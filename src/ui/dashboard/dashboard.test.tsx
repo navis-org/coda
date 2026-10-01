@@ -32,6 +32,7 @@ import {
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
+import { FIRST_TAB_ID, activeTab } from '../../core/dashboard'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -132,7 +133,10 @@ describe('entering the dashboard', () => {
     // A graph whose author saved it from the grid opens into the grid.
     const saved = {
       ...store().graph,
-      dashboard: { columns: 2, cells: [{ nodeId: 'view' }], open: true as const },
+      dashboard: {
+        tabs: [{ id: FIRST_TAB_ID, columns: 2, cells: [{ nodeId: 'view' }] }],
+        open: true as const,
+      },
     }
     act(() => store().loadGraph(saved))
     expect(store().dashboardOpen).toBe(true)
@@ -140,7 +144,10 @@ describe('entering the dashboard', () => {
 
     // And the same layout without the flag does not.
     act(() =>
-      store().loadGraph({ ...saved, dashboard: { columns: 2, cells: [{ nodeId: 'view' }] } }),
+      store().loadGraph({
+        ...saved,
+        dashboard: { tabs: [{ id: FIRST_TAB_ID, columns: 2, cells: [{ nodeId: 'view' }] }] },
+      }),
     )
     expect(store().dashboardOpen).toBe(false)
     expect(document.querySelector('.react-flow')).not.toBeNull()
@@ -293,12 +300,12 @@ describe('a cell', () => {
     await withCells(['view', 'group'])
     const before = store().graph.nodes.length
     fireEvent.click(
-      within(cellFor('view') as HTMLElement).getByLabelText('Remove from dashboard'),
+      within(cellFor('view') as HTMLElement).getByLabelText('Remove from the dashboard'),
     )
     await waitFor(() => expect(cells().length).toBe(1))
     expect(store().graph.nodes.length).toBe(before)
     expect(store().graph.nodes.some((n) => n.id === 'view')).toBe(true)
-    expect(store().graph.dashboard?.cells).toEqual([{ nodeId: 'group' }])
+    expect(activeTab(store().graph).cells).toEqual([{ nodeId: 'group' }])
   })
 
   /*
@@ -403,7 +410,7 @@ describe('the grid', () => {
     const span = () => cellFor('view')?.getAttribute('style') ?? ''
     // The default is half the area, and it is stored as absence.
     expect(span()).toContain('span 3')
-    expect(store().graph.dashboard?.cells[0]).toEqual({ nodeId: 'view' })
+    expect(activeTab(store().graph).cells[0]).toEqual({ nodeId: 'view' })
 
     act(() => store().setDashboardSpan('view', { h: 5 }))
     expect(span()).toContain('span 4')
@@ -535,5 +542,128 @@ describe('the run bar', () => {
     const one = { done: 1, total: 1 }
     act(() => useGraphStore.setState({ runProgress: () => one }))
     expect(screen.getByRole('progressbar').getAttribute('aria-valuetext')).toBe('1 of 1 node')
+  })
+})
+
+/**
+ * Tabs: several pages of one dashboard.
+ *
+ * What is pinned here is the surface half. The model's rules — the file form, the ids, the
+ * neighbour that takes a removed tab's place — are `core/dashboard.test.ts`'s.
+ */
+describe('tabs', () => {
+  const tabs = () => screen.getAllByRole('tab').map((t) => t.textContent)
+  const ids = () => [...cells()].map((c) => c.getAttribute('data-node'))
+
+  it('draws one tab, reading "Dashboard", on a dashboard that never grew a second', async () => {
+    await withCells(['view'])
+    expect(tabs()).toEqual(['Dashboard'])
+    expect(screen.getByRole('tab').getAttribute('aria-selected')).toBe('true')
+  })
+
+  /*
+   * The memory rule, per page: a tab not on screen is unmounted, not hidden — and a node on both
+   * pages keeps its one cell across the switch rather than being torn down and rebuilt.
+   */
+  it('shows one page at a time, and its cells only', async () => {
+    await withCells(['view', 'group'])
+    fireEvent.click(screen.getByLabelText('New dashboard tab'))
+    expect(tabs()).toEqual(['Tab 1', 'Tab 2'])
+    expect(cells().length).toBe(0)
+    expect(screen.getByText(/Nothing on this tab yet/i)).toBeTruthy()
+
+    act(() => store().addToDashboard(['conn', 'view']))
+    expect(ids()).toEqual(['conn', 'view'])
+    const shared = cellFor('view')
+    // The ✕ takes the cell off this page, not off the dashboard — the node is on two.
+    expect(within(shared as HTMLElement).getByLabelText('Remove from this tab')).toBeTruthy()
+    expect(cellFor('group')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Tab 1' }))
+    expect(ids()).toEqual(['view', 'group'])
+    expect(cellFor('conn')).toBeNull()
+    expect(cellFor('view')).toBe(shared)
+  })
+
+  it('renames in place, and a blank name goes back to the generated label', async () => {
+    await withCells(['view'])
+    act(() => store().addDashboardTab())
+    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Tab 2' }))
+    const field = screen.getByLabelText('Tab name')
+    fireEvent.change(field, { target: { value: '  Morphology ' } })
+    fireEvent.blur(field)
+    expect(tabs()).toEqual(['Tab 1', 'Morphology'])
+    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Morphology' }))
+    fireEvent.change(screen.getByLabelText('Tab name'), { target: { value: ' ' } })
+    fireEvent.blur(screen.getByLabelText('Tab name'))
+    expect(tabs()).toEqual(['Tab 1', 'Tab 2'])
+  })
+
+  it('moves along the strip with the arrow keys, activating as it goes', async () => {
+    await withCells(['view'])
+    act(() => {
+      store().addDashboardTab(['group'])
+      store().setDashboardTab('main')
+    })
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Tab 1' }), { key: 'ArrowRight' })
+    expect(ids()).toEqual(['group'])
+    expect(document.activeElement?.textContent).toBe('Tab 2')
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Tab 2' }), { key: 'ArrowRight' })
+    expect(ids()).toEqual(['view'])
+  })
+
+  it('offers removal from the strip, and not for the only tab', async () => {
+    await withCells(['view'])
+    fireEvent.contextMenu(screen.getByRole('tab', { name: 'Dashboard' }))
+    expect(screen.getByRole('button', { name: 'Delete Tab' }).hasAttribute('disabled')).toBe(
+      true,
+    )
+    fireEvent.keyDown(document, { key: 'Escape' })
+    act(() => store().addDashboardTab(['group']))
+    fireEvent.contextMenu(screen.getByRole('tab', { name: 'Tab 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Tab' }))
+    expect(tabs()).toEqual(['Dashboard'])
+    expect(ids()).toEqual(['view'])
+    // Its cells, never its nodes.
+    expect(store().graph.nodes.some((n) => n.id === 'group')).toBe(true)
+  })
+
+  /*
+   * Undo walks graph snapshots, and the tab on screen is held only in the document — so undoing
+   * an edit made on another page brings that page back, and switching itself costs no step.
+   */
+  it('costs no undo step to switch, and an undo lands on the tab the edit was made on', async () => {
+    await withCells(['view'])
+    act(() => store().addDashboardTab(['group']))
+    act(() => store().setDashboardSpan('group', { w: 2 }))
+    const steps = store().past.length
+    act(() => store().setDashboardTab('main'))
+    expect(store().past.length).toBe(steps)
+    act(() => store().undo())
+    expect(tabs()).toEqual(['Tab 1', 'Tab 2'])
+    expect(screen.getByRole('tab', { name: 'Tab 2' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    expect(activeTab(store().graph).cells).toEqual([{ nodeId: 'group' }])
+  })
+
+  /*
+   * The share-link order, on a page other than the first: the file opens on the tab it was saved
+   * from, and a run underneath it fills that tab's cells.
+   */
+  it('opens a saved file on the tab it was saved from, and runs underneath it', async () => {
+    act(() => {
+      store().addToDashboard(['view'])
+      store().addDashboardTab(['conn'])
+      store().setDashboardOpen(true)
+    })
+    const saved = store().graph
+    act(() => store().loadGraph(demoWorkflow('partners')))
+    act(() => store().loadGraph(saved))
+    await renderRun()
+    expect(screen.getByRole('tab', { name: 'Tab 2' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    await waitFor(() => expect(cellFor('conn')?.textContent).toMatch(/rows/))
   })
 })

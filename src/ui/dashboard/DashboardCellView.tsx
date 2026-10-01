@@ -29,7 +29,7 @@
 import { memo, useCallback, useRef, useState } from 'react'
 
 import type { DashboardCell } from '../../core/dashboard'
-import { DEFAULT_ROW_SPAN, ROW_TRACKS } from '../../core/dashboard'
+import { DEFAULT_ROW_SPAN, ROW_TRACKS, dashboardOf, pageNoun } from '../../core/dashboard'
 import { useGraphStore } from '../../store/graphStore'
 import { ViewerSurface } from '../panels/ViewerSurface'
 import { spanFromDrag } from './gridGeometry'
@@ -82,6 +82,9 @@ function DashboardCellViewInner({
   const expandNode = useGraphStore((s) => s.expandNode)
   const removeFromDashboard = useGraphStore((s) => s.removeFromDashboard)
   const setDashboardSpan = useGraphStore((s) => s.setDashboardSpan)
+  // A string from a two-value union — a primitive, invariant 7. The ✕ removes the cell from the
+  // page on screen, which is not "the dashboard" once a node can sit on several.
+  const where = useGraphStore((s) => pageNoun(dashboardOf(s.graph)))
   // A primitive — invariant 7. The cell stands down while the overlay draws this same node,
   // which is `showPreview`'s rule reaching its third surface rather than a new one.
   const expanded = useGraphStore((s) => s.expandedNodeId === nodeId)
@@ -234,8 +237,8 @@ function DashboardCellViewInner({
                   type="button"
                   className="btn btn--ghost"
                   onClick={() => removeFromDashboard([nodeId])}
-                  title="Take this off the dashboard — the node stays on the canvas"
-                  aria-label="Remove from dashboard"
+                  title={`Take this off ${where} — the node stays on the canvas`}
+                  aria-label={`Remove from ${where}`}
                 >
                   ✕
                 </button>

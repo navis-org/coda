@@ -21,7 +21,7 @@ import {
   snapRowSpan,
   addCells,
   clampSpan,
-  isOnDashboard,
+  allOnTab,
   moveCell,
   pruneDashboard,
   removeCells,
@@ -31,7 +31,36 @@ import {
   setViewOpen,
   unplacedNodes,
   validDashboard,
+  activeTab,
+  addTab,
+  dashboardOf,
+  duplicateTab,
+  FIRST_TAB_ID,
+  MAX_TAB_TITLE,
+  moveTab,
+  removeTab,
+  renameTab,
+  setActiveTab,
+  tabLabel,
 } from './dashboard'
+import type { DashboardCell, DashboardLayout } from './dashboard'
+
+/** The first tab's cells — every case in this half of the file is about a one-tab dashboard. */
+function cellsOf(graph: CodaGraph): DashboardCell[] | undefined {
+  return graph.dashboard?.tabs[0]?.cells
+}
+
+/** The ids of every tab holding a cell for this node, in strip order. */
+function tabsHolding(graph: CodaGraph, nodeId: string): string[] {
+  return (graph.dashboard?.tabs ?? [])
+    .filter((t) => t.cells.some((c) => c.nodeId === nodeId))
+    .map((t) => t.id)
+}
+
+/** A one-tab layout as `validDashboard` reads the single-tab form. */
+function single(columns: number, cells: DashboardCell[]): DashboardLayout {
+  return { tabs: [{ id: FIRST_TAB_ID, columns, cells }] }
+}
 
 function graphWith(ids: string[], dashboard?: CodaGraph['dashboard']): CodaGraph {
   return {
@@ -45,12 +74,8 @@ function graphWith(ids: string[], dashboard?: CodaGraph['dashboard']): CodaGraph
 describe('placing nodes on a dashboard', () => {
   it('appends in the order given and skips a node already placed', () => {
     const g = addCells(graphWith(['a', 'b', 'c']), ['c', 'a'])
-    expect(g.dashboard?.cells.map((c) => c.nodeId)).toEqual(['c', 'a'])
-    expect(addCells(g, ['b', 'c']).dashboard?.cells.map((c) => c.nodeId)).toEqual([
-      'c',
-      'a',
-      'b',
-    ])
+    expect(cellsOf(g)?.map((c) => c.nodeId)).toEqual(['c', 'a'])
+    expect(cellsOf(addCells(g, ['b', 'c']))?.map((c) => c.nodeId)).toEqual(['c', 'a', 'b'])
   })
 
   /*
@@ -61,7 +86,7 @@ describe('placing nodes on a dashboard', () => {
    */
   it('never places one node twice, however many times it is asked', () => {
     const g = addCells(addCells(graphWith(['a']), ['a', 'a']), ['a'])
-    expect(g.dashboard?.cells).toEqual([{ nodeId: 'a' }])
+    expect(cellsOf(g)).toEqual([{ nodeId: 'a' }])
   })
 
   it('ignores a node that is not in the graph', () => {
@@ -100,7 +125,7 @@ describe('placing nodes on a dashboard', () => {
 
 describe('the order that is the layout', () => {
   const placed = addCells(graphWith(['a', 'b', 'c', 'd']), ['a', 'b', 'c', 'd'])
-  const order = (g: CodaGraph) => g.dashboard?.cells.map((c) => c.nodeId)
+  const order = (g: CodaGraph) => cellsOf(g)?.map((c) => c.nodeId)
 
   /*
    * `moveCell` counts the target in the list *after* the cell is lifted out. Getting it the
@@ -149,8 +174,8 @@ describe('spans', () => {
    */
   it('stores the default of each axis as absence, and they are not the same number', () => {
     const g = setSpan(addCells(graphWith(['a']), ['a']), 'a', { w: 2, h: 6 })
-    expect(g.dashboard?.cells[0]).toEqual({ nodeId: 'a', w: 2, h: 6 })
-    expect(setSpan(g, 'a', { w: 1, h: DEFAULT_ROW_SPAN }).dashboard?.cells[0]).toEqual({
+    expect(cellsOf(g)?.[0]).toEqual({ nodeId: 'a', w: 2, h: 6 })
+    expect(cellsOf(setSpan(g, 'a', { w: 1, h: DEFAULT_ROW_SPAN }))?.[0]).toEqual({
       nodeId: 'a',
     })
     expect(DEFAULT_ROW_SPAN).not.toBe(1)
@@ -178,7 +203,8 @@ describe('spans', () => {
     g = setSpan(g, 'a', { w: 4 })
     g = setSpan(g, 'b', { w: 2 })
     g = setColumns(g, 2)
-    expect(g.dashboard).toEqual({
+    expect(activeTab(g)).toEqual({
+      id: FIRST_TAB_ID,
       columns: 2,
       cells: [
         { nodeId: 'a', w: 2 },
@@ -189,9 +215,9 @@ describe('spans', () => {
 
   it('refuses a column count outside the range instead of storing it', () => {
     const g = addCells(graphWith(['a']), ['a'])
-    expect(setColumns(g, 99).dashboard?.columns).toBe(6)
-    expect(setColumns(g, 0).dashboard?.columns).toBe(1)
-    expect(setColumns(g, Number.NaN).dashboard?.columns).toBe(DEFAULT_COLUMNS)
+    expect(activeTab(setColumns(g, 99)).columns).toBe(6)
+    expect(activeTab(setColumns(g, 0)).columns).toBe(1)
+    expect(activeTab(setColumns(g, Number.NaN)).columns).toBe(DEFAULT_COLUMNS)
   })
 })
 
@@ -207,6 +233,7 @@ describe('the view a graph was saved from', () => {
     const g = addCells(graphWith(['a']), ['a'])
     expect(g.dashboard?.open).toBeUndefined()
     expect(setViewOpen(g, true).dashboard).toEqual({ ...g.dashboard, open: true })
+    expect(g.dashboard?.tabs).toHaveLength(1)
     // Back to the canvas removes the key rather than storing `false` — `GraphGroup.filled`'s
     // idiom, so a graph seen once as a grid and then closed round trips as it always did.
     expect('open' in (setViewOpen(setViewOpen(g, true), false).dashboard ?? {})).toBe(false)
@@ -267,14 +294,14 @@ describe('a cell whose node is gone', () => {
   it('is pruned, and an emptied dashboard goes with it', () => {
     const g = addCells(graphWith(['a', 'b']), ['a', 'b'])
     const pruned = pruneDashboard({ ...g, nodes: g.nodes.filter((n) => n.id === 'b') })
-    expect(pruned.dashboard?.cells).toEqual([{ nodeId: 'b' }])
+    expect(cellsOf(pruned)).toEqual([{ nodeId: 'b' }])
     expect('dashboard' in pruneDashboard({ ...g, nodes: [] })).toBe(false)
   })
 
   it('is dropped by the deleting path itself, not only by a later pass', async () => {
     const { removeNodes } = await import('./graph')
     const g = addCells(graphWith(['a', 'b']), ['a', 'b'])
-    expect(removeNodes(g, ['a']).dashboard?.cells).toEqual([{ nodeId: 'b' }])
+    expect(cellsOf(removeNodes(g, ['a']))).toEqual([{ nodeId: 'b' }])
   })
 })
 
@@ -295,7 +322,7 @@ describe('a stored layout', () => {
   it('keeps what is well formed and drops the rest, silently', () => {
     expect(
       validDashboard({ columns: 3, cells: [{ nodeId: 'a', w: 2 }, { nodeId: 'b' }] }, alive),
-    ).toEqual({ columns: 3, cells: [{ nodeId: 'a', w: 2 }, { nodeId: 'b' }] })
+    ).toEqual(single(3, [{ nodeId: 'a', w: 2 }, { nodeId: 'b' }]))
     expect(validDashboard({ columns: 2, cells: 'nope' }, alive)).toBeUndefined()
     expect(validDashboard(undefined, alive)).toBeUndefined()
   })
@@ -311,16 +338,13 @@ describe('a stored layout', () => {
         { columns: 2, cells: [{ nodeId: 'a' }, { nodeId: 'ghost' }, { nodeId: 'a' }] },
         alive,
       ),
-    ).toEqual({ columns: 2, cells: [{ nodeId: 'a' }] })
+    ).toEqual(single(2, [{ nodeId: 'a' }]))
   })
 
   it('clamps a span and a column count that arrived out of range', () => {
     expect(
       validDashboard({ columns: 40, cells: [{ nodeId: 'a', w: 40, h: 40 }] }, alive),
-    ).toEqual({
-      columns: 6,
-      cells: [{ nodeId: 'a', w: 6, h: ROW_TRACKS }],
-    })
+    ).toEqual(single(6, [{ nodeId: 'a', w: 6, h: ROW_TRACKS }]))
   })
 
   /*
@@ -330,10 +354,10 @@ describe('a stored layout', () => {
    */
   it('snaps a stored height that is not one of the four on offer', () => {
     expect(
-      validDashboard({ columns: 2, cells: [{ nodeId: 'a', h: 5 }] }, alive)?.cells,
+      validDashboard({ columns: 2, cells: [{ nodeId: 'a', h: 5 }] }, alive)?.tabs[0]?.cells,
     ).toEqual([{ nodeId: 'a', h: 4 }])
     expect(
-      validDashboard({ columns: 2, cells: [{ nodeId: 'a', h: 1 }] }, alive)?.cells,
+      validDashboard({ columns: 2, cells: [{ nodeId: 'a', h: 1 }] }, alive)?.tabs[0]?.cells,
     ).toEqual([{ nodeId: 'a', h: 2 }])
   })
 
@@ -351,8 +375,13 @@ describe('a stored layout', () => {
     const g = setSpan(addCells(graphWith(['a', 'b']), ['b', 'a']), 'b', { w: 2, h: 2 })
     const back = deserializeGraph(serializeGraph(g)).graph
     expect(back.dashboard).toEqual({
-      columns: DEFAULT_COLUMNS,
-      cells: [{ nodeId: 'b', w: 2, h: 2 }, { nodeId: 'a' }],
+      tabs: [
+        {
+          id: FIRST_TAB_ID,
+          columns: DEFAULT_COLUMNS,
+          cells: [{ nodeId: 'b', w: 2, h: 2 }, { nodeId: 'a' }],
+        },
+      ],
     })
   })
 
@@ -363,7 +392,7 @@ describe('a stored layout', () => {
     const json = JSON.parse(serializeGraph(g))
     json.nodes[0].type = 'nobody.registers.this'
     const loaded = deserializeGraph(JSON.stringify(json))
-    expect(loaded.graph.dashboard?.cells).toEqual([{ nodeId: 'a' }, { nodeId: 'b' }])
+    expect(cellsOf(loaded.graph)).toEqual([{ nodeId: 'a' }, { nodeId: 'b' }])
     expect(loaded.warnings.join(' ')).not.toMatch(/dashboard/i)
     const saved = JSON.parse(serializeGraph(loaded.graph))
     expect(saved.nodes[0].type).toBe('nobody.registers.this')
@@ -375,7 +404,7 @@ describe('a stored layout', () => {
     const json = JSON.parse(serializeGraph(g))
     delete json.nodes[0].type
     const loaded = deserializeGraph(JSON.stringify(json))
-    expect(loaded.graph.dashboard?.cells).toEqual([{ nodeId: 'b' }])
+    expect(cellsOf(loaded.graph)).toEqual([{ nodeId: 'b' }])
     expect(loaded.warnings.join(' ')).not.toMatch(/dashboard/i)
   })
 })
@@ -399,7 +428,7 @@ describe('a node that cannot be drawn', () => {
 
   it('gets no cell however it is offered one', () => {
     const g = addCells(withNote(), ['a', 'note'])
-    expect(g.dashboard?.cells).toEqual([{ nodeId: 'a' }])
+    expect(cellsOf(g)).toEqual([{ nodeId: 'a' }])
     // The selection-shaped call, which is how it used to get in.
     expect(addCells(withNote(), ['note']).dashboard).toBeUndefined()
   })
@@ -409,7 +438,7 @@ describe('a node that cannot be drawn', () => {
     const alive = new Map(nodes.map((n) => [n.id, n]))
     expect(
       validDashboard({ columns: 2, cells: [{ nodeId: 'note' }, { nodeId: 'a' }] }, alive)
-        ?.cells,
+        ?.tabs[0]?.cells,
     ).toEqual([{ nodeId: 'a' }])
   })
 
@@ -421,9 +450,255 @@ describe('a node that cannot be drawn', () => {
   })
 })
 
-describe('isOnDashboard', () => {
+describe('allOnTab', () => {
   it('answers for a graph with no dashboard at all', () => {
-    expect(isOnDashboard(graphWith(['a']), 'a')).toBe(false)
-    expect(isOnDashboard(addCells(graphWith(['a']), ['a']), 'a')).toBe(true)
+    expect(allOnTab(activeTab(graphWith(['a'])), ['a'])).toBe(false)
+    const g = addCells(graphWith(['a', 'b']), ['a'])
+    expect(allOnTab(activeTab(g), ['a'])).toBe(true)
+    // `every`: a mixed selection is not on, so the gesture finishes putting it on.
+    expect(allOnTab(activeTab(g), ['a', 'b'])).toBe(false)
+    // And no selection is never "all on", or an empty gesture would offer to remove nothing.
+    expect(allOnTab(activeTab(g), [])).toBe(false)
+  })
+})
+
+/**
+ * Tabs: several pages of one dashboard, each its own grid.
+ *
+ * The load-bearing claims are about what does *not* change — a dashboard that never grows a
+ * second page must be byte-identical on disk to one written before tabs existed — and about the
+ * two ids that must keep naming the right thing when the strip moves under them.
+ */
+describe('tabs', () => {
+  const ids = (g: CodaGraph) => g.dashboard?.tabs.map((t) => t.id)
+  const on = (g: CodaGraph, tabId: string) =>
+    g.dashboard?.tabs.find((t) => t.id === tabId)?.cells.map((c) => c.nodeId)
+
+  it('writes a single untitled tab in the form every dashboard had before tabs', () => {
+    const g = setViewOpen(addCells(graphWith(['a', 'b']), ['a', 'b']), true)
+    const stored = JSON.parse(serializeGraph(g)).dashboard
+    expect(Object.keys(stored)).toEqual(['columns', 'cells', 'open'])
+    expect(stored).toEqual({
+      columns: DEFAULT_COLUMNS,
+      cells: [{ nodeId: 'a' }, { nodeId: 'b' }],
+      open: true,
+    })
+  })
+
+  /*
+   * The byte-identity claim end to end: a file written by a build that had no tabs comes back
+   * out exactly as it went in, apart from the save stamp every write changes.
+   */
+  it('round trips a pre-tabs file byte-identically', () => {
+    const before = serializeGraph(
+      setViewOpen(addCells(graphWith(['a', 'b']), ['b', 'a']), true),
+    )
+    const after = serializeGraph(deserializeGraph(before).graph)
+    const unstamped = (json: string) => json.replace(/"modifiedAt": "[^"]*"/, '')
+    expect(unstamped(after)).toBe(unstamped(before))
+  })
+
+  it('adds a page after the others and puts it on screen, with the grid it came from', () => {
+    let g = setColumns(addCells(graphWith(['a']), ['a']), 4)
+    g = addTab(g)
+    expect(ids(g)).toEqual([FIRST_TAB_ID, 't2'])
+    expect(activeTab(g)).toEqual({ id: 't2', columns: 4, cells: [] })
+    expect(g.dashboard?.active).toBe('t2')
+  })
+
+  /*
+   * The one way a layout comes into existence without a cell: asking for a second page is a
+   * decision, where pressing `D` is not.
+   */
+  it('mints a layout of two empty pages on a graph that had none', () => {
+    const g = addTab(graphWith(['a']))
+    expect(g.dashboard?.tabs.map((t) => t.cells)).toEqual([[], []])
+    expect(activeTab(g).id).toBe('t2')
+  })
+
+  it('lets a node sit on several tabs, once on each', () => {
+    let g = addCells(graphWith(['a', 'b']), ['a'])
+    g = addTab(g)
+    g = addCells(g, ['a', 'a', 'b'])
+    expect(on(g, FIRST_TAB_ID)).toEqual(['a'])
+    expect(on(g, 't2')).toEqual(['a', 'b'])
+    expect(tabsHolding(g, 'a')).toEqual([FIRST_TAB_ID, 't2'])
+    expect(allOnTab(activeTab(g), ['b'])).toBe(true)
+    expect(allOnTab(g.dashboard!.tabs[0]!, ['b'])).toBe(false)
+    expect(unplacedNodes(g, FIRST_TAB_ID).map((n) => n.id)).toEqual(['b'])
+  })
+
+  it('addresses a tab that is not on screen, and does nothing for one that does not exist', () => {
+    const g = addTab(addCells(graphWith(['a', 'b']), ['a']))
+    expect(on(addCells(g, ['b'], FIRST_TAB_ID), FIRST_TAB_ID)).toEqual(['a', 'b'])
+    expect(on(removeCells(g, ['a'], FIRST_TAB_ID), FIRST_TAB_ID)).toEqual([])
+    expect(addCells(g, ['b'], 'ghost')).toBe(g)
+    expect(setColumns(g, 5, 'ghost')).toBe(g)
+  })
+
+  it('switches tabs by id, and never mints a layout to switch on', () => {
+    const g = addTab(addCells(graphWith(['a']), ['a']))
+    const back = setActiveTab(g, FIRST_TAB_ID)
+    // Absence means the first, so switching back removes the key rather than storing it.
+    expect('active' in (back.dashboard ?? {})).toBe(false)
+    expect(setActiveTab(back, FIRST_TAB_ID)).toBe(back)
+    expect(setActiveTab(back, 'ghost')).toBe(back)
+    const bare = graphWith(['a'])
+    expect(setActiveTab(bare, FIRST_TAB_ID)).toBe(bare)
+  })
+
+  it('names a tab trimmed and capped, and a blank name is no name', () => {
+    const g = addTab(addCells(graphWith(['a']), ['a']))
+    const named = renameTab(g, 't2', '   Morphology  ')
+    expect(activeTab(named).title).toBe('Morphology')
+    expect(renameTab(named, 't2', 'Morphology')).toBe(named)
+    expect('title' in activeTab(renameTab(named, 't2', '  '))).toBe(false)
+    expect(activeTab(renameTab(g, 't2', 'x'.repeat(99))).title).toHaveLength(MAX_TAB_TITLE)
+  })
+
+  it('labels an untitled tab "Dashboard" alone and by position among others', () => {
+    let g = addCells(graphWith(['a']), ['a'])
+    expect(tabLabel(dashboardOf(g), activeTab(g))).toBe('Dashboard')
+    g = addTab(g)
+    const layout = dashboardOf(g)
+    expect(layout.tabs.map((t) => tabLabel(layout, t))).toEqual(['Tab 1', 'Tab 2'])
+  })
+
+  it('writes the list form for a second tab or a name, with `active` only when not the first', () => {
+    const one = renameTab(addCells(graphWith(['a']), ['a']), FIRST_TAB_ID, 'Overview')
+    expect(JSON.parse(serializeGraph(one)).dashboard).toEqual({
+      tabs: [
+        {
+          id: FIRST_TAB_ID,
+          title: 'Overview',
+          columns: DEFAULT_COLUMNS,
+          cells: [{ nodeId: 'a' }],
+        },
+      ],
+    })
+    const two = setViewOpen(addTab(one, 'Detail'), true)
+    const stored = JSON.parse(serializeGraph(two)).dashboard
+    expect(Object.keys(stored)).toEqual(['tabs', 'active', 'open'])
+    expect(stored.active).toBe('t2')
+    expect(stored.tabs[1]).toEqual({
+      id: 't2',
+      title: 'Detail',
+      columns: DEFAULT_COLUMNS,
+      cells: [],
+    })
+    // …and loads back as it was written.
+    expect(deserializeGraph(serializeGraph(two)).graph.dashboard).toEqual(two.dashboard)
+  })
+
+  it('removes a tab — its cells, not its nodes — and refuses the only one', () => {
+    let g = addCells(graphWith(['a', 'b']), ['a'])
+    expect(removeTab(g, FIRST_TAB_ID)).toBe(g)
+    g = addCells(addTab(g), ['b'])
+    const gone = removeTab(g, 't2')
+    expect(ids(gone)).toEqual([FIRST_TAB_ID])
+    expect(cellsOf(gone)).toEqual([{ nodeId: 'a' }])
+    expect(gone.nodes.map((n) => n.id)).toEqual(['a', 'b'])
+  })
+
+  /*
+   * Every tab strip's convention: the right-hand neighbour takes a removed tab's place, else the
+   * left. Removing a tab that is *not* on screen must leave the screen alone.
+   */
+  it('hands the screen to a neighbour when the tab on it goes', () => {
+    let g = addCells(graphWith(['a']), ['a'])
+    g = addTab(addTab(addTab(g))) // main, t2, t3, t4 — t4 on screen
+    expect(activeTab(removeTab(setActiveTab(g, 't2'), 't2')).id).toBe('t3')
+    expect(activeTab(removeTab(g, 't4')).id).toBe('t3')
+    expect(activeTab(removeTab(g, 't2')).id).toBe('t4')
+  })
+
+  /*
+   * `active` is an id, but its absence means "the first" — and the first is what a move changes.
+   * A move that put another tab first would otherwise silently switch the screen to it.
+   */
+  it('keeps the tab on screen on screen when the strip is reordered', () => {
+    let g = addCells(graphWith(['a']), ['a'])
+    g = setActiveTab(addTab(g), FIRST_TAB_ID)
+    const moved = moveTab(g, 't2', 0)
+    expect(ids(moved)).toEqual(['t2', FIRST_TAB_ID])
+    expect(activeTab(moved).id).toBe(FIRST_TAB_ID)
+    expect(moveTab(g, 't2', 1)).toBe(g)
+  })
+
+  it('duplicates a tab beside itself and puts the copy on screen', () => {
+    let g = setSpan(addCells(graphWith(['a', 'b']), ['a', 'b']), 'a', { w: 2 })
+    g = addTab(renameTab(g, FIRST_TAB_ID, 'Overview'))
+    const copy = duplicateTab(g, FIRST_TAB_ID)
+    expect(ids(copy)).toEqual([FIRST_TAB_ID, 't3', 't2'])
+    expect(activeTab(copy)).toEqual({
+      id: 't3',
+      title: 'Overview copy',
+      columns: DEFAULT_COLUMNS,
+      cells: [{ nodeId: 'a', w: 2 }, { nodeId: 'b' }],
+    })
+  })
+
+  /*
+   * A tab is kept when its last node is deleted — a page somebody made is not decoration — and
+   * the layout goes only when it has become the thing a graph with no dashboard already is.
+   */
+  it('keeps an emptied tab through a deletion, and drops only a layout that is no layout', () => {
+    let g = addCells(graphWith(['a', 'b']), ['a'])
+    g = addCells(addTab(g), ['b'])
+    const pruned = pruneDashboard({ ...g, nodes: g.nodes.filter((n) => n.id === 'a') })
+    expect(ids(pruned)).toEqual([FIRST_TAB_ID, 't2'])
+    expect(on(pruned, 't2')).toEqual([])
+    const named = renameTab(addCells(graphWith(['a']), ['a']), FIRST_TAB_ID, 'Overview')
+    expect(ids(removeCells(named, ['a']))).toEqual([FIRST_TAB_ID])
+  })
+
+  it('reads the list form leniently', () => {
+    const node = (id: string) => ({
+      id,
+      type: 'out.table',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    const alive = new Map([
+      ['a', node('a')],
+      ['b', node('b')],
+    ])
+    const layout = validDashboard(
+      {
+        tabs: [
+          { id: 'main', columns: 3, cells: [{ nodeId: 'a' }, { nodeId: 'a' }] },
+          { id: 'main', title: '  Two ', cells: 'nope' },
+          { title: 7, cells: [{ nodeId: 'a' }, { nodeId: 'ghost' }, { nodeId: 'b' }] },
+          'junk',
+        ],
+        active: 'nowhere',
+        open: true,
+      },
+      alive,
+    )
+    expect(layout).toEqual({
+      tabs: [
+        { id: 'main', columns: 3, cells: [{ nodeId: 'a' }] },
+        { id: 't2', title: 'Two', columns: DEFAULT_COLUMNS, cells: [] },
+        { id: 't3', columns: DEFAULT_COLUMNS, cells: [{ nodeId: 'a' }, { nodeId: 'b' }] },
+      ],
+      open: true,
+    })
+    expect(validDashboard({ tabs: [] }, alive)).toBeUndefined()
+    expect(
+      validDashboard({ tabs: [{ id: 'x', cells: [{ nodeId: 'ghost' }] }] }, alive),
+    ).toBeUndefined()
+    expect(
+      validDashboard(
+        {
+          tabs: [
+            { id: 'x', cells: [] },
+            { id: 'y', cells: [] },
+          ],
+          active: 'x',
+        },
+        alive,
+      )?.active,
+    ).toBeUndefined()
   })
 })

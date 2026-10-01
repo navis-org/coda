@@ -1,4 +1,12 @@
-import { isOnDashboard, placeableIds } from '../../core/dashboard'
+import type { CodaGraph } from '../../core/graph'
+import {
+  activeTab,
+  allOnTab,
+  dashboardOf,
+  isTabbed,
+  placeableIds,
+  tabLabel,
+} from '../../core/dashboard'
 import { MAX_HINTS } from '../../core/graph'
 import { groupsTouching } from '../../core/groups'
 import { getNodeDef, isAnnotation } from '../../core/registry'
@@ -9,7 +17,7 @@ import { restoreHints, splitHints, useDismissedHints } from '../hints'
 import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
 import { AlignTools } from './AlignTools'
-import { ContextMenu } from '../menu/ContextMenu'
+import { ContextMenu, ContextMenuSection } from '../menu/ContextMenu'
 
 export interface NodeContextMenuProps {
   screenPosition: { x: number; y: number }
@@ -88,7 +96,9 @@ export function NodeContextMenu({
    * way — this is what stops the row counting it and promising otherwise.
    */
   const placeable = placeableIds(graph, targets)
-  const onDashboard = placeable.length > 0 && placeable.every((id) => isOnDashboard(graph, id))
+  const tabbed = isTabbed(dashboardOf(graph))
+  // Only the single row reads it, so a tabbed dashboard does not pay for it on every commit.
+  const onDashboard = !tabbed && allOnTab(activeTab(graph), placeable)
 
   const act = (fn: () => void) => () => {
     fn()
@@ -192,23 +202,33 @@ export function NodeContextMenu({
            * be used as one is exactly the moment somebody is assembling it — see
            * `addToDashboard` in the store.
            */}
-          <button
-            type="button"
-            className="context-menu__item"
-            title={
-              onDashboard
-                ? 'Take it off the grid. The node stays here.'
-                : 'Put it on the grid view — the nodes worth looking at, without the canvas (D)'
-            }
-            disabled={placeable.length === 0}
-            onClick={act(() =>
-              onDashboard
-                ? actions.removeFromDashboard(placeable)
-                : actions.addToDashboard(placeable),
-            )}
-          >
-            {onDashboard ? 'Remove from Dashboard' : 'Add to Dashboard'}
-          </button>
+          {tabbed ? (
+            <ContextMenuSection
+              label="Dashboard"
+              title="Which pages of the dashboard this is on"
+              disabled={placeable.length === 0}
+            >
+              <TabRows graph={graph} placeable={placeable} onClose={onClose} />
+            </ContextMenuSection>
+          ) : (
+            <button
+              type="button"
+              className="context-menu__item"
+              title={
+                onDashboard
+                  ? 'Take it off the grid. The node stays here.'
+                  : 'Put it on the grid view — the nodes worth looking at, without the canvas (D)'
+              }
+              disabled={placeable.length === 0}
+              onClick={act(() =>
+                onDashboard
+                  ? actions.removeFromDashboard(placeable)
+                  : actions.addToDashboard(placeable),
+              )}
+            >
+              {onDashboard ? 'Remove from Dashboard' : 'Add to Dashboard'}
+            </button>
+          )}
         </>
       )}
       <button
@@ -348,5 +368,64 @@ export function NodeContextMenu({
         Delete <kbd>⌫</kbd>
       </button>
     </ContextMenu>
+  )
+}
+
+/**
+ * The dashboard row once the dashboard is in use as pages (`isTabbed`): every tab, ticked where
+ * the selection already has a cell, and `New Tab` at the foot — mounted only while the section is
+ * open.
+ *
+ * A tab row toggles and **leaves the menu open**, because ticking a node onto two pages is an
+ * ordinary thing to want and closing after the first makes it two right-clicks. `New Tab` closes
+ * it, having put the reader somewhere new.
+ *
+ * Otherwise the plain row stays, so a dashboard nobody has given pages reads as it always did.
+ */
+function TabRows({
+  graph,
+  placeable,
+  onClose,
+}: {
+  graph: CodaGraph
+  placeable: string[]
+  onClose: () => void
+}) {
+  const layout = dashboardOf(graph)
+  const actions = useGraphStore.getState()
+  return (
+    <>
+      {layout.tabs.map((tab, index) => {
+        const on = allOnTab(tab, placeable)
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            className="context-menu__item"
+            aria-pressed={on}
+            title={on ? 'Take it off this tab. The node stays here.' : 'Put it on this tab'}
+            onClick={() =>
+              on
+                ? actions.removeFromDashboard(placeable, tab.id)
+                : actions.addToDashboard(placeable, tab.id)
+            }
+          >
+            {on ? '✓ ' : ''}
+            {tabLabel(layout, tab, index)}
+          </button>
+        )
+      })}
+      <button
+        type="button"
+        className="context-menu__item"
+        title="A new page of the dashboard, with this on it"
+        onClick={() => {
+          actions.addDashboardTab(placeable)
+          onClose()
+        }}
+      >
+        + New Tab
+      </button>
+    </>
   )
 }

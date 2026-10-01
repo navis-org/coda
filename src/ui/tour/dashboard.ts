@@ -51,6 +51,7 @@
  * demonstrate the feature and not the point.
  */
 
+import { activeTab } from '../../core/dashboard'
 import { emptyGraph } from '../../core/graph'
 import { getToken } from '../../data/neuprint/credentials'
 import { useGraphStore } from '../../store/graphStore'
@@ -131,7 +132,7 @@ function arrange(): void {
 
 /** How many of the three are on the dashboard. The predicate the "your turn" step waits on. */
 function celled(): number {
-  const cells = useGraphStore.getState().graph.dashboard?.cells ?? []
+  const { cells } = activeTab(useGraphStore.getState().graph)
   const ids = new Set(CELLS.map((type) => b.idOf(type)))
   return cells.filter((c) => ids.has(c.nodeId)).length
 }

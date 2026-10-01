@@ -31,7 +31,7 @@ import { findParam } from '../core/node'
 import { getNodeDef, isAnnotation, packOfType, requireNodeDef } from '../core/registry'
 import { effectiveOff, offeredType, packsOffByDefault } from '../core/packs'
 import { packOf } from '../core/nodeType'
-import { ROW_TRACKS } from '../core/dashboard'
+import { ROW_TRACKS, activeTab } from '../core/dashboard'
 import { Scheduler } from '../core/scheduler'
 import { attributeSchema, columnNames, tableSchema } from '../core/types'
 import { isMatrixValue, isTableValue } from '../core/values'
@@ -800,7 +800,7 @@ describe('opening as a dashboard', () => {
 
   it('places the control and the viewers, in that order, and says it is the view', () => {
     const graph = built('partners', ['table', 'bar'], true)
-    expect(graph.dashboard?.cells.map((cell) => cell.nodeId)).toEqual([
+    expect(activeTab(graph).cells.map((cell) => cell.nodeId)).toEqual([
       'explore',
       'view',
       'view2',
@@ -809,19 +809,19 @@ describe('opening as a dashboard', () => {
     expect(graph.dashboard?.open).toBe(true)
     // Everything between the control and the viewers is plumbing, and a grid of plumbing is a
     // canvas with worse ergonomics.
-    const placed = new Set(graph.dashboard?.cells.map((c) => c.nodeId))
+    const placed = new Set(activeTab(graph).cells.map((c) => c.nodeId))
     expect(placed.has('conn')).toBe(false)
     expect(placed.has('sort')).toBe(false)
   })
 
   it('gives a single row the whole height, and falls back to halves past that', () => {
     const two = built('neurons', ['table'], true)
-    expect(two.dashboard?.columns).toBe(2)
-    expect(two.dashboard?.cells.map((c) => c.h)).toEqual([ROW_TRACKS, ROW_TRACKS])
+    expect(activeTab(two).columns).toBe(2)
+    expect(activeTab(two).cells.map((c) => c.h)).toEqual([ROW_TRACKS, ROW_TRACKS])
 
     // Three cells is a 2 × 2 grid with a gap, so the heights go back to the default half.
     const three = built('partners', ['table', 'bar'], true)
-    expect(three.dashboard?.cells.every((c) => c.h === undefined)).toBe(true)
+    expect(activeTab(three).cells.every((c) => c.h === undefined)).toBe(true)
   })
 
   it('is a layout the loader accepts, cells and all', () => {

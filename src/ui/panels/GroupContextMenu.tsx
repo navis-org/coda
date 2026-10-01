@@ -11,7 +11,7 @@
  * blue is in each mode. See `GROUP_COLORS` for why a document may not carry a CSS value.
  */
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 
 import type { GraphGroup, GraphNode, GroupColor } from '../../core/graph'
 import { GROUP_COLORS, nodesById } from '../../core/graph'
@@ -23,7 +23,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
 import { AlignTools } from './AlignTools'
-import { ContextMenu } from '../menu/ContextMenu'
+import { ContextMenu, ContextMenuSection } from '../menu/ContextMenu'
 
 /**
  * Which of the members' params the folded box carries.
@@ -46,14 +46,26 @@ import { ContextMenu } from '../menu/ContextMenu'
  * make, not a rule per node type kept true by hand.
  */
 function ExposedPicker({ group }: { group: GraphGroup }) {
-  const [open, setOpen] = useState(false)
+  const count = group.exposed?.length ?? 0
+  return (
+    <ContextMenuSection
+      label={`Controls on the folded box${count > 0 ? ` (${count})` : ''}`}
+      title="Put a card's controls on the box this frame folds into"
+    >
+      <ExposedRows group={group} />
+    </ContextMenuSection>
+  )
+}
+
+/**
+ * The section's rows, mounted only while it is open: the enumeration walks every member and runs
+ * every `visibleIf` they declare, and this row is closed on almost every right-click.
+ */
+function ExposedRows({ group }: { group: GraphGroup }) {
   const toggleExposed = useGraphStore((s) => s.toggleExposedParam)
   const graph = useGraphStore((s) => s.graph)
 
-  // Only while the section is showing: the enumeration walks every member and runs every
-  // `visibleIf` they declare, and this row is closed on almost every right-click.
   const members = useMemo(() => {
-    if (!open) return []
     const nodes = nodesById(graph)
     const found: Array<{ node: GraphNode; def: NodeDefinition; params: ParamDef[] }> = []
     for (const id of group.nodeIds) {
@@ -64,49 +76,29 @@ function ExposedPicker({ group }: { group: GraphGroup }) {
       if (params.length > 0) found.push({ node, def, params })
     }
     return found
-  }, [open, graph, group.nodeIds])
+  }, [graph, group.nodeIds])
 
-  const count = group.exposed?.length ?? 0
-
-  return (
-    <>
-      <button
-        type="button"
-        className="context-menu__item context-menu__item--parent"
-        aria-expanded={open}
-        title="Put a card's controls on the box this frame folds into"
-        onClick={() => setOpen((was) => !was)}
-      >
-        Controls on the folded box{count > 0 ? ` (${count})` : ''}
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
-      </button>
-      {open && (
-        <div className="context-menu__controls">
-          {members.map(({ node, def, params }) => (
-            <div key={node.id}>
-              <div className="context-menu__caption">{node.title ?? def.label}</div>
-              {params.map((param) => {
-                const on = isExposed(group, node.id, param.id)
-                return (
-                  <button
-                    key={param.id}
-                    type="button"
-                    className="context-menu__item"
-                    aria-pressed={on}
-                    title={param.help ?? param.label}
-                    onClick={() => toggleExposed(group.id, node.id, param.id)}
-                  >
-                    {on ? '✓ ' : ''}
-                    {param.label}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  )
+  return members.map(({ node, def, params }) => (
+    <div key={node.id}>
+      <div className="context-menu__caption">{node.title ?? def.label}</div>
+      {params.map((param) => {
+        const on = isExposed(group, node.id, param.id)
+        return (
+          <button
+            key={param.id}
+            type="button"
+            className="context-menu__item"
+            aria-pressed={on}
+            title={param.help ?? param.label}
+            onClick={() => toggleExposed(group.id, node.id, param.id)}
+          >
+            {on ? '✓ ' : ''}
+            {param.label}
+          </button>
+        )
+      })}
+    </div>
+  ))
 }
 
 /** Named for the reader rather than for the token: a swatch has to say something out loud. */

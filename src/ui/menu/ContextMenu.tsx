@@ -92,3 +92,43 @@ export function ContextMenu({
   )
   return portal ? createPortal(menu, document.fullscreenElement ?? document.body) : menu
 }
+
+/**
+ * A section of a context menu that opens in place: a row with a disclosure arrow, and below it,
+ * once opened, a bounded scrolling list.
+ *
+ * In place rather than as a flyout, which is the group menu's argument: a flyout is a second panel
+ * to place against a window edge, and a panel holding one has to switch its own scrolling off
+ * (`Dropdown`'s `flyouts`). The children render **only while open**, so a section whose rows are
+ * costly to work out — every member's params, every tab's cells — pays for it on the right-clicks
+ * that ask, not on all of them; put that work in a component passed as a child.
+ */
+export function ContextMenuSection({
+  label,
+  title,
+  disabled,
+  children,
+}: {
+  label: ReactNode
+  title?: string
+  disabled?: boolean
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        className="context-menu__item context-menu__item--parent"
+        aria-expanded={open}
+        disabled={disabled}
+        title={title}
+        onClick={() => setOpen((was) => !was)}
+      >
+        {label}
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && !disabled && <div className="context-menu__controls">{children}</div>}
+    </>
+  )
+}

@@ -7,7 +7,7 @@
  */
 
 import type { DashboardLayout } from './dashboard'
-import { pruneDashboard, validDashboard } from './dashboard'
+import { pruneDashboard, storedDashboard, validDashboard } from './dashboard'
 import { MISSING_TYPE, documentNode, placeholderParams } from './missing'
 import type { ParamValues, ResolvedPort } from './node'
 import { hasPortGroups, allInputPorts, inputPorts, outputPorts } from './ports'
@@ -975,11 +975,15 @@ export function reconnectEdge(
  * `fragmentBody` is the other.
  */
 export function serializeGraph(graph: CodaGraph, options: { compact?: boolean } = {}): string {
-  const out: CodaGraph = {
+  // The dashboard is written in its stored form, which is not the in-memory one.
+  const out: Omit<CodaGraph, 'dashboard'> & { dashboard?: unknown } = {
     ...graph,
     nodes: graph.nodes.map(documentNode),
     version: GRAPH_FORMAT_VERSION,
     meta: { ...graph.meta, modifiedAt: new Date().toISOString() },
+    // Overwritten in place rather than spread after, so the key keeps the position it had —
+    // a dashboard that does not use tabs must round trip byte-identically. See `storedDashboard`.
+    ...(graph.dashboard ? { dashboard: storedDashboard(graph.dashboard) } : {}),
   }
   return options.compact ? JSON.stringify(out) : JSON.stringify(out, null, 2)
 }

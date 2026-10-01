@@ -1170,8 +1170,11 @@ rule belongs to one area, its record is in that area's doc.
 - **A dashboard cell is a reference to a node id, and the grid replaces the canvas rather than
   covering it.** `D` swaps `Editor` for `DashboardView` in the same grid area, so React Flow
   unmounts and every card's preview goes with it — the swap trades WebGL contexts rather than
-  adding them. Hence **at most one cell per node, and only nodes that can be drawn**, enforced in
-  `addCells` *and* `validDashboard`, a hand-edited file being the other way each arrives. The dock
+  adding them. Hence **at most one cell per node per tab, and only nodes that can be drawn**, enforced
+  in `addCells` *and* `validDashboard`, a hand-edited file being the other way each arrives. **Tabs
+  are pages of one layout**: only the active one is mounted, a lone untitled tab is written in the
+  **pre-tabs form** so it round trips byte-identically (`storedDashboard`), and the active tab lives
+  **only in the document**, so an undo lands on the tab its edit was made on. The dock
   does not render while the grid is up. **Order is position** — no `x`/`y`, flow is not `dense`, so
   a gap is visible rather than CSS reordering the list somebody just dragged. The **layout is in the
   document**, inverting the dock's rule on purpose: these ids belong to *this* graph — kept

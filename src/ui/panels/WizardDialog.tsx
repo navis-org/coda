@@ -56,6 +56,7 @@ import {
   startOptions,
   visualisationOptions,
 } from '../../wizard/options'
+import { activeTab } from '../../core/dashboard'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../../core/registry'
 import { plural } from '../format'
 import type { CodaGraph } from '../../core/graph'
@@ -737,10 +738,10 @@ function Summary({
    * that — wrong on the day it changes, in the one place the reader is deciding whether to press
    * the button.
    */
-  const cells = graph.dashboard?.cells.length ?? 0
-  const controls = graph.dashboard?.cells[0]
-    ? requireNodeDef(graph.nodes.find((n) => n.id === graph.dashboard!.cells[0]!.nodeId)!.type)
-        .label
+  const placed = activeTab(graph).cells
+  const cells = placed.length
+  const controls = placed[0]
+    ? requireNodeDef(graph.nodes.find((n) => n.id === placed[0]!.nodeId)!.type).label
     : ''
 
   return (

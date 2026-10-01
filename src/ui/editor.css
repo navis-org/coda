@@ -12508,10 +12508,88 @@ details[open] > summary.tile__label {
     animation: coda-pulse 1.6s ease-in-out infinite;
   }
 }
-.dashboard__title {
+/*
+ * The tab strip, where the title was. A single tab reads "Dashboard" in the title's own weight,
+ * so a dashboard that never grows a second page looks as it did.
+ *
+ * **It scrolls sideways inside itself and never widens the bar.** `min-width: 0` on a flex child
+ * is what lets it shrink below its content; without it a dozen tabs make the *document* wider
+ * than the viewport, which on a phone is the whole page zooming out (`pnpm probe:mobile`).
+ */
+.dash-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* On the strip rather than on each tab, so the rename field inherits it through the shared
+     rename rule's `font: inherit`. */
   font-size: 13px;
 }
+/*
+ * On a phone the bar wraps and the strip takes a row of its own. Without it the strip's
+ * `min-width: 0` lets the other controls squeeze it to nothing — measured at 412px: the tabs at
+ * zero width and the document 419 wide. `NARROW_QUERY`'s width, as a plain media query because
+ * no React branch is paired with it.
+ */
+@media (max-width: 720px) {
+  .dashboard__bar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .dash-tabs {
+    flex-basis: 100%;
+  }
+}
+/* The scroller is the list alone — `+` sits after it, so it is always in reach. */
+.dash-tabs__list {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dash-tabs__tab {
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 9px;
+  font: inherit;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.dash-tabs__tab:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+.dash-tabs__tab[aria-selected='true'] {
+  color: var(--text-primary);
+  font-weight: 600;
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+/* `.btn--icon`, a little smaller and with a larger glyph, to sit level with the tabs. */
+.dash-tabs__add {
+  flex: none;
+  width: 24px;
+  font-size: 15px;
+  line-height: 1;
+}
+/* Sized to a tab, so the strip does not jump when it opens; the look is `.wf-tabs__rename`'s. */
+.dash-tabs__rename {
+  flex: none;
+  width: 160px;
+  padding: 3px 8px;
+}
 .dashboard__count {
+  flex: none;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -12848,18 +12926,22 @@ details[open] > summary.tile__label {
   color: var(--text-primary);
 }
 
-/* Takes the name button's slot and metrics, so the row does not jump when the field opens. */
-.wf-tabs__rename {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 1px 4px 1px 3px;
-  padding: 2px 4px;
+/* The in-place rename field's look, shared with the dashboard's tab strip. */
+.wf-tabs__rename,
+.dash-tabs__rename {
   font: inherit;
   color: var(--text-primary);
   background: var(--surface-0, var(--surface-1));
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
   outline: none;
+}
+/* Takes the name button's slot and metrics, so the row does not jump when the field opens. */
+.wf-tabs__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 1px 4px 1px 3px;
+  padding: 2px 4px;
 }
 
 /*

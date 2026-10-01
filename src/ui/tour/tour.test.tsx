@@ -29,7 +29,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
-import { DEFAULT_ROW_SPAN } from '../../core/dashboard'
+import { DEFAULT_ROW_SPAN, activeTab } from '../../core/dashboard'
 import { requireNodeDef } from '../../core/registry'
 import { getToken } from '../../data/neuprint/credentials'
 import { useGraphStore } from '../../store/graphStore'
@@ -213,14 +213,14 @@ describe('Build a Dashboard', () => {
     const state = useGraphStore.getState()
     const { graph } = state
     const type = (id: string) => graph.nodes.find((n) => n.id === id)?.type
-    const cells = graph.dashboard?.cells ?? []
+    const { cells, columns } = activeTab(graph)
 
     expect(cells.map((c) => type(c.nodeId))).toEqual([
       'neuron.explore',
       'out.neuroglancer',
       'out.table',
     ])
-    expect(graph.dashboard?.columns).toBe(2)
+    expect(columns).toBe(2)
     /*
      * Half, full, half — the scene is the one that runs the whole height. Read through
      * `DEFAULT_ROW_SPAN` rather than off `c.h`, because a half-height cell stores its height as

@@ -112,6 +112,29 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: '2026-10-01',
+    title: 'Dashboards with tabs',
+    summary:
+      'Build several dashboards from one workflow: an overview, a page of tables, a page of 3D views, each with its own grid.',
+    highlight: false,
+    features: [
+      {
+        kind: 'editor',
+        date: '2026-10-01',
+        title: 'Tabs on the dashboard',
+        body:
+          'Press **+** beside the dashboard’s title to add a page. Each tab has its own cells and its own number of columns, and a node can sit on as many tabs as you like. Double-click a tab to rename it; right-click it to duplicate, move or delete it.\n\n' +
+          'On the canvas, right-click a card and pick which tabs it goes on. A workflow saved from the dashboard opens on the tab it was saved from.',
+        // Taken by hand from the running app: a capture can only crop to a dialog or the whole
+        // window, and the subject here is one bar.
+        image: {
+          file: 'dashboard-tabs.webp',
+          alt: 'The dashboard’s bar with three tabs — Overview, Partners and Tables — a + to add another, and the column slider, Add node and Canvas buttons on the right.',
+        },
+      },
+    ],
+  },
+  {
     date: '2026-09-30',
     title: 'Your own connectome, from your own files',
     summary:
