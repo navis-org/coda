@@ -62,7 +62,6 @@ function draw(table: TableValue, props: Partial<Parameters<typeof ScatterViewer>
       shape={{ mode: 'constant', column: undefined, constant: 'circle' }}
       idColumn="neuronId"
       opacity={0.8}
-      maxPoints={50000}
       trend="none"
       trendPerGroup
       selection={[]}
@@ -78,13 +77,10 @@ describe('the caption', () => {
     expect(screen.getByText(/post vs pre/)).toBeTruthy()
   })
 
-  it('admits the point budget rather than quietly thinning', () => {
-    draw(neurons(100), { maxPoints: 10 })
-    expect(screen.getByText('showing 10 of 100')).toBeTruthy()
-  })
-
-  it('says nothing about a budget it did not reach', () => {
-    draw(neurons(10), { maxPoints: 50000 })
+  it('draws every point, so there is no sample to admit', () => {
+    // Past `CIRCLES_MAX` the canvas writes pixels rather than thinning the rows.
+    draw(neurons(12_000))
+    expect(screen.getByText(/12,000 points/)).toBeTruthy()
     expect(screen.queryByText(/showing/)).toBeNull()
   })
 

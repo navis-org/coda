@@ -1,6 +1,6 @@
 /**
- * Geometry for the scatter plot: scales, ticks, the point budget, projection, hit testing,
- * lasso containment and the least-squares trend.
+ * Geometry for the scatter plot: scales, ticks, projection, culling, hit testing, lasso
+ * containment and the least-squares trend.
  *
  * Headless and pure, with the same standing as `networkLayout.ts` and `networkDraw.ts`. The
  * viewer draws to a canvas and jsdom has no canvas, so everything decidable without pixels
@@ -26,8 +26,45 @@ import type { MarkerShape } from '../encoding'
 
 export type ScaleKind = 'linear' | 'log'
 
-/** Default ceiling on drawn points. See `sampleRows` for what happens above it. */
-export const DEFAULT_MAX_POINTS = 50_000
+/**
+ * Above this many marks inside the plot, the canvas pass draws pixels rather than tracing
+ * antialiased paths (`scatterGl.ts`, `scatterRaster.ts`), and the SVG export embeds the marks as
+ * one image. Asked through `drawsPixels`, so the screen and the export cannot disagree.
+ *
+ * Measured, not chosen (`pnpm probe:scatter-scale`, fish2's 129,325-point NBLAST embedding, M3
+ * Max, devicePixelRatio 2): a path of 10,000 circles rasterises inside one 60 Hz frame, 50,000
+ * took 117 ms and 129,325 took 420 ms — the cost is Skia's raster, ~3.4 µs a mark, not anything
+ * this file computes. The pixel pass held 60 Hz at all 129,325. Counted over the *visible* marks,
+ * so zooming in hands the picture back to real circles as soon as there are few enough to draw.
+ */
+export const CIRCLES_MAX = 10_000
+
+/** Whether a spec is painted as pixels rather than paths — the one reading of `CIRCLES_MAX`. */
+export function drawsPixels(spec: ScatterSpec): boolean {
+  return spec.visible.length > CIRCLES_MAX
+}
+
+/**
+ * The opacity a mark is composited at. One function for every painter: the pixel passes have to
+ * match the path pass exactly, or the cloud's density jumps as a zoom crosses `CIRCLES_MAX`.
+ */
+export function markAlpha(opacity: number): number {
+  return Math.max(0.02, Math.min(1, opacity))
+}
+
+/**
+ * Whether a mark of radius `r` at (`x`, `y`) touches the plot rect, `pad` pixels further out.
+ * What fills `ScatterSpec.visible`, and what decides which selection rings are drawn.
+ */
+export function reachesPlot(plot: Rect, x: number, y: number, r: number, pad = 0): boolean {
+  const reach = r + pad
+  return (
+    x + reach >= plot.x &&
+    x - reach <= plot.x + plot.width &&
+    y + reach >= plot.y &&
+    y - reach <= plot.y + plot.height
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Scales
@@ -102,37 +139,12 @@ export function usableRows(
   return { rows: kept.subarray(0, n), skipped: length - n }
 }
 
-/**
- * A stable stride through the usable rows, capped at `maxPoints`.
- *
- * Deterministic on purpose — a random sample would reshuffle on every re-render, so panning
- * would make points flicker in and out and the picture would never be the same twice. The
- * stride is over the row order, which is arbitrary with respect to position, so it thins the
- * cloud evenly rather than clipping a corner of it.
- *
- * The *selection* is not sampled: a lasso is tested against every usable row, so it catches
- * what is inside it whether or not that point was drawn. See `rowsInPolygon`.
- */
-export function sampleRows(rows: Int32Array, maxPoints: number): Int32Array {
-  const cap = Math.max(1, Math.floor(maxPoints))
-  if (rows.length <= cap) return rows
-  const out = new Int32Array(cap)
-  const stride = rows.length / cap
-  for (let i = 0; i < cap; i++) out[i] = rows[Math.floor(i * stride)]!
-  return out
-}
-
-/** Extent of the transformed coordinate over the given rows, or undefined when empty. */
-export function extentOf(
-  values: ColumnData,
-  rows: Int32Array,
-  kind: ScaleKind,
-): Domain | undefined {
+/** Extent of a transformed coordinate, or undefined when there is none. */
+export function extentOf(values: Float64Array): Domain | undefined {
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
-  for (let i = 0; i < rows.length; i++) {
-    const t = forward(kind, cellNumber(values[rows[i]!]))
-    if (!Number.isFinite(t)) continue
+  for (let i = 0; i < values.length; i++) {
+    const t = values[i]!
     if (t < min) min = t
     if (t > max) max = t
   }
@@ -234,26 +246,50 @@ function logTicks(domain: Domain, count: number): number[] {
 // Projection
 // ---------------------------------------------------------------------------
 
+/**
+ * The projection, as `pixel = t · scale + offset` per axis — y's scale negative, because SVG
+ * and canvas both grow downwards.
+ *
+ * The one definition of where a transformed value lands. `projectX`/`projectY` and every frame
+ * read it, and the GPU pass is handed its numbers as uniforms rather than re-deriving them in GLSL,
+ * so the two passes either side of `CIRCLES_MAX` cannot disagree about a mark's position.
+ */
+export interface Affine {
+  sx: number
+  ox: number
+  sy: number
+  oy: number
+}
+
+export function viewAffine(view: Viewport, plot: Rect): Affine {
+  // A zero span would divide by zero; one unit is as good a window as any for a single value.
+  const sx = plot.width / (view.x.max - view.x.min || 1)
+  const sy = -plot.height / (view.y.max - view.y.min || 1)
+  return { sx, ox: plot.x - view.x.min * sx, sy, oy: plot.y + plot.height - view.y.min * sy }
+}
+
 /** Transformed value → pixel x within the plot rect. */
 export function projectX(t: number, view: Viewport, plot: Rect): number {
-  const span = view.x.max - view.x.min || 1
-  return plot.x + ((t - view.x.min) / span) * plot.width
+  const a = viewAffine(view, plot)
+  return t * a.sx + a.ox
 }
 
-/** Transformed value → pixel y. Flipped, because SVG and canvas both grow downwards. */
+/** Transformed value → pixel y. */
 export function projectY(t: number, view: Viewport, plot: Rect): number {
-  const span = view.y.max - view.y.min || 1
-  return plot.y + plot.height - ((t - view.y.min) / span) * plot.height
+  const a = viewAffine(view, plot)
+  return t * a.sy + a.oy
 }
 
+/** Pixel x → transformed value: `viewAffine` inverted. A plot with no width maps to its edge. */
 export function unprojectX(px: number, view: Viewport, plot: Rect): number {
-  const span = view.x.max - view.x.min || 1
-  return view.x.min + ((px - plot.x) / Math.max(1, plot.width)) * span
+  const a = viewAffine(view, plot)
+  return a.sx ? (px - a.ox) / a.sx : view.x.min
 }
 
+/** Pixel y → transformed value. */
 export function unprojectY(px: number, view: Viewport, plot: Rect): number {
-  const span = view.y.max - view.y.min || 1
-  return view.y.min + ((plot.y + plot.height - px) / Math.max(1, plot.height)) * span
+  const a = viewAffine(view, plot)
+  return a.sy ? (px - a.oy) / a.sy : view.y.min
 }
 
 // ---------------------------------------------------------------------------
@@ -286,57 +322,146 @@ export interface TrendLine {
   n: number
 }
 
+/** A trend fitted once per marks, in transformed space; a frame only places its ends. */
+export interface TrendFit {
+  /** The group's colour; undefined for the one overall line, which takes the frame's ink. */
+  color: string | undefined
+  slope: number
+  intercept: number
+  r: number
+  n: number
+}
+
 /**
- * Everything needed to paint one frame, in pixels, and nothing else.
+ * Everything about the marks that a pan or a zoom does not change, built once per table,
+ * columns, scales and encoding.
  *
- * Parallel arrays rather than an array of point objects: at the default cap this is fifty
- * thousand marks, and fifty thousand small objects per re-render is real garbage for a
- * structure that is written once and read once.
+ * The split from `ScatterSpec` is the whole of what makes a pan cheap at embedding scale. A frame
+ * used to re-read every cell, re-resolve every colour, shape and radius through the encodings, and
+ * regroup and re-upload all of it — for fish2's 129,325 marks, a 2.5 MB GPU upload and two
+ * `Array(129325)` per pointer move, for values that cannot have changed. Now a frame projects the
+ * transformed coordinates held here and does nothing else per mark; the GPU pass uploads these
+ * arrays once and moves a uniform (`scatterGl.ts`); and selection indices, which are positions in
+ * these arrays, survive every pan.
+ *
+ * Parallel arrays rather than an array of point objects, a hundred thousand small objects being
+ * real garbage for a structure that is written once and read many times.
  */
-export interface ScatterSpec {
-  plot: Rect
-  view: Viewport
+export interface ScatterMarks {
   xScale: ScaleKind
   yScale: ScaleKind
-  /** Tick positions in transformed space. Label them through `inverse`. */
-  xTicks: number[]
-  yTicks: number[]
-  /** Source row behind each drawn mark. */
+  /**
+   * Source row behind each mark: every usable row. Also what the lasso is tested against, so
+   * the selection and the drawing are the same set of rows.
+   */
   rows: Int32Array
-  px: Float32Array
-  py: Float32Array
+  /** Coordinates in transformed space — what a frame projects. */
+  xt: Float64Array
+  yt: Float64Array
   radius: Float32Array
   colors: string[]
   shapes: MarkerShape[]
-  trends: TrendLine[]
-  /** Marks painted. */
-  drawn: number
-  /**
-   * Every row that could be drawn, before the point budget — which is a superset of `rows`.
-   * Carried on the spec because the lasso is tested against it rather than against the
-   * sample, and recomputing it per gesture would be a second pass that could disagree.
-   */
-  usableRows: Int32Array
-  total: number
+  /** Every mark grouped by colour and shape, in stacking order. See `markBuckets`. */
+  buckets: MarkBucket[]
+  /** Which of `buckets` each mark is in, so a frame can sort its visible marks in one pass. */
+  bucketOf: Uint32Array
+  /** What the GPU pass checks against the driver's largest point before it draws anything. */
+  largestRadius: number
+  /** Unpadded extent in transformed space; undefined with nothing to plot. */
+  extent: Viewport | undefined
+  fits: TrendFit[]
   /** Rows with a missing, non-numeric or (under a log axis) non-positive coordinate. */
   skipped: number
 }
 
-export interface BuildOptions {
+/**
+ * One frame: the marks projected into the plot under a view, and nothing else.
+ */
+export interface ScatterSpec {
+  marks: ScatterMarks
+  plot: Rect
+  view: Viewport
+  /** Tick positions in transformed space. Label them through `inverse`. */
+  xTicks: number[]
+  yTicks: number[]
+  /** Pixel position of every mark, indexed as the marks are. */
+  px: Float32Array
+  py: Float32Array
+  trends: TrendLine[]
+  /**
+   * Indices of the marks that reach the plot rect, radius included.
+   *
+   * The culling every consumer shares: the canvas pass, the hit index and the export all walk
+   * this, so a zoom into one cluster of a whole-dataset embedding costs what that cluster costs.
+   * It is also what `CIRCLES_MAX` is counted against.
+   */
+  visible: Int32Array
+}
+
+export interface MarksOptions {
   xValues: ColumnData
   yValues: ColumnData
   length: number
   xScale: ScaleKind
   yScale: ScaleKind
+  style: MarkStyle
+  trend?: 'none' | 'linear'
+  /** One fit per colour the marks resolved to, rather than one overall. */
+  trendPerGroup?: boolean
+}
+
+export function buildMarks(options: MarksOptions): ScatterMarks {
+  const { xValues, yValues, length, xScale, yScale, style } = options
+  const { rows, skipped } = usableRows(xValues, yValues, length, xScale, yScale)
+  const count = rows.length
+  const xt = new Float64Array(count)
+  const yt = new Float64Array(count)
+  const radius = new Float32Array(count)
+  const colors = new Array<string>(count)
+  const shapes = new Array<MarkerShape>(count)
+  let largestRadius = 0
+  for (let i = 0; i < count; i++) {
+    const row = rows[i]!
+    xt[i] = forward(xScale, cellNumber(xValues[row]))
+    yt[i] = forward(yScale, cellNumber(yValues[row]))
+    const r = style.radiusAt(row)
+    radius[i] = r
+    if (r > largestRadius) largestRadius = r
+    colors[i] = style.colorAt(row)
+    shapes[i] = style.shapeAt(row)
+  }
+  const x = extentOf(xt)
+  const y = extentOf(yt)
+  return {
+    xScale,
+    yScale,
+    rows,
+    xt,
+    yt,
+    radius,
+    colors,
+    shapes,
+    ...markBuckets(colors, shapes),
+    largestRadius,
+    extent: x && y ? { x, y } : undefined,
+    fits:
+      options.trend === 'linear'
+        ? fitTrends(xt, yt, options.trendPerGroup !== false ? colors : undefined)
+        : [],
+    skipped,
+  }
+}
+
+export interface BuildOptions {
+  marks: ScatterMarks
   plot: Rect
   /** Omit to frame the data; supply one to keep a pan/zoom the user set. */
   view?: Viewport
   aspect?: 'fit' | 'equal'
-  maxPoints?: number
-  style: MarkStyle
-  /** Rows to fit trends over, grouped by the colour they resolved to. Empty for none. */
-  trend?: 'none' | 'linear'
-  trendPerGroup?: boolean
+  /**
+   * The ink of a single overall trend line. A frame's rather than the marks', so a theme change
+   * re-inks the line without rebuilding — and re-uploading — every mark.
+   */
   trendColor: string
 }
 
@@ -347,89 +472,53 @@ export interface BuildOptions {
  * is pressed — and because a fit computed differently in those two places is a Fit button
  * that moves the picture.
  */
-export function fitView(options: {
-  xValues: ColumnData
-  yValues: ColumnData
-  rows: Int32Array
-  xScale: ScaleKind
-  yScale: ScaleKind
-  plot: Rect
-  aspect?: 'fit' | 'equal'
-}): Viewport | undefined {
-  const x = extentOf(options.xValues, options.rows, options.xScale)
-  const y = extentOf(options.yValues, options.rows, options.yScale)
-  if (!x || !y) return undefined
-  const view: Viewport = { x: padDomain(x), y: padDomain(y) }
-  return options.aspect === 'equal' ? equaliseAspect(view, options.plot) : view
+export function fitView(
+  marks: ScatterMarks,
+  plot: Rect,
+  aspect?: 'fit' | 'equal',
+): Viewport | undefined {
+  if (!marks.extent) return undefined
+  const view: Viewport = { x: padDomain(marks.extent.x), y: padDomain(marks.extent.y) }
+  return aspect === 'equal' ? equaliseAspect(view, plot) : view
 }
 
 export function buildScatter(options: BuildOptions): ScatterSpec {
-  const { xValues, yValues, length, xScale, yScale, plot, style } = options
-  const { rows: usable, skipped } = usableRows(xValues, yValues, length, xScale, yScale)
-
-  // The frame is computed over *every* usable row, not over the sample: an axis range that
-  // moved when the point budget changed would make the cap look like a filter on the data.
+  const { marks, plot } = options
   const view = options.view ??
-    fitView({
-      xValues,
-      yValues,
-      rows: usable,
-      xScale,
-      yScale,
-      plot,
-      ...(options.aspect ? { aspect: options.aspect } : {}),
-    }) ?? { x: { min: 0, max: 1 }, y: { min: 0, max: 1 } }
+    fitView(marks, plot, options.aspect) ?? { x: { min: 0, max: 1 }, y: { min: 0, max: 1 } }
 
-  const drawn = sampleRows(usable, options.maxPoints ?? DEFAULT_MAX_POINTS)
-  const count = drawn.length
+  const count = marks.rows.length
   const px = new Float32Array(count)
   const py = new Float32Array(count)
-  const radius = new Float32Array(count)
-  const colors = new Array<string>(count)
-  const shapes = new Array<MarkerShape>(count)
-
+  const visible = new Int32Array(count)
+  const { sx, ox, sy, oy } = viewAffine(view, plot)
+  let seen = 0
   for (let i = 0; i < count; i++) {
-    const row = drawn[i]!
-    px[i] = projectX(forward(xScale, cellNumber(xValues[row])), view, plot)
-    py[i] = projectY(forward(yScale, cellNumber(yValues[row])), view, plot)
-    radius[i] = style.radiusAt(row)
-    colors[i] = style.colorAt(row)
-    shapes[i] = style.shapeAt(row)
+    const x = marks.xt[i]! * sx + ox
+    const y = marks.yt[i]! * sy + oy
+    px[i] = x
+    py[i] = y
+    if (reachesPlot(plot, x, y, marks.radius[i]!)) visible[seen++] = i
   }
 
-  const trends =
-    options.trend === 'linear'
-      ? fitTrends({
-          xValues,
-          yValues,
-          rows: usable,
-          xScale,
-          yScale,
-          view,
-          perGroup: options.trendPerGroup !== false,
-          colorAt: style.colorAt,
-          fallbackColor: options.trendColor,
-        })
-      : []
-
   return {
+    marks,
     plot,
     view,
-    xScale,
-    yScale,
-    xTicks: axisTicks(view.x, xScale),
-    yTicks: axisTicks(view.y, yScale),
-    rows: drawn,
+    xTicks: axisTicks(view.x, marks.xScale),
+    yTicks: axisTicks(view.y, marks.yScale),
     px,
     py,
-    radius,
-    colors,
-    shapes,
-    trends,
-    drawn: count,
-    usableRows: usable,
-    total: length,
-    skipped,
+    trends: marks.fits.map((fit) => ({
+      color: fit.color ?? options.trendColor,
+      x0: view.x.min,
+      y0: fit.intercept + fit.slope * view.x.min,
+      x1: view.x.max,
+      y1: fit.intercept + fit.slope * view.x.max,
+      r: fit.r,
+      n: fit.n,
+    })),
+    visible: visible.subarray(0, seen),
   }
 }
 
@@ -481,7 +570,7 @@ export function fitLine(
 }
 
 /**
- * One line overall, or one per colour group.
+ * One fit overall (`colors` undefined), or one per colour group, over transformed space.
  *
  * Grouping is keyed on the *resolved colour* rather than on the raw column value, which is
  * what makes each line correspond exactly to a legend entry — the eight-slot cap and the
@@ -489,48 +578,27 @@ export function fitLine(
  * bucket the legend actually names instead of for a group nothing on screen identifies.
  * A constant colour therefore collapses to a single line by construction.
  */
-function fitTrends(options: {
-  xValues: ColumnData
-  yValues: ColumnData
-  rows: Int32Array
-  xScale: ScaleKind
-  yScale: ScaleKind
-  view: Viewport
-  perGroup: boolean
-  colorAt: (row: number) => string
-  fallbackColor: string
-}): TrendLine[] {
-  const { xValues, yValues, rows, xScale, yScale, view, perGroup, colorAt } = options
+function fitTrends(
+  xt: Float64Array,
+  yt: Float64Array,
+  colors: string[] | undefined,
+): TrendFit[] {
   const groups = new Map<string, number[]>()
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!
-    const key = perGroup ? colorAt(row) : ''
+  for (let i = 0; i < xt.length; i++) {
+    const key = colors ? colors[i]! : ''
     const bucket = groups.get(key)
-    if (bucket) bucket.push(row)
-    else groups.set(key, [row])
+    if (bucket) bucket.push(i)
+    else groups.set(key, [i])
   }
-
-  const lines: TrendLine[] = []
-  for (const [key, bucket] of groups) {
-    const xs = new Float64Array(bucket.length)
-    const ys = new Float64Array(bucket.length)
-    for (let i = 0; i < bucket.length; i++) {
-      xs[i] = forward(xScale, cellNumber(xValues[bucket[i]!]))
-      ys[i] = forward(yScale, cellNumber(yValues[bucket[i]!]))
-    }
-    const fit = fitLine(xs, ys)
-    if (!fit) continue
-    lines.push({
-      color: key || options.fallbackColor,
-      x0: view.x.min,
-      y0: fit.intercept + fit.slope * view.x.min,
-      x1: view.x.max,
-      y1: fit.intercept + fit.slope * view.x.max,
-      r: fit.r,
-      n: fit.n,
-    })
+  const fits: TrendFit[] = []
+  for (const [key, members] of groups) {
+    const fit = fitLine(
+      Float64Array.from(members, (i) => xt[i]!),
+      Float64Array.from(members, (i) => yt[i]!),
+    )
+    if (fit) fits.push({ color: colors ? key : undefined, ...fit })
   }
-  return lines
+  return fits
 }
 
 // ---------------------------------------------------------------------------
@@ -542,41 +610,53 @@ function fitTrends(options: {
  *
  * A grid rather than a quadtree: the points are already projected into a bounded rect, the
  * query is always "what is under the pointer", and a flat array of buckets has no pointer
- * chasing. Rebuilt whenever the spec is, which is once per pan/zoom/restyle rather than once
- * per mouse move.
+ * chasing.
  */
 export interface HitIndex {
-  /** Index into the spec's parallel arrays, or -1. */
+  /** Position of the nearest mark in `spec.marks`, or -1. */
   nearest(x: number, y: number, maxDistance: number): number
 }
 
+/**
+ * Over the visible marks only. An off-screen mark cannot be under the pointer, and `cellOf`
+ * clamps to the border cells — so indexing every mark piled a zoomed-out remainder of a
+ * 100k-point embedding into the cells along the edge, and hovering there walked all of it.
+ *
+ * Built on the first query rather than with the spec. A pan makes a spec per pointer move and
+ * hovers none of them — the pointer is dragging — so an eager index was a grid of a hundred
+ * thousand entries built and thrown away every frame.
+ */
 export function buildHitIndex(spec: ScatterSpec, cellSize = 16): HitIndex {
-  const { plot, px, py, drawn } = spec
+  const { plot, px, py, visible } = spec
   const cell = Math.max(4, cellSize)
   const cols = Math.max(1, Math.ceil(plot.width / cell))
   const rows = Math.max(1, Math.ceil(plot.height / cell))
-  const buckets: number[][] = Array.from({ length: cols * rows }, () => [])
+  let buckets: number[][] | undefined
 
-  const cellOf = (x: number, y: number): number => {
-    const col = Math.min(cols - 1, Math.max(0, Math.floor((x - plot.x) / cell)))
-    const row = Math.min(rows - 1, Math.max(0, Math.floor((y - plot.y) / cell)))
-    return row * cols + col
+  // Clamped, so a position off the plot reads as the border cell.
+  const colOf = (x: number) => Math.min(cols - 1, Math.max(0, Math.floor((x - plot.x) / cell)))
+  const rowOf = (y: number) => Math.min(rows - 1, Math.max(0, Math.floor((y - plot.y) / cell)))
+
+  const index = (): number[][] => {
+    if (buckets) return buckets
+    buckets = Array.from({ length: cols * rows }, () => [])
+    for (const i of visible) buckets[rowOf(py[i]!) * cols + colOf(px[i]!)]!.push(i)
+    return buckets
   }
-
-  for (let i = 0; i < drawn; i++) buckets[cellOf(px[i]!, py[i]!)]!.push(i)
 
   return {
     nearest(x, y, maxDistance) {
+      const grid = index()
       // The search widens by whole cells until it has covered `maxDistance`, so a sparse
       // region costs the same handful of buckets as a dense one.
       const reach = Math.ceil(maxDistance / cell)
-      const col = Math.min(cols - 1, Math.max(0, Math.floor((x - plot.x) / cell)))
-      const row = Math.min(rows - 1, Math.max(0, Math.floor((y - plot.y) / cell)))
+      const col = colOf(x)
+      const row = rowOf(y)
       let best = -1
       let bestDistance = maxDistance * maxDistance
       for (let r = Math.max(0, row - reach); r <= Math.min(rows - 1, row + reach); r++) {
         for (let c = Math.max(0, col - reach); c <= Math.min(cols - 1, col + reach); c++) {
-          for (const i of buckets[r * cols + c]!) {
+          for (const i of grid[r * cols + c]!) {
             const dx = px[i]! - x
             const dy = py[i]! - y
             const distance = dx * dx + dy * dy
@@ -611,32 +691,15 @@ export function pointInPolygon(x: number, y: number, polygon: number[]): boolean
 }
 
 /**
- * Every row whose position falls inside the polygon — tested against the *whole* table, not
- * against the sample that was drawn.
- *
- * That is the deliberate half. Above the point budget a lasso still catches what is inside
- * it, so `Selected` describes the region rather than the subset that happened to survive the
- * stride. The caption says how many points were drawn, which is what stops the difference
- * from being a surprise.
+ * Every source row whose mark falls inside the polygon — every mark, on screen or not, tested at
+ * the frame's own projection, so the answer does not depend on which renderer drew them.
  */
-export function rowsInPolygon(options: {
-  xValues: ColumnData
-  yValues: ColumnData
-  rows: Int32Array
-  xScale: ScaleKind
-  yScale: ScaleKind
-  view: Viewport
-  plot: Rect
-  polygon: number[]
-}): number[] {
-  const { xValues, yValues, rows, xScale, yScale, view, plot, polygon } = options
+export function rowsInPolygon(spec: ScatterSpec, polygon: number[]): number[] {
   if (polygon.length < 6) return []
+  const { px, py, marks } = spec
   const hits: number[] = []
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!
-    const x = projectX(forward(xScale, cellNumber(xValues[row])), view, plot)
-    const y = projectY(forward(yScale, cellNumber(yValues[row])), view, plot)
-    if (pointInPolygon(x, y, polygon)) hits.push(row)
+  for (let i = 0; i < marks.rows.length; i++) {
+    if (pointInPolygon(px[i]!, py[i]!, polygon)) hits.push(marks.rows[i]!)
   }
   return hits
 }
@@ -648,4 +711,71 @@ export function rectPolygon(x0: number, y0: number, x1: number, y1: number): num
   const top = Math.min(y0, y1)
   const bottom = Math.max(y0, y1)
   return [left, top, right, top, right, bottom, left, bottom]
+}
+
+// ---------------------------------------------------------------------------
+// Batching
+// ---------------------------------------------------------------------------
+
+export interface MarkBucket {
+  color: string
+  shape: MarkerShape
+  /** Indices of the marks in this bucket, in mark order. */
+  indices: number[]
+}
+
+/**
+ * The marks grouped by colour and shape, buckets in order of first appearance, and which bucket
+ * each mark went to.
+ *
+ * One grouping for every painter — the canvas path, the pixel raster, the GPU pass and the SVG —
+ * because the bucket order *is* the stacking order: a later bucket is drawn over an earlier one.
+ * Two painters batching their own way would stack one category over another on screen and the
+ * other way round past `CIRCLES_MAX`, and the cloud would visibly change as a zoom crossed it.
+ * Built once per marks; a frame takes its subset through `visibleBuckets`, which keeps the order.
+ */
+function markBuckets(
+  colors: string[],
+  shapes: MarkerShape[],
+): { buckets: MarkBucket[]; bucketOf: Uint32Array } {
+  const buckets: MarkBucket[] = []
+  const bucketOf = new Uint32Array(colors.length)
+  const byColor = new Map<string, Map<MarkerShape, number>>()
+  for (let i = 0; i < colors.length; i++) {
+    const color = colors[i]!
+    const shape = shapes[i]!
+    let byShape = byColor.get(color)
+    if (!byShape) byColor.set(color, (byShape = new Map()))
+    let at = byShape.get(shape)
+    if (at === undefined) {
+      at = buckets.length
+      byShape.set(shape, at)
+      buckets.push({ color, shape, indices: [] })
+    }
+    buckets[at]!.indices.push(i)
+    bucketOf[i] = at
+  }
+  return { buckets, bucketOf }
+}
+
+/** Kept per spec: a hover or a selection change repaints the same frame. */
+const visibleCache = new WeakMap<ScatterSpec, MarkBucket[]>()
+
+/**
+ * A frame's visible marks, in the marks' own buckets and their order — one pass over `visible`,
+ * which is ascending, so each bucket keeps its marks in mark order too.
+ */
+export function visibleBuckets(spec: ScatterSpec): MarkBucket[] {
+  const { buckets, bucketOf, rows } = spec.marks
+  if (spec.visible.length === rows.length) return buckets
+  let kept = visibleCache.get(spec)
+  if (kept) return kept
+  const indices: number[][] = buckets.map(() => [])
+  for (const i of spec.visible) indices[bucketOf[i]!]!.push(i)
+  kept = []
+  for (let b = 0; b < buckets.length; b++) {
+    if (indices[b]!.length > 0) kept.push({ ...buckets[b]!, indices: indices[b]! })
+  }
+  visibleCache.set(spec, kept)
+  return kept
 }

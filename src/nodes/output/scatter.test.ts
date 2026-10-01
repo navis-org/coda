@@ -177,11 +177,11 @@ describe('out.scatter — provenance', () => {
     scheduler = makeScheduler()
   })
 
-  it('every drawing knob is free, Max points included', async () => {
+  it('every drawing knob is free, Vector marks included', async () => {
     const graph = pipeline()
     await scheduler.run(graph, { mode: 'full' })
 
-    let changed = setNodeParam(graph, 'plot', 'maxPoints', 500)
+    let changed = setNodeParam(graph, 'plot', 'vectorMarks', true)
     changed = setNodeParam(changed, 'plot', 'opacity', 0.2)
     changed = setNodeParam(changed, 'plot', 'xLog', true)
     changed = setNodeParam(changed, 'plot', 'trend', 'linear')
@@ -189,9 +189,8 @@ describe('out.scatter — provenance', () => {
     changed = setNodeParam(changed, 'plot', 'pointColorMode', 'categorical')
     scheduler.refreshStates(changed)
 
-    // `out` is the table unchanged and a lasso is tested against every row rather than
-    // against the drawn sample, so no output can tell whether a point was painted. That is
-    // the difference from the Network viewer's Filter tab, which really does subtract.
+    // `out` is the table unchanged and nothing here decides which rows anything carries.
+    // That is the difference from the Network viewer's Filter tab, which really does subtract.
     expect(scheduler.info('plot').state).toBe('ok')
 
     const summary = await scheduler.run(changed, { mode: 'full' })
@@ -222,7 +221,7 @@ describe('out.scatter — provenance', () => {
     // anyone restyles, which reads as a bug somewhere else entirely.
     const params = requireNodeDef('out.scatter').params ?? []
     const flag = (id: string) => params.find((p) => p.id === id)?.presentational
-    for (const id of ['x', 'y', 'xLog', 'yLog', 'aspect', 'opacity', 'maxPoints', 'trend']) {
+    for (const id of ['x', 'y', 'xLog', 'yLog', 'aspect', 'opacity', 'vectorMarks', 'trend']) {
       expect(flag(id), id).toBe(true)
     }
     expect(flag('selection')).toBeFalsy()

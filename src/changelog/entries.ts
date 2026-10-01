@@ -133,6 +133,16 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         },
       },
     ],
+    items: [
+      {
+        kind: 'chart',
+        date: '2026-10-01',
+        title: '**Scatter Plot** draws every point, however many',
+        body:
+          'An embedding of a whole dataset — a hundred thousand neurons and more — now draws in full and pans smoothly, so `Max points` is gone. Exported, more than 10,000 points in view become one embedded image inside the SVG; tick **Vector marks** to keep every point a shape.',
+        demo: 'out.scatter',
+      },
+    ],
   },
   {
     date: '2026-09-30',

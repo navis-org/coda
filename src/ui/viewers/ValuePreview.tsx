@@ -913,7 +913,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
           {...(label ? { labelColumn: label } : {})}
           {...(id ? { idColumn: id } : {})}
           opacity={Number(params.opacity)}
-          maxPoints={Number(params.maxPoints)}
+          vectorMarks={params.vectorMarks === true}
           trend={choice<'linear' | 'none'>('trend')}
           trendPerGroup={params.trendPerGroup !== false}
           selection={selection}

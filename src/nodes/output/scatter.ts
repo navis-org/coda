@@ -14,11 +14,14 @@
  *    carries. Marking it presentational would let a stale downstream result survive a change
  *    to the very thing that identifies the rows.
  *
- * Note what is *not* on that list. `Max points` thins the drawing and nothing else: `out` is
- * the table unchanged and a lasso is tested against every row rather than against the sample
- * (see `rowsInPolygon`), so no output can tell whether a point was painted. That is the
- * difference from the Network viewer's Filter tab, which genuinely does subtract from what
- * the node returns and has to say so.
+ * Note what is *not* on that list. `Vector marks` changes only how an exported file carries
+ * the marks, so no output can tell; the Network viewer's Filter tab, by contrast, genuinely
+ * subtracts from what the node returns and has to say so.
+ *
+ * There used to be a `Max points`, a stride sample of 50,000 that was there because a path
+ * of circles rasterised at 3.4 µs a mark. Past `CIRCLES_MAX` visible marks the canvas now
+ * writes pixels and draws every row, so the cap and its `showing N of M` caption went; a
+ * stored value is an undeclared param and `normalizeParams` ignores it.
  */
 
 import { registerNode } from '../../core/registry'
@@ -186,13 +189,11 @@ registerNode({
       group: 'points',
     },
     {
-      id: 'maxPoints',
-      kind: 'int',
-      label: 'Max points',
-      help: 'Above this, a stable stride through the rows is drawn and the caption says how many of how many. It thins the picture only — the table passes through whole.',
-      default: 50000,
-      min: 100,
-      step: 1000,
+      id: 'vectorMarks',
+      kind: 'boolean',
+      label: 'Vector marks',
+      help: 'Above 10,000 points in view an exported SVG carries the marks as one high-resolution image, keeping axes, labels and legend as vector — a file of a hundred thousand vector marks opens in almost nothing. Tick this for every mark as a vector shape regardless.',
+      default: false,
       presentational: true,
       advanced: true,
       group: 'points',

@@ -31,9 +31,10 @@ import { GestureMarquee } from './GestureMarquee'
 import { ColorKey, ShapeKey, SizeKey } from './LegendKeys'
 import type { LegendItem } from './scatterDraw'
 import { drawScatter, scatterToSvg } from './scatterDraw'
-import type { Rect, ScaleKind, ScatterSpec, Viewport } from './scatterPlot'
+import type { Rect, ScaleKind, ScatterMarks, ScatterSpec, Viewport } from './scatterPlot'
 import {
   buildHitIndex,
+  buildMarks,
   buildScatter,
   cellNumber,
   equaliseAspect,
@@ -72,7 +73,8 @@ export interface ScatterViewerProps {
   /** How a selected point is named downstream. Undefined means the row index. */
   idColumn?: string
   opacity: number
-  maxPoints: number
+  /** Every exported mark a vector shape, even past `CIRCLES_MAX`. */
+  vectorMarks?: boolean
   trend: 'none' | 'linear'
   trendPerGroup: boolean
   selection: string[]
@@ -123,7 +125,7 @@ export function ScatterViewer({
   labelColumn,
   idColumn,
   opacity,
-  maxPoints,
+  vectorMarks = false,
   trend,
   trendPerGroup,
   selection,
@@ -200,21 +202,22 @@ export function ScatterViewer({
     [view, aspect, plot],
   )
 
-  const spec: ScatterSpec | undefined = useMemo(() => {
-    if (!xValues || !yValues || plot.width < 10 || plot.height < 10) return undefined
-    return buildScatter({
+  /*
+   * Two memos, and the split is the performance. `marks` is everything a pan cannot change — the
+   * cells read, the encodings resolved, the stacking order, the trend fit — and `spec` is one
+   * frame of it under a view. A pan or a resize rebuilds only the second, and the GPU pass keeps
+   * the first uploaded (`scatterGl.ts`); see `ScatterMarks`.
+   */
+  const marks: ScatterMarks | undefined = useMemo(() => {
+    if (!xValues || !yValues) return undefined
+    return buildMarks({
       xValues,
       yValues,
       length: table.length,
       xScale,
       yScale,
-      plot,
-      ...(framed ? { view: framed } : {}),
-      aspect,
-      maxPoints,
       trend,
       trendPerGroup,
-      trendColor: ink.primary,
       style: {
         colorAt: colors.at,
         radiusAt: sizes.at,
@@ -227,31 +230,39 @@ export function ScatterViewer({
     table.length,
     xScale,
     yScale,
-    plot,
-    framed,
-    aspect,
-    maxPoints,
     trend,
     trendPerGroup,
-    ink.primary,
     colors,
     sizes,
     shapes,
   ])
+
+  const spec: ScatterSpec | undefined = useMemo(() => {
+    if (!marks || plot.width < 10 || plot.height < 10) return undefined
+    return buildScatter({
+      marks,
+      plot,
+      ...(framed ? { view: framed } : {}),
+      aspect,
+      trendColor: ink.primary,
+    })
+  }, [marks, plot, framed, aspect, ink.primary])
 
   const hitIndex = useMemo(() => (spec ? buildHitIndex(spec) : undefined), [spec])
 
   // --- selection ---------------------------------------------------------
   const keyAt = useMemo(() => rowKeys(table, idColumn), [table, idColumn])
   const selectedKeys = useMemo(() => new Set(stableSelection.map(String)), [stableSelection])
+  // Positions in `marks`, which a pan does not move — so this is not redone per frame, where a
+  // key per row was 129,325 strings built on every pointer move.
   const selectedIndices = useMemo(() => {
     const out = new Set<number>()
-    if (!spec || selectedKeys.size === 0) return out
-    for (let i = 0; i < spec.drawn; i++) {
-      if (selectedKeys.has(keyAt(spec.rows[i]!))) out.add(i)
+    if (!marks || selectedKeys.size === 0) return out
+    for (let i = 0; i < marks.rows.length; i++) {
+      if (selectedKeys.has(keyAt(marks.rows[i]!))) out.add(i)
     }
     return out
-  }, [spec, selectedKeys, keyAt])
+  }, [marks, selectedKeys, keyAt])
 
   const commitRows = useCallback(
     (rows: number[], additive: boolean) => {
@@ -388,7 +399,7 @@ export function ScatterViewer({
         if (current.kind !== 'pan') onSelectionChange?.([])
         return
       }
-      const key = keyAt(spec.rows[index]!)
+      const key = keyAt(spec.marks.rows[index]!)
       if (event.shiftKey || event.metaKey || event.ctrlKey) {
         const next = new Set(selectedKeys)
         if (next.has(key)) next.delete(key)
@@ -400,20 +411,8 @@ export function ScatterViewer({
       return
     }
 
-    if (!polygon || !xValues || !yValues) return
-    const rows = rowsInPolygon({
-      xValues,
-      yValues,
-      // Every usable row, not the drawn sample: above the point budget a lasso still means
-      // the region it enclosed. See `rowsInPolygon`.
-      rows: spec.usableRows,
-      xScale,
-      yScale,
-      view: spec.view,
-      plot: spec.plot,
-      polygon,
-    })
-    commitRows(rows, current.kind === 'lasso' && current.additive)
+    if (!polygon) return
+    commitRows(rowsInPolygon(spec, polygon), current.kind === 'lasso' && current.additive)
   }
 
   const fit = useCallback(() => setView(undefined), [])
@@ -466,6 +465,7 @@ export function ScatterViewer({
           title: `${yColumn} against ${xColumn}`,
           legend: legendItems,
           ...(ramp ? { ramp } : {}),
+          vectorMarks,
         })
       },
     }),
@@ -481,6 +481,7 @@ export function ScatterViewer({
       legendItems,
       colors.legend,
       wrapRef,
+      vectorMarks,
     ],
   )
 
@@ -492,11 +493,10 @@ export function ScatterViewer({
     return <ViewerEmpty>Nothing to plot — the table is empty.</ViewerEmpty>
   }
 
-  const usable = spec?.usableRows.length ?? 0
-  const thinned = spec ? spec.drawn < usable : false
-  const dropped = spec?.skipped ?? 0
+  const usable = marks?.rows.length ?? 0
+  const dropped = marks?.skipped ?? 0
   const singleTrend = spec?.trends.length === 1 ? spec.trends[0] : undefined
-  const hoveredRow = hovered && spec ? spec.rows[hovered.index] : undefined
+  const hoveredRow = hovered && spec ? spec.marks.rows[hovered.index] : undefined
 
   return (
     <div className="viewer" ref={viewerRef}>
@@ -529,7 +529,7 @@ export function ScatterViewer({
         <canvas ref={canvasRef} />
 
         {/* The marquee and the lasso trail, as an overlay rather than in the repaint: a
-            gesture redrawing fifty thousand marks per pointer move is not a gesture. */}
+            gesture redrawing a hundred thousand marks per pointer move is not a gesture. */}
         {gesture?.kind === 'box' && gesture.moved && (
           <GestureMarquee {...gesture} width={box.width} height={box.height} />
         )}
@@ -625,14 +625,6 @@ export function ScatterViewer({
           {yColumn} vs {xColumn} · {plural(usable, 'point')}
           {stableSelection.length > 0 && ` · ${formatNumber(stableSelection.length)} selected`}
         </span>
-        {thinned && !compact && (
-          <span
-            className="viewer__note"
-            title="Above Max points a stable stride is drawn. The table passes through whole, and a lasso still catches every row inside it."
-          >
-            showing {formatNumber(spec?.drawn ?? 0)} of {formatNumber(usable)}
-          </span>
-        )}
         {dropped > 0 && !compact && (
           <span
             className="viewer__note"

@@ -2184,18 +2184,90 @@ column and what a tooltip prints; _transformed space_ is that under the axis sca
 transformed, because that is the space the picture is linear in. `forward`/`inverse` are the
 only crossings and everything named `*T` is transformed.
 
-**`Max points` thins the drawing and nothing else — so it is presentational, and the Network Viewer
-viewer's filters are not.** That contrast is the whole of it. `out` is the input table
-unchanged, and a lasso is tested against **every usable row rather than the drawn sample**, so
-no output can tell whether a point was painted. `out.network`'s `minLinkWeight`/`topNodes`
-genuinely subtract from what it returns, which is why they stale everything downstream and
-carry an `affectsData` tab. Getting this backwards would have a graph go stale every time
-somebody raised a drawing cap, which reads as a scheduler bug.
+**Every row is drawn, and past `CIRCLES_MAX` (10,000) visible marks they are drawn on the GPU.**
+There was a `Max points`, a deterministic stride of 50,000, and it existed because a path of
+antialiased circles is Skia's raster at ~3.4 µs a mark. Measured by `pnpm probe:scatter-scale` on
+fish2's 129,325-neuron NBLAST embedding (M3 Max, devicePixelRatio 2, median frame while panning):
+10,000 circles 16.7 ms, 50,000 117 ms — so the old default was not smooth either — and 129,325
+420 ms. Issuing the path took 21 ms of that and the spec 3.4 ms; the rest was raster, worse on a card
+where marks overlap more. Nothing was culled, so a tenfold zoom with 4,261 marks in view still took
+50 ms. Now `buildScatter` culls to `spec.visible`, which the canvas pass, the hit index and the
+export all walk, and the count of it picks the pass: paths up to `CIRCLES_MAX`, pixels above.
 
-The sample is a **deterministic stride**, not a random draw: a random one reshuffles per
-render, so points would flicker in and out during a pan and the picture would never be the
-same twice. The caption says `showing 50,000 of 165,122`, in the same idiom as
-`labels thinned`.
+**The pixel pass is one WebGL2 context for the whole app (`scatterGl.ts`), with a CPU raster
+(`scatterRaster.ts`) as its fallback and as the export path — and the CPU raster was the first
+answer and was wrong.** A prototype stamping pixels into an `ImageData` measured 60 Hz at 129,325
+and was recommended on that number; it had stamped marks of ~2 device pixels where a real one is 6,
+five times less work. Built properly it took 103 ms a frame. Blending onto an *opaque* buffer — the
+plot background and grid written in first, so source-over needs no division and red and blue share
+one integer multiply — brought it to 67 ms at 2× and 18 ms at 1×, and that is the floor: the cost is
+the overdraw itself, 129,325 marks of ~113 device pixels over a 3.5M-pixel plot. `gl.POINTS` drew
+the same frame in 6.7 ms of main thread. **One context, not one per scatter**: the module owns an
+offscreen canvas, draws whichever scatter is repainting, and that scatter copies the frame into its
+own 2D canvas with `drawImage` *in the same task*, which is why `preserveDrawingBuffer` is off. The
+2D canvas keeps the background, grid, axes, trend and hover; only the marks and the selection rings
+go through the GPU. Every other WebGL user here is a viewer owning its own context, which the store
+and the dashboard ration carefully, so a scatter on every card would have been one more each.
+
+**A pan builds a frame of the marks, never the marks.** `ScatterMarks` (`buildMarks`) is
+everything a pan cannot change — the usable rows, each mark's coordinates *in transformed space*,
+its radius, colour and shape, the colour/shape buckets, the trend fits — and `ScatterSpec`
+(`buildScatter`) is one frame of it: the view, the ticks, `px`/`py` and `visible`. The viewer
+memoises them separately, so a pointer move during a pan projects stored numbers and does nothing
+else per mark. Before the split every frame re-read every cell through `cellNumber`, re-resolved
+every encoding, allocated two `Array(n)` of colours and shapes, rebuilt the hit grid, rebuilt a
+string key per row to find the selection, and re-uploaded ~2.5 MB to the GPU. Measured at
+129,325 marks on the GPU path (median per frame): building the frame 3.6 → 0.4 ms, the hit index
+1.1 → 0 ms, issuing the draw 2.9 → 0.1 ms; the marks cost 3–10 ms once. Four things follow:
+
+- **The GPU keeps the marks uploaded and moves a uniform.** Positions go up once as transformed
+  coordinates *less the data's centre*, and the vertex shader applies `viewAffine`'s scale and
+  offset — the one definition of the projection, which `projectX`/`projectY` and every frame also
+  read, so the shader holds no projection of its own to drift. Opacity is a uniform too, so neither
+  a pan nor an opacity drag uploads anything, and the trend's ink is the frame's, so a theme change
+  does not rebuild the marks either. The centring is not optional: float32 absolute positions would lose the low
+  digits of large values under a narrow view, and the probe draws the parity mark again with every
+  coordinate offset by 10,000,000 and gets the identical footprint. Uploads are kept per marks
+  object, eight at most (`MARKS_KEPT`), least recently drawn deleted — a dashboard repaints
+  several scatters in turn, and a `WebGLBuffer` is only freed when somebody says so. The lookup is
+  a `WeakMap`, so the eight uploads do not pin eight sets of ~6 MB of arrays after their viewers
+  let go; `LruMap` holds keys strongly and has no eviction hook, which is why it is not used. The GPU draws
+  the whole set and clips; culling to `visible` is a CPU concern, where `CIRCLES_MAX` is counted.
+- **Selection indices are positions in the marks**, so the `selectedIndices` memo keys on the marks
+  and the selection, and survives every pan.
+- **The hit index is built on its first query.** A pan makes a spec per pointer move and hovers
+  none of them, so an eager grid was a hundred thousand entries built and discarded per frame.
+- **Stacking order is the marks'**: `markBuckets` runs once over every mark, recording each mark's
+  bucket, and `visibleBuckets` sorts a frame's visible marks into those buckets in one pass over
+  `visible` — so it costs what is on screen, and keeps the order — so the GPU pass (all marks) and the circle path
+  and CPU raster (visible marks) stack categories identically.
+
+`scatterRebuild.test.tsx` drives a real pointer pan and asserts frames are rebuilt and the marks are
+not; the rest is `pnpm probe:scatter-scale`.
+
+**Crossing the threshold must not change the picture**, so three things are shared rather than
+matched. *Stacking*: `markBuckets` is the one batching, its order the draw order in all three
+painters — the path pass used to bucket by a `colour|shape` string per mark per frame, and a second
+batching would stack categories differently either side of 10,000. *Composite*: premultiplied
+source-over at the node's `Opacity`, which is what `globalAlpha` does to a path; last-write-wins was
+faster and discarded `Opacity`. *Shape*: `markStamp`'s coverage (a 4×4 supersample per shape and
+size) is what the CPU raster stamps and what the GPU's texture array is built from, so an outline
+has one definition. The probe draws one isolated mark with its selection ring either side of the
+threshold and compares: same centre colour, footprint 100.3% of the path's. The selection ring on
+the GPU is analytic, its radius depending on the mark's.
+
+**The export carries the plot area as one PNG past the same threshold**, axes, ticks, labels and
+legend staying vector — matplotlib's `rasterized=True`. Measured at 129,325: 2.8 MB in 359 ms, against
+5.7 MB of vector marks. `Vector marks` opts back in. The image is the CPU raster at 4×, opaque, so it
+carries the grid drawn into it over the vector grid beneath; where the browser cannot encode a PNG,
+the export falls back to vector marks rather than to none. `Vector marks` is presentational for the
+reason everything on the tabbed panel is: no output can tell.
+
+Two smaller findings from the same work. The hit index used to bucket every mark, and `cellOf`
+clamps off-plot positions to the border cells, so a zoom into one cluster piled the rest of a
+whole-dataset embedding along the edges and a hover there walked it — it indexes `visible` now. And
+a stored `maxPoints` is simply an undeclared param, which `normalizeParams` ignores; it was
+presentational, so no provenance key moved.
 
 **Selection is by id, with the row index as an admitted fallback.** `nodes/lib/rowIds.ts` owns
 it and _both_ the viewer and the node import it — what a selected point is called has to mean

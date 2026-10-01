@@ -1,8 +1,8 @@
 ### Drawing and export
 
-To draw tens of thousands of points the plot renders to a canvas rather than as SVG. Export re-draws it as vector (PDF, SVG, PNG) without loss, so the file does not depend on the sample shown on screen.
+Every row is drawn, whatever the size of the table — a whole-dataset embedding of over a hundred thousand neurons pans smoothly. With more than 10,000 points in view the marks are drawn as pixels; zoom in past that and they become exact shapes again.
 
-Past `Max points` the node draws a uniform sample of the table, and the caption says how many of how many. The full table still passes through to the `out` port unchanged, and a lasso tests against every row — not just the visible sample.
+Export re-draws the current view (SVG, PDF, PNG). With more than 10,000 points in view the exported marks are one high-resolution image inside an otherwise vector file, because a file of a hundred thousand vector marks opens in almost nothing. Tick `"Vector marks"` for every mark as a shape regardless.
 
 ### Selection and lasso
 
@@ -13,5 +13,5 @@ Lasso a group of points and they arrive at the **Selected** output as a table. T
 
 ```coda-params
 caption: Interactive parameters
-out.scatter: xLog, yLog, maxPoints
+out.scatter: xLog, yLog, vectorMarks
 ```
