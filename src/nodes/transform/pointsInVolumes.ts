@@ -50,9 +50,13 @@ registerNode({
   label: 'Points in Volumes',
   category: 'transform',
   description:
-    'Split a point cloud by the meshes enclosing it, adding a `roi` column naming each point’s volume — written over a same-named column rather than beside it.',
+    'Split a point cloud by the meshes enclosing it, and add a `roi` column naming the volume each point is in. An existing column of that name is written over.',
   guide:
-    'Tests every point of a cloud against a set of meshes and hands back both halves — the points inside some volume, and the rest — with a column naming which volume each one landed in. It is the only route from a synapse cloud to the region a synapse is in: neuPrint, CAVE and CATMAID all publish synapse coordinates with no region attached. The volumes need not be neuropils; a set of neuron meshes on the same socket asks which synapses lie inside another cell. Where volumes overlap the first on the wire wins, and the node says how many points that decided.',
+    'Tests every point against a set of meshes and returns the points inside a volume and ' +
+    'those outside, with a column naming each point’s volume. Use it to assign synapses to ' +
+    'brain regions, which neuPrint, CAVE and CATMAID do not provide. The volumes can be any ' +
+    'meshes, e.g. other neurons. Where volumes overlap, the first one on the wire wins; the ' +
+    'node reports how many points that affected.',
   cost: 'expensive',
   inputs: [
     { id: 'points', label: 'Points', type: T.points() },
@@ -72,7 +76,7 @@ registerNode({
       kind: 'string',
       label: 'Column',
       placeholder: DEFAULT_VOLUME_COLUMN,
-      help: 'What to call the column naming each point’s volume. A column of this name already on the cloud is written over in place, rather than appearing twice.',
+      help: 'Name of the new column holding each point’s volume. An existing column of this name is overwritten.',
       default: DEFAULT_VOLUME_COLUMN,
     },
   ],
@@ -109,13 +113,15 @@ registerNode({
   evaluate: async (ctx) => {
     const points = ctx.input('points')
     if (!isPointsValue(points)) {
-      throw new Error('Wire a point cloud — Synapses, or any node handing on one — to Points.')
+      throw new Error(
+        'Nothing is wired into `Points`. Wire in a point cloud, e.g. from the Synapses node.',
+      )
     }
     const volumes = ctx.input('volumes')
     if (!isMeshesValue(volumes)) {
       throw new Error(
-        'Wire meshes to Volumes — ROI Meshes for a dataset’s neuropils, or the Meshes node ' +
-          'for neurons.',
+        'Nothing is wired into `Volumes`. Wire in meshes: ROI Meshes for a dataset’s ' +
+          'neuropils, or the Meshes node for neurons.',
       )
     }
 
@@ -138,7 +144,7 @@ registerNode({
      */
     if (volumes.items.length === 0) {
       ctx.warn(
-        'No volumes on the wire, so every point is outside. Check the Regions picker on ROI ' +
+        'No volumes arrived on `Volumes`, so every point is outside. Check `Regions` on ROI ' +
           'Meshes, or whatever filtered the volumes upstream.',
       )
       const labels = new Array<string | null>(points.attributes.length).fill(null)
@@ -177,8 +183,9 @@ registerNode({
     if (ambiguous > 0) {
       ctx.warn(
         `${ambiguous.toLocaleString()} of ${points.attributes.length.toLocaleString()} ` +
-          `points are inside more than one volume and were named for the first on the ` +
-          `wire. Primary regions do not overlap, so this usually means nested meshes.`,
+          `points are inside more than one volume and were assigned to the first one. ` +
+          `Primary regions do not overlap, so this usually means some meshes are nested ` +
+          `inside others.`,
       )
     }
     return { inside, outside }

@@ -42,9 +42,12 @@ export const depthNode = packNode({
   label: 'Cortical Depth',
   category: 'transform',
   description:
-    'Adds each point’s depth below the pia, its layer and its lateral position, and the cell type at each end of a synapse.',
+    'Adds each point’s `depth` below the pia (µm), its `layer` and its `lateral` position, ' +
+    'and on a synapse cloud the cell types `type` and `partnerType` at either end.',
   guide:
-    'Places a point cloud in the cortex through the dataset’s cortical frame: each point gets its depth below the pia in µm, its layer and its lateral position. On a synapse cloud it adds the cell type of the neuron and of its partner. Hands on the cloud, and the same rows as a table for Laminar Profile, Group By or any chart.',
+    'Adds cortical depth below the pia (in µm), layer and lateral position to each point of a point cloud, using the dataset’s cortical frame. ' +
+    'On a synapse cloud it also adds the cell types of each neuron and its partner. ' +
+    'Usually fed by Synapses, with the table going into Laminar Profile or Group By.',
   cost: 'expensive',
   inputs: [
     { id: 'points', label: 'Points', type: T.points() },
@@ -56,7 +59,7 @@ export const depthNode = packNode({
   ],
   params: [
     cellTypeSourceParam(
-      'The table cell types are read from, for the neuron and its partner. None adds no types.',
+      'The table to read cell types from, for the neuron and its partner. "None" adds no types.',
     ),
   ],
 
@@ -73,7 +76,7 @@ export const depthNode = packNode({
   evaluate: async (ctx) => {
     const points = ctx.input('points')
     if (!isPointsValue(points)) {
-      throw new Error('Wire a point cloud — Synapses, or any node handing one on — to Points.')
+      throw new Error('`Points` needs a point cloud. Wire one in, for example from Synapses.')
     }
     const dataset = requireDataset(ctx.input('dataset'))
     const frame = frameOf(dataset)
@@ -107,9 +110,9 @@ export const depthNode = packNode({
     // A point far above the pia is a position from another volume, or in other units — not L1.
     if (outside > 0) {
       ctx.warn(
-        `${outside.toLocaleString()} of ${placed.attributes.length.toLocaleString()} points sit more than ` +
-          `${frame.aboveTolerance} µm above the pia, so have a depth and no layer. Check they ` +
-          `are from this dataset.`,
+        `${outside.toLocaleString()} of ${placed.attributes.length.toLocaleString()} points are more than ` +
+          `${frame.aboveTolerance} µm above the pia, so they have a depth but no layer. Check that ` +
+          `they come from this dataset.`,
       )
     }
     return { points: placed, table: placed.attributes }

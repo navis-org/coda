@@ -213,7 +213,7 @@ describe('core.uploadMesh', () => {
   it('asks for a file before it asks for anything else', () => {
     const def = requireNodeDef('core.uploadMesh')
     expect(def.validate!(contextFor(graph()))).toEqual([
-      'No mesh chosen — use the button on the node',
+      'No mesh chosen. Use the button on the node to pick a file.',
     ])
   })
 

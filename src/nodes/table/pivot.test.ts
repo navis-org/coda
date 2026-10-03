@@ -144,7 +144,9 @@ describe('pivot node — rows against columns', () => {
 
   it('warns at edit time', () => {
     const issues = (inferGraph(sameColumn()).nodes['piv']?.issues ?? []).map((i) => i.message)
-    expect(issues).toContain('Rows and Columns point at the same column')
+    expect(issues).toContain(
+      '`Rows` and `Columns` are the same column. Pick a different column for one of them.',
+    )
   })
 
   it('refuses to run, rather than building a diagonal the size of the field squared', async () => {
@@ -199,7 +201,7 @@ describe('pivot node — a column the schema has not heard of yet', () => {
       def,
       makeInferContext(def, params as never, { in: cold }),
     )
-    expect(issues).toContain('Missing column: somaSide')
+    expect(issues).toContain('Column "somaSide" is missing from the input.')
   })
 
   it('resolves normally the moment discovery lands, with no edit', () => {

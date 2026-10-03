@@ -1,5 +1,9 @@
+## What Edit Table does
+
+Edit Table overwrites values in a table. Use it when you disagree with the data: a cell type that has since been revised, a status that is wrong for the dozen neurons you have actually looked at, or a grouping of your own that the dataset doesn't have. Because the edits live in the workflow, you can always see what was changed, and you can re-run the analysis without them by simply taking the node out.
+
 ```coda-graph
-caption: An override that lives in the graph, so the analysis can be re-run with it and without it
+caption: Correct a few annotations before looking at the table.
 dataset.hemibrain as hb
 neuron.findNeurons as find
 core.editTable as edit
@@ -9,122 +13,98 @@ find -> edit
 edit -> tab
 ```
 
-## A rule, not a cell
+## Rules
 
-Every row on the card is one rule with three parts, and it reads left to right as a sentence:
+Each line on the card is one rule with three parts: which rows to change, which column to write to, and what value to write. For example:
 
 | Where | Column | Value |
 | --- | --- | --- |
 | `type==LC4 status==Traced` | `type` | `LC4a` |
 
-Which rows, which column, what to put in it. Blank *Where* means **every row**.
+sets `type` to `LC4a` in every row where `type` is `LC4` and `status` is `Traced`. Leave *Where* blank to change every row.
 
-It is a rule rather than a coordinate because the table you are editing is *derived* — fetched,
-filtered, joined, and fetched again tomorrow against a server whose proofreading has moved on.
-"Row 412, column type" stops meaning anything the first time something upstream drops a row, and it
-stops meaning it **silently**: row 412 still exists and still has a type.
+```coda-params
+core.editTable: edits
+```
 
-## The filter language
+Rules select rows by their contents rather than by position. The table you are editing is usually the result of a query, and the next time it is fetched, filtered or joined, "row 412" may well be a different neuron. A rule like the one above still means the same thing.
 
-The *Where* field is the same query language as the [Explore Dataset](#neuron.explore) search box
-and the [Table](#out.table) viewer's header filters. Terms are separated by spaces and **all of them
-must match** — there is no `OR` and no bracketing. `AND` is not a keyword either: writing it puts
-the literal word `and` in your query, which this node rejects. Use two terms.
+## Writing filters
 
-| Write | Means |
+The *Where* field uses the same query language as the search box in [Explore Dataset](#neuron.explore) and the header filters of the [Table](#out.table) viewer. Terms are separated by spaces, and a row has to match all of them. There is no `OR` and no brackets. `AND` isn't a keyword either: write two terms instead (the node rejects a literal `and`).
+
+| Write | To match rows where |
 | --- | --- |
 | `type==LC4` | the column equals the value |
-| `type!=LC4` | does not equal it — **and this is the one that also matches rows with no value at all** |
-| `pre>100`, `pre>=100`, `pre<5`, `pre<=5` | numeric comparison on a number column |
-| `type~^LC[0-9]+$` | regular expression |
-| `!type==LC4`, `-type==LC4` | exclude what follows |
-| `type=="LC4 giant"` | quote a value with a space in it |
-| `type==lc4` | matches `LC4` — **comparison is case-insensitive** |
+| `type!=LC4` | the column does not equal the value, **including rows where it is empty** |
+| `pre>100`, `pre>=100`, `pre<5`, `pre<=5` | a number column is above or below a value |
+| `type~^LC[0-9]+$` | the column matches a regular expression |
+| `!type==LC4` or `-type==LC4` | the term does not match |
+| `type=="LC4 giant"` | the value contains a space (use quotes) |
 
-**The regex is not anchored.** `type~LC` matches `LC4`, `LC4 giant` *and* `PLC5`. Anchor it
-yourself when you mean the whole value: `type~^LC[0-9]+$`.
+Comparisons ignore case, so `type==lc4` matches `LC4`.
 
-**A missing value satisfies `!=` and nothing else.** On a table with one untyped neuron in it,
-`status!=Traced` returns the untraced *and* the unlabelled — which is not what SQL would do.
+Two things that may surprise you:
 
-> [!WARNING] A bare term is refused here
-> In the Explore box `LC4` on its own means "any column contains LC4", which is right for finding
-> something and wrong for overwriting it: `LC4` also turns up in `instance`, in `notes` and in
-> somebody's own `group` column. Write `type==LC4`.
+- Regular expressions are not anchored: `type~LC` matches `LC4`, `LC4 giant` and also `PLC5`. If you mean the whole value, anchor it yourself, as in `type~^LC[0-9]+$`.
+- An empty value matches `!=` and nothing else. On a table with one untyped neuron, `status!=Traced` returns the untraced neurons *and* that one. This is not how SQL behaves.
+
+> [!WARNING] Name the column in every term
+> In the Explore search box, a bare `LC4` means "any column contains LC4". That is fine for
+> finding neurons but dangerous for overwriting values: `LC4` might also turn up in `instance`, in
+> `notes` or in a `group` column of your own. Edit Table therefore refuses bare terms. Write
+> `type==LC4`.
 
 ## Examples
 
-**Retype a set of neurons.**
+**Retype a set of neurons:**
 
 | Where | Column | Value |
 | --- | --- | --- |
 | `type==LC4 status==Traced` | `type` | `LC4a` |
 
-**Tag a group of your own.** `group` does not exist upstream, so this rule creates it — null on
-every row it does not match:
+**Tag a group of your own.** There is no `group` column upstream, so this rule creates one. Rows the rule doesn't match get an empty value:
 
 | Where | Column | Value |
 | --- | --- | --- |
 | `type~^LPLC[0-9]+$` | `group` | `LPLC family` |
 
-**Blank a value you disagree with.** `""` — two quote characters — writes an *empty* cell. An empty
-*Value* field is a row you have not finished, and does nothing:
+**Clear a value.** Write `""` (two quote characters) to empty a cell. An empty *Value* field means the rule isn't finished yet and does nothing:
 
 | Where | Column | Value |
 | --- | --- | --- |
 | `status==Traced pre<10` | `status` | `""` |
 
-**Fix everything at once, then narrow.** Rules run top to bottom and each sees what the ones above
-it wrote, so the second rule below filters on the column the first one created:
+**Set everything, then narrow down.** Rules run from top to bottom and each one sees what the rules above it wrote, so the second rule here can filter on the column the first one created:
 
 | Where | Column | Value |
 | --- | --- | --- |
 | *(blank)* | `checked` | `no` |
 | `type==LC4` | `checked` | `yes` |
 
-Reordering those two rows changes the answer.
+Swapping the two rules gives you a different result.
 
-## It adds columns, and it widens them
+## New columns and column types
 
-Naming a column the table does not have **creates** it, and the new column is published straight
-away — a column picker two nodes downstream offers it without waiting for a Run.
+If you name a column the table doesn't have, it is created. The new column shows up in column pickers downstream straight away, without having to run anything.
 
-Writing a value that does not fit the column's type **widens the column** rather than dropping the
-edit. Writing `unknown` into a whole-number column turns the whole column into text, including the
-numbers already in it; the card says so, and so does the warning on the node. Widening only ever
-goes one way — whole number → number → text.
+If you write a value that doesn't fit the column's type, the whole column is converted rather than the edit being dropped. For example, writing `unknown` into a column of whole numbers turns the entire column into text, including the numbers that were already there. The card and the node's warning both tell you when this happens. Conversion only goes one way: whole number → number → text. Clearing a cell with `""` never converts anything, because an empty value fits every column type.
 
-Clearing a cell with `""` does not widen anything: an empty value fits every column type.
+## When a rule doesn't work
 
-## Nothing refuses, but a broken rule edits nothing
+Problems with a rule never stop the node: you get a warning and the table still passes through. A rule whose filter can't be worked out (e.g. because it names a column that doesn't exist) is switched off completely and marked on the card. This errs on the side of changing too few rows rather than too many. (The [Table](#out.table) viewer does the opposite with its header filters: a filter it can't apply is ignored, so you see more rows.)
 
-Every problem here is a warning and the table still passes through. But which way it errs matters,
-and it is the opposite of the [Table](#out.table) viewer's: there, a filter that cannot be applied
-is dropped and you see *more* rows than you meant. Dropping a term here would overwrite more rows
-than you meant, so a rule whose filter cannot be resolved is **switched off entirely** and marked on
-the card.
+> [!WARNING] Negating a misspelled column
+> A filter on a column that doesn't exist matches no rows, so its negation would match every
+> row: `!typ==LC4`, one letter off from `!type==LC4`, would overwrite the whole table. Edit Table
+> refuses such a rule.
 
-> [!WARNING] A negated term on a missing column matches everything
-> A filter naming a column that does not exist matches nothing — but its negation matches every
-> row. `!typ==LC4`, one letter away from `!type==LC4`, would overwrite the whole table. It is
-> refused instead.
+A rule with a valid filter that happens to match no rows looks exactly like one that worked. Check the **rows changed** count under the rules; after a run, the node also warns you about each rule that changed nothing.
 
-Edit time cannot catch a rule whose filter is valid and matches no rows, which looks exactly like a
-rule that worked. That is what the **rows changed** count under the rules is for; the node also
-raises a warning per rule after a Run.
+## Related nodes
 
-## Where it sits
+- [Filter Table](#core.filterTable) drops rows. Edit Table changes values and keeps every row.
+- Rename Columns changes a column's *name*; Edit Table changes its *values*.
+- Relabel rewrites a column using a lookup table from elsewhere in the workflow. Once you have hundreds of corrections, put them in a CSV, bring it in with [Upload Table](#core.uploadTable) and use Relabel. Edit Table is meant for a handful of changes you decided on yourself.
 
-- **Filter Table** drops rows; this one rewrites them and keeps every row.
-- **Rename Columns** changes a column's *name*; this changes its *values*.
-- **Relabel** rewrites a column through a lookup table wired in from somewhere else — the right
-  tool once the overrides number in the hundreds. Put them in a CSV, bring them in with
-  [Upload Table](#core.uploadTable), and relabel. Edit Table is for the handful you decided
-  yourself.
-
-Both export routes translate it: `.loc[rows, column] = value` in the notebook, and
-`mutate(column := replace(...))` in the R document.
-
-```coda-params
-core.editTable: edits
-```
+Both the Python notebook and the R Markdown export include your edits: as `.loc[rows, column] = value` in Python and as `mutate(column := replace(...))` in R.

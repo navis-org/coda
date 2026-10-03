@@ -352,7 +352,7 @@ export const GUIDED_TOUR: readonly TourStep[] = [
   },
   {
     id: 'canvas',
-    title: 'The canvas is the document',
+    title: 'The canvas',
     body:
       'A Coda pipeline is a graph consisting of nodes: data flows along the wires, left to right. Drag ' +
       'empty space to pan, scroll to zoom, click a node to select it, click + drag a port to make a new ' +
@@ -365,8 +365,8 @@ export const GUIDED_TOUR: readonly TourStep[] = [
     id: 'card',
     title: 'This is a node',
     body:
-      'Workflows are built by adding nodes to the canvas and wire them together. Each node has ' +
-      'a specific purpose and a specific type. This here is one of the most important node types in ' +
+      'Workflows are built by adding nodes to the canvas and wiring them together. Each node has ' +
+      'a specific purpose and a specific type. This here is one of the most important node types ' +
       'in Coda: a <b>dataset node</b> - it determines where the data comes from.',
     before: focusCard,
     anchor: focusedCard,
@@ -375,7 +375,7 @@ export const GUIDED_TOUR: readonly TourStep[] = [
   },
   {
     id: 'ports',
-    title: 'Nodes have ports for in- and output',
+    title: 'Nodes have ports for input and output',
     body:
       'Inputs on the left, outputs on the right. Colour + shape say what a socket carries, ' +
       'and the label spells it out. Only matching types will connect!',
@@ -391,12 +391,11 @@ export const GUIDED_TOUR: readonly TourStep[] = [
      * tour has been building up to.
      */
     id: 'wire',
-    title: 'A wire is one node feeding the next',
+    title: 'Wires connect nodes',
     body:
-      'Drag from an output to a matching input to make one. Data flows along it when you Run, ' +
-      'and one output can feed as many inputs as you like. Two things worth knowing: drag a ' +
-      'wire’s end away to re-route it, and drop a fresh, unconnected node onto a wire to splice ' +
-      'it into the middle.',
+      'Drag from an output to a matching input to connect two nodes. One output can feed as many ' +
+      'inputs as you like. To re-route a wire, drag its end somewhere else. You can also drop a ' +
+      'new, unconnected node onto a wire to insert it in between.',
     before: focusWire,
     anchor: wireSpan,
     after: clearSpan,
@@ -407,8 +406,8 @@ export const GUIDED_TOUR: readonly TourStep[] = [
     id: 'add',
     title: 'Adding new nodes is easy',
     body:
-      'Press this button and the six node categories fan out above it — pick one and its nodes ' +
-      'appear along the bottom. The bottom button, or `Tab`, opens the full browser instead. ' +
+      'Press this button and the six node categories fan out above it. Pick one and its nodes ' +
+      'appear along the bottom. The bottom button (or Tab) opens the full node browser instead. ' +
       'Alternatively, hit Space to open the command palette, which works for both nodes and ' +
       'commands.',
     anchor: () => byTour('add'),
@@ -419,10 +418,10 @@ export const GUIDED_TOUR: readonly TourStep[] = [
   },
   {
     id: 'run',
-    title: 'Press `Run` to execute the pipeline',
+    title: 'Press Run to execute the pipeline',
     body:
       'Adding or editing a node will mark it and everything downstream of it as stale. ' +
-      'Pressing `Run` (or ⇧R) brings every *stale* node up to date - this badge counts how many are waiting. ',
+      'Pressing Run (or ⇧R) brings every stale node up to date - this badge counts how many are waiting.',
     anchor: () => byTour('run'),
     side: 'bottom',
     align: 'end',
@@ -439,7 +438,7 @@ export const GUIDED_TOUR: readonly TourStep[] = [
   },
   {
     id: 'inspector',
-    title: 'The Inspector show additional information and settings',
+    title: 'The Inspector shows additional information and settings',
     body:
       "A node's card shows the most important settings. The inspector shows everything. " +
       'Press I to open/close the sidebar.',
@@ -455,8 +454,8 @@ export const GUIDED_TOUR: readonly TourStep[] = [
     id: 'dashboard',
     title: 'Use Dashboard once the workflow is built',
     body:
-      'The Dashboard lets you select the important nodes (viewers, filter, etc) from the canvas ' +
-      'and arrange them on a grid. It removes the wires and the "supporting" nodes. ',
+      'The Dashboard lets you select the important nodes (viewers, filters, etc.) from the canvas ' +
+      'and arrange them on a grid. It removes the wires and the "supporting" nodes.',
     anchor: () => byTour('dashboard'),
     side: 'bottom',
     align: 'end',
@@ -476,8 +475,8 @@ export const GUIDED_TOUR: readonly TourStep[] = [
     id: 'assistant',
     title: 'Need help? Use the AI assistant to build/edit workflows.',
     body:
-      'Describe the change you want and it proposes nodes and wires. Requires an OpenAI, Anthropic, ' +
-      "Gemini API key or a local LLM to work. See the 'Connections' panel for details.",
+      'Describe the change you want and it proposes nodes and wires. Requires an OpenAI, Anthropic ' +
+      "or Gemini API key, or a local LLM, to work. See the 'Connections' panel for details.",
     anchor: () => byTour('assistant'),
     side: 'bottom',
     align: 'end',
@@ -496,9 +495,9 @@ export const GUIDED_TOUR: readonly TourStep[] = [
     id: 'guides',
     title: 'More help',
     body:
-      'Under Documentation: the Field Guide explains the concepts this tour has been pointing ' +
-      'at, and the Node Guide is the reference for every node, its sockets and its settings. ' +
-      'Both open in a new tab. This tour is under Guides, whenever you want it again.',
+      'Under Documentation you will find the Field Guide, which explains the concepts behind ' +
+      'Coda, and the Node Guide, which documents every node and its settings. Both open in a new ' +
+      'tab. This tour is under Guides if you want to take it again.',
     anchor: () => byTour('help'),
     side: 'bottom',
     align: 'start',

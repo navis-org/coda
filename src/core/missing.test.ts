@@ -52,7 +52,7 @@ describe('loading a node this build does not have', () => {
     expect(missingTypeOf(ghostOf(graph))).toBe('light:reader.tiff')
     expect(graph.edges.map((e) => e.id)).toEqual(['e1', 'e2'])
     expect(warnings).toEqual([
-      'Kept unknown node type "light:reader.tiff" (ghost) as a placeholder',
+      'Node type "light:reader.tiff" (ghost) is not in this build of Coda. It was kept as a placeholder.',
     ])
   })
 

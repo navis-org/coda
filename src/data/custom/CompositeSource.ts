@@ -348,14 +348,14 @@ function warnShort(
   req.onWarn(
     missing === asked
       ? `${from} returned no ${noun} for any of the ${asked} neurons asked for. Check that ` +
-          `the dataset wired into ${GEOMETRY_SOCKETS[role]} uses the same ids as the neuron table.`
+          `the dataset wired into \`${GEOMETRY_SOCKETS[role]}\` uses the same ids as the neuron table.`
       : `${missing} of ${asked} neurons have no ${noun} in ${from}.`,
   )
 }
 
 const NO_NEURON_TABLE =
   'This Custom Dataset has no neuron table, so it cannot say which neurons it has. Wire a ' +
-  'table into its Neurons socket or an edge list into Edges, or name the neurons with an Input ' +
+  'table into its `Neurons` socket or an edge list into `Edges`, or name the neurons with an Input ' +
   'IDs node.'
 
 /**
@@ -395,8 +395,8 @@ function requireBuilt(datasetId: string) {
   const build = buildFor(datasetId)
   if (!build) {
     throw new Error(
-      'This Custom Dataset has not run yet — what it holds is only known once it has. Run it, ' +
-        'and wire it as an ordinary input rather than a reference.',
+      'This Custom Dataset has not run yet, so what it holds is not known. Run it, and wire ' +
+        'it as an ordinary input instead of a reference.',
     )
   }
   return build
@@ -411,7 +411,7 @@ function requireSynapses(datasetId: string): SynapseTable {
     id
       ? 'This Custom Dataset’s synapse table is no longer held in this tab. Select the Custom ' +
           'Dataset node, press Invalidate in the inspector, and run again.'
-      : 'This Custom Dataset has no synapses: wire a synapse table into its Synapses socket.',
+      : 'This Custom Dataset has no synapses. Wire a synapse table into its `Synapses` socket.',
   )
 }
 
@@ -423,8 +423,8 @@ function delegateFor(
   // A build's parts come from resolved values, so both ids are there whenever the part is.
   if (!part?.sourceId || !part.datasetId) {
     throw new Error(
-      `This Custom Dataset has no ${role}: wire a dataset into its ` +
-        `${GEOMETRY_SOCKETS[role]} socket to take them from.`,
+      `This Custom Dataset has no ${role}. Wire a dataset into its ` +
+        `\`${GEOMETRY_SOCKETS[role]}\` socket to take them from.`,
     )
   }
   return { source: requireSource(part.sourceId), datasetId: part.datasetId }
@@ -442,7 +442,7 @@ function idTable(ids: readonly string[]): TableValue {
 function noConnectivity<T>(): Promise<T> {
   return Promise.reject(
     new Error(
-      'This Custom Dataset has no connectivity. Wire an edge list into its Edges socket — a ' +
+      'This Custom Dataset has no connectivity. Wire an edge list into its `Edges` socket: a ' +
         'table or a Link Table file with a column for each end.',
     ),
   )

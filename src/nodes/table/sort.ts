@@ -9,7 +9,7 @@ registerNode({
   category: 'transform',
   description: 'Order rows by a column, optionally keeping only the top N.',
   guide:
-    'Order rows by a column, and optionally keep only the first N of them. Top N is what turns a sort into “the twenty strongest partners”, which is most of what a sort is used for here. Nulls sort last whichever direction you choose, so a missing value never displaces a real one at the top of the list.',
+    'Sorts rows by one column, descending by default, and can keep only the first N, e.g. the twenty strongest partners. Missing values always go last, whichever direction you sort in.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -20,7 +20,7 @@ registerNode({
       id: 'limit',
       kind: 'int',
       label: 'Top N',
-      help: '0 keeps every row.',
+      help: 'Keep only the first N rows after sorting. 0 keeps every row.',
       default: 0,
       min: 0,
       step: 5,
@@ -39,7 +39,7 @@ registerNode({
     const table = ctx.input('in')
     if (!isTableValue(table)) throw new Error('Input is not a table')
     const columnName = ctx.column('column')
-    if (!columnName) throw new Error('No column selected')
+    if (!columnName) throw new Error('No column is selected. Pick one in `By`.')
     return {
       out: sortTable(
         table,

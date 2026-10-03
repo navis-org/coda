@@ -38,9 +38,14 @@ export const adjacencyNode = packNode({
   type: 'neuron.adjacency',
   label: 'Adjacency',
   category: 'query',
-  description: 'Synapse counts from one neuron set onto another, as a matrix and a link table.',
+  description:
+    'Synapse counts from one set of neurons onto another, as a matrix and as a table of ' +
+    'links with `source`, `target` and `weight`.',
   guide:
-    'Synapse counts from one neuron set onto another, as a matrix for the Heatmap and the same connections long for everything else — Build Network above all, which a matrix could not reach before. Two inputs rather than one because the question is nearly always “A onto B”, and pushing both through a single collection would lose exactly the grouping that makes the picture readable. Links holds one row per non-zero cell: a matrix cell is 0 where nothing was found, and keeping those would make a complete graph of zero-weight links. Its columns are source, target and weight, which are the names Build Network asks for — set Target and Weight there, since its pickers take the first column that fits rather than the one that matches. Feed the matrix through Normalize first if the counts are dominated by whichever type happens to be numerous.',
+    'Counts synapses from the Sources onto the Targets, per cell type or per neuron. The ' +
+    'matrix goes into a Heatmap (via Normalize if one type dominates). Links has one row ' +
+    'per non-zero cell with source, target and weight columns, ready for Build Network once ' +
+    'its Target and Weight pickers are set to them.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -73,7 +78,7 @@ export const adjacencyNode = packNode({
       id: 'weight',
       kind: 'enum',
       label: 'Weight',
-      help: 'What fills a cell: the connection’s synapse count, or a property the dataset publishes on each connection — on fish2, weightAxonDendrite gives an axon→dendrite matrix.',
+      help: 'What fills each cell: the synapse count, or a property the dataset publishes per connection (e.g. weightAxonDendrite on fish2 for an axon→dendrite matrix).',
       default: WEIGHT_PROPERTY,
       optionsWithoutPeek: true,
       options: (ctx) => weightPropertyOptions(ctx.inputs.dataset),

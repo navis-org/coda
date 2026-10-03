@@ -1,24 +1,43 @@
-A linkage tree holds every possible grouping at once. This node picks one: ask for a target number of groups, cut across at a distance threshold, or — when two connectomes were clustered together — cut wherever a group is lopsided.
+## What Cut Tree does
 
-It is separate from [Hierarchical Clustering](#cluster.linkage) because the tree is computed once and can be expensive, where the cut is something you try repeatedly while looking at the [Dendrogram](#out.dendrogram).
+A tree from [Linkage](#cluster.linkage) contains every possible grouping of your neurons at once, from one group per neuron at the bottom to a single group at the top. Cut Tree picks one of those groupings and tells you which cluster each neuron ends up in.
 
-**By count vs. by distance.** Ask for six clusters and you get exactly six — the algorithm undoes the tallest merges until there are that many groups. Cut at a distance and you get however many groups fall out below the threshold, which is the honest way round for "how alike do two neurons have to be to count as the same thing?" With NBLAST scores a distance of 0.5 is a score of 0.5, so smaller means stricter and more groups. The tree's maximum distance is in the validation message if you cut above the top.
+Computing the tree can take a while, but cutting it is fast. That's why the two are separate nodes: you can try different cuts while looking at the [Dendrogram](#out.dendrogram) without re-running the clustering.
 
-**Groups drawing from every dataset.** The third mode is for co-clustering: two brains' neurons on one tree, where the question is which groups contain neurons from *both*. A count cut cannot ask that — it will hand back a group of forty neurons all from one dataset. This mode descends to the *deepest* groups in which every dataset is present and none holds more than `Largest share`. Neurons with no counterpart fall out alone, and that count is a result rather than a setting to tune away.
+```coda-params
+cluster.cut: mode, count, height, maxShare
+```
 
-> [!WARNING] The mixed mode reads each neuron's dataset from its qualified id
-> `flywire:720575940623374218` — so put a **Qualify Ids** on each branch before the
-> [Stack Tables](#core.stack) that combined them. Without it every neuron looks like one dataset,
-> no group can draw from two, and everything comes back a singleton. The node says so.
+## Ways to cut
 
-This mode is *not* a port of cocoa's `extract_homogeneous_clusters` — the criterion above is Coda's own, written out so the two can be compared.
+`Cut by` offers three modes:
 
-**Two outputs for two jobs.** `Clusters` is the table — one row per neuron with its cluster number — to join back onto a neuron table and colour every downstream view by cluster. `Tree` is the same tree with the cut recorded on it, so a [Dendrogram](#out.dendrogram) wired to it is coloured by group automatically.
+- **"number of clusters"** gives you exactly as many groups as you set in `Clusters`. Under the hood, the tallest merges in the tree are undone until there are that many groups.
+- **"distance"** cuts across the tree at a fixed height: everything joined at or below `Distance` stays together. You get however many groups that produces. This is often the more natural question ("how similar do two neurons need to be to count as the same type?"). With NBLAST scores, a distance of 0.5 corresponds to a score of 0.5, so smaller values are stricter and give you more groups. If you cut above the top of the tree, you get a single cluster and the node tells you the tree's maximum distance.
+- **"groups drawing from every dataset"** is for co-clustering two (or more) connectomes on a single tree, where the question is which groups contain neurons from *all* datasets. A count cut can't answer that: it will happily return a group of forty neurons that all come from the same dataset. Instead, this mode descends to the smallest groups in which every dataset is present and no dataset makes up more than `Largest share` of the group. The default of 0.8 means no group may be more than four-fifths one brain.
+
+In the third mode, neurons that have no counterpart in the other dataset end up in clusters of their own. The node reports how many; that number is a result, not something to tune away.
+
+> [!WARNING] Qualify ids before stacking
+> The third mode reads each neuron's dataset from its qualified id, e.g.
+> `flywire:720575940623374218`. So put a `Qualify Ids` on each branch before the
+> [Stack Tables](#core.stack) that combines them (see [Partner Vectors](#neuron.partnerVectors)
+> for an example). Without it, every neuron appears to come from the same dataset and everything
+> comes back as a singleton. The node warns you if that happens.
+
+> [!NOTE] Comparison with cocoa
+> This mode is not a port of cocoa's `extract_homogeneous_clusters`. The criterion described
+> above is Coda's own.
+
+## Outputs
+
+- `Clusters` is a table with one row per neuron: `label`, `cluster`, `order` and `size`. Join it back onto a neuron table to colour other views by cluster.
+- `Tree` is the same tree with the cut recorded on it. A [Dendrogram](#out.dendrogram) wired to this output colours its branches by cluster automatically.
 
 ## An example workflow
 
 ```coda-graph
-caption: One cut, two jobs. Not shown: the neuron table `Clusters to Neurons` matches against, and Neuroglancer's `Dataset`.
+caption: Cut an NBLAST clustering into groups, look at them in a dendrogram and in Neuroglancer.
 neuron.nblast as nb
 cluster.linkage as link
 cluster.cut as cut { mode: count, count: 6 }
@@ -32,10 +51,8 @@ cut:clusters -> back:labels
 back -> ng:neurons
 ```
 
-Everything left of this node is `expensive` and runs once; everything right of it is cheap. So the loop you work in is: read the [Dendrogram](#out.dendrogram) — coloured by group, because it is wired to `Tree` — change `Clusters` or `Distance`, look again. The [NBLAST](#neuron.nblast) above never re-runs.
+(Not shown here: the neuron table that [Clusters to Neurons](#cluster.clustersToNeurons) matches against, and the `Dataset` input of Neuroglancer.)
 
-The lower branch is the other half: [Clusters to Neurons](#cluster.clustersToNeurons) joins the `Clusters` table back onto a neuron table, so every neuron carries its cluster number and [Neuroglancer](#out.neuroglancer) — or a [3D View](#out.viewer3d), a [Network](#out.network), a [Scatter](#out.scatter) — colours by it. Wire that branch from `Clusters`, not from a Dendrogram's `Selected`: `Selected` is whatever you clicked, and only `Clusters` covers every neuron.
+[NBLAST](#neuron.nblast) and Linkage only run once, whereas everything from Cut Tree onwards is quick to re-run. So a typical loop is: look at the [Dendrogram](#out.dendrogram) (coloured by cluster because it is wired to `Tree`), change `Clusters` or `Distance`, and look again.
 
-```coda-params
-cluster.cut: mode, count, height, maxShare
-```
+The lower branch uses [Clusters to Neurons](#cluster.clustersToNeurons) to attach the cluster numbers to a neuron table, so that [Neuroglancer](#out.neuroglancer), a [3D View](#out.viewer3d), a [Network](#out.network) or a [Scatter](#out.scatter) can colour by cluster. Make sure to wire that branch from `Clusters` and not from the Dendrogram's `Selected` output: `Selected` only contains whatever you clicked, while `Clusters` covers every neuron.

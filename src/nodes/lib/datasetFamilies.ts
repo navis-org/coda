@@ -371,9 +371,9 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     population: ['superclass'],
     label: 'MaleCNS',
     description:
-      'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
+      'Whole central nervous system of an adult male fly: brain and ventral nerve cord.',
     guide:
-      'The largest fly connectome published so far: 167k proofread neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the motor neurons driving muscles.',
+      'The central nervous system of an adult male fly, brain and ventral nerve cord, read from neuPrint. With 167k proofread neurons it is the largest fly connectome published so far, so a circuit can be followed from sensory neurons all the way to the motor neurons that drive the muscles.',
     glyph: 'fly_cns',
   },
   {
@@ -385,9 +385,9 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'hemibrain',
     population: ['typed'],
     label: 'Hemibrain',
-    description: 'Approximately half a central brain of an adult female fly.',
+    description: 'Approximately one hemisphere of the central brain of an adult female fly.',
     guide:
-      'Approximately one hemisphere of the central brain (with bits of the right optic lobe). Rich annotations: cell type, class, cell body fibre, soma radius, hemilineage, etc.',
+      'Approximately one hemisphere of the central brain of an adult female fly, plus parts of the right optic lobe, read from neuPrint. Comes with rich annotations (cell type, class, cell body fibre, hemilineage and more); some neurons are truncated at the edges of the volume.',
     glyph: 'fly_hemibrain',
   },
   {
@@ -398,9 +398,9 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     notebook: NEUPRINT_NOTEBOOK,
     family: 'manc',
     label: 'MANC',
-    description: 'Nerve cord of a male adult fly.',
+    description: 'Ventral nerve cord of an adult male fly.',
     guide:
-      'The ventral nerve cord on its own: motor neurons, the premotor circuits driving them, and the descending neurons arriving from the brain.',
+      'The male adult nerve cord (MANC), read from neuPrint. It contains the motor neurons, the premotor circuits that drive them, and the descending neurons that arrive from the brain.',
     glyph: 'fly_vnc',
   },
   {
@@ -412,9 +412,9 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'optic-lobe',
     label: 'Optic Lobe',
     description:
-      'The right optic lobe: medulla, lobula and lobula plate with bits of the central brain and the lamina',
+      'The right optic lobe of a male fly: medulla, lobula and lobula plate, with parts of the lamina and the central brain.',
     guide:
-      'One optic lobe: medulla, lobula and lobula plate with bits of the central brain and the lamina. This is part of the MaleCNS dataset and was released before the full dataset. Mostly kept as reference for the early papers that used it.',
+      'The right optic lobe of the MaleCNS volume (medulla, lobula and lobula plate, with parts of the lamina and the central brain), released before the full dataset. It is mainly kept for reproducing the papers that used it; for new work use MaleCNS.',
     glyph: 'fly_optic',
     // Superseded by MaleCNS: reached for deliberately, not started from. See `starter`.
     starter: false,
@@ -428,9 +428,9 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'fib19',
     label: 'FIB-19',
     description:
-      'Partial reconstruction of a female fly’s visual system: medulla, lobula and lobula plate.',
+      'Partial reconstruction of a female fly’s visual system: parts of the medulla, lobula and lobula plate.',
     guide:
-      'A partial reconstruction covering portions of the fly medulla, lobula, and lobula plate to reveal connectivity patterns in the visual motion detection pathway.',
+      'A partial reconstruction of the medulla, lobula and lobula plate of a female fly, read from neuPrint. It was made to map the circuits of the visual motion detection pathway.',
     glyph: 'fly_optic',
     starter: false,
   },
@@ -442,9 +442,9 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     notebook: NEUPRINT_NOTEBOOK,
     family: 'mushroombody',
     label: 'Mushroom Body',
-    description: 'Reconstruction of the mushroom body’s alpha lobe.',
+    description: 'Reconstruction of the alpha lobe of the mushroom body of a male fly.',
     guide:
-      'Dense reconstruction of the alpha (vertical) lobe of the mushroom body in a male Drosophila. One of the earliest fly connectomes, contains 983 neurons.',
+      'A dense reconstruction of the alpha (vertical) lobe of the mushroom body of a male Drosophila, read from neuPrint. One of the earliest fly connectomes, with 983 neurons.',
     glyph: 'specimen',
     // One structure rather than a brain. See `starter`.
     starter: false,
@@ -463,9 +463,9 @@ const MOCK_FAMILIES: DatasetFamily[] = [
     family: 'optic-lobe-mini',
     label: 'Demo Data',
     description:
-      'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
+      'A synthetic optic-lobe-like connectome generated in the browser. Needs no token.',
     guide:
-      'A synthetic optic lobe, generated in the browser with the columnar repetition a real one has. Nothing is fetched and no token is needed — it is deterministic from a seed, so a graph built on it gives the same answer on any machine. It is what the Workflow Wizard’s demo workflows and the guided tours run on, and the right place to try a pipeline before pointing it at a real volume.',
+      'A synthetic optic lobe with the columnar structure of a real one, generated in the browser from a fixed seed. Nothing is fetched and no token is needed, and a workflow gives the same answer on any machine. The Workflow Wizard’s demo workflows and the guided tours run on it, and it is a good place to try a pipeline before running it on real data.',
     glyph: 'fly_optic',
     synthetic: true,
   },
@@ -599,8 +599,8 @@ const FLYWIRE_CHAIN: AnnotationChain = {
   // `hierarchical_neuron_annotations` is an older cut of the file the chain fetches (see the
   // note above), and the community tags are `neuron_information_v2`, which it never held.
   staleBuiltin:
-    'an outdated cut of the FlyWire annotations: later typing and corrections are missing, and ' +
-    'it has no community tags',
+    'an outdated version of the FlyWire annotations. It is missing later typing and ' +
+    'corrections, and it has no community tags',
 }
 
 /**
@@ -691,7 +691,7 @@ const MINNIE_CHAIN: AnnotationChain = {
     'This datastack keeps its cell typing in CAVE tables rather than on the neuron, so on its own ' +
     'it answers with root ids and no names. One view, aibs_cell_info, already combines those ' +
     'tables by precedence.',
-  unlabelled: 'MICrONS types its cells in CAVE tables rather than on the neuron',
+  unlabelled: 'MICrONS keeps its cell types in separate CAVE tables',
 }
 
 const CAVE_FAMILIES: DatasetFamily[] = [
@@ -705,9 +705,9 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     backend: 'cave',
     family: 'flywire_fafb_public',
     label: 'FlyWire FAFB public',
-    description: 'Whole adult female fly brain (optic lobes + central brain).',
+    description: 'Whole brain of an adult female fly: central brain and both optic lobes.',
     guide:
-      'Public FlyWire segmentation read through CAVE, so version is a materialization number. Cell annotations download once per dataset and search locally—first query waits, rest are instant. Meshes, synapses and skeletons work, the skeletons only on materialization 783, which is the one that publishes them. Paths and per-region counts do not; nodes that need them decline rather than fail.',
+      'The public FlyWire whole-brain connectome, read through CAVE; the version is a materialization number. Meshes, synapses and connectivity work, skeletons only on materialization 783. The built-in cell types are outdated, so use the Use current annotations button on the card to wire in the current ones.',
     glyph: 'fly_brain',
     annotationChain: FLYWIRE_CHAIN,
     /*
@@ -723,9 +723,9 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     backend: 'cave',
     family: 'brain_and_nerve_cord_public',
     label: 'BANC public',
-    description: 'Adult female fly brain and ventral nerve cord.',
+    description: 'Brain and ventral nerve cord of an adult female fly.',
     guide:
-      'The public BANC segmentation read through CAVE. It exposes the full brain-and-nerve-cord volume, and the neuron table is the public cell list published alongside the stack.',
+      'The public BANC (brain and nerve cord) connectome, read through CAVE. The version is a materialization number, and the neuron table is the public cell list published with the datastack.',
     glyph: 'fly_cns',
     annotationChain: BANC_CHAIN,
     notebook: { python: 'caveclient' },
@@ -736,9 +736,9 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     backend: 'cave',
     family: 'minnie65_public',
     label: 'MICrONS Minnie65 public',
-    description: 'A public mouse visual cortex volume from the MICrONS collaboration.',
+    description: 'Public volume of mouse visual cortex from the MICrONS collaboration.',
     guide:
-      'The public MICrONS Minnie65 segmentation read through CAVE. Version is a materialization number, and the neuron table is the stack’s published cell list.',
+      'The public MICrONS Minnie65 volume of mouse visual cortex, read through CAVE. The version is a materialization number, and the neuron table is the cell list published with the datastack.',
     glyph: 'mouse_brain',
     annotationChain: MINNIE_CHAIN,
     typeColumns: ['type', 'mtype'],
@@ -780,9 +780,9 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     family: '1',
     label: 'FAFB',
     description:
-      'Early manual reconstructions in an female fly brain. Published data hosted by VFB.',
+      'Early manual reconstructions in an adult female fly brain. Published data hosted by Virtual Fly Brain.',
     guide:
-      'A few thousand hand-traced neurons on the same image volume as FlyWire. Hosted by the Virtual Fly Brain at https://catmaid-fafb.virtualflybrain.org/.',
+      'A few thousand neurons traced by hand in CATMAID on the same image volume as FlyWire, with skeletons, synapses, connectivity and free-text annotations. Hosted by Virtual Fly Brain at https://catmaid-fafb.virtualflybrain.org/; no credentials needed.',
     glyph: 'fly_brain',
   },
   {
@@ -795,9 +795,9 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     family: '1',
     label: 'L1',
     description:
-      'Central nervous system of a first-instar fly larva. Densely reconstructed brain, sparse elsewhere. Published data hosted by VFB.',
+      'Central nervous system of a first-instar fly larva, with the brain densely reconstructed and the rest sparsely. Published data hosted by Virtual Fly Brain.',
     guide:
-      'The larval connectome: 5,013 hand-traced neurons across the whole first-instar central nervous system, brain to abdominal neuromeres, hosted by Virtual Fly Brain at https://l1em.catmaid.virtualflybrain.org/. Unlike FAFB this instance meta-annotates nothing, so a neuron\u2019s type is its own name and its large bag of annotations shows as Additional tags.',
+      'The larval connectome: 5,013 hand-traced neurons across the whole first-instar central nervous system, hosted by Virtual Fly Brain at https://l1em.catmaid.virtualflybrain.org/. A neuron\u2019s type is its own name, and its many annotations (lineages, clusters, papers) show up as tags.',
     glyph: 'fly_larva',
   },
 ]
@@ -885,7 +885,7 @@ export function familyChainHint(
   const chain = family?.annotationChain
   if (!family || !chain || annotations) return undefined
   const line = (reason: string, label: string): ValidationLine => ({
-    message: `${reason} Click button below to wire in the recommended ${chain.title}.`,
+    message: `${reason} Click the button below to wire in the recommended ${chain.title}.`,
     fix: {
       label,
       title: `Add ${chain.title} in front of this dataset`,

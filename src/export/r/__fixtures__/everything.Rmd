@@ -40,7 +40,7 @@ coda_combine <- function(df, columns, source = FALSE) {
   for (name in columns) {
     if (!name %in% names(df)) next
     col <- df[[name]]
-    # Null and the empty string are one absence: a blank must not stop the search.
+    # NA and the empty string both count as missing.
     fill <- is.na(out) & !is.na(col) & as.character(col) != ""
     out[fill] <- if (source) name else col[fill]
   }
@@ -48,9 +48,9 @@ coda_combine <- function(df, columns, source = FALSE) {
 }
 
 
-#' A column as Coda's match keys — `rowKey`'s rule, one language over.
+#' Convert a column to the text keys Coda matches on.
 coda_match_keys <- function(x) {
-  # A JS boolean prints lower case; everything else is as.character already.
+  # Logicals become lower-case "true"/"false", as in Coda; everything else as.character.
   if (is.logical(x)) return(ifelse(is.na(x), NA_character_, tolower(as.character(x))))
   as.character(x)
 }
@@ -61,10 +61,8 @@ coda_match_keys <- function(x) {
   ends_label <- c(frame$preLabel, frame$postLabel)
   ends_id <- c(frame$idPre, frame$idPost)
   labels <- unique(ends_label)
-  # Vectorised rather than a pass per label. `sum(frame$w[frame$preLabel == l])` inside a
-  # loop over labels is a full-length comparison each time, i.e. quadratic: measured at
-  # 116s for a million edges over ten thousand labels, against 1.35s for this.
-  # A union over both ends: two distinct-counts added together count a neuron twice.
+  # Vectorised over labels; a loop per label is very slow on large tables.
+  # A neuron is counted once even if it appears at both ends.
   uniq <- !duplicated(paste(ends_label, ends_id, sep = "\u0001"))
   n <- tabulate(match(ends_label[uniq], labels), length(labels))
   out <- tapply(frame$w, factor(frame$preLabel, levels = labels), sum)
@@ -96,16 +94,15 @@ coda_compare_connectivity <- function(datasets, min_weight = 0) {
                         idPost = idPost[ok], w = w[ok], stringsAsFactors = FALSE)
     key <- paste(frame$preLabel, frame$postLabel, sep = "\u0001")
     summed[[d$name]] <- tapply(frame$w, key, sum)
-    # The mapping's labels, not the edges' — see the note above.
+    # Every label in the mapping, used below to tell a missing edge (0) from a label
+    # the dataset does not have (NA).
     pools[[d$name]] <- unname(lookup)
     counts[[d$name]] <- .coda_label_totals(frame, d$name)
   }
 
   # First-appearance order across the datasets.
   keys <- unique(unlist(lapply(summed, names), use.names = FALSE))
-  # A row survives where *any* dataset reaches the threshold, so an asymmetry outlives it.
-  # One vectorised index per dataset, never one per key: `s[k]` on a named vector re-hashes
-  # the whole names vector, measured at 36s for 20,000 lookups into a million names.
+  # Keep a row if any dataset reaches min_weight. Looked up once per dataset for speed.
   reached <- logical(length(keys))
   for (n in names(summed)) {
     v <- unname(summed[[n]][keys])
@@ -121,8 +118,7 @@ coda_compare_connectivity <- function(datasets, min_weight = 0) {
   names(present) <- names(summed)
   for (n in names(summed)) {
     got <- unname(summed[[n]][keys])
-    # 0 where the dataset holds both labels and has no such edge — a real absence — and NA
-    # where it holds neither, because then nothing was asked.
+    # 0 where the dataset has both labels but no such edge; NA where it lacks either label.
     got[is.na(got) & present[[n]]] <- 0
     out[[paste0("weight_", n)]] <- got
   }
@@ -132,9 +128,8 @@ coda_compare_connectivity <- function(datasets, min_weight = 0) {
 
 
 coda_describe <- function(df) {
-  # The zero-row template is rbound in ahead of the rows, which fixes the column order and
-  # the types -- and answers a frame with no columns at all, where `do.call(rbind, list())`
-  # would otherwise return NULL.
+  # A zero-row template bound first fixes column order and types, and covers a frame
+  # with no columns.
   template <- data.frame(
     column = character(), dtype = character(), non_nulls = integer(), nulls = integer(),
     non_zero = numeric(), unique = integer(), min = numeric(), q1 = numeric(),
@@ -144,13 +139,11 @@ coda_describe <- function(df) {
 
   one <- function(name) {
     v <- df[[name]]
-    # Coda's absence rule: NA, or a string that is empty once trimmed. FALSE stays a real
-    # answer, which is why this tests the text rather than truthiness.
+    # Coda's rule for missing: NA, or a string that is empty once trimmed. FALSE counts
+    # as present.
     label <- trimws(as.character(v))
     present <- !is.na(v) & !is.na(label) & nzchar(label)
-    # `is.numeric` is FALSE for a logical column, which is what we want: a mean of 0.4
-    # under a column of TRUE/FALSE is not a summary anybody asked for. An id is excluded
-    # for the other reason -- a mean neuron id names no neuron.
+    # Statistics only for numeric columns, excluding logicals and neuronId.
     measured <- is.numeric(v) && !identical(name, "neuronId")
 
     row <- template[1, ]
@@ -158,14 +151,12 @@ coda_describe <- function(df) {
     row$dtype <- class(v)[1]
     row$non_nulls <- as.integer(sum(present))
     row$nulls <- as.integer(sum(!present))
-    # Distinct values as printed, which is the count a group-and-count downstream agrees
-    # with.
+    # Distinct values as printed.
     row$unique <- as.integer(length(unique(label[present])))
 
     if (measured) {
       x <- as.numeric(v[present])
-      # An NA or an infinity arrived, so it is present and distinct above -- but it takes
-      # no part in the spread, where it would drag a quantile with it.
+      # Infinite values count as present above but are left out of the statistics.
       x <- x[is.finite(x)]
       row$non_zero <- sum(x != 0)
       if (length(x)) {
@@ -185,14 +176,14 @@ coda_describe <- function(df) {
 }
 
 
-#' Cast id columns to exact text — Coda holds every neuron id as a character vector.
+#' Convert id columns to text, the form Coda stores neuron ids in.
 coda_ids <- function(df, ...) {
   for (name in c(...)) {
     if (!name %in% names(df)) next
     col <- df[[name]]
     if (is.character(col)) next
-    # `format` rather than `as.character`: the latter gives scientific notation for a
-    # wide id, and `trim` stops a vector being padded to a common width.
+    # `format` avoids the scientific notation `as.character` gives large ids; `trim`
+    # stops padding to a common width.
     text <- format(col, scientific = FALSE, trim = TRUE)
     text[is.na(col)] <- NA_character_
     df[[name]] <- text
@@ -202,14 +193,12 @@ coda_ids <- function(df, ...) {
 
 
 coda_edge_list <- function(ids, prepost, min_weight, all_segments, conn) {
-  # Coda's Connectivity output: preId -> postId, always oriented the way the synapse
-  # points, whichever way the traversal travelled.
+  # Fetch an edge list like Coda's Connectivity node: preId -> postId, in the
+  # direction of the synapse.
   #
-  # all_segments = FALSE keeps only bodies neuPrint labels :Neuron, which is this
-  # function's own default; TRUE matches :Segment instead -- every body, fragments
-  # included. Note that it applies to BOTH ends, so with FALSE a queried body that is
-  # not itself a published neuron returns nothing, where Coda's canvas always keeps the
-  # neurons you asked about.
+  # all_segments = FALSE keeps only bodies labelled :Neuron; TRUE keeps every body,
+  # fragments included. This applies to both ends, so with FALSE a queried body that is
+  # not itself a :Neuron returns nothing (Coda's node always keeps the queried neurons).
   one <- function(side) {
     tbl <- neuprint_connection_table(
       ids, prepost = side, threshold = min_weight, details = TRUE,
@@ -241,19 +230,17 @@ coda_edge_list <- function(ids, prepost, min_weight, all_segments, conn) {
       weight = numeric(0), hop = integer(0), direction = character(0)
     ))
   }
-  # An edge inside the seed set comes back from each end, and Build Network sums the
-  # weight of every row joining a pair -- so a duplicate is a doubled synapse count in
-  # the picture rather than a cosmetic repeat.
+  # An edge between two seeds is returned from both ends; drop the duplicate so its
+  # weight is not counted twice downstream.
   out <- coda_ids(out, "preId", "postId")
   dplyr::distinct(out, preId, postId, .keep_all = TRUE)
 }
 
 
 coda_endpoint_neurons <- function(connections, seed_ids = NULL) {
-  # The neurons an edge list is about: the seeds, then every partner, one row each.
+  # One row per neuron in an edge list: the seeds first, then every partner.
   #
-  # The seeds are included whether or not any edge survived min_weight -- both ends of
-  # the edge list only cover the seeds that turned out to be wired to something.
+  # Seeds are included even if none of their edges passed min_weight.
   parts <- list()
   connections <- coda_ids(connections, "preId", "postId")
   if (!is.null(seed_ids)) {
@@ -270,8 +257,7 @@ coda_endpoint_neurons <- function(connections, seed_ids = NULL) {
 
   rows <- dplyr::bind_rows(parts)
   rows$type[!is.na(rows$type) & rows$type == ""] <- NA_character_
-  # First appearance decides the order; the first non-empty type wins, which need not be
-  # the same row -- a neuron can arrive as an untyped seed and be typed by an edge later.
+  # Order is by first appearance; the type is the first non-empty one seen for that neuron.
   typed <- dplyr::distinct(rows[!is.na(rows$type), ], neuronId, .keep_all = TRUE)
   out <- dplyr::distinct(rows, neuronId, .keep_all = TRUE)
   out$type <- typed$type[match(out$neuronId, typed$neuronId)]
@@ -284,9 +270,8 @@ coda_flow_layers <- function(g, layer_attr = NULL) {
   n <- igraph::vcount(g)
   if (n == 0) return(integer(0))
   if (!is.null(layer_attr)) {
-    # Read off a column, renumbered densely: the numbers are a measurement and the layers
-    # are positions, so 0/2/5 hops draw as three adjacent columns. Anything unmeasured
-    # lands in one layer after every measured one, never in the first.
+    # Layers from a column, renumbered so 0/2/5 hops draw as three adjacent columns.
+    # Vertices without a value go in one extra layer after the rest.
     raw <- suppressWarnings(as.numeric(igraph::vertex_attr(g, layer_attr)))
     known <- sort(unique(raw[is.finite(raw)]))
     out <- match(raw, known)
@@ -353,14 +338,13 @@ coda_flow_layers <- function(g, layer_attr = NULL) {
 
 
 coda_follow_order <- function(lead, follower) {
-  # Positions putting `follower` in `lead`'s order, matched by label. Coda's rule.
+  # Positions that put `follower` in `lead`'s order, matched by label.
   taken <- rep(FALSE, length(follower))
   out <- integer(0)
   for (label in lead) {
     hits <- which(follower == label & !taken)
     if (length(hits) > 0) {
-      # Every untaken line of that name, not just the first — `followOrder`'s rule: one
-      # lead label may stand for several follower lines and takes all of them.
+      # Take every untaken line with this label; one lead label can match several.
       taken[hits] <- TRUE
       out <- c(out, hits)
     }
@@ -370,7 +354,7 @@ coda_follow_order <- function(lead, follower) {
 }
 
 
-#' Rename an annotation table's columns to the two names Coda addresses by name.
+#' Rename an annotation table's id column to `neuronId` and its cell type column to `type`.
 coda_annotation_columns <- function(df, id_column) {
   if (id_column %in% names(df)) names(df)[names(df) == id_column] <- "neuronId"
   if (!("type" %in% names(df))) {
@@ -400,7 +384,7 @@ coda_google_sheet <- function(url, id_column = "root_id", columns = NULL) {
   keep <- if (length(columns)) {
     columns[columns %in% names(df) & columns != id_column]
   } else {
-    # Empty means every column but the id, which is how a sheet says "all of it".
+    # Empty means every column except the id.
     setdiff(names(df), id_column)
   }
   coda_annotation_columns(df[, c(id_column, keep), drop = FALSE], id_column)
@@ -414,15 +398,13 @@ coda_in_volumes <- function(df, volumes, column) {
   named <- rep(NA_character_, nrow(df))
   found <- logical(nrow(df))
   ambiguous <- logical(nrow(df))
-  # Skipped wholesale on an empty cloud: pointsinside dispatches to Rvcg, which builds the
-  # mesh KD-tree per call whatever the point count, so the loop would cost every tree to
-  # answer nothing. The column and its type are still set below.
+  # Skip the loop on an empty point cloud; pointsinside builds a tree on every call.
   for (i in if (nrow(df)) seq_along(volumes) else integer(0)) {
     hit <- as.logical(nat::pointsinside(xyz, volumes[[i]]))
     hit[is.na(hit)] <- FALSE
-    # A point is ambiguous the moment a volume claims one something else already had.
+    # A point is ambiguous if more than one volume contains it.
     ambiguous <- ambiguous | (hit & found)
-    # First on the wire wins, so only points nothing has claimed are named here.
+    # The first volume in the list that contains a point names it.
     named[hit & !found] <- labels[[i]]
     found <- found | hit
   }
@@ -431,7 +413,7 @@ coda_in_volumes <- function(df, volumes, column) {
 }
 
 
-#' Coda's `join` aggregation: distinct, first-appearance order, absences skipped.
+#' Coda's `join` aggregation: distinct values in order of appearance, NA and blanks skipped.
 coda_join <- function(x) {
   kept <- as.character(x[!is.na(x)])
   kept <- unique(kept[kept != ""])
@@ -439,7 +421,7 @@ coda_join <- function(x) {
 }
 
 
-#' Chain two annotation sources: outer join on `neuronId`, the later one winning.
+#' Combine two annotation tables: outer join on `neuronId`, the later table's values win.
 coda_join_annotations <- function(left, right) {
   if (is.null(left)) return(right)
   if (is.null(right)) return(left)
@@ -462,13 +444,11 @@ coda_matrix_selection <- function(labels, picked, arrival = NULL) {
   # Coda's Selected Rows / Selected Columns: the lines a rectangle covered.
   labels <- as.character(labels)
   if (is.null(arrival)) arrival <- labels
-  # `as.integer` because `picked` arrives as R numerics: without it `index` below is a
-  # double column, and a document writing 1 where the canvas writes 1L is a column a join
-  # downstream reads differently.
+  # `as.integer` so `index` is an integer column, as in Coda.
   keep <- as.integer(sort(unique(picked[picked >= 0 & picked < length(labels)]))) + 1L
   data.frame(
     label = as.character(arrival)[keep],
-    # Zero-based: Coda counts positions from 0 and this column is Coda's, not R's.
+    # Zero-based, as Coda counts positions.
     index = keep - 1L,
     relabel = labels[keep],
     stringsAsFactors = FALSE
@@ -476,14 +456,14 @@ coda_matrix_selection <- function(labels, picked, arrival = NULL) {
 }
 
 
-#' Coda's `max` aggregation: NA rather than -Inf for a group with no values.
+#' Coda's `max` aggregation; returns NA for a group with no values (base max gives -Inf).
 coda_max <- function(x) {
   kept <- x[!is.na(x)]
   if (length(kept) == 0) NA_real_ else max(kept)
 }
 
 
-#' Coda's `min` aggregation: NA rather than Inf for a group with no values.
+#' Coda's `min` aggregation; returns NA for a group with no values (base min gives Inf).
 coda_min <- function(x) {
   kept <- x[!is.na(x)]
   if (length(kept) == 0) NA_real_ else min(kept)
@@ -502,12 +482,12 @@ coda_natural_order <- function(labels) {
 }
 
 
-# Centrality columns -- Coda's Network Centrality node.
+# Centrality columns, like Coda's Network Centrality node.
 #
 # Returns list(nodes = <data.frame>, summary = <one-row data.frame>). Weighted paths use
 # 1/weight as a distance, so a strong connection is a short path. `closeness` is harmonic
-# centrality over incoming distances, divided by n - 1: classical closeness is undefined
-# for any node that cannot reach everything, which on a connectome is most of them.
+# centrality over incoming distances divided by n - 1, which stays defined when some
+# nodes are unreachable.
 coda_network_centrality <- function(g, betweenness = TRUE, closeness = TRUE,
                                     pagerank = TRUE, eigenvector = FALSE,
                                     communities = TRUE, weighted = FALSE,
@@ -518,12 +498,9 @@ coda_network_centrality <- function(g, betweenness = TRUE, closeness = TRUE,
   if (is.null(ids)) ids <- as.character(seq_len(n))
   w <- E(g)$weight
   if (is.null(w)) w <- rep(1, ecount(g))
-  # NA is igraph for "unweighted"; a non-positive weight cannot become a length, so it
-  # falls back to one hop rather than making every path through it free.
+  # NA means unweighted in igraph. A non-positive weight counts as one hop.
   d <- if (weighted) ifelse(w > 0, 1 / w, 1) else NA
-  # Self-loops leave first, which is Coda's rule throughout: a self-loop counts towards
-  # degree and towards nothing else. It matters most for eigenvector centrality, where one
-  # heavy autapse is an eigenvector all of its own.
+  # Drop self-loops first; as in Coda, they count towards degree only.
   if (any(which_loop(g))) {
     keep <- !which_loop(g)
     d <- if (weighted) d[keep] else NA
@@ -584,13 +561,11 @@ coda_network_centrality <- function(g, betweenness = TRUE, closeness = TRUE,
 }
 
 
-# Per-node and graph-level statistics -- Coda's Network Metrics node.
+# Per-node and graph-level statistics, like Coda's Network Metrics node.
 #
 # Returns list(nodes = <data.frame>, summary = <one-row data.frame>). Structural measures
-# are taken over the undirected simple projection, so a reciprocal pair is one neighbour
-# relationship and a self-loop counts towards degree and nothing else. `clustering` is NA
-# rather than 0 where a node has fewer than two neighbours: it has no pair of them to
-# close, and calling that 0 makes the mean a count of the leaves.
+# use the undirected simple graph: a reciprocal pair is one neighbour, and a self-loop
+# counts towards degree only. `clustering` is NA for nodes with fewer than two neighbours.
 coda_network_metrics <- function(g) {
   directed <- is_directed(g)
   n <- vcount(g)
@@ -613,8 +588,7 @@ coda_network_metrics <- function(g) {
   local <- transitivity(u, type = "local")
   local[deg_u < 2] <- NA_real_
 
-  # Largest component first, ties by the earliest vertex -- the ordering Coda gives these,
-  # so that colouring by component ranks the same way in both.
+  # Number components largest first (ties by earliest vertex), as Coda does.
   cmp <- components(u)
   by_size <- order(-cmp$csize, seq_along(cmp$csize))
   rank <- integer(length(cmp$csize))
@@ -639,9 +613,7 @@ coda_network_metrics <- function(g) {
   observed <- if (directed) ecount(g) - loops else ecount(u)
   possible <- if (directed) n * (n - 1) else n * (n - 1) / 2
   triples <- sum(deg_u * (deg_u - 1) / 2)
-  # NaN is igraph saying the coefficient is 0/0 -- a regular graph has no variation in the
-  # degrees at its link ends. NA says the question does not apply; 0 would say "no
-  # preference", which is a different and wrong claim.
+  # igraph returns NaN where a coefficient is 0/0 (e.g. on a regular graph); report NA.
   na_if_nan <- function(x) if (length(x) != 1 || is.nan(x)) NA_real_ else as.numeric(x)
 
   summary <- data.frame(
@@ -649,19 +621,14 @@ coda_network_metrics <- function(g) {
     links = ecount(g),
     directed = directed,
     selfLoops = as.integer(loops),
-    # Always 0 here, and kept so the column set matches Coda's: the graph was built from
-    # grouped links, which cannot hold two edges between one pair.
+    # Always 0 here (the graph is built from grouped links); kept to match Coda's columns.
     parallelLinks = 0L,
     isolated = as.integer(sum(nodes$degree == 0)),
     density = if (possible > 0) observed / possible else NA_real_,
     meanDegree = if (n > 0) mean(nodes$degree) else NA_real_,
     medianDegree = if (n > 0) stats::median(nodes$degree) else NA_real_,
     maxDegree = if (n > 0) max(nodes$degree) else 0L,
-    # Undirected reciprocity is 1 by construction, so reporting it would be reporting the
-    # value of `directed` in a column nobody would read that way.
-    # Not igraph's `reciprocity()` default, which counts self-loops in its denominator.
-    # Coda counts a self-loop towards degree and nothing else, so `ignore.loops` is what
-    # makes the two agree on a graph with autapses.
+    # NA for an undirected graph. Self-loops are ignored, as in Coda.
     reciprocity = if (directed && ecount(g) > 0)
                     reciprocity(g, ignore.loops = TRUE) else NA_real_,
     components = length(cmp$csize),
@@ -684,12 +651,11 @@ coda_network_metrics <- function(g) {
 coda_geom_samples <- function(n) {
   d <- n$d
   pts <- as.matrix(d[, c("X", "Y", "Z")])
-  # WKNND refuses anything but a double matrix, and a hand-built neuronlist can carry
-  # integer coordinates — so this is coerced here rather than at each of the two callers.
+  # WKNND needs a double matrix; a neuronlist can carry integer coordinates.
   storage.mode(pts) <- "double"
   weights <- numeric(nrow(pts))
-  # Parent is a PointNo, not a row number, so it is matched through the index. A root is -1
-  # and matches to NA, which is what `child` filters on — one edge per non-root node.
+  # Each node gets half the length of every edge at it. Parent is a PointNo, so it is
+  # matched to a row; roots (-1) give NA and are skipped.
   parent <- match(d$Parent, d$PointNo)
   child <- which(!is.na(parent))
   if (length(child)) {
@@ -733,25 +699,16 @@ coda_neuron_distance <- function(query, target = NULL, method = "nearest",
     }
     a <- t(vapply(qs, centre, numeric(3)))
     b <- if (all_by_all) a else t(vapply(ts, centre, numeric(3)))
-    # Vectorised per axis, not a cell-by-cell loop: three outer differences where the loop
-    # was a million interpreted iterations at a thousand neurons. Deliberately *not* the
-    # |a|^2 + |b|^2 - 2 a.b identity, which is one matrix product but cancels catastrophically
-    # on the diagonal — a neuron against itself came back 3e-5 um instead of 0, and a zero
-    # diagonal is what Linkage and the Heatmap read. A difference of a number with itself is
-    # exactly zero. Into out[], not over it: the matrix already carries the names.
+    # Per-axis differences, which give exactly zero on the diagonal.
     out[] <- sqrt(outer(a[, 1], b[, 1], "-")^2 + outer(a[, 2], b[, 2], "-")^2 +
                   outer(a[, 3], b[, 3], "-")^2)
     return(out)
   }
 
   both <- symmetry != "query"
-  # One tree per neuron, built once. `nabor::knn` builds a tree over `data` on every call and
-  # throws it away, so inside the loop a 500-neuron all-by-all would build a quarter of a
-  # million of them rather than five hundred. WKNND rather than WKNNF: the F variant keeps
-  # floats internally and differs from knn in the sixth decimal, where D is bit-identical.
+  # One k-d tree per neuron, built once and reused. WKNND matches nabor::knn exactly.
   tree <- function(s) if (nrow(s$points) == 0) NULL else nabor::WKNND(s$points)
-  # Only where something reads them: with two inputs and one direction every one of these
-  # would be built and discarded, which is the guard the Python helper already had.
+  # Build query trees only where they are used.
   qt <- if (all_by_all || both) lapply(qs, tree) else NULL
   tt <- if (all_by_all) qt else lapply(ts, tree)
   directed <- function(s, to) {
@@ -767,9 +724,7 @@ coda_neuron_distance <- function(query, target = NULL, method = "nearest",
     }
     if (statistic == "min") return(min(d))
     if (statistic == "max") return(max(d))
-    # Reduced where it is read and nowhere else: the neuron's whole cable is fixed for the
-    # matrix, and sum() over 20k doubles per *cell* is ~20 us that min, max and an absolute
-    # within never look at.
+    # Mean and median are weighted by cable length.
     total <- sum(s$weights)
     if (total <= 0)
       return(if (statistic == "mean") mean(d) else stats::median(d))
@@ -799,9 +754,7 @@ coda_neuron_distance <- function(query, target = NULL, method = "nearest",
 
 
 coda_neurons <- function(df) {
-  # neuprintr publishes `bodyid`; Coda calls the id column `neuronId` everywhere.
-  # `df$neuronId` on a tibble is NULL rather than an error, so an unrenamed frame
-  # reports zero neurons somewhere far from here.
+  # Rename neuprintr's `bodyid` column to `neuronId`, Coda's name, and keep ids as text.
   if (!is.null(df) && "bodyid" %in% names(df) && !("neuronId" %in% names(df))) {
     df <- dplyr::rename(df, neuronId = bodyid)
   }
@@ -839,8 +792,7 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
       stop("Pass the neurons you asked about, or an edge list carrying a \"direction\" ",
            "column saying how each edge was found.")
     }
-    # `direction` only names the neuron that was asked about while the frontier still is
-    # the seed set, which is the first hop.
+    # `direction` only identifies the queried neuron on the first hop.
     if ("hop" %in% names(df)) {
       df <- df[suppressWarnings(as.numeric(df$hop)) == 1, , drop = FALSE]
     }
@@ -858,14 +810,12 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
     if (nrow(frame) == 0) next
     direction <- side[[2]]; query_col <- side[[3]]
     id_col <- side[[4]]; type_col <- side[[5]]
-    # Every gram attributable to a neuron, before anything is dropped. cnFracs denominator,
-    # countable only here: a dropped connection leaves nothing behind to count it against.
+    # Total weight per neuron before anything is dropped: the denominator for cnFrac.
     seen[[length(seen) + 1L]] <- data.frame(
       neuronId = as.character(frame[[query_col]]),
       w = frame[["coda_weight_"]], stringsAsFactors = FALSE)
     if (!is.null(lookup)) {
-      # The mapping replaces partner_by and untyped: a partner outside the shared label
-      # space can only exist in one dataset, so it is dropped rather than falling back.
+      # With a mapping, partners are labelled from it and those it lacks are dropped.
       mapped <- unname(lookup[coda_match_keys(frame[[id_col]])])
       frame <- frame[!is.na(mapped), , drop = FALSE]
       label <- mapped[!is.na(mapped)]
@@ -884,8 +834,7 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
     } else {
       label <- as.character(frame[[id_col]])
     }
-    # After the branch, not inside one: `untyped == "drop"` can empty the frame too, which
-    # is where the Python this mirrors puts the same guard.
+    # `untyped == "drop"` can also leave the frame empty.
     if (nrow(frame) == 0) next
     parts[[length(parts) + 1L]] <- data.frame(
       neuronId = frame[[query_col]],
@@ -903,16 +852,13 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
   }
   long <- do.call(rbind, parts)
   long$feature <- paste0(long$direction, ":", long$partner)
-  # Repeats of one neuron/partner pair are summed, exactly as a Pivot set to sum would.
-  # `rowsum` rather than `aggregate(weight ~ ...)`, which builds an interaction factor and
-  # dispatches per group in R -- minutes on a million-edge frame. Grouping by (neuronId,
-  # feature) is the whole key: `feature` already determines `direction` and `partner`.
+  # Sum repeats of each neuron/feature pair, as a Pivot set to sum would.
   key <- paste0(long$neuronId, "\r", long$feature)
   summed <- rowsum(long$weight, key, reorder = FALSE)
   long <- long[match(rownames(summed), key), , drop = FALSE]
   long$weight <- as.vector(summed)
-  # cnFrac against the pre-restriction totals, and *before* the fraction weighting below
-  # rescales the weights -- after it, this would be a fraction of a fraction.
+  # cnFrac: the fraction of each neuron's total weight that was kept, computed before
+  # the fraction weighting below.
   before <- do.call(rbind, seen)
   before <- rowsum(before$w, before$neuronId, reorder = FALSE)
   kept <- rowsum(long$weight, as.character(long$neuronId), reorder = FALSE)
@@ -929,11 +875,10 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
 
 
 coda_partners_by <- function(ids, query, min_weight, conn) {
-  # One direction of partners counted by an edge property rather than the weight --
-  # the card's Count by. neuprint_connection_table returns the weight and nothing else
-  # about a connection, so `query` is the one Coda sends, with the property after the
-  # weight and {ids} where the ids go. The property becomes the weight here, and the
-  # threshold applies to it, since that is the count the card shows.
+  # Fetch partners in one direction, counted by an edge property (the card's Count by).
+  #
+  # `query` is the Cypher Coda sends, with {ids} where the ids go. The property
+  # replaces the weight, and min_weight applies to it.
   q <- sub("{ids}", paste0("[", paste(ids, collapse = ","), "]"), query, fixed = TRUE)
   tbl <- neuprint_fetch_custom(q, conn = conn)
   if (is.null(tbl) || nrow(tbl) == 0) return(NULL)
@@ -944,19 +889,18 @@ coda_partners_by <- function(ids, query, min_weight, conn) {
 
 coda_profile <- function(ids, min_weight = 1, top_n = 10, groups = NULL, conn,
                          property_queries = NULL) {
-  # Keys mirror the card's tiles: upstream_types, downstream_types, top_upstream,
-  # top_downstream, regions.
+  # Compute the tables shown by Coda's Neuron Profile node.
   #
-  # Three rules that produce a plausible wrong number rather than an error:
-  #  * Untyped partners keep their own bucket. Merging them puts a fictitious type at
-  #    the top of the list on male-CNS.
-  #  * Synapses are summed AND distinct partners counted -- forty synapses onto one
-  #    neuron is not forty onto forty.
-  #  * roiInfo NESTS: a synapse in LO(R) is counted again in its parent OL(R), so the
-  #    regions are filtered to the primary set before summing or the totals double.
+  # Returns a list with upstream_types, downstream_types, top_upstream, top_downstream
+  # and regions, one per tile on the card.
   #
-  # property_queries counts every partner by an edge property instead of the weight --
-  # the card's Count by: the two queries Coda sends, keyed PRE and POST like `side`.
+  #  * Untyped partners are kept as their own group.
+  #  * Both synapses and distinct partners are counted per type.
+  #  * roiInfo is nested (a synapse in LO(R) also counts in OL(R)); use primary_rois to
+  #    filter regions before summing.
+  #
+  # property_queries counts partners by an edge property instead of the weight (the
+  # card's Count by): the two queries Coda sends, keyed PRE and POST.
   partners <- function(side) {
     if (!is.null(property_queries)) {
       return(coda_partners_by(ids, property_queries[[side]], min_weight, conn))
@@ -1012,19 +956,13 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, groups = NULL, conn,
     ))
   }
 
-  # Uncapped before the fold, capped after it: capping each member's own list first would
-  # rank a partner type by how often it reaches somebody's top ten rather than by how
-  # strong it is. Passed as `cap = 0` at each call rather than by reassigning `top_n`, which
-  # the closures above capture -- rewriting what a parameter means underneath them leaves a
-  # signature saying the per-neuron frames are capped when they are not.
+  # Grouped: average over all members first, then keep the top_n per group.
   rank_groups <- function(df, column) {
     if (is.null(df) || top_n <= 0) return(df)
     df |> group_by(group) |> arrange(desc(.data[[column]]), .by_group = TRUE) |>
       slice_head(n = top_n) |> ungroup()
   }
 
-  # Bound once: R has no common-subexpression elimination, so `roll_up(up)` written twice is
-  # two full group_by/summarise passes over the connectivity frame in every knit.
   up_types <- roll_up(up, cap = 0)
   down_types <- roll_up(down, cap = 0)
 
@@ -1045,10 +983,7 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, groups = NULL, conn,
       coda_group_means(top_of(down, cap = 0), groups, c("partner", "type"), "weight"),
       "weight_mean"
     ),
-    # NOT folded, and the same raw roiInfo the ungrouped branch returns: neuprintr hands
-    # back the nested breakdown and leaves the primary-ROI filter to the reader, so a mean
-    # over it would average double-counted totals. The Python helper folds its regions
-    # because it filters them first.
+    # Regions stay per neuron: roiInfo is nested, so averaging it would double-count.
     regions = roi,
     primary_rois = primary,
     upstream_types_by_neuron = up_types,
@@ -1057,19 +992,12 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, groups = NULL, conn,
 }
 
 coda_group_means <- function(per_neuron, groups, keys, values) {
-  # Per-neuron rows folded to one row per (group, key), absent members counted as ZERO.
+  # Average per-neuron rows over each group, giving one row per (group, key).
   #
-  # `groups` is a data frame of bodyid and group. Every member of a group is in the
-  # denominator whether or not it has a row here, and that is the whole of what makes these
-  # means over a cell type: a neuron that never reaches partner type X has been measured,
-  # and the measurement is zero. Averaging the rows present would report the mean over the
-  # members that happen to connect and print it under the type's name.
-  #
-  # `<value>_present` is what tells those two apart. The spread is the SAMPLE sd and is NA
-  # for a group of one, where the spread of one measurement is unknown rather than zero.
-  #
-  # Ported from `subjectPartnerTypes` in nodes/lib/profileStats.ts, which is what the card
-  # draws; `pnpm probe:r-helpers` runs this against the same numbers.
+  # `groups` is a data frame of bodyid and group. A member with no row for a key counts
+  # as zero, so each mean is over the whole group. `<value>_present` counts the members
+  # with a non-zero value. `<value>_sd` is the sample standard deviation (NA for a
+  # group of one). Matches the grouped view of Coda's Neuron Profile node.
   if (is.null(per_neuron) || nrow(per_neuron) == 0) return(NULL)
   sizes <- groups |> count(group, name = "n")
   df <- per_neuron |> inner_join(groups, by = "bodyid")
@@ -1083,8 +1011,8 @@ coda_group_means <- function(per_neuron, groups, keys, values) {
                 present = sum(.data[[value]] != 0), .groups = "drop") |>
       left_join(sizes, by = "group") |>
       mutate(mean = total / n)
-    # Second pass, because a deviation needs the mean. Members with no row here each
-    # contribute a full (0 - mean)^2, which is the (n - counted) term.
+    # Sum of squared deviations; members with no row add (0 - mean)^2 each, the
+    # (n - counted) term below.
     ss <- df |>
       left_join(stats, by = by) |>
       group_by(across(all_of(by))) |>
@@ -1107,7 +1035,7 @@ coda_qualify_ids <- function(df, column, direction = "add", prefix = "", into = 
   ids <- df[[column]]
   text <- as.character(ids)
   if (direction == "add") {
-    # A null stays null: tagging one invents a neuron that does not exist.
+    # A missing id stays missing.
     df[[column]] <- if (nzchar(prefix)) ifelse(is.na(ids), NA_character_,
                                                paste0(prefix, ":", text)) else text
     return(df)
@@ -1132,8 +1060,8 @@ coda_rank <- function(frame, value, flag = NULL, descending = TRUE,
   if (drop_non_positive) out <- out[out[[value]] > 0, , drop = FALSE]
   out <- out[order(out[[value]], decreasing = descending), , drop = FALSE]
   out$coda_rank <- seq_len(nrow(out))
-  # Of the values, never of the rows. Flagged rows are out of both halves: on an Influence
-  # result they are the seeds, which carry most of the total and say nothing about the rest.
+  # Cumulative share of the summed values. Flagged rows (e.g. the seeds of an Influence
+  # result) are left out of the share.
   counted <- out[[value]]
   if (!is.null(flag)) counted[as.logical(out[[flag]])] <- 0
   total <- sum(counted)
@@ -1160,8 +1088,8 @@ coda_read_mesh <- function(path) {
 #' Rewrite `column` by looking each value up in `mapping`. Coda's Relabel node.
 coda_relabel <- function(df, column, mapping, key, value, into = NULL,
                          unmatched = "null") {
-  # `match` takes the first of a repeated key and pairs NA with NA, both of which are
-  # Coda's rules; `miss` is what tells 'no match' from 'mapped to nothing'.
+  # `match` takes the first of a repeated key and pairs NA with NA, as Coda does.
+  # `miss` marks values not found in the mapping.
   idx <- match(coda_match_keys(df[[column]]), coda_match_keys(mapping[[key]]))
   miss <- is.na(idx)
   values <- mapping[[value]][idx]
@@ -1189,8 +1117,8 @@ coda_relabel <- function(df, column, mapping, key, value, into = NULL,
 .coda_or1 <- function(x) x + (1 - x %% 2)
 
 .coda_or61 <- function(x) {
-  # bitwOr is signed 32-bit and returns NA above 2^31, so the OR is done on the low six
-  # bits -- which is all 61 touches -- and added back.
+  # bitwOr is signed 32-bit and returns NA above 2^31, so OR only the low six bits
+  # (all that 61 touches) and add them back.
   low <- x %% 64
   x - low + bitwOr(as.integer(low), 61L)
 }
@@ -1218,8 +1146,8 @@ coda_relabel <- function(df, column, mapping, key, value, into = NULL,
 coda_sample_rows <- function(length, count, seed) {
   # Row positions for a seeded draw, ascending and 1-based.
   #
-  # Partial Fisher-Yates over `count` draws, then sorted: this samples rather than
-  # shuffles, so a random subset of a sorted table stays sorted.
+  # Partial Fisher-Yates over `count` draws, then sorted, so a sample of a sorted
+  # table stays sorted.
   length <- max(0, as.integer(length))
   count <- max(0, min(length, as.integer(count)))
   if (count == 0) return(integer(0))
@@ -1234,26 +1162,23 @@ coda_sample_rows <- function(length, count, seed) {
 
 
 coda_search <- function(df, query) {
-  # Coda's Explore Dataset query language, matching only.
+  # Filter rows with Coda's Explore Dataset search syntax.
   #
-  # Terms are AND-ed; a leading "!" or "-" negates one. A bare word is a substring of the
-  # row's searchable text; a bare term starting with "/" is a regex tested against each
-  # searchable field on its own, so "/^LC4$" is the anchored search a plain "^LC4$" is
-  # not. "field=value" compares one column, with > < >= <= != and ~ (unanchored regex)
-  # as the other operators.
+  # Terms are combined with AND; a leading "!" or "-" negates a term. A bare word matches
+  # as a substring of the row's text. A term starting with "/" is a regex tested against
+  # each field separately, so "/^LC4$" matches a field that is exactly LC4.
+  # "field=value" compares one column; the other operators are > < >= <= != and ~ (regex).
   #
-  # Two things this does NOT reproduce, both of which change which rows you get: hits are
-  # in table order rather than ranked by relevance (which matters where the result is
-  # capped), and a query matching nothing returns nothing where Coda retries it as a
-  # subsequence.
+  # Differences from Coda: hits are returned in table order, not ranked by relevance,
+  # and a query that matches nothing returns nothing (Coda retries it as a subsequence).
   ops <- c("==", "!=", ">=", "<=", "~", ">", "<", "=")
   tokens <- scan(text = query, what = "", quiet = TRUE)
   if (length(tokens) == 0) return(df)
 
   haystack <- NULL
   keep <- rep(TRUE, nrow(df))
-  # The columns free text and a bare regex both look at: string columns and neuronId
-  # only, so a bare "1200" finds a neuron id and not every neuron with 1200 synapses.
+  # Searchable columns: text columns plus neuronId, so "1200" finds a neuron id
+  # but not a synapse count of 1200.
   search_cols <- names(df)[vapply(df, function(x) is.character(x) || is.factor(x), TRUE)]
   search_cols <- union(search_cols, intersect("neuronId", names(df)))
 
@@ -1281,9 +1206,8 @@ coda_search <- function(df, query) {
 
     if (is.null(field)) {
       if (startsWith(raw, "/")) {
-        # A bare regex, neuroglancer-style: the closing slash is optional, and it is
-        # tested per field rather than against the joined haystack, because an anchored
-        # pattern is the point and "^LC4$" cannot match a row's joined text.
+        # A bare regex (closing slash optional), tested against each field separately
+        # so that anchors like "^LC4$" work.
         pattern <- substring(raw, 2)
         if (endsWith(pattern, "/") && !endsWith(pattern, "\\/")) {
           pattern <- substr(pattern, 1, nchar(pattern) - 1)
@@ -1291,8 +1215,7 @@ coda_search <- function(df, query) {
         if (nchar(pattern) == 0) next
         mask <- rep(FALSE, nrow(df))
         for (col in search_cols) {
-          # grepl is FALSE for NA, including against "^$" -- so a missing value is
-          # skipped rather than matched as "", with no guard of our own.
+          # grepl returns FALSE for NA, so missing values never match.
           mask <- mask | grepl(pattern, df[[col]], ignore.case = TRUE)
         }
       } else {
@@ -1342,10 +1265,8 @@ coda_search <- function(df, query) {
     return(as.matrix(Matrix::tcrossprod(B)))
   }
   if (metric == "jaccardWeighted") {
-    # No product form, so this is the feature-major pass the canvas runs. A dgCMatrix is
-    # already column-major, so @p/@i/@x give each feature's observations directly, and
-    # every pair that shares it is one outer minimum. Cost is the same sum-of-squared-
-    # column-heights, against O(n x nnz) for tiling one row against the whole matrix.
+    # No product form, so loop over features: each dgCMatrix column lists the
+    # observations that have it, and every pair of them adds an outer minimum.
     n <- nrow(X)
     G <- matrix(0, n, n)
     for (c in seq_len(ncol(X))) {
@@ -1365,8 +1286,7 @@ coda_search <- function(df, query) {
   if (metric == "euclidean") output <- "distance"
   total <- Matrix::rowSums(X)
   squares <- Matrix::rowSums(X * X)
-  # `tabulate` over the stored row indices: how many features each observation has, with
-  # no lgCMatrix allocated to count them.
+  # Number of features each observation has.
   present <- tabulate(X@i + 1L, nbins = nrow(X))
   G <- .coda_gram(X, metric)
   S <- switch(metric,
@@ -1374,15 +1294,12 @@ coda_search <- function(df, query) {
       norm <- sqrt(squares)
       G / outer(norm, norm)
     },
-    # `pmax(m, 0)` and not `pmax(0, m)`: pmax keeps the attributes of its *first*
-    # argument, so the scalar-first spelling returns a bare vector and `diag<-` then
-    # refuses it. Found by running this, not by reading it.
+    # The matrix goes first in `pmax` so the result keeps its matrix attributes.
     euclidean = sqrt(pmax(outer(squares, squares, "+") - 2 * G, 0)),
     jaccard = G / (outer(present, present, "+") - G),
     jaccardWeighted = G / (outer(total, total, "+") - G),
     pearson = {
-      # Centred over the ambient feature space, counting an absent feature as the zero it
-      # is -- not over the features an observation happens to have.
+      # Centred over all features, counting an absent feature as zero.
       mu <- total / width
       sd_ <- sqrt(pmax(squares / width - mu^2, 0))
       (G / width - outer(mu, mu)) / outer(sd_, sd_)
@@ -1390,14 +1307,13 @@ coda_search <- function(df, query) {
     stop(sprintf("Unknown metric: %s", metric)))
   S[!is.finite(S)] <- 0
   if (output == "distance" && metric != "euclidean") S <- 1 - S
-  # Written rather than computed: an observation with no features at all divides 0 by 0,
-  # and a non-zero distance to itself is not a distance.
+  # Set the diagonal explicitly; an observation with no features would give 0/0.
   diag(S) <- if (output == "distance") 0 else 1
   dimnames(S) <- list(labels, labels)
   S
 }
 
-#' Triplets -- observation, feature, value -- compared pairwise.
+#' Compare observations pairwise from a long table of observation, feature and value.
 coda_similarity_long <- function(df, observations, features, value = NULL,
                                  metric = "cosine", output = "similarity") {
   obs <- as.character(df[[observations]])
@@ -1407,11 +1323,11 @@ coda_similarity_long <- function(df, observations, features, value = NULL,
   obs <- obs[keep]; feat <- feat[keep]; w <- w[keep]
   labels <- sort(unique(obs))
   columns <- sort(unique(feat))
-  # `sparseMatrix` sums duplicated (i, j) pairs, which is the coalescing step by another name.
+  # `sparseMatrix` sums duplicated (i, j) pairs.
   X <- Matrix::sparseMatrix(i = match(obs, labels), j = match(feat, columns), x = w,
                             dims = c(length(labels), length(columns)))
-  # Presence is applied after the merge, not by passing ones in: an ungrouped table listing
-  # a pair four times would otherwise carry a 4 under presence's name.
+  # Without a value column, set entries to 1 after summing, so a pair listed several
+  # times still counts once.
   if (is.null(value)) X@x <- rep(1, length(X@x))
   .coda_similarity(X, labels, metric, output)
 }
@@ -1421,8 +1337,7 @@ coda_similarity_wide <- function(df, id_column, columns, metric = "cosine",
                                  output = "similarity") {
   ids <- as.character(df[[id_column]])
   labels <- sort(unique(ids))
-  # `vapply` already returns an nrow x ncol matrix -- reshaping it copied the whole dense
-  # block a second time. `drop = FALSE` keeps the one-column case a matrix.
+  # `vapply` returns an nrow x ncol matrix; setting `dim` keeps the one-column case a matrix.
   values <- vapply(columns, function(nm) suppressWarnings(as.numeric(df[[nm]])),
                    numeric(nrow(df)))
   dim(values) <- c(nrow(df), length(columns))
@@ -1436,8 +1351,7 @@ coda_similarity_wide <- function(df, id_column, columns, metric = "cosine",
 coda_synapse_edges <- function(df, source, target, source_type, target_type,
                                polarity, by = character(0)) {
   df <- coda_ids(df, source, target)
-  # A column that was not picked stands in as all-missing rather than being indexed out of
-  # the frame: with one type picked and not the other, a flipped row has nothing to carry.
+  # A column that was not picked is treated as all missing.
   held <- function(name) {
     if (is.null(name)) rep(NA_character_, nrow(df)) else as.character(df[[name]])
   }
@@ -1447,15 +1361,12 @@ coda_synapse_edges <- function(df, source, target, source_type, target_type,
   } else {
     text <- tolower(trimws(as.character(df[[polarity]])))
     flip <- !is.na(text) & text == "post"
-    # `%in%` never yields NA, so an unreadable cell is already counted here; the
-    # `!is.na` above is needed because `NA == "post"` is NA rather than FALSE.
+    # Rows whose polarity is neither "pre" nor "post" (NA included) are counted here.
     unoriented <- sum(!text %in% c("pre", "post"))
   }
-  # `idText` trims first, so "  " is an absence and not an id -- pandas strips in the
-  # notebook helper for the same reason.
+  # Ids that are blank once trimmed count as missing.
   blank <- function(v) { v <- trimws(v); v[!is.na(v) & v == ""] <- NA_character_; v }
-  # `ifelse` evaluates both arms over the whole frame, so the fixed orientation -- the
-  # default, and what the fixture emits -- takes the column it was given and no temporary.
+  # Swap pre and post on rows whose polarity is "post".
   side <- function(when_flipped, otherwise) {
     if (is.null(polarity)) return(held(otherwise))
     ifelse(flip, held(when_flipped), held(otherwise))
@@ -1466,20 +1377,16 @@ coda_synapse_edges <- function(df, source, target, source_type, target_type,
   dropped <- sum(!keep)
   kept <- which(keep)
   pre <- pre[kept]; post <- post[kept]
-  # `coda_match_keys` is rowKey's rule one language over, and the helper it belongs to asks
-  # to be needed rather than copied -- a logical column keys "true", not "TRUE".
+  # The `by` columns are keyed with coda_match_keys, Coda's matching rule.
   parts <- c(list(pre, post), lapply(by, function(name) coda_match_keys(df[[name]][kept])))
-  # \x1f stands for a missing value and \x1e separates the fields, so two columns cannot
-  # be read as one. R has no spelling for an embedded nul, which is what rowKey uses.
+  # \x1f stands for a missing value and \x1e separates the fields.
   parts <- lapply(parts, function(v) { v[is.na(v)] <- "\x1f"; v })
   keys <- do.call(paste, c(parts, list(sep = "\x1e")))
-  # `duplicated` gives the first occurrences directly; `match(groups, keys)` would hash
-  # every key a third time to recover them.
+  # First occurrence of each group.
   first <- which(!duplicated(keys))
   groups <- keys[first]
   at <- match(keys, groups)
-  # Assigned in reverse so the *earliest* non-missing value of each group is the one left
-  # standing -- the canvas's first-non-null rule, without a loop over groups.
+  # Assigned in reverse so each group keeps its earliest non-missing value, as in Coda.
   carried <- function(values) {
     values <- as.character(values)[kept]
     out <- rep(NA_character_, length(groups))
@@ -1499,17 +1406,14 @@ coda_synapse_edges <- function(df, source, target, source_type, target_type,
 
 coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight,
                                        all_segments, conn) {
-  # Coda's Connectivity node past one hop: a breadth-first walk returning an edge list.
+  # Walk the connectome breadth-first for `hops` steps and return the edge list, like
+  # Coda's Connectivity node with more than one hop.
   #
-  # Three rules worth keeping, each of which silently changes the answer if dropped:
-  #
-  #  * A neuron is expanded at most once. Connectomes are full of recurrent loops, so a
-  #    walk that re-expands a visited neuron does not terminate. The edge back into an
-  #    already-visited neuron is still reported; only the expansion is skipped.
-  #  * An edge re-found at a later hop keeps the hop it was first given, so the label
-  #    says something about the graph rather than about the walk order.
-  #  * direction = "both" expands both ways at every hop -- the undirected ball, not two
-  #    cones. That is what finds the neurons sharing input with a seed.
+  #  * Each neuron is expanded at most once, so recurrent loops terminate. Edges back
+  #    into an already-visited neuron are still reported.
+  #  * An edge found again at a later hop keeps the hop it was first found at.
+  #  * direction = "both" expands both ways at every hop, so it also finds neurons that
+  #    share input with a seed.
   prepost <- switch(direction, inputs = "PRE", both = "BOTH", "POST")
   frontier <- unique(as.numeric(seed_ids))
   expanded <- numeric(0)
@@ -1527,7 +1431,7 @@ coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight,
     if (is.null(found)) {
       found <- step
     } else {
-      # Keep the hop and direction an edge was FIRST given.
+      # Keep the hop and direction an edge was first found with.
       fresh <- dplyr::anti_join(step, found, by = c("preId", "postId"))
       found <- dplyr::bind_rows(found, fresh)
       step <- fresh
@@ -1549,7 +1453,7 @@ coda_umap_knn <- function(df, query, target, score = NULL,
                           scores_are = "similarity", k = 15) {
   q <- coda_match_keys(df[[query]])
   t <- coda_match_keys(df[[target]])
-  # First-appearance order, which is the order the canvas lays the points out in.
+  # First-appearance order, the order Coda lays the points out in.
   labels <- unique(q)
   n <- length(labels)
   if (n < 4) stop("an embedding needs at least 4 observations, got ", n)
@@ -1561,8 +1465,7 @@ coda_umap_knn <- function(df, query, target, score = NULL,
   keep <- !is.na(from) & !is.na(to) & from != to & is.finite(d)
   if (any(d[keep] < 0)) stop("scores give negative distances; check `scores_are`")
   from <- from[keep]; to <- to[keep]; d <- d[keep]
-  # Closest first, so the duplicate a pair may have keeps its smallest distance and the
-  # per-row head below is already in order.
+  # Sort closest first, so a repeated pair keeps its smallest distance.
   ord <- order(d)
   from <- from[ord]; to <- to[ord]; d <- d[ord]
   dup <- duplicated(cbind(from, to))
@@ -1573,8 +1476,7 @@ coda_umap_knn <- function(df, query, target, score = NULL,
   for (row in names(by_row)) {
     i <- as.integer(row)
     take <- head(by_row[[row]], k - 1)
-    # The padded slots keep the row's furthest real neighbour; an infinity would make the
-    # row's mean infinite and destroy its own neighbourhood.
+    # Padded slots repeat the distance to the row's furthest real neighbour.
     dist[i, ] <- d[take[length(take)]]
     dist[i, 1] <- 0
     idx[i, seq_along(take) + 1] <- to[take]
@@ -1661,9 +1563,8 @@ dataset_generic <- neuprint_connection(
 
 ```{r upload-table}
 # ── Upload Table ──
-# NOTE: Coda stores an uploaded table in the browser, not in the graph, so
-# the rows are not in this document. Point this at your copy of
-# "annotations.csv".
+# NOTE: Coda stores an uploaded table in the browser, so its rows are not in
+# this document. Point this at your copy of "annotations.csv".
 upload_table <- read_csv("annotations.csv", show_col_types = FALSE)
 upload_table <- upload_table |> rename(neuronId = `root_id`)
 upload_table <- coda_ids(upload_table, "neuronId")
@@ -1672,15 +1573,15 @@ upload_table <- upload_table |> mutate(across(all_of(c("cluster")), as.character
 
 ```{r upload-mesh}
 # ── Upload Mesh ──
-# NOTE: Coda stores uploaded meshes in the browser, not in the graph, so
-# point this at your copy of "glomeruli.obj". OBJ and STL go through rgl
-# (with nat); PLY needs Rvcg — install.packages("Rvcg").
+# NOTE: Coda stores uploaded meshes in the browser, so they are not in this
+# document. Point this at your copy of "glomeruli.obj". OBJ and STL are read
+# with rgl (installed with nat); PLY needs Rvcg: install.packages("Rvcg").
 upload_mesh_paths <- c("glomeruli.obj")
 upload_mesh <- lapply(upload_mesh_paths, coda_read_mesh)
 names(upload_mesh) <- tools::file_path_sans_ext(basename(upload_mesh_paths))
 
-# Coda's Units param, applied: everything downstream is nanometres, and these files
-# are in microns.
+# These files are in microns (Coda's `Units`). Convert to nanometres,
+# which is what everything downstream expects.
 upload_mesh <- lapply(upload_mesh, function(m) { m$vb[1:3, ] <- m$vb[1:3, ] * 1000; m })
 ```
 
@@ -1702,9 +1603,9 @@ find_neurons <- neuprint_search(
   meta = TRUE,
   conn = hemibrain_neuprint
 ) |> coda_neurons()
-# NOTE: neuprint_search narrows on one field, so Coda's other filters are
-# applied to the result rather than in the query. Same rows, one larger
-# response.
+# NOTE: neuprint_search filters on one field only, so Coda's other filters
+# are applied to the result below. The rows are the same; the download is
+# larger.
 find_neurons <- find_neurons |> filter((!is.na(.data[["status"]]) & as.character(.data[["status"]]) == "Traced"), (!is.na(.data[["size"]]) & .data[["size"]] >= 50000))
 find_neurons <- find_neurons |> head(200)
 ```
@@ -1739,9 +1640,8 @@ explore_dataset_all <- neuprint_fetch_custom(
 )
 
 explore_dataset_hits <- coda_search(explore_dataset_all, "status!=Traced pre>100")
-# NOTE: Coda caps this at 500 hits and keeps the 500 most *relevant*; the
-# ranking is not ported, so this keeps the first matches in table order
-# instead.
+# NOTE: Coda caps this at 500 hits and keeps the 500 most relevant. That
+# ranking is not reproduced, so this keeps the first matches in table order.
 explore_dataset_hits <- explore_dataset_hits |> head(500)
 
 explore_dataset_selected <- explore_dataset_all |> filter(neuronId %in% c("1001", "1005"))
@@ -1778,16 +1678,16 @@ roi_connectivity_matrix_df <- roi_connectivity_links
 
 ```{r description}
 # ── Description ──
-# NOTE: This card shows the dataset's published description and citation,
-# which is prose rather than a step. Read it with neuprint_get_meta() /
-# neuprint_datasets() if you need it here.
+# NOTE: This card shows the dataset's published description and citation. It
+# does no analysis, so nothing is exported. Read it with neuprint_get_meta()
+# / neuprint_datasets() if you need it here.
 ```
 
 ```{r dataset-summary}
 # ── Dataset Summary ──
-# NOTE: The card counts the whole dataset index. `neuprint_get_meta` on
-# every body is the equivalent and is a large download — expect this chunk
-# to take a while.
+# NOTE: The card counts every neuron in the dataset. Fetching metadata for
+# every body (as `neuprint_get_meta` would) is a large download, so expect
+# this chunk to take a while.
 dataset_summary_neurons <- neuprint_fetch_custom(
   "MATCH (n:Neuron) RETURN n.bodyId AS neuronId, n.type AS type,
    n.status AS status, n.pre AS pre, n.post AS post",
@@ -1804,8 +1704,8 @@ dataset_summary_top_types
 
 ```{r roi-viewer}
 # ── ROI Viewer ──
-# NOTE: Region meshes are display surfaces published for visualization — a
-# volume measured off one is an approximation rather than a figure to quote.
+# NOTE: Region meshes are published for visualization only, so a volume
+# measured from one is approximate.
 roi_viewer_rois <- neuprint_ROIs(superLevel = FALSE, conn = hemibrain_neuprint)
 
 # One request each. nat::plot3d() draws them once read.
@@ -1815,9 +1715,9 @@ roi_viewer_rois
 
 ```{r roi-meshes}
 # ── ROI Meshes ──
-# NOTE: One request per region, and neuPrint publishes these for
-# visualization only — decimated surfaces, so a volume measured off one is
-# an approximation.
+# NOTE: This makes one request per region. neuPrint publishes these meshes
+# for visualization only: they are decimated, so a volume measured from one
+# is approximate.
 roi_meshes_rois <- c("EB", "FB")
 roi_meshes <- lapply(roi_meshes_rois, neuprint_ROI_mesh, conn = hemibrain_neuprint)
 names(roi_meshes) <- roi_meshes_rois
@@ -1826,10 +1726,10 @@ roi_meshes_rois
 
 ```{r landmark-transform}
 # ── Landmark Transform ──
-# NOTE: nat::tpsreg() needs nat >= 1.9.0 and the Morpho package, which is a
-# Suggests rather than a hard dependency — install.packages("Morpho") if
-# this fails. Coda fits the same spline with navis-fastcore; the two agree
-# to well under a nanometre.
+# NOTE: nat::tpsreg() needs nat >= 1.9.0 and the Morpho package, which nat
+# does not install for you. Run install.packages("Morpho") if this fails.
+# Coda fits the same spline with navis-fastcore; the two agree to well under
+# a nanometre.
 landmark_transform <- nat::tpsreg(
   as.matrix(upload_table[, c("x", "y", "z")]),
   as.matrix(upload_table[, c("x2", "y2", "z2")]) * 1000
@@ -1849,9 +1749,9 @@ google_sheet <- coda_join_annotations(upload_table, google_sheet)
 ```{r embedding}
 # ── Embedding ──
 # NOTE: Coda runs umap-js and the notebook exporter runs umap-learn; this is
-# uwot. All three are the same algorithm with the same settings, and all
-# three draw different arrangements of the same neighbourhoods — as two
-# seeds of any one of them do.
+# uwot. All three run the same algorithm with the same settings, but each
+# draws a different arrangement of the same neighbourhoods, just as two
+# seeds of one implementation would.
 .knn <- coda_umap_knn(
   table_from_url,
   query = "queryId",
@@ -1945,40 +1845,38 @@ skeletons[, "type"] <- find_neurons[["type"]][idx_]
 
 ```{r meshes}
 # ── Meshes ──
-# TODO: neuprintr has no neuron-mesh fetch — neuprint_ROI_mesh() reads ROI
+# TODO: neuprintr cannot fetch neuron meshes: neuprint_ROI_mesh() reads ROI
 # shells only. Use the Skeletons node, which reads the same neurons as a nat
 # neuronlist, or fetch meshes from the precomputed source directly.
 ```
 
 ```{r synapses}
 # ── Synapses ──
-# NOTE: neuprintr returns bodyid and prepost (0/1) where Coda carries
-# neuronId and polarity ("pre"/"post"). Any cell below naming a synapse
-# column needs one spelling or the other; this exporter does not normalise
-# them yet.
-# NOTE: neuprint_get_synapses returns a presynaptic site once per partner it
-# drives, where the Synapses node is set to one row per site — so this frame
-# has more rows than the canvas. De-duplicate on the location columns to
-# match. Postsynaptic rows are unaffected.
+# NOTE: neuprintr returns the columns bodyid and prepost (0/1). Coda calls
+# them neuronId and polarity ("pre"/"post"). This exporter does not rename
+# them yet, so check any cell below that names a synapse column.
+# NOTE: neuprint_get_synapses returns a presynaptic site once for each
+# partner it connects to, but the Synapses node’s `Rows` is set to one row
+# per site. This frame therefore has more rows than Coda. De-duplicate on
+# the location columns to match. Postsynaptic rows are unaffected.
 synapses <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
 ```
 
 ```{r synapses-2}
 # ── Synapses ──
-# NOTE: neuprintr returns bodyid and prepost (0/1) where Coda carries
-# neuronId and polarity ("pre"/"post"). Any cell below naming a synapse
-# column needs one spelling or the other; this exporter does not normalise
-# them yet.
-# NOTE: neuprintr has no confidence argument — filter this frame yourself,
+# NOTE: neuprintr returns the columns bodyid and prepost (0/1). Coda calls
+# them neuronId and polarity ("pre"/"post"). This exporter does not rename
+# them yet, so check any cell below that names a synapse column.
+# NOTE: neuprintr has no confidence argument. Filter this frame yourself,
 # e.g. subset(<points>, confidence >= 0.8).
 synapses_2 <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
 ```
 
 ```{r synapses-between}
 # ── Synapses Between ──
-# NOTE: The open side is neuPrint's :Neuron label; the canvas counts the
-# neurons the Dataset node's population selects — the same set unless that
-# population narrows further.
+# NOTE: The side with no neurons wired is matched on neuPrint's :Neuron
+# label. Coda uses the neurons selected by the Dataset node's population
+# instead. The two are the same unless that population is narrower.
 .sources <- paste0("[", paste(find_neurons$neuronId, collapse = ","), "]")
 synapses_between <- neuprint_fetch_custom(
   sub("{sources}", .sources, "MATCH (n:Segment)\nWHERE n.bodyId IN {sources}\nMATCH (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m:Neuron)\nMATCH (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)\nRETURN n.bodyId, n.type, m.bodyId, m.type, ns.location.x, ns.location.y,\n       ns.location.z, ns.confidence", fixed = TRUE),
@@ -2099,9 +1997,8 @@ copy_ids <- find_neurons
 copy_ids_vec <- as.character(copy_ids$neuronId)
 copy_ids_vec <- unique(copy_ids_vec)
 copy_ids_vec <- paste0('"', copy_ids_vec, '"')
-# NOTE: In Coda this button puts the ids on the clipboard. A document has
-# none, so they are printed here — copy them from the output, or use the
-# vector directly.
+# NOTE: In Coda this button copies the ids to the clipboard. Here they are
+# printed instead: copy them from the output, or use the vector directly.
 writeLines(paste(copy_ids_vec, collapse = ", "))
 ```
 
@@ -2128,8 +2025,8 @@ box_plot_selected <- box_plot_out |> filter(as.character(`type`) %in% c("LC4"))
 
 box_plot_keep <- box_plot_out |> count(`type`, sort = TRUE) |> head(12) |> pull(`type`)
 box_plot_data <- box_plot_out |> filter(`type` %in% box_plot_keep)
-# NOTE: The 5th–95th percentile whisker has no `geom_boxplot` equivalent —
-# `coef` is a multiple of the IQR — so this draws the full range instead.
+# NOTE: `Whiskers` "5th–95th percentile" has no `geom_boxplot` equivalent
+# (`coef` is a multiple of the IQR), so this draws the full range instead.
 ggplot(box_plot_data, aes(x = `pre`, y = `type`)) +
   geom_violin(alpha = 0.35) +
   geom_boxplot(width = 0.2, coef = Inf, outlier.shape = NA) +
@@ -2194,8 +2091,9 @@ adjacency_matrix_df <- neuprint_get_adjacency_matrix(
 adjacency_links <- as.data.frame(as.table(as.matrix(adjacency_matrix_df)), stringsAsFactors = FALSE)
 names(adjacency_links) <- c("source", "target", "weight")
 adjacency_links <- adjacency_links[adjacency_links$weight != 0, ]
-# NOTE: Coda groups this matrix by cell type. neuprint_get_adjacency_matrix
-# is per body, so the roll-up is done here rather than in the query.
+# NOTE: Coda groups this matrix by cell type (`Group by type`).
+# neuprint_get_adjacency_matrix returns one row and column per body, so
+# group the result yourself to match.
 ```
 
 ```{r influence-3}
@@ -2207,11 +2105,11 @@ adjacency_links <- adjacency_links[adjacency_links$weight != 0, ]
 
 ```{r paths}
 # ── Paths ──
-# NOTE: neuprintr returns every route within the hop budget. Coda also ranks
-# them by their weakest link and keeps the strongest; that ranking is not
-# reproduced, so this is the unranked set.
-# NOTE: This node’s Network output is not reproduced here — only the routes
-# table is. A cell below that reads the Network port will not find it.
+# NOTE: neuprintr returns every route within `Max hops`. Coda also ranks
+# them by their weakest link and keeps the strongest. This cell does not, so
+# it returns every route, unranked.
+# NOTE: Only this node’s `Paths` output is reproduced here, not its
+# `Network` output. A cell below that reads `Network` will fail.
 paths_paths <- neuprint_get_paths(
   find_neurons$neuronId,
   ids_from_label$neuronId,
@@ -2292,10 +2190,10 @@ print(
     labs(x = "rank", y = "weight") +
     theme_minimal()
 )
-# NOTE: The card draws the share as a second panel sharing the ranking's
-# axis. ggplot2 cannot stack two panels with different y transforms, so this
-# is a second figure over the same ranking — empty where the share was
-# withheld; see coda_rank.
+# NOTE: Coda draws the share as a second panel below the ranking, on the
+# same x axis. ggplot2 cannot stack two panels with different y transforms,
+# so this is a separate figure over the same ranking. It is empty where Coda
+# did not compute the share; see coda_rank.
 
 print(
   ggplot(.ranked, aes(x = coda_rank, y = coda_share)) +
@@ -2330,7 +2228,8 @@ similarity_matrix <- coda_similarity_wide(
 
 ```{r rank-plot-2}
 # ── Rank Plot ──
-# TODO: nothing upstream produced a value — "Influence" was not translated.
+# TODO: nothing upstream produced a value, because "Influence" was not
+# translated.
 ```
 
 ```{r split-neurons}
@@ -2363,12 +2262,12 @@ select_one <- skeletons |> slice(1)
 
 ```{r transform-neurons}
 # ── Transform Neurons ──
-# TODO: Transform Neurons uses the registrations Coda ships, which are keyed
-# by template space name. The natverse spreads its templatebrain objects
-# across a package each — FAFB14 in nat.flybrains, FlyWire in fafbseg, MANC
-# in malevnc, MaleCNS in malecns — and the hemibrain has none at all, so a
-# faithful cell needs a space-to-package table nobody has written. Wire a
-# Landmark Transform instead and this emits. See neuron.mirror.
+# TODO: Transform Neurons uses the registrations built into Coda, which are
+# looked up by template space name. The natverse keeps its templatebrain
+# objects in separate packages (FAFB14 in nat.flybrains, FlyWire in fafbseg,
+# MANC in malevnc, MaleCNS in malecns) and has none for the hemibrain, so
+# this cannot be translated automatically. Wire a Landmark Transform into
+# `Transform` instead and this node will export.
 ```
 
 ```{r transform-neurons-2}
@@ -2379,37 +2278,35 @@ transform_neurons_2 <- xform(skeletons, reg = landmark_transform)
 ```{r clean-skeletons}
 # ── Clean Skeletons ──
 # TODO: nat has resample() and stitch_neurons(), which are close to two of
-# the four steps here, but its smoothing takes a window in nodes where this
-# node takes a Gaussian width in micrometres along the neurite — a cell that
-# ran would produce plausible neurons that are not the ones on screen.
-# Export as a notebook for the exact pipeline; it calls navis-fastcore,
-# which is what Coda ran.
+# the four steps here. But its smoothing takes a window in nodes, while this
+# node takes a Gaussian width in micrometres along the neurite, so a
+# translated cell would return different neurons. Export as a notebook for
+# the exact pipeline; it calls navis-fastcore, which is what Coda ran.
 ```
 
 ```{r clean-skeletons-2}
 # ── Clean Skeletons ──
 # TODO: nat has resample() and stitch_neurons(), which are close to two of
-# the four steps here, but its smoothing takes a window in nodes where this
-# node takes a Gaussian width in micrometres along the neurite — a cell that
-# ran would produce plausible neurons that are not the ones on screen.
-# Export as a notebook for the exact pipeline; it calls navis-fastcore,
-# which is what Coda ran.
+# the four steps here. But its smoothing takes a window in nodes, while this
+# node takes a Gaussian width in micrometres along the neurite, so a
+# translated cell would return different neurons. Export as a notebook for
+# the exact pipeline; it calls navis-fastcore, which is what Coda ran.
 ```
 
 ```{r nblast-k-nn}
 # ── NBLAST k-NN ──
-# TODO: nat.nblast has no shortlisted k-nearest search. The honest
-# equivalent is nblast_allbyall() followed by a per-row top-k, which is the
-# full n^2 matrix this node exists to avoid — a different computation under
-# the same name. Use the NBLAST node, which exports as nblast_allbyall(),
-# and take the top matches from its matrix.
+# TODO: nat.nblast has no shortlisted k-nearest search. The closest
+# equivalent is nblast_allbyall() followed by a per-row top-k, which
+# computes the full n^2 matrix this node is designed to avoid. Use the
+# NBLAST node, which exports as nblast_allbyall(), and take the top matches
+# from its matrix.
 ```
 
 ```{r nblast-df}
 # ── NBLAST ──
-# NOTE: NBLAST is calibrated in micrometres and neuprintr returns raw voxels
-# — 8 nm on the hemibrain. Check this factor against your dataset: nothing
-# in the graph records it.
+# NOTE: NBLAST is calibrated in micrometres, and neuprintr returns raw
+# voxels (8 nm on the hemibrain). Check this factor against your dataset,
+# because nothing in the graph records it.
 VOXEL_UM <- 8 / 1000
 
 nblast_df_dps <- dotprops(
@@ -2426,9 +2323,9 @@ nblast_df <- nblast_allbyall(
 
 ```{r nblast-df-2}
 # ── NBLAST ──
-# NOTE: NBLAST is calibrated in micrometres and neuprintr returns raw voxels
-# — 8 nm on the hemibrain. Check this factor against your dataset: nothing
-# in the graph records it.
+# NOTE: NBLAST is calibrated in micrometres, and neuprintr returns raw
+# voxels (8 nm on the hemibrain). Check this factor against your dataset,
+# because nothing in the graph records it.
 VOXEL_UM <- 8 / 1000
 
 nblast_df_2_dps <- dotprops(
@@ -2451,9 +2348,9 @@ nblast_df_2 <- nblast(
 
 ```{r distance-between}
 # ── Distance between ──
-# NOTE: Coda reports micrometres and neuprintr returns raw voxels — 8 nm on
-# the hemibrain. Check this factor against your dataset: nothing in the
-# graph records it.
+# NOTE: Coda reports micrometres, and neuprintr returns raw voxels (8 nm on
+# the hemibrain). Check this factor against your dataset, because nothing in
+# the graph records it.
 VOXEL_UM <- 8 / 1000
 
 distance_between <- coda_neuron_distance(
@@ -2467,15 +2364,15 @@ distance_between <- coda_neuron_distance(
 
 ```{r distance-between-2}
 # ── Distance between ──
-# NOTE: Coda reports micrometres and neuprintr returns raw voxels — 8 nm on
-# the hemibrain. Check this factor against your dataset: nothing in the
-# graph records it.
+# NOTE: Coda reports micrometres, and neuprintr returns raw voxels (8 nm on
+# the hemibrain). Check this factor against your dataset, because nothing in
+# the graph records it.
 VOXEL_UM <- 8 / 1000
 
-# NOTE: This counts each Query node once, which is what bounds the answer by
-# the neuron's own cable. navis' cable_overlap instead sums a node once per
-# Target point that picks it — a little over one per cent apart on two
-# example neurons at 2 µm.
+# NOTE: This counts each skeleton node of `Query` once, so the answer cannot
+# exceed the neuron's own cable. navis' cable_overlap instead counts a node
+# once for every `Target` point that picks it. On two example neurons at 2
+# µm the two differ by a little over one per cent.
 distance_between_2 <- coda_neuron_distance(
   skeletons * VOXEL_UM,
   skeletons * VOXEL_UM,
@@ -2497,12 +2394,14 @@ n_3d_view <- tibble(neuronId = character(0))
 
 ```{r clean-meshes}
 # ── Clean Meshes ──
-# TODO: nothing upstream produced a value — "Meshes" was not translated.
+# TODO: nothing upstream produced a value, because "Meshes" was not
+# translated.
 ```
 
 ```{r distance-between-3}
 # ── Distance between ──
-# TODO: nothing upstream produced a value — "Meshes" was not translated.
+# TODO: nothing upstream produced a value, because "Meshes" was not
+# translated.
 ```
 
 ```{r stack-neurons}
@@ -2517,11 +2416,11 @@ stack_neurons <- bind_rows(
 ```{r synblast}
 # ── syNBLAST ──
 # TODO: The natverse has no synapse-based NBLAST. nat.nblast scores dotprops
-# — tangent vectors fitted to skeleton points — and syNBLAST compares
-# connector positions with the dot product fixed at 1, which is a different
-# score out of the same lookup matrix. Export this graph as a notebook
-# instead: navis-fastcore is a Python package, so that cell calls the same
-# implementation Coda ran.
+# (tangent vectors fitted to skeleton points), while syNBLAST compares
+# connector positions with the dot product fixed at 1, which gives a
+# different score from the same lookup matrix. Export this graph as a
+# notebook instead: navis-fastcore is a Python package, so that cell calls
+# the same implementation Coda ran.
 ```
 
 ```{r attach-attributes}
@@ -2571,12 +2470,12 @@ qualify_ids_2 <- coda_qualify_ids(qualify_ids, "neuronId", direction = "remove",
 
 ```{r flow-chart}
 # ── Flow Chart ──
-# NOTE: The canvas folds each layer past 4 boxes into one "+N others". That
-# is a drawing control, so this figure shows every box — filter upstream to
-# match it.
-# NOTE: A vertex here is a fixed-size rectangle, where Coda sizes each box
-# to its label. Feedback edges are not dashed as they are on the canvas —
-# igraph styles edges one way per plot.
+# NOTE: The card merges each layer past 4 boxes into one "+N others" box
+# (`Fold past`). This figure shows every box. Filter upstream to match the
+# card.
+# NOTE: A vertex here is a fixed-size rectangle, while Coda sizes each box
+# to its label. Feedback edges are not dashed as they are in Coda, because
+# igraph styles all edges in a plot the same way.
 flow_chart_out <- paths_network
 .picked <- c("720575940628857210")
 flow_chart_selected <- igraph::as_data_frame(flow_chart_out, what = "vertices") |>
@@ -2615,10 +2514,10 @@ plot(
 
 ```{r points-in-volumes}
 # ── Points in Volumes ──
-# NOTE: nat::pointsinside needs Rvcg, which nat only suggests —
-# install.packages("Rvcg") if this errors. It casts its own rays where Coda
-# descends a bounding volume hierarchy, so the two agree on any closed mesh
-# except at its surface.
+# NOTE: nat::pointsinside needs Rvcg, which nat does not install for you.
+# Run install.packages("Rvcg") if this errors. Rvcg and Coda use different
+# inside tests, so they agree on any closed mesh except for points on its
+# surface.
 points_in_volumes_split <- coda_in_volumes(synapses_between_2, roi_meshes, "roi")
 points_in_volumes_inside <- points_in_volumes_split$points[!is.na(points_in_volumes_split$points[["roi"]]), ]
 points_in_volumes_outside <- points_in_volumes_split$points[is.na(points_in_volumes_split$points[["roi"]]), ]
@@ -2648,9 +2547,9 @@ similarity_matrix_2 <- coda_similarity_long(
 ```{r embedding-2}
 # ── Embedding ──
 # NOTE: Coda runs umap-js and the notebook exporter runs umap-learn; this is
-# uwot. All three are the same algorithm with the same settings, and all
-# three draw different arrangements of the same neighbourhoods — as two
-# seeds of any one of them do.
+# uwot. All three run the same algorithm with the same settings, but each
+# draws a different arrangement of the same neighbourhoods, just as two
+# seeds of one implementation would.
 .features <- coda_similarity_long(
   partner_vectors,
   observations = "neuronId",
@@ -2682,7 +2581,7 @@ embedding_2$annotation <- NA_character_
 
 ```{r stack-neurons-2}
 # ── Stack Neurons ──
-# TODO: nothing upstream produced a value — "Mirror Neurons" was not
+# TODO: nothing upstream produced a value, because "Mirror Neurons" was not
 # translated.
 ```
 
@@ -2709,13 +2608,13 @@ nblast_matches <- do.call(rbind, lapply(seq_len(nrow(m_)), function(i) {
 # ── NBLAST Matches ──
 m_ <- as.matrix(nblast_df)
 diag(m_) <- -Inf
-# NOTE: Best means is on "from the matrix", which Coda answers by reading
-# what the matrix says its cells are. A plain matrix has nowhere to carry
-# that, so this assumes higher is better.
+# NOTE: `Best means` is set to "from the matrix", which Coda answers from
+# what the matrix says its cells are. A plain R matrix does not carry that,
+# so this assumes higher is better.
 cut_ <- apply(m_, 1, function(r) max(r[is.finite(r)], -Inf)) * (1 - 0.05)
-# NOTE: The band is around each row's own best score, not the matrix's: 0.05
-# keeps everything within 5% of that neuron's top match. It multiplies, so
-# it behaves as intended only for positive scores.
+# NOTE: The band is relative to each row's own best score: 0.05 keeps
+# everything within 5% of that neuron's top match. It multiplies, so it only
+# works as intended for positive scores.
 nblast_matches_2 <- do.call(rbind, lapply(seq_len(nrow(m_)), function(i) {
   hit <- which(is.finite(m_[i, ]) & m_[i, ] >= cut_[i])
   if (!length(hit)) return(NULL)
@@ -2733,9 +2632,9 @@ nblast_matches_2 <- do.call(rbind, lapply(seq_len(nrow(m_)), function(i) {
 ```{r nblast-matches-3}
 # ── NBLAST Matches ──
 m_ <- as.matrix(nblast_df)
-# NOTE: Best means is on "from the matrix", which Coda answers by reading
-# what the matrix says its cells are. A plain matrix has nowhere to carry
-# that, so this assumes higher is better.
+# NOTE: `Best means` is set to "from the matrix", which Coda answers from
+# what the matrix says its cells are. A plain R matrix does not carry that,
+# so this assumes higher is better.
 cut_ <- rep(0.4, nrow(m_))
 nblast_matches_3 <- data.frame(
   query = rownames(m_),
@@ -2746,9 +2645,9 @@ nblast_matches_3 <- data.frame(
 
 ```{r linkage}
 # ── Linkage ──
-# NOTE: Coda's linkage is SciPy's via navis-fastcore, and "average" is
-# hclust's "average". Checked on one matrix: same merge heights, same leaf
-# order. "ward.D" is a different criterion and would not agree.
+# NOTE: Coda's linkage is SciPy's (via navis-fastcore), and its "average" is
+# hclust's "average". Both give the same merge heights and leaf order on a
+# test matrix. "ward.D" is a different criterion and would not agree.
 m_ <- as.matrix(nblast_df)
 d_ <- as.dist(1 - ((m_ + t(m_)) / 2))
 
@@ -2765,9 +2664,9 @@ linkage_tree_clusters <- NULL
 ```{r embedding-3}
 # ── Embedding ──
 # NOTE: Coda runs umap-js and the notebook exporter runs umap-learn; this is
-# uwot. All three are the same algorithm with the same settings, and all
-# three draw different arrangements of the same neighbourhoods — as two
-# seeds of any one of them do.
+# uwot. All three run the same algorithm with the same settings, but each
+# draws a different arrangement of the same neighbourhoods, just as two
+# seeds of one implementation would.
 .m <- as.matrix(nblast_df)
 .labels <- rownames(.m)
 .d <- 1 - .m
@@ -2780,8 +2679,8 @@ linkage_tree_clusters <- NULL
   seed = 7,
   verbose = FALSE
 )
-# NOTE: Scores are similarities, so the distance is 1 − score — the same
-# reading the Linkage chunk makes.
+# NOTE: Scores are similarities, so the distance is 1 − score, as in the
+# Linkage chunk.
 embedding_3 <- data.frame(
   label = .labels,
   umap1 = .xy[, 1],
@@ -2829,8 +2728,8 @@ select_one_2 <- sort_df |> slice(4)
 ```{r select-neurons}
 # ── Select Neurons ──
 # NOTE: R has no 64-bit integer, so an 18-digit root id read as a number was
-# already rounded before this line — read that column as character at the
-# source if these are CAVE ids.
+# already rounded before this line. If these are CAVE ids, read that column
+# as character where it is loaded.
 select_neurons_ids <- format(sort_df[["postId"]], scientific = FALSE, trim = TRUE)
 select_neurons <- skeletons[names(skeletons) %in% select_neurons_ids]
 ```
@@ -2891,8 +2790,8 @@ heatmap_out |>
 # ── Reduce Matrix ──
 m_ <- as.matrix(similarity_matrix_2)
 m_[!is.finite(m_)] <- NA
-# Only where the two label lists agree: a square matrix is not necessarily a
-# self-comparison, and Coda declines to guess.
+# Only when the row and column labels are identical. A square matrix is not
+# necessarily a self-comparison, and Coda skips the diagonal only in that case.
 if (identical(rownames(m_), colnames(m_))) diag(m_) <- NA
 reduce_matrix <- data.frame(`label` = rownames(m_))
 reduce_matrix[["sim_mean"]] <- rowMeans(m_, na.rm = TRUE)
@@ -2905,16 +2804,16 @@ reduce_matrix[["sim_n"]] <- rowSums(!is.na(m_))
 
 ```{r cut-tree}
 # ── Cut Tree ──
-# TODO: This Cut Tree groups by which datasets each cluster draws from,
-# which has no single-call equivalent here.
+# TODO: This Cut Tree groups clusters by which datasets they draw from, and
+# there is no single call that does this here.
 ```
 
 ```{r cut-tree-2}
 # ── Cut Tree ──
 cl_ <- cutree(linkage_tree, k = 4)
 # NOTE: Coda numbers clusters left to right as the dendrogram draws them;
-# `cutree` numbers by observation order. Same grouping — this renumbers so
-# the two agree.
+# `cutree` numbers them by observation order. The groups are the same, and
+# the next line renumbers them so the two agree.
 cl_ <- match(cl_, unique(cl_[linkage_tree$order]))
 
 cut_tree_2_clusters <- tibble(
@@ -2932,12 +2831,12 @@ cut_tree_2_tree_clusters <- cl_
 
 ```{r cut-tree-3}
 # ── Cut Tree ──
-# NOTE: Cutting at a height gives however many groups fall out below it,
-# which may be one if the height is above the top of the tree.
+# NOTE: Cutting at a height gives as many groups as fall below it. If the
+# height is above the top of the tree, that is a single group.
 cl_ <- cutree(linkage_tree, h = 0.6)
 # NOTE: Coda numbers clusters left to right as the dendrogram draws them;
-# `cutree` numbers by observation order. Same grouping — this renumbers so
-# the two agree.
+# `cutree` numbers them by observation order. The groups are the same, and
+# the next line renumbers them so the two agree.
 cl_ <- match(cl_, unique(cl_[linkage_tree$order]))
 
 cut_tree_3_clusters <- tibble(
@@ -3033,8 +2932,8 @@ relabel_2 <- coda_relabel(deduplicate, "preType", combine_columns, "type", "labe
 ```{r selected-to-neurons}
 # ── Selected to Neurons ──
 # NOTE: No neuron table is wired on the canvas, so the labels are read as
-# neuron ids. Unusable ids are dropped, as in Coda, and the rest kept as
-# character — every Coda id column is text.
+# neuron ids. Unusable ids are dropped, as in Coda, and the rest are kept as
+# character, because every Coda id column is text.
 selected_to_neurons <- dendrogram_selected |>
   mutate(neuronId = suppressWarnings(as.numeric(`label`))) |>
   filter(!is.na(neuronId)) |>
@@ -3117,9 +3016,9 @@ build_network <- graph_from_data_frame(
 
 ```{r join}
 # ── Join ──
-# NOTE: Coda keeps the first matching row, so a duplicated key annotates
-# rather than multiplies. `distinct` reproduces that; without it the join
-# returns every matching pair.
+# NOTE: Coda keeps the first matching row, so a duplicated key does not add
+# extra rows. `distinct` reproduces that; without it the join returns every
+# matching pair.
 join <- select_columns |>
   left_join(
     group_by_df_3 |> distinct(`preType`, .keep_all = TRUE),
@@ -3130,9 +3029,9 @@ join <- select_columns |>
 
 ```{r join-2}
 # ── Join ──
-# NOTE: Coda keeps the first matching row, so a duplicated key annotates
-# rather than multiplies. `distinct` reproduces that; without it the join
-# returns every matching pair.
+# NOTE: Coda keeps the first matching row, so a duplicated key does not add
+# extra rows. `distinct` reproduces that; without it the join returns every
+# matching pair.
 join_2 <- select_columns |>
   full_join(
     group_by_df_3 |> distinct(`postType`, .keep_all = TRUE),
@@ -3143,15 +3042,14 @@ join_2 <- select_columns |>
 
 ```{r join-3}
 # ── Join ──
-# NOTE: Coda keeps the first matching row, so a duplicated key annotates
-# rather than multiplies. `distinct` reproduces that; without it the join
-# returns every matching pair.
+# NOTE: Coda keeps the first matching row, so a duplicated key does not add
+# extra rows. `distinct` reproduces that; without it the join returns every
+# matching pair.
 # NOTE: Row **order** differs here, and only here. Coda emits one row per
 # right-table row in the right table's order; dplyr 1.2 puts the matched
 # rows in the left table's order and the unmatched right rows after them.
-# Measured against both rather than surmised — the rows themselves are
-# identical — so add an `arrange()` only if something downstream depends on
-# the order.
+# The rows themselves are identical, so add an `arrange()` only if something
+# downstream depends on the order.
 join_3 <- select_columns |> distinct(`preType`, .keep_all = TRUE) |>
   right_join(
     group_by_df_3,
@@ -3167,8 +3065,8 @@ network_viewer_out <- delete_edges(network_viewer_out, E(network_viewer_out)[E(n
 network_viewer_out <- delete_vertices(network_viewer_out, V(network_viewer_out)[degree(network_viewer_out) == 0])
 
 # NOTE: Coda draws this with ForceAtlas2 in the browser. igraph has no
-# equivalent, so the graph is handed over and the layout is yours to pick —
-# uncomment one.
+# equivalent, so pick a layout yourself by uncommenting one of the lines
+# below.
 # plot(network_viewer_out, layout = layout_with_fr(network_viewer_out), vertex.size = 4, vertex.label = NA)
 # plot(network_viewer_out, layout = layout_with_kk(network_viewer_out))
 # plot(network_viewer_out, layout = layout_as_tree(network_viewer_out))
@@ -3201,12 +3099,12 @@ filter_network_2 <- induced_subgraph(build_network, keep)
 
 ```{r network-centrality}
 # ── Network Centrality ──
-# NOTE: The canvas sampled 200 source nodes. igraph has no pivot sampling,
-# so this runs the exact sweep: more precise, and considerably slower on a
+# NOTE: Coda sampled 200 source nodes (`Sample`). igraph cannot sample, so
+# this computes the exact values. That is more precise, and much slower on a
 # large graph.
-# NOTE: igraph’s Louvain is undirected only, so the community pass runs on
-# the collapsed graph. The partition and the modularity are the undirected
-# ones.
+# NOTE: igraph’s Louvain works on undirected graphs only, so communities are
+# found with edge directions ignored. The partition and the modularity are
+# those of the undirected graph.
 network_centrality_out <- build_network
 .central <- coda_network_centrality(
   network_centrality_out,
@@ -3266,9 +3164,9 @@ rownames(pivot_matrix_df) <- pivot_table_df[[1]]
 
 ```{r muted-step}
 # ── Muted step ──
-# Muted on the canvas, so it produced nothing and nothing downstream of it
-# ran. Left here rather than dropped, because a node missing from the
-# document and a node deliberately switched off look identical otherwise.
+# This node is muted on the canvas, so it produced nothing and nothing
+# downstream of it ran. It is kept here so a muted node is not mistaken for
+# one missing from the document.
 ```
 
 ```{r normalize}
@@ -3282,9 +3180,10 @@ normalize[empty_, ] <- 0
 ```{r heatmap-2}
 # ── Heatmap ──
 heatmap_2_out <- as.matrix(pivot_matrix_df)
-# NOTE: The clustering is seaborn's clustermap: each row a vector across the
-# columns. Coda reads an empty cell as 0 and puts a constant vector at
-# distance 1 from everything, rather than letting `cor`'s NA stop `hclust`.
+# NOTE: The clustering follows seaborn's clustermap: each row is a vector
+# across the columns. As in Coda, an empty cell counts as 0 and a constant
+# vector is put at distance 1 from everything, so `cor`'s NA does not stop
+# `hclust`.
 x_ <- heatmap_2_out
 x_[!is.finite(x_)] <- 0
 d_ <- 1 - cor(t(x_))
@@ -3320,7 +3219,7 @@ if ("LC4" %in% rownames(heatmap_3_out)) {
   cols_ <- rev(order(heatmap_3_out[key_, ], decreasing = TRUE, na.last = TRUE, method = "radix"))
   rows_ <- coda_follow_order(colnames(heatmap_3_out)[cols_], rownames(heatmap_3_out))
 } else {
-  message("No row is called \"LC4\", so the columns are left as they arrived.")
+  message("No row is called \"LC4\", so the columns keep their original order.")
   cols_ <- seq_len(ncol(heatmap_3_out))
   rows_ <- seq_len(nrow(heatmap_3_out))
 }
@@ -3387,9 +3286,8 @@ heatmap_5_rows <- coda_matrix_selection(rownames(heatmap_5_out), integer(0))
 heatmap_5_columns <- coda_matrix_selection(colnames(heatmap_5_out), integer(0))
 # NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
 # is the nearest published one.
-# NOTE: The card draws this with circles sized by value, which is a drawing
-# rather than a change to the matrix — the numbers below are the same either
-# way. This draws it as tiles.
+# NOTE: The card draws circles sized by value. This draws tiles instead; the
+# numbers are the same either way.
 
 heatmap_5_out |>
   as.data.frame() |>
@@ -3416,10 +3314,9 @@ heatmap_6_columns <- coda_matrix_selection(colnames(heatmap_6_out), integer(0))
 # is the nearest published one.
 hi_ <- 50
 lo_ <- 0
-# NOTE: The colour runs on a log scale and the values do not: the fill is
-# log10(1 + value - low) and the label is the raw value. Cells past either
-# end are clipped, as on the card, and the legend stays in transformed
-# units.
+# NOTE: Only the colour uses a log scale: the fill is log10(1 + value - low)
+# and the label is the raw value. Cells past either end are clipped, as in
+# Coda, and the legend is in transformed units.
 
 heatmap_6_out |>
   as.data.frame() |>

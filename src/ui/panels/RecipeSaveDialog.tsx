@@ -135,8 +135,8 @@ function RecipeSavePanel({ ids }: { ids: readonly string[] }) {
         <p className="sources__note">
           {plural(cards.length, 'card')}
           {slots.length === 0
-            ? ', wired to nothing outside the selection.'
-            : '. With one card selected, an inserted recipe attaches to it through the first of these that fits:'}
+            ? ', not wired to anything outside the selection.'
+            : '. If one card is selected when you insert this recipe, that card is wired in place of the first of these that fits:'}
         </p>
         {slots.length > 0 && (
           <ul className="recipe-save__slots">
@@ -152,8 +152,8 @@ function RecipeSavePanel({ ids }: { ids: readonly string[] }) {
             {reset.size > 0 ? ` (${reset.size})` : ''}
           </summary>
           <p className="sources__note sources__note--tight">
-            For values that belong to this workflow rather than to the recipe — an id list, a
-            file name. Everything unticked is saved as it is.
+            Tick the cards whose settings only make sense in this workflow, such as an id list
+            or a file name. Unticked cards are saved with their current settings.
           </p>
           {cards.map((card) => (
             <label key={card.id} className="share__check">
@@ -178,7 +178,7 @@ function RecipeSavePanel({ ids }: { ids: readonly string[] }) {
           </p>
         )}
         <p className="sources__note sources__note--tight">
-          Kept in this browser, and cleared with the site data.
+          Saved in this browser only. Clearing the site data deletes it.
         </p>
 
         <div className="sources__actions recipe-save__actions">

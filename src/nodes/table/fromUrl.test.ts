@@ -302,7 +302,7 @@ describe('core.tableFromUrl — validation', () => {
   })
 
   it('refuses text that is not a URL, and a scheme that cannot be fetched', () => {
-    expect(issues({ url: 'annotations.csv' })).toContain('is not a URL')
+    expect(issues({ url: 'annotations.csv' })).toContain('is not a valid URL')
     expect(issues({ url: 'file:///Users/me/annotations.csv' })).toContain('Only http and https')
     // `javascript:` is refused by the same rule rather than by a special case.
     expect(issues({ url: 'javascript:alert(1)' })).toContain('Only http and https')

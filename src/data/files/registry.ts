@@ -379,8 +379,8 @@ function localFileMissing(name: string): string {
 
 function localFilePermission(name: string): string {
   return (
-    `Allow access to "${name || 'the file'}" again — the browser remembers it but asks after a ` +
-    `reload. Use the button on the card.`
+    `Allow access to "${name || 'the file'}" again. The browser remembers the file but asks ` +
+    `again after a reload. Use the button on the card.`
   )
 }
 

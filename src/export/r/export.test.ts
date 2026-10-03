@@ -173,7 +173,7 @@ describe('include fragments', () => {
    */
   it('says that the restriction reaches the queried end too', () => {
     expect(chunk({ direction: 'outputs', hops: 1, minWeight: 1 })).toContain(
-      'it applies to BOTH ends',
+      'This applies to both ends',
     )
   })
 })

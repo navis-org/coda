@@ -47,9 +47,11 @@ registerNode({
   label: 'Reduce Matrix',
   category: 'transform',
   description:
-    'Aggregate a matrix’s rows or columns into one table row each. The result is `label` and one column per statistic you tick — a second tick adds a column — and `Prefix` renames them all, so `zap` gives `zap_mean`.',
+    'Summarise each row or each column of a matrix as one table row. The result is `label` plus one column per statistic you tick, and `Prefix` renames them all, so `zap` gives `zap_mean`.',
   guide:
-    'Turns a matrix into a table with one row per matrix row, or per column, carrying the statistics you tick: mean, median, sd, min, max, sum, n. It is the way from a trace or similarity matrix to a per-neuron number you can sort, join or colour a scene by. Non-finite cells are skipped, so an all-NaN row comes out null rather than zero.',
+    'Summarises each row (or each column) of a matrix with the statistics you tick, such as ' +
+    'mean, max or sd, and returns them as a table keyed by label. Use it to get from a trace or ' +
+    'similarity matrix to one number per neuron that you can sort, join or colour by.',
   cost: 'cheap',
 
   inputs: [{ id: 'in', label: 'Matrix', type: T.matrix() }],
@@ -62,7 +64,7 @@ registerNode({
       label: 'Reduce',
       default: 'rows',
       options: REDUCE_AXIS_OPTIONS,
-      help: 'Which lines survive. “Each row, across its columns” gives one output row per matrix row — for a trace matrix, one per neuron. The other way round transposes the answer, which is why both halves are named.',
+      help: 'Which way to reduce. "each row, across its columns" gives one output row per matrix row, e.g. one per neuron for a trace matrix.',
     },
     {
       id: 'stats',
@@ -72,7 +74,7 @@ registerNode({
       emptyLabel: 'labels only',
       default: ['mean'],
       options: REDUCE_STAT_OPTIONS,
-      help: 'One column per tick, in the order ticked. Non-finite cells are skipped: a line with none comes out null, except sum, which is 0, and n, which is the count. sd is the sample standard deviation and is null below two values. Median is the one that costs a sort per line.',
+      help: 'One column per statistic, in the order ticked. Non-finite cells are skipped; a line with none gives null (0 for "sum" and "n"). "sd" is the sample standard deviation.',
     },
     {
       id: 'prefix',
@@ -80,14 +82,14 @@ registerNode({
       label: 'Prefix',
       default: '',
       placeholder: 'none',
-      help: 'Prepended to every statistic’s column name, so “zap” gives zap_mean and zap_max. Worth setting when two of these meet at a Join, where two columns called mean leave one picker with a stale answer.',
+      help: 'Added to the start of each statistic’s column name, so "zap" gives zap_mean. Set it when two of these tables meet at a Join.',
     },
     {
       id: 'excludeDiagonal',
       kind: 'boolean',
       label: 'Exclude diagonal',
       default: false,
-      help: 'Drop each line’s self-comparison — the cell where a Similarity, NBLAST or Adjacency matrix scores a neuron against itself, which otherwise drags every mean towards 1. Applied only where the row and column labels are the same list; ignored with a warning anywhere else, since a square matrix is not necessarily a self-comparison.',
+      help: 'Skip the cells that score a neuron against itself, e.g. in a Similarity, NBLAST or Adjacency matrix. Only applies when the row and column labels are the same list.',
     },
   ],
 

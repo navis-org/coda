@@ -111,9 +111,11 @@ registerNode({
   // room for them on the canvas rather than only once somebody opens it full size.
   cardWidth: 520,
   description:
-    'Browse every neuron in a dataset. Fuzzy search across all fields, per-field filters, and a picker.',
+    'Browse every neuron in a dataset, with fuzzy search across all fields, per-field filters and a picker. Outputs the search hits, the ticked neurons and the whole table.',
   guide:
-    'Entry point when you don’t know what to ask for. Loads the dataset’s entire neuron table once and searches it locally as you type — fast after the initial download. Three outputs: Hits for the query, Selected for ticked neurons, and All as an ordinary table for grouping and charting.',
+    'Browse and search every neuron in a dataset. The neuron table is downloaded once and then ' +
+    'searched locally as you type. Wire a dataset in; Hits gives the search results, Selected ' +
+    'the neurons you ticked, and All the whole table.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [
@@ -162,7 +164,7 @@ registerNode({
       kind: 'ids',
       label: 'Fields',
       noun: 'fields',
-      help: 'Which fields each row shows, as columns or chips — edited from the expanded list’s header. Clear to go back to the automatic fields.',
+      help: 'Which fields each row shows, edited from the expanded list’s header. Clear to go back to the automatic fields.',
       default: [],
       presentational: true,
       advanced: true,
@@ -260,7 +262,7 @@ registerNode({
     )
     if (!sourceSupports(ctx.inputs.dataset, 'neuronIndex')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
-      issues.push(`${label} cannot list a whole dataset — use Find Neurons instead`)
+      issues.push(`${label} cannot list a whole dataset. Use a Find Neurons node instead.`)
     }
     return issues
   },
@@ -270,8 +272,8 @@ registerNode({
     const source = ctx.resolveSource(dataset.sourceId)
     if (!source.neuronIndex) {
       throw new Error(
-        `${source.label} publishes no neuron index, so it cannot be explored. Use Find ` +
-          `Neurons.`,
+        `${source.label} publishes no neuron index, so it cannot be explored. Use a Find ` +
+          `Neurons node instead.`,
       )
     }
 

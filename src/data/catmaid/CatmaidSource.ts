@@ -641,9 +641,8 @@ export class CatmaidSource implements DataSource {
       // A megabyte each, eight at a time on somebody's community server: ~0.6 s a skeleton.
       req.onWarn?.(
         `${ids.length.toLocaleString()} skeletons from this CATMAID is around ` +
-          `${ids.length} MB and ${describeDuration(ids.length * 0.6)}. CATMAID serves densely ` +
-          `traced skeletons uncompressed, so this is a transfer cost rather than a drawing one, ` +
-          `and it is somebody's community server at the other end. Fetching anyway.`,
+          `${ids.length} MB and ${describeDuration(ids.length * 0.6)}, because CATMAID sends ` +
+          `densely traced skeletons uncompressed, from a shared community server. Fetching anyway.`,
       )
     }
 

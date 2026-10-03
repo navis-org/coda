@@ -510,7 +510,7 @@ export async function fetchBytes(
           .map((route) => route.hint)
           .filter(Boolean)
           .join(' ')} ` +
-        `The last said: ${last instanceof Error ? last.message : String(last)}`
+        `The last error was: ${last instanceof Error ? last.message : String(last)}`
       : 'No fallback route is configured for it.'
     throw new PrecomputedFetchError(
       `Could not read ${url}: ${container ?? 'the host'} is unreachable or refuses ` +

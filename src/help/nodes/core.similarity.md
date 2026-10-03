@@ -1,9 +1,11 @@
-Compares every observation with every other over its features, as the square matrix a [Linkage](#cluster.linkage) or a [Heatmap](#out.heatmap) takes.
+## What Similarity Matrix does
 
-Any feature works, but this node was written for connectivity. Because connectivity is sparse, it reads the long form directly rather than pivoting first — that is what makes it scale. Wide format is supported, but not recommended for large datasets.
+Similarity Matrix compares every observation (typically a neuron) with every other one over a set of features, and returns the result as a square matrix. That matrix can go straight into a [Linkage](#cluster.linkage) for clustering or into a [Heatmap](#out.heatmap).
+
+You can use any kind of feature, but the most common case is connectivity: two neurons are similar if they connect to the same partners. [Partner Vectors](#neuron.partnerVectors) produces exactly the input this node needs:
 
 ```coda-graph
-caption: Connectivity similarity is the case it was written for.
+caption: Compare neurons by their connectivity and draw the result.
 neuron.partnerVectors as pv
 core.similarity as sim
 out.heatmap as hm
@@ -11,42 +13,43 @@ pv -> sim
 sim -> hm
 ```
 
-## Layout decides which pickers you get
+## Input layout
 
 ```coda-params
 core.similarity: layout, metric, output
 ```
 
-**Long** is a table of triplets — observation, feature, value. It is what [Partner Vectors](#neuron.partnerVectors) and Group By produce, and **the only form that scales**: neuron connectivity is typically well under 1% dense.
+`Layout` tells the node how your features are arranged:
 
-**Wide** is one row per observation with a column per feature — what an uploaded feature vector looks like. Pick `Id column` and `Feature columns`.
+- "Long (one row per pair)" is a table with one row per observation and feature, e.g. `neuronId`, `feature`, `weight`. This is what [Partner Vectors](#neuron.partnerVectors) and [Group By](#core.groupBy) produce. Pick the `Observations`, `Features` and `Value` columns.
+- "Wide (one column per feature)" is a table with one row per observation and one column per feature, which is what an uploaded table of feature vectors usually looks like. Pick the `Id column` and the `Feature columns`.
 
-> [!NOTE] Leaving `Value` empty asks a different question
-> The vector is 1 wherever a pair is listed at all, however many rows list it — whether two
-> observations touch the same features, rather than how hard.
+Use the long layout whenever you can. Connectivity is very sparse (most neurons don't connect to most others), and the long layout only stores the connections that actually exist. That is what lets this node handle large populations.
+
+If you leave `Value` empty, every listed pair counts as 1, no matter how many rows list it. You then compare *whether* two neurons share partners, not how strongly they connect to them.
 
 ## Metrics
 
-| Metric               | Keeps                                                                         |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `Cosine`             | measures direction of the feature vector, not its magnitude; the usual choice |
-| `Jaccard (presence)` | boolean: weights ignored entirely, and a zero counts as absent                |
-| `Jaccard (weighted)` | presence and weight                                                           |
-| `Pearson`            | the weights, as a correlation                                                 |
-| `Euclidean`          | the magnitude too, so it separates by how much as well as by what             |
+| Metric | Compares |
+| --- | --- |
+| "Cosine" | the direction of the feature vectors, ignoring their overall size: a strongly and a weakly connected neuron with the same partners come out alike. The default, and usually the right choice |
+| "Jaccard (presence)" | only which features are present; weights are ignored and a zero counts as absent |
+| "Jaccard (weighted)" | which features are present, and with what weight |
+| "Pearson" | the weights, as a correlation |
+| "Euclidean" | the weights including their overall size, so a strongly and a weakly connected neuron come out different even if they have the same partners |
 
-`Cells are` determines the output: similarities or distances (1 − similarity). The matrix knows which it is, so [Linkage](#cluster.linkage) downstream needs nothing set either way. A heatmap is usually easier to read as similarities.
+`Cells are` decides whether the matrix contains similarities or distances (1 − similarity). [Linkage](#cluster.linkage) handles either without you having to set anything; for a heatmap, similarities are usually easier to read. "Euclidean" is a distance by nature, so the setting is hidden for it.
 
-> [!WARNING] The matrix is N²
-> Square in the number of observations, so this works at low thousands: "compare these three
-> hundred neurons across two brains", not "co-cluster two connectomes".
+> [!WARNING] The matrix grows with the square of the number of neurons
+> 300 neurons give you 90,000 cells, 3,000 neurons 9 million. In practice this node works up to a
+> few thousand neurons, and the node warns you when a comparison gets expensive.
 
-## Two brains in one matrix
+## Comparing neurons across two datasets
 
-Neurons from two connectomes can go into the same matrix, and then a MaleCNS neuron and a FlyWire neuron can land in the same cluster. Nothing here is special-cased for it — the node compares whatever rows it is given — which is why the two ways it goes wrong are the caller's to avoid.
+You can put neurons from two connectomes into the same matrix, so that e.g. a male CNS neuron and a FlyWire neuron can end up in the same cluster. The node itself doesn't treat this case any differently: it compares whatever rows it gets. Two things are up to you to get right:
 
 ```coda-graph
-caption: The two branches meet at Stack Tables. What arrives here is one long table whose rows come from two brains.
+caption: Two datasets, each with qualified ids, stacked into one table and compared.
 neuron.partnerVectors as pvA
 neuron.partnerVectors as pvB
 core.qualifyIds as qA { prefix: malecns }
@@ -62,15 +65,15 @@ stack -> sim
 sim -> link
 ```
 
-**`Observations` must be unique across the whole stack.** Body ids are per-dataset, so neuron 12345 exists in both brains and is two different cells. Stacked raw, they are one row here, holding the union of two neurons' connectivity. A `Qualify Ids` on each branch rewrites the id to `malecns:12345` / `flywire:12345` before the stack.
+**Ids have to be unique across both datasets.** Body ids are per dataset, so neuron 12345 can exist in both brains as two different cells. Stacked as they are, they would be treated as a single neuron with the combined connectivity of both. Put a Qualify Ids node on each branch before the [Stack Tables](#core.stack) to turn the ids into `malecns:12345` and `flywire:12345`.
 
-**`Features` must be a shared vocabulary**, or the answer is a plausible-looking lie. If the two branches name their partners in their own dataset's terms, no feature appears in both, every cross-brain cell is 0, and the result is a clean block-diagonal heatmap that clusters each brain perfectly on its own. Wire `Labels` from [Match Cell Types](#compare.matchTypes) into each [Partner Vectors](#neuron.partnerVectors) so both sides emit the same feature names.
+**Features have to use the same names in both datasets.** If each branch names partners in its own dataset's terms, no feature appears in both, every cross-dataset similarity is 0, and the heatmap shows two clean blocks along the diagonal: each brain clusters perfectly on its own and nothing matches across. Wire the `Labels` output of [Match Cell Types](#compare.matchTypes) into each [Partner Vectors](#neuron.partnerVectors) so that both sides use the same feature names.
 
-> [!TIP] Sanity-check the picture, not just the numbers
-> Put a [Heatmap](#out.heatmap) on the matrix before clustering. Two dark blocks on the diagonal
-> with nothing between them is the failure above. A real cross-brain result has visible structure
-> off the diagonal.
+> [!TIP] Look at the matrix before clustering
+> Put a [Heatmap](#out.heatmap) on the matrix first. Two dark blocks along the diagonal with
+> nothing between them means the features don't match up. A real cross-dataset result has visible
+> structure off the diagonal.
 
-`Cosine` earns its default here: it ignores overall magnitude, so a neuron reconstructed in a denser dataset is not made dissimilar to its counterpart by sheer synapse count. It does not fix a systematic difference in _which_ partners were detected — for that, set `Weights` to fractions on Partner Vectors.
+"Cosine" is a good choice here, too: a neuron from a more densely reconstructed dataset has more synapses overall, and cosine ignores that. It does not help with systematic differences in *which* partners were found. For that, set `Weights` to fractions on Partner Vectors.
 
-Downstream, [Cut Tree](#cluster.cut)'s mixed mode reads each neuron's brain back off its qualified id and returns the deepest clusters that still hold both.
+Further downstream, [Cut Tree](#cluster.cut) can read each neuron's dataset back off its qualified id and, in its mixed mode, gives you the most fine-grained clusters that still contain neurons from both datasets.

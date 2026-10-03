@@ -42,13 +42,11 @@ registerNode({
   label: 'NBLAST k-NN',
   category: 'analysis',
   description:
-    'Find each neuron’s most similar neurons, as a table of matches. Columns are `queryId`, `targetId`, `rank` and `score`.',
+    'Find each neuron’s most similar neurons, as a table of matches with the columns `queryId`, `targetId`, `rank` and `score`.',
   guide:
-    'A version of NBLAST that gives you the top-k matches for each query neuron. Each row is one ' +
-    'match — neuron, neighbour, rank and score — so Build Network turns it straight into a ' +
-    'similarity graph. The shortlist that makes this cheap is approximate; the scores are ' +
-    'exact. With a Target wired, a neuron in both sets matches itself at 1.00 and spends one ' +
-    'of its k places doing so.',
+    'Finds the top matches for each query neuron using NBLAST, scoring only a shortlist of ' +
+    'likely candidates instead of all pairs, which makes it fast for large populations. The ' +
+    'output is a table with one row per match, ready for Build Network or Embedding.',
   cost: 'expensive',
   inputs: [
     { id: 'query', label: 'Query', type: T.skeletons() },
@@ -66,7 +64,7 @@ registerNode({
       // multiplies the result rather than the search — 10,000 neurons at k=1,000 is ten million
       // rows, which is a table Coda can build and a person can filter.
       max: 1000,
-      help: 'How many neighbours to keep for each neuron, best first. With a Target wired, a neuron in both sets spends one on itself.',
+      help: 'How many neighbours to keep for each neuron, best first. With a Target wired, a neuron in both sets counts itself as one.',
     },
     {
       id: 'symmetry',
@@ -74,7 +72,7 @@ registerNode({
       label: 'Symmetry',
       default: 'mean',
       options: SYMMETRY_OPTIONS,
-      help: 'Applied before the top-k cut: once only k neighbours survive there is no transpose left to symmetrise against.',
+      help: 'How to combine the two scores of each pair, before the best matches are picked.',
     },
     labelColumnParam(
       'Adds a name for each side of a match. Neuron ids where this is empty or unset.',
@@ -87,7 +85,7 @@ registerNode({
       min: 0,
       step: 0.5,
       advanced: true,
-      help: 'Space the points evenly before comparing, in micrometres. Too fine is slow, too coarse is meaningless; 1 µm is the convention. 0 leaves each skeleton as it was traced.',
+      help: 'Resample skeletons to this point spacing before comparing. 1 µm is the convention; 0 keeps each skeleton as traced.',
     },
     {
       id: 'nCandidates',
@@ -101,7 +99,7 @@ registerNode({
       max: MAX_NEURONS,
       step: 10,
       advanced: true,
-      help: 'Shortlist size per neuron — the one control trading recall against cost. fastcore measured recall of the true top 20 at 0.911 for 50, 0.969 for 100 and 0.990 for 200.',
+      help: 'How many candidates per neuron get a full score. More finds more of the true best matches but is slower; 200 recovers about 99% of the top 20.',
     },
     {
       id: 'tangentK',
@@ -127,9 +125,7 @@ registerNode({
       label: 'Weight by alpha',
       default: false,
       advanced: true,
-      help:
-        'Weight each point by how strongly its neighbourhood is a line rather than a blob, ' +
-        'which plays down tufts and branch points.',
+      help: 'Weight each point by how line-like its neighbourhood is, which plays down tufts and branch points.',
     },
     warnAboveParam({
       threshold: MAX_NEURONS,

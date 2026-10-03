@@ -212,13 +212,15 @@ describe('the node', () => {
     const { points, warnings } = await run(
       skeletons([yShape(), yShape({ id: '8', compartments: undefined })]),
     )
-    expect(warnings.some((w) => w.startsWith('1 of 2 skeletons carry no compartment'))).toBe(
+    expect(warnings.some((w) => w.startsWith('1 of 2 skeletons have no compartment'))).toBe(
       true,
     )
     expect(points.attributes.data.compartment!.filter((c) => c === null)).toHaveLength(6)
   })
 
   it('refuses voxel geometry, where a spacing in µm means nothing', async () => {
-    await expect(run({ ...skeletons(), units: 'voxels' })).rejects.toThrow(/not nanometres/)
+    await expect(run({ ...skeletons(), units: 'voxels' })).rejects.toThrow(
+      /are in voxels. They must be in nanometres/,
+    )
   })
 })

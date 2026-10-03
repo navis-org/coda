@@ -101,12 +101,11 @@ registerNode({
    * `matchColumn column default=neuronId` / `labelColumn column default=type`.
    */
   description:
-    'Draw a merge tree, select branches of it, and name its leaves from an annotation table.',
+    'Draw a merge tree from Linkage, select branches of it, and name its leaves from an annotation table.',
   guide:
-    'A diagram of the hierarchical relationship between objects. Typically an output from ' +
-    'hierarchical clustering (see linkage). Wire a neuron table to Annotations to label the ' +
-    'leaves by cell type — or by anything else the table carries — without changing the tree. ' +
-    'Expand the card to scroll-zoom into a big one; the names come back as there is room.',
+    'Draws the tree from a Linkage node; click a branch to select its leaves and pass them on ' +
+    'through Selected. Wire a neuron table into Annotations to label the leaves by cell type. ' +
+    'Expand the card to zoom into large trees.',
   cost: 'cheap',
   defaultSize: { width: 560, height: 420 },
   inputs: [
@@ -133,7 +132,7 @@ registerNode({
         { value: 'right', label: 'leaves on the right' },
         { value: 'down', label: 'leaves at the bottom' },
       ],
-      help: '"Leaves on the right" reads labels horizontally and fits more of them. "Leaves at the bottom" is the conventional orientation.',
+      help: '"Leaves on the right" fits more readable labels. "Leaves at the bottom" is the conventional layout.',
     },
     {
       id: 'showLabels',
@@ -141,14 +140,14 @@ registerNode({
       label: 'Leaf labels',
       default: true,
       presentational: true,
-      help: 'Dropped automatically where there is not room for them; the caption says so.',
+      help: 'Show the leaf labels. They are dropped where there is no room; the caption says so.',
     },
     ...labelPickerParams({
       presentational: true,
       matchHelp:
-        'Which column of the wired table is compared with the leaf label. Leaf labels are whatever named the matrix, usually "neuronId". Compared as text.',
+        'The column of the wired table to match against the leaf labels, usually neuron ids. Compared as text.',
       labelHelp:
-        'Which column names each leaf on the drawing. Only the picture changes — the tree, its Selected output and everything downstream keep the matrix’s labels. Unmatched leaves keep their own.',
+        'The column that names each leaf in the drawing. Only the drawing changes: the Selected output and everything downstream keep the original labels. Unmatched leaves keep their own.',
     }),
     {
       id: 'selection',
@@ -156,7 +155,7 @@ registerNode({
       label: 'Selected',
       noun: 'leaves',
       default: [],
-      help: 'Set by clicking a branch in the viewer. Holds leaf positions rather than names, since a label can repeat. Feeds Selected.',
+      help: 'Set by clicking a branch in the viewer. Feeds Selected.',
     },
   ],
 
@@ -172,7 +171,8 @@ registerNode({
    */
   evaluate: (ctx) => {
     const tree = ctx.input('in')
-    if (!isLinkageValue(tree)) throw new Error('Input is not a tree — wire a Linkage node in')
+    if (!isLinkageValue(tree))
+      throw new Error('Input is not a tree. Wire a Linkage node into it.')
 
     /*
      * **The selection holds observation indices, not labels**, which is the opposite of the

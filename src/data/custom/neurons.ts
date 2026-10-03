@@ -81,8 +81,8 @@ export function idColumnProblem(schema: TableSchema, name: string): string | und
   const dtype = findColumn(schema, name)?.dtype
   if (dtype === 'f64') {
     return (
-      `"${name}" holds decimals, and a neuron id stored as one has already lost digits — ` +
-      `it would name a different neuron. Read the file with that column as text or integers.`
+      `"${name}" holds decimals, and a neuron id stored as a decimal has already lost digits, ` +
+      `so it would name a different neuron. Read the file with that column as text or integers.`
     )
   }
   if (dtype === 'bool') return `"${name}" holds true/false values, not neuron ids.`

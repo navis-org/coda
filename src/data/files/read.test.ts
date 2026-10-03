@@ -230,7 +230,7 @@ describe('readRows', () => {
   it('refuses a 64-bit value past 2^53 in a number column rather than rounding it', async () => {
     const reader = await openTableFile(fixture('synapses.feather'))
     await expect(readRows(reader, readRequest(reader.summary))).rejects.toThrow(
-      /untick Detect id columns and choose "hash" under Read as text — with every other id column/,
+      /untick `Detect id columns` and choose "hash" under `Read as text`, along with every other id column/,
     )
   })
 

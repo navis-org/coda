@@ -132,7 +132,9 @@ describe('Read Rows', () => {
 
   it('reads nothing for a match column with no ids, and says so', async () => {
     const g = graph(localFile('synapses.parquet'), { matchColumn: 'pre_pt_root_id' })
-    expect(issues(g, 'r')).toEqual([expect.stringMatching(/With none, nothing is read/)])
+    expect(issues(g, 'r')).toEqual([
+      expect.stringMatching(/no ids to look for in "pre_pt_root_id", so nothing will be read/),
+    ])
     const out = (await run(g)).output('r', 'out')
     expect(isTableValue(out) && out.length).toBe(0)
   })
@@ -149,7 +151,7 @@ describe('Read Rows', () => {
     g = addEdge(g, { source: 'r', sourceHandle: 'out', target: 's', targetHandle: 'ids' })
     const scheduler = await run(g)
     const ask =
-      'Pick the IDs table’s column holding the ids under ID column — "pre_pt_root_id" looks like it.'
+      'Pick the IDs table’s column that holds the ids in `ID column`. "pre_pt_root_id" looks like the right one.'
     expect(issues(g, 's')).toContain(ask)
     expect(scheduler.info('s').error).toBe(`The IDs table has no column "neuronId". ${ask}`)
   })

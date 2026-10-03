@@ -144,7 +144,9 @@ describe('notebook export', () => {
     const source = notebookText(g)
     expect(source).toContain('meshes=lambda ids: neu.fetch_mesh_neuron(ids, lod=1, client=')
     expect(source).not.toMatch(/^\s+skeletons=/m)
-    expect(source).toMatch(/CAVE dataset wired into skeletons has no\s+#?\s*skeletons route/)
+    expect(source).toMatch(
+      /no[\s#]+way[\s#]+to[\s#]+fetch[\s#]+skeletons[\s#]+from[\s#]+the[\s#]+CAVE[\s#]+dataset[\s#]+wired[\s#]+into[\s#]+`Skeletons`/,
+    )
     expect(source).not.toContain('TODO')
   })
 
@@ -198,7 +200,7 @@ describe('notebook export', () => {
   it('says a muted node was muted rather than omitting it', () => {
     const source = exportFixture()
     expect(source).toContain('Muted step')
-    expect(source).toContain('Muted on the canvas')
+    expect(source).toContain('This node is muted on the canvas')
   })
 
   /*
@@ -464,7 +466,7 @@ describe('the region and normalisation options', () => {
     expect(text).toContain("groupby(['bodyId_pre', 'bodyId_post'], as_index=False)['weight']")
     // And the one place the two genuinely disagree is said in the cell rather than left to be
     // discovered from a row count.
-    expect(text).toContain('min_total_weight across every ROI')
+    expect(text).toContain('min_total_weight to the total across every ROI')
   })
 
   it('refuses normalisation rather than emitting the reachable half of it', () => {
@@ -476,7 +478,7 @@ describe('the region and normalisation options', () => {
       normalizeBasis: 'connected',
     })
     expect(text).toContain('TODO')
-    expect(text).toMatch(/no neuprint-python equivalent/)
+    expect(text).toMatch(/neuprint-python has no equivalent/)
     // The refusal has to say what to write instead, or it reads as the feature being broken.
     expect(text).toContain('upstream/downstream')
   })

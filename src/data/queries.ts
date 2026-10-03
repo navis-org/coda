@@ -125,8 +125,8 @@ export async function connectivityFor(
     if (req.edges) {
       throw new Error(
         `This dataset's connectivity comes from the edge set "${req.edges.name}", which ` +
-          `records pre, post and weight only. Turn the region options off, or detach the ` +
-          `edge set under Edge data.`,
+          `only records pre, post and weight. Turn the region options off, or detach the ` +
+          `edge set under \`Edge data\`.`,
       )
     }
     if (!canSplitConnectivityByRoi(source, req.datasetId, false)) {

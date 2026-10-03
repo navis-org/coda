@@ -256,7 +256,7 @@ describe('the guards', () => {
     // the default 15 would be a stack trace where the honest answer is "everybody".
     const warner = collecting()
     expect(clampNeighbours(warner, 15, 6)).toBe(5)
-    expect(warner.messages.join(' ')).toMatch(/Neighbours was 15/)
+    expect(warner.messages.join(' ')).toMatch(/`Neighbours` is 15, but there are only/)
     expect(clampNeighbours(NO_WARN, 3, 100)).toBe(3)
   })
 

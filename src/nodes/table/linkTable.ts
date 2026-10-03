@@ -107,12 +107,11 @@ registerNode({
   category: 'utility',
   cardWidth: 300,
   description:
-    'Link a large Parquet or Feather file — on disk or at a URL — without copying it. Read Rows pulls out what you need.',
+    'Link a large Parquet, Feather or Delta table, on disk or at a URL, without loading it. Read Rows pulls out the rows you need.',
   guide:
-    'A Parquet or Feather file, on disk or at a URL, linked rather than copied: only its footer ' +
-    'is read here, so its columns reach every picker at once however large the file is, and ' +
-    '**Read Rows** pulls out the rows you need. For tables too large for Upload Table — a ' +
-    'synapse table, an edge list, an annotation dump.',
+    'Links a large Parquet, Feather or Delta table, on disk or at a URL, without loading it: ' +
+    'only the footer is read, so its columns show up downstream straight away. Wire it into ' +
+    'Read Rows to pull out the rows you need, e.g. the synapses of a few neurons.',
   cost: 'cheap',
   inputs: [],
   outputs: [{ id: 'file', label: 'Table file', type: T.tableFile() }],
@@ -135,7 +134,7 @@ registerNode({
       kind: 'string',
       label: 'URL',
       placeholder: 'https://… or gs://…/table.parquet',
-      help: 'A Parquet or Feather file, or the folder of a Delta table, on a server that allows cross-origin range requests (a public gs:// bucket always does). Ignored while a local file is chosen.',
+      help: 'A Parquet or Feather file, or a Delta table folder, on a server that allows cross-origin range requests (public gs:// buckets do). Ignored while a local file is chosen.',
       default: '',
     },
     {
@@ -170,7 +169,7 @@ registerNode({
       id: 'indexColumns',
       kind: 'columns',
       label: 'Index columns',
-      help: 'Columns you look ids up in. The first lookup on one records each block’s smallest and largest id, and every later lookup skips the blocks that cannot hold its ids — the skipping sorted Parquet gets from its own statistics. It helps a file sorted or grouped by the column, never a shuffled one.',
+      help: 'Columns you look ids up in. The first lookup records each block’s id range so later lookups can skip blocks. Only helps if the file is sorted or grouped by the column.',
       from: '',
       schemaFrom: (_inputs, params) => {
         const summary = peekEntry(params).entry?.summary
@@ -205,15 +204,15 @@ registerNode({
     const issues: string[] = []
     if (summary.format === 'feather' && ctx.columns('indexColumns').length === 0) {
       issues.push(
-        'Feather keeps no statistics, so every id lookup reads the whole file. Choose the id ' +
-          'column under Index columns and the first lookup records where each id is — or write ' +
-          'the file as Parquet sorted by that column.',
+        'Feather keeps no statistics, so every id lookup reads the whole file. Pick the id ' +
+          'column in `Index columns` so the first lookup records where each id is, or save the ' +
+          'file as Parquet sorted by that column.',
       )
     }
     if (summary.skipped.length) {
       issues.push(
         `Left out ${summary.skipped.length === 1 ? 'a column' : `${summary.skipped.length} columns`} ` +
-          `Coda has no cell for (lists, structs, maps): ${summary.skipped.join(', ')}.`,
+          `whose type Coda cannot read (lists, structs, maps): ${summary.skipped.join(', ')}.`,
       )
     }
     return issues

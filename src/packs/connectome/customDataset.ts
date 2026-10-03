@@ -94,10 +94,10 @@ import { requireDataset, sourceSupports } from '../../nodes/lib/datasetParam'
 const DEFAULT_LABEL = 'Custom dataset'
 
 export const NOTHING_WIRED =
-  'Wire at least one part: a table of neurons into Neurons, an edge list into Edges, a synapse ' +
-  'table into Synapses, or a dataset into Meshes or Skeletons to take geometry from.'
+  'Wire at least one part: a table of neurons into `Neurons`, an edge list into `Edges`, a ' +
+  'synapse table into `Synapses`, or a dataset into `Meshes` or `Skeletons` to take geometry from.'
 
-export const PICK_ID_COLUMN = 'Pick which column of the Neurons table holds the neuron id.'
+export const PICK_ID_COLUMN = "Pick the Neurons table's neuron id column in `ID column`."
 
 /** The Weight column's declared default — also the one held value that is not a decision. */
 const DEFAULT_WEIGHT = 'weight'
@@ -187,15 +187,18 @@ function unpicked(
   guess: Guess,
 ): string[] {
   const problems: string[] = []
-  for (const { id, what, guess: key } of pickers) {
+  for (const { id, label, what, guess: key } of pickers) {
     if (ctx.column(id)) continue
-    const looks = guess[key] ? ` — "${guess[key]}" looks like it` : ''
-    problems.push(`Pick the ${socket} column holding the ${what}${looks}.`)
+    const looks = guess[key] ? ` "${guess[key]}" looks like it.` : ''
+    problems.push(`Pick the ${socket} column holding the ${what} in \`${label}\`.${looks}`)
   }
   const [pre, post] = pickers
   const end = ctx.column(pre!.id)
   if (end && end === ctx.column(post!.id)) {
-    problems.push(`${pre!.label} and ${post!.label} name the same column.`)
+    problems.push(
+      `\`${pre!.label}\` and \`${post!.label}\` are set to the same column. Pick a different ` +
+        `column for one of them.`,
+    )
   }
   return problems
 }
@@ -239,18 +242,21 @@ export function synapseColumnsOf(
   const position = ctx.columns('synPosition')
   if (position.length !== 3) {
     const axes = [guess.x, guess.y, guess.z]
-    const looks = axes.every(Boolean) ? ` — "${axes.join('", "')}" look like them` : ''
-    problems.push(`Pick three Synapses position columns, x, y and z in that order${looks}.`)
+    const looks = axes.every(Boolean) ? ` "${axes.join('", "')}" look like them.` : ''
+    problems.push(
+      `Pick three columns in \`Synapse position\`: x, y and z, in that order.${looks}`,
+    )
   }
   const voxel = parseVoxel(String(ctx.params.voxelSize))
   if (!voxel)
-    problems.push('Voxel size must be three positive numbers of nanometres, e.g. 4, 4, 40.')
+    problems.push('`Voxel size` must be three positive numbers in nanometres, e.g. 4, 4, 40.')
   const carry = ctx.columns('synCarry')
   const shadowed = shadowedColumns(carry)
   if (shadowed.length) {
     problems.push(
-      `Carry columns cannot include ${shadowed.map((n) => `"${n}"`).join(', ')} — every synapse ` +
-        `point already has a column of that name.`,
+      `\`Carry columns\` cannot include ${shadowed.map((n) => `"${n}"`).join(', ')}, because ` +
+        `every synapse point already has a column of that name. Remove ` +
+        `${shadowed.length === 1 ? 'it' : 'them'} from \`Carry columns\`.`,
     )
   }
   const [x, y, z] = position
@@ -299,13 +305,14 @@ export function edgeColumnsOf(
   const untouched = !weight && chosen === DEFAULT_WEIGHT
   if (untouched && guess.textWeight) {
     notes.push(
-      `The "${DEFAULT_WEIGHT}" column does not hold numbers, so each row counts as one. Pick a ` +
-        `numeric column under Weight column to sum it instead, or clear it to say rows are meant.`,
+      `The "${DEFAULT_WEIGHT}" column does not hold numbers, so each row counts as one ` +
+        `connection. To sum a numeric column instead, pick it in \`Weight column\`. To count ` +
+        `rows on purpose, clear \`Weight column\`.`,
     )
   } else if (untouched && guess.weight) {
     notes.push(
-      `There is no "${DEFAULT_WEIGHT}" column, so each row counts as one — "${guess.weight}" ` +
-        `looks like a weight; pick it under Weight column to sum it instead.`,
+      `There is no "${DEFAULT_WEIGHT}" column, so each row counts as one connection. ` +
+        `"${guess.weight}" looks like a weight; pick it in \`Weight column\` to sum it instead.`,
     )
   }
   // A column somebody chose that has since gone, or that holds text: `validateColumnParams`
@@ -315,7 +322,7 @@ export function edgeColumnsOf(
     return {
       problems,
       notes,
-      refusal: `The Edges list has no numeric column "${chosen}" to take weights from.`,
+      refusal: `The Edges table has no numeric column "${chosen}". Pick a numeric column in \`Weight column\`, or clear it to count rows.`,
     }
   }
   if (problems.length || !pre || !post) return { problems, notes }
@@ -328,13 +335,13 @@ export const customDatasetNode: NodeDefinition = packNode({
   category: 'dataset',
   cardWidth: DATASET_CARD_WIDTH,
   description:
-    'Assemble a dataset from parts: a neuron table, an edge list, a synapse table, and geometry from other datasets.',
+    'Assemble a dataset from your own parts: a neuron table, an edge list, a synapse table, ' +
+    'and meshes or skeletons from other datasets.',
   guide:
-    'For data no single backend holds: a neuron table into **Neurons**, an edge list into ' +
-    '**Edges**, a synapse table into **Synapses** — each a table or a Link Table file, with its ' +
-    'columns picked — and any dataset into **Meshes** or **Skeletons**. Without an edge list, ' +
-    'connectivity counts synapses. The ids must mean the same neurons in every part, which ' +
-    'nothing here can check.',
+    'Builds a dataset from your own parts: a neuron table, an edge list and/or a synapse table ' +
+    '(as tables or Link Table files), plus meshes and skeletons from any other dataset. Wire only ' +
+    'what you have; downstream nodes like Find Neurons or Connectivity treat the result like any ' +
+    'other dataset. The ids must refer to the same neurons in every part.',
   cost: 'cheap',
   inputs: [
     { id: 'neurons', label: 'Neurons', type: T.table(), required: false },
@@ -373,7 +380,7 @@ export const customDatasetNode: NodeDefinition = packNode({
       optional: true,
       default: ID_COLUMN_NAME,
       whenWired: true,
-      help: 'The column of the Neurons table holding each neuron’s id. It is renamed neuronId and read as text, so eighteen-digit ids stay exact.',
+      help: 'The Neurons table’s id column. It becomes neuronId and is read as text, so 18-digit ids stay exact.',
     },
     ...EDGE_PICKERS.map(({ id, label, what, fallback }): ParamDef => ({
       id,
@@ -395,7 +402,7 @@ export const customDatasetNode: NodeDefinition = packNode({
       default: DEFAULT_WEIGHT,
       dtypes: ['i64', 'f64'],
       whenWired: true,
-      help: 'Each connection’s weight, summed where a pair repeats. Empty counts every row as one — a list with a row per synapse then counts synapses.',
+      help: 'Each connection’s weight, summed where a pair repeats. Leave empty to count rows instead.',
     },
     /*
      * The synapse table's — `SYNAPSE_PICKERS`, optional for `idColumn`'s reason.
@@ -431,7 +438,7 @@ export const customDatasetNode: NodeDefinition = packNode({
       default: [],
       advanced: true,
       whenWired: true,
-      help: 'Further columns of the Synapses table to put on every synapse point — a neurotransmitter prediction, a region — for colouring and filtering downstream.',
+      help: 'Other Synapses columns to keep on each synapse point, e.g. a neurotransmitter prediction, for colouring and filtering downstream.',
     },
     {
       id: 'voxelSize',
@@ -441,7 +448,7 @@ export const customDatasetNode: NodeDefinition = packNode({
       placeholder: DEFAULT_VOXEL,
       advanced: true,
       whenWired: 'synapses',
-      help: 'Nanometres per unit of the position columns, x, y and z — 1, 1, 1 when they are already in nanometres; FlyWire’s voxels are 4, 4, 40.',
+      help: 'Nanometres per unit of the x, y and z columns: 1, 1, 1 if already in nanometres; 4, 4, 40 for FlyWire voxels.',
       // A string holding three numbers — a shape the kind cannot convey (`catalogueNote`).
       catalogueNote: `Three positive numbers, nanometres per unit of x, y and z, comma-separated: "4, 4, 40". Default "${DEFAULT_VOXEL}".`,
     },
@@ -494,7 +501,9 @@ export const customDatasetNode: NodeDefinition = packNode({
     for (const role of GEOMETRY_ROLES) {
       const type = ctx.inputs[role]
       if (type && !sourceSupports(type, role)) {
-        issues.push(`The dataset wired into ${GEOMETRY_SOCKETS[role]} has no ${role}.`)
+        issues.push(
+          `The dataset wired into \`${GEOMETRY_SOCKETS[role]}\` has no ${role}. Wire a dataset that does.`,
+        )
       }
     }
     return issues
@@ -573,10 +582,10 @@ export const customDatasetNode: NodeDefinition = packNode({
         const rows = isTableFileValue(synapseInput) ? synapseInput.rows : synapseInput.length
         if (rows === undefined || rows > WHOLE_READ_WARN_ROWS) {
           ctx.warn(
-            `Connectivity here is counted from the Synapses ${isTableFileValue(synapseInput) ? 'file' : 'table'}` +
-              `${rows === undefined ? '' : `'s ${rows.toLocaleString()} rows`}, whose pre and post ` +
-              `columns the first connectivity question reads in full. Wire an edge list into ` +
-              `Edges to answer it from that instead.`,
+            `Connectivity is counted from the Synapses ${isTableFileValue(synapseInput) ? 'file' : 'table'}` +
+              `${rows === undefined ? '' : ` (${rows.toLocaleString()} rows)`}, so the first ` +
+              `connectivity query reads its pre and post columns in full, which can be slow. ` +
+              `Wire an edge list into \`Edges\` to count from that instead.`,
           )
         }
         edges = wiredEdges(

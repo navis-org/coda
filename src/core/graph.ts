@@ -1144,9 +1144,9 @@ function droppedHandle(
   ports: readonly { id: string }[],
 ): string {
   const where = `Dropped edge ${side === 'output' ? 'from' : 'into'} ${nodeType} (${nodeId})`
-  if (typeof stored === 'string') return `${where}: no ${side} "${stored}"`
-  const has = ports.length === 0 ? `it has no ${side}s` : `it has ${ports.length}`
-  return `${where}: the file records no ${side} port, and ${has}`
+  if (typeof stored === 'string') return `${where}: the node has no ${side} "${stored}".`
+  const has = ports.length === 0 ? `the node has no ${side}s` : `the node has ${ports.length}`
+  return `${where}: the file does not say which ${side} the wire uses, and ${has}.`
 }
 
 /**
@@ -1250,7 +1250,7 @@ export function deserializeGraph(json: string): LoadResult {
   }
   if (typeof obj.version === 'number' && obj.version > GRAPH_FORMAT_VERSION) {
     warnings.push(
-      `File format v${obj.version} is newer than this build (v${GRAPH_FORMAT_VERSION}); some nodes may not load.`,
+      `This file uses format v${obj.version}, which is newer than this build of Coda (v${GRAPH_FORMAT_VERSION}). Some nodes may not load.`,
     )
   }
 
@@ -1267,11 +1267,14 @@ export function deserializeGraph(json: string): LoadResult {
   const nodes: GraphNode[] = []
   for (const n of stored) {
     if (!n || typeof n.id !== 'string' || typeof n.type !== 'string') {
-      warnings.push('Dropped a node with no id/type')
+      warnings.push('Dropped a node that has no id or type.')
       continue
     }
     const ports = placeholderPorts.get(n.id)
-    if (ports) warnings.push(`Kept unknown node type "${n.type}" (${n.id}) as a placeholder`)
+    if (ports)
+      warnings.push(
+        `Node type "${n.type}" (${n.id}) is not in this build of Coda. It was kept as a placeholder.`,
+      )
     // Both hoisted: each validator allocates, and the `...(f(x) ? { k: f(x) } : {})` shape pays
     // for it twice per node on every load and every paste.
     const size = validSize(n.size)

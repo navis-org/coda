@@ -15,7 +15,8 @@ import { laminarProfileNode } from './laminarProfile'
 export const cortex: PackDefinition = {
   id: 'cortex',
   label: 'Cortex',
-  description: 'Cortical neurons against depth and layer, starting with MICrONS.',
+  description:
+    'Nodes that place cortical neurons and synapses by depth and layer, starting with MICrONS.',
   defaultOn: false,
   requires: ['cave'],
   glyph: 'cortex:gallery',

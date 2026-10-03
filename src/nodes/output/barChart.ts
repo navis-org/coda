@@ -8,11 +8,9 @@ registerNode({
   label: 'Bar Chart',
   category: 'visualisation',
   description:
-    'Bar chart of one numeric column, summed per category, with an optional series. Because it ' +
-    'sums, a total per category needs no Group By in front; for a count of rows instead, put a ' +
-    'Group By with `agg: count` in front and chart its `n`.',
+    'Bar chart of one numeric column, summed per category, with an optional series to stack by. Because it sums, a total per category needs no Group By in front; for a count of rows instead, put a Group By with `agg: count` in front and chart its `n`.',
   guide:
-    'One numeric column, grouped by a category, optionally split into a series. The ordinary end of a Group By, and the fastest way to turn “synapses per partner type” into something you can read. Every knob on it is presentational, so restyling never marks anything stale.',
+    'Bars of one numeric column per category, optionally stacked by a second column. Values are summed per category, so synapses per partner type can be charted straight from a Connectivity table. Changing its settings only redraws the chart; nothing re-runs.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -74,7 +72,9 @@ registerNode({
     if (!ctx.inputs.in || ctx.params.useSeries !== true) return []
     const series = ctx.column('series')
     return series && series === ctx.column('category')
-      ? ['Stack-by and Category are the same column']
+      ? [
+          '`Stack by` and `Category` are the same column. Pick a different column for one of them.',
+        ]
       : []
   },
 

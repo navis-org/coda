@@ -181,8 +181,8 @@ export function checkPointsSize(
     count: points,
     threshold: POINTS_WARN,
     unit: 'points',
-    control: 'what this node makes without comment',
-    cost: `${formatBytes(bytes)} of point cloud${what}. A coarser Spacing shrinks it.`,
+    control: 'the usual size for this node',
+    cost: `${formatBytes(bytes)} of point cloud${what}. A coarser \`Spacing (µm)\` makes it smaller.`,
   })
 }
 

@@ -1,4 +1,8 @@
-Principally for the MICrONS minnie65 dataset, the gallery draws a wall of cells against depth below the pia. Each cell's axon and dendrite are in two colours, and the layers run behind them. The wall scrolls on the card, and can be resized or opened full size. Cells can be browsed by type, and selected to pass on as a table and as skeletons. For a dataset's cells as a searchable table, use [Explore Dataset](#neuron.explore).
+## What the Cortex Gallery does
+
+The Cortex Gallery draws a wall of cells, each at its depth below the pia, with the cortical layers in the background and the axon and dendrite in two different colours. It is mainly meant for the MICrONS minnie65 dataset.
+
+You can browse the wall by cell type, scroll through it on the card, resize the card or open it full size. Cells you select are passed on as a table and as skeletons. If you would rather search a dataset's cells as a table, use [Explore Dataset](#neuron.explore).
 
 ```coda-graph
 caption: Select cells on the wall; Skeletons carries their reconstructions.
@@ -11,57 +15,62 @@ gal:selected -> tbl
 gal:skeletons -> v3d:skeletons
 ```
 
-## What it draws
+## What is drawn
 
-Each cell is drawn at its soma's depth, from the dataset's cortical frame. For MICrONS minnie65 that is the rigid transform of `standard_transform` (see below): a 5° rotation, with the pia at depth 0. The layer boundaries are the column's published ones, and the ruler at the start of each row names them.
+Each cell is placed at the depth of its soma, using the dataset's cortical frame. For MICrONS minnie65 that is the rigid transform from `standard_transform` (credited below): a 5° rotation, with the pia at depth 0. The layer boundaries are the column's published ones, and the ruler at the start of each row names them.
 
-Axon and dendrite are the skeletons' own compartment labels. An unlabelled segment is grey; nothing is inferred/computed locally. Skeletons are fetched on demand via CAVE's SkeletonService, with L2 skeletons as fallback if a neuron has no cached skeleton.
+Axon and dendrite come from the skeletons' own compartment labels. Unlabelled segments are drawn in grey: nothing is inferred or computed locally. Skeletons are fetched on demand from CAVE's SkeletonService. If a neuron has no cached skeleton there, its L2 skeleton is used instead.
 
-The stripe over each cell is its type - see `Cell type source` below.
-`Second stripe` adds a band from another column, such as `mtype`. Past eight values colours repeat - the legend will note that.
+The coloured stripe over each cell shows its type (see `Cell type source` below). `Second stripe` adds another band from a different column, such as `mtype`. Beyond eight values the colours repeat, and the legend says so.
 
-A dataset with no declared cortical frame is refused. Only minnie65 has one so far.
+Datasets without a declared cortical frame are refused. At the moment, only minnie65 has one.
 
 ## Cell type source
 
-minnie65 publishes its cell types in tables beside the neuron table, not on it. By default the gallery, merges them into a single columns - this allows the widget to work with a bare dataset as input. You have, however, full control over which annotations are used via `Cell type source` and `Group by`:
+minnie65 publishes its cell types in separate tables next to the neuron table. By default, the gallery merges these into a single column, so it works with a bare dataset as input. You can choose which annotations to use with `Cell type source` and `Group by`:
 
-- `aibs_cell_info`, the default, combines the published typings by precedence: `type`, `mtype`, `broad_type` and `visual_area`.
-- The others are single typings, among them two sets of m-types. Each arrives as `type`, so `Group by` regroups the wall without being changed.
-- **None** reads whatever annotations are wired into Dataset.
+- `aibs_cell_info` (the default) combines the published typings in order of precedence: `type`, `mtype`, `broad_type` and `visual_area`.
+- The other options are single typings, among them two sets of m-types. Each of them arrives as `type`, so `Group by` regroups the wall without you having to change it.
+- "None" uses only the annotations already on the Dataset, e.g. a table you wired into it.
 
-Neuron status, i.e. which neurons are marked as proofread, is always read from `aibs_cell_info`.
+Proofreading status is always read from `aibs_cell_info`, whichever source you pick.
 
 ## Browsing
 
-- **Line-up** shows all groups in sequency.
-- **Rows** gives each group its own row.
-- **Compare** sets two groups side by side on one depth scale. Pick them with "Compare" and "with".
+`Mode` sets how the groups are laid out:
 
-`Order` sets how the groups follow one another. By depth, a group's place is its median soma depth, so the wall reads down the cortex. Within a group, cells are always shallowest first.
+- "Line-up" shows all groups one after another.
+- "Rows" gives each group its own row.
+- "Compare" puts two groups side by side on the same depth scale. Pick them with `Compare` and `With`.
 
-`Column width` sets how wide each cell's column is. **Fit each neuron** makes a column as wide as the cell's own arbour, never clipped, so columns vary. **Even** gives every cell the same width, clipped at its edges, so columns line up. That width is `Width (µm)`, or, left empty, the median extent of the cells on the wall. Widths are in µm, so the card and the full-size view look the same.
+`Order` sets the order of the groups. "By depth" places each group by the median depth of its somata, so the wall reads down the cortex. Within a group, cells are always sorted shallowest first.
 
-`Per type` cells of each group are drawn, a random sample of those that pass `Proofread`. Shuffle draws another. Each group is sampled on its own, so filtering one out leaves the others' cells where they were.
+`Column width` sets how wide each cell's column is:
 
-`Proofread` reads minnie65's proofreading status. If that status cannot be read, the card says so and draws every cell.
+- "Fit each neuron" makes each column as wide as the cell's own arbour, without clipping. Columns therefore vary in width.
+- "Even" gives every cell the same width and clips the arbours at the edges, so the columns line up. The width is `Width (µm)` or, if you leave that empty, the median extent of the cells on the wall.
 
-The download button beside the cell count saves the whole wall, every row and not just those in view, as an SVG or a PNG with a legend of its colours. The selection is not drawn.
+Widths are in µm, so the card and the full-size view look the same.
 
+`Per type` sets how many cells of each group are drawn: a random sample of the cells that pass `Proofread`. Hit shuffle to draw a different sample. Each group is sampled separately, so filtering one group out does not change the cells shown for the others.
 
-## Settings
+`Proofread` uses minnie65's proofreading status. If the status can't be read, the card tells you and draws every cell.
+
+The download button next to the cell count saves the whole wall (every row, not only those in view) as an SVG or PNG, with a legend of its colours. The selection is not drawn in the export.
 
 ```coda-params
 cortex:gallery: cellTypes, groupBy, stripe, proofread, columnMode, columnUm, perType
 ```
 
-## What it outputs
+## Selecting cells
 
-Click a cell to select it, and again to deselect it. Click "N selected" beside the cell count to clear the selection. The selection is saved in the workflow.
+Click a cell to select it, and click it again to deselect it. To clear the whole selection, click "N selected" next to the cell count. The selection is saved with the workflow.
 
-- `Selected` is the selected cells' rows of the neuron table, with the chosen cell-type columns and two more: `soma_depth` in µm below the pia, and `layer`. A cell with no single nucleus has neither.
-- `Skeletons` are the selected cells' reconstructions, with their compartment labels. They are read at the Dataset's materialization, so each is the neuron as it is there, including any proofreading since earlier releases. Each skeleton carries its cell's row from `Selected` (cell type, depth, layer), so a [3D View](#out.viewer3d) can colour by any of them.
+There are two outputs:
+
+- `Selected` contains the selected cells' rows from the neuron table, with the chosen cell-type columns plus `soma_depth` (µm below the pia) and `layer`. Cells without exactly one nucleus get neither.
+- `Skeletons` contains the selected cells' reconstructions, with their compartment labels. They are read at the Dataset's materialization, so each one reflects the neuron as it is there, including any proofreading done since earlier releases. Each skeleton carries its cell's row from `Selected` (cell type, depth, layer), so you can colour a [3D View](#out.viewer3d) by any of those columns.
 
 ## Data and credit
 
-Needs a CAVE token (Connections). MICrONS minnie65 is the [MICrONS Consortium](https://www.microns-explorer.org/cortical-mm3)'s, Nature 2025. The depth transform follows [`standard_transform`](https://github.com/CAVEconnectome/standard_transform). This widget is based on work by Casey Schneider-Mizell (Allen Institute for Brain Science).
+You need a CAVE token (Connections). MICrONS minnie65 is from the [MICrONS Consortium](https://www.microns-explorer.org/cortical-mm3), Nature 2025. The depth transform follows [`standard_transform`](https://github.com/CAVEconnectome/standard_transform). This widget is based on work by Casey Schneider-Mizell (Allen Institute for Brain Science).

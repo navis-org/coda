@@ -104,13 +104,9 @@ registerNode({
   label: 'Neuron Topology',
   category: 'visualisation',
   description:
-    'Measure one neuron’s arbour and see where its partners synapse onto it. Morphometrics is one row per neuron — `cableLength`, `nodes`, `branchPoints`, `endPoints`, `maxStrahler` and more — and splitting axon from dendrite adds `splitStatus`, `cableAxon`, `cableDendrite` and their synapse counts.',
+    'Measure one neuron’s arbour and see where its partners synapse onto it. Morphometrics has one row per neuron (`cableLength`, `nodes`, `branchPoints`, `endPoints`, `maxStrahler` and more); splitting axon from dendrite adds `splitStatus`, `cableAxon`, `cableDendrite` and their synapse counts.',
   guide:
-    'Morphometrics for the neurons you feed it — cable length, branch points, Strahler order, ' +
-    'tortuosity — beside a 3D view of the cell, and a partner list that lights up exactly where ' +
-    'a chosen partner synapses onto the arbour. Turning on Split axon/dendrite runs navis’s ' +
-    'synapse flow centrality and adds per-compartment columns, which is the one control here ' +
-    'that costs a download and marks the graph stale; everything else you can touch is free.',
+    'Morphometrics such as cable length, branch points and Strahler order for each neuron, beside a 3D view and a partner list that highlights where a chosen partner synapses. Split axon/dendrite uses navis’s synapse flow centrality and adds per-compartment columns; it is the only setting that needs a new download.',
   cost: 'expensive',
   /*
    * Wide rather than tall. The card is the Stage layout — the 3D view *is* the surface, with the
@@ -144,7 +140,7 @@ registerNode({
       id: 'split',
       kind: 'boolean',
       label: 'Split axon/dendrite',
-      help: 'Run navis’s synapse flow centrality and label every node axon, dendrite or linker. Adds per-compartment columns to Morphometrics, and needs the Python runtime.',
+      help: 'Label every node axon, dendrite or linker using navis’s synapse flow centrality. Adds per-compartment columns to Morphometrics; needs the Python runtime.',
       default: false,
       /*
        * `advanced`, like every other control on this node, and for the reason the three
@@ -171,7 +167,7 @@ registerNode({
       id: 'flowThresh',
       kind: 'number',
       label: 'Linker threshold',
-      help: 'The linker is every node at or above this fraction of peak synapse flow. navis’s default is 0.9; lower it to cut more of the arbour away as linker.',
+      help: 'Nodes at or above this fraction of peak synapse flow are linker. navis’s default is 0.9; lower it to mark more as linker.',
       default: 0.9,
       min: 0.1,
       max: 1,
@@ -190,7 +186,7 @@ registerNode({
       id: 'splitVal',
       kind: 'number',
       label: 'Axon threshold',
-      help: 'A fragment is axon when it holds at least this much output per unit of input. navis’s default is 1; below 1 biases towards axon, above 1 towards dendrite.',
+      help: 'A fragment is axon if its output-to-input ratio is at least this. navis’s default is 1; lower favours axon, higher favours dendrite.',
       default: 1,
       min: 0.1,
       max: 3,
@@ -213,7 +209,7 @@ registerNode({
       id: 'heal',
       kind: 'boolean',
       label: 'Heal fragmented skeletons',
-      help: 'Join a skeleton that arrived in several pieces into one tree before splitting it. Without this a fragmented neuron cannot be split. The joins are used by the split only — the skeleton drawn and measured is unchanged.',
+      help: 'Join a skeleton that arrived in pieces before splitting it; a fragmented neuron cannot be split otherwise. The skeleton drawn and measured is unchanged.',
       default: false,
       advanced: true,
       visibleIf: (params) => params['split'] === true,
@@ -242,7 +238,7 @@ registerNode({
       id: 'page',
       kind: 'int',
       label: 'Neuron',
-      help: 'Which neuron of the incoming table is shown. Browsing never invalidates anything.',
+      help: 'Which neuron of the incoming table is shown. Browsing re-runs nothing.',
       default: 0,
       min: 0,
       presentational: true,
@@ -256,7 +252,7 @@ registerNode({
       kind: 'ids',
       label: 'Pinned',
       noun: 'neurons',
-      help: 'The neuron the Current port emits. Written by the widget’s pin control.',
+      help: 'The neuron the Current output emits. Set by the pin control.',
       default: [],
       // The stage's Pin button is this control; a second copy on the card is a row saying
       // "no neurons" where the picture should be.
@@ -282,7 +278,7 @@ registerNode({
       id: 'pointSize',
       kind: 'number',
       label: 'Synapse size',
-      help: 'Diameter of a synapse dot, in screen pixels, so it stays the same size whatever the neuron’s extent.',
+      help: 'Diameter of a synapse dot, in screen pixels.',
       default: 6,
       min: 1,
       max: 24,
@@ -385,7 +381,7 @@ registerNode({
       id: 'skeletonOpacity',
       kind: 'number',
       label: 'Skeleton opacity',
-      help: 'How solid the skeleton is drawn. Below 1 it stops hiding what is behind it — a synapse inside a thick branch, or the mesh shell around the arbour.',
+      help: 'How solid the skeleton is. Lower it to see synapses or the mesh behind it.',
       default: 1,
       min: 0,
       max: 1,
@@ -446,7 +442,7 @@ registerNode({
       id: 'showMesh',
       kind: 'boolean',
       label: 'Mesh',
-      help: 'Draw the neuron’s mesh as a translucent shell around the skeleton. It is fetched while this is on, once per neuron you page to.',
+      help: 'Draw the neuron’s mesh as a translucent shell. While on, it is fetched for each neuron you page to.',
       default: true,
       presentational: true,
       advanced: true,
@@ -485,7 +481,7 @@ registerNode({
       kind: 'ids',
       label: 'Highlighted partners',
       noun: 'partners',
-      help: 'Partners whose synapses are drawn on the arbour. Lighting one is free.',
+      help: 'Partners whose synapses are drawn on the arbour.',
       default: [],
       presentational: true,
       advanced: true,
@@ -510,7 +506,7 @@ registerNode({
         { value: 'typed', label: 'Cell type, untyped apart' },
         { value: 'neuron', label: 'One row per neuron' },
       ],
-      help: 'How the partner list is rolled up. "Cell type" puts every untyped partner in one "—" row; the other two give partners a row each, keyed by id.',
+      help: 'How the partner list is grouped. "Cell type" puts all untyped partners in one "—" row; the other options give them a row each, by id.',
       default: 'type',
       presentational: true,
       advanced: true,
@@ -644,7 +640,7 @@ registerNode({
       ctx,
       table,
       Number(ctx.params.limit),
-      'Each skeleton is a separate request, and a few thousand of them is minutes rather than seconds.',
+      'Each skeleton is a separate request, so a few thousand of them take minutes.',
     )
 
     /**
@@ -780,9 +776,9 @@ registerNode({
      */
     if (unsplit > 0 && neuronCount > 0) {
       ctx.warn(
-        `${unsplit} of ${neuronCount} neurons could not be split — see the splitStatus column.` +
+        `${unsplit} of ${neuronCount} neurons could not be split. See the \`splitStatus\` column.` +
           (fragmented > 0
-            ? `${fragmented} of them arrived in several pieces. Tick Heal fragmented skeletons ` +
+            ? ` ${fragmented} of them arrived in several pieces. Tick \`Heal fragmented skeletons\` ` +
               `on the Compartments tab to join them first.`
             : ''),
       )

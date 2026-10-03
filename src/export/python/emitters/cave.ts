@@ -101,9 +101,8 @@ function clientFor(
     expr: local,
     setup: [
       ...ctx.note(
-        'The Dataset wired here is a reference — it names a datastack rather than taking its ' +
-          'value — and its cell is written below this one, so this builds its own client for ' +
-          'the same datastack and materialization.',
+        'The Dataset wired here only names a datastack, and its cell comes after this one, so ' +
+          'this cell builds its own client for the same datastack and materialization.',
       ),
       `${local} = ${caveClient(target.deployment, target.datastack, target.version)}`,
     ],
@@ -130,8 +129,8 @@ function datasetCell(
 ): string[] {
   if (!datasetId) {
     return ctx.todo(
-      'This CAVE dataset could not be resolved to a datastack and materialization, so there ' +
-        'is nothing to point a client at. Set a materialization on the node and export again.',
+      'Coda could not work out which datastack and materialization this CAVE dataset uses, ' +
+        'so no client was created. Set `Materialization` on the node and export again.',
     )
   }
   const parsed = splitDatasetId(datasetId)
@@ -153,8 +152,8 @@ function datasetCell(
   if (chain) {
     return [
       ...ctx.note(
-        'Annotations are wired to this dataset on the canvas, so they replace the ' +
-          "datastack's own labels rather than adding to them.",
+        'Annotations are wired to this dataset in Coda, so they replace the ' +
+          "datastack's own labels entirely.",
       ),
       `${out} = CodaCaveDataset(`,
       `    ${client},`,
@@ -213,7 +212,7 @@ registerEmitter(
   'dataset.cave',
   (ctx) => {
     const datastack = String(ctx.params.datastack).trim()
-    if (!datastack) return ctx.todo('This CAVE node names no datastack.')
+    if (!datastack) return ctx.todo('This CAVE node has no `Datastack` set.')
     const version = String(ctx.params.version).trim()
     if (!version) {
       /*
@@ -224,8 +223,9 @@ registerEmitter(
        */
       return [
         ...ctx.todo(
-          `This node tracks the newest materialization of "${datastack}" and the exporter ` +
-            'could not resolve which that is. Pin one on the node, or pass `version=` below.',
+          `\`Materialization\` is empty, so this node uses the newest materialization of ` +
+            `"${datastack}", and the exporter could not find out which one that is. Pick one ` +
+            'in `Materialization`, or pass `version=` below.',
         ),
       ]
     }
@@ -251,7 +251,7 @@ registerEmitter(
   'annotation.caveTable',
   (ctx) => {
     const table = String(ctx.params.table).trim()
-    if (!table) return ctx.todo('This CAVE table node names no table.')
+    if (!table) return ctx.todo('This CAVE table node has no `Table` set.')
 
     /*
      * A wired Dataset wins over the param, which is the precedence a socket always takes here and
@@ -264,8 +264,9 @@ registerEmitter(
       const resolved = clientFor(ctx, 'dataset', '_cave')
       if (!resolved) {
         return ctx.todo(
-          'The Dataset wired to this CAVE table has not resolved to a datastack and ' +
-            'materialization yet, so there is nothing to point a client at.',
+          'Coda could not yet tell which datastack and materialization the Dataset wired to ' +
+            'this CAVE table uses, so no client was created. Pin a materialization on the ' +
+            'Dataset node and export again.',
         )
       }
       client = resolved.expr
@@ -275,8 +276,8 @@ registerEmitter(
       const typed = caveTarget(undefined, ctx.params)
       if (!typed) {
         return ctx.todo(
-          `"${datastackParam || '(none)'}" is not a datastack and materialization. Name one as ` +
-            '`flywire_fafb_public:783`, or wire a Dataset.',
+          `\`Datastack\` ("${datastackParam || '(none)'}") is not a datastack and ` +
+            'materialization. Write it as `flywire_fafb_public:783`, or wire a Dataset.',
         )
       }
       ctx.require('caveclient', 'CAVEclient')
@@ -294,7 +295,9 @@ registerEmitter(
     if (columns.length > 0) args.push(`    columns=${pyList(columns)},`)
     if (pivotOn) {
       if (!valueColumn) {
-        return ctx.todo('Pivot on is set on this CAVE table but the value column is not.')
+        return ctx.todo(
+          '`Pivot on` is set on this CAVE table but `Value column` is empty. Set `Value column`, or clear `Pivot on`.',
+        )
       }
       args.push(`    pivot_on=${pyStr(pivotOn)},`, `    value_column=${pyStr(valueColumn)},`)
     }
@@ -332,8 +335,8 @@ registerEmitter(
     const supervoxel = ctx.column('supervoxelColumn')
     if (!supervoxel) {
       return ctx.todo(
-        'No supervoxel column is set on this Update root IDs, and a supervoxel is the only ' +
-          'stable handle a retired root id can be recovered from.',
+        '`Supervoxel ID column` is not set. Outdated root ids can only be updated through ' +
+          'their supervoxel ids, so pick the column that holds them.',
       )
     }
     ctx.helper('coda_update_root_ids')
@@ -351,8 +354,8 @@ registerEmitter(
       const target = caveTargetOfType(ctx.inputType('dataset'), {})
       if (!target) {
         return ctx.todo(
-          'This Update root IDs pins a materialization, and the Dataset wired to it has not ' +
-            'resolved to a datastack, so there is nothing to pin it against.',
+          '`Materialization` is set on this Update root IDs node, but Coda could not tell ' +
+            'which datastack the wired Dataset uses, so there is no datastack to apply it to.',
         )
       }
       ctx.require('caveclient', 'CAVEclient')
@@ -364,8 +367,9 @@ registerEmitter(
       const resolved = clientFor(ctx, 'dataset', '_repair_at')
       if (!resolved) {
         return ctx.todo(
-          'The Dataset wired to this Update root IDs has not resolved to a datastack and ' +
-            'materialization, so there is no instant to bring the ids forward to.',
+          'Coda could not tell which datastack and materialization the Dataset wired to this ' +
+            'Update root IDs node uses, so it does not know which point in time to update the ' +
+            'ids to. Pin a materialization on the Dataset node and export again.',
         )
       }
       client = resolved.expr
@@ -408,7 +412,7 @@ registerEmitter(
 function seaTableCell(ctx: EmitContext, defaultHost: string): string[] {
   const base = String(ctx.params.base).trim()
   const table = String(ctx.params.table).trim()
-  if (!base || !table) return ctx.todo('This node names no base and table.')
+  if (!base || !table) return ctx.todo('This node has no `Base` or `Table` set.')
 
   ctx.require('os')
   ctx.require('seaserpent')
@@ -424,9 +428,9 @@ function seaTableCell(ctx: EmitContext, defaultHost: string): string[] {
   if (workspace) {
     lines.push(
       ...ctx.note(
-        `sea-serpent finds workspace "${workspace}" by enumerating the account's ` +
-          `workspaces, so there is nothing to pass it. If two workspaces hold a base ` +
-          `called "${base}" it will say so.`,
+        `sea-serpent finds the base by searching every workspace in the account, so ` +
+          `\`Workspace\` ("${workspace}") is not passed. If two workspaces have a base ` +
+          `called "${base}", sea-serpent will report it.`,
       ),
     )
   }
@@ -449,9 +453,9 @@ function seaTableCell(ctx: EmitContext, defaultHost: string): string[] {
      */
     const sql = [idColumn, ...columns].map((c) => `\`${c}\``).join(', ')
     lines.push(
-      `# Every column is downloaded and then narrowed, as it is on the canvas. To narrow it`,
-      `# server-side instead \u2014 measured at about 4x faster, at the cost of sea-serpent's`,
-      `# dtype conversion \u2014 replace the call below with:`,
+      `# Every column is downloaded and then narrowed, as in Coda. To fetch only these columns`,
+      `# from the server (about 4x faster, but without sea-serpent's dtype conversion),`,
+      `# replace the call below with:`,
       `#     _rows = _sea.query('SELECT ${sql} FROM \`${table}\`', no_limit=True)`,
       `#     ${out} = coda_annotation_columns(pd.DataFrame(_rows), ${pyStr(idColumn)})`,
     )
@@ -514,9 +518,9 @@ function discoveryClient(ctx: EmitContext): { expr: string; setup: string[] } | 
 
 /** The sentence both of these say when neither the wire nor the field named a datastack. */
 const NO_DATASTACK =
-  'This node has no datastack and materialization — neither from the Dataset wired to it nor ' +
-  'from its own field. Name one as `flywire_fafb_public:783`, or pin a materialization on the ' +
-  'Dataset node, and export again.'
+  'This node has no datastack and materialization: none comes from a wired Dataset, and ' +
+  '`Datastack` is empty. Enter one in `Datastack` as `flywire_fafb_public:783`, or pin a ' +
+  'materialization on the Dataset node, and export again.'
 
 registerEmitter(
   'cave.tables',
@@ -542,14 +546,15 @@ registerEmitter(
   'cave.tableInfo',
   (ctx) => {
     const table = String(ctx.params.table).trim()
-    if (!table) return ctx.todo('This CAVE table info node names no table or view.')
+    if (!table)
+      return ctx.todo('This CAVE table info node has no table or view set in `Table`.')
     const resolved = discoveryClient(ctx)
     if (!resolved) return ctx.todo(NO_DATASTACK)
     ctx.helper('coda_cave_table_info')
     return [
       ...ctx.note(
-        'The card in Coda shows this table’s description and row counts; here they are ' +
-          'printed, and the column listing is what the cell binds.',
+        'In Coda the card shows this table’s description and row counts. Here they are ' +
+          'printed, and the cell’s output is the list of columns.',
       ),
       ...resolved.setup,
       `${ctx.output('columns')} = coda_cave_table_info(${resolved.expr}, ${pyStr(table)})`,

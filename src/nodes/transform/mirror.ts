@@ -97,10 +97,9 @@ registerNode({
    * two halves, what the correction is worth, the Python download — is in that document.
    */
   guide:
-    'Reflect neurons across the midline of the space they were fetched in, so a left neuron ' +
-    'can be compared with a right one — by eye or by NBLAST, neither of which can see past ' +
-    'the fact that the two are simply in different places. The space is read off the ' +
-    'geometry, so there is nothing to configure.',
+    'Flips skeletons, meshes or points onto the other side of the brain, so that a neuron can ' +
+    'be compared with its partner in the other hemisphere in a 3D View or with NBLAST. The ' +
+    'template space is read from the neurons, so usually there is nothing to configure.',
   /*
    * `expensive`, and it is the `Warp` default that decides it. Cost is a property of the node
    * rather than of a param, so it has to be true of the *default* path — which fetches a
@@ -133,7 +132,7 @@ registerNode({
       kind: 'boolean',
       label: 'Warp',
       default: true,
-      help: 'Correct for the brain’s left/right asymmetry with a landmark spline rather than flipping and leaving it. Off is a few micrometres out — fine for a picture, not for NBLAST. On needs the Python runtime.',
+      help: 'Correct for the brain’s left/right asymmetry with a landmark warp. Off is a few micrometres out, which is fine for pictures but too much for NBLAST. Needs the Python runtime.',
     },
     {
       id: 'space',
@@ -141,7 +140,7 @@ registerNode({
       label: 'Space',
       default: '',
       options: [FROM_DATA, ...mirrorableSpaces().map((s) => ({ value: s.id, label: s.label }))],
-      help: 'Which template space to mirror in. Leave on "From the data" unless the geometry arrived without one, since naming it here is a claim about coordinates nobody else can identify.',
+      help: 'The template space to mirror in. Leave on "From the data" unless the geometry arrived without one.',
     },
   ],
 
@@ -159,7 +158,9 @@ registerNode({
   validate: (ctx) => {
     const input = ctx.inputs.in
     if (!isGeometryKind(input?.kind)) {
-      return ['Mirror takes skeletons, meshes or points — not a table.']
+      return [
+        'Mirror Neurons takes skeletons, meshes or points. Wire one of those into `Neurons`.',
+      ]
     }
 
     /*
@@ -176,7 +177,9 @@ registerNode({
      */
     const override = String(ctx.params.space)
     if (override && !mirrorFor(override)) {
-      return [`Coda ships no mirror for “${override}”.`]
+      return [
+        `Coda has no mirror for “${override}”. Pick another \`Space\`, or set it to "From the data".`,
+      ]
     }
     return []
   },
@@ -191,9 +194,9 @@ registerNode({
     if (conflict) {
       const [carried, override] = conflict
       throw new Error(
-        `These coordinates are in ${spaceName(carried)} (${carried}) but Space is set to ` +
-          `${spaceName(override)} (${override}). Mirroring about the wrong midline ` +
-          `produces garbage.`,
+        `These coordinates are in ${spaceName(carried)} (${carried}), but \`Space\` is set to ` +
+          `${spaceName(override)} (${override}). Mirroring about the wrong midline gives ` +
+          `meaningless results, so set \`Space\` to "From the data".`,
       )
     }
     if (!spaceId) {
@@ -203,9 +206,8 @@ registerNode({
        * synthetic connectome, a Custom node — not a bug upstream.
        */
       throw new Error(
-        'These coordinates name no template space, so there is no midline to mirror ' +
-          'about. Fetch them from a dataset Coda has a registration for, or name the space ' +
-          'here.',
+        'These coordinates have no template space, so there is no midline to mirror ' +
+          'about. Fetch them from a dataset Coda has a registration for, or set `Space`.',
       )
     }
     /*
@@ -219,10 +221,9 @@ registerNode({
      */
     if (value.units && value.units !== 'nm') {
       throw new Error(
-        `These coordinates are in ${value.units} of an unknown size and ` +
-          `${spaceName(spaceId)}'s midline is in nanometres, so mirroring would put every ` +
-          `neuron somewhere plausible and wrong. Fetch from a deployment that publishes a ` +
-          `voxel size.`,
+        `These coordinates are in ${value.units} of an unknown size, but ` +
+          `${spaceName(spaceId)}'s midline is in nanometres, so the mirrored neurons would ` +
+          `land in the wrong place. Fetch them from a deployment that publishes a voxel size.`,
       )
     }
 
@@ -238,11 +239,11 @@ registerNode({
     if (!spec) {
       throw new Error(
         isTransformValue(supplied)
-          ? `A supplied Warp replaces the correction, not the flip, and Coda has no midline ` +
-              `for ${spaceName(spaceId)} (${spaceId}) to flip about. Use Transform Neurons for ` +
-              `a space this build does not know.`
-          : `Coda ships no mirror landmarks for ${spaceName(spaceId)} (${spaceId}), and there ` +
-              'is no route to one that works in a browser.',
+          ? `Coda has no midline for ${spaceName(spaceId)} (${spaceId}) to flip about, and a ` +
+              `wired \`Warp\` only replaces the asymmetry correction that follows the flip. ` +
+              `Use Transform Neurons for a space Coda does not know.`
+          : `Coda has no mirror landmarks for ${spaceName(spaceId)} (${spaceId}), and none ` +
+              'can be computed in the browser.',
       )
     }
 

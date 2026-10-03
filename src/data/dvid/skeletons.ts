@@ -105,8 +105,8 @@ export async function openDvidSkeletonSource(
   if (!scale) {
     throw new Error(
       `${serverOf(base)} does not say what ${ref.instance}'s voxels measure, so its ` +
-        `skeletons cannot be placed in nanometres — unscaled they sit inside the meshes ` +
-        `at a fraction of their size.`,
+        `skeletons cannot be converted to nanometres. Without that, they would be drawn inside ` +
+        `the meshes at a fraction of their size.`,
     )
   }
   return { base, scale }

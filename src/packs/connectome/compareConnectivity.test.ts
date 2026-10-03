@@ -266,7 +266,9 @@ describe('the run', () => {
       ...ctx,
       column: (id: string) => (id === 'pre1' ? undefined : ctx.column(id)),
     }
-    expect(() => (def.evaluate as (c: unknown) => unknown)(blanked)).toThrow(/pre and post/)
+    expect(() => (def.evaluate as (c: unknown) => unknown)(blanked)).toThrow(
+      /presynaptic and postsynaptic id columns/,
+    )
   })
 
   it('warns about incomparable totals and still returns the table', () => {

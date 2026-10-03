@@ -83,9 +83,11 @@ registerNode({
   // a width that fits three controls on one card fits them on the other.
   cardWidth: 360,
   description:
-    'Split skeletons or meshes in two by their attributes: the matches, and the rest.',
+    'Split skeletons or meshes in two by filter rows on their attributes: those that match, and the rest.',
   guide:
-    'Stack Neurons run backwards: it asks the attribute table a question and hands back both answers, so one row on the stack’s own source column takes a scene apart again. Reach for it instead of filtering twice with opposite conditions — the negation of several ANDed rows is not one condition. With no filters nothing matches.',
+    'Splits a set of skeletons or meshes in two using filter rows on their attributes: neurons ' +
+    'matching every row come out of Matching, all others out of Rest. Useful for taking a ' +
+    'stacked scene apart again. With no filter rows, nothing matches.',
   cost: 'cheap',
   /*
    * `any`, like `neuron.stack` and `core.selectOne`: "skeletons or meshes" is not something the
@@ -111,7 +113,7 @@ registerNode({
       kind: 'ids',
       label: 'Filters',
       noun: 'filters',
-      help: 'Filter rows, combined with AND, asked of the attribute table these neurons carry. Neurons matching all of them leave on Matching, the rest on Rest — so with none set, nothing matches.',
+      help: 'Filter rows on the neurons’ attributes, combined with AND. Neurons matching all of them go out on Matching, the rest on Rest. With no filters, everything goes to Rest.',
       catalogueNote: filtersNote(),
       default: [],
     },
@@ -161,8 +163,8 @@ registerNode({
 
     if (matchesNothing(rows)) {
       ctx.warn(
-        `${nothingMatchesReason()} Add a filter row, or filter the neuron table upstream ` +
-          `if you only want one half.`,
+        `${nothingMatchesReason()} Add a row to \`Filters\`. If you only want one half, ` +
+          `filter the neuron table upstream instead.`,
       )
     }
 

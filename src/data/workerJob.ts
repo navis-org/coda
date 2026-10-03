@@ -53,7 +53,7 @@ export interface JobOptions<J, R> extends JobRunOptions {
  */
 function notLoaded(label: string): string {
   return (
-    `The ${label} could not be loaded — the app has likely changed since this page was opened. ` +
+    `The ${label} could not be loaded. Coda has probably been updated since this page was opened. ` +
     `Reload the page and run again.`
   )
 }

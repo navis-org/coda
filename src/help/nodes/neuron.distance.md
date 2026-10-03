@@ -1,23 +1,23 @@
-## What it measures
+## What Distance between does
 
-Every pair of neurons, as a number of micrometres. Three measures, chosen with `Measure`:
+Distance between measures how far apart neurons are in space and returns a matrix with one value per pair, in micrometres. It takes skeletons or meshes on either input. Leave `Target` empty to compare every neuron against every other (all-by-all), or wire a second set to compare one group against another.
 
-- **`nearest-point distance`** works from every part of the Query to the closest part of the Target. `Statistic` reduces that to one number — the closest approach, the mean or median separation, or the furthest any part of the Query gets from the Target.
-- **`centroid distance`** compares one point per neuron: the centre of mass of its cable, or of its surface.
-- **`cable or area within a distance`** turns the question round and asks how *much* of a neuron is close to the other one.
+`Measure` decides what exactly is calculated:
 
-These are distances to the **nearest** part of the other neuron, never between every pair of points. An all-pairs mean is dominated by how large each neuron is rather than by how near the two are: two arbours 50 µm apart and 200 µm across average about 150 µm, and would do so whether or not they touched.
+- "nearest-point distance": for every part of the Query neuron, find the closest part of the Target neuron. `Statistic` then reduces those distances to a single number: the closest approach, the mean or median separation, or how far the Query gets from the Target at most.
+- "centroid distance": the distance between the two neurons' centres of mass (of their cable or their surface).
+- "cable or area within a distance": how much of one neuron lies within a given distance of the other.
 
-Skeletons and meshes both, on either socket. A distance to a mesh is a distance to its **surface**, not to its nearest vertex.
+For meshes, distances are measured to the nearest point on the mesh's surface, not to its nearest vertex.
 
-## Where it sits beside NBLAST
+## Distance vs. NBLAST
 
-The same two sockets and the same matrix out, and a different question. NBLAST scores how alike two arbours are in *shape*; two identically-shaped cells in opposite hemispheres score highly. This asks where they are.
+This node has the same inputs and output as [NBLAST](#neuron.nblast) but answers a different question. NBLAST asks how similar two neurons are in *shape*: two neurons with identical shapes in opposite hemispheres get a high score. Distance between asks where they are relative to each other.
 
-It is also the one node whose matrix is a distance already, so `Linkage` clusters it with nothing in between.
+Because the output already contains distances, [Linkage](#cluster.linkage) can cluster it directly:
 
 ```coda-graph
-caption: Distances are a matrix, so clustering and the Heatmap take them unchanged.
+caption: Cluster neurons by how far apart they are.
 dataset.hemibrain as ds
 neuron.skeletons as skel
 neuron.distance as dist
@@ -29,45 +29,45 @@ dist -> link
 link:ordered -> hm
 ```
 
-Leave `Target` empty for an all-by-all, or wire a second set to measure one group against another.
+## Nearest points, not all pairs
 
-## Sampling does not move the answer
+All statistics are computed over distances to the *nearest* point on the other neuron, not over every pair of points. A mean over all pairs would mostly reflect how large the neurons are: two arbours that are 50 µm apart and 200 µm across would average about 150 µm, whether or not they touch.
 
-A skeleton's nodes sit wherever it was traced or resampled; a mesh is tessellated finely where it curves. So every sample carries the amount of neuron it stands for — half the length of each edge at a skeleton node, a third of the area of each triangle at a mesh vertex — and the statistics are weighted by it.
+## Sampling
 
-What that means in practice:
+Skeleton nodes sit wherever the neuron was traced or resampled, and meshes have more vertices where the surface curves. To make sure this doesn't bias the results, each sample point is weighted by how much of the neuron it represents: half the length of each edge at a skeleton node, and a third of the area of each triangle at a mesh vertex.
 
-- `mean separation` and `median separation` are a mean and a median **over the neuron's cable or surface**. Resampling a skeleton upstream, or a coarser `Downsample` on the Meshes node, does not move them.
-- `centroid distance` is a centre of mass, not the average of the sample points. A neuron traced densely at the soma and sparsely along a long projection has its centroid on the cable, not near the soma.
-- `cable or area within a distance` is a real quantity — µm of cable, µm² of surface — so two neurons reconstructed differently are comparable.
+In practice this means:
 
-`closest approach` and the furthest distance are not averages of anything and ignore the weights.
+- "mean separation" and "median separation" are averages over the neuron's cable or surface. Resampling a skeleton upstream, or changing `Downsample` on the [Meshes](#neuron.meshes) node, does not change them.
+- "centroid distance" uses the centre of mass, not the average of the sample points. For a neuron that was traced densely around the soma and sparsely along a long projection, the centroid still lies on the cable rather than near the soma.
+- "cable or area within a distance" gives real quantities (µm of cable, µm² of surface), so neurons reconstructed in different ways are comparable.
 
-> [!NOTE]
-> The pair of nodes this is most often confused with is **Clean Skeletons**, one card up. Resampling there is still worth doing to make two datasets' skeletons comparable in *shape* for NBLAST — it is just no longer needed to make a mean distance mean something.
+"closest approach" and "furthest from the other" are not averages and ignore the weights.
 
-## The two directions disagree
+> [!TIP] You don't need to resample for this node
+> Clean Skeletons is still worth using to make skeletons from two
+> datasets comparable in shape for NBLAST, but you don't need it to get meaningful mean distances
+> here.
 
-Measuring A against B is not measuring B against A: a small neuron can lie entirely alongside a large one, and only the Query side is sampled at all. `Symmetry` decides what to publish.
+## Symmetry
+
+Measuring A against B does not give the same result as measuring B against A: a small neuron can lie entirely alongside a large one, and only the Query side is sampled. `Symmetry` decides how the two directions are combined:
 
 ```coda-params
 neuron.distance: symmetry
 ```
 
-| Setting                     | Symmetric | Use when                                             |
-| --------------------------- | --------- | ---------------------------------------------------- |
-| `mean of both directions`   | yes       | the default; what makes an all-by-all matrix symmetric |
-| `smaller of the two`        | yes       | "do these come near each other at all"                 |
-| `larger of the two`         | yes       | "is either of them far from the other"                 |
-| `query against target only` | no        | the Query is the population you are describing         |
+| Setting                     | Symmetric | Use when                                                |
+| --------------------------- | --------- | ------------------------------------------------------- |
+| "mean of both directions"   | yes       | the default; makes an all-by-all matrix symmetric       |
+| "smaller of the two"        | yes       | you want to know whether two neurons come close at all  |
+| "larger of the two"         | yes       | you want to know whether either is far from the other   |
+| "query against target only" | no        | the Query is the population you are describing          |
 
-`centroid distance` has one direction by construction, so the setting is hidden for it.
+The setting is hidden for "centroid distance", which only has one direction anyway.
 
-**It is also drawn dead for a closest approach between two skeletons**, where the two directions
-are the same number — the nearest pair of points is the nearest pair whichever side you start
-from. Wire a mesh to either socket and it comes back, because only the Query side is ever sampled:
-a skeleton's nodes against a surface and that surface's vertices against the nodes really are two
-measurements. Your setting is kept while the control is dead, not reset.
+It is also greyed out for "closest approach" between two sets of skeletons: here both directions give the same number, since the nearest pair of points is the same whichever side you start from. If you wire a mesh to either input, the setting becomes available again, because measuring skeleton nodes against a surface and the surface's vertices against the nodes are two different measurements. Your choice is kept while the setting is greyed out.
 
 ## Cable within a distance
 
@@ -75,15 +75,18 @@ measurements. Your setting is kept while the control is dead, not reset.
 neuron.distance: within, report
 ```
 
-`Within` is how close counts as close — 2 µm is the usual choice, and roughly the distance across which a synapse could plausibly be made. `Report` chooses between an absolute quantity and a fraction of the neuron's own total.
+`Within` sets how close counts as close. 2 µm is a common choice: it is navis's default for cable overlap and roughly the distance across which two neurons could plausibly form a synapse.
 
-The fraction is what makes two neurons of very different sizes comparable, and it is the only form a clustering can use directly: an absolute overlap is unbounded, so there is no distance to be had from it without a `Normalize` first.
+`Report` switches between an absolute quantity (µm of cable or µm² of surface) and a fraction of the neuron's own total. The fraction makes neurons of very different sizes comparable, and it is the only form you can cluster directly: an absolute overlap has no upper bound, so you would have to run it through a [Normalize](#core.normalize) first.
 
-> [!WARNING]
-> With skeletons on one socket and meshes on the other, the two directions are µm of cable and µm² of surface. Averaging them is not a number of anything, so the node refuses — set `Symmetry` to `query against target only`, which measures the Query and nothing else, or wire the same kind of geometry to both.
+> [!WARNING] Skeletons vs. meshes
+> With skeletons on one input and meshes on the other, the two directions are µm of cable and µm²
+> of surface respectively, and averaging them makes no sense. The node refuses this combination:
+> either set `Symmetry` to "query against target only" or wire the same kind of geometry to both
+> inputs.
 
-## What it does not do
+## Limitations
 
-There is **no soma-to-soma distance**. Coda's skeletons carry positions, radii and a parent per node, and no soma — a root is usually the soma on a reconstruction that has one, and is not on a chunk-graph skeleton or on a fragment, so an anchor that meant two things depending on where the skeleton came from would be worse than none. `centroid distance` is the anchor that is always well defined.
+There is no soma-to-soma distance. Coda's skeletons don't carry a soma: the root is usually the soma for a full reconstruction, but not for a chunk-graph skeleton or a fragment. Use "centroid distance" if you need a single anchor point per neuron.
 
-Both sides have to be in the same coordinate system, and in nanometres. Geometry in dataset voxels is refused rather than reported in the wrong units; two template spaces are refused because every pair would come back hundreds of micrometres apart whatever their real shapes. `Transform Neurons` is the step in between.
+Both inputs have to be in the same coordinate system, and in nanometres. Geometry in voxels is refused, and so are neurons in two different template spaces (every pair would come out hundreds of micrometres apart). Use [Transform Neurons](#neuron.xform) to bring them into the same space first.

@@ -309,8 +309,8 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       ...(options.allowHash
         ? {
             help:
-              '"A colour each" gives every value its own colour, using neuroglancer’s hash. ' +
-              '"By category" takes colours from the palette, commonest value first.',
+              'With "a colour each", every value gets its own colour from neuroglancer’s hash. ' +
+              'With "by category", colours come from the palette, most common value first.',
           }
         : {}),
       options: [
@@ -390,9 +390,8 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
             default: 'coda',
             options: [...PALETTE_OPTIONS],
             help:
-              'Which colours "by category" cycles through; the number is how many values get ' +
-              'their own before it repeats. Okabe–Ito is colour-blind safe; only Coda suits ' +
-              'both the light and the dark background.',
+              'The colours "by category" cycles through; the number is how many before they ' +
+              'repeat. Okabe–Ito is colour-blind safe; only Coda suits both light and dark themes.',
             /*
              * Only where a palette is what is being cycled. `constant` and `literal` name their
              * own colours, `sequential` is a ramp rather than a set, `hash` derives a colour per
@@ -543,8 +542,8 @@ function valueScaleParams(
       options: VALUE_RAMP_OPTIONS,
       visibleIf: byValue,
       help:
-        'The colours "by value" runs through. Coda blue reverses with the theme; the rest are ' +
-        'matplotlib’s, drawn as published. A centred ramp puts its middle colour on Centre.',
+        'The colours "by value" runs through. "Coda blue" flips with the theme. A centred ramp ' +
+        'puts its middle colour at the centre value.',
     }),
     control('min', {
       id: `${prefix}ColorMin`,
@@ -552,7 +551,7 @@ function valueScaleParams(
       default: '',
       placeholder: 'auto',
       visibleIf: sequential,
-      help: 'The value at the bottom of the ramp. Empty lets the data decide. Values below it take the end colour.',
+      help: 'The value at the bottom of the ramp. Leave empty to use the data minimum. Values below it get the end colour.',
     }),
     control('centre', {
       id: `${prefix}ColorCenter`,
@@ -560,7 +559,7 @@ function valueScaleParams(
       default: '',
       placeholder: '0',
       visibleIf: diverging,
-      help: 'The value the middle colour stands for. Empty means 0. Both arms stay the same length, so equal steps of colour are equal amounts either side.',
+      help: 'The value at the middle colour. Empty means 0. The ramp extends equally far on both sides.',
     }),
     control('max', {
       id: `${prefix}ColorMax`,
@@ -568,14 +567,14 @@ function valueScaleParams(
       default: '',
       placeholder: 'auto',
       visibleIf: byValue,
-      help: 'The value at the top of the ramp; empty lets the data decide. On a centred ramp it is the distance from Centre to either end.',
+      help: 'The value at the top of the ramp. Leave empty to use the data. On a centred ramp, this is the distance from the centre to either end.',
     }),
     control('log', {
       id: `${prefix}ColorLog`,
       kind: 'boolean',
       default: false,
       visibleIf: sequential,
-      help: 'Spread the colour over a log scale — the mapping only; the numbers on the colour bar stay the values. Not offered on a centred ramp.',
+      help: 'Map values to colour on a log scale. The numbers on the colour bar stay as they are. Not available for centred ramps.',
     }),
   ]
 }
@@ -730,8 +729,8 @@ export function shapeParams(options: ShapeParamOptions): ParamDef[] {
       label,
       default: defaultMode,
       help:
-        'Six marks, with everything past the sixth commonest value drawn as a dash. Pointing ' +
-        'shape and colour at the same column keeps a picture readable without colour.',
+        'Draw one shape, or one per category. Values past the six most common are drawn as a ' +
+        'dash. Use the same column as colour to stay readable without colour.',
       options: [
         { value: 'constant', label: 'single shape' },
         { value: 'categorical', label: 'by category' },

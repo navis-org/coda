@@ -1,28 +1,24 @@
-## From a table file to a table
+## What Read Rows does
 
-This is the one place a [Link Table](#core.linkTable) file becomes an ordinary table — one every
-Filter, Join and chart accepts. Whatever it keeps is in memory from here on, so it keeps only what
-you ask for:
+Read Rows takes a file from [Link Table](#core.linkTable) and turns (part of) it into an ordinary table that Filter, Join, the charts and every other table node accept. Whatever it reads is held in memory from here on, so you tell it exactly what to keep:
 
-- **`Columns`** to keep, in this order. None chosen keeps every column.
-- **`Match column`** and **`IDs`**: keep only rows whose value there is one of the ids, typed into
-  the card or taken from a wired table's `ID column` — both, where both are given.
-- **`Row cap`**: stop after this many rows. The card says when it stopped early.
-
-With a match column and no ids, nothing is read. With no match column, the first rows up to the
-cap are read — a million by default, from the start of the file, not a sample of it.
+- `Columns`: the columns to keep, in this order. If you pick none, every column is kept.
+- `Match column` and `IDs`: keep only rows whose value in the match column is one of the ids. You can type ids into the card, wire in a table and pick its `ID column`, or both.
+- `Row cap`: stop after this many rows. The card tells you if it stopped early.
 
 ```coda-params
 core.readRows: matchColumn, ids
 ```
 
+A typical use is looking up the synapses or connections of a few neurons: wire their ids in from e.g. [Find Neurons](#neuron.findNeurons) and set `Match column` to the file's id column (`pre_pt_root_id`, `bodyId` and the like).
+
+> [!NOTE] No ids, no rows
+> If you pick a match column but give no ids, nothing is read. If you don't pick a match column,
+> the node reads rows from the start of the file until it hits `Row cap` (a million by default).
+> That is the beginning of the file, not a random sample of it.
+
 ## How long a lookup takes
 
-The read happens in the background, and Cancel stops it at once. A lookup in a large file is fast
-when whole blocks can be skipped — a Parquet file sorted by the match column, or a Feather file with
-that column under `Index columns` on its Link Table — and reads the whole file when the ids are
-spread through every block. The card says when nothing could be skipped in a file of four or more
-blocks.
+Reading happens in the background, and Cancel stops it immediately. A lookup in a large file is fast if whole blocks can be skipped. That is the case for a Parquet file sorted by the match column, or for a Feather file whose Link Table lists that column under `Index columns`. If the ids are spread across every block, the whole file has to be read. For a file of four or more blocks, the card warns you when a lookup could not skip anything; see [Link Table](#core.linkTable) for how to sort a file.
 
-A read that would hold more than a browser tab survives is refused before it runs out of memory,
-naming the three controls above that shrink it.
+If a read would need more memory than a browser tab can handle, the node stops before running out and tells you to choose fewer columns, match fewer ids or lower the row cap.

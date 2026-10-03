@@ -53,9 +53,11 @@ registerNode({
   type: 'core.stack',
   label: 'Stack Tables',
   category: 'transform',
-  description: 'Combine two tables vertically, keeping every column either of them has.',
+  description: 'Append the rows of two or more tables, keeping every column any of them has.',
   guide:
-    'The vertical counterpart of Join: where that one widens a table with columns, this lengthens it with rows. Every column survives — a column only one side has is null-filled for the other. But a column the two sides genuinely disagree on (number vs text) is refused by name rather than reconciled.',
+    'Combines two or more tables by appending their rows, e.g. the results of the same query ' +
+    'on two datasets. Every column of every input is kept, and an optional Source column ' +
+    'records which input each row came from. To add columns instead, use Join.',
   cost: 'cheap',
   inputs: [
     {
@@ -122,7 +124,10 @@ registerNode({
       const clashes = schemas.some(
         (schema) => schema && schema.columns.some((c) => c.name === source),
       )
-      if (clashes) issues.push(`Source column "${source}" already exists in one of the inputs`)
+      if (clashes)
+        issues.push(
+          `\`Source column\` is "${source}", which already exists in one of the inputs. Pick another name.`,
+        )
     }
 
     /*

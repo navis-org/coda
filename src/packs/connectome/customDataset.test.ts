@@ -236,7 +236,7 @@ describe('validate', () => {
     // taken `root_id` — or `cell_type` — without a word.
     const graph = customGraph({ neurons: true, idColumn: null })
     expect(issues(graph, 'c')).toContain(
-      'Pick which column of the Neurons table holds the neuron id.',
+      "Pick the Neurons table's neuron id column in `ID column`.",
     )
     expect(inferGraph(graph).nodes['c']?.outputs.dataset).not.toHaveProperty('annotations')
   })
@@ -370,14 +370,16 @@ describe('an edge list', () => {
     // The defaults `pre` / `post` / `weight` are not in this table.
     const found = issues(customGraph({ edges: true }), 'c')
     expect(found).toContain(
-      'Pick the Edges column holding the presynaptic id — "pre_root_id" looks like it.',
+      'Pick the Edges column holding the presynaptic id in `Pre column`. "pre_root_id" looks like it.',
     )
     expect(found).toContain(
-      'Pick the Edges column holding the postsynaptic id — "post_root_id" looks like it.',
+      'Pick the Edges column holding the postsynaptic id in `Post column`. "post_root_id" looks like it.',
     )
     // The untouched default counts rows, and says which column looks like a weight.
     expect(found).toContainEqual(
-      expect.stringMatching(/no "weight" column, so each row counts as one — "syn_count"/),
+      expect.stringMatching(
+        /no "weight" column, so each row counts as one connection\. "syn_count" looks like a weight/,
+      ),
     )
   })
 
@@ -517,7 +519,7 @@ describe('a synapse table', () => {
       params: { ...SYN, synPosition: ['nope', 'y', 'z'] },
     })
     expect(issues(graph, 'c')).toContain(
-      'Pick three Synapses position columns, x, y and z in that order — "x", "y", "z" look like them.',
+      'Pick three columns in `Synapse position`: x, y and z, in that order. "x", "y", "z" look like them.',
     )
   })
 
@@ -558,7 +560,7 @@ describe('a synapse table', () => {
       onWarn: (message) => warnings.push(message),
     })
     expect(points.attributes.length).toBe(3)
-    expect(warnings).toEqual([expect.stringMatching(/Min confidence was ignored/)])
+    expect(warnings).toEqual([expect.stringMatching(/`Min confidence` was ignored/)])
   })
 
   it('answers synapses between two sets, oriented', async () => {

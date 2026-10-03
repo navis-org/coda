@@ -24,12 +24,11 @@ export const rawCypherNode = packNode({
   label: 'Cypher',
   category: 'query',
   description:
-    'Run a custom Cypher query against a neuPrint dataset. Returns the results as a table.',
+    'Runs a Cypher query you write against a neuPrint dataset and returns the result as a table.',
   guide:
-    'Run a custom Cypher against a neuPrint dataset. Data is returned as an ordinary table and ' +
-    'everything downstream works normally, with one caveat: the server decides the shape of the ' +
-    'result, so the column pickers are empty until the first run and empty again after a reload. ' +
-    'Queries are sent as typed, against a shared production Neo4j that takes read-only ones only.',
+    'Runs a Cypher query you write yourself against a neuPrint dataset and returns the result ' +
+    'as a table. Column pickers downstream stay empty until the query has run, and again after ' +
+    'a reload. The servers are shared and only accept read-only queries.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [{ id: 'result', label: 'Result', type: T.table() }],
@@ -56,7 +55,7 @@ export const rawCypherNode = packNode({
     if (!query) return ['Query is empty']
     if (!sourceSupports(ctx.inputs.dataset, 'rawQuery')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
-      return [`${label} has no query engine — connect a neuPrint dataset.`]
+      return [`${label} cannot run Cypher queries. Wire in a neuPrint dataset instead.`]
     }
     return []
   },

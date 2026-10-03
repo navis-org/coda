@@ -165,7 +165,7 @@ describe('warnings', () => {
     expect(quiet).toEqual([])
 
     const loud = inferGraph(pipeline({ hops: 3, minWeight: 1 })).nodes.conn?.issues ?? []
-    expect(loud.some((i) => /Raise Min weight/.test(i.message))).toBe(true)
+    expect(loud.some((i) => /Raise `Min weight`/.test(i.message))).toBe(true)
     // A warning, never a refusal — the graph stays runnable.
     expect(loud.every((i) => i.severity === 'warning')).toBe(true)
   })

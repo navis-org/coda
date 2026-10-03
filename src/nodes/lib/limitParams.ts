@@ -83,7 +83,7 @@ export function warnSideCount(
     count,
     threshold: limit,
     unit: `neurons on ${side}`,
-    control: "this node's Warn above",
+    control: '`Warn above`',
     cost,
   })
 }
@@ -154,13 +154,16 @@ export function neuronIdsFrom(
 ): string[] {
   if (!isTableValue(value)) throw new Error('Neurons input is not a table')
   const ids = idColumn(value, ID_COLUMN_NAME)
-  if (ids.length === 0) throw new Error('No neuronIds in the incoming neuron table')
+  if (ids.length === 0)
+    throw new Error(
+      'The incoming neuron table has no neuron ids, so there is nothing to fetch.',
+    )
   if (ids.length > limit) {
     warnOverThreshold(ctx, {
       count: ids.length,
       threshold: limit,
       unit: 'neurons',
-      control: "this node's Warn above",
+      control: '`Warn above`',
       cost,
     })
   }

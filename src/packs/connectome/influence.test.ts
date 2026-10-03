@@ -154,12 +154,14 @@ describe('Influence hop budget', () => {
 describe('Influence denominator gating', () => {
   it('refuses downstream under the traversal denominator, at edit time and at run time', async () => {
     const params = { ...COMPARABLE, direction: 'outputs' }
-    expect(issues(params).join(' ')).toMatch(/Denominator to published totals|use Upstream/i)
+    expect(issues(params).join(' ')).toMatch(
+      /`Denominator` to one of the published totals options/,
+    )
 
     const sched = scheduler()
     await sched.run(pipeline(params), { mode: 'full' })
     // Named the fix rather than reporting a missing column two layers down.
-    expect(sched.info('inf').error).toMatch(/published totals|Upstream/)
+    expect(sched.info('inf').error).toMatch(/published totals options|"upstream"/)
   })
 
   it('runs downstream once the denominator can be had from the far end', async () => {
@@ -176,7 +178,7 @@ describe('Influence denominator gating', () => {
     // A warning about *cost*, and it has to say the scores are unaffected — otherwise it reads
     // as a wrong answer rather than a slow one.
     expect(said).toMatch(/same scores/)
-    expect(said).toMatch(/published totals/)
+    expect(said).toMatch(/published totals options/)
   })
 })
 
@@ -265,7 +267,7 @@ describe('Influence per query neuron', () => {
       { ...COMPARABLE, perQuery: true, denominator: 'connected' },
       { candidates: 'L1' },
     ).join(' ')
-    expect(said).toMatch(/meet in the middle/)
+    expect(said).toMatch(/cannot search from both ends/)
     expect(said).toMatch(/same scores/)
   })
 })
@@ -423,6 +425,8 @@ describe('Influence over a Neurons table that repeats an id', () => {
   it('says that it folded the repeats away rather than doing it quietly', async () => {
     const sched = scheduler()
     await sched.run(doubled(COMPARABLE), { mode: 'full' })
-    expect(sched.warning('inf') ?? '').toMatch(/repeated ids? (was|were) folded away/)
+    expect(sched.warning('inf') ?? '').toMatch(
+      /ids? appeared more than once and (was|were) merged/,
+    )
   })
 })

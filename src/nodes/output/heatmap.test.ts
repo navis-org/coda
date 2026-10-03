@@ -273,8 +273,8 @@ describe('the annotations port', () => {
     const { out, warnings } = await run(rois, {}, NAMED)
     expect(out.colLabels).toEqual(['ME(R)', 'LO(R)'])
     expect(warnings).toEqual([
-      'No columns are named by "type", so they keep the labels they arrived with. ' +
-        'Check Match on, or narrow Apply to.',
+      'None of the columns are named by "type", so they keep their original labels. ' +
+        'Check `Match on`, or narrow `Apply to`.',
     ])
   })
 
@@ -506,7 +506,7 @@ describe('what validate can see at edit time', () => {
   it('names the two pickers when the port is wired and one is unset', () => {
     const table = T.table(tableSchema(column('neuronId', 'str'), column('type', 'str')))
     expect(issues({ matchColumn: '', labelColumn: '' }, table).join(' ')).toMatch(
-      /Match on and Label by are not both set/,
+      /`Match on` and `Label by` are not both set/,
     )
   })
 

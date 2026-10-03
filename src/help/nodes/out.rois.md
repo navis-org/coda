@@ -1,39 +1,51 @@
-> [!WARNING] neuPrint-only
-> neuPrint is the only backend that provides curated ROI meshes.
+## What the ROI Viewer does
+
+The ROI Viewer draws a dataset's brain regions (neuropils) together in 2D, looking down one of three anatomical planes: frontal, dorsal or lateral. By default each region is coloured by how completely it has been reconstructed, which makes it a quick way to see where a dataset is well traced and where it isn't.
 
 ```coda-graph
-caption: Show brain regions
+caption: Show the brain regions of a dataset.
 dataset.malecns as ds
 out.rois as r
 ds -> r
 ```
 
-### Caching
+> [!WARNING] neuPrint only
+> Only neuPrint datasets provide curated region meshes, and not all of them do. For a dataset
+> without them the node shows a warning and draws nothing.
 
-ROI meshes are downloaded once and cached. Only the frontal, dorsal and lateral outlines are kept, to bound the cache.
-
-### Getting a closer look
-
-Scroll to zoom and drag to pan, off the canvas — in the expanded view, a dashboard cell or the pinned dock. `⤢`, or a double-click, goes back to the whole brain. Zooming re-thins the labels rather than magnifying them, so a crowded corner gains names as you go in.
-
-### Explode
-
-Where two regions overlap in the current plane, the `Explode` slider un-stacks them by computing a 2D separation field and pushing them apart until they no longer overlap.
-
-### Primary only
-
-neuPrint's published region lists nest. Hemibrain publishes 230 regions of which 63 tile the volume; male-CNS publishes 5,619 of which 144 do. `Primary regions only` keeps the tiling set, and is the default. Disable it to compare sub-compartments of a single neuropil.
-
-> [!WARNING] The toggle chooses which list gets downloaded
-> The two are cached separately, so switching back to the primary set is instant and switching away
-> asks for the meshes it has not seen. That is one request per region, so a published list of more
-> than a few hundred asks a second time before it starts — male-CNS's 5,619 is a much longer wait
-> than its 144, and nothing is stored until it finishes.
-
-### Colour options
-
-`Completeness (post)` is the fraction of post-synapses in a region that belong to a proofread neuron; `Completeness (pre)` is its presynaptic complement. `Region` gives each region a distinct hue, with left/right pairs sharing one because they are one structure seen twice. `Side` groups by hemisphere alone.
+## Settings
 
 ```coda-params
 out.rois: view, explode, colorBy, primaryOnly
 ```
+
+`Colour` has the following options:
+
+| Option                  | What it shows                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| "Completeness (post)"   | the fraction of postsynapses in a region that belong to a proofread neuron (the default)             |
+| "Completeness (pre)"    | the same for presynapses                                                                              |
+| "Region"                | a distinct colour per region; left/right pairs share a colour                                         |
+| "Side"                  | one colour per hemisphere                                                                             |
+| "Flat"                  | the same colour for every region                                                                      |
+
+Where regions overlap in the chosen plane, the `Explode` slider pushes them apart until they no longer overlap. At 100% they are just separated.
+
+## Primary regions only
+
+The region lists that neuPrint publishes are nested: hemibrain has 230 regions, of which 63 tile the brain without overlap; male CNS has 5,619, of which 144 do. With `Primary regions only` ticked (the default) you only see the regions that tile the brain. Untick it if you want to compare the sub-compartments of a single neuropil.
+
+> [!WARNING] Unticking downloads more meshes
+> The two sets of regions are cached separately. Switching back to the primary regions is instant,
+> but switching away has to download the meshes for every additional region, one request each. For
+> lists longer than a few hundred regions the card asks you to confirm first. For male CNS's 5,619
+> regions that is a much longer wait than for its 144, and nothing is cached until the download
+> has finished.
+
+## Zooming in
+
+In the expanded view, a dashboard cell or the pinned dock you can scroll to zoom and drag to pan. `⤢` or a double-click takes you back to the whole brain. Labels stay the same size as you zoom; instead, more regions get a label as you zoom into a crowded area.
+
+## Caching
+
+Region meshes are downloaded once and then cached. To keep the cache small, only the frontal, dorsal and lateral outlines are stored.

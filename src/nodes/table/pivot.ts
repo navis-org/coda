@@ -30,11 +30,11 @@ registerNode({
   label: 'Pivot',
   category: 'transform',
   description:
-    'Reshape a long table into a matrix of rows × columns, as a matrix and a wide table. The wide ' +
-    "table's columns are the distinct values found in the Columns field, so nothing can name them " +
-    'until it has run.',
+    "Reshape a long table into a matrix of rows × columns, output both as a matrix and as a wide table. The wide table's columns are the distinct values found in the Columns field, so they are known only after a run.",
   guide:
-    'Reshape a long table into rows × columns — the step between a connectivity result and a heatmap. Emits both shapes of the same pivot: a Matrix for heatmaps and normalization, the same thing wide as a Table for sorting, filtering, and export — they never disagree.',
+    'Reshapes a long table into a matrix, aggregating one column for every pair of row and ' +
+    'column values (e.g. preType × postType, summing weight). The Matrix output goes to a ' +
+    'Heatmap, Normalize or Linkage; the Table output holds the same numbers as a wide table.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [
@@ -71,11 +71,13 @@ registerNode({
     const rows = ctx.column('rows')
     const cols = ctx.column('columns')
     if (rows && cols && rows === cols) {
-      issues.push('Rows and Columns point at the same column')
+      issues.push(
+        '`Rows` and `Columns` are the same column. Pick a different column for one of them.',
+      )
     }
     const agg = String(ctx.params.agg) as AggFn
     if (agg !== 'count' && !ctx.column('value'))
-      issues.push(`"${agg}" needs a numeric value column`)
+      issues.push(`"${agg}" needs a numeric column. Pick one in \`Of column\`.`)
     return issues
   },
 
@@ -84,7 +86,7 @@ registerNode({
     if (!isTableValue(table)) throw new Error('Input is not a table')
     const rows = ctx.column('rows')
     const cols = ctx.column('columns')
-    if (!rows || !cols) throw new Error('Pick both a row and a column field')
+    if (!rows || !cols) throw new Error('Pick a column for both `Rows` and `Columns`.')
     /*
      * A refusal rather than the warning `validate` already carries, because a field pivoted
      * against itself can only be a diagonal — there is no partial result worth returning.
@@ -96,8 +98,8 @@ registerNode({
      */
     if (rows === cols) {
       throw new Error(
-        `Rows and Columns are both "${rows}", which pivots the field against itself and ` +
-          `can only give a diagonal. Pick a different Columns field.`,
+        `\`Rows\` and \`Columns\` are both "${rows}", so the result would only have values on ` +
+          `the diagonal. Pick a different column for \`Columns\`.`,
       )
     }
     const agg = String(ctx.params.agg) as AggFn

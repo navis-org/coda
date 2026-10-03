@@ -1,4 +1,6 @@
-The fish2 neurons matched to a set of ZapBench cells, as a neuron table ready for [Skeletons](#neuron.skeletons), [Meshes](#neuron.meshes) or any node that takes neurons.
+## What ZapBench to Neurons does
+
+ZapBench to Neurons looks up the fish2 neurons that match a set of ZapBench cells, and returns them as a neuron table. You can feed that into [Skeletons](#neuron.skeletons), [Meshes](#neuron.meshes) or any other node that takes neurons.
 
 ```coda-graph
 caption: Cells typed by id, drawn as meshes.
@@ -12,31 +14,31 @@ zn -> mesh:neurons
 mesh -> v3d:meshes
 ```
 
-For cells picked on a Heatmap, see the figure on [ZapBench Traces](#zapbench:traces).
+To go from cells you picked on a [Heatmap](#out.heatmap), see the figure on [ZapBench Traces](#zapbench:traces).
 
-## Cells in
+## Specifying cells
+
+You can wire a table into `Cells`, type ids into `Cell IDs`, or both. Each cell is looked up only once: typed ids come first, then the ones from the wired column.
 
 ```coda-params
 zapbench:neurons: column, ids
 ```
 
-Cells come from the wired `Cells` table, from `Cell IDs`, or both. Each cell is looked up once: typed ids first, then the wired column.
+- **From a Heatmap:** `Cell column` defaults to `label`, which is the column a Heatmap's `Selected Rows` carries. A label like `40211+40212` is read as each of the cells it lists, so a row selected at a reduced scale looks up every cell it averages.
+- **From a table:** a `zapbenchId` column works too.
+- **Ranges:** a range like `5000-5100` includes both ends.
+- **Invalid ids:** ids outside 1–71,721 are refused. Numbers above a million are flagged, because they are most likely neuron ids rather than cell ids.
 
-- **From a Heatmap.** `Cell column` defaults to `label`, the column a Heatmap's `Selected Rows` carries. A label like `40211+40212` is read as each of its cells, so a bin selected at reduced scale looks up every cell it averages.
-- **From a table.** A `zapbenchId` column works too.
-- **Ranges.** A range like `5000-5100` includes both ends.
-- **Out of range.** Ids outside 1–71,721 are refused, and numbers above a million are flagged as likely neuron ids.
+## How the lookup works
 
-## What it reads
+Nothing is read from the ZapBench bucket. Instead, the node asks neuPrint for the fish2 neurons whose `zapbenchId` is in your list, one query per 5,000 cells. For this you need a Dataset wired to fish2 and the same neuPrint token that every other neuPrint node uses. Other datasets are refused, because none of them has a `zapbenchId`.
 
-Nothing comes from the ZapBench bucket. The node sends one neuPrint query per 5,000 cells, for the fish2 neurons whose `zapbenchId` is in the list. It needs a Dataset wired to fish2 and the neuPrint token every neuPrint node uses. Other datasets are refused, since none carries `zapbenchId`.
+The output has fish2's neuron columns, the same as [Find Neurons](#neuron.findNeurons) returns, with rows in the order of your cells.
 
-The output has fish2's neuron columns, as Find Neurons returns them, with rows in the order of the cells.
+> [!NOTE] Population filters are ignored
+> Every matched neuron is returned, regardless of which checkboxes are ticked on the Dataset node.
 
-> [!NOTE] The dataset's population filters do not apply
-> Every matched body is returned, whatever the Dataset node's checkboxes say.
-
-62,178 of the 71,721 cells have an EM neuron. The rest are counted in a warning, not treated as errors.
+62,178 of the 71,721 cells have a matching EM neuron. Cells without one are counted in a warning rather than treated as errors.
 
 ## Data and credit
 

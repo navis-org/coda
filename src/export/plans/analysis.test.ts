@@ -79,10 +79,12 @@ describe('embedPlan', () => {
 
   it('refuses no route and several routes before anything else', () => {
     expect(embed(settings).refusal).toMatch(
-      /^This Embedding cannot be translated: Wire one of Matrix, Features, Neighbours:/,
+      /^This Embedding cannot be translated: Wire one of `Matrix`, `Features`, `Neighbours`:/,
     )
     const both = embed(settings, { matrix: 'm', features: 'f' })
-    expect(both.refusal).toMatch(/^This Embedding cannot be translated: Matrix and Features/)
+    expect(both.refusal).toMatch(
+      /^This Embedding cannot be translated: `Matrix` and `Features` are wired at once/,
+    )
   })
 
   it('refuses a route with unpicked columns on the input, not on the plan', () => {
@@ -243,14 +245,16 @@ describe('linkagePlan', () => {
 
 describe('cutPlan', () => {
   it('refuses the mixed mode and reads the one control each other mode shows', () => {
-    expect(cutPlan({ mode: 'mixed', count: 4 }).refusal).toMatch(/^This Cut Tree groups by/)
+    expect(cutPlan({ mode: 'mixed', count: 4 }).refusal).toMatch(
+      /^This Cut Tree groups clusters by/,
+    )
     // A height cut carries the note both documents write beside it; a count cut has nothing.
     expect(cutPlan({ mode: 'height', height: 0.6, count: 4 })).toEqual({
       by: 'height',
       at: 0.6,
       note:
-        'Cutting at a height gives however many groups fall out below it, which may be one ' +
-        'if the height is above the top of the tree.',
+        'Cutting at a height gives as many groups as fall below it. If the height is above ' +
+        'the top of the tree, that is a single group.',
     })
     expect(cutPlan({ mode: 'count', height: 0.6, count: 4 })).toEqual({ by: 'count', at: 4 })
   })
@@ -303,7 +307,7 @@ describe('the smaller analysis plans', () => {
     })
     expect(
       plan({ ...params, [landmarkParamId('target', LANDMARK_AXES[2]!)]: '' }).refusal,
-    ).toBe('Landmark Transform has unset coordinate columns — pick all six.')
+    ).toBe('Landmark Transform has unset coordinate columns. Pick all six.')
   })
 
   it('note a Matches direction read off the matrix, and no other', () => {

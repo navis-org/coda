@@ -50,16 +50,18 @@ import { ANY_OPTION, datasetInfoFromType, schemasFromType } from '../lib/dataset
  * The caption names the population every time.
  */
 const STATUS_HELP =
-  'Which neurons the counts are over. Empty means every neuron the dataset publishes, which is what the index carries — unlike Find Neurons, which defaults to Traced.'
+  'Which neurons the counts cover. Empty counts every neuron the dataset publishes, including untraced ones.'
 
 registerNode({
   type: 'out.datasetSummary',
   label: 'Dataset Summary',
   category: 'visualisation',
   description:
-    'What is in a dataset: neuron counts, how they are classified, and how completely each region is traced.',
+    'Overview of a dataset: neuron counts, how they are classified, and how completely each region is traced.',
   guide:
-    'High-level summary of what’s in the dataset: neuron counts, annotations, reconstruction completeness and so on. What can be shown depends on the input dataset.',
+    'An overview of a dataset: neuron counts, how they are classified, the most numerous cell ' +
+    'types and how completely each region is reconstructed. Wire a dataset node into it; ' +
+    'neuPrint datasets show the most, other backends only what they publish.',
   cost: 'cheap',
   // Profile's box. The two are the same kind of card — a grid of tiles read at a glance — and a
   // summary that opened narrower than the thing it is a sibling of would read as less important.
@@ -125,7 +127,7 @@ registerNode({
       id: 'chartsMode',
       kind: 'enum',
       label: 'Chosen charts',
-      help: 'Whether the fields above are added to the automatic charts or replace them. Only the automatic set can be replaced.',
+      help: 'Whether the fields above are "added to the automatic ones" or make up "the whole list".',
       default: 'add',
       absentMeans: 'replace',
       options: [
@@ -176,7 +178,7 @@ registerNode({
       id: 'completenessMeasure',
       kind: 'enum',
       label: 'Completeness',
-      help: 'Which half of a synapse the region chart reports. Postsynaptic bounds what a connectivity query can see.',
+      help: 'Which side of each synapse the region chart reports. "Postsynaptic" shows how much a connectivity query can see.',
       default: 'post',
       options: [
         { value: 'post', label: 'Postsynaptic' },
@@ -210,7 +212,7 @@ registerNode({
       id: 'refresh',
       kind: 'int',
       label: 'Refresh',
-      help: "Bumped by the card's reload button. Re-downloads the dataset index instead of reading the cached copy.",
+      help: "Set by the card's reload button. Re-downloads the dataset index instead of using the cached copy.",
       default: 0,
       min: 0,
       presentational: true,

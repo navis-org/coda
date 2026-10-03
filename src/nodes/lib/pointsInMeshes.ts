@@ -136,15 +136,14 @@ export function columnClash(
     ? {
         severity: 'error',
         message:
-          `Column "${name}" holds ids and a same-named column is written over in place — so ` +
-          'this would replace them with region names and leave every join downstream matching ' +
-          'nothing. Pick another name.',
+          `Column "${name}" holds ids, and this node would overwrite it with region names, so ` +
+          'every join downstream would match nothing. Pick another name for `Column`.',
       }
     : {
         severity: 'warning',
         message:
-          `These points already carry a column called "${name}", and it is written over in ` +
-          'place rather than added beside. Rename this one if you meant to keep both.',
+          `These points already carry a column called "${name}", and this node will overwrite ` +
+          'it. To keep both, pick another name for `Column`.',
       }
 }
 
@@ -325,12 +324,11 @@ export function warnRayCount(ctx: Warner, rays: number, volumes: number): void {
     count: rays,
     threshold: RAY_WARN,
     unit: 'ray casts',
-    control: 'the work this node is usually asked for',
+    control: 'the usual amount of work for this node',
     cost:
-      `Each ray is one descent of a volume's triangle tree: ` +
-      `${describeDuration(rays / RAYS_PER_SECOND)}, single-threaded, against the ` +
-      `${volumes.toLocaleString()} volumes whose bounding box contains the point. ` +
-      `Filtering the Volumes wire moves this most.`,
+      `That is ${describeDuration(rays / RAYS_PER_SECOND)}, single-threaded, against the ` +
+      `${volumes.toLocaleString()} volumes whose bounding box contains a point. ` +
+      `Wiring fewer volumes into \`Volumes\` helps most.`,
   })
 }
 
@@ -354,8 +352,8 @@ export function checkPointFrame(
         { left: 'The points', right: 'the volumes' },
         {
           units:
-            'Tested against each other at that scale every point falls outside every volume, ' +
-            'so the result would be an empty Inside port rather than an error.',
+            'At that scale every point would fall outside every volume, and `Inside` would ' +
+            'come out empty without an error.',
           space: 'Nothing would be found inside anything.',
         },
       )

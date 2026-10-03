@@ -278,7 +278,7 @@ describe('cost', () => {
     const { warnings } = await run(neurons(rows), { condition: WHOLE_RECORDING_ID })
     const cost = warnings.find((w) => /512-neuron blocks/.test(w))
     expect(cost).toMatch(/6 of the array’s 512-neuron blocks/)
-    expect(cost).toMatch(/narrowing Condition is what makes it smaller/)
+    expect(cost).toMatch(/pick a narrower `Condition` to make the read smaller/)
     /*
      * Bytes as a formatted size, never the raw count. Routed through `warnOverThreshold` this
      * read announced "580,902,912 bytes to read is past the size a ZapBench read is worth
@@ -425,7 +425,7 @@ describe('keeping neurons that have no ZapBench id', () => {
     )
     const zero = await run(neurons(rows), { condition: 'dark', unmatched: 'zero' })
     expect(zero.warnings.find((w) => /carry no ZapBench id/.test(w))).toMatch(
-      /nothing downstream can tell from a measurement/,
+      /kept as zeros, which look like real measurements/,
     )
   })
 

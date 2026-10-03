@@ -273,7 +273,7 @@ describe('what it says on the card', () => {
       { column: 'kind', op: 'eq', value: 'label' },
       { in: network, seed: T.table(tableSchema(column('node', 'str'))) },
     )
-    expect(found.join(' ')).toMatch(/Seed: pick the column/)
+    expect(found.join(' ')).toMatch(/`Seed ids` is empty. Pick the column/)
   })
 
   it('refuses an operator somebody chose that the column type does not offer', () => {

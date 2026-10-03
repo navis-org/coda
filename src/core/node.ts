@@ -1909,7 +1909,7 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
       if (p.optional) continue
       const dtypes = dtypesOf(p, ctx.params)
       const restriction = dtypes ? ` of type ${dtypes.join('/')}` : ''
-      issues.push(`No columns${restriction} available for "${p.label}"`)
+      issues.push(`No columns${restriction} available for \`${p.label}\`.`)
       continue
     }
     if (p.kind === 'column') {
@@ -1943,24 +1943,25 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
           columnSchemaFor(p, ctx.inputs, ctx.params)?.columns.some(
             (c) => c.name === stored && !dtypes.includes(c.dtype),
           ) === true
-        const gone = narrowed && dtypes ? `is not ${dtypes.join('/')}` : 'is gone'
+        const gone = narrowed && dtypes ? `is not ${dtypes.join('/')}` : 'is missing'
         if (p.optional) {
-          if (stored !== p.default) issues.push(`Column "${stored}" ${gone}`)
+          if (stored !== p.default) issues.push(`Column "${stored}" ${gone}.`)
         } else if (stored !== p.default) {
           issues.push(
             narrowed
-              ? `Column "${stored}" ${gone}, which "${p.label}" needs`
-              : `Missing column: ${stored}`,
+              ? `Column "${stored}" ${gone}, which \`${p.label}\` needs.`
+              : `Column "${stored}" is missing from the input.`,
           )
         } else if (!narrowed) {
-          issues.push(`Column "${stored}" is gone — using "${available[0]}"`)
+          issues.push(`Column "${stored}" is missing, so "${available[0]}" is used instead.`)
         }
       }
     } else {
       const stored = ctx.params[p.id]
       if (Array.isArray(stored)) {
         const missing = stored.filter((n) => !available.includes(n))
-        if (missing.length) issues.push(`Missing column(s): ${missing.join(', ')}`)
+        if (missing.length)
+          issues.push(`Columns missing from the input: ${missing.join(', ')}.`)
       }
     }
   }

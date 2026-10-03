@@ -134,7 +134,7 @@ export function carryParam(noun: CarryNoun): ColumnsParam {
     default: [],
     help:
       `Columns of the incoming neuron table to carry onto the ${PLURAL[noun]}, matched by ` +
-      'neuronId — a cell type or an annotation for Split Neurons, the 3D View and Download. ' +
+      'neuronId, e.g. a cell type for Split Neurons, the 3D View or Download. ' +
       'A carried column replaces one of the same name.',
   }
 }

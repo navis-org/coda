@@ -68,7 +68,7 @@ function requireExactIds(types: readonly string[], columns: EdgeColumnChoice): v
     if (FLOAT_TYPES.test(type)) {
       throw new Error(
         `The ${role} column is ${type}, so its ids were rounded when the file was ` +
-          `written — an eighteen-digit id cannot survive a float column. Re-export it as ` +
+          `written (a float column cannot hold an eighteen-digit id exactly). Re-export it as ` +
           `an integer or as text.`,
       )
     }

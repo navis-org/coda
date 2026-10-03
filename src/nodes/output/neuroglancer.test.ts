@@ -388,7 +388,7 @@ describe('guard rails', () => {
 
     expect(layersOf(scene)[1]!['segments']).toEqual(['10001', '10002'])
     expect(said.join(' ')).toMatch(/4 of 6 rows/)
-    expect(said.join(' ')).toMatch(/plain whole numbers only/)
+    expect(said.join(' ')).toMatch(/only accepts ids that are plain whole numbers/)
   })
 
   it('refuses a wide id rather than printing a different neuron', async () => {

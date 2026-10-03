@@ -124,18 +124,18 @@ function distance(a: [number, number], b: [number, number]): number {
 
 describe('the Embedding node', () => {
   it('refuses to guess when nothing, or more than one thing, is wired', () => {
-    expect(validateWith({})[0]).toMatch(/Wire one of Matrix, Features, Neighbours/)
+    expect(validateWith({})[0]).toMatch(/Wire one of `Matrix`, `Features`, `Neighbours`/)
     // Not a precedence: on an expensive node, silently picking one would put a picture on the
     // canvas computed from an input it ignored.
     const both = validateWith({ matrix: { kind: 'matrix' }, features: { kind: 'table' } })
-    expect(both[0]).toMatch(/Matrix and Features are wired at once/)
+    expect(both[0]).toMatch(/`Matrix` and `Features` are wired at once/)
   })
 
   it('refuses a Min distance above the Spread it packs within', () => {
     // umap-learn refuses this outright; umap-js does not, so an unfittable pair there comes
     // back as an arrangement that merely looks wrong.
     const issues = validateWith({ matrix: { kind: 'matrix' } }, { minDist: 0.9, spread: 0.2 })
-    expect(issues[0]).toMatch(/Min distance cannot exceed Spread/)
+    expect(issues[0]).toMatch(/`Min distance` cannot be larger than `Spread`/)
   })
 
   it('embeds a score matrix, one row per observation, in the matrix’s own order', async () => {

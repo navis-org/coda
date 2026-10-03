@@ -59,9 +59,9 @@ describe('familyChainHint', () => {
     const warning = familyChainHint(flywire, undefined)
     // Pinned whole: this is the wording that was asked for, assembled from three declarations.
     expect(warning?.message).toBe(
-      'Cell types come from the hierarchical_neuron_annotations CAVE table, an outdated cut of ' +
-        'the FlyWire annotations: later typing and corrections are missing, and it has no ' +
-        'community tags. Click button below to wire in the recommended FlyWire annotations.',
+      'Cell types come from the hierarchical_neuron_annotations CAVE table, an outdated version ' +
+        'of the FlyWire annotations. It is missing later typing and corrections, and it has no ' +
+        'community tags. Click the button below to wire in the recommended FlyWire annotations.',
     )
     expect(warning?.fix).toEqual(
       expect.objectContaining({ label: ATTACH_CHAIN_LABEL, action: 'attachAnnotationChain' }),
@@ -76,8 +76,8 @@ describe('familyChainHint', () => {
     const minnie = datasetFamily('minnie65')
     const hint = familyChainHint(minnie, undefined)
     expect(hint?.message).toBe(
-      'No cell types without annotations: MICrONS types its cells in CAVE tables rather than on ' +
-        'the neuron. Click button below to wire in the recommended MICrONS cell types.',
+      'No cell types without annotations: MICrONS keeps its cell types in separate CAVE tables. ' +
+        'Click the button below to wire in the recommended MICrONS cell types.',
     )
     expect(hint?.fix).toEqual(
       expect.objectContaining({ label: ADD_CHAIN_LABEL, action: 'attachAnnotationChain' }),

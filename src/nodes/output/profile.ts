@@ -74,16 +74,13 @@ registerNode({
    * one-liner the palette shows.
    */
   description:
-    'Inspect one neuron at a time: identity, partners by type, regions, transmitter and shape. ' +
-    'Set Group by to a column and it profiles whole groups instead — one cell type per page, ' +
-    'every number a mean with a spread across the members.',
+    'Inspect one neuron at a time: identity, partners by type, regions, transmitter and shape. Set Group by to a column to profile whole groups instead, e.g. one cell type per page, with each number a mean and spread across the members.',
   // Capped at 400 characters — `help.test.ts` holds it to being a TL;DR rather than the page.
   guide:
-    'Inspect one neuron at a time: identity, partners by type in both directions, synapses by ' +
-    'region, transmitter, and a 3D view. Set Group by to a column and it pages those groups ' +
-    'instead — a cell type, a hemilineage, a cluster — every number a mean with its spread. ' +
-    'Paging is free; pinning sends what you are looking at, a whole type when grouped, out of ' +
-    'the Current port and marks the graph stale.',
+    'Summarises one neuron at a time: identity, partners by type, synapses per region, ' +
+    'transmitter and shape. Set Group by to e.g. a type column to page through whole groups ' +
+    'instead, with means and spreads. Usually fed from Explore Dataset; pinned neurons come out ' +
+    'of Current.',
   cost: 'cheap',
   defaultSize: { width: 560, height: 620 },
   inputs: [
@@ -106,7 +103,7 @@ registerNode({
       id: 'page',
       kind: 'int',
       label: 'Neuron',
-      help: 'Which neuron of the incoming table is shown. Browsing never invalidates anything.',
+      help: 'Which neuron of the incoming table is shown. Browsing re-runs nothing.',
       default: 0,
       min: 0,
       // The whole point of the pin: paging is looking, not deciding, so it stays out of the
@@ -142,7 +139,7 @@ registerNode({
       kind: 'column',
       label: 'Group by',
       from: 'neurons',
-      help: 'Profile every neuron sharing this column’s value together — means and spreads across a cell type. Leave empty for one neuron at a time.',
+      help: 'Profile all neurons sharing this column’s value together, e.g. a cell type. Leave empty for one neuron at a time.',
       default: '',
       optional: true,
       presentational: true,
@@ -157,7 +154,7 @@ registerNode({
       kind: 'ids',
       label: 'Pinned',
       noun: 'neurons',
-      help: 'The neurons the Current port emits. Written by the widget’s pin control — one neuron, or every member of the group when Group by is set.',
+      help: 'The neurons the Current output emits. Set by the pin control: one neuron, or the whole group when `Group by` is set.',
       default: [],
     },
     {
@@ -188,7 +185,7 @@ registerNode({
       id: 'minWeight',
       kind: 'int',
       label: 'Min synapses',
-      help: 'Partner connections below this are left out of the lists and the counts. Every heading says which threshold it counted at.',
+      help: 'Partner connections below this are left out of the lists and counts.',
       default: 1,
       min: 1,
       step: 1,
@@ -208,7 +205,7 @@ registerNode({
       id: 'countBy',
       kind: 'enum',
       label: 'Count by',
-      help: 'What the partner lists count: every synapse, or a property the dataset publishes on each connection — on fish2, weightAxonDendrite counts only axon→dendrite synapses. Min synapses applies to the chosen count.',
+      help: 'What the partner lists count: synapses, or a connection property the dataset publishes (e.g. `weightAxonDendrite` on fish2). `Min synapses` applies to this count.',
       default: WEIGHT_PROPERTY,
       optionsWithoutPeek: true,
       options: (ctx) => weightPropertyOptions(ctx.inputs.dataset),

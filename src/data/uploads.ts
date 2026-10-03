@@ -130,7 +130,7 @@ const UPLOAD_NOUNS: Record<UploadMeta['kind'], UploadNoun> = {
 /** The badge a `validate` returns: a clause, because the card draws it under the node's name. */
 export function uploadMissingBadge(fileName: string, kind: UploadMeta['kind']): string {
   const noun = UPLOAD_NOUNS[kind]
-  return `${fileName || noun.unnamed} is not stored in this browser — pick ${noun.file} again`
+  return `${fileName || noun.unnamed} is not stored in this browser. Pick ${noun.file} again`
 }
 
 /**
@@ -152,7 +152,7 @@ export function uploadMissingReason(
       : `pick ${noun.file} again on this node to restore ${noun.them}`
   return (
     `“${fileName || noun.unnamed}” is not stored in this browser. Uploaded ` +
-    `${noun.held} stay on the machine that uploaded them — ${remedy}.`
+    `${noun.held} stay on the machine that uploaded them, so ${remedy}.`
   )
 }
 

@@ -127,7 +127,9 @@ describe('cleanOps — units, and when they matter', () => {
     expect(usesDistance({ ...OFF, smooth: 2 })).toBe(true)
     expect(usesDistance({ ...OFF, heal: true, healMaxDist: 5 })).toBe(true)
     expect(usesDistance({ ...OFF, method: 'resample', spacing: 1 })).toBe(true)
-    expect(() => checkCleanUnits({ units: 'voxels' }, true)).toThrow(/not nanometres/)
+    expect(() => checkCleanUnits({ units: 'voxels' }, true)).toThrow(
+      /are in voxels, so a distance in micrometres cannot be applied/,
+    )
   })
 
   it('does not count healing with no limit as a distance', () => {
@@ -263,7 +265,7 @@ describe('cleanOps — the resample ceiling', () => {
     const said: string[] = []
     checkResampleSize({ warn: (m) => said.push(m) }, cable(), 0.1 * NM_PER_UM)
     expect(said.join(' ')).toMatch(/nodes after resampling/)
-    expect(said.join(' ')).toMatch(/0.1 µm Spacing/)
+    expect(said.join(' ')).toMatch(/0.1 µm `Spacing`/)
   })
 
   it('still refuses the one spacing that has no geometry on the other side of it', () => {
@@ -353,12 +355,16 @@ describe('neuron.cleanSkeletons — types and params', () => {
   }
 
   it('says so when nothing is switched on', () => {
-    expect(validate({ method: 'none' })).toMatch(/passes the skeletons through/)
+    expect(validate({ method: 'none' })).toMatch(/skeletons pass through unchanged/)
   })
 
   it('catches a spacing that was typed in nanometres', () => {
-    expect(validate({ method: 'resample', spacing: 500 })).not.toMatch(/micrometres, not/)
-    expect(validate({ method: 'resample', spacing: 0.001 })).toMatch(/micrometres, not/)
+    expect(validate({ method: 'resample', spacing: 500 })).not.toMatch(
+      /check you did not enter nanometres/,
+    )
+    expect(validate({ method: 'resample', spacing: 0.001 })).toMatch(
+      /check you did not enter nanometres/,
+    )
   })
 })
 

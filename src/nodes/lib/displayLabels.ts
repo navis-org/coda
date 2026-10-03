@@ -170,8 +170,8 @@ export function labelPickerIssues(
   const label = ctx.column('labelColumn')
   if (!match || !label) {
     return [
-      `Annotations is wired but Match on and Label by are not both set, so the ` +
-        `${noun.plural} keep the labels they arrived with.`,
+      `\`Annotations\` is wired, but \`Match on\` and \`Label by\` are not both set, so the ` +
+        `${noun.plural} keep the labels they arrived with. Set both to use the annotations.`,
     ]
   }
 
@@ -187,13 +187,14 @@ export function labelPickerIssues(
      * having wired no annotations at all: hence a line here rather than silence.
      */
     issues.push(
-      `"${match}" is ${key.dtype}: a wide neuron id read as a number has already lost ` +
-        `digits, so those ${noun.plural} keep their own labels.`,
+      `"${match}" is ${key.dtype}, and a long neuron id stored as a number has already lost ` +
+        `digits, so those ${noun.plural} keep their own labels. Match on a text id column instead.`,
     )
   }
   if (match === label) {
     issues.push(
-      `Match on and Label by are both "${match}" — every ${noun.singular} keeps its own name`,
+      `\`Match on\` and \`Label by\` are both "${match}", so every ${noun.singular} keeps its ` +
+        `own name. Pick a different column for \`Label by\`.`,
     )
   }
   return issues

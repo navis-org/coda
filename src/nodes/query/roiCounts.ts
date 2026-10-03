@@ -19,9 +19,12 @@ registerNode({
   type: 'neuron.roiCounts',
   label: 'ROI Counts',
   category: 'query',
-  description: 'Pre/post synapse counts per ROI for the incoming neurons.',
+  description:
+    'Pre- and postsynapse counts per region for the incoming neurons: one row per neuron and region, with `roi`, `pre` and `post` columns.',
   guide:
-    'Where these neurons put their synapses by region: one row per neuron per ROI, with pre and post separate. Long form composes with Group By and Pivot without needing a separate reshape. Region counts nest—each synapse is counted multiple times—so summing all rows roughly doubles the true total.',
+    'Counts the pre- and postsynapses of the incoming neurons in each brain region, as one row ' +
+    'per neuron per region; summarise it with Group By or Pivot. Regions are nested, so adding ' +
+    'up all rows counts each synapse several times.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },

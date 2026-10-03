@@ -329,7 +329,9 @@ describe('out.scatter — an input whose schema is not known yet', () => {
     // pivot is one numeric column wide and both axes would take it.
     const messages = (warm.nodes['plot']?.issues ?? []).map((i) => i.message)
     // The mock has one status, so the pivot comes out one numeric column wide.
-    expect(messages).toContain('Only "Traced" is numeric — X and Y would be the same column')
+    expect(messages).toContain(
+      'Only "Traced" is numeric, so `X` and `Y` are the same column. Add a second numeric column upstream.',
+    )
     // And nothing about the ID column, which is optional: with no `neuronId` here it means
     // row positions, not drift to be reported.
     expect(messages.some((m) => m.includes('neuronId'))).toBe(false)
@@ -365,8 +367,8 @@ describe('out.scatter — what it warns about once it can see', () => {
     // saying the same thing is how a list of issues stops being read.
     const reported = issues(narrowed(['type']), 'plot')
     expect(reported).toEqual([
-      'No columns of type i64/f64 available for "X"',
-      'No columns of type i64/f64 available for "Y"',
+      'No columns of type i64/f64 available for `X`.',
+      'No columns of type i64/f64 available for `Y`.',
     ])
   })
 
@@ -395,9 +397,9 @@ describe('out.scatter — what it warns about once it can see', () => {
     })
     g = addEdge(g, { source: 'em', sourceHandle: 'out', target: 'plot', targetHandle: 'in' })
     expect(issues(g, 'plot')).toEqual([
-      'Column "pre" is gone — using "umap1"',
-      'Column "post" is gone — using "umap1"',
-      'X and Y are both "umap1", which draws a diagonal — pick a different Y',
+      'Column "pre" is missing, so "umap1" is used instead.',
+      'Column "post" is missing, so "umap1" is used instead.',
+      '`X` and `Y` are both "umap1", which draws a diagonal line. Pick a different column for `Y`.',
     ])
   })
 
@@ -406,8 +408,8 @@ describe('out.scatter — what it warns about once it can see', () => {
     // a non-optional picker does reach for the first column, so that message is honest here
     // in a way it never was for the optional ID column.
     expect(issues(narrowed(['type', 'pre']), 'plot')).toEqual([
-      'Column "post" is gone — using "pre"',
-      'Only "pre" is numeric — X and Y would be the same column',
+      'Column "post" is missing, so "pre" is used instead.',
+      'Only "pre" is numeric, so `X` and `Y` are the same column. Add a second numeric column upstream.',
     ])
   })
 

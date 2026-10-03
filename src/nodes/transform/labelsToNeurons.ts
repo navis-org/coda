@@ -64,7 +64,7 @@ function define(flavour: Flavour): NodeDefinition {
         label: 'Label column',
         from: 'labels',
         default: 'label',
-        help: 'Which column names the neurons. Both the Dendrogram and Cut Tree call it "label", which is what a matrix axis carried — a neuron id unless NBLAST was told otherwise.',
+        help: 'The column holding the labels. Dendrogram and Cut Tree both call it `label`.',
       },
       {
         id: 'matchColumn',
@@ -72,7 +72,7 @@ function define(flavour: Flavour): NodeDefinition {
         label: 'Match on',
         from: 'neurons',
         default: 'neuronId',
-        help: 'Which column of the wired neuron table a label is compared with. Set it to the same column NBLAST used for "Label by" — "type" where the tree is labelled by cell type. Compared as text.',
+        help: 'The column of the neuron table the labels are matched against. Use the column NBLAST used for `Label by`, e.g. `type`.',
       },
       {
         id: 'suffix',
@@ -120,16 +120,16 @@ function define(flavour: Flavour): NodeDefinition {
         !labels.columns.some((c) => c.name === flavour.expects)
       ) {
         issues.push(
-          `No "${flavour.expects}" column on the input, so nothing downstream can colour by ` +
-            `it. Wire the Clusters output of a Cut Tree.`,
+          `The input has no "${flavour.expects}" column, so nothing downstream can colour by ` +
+            `it. Wire in the \`Clusters\` output of a Cut Tree.`,
         )
       }
       // Without a neuron table the labels have to *be* neuron ids, which is only true when
       // NBLAST was left to label by id. Said here because the alternative is an empty result.
       if (!ctx.inputs.neurons) {
         issues.push(
-          'No Neurons wired, so the labels are read as neuron ids. Wire the neuron table that ' +
-            'was clustered if the tree is labelled by anything else.',
+          'Nothing is wired into `Neurons`, so the labels are read as neuron ids. If the tree is ' +
+            'labelled by anything else, wire in the neuron table you clustered.',
         )
       }
       return issues
@@ -160,12 +160,11 @@ define({
   label: 'Selected to Neurons',
   inputLabel: 'Selected',
   description:
-    'Turn a Dendrogram selection into neurons. The selection’s columns ride along, and one whose name the neuron table already uses is suffixed `_c`.',
+    'Turn a Dendrogram selection into neurons. The selection’s columns are carried along, and any whose name the neuron table already uses is suffixed `_c`.',
   guide:
-    'A Dendrogram selects branch names, not neurons. This turns those names back into the ' +
-    'clustered neurons, ready for Neuroglancer, a 3D view, or Skeletons. Wire the original ' +
-    'neuron table and set "Match on" to what NBLAST used for "Label by"; if it was neuron ' +
-    'id (the default), leave Neurons unwired.',
+    'Turns the leaf names selected in a Dendrogram back into neurons, ready for Neuroglancer, ' +
+    'a 3D View or Skeletons. Wire the neuron table you clustered and set Match on to the column ' +
+    'NBLAST used for Label by; if that was neuron id (the default), leave Neurons unwired.',
 })
 
 define({
@@ -174,10 +173,9 @@ define({
   inputLabel: 'Clusters',
   expects: 'cluster',
   description:
-    'Put cluster numbers back onto the neurons they belong to. `cluster`, `order` and `size` ride along, and a column whose name the neuron table already uses is suffixed `_c`.',
+    'Put cluster numbers back onto the neurons they came from. `cluster`, `order` and `size` are carried along, and any column whose name the neuron table already uses is suffixed `_c`.',
   guide:
-    'Cut Tree gives cluster numbers for leaf names, not neurons. This maps those clusters ' +
-    'back onto the neurons they came from, so Neuroglancer can colour by cluster, Filter ' +
-    'can isolate a group, or Group By can count. Wire the original neuron table and set ' +
-    '"Match on" to what NBLAST used for "Label by".',
+    'Maps the cluster numbers from Cut Tree back onto the neurons they came from, e.g. to colour ' +
+    'by cluster in Neuroglancer. Wire the neuron table you clustered into Neurons and set Match ' +
+    'on to the column NBLAST used for Label by.',
 })

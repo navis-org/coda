@@ -100,7 +100,7 @@ export interface ThresholdWarning {
 export function warnOverThreshold(ctx: Warner, w: ThresholdWarning): void {
   ctx.warn(
     `${w.count.toLocaleString()} ${w.unit} is past ${w.control} ` +
-      `(${w.threshold.toLocaleString()}). ${w.cost} Running anyway — cancel if that is ` +
+      `(${w.threshold.toLocaleString()}). ${w.cost} Running anyway; cancel if this is ` +
       `not what you wanted.`,
   )
 }
@@ -141,12 +141,12 @@ export function refuseIfOverCrashFloor(what: string, bytes: number, remedy?: str
 export function crashFloorIssue(
   what: string,
   bytes: number,
-  remedy = 'Cut the shape upstream — filter, group, or split the run.',
+  remedy = 'Reduce the data upstream, for example with a filter or a group-by, or split the run.',
 ): string | undefined {
   if (bytes <= CRASH_FLOOR_BYTES) return undefined
   return (
-    `Refused: ${what} would allocate ${formatBytes(bytes)} at once, past the ` +
-    `${formatBytes(CRASH_FLOOR_BYTES)} a browser tab survives. ${remedy}`
+    `Refused: ${what} would allocate ${formatBytes(bytes)} at once, more than the ` +
+    `${formatBytes(CRASH_FLOOR_BYTES)} a browser tab can hold. ${remedy}`
   )
 }
 

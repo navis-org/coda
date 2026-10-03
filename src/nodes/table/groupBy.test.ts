@@ -128,7 +128,7 @@ describe('the node', () => {
         in: T.table(CONN),
       }),
     )
-    expect(issues).toEqual(['"sum" needs at least one value column'])
+    expect(issues).toEqual(['"sum" needs at least one value column. Pick one in `Of columns`.'])
   })
 
   it('warns about an unset key picker first, since it is the one that refuses', () => {
@@ -137,6 +137,8 @@ describe('the node', () => {
         in: T.table(CONN),
       }),
     )
-    expect(issues).toEqual(['Pick at least one column to group by'])
+    expect(issues).toEqual([
+      'No columns are picked in `Group by`. Pick at least one column to group by.',
+    ])
   })
 })

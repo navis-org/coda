@@ -221,7 +221,7 @@ export function StartPage() {
         {workflows.length > 0 && (
           <Deck
             label="Your workflows"
-            note="saved in this browser · not synced, and cleared with the site data"
+            note="saved in this browser only · clearing the site data deletes them"
             cards={workflows}
             onPick={pick}
           />
@@ -235,14 +235,14 @@ export function StartPage() {
          */}
         <Deck
           label="Start & learn"
-          note="the wizard builds a graph to your question · tours run in place · the Zoo fetches what others shared"
+          note="let the wizard build a workflow for you, take a tour, or open a workflow someone else shared"
           cards={DOOR_CARDS}
           onPick={pick}
         />
 
         <Deck
           label="Preconfigured Datasets"
-          note="real data · add credentials under Connections, the branch icon in the toolbar"
+          note="real data · some need a sign-in, under Connections (the branch icon in the toolbar)"
           cards={datasets}
           onPick={pick}
         />

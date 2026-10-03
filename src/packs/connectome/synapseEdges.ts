@@ -35,9 +35,16 @@ export const synapseEdgesNode = packNode({
   label: 'Synapses to Edges',
   category: 'transform',
   description:
-    'Count a synapse point cloud into a connectivity edge list — `preId`, `postId` and a `weight` that is the number of synapses, under the same column names Connectivity emits. Needs a cloud carrying a partner column, which Synapses Between has and a plain Synapses cloud on neuPrint or CATMAID does not.',
+    'Count a synapse point cloud into a connectivity edge list: `preId`, `postId` and a ' +
+    '`weight` that is the number of synapses, the same column names Connectivity emits; ' +
+    '`Split by` columns follow `weight`. The cloud needs a partner column, which Synapses ' +
+    'Between has and a plain Synapses cloud on neuPrint or CATMAID does not.',
   guide:
-    'Counts a synapse cloud into an edge list: one row per connected pair, with weight the number of synapses between them. It is what turns "here is where they connect" back into "how strongly" — so a cloud narrowed by Points in Volumes gives connectivity restricted to one neuropil, which no backend answers directly. Split by takes extra columns, so splitting on the region column gives one row per pair per region in a single card. The control to read before running is Orientation: a Synapses Between cloud is already oriented, while a plain Synapses cloud says which end its neuron is in a polarity column, and counting that one without flipping merges a neuron’s inputs and outputs.',
+    'Counts a synapse cloud into an edge list with one row per connected pair, weighted by ' +
+    'the number of synapses. After Points in Volumes this gives connectivity within one ' +
+    'region; Split by on a region column gives one row per pair per region. A plain ' +
+    'Synapses cloud needs Orientation set to read its polarity column, or inputs and ' +
+    'outputs are merged.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Points', type: T.points() }],
   outputs: [{ id: 'out', label: 'Edges', type: T.table() }],
@@ -54,7 +61,7 @@ export const synapseEdgesNode = packNode({
       label: 'Presynaptic',
       from: 'in',
       default: 'neuronId',
-      help: 'The id column holding the upstream neuron. On a Synapses Between cloud this is neuronId whatever Location says.',
+      help: 'The id column of the presynaptic neuron. For Synapses Between this is neuronId, whatever its `Location`.',
     },
     {
       id: TARGET_PARAM,
@@ -62,7 +69,7 @@ export const synapseEdgesNode = packNode({
       label: 'Postsynaptic',
       from: 'in',
       default: 'partnerId',
-      help: 'The id column holding the downstream neuron. A Synapses cloud from neuPrint or CATMAID carries none — use Synapses Between.',
+      help: 'The id column of the postsynaptic neuron. Synapses from neuPrint or CATMAID have none; use Synapses Between.',
     },
     /*
      * In the key and not presentational: it decides which way every row is counted.
@@ -81,7 +88,7 @@ export const synapseEdgesNode = packNode({
         { value: 'fixed', label: 'columns are already oriented' },
         { value: 'polarity', label: 'read from a polarity column' },
       ],
-      help: 'A Synapses Between cloud is oriented: neuronId is the source in every row, so leave this alone. A plain Synapses cloud is query-relative — its polarity column says whether the neuron is the pre or the post end — and needs the second reading, or its inputs and outputs are counted as one.',
+      help: 'Which end of each synapse is presynaptic. Leave the default for Synapses Between; for Synapses, pick the second option.',
     },
     {
       id: POLARITY_PARAM,
@@ -91,7 +98,7 @@ export const synapseEdgesNode = packNode({
       default: 'polarity',
       dtypes: ['str'],
       visibleIf: (params) => params[ORIENTATION_PARAM] === 'polarity',
-      help: 'Rows reading "post" are flipped, so the presynaptic column is read as the downstream end. Anything else is left as the pickers say, and counted.',
+      help: 'Rows reading "post" have their two ends swapped. Rows with any other value are left as they are, and their number is reported.',
     },
     {
       id: GROUP_PARAM,
@@ -99,7 +106,7 @@ export const synapseEdgesNode = packNode({
       label: 'Split by',
       from: 'in',
       default: [],
-      help: 'Extra columns to break each pair on. Splitting on the region column Points in Volumes writes gives one row per pair per region — Connectivity’s Split by region, for the backends that have none.',
+      help: 'Extra columns to split each pair by. Use the region column from Points in Volumes for one row per pair per region.',
     },
     /*
      * `advanced`, because their defaults are right on every cloud Coda produces and a card
@@ -153,7 +160,8 @@ export const synapseEdgesNode = packNode({
     const dropped = droppedGroupColumns(plan)
     if (dropped.length > 0) {
       issues.push(
-        `Split by ignores ${dropped.join(', ')}: already carried by this node’s own columns.`,
+        `\`Split by\` ignores ${dropped.join(', ')}, because the output already has ` +
+          `${dropped.length === 1 ? 'that column' : 'those columns'}.`,
       )
     }
     return issues
@@ -162,9 +170,7 @@ export const synapseEdgesNode = packNode({
   evaluate: (ctx) => {
     const points = ctx.input('in')
     if (!isPointsValue(points)) {
-      throw new Error(
-        'Wire a synapse cloud — Synapses Between, or any node handing one on — to Points.',
-      )
+      throw new Error('Wire synapse points into `Points`, for example from Synapses Between.')
     }
     const plan = readPlan(ctx)
     const { table, dropped, unoriented } = synapseEdgesTable(points.attributes, plan)
@@ -177,9 +183,9 @@ export const synapseEdgesNode = packNode({
     }
     if (unoriented > 0) {
       ctx.warn(
-        `${unoriented.toLocaleString()} synapses have a "${plan.polarity}" that reads ` +
-          `neither pre nor post; those rows were counted as the pickers name them. Check ` +
-          `Polarity points at the right column.`,
+        `${unoriented.toLocaleString()} synapses have a "${plan.polarity}" value that is ` +
+          `neither pre nor post, so they were counted as \`Presynaptic\` and ` +
+          `\`Postsynaptic\` name them. Check that \`Polarity\` is set to the right column.`,
       )
     }
     return { out: table }

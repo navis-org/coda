@@ -230,8 +230,8 @@ function HintEditorPanel({ target }: { target: HintTarget }) {
         </div>
       )}
       <p className="hint-editor__note">
-        Saved with the workflow. Anyone opening it can hide a hint for themselves with ×; only
-        Delete removes it for everybody.
+        Hints are saved with the workflow. Anyone can hide a hint for themselves with ×, but
+        only Delete removes it for everyone.
       </p>
       <div className="hint-editor__actions">
         {existing && (

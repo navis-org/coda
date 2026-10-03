@@ -1,4 +1,6 @@
-A dataset assembled from parts, for data no single backend holds: a sheet of cell types, a synapse table on your disk, meshes from a public bucket. Everything below it — Find Neurons, Explore, Connectivity, Skeletons, Synapses — treats the result as one dataset.
+## What Custom Dataset does
+
+Custom Dataset assembles a dataset from parts, for data that no single backend holds. For example: cell types from a spreadsheet, a synapse table on your disk and meshes from a public bucket. Nodes downstream of it ([Find Neurons](#neuron.findNeurons), [Explore](#neuron.explore), [Connectivity](#neuron.connectivity), [Skeletons](#neuron.skeletons), Synapses and so on) treat the result like any other dataset.
 
 ```coda-graph
 caption: Cell types from a sheet, synapses from a local file, geometry from a public bucket.
@@ -14,48 +16,56 @@ seg -> custom:skeletons
 custom -> explore
 ```
 
-## The parts
+## Inputs
 
-Wire only the parts you have; each answers its own questions and nothing else.
+You only need to wire the parts you have. Each part answers its own kind of question and nothing else:
 
-| Socket | Takes | Answers |
-| --- | --- | --- |
-| **Neurons** | a table, one row per neuron | which neurons exist and what they are called: Find Neurons, Explore, labels on every result |
-| **Edges** | a table or a [Link Table](#core.linkTable) file, one row per connection | Connectivity, Adjacency, Paths and the synapse totals behind normalised weights |
-| **Synapses** | a table or a Link Table file, one row per synaptic connection | Synapses and Synapses Between — and connectivity too, counting rows per pair, when nothing is wired into Edges |
-| **Meshes**, **Skeletons** | any dataset: a Neuroglancer Source, neuPrint, CAVE | geometry, fetched from that dataset under the ids you ask for |
+| Input                   | Takes                                                                          | Used for                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `Neurons`               | a table with one row per neuron                                                | which neurons exist and what they are called: Find Neurons, Explore, labels on every result |
+| `Edges`                 | a table or a [Link Table](#core.linkTable) file with one row per connection     | Connectivity, Adjacency, [Paths](#neuron.paths), and the synapse totals behind normalised weights          |
+| `Synapses`              | a table or a Link Table file with one row per synapse                          | Synapses and Synapses Between; also connectivity, if nothing is wired into `Edges`        |
+| `Meshes`, `Skeletons`   | any dataset, e.g. a Neuroglancer Source, neuPrint or CAVE                       | geometry, fetched from that dataset for the ids you ask about                             |
 
-With no Neurons table, the neurons are every id the edge list or synapse table mentions, with no labels.
+Without a `Neurons` table, the neurons are simply all ids that appear in the edge list or synapse table, and they have no labels.
 
-To drop rows from a file part — synapses below a confidence score, say — put a
-[Filter Table](#core.filterTable) between the Link Table and the socket. It is applied to the rows
-each question fetches, so it costs no extra read.
+If `Edges` is empty, connectivity is counted from the synapse table: each row is one synapse, and the number of rows per pair of neurons becomes the weight.
 
-> [!WARNING] The ids must mean the same neurons in every part
-> Nothing here can check that the root ids in your synapse table are the ones the mesh bucket
-> uses. A mesh fetch that comes back empty for every neuron usually means they are not — a
-> different materialization, or a different column.
+To drop rows from a file, e.g. synapses below some confidence score, put a [Filter Table](#core.filterTable) between the Link Table and this node. The filter is applied to the rows each query fetches, so it costs no extra read.
+
+> [!WARNING] Ids must mean the same neurons in every part
+> The node has no way of checking that the root ids in your synapse table are the same ones the
+> mesh bucket uses. If a mesh fetch comes back empty for every neuron, that is usually the reason:
+> a different materialization, or the wrong id column.
 
 ## Picking columns
 
-Each socket's pickers appear once something is wired into it. They never substitute one column for another: a column the table does not have is asked for on the card, naming the one that looks right. `Voxel size` and `Carry columns` are in the inspector.
+Each input's column pickers appear once something is wired into it. If the table does not have a column with the expected name (e.g. `pre` and `post` for an edge list), the node does not guess. Instead, the card asks you to pick one and suggests the column that looks right.
+
+`Weight column` defaults to `weight`. If the edge list has no such column, each row counts as one connection. Clear the picker if that is what you want, e.g. for an edge list with one row per synapse.
+
+`Voxel size` and `Carry columns` are in the inspector. `Voxel size` gives the nanometres per unit of the synapse position columns: leave it at `1, 1, 1` if they are already in nanometres, or use `4, 4, 40` for FlyWire's voxels. `Carry columns` puts extra columns of the synapse table (e.g. a neurotransmitter prediction) onto every synapse point, for colouring and filtering downstream.
 
 ```coda-params
 connectome:customDataset: idColumn, pre, post, weight, synPre, synPost, synPosition, voxelSize, synCarry
 ```
 
+In the `Neurons` table, the id column is renamed `neuronId` and read as text. Rows without a usable id are left out, and if an id appears more than once only the first row is kept; the card warns about both.
+
 ## What is read, and when
 
-The node itself reads nothing, so it runs at once. The questions below it pay:
+The node itself reads nothing, so it runs immediately. The reading happens when a node downstream asks a question:
 
-- **An edge list is read whole** by the first connectivity question, then held for the tab, so every hop after it is answered from memory. After a reload the next question reads it again.
-- **A synapse table is never read whole.** Each Synapses question reads only the rows naming the neurons asked about. From a Link Table file it is as fast as the file's order allows; [Link Table](#core.linkTable) says how to make it fast.
-- **Connectivity counted from a synapse table** is the exception: its `pre` and `post` columns are read whole, once. The card warns when that is more than ten million rows, or when the file does not say how many it holds — which a Feather file never does. Wiring an edge list into Edges spares it.
+- **Edge lists are read in full** by the first connectivity query and then kept in memory for as long as the tab is open, so every further hop is answered without reading again. After a reload, the next query reads the file again.
+- **Synapse tables are never read in full.** Each Synapses query reads only the rows for the neurons it asks about. From a Link Table file this is as fast as the file's row order allows; see [Link Table](#core.linkTable) for how to make it fast.
+- **Connectivity counted from a synapse table** is the exception: its pre and post columns are read in full, once. The card warns you when that means more than ten million rows, or when the file does not say how many rows it holds (Feather files never do). Wiring an edge list into `Edges` avoids this.
 
-Query nodes below a Custom Dataset wait for it to run, since what it holds is only known then.
+Query nodes downstream of a Custom Dataset wait for it to run, because what it contains is only known then.
 
-## What it cannot say
+## Limitations
 
-A synapse table carries no template space, so synapse points claim none. It carries no score Coda knows the scale of, so `Min confidence` on a synapse node is ignored, with a warning. It holds one position per synapse, so `Location` on Synapses Between moves no point.
+- A synapse table carries no template space, so the synapse points don't claim one.
+- Its scores have no scale Coda knows about, so `Min confidence` on a synapse node is ignored (with a warning).
+- It holds one position per synapse, so `Location` on Synapses Between has no effect.
 
-Local files behave as [Link Table](#core.linkTable) and [Upload Table](#core.uploadTable) describe: a shared workflow names them, and a colleague chooses their own copy.
+Local files behave as described for [Link Table](#core.linkTable) and [Upload Table](#core.uploadTable): a shared workflow only records their names, and a colleague opening it has to choose their own copy of each file.

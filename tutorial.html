@@ -32,8 +32,8 @@
     <h1>Next Generation Connectomics Analysis <em>in the Browser</em></h1>
 
     <p class="hero__sub">
-      A browser-based node editor for connectome data. Wire up the steps &mdash; query, traverse,
-      filter, aggregate, plot &mdash; and each one shows its result where it sits.
+      A browser-based node editor for connectome data. Each step of an analysis (query, traverse,
+      filter, aggregate, plot) is a node, and every node shows its result right on the canvas.
     </p>
 
     <div class="hero__meta">
@@ -42,7 +42,7 @@
       <span>~10 minutes</span>
     </div>
 
-    <div class="scrollcue"><span class="scrollcue__line"></span>Scroll &mdash; the graph builds itself</div>
+    <div class="scrollcue"><span class="scrollcue__line"></span>Scroll down to build the graph</div>
   </div>
 </header>
 
@@ -175,7 +175,7 @@
 
         <!-- Anatomy callouts, chapter 1 only -->
         <div class="callout" data-side="l" style="left:48px; top:142px; width:150px; --lead:30px;">what this step does</div>
-        <div class="callout" data-side="r" style="left:428px; top:142px; --lead:30px;">Run &mdash; this node only</div>
+        <div class="callout" data-side="r" style="left:428px; top:142px; --lead:30px;">run this node</div>
         <div class="callout" data-side="l" style="left:48px; top:171px; width:150px; --lead:30px;">inputs</div>
         <div class="callout" data-side="r" style="left:428px; top:171px; --lead:30px;">outputs</div>
         <div class="callout" data-side="r" style="left:428px; top:213px; --lead:30px;">parameters</div>
@@ -195,7 +195,7 @@
           <label class="tb tb--check"><i></i> Auto-run</label>
           <span class="tb tb--run" data-ring="">&#9654; Run 2 <b>&#8679;R</b></span>
         </div>
-        <span class="detail__cap">the whole graph &mdash; everything stale, in order</span>
+        <span class="detail__cap">the whole graph: everything stale, in order</span>
         <span class="detail__or">or</span>
         <div class="detail__node">
           <span>Connectivity</span>
@@ -212,26 +212,27 @@
       <span class="beat__n">Chapter 1</span>
       <h2>A node is one step</h2>
       <p>
-        Every step is a card. <code>Find&nbsp;Neurons</code> runs one query: match a type pattern
-        against a dataset. Here, traced lobula columnar cells &mdash; <code>^LC\d+$</code>.
+        Every step is a card. <code>Find&nbsp;Neurons</code> runs one query: it matches a type
+        pattern against a dataset. Here we ask for traced lobula columnar cells with
+        <code>^LC\d+$</code>.
       </p>
       <p>
-        Inputs left, outputs right, parameters between them,
-        the last result along the bottom. <strong>&#9654;</strong> in the header runs this node and
-        whatever is upstream of it.
+        Inputs are on the left, outputs on the right, parameters in between, and the last result
+        along the bottom. <strong>&#9654;</strong> in the header runs this node and whatever is
+        upstream of it.
       </p>
       <p>
-        The stripe down the left edge is run state. Grey here because the
+        The stripe down the left edge shows the run state. It is grey here because the
         <span class="ty ty--dataset">Dataset</span> input is empty, so there is nothing to run yet.
       </p>
     </article>
 
     <article class="beat" data-beat="1">
       <span class="beat__n">Chapter 2</span>
-      <h2>Sockets are typed</h2>
+      <h2>Sockets and types</h2>
       <p>
-        A link carries a typed value, not a file. Each socket declares what it accepts, so a link
-        that cannot work is refused as you drag it.
+        Each socket has a type that says what it accepts. If you try to connect two sockets that
+        don't fit, Coda won't let you draw the link.
       </p>
       <div class="fig">
         <div class="legend">
@@ -244,10 +245,10 @@
           <div class="legend__row"><span class="swatch"><i class="sock" data-fam="layers" data-shape="ring"></i></span> <b class="ty ty--layers">Layers</b> &mdash; extra neuroglancer layers to draw alongside</div>
         </div>
         <p class="fig__cap">
-          Colour names the <b>material</b> and shape separates the members within it, so a shape repeats
-          <em>across</em> materials and never inside one: a skeleton and a table of Neurons are
-          both filled circles, Matrix and Transform both diamonds, the hue says which. One
-          material can hold several shapes &mdash; the three marks above are all Geometries.
+          The colour tells you the general kind of data and the shape tells you the type within it.
+          The same shape can appear in two colours: a skeleton and a table of Neurons are both
+          filled circles, Matrix and Transform are both diamonds. One colour can also have several
+          shapes: the three marks above are all Geometries.
         </p>
       </div>
     </article>
@@ -256,22 +257,22 @@
       <span class="beat__n">Chapter 3</span>
       <h2>Execution model</h2>
       <p>
-        Each node has a cost. <strong>Cheap</strong> ones &mdash; <code>Filter</code>,
-        <code>Sort</code>, <code>Group&nbsp;By</code> &mdash; re-run automatically after you
-        edited them. <strong>Expensive</strong> nodes query e.g. a backend and go <em>stale</em> instead.
+        Each node has a cost. <strong>Cheap</strong> ones such as <code>Filter&nbsp;Table</code>,
+        <code>Sort</code> or <code>Group&nbsp;By</code> re-run automatically after you
+        edit them. <strong>Expensive</strong> nodes, e.g. ones that query a backend, go <em>stale</em> instead.
       </p>
       <p>
         <strong>Run</strong> (<kbd>&#8679;R</kbd>) executes everything stale, in dependency order.
-        <strong>&#9654;</strong> on the card itself executes that node and only its upstream. Both report
-        progress as a gold ring round the card.
+        <strong>&#9654;</strong> on the card itself executes only that node and what is upstream of it.
+        Either way, a gold ring around the card shows its progress.
       </p>
       <p>
         <strong>Auto-run</strong> means every edit re-runs the whole graph, expensive nodes included.
-        On by default but can be turned off, so an expensive workflow is under your control.
+        It is on by default, but you can turn it off to control when an expensive workflow runs.
       </p>
       <p>
-        <strong>Clear</strong> removes all results, so you can start over. It does not remove any nodes or wiring.
-        Also worth trying if a node is stuck in e.g. an error.
+        <strong>Clear</strong> removes all results so you can start over. It does not remove any nodes or wiring.
+        Also worth trying if a node is stuck, e.g. in an error.
       </p>
     </article>
 
@@ -281,13 +282,13 @@
       <p>
         Coda provides nodes for complex operations such as <code>Find&nbsp;Neurons</code>,
         <code>Connectivity</code>, <code>Paths</code> or <code>Skeletons</code>, and
-        primitives for basic data processing steps - e.g.  <code>Filter</code>, <code>Group&nbsp;By</code>,
+        primitives for basic data processing steps, e.g. <code>Filter&nbsp;Table</code>, <code>Group&nbsp;By</code>,
         <code>Join</code>, <code>Pivot</code> and so on.
       </p>
       <p>
         Use the "<strong>+</strong>" button to add new nodes, or press <kbd>Tab</kbd> to open the node browser.
-        Search, category chips, and a <strong>port signature</strong> on every row, so you can
-        see what a node takes and returns before inserting it.
+        The browser has a search box and category chips, and each row shows the node's
+        <strong>port signature</strong>, i.e. what it takes and what it returns.
       </p>
       <div class="surface" style="margin-top:.35rem">
         <div class="surface__bar"><strong>Add a node</strong><span>Tab</span></div>
@@ -313,24 +314,25 @@
         </div>
       </div>
       <p class="fig__cap">
-        <kbd>Space</kbd> is the same set as a compact palette, plus every command. Drag a wire into
-        empty canvas and the list narrows to what accepts it &mdash; then wires up your pick.
+        <kbd>Space</kbd> opens a compact palette with the same nodes plus every command. If you
+        drag a wire into empty canvas, the list only shows nodes that accept it, and the node you
+        pick arrives already wired up.
       </p>
     </article>
 
     <article class="beat" data-beat="4">
       <span class="beat__n">Chapter 5</span>
-      <h2>Viewers are interactive</h2>
+      <h2>Viewers</h2>
       <p>
-        <code>Bar&nbsp;Chart</code> draws the table and passes <em>the same table on</em>, so a viewer
-        drops into the middle of a chain without breaking it. <code>Table</code>,
+        <code>Bar&nbsp;Chart</code> draws the table and also passes <em>the same table on</em>, so
+        you can put a viewer in the middle of a chain. <code>Table</code>,
         <code>Heatmap</code>, <code>Scatter&nbsp;Plot</code>, <code>Network&nbsp;Viewer</code>,
-        <code>3D&nbsp;Viewer</code> and an embedded neuroglancer all behave this way.
+        <code>3D&nbsp;View</code> and <code>Neuroglancer</code> all work this way.
       </p>
       <p>
-        Several also emit a selection. Lasso points in <code>Scatter&nbsp;Plot</code>, click nodes in
-        <code>Network&nbsp;Viewer</code>: the picked rows leave by a <b class="ty ty--table">Selected</b> output
-        and wire onward like anything else.
+        Several viewers also let you select things. Lasso points in <code>Scatter&nbsp;Plot</code> or
+        click nodes in <code>Network&nbsp;Viewer</code>, and the picked rows come out of a
+        <b class="ty ty--table">Selected</b> output that you can wire onward like any other.
       </p>
       <div class="surface" style="margin-top:.35rem">
         <div class="surface__bar"><strong>Scatter Plot</strong><span>pre &times; post &middot; colour by class</span></div>
@@ -365,8 +367,8 @@
         <div class="node__foot" style="border-top:1px solid var(--border)"><span>1,704 points &middot; 10 selected</span><span>&#8679;drag to lasso</span></div>
       </div>
       <p class="fig__cap">
-        A selection is an ordinary param: it lands in the saved file and in every downstream
-        provenance key. Picking by eye is a step, not a detour out of the pipeline.
+        A selection is stored like any other parameter: it is saved with the workflow, and
+        changing it counts as an edit like any other.
       </p>
     </article>
 
@@ -375,12 +377,13 @@
       <h2>Save it, send it</h2>
       <p>
         A workflow is a simple JSON file that captures every step, every parameter.
-        <strong>Save&nbsp;&#9656;&nbsp;Download</strong> writes it as a <code>.coda.json</code>.
-        <strong>Save&nbsp;&#9656;&nbsp;Save</strong> stores it in your browser&rsquo;s local storage,
-        so you can close the tab and come back later. <strong>Share</strong>
+        <strong>Save&nbsp;&#9656;&nbsp;Download&nbsp;.coda.json</strong> writes it to a file.
+        <strong>Save&nbsp;&#9656;&nbsp;Save in this browser</strong> stores it in your browser&rsquo;s
+        local storage, so you can close the tab and come back later. <strong>Share workflow</strong>
+        turns it into a link you can send to someone.
       </p>
       <p>
-        A workflow file never contains data/results or your credentials! Whoever opens it gets this pipeline
+        A workflow file never contains data, results or your credentials! Whoever opens it gets this pipeline
         exactly as you left it, presses Run, and can move a threshold to see what changes.
       </p>
     </article>
@@ -424,18 +427,18 @@
       </div>
       <div class="split">
         <div class="point rise" data-delay="2" style="max-width:var(--measure)">
-          <h3><code>Dataset&nbsp;Summary</code> provides a birds-eye view</h3>
+          <h3><code>Dataset&nbsp;Summary</code> provides a bird&rsquo;s-eye view</h3>
           <p>
-            This nodes summarizes the dataset: annotations, neuron counts, completion rate, etc.
+            This node summarizes the dataset: annotations, neuron counts, completion rate, etc.
             What is shown depends on what the dataset publishes.
           </p>
         </div>
         <div class="point rise" data-delay="2" style="max-width:var(--measure)">
           <h3><code>Neuron&nbsp;Profile</code> provides neuron-level summaries</h3>
           <p>
-            Identity, transmitter, synapse totals, strongest partners, the per&#8209;ROI split and the
-            morphology &mdash; one neuron at a time. Page through a collection freely; pin one and it
-            leaves by <b class="ty ty--table">Current</b>.
+            Shows identity, transmitter, synapse totals, strongest partners, synapses per ROI and the
+            morphology for one neuron at a time. You can page through a whole set of neurons. Pin
+            one and it comes out of the <b class="ty ty--table">Current</b> output.
           </p>
         </div>
       </div>
@@ -553,7 +556,7 @@
     <div class="split">
       <div class="stack">
         <div class="point rise">
-          <h3>Login or paste a token once</h3>
+          <h3>Log in or paste a token once</h3>
           <p>
             Even public connectome datasets often require you to make an account.
             When trying to access them via Coda, you will be prompted to either log in with
@@ -563,25 +566,25 @@
         <div class="point rise" data-delay="1">
           <h3>Credentials stay in this browser</h3>
           <p>
-            Held in local storage, never sent to a third party or written into a saved workflow.
-            A <code>.coda.json</code> you send a colleague carries the analysis and not your
-            credentials.
+            Tokens are kept in your browser&rsquo;s local storage. They are only sent to the server
+            they belong to and are never written into a saved workflow, so a <code>.coda.json</code>
+            you send to a colleague contains the analysis but not your credentials.
           </p>
         </div>
         <div class="point rise" data-delay="2">
           <h3>Multiple nodes per dataset</h3>
           <p>
             Some datasets are hosted on multiple backends. For example, the public release of the
-            FlyWire dataset is available via both neuPrint and CAVE. Coda supports both but note that
+            FlyWire dataset is available via both neuPrint and CAVE. Coda supports both, but note that
             each of these backends has slightly different data and capabilities.
           </p>
         </div>
         <div class="point rise" data-delay="3">
-          <h3>Credit comes attached</h3>
+          <h3>Citing the data</h3>
           <p>
-            Every published dataset node arrives with a <code>Description</code> card wired to it:
-            what the dataset covers and the papers its authors ask you to cite. Delete it if you
-            like but please do not forget to give credit where it is due.
+            Every published dataset node comes with a <code>Description</code> card wired to it. It
+            tells you what the dataset covers and which papers its authors ask you to cite. Delete it
+            if you like, but please do not forget to give credit where it is due.
           </p>
         </div>
       </div>
@@ -639,7 +642,7 @@
             <div class="keyrow"><kbd>H</kbd><span>Collapse the selected cards</span></div>
             <div class="keyrow"><kbd>M</kbd><span>Mute the selection</span></div>
             <div class="keyrow"><kbd>&#8984;D</kbd><span>Duplicate the selection</span></div>
-            <div class="keyrow"><kbd>&#8984;Z</kbd><span>Undo &mdash; including a drag, back to where it began</span></div>
+            <div class="keyrow"><kbd>&#8984;Z</kbd><span>Undo, including moving nodes</span></div>
           </div>
         </div>
         <p class="fig__cap rise" data-delay="1" style="max-width:32rem">
@@ -651,7 +654,7 @@
         <div class="gestures rise" data-delay="1">
           <div class="gesture">
             <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M4 13h26M4 13l4-4M4 13l4 4M30 13l-4-4M30 13l-4 4"/></svg>
-            <span><strong>Drag</strong> pans. Panning is the common gesture, so it is the bare one.</span>
+            <span><strong>Drag</strong> pans the canvas.</span>
           </div>
           <div class="gesture">
             <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5" y="5" width="24" height="16" rx="2" stroke-dasharray="3 3"/></svg>
@@ -663,11 +666,11 @@
           </div>
           <div class="gesture">
             <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="13" r="3" fill="currentColor" stroke="none"/><path d="M9 13c6 0 6-7 12-7"/><circle cx="24" cy="6" r="3"/><path d="M9 14c5 3 8 5 14 5"/></svg>
-            <span><strong>Drag a wire into empty space</strong> for a list filtered to what accepts it &mdash; your pick arrives wired.</span>
+            <span><strong>Drag a wire into empty space</strong> to get a list of nodes that accept it. The one you pick arrives wired up.</span>
           </div>
           <div class="gesture">
             <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M4 18c8 0 10-10 18-10"/><path d="M20 4l4 4-4 4" stroke-linejoin="round"/></svg>
-            <span><strong>Drag either end of a wire off its socket</strong> to re-route; right&#8209;click it for a menu. A drop on a socket that refuses snaps back rather than cutting the link.</span>
+            <span><strong>Drag either end of a wire off its socket</strong> to re-route it, or right&#8209;click it for a menu. If you drop it on a socket that doesn&rsquo;t accept it, the wire goes back to where it was.</span>
           </div>
           <div class="gesture">
             <svg width="34" height="26" viewBox="0 0 34 26" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="4" y="6" width="26" height="14" rx="2"/><path d="M4 11h26" stroke-width="1.2"/></svg>
@@ -686,36 +689,37 @@
   <div class="shell">
     <div class="chapter__head rise">
       <span class="beat__n">Chapter 10</span>
-      <h2>Where a workflow goes</h2>
-      <p class="lede">Four places, and one of them has strings attached.</p>
+      <h2>Keeping your work</h2>
+      <p class="lede">There are three ways to keep a workflow, and its results have to be downloaded separately.</p>
     </div>
 
     <div class="cards2 rise">
       <div class="savecard" data-durable="true">
-        <span class="savecard__tag">Save &#9656; Download &middot; durable</span>
+        <span class="savecard__tag">Save &#9656; Download .coda.json &middot; durable</span>
         <h3>A <code>.coda.json</code> file</h3>
         <p>
-          Plain JSON &mdash; put it in a repository, a supplement, an email, and
-          reproduces the pipeline wherever it lands. Results are not in it: the recipe, not the meal.
+          Plain JSON that you can put in a repository, a paper&rsquo;s supplement or an email.
+          Whoever opens it gets the same pipeline. It contains the steps, not the results.
         </p>
       </div>
       <div class="savecard">
-        <span class="savecard__tag">Save &#9656; In this browser &middot; convenient</span>
+        <span class="savecard__tag">Save &#9656; Save in this browser &middot; convenient</span>
         <h3>The browser shelf</h3>
         <p>
-          A named copy in this machine, listed under <em>Open</em> and on the start page.
+          A named copy on this machine, listed under <em>Open</em> and on the start page.
           Good for picking up where you left off.
         </p>
         <p>
-          <strong>Not a backup!</strong> Per browser and per profile, not synced, empty in a private
-          window, and cleared with the site data. Anything you would be sorry to lose, download.
+          <strong>Not a backup!</strong> It is per browser and per profile, not synced, empty in a
+          private window, and gone when you clear the site data. If you would be sorry to lose it,
+          download it.
         </p>
       </div>
     </div>
 
     <div class="cards2 rise">
       <div class="savecard" data-durable="true">
-        <span class="savecard__tag">Share workflow &#9656; Copy to clipboard</span>
+        <span class="savecard__tag">Share workflow &#9656; Copy</span>
         <h3>A workflow link</h3>
         <p>
           The JSON encoded into a shareable link. Paste it into an email or a chat,
@@ -723,11 +727,11 @@
         </p>
       </div>
       <div class="savecard">
-        <span class="savecard__tag">Save &#9656; In this browser &middot; convenient</span>
+        <span class="savecard__tag">Download</span>
         <h3>The data</h3>
         <p>
           A workflow file never contains results. If you want to keep the outputs you
-          have to download them as CSV, SVG, PNG, etc. via the either the
+          have to download them as CSV, SVG, PNG, etc. via either the
           <strong>Download button</strong> in a node's footer, or via the dedicated
           <strong>Download node</strong>.
         </p>
@@ -741,10 +745,10 @@
      ========================================================================== -->
 <section class="outro">
   <div class="shell">
-    <h2 class="rise">Open it and add one node.</h2>
+    <h2 class="rise">Try it yourself</h2>
     <p class="rise" data-delay="1">
-      Nothing to install, and the demo data needs no accounts. Start from one, take it
-      apart, point it at your own question.
+      There is nothing to install, and the demo data needs no account. Let the Workflow Wizard
+      build you a starting point, change it, then point it at your own question.
     </p>
     <div class="outro__actions rise" data-delay="2">
       <a class="cta" data-primary="true" href="https://navis-org.github.io/coda/" target="_blank" rel="noreferrer noopener">Open Coda</a>
@@ -767,8 +771,8 @@
     Coda &mdash; connectome data analysis &middot; Fly Connectomics Group, Cambridge<br>
     Connectome data published by the FlyEM project at Janelia Research Campus, by the FlyWire
     consortium, and by Virtual Fly Brain.<br>
-    Page views are counted with <a href="https://coda-science.goatcounter.com/">GoatCounter</a>
-    &mdash; no cookies, nothing kept in your browser, and the dashboard is public.
+    Page views are counted with <a href="https://coda-science.goatcounter.com/">GoatCounter</a>.
+    It uses no cookies, keeps nothing in your browser, and the dashboard is public.
   </div>
 </footer>
     <script type="module" src="/src/tutorial/main.ts"></script>

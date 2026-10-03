@@ -115,7 +115,7 @@ export function DashboardTabs({
               data-tab-id={tab.id}
               aria-selected={selected}
               tabIndex={selected ? 0 : -1}
-              title={`${label} — double-click to rename, right-click for more`}
+              title={`${label}. Double-click to rename, right-click for more`}
               onClick={() => setDashboardTab(tab.id)}
               onDoubleClick={() => setEditing(tab.id)}
               onKeyDown={(event) => onKeyDown(event, index)}
@@ -133,7 +133,7 @@ export function DashboardTabs({
       <button
         type="button"
         className="btn btn--ghost btn--icon dash-tabs__add"
-        title="New tab — another page of this dashboard"
+        title="Add a tab to this dashboard"
         aria-label="New dashboard tab"
         onClick={() => addDashboardTab()}
       >
@@ -187,7 +187,7 @@ function TabMenu({
       <button
         type="button"
         className="context-menu__item"
-        title="A copy of this page beside it — the same cells, the same nodes"
+        title="Add a copy of this tab next to it, with the same cells"
         onClick={act(() => store.duplicateDashboardTab(tab.id))}
       >
         Duplicate
@@ -215,8 +215,8 @@ function TabMenu({
         disabled={only}
         title={
           only
-            ? 'The only tab — take its cells off instead'
-            : 'Take this page off the dashboard — its nodes stay on the canvas'
+            ? 'This is the only tab. Remove its cells instead'
+            : 'Delete this tab. Its nodes stay on the canvas'
         }
         onClick={act(() => store.removeDashboardTab(tab.id))}
       >

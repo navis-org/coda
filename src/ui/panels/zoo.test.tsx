@@ -286,7 +286,7 @@ describe('when the Zoo cannot be reached', () => {
     open()
     await listed('LC circuit network')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
-    expect(await screen.findByText(/Offline — showing a copy/)).toBeTruthy()
+    expect(await screen.findByText(/Offline\. Showing a copy/)).toBeTruthy()
   })
 })
 
@@ -316,7 +316,7 @@ describe('the empty states', () => {
     await listed('LC circuit network')
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')))
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
-    await screen.findByText(/showing the copy from|Offline — showing a copy/)
+    await screen.findByText(/Showing the copy from|Offline\. Showing a copy/)
     expect(rows()).toContain('LC circuit network')
   })
 })

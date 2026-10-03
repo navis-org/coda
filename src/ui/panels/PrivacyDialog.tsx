@@ -72,7 +72,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
               The datasets Coda queries are public, but they are not unattributed.
             </strong>{' '}
             Each represents years of effort (sample prep, imaging, reconstruction, proofreading,
-            curation, etc) by the group that published it, released on the understanding that
+            curation, etc.) by the group that published it, released on the understanding that
             work built on it says so.
           </p>
           <p>
@@ -94,40 +94,39 @@ function Dialog({ onClose }: { onClose: () => void }) {
             <div className="privacy__row">
               <dt>Your workflow</dt>
               <dd>
-                In this browser. Autosaved to local storage on this machine; a share link
-                carries the whole graph inside the address itself. There is no account and no
-                server of ours holding it.
+                In this browser. It is autosaved to local storage on this machine, and a share
+                link carries the whole graph inside the address itself. There is no account, and
+                no server of ours holds it.
               </dd>
             </div>
             <div className="privacy__row">
               <dt>Tokens &amp; keys</dt>
               <dd>
-                In this browser&rsquo;s local storage, in the clear, on this machine only. Never
-                written into a saved graph or an export, never sent to us.
+                In this browser&rsquo;s local storage, unencrypted, on this machine only. They
+                are never written into a saved graph or an export, and never sent to us.
               </dd>
             </div>
             <div className="privacy__row">
               <dt>Connectome data</dt>
               <dd>
-                Fetched straight from the publisher&rsquo;s servers to this page — neuPrint,
-                CAVE, CATMAID, Neuroglancer buckets. Analysis runs in your browser, not on a
-                server.
+                Fetched straight from the publisher&rsquo;s servers (neuPrint, CAVE, CATMAID,
+                Neuroglancer buckets) into this page. Analysis runs in your browser.
               </dd>
             </div>
             <div className="privacy__row">
               <dt>AI assistant</dt>
               <dd>
-                Off unless you configure it. Your questions in the current conversation and the
-                graph on your canvas go straight to the provider you pick, with no server of
-                ours in between — as does a summary of what its nodes last produced (row counts,
-                value ranges, the commonest values in a column), which you can switch off in the
-                assistant drawer.
+                Off unless you set it up. When it is on, your questions in the current
+                conversation and the graph on your canvas go straight to the provider you pick,
+                with no server of ours in between. So does a summary of what its nodes last
+                produced (row counts, value ranges, the most common values in a column); you can
+                switch that off in the assistant drawer.
               </dd>
             </div>
             <div className="privacy__row">
               <dt>Visitor stats</dt>
               <dd>
-                We count page views only — no cookies, nothing kept in your browser, and{' '}
+                We only count page views: no cookies, nothing kept in your browser, and{' '}
                 <a href={ANALYTICS_URL} target="_blank" rel="noreferrer noopener">
                   the dashboard is public
                 </a>
@@ -137,8 +136,8 @@ function Dialog({ onClose }: { onClose: () => void }) {
             <div className="privacy__row">
               <dt>Videos</dt>
               <dd>
-                The tutorial video loads from YouTube, on its privacy-enhanced player, only when
-                you press play — until then it is a picture stored with Coda, and nothing is
+                The tutorial video loads from YouTube&rsquo;s privacy-enhanced player only when
+                you press play. Until then it is a picture stored with Coda, and nothing is
                 requested from YouTube.
               </dd>
             </div>

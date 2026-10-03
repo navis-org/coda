@@ -300,7 +300,7 @@ export function placeAll(
 export function frameIssue(dataset: DatasetIdentity | undefined): string | undefined {
   if (!dataset?.sourceId || !dataset.datasetId || frameOf(dataset)) return undefined
   return (
-    'No cortical frame is declared for this dataset, so there is no depth or layer to place ' +
-    `anything at. Declared for: ${CORTICAL_FRAMES.map((f) => f.dataset).join(', ')}.`
+    'This dataset has no cortical frame, so depth and layer cannot be computed. ' +
+    `Cortical frames exist for: ${CORTICAL_FRAMES.map((f) => f.dataset).join(', ')}.`
   )
 }

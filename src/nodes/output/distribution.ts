@@ -34,9 +34,10 @@ registerNode({
   type: 'out.distribution',
   label: 'Box Plot',
   category: 'visualisation',
-  description: 'Box plot or violin plot of a numeric column, split by an optional group.',
+  description:
+    'Box plot, violin plot or swarm of a numeric column, split by an optional group.',
   guide:
-    'Quartiles, whiskers and outliers for one numeric column, one box per group — and a violin over the same axis when the shape matters more than the summary, since two very different distributions can share a five-number summary. Whisker rule, log axis and how many groups to draw are all settings; clicking a box sends that group’s rows on as Selected.',
+    "Draws one numeric column as a box, violin or swarm per group, with quartiles, whiskers and outliers. The whisker rule, a log axis and the number of groups are settings; click a box to send that group's rows out of Selected.",
   cost: 'cheap',
   // Tall enough for the value axis to be above the fold at the default group cap. Measured.
   defaultSize: { width: 460, height: 440 },
@@ -65,7 +66,7 @@ registerNode({
       // whole-table distribution is a real thing to ask for.
       optional: true,
       // Not presentational: it decides which rows a selected box names. See the header.
-      help: 'One box per distinct value; empty draws a single box over every row. Also what a selected box means.',
+      help: 'One box per distinct value. Leave empty for a single box over all rows. Also sets what a selected box refers to.',
     },
     {
       id: 'style',
@@ -79,7 +80,7 @@ registerNode({
         { value: 'swarm', label: 'swarm' },
         { value: 'swarmBox', label: 'swarm + box' },
       ],
-      help: 'A box is five numbers, a violin the shape behind them, a swarm the observations themselves. Above 300 per group the swarm is thinned and the caption says so.',
+      help: 'How each group is drawn. Swarms are thinned above 300 points per group; the caption says so.',
       presentational: true,
     },
     {
@@ -91,7 +92,7 @@ registerNode({
         { value: 'rows', label: 'groups down the side' },
         { value: 'columns', label: 'groups along the bottom' },
       ],
-      help: '"Groups down the side" reads long names straight along a left-hand gutter. "Groups along the bottom" is the conventional orientation for a figure; its labels are rotated 45°.',
+      help: '"Groups down the side" fits long names. "Groups along the bottom" is the conventional figure layout, with labels rotated 45°.',
       presentational: true,
     },
     {
@@ -116,7 +117,7 @@ registerNode({
         { value: 'p5p95', label: '5th–95th percentile' },
         { value: 'minmax', label: 'full range' },
       ],
-      help: 'The whisker ends at the most extreme value inside the fence, not at the fence itself.',
+      help: 'How far the whiskers reach. Each ends at the most extreme value within that range.',
       presentational: true,
       advanced: true,
     },
@@ -124,7 +125,7 @@ registerNode({
       id: 'logAxis',
       kind: 'boolean',
       label: 'Log axis',
-      help: 'Quartiles are unchanged by it, so only the axis and the violin’s shape move. Values at or below zero are dropped; the caption says how many.',
+      help: 'Use a log scale for the value axis. Values at or below zero are dropped; the caption says how many.',
       default: false,
       presentational: true,
       advanced: true,
@@ -144,7 +145,7 @@ registerNode({
       default: 24,
       min: 1,
       max: 100,
-      help: 'The largest groups are kept and the tail is dropped rather than pooled. The caption says how many there were.',
+      help: 'How many groups to show, largest first. The rest are dropped; the caption says how many there were.',
       presentational: true,
       advanced: true,
     },
@@ -154,7 +155,7 @@ registerNode({
       label: 'Selected',
       noun: 'groups',
       default: [],
-      help: 'Set by clicking boxes in the viewer. Holds group labels rather than row ids, so it survives an upstream re-run. Feeds Selected.',
+      help: 'Set by clicking boxes in the viewer. Feeds Selected.',
     },
   ],
 
@@ -165,7 +166,7 @@ registerNode({
     if (!ctx.inputs.in) return []
     const group = ctx.column('group')
     return group && group === ctx.column('value')
-      ? ['Group-by and Value are the same column']
+      ? ['`Group by` and `Value` are the same column. Pick a different column for one of them.']
       : []
   },
 

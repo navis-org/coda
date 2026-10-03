@@ -32,10 +32,9 @@ registerNode({
   category: 'transform',
   description: 'Keep rows matching a condition on one column.',
   guide:
-    'Keep the rows matching one condition. The operator list follows the column’s type — a ' +
-    'number gets ≥ and ≤, text gets contains and matches. It is cheap, so the result ' +
-    're-computes as you type a threshold. Below a Link Table it reads nothing: the condition is ' +
-    'applied to the rows each lookup fetches from the file.',
+    'Keeps the rows that match one condition on one column, e.g. pre ≥ 100 or type starts with ' +
+    'LC. The operators on offer depend on the column type. Chain several for AND; below a Link ' +
+    'Table, the condition is applied to whatever rows are later read from the file.',
   cost: 'cheap',
   // A table, or a Link Table file, whose condition rides on to its readers (`data/files/filters.ts`).
   inputs: [{ id: 'in', label: 'Table', type: T.any(), kinds: TABLE_OR_FILE_KINDS }],
@@ -89,10 +88,13 @@ registerNode({
     if (!isTableFileValue(input) && !isTableValue(input))
       throw new Error('Input is not a table')
     const columnName = ctx.column('column')
-    if (!columnName) throw new Error('No column selected')
+    if (!columnName) throw new Error('No column is selected. Pick one in `Column`.')
     // Both kinds carry their schema, so the column and the operator are resolved once.
     const dtype = findColumn(input.schema, columnName)?.dtype
-    if (!dtype) throw new Error(`Filter column "${columnName}" not found`)
+    if (!dtype)
+      throw new Error(
+        `Column "${columnName}" is not in the input table. Pick another in \`Column\`.`,
+      )
     const op = resolveFilterOp(ctx.params.op, dtype, FILTER_TABLE_DEFAULT_OP)
     const value = String(ctx.params.value)
     if (isTableValue(input)) return { out: filterTable(input, columnName, op, value) }

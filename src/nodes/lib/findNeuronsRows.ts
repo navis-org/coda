@@ -95,5 +95,5 @@ export function asksNothing(
  * remedy differs per surface, so each appends its own.
  */
 export function noFiltersReason(): string {
-  return 'This Find Neurons has no filters, so it returns no neurons rather than the whole dataset.'
+  return 'This Find Neurons has no filters, so it returns no neurons.'
 }

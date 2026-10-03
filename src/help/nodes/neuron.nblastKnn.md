@@ -1,13 +1,9 @@
-[NBLAST](#neuron.nblast)'s sibling, asking a different question: for each query neuron, what are the best matches in the target set?
+## What NBLAST k-NN does
 
-It is not a subset of the all-pairs matrix. It pre-selects a shortlist of candidates and scores only those with NBLAST, giving a table of matches — query neuron, candidate neighbour, rank, score.
-
-> [!NOTE] The scores are exact; the candidate pre-selection is not
-> At the default 200 candidates, recall of the true top 20 is ~99% while scoring ~0.16% of all
-> possible pairs.
+NBLAST k-NN finds the top matches for each query neuron. It uses the same scoring as [NBLAST](#neuron.nblast) but, instead of comparing every neuron against every other neuron, it first picks a shortlist of likely candidates for each neuron and then scores only those. The result is a table of matches rather than a matrix, which makes it much cheaper for large populations.
 
 ```coda-graph
-caption: Get the top 10 matches
+caption: Get the top 10 matches for each neuron.
 neuron.skeletons as skel1
 neuron.skeletons as skel2
 neuron.nblastKnn as nbl {k: 10}
@@ -17,26 +13,38 @@ skel2 -> nbl:target
 nbl -> tbl
 ```
 
-### Output format
+The scores themselves are exact NBLAST scores; only the shortlist is an approximation. At the default of 200 candidates, about 99% of the true top 20 matches are found while scoring only ~0.16% of all possible pairs.
 
-- **Neuron**: the query neuron
-- **Neighbor**: a candidate neuron
-- **Rank**: position in the top-k for this neuron (1 is best)
-- **Score**: the NBLAST similarity — 0 to 1 when normalised; see [NBLAST](#neuron.nblast) for the scoring mechanics and the resample unit trap
+## Output
 
-So it plugs straight into Build Network, Filter or Sort like any other table.
+The output table has one row per match:
 
-> [!WARNING] Self-matching with and without Target
-> With a `Target` wired, a neuron present in both sets scores itself at 1.00 and takes one of its k
-> slots, so effectively k−1 real neighbours. Without a `Target`, every neuron is excluded from
-> matching itself and all k slots are filled with other neighbours.
+| Column     | What it is                                              |
+| ---------- | ------------------------------------------------------- |
+| `queryId`  | the query neuron                                        |
+| `targetId` | the matching neuron                                     |
+| `rank`     | position among this neuron's matches (1 is best)        |
+| `score`    | the NBLAST score (0 to 1 if `Normalise` is on)          |
 
-### Settings
+If you set `Label by`, you also get `queryLabel` and `targetLabel` columns with a name for each side.
+
+This is an ordinary table, so you can pass it on to e.g. [Build Network](#net.build) to get a similarity graph, or to [Embedding](#core.embed) to lay the neurons out in 2D.
+
+A neuron can end up with fewer rows than `Matches per neuron` if fewer matches could be found for it.
+
+> [!WARNING] Neurons matching themselves
+> With `Target` wired, a neuron that is in both sets matches itself with a score of 1.00 and uses
+> up one of its places, so you effectively get one match fewer. Without `Target`, neurons are never
+> matched against themselves.
+
+## Settings
 
 ```coda-params
 neuron.nblastKnn: k, nCandidates
 ```
 
-- **Symmetry**, **Resample**, **Normalise**, **Weight by alpha**: same semantics as [NBLAST](#neuron.nblast).
-- **Tangent neighbours**: points used to fit the tangent vector at each skeleton point. 5 is the convention.
-- **Warn above**: a threshold, not a cap. This is the node built for large sets, since its cost grows with **Candidates** rather than with the square of the population.
+`Candidates` (under the advanced settings) is the size of the shortlist per neuron and trades accuracy for speed. For reference, the share of the true top 20 matches that is found is about 91% at 50 candidates, 97% at 100 and 99% at 200.
+
+`Symmetry`, `Resample`, `Normalise` and `Weight by alpha` work just like in [NBLAST](#neuron.nblast). Note that `Symmetry` is applied before the top matches are picked. `Tangent neighbours` is the number of points used to fit the tangent vector at each skeleton point; 5 is the usual value.
+
+`Warn above` only shows a warning; it doesn't stop you from running larger sets. Since the cost of this node grows with the number of candidates rather than with the square of the number of neurons, it is the one to use for large populations.

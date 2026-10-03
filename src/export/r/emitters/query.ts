@@ -84,8 +84,8 @@ const DATASET_NOTES: Record<DatasetNote, string> = {
     'is, so only the family is named. Set `dataset` to the exact release you mean ' +
     'before sharing the document.',
   pinnedLatest:
-    'The node is set to "Latest"; this pins the version it resolved to at export, so the ' +
-    'document keeps answering the same question after the next release.',
+    'The node is set to "Latest". This cell uses the version that was latest at export, so ' +
+    'it keeps giving the same results after the next release.',
 }
 
 function emitDataset(ctx: EmitContext, familyKey: string): string[] {
@@ -197,8 +197,8 @@ registerEmitter('neuron.findNeurons', (ctx) => {
     return [
       ...lines,
       ...ctx.note(
-        `${noFiltersReason()} So this chunk is the empty frame it produces — add a filter row ` +
-          'on the canvas and re-export, or write the query in here.',
+        `${noFiltersReason()} This chunk builds the same empty table. Add a filter row ` +
+          'on the canvas and export again, or write the query here.',
       ),
       `${out} <- data.frame(`,
       ...columns,
@@ -219,9 +219,9 @@ registerEmitter('neuron.findNeurons', (ctx) => {
   )
   if (searchable === -1) {
     return ctx.todo(
-      'This Find Neurons has no type or instance filter that neuprint_search can express. It ' +
-        'needs one — an unbounded query against a shared production Neo4j is not something to ' +
-        'generate.',
+      'This Find Neurons has no type or instance filter that neuprint_search can express. Add ' +
+        'a `type` or `instance` row to `Filters` and export again. Without one, the query ' +
+        'would fetch every neuron from a shared production server.',
     )
   }
 
@@ -244,7 +244,7 @@ registerEmitter('neuron.findNeurons', (ctx) => {
     lines.push(
       ...ctx.note(
         `Coda restricts this to neurons with synapses in ${roi}. neuprint_search cannot ` +
-          'express that; neuprint_bodies_in_ROI() is how to intersect the result.',
+          'do that. Use neuprint_bodies_in_ROI() and intersect it with the result.',
       ),
     )
   }
@@ -253,8 +253,8 @@ registerEmitter('neuron.findNeurons', (ctx) => {
     ctx.library('dplyr')
     lines.push(
       ...ctx.note(
-        "neuprint_search narrows on one field, so Coda's other filters are applied to the " +
-          'result rather than in the query. Same rows, one larger response.',
+        "neuprint_search filters on one field only, so Coda's other filters are applied to the " +
+          'result below. The rows are the same; the download is larger.',
       ),
       // `filter()` ANDs its arguments, which is what a list of rows means — and it is the same
       // compiler `out.table`'s header filters use, so the null rule and the per-term case
@@ -469,8 +469,8 @@ registerEmitter('neuron.adjacency', (ctx) => {
   if (ctx.params.groupByType !== false) {
     lines.push(
       ...ctx.note(
-        'Coda groups this matrix by cell type. neuprint_get_adjacency_matrix is per body, so ' +
-          'the roll-up is done here rather than in the query.',
+        'Coda groups this matrix by cell type (`Group by type`). neuprint_get_adjacency_matrix ' +
+          'returns one row and column per body, so group the result yourself to match.',
       ),
     )
   }
@@ -538,8 +538,8 @@ registerEmitter('neuron.roiMeshes', (ctx) => {
 
   return [
     ...ctx.note(
-      'One request per region, and neuPrint publishes these for visualization only — ' +
-        'decimated surfaces, so a volume measured off one is an approximation.',
+      'This makes one request per region. neuPrint publishes these meshes for visualization ' +
+        'only: they are decimated, so a volume measured from one is approximate.',
     ),
     chosen.length > 0
       ? `${names} <- c(${chosen.map((roi) => JSON.stringify(roi)).join(', ')})`
@@ -573,10 +573,10 @@ registerEmitter('neuron.rawCypher', (ctx) => {
 /** `neuprint_read_neurons` reads neuPrint's own SWC. */
 const SKELETON_NOTES: Record<SkeletonsNote, string> = {
   publishedLayer:
-    'The Skeletons node is set to the published precomputed layer rather than neuPrint’s ' +
-    'own SWC. This cell reads the SWC: the published copy is a bucket named by the ' +
-    'dataset’s neuroglancer state, it carries no radii, and it covers only the bodies ' +
-    'that were exported into it.',
+    'The Skeletons node’s `Source` is set to the published precomputed layer. This cell ' +
+    'reads neuPrint’s own SWC instead. The published copy lives in a bucket named by the ' +
+    'dataset’s neuroglancer state, has no radii, and covers only the bodies that were ' +
+    'exported into it.',
 }
 
 registerEmitter('neuron.skeletons', (ctx) => {
@@ -599,7 +599,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
 registerEmitter('neuron.meshes', (ctx) => {
   // The one capability neuprintr does not have. `neuprint_ROI_mesh` is ROI shells, not neurons.
   return ctx.todo(
-    'neuprintr has no neuron-mesh fetch — neuprint_ROI_mesh() reads ROI shells only. Use the ' +
+    'neuprintr cannot fetch neuron meshes: neuprint_ROI_mesh() reads ROI shells only. Use the ' +
       'Skeletons node, which reads the same neurons as a nat neuronlist, or fetch meshes from ' +
       'the precomputed source directly.',
   )
@@ -626,9 +626,9 @@ registerEmitter('neuron.synapses', (ctx) => {
    */
   return [
     ...ctx.note(
-      'neuprintr returns bodyid and prepost (0/1) where Coda carries neuronId and ' +
-        'polarity ("pre"/"post"). Any cell below naming a synapse column needs one ' +
-        'spelling or the other; this exporter does not normalise them yet.',
+      'neuprintr returns the columns bodyid and prepost (0/1). Coda calls them neuronId and ' +
+        'polarity ("pre"/"post"). This exporter does not rename them yet, so check any cell ' +
+        'below that names a synapse column.',
     ),
     /*
      * **Two of the node's controls have no neuprintr spelling**, and each is a TODO with the gap
@@ -644,16 +644,16 @@ registerEmitter('neuron.synapses', (ctx) => {
      */
     ...(minConfidence > 0
       ? ctx.note(
-          `neuprintr has no confidence argument — filter this frame yourself, e.g. ` +
+          `neuprintr has no confidence argument. Filter this frame yourself, e.g. ` +
             `subset(<points>, confidence >= ${minConfidence}).`,
         )
       : []),
     ...(unit !== SYNAPSE_UNITS.links
       ? ctx.note(
-          'neuprint_get_synapses returns a presynaptic site once per partner it drives, where ' +
-            'the Synapses node is set to one row per site — so this frame has more rows than ' +
-            'the canvas. De-duplicate on the location columns to match. Postsynaptic rows are ' +
-            'unaffected.',
+          'neuprint_get_synapses returns a presynaptic site once for each partner it connects to, ' +
+            'but the Synapses node’s `Rows` is set to one row per site. This frame therefore has ' +
+            'more rows than Coda. De-duplicate on the location columns to match. Postsynaptic ' +
+            'rows are unaffected.',
         )
       : []),
     `${ctx.output('points')} <- neuprint_get_synapses(${args.join(', ')}, conn = ${conn})`,
@@ -689,9 +689,9 @@ registerEmitter('neuron.synapsesBetween', (ctx) => {
   return [
     ...(labelled
       ? ctx.note(
-          "The open side is neuPrint's :Neuron label; the canvas counts the neurons the " +
-            "Dataset node's population selects — the same set unless that population narrows " +
-            'further.',
+          "The side with no neurons wired is matched on neuPrint's :Neuron label. Coda uses the " +
+            "neurons selected by the Dataset node's population instead. The two are the same " +
+            'unless that population is narrower.',
         )
       : []),
     ...(sources ? [`.sources <- ${cypherIdList(sources)}`] : []),

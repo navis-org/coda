@@ -62,13 +62,12 @@ registerNode({
   label: 'NBLAST Matches',
   category: 'analysis',
   description:
-    'Pull each neuron’s best matches out of a score matrix, as a table. Columns are `query`, `target`, `rank` and `score`, or `query` and `matches` when counting — note that NBLAST k-NN calls the same pair `queryId` and `targetId`.',
+    'Pull each neuron’s best matches out of a score matrix, as a table with the columns `query`, `target`, `rank` and `score`, or `query` and `matches` when counting. NBLAST k-NN names the same pair `queryId` and `targetId`.',
   guide:
-    'Turns a score matrix into the long table every other node wants: one row per match, with ' +
-    'the neuron, its match, the rank and the score. Take the top N per neuron, everything ' +
-    'above a cutoff, or just the counts so you can pick a cutoff first. Works on any matrix, ' +
-    'not only NBLAST’s — and note that the “within %” cutoff is a band around each neuron’s ' +
-    'own best match rather than the top few percent overall.',
+    'Turns a score matrix into a table with one row per match: the neuron, its match, the ' +
+    'rank and the score. Keep the top N matches per neuron, every match above a score, or ' +
+    'every match within a fraction of the neuron’s own best score; or just count matches per ' +
+    'neuron to help choose a cutoff. Any score matrix works, not just NBLAST’s.',
   cost: 'expensive',
   inputs: [{ id: 'in', label: 'Matrix', type: T.matrix() }],
   outputs: [{ id: 'matches', label: 'Matches', type: T.table(matchSchema('top')) }],
@@ -79,7 +78,7 @@ registerNode({
       label: 'Extract',
       default: 'top',
       options: MATCH_MODES,
-      help: 'A ranked shortlist per neuron, everything clearing a cutoff, or how many each neuron would yield at one.',
+      help: 'Keep the top matches per neuron, every match past a cutoff, or count how many matches each neuron has past a cutoff.',
     },
     {
       id: 'n',
@@ -89,7 +88,7 @@ registerNode({
       min: 1,
       max: 1000,
       visibleIf: (params) => String(params.mode) === 'top',
-      help: 'How many to keep, best first. Cut down to what the matrix can offer if it is narrower, with a warning rather than an error.',
+      help: 'How many matches to keep per neuron, best first. If the matrix has fewer, you get a warning.',
     },
     {
       id: 'cutoff',
@@ -98,7 +97,7 @@ registerNode({
       default: 'threshold',
       options: MATCH_CUTOFFS,
       visibleIf: (params) => String(params.mode) !== 'top',
-      help: 'An absolute score applies one number to every neuron. A percentage band applies to each neuron’s own best match, for when some have a near-perfect match and others nothing above 0.3.',
+      help: '"an absolute score" uses one cutoff for every neuron. "within % of each best" is relative to each neuron’s own best match, which helps when some neurons match much better than others.',
     },
     {
       id: 'threshold',
@@ -108,7 +107,7 @@ registerNode({
       step: 0.05,
       visibleIf: (params) =>
         String(params.mode) !== 'top' && String(params.cutoff) === 'threshold',
-      help: 'Keep every cell at or above this — at or below, on a distance matrix. A normalised NBLAST score runs to 1, and around 0.5 is the usual place to start.',
+      help: 'Keep matches scoring at least this (at most, on a distance matrix). For normalised NBLAST scores, 0.5 is a good start.',
     },
     {
       id: 'percentage',
@@ -120,16 +119,14 @@ registerNode({
       step: 0.01,
       visibleIf: (params) =>
         String(params.mode) !== 'top' && String(params.cutoff) === 'percentage',
-      help:
-        'A fraction, not a percent: 0.05 keeps everything within 5% of that neuron’s best ' +
-        'match. Its own best, not the matrix’s.',
+      help: 'Given as a fraction: 0.05 keeps every match within 5% of that neuron’s own best match.',
     },
     {
       id: 'skipSelf',
       kind: 'boolean',
       label: 'Skip self-matches',
       default: true,
-      help: 'Drop each neuron’s own diagonal cell, which is 1.00 on a normalised all-by-all. On a square matrix built from two different sets it drops a cell that is not a self-match.',
+      help: 'Ignore the diagonal, i.e. each neuron’s match with itself. Turn off for a square matrix built from two different sets.',
     },
     {
       id: 'axis',
@@ -138,7 +135,7 @@ registerNode({
       default: '0',
       options: MATCH_AXES,
       advanced: true,
-      help: 'Which way the matrix is scanned. "Rows" is the usual answer; "columns" is for a query-against-target matrix read from the target’s side.',
+      help: 'Find matches for each row or each column. Pick "each column (target)" to read a query-against-target matrix from the target’s side.',
     },
     {
       id: 'direction',
@@ -147,7 +144,7 @@ registerNode({
       default: 'auto',
       options: MATCH_DIRECTIONS,
       advanced: true,
-      help: 'Whether a high score or a low one is a good match. "From the matrix" reads what the matrix says it is, and assumes higher is better where nothing said — which a Pivot never does.',
+      help: 'Whether high or low scores are better. "from the matrix" uses what the matrix declares, and assumes higher is better if it declares nothing (a Pivot never does).',
     },
   ],
 

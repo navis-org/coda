@@ -62,9 +62,14 @@ registerNode({
   type: 'net.filter',
   label: 'Filter Network',
   category: 'analysis',
-  description: 'Cut out the part of a network around a selection.',
+  description:
+    'Keep the part of a network around a selection of nodes: the selection itself, everything within a number of hops of it, or its whole connected component.',
   guide:
-    'Picks a set of nodes and keeps what is near them: the selection itself, everything within a number of hops, or the whole connected component it sits in. Built for reading Match Cell Types’ Network port, where the graph is thousands of nodes and the unit worth looking at is one component — that is what the matcher decides on, so a component is the answer to both “why did these correspond?” and “why did those not?”. Name the nodes with a condition on any node column, or wire a table of ids, or both; the two are unioned. Every link with both ends in the result is kept. Build Network’s degree and weight columns are recomputed against the surviving links, so a size encoding describes the picture; a column some other producer derived — the neuron counts on Match Cell Types’ label nodes — is carried through unchanged and still describes the whole graph.',
+    'Selects nodes by a condition on any node column, by a wired table of ids, or both (the ' +
+    'two are combined), and keeps them plus their neighbours within some hops or their whole ' +
+    "component. Links with both ends kept stay. Build Network's degree and weight columns are " +
+    'recomputed for the remaining links. Useful for looking at one component of Match Cell ' +
+    "Types' Network.",
   cost: 'cheap',
 
   inputs: [
@@ -180,7 +185,9 @@ registerNode({
      * `Match Cell Types`' Pass Through port, same shape and same message.
      */
     if (ctx.inputs.seed && !ctx.column('seedColumn')) {
-      issues.push('Seed: pick the column holding the node ids to start from.')
+      issues.push(
+        '`Seed` is wired but `Seed ids` is empty. Pick the column holding the node ids to start from.',
+      )
     }
     /*
      * Said rather than refused. An empty selection is a legitimate state while somebody is
@@ -188,7 +195,9 @@ registerNode({
      * downstream — this is the card explaining a blank drawing, not a reason to stop.
      */
     if (!column && !ctx.inputs.seed) {
-      issues.push('Nothing selects any nodes yet — pick a column, or wire a table of ids.')
+      issues.push(
+        'Nothing selects any nodes yet. Pick a `Column`, or wire a table of ids into `Seed`.',
+      )
     }
     return issues
   },
@@ -241,9 +250,9 @@ registerNode({
 
     if (seeds.size > 0 && kept.size === 0) {
       ctx.warn(
-        'Nothing selected: no node matched the condition and no seed id is in this ' +
-          'network. Ids are exact — Match Cell Types prefixes its own with "label/" and ' +
-          '"neurons/".',
+        'Nothing selected: no node matched the condition, and none of the seed ids are in this ' +
+          'network. Ids must match exactly; note that Match Cell Types adds the prefixes ' +
+          '"label/" and "neurons/" to its ids.',
       )
     }
 

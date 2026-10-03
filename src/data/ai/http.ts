@@ -79,8 +79,8 @@ function networkMessage(url: string, error: unknown): string {
     )
   }
   return (
-    `Could not reach ${where}. This request goes straight from the browser, so there is no ` +
-    `proxy to blame — check the connection, or whether an extension or a Content-Security-` +
+    `Could not reach ${where}. This request goes straight from the browser with no proxy in ` +
+    `between. Check the connection, and whether an extension or a Content-Security-` +
     `Policy is blocking it. (${errorMessage(error)})`
   )
 }

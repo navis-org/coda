@@ -357,12 +357,11 @@ const SECTIONS: readonly [Section, ...Section[]] = [
       <>
         <strong>Credentials stay in this browser.</strong>
         <Why>
-          {"Tokens — and a CATMAID instance's HTTP basic password, if you set one — are held in " +
-            "this browser's local storage on this machine only, in the clear. They are never " +
+          {"Tokens (and a CATMAID instance's HTTP basic password, if you set one) are stored " +
+            "unencrypted in this browser's local storage, on this machine only. They are never " +
             'written into a saved graph or an export, never sent to us, and never shared with ' +
-            'any third party: each goes only to the deployment it belongs to, directly where ' +
-            'that deployment allows a browser to reach it and otherwise through a same-origin ' +
-            'relay.'}
+            'any third party. Each one goes only to the deployment it belongs to: directly if ' +
+            'that deployment lets a browser reach it, otherwise through a same-origin relay.'}
         </Why>
       </>
     ),
@@ -403,16 +402,16 @@ const SECTIONS: readonly [Section, ...Section[]] = [
           drawer — a summary of what it last produced go to the provider you pick.{' '}
           {/* Inside the block, or the `?` drops onto a line of its own under it. */}
           <Why>
-            {"Keys are held in this browser's local storage on this machine only, are never " +
-              'written into a saved graph or an export, and are never sent to us — requests go ' +
+            {"Keys are stored in this browser's local storage on this machine only. They are " +
+              'never written into a saved graph or an export, and never sent to us: requests go ' +
               'straight from this page to the provider you pick, with no server of ours in ' +
-              'between. The summary is the one part you can decline — Send run values, in the ' +
-              'assistant drawer. It describes what a node produced rather than reproducing it: ' +
-              'row counts, ranges, and the commonest values of a column, for nodes whose ' +
+              'between. The summary is the only part you can turn off (Send run values, in the ' +
+              'assistant drawer). It describes what a node produced without including the data: ' +
+              'row counts, ranges, and the most common values of a column, for nodes whose ' +
               'results are current. No rows are sent, and neuron ids are never listed. A model ' +
-              'running on your own machine under Ollama sends nothing off it at all — but an ' +
-              'Ollama model whose name ends in -cloud runs on ollama.com, and is no more ' +
-              'local than the rest.'}
+              'running on your own machine under Ollama sends nothing off it at all. But an ' +
+              'Ollama model whose name ends in -cloud runs on ollama.com, so it is not local ' +
+              'either.'}
           </Why>
         </span>
       </>
@@ -450,11 +449,11 @@ const SECTIONS: readonly [Section, ...Section[]] = [
       <>
         <strong>Only needed to make a short link.</strong>
         <Why>
-          {"The token is held in this browser's local storage on this machine only, is never " +
-            'written into a saved graph or an export, and is never sent to us — it goes ' +
-            'straight from this page to api.github.com. Reading a shared gist needs no token at ' +
-            'all, so a link you send works for anybody. A workflow you upload becomes a gist on ' +
-            'your own account, which you can delete from GitHub at any time.'}
+          {"The token is stored in this browser's local storage on this machine only. It is " +
+            'never written into a saved graph or an export and never sent to us; it goes ' +
+            'straight from this page to api.github.com. Opening a shared gist needs no token, ' +
+            'so a link you send works for anyone. A workflow you upload becomes a gist on your ' +
+            'own account, which you can delete on GitHub at any time.'}
         </Why>
       </>
     ),
@@ -547,7 +546,7 @@ export function SourcesPanel() {
     // Re-list so the dataset picker and the ROI/status enums populate without a reload.
     void getSource('neuprint')
       ?.listDatasets()
-      .then((datasets) => notify(`neuPrint connected — ${datasets.length} datasets`))
+      .then((datasets) => notify(`neuPrint connected: ${datasets.length} datasets`))
       .catch(() => undefined)
     closePanel()
   }, [token, session, server, notify, closePanel])
@@ -853,10 +852,10 @@ function NeuPrintTab({
         Google account you use for neuPrint.
         <Why>
           {"The window that opens belongs to Janelia's sign-in service, so Coda never sees your " +
-            'password — what comes back is a neuPrint token, good for about a week, which works ' +
-            'on every neuPrint server. If you tick "Don\'t ask again", later sign-ins finish on ' +
-            `their own; you can withdraw that at ${DSG_ACCOUNT_URL}. Some datasets also ask you ` +
-            'to accept their terms of use on the neuPrint site before they will answer.'}
+            'password. What comes back is a neuPrint token that is valid for about a week and ' +
+            'works on every neuPrint server. If you tick "Don\'t ask again", later sign-ins ' +
+            `finish by themselves; you can undo that at ${DSG_ACCOUNT_URL}. Some datasets also ` +
+            'ask you to accept their terms of use on the neuPrint site before they will answer.'}
         </Why>
       </p>
 
@@ -899,8 +898,8 @@ function NeuPrintTab({
           </a>
           <Why>
             {'The same token neuprint-python reads from NEUPRINT_APPLICATION_CREDENTIALS. ' +
-              'Pasting is also the way through if your browser blocks the sign-in window, or if ' +
-              'this copy of Coda is served from a site the sign-in service does not accept.'}
+              'Pasting also works if your browser blocks the sign-in window, or if this copy of ' +
+              'Coda runs on a site the sign-in service does not accept.'}
           </Why>
         </p>
       </details>
@@ -917,12 +916,12 @@ function NeuPrintTab({
       <p className="sources__hint">
         Leave this empty unless you run your own proxy.
         <Why>
-          {'Empty means work it out: the deployment is tried directly, and where it sends no ' +
-            `CORS headers the same-origin ${DEFAULT_PROXY_PATH} path is used instead — served ` +
-            'in development by vite.config.ts, and by nothing at all in a static deploy. Naming ' +
-            'a URL here overrides both, with no fallback, and applies to the default deployment ' +
-            "only. Not the same thing as a dataset node's Server, which names which neuPrint " +
-            'deployment to ask.'}
+          {'If empty, Coda tries the deployment directly, and if it sends no CORS headers, ' +
+            `uses the same-origin ${DEFAULT_PROXY_PATH} path instead. That path is served by ` +
+            'vite.config.ts in development and by nothing at all in a static deploy. A URL ' +
+            'entered here replaces both, with no fallback, and applies to the default ' +
+            "deployment only. This is different from a dataset node's Server, which picks the " +
+            'neuPrint deployment to ask.'}
         </Why>
       </p>
 
@@ -990,7 +989,7 @@ function SharingTab({ onSaved }: { onSaved: () => void }) {
     setGithubToken(token)
     try {
       const login = await githubLogin()
-      if (!login) throw new Error('GitHub named no account for that token.')
+      if (!login) throw new Error('GitHub returned no account for that token.')
       setProbe({ state: 'ok', login })
     } catch (error) {
       setGithubToken(previous)
@@ -1177,9 +1176,9 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
         Configure per-CATMAID instances credentials. Access to public instances (e.g. VFB) needs
         no credentials.
         <Why>
-          {'Every GET is answered anonymously, but connectivity and neuron names go over POST, ' +
-            'which a browser cannot send anonymously, so those need a token. Get one from your ' +
-            'instance: hover your name, then “Get API token”.'}
+          {'GET requests work anonymously, but connectivity and neuron names are fetched over ' +
+            'POST, which a browser cannot send anonymously, so those need a token. To get one, ' +
+            'hover over your name on your instance and click “Get API token”.'}
         </Why>
       </p>
 
@@ -1187,10 +1186,10 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
         <p className="sources__hint">
           None configured — Virtual Fly Brain&rsquo;s servers need none.
           <Why>
-            {'They publish a read-only token per instance and Coda carries it, so ' +
-              `${hostPattern(DEFAULT_CATMAID_SERVER)} and the other seven work as they are. Add ` +
-              'a row for an instance that asks for a credential — or to use your own account on ' +
-              'one of theirs, which takes precedence over the published token.'}
+            {'VFB publishes a read-only token for each of its instances and Coda includes it, ' +
+              `so ${hostPattern(DEFAULT_CATMAID_SERVER)} and the other seven work as they are. ` +
+              'Add a row for an instance that asks for a credential, or to use your own account ' +
+              'on a VFB instance; your own token takes precedence over the published one.'}
           </Why>
         </p>
       ) : null}
@@ -1315,7 +1314,7 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
             const saved = `Saved ${stored.length} CATMAID instance${stored.length === 1 ? '' : 's'}`
             notify(
               dropped > 0
-                ? `${saved} — ${dropped} incomplete row${dropped === 1 ? '' : 's'} dropped.`
+                ? `${saved}. Dropped ${dropped} incomplete row${dropped === 1 ? '' : 's'}.`
                 : `${saved}.`,
             )
             onSaved()
@@ -1513,7 +1512,7 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
       const listed = results.flatMap((result) =>
         result.status === 'fulfilled' ? result.value : [],
       )
-      notify(`CAVE connected — ${listed.length} datasets`)
+      notify(`CAVE connected: ${listed.length} datasets`)
     })
     onSaved()
   }
@@ -1526,13 +1525,13 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
         already have a CAVE account, use the Google account it is linked to.
         <Why>
           {'Sign in with the Google account you use for that deployment. The window that opens ' +
-            "belongs to CAVE's own auth service, so Coda never sees your password — what comes " +
-            'back is a token for that deployment and nothing else. Deployments are separate ' +
-            'services with separate accounts, and so is neuPrint. Signing in for the first time ' +
-            'creates an account and asks you to choose a username before it finishes: that step ' +
-            'is part of it, and the sign-in completes when you submit the form. Which datasets ' +
-            'the new account may read is the deployment’s to grant, so a query can still be ' +
-            'refused after a sign-in that worked.'}
+            "belongs to CAVE's own sign-in service, so Coda never sees your password. What " +
+            'comes back is a token for that deployment only. Each deployment is a separate ' +
+            'service with its own accounts, and neuPrint is separate again. The first time you ' +
+            'sign in, CAVE creates an account and asks you to choose a username. That form is ' +
+            'part of signing in, and the sign-in completes when you submit it. The deployment ' +
+            'decides which datasets a new account may read, so a query can still be refused ' +
+            'after a successful sign-in.'}
         </Why>
       </p>
 
@@ -1614,9 +1613,9 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
                     </a>
                     <Why>
                       {'The same token caveclient stores in ~/.cloudvolume/secrets, so if you ' +
-                        'already use CAVE from Python you have one. Pasting is also the way ' +
-                        'through if your browser blocks the sign-in window, or if that window ' +
-                        'ends on an error page.'}
+                        'already use CAVE from Python you have one. Pasting also works if your ' +
+                        'browser blocks the sign-in window, or if that window ends on an error ' +
+                        'page.'}
                     </Why>
                   </p>
                 )}

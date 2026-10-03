@@ -131,7 +131,7 @@ describe('an input with nothing matching', () => {
   it('names the restriction and the control', () => {
     const only = T.table(tableSchema(column('type', 'str')))
     expect(issues(def(picker({ dtypes: ['i64', 'f64'] })), { col: '' }, only)).toEqual([
-      'No columns of type i64/f64 available for "Column"',
+      'No columns of type i64/f64 available for `Column`.',
     ])
   })
 
@@ -159,7 +159,7 @@ describe('a stored column the picker has narrowed away', () => {
 
   it('says the chosen column is the wrong type, not that it is gone', () => {
     expect(issues(def(numeric()), { mode: 'numbers', col: 'type' }, table)).toEqual([
-      'Column "type" is not i64/f64, which "Column" needs',
+      'Column "type" is not i64/f64, which `Column` needs.',
     ])
   })
 
@@ -180,14 +180,16 @@ describe('a stored column that has disappeared', () => {
   it('reports a chosen column as missing, because that is what now happens to it', () => {
     // `resolveColumn` keeps it, so there is no fallback to name — the singular says exactly
     // what the plural has always said.
-    expect(issues(def(picker()), { col: 'weight' }, table)).toEqual(['Missing column: weight'])
+    expect(issues(def(picker()), { col: 'weight' }, table)).toEqual([
+      'Column "weight" is missing from the input.',
+    ])
   })
 
   it('names the fallback only where one is actually taken', () => {
     // A stored value still equal to the definition's declared default is a suggestion, not a
     // decision, so it does fall back — and says so.
     expect(issues(def(picker({ default: 'weight' })), { col: 'weight' }, table)).toEqual([
-      'Column "weight" is gone — using "neuronId"',
+      'Column "weight" is missing, so "neuronId" is used instead.',
     ])
   })
 
@@ -195,7 +197,7 @@ describe('a stored column that has disappeared', () => {
     // `resolveColumn` answers *off* here rather than reaching for the first column, so the
     // message above would be a false statement and not merely a loud one.
     expect(issues(def(picker({ optional: true })), { col: 'weight' }, table)).toEqual([
-      'Column "weight" is gone',
+      'Column "weight" is missing.',
     ])
   })
 
@@ -227,7 +229,7 @@ describe('a stored column that has disappeared', () => {
       default: [],
     }
     expect(issues(def(multi), { cols: ['type', 'weight', 'nope'] }, table)).toEqual([
-      'Missing column(s): weight, nope',
+      'Columns missing from the input: weight, nope.',
     ])
   })
 })

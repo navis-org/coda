@@ -1,18 +1,20 @@
-The same lookup as [Selected to Neurons](#cluster.selectedToNeurons), registered under its own name for discoverability. Wire a Cut Tree's `Clusters` output here — not a Dendrogram's `Selected` — and every neuron gets its cluster number back, ready for:
+[Cut Tree](#cluster.cut) assigns cluster numbers to leaf *names*, not neurons. Clusters to Neurons maps those cluster numbers back onto the neurons, so that every neuron carries its `cluster` (plus `order` and `size`). You can then e.g.:
 
-- Neuroglancer to colour segments by cluster
-- Filter to isolate one group
-- Group By to count members per cluster
+- colour segments by cluster in [Neuroglancer](#out.neuroglancer)
+- isolate one group with a Filter
+- count members per cluster with a [Group By](#core.groupBy)
 
-It is a **local match against whatever neuron table is wired in**, not a backend query. See [Selected to Neurons](#cluster.selectedToNeurons) for that distinction and for how `Match on` and `Suffix` work; both nodes share the same matching logic.
+Wire it to Cut Tree's `Clusters` output, not to a [Dendrogram](#out.dendrogram)'s `Selected`: only `Clusters` covers every neuron.
 
-> [!WARNING] A labels table with no `cluster` column warns rather than refuses
-> That is usually a Dendrogram's `Selected` wired in by mistake, in place of a Cut Tree's
-> `Clusters`. The name-matching itself is still valid without a cluster column, so the run
-> proceeds with nothing to colour by.
-
-Where a label names several neurons — a cell type does — every one of them comes back carrying that cluster number.
+This node does the same lookup as [Selected to Neurons](#cluster.selectedToNeurons). It matches against the neuron table you wire into `Neurons` rather than querying the dataset; see that node's help for details and for how `Match on` and `Suffix` work.
 
 ```coda-params
 cluster.clustersToNeurons: labelColumn, matchColumn
 ```
+
+If a label stands for several neurons (as a cell type does), every one of those neurons gets that cluster number.
+
+> [!NOTE] No `cluster` column
+> If the input table has no `cluster` column, the node warns you but still runs. This usually
+> means a Dendrogram's `Selected` was wired in instead of Cut Tree's `Clusters`. The matching
+> still works, there is just nothing to colour by.

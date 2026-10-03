@@ -151,16 +151,16 @@ export function embedRoute(isWired: (port: string) => boolean): EmbedRouteResult
     return {
       ok: false,
       refusal:
-        `Wire one of ${EMBED_ROUTES.map((r) => r.label).join(', ')}: a score matrix, a ` +
-        `table of feature vectors, or a table of nearest neighbours.`,
+        `Wire one of ${EMBED_ROUTES.map((r) => `\`${r.label}\``).join(', ')}: a score matrix, ` +
+        `a table of feature vectors, or a table of nearest neighbours.`,
     }
   }
   if (wired.length > 1) {
     return {
       ok: false,
       refusal:
-        `${wired.map((route) => route.label).join(' and ')} are wired at once and they ` +
-        `are alternatives — disconnect all but one.`,
+        `${wired.map((route) => `\`${route.label}\``).join(' and ')} are wired at once, but ` +
+        `only one can be used. Disconnect all but one.`,
     }
   }
   return { ok: true, route: wired[0]!.port }
@@ -168,14 +168,15 @@ export function embedRoute(isWired: (port: string) => boolean): EmbedRouteResult
 
 /** The messages both halves of the Features and Neighbours routes report. See invariant 5. */
 export const EMBED_ISSUES = {
-  longColumns: 'Pick an Observations and a Features column',
+  longColumns: 'Pick an `Observations` and a `Features` column.',
   sameFeature:
-    'Observations and Features point at the same column, so every point is identical',
-  wideId: 'Pick the column naming each row',
-  wideFeatures: 'Pick at least one feature column',
-  neighbourColumns: 'Pick the two columns naming each neighbour pair',
+    '`Observations` and `Features` are the same column, so every point is identical. Pick a different column for one of them.',
+  wideId: 'Pick an `Id column` naming each row.',
+  wideFeatures: 'Pick at least one column under `Feature columns`.',
+  neighbourColumns:
+    'Pick `Neighbour: from` and `Neighbour: to`, the two columns naming each neighbour pair.',
   sameNeighbour:
-    'From and To point at the same column, so every neuron is only its own neighbour',
+    '`Neighbour: from` and `Neighbour: to` are the same column, so every neuron is only its own neighbour. Pick a different column for one of them.',
 } as const
 
 // ---------------------------------------------------------------------------
@@ -209,7 +210,7 @@ export const EMBED_OBSERVATIONS_WARN = 20_000
  * needs two observations and a neighbourhood needs four.
  */
 export function checkEmbedMatrix(ctx: Warner, matrix: MatrixValue): void {
-  checkSquarePopulation(matrix, 'An embedding', 'single neighbourhood to lay out')
+  checkSquarePopulation(matrix, 'An embedding', 'layout')
   checkEmbedCount(ctx, matrix.rowLabels.length)
 }
 
@@ -218,7 +219,7 @@ export function checkEmbedCount(ctx: Warner, n: number): void {
   if (n < MIN_EMBED_OBSERVATIONS) {
     throw new Error(
       `An embedding needs at least ${MIN_EMBED_OBSERVATIONS} observations, got ${n}. ` +
-        `Fewer have no neighbourhood structure to preserve.`,
+        `Check that the right input is wired and that no filter upstream emptied the set.`,
     )
   }
   if (n > EMBED_OBSERVATIONS_WARN) {
@@ -226,10 +227,10 @@ export function checkEmbedCount(ctx: Warner, n: number): void {
       count: n,
       threshold: EMBED_OBSERVATIONS_WARN,
       unit: 'observations',
-      control: 'the size this stays interactive at',
+      control: 'the usual size for an interactive embedding',
       cost:
-        'UMAP runs single-threaded in slices, and the fuzzy-set construction allocates ' +
-        'per neighbour pair.',
+        'UMAP runs single-threaded, and its memory use grows with the number of neighbour ' +
+        'pairs.',
     })
   }
 }
@@ -246,8 +247,8 @@ export function clampNeighbours(ctx: Warner, requested: number, n: number): numb
   const capped = Math.max(2, Math.min(requested, n - 1))
   if (capped !== requested) {
     ctx.warn(
-      `Neighbours was ${requested}, more than ${n} observations can offer; used ` +
-        `${capped}. On a set this small the neighbourhood is nearly the whole of it.`,
+      `\`Neighbours\` is ${requested}, but there are only ${n} neurons, so ${capped} was ` +
+        `used. With this few neurons, each neighbourhood covers almost the whole set.`,
     )
   }
   return capped
@@ -498,11 +499,11 @@ export function checkNeighbourDistances(rows: readonly number[][], scoreIs: stri
   throw new Error(
     scoreIs === 'similarity'
       ? `Read as similarities, these scores give distances as low as ${lowest.toFixed(3)}` +
-          `, and a distance cannot be negative. Scores above 1 mean Normalise is off at ` +
-          `the NBLAST node. If the column holds distances already, say so with "Scores ` +
-          `are".`
-      : `These scores go as low as ${lowest.toFixed(3)}, and a distance cannot be negative. Set ` +
-          `"Scores are" back to similarities if a bigger number means more alike.`,
+          `, and a distance cannot be negative. Scores above 1 mean \`Normalise\` is off on ` +
+          `the NBLAST node. If the column already holds distances, set \`Scores are\` to ` +
+          `"distances".`
+      : `These scores go as low as ${lowest.toFixed(3)}, and a distance cannot be negative. If ` +
+          `a bigger number means more alike, set \`Scores are\` to "similarities".`,
   )
 }
 

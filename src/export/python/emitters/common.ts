@@ -351,8 +351,8 @@ export function carryLines(
     refused.length > 0
       ? ctx.note(
           `This node carries ${refused.map((n) => `\`${n}\``).join(', ')} onto the geometry, ` +
-            'and navis computes that attribute itself — `type` is the neuron class, ' +
-            '`cable_length` and `soma` are read off the skeleton — so it cannot be set on a ' +
+            'but navis computes that attribute itself (`type` is the neuron class, and ' +
+            '`cable_length` and `soma` come from the skeleton), so it cannot be set on a ' +
             'neuron and is left out here. Rename the column upstream if the notebook needs it.',
         )
       : []

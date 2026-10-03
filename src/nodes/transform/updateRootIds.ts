@@ -37,10 +37,9 @@ export const updateRootIdsNode = packNode({
   category: 'transform',
   description: 'Repoint stale CAVE root ids at a materialization, using their supervoxel ids.',
   guide:
-    'Root ids drift when proofreading touches a segment, leaving annotation tables out of sync ' +
-    'with the materialization. This node repairs them by looking up what each stale id’s ' +
-    'supervoxel became and rewriting only stale entries. Unedited tables cost one staleness ' +
-    'check and no further lookups.',
+    'Brings outdated CAVE root ids in a table up to date with a materialization, using each ' +
+    'row’s supervoxel id. Usually sits between an annotation table and the CAVE Dataset it ' +
+    'annotates; wire that Dataset into its Dataset input to say which datastack to ask.',
   cost: 'expensive',
   dataCache: true,
   inputs: [
@@ -68,7 +67,7 @@ export const updateRootIdsNode = packNode({
       kind: 'column',
       label: 'Supervoxel ID column',
       from: 'in',
-      help: 'The supervoxel each row was annotated at. This is what a stale root id is recovered from, so a row without one is left alone.',
+      help: 'The supervoxel each row was annotated at, used to find the current root id. Rows without one are left alone.',
       /*
        * A named default rather than `''`, and the difference is whether this node can run on the
        * first press of a fresh session.
@@ -91,7 +90,7 @@ export const updateRootIdsNode = packNode({
       kind: 'string',
       label: 'Materialization',
       placeholder: 'the dataset’s',
-      help: 'Which materialization to bring the ids up to. Empty uses the one the wired Dataset is pinned to, which is nearly always what you want.',
+      help: 'Materialization to update the ids to. Leave empty to use the one the wired Dataset is pinned to.',
       default: '',
       advanced: true,
     },
@@ -117,17 +116,18 @@ export const updateRootIdsNode = packNode({
     const foreign = foreignBackend(ctx.inputs.dataset, 'cave')
     if (foreign) {
       return [
-        `Root ids only move in CAVE — a ${foreign} dataset has no chunkedgraph to look them up in`,
+        `Root ids only change in CAVE datasets, and a ${foreign} dataset has no chunkedgraph to ` +
+          `look them up in. Wire a CAVE Dataset into \`Dataset\`.`,
       ]
     }
     if (!ctx.column('supervoxelColumn')) {
       return [
-        'Pick the column holding each row’s supervoxel id — the ids cannot be updated without it',
+        'Pick a `Supervoxel ID column`. The ids cannot be updated without each row’s supervoxel id.',
       ]
     }
     const version = String(ctx.params.version).trim()
     if (version && !Number.isInteger(Number(version))) {
-      return [`"${version}" is not a materialization number — CAVE numbers them, e.g. 783`]
+      return [`"${version}" is not a materialization number. CAVE numbers them, e.g. 783.`]
     }
     return []
   },
@@ -140,7 +140,7 @@ export const updateRootIdsNode = packNode({
     // else, which is all this needs. See `PortDef.reference`.
     const dataset = ctx.input('dataset')
     if (dataset?.kind !== 'dataset') {
-      throw new Error('Wire a CAVE Dataset, so the ids can be looked up somewhere')
+      throw new Error('Wire a CAVE Dataset into `Dataset` so the ids can be looked up.')
     }
     // Which datastack, and which deployment's chunkedgraph answers it — whose token asks — is the
     // Dataset's, through the one reader of that rule. A version on this node overrides its own.
@@ -148,13 +148,16 @@ export const updateRootIdsNode = packNode({
     const chosen = String(ctx.params.version).trim()
     const version = chosen ? Number(chosen) : target?.version
     if (!target || version === undefined || !Number.isInteger(version)) {
-      throw new Error(`Cannot read a materialization out of "${dataset.datasetId}"`)
+      throw new Error(
+        `Cannot read a materialization from "${dataset.datasetId}". Set \`Materialization\` on this node.`,
+      )
     }
     const { deployment, datastack } = target
 
     const idColumn = ctx.column('idColumn')
     const svColumn = ctx.column('supervoxelColumn')
-    if (!idColumn || !svColumn) throw new Error('Pick an ID column and a supervoxel ID column')
+    if (!idColumn || !svColumn)
+      throw new Error('Pick an `ID column` and a `Supervoxel ID column`.')
     const ids = table.data[idColumn]
     const svs = table.data[svColumn]
     if (!ids || !svs) throw new Error(`"${idColumn}" or "${svColumn}" is not in this table`)

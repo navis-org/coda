@@ -68,7 +68,7 @@ registerEmitter('core.linkTable', (ctx) => {
   return [
     ...(ref.kind === 'local'
       ? ctx.note(
-          `A file on the disk of whoever built this workflow, named as the canvas knows it. ` +
+          `This file was on the computer of whoever built this workflow. ` +
             `Set the path to your own copy of ${ref.name || 'it'}.`,
         )
       : []),
@@ -76,17 +76,17 @@ registerEmitter('core.linkTable', (ctx) => {
       ? []
       : ctx.note(
           `The canvas had not read this ${format === 'delta' ? 'table’s log' : 'file’s footer'} at ` +
-            'export, so the columns read as text are the integer ones whose names say they hold ' +
-            'ids — Coda’s own rule. Name any other id column in text_columns: an eighteen-digit ' +
-            'id read as a number is a different neuron.' +
+            'export, so only integer columns whose names say they hold ids are read as text, ' +
+            'as Coda does. Add any other id column to text_columns, because an eighteen-digit ' +
+            'id read as a number becomes a different neuron.' +
             (format === 'delta'
               ? ' No version is pinned either, so this reads the table as it is when the cell runs.'
               : ''),
         )),
     ...(format === 'feather'
       ? ctx.note(
-          'Feather keeps no statistics, so every lookup in this file reads it whole — Parquet ' +
-            'sorted by the id column is what lets a lookup read a fraction of it.',
+          'Feather keeps no statistics, so every id lookup reads the whole file. Save the ' +
+            'file as Parquet sorted by the id column so a lookup reads only part of it.',
         )
       : []),
     `${out} = CodaTableFile(`,
@@ -132,7 +132,8 @@ registerEmitter('core.readRows', (ctx) => {
     ...args.map((a) => `    ${a},`),
     `)`,
     `if len(${out}) > ${limit}:`,
-    `    print('Stopped at the row cap of ${limit.toLocaleString('en-US')} with rows left to read.')`,
+    `    print('Stopped at the row cap of ${limit.toLocaleString('en-US')} with more rows left to read. '`,
+    `          'Raise the cap, match fewer ids, or filter the table upstream.')`,
     `    ${out} = ${out}.head(${limit})`,
   ]
 })
@@ -156,7 +157,7 @@ registerEmitter('dataset.ngsource', (ctx) => {
   ctx.helper('CodaPrecomputed')
   return [
     `${ctx.output('dataset')} = CodaPrecomputed(${pyStr(ref.canonical)})`,
-    ...ctx.note('A neuroglancer layer has no notebook form.'),
+    ...ctx.note('Neuroglancer layers cannot be exported to a notebook, so `Layers` is None.'),
     `${ctx.output('layers')} = None`,
   ]
 })
@@ -222,9 +223,10 @@ registerEmitter(
       else {
         notes.push(
           ...ctx.note(
-            `The ${backendName(datasetBackend(ctx, kind))} dataset wired into ${kind} has no ` +
-              `${kind} route in this notebook, so this dataset holds none; fetch them with that ` +
-              `dataset's own client.`,
+            `The notebook has no way to fetch ${kind} from the ` +
+              `${backendName(datasetBackend(ctx, kind))} dataset wired into ` +
+              `\`${kind === 'meshes' ? 'Meshes' : 'Skeletons'}\`, so this dataset holds none. ` +
+              `Fetch them with that dataset's own client.`,
           ),
         )
       }

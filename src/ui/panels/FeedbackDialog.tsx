@@ -41,7 +41,7 @@ const CATEGORIES: Record<FeedbackCategory, CategoryCopy> = {
   },
   general: {
     label: 'Get in Touch',
-    blurb: 'Anything else \u2014 a question, a thought, a hello.',
+    blurb: 'Anything else: a question, a thought, or just hello.',
     placeholder: 'Say hello, ask a question, anything…',
   },
 }
@@ -220,7 +220,7 @@ function Dialog({
             </label>
 
             <label className="sources__field">
-              <span>Your email (optional — only if you&rsquo;d like a reply)</span>
+              <span>Your email (optional, only if you&rsquo;d like a reply)</span>
               <input
                 className="field"
                 type="email"
@@ -285,9 +285,9 @@ function Dialog({
                 {includeLink && linkState.state === 'too-long' && (
                   <div className="feedback__link-toolong">
                     <p className="sources__note sources__note--tight">
-                      This graph packs to {formatNumber(linkState.length)} characters — too long
-                      for a plain link. Close this and use <strong>Share ▸ GitHub Gist</strong>{' '}
-                      to shorten it, then paste the result below.
+                      A link to this graph would be {formatNumber(linkState.length)} characters
+                      long, which is too long to send. Use <strong>Share ▸ GitHub Gist</strong>{' '}
+                      to get a short link, then paste it below.
                     </p>
                     <input
                       className="field"

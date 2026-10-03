@@ -97,7 +97,7 @@ describe('buildCommandItems', () => {
     const item = byId(commands(), 'cmd:export-notebook')
     expect(item.disabled).toBe(true)
     expect(item.hint).toContain('Demo Data')
-    expect(item.hint).toContain('swap in a real dataset')
+    expect(item.hint).toContain('replace it with a real dataset')
   })
 
   it('enables Export as Jupyter Notebook once the dataset is a real one', () => {
@@ -747,7 +747,7 @@ describe('breadcrumbs on the real item list', () => {
   it('uses the middle segment where it earns its place', () => {
     expect(rowFor('Dark')).toBe('View ▶ Theme ▶ Dark')
     expect(rowFor('Find Neurons')).toBe(
-      'Add ▶ Query ▶ Find Neurons ▶ Search a dataset for neurons, by any field the dataset publishes.',
+      'Add ▶ Query ▶ Find Neurons ▶ Searches a dataset for neurons by any field the dataset publishes.',
     )
   })
 })

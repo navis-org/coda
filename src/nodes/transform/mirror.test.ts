@@ -182,7 +182,7 @@ describe('neuron.mirror — what it refuses, and when', () => {
 
   it('warns at edit time about a space Coda ships nothing for', () => {
     const issues = inferGraph(pipeline({ space: 'JRC2018Ucns' })).nodes['mirror']?.issues ?? []
-    expect(issues.map((i) => i.message).join(' ')).toMatch(/ships no mirror/)
+    expect(issues.map((i) => i.message).join(' ')).toMatch(/has no mirror for/)
   })
 
   it('refuses unregistered geometry by naming both ways out', async () => {
@@ -192,8 +192,8 @@ describe('neuron.mirror — what it refuses, and when', () => {
      * a bug upstream, it is a dataset nobody registered.
      */
     const error = (await run(pipeline())).info('mirror').error ?? ''
-    expect(error).toMatch(/name no template space/)
-    expect(error).toMatch(/name the space here/)
+    expect(error).toMatch(/have no template space/)
+    expect(error).toMatch(/or set `Space`/)
   })
 })
 
@@ -271,7 +271,7 @@ describe('neuron.mirror — the override, which is the only way through here', (
     } as unknown as EvalContext
 
     await expect(requireNodeDef('neuron.mirror').evaluate(context)).rejects.toThrow(
-      /in voxels of an unknown size and Fish2 \(zebrafish\)'s midline/,
+      /in voxels of an unknown size, but Fish2 \(zebrafish\)'s midline/,
     )
   })
 
@@ -307,7 +307,7 @@ describe('neuron.mirror — the override, which is the only way through here', (
     expect(scheduler.info('mirror').error).toBeUndefined()
     const error = scheduler.info('mirror2').error ?? ''
     expect(error).toMatch(/are in MANC/)
-    expect(error).toMatch(/Space is set to .*FLYWIRE/)
+    expect(error).toMatch(/`Space` is set to .*FLYWIRE/)
     expect(error).toMatch(/wrong midline/)
   })
 
@@ -472,7 +472,7 @@ describe('neuron.mirror — the spline half', () => {
     checkWarpSize(ctx, 3_000_000, 3390)
     expect(said.join(' ')).toMatch(/3,000,000 points/)
     expect(said.join(' ')).toMatch(/3,390 landmarks/)
-    expect(said.join(' ')).toMatch(/turn Warp off/)
+    expect(said.join(' ')).toMatch(/turn `Warp` off/)
     expect(said.join(' ')).toMatch(/Warping anyway/)
 
     said.length = 0

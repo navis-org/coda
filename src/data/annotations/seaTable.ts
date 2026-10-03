@@ -309,8 +309,8 @@ async function workspaceFor(
   }
   const where = matched.map((b) => `${b.workspaceName} (${b.workspaceId})`)
   throw new SeaTableError(
-    `${found.length} bases are called "${base}" on ${normaliseHost(host)} — in ${where.join(', ')}. ` +
-      `Set Workspace to the one you mean.`,
+    `${found.length} bases are called "${base}" on ${normaliseHost(host)}: in ${where.join(', ')}. ` +
+      `Set \`Workspace\` to the one you mean.`,
   )
 }
 

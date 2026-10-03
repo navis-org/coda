@@ -98,9 +98,7 @@ export function parseIdList(text: unknown, noun = 'neuron id'): IdListResult {
     if (value.length > MAX_ID_DIGITS) {
       return {
         ids: [],
-        error:
-          `"${token}" is too long to be a ${noun} — ids are at most ${MAX_ID_DIGITS} digits, ` +
-          `which is what a 64-bit id holds.`,
+        error: `"${token}" is too long to be a ${noun}. Ids have at most ${MAX_ID_DIGITS} digits.`,
       }
     }
     // Deduplicated with first-occurrence order kept: a neuron listed twice is one neuron, and a

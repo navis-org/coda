@@ -69,12 +69,13 @@ registerNode({
   type: 'core.embed',
   label: 'Embedding',
   category: 'analysis',
-  description: 'Lay out a similarity matrix or feature table in 2D with UMAP.',
+  description:
+    'Lay out a similarity matrix, a feature table or a nearest-neighbour table in 2D with UMAP.',
   guide:
-    'UMAP in the browser: a score matrix, a table of feature vectors or a table of nearest ' +
-    'neighbours becomes two coordinates per neuron, ready for a Scatter Plot. It preserves who ' +
-    'is near whom, so distance between clusters means nothing, and it is stochastic — the Seed ' +
-    'is part of the picture. Wire Neighbours from NBLAST k-NN to skip the all-by-all matrix.',
+    'Lays out neurons in 2D with UMAP so that similar neurons end up close together. Takes a ' +
+    'similarity matrix, a feature table or a nearest-neighbour table; plot the result with a ' +
+    'Scatter Plot. Distances between clusters are meaningless, and a different Seed gives a ' +
+    'different layout.',
   cost: 'expensive',
 
   inputs: [
@@ -120,9 +121,7 @@ registerNode({
       default: 15,
       min: 2,
       max: 200,
-      help:
-        'How local the structure is. Small values keep fine detail, large ones the overall ' +
-        'shape. Counts the neuron itself, so 15 means 14 neighbours.',
+      help: 'How local the structure is: small values keep fine detail, large ones the overall shape. Includes the neuron itself, so 15 means 14 neighbours.',
     },
     {
       id: 'minDist',
@@ -133,9 +132,7 @@ registerNode({
       max: 0.99,
       step: 0.05,
       slider: true,
-      help:
-        'How tightly points may pack. Near zero gives dense clumps, larger values spread them ' +
-        'out. Changes the drawing, not the neighbourhoods.',
+      help: 'How tightly points may pack. Near zero gives dense clumps. Only changes the drawing; which neurons are neighbours stays the same.',
     },
     {
       id: 'seed',
@@ -144,9 +141,7 @@ registerNode({
       default: 42,
       min: 0,
       max: 1_000_000,
-      help:
-        'UMAP is stochastic: the same seed gives the same arrangement. Change it to check ' +
-        'that a group you read off the plot is real.',
+      help: 'The same seed gives the same layout. Try another seed to check that a group you see is real.',
     },
     {
       id: 'spread',
@@ -157,7 +152,7 @@ registerNode({
       max: 10,
       step: 0.1,
       advanced: true,
-      help: 'The scale the whole embedding is drawn at. Read together with Min distance, which cannot exceed it.',
+      help: 'The overall scale of the embedding. `Min distance` cannot exceed it.',
     },
     {
       id: 'epochs',
@@ -167,9 +162,7 @@ registerNode({
       min: 0,
       max: 5000,
       advanced: true,
-      help:
-        'How long the layout is optimised for. 0 uses umap-learn’s default: 500 below ten ' +
-        'thousand points, 200 above.',
+      help: 'How many optimisation steps to run. 0 uses umap-learn’s default: 500 below 10,000 points, 200 above.',
     },
 
     // --- the Matrix route ------------------------------------------------
@@ -184,9 +177,7 @@ registerNode({
         { value: 'one_minus', label: '1 − value' },
         { value: 'none', label: 'the values are already distances' },
       ],
-      help:
-        'UMAP needs distances. "Auto" asks the matrix, inverting it if it carries ' +
-        'similarities. Same as the Linkage node’s.',
+      help: 'UMAP needs distances. "auto (from the matrix)" converts similarities to distances. Same as in Linkage.',
     },
 
     // --- the Features route ----------------------------------------------
@@ -197,7 +188,7 @@ registerNode({
       default: 'long',
       advanced: true,
       options: SIMILARITY_LAYOUT_OPTIONS,
-      help: '"Long" is a table of triplets, as Partner Vectors produces; "wide" is one row per neuron with a column per feature.',
+      help: 'How the table is laid out. "Long (one row per pair)" is what Partner Vectors produces.',
     },
     {
       id: 'observations',
@@ -207,7 +198,7 @@ registerNode({
       default: '',
       advanced: true,
       visibleIf: isLongLayout,
-      help: 'What each point in the plot will be — the neurons being compared.',
+      help: 'The column naming each point in the plot, usually neurons.',
     },
     {
       id: 'featureColumn',
@@ -217,7 +208,7 @@ registerNode({
       default: '',
       advanced: true,
       visibleIf: isLongLayout,
-      help: 'What they are being compared over. From Partner Vectors this is "feature".',
+      help: 'The column to compare over. From Partner Vectors this is `feature`.',
     },
     {
       id: 'value',
@@ -239,7 +230,7 @@ registerNode({
       default: '',
       advanced: true,
       visibleIf: (params) => !isLongLayout(params),
-      help: 'The column naming each row. Everything else picked below is a dimension.',
+      help: 'The column naming each row.',
     },
     {
       id: 'wideFeatures',
@@ -259,7 +250,7 @@ registerNode({
       default: 'cosine',
       advanced: true,
       options: SIMILARITY_METRIC_OPTIONS,
-      help: 'How two feature vectors are compared, before UMAP sees them. Same list as the Similarity Matrix node’s.',
+      help: 'How two feature vectors are compared. Same options as Similarity Matrix.',
     },
 
     // --- the Neighbours route --------------------------------------------
@@ -270,7 +261,7 @@ registerNode({
       from: 'neighbours',
       default: 'queryId',
       advanced: true,
-      help: 'The column naming the neuron a row is about. These are the points that get laid out.',
+      help: 'The column naming the neuron each row is about. These neurons become the points.',
     },
     {
       id: 'targetColumn',
@@ -324,7 +315,7 @@ registerNode({
       default: 'type',
       optional: true,
       advanced: true,
-      help: 'What to write into the "annotation" column — cell type, hemilineage, a Cut Tree cluster. A Scatter Plot downstream colours by it.',
+      help: 'The column to copy into `annotation`, e.g. cell type or a Cut Tree cluster. A Scatter Plot can colour by it.',
     },
   ],
 
@@ -366,7 +357,9 @@ registerNode({
      * that merely looks wrong. Said at edit time, where the number is still on screen.
      */
     if (Number(ctx.params.minDist) > Number(ctx.params.spread)) {
-      return ['Min distance cannot exceed Spread: it is how tightly points may pack within it.']
+      return [
+        '`Min distance` cannot be larger than `Spread`. Lower `Min distance` or raise `Spread`.',
+      ]
     }
     return []
   },
@@ -405,7 +398,7 @@ registerNode({
       if (built.losses.isolated > 0) {
         ctx.warn(
           `${built.losses.isolated.toLocaleString()} neurons have no neighbours at all, so ` +
-            `UMAP left them where the initialisation put them - unplaced, not outliers.`,
+            `UMAP could not place them. Their positions are arbitrary, so do not read them as outliers.`,
         )
       }
       graph = built.graph
@@ -446,7 +439,7 @@ registerNode({
         ctx.warn(
           `Nothing in the Annotations table matched: "` +
             `${ctx.column('matchOn') ?? 'neuronId'}" holds none of this embedding's ids, so ` +
-            `the annotation column is empty. Check the column.`,
+            `the annotation column is empty. Check that \`Match on\` names the right column.`,
         )
       } else if (matched < graph.labels.length) {
         ctx.progress(

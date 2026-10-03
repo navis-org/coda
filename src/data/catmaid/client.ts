@@ -232,7 +232,7 @@ async function catmaidRequest<T>(
   if (!response) {
     throw new CatmaidError(
       `Could not reach CATMAID at ${origin}. It could not be read cross-origin, or the host is ` +
-        `down — a browser reports both the same way. (${errorMessage(lastError)})`,
+        `down. The browser does not say which. (${errorMessage(lastError)})`,
     )
   }
 
@@ -332,7 +332,7 @@ function refusalMessage(
     return (
       `${origin} refused a POST because of Django's CSRF check, which a browser cannot satisfy: ` +
       `\`Referer\` is a forbidden header name and the CSRF cookie is SameSite=Lax. A CATMAID ` +
-      `token bypasses it — add one in Connections — or run \`pnpm dev\`, whose relay does the ` +
+      `token bypasses it, so add one in Connections, or run \`pnpm dev\`, whose relay does the ` +
       `CSRF handshake server-side. See docs/catmaid_vfb.md.`
     )
   }
@@ -340,11 +340,11 @@ function refusalMessage(
     return (
       `${origin} refused an unauthenticated request. Public CATMAID instances answer every GET ` +
       `anonymously but not a POST, and Coda needs POST for connectivity and neuron names. Add a ` +
-      `token in Connections — the branch icon in the toolbar.`
+      `token in Connections (the branch icon in the toolbar).`
     )
   }
   return (
-    `${origin} rejected the token. CATMAID tokens are per-user and per-instance — check that ` +
+    `${origin} rejected the token. CATMAID tokens are per-user and per-instance, so check that ` +
     `this one was issued by this server.`
   )
 }

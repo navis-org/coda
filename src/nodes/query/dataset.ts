@@ -16,7 +16,11 @@ registerNode({
   type: 'neuron.dataset',
   label: 'Dataset (generic)',
   category: 'dataset',
-  description: 'Select a data source and dataset. Superseded by the per-dataset nodes.',
+  description: 'Picks a data source and a dataset. Replaced by the per-dataset nodes.',
+  guide:
+    'The old generic dataset node, which takes a source and a dataset id. It was replaced by ' +
+    'the per-dataset nodes (MaleCNS, FlyWire and so on) and is hidden from the palette; it is ' +
+    'only kept so that workflows saved with it still load.',
   hidden: true,
   cost: 'cheap',
   outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
@@ -25,7 +29,7 @@ registerNode({
       id: 'source',
       kind: 'enum',
       label: 'Source',
-      help: 'Which backend to query. neuPrint arrives behind this same interface.',
+      help: 'Which backend to query.',
       default: '',
       options: () => allSources().map((s) => ({ value: s.id, label: s.label })),
     },
@@ -44,7 +48,7 @@ registerNode({
       id: 'refresh',
       kind: 'int',
       label: 'Refresh',
-      help: 'Bumped by the Refresh button. Forces a re-fetch even when nothing else changed.',
+      help: 'Set by the Refresh button to force a re-fetch.',
       default: 0,
       min: 0,
       advanced: true,

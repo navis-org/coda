@@ -369,8 +369,8 @@ export function cutPlan(params: ParamValues): CutPlan {
   if (mode === 'mixed') {
     return {
       refusal:
-        'This Cut Tree groups by which datasets each cluster draws from, which has no ' +
-        'single-call equivalent here.',
+        'This Cut Tree groups clusters by which datasets they draw from, and there is no ' +
+        'single call that does this here.',
     }
   }
   return mode === 'height'
@@ -378,8 +378,8 @@ export function cutPlan(params: ParamValues): CutPlan {
         by: 'height',
         at: Number(params.height),
         note:
-          'Cutting at a height gives however many groups fall out below it, which may be one ' +
-          'if the height is above the top of the tree.',
+          'Cutting at a height gives as many groups as fall below it. If the height is above ' +
+          'the top of the tree, that is a single group.',
       }
     : { by: 'count', at: Number(params.count) }
 }
@@ -438,7 +438,7 @@ export function landmarkPlan(ctx: Pick<NeutralContext, 'column'>): LandmarkPlan 
   const from = columns('source')
   const to = columns('target')
   if ([...from, ...to].some((name) => !name)) {
-    return { refusal: 'Landmark Transform has unset coordinate columns — pick all six.' }
+    return { refusal: 'Landmark Transform has unset coordinate columns. Pick all six.' }
   }
   return { from, to }
 }

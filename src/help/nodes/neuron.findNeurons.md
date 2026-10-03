@@ -1,5 +1,9 @@
+## What Find Neurons does
+
+Find Neurons searches a dataset for neurons matching one or more filters. The result is a table of neurons that you can pass on to almost any other node, e.g. to look at them in 3D:
+
 ```coda-graph
-caption: Search for neurons and visualise what you select
+caption: Search for neurons and look at them in Neuroglancer.
 dataset.hemibrain as hb
 neuron.findNeurons as find
 out.neuroglancer as ngl
@@ -7,26 +11,39 @@ hb -> find
 find -> ngl
 ```
 
-Filters are rows: a **field**, a **condition** and a **value**. Add as many as you need — they all have to match.
+## Filters
 
-The field list is the dataset's own, so this node looks different depending on what you plug into it. A neuPrint dataset offers `type`, `status`, `size` and whatever else that release publishes — `cellBodyFiber` on hemibrain, `hemilineage` on manc. A FlyWire datastack offers `super_class`, `cell_class` and `cell_sub_class`. A CATMAID project offers `annotations` and `cableLength`. You cannot pick a field the dataset does not have.
+Each filter is a row with a field, a condition and a value, e.g. `type` "matches regex" `LC.*`. You can add as many rows as you like; a neuron has to match all of them.
 
-A few conditions are worth knowing:
+The fields come from the dataset you plug in, so the list changes from dataset to dataset:
 
-- **is one of** takes several values, comma-separated. That is how you say "or" here — and against neuPrint it is faster than the equivalent pattern, because it becomes an indexed lookup.
-- **matches regex** matches the *whole* name, so `LC.*` finds `LC4` but not `LPLC1`.
-- **is** and **contains** are case-sensitive unless you say otherwise.
+- neuPrint datasets offer `type`, `status`, `size` and whatever else that release publishes, such as `cellBodyFiber` on hemibrain or `hemilineage` on MANC.
+- FlyWire offers `super_class`, `cell_class` and `cell_sub_class`.
+- CATMAID projects offer `annotations` and `cableLength`.
 
-> [!WARNING] A node with no filters returns no neurons
-> Not the whole dataset: these queries run against shared production servers. Add a row and it
-> queries; delete the last one and it goes quiet again. To say "everything" on purpose, say it —
-> a row like `neuronId` `is not empty` matches every neuron there is. To look around a dataset
-> without asking it anything, use `Explore Dataset`.
+A few conditions are worth knowing about:
 
-**In ROI** is not a filter row, because a region is not a property of a neuron in the way a type is, and it appears only where the dataset can answer it. It still counts as a filter, so a node whose only setting is a region does query. **Limit** does not: a cap is not a question about *which* neurons, so a node whose only setting is a limit still returns nothing. It defaults to 0, which caps nothing.
-
-Past ten thousand matches the card says so. Nothing is refused — but every one of those ids travels into everything downstream, and a morphology node below this is over its own **Warn above** before it starts.
+- "is one of" takes several comma-separated values. This is how you say "or" (e.g. `type` "is one of" `LC4, LPLC2`). On neuPrint it is also faster than the equivalent regex.
+- "matches regex" has to match the *whole* value, so `LC.*` finds `LC4` but not `LPLC1`.
+- "is" and "contains" are case-sensitive.
 
 ```coda-params
 neuron.findNeurons: filters, limit
 ```
+
+> [!WARNING] No filters, no neurons
+> A Find Neurons node without any filters returns nothing rather than the whole dataset, because
+> these queries go to shared servers. If you really want every neuron, add a row like `neuronId`
+> "is not empty". To browse a dataset without querying it, use
+> [Explore Dataset](#neuron.explore).
+
+## Region and limit
+
+Under the advanced settings you will find two more options:
+
+- `In ROI` restricts the search to neurons with synapses in a given region. It only shows up for datasets that support it. A region on its own counts as a filter, so a node with only `In ROI` set will run a query.
+- `Limit` caps the number of neurons returned. The default of 0 means no cap. A limit on its own does not count as a filter, so a node with only a limit still returns nothing.
+
+## Large results
+
+If more than 10,000 neurons match, the node shows a warning. It still returns all of them, but keep in mind that every one of those neurons is passed on to everything downstream. A morphology node such as [Skeletons](#neuron.skeletons) will likely be above its own `Warn above` threshold before it even starts.

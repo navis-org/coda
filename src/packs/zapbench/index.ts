@@ -16,7 +16,7 @@ export const zapbench: PackDefinition = {
   id: 'zapbench',
   label: 'ZapBench',
   description:
-    'Whole-brain calcium activity from the larval zebrafish, with its cells matched to neurons.',
+    'Whole-brain calcium imaging of the larval zebrafish from ZapBench, with its cells matched to fish2 neurons.',
   glyph: 'zapbench:traces',
   nodes: [neuronTracesNode, tracesNode, neuronsNode],
 }

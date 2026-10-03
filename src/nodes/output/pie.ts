@@ -32,9 +32,10 @@ registerNode({
   type: 'out.pie',
   label: 'Pie Chart',
   category: 'visualisation',
-  description: 'Pie or donut chart: shares of a whole, one slice per category.',
+  description:
+    'Pie or donut chart of shares of a whole: one slice per category, sized by a value column or, with none picked, by row count.',
   guide:
-    'Composition as a ring or a wheel — one slice per category, sized by a value column or by row count when none is picked. The tail past eight slices folds into one residual rather than taking a ninth colour, and clicking a slice sends its rows on as Selected. It answers “what fraction” well and “which is bigger” badly; for the latter use a Bar Chart.',
+    'Shows the composition of a table as a pie or donut, one slice per category. Past eight slices the rest fold into one grey slice; click a slice to send its rows out of Selected. To compare sizes between categories, a Bar Chart is easier to read.',
   cost: 'cheap',
   // A pie needs its legend and its caption as well as the ring, and at 320 the ring had no
   // height left at all — the card drew a key to a picture that was not there. Measured.
@@ -52,7 +53,7 @@ registerNode({
       from: 'in',
       default: '',
       // Not presentational: it decides which rows a selected slice names. See the header.
-      help: 'One slice per distinct value. Also what a selected slice means, so changing it re-runs anything downstream of Selected.',
+      help: 'One slice per distinct value. Changing it re-runs anything downstream of Selected.',
     },
     {
       id: 'value',
@@ -76,7 +77,7 @@ registerNode({
         { value: 'donut', label: 'donut' },
         { value: 'pie', label: 'pie' },
       ],
-      help: 'The hole is where the total goes, and a ring compares arc lengths rather than angles.',
+      help: 'A donut shows the total in its hole.',
       presentational: true,
     },
     {
@@ -96,7 +97,7 @@ registerNode({
       default: 8,
       min: 2,
       max: 24,
-      help: 'Past this the tail folds into one grey residual rather than repeating a hue. Clicking it selects everything inside it.',
+      help: 'Slices past this fold into one grey slice. Clicking it selects everything inside it.',
       presentational: true,
       advanced: true,
     },
@@ -110,7 +111,7 @@ registerNode({
         { value: 'value', label: 'value' },
         { value: 'none', label: 'none' },
       ],
-      help: 'Dropped automatically from any slice too narrow to hold one.',
+      help: 'What each slice is labelled with. Dropped from slices too narrow to hold one.',
       presentational: true,
       advanced: true,
     },
@@ -120,7 +121,7 @@ registerNode({
       label: 'Selected',
       noun: 'slices',
       default: [],
-      help: 'Set by clicking slices in the viewer. Holds category labels rather than row ids, so it survives an upstream re-run. Feeds Selected.',
+      help: 'Set by clicking slices in the viewer. Feeds Selected.',
     },
   ],
 
@@ -131,7 +132,7 @@ registerNode({
     if (!ctx.inputs.in) return []
     const value = ctx.column('value')
     return value && value === ctx.column('category')
-      ? ['Value and Category are the same column']
+      ? ['`Value` and `Category` are the same column. Pick a different column for one of them.']
       : []
   },
 

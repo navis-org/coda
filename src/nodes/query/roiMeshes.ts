@@ -54,9 +54,11 @@ registerNode({
   type: 'neuron.roiMeshes',
   label: 'ROI Meshes',
   category: 'query',
-  description: 'Fetch the 3D shells of a dataset’s neuropil regions.',
+  description: 'Fetches the 3D meshes of a dataset’s brain regions (neuropils) as Volumes.',
   guide:
-    'The 3D shape of the dataset’s neuropils, as meshes on a wire — so the 3D View can draw an arbour inside the region it innervates. Pick regions by name, or leave the picker empty for the set that tiles the volume. Each shell is a separate request and a whole primary set runs to tens of megabytes, so this waits for an explicit Run.',
+    'Fetches the 3D meshes of a dataset’s brain regions (neuropils), so you can show neurons ' +
+    'inside the regions they innervate. Wire the output into the 3D View’s Volumes input. Leave ' +
+    'Regions empty to get the primary regions, which tile the brain without overlapping.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [{ id: 'meshes', label: 'Volumes', type: T.meshes(ROI_MESH_SCHEMA) }],
@@ -73,7 +75,7 @@ registerNode({
        * source knows which of its regions tile.
        */
       emptyLabel: 'the primary set',
-      help: 'Which neuropils to fetch. Empty means the set that tiles the volume — the regions that do not sit inside one another. On a neuroglancer source that publishes meshes but no names, type the segment ids of the regions instead, separated by commas.',
+      help: 'Which neuropils to fetch. Leave empty for the regions that tile the volume without nesting. For a neuroglancer source with meshes but no names, type segment ids separated by commas.',
       default: [],
       // Shared with Connectivity's region picker, which is where the alphabetical rule and the
       // reason for it now live — see `roiOptions`.
@@ -117,7 +119,9 @@ registerNode({
     } else if (info?.rois.length) {
       const missing = chosen.filter((roi) => !info.rois.includes(roi))
       if (missing.length > 0) {
-        issues.push(`This dataset has no region called ${missing.join(', ')}`)
+        issues.push(
+          `This dataset has no region called ${missing.join(', ')}. Check the names in \`Regions\`.`,
+        )
       }
     }
     if (chosen.length > REGIONS_WARN) {
@@ -125,10 +129,10 @@ registerNode({
       // `NodeIssue`'s 'warning' severity has said "this is fine, but" since before `ctx.warn`.
       // Without the second clause where ids are typed: there, empty asks for nothing.
       issues.push(
-        `${chosen.length} regions is a lot to fetch one shell at a time` +
+        `${chosen.length} regions is a lot to fetch, since each one is a separate request.` +
           (info?.regionsById
-            ? '.'
-            : `; leaving the picker empty asks for the source's primary set.`),
+            ? ''
+            : ` Leave \`Regions\` empty to fetch the dataset's primary set instead.`),
       )
     }
     return issues
@@ -194,7 +198,7 @@ function typedRegionIds(entries: readonly string[]): IdListResult {
   return {
     ids: [],
     error:
-      'This source publishes its region meshes without names — type their segment ids into Regions',
+      'This source publishes its region meshes without names. Type their segment ids into `Regions`.',
   }
 }
 

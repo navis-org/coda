@@ -184,11 +184,11 @@ export function filterConditionIssues(
   if (!dtype) return []
   const issues: string[] = []
   if (!opsForDType(dtype).some((o) => o.value === op)) {
-    issues.push(`"${op}" does not apply to a ${dtype} column — pick another condition`)
+    issues.push(`"${op}" does not apply to a ${dtype} column. Pick another \`Condition\`.`)
   } else if (opNeedsValue(op)) {
     if (raw === '') issues.push('Comparison value is empty')
     else if (isNumericDType(dtype) && !Number.isFinite(Number(raw))) {
-      issues.push(`"${raw}" is not a number — this column is ${dtype}`)
+      issues.push(`"${raw}" is not a number, and this column is ${dtype}.`)
     }
   }
   return issues
@@ -1226,8 +1226,8 @@ export function stackTables(
   const source = options.sourceColumn?.trim()
   if (source && tables.some((table) => findColumn(table.schema, source))) {
     throw new Error(
-      `Source column "${source}" already exists in one of the inputs. Pick a name no input ` +
-        `uses, or clear the field.`,
+      `\`Source column\` "${source}" already exists in one of the inputs. Pick a name no ` +
+        `input uses, or clear the field.`,
     )
   }
 
@@ -1238,7 +1238,7 @@ export function stackTables(
   if (conflicts.length > 0) {
     throw new Error(
       `Cannot stack: ${conflicts.map(describeConflict).join('; ')}. One column cannot hold ` +
-        `both — convert it upstream, or drop it with a Select.`,
+        `both types. Convert it upstream, or drop it with a Select.`,
     )
   }
 
@@ -1392,11 +1392,11 @@ export function groupByTable(
 ): TableValue {
   const keyColumns = by.filter((n) => findColumn(table.schema, n))
   if (keyColumns.length === 0) {
-    throw new Error('Group by needs at least one existing key column')
+    throw new Error('`Group by` needs at least one column that exists in the table')
   }
   const valueColumns = aggValueColumns(values, agg)
   if (agg !== 'count' && valueColumns.length === 0) {
-    throw new Error(`Aggregation "${agg}" needs a value column`)
+    throw new Error(`\`Aggregate\` "${agg}" needs a column under \`Of columns\``)
   }
 
   const keyData = keyColumns.map((n) => getColumn(table, n))
@@ -1997,10 +1997,10 @@ export function relabelTable(
     throw new Error(`Column "${spec.column}" not found`)
   }
   if (!findColumn(map.schema, spec.keyColumn)) {
-    throw new Error(`Mapping key column "${spec.keyColumn}" not found`)
+    throw new Error(`\`Key\` column "${spec.keyColumn}" not found in the mapping`)
   }
   if (!findColumn(map.schema, spec.valueColumn)) {
-    throw new Error(`Mapping value column "${spec.valueColumn}" not found`)
+    throw new Error(`\`Value\` column "${spec.valueColumn}" not found in the mapping`)
   }
   const layout = relabelLayout(table.schema, map.schema, spec)!
 
@@ -2107,12 +2107,12 @@ export function pivotTable(
   ctx: Warner,
 ): MatrixValue {
   if (!findColumn(table.schema, indexColumn))
-    throw new Error(`Row column "${indexColumn}" not found`)
+    throw new Error(`\`Rows\` column "${indexColumn}" not found`)
   if (!findColumn(table.schema, columnsColumn)) {
-    throw new Error(`Column column "${columnsColumn}" not found`)
+    throw new Error(`\`Columns\` column "${columnsColumn}" not found`)
   }
   if (agg !== 'count' && !valueColumn)
-    throw new Error(`Aggregation "${agg}" needs a value column`)
+    throw new Error(`\`Aggregate\` "${agg}" needs a column under \`Of column\``)
 
   const rowData = getColumn(table, indexColumn)
   const colData = getColumn(table, columnsColumn)
@@ -2125,9 +2125,10 @@ export function pivotTable(
   if (colLabels.length > MAX_PIVOT_COLUMNS) {
     throw new Error(
       `"${columnsColumn}" has ${colLabels.length.toLocaleString()} distinct values, so ` +
-        `this pivot would be that many columns wide; past ` +
-        `${MAX_PIVOT_COLUMNS.toLocaleString()} there is no result. Columns should be the ` +
-        `small field — a side, a status, an ROI. Group or filter first.`,
+        `this pivot would be that many columns wide, and the limit is ` +
+        `${MAX_PIVOT_COLUMNS.toLocaleString()}. \`Columns\` should be a column with few ` +
+        `values, such as a side, a status or an ROI. Swap \`Rows\` and \`Columns\`, or group ` +
+        `or filter first.`,
     )
   }
   refuseIfOverCrashFloor(
@@ -2139,8 +2140,8 @@ export function pivotTable(
       count: colLabels.length,
       threshold: PIVOT_COLUMNS_WARN,
       unit: `distinct values in "${columnsColumn}"`,
-      control: 'the width a pivot is usually meant to have',
-      cost: 'Columns is the small axis by construction — a side, a status, an ROI — and every distinct value is a column of the wide table beside the matrix.',
+      control: 'the usual width for a pivot',
+      cost: 'Each distinct value becomes a column of the wide table. `Columns` is usually a column with few values, such as a side, a status or an ROI.',
     })
   }
   if (size > PIVOT_CELLS_WARN) {
@@ -2148,7 +2149,7 @@ export function pivotTable(
       count: size,
       threshold: PIVOT_CELLS_WARN,
       unit: `cells (${rowLabels.length.toLocaleString()} x ${colLabels.length.toLocaleString()})`,
-      control: 'the size a pivot is usually meant to have',
+      control: 'the usual size for a pivot',
       cost: `That is ${formatBytes(size * 8)} of Float64, plus the wide table beside it.`,
     })
   }
@@ -2522,7 +2523,7 @@ export function unpivotTable(
       count: cells,
       threshold: PIVOT_CELLS_WARN,
       unit: `cells (${outRows.toLocaleString()} rows x ${plan.schema.columns.length} columns)`,
-      control: 'the size a reshape is usually meant to have',
+      control: 'the usual size for a reshape',
       cost:
         `Unfolding ${width.toLocaleString()} columns repeats every kept column ` +
         `${width.toLocaleString()} times. Fold fewer columns, or filter first.`,
@@ -2580,10 +2581,14 @@ export function unpivotTable(
 export function unpivotIssues(schema: TableSchema | undefined, spec: UnpivotSpec): string[] {
   const issues: string[] = []
   if (!spec.nameInto.trim() || !spec.valueInto.trim()) {
-    issues.push('Both output columns need a name — the table passes through unchanged')
+    issues.push(
+      '`Name column` and `Value column` both need a name. Until then the table passes through unchanged.',
+    )
   }
   if (spec.columns.length === 0) {
-    issues.push('No columns to fold — the table passes through unchanged')
+    issues.push(
+      'No columns to fold, so the table passes through unchanged. Pick some under `Fold columns`.',
+    )
     return issues
   }
   const plan = unpivotPlan(schema, spec)
@@ -2591,10 +2596,14 @@ export function unpivotIssues(schema: TableSchema | undefined, spec: UnpivotSpec
 
   const both = spec.keep.filter((n) => plan.melted.includes(n))
   if (both.length > 0) {
-    issues.push(`${both.join(', ')} is both folded and kept — it will only appear as a value`)
+    issues.push(
+      `${both.join(', ')} is in both \`Fold columns\` and \`Keep\`, so it will only appear as a value.`,
+    )
   }
   if (plan.kept.length === 0) {
-    issues.push('Nothing is kept, so the values cannot be traced back to their rows')
+    issues.push(
+      'Nothing is in `Keep`, so the values cannot be traced back to their rows. Pick an id column to keep.',
+    )
   }
   return issues
 }
@@ -2667,8 +2676,8 @@ export function normalizeMatrix(
     if (count === 0) return
     ctx.warn(
       `${count.toLocaleString()} of ${of.toLocaleString()} ${unit} ${why}. ` +
-        `Those cells are left empty rather than set to zero, which would read as a measurement ` +
-        `of nearly nothing — a heatmap draws an empty cell as unrecorded.`,
+        `Those cells are left empty, so a heatmap shows them as unrecorded. Setting them to ` +
+        `zero would make them look like a real measurement.`,
     )
   }
 

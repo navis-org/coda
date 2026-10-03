@@ -421,8 +421,8 @@ function noRoute(
       ? `${spec.label} publishes no flat skeleton bucket for materialization ${version}`
       : `${spec.label} declares no skeleton service`
   return new CaveError(
-    `${missing}, so the Skeletons node cannot take that route here. Set its Source back to ` +
-      `Automatic, which picks whichever route this dataset does have.`,
+    `${missing}, so the Skeletons node cannot use that route here. Set its \`Source\` back to ` +
+      `"Automatic" to use whichever route this dataset has.`,
   )
 }
 
@@ -1316,8 +1316,8 @@ export class CaveSource implements DataSource {
       req.onWarn?.(
         `${result.missing.length.toLocaleString()} of ${req.neuronIds.length.toLocaleString()} ` +
           `neurons have no mesh in ${spec.label}'s published segmentation for this version, so ` +
-          `they are not in this result. A flat segmentation holds the root ids that were current ` +
-          `when it was written; an id from another materialization will not be in it.`,
+          `they are not in this result. The published segmentation only holds the root ids that ` +
+          `were current at this materialization, so an id from another version will not be in it.`,
       )
     }
 
@@ -1387,11 +1387,10 @@ export class CaveSource implements DataSource {
         `${count.toLocaleString()} graphene meshes from ${spec.label} is ` +
           `${describeDuration(count * SECONDS_PER_NEURON)} and ` +
           `${Math.round(count * MB_PER_NEURON.low)}–${Math.round(count * MB_PER_NEURON.high)} MB. ` +
-          `A graphene mesh has no level of detail, so each one is dozens to hundreds of separate ` +
-          `requests, and how many varies by more than a hundredfold between neurons — this is ` +
-          `the slow route, and a materialization with a flat segmentation beside it does the ` +
-          `same set in two requests a neuron. Fetching anyway; cancel if that is not what you ` +
-          `meant.`,
+          `Each graphene mesh takes dozens to hundreds of separate requests, and the number varies ` +
+          `a hundredfold between neurons. A materialization with a published (flat) segmentation ` +
+          `fetches the same meshes in two requests per neuron. Fetching anyway; cancel if you ` +
+          `did not mean to.`,
       )
     }
 
@@ -1494,11 +1493,11 @@ export class CaveSource implements DataSource {
       req.onWarn?.(
         `${shortMeshes.toLocaleString()} of the meshes from ${spec.label} are incomplete: ` +
           `${fragments.missing.toLocaleString()} of ${fragments.named.toLocaleString()} ` +
-          `fragments are not in the result, so what is drawn is less than the neuron. ` +
+          `fragments are missing, so part of each neuron is not drawn. ` +
           // Two remedies, and only one of them is a retry — see `FragmentTally.unaddressable`.
           (fragments.unaddressable === fragments.missing
-            ? `Their names are in a form this build cannot address, which is a bug in Coda ` +
-              `rather than something a retry will fix.`
+            ? `Coda could not read their names. This is a bug in Coda, and running again will ` +
+              `not fix it.`
             : `Clear Cache on this node and Run to try the missing ones again.`),
       )
     }
@@ -1635,7 +1634,7 @@ export class CaveSource implements DataSource {
           throw new CaveError(
             `Could not ask ${spec.label}'s skeleton service which neurons it holds ` +
               `(${errorMessage(error)}), so no route was chosen. Run again, or set the Skeletons ` +
-              'Source to the level-2 chunk graph.',
+              'node\'s `Source` to "level-2 chunk graph".',
           )
         },
       )
@@ -1750,9 +1749,9 @@ export class CaveSource implements DataSource {
       req.onWarn?.(
         `${req.neuronIds.length.toLocaleString()} skeletons from ${spec.label} is around ` +
           `${megabytes.toLocaleString()} MB and ${describeDuration(req.neuronIds.length * 0.2)}. ` +
-          `These are skeletonised at mip 1 — tens of thousands of nodes each, not the few ` +
-          `hundred a chunk-graph skeleton has — so the cost here is memory rather than the ` +
-          `wait. Fetching anyway; cancel if that is not what you meant.`,
+          `These skeletons have tens of thousands of nodes each (a level-2 chunk-graph skeleton ` +
+          `has a few hundred), so they take a lot of memory. Fetching anyway; cancel if you did ` +
+          `not mean to.`,
       )
     }
 
@@ -1808,10 +1807,10 @@ export class CaveSource implements DataSource {
       const missing = req.neuronIds.length - available.length
       req.onWarn?.(
         `${missing.toLocaleString()} of ${req.neuronIds.length.toLocaleString()} neurons have no ` +
-          `skeleton in ${spec.label}'s skeleton cache, so they are not in this result. That ` +
-          `service builds a skeleton the first time somebody asks for one and Coda does not ` +
-          `queue that — a cold build is tens of seconds per neuron. Leave Source on Automatic ` +
-          `for a route that can answer for every neuron.`,
+          `skeleton in ${spec.label}'s skeleton cache, so they are not in this result. The ` +
+          `service only builds a skeleton the first time it is asked for one, which takes tens ` +
+          `of seconds per neuron, and Coda does not ask it to. Set \`Source\` to "Automatic" to ` +
+          `use a route that has every neuron.`,
       )
     }
 
@@ -1879,9 +1878,8 @@ export class CaveSource implements DataSource {
       // Two chunkedgraph reads apiece, sixteen at a time: ~0.3 s a neuron once warm.
       req.onWarn?.(
         `${req.neuronIds.length.toLocaleString()} skeletons from ${spec.label} is ` +
-          `${describeDuration(req.neuronIds.length * 0.3)}. Each one is built from the ` +
-          `level-2 cache rather than read ready-made, so this datastack is the slow way to get ` +
-          `a skeleton. Building anyway.`,
+          `${describeDuration(req.neuronIds.length * 0.3)}, because each one is built from the ` +
+          `level-2 cache on request. Building anyway.`,
       )
     }
 
@@ -1891,8 +1889,8 @@ export class CaveSource implements DataSource {
     if (!source) {
       throw new CaveError(
         `${spec.label} has no level-2 cache to build skeletons from, and no published skeletons ` +
-          `for this materialization either. That is a fact about the datastack rather than ` +
-          `about this graph — meshes and synapses are unaffected.`,
+          `for this materialization either, so no skeletons can be fetched from it. Meshes and ` +
+          `synapses are unaffected.`,
       )
     }
 
@@ -2432,7 +2430,7 @@ export class CaveSource implements DataSource {
       throw new CaveError(
         `Coda has no wiring for the CAVE datastack "${parsed.datastack}" on ` +
           `${caveServerLabel(this.deployment)}. A datastack has to ` +
-          `say which of its tables are neurons and which are connections — see ` +
+          `say which of its tables are neurons and which are connections; see ` +
           `src/data/cave/spec.ts.`,
       )
     }

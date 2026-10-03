@@ -36,9 +36,15 @@ export const synapsesNode = packNode({
   type: 'neuron.synapses',
   label: 'Synapses',
   category: 'query',
-  description: 'Fetch synapse locations as a 3D point cloud.',
+  description:
+    'Fetch the synapses of a set of neurons as a 3D point cloud, one point per synapse, ' +
+    'carrying `neuronId`, `polarity` and, where the source has one, `partnerId`.',
   guide:
-    'Synapse locations as a 3D point cloud, one point per synapse with its polarity in the attribute table — and its partner where the data source carries one. Drawn in the same space as skeletons and meshes, so a scene can colour neurons by cell type and their synapses by direction at once. This is the node that turns “these two are connected” into “and here is where”. Backends count synapses differently, so Rows says whether a point is a connection or a site.',
+    'Fetches the synapses of a set of neurons as a point cloud, with each synapse’s ' +
+    'polarity and, where the data source has it, its partner. The points share a space with ' +
+    'skeletons and meshes, so they can be drawn together in a 3D View. Backends count ' +
+    'synapses differently, so Rows sets whether a point is one connection or one synaptic ' +
+    'site.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -111,7 +117,7 @@ export const synapsesNode = packNode({
       ctx,
       ctx.input('neurons'),
       Number(ctx.params.limit),
-      'These arrive in one query, but it returns a row per synapse — thousands per neuron.',
+      'These arrive in one query, but it returns one row per synapse, often thousands per neuron.',
     )
     const polarity = String(ctx.params.polarity)
     /*
@@ -162,9 +168,15 @@ export const synapsesBetweenNode = packNode({
   type: 'neuron.synapsesBetween',
   label: 'Synapses Between',
   category: 'query',
-  description: 'Fetch the synapses from one set of neurons onto another as a 3D point cloud.',
+  description:
+    'Fetch the synapses from one set of neurons onto another as a 3D point cloud. Each ' +
+    'point carries its source as `neuronId` and its target as `partnerId`.',
   guide:
-    'Where two populations actually connect: every synapse from the Sources onto the Targets, one point per synapse connection, narrowed at the server rather than fetched for one side and filtered. Wire only Sources for everything they synapse onto, or only Targets for everything onto them — the open side then counts published neurons unless Include fragments is on. Each point carries its source as neuronId and its target as partnerId, so counting points per pair gives the Connectivity weight; Location picks whether a point sits at the presynaptic or the postsynaptic site.',
+    'Fetches every synapse from the Sources onto the Targets as a point cloud, one point ' +
+    'per connection. Wire only Sources for everything they synapse onto, or only Targets ' +
+    'for everything onto them. Location sets whether points sit at the pre- or postsynaptic ' +
+    'site; counting points per pair, e.g. with Synapses to Edges, gives the Connectivity ' +
+    'weight.',
   cost: 'expensive',
   /*
    * Both optional, at least one wired — `fetch_synapse_connections(sources, None)` and its mirror.
@@ -193,7 +205,7 @@ export const synapsesBetweenNode = packNode({
         { value: 'pre', label: 'presynaptic site' },
         { value: 'post', label: 'postsynaptic site' },
       ],
-      help: 'Which end of each connection a point is drawn at. neuPrint and CAVE have both; CATMAID has one position per connector and draws it for either. The columns do not change — neuronId stays the source, partnerId the target, and polarity says which end this is.',
+      help: 'Which end of each connection the points are drawn at. CATMAID has one position per connector and uses it for both. The columns stay the same: neuronId is the source, partnerId the target.',
     },
     /*
      * Connectivity's control, with Connectivity's answer, for the side left open.
@@ -216,7 +228,7 @@ export const synapsesBetweenNode = packNode({
       kind: 'boolean',
       label: 'Include fragments',
       default: false,
-      help: 'Only matters with Sources or Targets unwired. Off, the open side counts only published neurons — set what counts on the Dataset node. On, fragments count too, and they are most of a neuron’s partners.',
+      help: 'Also count partners that are not published neurons (what counts is set on the Dataset node). Only applies when Sources or Targets is unwired.',
     },
     minConfidenceParam(
       'Drop a connection when either of its synapses scores below this; 0 keeps every one.',
@@ -232,7 +244,7 @@ export const synapsesBetweenNode = packNode({
 
   validate: (ctx) => {
     if (ctx.inputs.sources === undefined && ctx.inputs.targets === undefined) {
-      return ['Wire Sources, Targets or both']
+      return ['Wire a neuron table into `Sources`, `Targets` or both.']
     }
     const dataset = ctx.inputs.dataset
     if (!dataset) return []
@@ -260,7 +272,7 @@ export const synapsesBetweenNode = packNode({
     const sources = ctx.input('sources')
     const targets = ctx.input('targets')
     if (sources === undefined && targets === undefined) {
-      throw new Error('Wire Sources, Targets or both')
+      throw new Error('Wire a neuron table into `Sources`, `Targets` or both.')
     }
     const sourceIds =
       sources === undefined ? undefined : neuronIdsFrom(ctx, sources, limit, cost)

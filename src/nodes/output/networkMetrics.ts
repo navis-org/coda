@@ -66,13 +66,12 @@ registerNode({
   type: 'net.metrics',
   label: 'Network Metrics',
   category: 'visualisation',
-  description: 'Graph statistics for a network: degree, clustering, components, density.',
+  description:
+    'Graph statistics for a network: degree, clustering and components per node, and density for the whole graph.',
   guide:
-    'Graph statistics for a network. Per node: in/out degree and strength, local clustering, ' +
-    'k-core and connected component. Per graph: density, degree spread, reciprocity, ' +
-    'transitivity, degree assortativity and the component sizes. The network passes through ' +
-    'carrying every per-node metric, so a viewer downstream can colour or size by them with ' +
-    'no extra wiring.',
+    'Computes graph statistics for a network from Build Network: degree, clustering, k-core and ' +
+    'components per node, plus density, reciprocity and more for the whole graph. The network ' +
+    'passes through with the per-node metrics attached, so a viewer downstream can colour by them.',
   cost: 'cheap',
   /*
    * Wider and taller than the chart viewers: this is a tile grid with two plots under it, and
@@ -181,7 +180,7 @@ registerNode({
       max: 80,
       advanced: true,
       presentational: true,
-      help: 'Bars in the histogram, or 0 for the automatic rule. Each bar is a labelled row, so a dozen is usually the readable maximum.',
+      help: 'Number of histogram bars, or 0 for automatic. About a dozen is the readable maximum.',
     },
     {
       /*
@@ -199,7 +198,7 @@ registerNode({
       default: false,
       advanced: true,
       presentational: true,
-      help: 'Draw the histogram as vertical columns rather than horizontal rows.',
+      help: 'Draw the histogram as vertical columns.',
     },
     {
       /*
@@ -255,17 +254,17 @@ registerNode({
         count: result.triangleWork,
         threshold: TRIANGLE_WORK_WARN,
         unit: 'neighbour comparisons',
-        control: 'the size a clustering coefficient is usually taken over',
+        control: 'what a clustering coefficient is usually computed over',
         cost:
-          "Closing triangles walks each node's neighbours for every neighbour of every " +
-          'other, which a few high-degree hubs make very expensive.',
+          'Counting triangles compares the neighbours of every pair of linked nodes, and a ' +
+          'few highly connected nodes make that very slow.',
       })
     }
     if (result.dangling > 0) {
       ctx.warn(
         `${result.dangling.toLocaleString()} of ${network.edges.length.toLocaleString()} ` +
-          `links name a node this network does not hold and are not counted here. Ordinary ` +
-          `after a filter; a surprise straight out of Build Network.`,
+          `links point to a node that is not in this network and were not counted. This is ` +
+          `normal after a filter, but unexpected straight out of Build Network.`,
       )
     }
 
@@ -284,10 +283,9 @@ registerNode({
       .filter((name) => !(ROLLUPS as readonly string[]).includes(name))
     if (overwritten.length > 0) {
       ctx.warn(
-        `The node table already had ${overwritten.join(', ')}; the new metric` +
-          `${overwritten.length > 1 ? 's were' : ' was'} written over ` +
-          `${overwritten.length > 1 ? 'them' : 'it'} rather than beside, so a picker ` +
-          `downstream sees one answer.`,
+        `The node table already had ${overwritten.join(', ')}. The new metric` +
+          `${overwritten.length > 1 ? 's replaced them' : ' replaced it'}, so pickers ` +
+          `downstream see only the new values.`,
       )
     }
 

@@ -139,7 +139,7 @@ export function canExportNotebook(
       detail:
         'Coda generates these connectomes in the browser, so there is no server for a ' +
         'notebook to query. Replace them with a real dataset node and export again.',
-      fix: 'generated in the browser — swap in a real dataset first',
+      fix: 'generated in the browser, so replace it with a real dataset first',
     }
   }
   const untranslatable = untranslatableDatasetNodes(graph, language)
@@ -152,8 +152,8 @@ export function canExportNotebook(
           ? `${names[0]} has no ${what} equivalent`
           : `${names.join(', ')} have no ${what} equivalent`,
       detail:
-        `The generated ${what} is built on ${STACK[language]}, and there is no emitter for ` +
-        `this backend yet — so every cell after the dataset would be a TODO.` +
+        `The generated ${what} is built on ${STACK[language]}, which cannot read this ` +
+        `backend yet, so every cell after the dataset would be a TODO.` +
         (language === 'r' ? ' The Jupyter notebook may still cover it.' : ''),
       fix: `no ${what} can be built for this backend yet`,
     }

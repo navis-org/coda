@@ -251,8 +251,8 @@ class CaveTableProvider implements AnnotationProvider {
     const isView = kindOf(listing, config.table) === 'view'
     if (isView && config.pivotOn) {
       throw new Error(
-        `${config.table} is a view, and Pivot on reads a table: clear Pivot on to read the ` +
-          'view as it stands.',
+        `${config.table} is a view, and \`Pivot on\` only works on a table. Clear \`Pivot on\` ` +
+          'to read the view as it is.',
       )
     }
 

@@ -410,8 +410,8 @@ export async function readDelimitedResponse(
     // The same two tiers `UploadBody` applies to a picked file, which is the point of them
     // living on the constants rather than at either call site.
     warn.warn(
-      `${subject} is ${megabytes(declared)} MB — parsing will take a moment and the tab will ` +
-        `be unresponsive while it does. Reading it anyway.`,
+      `${subject} is ${megabytes(declared)} MB, so parsing will take a moment and the tab will ` +
+        `not respond until it is done. Reading it anyway.`,
     )
   }
 

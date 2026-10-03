@@ -103,7 +103,9 @@ registerNode({
   description:
     'Render a matrix as a heatmap, and name its rows and columns from an annotation table.',
   guide:
-    'A matrix drawn as a grid of coloured cells — the natural end of Adjacency or Pivot. Sequential for counts and fractions, diverging when zero is a meaningful middle. Wire a neuron table to Annotations to name the axes by cell type rather than by root id. The Order tab sorts by total, name, one row or column, or clustering — and the named, filtered, sorted matrix is what the node outputs.',
+    'Draws a matrix (e.g. from Adjacency, Pivot or NBLAST) as a grid of coloured cells. Wire a ' +
+    'neuron table into Annotations to label rows and columns by cell type, and use the Order ' +
+    'tab to sort or cluster them. The relabelled, filtered and sorted matrix is also the output.',
   cost: 'cheap',
   inputs: [
     { id: 'in', label: 'Matrix', type: T.matrix() },
@@ -164,7 +166,7 @@ registerNode({
       group: 'colour',
       options: SEQUENTIAL_PALETTE_OPTIONS,
       visibleIf: (p) => p.scale !== 'diverging',
-      help: 'Coda blue reverses with the theme, so an empty cell always recedes. The rest are matplotlib’s, drawn as published on both themes.',
+      help: '"Coda blue" adapts to the light or dark theme; the others look the same on both.',
     },
     {
       id: 'divergingPalette',
@@ -175,7 +177,7 @@ registerNode({
       group: 'colour',
       options: DIVERGING_PALETTE_OPTIONS,
       visibleIf: (p) => p.scale === 'diverging',
-      help: 'Coda’s pair puts blue on the negative arm. The ColorBrewer sets run as published — RdBu has red at the negative end.',
+      help: '"Coda blue–red" puts blue on the negative side; "red–blue (RdBu)" puts red there.',
     },
     /*
      * The two ends of the ramp, and empty means "ask the data". `string` rather than `number`
@@ -193,7 +195,7 @@ registerNode({
       advanced: true,
       group: 'colour',
       visibleIf: (p) => p.scale !== 'diverging',
-      help: 'The value at the bottom of the colour ramp. Empty lets the data decide. Cells below it are drawn in the end colour, not dropped.',
+      help: 'The value at the bottom of the colour ramp. Leave empty to use the data. Lower values take the end colour.',
     },
     {
       id: 'colorMax',
@@ -204,7 +206,7 @@ registerNode({
       presentational: true,
       advanced: true,
       group: 'colour',
-      help: 'The value at the top of the colour ramp; empty lets the data decide. Set both ends to hold one scale across two heatmaps. On a diverging scale this is the magnitude of both arms.',
+      help: 'The value at the top of the colour ramp. Leave empty to use the data. Set both ends to compare heatmaps on one scale. On a diverging scale this sets both arms.',
     },
     {
       id: 'logColor',
@@ -215,7 +217,7 @@ registerNode({
       advanced: true,
       group: 'colour',
       visibleIf: (p) => p.scale !== 'diverging',
-      help: 'Spread the colour over a log scale — the mapping only; the printed cells, the tooltip and the colour bar keep the values. Not offered on a diverging scale.',
+      help: 'Map values to colour on a log scale. The numbers shown stay as they are. Not available for diverging palettes.',
     },
     /*
      * The mark, and it is `presentational` like everything else on this tab: it changes how a
@@ -239,13 +241,13 @@ registerNode({
         { value: 'square', label: 'squares' },
         { value: 'circle', label: 'circles sized by value' },
       ],
-      help: 'Circles carry the value twice — as colour and as area — so a sparse matrix reads as sparse. A cell at the bottom of the scale draws nothing, and on a diverging scale the size is the distance from the centre while the colour keeps the direction. Squares are drawn instead where the cells are too small for a circle to be one; the card says so.',
+      help: 'Circles show the value as both colour and size. Cells at the bottom of the scale draw nothing. Squares are used when cells are too small; the card says so.',
     },
     {
       id: 'showValues',
       kind: 'boolean',
       label: 'Show values',
-      help: 'Only legible on small matrices; the viewer hides them automatically when cells get too small.',
+      help: 'Print each cell’s value. Hidden automatically when cells get too small.',
       default: false,
       presentational: true,
       group: 'colour',
@@ -255,9 +257,9 @@ registerNode({
     ...labelPickerParams({
       group: 'labels',
       matchHelp:
-        'Which column of the wired table is compared with the row or column label. Axis labels are whatever named the matrix, usually "neuronId". Compared as text.',
+        'The column of the wired table to match against the row and column labels, usually neuron ids. Compared as text.',
       labelHelp:
-        'Which column names each row or column. Unlike the Dendrogram’s, this changes the matrix the node outputs, so the Filter and Order tabs, the CSV and the notebook all see the new names. Unmatched lines keep their own.',
+        'The column that names each row and column. This renames the output matrix too, so filtering, ordering and exports use the new names. Unmatched lines keep their own.',
     }),
     /*
      * `both` by default, because the matrix that motivated the port is square over one
@@ -275,7 +277,7 @@ registerNode({
       advanced: true,
       group: 'labels',
       options: LABEL_AXIS_OPTIONS,
-      help: 'Which axis the names are written onto. "Both" is right for a square matrix over one population; narrow it when the two axes are different kinds of thing.',
+      help: 'Which axes get the new names. Use "both axes" for a square matrix over one population.',
     },
 
     // --- filter -----------------------------------------------------------
@@ -313,7 +315,7 @@ registerNode({
       default: 'none',
       group: 'order',
       options: SORT_BY_OPTIONS,
-      help: 'Reorders the matrix this node outputs, not just the picture. "Total" sums each row or column; "clustering" is seaborn’s clustermap. To cluster a score matrix by its own scores, use Linkage.',
+      help: 'How to order the rows and columns. This reorders the output matrix as well. To cluster a score matrix by its own scores, use Linkage.',
     },
     {
       id: 'sortKey',
@@ -323,7 +325,7 @@ registerNode({
       placeholder: 'a label',
       group: 'order',
       visibleIf: (p) => p.sortBy === 'value',
-      help: 'Ordering rows, the column whose values decide; ordering columns, the row. A label the matrix lacks leaves that axis untouched and says so on the card.',
+      help: 'The label whose values set the order: a column when ordering rows, a row when ordering columns. An unknown label leaves that axis unchanged.',
     },
     {
       id: 'sortAxis',
@@ -334,7 +336,7 @@ registerNode({
       group: 'order',
       options: SORT_AXIS_OPTIONS,
       visibleIf: ordering,
-      help: 'Which axis the criterion runs on. Both sorts each axis on its own.',
+      help: 'Which axis to order. "both, independently" orders each axis on its own.',
     },
     {
       id: 'sortFollow',
@@ -344,7 +346,7 @@ registerNode({
       advanced: true,
       group: 'order',
       visibleIf: (p) => ordering(p) && p.sortAxis !== 'both',
-      help: 'The other axis takes the same order, matched line for line on the label each arrived with — so it still pairs neuron with neuron once the Labels tab has named several of them the same. Lines the sorted axis does not have keep their place after them.',
+      help: 'Give the other axis the same order, matching lines by their original labels. Lines the sorted axis lacks go at the end.',
     },
     {
       id: 'sortReverse',
@@ -364,7 +366,7 @@ registerNode({
       group: 'order',
       options: LINKAGE_METHODS,
       visibleIf: (p) => p.sortBy === 'cluster',
-      help: 'How the distance between two groups is measured. Average is seaborn’s default.',
+      help: 'How the distance between two clusters is measured. "average (UPGMA)" is seaborn’s default.',
     },
     {
       id: 'clusterMetric',
@@ -375,7 +377,7 @@ registerNode({
       group: 'order',
       options: CLUSTER_METRIC_OPTIONS,
       visibleIf: (p) => p.sortBy === 'cluster',
-      help: 'How two rows are compared. Euclidean is seaborn’s default and is swayed by how much a row connects; correlation and cosine compare the shape of its profile instead.',
+      help: 'How two rows are compared. "euclidean" is affected by how strongly a row connects; "correlation" and "cosine" compare only the pattern.',
     },
 
     // --- selection --------------------------------------------------------
@@ -397,7 +399,7 @@ registerNode({
       noun: 'lines',
       default: [],
       group: 'selection',
-      help: 'Set by shift-dragging a rectangle on the expanded card; hold Alt to add a second block. Holds the positions it covers, so a box round one row of a repeated cell type takes that row and not its namesakes. Feeds Selected Rows and Selected Columns.',
+      help: 'Set by shift-dragging a rectangle on the expanded card; hold Alt to add a second block. Feeds Selected Rows and Selected Columns.',
     },
   ],
 
@@ -628,8 +630,8 @@ function nameAxes(
     if (!count || count.total === 0 || count.named === count.total) continue
     if (count.named === 0) {
       ctx.warn(
-        `No ${axis} are named by "${options.label}", so they keep the labels they ` +
-          `arrived with. Check Match on, or narrow Apply to.`,
+        `None of the ${axis} are named by "${options.label}", so they keep their original ` +
+          `labels. Check \`Match on\`, or narrow \`Apply to\`.`,
       )
       continue
     }
@@ -663,8 +665,9 @@ function filterMatrix(
     const { filter, error } = parseLabelFilter(axis === 'rows' ? filters.rows : filters.columns)
     if (error) {
       ctx.warn(
-        `The ${axis} filter is not a valid regular expression (${error}), so every ` +
-          `${axis === 'rows' ? 'row' : 'column'} was kept.`,
+        `The \`${axis === 'rows' ? 'Rows' : 'Columns'}\` filter is not a valid regular ` +
+          `expression (${error}), so every ${axis === 'rows' ? 'row' : 'column'} was kept. ` +
+          `Fix the pattern, or remove the leading "/" to match plain text.`,
       )
       continue
     }

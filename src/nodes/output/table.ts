@@ -33,13 +33,11 @@ registerNode({
   label: 'Table',
   category: 'visualisation',
   description:
-    'A table widget to load your data into. Allows sorting and per-column filtering.',
+    'Show a table with sorting, paging and per-column filtering. The input passes through unchanged, and the rows that pass the filters come out of Filtered.',
   guide:
-    'Lets you inspect any tabular data: rows and columns, sortable, paged and exportable as CSV. ' +
-    'Like every viewer here it passes its input straight through, so it can be dropped into the ' +
-    'middle of a chain without breaking anything downstream. Sorting is view-only and costs no ' +
-    'run; the per-column filters under the headers are not, and what they keep leaves by the ' +
-    'second port.',
+    'Shows any table as rows and columns that you can sort, page through, filter and export ' +
+    'as CSV. The Table output passes the input on unchanged, so you can drop it anywhere in a ' +
+    'chain; the Filtered output carries only the rows that pass the column filters.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [
@@ -80,7 +78,7 @@ registerNode({
       id: 'filters',
       kind: 'ids',
       label: 'Filters',
-      help: 'Per-column filters set from the table header. Each keeps the rows it matches; the Filtered port carries what survives all of them.',
+      help: 'Per-column filters, set from the table header. The Filtered output carries the rows that pass all of them.',
       noun: 'filters',
       default: [],
     },
@@ -88,7 +86,7 @@ registerNode({
       id: 'showFilters',
       kind: 'boolean',
       label: 'Show filter row',
-      help: 'Show the filter fields under the column headers. Forced on whenever a filter is set, so a filtered table always says why.',
+      help: 'Show the filter fields under the column headers. Always shown while a filter is set.',
       default: false,
       advanced: true,
       // Whether the *controls* are on screen cannot change a byte of either port.

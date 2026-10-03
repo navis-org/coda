@@ -84,7 +84,7 @@ describe('cells somebody lists', () => {
       condition: 'gain',
     })
     expect(traces.rowLabels).toEqual(['5', '4', '6'])
-    expect(warnings).toEqual(['2 repeated cell ids are read once.'])
+    expect(warnings).toEqual(['2 cell ids were listed more than once and are read once.'])
   })
 
   it('is an empty matrix, fetching nothing, when nothing is listed', async () => {
@@ -99,7 +99,7 @@ describe('cells somebody lists', () => {
     expect(validate(params)).toEqual([
       'Not cell ids: twelve. List whole numbers, ranges like 100-200, or row labels from ' +
         'ZapBench Traces.',
-      'No ZapBench cell is numbered 0 — this release numbers its 71,721 cells from 1.',
+      'No ZapBench cell is numbered 0. This release numbers its 71,721 cells from 1.',
     ])
     await expect(run(params)).rejects.toThrow(/Not cell ids: twelve/)
   })
@@ -132,13 +132,13 @@ describe('every cell', () => {
     // `turning` at s2 spans two chunk rows, so twice the reads of `position`.
     const { warnings } = await run({ condition: 'turning' })
     expect(warnings).toEqual([
-      expect.stringMatching(/^Every cell comes to about \d+ MB in 72 reads\./),
+      expect.stringMatching(/^Reading every cell comes to about \d+ MB in 72 reads\./),
     ])
   })
 
   it('refuses a downsampled read it cannot name', async () => {
     serveTraceChunks()
-    await expect(run({ condition: 'position' })).rejects.toThrow(/Set Scale to Full/)
+    await expect(run({ condition: 'position' })).rejects.toThrow(/Set `Scale` to "Full"/)
   })
 
   it('says on the card that a matrix no tab can hold will be refused', () => {
@@ -152,8 +152,8 @@ describe('every cell', () => {
 
   it('says a product with no downsampled copy needs full scale', () => {
     expect(validate({ product: 'stimulus_evoked_response' })).toEqual([
-      'Stimulus-evoked response has no downsampled copy in this release — only Activity does. ' +
-        'Set Scale to Full.',
+      'Stimulus-evoked response has no downsampled copy in this release; only "Activity" does. ' +
+        'Set `Scale` to "Full".',
     ])
   })
 

@@ -43,11 +43,11 @@ function populationNote(ctx: EmitContext): string[] {
   if (population.length === 0) return []
   return ctx.note(
     'Partners here are restricted to bodies neuPrint labels :Neuron, which is what ' +
-      'neuprint_connection_table does with all_segments = FALSE. The Dataset node narrows the ' +
-      'population further (' +
+      'neuprint_connection_table does with all_segments = FALSE. The Dataset node also narrows the ' +
+      'population (' +
       population.join(', ') +
-      '), which this call cannot express on a partner — so this chunk can return a few more ' +
-      'partners than the canvas did.',
+      '), which this call cannot apply to partners. This chunk can therefore return a few more ' +
+      'partners than Coda did.',
   )
 }
 
@@ -158,7 +158,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
   const minWeight = Math.max(1, Number(ctx.params.minWeight))
   // One sentence for both routes, which refuse Normalize for the same reason.
   const normalizeTodo =
-    'Normalize is not translated. The all-synapses denominators are the upstream/downstream columns of neuprint_get_meta(); the reconstructed-partners-only denominator needs its own aggregate query, and the two differ by a factor of two and a half on male-CNS.'
+    '`Normalize` is not translated. To divide by all synapses, use the upstream/downstream columns of neuprint_get_meta(). To divide by reconstructed partners only, you need a separate aggregate query. The two denominators differ by a factor of two and a half on male-CNS.'
 
   /*
    * Edge properties go through the canvas's own query (`cypherConnectivity`), which states the
@@ -171,7 +171,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
     if (ctx.params.normalize === true) return ctx.todo(normalizeTodo)
     if (hops > 1) {
       return ctx.todo(
-        `Edge properties (${properties.join(', ')}) are exported for one hop. The multi-hop traversal helper fetches through neuprint_connection_table, which returns weight and nothing else about a connection. Set Hops to 1, or clear Edge properties.`,
+        `Edge properties (${properties.join(', ')}) can only be exported for one hop. The multi-hop traversal helper uses neuprint_connection_table, which returns only the weight of each connection. Set \`Hops\` to 1, or clear \`Edge properties\`.`,
       )
     }
     return cypherConnectivity(ctx, out, neurons, conn, properties)
@@ -192,7 +192,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
   // the export while the node and the notebook treated it as no regions at all.
   if (regionOptions(ctx.params).used) {
     return ctx.todo(
-      'The region options are not translated. neuprint_connection_table() can break a connection down by region; the argument names were not verified against an installed neuprintr, and guessing them produces a cell that fails at your console.',
+      'The region options are not translated (`Split by region`, `Regions`, `Primary regions only`). neuprint_connection_table() can break a connection down by region, but its argument names were not checked against an installed neuprintr. Add them by hand and check them against the neuprintr documentation.',
     )
   }
   if (ctx.params.normalize === true) return ctx.todo(normalizeTodo)
@@ -251,10 +251,9 @@ registerHelper({
   needs: ['coda_ids'],
   source: [
     'coda_endpoint_neurons <- function(connections, seed_ids = NULL) {',
-    '  # The neurons an edge list is about: the seeds, then every partner, one row each.',
+    '  # One row per neuron in an edge list: the seeds first, then every partner.',
     '  #',
-    '  # The seeds are included whether or not any edge survived min_weight -- both ends of',
-    '  # the edge list only cover the seeds that turned out to be wired to something.',
+    '  # Seeds are included even if none of their edges passed min_weight.',
     '  parts <- list()',
     '  connections <- coda_ids(connections, "preId", "postId")',
     '  if (!is.null(seed_ids)) {',
@@ -271,8 +270,7 @@ registerHelper({
     '',
     '  rows <- dplyr::bind_rows(parts)',
     '  rows$type[!is.na(rows$type) & rows$type == ""] <- NA_character_',
-    '  # First appearance decides the order; the first non-empty type wins, which need not be',
-    '  # the same row -- a neuron can arrive as an untyped seed and be typed by an edge later.',
+    '  # Order is by first appearance; the type is the first non-empty one seen for that neuron.',
     '  typed <- dplyr::distinct(rows[!is.na(rows$type), ], neuronId, .keep_all = TRUE)',
     '  out <- dplyr::distinct(rows, neuronId, .keep_all = TRUE)',
     '  out$type <- typed$type[match(out$neuronId, typed$neuronId)]',
@@ -296,14 +294,12 @@ registerHelper({
   needs: ['coda_ids'],
   source: [
     'coda_edge_list <- function(ids, prepost, min_weight, all_segments, conn) {',
-    "  # Coda's Connectivity output: preId -> postId, always oriented the way the synapse",
-    '  # points, whichever way the traversal travelled.',
+    "  # Fetch an edge list like Coda's Connectivity node: preId -> postId, in the",
+    '  # direction of the synapse.',
     '  #',
-    '  # all_segments = FALSE keeps only bodies neuPrint labels :Neuron, which is this',
-    "  # function's own default; TRUE matches :Segment instead -- every body, fragments",
-    '  # included. Note that it applies to BOTH ends, so with FALSE a queried body that is',
-    "  # not itself a published neuron returns nothing, where Coda's canvas always keeps the",
-    '  # neurons you asked about.',
+    '  # all_segments = FALSE keeps only bodies labelled :Neuron; TRUE keeps every body,',
+    '  # fragments included. This applies to both ends, so with FALSE a queried body that is',
+    "  # not itself a :Neuron returns nothing (Coda's node always keeps the queried neurons).",
     '  one <- function(side) {',
     '    tbl <- neuprint_connection_table(',
     '      ids, prepost = side, threshold = min_weight, details = TRUE,',
@@ -335,9 +331,8 @@ registerHelper({
     '      weight = numeric(0), hop = integer(0), direction = character(0)',
     '    ))',
     '  }',
-    '  # An edge inside the seed set comes back from each end, and Build Network sums the',
-    '  # weight of every row joining a pair -- so a duplicate is a doubled synapse count in',
-    '  # the picture rather than a cosmetic repeat.',
+    '  # An edge between two seeds is returned from both ends; drop the duplicate so its',
+    '  # weight is not counted twice downstream.',
     '  out <- coda_ids(out, "preId", "postId")',
     '  dplyr::distinct(out, preId, postId, .keep_all = TRUE)',
     '}',
@@ -357,17 +352,14 @@ registerHelper({
   source: [
     'coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight,',
     '                                       all_segments, conn) {',
-    "  # Coda's Connectivity node past one hop: a breadth-first walk returning an edge list.",
+    '  # Walk the connectome breadth-first for `hops` steps and return the edge list, like',
+    "  # Coda's Connectivity node with more than one hop.",
     '  #',
-    '  # Three rules worth keeping, each of which silently changes the answer if dropped:',
-    '  #',
-    '  #  * A neuron is expanded at most once. Connectomes are full of recurrent loops, so a',
-    '  #    walk that re-expands a visited neuron does not terminate. The edge back into an',
-    '  #    already-visited neuron is still reported; only the expansion is skipped.',
-    '  #  * An edge re-found at a later hop keeps the hop it was first given, so the label',
-    '  #    says something about the graph rather than about the walk order.',
-    '  #  * direction = "both" expands both ways at every hop -- the undirected ball, not two',
-    '  #    cones. That is what finds the neurons sharing input with a seed.',
+    '  #  * Each neuron is expanded at most once, so recurrent loops terminate. Edges back',
+    '  #    into an already-visited neuron are still reported.',
+    '  #  * An edge found again at a later hop keeps the hop it was first found at.',
+    '  #  * direction = "both" expands both ways at every hop, so it also finds neurons that',
+    '  #    share input with a seed.',
     '  prepost <- switch(direction, inputs = "PRE", both = "BOTH", "POST")',
     '  frontier <- unique(as.numeric(seed_ids))',
     '  expanded <- numeric(0)',
@@ -385,7 +377,7 @@ registerHelper({
     '    if (is.null(found)) {',
     '      found <- step',
     '    } else {',
-    '      # Keep the hop and direction an edge was FIRST given.',
+    '      # Keep the hop and direction an edge was first found with.',
     '      fresh <- dplyr::anti_join(step, found, by = c("preId", "postId"))',
     '      found <- dplyr::bind_rows(found, fresh)',
     '      step <- fresh',

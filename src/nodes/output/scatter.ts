@@ -38,7 +38,9 @@ registerNode({
   category: 'visualisation',
   description: 'Plot two numeric columns against each other, with colour, size and shape.',
   guide:
-    'Two numeric columns against each other with colour, size and shape as encoding channels — seaborn’s scatterplot, rendered to canvas for large datasets. Lasso to select points as output; log axes and linear trends available.',
+    'Plots two numeric columns against each other, with optional colour, size and shape ' +
+    'channels, log axes and a linear trend. Typically wired from Embedding or any table; points ' +
+    'you lasso come out of Selected.',
   cost: 'cheap',
   defaultSize: { width: 460, height: 380 },
   /*
@@ -90,7 +92,7 @@ registerNode({
       id: 'xLog',
       kind: 'boolean',
       label: 'Log X',
-      help: 'For data spanning orders of magnitude, where a linear axis piles most of it into one corner. Values at or below zero are dropped; the caption says how many.',
+      help: 'Use a log scale for data spanning orders of magnitude. Values at or below zero are dropped; the caption says how many.',
       default: false,
       presentational: true,
       advanced: true,
@@ -109,7 +111,7 @@ registerNode({
       id: 'aspect',
       kind: 'enum',
       label: 'Aspect',
-      help: '"Equal" gives both axes the same units per pixel, which is what a UMAP or t-SNE embedding needs. "Fit" fills the card.',
+      help: '"Equal" uses the same scale on both axes, as a UMAP or t-SNE embedding needs. "Fit" fills the card.',
       default: 'fit',
       options: [
         { value: 'fit', label: 'fit the card' },
@@ -167,7 +169,7 @@ registerNode({
       id: 'opacity',
       kind: 'number',
       label: 'Opacity',
-      help: 'Overplotting is the default state of a real scatter; this is what reads through it.',
+      help: 'Point opacity. Lower it to see through overlapping points.',
       default: 0.8,
       min: 0.05,
       max: 1,
@@ -192,7 +194,7 @@ registerNode({
       id: 'vectorMarks',
       kind: 'boolean',
       label: 'Vector marks',
-      help: 'Above 10,000 points in view an exported SVG carries the marks as one high-resolution image, keeping axes, labels and legend as vector — a file of a hundred thousand vector marks opens in almost nothing. Tick this for every mark as a vector shape regardless.',
+      help: 'Export every point as a vector shape. Otherwise, SVGs with more than 10,000 points in view draw the points as one image.',
       default: false,
       presentational: true,
       advanced: true,
@@ -209,7 +211,7 @@ registerNode({
         { value: 'none', label: 'none' },
         { value: 'linear', label: 'linear fit' },
       ],
-      help: 'Least squares in the space the axes are drawn in, so a log-log fit is a power law.',
+      help: 'A least-squares fit on the plotted axes, so on log-log axes it fits a power law.',
       presentational: true,
       advanced: true,
       group: 'trend',
@@ -230,7 +232,7 @@ registerNode({
       id: 'idColumn',
       kind: 'column',
       label: 'ID column',
-      help: 'What a selected point is called downstream. An id survives an upstream re-run where a row position does not; the row index is the fallback, and the caption says so.',
+      help: 'Identifies each point, so a selection survives an upstream re-run. Without one, points are identified by row number.',
       from: 'in',
       // `neuronId` when the table has one; `optional` is what makes the resolver answer
       // "nothing" rather than reaching for the first column when it does not.
@@ -285,8 +287,12 @@ registerNode({
     // naming different columns is the case that always holds.
     if (!x || !y || x !== y) return []
     return columnsOfType(schema, NUMERIC_DTYPES).length === 1
-      ? [`Only "${x}" is numeric — X and Y would be the same column`]
-      : [`X and Y are both "${x}", which draws a diagonal — pick a different Y`]
+      ? [
+          `Only "${x}" is numeric, so \`X\` and \`Y\` are the same column. Add a second numeric column upstream.`,
+        ]
+      : [
+          `\`X\` and \`Y\` are both "${x}", which draws a diagonal line. Pick a different column for \`Y\`.`,
+        ]
   },
 
   /**

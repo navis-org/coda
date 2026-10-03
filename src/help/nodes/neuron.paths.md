@@ -1,5 +1,9 @@
+## What Paths does
+
+Paths finds the strongest routes from one set of neurons (`Sources`) to another (`Targets`). Where [Connectivity](#neuron.connectivity) tells you what a neuron is connected to, Paths tells you how one group of neurons reaches another:
+
 ```coda-graph
-caption: Get the top 10 matches
+caption: Find the strongest routes between two neurons and draw them as a network.
 neuron.inputIds as in1 {ids: "10001"}
 neuron.inputIds as in2 {ids: "21312"}
 neuron.paths as p
@@ -9,48 +13,59 @@ in2 -> p:targets
 p -> net
 ```
 
-### Ranking looks for bottlenecks
+```coda-params
+neuron.paths: maxHops, minWeight, topN, collapseTypes
+```
 
-Routes are ranked by the minimum synaptic weight along any single hop, not the sum across the whole path — so a long route through consistently strong connections beats a short route that includes one very weak link.
+## How routes are ranked
 
-### Type-level vs. neuron-level search
+A route is ranked by its weakest link, i.e. the smallest number of synapses on any single hop along the way. The weights are not added up. A long route through consistently strong connections therefore ranks above a short route that includes one weak connection.
 
-With `Collapse types` on (the default), the search runs on the **type-level graph**: LC4 is one node, not hundreds of individual LC4 neurons. This changes what routes are *found* — a pathway like LC4 → PLP1 → DNp01 is discovered even when no single PLP1 neuron both receives from an LC4 *and* projects to a DNp01.
+The search runs from both ends at once and keeps the `N strongest` routes (25 by default; 0 keeps every route it finds). `Max hops` sets the longest route it looks for. Every extra hop multiplies the number of neurons to search, so `Min synapses` is what keeps larger searches manageable.
 
-`Min synapses` filters after type-level summing, so it thresholds total traffic between cell types. With `Collapse types` off, it filters individual neuron-to-neuron connections.
+## Cell types vs. individual neurons
 
-Each node of the Network output carries `neurons`, how many cells it stands for: 1 at neuron level, and collapsed, how many distinct neurons of that type were seen on the connections that reached the network. It reads well as a size encoding, and it is the reminder that a type node is a population rather than a cell.
+With `Collapse types` on (the default), the search runs on a graph of cell types: all LC4 neurons become a single LC4 node. This changes which routes can be found. For example, LC4 → PLP1 → DNp01 is found even if no single PLP1 neuron both receives input from an LC4 and connects to a DNp01.
 
-> [!NOTE] `neurons` is a floor, not the size of the cell type
-> A node's count is the largest number of distinct cells any *one* of its connections reported,
-> because counts from two connections cannot be added — the same neurons appear on both. Where a
-> type reaches different partners through different members, the real population is larger than
-> any single connection saw. Read it as "at least this many".
+`Min synapses` applies after the weights have been summed per cell type, so with `Collapse types` on it is a threshold on the total number of synapses between two cell types. With `Collapse types` off, it applies to individual neuron-to-neuron connections.
 
-### Normalising: a share of a population, not a synapse count
+Each node in the `Network` output has a `neurons` column with the number of cells it stands for: 1 for an individual neuron, and for a cell type the number of distinct neurons of that type seen on the connections that were found. This works well as a size encoding in the [Network Viewer](#out.network).
 
-`Normalize` divides each connection by one end's total synapse count, adding `weightNorm` and the denominator `weightTotal` beside the raw `weight`. With `Collapse types` on the denominator is the **whole population's** total — `LC4 → PLP1` over everything every PLP1 neuron receives — because that is the population the weight was summed over.
+> [!NOTE] `neurons` is a lower bound
+> The count for a cell type is the largest number of distinct neurons seen on any one of its
+> connections (counts from different connections can't be added up, because the same neurons
+> appear on several). If a cell type reaches different partners through different members, the
+> real number is larger. Read it as "at least this many".
 
-`Rank by` decides which of the two weakest links orders the result, and the two disagree in a way that is the point. On the bundled optic lobe, from L1 to DNp02 in four hops: the routes through LPLC2 carry 375 synapses at their narrowest step against 352 for the route through LC4, so in synapses LPLC2 wins — but LPLC2 takes about 15% of its input from any one T4 subtype where LC4 takes 61% from Tm3, so as a share the LC4 route wins four times over. Both numbers are published on every route whichever ranking was used.
+## Normalizing weights
 
-`Min fraction` is applied **as the search grows**, not to the finished ranking: a connection below it is not followed, so the groups behind it never enter the network at all. That is why the denominators are fetched hop by hop.
+`Normalize` divides each connection by a total synapse count and adds two columns next to the raw `weight`: `weightNorm` (the fraction) and `weightTotal` (the total it was divided by). As in [Connectivity](#neuron.connectivity), `Normalize by` picks which end of the connection the total belongs to, and `Denominator` picks which synapses are counted.
 
-> [!NOTE] An unmeasurable connection is never dropped and never scored
-> A connection whose denominator the dataset does not publish is never dropped by the floor, and
-> such a route ranks below every route that could be scored, with an empty `bottleneckNorm`.
-
-Normalising needs per-neuron synapse totals: neuPrint publishes them, CAVE and CATMAID do not. A dataset answering from an attached edge set supplies them from the file itself, summing each neuron's own weights — the two halves of the fraction then count the same connectome. An edge list cannot tell a reconstructed partner from any other, so Basis makes no difference there.
-
-### N strongest: bounded, not infinite
-
-The search does not find every route, but the strongest ones. `N strongest` controls how many are kept, and the search stops once it has that many.
-
-### Outputs
-
-- **Network**: the pruned graph of routes found, each node carrying `role`, `hop`, `paths` and `neurons`.
-- **Layout**: a fixed ELK-layered arrangement, not user-configurable — any knob would take part in the provenance key and invalidate downstream work. Wire it into a [Network Viewer](#out.network)'s Layout input; when connected it overrides that viewer's own Layout picker.
-- **Paths**: one row per route, ranked by bottleneck. Normalised, it also carries `bottleneckNorm` — but no denominator column, because a route's two bottlenecks are routinely different steps and one number could name the denominator of neither. The Network output is where each fraction sits beside its own total.
+With `Collapse types` on, the total is that of the whole cell type: for `LC4 → PLP1`, the weight is divided by the total input of all PLP1 neurons combined.
 
 ```coda-params
-neuron.paths: maxHops, minWeight, topN, collapseTypes, normalize, normalizeBy, normalizeBasis, rankBy, minFraction
+neuron.paths: normalize, normalizeBy, normalizeBasis, rankBy, minFraction
 ```
+
+`Rank by` decides whether routes are ranked by their weakest link in synapses ("synapses (weakest link)") or as a fraction of the total ("fraction of the total"). The two can give quite different answers. On the bundled optic lobe data, searching from L1 to DNp02 in four hops:
+
+- The routes through LPLC2 have 375 synapses at their weakest link, against 352 for the route through LC4, so ranked by synapses LPLC2 comes first.
+- But LPLC2 gets only about 15% of its input from any one T4 subtype, whereas LC4 gets 61% of its input from Tm3. Ranked by fraction, the route through LC4 comes first by a factor of four.
+
+Both numbers are reported for every route, whichever ranking you pick.
+
+`Min fraction` is applied during the search, not to the final ranking: a connection below it is not followed, so whatever lies behind it never enters the network. Like `Min synapses`, this keeps the search smaller.
+
+If the dataset does not publish a total for a connection, that connection is never dropped by `Min fraction`. A route containing it gets an empty `bottleneckNorm` and is ranked below all routes that could be scored.
+
+> [!WARNING] Which datasets can normalize
+> Normalizing needs per-neuron synapse totals. neuPrint publishes them; CAVE and CATMAID don't.
+> A dataset with a local edge table (attached via `Edge data`) computes the totals from that file
+> by summing each neuron's weights. An edge table can't tell neurons from fragments, so both
+> `Denominator` options give the same number there.
+
+## Outputs
+
+- `Network`: the graph spanned by the routes that were found. Each node carries `role`, `hop`, `paths` and `neurons`.
+- `Layout`: a fixed, layered left-to-right layout of that network. Wire it into the `Layout` input of a [Network Viewer](#out.network) to use it in place of the viewer's own layout. It has no settings.
+- `Paths`: one row per route, ranked by its weakest link, with `rank`, `source`, `target`, `hops`, `bottleneck` and `path`. When normalizing it also has `bottleneckNorm`, but no denominator column: the weakest link in synapses and the weakest link as a fraction are often different hops. Look up each connection's own total in the `Network` output instead.

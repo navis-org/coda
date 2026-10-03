@@ -44,9 +44,9 @@ registerNode({
    */
   cardWidth: DATASET_CARD_WIDTH,
   description:
-    'What a dataset covers, who made it and how to cite it, as its publisher states it.',
+    'The text a dataset’s publisher wrote about it: what it covers, who made it and how to cite it.',
   guide:
-    'A credit card, and the text on it is the publisher’s rather than ours — neuPrint ships a markdown blurb per dataset naming the project, its companion viewers and the papers to cite, which nothing else in Coda renders. It arrives already wired whenever you add a dataset node, because a connectome is years of somebody’s reconstruction work published with a request for attribution, and a picker labelled “MaleCNS” gives no hint of that. Delete it and it stays deleted; Add ▸ Dataset ▸ Description brings it back.',
+    'Shows the description a dataset’s publisher provides, e.g. neuPrint’s text naming the project, its viewers and the papers to cite. It is added and wired below every new dataset node. If you delete it, it stays deleted; Add ▸ Dataset ▸ Description brings it back.',
   /*
    * Cheap despite reaching the network: the listing is one small JSON per deployment, it is
    * already in hand whenever the dataset node upstream has run, and `evaluate` only asks for it

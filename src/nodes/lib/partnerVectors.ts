@@ -216,22 +216,22 @@ export function partnerVectorIssues(
   const missing = [PRE_ID, POST_ID].filter((name) => !findColumn(input, name))
   if (missing.length > 0) {
     return [
-      `Needs ${missing.join(' and ')} — the shape Connectivity emits. Rename Columns ` +
-        `will map an edge list that spells them differently.`,
+      `This table needs ${missing.join(' and ')} columns, as Connectivity produces. If your ` +
+        `edge list names them differently, rename them with Rename Columns.`,
     ]
   }
   if (partnerBy === 'type') {
     const types = [PRE_TYPE, POST_TYPE].filter((name) => !findColumn(input, name))
     if (types.length > 0) {
       return [
-        `Grouping partners by cell type needs ${types.join(' and ')}, which this table has no`,
+        `Grouping partners by cell type needs ${types.join(' and ')} columns, which this table does not have.`,
       ]
     }
   }
   if (!hasNeurons && !findColumn(input, DIRECTION_COLUMN)) {
     return [
-      `Wire the query neurons to the Neurons input: without a ${DIRECTION_COLUMN} ` +
-        `column nothing says which end of an edge was asked about.`,
+      `Wire the query neurons into \`Neurons\`. This table has no ${DIRECTION_COLUMN} ` +
+        `column, so nothing says which end of each edge is the query neuron.`,
     ]
   }
   return []
@@ -327,9 +327,9 @@ export function partnerVectorTable(
 
   if (!spec.queries && !direction) {
     throw new Error(
-      `Nothing says which end of an edge was the query. Wire the neurons you asked ` +
-        `about to the Neurons input, or feed this a Connectivity result, which carries "` +
-        `${DIRECTION_COLUMN}".`,
+      `Nothing says which end of each edge is the query neuron. Wire the query neurons ` +
+        `into \`Neurons\`, or use a Connectivity result, which has a "` +
+        `${DIRECTION_COLUMN}" column.`,
     )
   }
 
@@ -461,16 +461,16 @@ export function partnerVectorTable(
   const { untypedById, untypedDropped, pastFirstHop, unusable, unlabelled } = counts
   if (pastFirstHop > 0) {
     ctx.warn(
-      `${pastFirstHop.toLocaleString()} edges are past the first hop and were left out ` +
-        `— "${DIRECTION_COLUMN}" only names the query neuron while the frontier is still ` +
-        `the seed set. Wire those neurons to the Neurons input to use every hop.`,
+      `${pastFirstHop.toLocaleString()} edges are past the first hop and were left out, ` +
+        `because "${DIRECTION_COLUMN}" only identifies the query neuron on the first hop. To ` +
+        `use every hop, wire the query neurons into \`Neurons\`.`,
     )
   }
   if (untypedById > 0) {
     ctx.warn(
-      `${untypedById.toLocaleString()} connections are to untyped partners, each ` +
-        `standing in for itself under its own id — one feature each rather than one ` +
-        `shared "untyped" feature. Switch Untyped partners to drop them instead.`,
+      `${untypedById.toLocaleString()} connections are to untyped partners, and each ` +
+        `partner became its own feature under its id. To drop them instead, set ` +
+        `\`Untyped partners\` to "Drop the connection".`,
     )
   }
   if (untypedDropped > 0) {
@@ -481,15 +481,15 @@ export function partnerVectorTable(
   }
   if (unusable > 0) {
     ctx.warn(
-      `${unusable.toLocaleString()} rows carried no usable weight or no partner id and were ` +
+      `${unusable.toLocaleString()} rows had no usable weight or no partner id and were ` +
         `skipped.`,
     )
   }
   if (unlabelled > 0) {
     ctx.warn(
-      `${unlabelled.toLocaleString()} connections are to partners the mapping does not ` +
-        `cover and were dropped — a partner outside the shared label space exists in ` +
-        `only one dataset. Read cnFrac to see how much of each neuron is left.`,
+      `${unlabelled.toLocaleString()} connections were dropped because their partner has no ` +
+        `match in the other dataset. The \`cnFrac\` column shows what fraction of each ` +
+        `neuron's connections is left.`,
     )
   }
 
@@ -511,7 +511,7 @@ export function partnerVectorTable(
     ctx.warn(
       `Neuron ${worst.key} kept only ${(worst.frac * 100).toFixed(0)}% of its ` +
         `connectivity (cnFrac ${worst.frac.toFixed(2)}); the rest went to partners ` +
-        `outside the comparison. Filter on cnFrac before clustering if that matters.`,
+        `outside the comparison. If that matters, filter on \`cnFrac\` before clustering.`,
     )
   }
 

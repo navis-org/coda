@@ -48,8 +48,8 @@ export async function openFeather(bytes: ByteSource): Promise<TableFileReader> {
   const footer = reader.footer
   if (!reader.isFile() || !footer) {
     throw new Error(
-      'This is an Arrow stream rather than a Feather file, and a stream cannot be read in ' +
-        'pieces. Write it with pyarrow.feather.write_feather, or as Parquet.',
+      'This is an Arrow stream, which cannot be read in pieces like a Feather file. Write it ' +
+        'with pyarrow.feather.write_feather, or as Parquet.',
     )
   }
 

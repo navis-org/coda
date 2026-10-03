@@ -53,7 +53,7 @@ export interface FetchTextMessages {
 export function unreachable(url: string, hint?: string): Error {
   return new Error(
     `Could not fetch ${url}. The host may be unreachable, or may refuse cross-origin ` +
-      `reads — a browser gives no reason.${hint ? ` ${hint}` : ''}`,
+      `reads. The browser does not say which.${hint ? ` ${hint}` : ''}`,
   )
 }
 

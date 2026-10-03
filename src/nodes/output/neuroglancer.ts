@@ -90,10 +90,9 @@ registerNode({
   category: 'visualisation',
   description: "View neurons in the dataset's own neuroglancer scene.",
   guide:
-    'View neurons in the dataset’s own published neuroglancer scene — the EM volume, the region ' +
-    'meshes and the synapse layers that scene already carries, with your neurons added to it. ' +
-    'Emits a URL that works both as a viewer and as a shareable link, and the card embeds it. ' +
-    'Every setting is inspector-only, so the embed keeps the space somebody opened the node for.',
+    'Shows neurons in the dataset’s own neuroglancer scene, embedded in the card. Wire in a ' +
+    'dataset and, optionally, a neuron table such as the selection from Explore Dataset. The ' +
+    'output is the scene URL, which you can open or share; all settings are in the inspector.',
   cost: 'cheap',
   /*
    * Big enough that the embed is worth having on the canvas at all. Only a starting point —
@@ -175,7 +174,7 @@ registerNode({
       label: 'Layers',
       default: 'all',
       advanced: true,
-      help: 'How much of what the dataset publishes to carry — EM, ROI meshes, synapses — or just the neurons, which makes a far shorter link. Extra layers are added either way.',
+      help: 'Include everything the dataset publishes (EM, ROI meshes, synapses), or "neurons only" for a much shorter link. Extra layers are added either way.',
       options: [
         { value: 'all', label: 'as published' },
         { value: 'segmentation', label: 'neurons only' },
@@ -194,7 +193,7 @@ registerNode({
        * panels take less of the card and the scene gets the room. It also means more pixels
        * to render, which is the trade at the bottom of the range.
        */
-      help: 'Scales neuroglancer’s whole frame, so its toolbar and panels take up less of the card. Not the camera zoom inside it.',
+      help: 'Scales neuroglancer’s toolbar and panels so they take up less of the card. Does not zoom the camera.',
       default: 0.75,
       min: 0.5,
       max: 1.5,
@@ -224,7 +223,7 @@ registerNode({
       default: '',
       advanced: true,
       placeholder: DEFAULT_NEUROGLANCER_URL,
-      help: 'Which neuroglancer deployment to open. Empty uses the one the dataset names. The scene travels in the URL fragment, so the instance must allow being embedded.',
+      help: 'Which neuroglancer deployment to open. Empty uses the dataset’s own. The deployment must allow embedding.',
     },
     {
       id: 'viewerType',
@@ -243,7 +242,7 @@ registerNode({
        * with no segmentation in it and nothing naming the cause — which has happened once
        * already, in the other direction.
        */
-      help: 'How a CAVE segmentation is authenticated. Spelunker builds need a middleauth+ prefix on the source; the Seung-lab fork runs its own login and refuses it. "Automatic" reads it off the deployment.',
+      help: 'How a CAVE segmentation is authenticated: Spelunker builds need a middleauth+ source prefix, which the Seung-lab fork refuses. "Automatic" works it out from the deployment.',
     },
   ],
 
@@ -278,7 +277,7 @@ registerNode({
     })
     if (!published) {
       throw new Error(
-        `${dataset.label} publishes no neuroglancer scene, so there is nothing to point a viewer at.`,
+        `${dataset.label} publishes no neuroglancer scene, so there is nothing to show.`,
       )
     }
 
@@ -383,8 +382,7 @@ function segmentColors(
   if (unreadable > 0) {
     ctx.warn(
       `${unreadable} of ${neurons.length} rows have an id neuroglancer cannot use and ` +
-        `were left out. It takes plain whole numbers only, and one bad id costs the ` +
-        `whole layer.`,
+        `were left out. Neuroglancer only accepts ids that are plain whole numbers.`,
     )
   }
 

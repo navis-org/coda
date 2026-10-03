@@ -50,9 +50,11 @@ registerNode({
   // The Labels field is a paste target — a list of cell types wrapped into a 232px box is
   // unreadable — and the unmatched line names labels rather than counting them.
   cardWidth: 300,
-  description: 'Resolve cell type or other labels back to the neurons carrying them.',
+  description: 'Looks up the neurons that carry given cell types or other labels.',
   guide:
-    'Resolve labels to neurons carrying them — the inverse of Find Neurons. Default to exact match because labels usually come from text people copied (a type column, a groupBy roll-up, a paper), and turning SMP001(a) into a regex would lose the literal parentheses.',
+    'Looks up the neurons carrying a list of labels, e.g. all neurons of a few cell types: the ' +
+    'inverse of Find Neurons. Type the labels or wire in a table column. Matching is exact by ' +
+    'default, so names like SMP001(a) can be pasted as they are.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -109,7 +111,7 @@ registerNode({
         { value: 'exact', label: 'exact label' },
         { value: 'regex', label: 'regular expression' },
       ],
-      help: 'Exact treats a label literally, so parentheses and dashes in a name are safe. Regex matches the whole name, like Find Neurons.',
+      help: '"exact label" matches the name literally, so parentheses and dashes are safe. "regular expression" must match the whole name, as in Find Neurons.',
     },
     {
       id: 'ignoreCase',

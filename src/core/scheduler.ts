@@ -633,7 +633,10 @@ export class Scheduler {
     }
 
     for (const nodeId of cyclic) {
-      this.setState(nodeId, { state: 'error', error: 'Node is part of a cycle' })
+      this.setState(nodeId, {
+        state: 'error',
+        error: 'This node is part of a cycle. Remove a wire to break the loop.',
+      })
     }
 
     this.pruneCache(graph)
@@ -1333,8 +1336,8 @@ export class Scheduler {
     const name = `Input "${port.label ?? port.id}"`
     return why
       ? `${name} is wired to ${label}, which has not resolved a dataset: ${why}`
-      : `${name} is wired to ${label}, which has not resolved a dataset yet — its version list ` +
-          `has not arrived. Run again once it has.`
+      : `${name} is wired to ${label}, which has not resolved a dataset yet because its ` +
+          `version list has not loaded. Run again once it has.`
   }
 
   /**

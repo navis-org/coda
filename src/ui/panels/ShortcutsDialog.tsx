@@ -85,8 +85,8 @@ function Dialog({ onClose }: { onClose: () => void }) {
        * nothing while the cursor was in a query box.
        */}
       <footer className="shortcuts__foot">
-        Bare letters are off while you are typing in a field, and while a guided tour is on
-        screen.
+        Single-key shortcuts do nothing while you are typing in a field or while a guided tour
+        is running.
       </footer>
     </Modal>
   )

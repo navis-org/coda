@@ -293,11 +293,10 @@ registerEmitter('core.filterTable', (ctx) => {
 registerEmitter('neuron.splitNeurons', (ctx) => {
   const src = ctx.wired('in')
   return ctx.todo(
-    'Split Neurons filters the attribute table a collection of skeletons or meshes carries, ' +
+    'Split Neurons filters the attribute table that comes with a set of skeletons or meshes, ' +
       'and a navis NeuronList has none: `fetch_skeletons` attaches no connectome metadata, and ' +
-      '`NeuronList.summary()`’s `type` column is the neuron class (`navis.Skeleton`) rather ' +
-      'than the cell type — so a filter compiled against it would match nothing and say ' +
-      'nothing. If the fields you split on were brought along by `Carry fields` on the ' +
+      'the `type` column of `NeuronList.summary()` is the neuron class (`navis.Skeleton`), ' +
+      'not the cell type. A filter on it would silently match nothing. If the fields you split on were brought along by `Carry fields` on the ' +
       'Skeletons or Meshes node, they *are* registered on the neurons and ' +
       '`nl[nl.summary()[column] == value]` works. Otherwise filter the neuron table above the ' +
       'Skeletons cell, or merge your neuron ' +
@@ -387,10 +386,9 @@ registerEmitter('neuron.pointsInVolumes', (ctx) => {
   ctx.helper('coda_in_volumes')
   return [
     ...ctx.note(
-      'navis tests containment with ncollpyde, Coda with a ray through a bounding ' +
-        'volume hierarchy. They agree on any closed mesh except at its surface — a point ' +
-        "exactly on a face, or any point in a non-watertight mesh, is each library's own " +
-        'answer.',
+      'navis tests containment with ncollpyde, and Coda casts a ray through a bounding ' +
+        'volume hierarchy. They agree on any closed mesh, except for points exactly on a face ' +
+        'and any point in a mesh that is not watertight, where the results can differ.',
     ),
     `${labelled}, ${overlapping} = coda_in_volumes(${points}, ${volumes}, ${pyStr(name)})`,
     `${inside} = ${labelled}[${labelled}[${pyStr(name)}].notna()].reset_index(drop=True)`,
@@ -732,16 +730,16 @@ registerEmitter('core.join', (ctx) => {
 
   return [
     ...ctx.note(
-      'Coda keeps the first matching row, so a duplicated key annotates rather than ' +
-        'multiplies. `drop_duplicates` reproduces that; without it `merge` returns every ' +
+      'Coda keeps only the first matching row for a duplicated key, so rows are never ' +
+        'multiplied. `drop_duplicates` does the same here; without it `merge` returns every ' +
         'matching pair.',
     ),
     ...(sameKey
       ? []
       : ctx.note(
-          `Coda publishes **one** key column, filled from whichever side the row came from — ` +
-            `\`dplyr::full_join\`'s shape rather than pandas'. Where the two keys are named ` +
-            `differently pandas keeps both, so the right one is renamed out of the way and ` +
+          `Coda outputs **one** key column, filled from whichever side the row came from ` +
+            `(like \`dplyr::full_join\`). When the two keys have different names pandas keeps ` +
+            `both, so the right one is renamed and then ` +
             `dropped` +
             (fillsKey ? `, after filling ${pyStr(leftKey)} from it.` : `.`),
         )),
@@ -843,7 +841,7 @@ registerEmitter('core.pivot', (ctx) => {
   // Unreachable through the picker, which offers `NUMERIC_AGG_OPTIONS`; a hand-edited file is
   // the only way here, and `pivot_table` would answer a frame of zeroes rather than fail.
   if (agg === 'join')
-    return ctx.todo('A pivot cannot aggregate text — a matrix cell is a number.')
+    return ctx.todo('A pivot cannot aggregate text, because a matrix cell must be a number.')
 
   const args = [
     `index=${pyStr(rows)}`,
@@ -912,7 +910,7 @@ registerEmitter('core.unpivot', (ctx) => {
   const folded = melted.map((n) => dtypeOf(ctx, 'in', n))
   if (plan?.dtype === 'str' && folded.some((d) => d && d !== 'str')) {
     lines.push(
-      `# The folded columns do not share a type, so the value column is text — Coda's rule.`,
+      `# The melted columns have different types, so the value column is text, as in Coda.`,
       `${out}[${pyStr(valueCol)}] = ${col(out, valueCol)}.astype('string')`,
     )
   }
@@ -1044,7 +1042,7 @@ registerEmitter('neuron.stack', (ctx) => {
   const { column, labels } = plan.source
   return [
     ...ctx.note(
-      'Coda adds the source as a column on the attribute table; navis carries it as an ' +
+      'Coda adds the source as a column on the attribute table. navis stores it as an ' +
         'attribute on each neuron, which is what plot3d(color_by=) and NeuronList.summary() read.',
     ),
     ...plan.inputs.flatMap((v, i) => [
@@ -1228,8 +1226,8 @@ registerEmitter('core.reduceMatrix', (ctx) => {
 
   if (options.excludeDiagonal) {
     lines.push(
-      `# Only where the two label lists agree: a square matrix is not necessarily a`,
-      `# self-comparison, and Coda declines to guess.`,
+      `# Only when the row and column labels are the same: a square matrix is not`,
+      `# necessarily a self-comparison, so Coda does not assume one.`,
       `if _m.index.equals(_m.columns):`,
       `    _m = _m.mask(np.eye(len(_m), dtype=bool))`,
     )

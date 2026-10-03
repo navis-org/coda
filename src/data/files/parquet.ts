@@ -265,7 +265,7 @@ function refuseCodecs(metadata: FileMetaData): void {
       if (codec && !PARQUET_CODECS.has(codec)) {
         throw new Error(
           `This Parquet file is compressed with ${codec}, which Coda cannot read yet. Rewrite ` +
-            `it with ZSTD or SNAPPY — in pandas, df.to_parquet(path, compression="zstd"); in ` +
+            `it with ZSTD or SNAPPY. In pandas: df.to_parquet(path, compression="zstd"); in ` +
             `polars, df.write_parquet(path), whose default is ZSTD.`,
         )
       }

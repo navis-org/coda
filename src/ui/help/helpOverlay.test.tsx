@@ -233,7 +233,7 @@ describe('the help overlay', () => {
     act(() => {
       link.click()
     })
-    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy(), {
+    await waitFor(() => expect(screen.getByText(/What Linkage does/)).toBeTruthy(), {
       timeout: DOC_LOAD_MS,
     })
     // The store still holds where the reader came in, so Back has somewhere to go.
@@ -316,7 +316,7 @@ describe('opening a workflow from the overlay', () => {
         .getByRole('button', { name: /Linkage/i })
         .click()
     })
-    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy(), {
+    await waitFor(() => expect(screen.getByText(/What Linkage does/)).toBeTruthy(), {
       timeout: DOC_LOAD_MS,
     })
 
@@ -378,6 +378,18 @@ describe('see also', () => {
     )
     expect(useGraphStore.getState().helpType).toBe('neuron.findNeurons')
     expect(within(dialog).getByRole('button', { name: /back/i })).toBeTruthy()
+  })
+
+  /* A related node with no document is still worth naming, but there is nothing to open. */
+  it('names an undocumented node without linking it', async () => {
+    const dialog = await openHelp('out.neuroglancer')
+    const see = within(dialog).getByRole('heading', { name: 'See also' }).parentElement!
+    const name = within(see).getByText('Neuroglancer Source')
+    expect(name.closest('button')).toBeNull()
+    expect(name.closest('tr')!.textContent).toContain(
+      requireNodeDef('dataset.ngsource').description,
+    )
+    expect(within(see).getByRole('button', { name: '3D View' })).toBeTruthy()
   })
 
   /* It is the end of the reading, so it must not appear before there is any — under "Loading…"

@@ -1551,12 +1551,12 @@ describe('meshes', () => {
      * which serves no mesh fragments; that it got that far is the point.
      */
     const said = (await warningsFor(ids)).join(' ')
-    expect(said).toMatch(
-      /no level of detail, so each one is dozens to hundreds of separate requests/,
-    )
+    expect(said).toMatch(/Each graphene mesh takes dozens to hundreds of separate requests/)
     // And it names the alternative, which for this datastack is not hypothetical: FlyWire's own
     // materializations were flattened, and only a stub with no bucket sends it down this route.
-    expect(said).toMatch(/flat segmentation beside it does the same set in two requests/)
+    expect(said).toMatch(
+      /published \(flat\) segmentation fetches the same meshes in two requests/,
+    )
     expect(said).toMatch(/Fetching anyway/)
   })
 

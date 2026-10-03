@@ -43,9 +43,9 @@ registerNode({
   // rename stops reading as one act.
   cardWidth: 320,
   description:
-    'Give one or more columns a different name. A column that merely already held a target name is suffixed `_2` rather than overwritten.',
+    'Rename one or more columns. If another column already has a target name, that column is suffixed `_2`.',
   guide:
-    'Give one or more columns a different name, leaving their values, dtypes and units alone. Mostly for making somebody else’s table speak Coda’s vocabulary: the id column has to be called neuronId before a table can meet a Neurons socket, and the cell typing has to be called type before connectivity rows, Explore Dataset chips and Neuron Profile roll-ups can read it — which is why renaming a column onto neuronId promotes the table to Neurons, and renaming neuronId away demotes it. Nothing here refuses: a row naming a column the table does not have renames nothing and says so, and two rows aiming at one name suffix the second rather than dropping a column.',
+    'Renames columns without changing their values. Mostly used to bring an outside table into Coda’s naming: neuron ids go in a column called neuronId, cell types in one called type. Renaming a column to neuronId turns the table into a Neurons table, and renaming neuronId away turns it back. A rename naming a missing column is skipped with a warning.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -59,7 +59,7 @@ registerNode({
       id: 'renames',
       kind: 'ids',
       label: 'Renames',
-      help: 'One row per column being renamed, set on the card. Stored as [from, to] pairs.',
+      help: 'One row per column to rename, set on the card.',
       noun: 'renames',
       default: [],
     },
@@ -86,11 +86,17 @@ registerNode({
     const issues: string[] = []
 
     const unnamed = renames.filter((r) => r.from && !r.to).map((r) => r.from)
-    if (unnamed.length > 0) issues.push(`No new name for: ${unnamed.join(', ')}`)
+    if (unnamed.length > 0)
+      issues.push(
+        `No new name for: ${unnamed.join(', ')}. Type one in \`Renames\`, or remove the row.`,
+      )
 
     // Empty while the schema is unknown, which is `renamePlan`'s rule rather than a guard
     // repeated here: a port publishing no schema is not a port whose table lacks these columns.
-    if (plan.missing.length > 0) issues.push(`Missing column(s): ${plan.missing.join(', ')}`)
+    if (plan.missing.length > 0)
+      issues.push(
+        `Missing column(s): ${plan.missing.join(', ')}. They are not in the input table, so they are not renamed.`,
+      )
 
     /*
      * Two rows aiming at one name. `renamedColumns` suffixes the second rather than emitting a
@@ -106,14 +112,17 @@ registerNode({
     }
     if (clashes.size > 0) {
       issues.push(
-        `Renamed to the same name: ${[...clashes].join(', ')} — the later one is suffixed`,
+        `Renamed to the same name: ${[...clashes].join(', ')}. The later one gets a suffix; ` +
+          `give each a different name to avoid it.`,
       )
     }
 
     // The demotion, said out loud. It is correct — the column is gone — but a Neurons table
     // silently becoming a plain one is a socket that stops accepting a wire two nodes later.
     if (wasNeurons && !plan.neurons && findColumn(schema, ID_COLUMN_NAME)) {
-      issues.push(`Renaming "${ID_COLUMN_NAME}" away — the result is no longer a Neurons table`)
+      issues.push(
+        `Renaming "${ID_COLUMN_NAME}" means the result is no longer a Neurons table, so ports that need neurons will not accept it.`,
+      )
     }
 
     return issues

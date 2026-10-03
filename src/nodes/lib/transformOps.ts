@@ -406,8 +406,8 @@ export function checkWarpSize(ctx: Warner, points: number, landmarks: number): v
   ctx.warn(
     `Warping ${points.toLocaleString()} points through ${landmarks.toLocaleString()} ` +
       `landmarks is ${describeDuration(product / WARP_PRODUCTS_PER_SECOND)}, ` +
-      `single-threaded. Warping anyway — cancel and fetch fewer neurons, take a ` +
-      `coarser Detail, or turn Warp off for a plain flip.`,
+      `single-threaded. Warping anyway. To make it faster, cancel and fetch fewer neurons, ` +
+      `choose a coarser \`Detail\`, or turn \`Warp\` off for a plain flip.`,
   )
 }
 
@@ -443,8 +443,8 @@ export function kindClashMessage(
 ): string {
   return (
     `${first.name} is ${first.noun} and ${other.name} is ${other.noun}. These are different ` +
-    'kinds of geometry and cannot share one collection — wire them to separate ports on the 3D ' +
-    'View instead.'
+    'kinds of geometry and cannot be stacked into one collection. Wire them to separate ports ' +
+    'on the 3D View instead.'
   )
 }
 
@@ -519,10 +519,10 @@ export function checkGeometryUnits(
 ): void {
   if (geometry.units === undefined || geometry.units === 'nm') return
   throw new Error(
-    `${side} ${noun} are in ${geometry.units}, not nanometres, so ${consequence} This happens ` +
-      `when the dataset's Meta publishes no voxelSize or no unit this build recognises, so the ` +
-      `fetch had nothing to convert with — the ${sourceNode} node's footer says which units it ` +
-      `got.`,
+    `${side} ${noun} are in ${geometry.units}. They must be in nanometres, or ${consequence} ` +
+      `This happens when the dataset's Meta has no voxelSize, or has a unit Coda does not ` +
+      `recognise, so there was nothing to convert with. The ${sourceNode} node's footer shows ` +
+      `which units it received.`,
   )
 }
 
@@ -574,9 +574,8 @@ export function spaceRemedy(clash: FrameClash): string {
   return toCommonFor(clash.left as TemplateSpaceId) &&
     toCommonFor(clash.right as TemplateSpaceId)
     ? 'Put them through Transform Neurons first.'
-    : 'Coda ships no route from one of these into a shared frame — where the two spaces are ' +
-        'different animals there is no such registration to ship — so there is no step that ' +
-        'would make this comparison mean anything.'
+    : 'Coda has no transform between these two spaces (they may be different animals), so ' +
+        'they cannot be compared.'
 }
 
 function lowerFirst(text: string): string {
@@ -659,8 +658,8 @@ export function checkStackable(inputs: readonly GeometryValue[]): StackedFrame {
           { left: stackInputName(stated.input), right: where },
           {
             units:
-              'Stacked, part of the collection would be drawn at the wrong scale with nothing ' +
-              'to say so.',
+              'Stacked, part of the collection would be drawn at the wrong scale without any ' +
+              'warning.',
             space: 'This would draw two clouds in opposite corners of an empty scene.',
           },
         ),
@@ -829,9 +828,9 @@ export function landmarkTriple(
        */
       if (typeof cell !== 'number' || !Number.isFinite(cell)) {
         throw new Error(
-          `Row ${row + 1} of "${name}" is not a finite number. A spline interpolates its ` +
-            `landmarks exactly, so one missing coordinate drags every neuron near it to the ` +
-            `origin.`,
+          `Row ${row + 1} of "${name}" is not a finite number. A spline passes exactly through ` +
+            `its landmarks, so one missing coordinate would drag every neuron near it to the ` +
+            `origin. Fix or remove that row.`,
         )
       }
       out[row * 3 + axis] = cell * scale

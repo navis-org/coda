@@ -15,7 +15,6 @@ import { allNodeDefs } from '../core/registry'
 import { helpTypes } from './registry'
 import { SEE_ALSO_GROUPS, seeAlsoFor } from './seeAlso'
 
-const DOCUMENTED = new Set(helpTypes())
 const REGISTERED = new Set(allNodeDefs().map((def) => def.type))
 
 describe('coverage', () => {
@@ -36,11 +35,10 @@ describe('coverage', () => {
   })
 
   /*
-   * Groups may name a node whose document has not been written yet — that is what keeps adding a
-   * document from meaning "remember to go and edit `seeAlso.ts`". What the list may not hold is a
-   * type the registry has never heard of, which is a typo rather than a plan.
+   * Groups may name a node with no document; the overlay lists it without a link. What the list
+   * may not hold is a type the registry has never heard of, which is a typo.
    */
-  it('names only real node types, documented or not yet', () => {
+  it('names only real node types', () => {
     for (const group of SEE_ALSO_GROUPS) {
       for (const type of group) {
         expect(REGISTERED.has(type), type).toBe(true)
@@ -66,12 +64,11 @@ describe('the relation itself', () => {
     for (const type of helpTypes()) expect(seeAlsoFor(type), type).not.toContain(type)
   })
 
-  /* Every entry is a button that opens another document in the same overlay, so one naming a node
-     with no document is the broken link `help.test.ts` refuses in prose. */
-  it('offers only nodes that have a document to open', () => {
-    for (const type of helpTypes()) {
-      for (const other of seeAlsoFor(type)) expect(DOCUMENTED.has(other), other).toBe(true)
-    }
+  /* A group is a clique, so a careless group relates nodes nobody would read together. This was
+     the case that made it obvious: Skeletons under Neuroglancer, Neuroglancer Source missing. */
+  it('relates Neuroglancer to its source and not to Skeletons', () => {
+    expect(seeAlsoFor('out.neuroglancer')).toContain('dataset.ngsource')
+    expect(seeAlsoFor('out.neuroglancer')).not.toContain('neuron.skeletons')
   })
 
   /*

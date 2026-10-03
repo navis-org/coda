@@ -105,12 +105,11 @@ export const caveAnnotationNode = packNode({
    */
   cardHeight: 265,
   description:
-    'Neuron labels from an annotation table inside a CAVE datastack. A `cell_type` column arrives renamed `type`, the name Coda reads a cell type from.',
+    'Neuron labels from an annotation table in a CAVE datastack. A `cell_type` column arrives renamed `type`, which is the column Coda reads cell types from.',
   guide:
-    'Reads a CAVE annotation table and hands it to a Dataset as its labels. Name the datastack; ' +
-    'wire the Dataset input to read from a different datastack only (wiring both ways is a cycle). ' +
-    'Set Pivot on for a one-row-per-(neuron, kind, value) table. The output is ordinary neuron ' +
-    'table data, so Filter or Sort can edit the chain before the Dataset.',
+    'Reads an annotation table from a CAVE datastack and passes it to a Dataset as neuron labels. ' +
+    'Wire the Dataset into its Dataset input (or type the datastack) and name the table; for a ' +
+    'long table with one row per neuron and kind of annotation, set Pivot on.',
   cost: 'expensive',
   dataCache: true,
   /*
@@ -138,7 +137,7 @@ export const caveAnnotationNode = packNode({
       kind: 'string',
       label: 'Table',
       placeholder: 'nuclei_v1',
-      help: 'Annotation table or view in this datastack. The list is the datastack’s tables and views (marked t and v), once it has been read, which needs a CAVE token; any name can still be typed.',
+      help: 'Annotation table or view in this datastack. Listing them (marked t and v) needs a CAVE token; you can always type a name.',
       default: '',
       // Views too: the read asks the listing which a name is and takes the view route for one.
       suggestions: caveTableSuggestions,
@@ -165,7 +164,7 @@ export const caveAnnotationNode = packNode({
       kind: 'string',
       label: 'ID column',
       default: DEFAULT_CAVE_ID_COLUMN,
-      help: 'Column holding the root id. On a table that references another, a column of the referenced table, which is where the root id is.',
+      help: 'Column holding the root id. For a table that references another, name the column in the referenced table.',
       advanced: true,
       suggestions: (ctx) => caveColumnSuggestions(ctx, 'id'),
     },
@@ -174,7 +173,7 @@ export const caveAnnotationNode = packNode({
       kind: 'string',
       label: 'Pivot on',
       placeholder: 'classification_system',
-      help: 'For a long table: the column naming the kind of annotation. Its distinct values become columns. Empty means one row per neuron already.',
+      help: 'For a long table, the column naming the kind of annotation; each distinct value becomes a column. Leave empty if the table is already one row per neuron.',
       default: '',
       advanced: true,
       suggestions: (ctx) => caveColumnSuggestions(ctx, 'own'),
@@ -184,7 +183,7 @@ export const caveAnnotationNode = packNode({
       kind: 'string',
       label: 'Value column',
       placeholder: 'cell_type',
-      help: 'With Pivot on, the column holding the annotation itself.',
+      help: 'With `Pivot on` set, the column holding the annotation itself.',
       default: '',
       advanced: true,
       visibleIf: (params) => Boolean(String(params.pivotOn)),
@@ -207,7 +206,8 @@ export const caveAnnotationNode = packNode({
      */
     const datastack = caveDatastackIssues(ctx.inputs.dataset, ctx.params)
     if (datastack.length > 0) return datastack
-    if (!String(ctx.params.table).trim()) return ['Name an annotation table']
+    if (!String(ctx.params.table).trim())
+      return ['Enter the name of an annotation table in `Table`.']
     if (pivotWithoutValue(ctx.params)) return [NO_VALUE_COLUMN]
     return []
   },
@@ -230,7 +230,7 @@ export const caveAnnotationNode = packNode({
 
 /** One sentence for the card and the run, so a badge and an error read as one problem. */
 const NO_VALUE_COLUMN =
-  'Pivot on is set but Value column is empty. Name the column holding each annotation, e.g. cell_type'
+  '`Pivot on` is set but `Value column` is empty. Enter the column that holds each annotation, e.g. cell_type.'
 
 function pivotWithoutValue(params: Record<string, unknown>): boolean {
   return Boolean(String(params.pivotOn).trim()) && !String(params.valueColumn).trim()
@@ -299,8 +299,8 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
     label: spec.label,
     category: 'dataset',
     description:
-      `Neuron labels from a ${spec.label} base. A \`cell_type\` column arrives renamed ` +
-      '`type`, the name Coda reads a cell type from.',
+      `Neuron labels from a table in a ${spec.label} base. A \`cell_type\` column arrives ` +
+      'renamed `type`, which is the column Coda reads cell types from.',
     guide: spec.guide,
     cost: 'expensive',
     dataCache: true,
@@ -328,7 +328,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
         kind: 'string',
         label: 'Columns',
         placeholder: 'cell_type, side',
-        help: 'Comma-separated columns to keep. Empty keeps every column — which is what is downloaded either way.',
+        help: 'Comma-separated columns to keep. Empty keeps every column. The whole table is downloaded either way.',
         default: '',
       },
       {
@@ -352,7 +352,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
         kind: 'string',
         label: 'Server',
         default: spec.host,
-        help: 'SeaTable deployment. FlyTable and cloud.seatable.io are the same software with unrelated accounts, so each needs its own token.',
+        help: 'SeaTable deployment. FlyTable and cloud.seatable.io have separate accounts, so each needs its own token.',
         advanced: true,
       },
     ],
@@ -365,8 +365,9 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
 
     validate: (ctx) => {
       const base = String(ctx.params.base).trim()
-      if (!base) return ['Name a base']
-      if (!String(ctx.params.table).trim()) return ['Name a table inside the base']
+      if (!base) return ['Enter the name of a base in `Base`.']
+      if (!String(ctx.params.table).trim())
+        return ['Enter the name of a table in this base in `Table`.']
       /*
        * The workspace is **not** required. It used to be, which was wrong twice over: a base name
        * is very nearly always unique across an account, and the field is `advanced`, so the card
@@ -385,7 +386,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
         const found = bases ? resolveWorkspace(bases, base) : []
         if (found.length > 1) {
           return [
-            `${found.length} workspaces hold a base called "${base}" — set Workspace to say which`,
+            `${found.length} workspaces have a base called "${base}". Set \`Workspace\` to choose one.`,
           ]
         }
       }
@@ -428,10 +429,9 @@ buildSeaTableNode({
   label: 'FlyTable',
   host: SEATABLE_HOSTS.flytable,
   guide:
-    'FlyTable is the LMB’s SeaTable deployment, where FlyWire’s live cell typing lives. It ' +
-    'downloads whole bases (the column-selection endpoint is not browser-readable), cached once ' +
-    'per base per session. The output is ordinary neuron table data, so a Table node shows what ' +
-    'you got, and Filter or Sort can tidy it before the Dataset.',
+    'Reads a table from FlyTable, the LMB’s SeaTable deployment used for FlyWire cell typing, ' +
+    'and passes it to a Dataset as neuron labels. Needs a FlyTable account token. The table is ' +
+    'cached in the browser; click the cache indicator on the card to fetch it again.',
 })
 
 buildSeaTableNode({
@@ -439,9 +439,9 @@ buildSeaTableNode({
   label: 'SeaTable',
   host: SEATABLE_HOSTS.seatable,
   guide:
-    'The same node as FlyTable pointed at cloud.seatable.io, which is the hosted service rather ' +
-    'than the LMB’s deployment — two unrelated accounts, so each needs its own token. Use this ' +
-    'for a base of your own; use FlyTable for the community annotations.',
+    'Reads a table from one of your bases on cloud.seatable.io and passes it to a Dataset as ' +
+    'neuron labels. Needs a SeaTable account token, separate from a FlyTable one. Use FlyTable ' +
+    'instead for the LMB’s own deployment.',
 })
 
 // ---------------------------------------------------------------------------
@@ -469,9 +469,11 @@ registerNode({
   label: 'Google Sheet',
   category: 'dataset',
   description:
-    'Neuron labels from a shared Google Sheet, read through its CSV export URL. A `cell_type` column arrives renamed `type`, the name Coda reads a cell type from.',
+    'Neuron labels from a Google Sheet shared by link, read through its CSV export. A `cell_type` column arrives renamed `type`, which is the column Coda reads cell types from.',
   guide:
-    'Reads a Google Sheet that needs no login — Share as anyone-with-link ▸ Viewer. Paste the URL into Sheet; Tab selects a different tab by its numeric gid. The output is an ordinary neuron table, so Filter or Sort can edit it before the Dataset.',
+    'Reads a tab of a Google Sheet and passes it to a Dataset as neuron labels. Share the sheet ' +
+    'as "Anyone with the link" (Viewer) and paste its link into Sheet; to read a different tab, ' +
+    'set Tab to its numeric gid.',
   cost: 'expensive',
   dataCache: true,
   inputs: [ANNOTATIONS_INPUT],
@@ -482,7 +484,7 @@ registerNode({
       kind: 'string',
       label: 'Sheet',
       placeholder: 'https://docs.google.com/spreadsheets/d/…/edit',
-      help: 'The sheet’s link, straight out of the address bar — or just the id from inside it. A "publish to web" link uses a different id and is not read here.',
+      help: 'The sheet’s link from the address bar, or just the id inside it. "Publish to web" links use a different id and do not work here.',
       default: '',
     },
     {
@@ -497,7 +499,7 @@ registerNode({
       kind: 'string',
       label: 'Columns',
       placeholder: 'cell_type, side',
-      help: 'Comma-separated columns to keep. Empty keeps everything but the id — the whole tab is downloaded either way.',
+      help: 'Comma-separated columns to keep. Empty keeps everything but the id. The whole tab is downloaded either way.',
       default: '',
     },
     {
@@ -505,7 +507,7 @@ registerNode({
       kind: 'string',
       label: 'Tab',
       placeholder: 'from the link',
-      help: 'The gid of the tab to read — the number after "#gid=" in the address bar. Empty uses the tab the pasted link named, or the first.',
+      help: 'The tab to read: the number after "#gid=" in the address bar. Leave empty for the tab in the pasted link, or the first tab.',
       default: '',
       advanced: true,
     },
@@ -523,13 +525,15 @@ registerNode({
    * wrong. Same rule `columnSchemaFor` states and `importShapeIssues` follows one node over.
    */
   validate: (ctx) => {
-    if (!String(ctx.params.sheet).trim()) return ['No sheet yet — paste its link']
+    if (!String(ctx.params.sheet).trim()) return ['No sheet yet. Paste its link into `Sheet`.']
     const { config, error } = sheetConfigFrom(ctx.params)
     if (error) return [error]
     if (!config) return []
     const gid = String(ctx.params.gid).trim()
     if (gid && !/^\d+$/.test(gid)) {
-      return [`Tab "${gid}" is not a gid — it is the number after “#gid=” in the sheet’s URL`]
+      return [
+        `Tab "${gid}" is not a valid gid. Use the number after "#gid=" in the sheet's URL.`,
+      ]
     }
 
     const known = peekRefColumns({ provider: GOOGLE_SHEET_PROVIDER, config })
@@ -547,7 +551,9 @@ registerNode({
     const missing = namedColumns(config.columns, config.idColumn).filter(
       (name) => !available.includes(annotationColumn(name)),
     )
-    return missing.length > 0 ? [`Not in that tab: ${missing.join(', ')}`] : []
+    return missing.length > 0
+      ? [`Not in that tab, so left out: ${missing.join(', ')}. Check the names in \`Columns\`.`]
+      : []
   },
 
   evaluate: async (ctx) => {

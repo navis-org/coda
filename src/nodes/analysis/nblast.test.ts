@@ -201,7 +201,7 @@ describe('nblastOps — the flattening', () => {
       checkNblastSpaces(spaced('JRCFIB2018F'), spaced('FLYWIRE'), 'skeletons'),
     ).toThrow(/Put them through Transform Neurons first/)
     expect(() => checkNblastSpaces(spaced('AEDES'), spaced('FLYWIRE'), 'skeletons')).toThrow(
-      /no route from one of these into a shared frame/,
+      /no transform between these two spaces/,
     )
     // Both sides still named, whichever branch answered: which one to move is the first thing
     // somebody needs.
@@ -336,9 +336,7 @@ describe('neuron.nblast — running', () => {
     await scheduler.run(pipeline({ limit: 2 }), { mode: 'full' })
 
     expect(scheduler.info('nb').error ?? scheduler.info('nb').state).toBe('ok')
-    expect(scheduler.warning('nb')).toMatch(
-      /neurons on Query is past this node's Warn above \(2\)/,
-    )
+    expect(scheduler.warning('nb')).toMatch(/neurons on Query is past `Warn above` \(2\)/)
     // The whole difference from the old behaviour: there is a result under the warning.
     expect(mockedRun).toHaveBeenCalled()
   })

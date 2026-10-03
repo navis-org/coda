@@ -219,8 +219,8 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
   if (matchesNothing(rows)) {
     return [
       ...ctx.note(
-        `${nothingMatchesReason()} So this chunk says that — add a filter row on the canvas and ` +
-          're-export, or write the condition in here.',
+        `${nothingMatchesReason()} This chunk does the same. Add a filter row on the canvas and ` +
+          'export again, or write the condition here.',
       ),
       `${matched} <- ${src}[FALSE]`,
       `${rest} <- ${src}`,
@@ -278,7 +278,7 @@ registerEmitter('neuron.selectNeurons', (ctx) => {
   return [
     ...ctx.note(
       'R has no 64-bit integer, so an 18-digit root id read as a number was already rounded ' +
-        'before this line — read that column as character at the source if these are CAVE ids.',
+        'before this line. If these are CAVE ids, read that column as character where it is loaded.',
     ),
     `${ids} <- format(${frame}[[${rStr(column)}]], scientific = FALSE, trim = TRUE)`,
     `${out} <- ${src}[names(${src}) %in% ${ids}]`,
@@ -317,10 +317,9 @@ registerEmitter('neuron.pointsInVolumes', (ctx) => {
   ctx.helper('coda_in_volumes')
   return [
     ...ctx.note(
-      'nat::pointsinside needs Rvcg, which nat only suggests — ' +
-        'install.packages("Rvcg") if this errors. It casts its own rays where Coda ' +
-        'descends a bounding volume hierarchy, so the two agree on any closed mesh ' +
-        'except at its surface.',
+      'nat::pointsinside needs Rvcg, which nat does not install for you. Run ' +
+        'install.packages("Rvcg") if this errors. Rvcg and Coda use different inside tests, ' +
+        'so they agree on any closed mesh except for points on its surface.',
     ),
     `${split} <- coda_in_volumes(${points}, ${volumes}, ${rStr(name)})`,
     `${inside} <- ${split}$points[!is.na(${split}$points[[${rStr(name)}]]), ]`,
@@ -356,9 +355,8 @@ registerEmitter('neuron.synapseEdges', (ctx) => {
   return [
     ...(plan.polarity
       ? ctx.note(
-          "These column names are the canvas's. A cloud from the Synapses cell above uses " +
-            "neuprintr's — bodyid and a 0/1 prepost — so rename it first, or read this cell " +
-            'as the shape rather than the spelling.',
+          "These column names are Coda's. A point cloud from the Synapses cell above uses " +
+            "neuprintr's names (bodyid and a 0/1 prepost), so rename those columns first.",
         )
       : []),
     `${fold} <- coda_synapse_edges(`,
@@ -688,9 +686,8 @@ registerEmitter('core.join', (ctx) => {
 
   return [
     ...ctx.note(
-      'Coda keeps the first matching row, so a duplicated key annotates rather than ' +
-        'multiplies. `distinct` reproduces that; without it the join returns every ' +
-        'matching pair.',
+      'Coda keeps the first matching row, so a duplicated key does not add extra rows. ' +
+        '`distinct` reproduces that; without it the join returns every matching pair.',
     ),
     /*
      * The one place R is the closer of the two languages, so it is worth saying which way
@@ -702,9 +699,8 @@ registerEmitter('core.join', (ctx) => {
       ? ctx.note(
           'Row **order** differs here, and only here. Coda emits one row per right-table row ' +
             "in the right table's order; dplyr 1.2 puts the matched rows in the left table's " +
-            'order and the unmatched right rows after them. Measured against both rather than ' +
-            'surmised — the rows themselves are identical — so add an `arrange()` only if ' +
-            'something downstream depends on the order.',
+            'order and the unmatched right rows after them. The rows themselves are identical, so ' +
+            'add an `arrange()` only if something downstream depends on the order.',
         )
       : []),
     `${out} <- ${how === 'right' ? distinct(left, leftKey) : left} |>`,
@@ -954,7 +950,7 @@ registerEmitter('core.uploadTable', (ctx) => {
   return [
     ...ctx.note(
       fileName
-        ? `Coda stores an uploaded table in the browser, not in the graph, so the rows are not ` +
+        ? `Coda stores an uploaded table in the browser, so its rows are not ` +
             `in this document. Point this at your copy of "${fileName}".`
         : 'This Upload Table node has no file. Point the path below at your CSV.',
     ),
@@ -997,9 +993,9 @@ registerEmitter('core.uploadMesh', (ctx) => {
   return [
     ...ctx.note(
       fileName
-        ? `Coda stores uploaded meshes in the browser, not in the graph, so point this at ` +
-            `your copy of "${fileName}". OBJ and STL go through rgl (with nat); PLY needs ` +
-            `Rvcg — install.packages("Rvcg").`
+        ? `Coda stores uploaded meshes in the browser, so they are not in this document. Point ` +
+            `this at your copy of "${fileName}". OBJ and STL are read with rgl (installed with ` +
+            `nat); PLY needs Rvcg: install.packages("Rvcg").`
         : 'This Upload Mesh node has no files. Point the paths below at your OBJ, STL or PLY.',
     ),
     `${out}_paths <- c(${rStr(fileName || 'your-region.obj')})`,
@@ -1010,8 +1006,8 @@ registerEmitter('core.uploadMesh', (ctx) => {
       ? []
       : [
           ``,
-          `# Coda's Units param, applied: everything downstream is nanometres, and these files`,
-          `# are in ${unit.label}.`,
+          `# These files are in ${unit.label} (Coda's \`Units\`). Convert to nanometres,`,
+          `# which is what everything downstream expects.`,
           `${out} <- lapply(${out}, function(m) { m$vb[1:3, ] <- m$vb[1:3, ] * ${unit.nm}; m })`,
         ]),
   ]
@@ -1057,8 +1053,8 @@ registerEmitter('neuron.stack', (ctx) => {
   const { column, labels } = plan.source
   return [
     ...ctx.note(
-      'c() merges the neuronlists and their attached data frames together, which is the ' +
-        'pairing Coda keeps between the geometry and its attribute table.',
+      'c() merges the neuronlists and their attached data frames together, so each neuron ' +
+        'keeps its own row of attributes, as in Coda.',
     ),
     ...plan.inputs.map((v, i) => `${v}[, ${rStr(column)}] <- ${rStr(labels[i]!)}`),
     `${out} <- ${joined}`,
@@ -1289,8 +1285,8 @@ registerEmitter('core.reduceMatrix', (ctx) => {
 
   if (options.excludeDiagonal) {
     lines.push(
-      `# Only where the two label lists agree: a square matrix is not necessarily a`,
-      `# self-comparison, and Coda declines to guess.`,
+      `# Only when the row and column labels are identical. A square matrix is not`,
+      `# necessarily a self-comparison, and Coda skips the diagonal only in that case.`,
       `if (identical(rownames(m_), colnames(m_))) diag(m_) <- NA`,
     )
   }

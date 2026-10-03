@@ -406,9 +406,9 @@ export function ZooBrowser({ onClose }: ZooBrowserProps) {
       <div className="zoo__foot">
         <span>
           {loaded?.stale
-            ? `Offline — showing a copy from ${formatAgo(loaded.savedAt)}, which may be missing newer workflows.`
+            ? `Offline. Showing a copy from ${formatAgo(loaded.savedAt)}, which may not include newer workflows.`
             : loadError && workflows.length > 0
-              ? `Could not refresh — showing the copy from ${formatAgo(loaded?.savedAt ?? Date.now())}.`
+              ? `Could not refresh. Showing the copy from ${formatAgo(loaded?.savedAt ?? Date.now())}.`
               : loaded
                 ? `${plural(workflows.length, 'workflow')} from ${zooRepoUrl().replace('https://github.com/', '')}`
                 : ''}

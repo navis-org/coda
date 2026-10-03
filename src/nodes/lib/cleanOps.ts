@@ -65,9 +65,9 @@ export function checkCleanUnits(value: { units?: GeometryUnits }, usesDistance: 
   if (!usesDistance) return
   if (value.units === undefined || value.units === 'nm') return
   throw new Error(
-    `These coordinates are in ${value.units}, not nanometres, so a distance in ` +
-      `micrometres means nothing here. Leave the distance controls at zero, or fetch ` +
-      `from a dataset whose Meta publishes a voxel size.`,
+    `These coordinates are in ${value.units}, so a distance in micrometres cannot be ` +
+      `applied to them. Leave the distance settings at 0, or fetch from a dataset whose ` +
+      `Meta publishes a voxel size.`,
   )
 }
 
@@ -252,8 +252,8 @@ export function checkResampleSize(
   const nodes = Math.round(cable / spacingNm)
 
   refuseIfOverCrashFloor(
-    `Resampling to ${(spacingNm / NM_PER_UM).toLocaleString()} µm — about ` +
-      `${nodes.toLocaleString()} nodes`,
+    `Resampling to ${(spacingNm / NM_PER_UM).toLocaleString()} µm (about ` +
+      `${nodes.toLocaleString()} nodes)`,
     nodes * BYTES_PER_NODE,
   )
   // Checked here rather than inside `warnOverThreshold`, which formats a warning and does not
@@ -263,11 +263,11 @@ export function checkResampleSize(
     count: nodes,
     threshold: RESAMPLE_NODES_WARN,
     unit: 'nodes after resampling',
-    control: 'what this node resamples to without comment',
+    control: 'the usual size for resampling',
     cost:
       `${skeletonPointCount(skeletons).toLocaleString()} nodes in, about ` +
       `${nodes.toLocaleString()} out at ${(spacingNm / NM_PER_UM).toLocaleString()} µm ` +
-      `Spacing — ${formatBytes(nodes * BYTES_PER_NODE)} of geometry.`,
+      `\`Spacing\`, which is ${formatBytes(nodes * BYTES_PER_NODE)} of geometry.`,
   })
 }
 
@@ -444,10 +444,10 @@ export function checkDropInternalsSize(
     count: casts,
     threshold: RAY_CASTS_WARN,
     unit: 'ray casts',
-    control: 'what this node strips without comment',
+    control: 'the usual amount of work for this node',
     cost:
       `${triangles.toLocaleString()} triangles at ${params.rays} rays and ` +
-      `${params.passes} passes, single-threaded. Lower Rays or Passes, or take a ` +
-      `coarser Detail on the Meshes node.`,
+      `${params.passes} passes, single-threaded. Lower \`Rays per face\` or \`Passes\`, or ` +
+      `choose a coarser \`Detail\` on the Meshes node.`,
   })
 }

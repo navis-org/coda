@@ -2126,7 +2126,7 @@ describe('a plan that is legal and still wrong', () => {
 
   it('says a Labels table is not a labels table, where the schema is known', () => {
     expect(messagesOf(misWiredComparison().graph)).toContain(
-      'Dataset 1: the Labels table has no "label" column, so it is not a Match Cell Types',
+      'Dataset 1: the table wired into `Labels 1` has no "label" column, so it is not a labels table from Match Cell Types',
     )
   })
 
@@ -2142,7 +2142,7 @@ describe('a plan that is legal and still wrong', () => {
     const graph = updateNode(applied.graph, cmp, {
       params: { ...node.params, labelColumn: 'type' },
     })
-    expect(messagesOf(graph)).not.toContain('is not a Match Cell Types labels table')
+    expect(messagesOf(graph)).not.toContain('is not a labels table from Match Cell Types')
   })
 
   it('leaves column complaints out, having already told the model they are fine', () => {
@@ -2158,7 +2158,7 @@ describe('a plan that is legal and still wrong', () => {
     // Both complaints are on the card; the model is shown one of them.
     expect(applied.warnings.some((w) => w.aboutColumns)).toBe(true)
     const concerns = concernsFrom(applied.warnings).join('\n')
-    expect(concerns).toContain('is not a Match Cell Types labels table')
+    expect(concerns).toContain('is not a labels table from Match Cell Types')
     expect(concerns).not.toContain('nosuchcolumn')
   })
 
@@ -2176,7 +2176,7 @@ describe('a plan that is legal and still wrong', () => {
       ),
     )
     expect(concernsFrom(elsewhere.warnings).join('\n')).not.toContain(
-      'is not a Match Cell Types labels table',
+      'is not a labels table from Match Cell Types',
     )
   })
 

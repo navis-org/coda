@@ -1,37 +1,47 @@
-Take a collection of skeletons or meshes and get **both halves** of a filter: the neurons matching every filter row on `Matching`, the rest on `Rest`.
+## What Split Neurons does
+
+Split Neurons takes a set of skeletons or meshes and splits it in two based on their attributes: neurons that match all filter rows come out of `Matching`, all others come out of `Rest`.
 
 ```coda-params
 neuron.splitNeurons: filters
 ```
 
-It is Stack Neurons run backwards. That node puts several collections end to end and writes a column saying which input each neuron came from; this one asks the attribute table a question and hands back both answers — so one row, `source is hemibrain`, takes a stacked scene apart on the column the stack wrote.
+The filter rows work like the ones in [Find Neurons](#neuron.findNeurons): same controls, same operators, and rows are combined with `AND`. The difference is that they are applied to the attribute table that comes with the skeletons or meshes, so you can filter on whatever came back with the geometry, e.g. `type`, `status`, `size` or `cableLength`.
 
-The filters are [Find Neurons](#neuron.findNeurons)' rows — same three controls, same operators, combined with `AND` — but read against the attribute table the collection carries rather than a dataset's neuron schema. So the fields are what came back with the geometry: `type`, `status`, `size`, `cableLength`, and whatever else was carried along.
+> [!TIP] Missing a column?
+> If the column you want to filter on isn't offered, use `Carry fields` on the
+> [Skeletons](#neuron.skeletons) or [Meshes](#neuron.meshes) node to bring it along from the
+> neuron table.
 
-**If the field you want is not offered, carry it.** [Skeletons](#neuron.skeletons) and [Meshes](#neuron.meshes) have a `Carry fields` control that brings columns of their incoming neuron table onto the geometry, matched by `neuronId`.
+You can think of this node as the opposite of Stack Neurons: Stack Neurons combines several sets and adds a column saying which input each neuron came from, Split Neurons separates them again. For example, a single row `source is hemibrain` takes a stacked scene apart again using the column Stack Neurons wrote.
 
-## Why not filter upstream twice
+## Why not just filter twice?
 
-| rows | `Matching` | `Rest` |
+Every neuron comes out of exactly one of the two outputs, so the counts always add up to the input. Getting the same result with two separate filters is surprisingly easy to get wrong. Take these filter rows:
+
+| Rows | `Matching` | `Rest` |
 | --- | --- | --- |
-| `type is LC4` **and** `side is left` | left LC4s | right LC4s, **and every non-LC4** |
+| `type is LC4` and `side is left` | left LC4s | right LC4s, and every neuron that isn't an LC4 |
 
-A hand-built pair — one arm keeping `type is LC4 AND side is left`, another keeping `type is not LC4` — loses the right-side LC4s from both. Here the two ports come off one pass, so every neuron leaves on exactly one of them and the counts sum to the input's. And once the geometry is in hand — after a stack, or after [Transform Neurons](#neuron.xform) — there is no table upstream to filter at all.
+If you instead build two filters by hand, one keeping `type is LC4 AND side is left` and the other keeping `type is not LC4`, the right-side LC4s end up in neither.
 
-> [!WARNING] With no filters, nothing matches
-> `Matching` is empty and the whole collection leaves on `Rest`. An empty set of rows is a
-> predicate that has matched nothing, not a pass-through, so a half-built card visibly does
-> nothing rather than looking like a finished one that happens to keep every neuron.
+This node is also useful once you only have the geometry, e.g. after stacking or after [Transform Neurons](#neuron.xform), where there is no neuron table left to filter.
 
-> [!WARNING] A row naming a column the neurons do not carry refuses the run
-> Splitting on the rows that do resolve would still hand back a partition — of a different
-> question, with neurons on the wrong side of it. The card marks the row before you run anything.
+## Good to know
 
-> [!WARNING] Skeletons and meshes only
-> A synapse cloud is refused although Stack Neurons accepts one: its attribute rows are connectors
-> rather than neurons. A table of neurons is refused too — that is
-> [Filter Table](#core.filterTable).
+> [!WARNING] No filters means nothing matches
+> Without any filter rows, `Matching` is empty and all neurons come out of `Rest`.
 
-Both halves carry the collection's units, template space and skeleton provenance, and each recomputes its own bounding box, so either port frames correctly in a [3D View](#out.viewer3d) and can be stacked, mirrored, NBLASTed or downloaded like any other collection.
+> [!WARNING] Filtering on a missing column
+> If a row names a column the neurons don't have, the node refuses to run. The row is marked on
+> the card before you run anything.
 
-The notebook export refuses this node and the R Markdown one emits it, which is the libraries' asymmetry rather than a gap: nat keeps a data frame beside its neurons, where navis keeps attributes on the neuron objects and `NeuronList.summary()`'s `type` column is the neuron class rather than the cell type.
+> [!NOTE] Skeletons and meshes only
+> Synapse point clouds are not accepted (their attribute rows are synapses rather than neurons).
+> To filter a table of neurons, use [Filter Table](#core.filterTable).
+
+Both outputs keep the input's units, template space and skeleton source, and each gets its own bounding box. You can therefore treat either of them like any other set of neurons: show it in a [3D View](#out.viewer3d), stack, mirror, [NBLAST](#neuron.nblast) or download it.
+
+## Exporting
+
+The R Markdown export supports this node, the Python notebook export does not. That is because navis has no equivalent: navis keeps attributes on the individual neuron objects (and the `type` column of `NeuronList.summary()` is the kind of neuron object, not the cell type), whereas nat keeps a data frame alongside its neurons.

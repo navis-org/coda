@@ -72,7 +72,7 @@ describe('Connectivity with edge properties', () => {
 
   it('still refuses Normalize, and anything past one hop', () => {
     expect(connectivityChunk({ edgeProperties: ['weightHP'], normalize: true })).toContain(
-      'Normalize is not translated',
+      '`Normalize` is not translated',
     )
     expect(connectivityChunk({ edgeProperties: ['weightHP'], hops: 2 })).toContain(
       'exported for one hop',

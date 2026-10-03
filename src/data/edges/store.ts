@@ -147,7 +147,7 @@ const REFUSAL: RefusalWords = {
   rolledBack: 'The edge set was rolled back',
   failed: 'The edge set could not be saved',
   quota:
-    'No room left in browser storage. Delete an edge set and try again — an edge set is ' +
+    'No room left in browser storage. Delete an edge set and try again; edge sets are ' +
     'far larger than anything else Coda keeps.',
 }
 
@@ -733,7 +733,7 @@ export async function requireEdgeSet(
   }
   throw new Error(
     `This dataset's connectivity comes from the edge set "${edges.name}", which is ` +
-      `not in this browser. Import the same file under Edge data on the dataset node; ` +
+      `not in this browser. Import the same file under \`Edge data\` on the dataset node; ` +
       `a set is identified by its contents, so the same file will match.`,
   )
 }

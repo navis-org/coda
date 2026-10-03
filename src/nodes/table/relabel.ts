@@ -62,12 +62,9 @@ registerNode({
   label: 'Relabel',
   category: 'transform',
   description:
-    'Rewrite a column through a two-column mapping table. The result takes the name in `Into`, or rewrites the column in place when that is empty; any other column already holding the name is suffixed `_2`.',
+    'Rewrite a column by looking its values up in a two-column mapping table. The result goes into the column named by `Into` (shown as Result), or replaces the column in place when that is empty; any other column already holding that name is suffixed `_2`.',
   guide:
-    'Rewrite one column by looking each value up in a mapping table: pick the column to rewrite, ' +
-    "then the mapping's key and value columns. Leave Result empty to rewrite in place, or name a " +
-    'column to add one beside it. Unmatched is the setting to think about — it defaults to ' +
-    'leaving an uncovered value empty, so unmapped values cannot pass for mapped ones.',
+    "Replaces each value in one column with its match in a mapping table, e.g. body ids with cell types. Pick the column, then the mapping's key and value columns, and leave Result empty to rewrite in place. Values the mapping does not cover become empty unless Unmatched says otherwise.",
   cost: 'cheap',
   inputs: [
     { id: 'in', label: 'Table', type: T.table() },
@@ -104,14 +101,14 @@ registerNode({
       kind: 'enum',
       label: 'Unmatched',
       default: 'null',
-      help: 'A value the mapping does not cover. Leaving it empty keeps unmapped values from passing for mapped ones.',
+      help: 'What to do with values the mapping does not cover. "keep the original value" makes unmapped values look like mapped ones.',
       options: UNMATCHED_OPTIONS,
     },
     {
       id: 'into',
       kind: 'string',
       label: 'Result',
-      help: "Name for a new column. Empty — or the column's own name — rewrites it in place.",
+      help: "Name for a new column. Leave empty, or use the column's own name, to rewrite it in place.",
       default: '',
     },
   ],
@@ -135,7 +132,9 @@ registerNode({
     const map = schemaOf(ctx.inputs.map)
 
     if (spec.keyColumn && spec.keyColumn === spec.valueColumn) {
-      issues.push(`Key and value are both "${spec.keyColumn}" — every value maps to itself`)
+      issues.push(
+        `\`Key\` and \`Value\` are both "${spec.keyColumn}", so every value maps to itself. Pick a different column for one of them.`,
+      )
     }
 
     const source = findColumn(table, spec.column)
@@ -149,17 +148,19 @@ registerNode({
        */
       const ids = spec.column === ID_COLUMN_NAME || spec.keyColumn === ID_COLUMN_NAME
       issues.push(
-        `"${spec.column}" is ${source.dtype} and "${spec.keyColumn}" is ${key.dtype} — ` +
-          `matched as text.` +
+        `"${spec.column}" is ${source.dtype} and "${spec.keyColumn}" is ${key.dtype}, so they ` +
+          `are matched as text.` +
           (ids && source.dtype === 'i64'
-            ? `, and a wide neuron id read as a number is already a different id (see invariant 8)`
+            ? ` A long neuron id stored as a number may already have changed into a different ` +
+              `id. Load the ids as text upstream.`
             : ''),
       )
     }
 
     if (spec.into && spec.into !== spec.column && findColumn(table, spec.into)) {
       issues.push(
-        `"${spec.into}" already exists — the new column is suffixed rather than replacing it`,
+        `"${spec.into}" already exists, so the new column gets a suffix. Pick another name in ` +
+          `\`Result\` to avoid it.`,
       )
     }
     return issues
@@ -171,9 +172,9 @@ registerNode({
     if (!isTableValue(table)) throw new Error('Input is not a table')
     if (!isTableValue(map)) throw new Error('Mapping input is not a table')
     const spec = specOf(ctx)
-    if (!spec.column) throw new Error('No column to relabel is selected')
+    if (!spec.column) throw new Error('No column to relabel is selected. Pick one in `Column`.')
     if (!spec.keyColumn || !spec.valueColumn) {
-      throw new Error("The mapping table's key and value columns must both be selected")
+      throw new Error('Pick both `Key` and `Value` from the mapping table.')
     }
     return { out: relabelTable(table, map, spec) }
   },

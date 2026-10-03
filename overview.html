@@ -288,7 +288,7 @@
       <p class="lede">
         The standard connectome analyses are chains of nodes rather than scripts you have to
         write: partner tables, morphological similarity, clustering by connectivity, influence scores
-        and path searches. Each is a just handful of nodes &mdash; including support for cross-dataset
+        and path searches. Each is just a handful of nodes &mdash; including support for cross-dataset
         comparisons.
       </p>
     </div>
@@ -297,11 +297,10 @@
       <article class="ana rise">
         <h3>Who talks to whom</h3>
         <p>
-          <b>Connectivity</b> fetches synaptic partners one or more hops out and hands back two
-          things: the edge list, and the neuron set it reached. <b>Adjacency</b> takes that set
-          onto itself &mdash; synapse counts from one group of neurons onto another, grouped by
-          cell type if you want it &mdash; which is a matrix, so the <b>Heatmap</b> is the next
-          card and nothing in between needs configuring.
+          <b>Connectivity</b> fetches synaptic partners one or more hops out. It gives you the
+          edge list and the set of neurons it reached. <b>Adjacency</b> turns that set into a
+          matrix of synapse counts between the neurons (optionally grouped by cell type), which
+          you can plug straight into a <b>Heatmap</b>.
         </p>
         <div class="chain">
           <span class="chip" data-cat="query" data-node="neuron.findNeurons">Find Neurons</span>
@@ -321,8 +320,8 @@
         <p class="ana__also">
           <em>For a bird's eye view:</em>
           <span class="chip chip--inline" data-cat="visualisation" data-node="out.profile">Neuron Profile</span>
-          answers the same question for one neuron or one cell type &mdash; inputs, outputs,
-          regions and transmitters on a single card, fetching for itself.
+          shows the inputs, outputs, brain regions and transmitters of a single neuron or cell
+          type on one card. It fetches its own data, so it needs nothing wired in.
         </p>
       </article>
 
@@ -330,9 +329,8 @@
         <h3>Morphological clustering</h3>
         <p>
           <b>NBLAST</b> scores neurons, all&#8209;by&#8209;all or query&#8209;target.
-          <b>Linkage</b> turns the score matrix into a tree, and the <b>Dendrogram</b> hands a
-          clade you click back out as a neuron set &mdash; so the clustering stays something you
-          can steer rather than a number you have to accept.
+          <b>Linkage</b> turns the score matrix into a tree, and the <b>Dendrogram</b> draws it.
+          Click a clade in the dendrogram to pass those neurons on to the next node.
         </p>
         <div class="chain">
           <span class="chip" data-cat="query" data-node="neuron.skeletons">Skeletons</span>
@@ -352,11 +350,10 @@
         <p class="ana__also">
           <em>Across datasets:</em> drop
           <span class="chip chip--inline" data-cat="transform" data-node="neuron.xform">Transform Neurons</span>
-          in after the skeletons to bridge each dataset into one template space &mdash; JRC2018
-          unisex, say &mdash; so the comparison is between shapes rather than between coordinate
-          frames.
+          in after the skeletons to move each dataset into the same template space (e.g. JRC2018
+          unisex) before you compare them.
           <span class="chip chip--inline" data-cat="transform" data-node="neuron.mirror">Mirror Neurons</span>
-          is the left/right version of the same move.
+          does the same for the left and right side of the brain.
         </p>
       </article>
 
@@ -364,9 +361,8 @@
         <h3>Connectivity-based clustering</h3>
         <p>
           <b>Partner Vectors</b> turns each neuron's connectivity into a feature vector and
-          <b>Similarity Matrix</b> scores every pair against every other &mdash; cosine, Pearson,
-          Jaccard or Euclidean. From there it is the same <b>Linkage</b> as above, and
-          <b>Cut Tree</b> hands the groups back as an ordinary table you can join onto anything.
+          <b>Similarity Matrix</b> compares every pair of neurons using cosine, Pearson, Jaccard or
+          Euclidean distance. From there you use the same <b>Linkage</b> as above.
         </p>
         <div class="chain">
           <span class="chip" data-cat="query" data-node="neuron.connectivity">Connectivity</span>
@@ -394,18 +390,17 @@
           to produce a 2D embedding that you can plug into a scatter plot.
           <em>Across datasets:</em>
           <span class="chip chip--inline" data-cat="analysis" data-node="compare.matchTypes">Match Cell Types</span>
-          derives the correspondence between two connectomes' type names first, so both
-          datasets' vectors are written on one shared feature axis.
+          works out which cell types correspond between two connectomes, so that the partner
+          vectors from both datasets can be compared directly.
         </p>
       </article>
 
       <article class="ana rise" data-delay="1">
-        <h3>Incluence metrics & path analyses</h3>
+        <h3>Influence metrics & path analyses</h3>
         <p>
-          <b>Influence</b> runs the influence score of Bates et al. &mdash;
-          <code>r = (I &minus; gW)<sup>&minus;1</sup>s</code>, walked to a hop budget, so what
-          comes back is that score <em>truncated</em> rather than approximated, with the unwalked
-          tail reported as a number rather than a caveat.
+          <b>Influence</b> calculates the influence score from Bates et al.,
+          <code>r = (I &minus; gW)<sup>&minus;1</sup>s</code>, up to a maximum number of hops.
+          The node also tells you how much of the score lies beyond that cut-off.
         </p>
         <div class="chain">
           <span class="chip" data-cat="query" data-node="neuron.influence">Influence</span>
@@ -415,9 +410,9 @@
           <span class="chip" data-cat="visualisation" data-node="out.barChart">Bar Chart</span>
         </div>
         <p>
-          <b>Paths</b> is the other half: every route from your sources to your targets within
-          <em>N</em> hops, ranked by its weakest link, optionally collapsing neurons to cell types
-          on the way. It comes out as a network, so the viewer is already wired.
+          <b>Paths</b> finds every route from your sources to your targets within <em>N</em> hops
+          and ranks them by their weakest link. Neurons can optionally be collapsed into cell
+          types. The result is a network you can open in the <b>Network Viewer</b>.
         </p>
         <div class="chain">
           <span class="chip" data-cat="query" data-node="neuron.paths">Paths</span>
@@ -430,10 +425,9 @@
     </div>
 
     <p class="fig__cap" style="max-width: 44rem; margin-top: 1.1rem">
-      The chip's colour is the node's category, exactly as on a card; the line between two chips
-      is the value that flows along it, named and typed the way its socket is. <b>Every one of
-      these is a real node</b> &mdash; the page is checked against the registry, so a renamed node
-      is a failing test rather than a stale figure.
+      Each chip is coloured by the node's category, the same as on the canvas. The label between
+      two chips is the output that connects them. All of these are real nodes you can find in the
+      node browser.
     </p>
   </div>
 </section>
@@ -464,7 +458,7 @@
       </p>
       <p>
         The layout is saved with the workflow, so a shared link can open straight into the
-        dashboard rather than the canvas behind it.
+        dashboard.
       </p>
     </div>
 
@@ -525,9 +519,9 @@
       </div>
     </div>
     <p class="fig__cap" style="max-width: 34rem; margin-top: 0.9rem">
-      Explore top left, its selection as a table below, and the same neurons in
-      <b>Neuroglancer</b> down the right &mdash; the dashboard the <em>Build a dashboard</em>
-      guide ends on. Tick a neuron in Explore and the other two follow.
+      Explore Dataset at the top left, its selection as a table below, and the same neurons in
+      <b>Neuroglancer</b> on the right. This is the dashboard you end up with in the
+      <em>Build a dashboard</em> guide.
     </p>
   </div>
 </section>
@@ -798,20 +792,20 @@
         <div class="point rise">
           <h3>From the card</h3>
           <p>
-            The <strong>&#10515;</strong> in a card&rsquo;s footer writes what that node is holding.
-            A viewer also exports its picture &mdash; re-drawn as vector, so an SVG opens in
-            Illustrator or Inkscape.
+            Click the <strong>&#10515;</strong> in a card&rsquo;s footer to download that node&rsquo;s
+            result. Viewers can also export their plot as SVG, which you can edit in Illustrator
+            or Inkscape.
           </p>
         </div>
         <div class="point rise" data-delay="1">
           <h3>Or as a step</h3>
           <p>
-            A <code>Download</code> node at the end of a chain writes its file on every run. It
-            passes its input through, so it drops in anywhere.
+            Add a <code>Download</code> node at the end of a chain to write a file on every run. It
+            passes its input through, so you can also put it in the middle of a chain.
           </p>
         </div>
         <div class="point rise" data-delay="2">
-          <h3>Formats the next tool reads</h3>
+          <h3>Formats</h3>
           <p>
             Tables as CSV, morphology as SWC and OBJ, networks as GraphML, trees as Newick, charts
             as SVG or PNG.
@@ -873,9 +867,9 @@
         Convert Pipelines to Python/R
       </h2>
       <p class="lede">
-        <strong>Save &#9656; Export as Jupyter Notebook</strong>, or as R Markdown. The graph is
-        walked in dependency order and written out as code on the libraries the field already
-        uses &mdash; neuprint-python, pandas and navis, or neuprintr, dplyr, nat and ggplot2.
+        Use <strong>Save &#9656; Export as Jupyter Notebook</strong> (or R Markdown) to turn a
+        workflow into code. It uses the usual libraries: neuprint-python, pandas and navis for
+        Python, and neuprintr, dplyr, nat and ggplot2 for R.
       </p>
     </div>
 
@@ -937,10 +931,10 @@ group_by_df &lt;- connectivity <span class="k">|&gt;</span>
     </div>
 
     <p class="fig__cap rise" data-delay="2" style="margin-top: 1.1rem; max-width: 52rem">
-      Runnable, and meant to be edited. Where Coda and the target library genuinely differ the
-      cell says so in a note, and the generated code is checked in CI against the real installed
-      libraries: syntax, undefined names, and whether an attribute actually resolves. A neuPrint
-      graph exports to both languages; a CAVE graph exports to Python, on <b>caveclient</b>.
+      The exported code runs as is, and you can edit it from there. If the library does something
+      differently from Coda, a note in the cell tells you. We test the generated code against the
+      actual libraries. neuPrint workflows export to both Python and R; CAVE workflows export to
+      Python only (using <b>caveclient</b>).
     </p>
   </div>
 </section>
@@ -962,22 +956,22 @@ group_by_df &lt;- connectivity <span class="k">|&gt;</span>
         <div class="point rise">
           <h3>Built-in assistant</h3>
           <p>
-            Ask for a workflow in plain language and the assistant builds it: the nodes, the wires
-            between them and the parameters, applied to the canvas as one step.
+            Describe what you want in plain language and the assistant builds the workflow for you:
+            nodes, connections and parameters. You can review the changes before applying them.
           </p>
         </div>
         <div class="point rise" data-delay="1">
           <h3>Four providers</h3>
           <p>
-            Anthropic, OpenAI, Gemini, or Ollama against a model running on your own machine.
-            Keys are pasted once and stay in this browser.
+            Anthropic, OpenAI, Gemini, or Ollama for a model running on your own machine. API keys
+            are stored in your browser.
           </p>
         </div>
         <div class="point rise" data-delay="2">
           <h3>Or your own client</h3>
           <p>
-            Coda&rsquo;s <a href="./mcp.html">MCP server</a> lets Claude, ChatGPT and the rest
-            build a workflow for you and hand back a link that opens it here.
+            With Coda&rsquo;s <a href="./mcp.html">MCP server</a>, Claude, ChatGPT and other clients
+            can build a workflow and give you a link that opens it in Coda.
           </p>
         </div>
       </div>
@@ -1036,15 +1030,16 @@ group_by_df &lt;- connectivity <span class="k">|&gt;</span>
         <div class="point rise">
           <h3>As a file</h3>
           <p>
-            Download the workflow as a <code>.coda.json</code> &mdash; plain JSON for a repository,
-            a supplement or an email. It stores the pipeline, not the results.
+            Download the workflow as a <code>.coda.json</code> file. It's plain JSON, so you can put
+            it in a repository, a supplement or an email. It contains the pipeline but not the results.
           </p>
         </div>
         <div class="point rise" data-delay="1">
           <h3>As a link</h3>
           <p>
-            Or share a URL with the whole graph packed into its fragment, neuroglancer-style. No
-            server, no account, nothing to expire. Large workflows go to a GitHub Gist instead.
+            Or share a URL that contains the whole workflow, similar to neuroglancer links. Nothing
+            is stored on a server, so the link doesn't expire. Large workflows can be shared via a
+            GitHub Gist instead.
           </p>
         </div>
       </div>

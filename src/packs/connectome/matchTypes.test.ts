@@ -235,14 +235,14 @@ describe('what it refuses on the card', () => {
   it('names a source that cannot list a whole dataset', () => {
     const bucket = T.dataset('test.noindex', 'some-volume')
     expect(issues({ types1: ['type'] }, { dataset1: bucket })[0]).toMatch(
-      /Dataset 1: Bucket cannot list a whole dataset/,
+      /Dataset 1: Bucket cannot list every neuron in a dataset/,
     )
   })
 
   it('asks for type columns, naming which dataset has none', () => {
     expect(
       issues({ types1: ['type'], types2: [] }, { dataset1: mock, dataset2: mock }),
-    ).toEqual(['Dataset 2: pick at least one column holding cell types.'])
+    ).toEqual(['Dataset 2: pick at least one column holding cell types in `Type columns 2`.'])
   })
 
   it('says nothing once both are picked', () => {
@@ -263,7 +263,7 @@ describe('what it refuses on the card', () => {
       { types1: ['type'], types2: ['type'] },
       { dataset1: mock, dataset2: mock, keep },
     )
-    expect(found.join(' ')).toMatch(/Pass Through: pick the column/)
+    expect(found.join(' ')).toMatch(/`Pass Through`: pick the column/)
 
     const chosen = issues(
       { types1: ['type'], types2: ['type'], keepColumn: 'type' },
@@ -439,7 +439,9 @@ describe('what it does at run time that the card cannot', () => {
       inputs: { dataset1: dataset('a'), dataset2: dataset('b') },
       source: { label: 'CATMAID' },
     })
-    await expect(def.evaluate(context)).rejects.toThrow(/CATMAID publishes no neuron index/)
+    await expect(def.evaluate(context)).rejects.toThrow(
+      /CATMAID does not publish a list of every neuron/,
+    )
   })
 
   it('refuses before it fetches anything', async () => {

@@ -245,8 +245,8 @@ registerEmitter(
       return [
         ...notes,
         ...ctx.note(
-          `${noFiltersReason()} So this cell is the empty frame it produces — add a filter row ` +
-            'on the canvas and re-export, or write the query in here.',
+          `${noFiltersReason()} This cell builds the same empty table. Add a filter row ` +
+            'on the canvas and export again, or write the query here.',
         ),
         `${out} = pd.DataFrame(columns=${pyList(columnNames(schema))})`,
       ]
@@ -310,8 +310,8 @@ registerEmitter(
     if (rest.length > 0) {
       lines.push(
         ...ctx.note(
-          'NeuronCriteria has no field for the rest of this node’s filters, so Coda applies ' +
-            'them to the result instead. Same rows, one larger response.',
+          'NeuronCriteria has no field for the rest of this node’s filters, so they are ' +
+            'applied to the result below. The rows are the same, but the download is larger.',
         ),
         ...maskLines(out, rest, schema),
       )
@@ -319,10 +319,10 @@ registerEmitter(
     if (!pushable && population.length > 0) {
       lines.push(
         ...ctx.note(
-          'The Dataset node narrows this graph to a population NeuronCriteria cannot ' +
-            'express: it ANDs its arguments and has no "is not empty" test, where these ' +
-            'combine with OR. So the same neurons arrive as a filter on the result — a ' +
-            'larger response than the canvas asks for.',
+          'The Dataset node’s population settings (`Traced only`, `Typed only`, ' +
+            '`Superclass only`) combine with OR, and NeuronCriteria can only AND its arguments ' +
+            'and has no "is not empty" test. So the population is applied as a filter on the ' +
+            'result. The rows are the same, but the download is larger than on the canvas.',
         ),
         ...pyPopulationMask(out, population, schema),
       )
@@ -360,8 +360,8 @@ function labelsFindNeurons(
   const lines: string[] = [
     ...ctx.note(
       cave
-        ? 'A CAVE datastack has no server-side neuron query, so Coda reads its whole index once ' +
-            'and filters it here — which is what this does. Explore Dataset shares the same frame.'
+        ? 'A CAVE datastack has no server-side neuron query, so this reads the whole neuron ' +
+            'index once and filters it here, as Coda does. Explore Dataset uses the same table.'
         : 'A Custom Dataset’s neurons are its Neurons table, filtered here as on the canvas.',
     ),
     `${out} = ${datasetLabels(dataset)}`,
@@ -372,8 +372,7 @@ function labelsFindNeurons(
       ...lines,
       ...ctx.note(
         `This node filters on region "${roi}", and a ${cave ? 'CAVE datastack' : 'Custom Dataset'} ` +
-          `publishes no regions, so Coda answers it empty rather than ignoring it. Drop the ` +
-          `region to get neurons back.`,
+          `publishes no regions, so the result is empty. Clear \`In ROI\` to get neurons back.`,
       ),
       `${out} = ${out}.iloc[0:0]`,
     ]
@@ -512,8 +511,8 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
   if (!pushable && population.length > 0) {
     lines.push(
       ...ctx.note(
-        'The Dataset node narrows this graph to a population NeuronCriteria cannot express, so ' +
-          'the same neurons arrive as a filter on the result instead.',
+        'NeuronCriteria cannot express the Dataset node’s population settings, so they are ' +
+          'applied as a filter on the result instead. The rows are the same.',
       ),
       ...pyPopulationMask(out, population, schema),
     )
@@ -562,7 +561,8 @@ registerEmitter('neuron.adjacency', (ctx) => {
   const c = ctx.wired('dataset')
   const sources = ctx.wired('sources')
   const targets = ctx.wired('targets')
-  if (!sources || !targets) return ctx.todo('Adjacency needs both Sources and Targets wired.')
+  if (!sources || !targets)
+    return ctx.todo('Adjacency needs both `Sources` and `Targets` wired.')
 
   ctx.require(
     'neuprint',
@@ -626,8 +626,9 @@ registerEmitter('neuron.roiCounts', (ctx) => {
     // The second half of `fetch_neurons`' pair is the per-ROI breakdown, which is the whole
     // of what this node returns — one row per neuron per ROI.
     ...ctx.note(
-      'These counts nest: a synapse in LO(R) is counted again in OL(R). Filter to ' +
-        '`fetch_primary_rois(client=...)` before summing, or the totals roughly double.',
+      'Some regions are nested inside others, so a synapse in LO(R) is also counted under ' +
+        'OL(R). Filter to `fetch_primary_rois(client=...)` before summing, or the totals ' +
+        'roughly double.',
     ),
     `_, ${out} = fetch_neurons(`,
     `    NeuronCriteria(bodyId=${neuronIdInts(neurons)}, client=${c}),`,
@@ -669,11 +670,10 @@ registerEmitter('neuron.rawCypher', (ctx) => {
 /** `neu.fetch_skeletons` reads neuPrint's own SWC, which is what the node does on Automatic. */
 const SKELETON_NOTES: Record<SkeletonsNote, string> = {
   publishedLayer:
-    'The Skeletons node is set to the published precomputed layer rather than neuPrint’s ' +
-    'own SWC. This cell fetches the SWC: the published copy is a bucket whose URL comes ' +
-    'from the dataset’s neuroglancer state, and navis reads it with ' +
-    '`navis.read_precomputed`. It carries no radii, and it covers only the bodies that ' +
-    'were exported into it.',
+    'The Skeletons node’s `Source` is set to the published precomputed layer, but this cell ' +
+    'fetches neuPrint’s own SWC. To read the published copy instead, take the bucket URL ' +
+    'from the dataset’s neuroglancer state and use `navis.read_precomputed`. That copy has ' +
+    'no radii and covers only the bodies exported into it.',
 }
 
 /**
@@ -752,8 +752,9 @@ registerEmitter(
       'meshes',
       Number(ctx.params.limit),
       ctx.note(
-        'Coda picks the level of detail from a triangle budget over the whole batch; ' +
-          'navis takes a fixed level. Raise `lod` for coarser, lower for finer.',
+        'Coda picks the level of detail from `Detail`, a triangle budget over the whole ' +
+          'batch. navis takes a fixed level instead. Raise `lod` for coarser meshes, lower ' +
+          'it for finer ones.',
       ),
     ),
   GEOMETRY_BACKENDS,
@@ -788,15 +789,15 @@ registerEmitter('neuron.roiMeshes', (ctx) => {
   ctx.require('navisNeuprint')
   return [
     ...ctx.note(
-      'Region meshes are one request each, and neuPrint publishes them for ' +
-        'visualization only — decimated surfaces, so a volume measured off one is an ' +
+      'Each region mesh is a separate request. neuPrint publishes these meshes for ' +
+        'display only: they are simplified surfaces, so a volume measured from one is an ' +
         'approximation.',
     ),
     ...(chosen.length > 0
       ? []
       : [
-          `# The picker was left empty, which means the set that tiles the volume — the`,
-          `# published list nests, so "every region" draws each shell inside another one.`,
+          `# \`Regions\` was left empty, so this uses the primary regions, which do not overlap.`,
+          `# The full published list has regions nested inside others.`,
         ]),
     `${out} = []`,
     `_skipped = []`,
@@ -852,8 +853,8 @@ registerEmitter(
       // a column this frame does not have — or, worse, reads `type` and gets polarity.
       codaSynapses(ctx, out),
       ...ctx.note(
-        'neuprint-python calls the pre/post column "type"; Coda calls it "polarity" and keeps ' +
-          '"type" for the cell type, which this frame does not carry — join it from a neuron ' +
+        'neuprint-python calls the pre/post column "type". Coda calls it "polarity" and uses ' +
+          '"type" for the cell type, which this table does not have. Join it from a neuron ' +
           'table if you need it.',
       ),
       /*
@@ -865,10 +866,10 @@ registerEmitter(
        */
       ...(unit === SYNAPSE_UNITS.links
         ? ctx.note(
-            'The Synapses node is set to one row per connection. fetch_synapses always ' +
-              'de-duplicates (WITH DISTINCT n, s), so this frame has one row per presynaptic ' +
-              'site instead — fewer rows than the canvas, by however many partners each site ' +
-              'drives. Postsynaptic rows are unaffected.',
+            'The Synapses node’s `Rows` is set to "one row per connection", but ' +
+              'fetch_synapses always de-duplicates (WITH DISTINCT n, s), so this table has one ' +
+              'row per presynaptic site. Expect fewer presynaptic rows than on the canvas, one ' +
+              'per site where the canvas has one per partner. Postsynaptic rows are unaffected.',
           )
         : []),
     ]
@@ -925,8 +926,8 @@ registerEmitter(
     const { location, minConfidence, includeFragments, open } = plan
     const out = ctx.output('points')
     const typeNote = ctx.note(
-      'This frame names the two bodies of each synapse but not their cell types, which ' +
-        'the canvas fills from the dataset. Join them from a neuron table if you need ' +
+      'This table names the two bodies of each synapse but not their cell types, which ' +
+        'the canvas fills in from the dataset. Join them from a neuron table if you need ' +
         'them.',
     )
 
@@ -934,8 +935,8 @@ registerEmitter(
       return [
         ...(minConfidence > 0 ? ctx.note(confidenceIgnoredWarning('This synapse table')) : []),
         ...ctx.note(
-          'A synapse table has one position per synapse and nothing to say which end it is ' +
-            'at, so Location moves no point and polarity is left empty, as on the canvas.',
+          'A synapse table has one position per synapse and does not say which end it is ' +
+            'at, so `Location` has no effect and polarity is left empty, as on the canvas.',
         ),
         `${out} = ${c}.synapses_between(`,
         `    sources=${sources ? neuronIds(sources) : 'None'},`,
@@ -954,7 +955,7 @@ registerEmitter(
         return ctx.todo(
           `This datastack's synapse table names its ${location}synaptic end ` +
             `"${location === 'pre' ? columns.preColumn : columns.postColumn}", which is not a ` +
-            'bound point, so there is no position column to read — the canvas refuses it too.',
+            'bound point, so there is no position column to read. The canvas refuses this too.',
         )
       }
       const score = spec?.scoreColumn
@@ -963,8 +964,8 @@ registerEmitter(
         ...(spec
           ? []
           : ctx.note(
-              'This datastack declares its synapse table in its info record rather than in ' +
-                'Coda’s table of datastacks, so the name is read from there, as the canvas does.',
+              'Coda has no entry for this datastack, so the synapse table name is read from ' +
+                'its info record, as the canvas does.',
             )),
         `${out} = ${c}.client.materialize.${spec?.kind === 'view' ? 'query_view' : 'query_table'}(`,
         `    ${spec ? pyStr(spec.table) : `${c}.client.info.get_datastack_info()['synapse_table']`},`,
@@ -995,8 +996,8 @@ registerEmitter(
           : []),
         ...(minConfidence > 0 && !score
           ? ctx.note(
-              `This synapse table has no score column, so Min confidence (${minConfidence}) is ` +
-                'ignored — on the canvas too, which says so on the card.',
+              `This synapse table has no score column, so \`Min confidence\` (${minConfidence}) ` +
+                'is ignored here and on the canvas.',
             )
           : []),
         ...typeNote,
@@ -1024,15 +1025,15 @@ registerEmitter(
       }
       return [
         ...ctx.note(
-          'Coda’s own query rather than fetch_synapse_connections, which timed out (504) asking ' +
-            'for every synapse a large neuron makes.',
+          'This uses Coda’s own query because fetch_synapse_connections timed out (504) when ' +
+            'asked for every synapse of a large neuron.',
         ),
         ...(includeFragments
           ? []
           : ctx.note(
-              'The open side is neuPrint’s :Neuron label, where the canvas counts the neurons ' +
-                'the Dataset node’s population selects — the same set unless that population ' +
-                'narrows further.',
+              'On the unwired side this query keeps neurons with neuPrint’s :Neuron label. ' +
+                'The canvas uses the Dataset node’s population settings instead, which give ' +
+                'the same set unless they narrow it further.',
             )),
         `${out} = fetch_custom(`,
         `    ${filled},`,
@@ -1105,9 +1106,9 @@ registerEmitter('neuron.roiCompleteness', (ctx) => {
     ...(primaryOnly
       ? [
           ``,
-          `# The published list nests: a synapse in AL-DA1(R) is counted again in AL(R), and`,
-          `# hemibrain returns 229 rows of which 63 tile the volume. Totalling the full table`,
-          `# double counts -- 21.0M presynaptic sites against a true 9.43M.`,
+          `# Some regions are nested inside others: a synapse in AL-DA1(R) is also counted in`,
+          `# AL(R). hemibrain returns 229 rows, of which 63 are primary regions. Totalling the`,
+          `# full table double counts: 21.0M presynaptic sites against a true 9.43M.`,
           `${out} = ${out}[${out}['primary']].reset_index(drop=True)`,
         ]
       : []),

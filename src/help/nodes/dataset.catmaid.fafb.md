@@ -1,15 +1,13 @@
-## FAFB (CATMAID)
+## About this dataset
 
-The "Female Adult Fly Brain" — an image dataset of a whole *Drosophila* brain ([Zheng et al., 2018](https://doi.org/10.1016/j.cell.2018.06.019)). Before it became "FlyWire FAFB", the automated segmentation, neurons in it were reconstructed by hand in CATMAID.
+FAFB ("Female Adult Fly Brain") is an electron microscopy volume of a whole adult *Drosophila* brain ([Zheng et al., 2018](https://doi.org/10.1016/j.cell.2018.06.019)). Before the automated segmentation that became [FlyWire](#dataset.flywire), neurons in this volume were reconstructed by hand in CATMAID. This node reads the published data from those efforts, which the Virtual Fly Brain project hosts at [catmaid-fafb.virtualflybrain.org](https://catmaid-fafb.virtualflybrain.org/). No credentials are needed.
 
-The published data from those early efforts is hosted by the Virtual Fly Brain project at [catmaid-fafb.virtualflybrain.org/](https://catmaid-fafb.virtualflybrain.org/).
+You get neuron skeletons, synapse locations, connectivity and annotations.
 
-### What CATMAID provides
+## Annotations
 
-Neuron skeletons, synapse locations, connectivity and annotations.
+CATMAID annotations are free text. The VFB instance carries a cleaned-up set, but nothing marks which annotations are cell types, which are developmental stages and which are something else entirely. Coda makes some educated guesses (e.g. which annotation is a neuron's type), but for the rest you will have to make up your own mind.
 
-The annotations are free text. The VFB instance carries a sanitised set, but nothing marks which annotations are cell types, developmental stages or other properties — Coda makes educated guesses, and you will have to make up your own mind about the rest.
+## Searching
 
-### Search
-
-`Explore Dataset` runs a fuzzy search over the full set of annotations, similar to CATMAID's "Global Search". It does not match the more elaborate functionality of CATMAID's "Neuron Search" widget.
+`Explore Dataset` runs a fuzzy search over all annotations, similar to CATMAID's "Global Search". It does not do everything CATMAID's more elaborate "Neuron Search" widget does.

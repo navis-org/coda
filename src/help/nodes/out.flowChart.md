@@ -1,7 +1,7 @@
-The picture a circuit paper prints: boxes in columns, arrows as thick as the connection is strong, the synapse count on them. Made for the dozen nodes a [Paths](#neuron.paths) result comes back with.
+The Flow Chart draws a small network as a circuit diagram of the kind you find in papers: labelled boxes arranged in columns, with arrows whose thickness reflects the strength of the connection and the synapse count printed on them. It is made for the dozen or so nodes that a [Paths](#neuron.paths) result typically contains.
 
 ```coda-graph
-caption: Routes from one population to another, drawn as the circuit they are.
+caption: Paths from one neuron to another, drawn as a circuit diagram.
 neuron.inputIds as in1 {ids: "10001"}
 neuron.inputIds as in2 {ids: "21312"}
 neuron.paths as p
@@ -11,7 +11,9 @@ in2 -> p:targets
 p -> flow
 ```
 
-**This or the [Network Viewer](#out.network)** — they draw the same material and the choice is about size. A force layout has nothing to arrange below about twenty nodes and everything to arrange above a few hundred; a flow chart is the other way round. Above 120 boxes the card says `crowded`, and above 600 it declines and says so rather than drawing a grey field.
+## Flow Chart or Network Viewer?
+
+The [Network Viewer](#out.network) takes the same input, and which one to use mostly depends on size. Below about twenty nodes a force layout has little to work with and the flow chart gives the clearer picture; above a few hundred it is the other way round. With more than 120 boxes the card shows `crowded`, and above 600 boxes it doesn't draw at all. Filter upstream, fold the columns (see `Fold past` below) or switch to the Network Viewer in that case.
 
 ## Layers
 
@@ -19,20 +21,19 @@ p -> flow
 out.flowChart: layerColumn, direction
 ```
 
-Empty, **Layer by** puts each box one column to the right of the furthest-back thing that reaches it — longest path. That is the right reading for a Paths result, whose network is assembled from routes.
+By default (`Layer by` left empty) each box is placed one column to the right of the furthest-back box that connects to it, i.e. layers follow the longest path. That works well for a Paths result, which is built from routes.
 
-It is the wrong one for a network assembled from a ball rather than from routes, and wrong in a way that looks fine: a neuron one synapse from its seed lands five columns out because something else reaches it the long way round. Point **Layer by** at a column of the network's own instead, and each box sits where that column says. The caption says which rule ran.
+For other networks, e.g. everything within a few hops of a seed neuron, longest-path layering can be misleading: a neuron directly downstream of the seed may end up five columns out because something else also reaches it via a longer route. In that case, point `Layer by` at a column in your network and each box is placed where that column says. The caption tells you which rule was used.
 
-> [!NOTE] Point it at a column that runs the way the signal does
-> A layering column is a drawing position, not a measurement, and the two come apart wherever a
-> network was assembled from a ball rather than from routes. A hop count towards a seed, for
-> instance, runs *against* the signal — the seed is 0 and its influencers are 1, 2, 3 — so laid
-> out by it the seed takes the first column and every connection draws as feedback. If the
-> network you have carries only such a measurement, reverse it upstream first.
+> [!NOTE] The layer column should follow the direction of the signal
+> Make sure the column increases in the direction of the signal. A hop count *towards* a seed runs
+> the other way: the seed is 0 and its upstream partners are 1, 2, 3. Laid out by that, the seed ends up in
+> the first column and every connection is drawn as feedback. If that's what you have, reverse
+> the values upstream first.
 
-> [!NOTE] A column of measurements becomes adjacent columns
-> Values of 0, 2 and 5 hops draw as three columns side by side, not six with gaps. A row with no
-> value at all goes after every measured one rather than into the first column.
+> [!NOTE] Gaps are closed up
+> Values of 0, 2 and 5 are drawn as three adjacent columns, not six columns with gaps. Rows with no
+> value go after all the others rather than into the first column.
 
 ## Arrows
 
@@ -40,11 +41,23 @@ It is the wrong one for a network assembled from a ball rather than from routes,
 out.flowChart: routing, weightedArrows, edgeLabels, edgeLabelColumn
 ```
 
-**Right angles** and **curves** route around whatever boxes lie between an arrow's two ends; **straight lines** joins the ends directly and may cross them. On a strictly two-layer fan the three look identical.
+- `Arrows`: "right angles" and "curves" route around any boxes between the two ends of an arrow; "straight lines" connects the ends directly and may cross other boxes. If the chart has only two layers, all three look the same.
+- `Thickness by weight`: turn this off to draw all arrows the same width, e.g. if the weights in your network aren't comparable.
+- `Arrow labels` prints the weight on each arrow. "when there is room" draws them for up to 40 boxes and switches them off above that, in which case the caption shows `labels off`.
+- `Label from` picks a different edge column to print. For example, use `weightNorm` on a normalised [Connectivity](#neuron.connectivity) or Paths result to show fractions instead of synapse counts.
 
-**Arrow labels** print the weight. *When there is room* draws them up to 40 boxes and drops them above that, with `labels off` in the caption. Point **Label from** at `weightNorm` on a normalised [Connectivity](#neuron.connectivity) or Paths result to label the arrows as fractions instead.
+### Feedback and other connections
 
-**A feedback arrow is dashed.** A layering makes every connection one of four things, and three of them are not a step forward: a recurrent connection runs back towards the sources, a connection inside one column has no length, and an autapse has one end. Drawn like the rest, a recurrent arrow points left through the boxes between its ends and reads as a data error. Nothing is hidden — the shape is what tells them apart, because colour is spent on the data.
+Each connection is one of four kinds, and they are told apart by the shape of the arrow (colour is left for your data):
+
+| Connection                           | Drawn as                     |
+| ------------------------------------ | ---------------------------- |
+| forward, to a later column           | a normal arrow               |
+| back, to an earlier column           | dashed                       |
+| between two boxes in the same column | bulging out to the side      |
+| from a neuron onto itself (autapse)  | a loop                       |
+
+Nothing is hidden. Feedback arrows are dashed so that an arrow pointing backwards through the chart doesn't look like an error.
 
 ## Boxes
 
@@ -52,23 +65,26 @@ out.flowChart: routing, weightedArrows, edgeLabels, edgeLabelColumn
 out.flowChart: labelColumn, nodeColorMode, foldPerLayer
 ```
 
-**Box label** is what each box says; empty uses the node's own id, which on a neuron-level network is an 18-digit root id. Point it at `type` or `instance` for something readable. Each box is sized to its own text, which is why this node lays itself out rather than taking a [Layout](#neuron.paths) wire: those positions are computed for same-sized discs.
+`Box label` sets the text in each box. Left empty, it shows the node id, which in a neuron-level network is a long root id; point it at `type` or `instance` for something readable. Each box is sized to fit its label.
 
-**Colour** defaults to `role` — `source`, `target` or `via` on a Paths network, which is the one encoding a route picture wants. Anything else the network carries works: a `hops` ramp, a cell class, a [Cut Tree](#cluster.cut) cluster.
+Boxes are a single colour by default. Switch `Box colour` to "by category" and the picker starts on `role`, which in a Paths network is `source`, `target` or `via`. Any other column works too, e.g. `hops`, a cell class or the cluster from a [Cut Tree](#cluster.cut).
 
-**Fold past** keeps that many boxes in each column, the busiest first, and folds the rest into one `+N others`. Clicking that box selects the nodes behind it.
+`Fold past` keeps that many boxes per column (the busiest first) and folds the rest into a single `+N others` box. Clicking that box selects all the nodes behind it.
 
-> [!NOTE] Folding changes the drawing and not the output
-> The Network port passes through whole, so adjusting the fold re-runs nothing. The cost is that
-> the folded network is not available downstream — filter upstream if you want it.
+> [!NOTE] Folding only changes the drawing
+> The `Network` output always passes on the whole network, so changing `Fold past` doesn't re-run
+> anything. It also means the folded version isn't available downstream; if you need a smaller
+> network, filter it upstream.
 
-## What leaves the node
+The Flow Chart lays itself out and has no `Layout` input: positions computed by Paths assume equal-sized discs and don't fit boxes sized to their labels.
 
-- **Network** — the input, untouched. Every control here is presentational bar the selection, so restyling a figure never re-runs the query above it.
-- **Selected** — the boxes you clicked, with the network's own node attributes beside them. Shift-click adds; clicking the background clears.
+## Outputs
 
-A node id is a neuron id on a neuron-level network and a cell type name on a type-level one, and `Selected` carries whichever it was under `neuronId`. A type-level selection therefore fails at the next query rather than quietly passing for neurons.
+- `Network` is the input, passed through unchanged. Apart from the selection, all settings on this node only affect the drawing, so restyling never re-runs anything upstream or downstream.
+- `Selected` contains the boxes you clicked, along with their node attributes. Shift-click adds to the selection; clicking the background clears it.
 
-## In an exported document
+In a neuron-level network the node ids are neuron ids; in a type-level network they are cell type names. `Selected` puts either into its `neuronId` column, so a selection of cell types will fail at the next query that expects neurons.
 
-Neither library draws this. The notebook lays the graph out with `multipartite_layout` and R Markdown with igraph's Sugiyama layout, both over Coda's own layering — so the columns are the card's. What differs is stated in the cell: networkx does no crossing minimisation and draws every edge straight, where igraph routes around the boxes in between; and a marker in either is a fixed size where Coda sizes each box to its label.
+## In exported notebooks
+
+Neither Python nor R has a direct equivalent of this chart. The Python notebook lays the graph out with networkx's `multipartite_layout` and the R Markdown with igraph's Sugiyama layout, both using Coda's layers, so the columns match the card. The exported cell notes the differences: networkx doesn't reduce edge crossings and draws every edge straight, whereas igraph routes edges around the boxes in between; and in both, markers have a fixed size, where Coda sizes each box to its label.

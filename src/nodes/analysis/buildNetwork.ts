@@ -102,9 +102,11 @@ registerNode({
   label: 'Build Network',
   category: 'analysis',
   description:
-    'Turn an edge table into a network of nodes and links. The columns you pick are renamed: links carry `source`, `target`, `weight` and `edges`, and nodes carry `id`, `degreeIn`, `degreeOut`, `weightIn` and `weightOut` — those are the names downstream pickers see.',
+    'Turn an edge table into a network of nodes and links. The columns you pick are renamed: links carry `source`, `target`, `weight` and `edges`, and nodes carry `id`, `degreeIn`, `degreeOut`, `weightIn` and `weightOut`. These are the names downstream pickers see.',
   guide:
-    'Turn an edge table into a network: nodes, links plus associated properties including derived ones such as in and out degree/weight. Both halves carry an ordinary attribute table, so colouring by cell type is a column picker.',
+    'Turns an edge table, typically from Connectivity, into a network of nodes and links with ' +
+    'in/out degree and weight per node. Optionally joins a table of node attributes such as cell ' +
+    'type. Wire the result into the Network Viewer, Network Metrics or Network Centrality.',
   cost: 'cheap',
   inputs: [
     { id: 'edges', label: 'Edges', type: T.table() },
@@ -144,7 +146,7 @@ registerNode({
       from: 'edges',
       default: [],
       optional: true,
-      help: 'Edge attributes to carry onto the links — an ROI, a transmitter, a sign. Empty carries every column not already represented. Merging parallel links keeps a value only if the rows agree; only Weight is summed.',
+      help: 'Edge columns to carry onto the links, e.g. an ROI or transmitter. Leave empty to carry all other columns. When parallel links are merged, a value is kept only if all rows agree.',
     },
     {
       id: 'nodeKey',
@@ -186,7 +188,9 @@ registerNode({
     const source = ctx.column('source')
     const target = ctx.column('target')
     if (source && target && source === target) {
-      issues.push('Source and Target are the same column — every link would be a self-loop')
+      issues.push(
+        '`Source` and `Target` are the same column, so every link would be a self-loop. Pick a different column for one of them.',
+      )
     }
     return issues
   },
@@ -198,7 +202,7 @@ registerNode({
     const sourceColumn = ctx.column('source')
     const targetColumn = ctx.column('target')
     if (!sourceColumn || !targetColumn)
-      throw new Error('Pick both a source and a target column')
+      throw new Error('Pick a `Source` and a `Target` column.')
 
     const weightColumn = ctx.column('weight')
     const directed = ctx.params.directed !== false

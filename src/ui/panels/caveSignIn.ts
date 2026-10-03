@@ -30,9 +30,9 @@ import type { PopupPassThrough, SignIn } from './popupSignIn'
 import { signInWithPopup } from './popupSignIn'
 
 const CLOSED_MESSAGE =
-  'The CAVE sign-in window closed before a token arrived. If it ended on an error page — a ' +
-  'session that expired, or cookies your browser blocked — signing in again usually clears it. ' +
-  'Otherwise paste a token from your CAVE account page below.'
+  'The CAVE sign-in window closed before a token arrived. If it ended on an error page (an ' +
+  'expired session, or cookies blocked by your browser), signing in again usually fixes it. ' +
+  'Otherwise, paste a token from your CAVE account page below.'
 
 const BLOCKED_MESSAGE =
   'Your browser blocked the CAVE sign-in window. Allow pop-ups for this page and try again, or ' +

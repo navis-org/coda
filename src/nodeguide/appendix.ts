@@ -100,7 +100,7 @@ function entry(n: GuideNode): string {
   return `<article class="entry" id="${nodeAnchor(n.type)}">
       <h4 class="entry__name">${esc(n.label)}<code class="entry__type">${esc(n.type)}</code></h4>
       <p class="entry__sig">${sig ? `<span class="entry__ports">${sig}</span>` : ''}<span class="entry__cost">${
-        n.cost === 'cheap' ? 'runs live' : 'runs on Run'
+        n.cost === 'cheap' ? 'runs as you edit' : 'waits for Run'
       }</span></p>
       ${n.description ? `<p class="entry__desc">${esc(n.description)}</p>` : ''}
       <p class="entry__guide">${esc(n.guide)}</p>
@@ -133,10 +133,10 @@ export function appendixHTML(): string {
   return `<section class="appendix shell" id="all-nodes" aria-labelledby="all-nodes-h">
     <h2 class="appendix__title" id="all-nodes-h">Every node, in full</h2>
     <p class="appendix__lede">
-      The same ${nodes.length} nodes as the grid above, written out in one page — grouped the
-      way a pipeline runs, so it can be read straight through or searched with the browser's own
-      find. Each entry names what the node takes and hands on, and whether it runs as you type or
-      waits for Run.
+      The same ${nodes.length} nodes as the grid above, written out on one page and grouped in
+      pipeline order. You can read it top to bottom or search it with your browser's find. Each
+      entry lists the node's inputs and outputs, and whether it runs as you edit or waits for you
+      to press Run.
     </p>
     ${groups}
   </section>`

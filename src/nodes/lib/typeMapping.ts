@@ -841,11 +841,11 @@ function partitionComponents(graph: Graph, datasetCount: number, s: Settings): n
       count: largest,
       threshold: COMPONENT_NODE_CAP,
       unit: 'labels and neuron groups in one type component',
-      control: 'the size a component can still be trimmed and split at',
+      control: 'the largest component that can still be split',
       cost:
         `${oversized} component(s) were matched whole, so their shared labels are ` +
-        `coarser than they could be. That usually means one generic label joins ` +
-        `everything — add it to the ignored labels.`,
+        `coarser than they could be. This usually means one generic label joins ` +
+        `everything. Add that label to \`Ignore labels\`.`,
     })
   }
 

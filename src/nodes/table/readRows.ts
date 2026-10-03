@@ -40,11 +40,11 @@ registerNode({
   label: 'Read Rows',
   category: 'utility',
   description:
-    'Pull rows out of a table file: chosen columns, rows matching a set of ids, up to a cap.',
+    'Read rows from a Link Table file: the chosen columns, the rows matching a set of ids, up to a cap.',
   guide:
-    'Turns a linked table file into a table you can filter, join and chart. Choose the **Columns** ' +
-    'to keep (none means all) and, to keep only some rows, a **Match column** and the ids to look ' +
-    'for — typed, or from a wired table. With a match column and no ids, nothing is read.',
+    'Reads rows from a Link Table file into an ordinary table you can filter, join and plot. ' +
+    'Pick the columns to keep and, to look up specific neurons, a match column plus the ids, ' +
+    'typed in or wired from a table. With a match column but no ids, nothing is read.',
   cost: 'expensive',
   inputs: [
     { id: 'file', label: 'Table file', type: T.tableFile() },
@@ -75,7 +75,7 @@ registerNode({
       label: 'IDs',
       multiline: true,
       placeholder: '720575940621039145\n720575940613052200',
-      help: 'The ids to look for, separated by spaces, commas or newlines — added to any wired ones.',
+      help: 'The ids to look for, separated by spaces, commas or newlines. Added to any wired ids.',
       default: '',
     },
     {
@@ -110,12 +110,14 @@ registerNode({
     const anyIds = typed.ids.length > 0 || Boolean(ctx.inputs.ids)
     if (matching && !anyIds) {
       return [
-        `No ids to look for in "${matching}" — type some, or wire a table of them. With none, ` +
-          `nothing is read.`,
+        `There are no ids to look for in "${matching}", so nothing will be read. Type ids into ` +
+          `\`IDs\`, or wire a table of them into the \`IDs\` port.`,
       ]
     }
     if (!matching && anyIds) {
-      return ['IDs are given but no Match column is chosen, so they are not used.']
+      return [
+        'IDs are given but `Match column` is empty, so they are not used. Pick the column to match them against.',
+      ]
     }
     // Silent while the wired table's columns are unknown: a Pivot upstream publishes none yet.
     const wiredColumns = ctx.schema('ids')?.columns ?? []
@@ -144,8 +146,8 @@ registerNode({
       if (collected.error) throw new Error(collected.error)
       if (collected.dropped > 0) {
         ctx.warn(
-          `${collected.dropped.toLocaleString()} cells of the IDs table's "${idColumn}" are not ` +
-            `ids and were left out.`,
+          `${collected.dropped.toLocaleString()} cells in the IDs table's "${idColumn}" column ` +
+            `are not valid ids and were skipped.`,
         )
       }
       key = {
@@ -169,8 +171,8 @@ registerNode({
 
     if (result.truncated) {
       ctx.warn(
-        `Stopped at the row cap of ${limit.toLocaleString()} with rows left to read. Raise ` +
-          `Row cap, match fewer ids, or narrow the table upstream.`,
+        `Stopped at the row cap of ${limit.toLocaleString()} with more rows left to read. Raise ` +
+          `\`Row cap\`, match fewer ids, or filter the table upstream.`,
       )
     }
     /*
@@ -193,9 +195,9 @@ registerNode({
       const blocks = tableFileBlocks(file.format, file.blocks)
       const what = file.format === 'delta' ? 'table' : 'file'
       ctx.warn(
-        `Read all ${file.blocks.toLocaleString()} ${blocks}: none could be skipped, so the ${what} ` +
-          `is probably not sorted by "${matching}". Sorting it by that column once makes every ` +
-          `lookup like this one read only the ${blocks} that hold the ids.`,
+        `All ${file.blocks.toLocaleString()} ${blocks} were read because none could be skipped, so ` +
+          `the ${what} is probably not sorted by "${matching}". Sort it by that column once, and ` +
+          `lookups like this one will read only the ${blocks} that hold the ids.`,
       )
     }
     return { out: makeTable(schema, result.data) }
@@ -210,8 +212,8 @@ export function pickIdColumn(columns: readonly { name: string }[], missing?: str
   const guess = columns.find((c) => isIdentifierColumn(c.name))?.name
   return (
     (missing ? `The IDs table has no column "${missing}". ` : '') +
-    'Pick the IDs table’s column holding the ids under ID column' +
-    (guess ? ` — "${guess}" looks like it.` : '.')
+    'Pick the IDs table’s column that holds the ids in `ID column`.' +
+    (guess ? ` "${guess}" looks like the right one.` : '')
   )
 }
 

@@ -40,9 +40,12 @@ export const partnerVectorsNode = packNode({
   label: 'Partner Vectors',
   category: 'analysis',
   description:
-    'Turn a connectivity edge list into one feature vector per query neuron, ready to compare.',
+    'Turn a Connectivity edge list into one feature vector per query neuron, built from its ' +
+    'upstream and downstream partners, for Similarity Matrix.',
   guide:
-    'Reshapes a Connectivity result into the long form Similarity Matrix reads: one row per neuron and partner, with upstream and downstream kept apart as separate features. It aggregates as it goes, so no Group By and no Pivot in between. Wire Labels from Match Cell Types to compare across brains.',
+    'Turns a Connectivity edge list into one feature vector per neuron (its partners, split into ' +
+    'upstream and downstream), ready to wire straight into Similarity Matrix. Wire Labels from ' +
+    'Match Cell Types to compare neurons across datasets.',
   cost: 'cheap',
 
   inputs: [
@@ -71,7 +74,7 @@ export const partnerVectorsNode = packNode({
       label: 'Partners by',
       default: 'type',
       options: PARTNER_BY_OPTIONS,
-      help: 'What counts as one feature. Cell type is the usual choice — comparing by neuron id only finds neurons sharing literal partners.',
+      help: 'What counts as one feature. "Cell type" is the usual choice; "Neuron id" only matches neurons that share the exact same partners.',
     },
     {
       id: 'untyped',
@@ -80,7 +83,7 @@ export const partnerVectorsNode = packNode({
       default: 'id',
       options: UNTYPED_OPTIONS,
       visibleIf: (params) => params.partnerBy !== 'id',
-      help: 'A partner the dataset has not named. Using its id keeps it as its own feature; dropping it means the vectors no longer account for all of a neuron’s synapses.',
+      help: 'What to do with partners that have no type. "Drop the connection" leaves the vectors short of a neuron’s full synapse count.',
     },
     {
       id: 'weight',
@@ -89,7 +92,7 @@ export const partnerVectorsNode = packNode({
       from: 'in',
       dtypes: NUMERIC_DTYPES,
       default: 'weight',
-      help: 'The edge strength to accumulate. Repeats of one neuron/partner pair are summed, exactly as a Pivot set to sum would.',
+      help: 'The edge strength to add up. Repeated neuron/partner pairs are summed.',
     },
     {
       id: 'weighting',
@@ -97,7 +100,7 @@ export const partnerVectorsNode = packNode({
       label: 'Weights',
       default: 'raw',
       options: WEIGHTING_OPTIONS,
-      help: 'Fractions are per direction, so a neuron with far more input than output still has both halves of its vector count. Cosine already ignores overall magnitude; this changes the balance between the directions.',
+      help: 'Whether features are synapse counts or fractions. Fractions are taken per direction, so inputs and outputs weigh equally even when one is much larger.',
     },
     /*
      * Two pickers rather than one per role on a repeated port: there is exactly one Labels table
@@ -111,7 +114,7 @@ export const partnerVectorsNode = packNode({
       label: 'Labels: neuron id',
       from: 'labels',
       default: ID_COLUMN_NAME,
-      help: 'On the Labels table: the partner id column. Match Cell Types publishes neuronId.',
+      help: 'The partner id column in the Labels table. Match Cell Types writes neuronId.',
       advanced: true,
     },
     {
@@ -120,7 +123,7 @@ export const partnerVectorsNode = packNode({
       label: 'Labels: label',
       from: 'labels',
       default: 'label',
-      help: 'On the Labels table: the shared label each id maps to.',
+      help: 'The Labels table’s label column.',
       advanced: true,
     },
   ],
@@ -149,8 +152,9 @@ export const partnerVectorsNode = packNode({
      */
     if (ctx.inputs.labels) {
       issues.push(
-        'Labels is wired, so partners are named by their shared label: Partners by and ' +
-          'Untyped partners do not apply, and partners the mapping misses are dropped.',
+        '`Labels` is wired, so partners are named by their shared label and `Partners by` ' +
+          'and `Untyped partners` have no effect. Partners with no label in the mapping are ' +
+          'dropped.',
       )
     }
     return issues
@@ -160,7 +164,7 @@ export const partnerVectorsNode = packNode({
     const table = ctx.input('in')
     if (!isTableValue(table)) throw new Error('Input is not a table')
     const weight = ctx.column('weight')
-    if (!weight) throw new Error('Pick a numeric weight column')
+    if (!weight) throw new Error('Pick a numeric column in `Weight`.')
 
     /*
      * An empty wired table is a real answer — nobody was asked about — and is not the same as

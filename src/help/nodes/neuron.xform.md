@@ -1,15 +1,11 @@
-## Why a shared space
+## What Transform Neurons does
 
-Two connectomes are two animals. A hemibrain skeleton and a FlyWire skeleton describe the same
-anatomy, but the coordinates have nothing to do with each other — different origins, orientations
-and scales. Drawn together they are two clouds in opposite corners of the scene; handed to NBLAST
-they score as strangers, because NBLAST asks how well one arbor lies *along* another.
+Transform Neurons moves neurons (skeletons, meshes or points) from their dataset's own coordinate system into a shared template space, **JRC2018U**. That is the unisex *Drosophila* template that navis and the natverse also use as the common reference.
 
-This node puts them in the same coordinate system: **JRC2018U**, the unisex template navis and the
-natverse both treat as the meeting point.
+You need this whenever you want to compare neurons from different datasets. A hemibrain skeleton and a FlyWire skeleton may describe the same anatomy, but their coordinates have different origins, orientations and scales. Without transforming them, they show up in opposite corners of a [3D View](#out.viewer3d), and [NBLAST](#neuron.nblast) scores them as unrelated.
 
 ```coda-graph
-caption: Two datasets, one frame. Neither NBLAST nor a 3D view can compare them before this.
+caption: Transform hemibrain neurons into the template space before NBLAST.
 dataset.hemibrain as hb
 neuron.skeletons as a
 neuron.xform as xa
@@ -19,92 +15,71 @@ a -> xa
 xa -> nb:query
 ```
 
-## One transform per dataset, and no graph
+The source space is read from the neurons themselves, so usually there is nothing to configure.
 
-Every space Coda knows has exactly one registration, straight into JRC2018U. That is a **star**, not
-a network: there is nothing to search and no route to choose. `Target` can name another dataset's
-space, which is out through the hub and back — always exactly two hops.
+## How it works
 
-navis carries a real bridging graph and will route through four intermediate templates. Most of
-those edges are CMTK and H5 registration files: native libraries and gigabytes of data, neither of
-which exists in a browser. Coda's landmark sets were **generated offline against that full navis
-stack** and flattened into one hop each.
+Coda ships exactly one transform (a thin-plate spline through landmarks) per dataset, going directly into JRC2018U. You can also pick another dataset's space as the `Target`: the neurons are then transformed into JRC2018U and from there into the target space, i.e. always exactly two steps.
 
-The shortcut costs about a micron:
+navis has a full network of registrations and may route through up to four intermediate templates. Most of those are CMTK or H5 registration files, which require native libraries and gigabytes of data and therefore can't run in a browser. Coda's landmarks were generated offline from that full navis setup, condensed into one step per dataset.
 
-| space | median | p95 |
-| --- | --- | --- |
-| Hemibrain | 0.77 µm | 2.3 µm |
-| FlyWire | 0.87 µm | 2.5 µm |
-| MANC | 0.54 µm | 1.8 µm |
-| MaleCNS | 0.61 µm | 4.4 µm |
+This shortcut costs about a micron of accuracy:
 
-Measured on 3,000 shell vertices per space against the long route. On a 250 µm brain, and against
-the biological variation between two flies, that is not the limiting error.
+| Space     | Median  | 95th percentile |
+| --------- | ------- | --------------- |
+| Hemibrain | 0.77 µm | 2.3 µm          |
+| FlyWire   | 0.87 µm | 2.5 µm          |
+| MANC      | 0.54 µm | 1.8 µm          |
+| MaleCNS   | 0.61 µm | 4.4 µm          |
 
-> [!note] Mirror before transforming, not after
-> Mirroring in a dataset's own space uses landmarks fitted for that brain's asymmetry. After
-> transforming, no such correction exists.
+These numbers were measured on 3,000 points on the surface of each brain, compared against the full navis route. For a 250 µm brain, and compared with the natural variation between two flies, that is usually not the limiting factor.
 
-## Two hops cost about what one does, twice
+If you have a registration of your own, build it with a Landmark Transform node and wire it into the `Transform` input. It then replaces the built-in route entirely, and `Target` and `Space` are ignored.
 
-Composing transforms does not compound their error the way you might expect. Measured against
-navis, in the region the target actually covers:
+> [!TIP] Mirror before transforming
+> If you also want to mirror neurons, do that first with [Mirror Neurons](#neuron.mirror). Mirroring
+> in the dataset's own space corrects for that brain's left/right asymmetry; after transforming,
+> that correction is no longer available.
 
-| | two hops | the two one-hops added |
-| --- | --- | --- |
-| hemibrain → FlyWire | 1.33 µm | 1.61 µm |
-| FlyWire → hemibrain | 1.87 µm | 1.61 µm |
+## Transforming between two datasets
 
-About the sum, and on the first pair slightly under it: two splines' errors cancel as readily as
-they add. The second hop costs time — another fit — and very little accuracy.
+Going from one dataset to another via JRC2018U doesn't add up errors as much as you might expect. Measured against navis, in the region covered by the target:
 
-> [!note] A target that does not cover the neuron does degrade the answer
-> The hemibrain is roughly one hemisphere, so about 60% of a whole-brain FlyWire neuron has no
-> hemibrain coordinate at all. Out there the spline extrapolates, and so does navis — its own
-> deformation field warns on the same region.
+|                     | Two steps | The two single steps added |
+| ------------------- | --------- | -------------------------- |
+| hemibrain → FlyWire | 1.33 µm   | 1.61 µm                    |
+| FlyWire → hemibrain | 1.87 µm   | 1.61 µm                    |
 
-Where two spaces do not overlap *at all* — a nerve cord into a brain-only volume — the node says so
-before you run it. Partial overlap it cannot judge in advance, since whether it matters depends on
-where your neurons are.
+So the error is roughly the sum of the two steps, sometimes less. The second step mostly costs time (another fit), not accuracy.
 
-## The nerve cord is placed, not registered
+> [!WARNING] Neurons outside the target volume
+> The hemibrain covers only about one hemisphere, so about 60% of a whole-brain FlyWire neuron has
+> no corresponding hemibrain coordinate. In that region the transform extrapolates (navis does too,
+> and warns about it), so those parts of the neuron are less accurate.
 
-JRC2018U is a **brain** template. There is no nerve cord in it.
+If two spaces don't overlap at all (e.g. a nerve cord into a brain-only dataset), the node tells you before you run it. Partial overlap can't be checked in advance, since whether it matters depends on where your neurons are.
 
-A VNC is registered to JRCVNC2018U — the honest target for one — and then moved into the brain's
-frame by a fixed affine, so that a brain and a nerve cord can be drawn in one scene. That is a
-*layout*: a VNC coordinate here is in the right place relative to the brain and means nothing
-anatomical on its own.
+## The ventral nerve cord
 
-- **MANC** is entirely nerve cord, so all of it is placed. The node says so on the card.
-- **MaleCNS** is both, and its two halves reach the frame by different routes, so they disagree
-  slightly where they meet: about 2% of points near the neck are more than 10 µm out, against a
-  median of 0.6 µm everywhere else. A descending neuron is the case that sees it.
+JRC2018U is a brain template and contains no nerve cord. Nerve cord neurons are therefore first registered to the VNC template (JRCVNC2018U) and then placed next to the brain with a fixed affine transform, so that brain and nerve cord neurons can be shown in one scene. Note that this is just a layout: a VNC coordinate is in the right place relative to the brain, but has no anatomical meaning in JRC2018U.
 
-A combined `JRC2018Ucns` space, with the two arranged properly, will replace this.
+- **MANC** is entirely nerve cord, so all of it is placed this way. The node says so on the card.
+- **MaleCNS** contains both brain and nerve cord, and the two parts take different routes into the template. Where they meet they disagree slightly: about 2% of points near the neck are off by more than 10 µm, compared with a median of 0.6 µm elsewhere. You will notice this mostly with descending neurons.
 
-## What the exported notebook does
+A combined `JRC2018Ucns` space, with brain and nerve cord arranged properly, will replace this.
 
-Not the same thing, deliberately — and this is the one place an export is *better* than the canvas.
-The cell reads `navis.xform_brain(..., source=…, target=…)`, which walks the full bridging graph
-rather than the shortcut sampled from it. Same destination, about a micron more accurate, and much
-more than that for a dataset-to-dataset target where Coda goes via the hub and navis usually goes
-direct.
+## Exporting
 
-> [!WARNING] For a dataset with a nerve cord the notebook refuses rather than emitting that call
-> navis has no registration placing a VNC in a brain template, so `xform_brain` routes it through a
-> brain deformation field instead: every sample point lands outside the field, navis warns, and the
-> answer comes back 97 µm from Coda's.
+The Python notebook export uses `navis.xform_brain(..., source=…, target=…)`, which goes through navis's full network of registrations instead of Coda's shortcut. It ends up in the same place, but about a micron more accurate, and more than that when transforming from one dataset into another (Coda goes via JRC2018U, navis often has a direct route).
 
-## Two smaller things
+> [!WARNING] Datasets with a nerve cord are not exported
+> navis has no registration that places a VNC in a brain template, so `xform_brain` would send it
+> through a brain registration instead. Every point would land outside that registration and the
+> result would be about 97 µm away from Coda's. The notebook export therefore refuses these
+> datasets.
 
-**The space is read off the geometry**, so there is nothing to set. The `Space` override exists for
-geometry that arrived without one — a Custom dataset node pointed at a deployment Coda ships no
-binding for. It can only *fill a gap*, never contradict the value: if the two disagree the node
-refuses, since a setting made once and forgotten would otherwise relocate a later graph's neurons
-with a green card and no warning.
+## Good to know
 
-**Coordinates stay in nanometres**, though JRC2018U is published in micrometres. The landmarks are
-converted on load, which is exact — a 3-D thin-plate spline's kernel is homogeneous, so scaling one
-side scales the result and nothing else.
+**The source space is read from the neurons.** The `Space` setting is only for neurons that arrive without a space, e.g. from a Custom dataset node pointed at a server Coda doesn't know. It can only fill in a missing space: if it disagrees with the space the neurons carry, the node refuses to run rather than silently moving the neurons somewhere else.
+
+**Coordinates stay in nanometres**, even though JRC2018U is published in micrometres. The landmarks are converted when they are loaded, which doesn't change the result.

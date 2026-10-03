@@ -63,14 +63,14 @@
     <h1>Build connectome workflows <em>from your own AI client</em></h1>
 
     <p class="hero__sub">
-      Coda has an assistant built in. The MCP server is the same thing from the other side: point
-      Claude, ChatGPT or any other MCP client at one URL, ask for a pipeline in plain language, and
-      get back a link that opens the finished workflow in your browser.
+      Coda has an assistant built in, but you can also use your own AI client. Point Claude,
+      ChatGPT or any other MCP client at the URL below, describe the pipeline you want, and you
+      get back a link that opens the workflow in Coda.
     </p>
 
     <div class="hero__meta">
       <span>one URL, nothing to install</span>
-      <span>authors and checks &mdash; never runs</span>
+      <span>builds workflows but does not run them</span>
       <span>same node catalogue as the app</span>
     </div>
   </div>
@@ -87,32 +87,33 @@
         What it is
       </h2>
       <p>
-        MCP &mdash; the Model Context Protocol &mdash; is how an AI client learns about a tool.
+        MCP (the Model Context Protocol) lets an AI client use external tools.
       </p>
     </div>
 
     <div class="split split--wide">
       <div class="stack">
         <div class="point rise">
-          <h3>The model does the wiring</h3>
+          <h3>The model builds the workflow</h3>
           <p>
-            It reads Coda&rsquo;s own node catalogue, adds the nodes, connects the ports and sets the
-            parameters &mdash; then checks the result against the same rules the cards on the canvas
-            use, and fixes what it finds before answering.
+            It reads Coda&rsquo;s node catalogue, adds the nodes, connects them and sets their
+            parameters. It then checks the workflow using the same checks Coda runs on the canvas,
+            and fixes any problems before it answers.
           </p>
         </div>
         <div class="point rise" data-delay="1">
           <h3>You get a link</h3>
           <p>
-            The workflow opens in Coda in your browser, where your credentials are, and you run it,
-            edit it, and take it from there. Nothing is computed on the way.
+            The link opens the workflow in Coda in your browser. From there you can run it (with
+            your own credentials) and edit it like any other workflow. The server only builds
+            the workflow, it never runs it.
           </p>
         </div>
         <div class="point rise" data-delay="2">
-          <h3>Always the current Coda</h3>
+          <h3>Always up to date</h3>
           <p>
-            The server reads the node definitions out of the deployed build, so a node added this
-            week is one the model can use today &mdash; no version to match, nothing to upgrade.
+            The server reads the node definitions from the deployed version of Coda, so new nodes
+            are available to the model as soon as they go live. There is nothing to upgrade.
           </p>
         </div>
       </div>
@@ -139,7 +140,7 @@
             </div>
           </div>
         </div>
-        <div class="cellbar"><span>&#9654;</span><em>one conversation</em><span>&middot; the workflow is built, not run</span></div>
+        <div class="cellbar"><span>&#9654;</span><em>one conversation</em><span>&middot; the workflow is built but not run</span></div>
       </div>
     </div>
   </div>
@@ -156,8 +157,8 @@
         Connect it
       </h2>
       <p>
-        It is hosted, so there is nothing to install and no key to paste. Wherever your client keeps
-        remote MCP servers, add this URL:
+        The server is hosted, so there is nothing to install and no key to paste. Just add this URL
+        wherever your client keeps its remote MCP servers:
       </p>
     </div>
 
@@ -186,8 +187,8 @@
       <div class="client rise" data-delay="2">
         <h3>ChatGPT, Cursor, VS&nbsp;Code, Zed&hellip;</h3>
         <p>
-          Anything that speaks MCP takes a remote server by URL &mdash; in a connector setting, or in
-          the client&rsquo;s own config file, as below.
+          Any MCP client can add a remote server by URL, either in its connector settings or in
+          its config file (see below).
         </p>
       </div>
     </div>
@@ -205,9 +206,8 @@
     </div>
 
     <p class="fig__cap rise" data-delay="2" style="margin-top: 1.1rem; max-width: 52rem">
-      Then just ask. A model that has never seen Coda reads <b>coda_guide</b> first, which is the
-      whole catalogue &mdash; every node type, its ports and its parameters &mdash; so no prompting
-      of your own is needed.
+      Then just ask. The model first calls <b>coda_guide</b>, which returns the full catalogue of
+      node types with their ports and parameters, so you don&rsquo;t need to explain Coda to it.
     </p>
   </div>
 </section>
@@ -219,8 +219,8 @@
   <div class="shell">
     <h2 class="rise">Try it</h2>
     <p class="rise" data-delay="1">
-      Add the URL to your client, then ask it for a connectome workflow. If you would rather not
-      leave Coda at all, the assistant inside the app does the same job with your own API key.
+      Add the URL to your client, then ask it for a connectome workflow. If you would rather stay
+      inside Coda, the built-in assistant does the same job using your own API key.
     </p>
     <div class="outro__actions rise" data-delay="2">
       <a class="cta" data-primary="true" href="./index.html">Open Coda</a>
@@ -237,8 +237,8 @@
     Coda &mdash; connectome data analysis &middot; Fly Connectomics Group, Cambridge<br>
     The MCP server is <a href="https://github.com/navis-org/coda-mcp">navis-org/coda-mcp</a>,
     open source and hosted at the LMB.<br>
-    Page views are counted with <a href="https://coda-science.goatcounter.com/">GoatCounter</a>
-    &mdash; no cookies, nothing kept in your browser, and the dashboard is public.
+    Page views are counted with <a href="https://coda-science.goatcounter.com/">GoatCounter</a>.
+    It uses no cookies, stores nothing in your browser, and the dashboard is public.
   </div>
 </footer>
     <script type="module" src="/src/mcppage/main.ts"></script>

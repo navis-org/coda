@@ -59,8 +59,8 @@ function PluginsBody({ onClose }: { onClose: () => void }) {
         {packs.length === 0 && <li className="plugins__empty">This build has no plugins.</li>}
       </ul>
       <footer className="plugins__footer">
-        Extra tools for particular kinds of data. Switching one off hides its nodes when you add
-        something new; workflows that use it still open and run.
+        Plugins add nodes for particular kinds of data. Switching one off hides its nodes from
+        the menus you add nodes from. Workflows that use it still open and run.
       </footer>
     </Modal>
   )

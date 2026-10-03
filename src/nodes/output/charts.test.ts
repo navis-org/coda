@@ -243,7 +243,9 @@ describe('out.histogram — a selection of ranges', () => {
   it('catches splitting a column by itself, which the resolver cannot see', () => {
     let g = pipeline('out.histogram', { value: 'pre' })
     g = setNodeParam(g, 'chart', 'series', 'pre')
-    expect(issues(g, 'chart')).toEqual(['Split-by and Value are the same column'])
+    expect(issues(g, 'chart')).toEqual([
+      '`Split by` and `Value` are the same column. Pick a different column for one of them.',
+    ])
   })
 })
 
@@ -292,20 +294,24 @@ describe('the warnings', () => {
     })
     g = { ...g, edges: g.edges.filter((e) => e.target !== 'chart') }
     g = addEdge(g, { source: 'sel', sourceHandle: 'out', target: 'chart', targetHandle: 'in' })
-    expect(issues(g, 'chart')).toEqual(['No columns of type i64/f64 available for "Value"'])
+    expect(issues(g, 'chart')).toEqual(['No columns of type i64/f64 available for `Value`.'])
   })
 
   it('catches a pie whose value is its category', () => {
     let g = pipeline('out.pie')
     g = setNodeParam(g, 'chart', 'category', 'pre')
     g = setNodeParam(g, 'chart', 'value', 'pre')
-    expect(issues(g, 'chart')).toEqual(['Value and Category are the same column'])
+    expect(issues(g, 'chart')).toEqual([
+      '`Value` and `Category` are the same column. Pick a different column for one of them.',
+    ])
   })
 
   it('catches a box plot grouped by the column it is plotting', () => {
     let g = pipeline('out.distribution')
     g = setNodeParam(g, 'chart', 'value', 'pre')
     g = setNodeParam(g, 'chart', 'group', 'pre')
-    expect(issues(g, 'chart')).toEqual(['Group-by and Value are the same column'])
+    expect(issues(g, 'chart')).toEqual([
+      '`Group by` and `Value` are the same column. Pick a different column for one of them.',
+    ])
   })
 })

@@ -232,7 +232,7 @@ export const EXCLUDED: readonly ExcludedEntry[] = [
   {
     key: 'mock.opticlobe',
     why: 'Not a connectome — generated in the browser, so it has no specimen, no resolution and nothing to cite. A row in a table comparing volumes would be six cells of “n/a” and one real claim.',
-    footnote: `**Demo Data** is not in the table: it is a synthetic dataset user for demonstration purposes only. It needs no account and fetches nothing.`,
+    footnote: `**Demo Data** is not in the table: it is a synthetic dataset for demonstration purposes only. It needs no account and fetches nothing.`,
   },
 ]
 
@@ -266,11 +266,11 @@ export const DATASET_GUIDE: readonly DatasetGuideEntry[] = [
       resolution: '8 × 8 × 8 nm',
       released: '2026',
     },
-    about: `A whole-CNS (brain and nerve cord) reconstruction. A collaboration between Janelia FlyEM project, Google Connectomics and the University of Cambridge.
+    about: `A whole-CNS (brain and nerve cord) reconstruction. A collaboration between the Janelia FlyEM project, Google Connectomics and the University of Cambridge.
 The largest and most complete fly connectome to date.`,
     strengths: [
       'High synaptic completion rate (fraction of synapses attached to proofread neurons)',
-      'Brain & nerve cord in one volume let you trace full circuits from sensory input to motor output',
+      'Brain & nerve cord in one volume lets you trace full circuits from sensory input to motor output',
       'Densely annotated with e.g. types, classes, hemilineages, neurotransmitters, sexual dimorphism and cross-referenced to the literature',
       'Cross-references to hemibrain, FlyWire and MANC as first-class columns',
       'Served via neuPrint, which provides the most complete set of queries',
@@ -299,7 +299,7 @@ The largest and most complete fly connectome to date.`,
       {
         text: 'Nern et al. (2025)',
         url: 'https://doi.org/10.1038/s41586-025-08746-0', // TODO(facts): verify
-        what: 'carries the optic lobe cell typing',
+        what: 'the optic lobe cell typing',
         required: false,
       },
       // TODO(facts): replace the bioRxiv link once the journal version is out.
@@ -338,14 +338,16 @@ The largest and most complete fly connectome to date.`,
     },
     about: `An automated segmentation of the FAFB volume (Zheng et al., 2018), proofread by Princeton, Cambridge and the FlyWire community. Published with a hierarchical annotation set covering super class, class, cell type and side.
 
-Coda reads it through CAVE, so a version is a materialization number: \`783\` matches the Nature paper package and \`630\` the preprint. **New ▸ FlyWire FAFB public** and the Workflow Wizard both open it with the current annotations wired in front of it — the \`flywire_annotations\` repository's hierarchical set with root ids repaired, plus the community annotations as tags — because the annotation table inside the datastack is by now out of date.`,
+Coda reads it through CAVE, so you pick a version by its materialization number: \`783\` matches the Nature paper package and \`630\` the preprint.
+
+The annotation table inside the datastack is out of date. If you start a FlyWire workflow from the New menu or the Workflow Wizard, Coda therefore adds the current annotations in front of the dataset: the hierarchical annotations from the \`flywire_annotations\` repository (with root ids updated) plus the community annotations as tags.`,
     strengths: [
       'A whole brain including both optic lobes',
       'Dense annotations from two sources: the hierarchical set & community tags',
       'High synaptic completion rate (fraction of synapses attached to proofread neurons)',
     ],
     caveats: [
-      'Brain only — nothing below the neck',
+      'Brain only, nothing below the neck',
       'CAVE does not support certain queries, e.g. paths or per-region connection counts',
       'High-res skeletons exist only on materialization 783',
     ],
@@ -353,7 +355,7 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
       {
         name: 'Codex',
         url: 'https://codex.flywire.ai',
-        note: 'the published browser — cell type search, circuit summaries, downloads and more',
+        note: 'the published browser: cell type search, circuit summaries, downloads and more',
       },
       {
         name: 'CAVE',
@@ -364,7 +366,7 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
       {
         name: 'flywire_annotations',
         url: 'https://github.com/flyconnectome/flywire_annotations',
-        note: 'the current hierarchical annotations, wired into the workflows by hand',
+        note: 'the current hierarchical annotations, which Coda adds to new FlyWire workflows',
       },
       {
         name: 'Nature paper package',
@@ -443,8 +445,8 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
       'Structure and function for the same neurons',
     ],
     caveats: [
-      'Proofreading is partial (but ongoing) — only a subset of neurons are complete, so connectivity is a lower bound and axons are truncated',
-      'A cubic millimetre is a small fraction of one cortical area, so long-range connectivity is absent by construction',
+      'Proofreading is partial (but ongoing): only a subset of neurons are complete, so connectivity is a lower bound and axons are truncated',
+      'A cubic millimetre is a small fraction of one cortical area, so long-range connections are missing',
       'Annotations are coarse compared with anything in the fly',
     ],
     repositories: [
@@ -496,11 +498,11 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
       resolution: '8 × 8 × 8 nm',
       released: '2020',
     },
-    about: `Janelia FlyEM's reconstruction of approximately half the central brain, extends across the midline to encompass the central complex.  The cell type naming is the vocabulary most later work is written in.`,
+    about: `Janelia FlyEM's reconstruction of approximately half the central brain. It extends across the midline to include the central complex. Most later work uses its cell type names.`,
     strengths: ['Probably the best-proofread mushroom body and central complex'],
     caveats: [
       'Half a brain, so no bilateral symmetry to check results against',
-      'Neurons are truncated at the midline and at the optic lobe boundary, which needs to be taken into account when analysing connectivity, cell counts, morpholoy, etc.',
+      'Neurons are truncated at the midline and at the optic lobe boundary, which needs to be taken into account when analysing connectivity, cell counts, morphology, etc.',
     ],
     repositories: [
       {
@@ -558,7 +560,7 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
     tier: 'reach',
     clade: 'fly',
     tagline:
-      'The male adult nerve cord on its own: motor neurons, premotor circuits, and the descending input driving them.',
+      'The ventral nerve cord of an adult male fly: motor neurons, premotor circuits and the descending neurons that drive them.',
     specs: {
       specimen: 'Adult male Drosophila',
       region: 'Ventral nerve cord',
@@ -573,7 +575,7 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
       'High completion rate (fraction of synapses attached to proofread neurons)',
     ],
     caveats: [
-      'Nerve cord only — descending/ascending neurons are cut at the neck',
+      'Nerve cord only: descending/ascending neurons are cut at the neck',
       'Superseded by MaleCNS for new work',
     ],
     repositories: [
@@ -636,7 +638,7 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
     tier: 'reach',
     clade: 'fly',
     tagline:
-      'A female whole central nervous system with the neck connective intact — the female counterpart to MaleCNS.',
+      'The whole central nervous system of an adult female fly, with the neck connective intact. The female counterpart to MaleCNS.',
     specs: {
       specimen: 'Adult female Drosophila',
       region: 'Whole CNS — brain and ventral nerve cord',
@@ -647,11 +649,11 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
     },
     about: `Brain And Nerve Cord: a complete female central nervous system imaged in one piece, with detailed annotation of the neurons innervating sensory organs, the motor neurons, and the viscera.
 
-Like FlyWire this is a CAVE datastack which limits some of the analysis capabilities.`, // TODO(facts): check the table name and the annotation coverage claim.
+Like FlyWire, this is a CAVE datastack, which limits some of the analysis capabilities.`, // TODO(facts): check the table name and the annotation coverage claim.
     strengths: [
-      'Whole CNS in a female fly, which is what makes a sex comparison against MaleCNS possible at all',
+      'Whole CNS of a female fly, so you can compare it against MaleCNS to look for sex differences',
       'Intact neck connective, so descending and ascending neurons are complete',
-      'Strong peripheral annotation (sensory modality, motor neurons, muscles, biological context, etc)', // TODO(facts)
+      'Strong peripheral annotation (sensory modality, motor neurons, muscles, biological context, etc.)', // TODO(facts)
     ],
     caveats: [
       'Completion rate (fraction of synapses attached to proofread neurons) is generally much lower than in MaleCNS, hemibrain or FlyWire',
@@ -663,7 +665,7 @@ Like FlyWire this is a CAVE datastack which limits some of the analysis capabili
       {
         name: 'Codex',
         url: 'https://codex.flywire.ai',
-        note: 'the primary browser — cell type search, circuit summaries, downloads and more',
+        note: 'the primary browser: cell type search, circuit summaries, downloads and more',
       },
       {
         name: 'Project overview',
@@ -774,7 +776,7 @@ Like FlyWire this is a CAVE datastack which limits some of the analysis capabili
 Note that while this is the same EM volume as FlyWire, the latter is a re-aligned version of the former, so coordinates will differ somewhat.`,
     strengths: ['Some very high-quality hand-traced neurons (mileage may vary though)'],
     caveats: [
-      'Sparse — most of the brain was never traced, so absence of a partner means nothing',
+      'Sparse: most of the brain was never traced, so a missing partner does not mean there is no connection',
     ],
     repositories: [
       {
@@ -822,15 +824,15 @@ Note that while this is the same EM volume as FlyWire, the latter is a re-aligne
       resolution: '8 × 8 × 8 nm',
       released: '2025',
     },
-    about: `The right optic lobe of the MaleCNS volume, with parts of the central brain and lamina, published separately and earlier. It carries the visual system cell type inventory the optic lobe papers are written against.
+    about: `The right optic lobe of the MaleCNS volume, with parts of the central brain and lamina, published separately and earlier. It contains the visual system cell type inventory used by the optic lobe papers.
 
-The same tissue is in MaleCNS. Reach for this release when you want the inventory as published.`,
+The same tissue is also part of MaleCNS. Use this release if you want the inventory exactly as published.`,
     strengths: [
       'The published visual cell type inventory, with the naming the optic lobe literature uses',
       'Much smaller than MaleCNS, so optic lobe analyses run faster',
     ],
     caveats: [
-      'A subset of MaleCNS — anything leaving the optic lobe is cut',
+      'A subset of MaleCNS: anything leaving the optic lobe is cut',
       'Kept mainly as a reference for the papers that used it',
     ],
     repositories: [
@@ -865,7 +867,7 @@ The same tissue is in MaleCNS. Reach for this release when you want the inventor
     tier: 'historical',
     clade: 'fly',
     tagline:
-      'An early partial reconstruction of the female visual system, built to work out motion detection.',
+      'An early partial reconstruction of the female visual system, made to study motion detection.',
     specs: {
       specimen: 'Adult female Drosophila',
       region: 'Portions of medulla, lobula and lobula plate',
@@ -874,12 +876,12 @@ The same tissue is in MaleCNS. Reach for this release when you want the inventor
       resolution: '8 × 8 × 8 nm',
       released: '2017', // TODO(facts)
     },
-    about: `A focused ion beam reconstruction covering a few columns of the fly visual system, made to resolve the circuitry behind elementary motion detection.
+    about: `A focused ion beam reconstruction covering a few columns of the fly visual system, made to map the circuits behind elementary motion detection.
 
-Superseded in every respect by the Optic Lobe release and MaleCNS, and kept because the motion detection literature rests on it.`,
+It has been superseded by the Optic Lobe release and MaleCNS. We keep it because much of the motion detection literature is based on it.`,
     strengths: ['The volume the ON/OFF motion detection circuit papers were built on'],
     caveats: [
-      'A few columns, not a visual system — nothing generalises without checking against a complete volume',
+      'Covers only a few columns, so check any result against a complete volume before generalising',
     ],
     repositories: [
       { name: 'neuPrint', url: 'https://neuprint.janelia.org', inCoda: 'FIB-19 (neuPrint)' },
@@ -901,7 +903,7 @@ Superseded in every respect by the Optic Lobe release and MaleCNS, and kept beca
     tier: 'historical',
     clade: 'fly',
     tagline:
-      'The alpha lobe of the mushroom body, densely reconstructed — one of the first fly connectomes.',
+      'A dense reconstruction of the mushroom body alpha lobe, and one of the first fly connectomes.',
     specs: {
       specimen: 'Adult male Drosophila',
       region: 'Mushroom body alpha (vertical) lobe',
@@ -912,12 +914,10 @@ Superseded in every respect by the Optic Lobe release and MaleCNS, and kept beca
     },
     about: `A dense reconstruction of the alpha lobe, published as one of the first demonstrations that a learning and memory centre could be mapped at synaptic resolution.
 
-983 neurons. It is a structure rather than a brain, and it is here because the mushroom body learning literature cites it.`,
-    strengths: [
-      'Small enough to hold in your head, and completely reconstructed within its boundary',
-    ],
+It contains 983 neurons. We include it because the mushroom body learning literature cites it.`,
+    strengths: ['Small (983 neurons) and completely reconstructed within its boundary'],
     caveats: [
-      'One lobe of one structure — every input and output is cut at the boundary',
+      'Only one lobe of the mushroom body: every input and output is cut at the boundary',
       'Both hemibrain and MaleCNS contain the whole mushroom body',
     ],
     repositories: [
@@ -968,37 +968,37 @@ export interface ElsewhereEntry {
 export const ELSEWHERE: readonly ElsewhereEntry[] = [
   {
     label: 'FANC — female adult nerve cord',
-    what: 'The female counterpart to MANC: a dense ventral nerve cord reconstruction, and the nerve cord half of a sex comparison that BANC now also answers.',
+    what: 'The female counterpart to MANC: a dense reconstruction of the ventral nerve cord. Together with MANC you can compare male and female nerve cords, although BANC now covers that too.',
     where: [
       { name: 'FANC community', url: 'https://github.com/htem/FANC_auto_recon' },
       { name: 'CAVE', url: 'https://global.daf-apis.com/info/' },
     ],
-    via: 'Custom CAVE, naming the datastack and the table that holds neurons. Outside Coda, [connecto](https://github.com/schlegelp/connecto) has a `fanc` handle.', // TODO(facts): give the datastack name and whether the public one is readable without an account.
+    via: 'Custom CAVE, with the datastack and the table that holds the neurons. Outside Coda, [connecto](https://github.com/schlegelp/connecto) has a `fanc` handle.', // TODO(facts): give the datastack name and whether the public one is readable without an account.
   },
   {
     label: 'Other neuPrint datasets',
     what: 'Janelia publishes volumes not listed here, including on alternative neuPrint deployments.',
     where: [{ name: 'neuPrint', url: 'https://neuprint.janelia.org' }],
-    via: 'Custom neuPrint, naming the deployment and dataset. Everything a built-in neuPrint node does works.',
+    via: 'Custom neuPrint, with the server and dataset name. It can do everything the built-in neuPrint nodes can.',
   },
   {
     label: 'Other CAVE datastacks',
     what: 'CAVE hosts more than the three datastacks with nodes here, including other MICrONS volumes and lab deployments.',
     where: [{ name: 'CAVE global listing', url: 'https://global.daf-apis.com/info/' }],
-    via: 'Custom CAVE, naming the datastack and its neuron table.',
+    via: 'Custom CAVE, with the datastack and its neuron table.',
   },
   {
     label: 'Your own CATMAID',
     what: 'A lab CATMAID server with your own tracing in it.',
     where: [{ name: 'CATMAID', url: 'https://catmaid.readthedocs.io' }],
-    via: 'Custom CATMAID, naming the server and project.',
+    via: 'Custom CATMAID, with the server and project.',
   },
   {
     label: 'Precomputed volumes',
-    what: 'Meshes and skeletons published as a neuroglancer precomputed bucket, with no connectivity behind them — H01 human cortical tissue is one.',
+    what: 'Meshes and skeletons published as a neuroglancer precomputed bucket, without any connectivity. The H01 human cortex dataset is one example.',
     where: [
       { name: 'H01 release', url: 'https://h01-release.storage.googleapis.com/landing.html' },
     ],
-    via: 'Neuroglancer Source, which emits a Dataset the geometry nodes take. Morphology only — nothing that needs a connectivity query will run.',
+    via: 'Neuroglancer Source. Its Dataset output works with the skeleton and mesh nodes, but nothing that needs connectivity will run.',
   },
 ]

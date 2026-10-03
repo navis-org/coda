@@ -11499,6 +11499,10 @@ details[open] > summary.tile__label {
 .help-see__item:hover {
   text-decoration: underline;
 }
+/* A related node with no document: named, not linked. */
+.help-see__name {
+  color: var(--text-primary);
+}
 .help-see__desc {
   color: var(--text-secondary);
 }

@@ -138,8 +138,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         kind: 'chart',
         date: '2026-10-01',
         title: '**Scatter Plot** draws every point, however many',
-        body:
-          'An embedding of a whole dataset — a hundred thousand neurons and more — now draws in full and pans smoothly, so `Max points` is gone. Exported, more than 10,000 points in view become one embedded image inside the SVG; tick **Vector marks** to keep every point a shape.',
+        body: 'An embedding of a whole dataset — a hundred thousand neurons and more — now draws in full and pans smoothly, so `Max points` is gone. Exported, more than 10,000 points in view become one embedded image inside the SVG; tick **Vector marks** to keep every point a shape.',
         demo: 'out.scatter',
       },
     ],
@@ -202,8 +201,8 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         date: '2026-09-26',
         title: 'Laminar Profile: synapses against the layers',
         body:
-          'Two new nodes in the **Cortex** plugin. **Cortical Depth** takes coordinates (princpially from synapses) and assigns depth below the pia, its layer. **Laminar Profile** draws that depth with the layers marked behind it.\n\n' +
-          'Can be facetted to e.g. compare types. Click a bar or a layer’s share to pass those synapses on. ' +
+          'Two new nodes in the **Cortex** plugin. **Cortical Depth** takes coordinates (typically synapses) and assigns each its depth below the pia and its layer. **Laminar Profile** draws that depth with the layers marked behind it.\n\n' +
+          'Facet the profile to compare e.g. partner types, and click a bar or a layer’s share to pass those synapses on. ' +
           'Works on MICrONS minnie65. **Open example** loads three cells whose inputs sit in different layers; it needs a CAVE sign-in.',
         image: {
           file: 'laminar-profile.webp',
@@ -234,7 +233,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         kind: 'data',
         date: '2026-09-26',
         title: 'CAVE table reads views.',
-        body: 'Previously the `CAVE table` node listed only tables. Now it also lists views and picks up their columns. A bare MICrONS Minnie65 node now has a button that adds the recommended cell-type annotations.',
+        body: 'The `CAVE table` node now lists views as well as tables, along with their columns. A bare MICrONS Minnie65 node now has a button that adds the recommended cell-type annotations.',
       },
     ],
     fixes: [
@@ -256,7 +255,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         date: '2026-09-25',
         title: 'Coda grew a Changelog',
         body:
-          'Chronologically list of all changes to Coda. Where a change can be tried, **Open example** loads a working workflow in the editor. \n\n' +
+          'A chronological list of all changes to Coda. Where a change can be tried, **Open example** loads a working workflow in the editor.\n\n' +
           'When a new feature drops, Coda shows a short note the next time you open it. You can find the note again under **? ▸ What’s New**.',
         image: {
           file: 'whats-new.webp',
@@ -303,7 +302,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         kind: 'data',
         date: '2026-09-25',
         title: 'MICrONS connectivity now uses an aggregated view.',
-        body: 'Speeds up all connectivity queries.',
+        body: 'This speeds up all connectivity queries.',
       },
       {
         kind: 'node',
@@ -558,7 +557,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       'Very thin neurons now get a thumbnail in Explore Dataset.',
       'Clearer error when a CAVE service is likely down.',
       'Collapsed groups line up correctly.',
-      'Default point size in the 3D View.',
+      'Synapse points in the 3D View are drawn at a visible size by default (800 nm).',
     ],
   },
   {

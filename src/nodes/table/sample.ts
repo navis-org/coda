@@ -21,9 +21,11 @@ registerNode({
   type: 'core.sample',
   label: 'Sample',
   category: 'transform',
-  description: 'Keep a subset of the rows: the top, the bottom, every Nth, or a random draw.',
+  description: 'Keep a subset of the rows: the first or last N, every Nth, or a random draw.',
   guide:
-    'Cut a table down to a manageable size: the top, the bottom, every Nth row, or a random draw. The random mode takes a seed and the draw is reproducible from it, so a figure made from a sample can be remade — which is the whole reason the seed is a visible parameter rather than a hidden one. The other three modes ignore the seed entirely and cost nothing when it changes.',
+    "Keeps a subset of a table's rows: the first or last N, every Nth row, or a random draw. " +
+    'Useful for cutting a large table down before plotting it or trying out an expensive step. ' +
+    'Random draws are reproducible from their Seed.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -33,7 +35,7 @@ registerNode({
       id: 'count',
       kind: 'int',
       label: 'Rows',
-      help: 'A ceiling: a smaller table comes through whole.',
+      help: 'The most rows to keep. A smaller table passes through whole.',
       default: 100,
       min: 0,
       step: 10,
@@ -76,7 +78,7 @@ registerNode({
   validate: (ctx) => {
     const mode = String(ctx.params.mode) as SampleMode
     if (mode === 'stride' && Number(ctx.params.step) <= 1) {
-      return ['Every 1 keeps every row — raise it, or the node is a pass-through']
+      return ['`Every` is 1, which keeps every row. Raise it to sample the table.']
     }
     return []
   },

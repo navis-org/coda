@@ -76,8 +76,8 @@ function Dialog({ onClose }: { onClose: () => void }) {
           </>
         )}
         <p className="memory__foot">
-          Per-workflow figures are Coda&rsquo;s estimate from the results themselves. A result
-          two workflows share is counted once, under the first.
+          The figures per workflow are Coda&rsquo;s own estimate. A result shared by two
+          workflows is counted once, under the first.
         </p>
         <p className="memory__foot">
           Memory consumption of 3D View, Neuroglancer and other viewers can&rsquo;t be measured.
@@ -95,8 +95,8 @@ function TabSection({ reading }: { reading: MemoryReading }) {
       <section className="memory__group">
         <h3>This tab</h3>
         <p className="memory__hint">
-          This browser does not report how much memory a page is using, or where its limit is —
-          Chrome and Edge do. Coda&rsquo;s own estimate of what it is holding is{' '}
+          This browser does not report how much memory a page is using or what its limit is
+          (Chrome and Edge do). Coda estimates it is holding{' '}
           <strong>{formatBytes(reading.held)}</strong>, broken down below.
         </p>
       </section>
@@ -116,9 +116,9 @@ function TabSection({ reading }: { reading: MemoryReading }) {
         </span>
       </div>
       <p className="memory__note">
-        Tables, text and other objects count against this limit. The browser ends a tab that
-        runs out, and one large step can do that well before the bar is full.
-        {heap.level !== 'ok' && ' Drop results you no longer need below to move away from it.'}
+        Tables, text and other objects count against this limit. If a tab runs out, the browser
+        closes it, and one large step can do that well before the bar is full.
+        {heap.level !== 'ok' && ' Drop results you no longer need below to free some memory.'}
       </p>
       <div className="memory__meter-row">
         <span>Arrays</span>
@@ -126,8 +126,8 @@ function TabSection({ reading }: { reading: MemoryReading }) {
         <span className="memory__figure">{formatBytes(reading.buffers)}</span>
       </div>
       <p className="memory__note">
-        Geometry and matrix buffers do not count against that limit; they are bounded by this
-        machine&rsquo;s memory instead.
+        Geometry and matrices do not count against that limit. They can use as much as this
+        computer&rsquo;s memory allows.
       </p>
     </section>
   )
@@ -214,7 +214,7 @@ function CacheSection({ reading }: { reading: MemoryReading }) {
       <ul className="memory__list">
         <Row
           name="Downloaded geometry"
-          detail="Skeletons and meshes kept so a re-run does not download them again, beyond what results above already hold."
+          detail="Skeletons and meshes kept so the next run does not download them again. Does not include what the results above hold."
           figure={formatBytes(reading.geometry)}
           action="Drop"
           disabled={reading.geometry === 0}
@@ -225,7 +225,7 @@ function CacheSection({ reading }: { reading: MemoryReading }) {
           detail={
             python === undefined
               ? 'Not running.'
-              : 'Its heap only grows while it runs; stopping it gives the memory back, and the next Python step starts it again.'
+              : 'Its memory only grows while it runs. Stopping it frees that memory, and the next Python step starts it again.'
           }
           figure={python === undefined ? '—' : formatBytes(python)}
           action="Stop"

@@ -1,4 +1,10 @@
-The ZapBench recording, starting from its cells rather than from neurons. Read every cell at a reduced scale to get an overview to select from, or read listed cells at full resolution. For traces of known neurons, use [Neurons to ZapBench Traces](#zapbench:neuronTraces).
+## What ZapBench Traces does
+
+ZapBench Traces reads the ZapBench calcium recording starting from its cells, and returns the traces as a matrix (one row per cell, one column per timestep). You can either read every cell at a reduced scale, which gives you an overview to select cells from, or read cells you list at full resolution.
+
+If you already know which neurons you want traces for, use [Neurons to ZapBench Traces](#zapbench:neuronTraces) instead.
+
+The typical workflow goes from activity to anatomy: look at all cells on a [Heatmap](#out.heatmap), shift-drag over the rows you are interested in on the expanded Heatmap, and send `Selected Rows` to [ZapBench to Neurons](#zapbench:neurons) to get the matching fish2 neurons:
 
 ```coda-graph
 caption: From activity to anatomy. Shift-drag rows on the expanded Heatmap; Selected Rows carries their cell ids.
@@ -16,11 +22,15 @@ zn -> skel:neurons
 skel -> v3d:skeletons
 ```
 
-## What it reads
+```coda-params
+zapbench:traces: cells, ids, scale, condition, product
+```
 
-Everything comes from the public ZapBench release, `gs://zapbench-release/volumes/20240930`, as HTTPS range requests. No token is needed.
+## Reading every cell
 
-`Cells: Every cell` reads `traces_rastermap_sorted`, the release's copy of `traces` ordered by activity, at the level `Scale` names:
+Everything comes from the public ZapBench release at `gs://zapbench-release/volumes/20240930`, via HTTPS range requests. You don't need a token.
+
+With `Cells` set to "Every cell", the node reads `traces_rastermap_sorted`, which is the release's copy of `traces` ordered by activity, at the level chosen under `Scale`:
 
 | Scale | Level | Matrix over the whole recording | Download |
 | --- | --- | --- | --- |
@@ -28,36 +38,35 @@ Everything comes from the public ZapBench release, `gs://zapbench-release/volume
 | Half | `s1` | 35,861 × 3,939, 1.1 GB | refused |
 | Full | `s0` | 71,721 × 7,879, 4.2 GB | refused |
 
-"Refused" means the matrix would pass the tab's 512 MiB allocation limit, and the card says so before a Run. A shorter `Condition` brings Half or Full under the limit.
+"Refused" means the matrix would exceed the browser tab's 512 MiB allocation limit; the card tells you so before you run it. Picking a shorter `Condition` brings Half or Full under that limit.
 
-Two small reads come first:
-- `sorting.json` (491 kB), which maps activity order back to cell ids.
-- A few values from adjacent levels, checking that each level is still the mean of the one below.
+Before the traces themselves, the node makes two small reads:
 
-If either check fails, a reduced scale is refused. Full scale falls back to `traces` in cell-id order, with a warning.
+- `sorting.json` (491 kB), which maps the activity order back to cell ids.
+- A few values from neighbouring levels, to check that each level really is the mean of the one below it.
 
-`Cells: Cells I list` reads the ids in `Cell IDs` at full resolution, one row per cell in the order typed. It uses the same reader as Neurons to ZapBench Traces, so costs are the same too.
+If either check fails, reduced scales are refused. At full scale, the node falls back to reading `traces` in cell-id order and shows a warning.
 
-Either way, past 64 MB the card warns and reads anyway.
+## Reading listed cells
 
-## A row at reduced scale is a bin
+With `Cells` set to "Cells I list", the node reads the ids in `Cell IDs` at full resolution, one row per cell, in the order you typed them. It uses the same reader as Neurons to ZapBench Traces, so the costs are the same as described there.
 
-At Quarter, each value is the mean of a 4 × 4 block: four neighbouring cells in activity order × four timesteps.
+In both modes, the card warns you above 64 MB but reads anyway.
 
-- **Row labels.** A row's label lists the cells it averages, `40211+40212+40213+40214`. [ZapBench to Neurons](#zapbench:neurons) reads such a label as all four cells.
-- **Column labels.** Columns are named by the absolute timestep their bin starts at.
-- **Partial bins.** A trailing partial time bin is dropped. The last row may hold fewer than four cells.
+## Rows at a reduced scale
 
-> [!NOTE] Rows are in activity order, not cell-id order
-> Neighbouring rows have correlated activity, which is what makes averaging them meaningful and a band on the Heatmap a coherent selection.
+At a reduced scale, each value is an average. At Quarter, for example, it is the mean of a 4 × 4 block: four neighbouring cells (in activity order) by four timesteps.
 
-`Values: Stimulus-evoked response` has no downsampled copy, so it needs `Scale: Full`.
+- **Row labels:** a row's label lists the cells it averages, e.g. `40211+40212+40213+40214`. ZapBench to Neurons reads such a label as all four cells.
+- **Column labels:** columns are named by the absolute timestep at which their bin starts.
+- **Incomplete bins:** a trailing time bin that is incomplete is dropped. The last row may hold fewer than four cells.
 
-## Settings
+> [!NOTE] Rows are in activity order
+> Rows are sorted by activity, not by cell id. Neighbouring rows therefore have correlated
+> activity, which is why averaging them is meaningful and why a band of rows on the Heatmap makes
+> a coherent selection.
 
-```coda-params
-zapbench:traces: cells, ids, scale, condition, product
-```
+Setting `Values` to "Stimulus-evoked response" requires `Scale` to be "Full", because there is no downsampled copy of that array.
 
 ## Data and credit
 

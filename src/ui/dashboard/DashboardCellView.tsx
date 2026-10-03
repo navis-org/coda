@@ -228,7 +228,7 @@ function DashboardCellViewInner({
                   type="button"
                   className="btn btn--ghost"
                   onClick={() => expandNode(nodeId)}
-                  title="Open full size — every setting, including the style panel"
+                  title="Open full size, with every setting and the style panel"
                   aria-label="Expand"
                 >
                   ⤢
@@ -237,7 +237,7 @@ function DashboardCellViewInner({
                   type="button"
                   className="btn btn--ghost"
                   onClick={() => removeFromDashboard([nodeId])}
-                  title={`Take this off ${where} — the node stays on the canvas`}
+                  title={`Remove from ${where}. The node stays on the canvas`}
                   aria-label={`Remove from ${where}`}
                 >
                   ✕

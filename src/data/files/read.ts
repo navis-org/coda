@@ -68,8 +68,8 @@ export async function openTableFile(source: ByteSource): Promise<TableFileReader
     )
   }
   throw new Error(
-    'This is not a Parquet or Feather file. A CSV cannot be read in pieces — every lookup ' +
-      'would read all of it — so convert it once, sorted by the column you will look ids up ' +
+    'This is not a Parquet or Feather file. A CSV cannot be read in pieces, so every lookup ' +
+      'would read all of it. Convert it once, sorted by the column you will look ids up ' +
       'in: pandas.read_csv(path).sort_values("root_id").to_parquet("out.parquet"). Small ' +
       'tables can go through Upload Table instead.',
   )

@@ -619,9 +619,9 @@ export class PrecomputedSource implements DataSource {
   private idsAsRegions(req: RoiMeshRequest, summary: string): { id: string; label: string }[] {
     if (!req.rois?.length) {
       throw new Error(
-        `${this.ref.canonical} publishes no segment properties — it is ${summary} — so ` +
-          `nothing can list its regions. Type the segment ids of the ones you want into ` +
-          `Regions, separated by commas.`,
+        `${this.ref.canonical} publishes no segment properties (it is ${summary}), so its ` +
+          `regions cannot be listed. Type the segment ids of the regions you want into ` +
+          `\`Regions\`, separated by commas.`,
       )
     }
     return req.rois.map((id) => ({ id, label: id }))
@@ -632,9 +632,9 @@ export class PrecomputedSource implements DataSource {
     const source = await this.describe(signal ? { signal } : {})
     if (!source.segmentPropertiesUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no segment properties — it is ${source.summary} ` +
-          `— so its segments have no names and nothing can list them. Supply the ids with ` +
-          `an Input IDs node.`,
+        `${this.ref.canonical} publishes no segment properties (it is ${source.summary}), so ` +
+          `its segments have no names and cannot be listed. Supply the ids with an Input IDs ` +
+          `node.`,
       )
     }
     return source.segmentPropertiesUrl
@@ -652,7 +652,7 @@ export class PrecomputedSource implements DataSource {
   private noConnectivity<T>(): Promise<T> {
     return Promise.reject(
       new Error(
-        `${this.label} publishes geometry, not connectivity. Wire a Dataset node for that.`,
+        `${this.label} only publishes geometry and has no connectivity. Wire a Dataset node for that.`,
       ),
     )
   }
@@ -674,8 +674,7 @@ export class PrecomputedSource implements DataSource {
     if (source.format === 'legacy' && req.neuronIds.length > LEGACY_WARN) {
       req.onWarn?.(
         `${this.label} publishes single-resolution meshes, so all ${req.neuronIds.length} arrive ` +
-          `at full detail — a few megabytes each — whatever Detail is set to. The fetch goes ` +
-          `ahead either way.`,
+          `at full detail (a few megabytes each), whatever \`Detail\` is set to. Fetching anyway.`,
       )
     }
 
@@ -831,9 +830,8 @@ export class PrecomputedSource implements DataSource {
     const source = await this.describe(signal ? { signal } : {})
     if (!source.skeletonUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no skeletons — it is ${source.summary}. A segmentation ` +
-          `names its skeleton directory in the same info that names its meshes, and most name ` +
-          `neither.`,
+        `${this.ref.canonical} publishes no skeletons; it is ${source.summary}. Point this at a ` +
+          `segmentation whose info names a skeleton directory.`,
       )
     }
     // Keyed on the URL rather than the opened copy — see `meshDir` for why they are not the
@@ -858,7 +856,7 @@ export class PrecomputedSource implements DataSource {
     const source = await this.describe(signal ? { signal } : {})
     if (!source.meshUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no meshes — it is ${source.summary}. Point this ` +
+        `${this.ref.canonical} publishes no meshes; it is ${source.summary}. Point this ` +
           `at a segmentation that names a mesh directory, or at the mesh directory itself.`,
       )
     }

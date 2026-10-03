@@ -6,7 +6,7 @@
     <title>Coda Node Guide — every dataset, query, transform and viewer</title>
     <!-- one line, so `grep 'meta name="description"'` finds it — see index.html for why. -->
     <!-- prettier-ignore -->
-    <meta name="description" content="Every node in Coda: what it takes, what it hands on, and the card it draws — searchable, grouped by where it sits in a pipeline." />
+    <meta name="description" content="All nodes in Coda: their inputs, outputs and settings, and what each card looks like on the canvas. Searchable and grouped by where they sit in a pipeline." />
     <link rel="icon" href="./logo.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
@@ -41,12 +41,12 @@
           <a href="./tutorial.html">Field guide &rarr;</a>
         </div>
 
-        <h1>Every node in Coda, <em>and what it hands on</em></h1>
+        <h1>All nodes in Coda, <em>and what they do</em></h1>
 
         <p class="top__sub">
-          A pipeline reads left to right: a dataset, a query against it, a transform or two, and
-          a viewer at the end. Pick any card to see its sockets, its settings and the card it
-          draws on the canvas.
+          A typical pipeline reads left to right: a dataset, a query against it, a transform or
+          two, and a viewer at the end. Click on any node to see its sockets, its settings and
+          what its card looks like on the canvas.
         </p>
       </div>
     </header>
@@ -96,8 +96,8 @@
       <div>
         <div id="groups"></div>
         <p class="empty" id="empty">
-          Nothing matches <b id="emptyq"></b>. Try a socket type &mdash; <b>matrix</b>,
-          <b>skeletons</b> &mdash; or a setting like <b>hops</b>.
+          Nothing matches <b id="emptyq"></b>. Try a socket type such as <b>matrix</b> or
+          <b>skeletons</b>, or a setting like <b>hops</b>.
         </p>
       </div>
 
@@ -108,8 +108,8 @@
           <h2 class="sub__h">Reading a socket</h2>
           <div class="legend" id="legend"></div>
           <p class="hint">
-            Colour, shape and the label beside it all say the same thing &mdash; three channels,
-            because only three hues clear the colourblind gate on this surface.
+            Colour, shape and label all tell you the socket's type. We use all three because
+            only three colours stay distinguishable for colourblind readers on this background.
           </p>
         </section>
       </aside>
@@ -133,9 +133,9 @@
             rel="noreferrer noopener"
             >Open an issue</a
           >
-          and say what you were trying to work out. The question is more useful than a proposed
-          node &mdash; often it turns out two of the ones above already answer it, and when it
-          does not, that is how the next node gets written.
+          and tell us what you were trying to work out. Describing the question is more helpful
+          than proposing a node: often two of the existing nodes already answer it, and if not,
+          that is how new nodes get written.
         </p>
         <div class="foot__meta">
           <span id="stamp"></span>

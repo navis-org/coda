@@ -118,9 +118,11 @@ registerNode({
   // Wider than Rename's, because a filter is three controls on a line rather than two: a field,
   // an operator and a value.
   cardWidth: 360,
-  description: 'Search a dataset for neurons, by any field the dataset publishes.',
+  description: 'Searches a dataset for neurons by any field the dataset publishes.',
   guide:
-    'The workhorse query: narrow to the neurons you mean, one filter row at a time. The field list is the dataset\u2019s own \u2014 a neuPrint dataset offers status and size, a FlyWire datastack offers super_class. Rows combine with AND, and \u201cis one of\u201d takes several values, which is how you say OR. With no filters it returns no neurons: these run against a live server.',
+    'Searches a dataset for neurons using one or more filter rows (field, condition, value), ' +
+    'e.g. type matches LC.*. Rows are combined with AND; use “is one of” for OR. ' +
+    'A node without filters returns no neurons. The result feeds most other neuron nodes.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [{ id: 'neurons', label: 'Neurons', type: T.neurons() }],
@@ -144,7 +146,7 @@ registerNode({
       id: 'roi',
       kind: 'enum',
       label: 'In ROI',
-      help: 'Restrict to neurons with synapses in this region. A region cannot be a filter row, but it is still a filter: a node whose only setting is a region does query.',
+      help: 'Only neurons with synapses in this region. Setting just a region is enough to run a query.',
       default: '',
       advanced: true,
       optionsWithoutPeek: true,
@@ -160,7 +162,7 @@ registerNode({
       id: 'limit',
       kind: 'int',
       label: 'Limit',
-      help: 'Cap on how many matches come back. 0 caps nothing \u2014 and a limit is not a filter, so a node whose only setting is a limit still returns no neurons.',
+      help: 'Maximum number of matches to return; 0 means no limit. A limit alone does not count as a filter, so on its own it returns no neurons.',
       default: 0,
       min: 0,
       step: 10,
@@ -191,7 +193,7 @@ registerNode({
     if (ctx.params.roi && !sourceSupports(ctx.inputs.dataset, 'roiFilter')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
       issues.push(
-        `${label} cannot filter neurons by region — clear "In ROI" to search this dataset`,
+        `${label} cannot filter neurons by region. Clear \`In ROI\` to search this dataset.`,
       )
     }
     return issues
@@ -243,10 +245,10 @@ registerNode({
         count: neurons.length,
         threshold: FOUND_NEURONS_WARN,
         unit: 'neurons matched',
-        control: 'the size a selection usually has',
+        control: 'the usual size of a selection',
         cost:
-          'Every one of those ids goes into the provenance key of everything downstream, ' +
-          'and a morphology node below this starts over its own Warn above.',
+          'Every node downstream works on all of them, and a skeleton or mesh node below ' +
+          'this will also be past its default `Warn above`. Add filters or set `Limit` to get fewer.',
       })
     }
     return { neurons }

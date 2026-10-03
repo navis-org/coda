@@ -1,7 +1,9 @@
-A matrix drawn as a grid of coloured cells — the natural end of [Pivot](#core.pivot), [Similarity Matrix](#core.similarity), [NBLAST](#neuron.nblast) or Adjacency.
+Draws a matrix as a grid of coloured cells. Typical inputs are the output of [Pivot](#core.pivot), [Similarity Matrix](#core.similarity), [NBLAST](#neuron.nblast) or Adjacency.
+
+The order of rows and columns matters a lot: an unsorted similarity matrix looks like noise, while the same numbers sorted by a clustering show clusters as blocks along the diagonal. For NBLAST scores, the easiest way to get there is to feed the heatmap from the `Ordered` output of [Linkage](#cluster.linkage) instead of the raw matrix. For any other matrix, use the `Order` tab (see below).
 
 ```coda-graph
-caption: Feed Linkage's `Ordered`, not the raw matrix.
+caption: Feed Linkage's `Ordered` output into the heatmap, not the raw matrix.
 neuron.nblast as nb
 cluster.linkage as link
 out.heatmap as hm
@@ -9,7 +11,7 @@ nb -> link
 link:ordered -> hm
 ```
 
-**An unordered similarity matrix is visual noise.** The same numbers in leaf order show their clusters as blocks down the diagonal, which is what `Ordered` is for — and what the `Order` tab below does for any other matrix.
+The heatmap's settings are spread over five tabs: `Colour`, `Labels`, `Filter`, `Order` and `Selection`. Everything except `Colour` changes the matrix that the node outputs, not just the picture. A Table wired next to the heatmap, the CSV export and the exported notebook all show what the card shows, and downstream nodes go stale when you change these tabs.
 
 ## Colour
 
@@ -17,31 +19,37 @@ link:ordered -> hm
 out.heatmap: scale, palette, cellShape, showValues
 ```
 
-Sequential for counts and fractions; diverging when zero is a meaningful middle, as after a log ratio. `Coda blue` and `Coda blue–red` reverse with the theme, so an empty cell always recedes into the surface. The rest — viridis, magma, inferno, plasma, cividis, rocket, mako for sequential; RdBu, PuOr, BrBG for diverging — are matplotlib's and seaborn's, drawn as published on both themes and named the same way in the exported notebook.
+Use "sequential" for counts and fractions, and "diverging (0 centred)" when zero is a meaningful midpoint, e.g. for a log ratio. "Coda blue" and "Coda blue–red" flip with the light/dark theme so that empty cells always fade into the background. The other palettes (viridis, magma, inferno, plasma, cividis, rocket and mako for sequential; RdBu, PuOr and BrBG for diverging) are the ones from matplotlib and seaborn. They look the same on both themes and have the same names in the exported notebook.
+
+> [!TIP] Normalise first if one row dominates
+> A heatmap of raw synapse counts mostly tells you which cell types are numerous. Put a
+> [Normalize](#core.normalize) in front to compare connectivity profiles instead.
+
+### Colour range
 
 ```coda-params
 out.heatmap: colorMin, colorMax, logColor
 ```
 
-**Min and Max** pin the two ends of the ramp; empty lets the data decide. Pin both on two heatmaps and they can be read against each other. A cell outside the range is drawn in the end colour it passed rather than dropped, and the caption says `values clipped`. On a diverging scale only Max is offered — it is the magnitude of *both* arms, since they have to match for the middle colour to keep meaning zero.
+`Min` and `Max` fix the two ends of the colour scale; leave them empty to use the range of the data. Set both to the same values on two heatmaps if you want to compare them by eye. Cells outside the range are drawn in the colour of the end they exceed (they are not dropped), and the caption says `values clipped`. On a diverging scale only `Max` is offered: it sets the magnitude of both arms, which have to be equal for the middle colour to still mean zero.
 
-**Log colour** spreads the ramp over a logarithm — the colour only. The printed cells, the tooltip and the two ends of the colour bar stay the values themselves. Against a maximum of 100, a weight of 1 is 1% of a linear ramp and 15% of a log one.
+`Log colour` maps values to colours on a log scale. Only the colours change: the numbers printed in the cells, the tooltip and the ends of the colour bar still show the actual values. For example, against a maximum of 100, a weight of 1 sits at 1% of a linear scale but 15% of a log scale. `Log colour` is not available on a diverging scale.
 
-> [!NOTE] Put a [Normalize](#core.normalize) in front if one row dominates
-> A heatmap of raw synapse counts is usually a picture of which cell type is numerous.
+### Circles
 
-**Cell shape** draws each cell as a disc whose **area** is the value, so magnitude is carried twice — by the colour and by the size. A connectivity matrix is mostly empty, and circles are what make that legible: an unconnected pair is an empty cell rather than a cell painted the bottom of the ramp.
+With `Cell shape` set to "circles sized by value", each cell is drawn as a disc whose area is proportional to the value, so the value is shown twice: as colour and as size. This works well for connectivity matrices, which are mostly empty: unconnected pairs show up as blank cells instead of cells in the lowest colour.
 
-Two consequences worth knowing before you pick it:
+Some things to be aware of:
 
-| | what happens |
-| --- | --- |
-| a cell at the bottom of the scale | draws **nothing** — so a recorded zero and a pair nobody measured look alike, where squares tell them apart |
-| a diverging scale | the *size* is the distance from the centre and the *colour* keeps the direction, since a radius cannot be negative |
-| cells smaller than a few pixels | drawn as squares instead, and the card says `too dense for circles` — zoom in, enlarge the card, or aggregate upstream |
+- A cell at the bottom of the scale draws nothing at all. That means you can't tell a recorded zero from a pair that was never measured, whereas squares would show the difference.
+- On a diverging scale, the size shows the distance from the centre and the colour shows the direction.
+- If the cells get too small for circles, they are drawn as squares and the card says `too dense for circles`. Zoom in, make the card bigger, or aggregate upstream.
 
-> [!NOTE] The notebook and the R document draw tiles
-> Circles are a drawing rather than a change to the matrix, and neither exporter follows: seaborn's `heatmap` is a tile renderer. Both documents carry a note saying the card used circles, so nothing disagrees silently. The numbers are the same either way.
+> [!NOTE] Exports always draw squares
+> The exported notebook and R document draw a normal tile heatmap. Both include a note saying that
+> the card used circles. The numbers are the same either way.
+
+`Show values` prints each cell's value. The numbers are hidden automatically once the cells get too small to read them.
 
 ## Labels
 
@@ -49,17 +57,17 @@ Two consequences worth knowing before you pick it:
 out.heatmap: matchColumn, labelColumn, labelAxis
 ```
 
-On most routes into a heatmap an axis is a column of root ids — `Adjacency`, `Pivot` and `Similarity Matrix` all label their rows with whatever identified the observation. Wire a neuron table to **Annotations** and the axes take a column of it instead: `Match on` is compared with the axis label, `Label by` supplies the name. Unmatched lines keep their own, and the card counts them.
+On most routes into a heatmap, the rows and columns are labelled with neuron ids: Adjacency, [Pivot](#core.pivot) and [Similarity Matrix](#core.similarity) all use whatever column identified the neurons. To use cell types (or any other column) instead, wire a neuron table into `Annotations`. `Match on` is the column compared with the existing labels and `Label by` is the column the new names come from. Rows or columns without a match keep their original label, and the card says how many there were.
 
-> [!WARNING] This changes the matrix, where the Dendrogram's port does not
-> [Dendrogram](#out.dendrogram) has the same two pickers and they only decorate. Here the names
-> are real: the Filter tab matches on them, the Order tab sorts by them, and the CSV and the
-> notebook carry them. The other side of that is what the axis gives up — the id it arrived with
-> — so a [Linkage](#cluster.linkage) whose leaves need ids goes *above* this node.
+> [!WARNING] The new labels replace the old ones
+> Unlike the same two settings on the [Dendrogram](#out.dendrogram), which only change the
+> drawing, here the names are written into the matrix. The `Filter` tab matches on them, the `Order`
+> tab sorts by them, and the CSV and notebook contain them. The original ids are gone from the
+> output, so if you also want to cluster with [Linkage](#cluster.linkage), put Linkage above this node.
 
-`Apply to` is `both` by default, which is right for a square matrix over one population. Narrow it when the two axes are different kinds of thing — neurons down, regions across — or the card will tell you that nothing named the columns.
+`Apply to` defaults to "both axes", which is what you want for a square matrix over a single population. If rows and columns are different kinds of things (e.g. neurons vs. brain regions), narrow it to "rows" or "columns"; otherwise the card will tell you that nothing matched the other axis.
 
-Naming by type routinely gives several lines the same name, which is what makes a filter of `/^LC4$` useful. The one thing it costs: `Order by: one row or column` takes the first line of a repeated name.
+When you label by cell type, several rows will often share the same name. That is what makes a filter like `/^LC4$` useful. The one catch: when the `Order` tab sorts by "one row or column", it uses the first row (or column) with that name.
 
 ## Filter
 
@@ -67,19 +75,21 @@ Naming by type routinely gives several lines the same name, which is what makes 
 out.heatmap: rowFilter, colFilter
 ```
 
-Keep only the rows or columns whose label matches. **Same spelling as the search box on [Explore Dataset](#neuron.explore)**: a plain term matches anywhere in the label ignoring case, and a term starting with `/` is a regular expression, whose closing `/` is optional.
+Keeps only the rows or columns whose label matches. This works the same way as the search box in [Explore Dataset](#neuron.explore): a plain term matches anywhere in the label regardless of case, and a term starting with `/` is a regular expression (the closing `/` is optional).
 
-| you type | you get |
-| --- | --- |
-| `LC` | every label containing `LC`, in any case |
-| `/^LC[0-9]+$` | `LC4` and `LC10`, but not `LPLC2` |
-| `/^(LC4\|LC6\|LPLC2)$` | exactly those three |
-| `!DN` or `-DN` | everything *except* labels containing `DN` |
+| you type               | you get                                    |
+| ---------------------- | ------------------------------------------ |
+| `LC`                   | every label containing `LC`, in any case   |
+| `/^LC[0-9]+$`          | `LC4` and `LC10`, but not `LPLC2`          |
+| `/^(LC4\|LC6\|LPLC2)$` | exactly those three                        |
+| `!DN` or `-DN`         | everything except labels containing `DN`   |
 
-> [!NOTE] A plain term is a literal, on purpose
-> Cell-type labels are full of regex characters — `LC4(R)`, `SMP001(a)` — so a box that compiled everything would quietly match `LC4R` too. The `/` is how you ask for a pattern.
+> [!NOTE] Plain terms are not regular expressions
+> Cell type names often contain characters that mean something in a regular expression, e.g.
+> `LC4(R)` or `SMP001(a)`. That's why a plain term is matched literally, and you have to start with
+> `/` to get a pattern.
 
-One expression per axis, and the two are independent: on a square matrix over one population, filtering both to the same expression keeps it square. Like the order below, **the filter changes the matrix this node outputs**.
+You get one expression per axis, and the two are independent. On a square matrix over one population, giving both axes the same expression keeps it square. If an expression can't be compiled, that axis is left unfiltered. If it compiles but matches nothing, the axis ends up empty. Filtering happens before sorting.
 
 ## Order
 
@@ -87,64 +97,73 @@ One expression per axis, and the two are independent: on a square matrix over on
 out.heatmap: sortBy, sortAxis, sortFollow, sortReverse
 ```
 
-**The order changes the matrix this node outputs**, not only the picture — so a Table wired beside the heatmap, the CSV export and the notebook all show what the card shows, and the tab says that downstream nodes go stale.
+`Order by` offers these options:
 
-- **Total** — the sum of each row or column, largest first.
-- **Label** — natural order, so `LC4` comes before `LC10`.
-- **One row or column** — type a label. Ordering rows, it names the column whose values decide; ordering columns, the row. A label the matrix does not have leaves that axis alone and says so on the card.
-- **Clustering** — seaborn's `clustermap`: each row is a vector across the columns, rows are clustered by the distance between those vectors, and the leaf order is the order. The first use boots Python in the tab.
+- "as they arrive": keep the input order.
+- "total, largest first": the sum of each row or column.
+- "label, A → Z": natural sort order, so `LC4` comes before `LC10`.
+- "one row or column": type a label into `Row or column`. When ordering rows, this names the column whose values decide the order, and vice versa. If the matrix has no such label, that axis is left as it is and the card says so.
+- "clustering": the same approach as seaborn's `clustermap`. Each row is treated as a vector across the columns, rows are clustered by the distance between those vectors, and the tree's leaf order becomes the row order. `Linkage` and `Distance` set the clustering method and the metric ("euclidean" is seaborn's default; "correlation" and "cosine" compare the shape of a profile instead of its magnitude). The first time you use this, Python has to start up in your browser tab, which takes a moment.
 
 > [!TIP] Other axis follows
-> A matrix from Adjacency is square over one population and usually not symmetric. With this on, the other axis takes the same order, line for line, so the diagonal stays the diagonal. Lines the sorted axis does not have keep their place after them. The match is on the label each line *arrived* with, so it still pairs neuron with neuron after the Labels tab has named several of them the same thing.
+> A matrix from Adjacency is square over one population but usually not symmetric. With
+> `Other axis follows` on, the other axis gets the same order, so the diagonal stays the diagonal.
+> Lines that only exist on the other axis are placed after the rest. Matching uses each line's
+> original label, so it still works after the `Labels` tab has given several lines the same name.
 
-> [!NOTE] Clustering here is not Linkage's
-> [Linkage](#cluster.linkage) reads the matrix *as* the distances, which is right for a score matrix; this reads each row as a profile and compares profiles, which is right for a connectivity matrix. For a score matrix, wire `Linkage → Ordered` instead.
+> [!NOTE] This clustering is not the same as Linkage
+> [Linkage](#cluster.linkage) treats the matrix values themselves as distances, which is right
+> for a score matrix such as NBLAST. The clustering here compares rows as profiles, which is
+> right for a connectivity matrix. To cluster a score matrix, use Linkage's `Ordered` output.
 
 ## Selecting rows and columns
 
-**Shift-drag a rectangle** (⌘- or Ctrl-drag does the same), on the card or in the expanded view. The rows and columns it covers leave the node on their own two ports, `Selected Rows` and `Selected Columns`, ready for [Selected to Neurons](#cluster.selectedToNeurons) or a filter.
+Shift-drag a rectangle (⌘-drag or Ctrl-drag does the same), either on the card or in the expanded view. The rows and columns it covers are sent out through two outputs, `Selected Rows` and `Selected Columns`, e.g. into [Selected to Neurons](#cluster.selectedToNeurons) or a filter.
 
-| gesture | what it does |
-| --- | --- |
-| shift-drag | select the rows and columns the box covers |
-| shift+⌘-drag | add another block to the selection |
-| shift+⌘-click | add the single cell under the pointer |
-| alt-shift-drag | adds too — the same thing, and what the Scatter uses |
-| shift-click | clear it |
-| drag | pan, as before — selection needs the modifier |
+| gesture        | what it does                                       |
+| -------------- | -------------------------------------------------- |
+| shift-drag     | select the rows and columns covered by the box     |
+| shift+⌘-drag   | add another block to the selection                 |
+| shift+⌘-click  | add the single cell under the pointer              |
+| alt-shift-drag | also adds a block (same gesture as in the Scatter) |
+| shift-click    | clear the selection                                |
+| drag           | pan                                                |
 
-The caption counts what is selected, on the card as well as expanded, and the `Selection` tab holds the same list as a field you can edit or empty.
+The caption shows how many rows and columns are selected, and the `Selection` tab holds the same list as a field you can edit or clear.
 
-Each table carries three columns:
+Both output tables have three columns:
 
-| column | what it is |
-| --- | --- |
-| `label` | what the line was called **on the way in** — the neuron id, unless something upstream named it |
-| `index` | its position in the matrix this node outputs, so a Sort downstream can restore this order |
-| `relabel` | what the card showed — the same as `label` unless the Labels tab renamed the axis |
+| column    | what it is                                                                                |
+| --------- | ----------------------------------------------------------------------------------------- |
+| `label`   | the line's label as it came into this node, usually the neuron id                          |
+| `index`   | its position in the matrix this node outputs, so you can restore the order with a Sort     |
+| `relabel` | the label shown on the card; the same as `label` unless the `Labels` tab renamed the axis |
 
-> [!WARNING] Sorting or filtering after selecting moves the selection
-> It holds the *positions* the box covered, so a box round one row of a repeated cell type takes
-> that row and not its namesakes. The price is at the other end: change the Order or Filter tab
-> under a standing selection and it names whatever now sits at those positions. The card shows it
-> the moment it happens — select after you have arranged the matrix, not before.
+> [!WARNING] Select last
+> The selection stores positions in the matrix, so that selecting one row of a repeated cell type
+> gives you that row only. The downside is that if you change the `Order` or `Filter` tab
+> afterwards, the selection now refers to whatever ended up at those positions. The card shows
+> this straight away, but it's best to arrange the matrix first and select afterwards.
 
-The picture is **bands rather than the box you drew**, because an added block is a second run and a matrix folded to fit puts many lines on one block. The two ports are independent lists rather than the block where they cross, which is why a wide drag reads as a cross. To take whole rows, drag the full width of the plot.
+The selection is drawn as bands across the plot, not as the box you dragged. Rows and columns are two separate lists, not the block where they cross, so a wide drag shows up as a cross. To select whole rows, drag across the full width of the plot.
 
-> [!NOTE] A single cell is still a row and a column
-> The two ports are independent lists, so shift+⌘-clicking one cell adds its row to `Selected Rows` and its column to `Selected Columns` — it does not name the pair. Clicking a second cell elsewhere gives you two rows and two columns, which is four cells' worth of cross rather than the two you pointed at.
+> [!NOTE] One cell means one row and one column
+> Shift+⌘-clicking a cell adds its row to `Selected Rows` and its column to `Selected Columns`; it
+> does not record the pair. Clicking a second cell elsewhere gives you two rows and two columns,
+> i.e. four cells' worth of cross, not the two cells you clicked.
 
-## More cells than pixels
+## Large matrices
 
-The matrix is folded onto a grid of at most one cell per pixel, so drawing costs the card rather than the data — millions of cells are fine.
+The heatmap never draws more than about one cell per pixel. Bigger matrices are folded into blocks, so even matrices with millions of cells are fine.
 
-> [!WARNING] A folded block keeps its **strongest** cell, never the mean
-> Averaging one strong connection across the hundred empty cells beside it would put it near the
-> bottom of the ramp, and a connectivity matrix is mostly empty. The tooltip names the real row,
-> column and value, and says `strongest of ~N cells` beside it.
+> [!WARNING] Blocks show their strongest cell
+> When several cells are folded into one block, the block shows the strongest value, not the
+> mean. In a mostly empty connectivity matrix, averaging would hide a single strong connection
+> among its empty neighbours. The tooltip shows the actual row, column and value, followed by
+> `strongest of ~N cells`.
 
-Axis labels are thinned to a legible pitch when there are more of them than fit, and the caption counts what it dropped.
+When there are more axis labels than fit, only some are drawn and the caption says how many were dropped.
 
 ## Zoom and pan
 
-In the expanded view, scroll to zoom about the pointer, drag to pan, and double-click or press ⤢ to see the whole matrix again. Zooming in re-folds only what is on screen, so a matrix that was blocks at full size becomes real cells with their own names and values; the labels are re-thinned for the room the zoom gives them and never shrink. The colour scale stays the whole matrix's, so a cell's colour means the same thing at every zoom.
+In the expanded view, scroll to zoom in around the pointer, drag to pan, and double-click or press ⤢ to see the whole matrix again. When you zoom in, only the visible part is folded, so blocks turn back into individual cells with their own labels and values. Labels stay the same size and reappear as there is room. The colour scale always covers the whole matrix, so a colour means the same value at every zoom level.

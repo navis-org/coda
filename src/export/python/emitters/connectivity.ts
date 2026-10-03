@@ -66,12 +66,12 @@ function populationNote(ctx: EmitContext): string[] {
   const population = unexpressedPopulation(ctx)
   if (population.length === 0) return []
   return ctx.note(
-    'Partners here are restricted to bodies neuPrint labels :Neuron, which is what ' +
-      'fetch_adjacencies does with an unconstrained far end. The Dataset node narrows the ' +
-      'population further (' +
+    'Partners here are limited to bodies that neuPrint labels :Neuron, which is what ' +
+      'fetch_adjacencies does when the partner is left open. The Dataset node also restricts ' +
+      'the population (' +
       population.join(', ') +
-      '), and NeuronCriteria cannot express that on a partner — so this cell can return a few ' +
-      'more partners than the canvas did.',
+      '), which NeuronCriteria cannot express for a partner, so this cell can return a few ' +
+      'more partners than Coda did.',
   )
 }
 
@@ -218,9 +218,9 @@ function customConnectivity(
 ): string[] {
   if (ctx.params.normalize === true) {
     return ctx.todo(
-      'Normalize divides by each neuron’s synapse total over the whole edge list, which this ' +
-        'notebook does not compute. Sum weight per postId (or preId) over the edge list and ' +
-        'divide by it, or untick Normalize.',
+      '`Normalize` divides by each neuron’s synapse total over the whole edge list, which ' +
+        'this notebook does not compute. Sum weight per postId (or preId) over the edge list ' +
+        'and divide by it, or untick `Normalize`.',
     )
   }
   const out = ctx.output('connections')
@@ -267,7 +267,7 @@ registerEmitter(
      */
     if (ctx.params.normalize === true) {
       return ctx.todo(
-        'Normalize has no neuprint-python equivalent for the "reconstructed partners only" denominator, and emitting only the "all synapses" one would answer a different question from the canvas. The all-synapses denominators are the upstream/downstream columns of fetch_neurons; weightNorm is weight divided by those.',
+        '`Normalize` cannot be exported: neuprint-python has no equivalent of the "reconstructed partners only" denominator. For the "all synapses" denominator, divide weight by the upstream/downstream columns of fetch_neurons to get weightNorm.',
       )
     }
     if (hops > 1 && usesRois) {
@@ -275,7 +275,7 @@ registerEmitter(
       // inside it is a different dedupe key and a different frontier, and a helper that got that
       // subtly wrong would be worse than a cell saying so.
       return ctx.todo(
-        'The region options are written against the one-hop fetch_adjacencies call; the multi-hop traversal helper works one row per pair. Set Hops to 1, or drop the region options.',
+        'The region options can only be exported for one hop, because the multi-hop traversal helper returns one row per neuron pair. Set `Hops` to 1, or clear `Regions` and untick `Split by region`.',
       )
     }
 
@@ -288,7 +288,7 @@ registerEmitter(
     if (properties.length > 0) {
       if (hops > 1) {
         return ctx.todo(
-          `Edge properties (${properties.join(', ')}) are exported for one hop. The multi-hop traversal helper fetches through fetch_adjacencies, which returns weight and nothing else about a connection. Set Hops to 1, or clear Edge properties.`,
+          `\`Edge properties\` (${properties.join(', ')}) can only be exported for one hop, because the multi-hop traversal helper uses fetch_adjacencies, which returns only each connection's weight. Set \`Hops\` to 1, or clear \`Edge properties\`.`,
         )
       }
       return cypherConnectivity(ctx, out, neurons, c, properties)
@@ -382,9 +382,9 @@ registerEmitter(
 
     const note = rois.length
       ? [
-          `# NOTE: fetch_adjacencies applies min_total_weight across every ROI, where Coda's`,
-          `# Min weight applies to the total *inside* the regions you named. A connection sitting`,
-          `# either side of ${minWeight} can therefore differ between this cell and the canvas.`,
+          `# NOTE: fetch_adjacencies applies min_total_weight to the total across every ROI, while`,
+          `# Coda's \`Min weight\` applies to the total inside the regions you named. Connections`,
+          `# close to ${minWeight} can therefore differ between this cell and Coda.`,
         ]
       : []
 
@@ -462,14 +462,10 @@ registerHelper({
   needs: ['coda_ids'],
   source: [
     'def coda_endpoint_neurons(connections, seed_ids=None):',
-    '    """The neurons an edge list is about: the seeds, then every partner, one row each.',
+    '    """List the neurons in an edge list: the seeds, then every partner, one row each.',
     '',
-    "    Coda's Connectivity node emits this beside the edge list so a partner set can go",
-    '    straight back into an adjacency query without being reassembled from two columns.',
-    '',
-    '    The seeds are included whether or not any edge survived min_weight. Both ends of the',
-    '    edge list only cover the seeds that turned out to be wired to something, and a seed',
-    '    dropping out of the set in silence is what this exists to avoid.',
+    "    This is the Neuron Set output of Coda's Connectivity node. Seeds are always included,",
+    '    even those left without edges after min_weight.',
     '    """',
     '    frames = []',
     '    if seed_ids is not None:',
@@ -486,8 +482,8 @@ registerHelper({
     '',
     '    rows = pd.concat(frames, ignore_index=True)',
     "    rows['type'] = rows['type'].replace('', None)",
-    '    # First appearance decides the order; the first non-empty type wins, which need not be',
-    '    # the same row -- a neuron can arrive as an untyped seed and be typed by an edge later.',
+    '    # Order by first appearance, but take the first non-empty type, which may come from',
+    '    # a later row (e.g. an untyped seed typed by an edge).',
     '    typed = (',
     "        rows.dropna(subset=['type'])",
     "        .drop_duplicates(subset='neuronId')",
@@ -515,21 +511,20 @@ registerHelper({
   requires: [['pandas']],
   source: [
     'def coda_walk(seed_ids, direction, hops, one_hop):',
-    '    """Coda\'s Connectivity walk, breadth first, whatever answers a hop.',
+    '    """Walk the connectome breadth-first from the seeds, as Coda\'s Connectivity node.',
     '',
-    "    `one_hop(ids, way)` returns the edges leaving `ids` that way ('downstream' or 'upstream')",
-    '    as preId/preType -> postId/postType, weight, ids as text. Returned: those columns, hop and',
-    '    direction, every row oriented the way the synapse points.',
+    "    `one_hop(ids, way)` returns the edges leaving `ids` in direction `way` ('downstream' or",
+    "    'upstream') with columns preId, preType, postId, postType and weight (ids as text).",
+    '    The result has the same columns plus `hop` and `direction`, each row oriented from',
+    '    presynaptic to postsynaptic.',
     '',
-    '    Three rules worth keeping, each of which silently changes the answer if dropped:',
+    '    Notes:',
     '',
-    '    * A neuron is expanded at most once. Connectomes are full of recurrent loops, so a',
-    '      walk that re-expands a visited neuron does not terminate. The edge back into an',
-    '      already-visited neuron is still reported; only the expansion is skipped.',
-    '    * An edge re-found at a later hop keeps the hop and direction it was first given,',
-    '      so the label says something about the graph rather than about the walk order.',
-    '    * direction="both" expands both ways at every hop -- the undirected ball, not two',
-    '      cones. That is what finds the neurons sharing input with a seed.',
+    '    * Each neuron is expanded at most once, so recurrent loops do not repeat. Edges back',
+    '      into visited neurons are still reported.',
+    '    * An edge found again at a later hop keeps the hop and direction it was first found at.',
+    '    * direction="both" expands both ways at every hop, so it also finds neurons that share',
+    '      inputs with a seed.',
     '    """',
     "    columns = ['preId', 'preType', 'postId', 'postType', 'weight']",
     "    ways = {'both': ['downstream', 'upstream'], 'inputs': ['upstream']}.get(direction, ['downstream'])",
@@ -544,8 +539,7 @@ registerHelper({
     '            for row in one_hop(todo, way).reindex(columns=columns).itertuples(index=False):',
     '                key = (row.preId, row.postId)',
     '                if key in seen:',
-    '                    # Reached from the other end at this same hop: an edge internal to the',
-    '                    # frontier, which is the one case that earns the "both" label.',
+    '                    # Found from both ends at the same hop: label it "both".',
     '                    if seen[key][0] == hop and seen[key][1] != way:',
     "                        seen[key][1] = 'both'",
     '                    continue',
@@ -567,11 +561,10 @@ registerHelper({
   needs: ['coda_ids', 'coda_walk'],
   source: [
     'def coda_traverse_connectivity(seed_ids, direction, hops, min_weight, all_segments, client):',
-    '    """Coda\'s Connectivity node against neuPrint: `coda_walk`, one hop a fetch_adjacencies call.',
+    '    """Run Coda\'s Connectivity node against neuPrint, one fetch_adjacencies call per hop.',
     '',
-    '    all_segments=False keeps only partners neuPrint labels :Neuron, which is what an',
-    "    unconstrained NeuronCriteria already means and what bounds the next hop's frontier.",
-    '    True matches :Segment instead -- every body, fragments included.',
+    '    With all_segments=False only partners labelled :Neuron are kept (and expanded at the',
+    '    next hop). With all_segments=True every body counts, fragments included.',
     '    """',
     '    far = NeuronCriteria(label="Segment", client=client) if all_segments else None',
     '',

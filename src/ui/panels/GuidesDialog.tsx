@@ -101,9 +101,9 @@ function Dialog() {
       <div className="guides__body">
         <div className="guides__walk">
           <p className="guides__lede">
-            Coda has {TOURS.length} short guides that run <strong>inside the editor</strong>,
-            pointing at things in place. If you only take one, take the first — it is twenty
-            seconds, and it names every control the other three talk about.
+            Coda has {TOURS.length} short guides that run <strong>inside the editor</strong> and
+            point at things as you go. If you only have time for one, take the first: it takes
+            about twenty seconds and labels every control the other three talk about.
           </p>
 
           <ul className="guides__list">
@@ -149,8 +149,8 @@ function Dialog() {
           </h3>
           <VideoEmbed video={FIRST_WORKFLOW} />
           <p className="guides__watch-blurb">
-            Two minutes, one workflow, start to finish: a real connectome, a search, two views
-            and a dashboard.
+            A two-minute video building one workflow from start to finish: a real connectome, a
+            search, two views and a dashboard.
           </p>
         </section>
       </div>

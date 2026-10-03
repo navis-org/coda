@@ -1,9 +1,9 @@
-## The shape of a brain region, on a wire
+## What ROI Meshes does
 
-Every other `ROI` node answers a question about regions with a **table**. This one answers with their **shapes**, so a scene can put an arbour inside the volume it innervates.
+ROI Meshes fetches the 3D shapes of a dataset's brain regions (neuropils), so that you can show neurons inside the regions they innervate. The other ROI nodes give you tables with numbers; this one gives you meshes. All it needs is a Dataset:
 
 ```coda-graph
-caption: The volumes and the neurons meet at the viewer. Both are fetched from the same dataset, so they are already in the same space.
+caption: Show neurons together with the regions they innervate.
 dataset.hemibrain as ds
 neuron.findNeurons as find
 neuron.skeletons as skel
@@ -17,43 +17,43 @@ skel -> view:skeletons
 rois:meshes -> view:volumes
 ```
 
-It needs nothing but a Dataset: like `ROI Completeness`, it asks about the *volume* rather than about a list of cells.
+Because the neurons and the regions come from the same dataset, they are already in the same space.
 
-## Empty means the set that tiles the volume
+## Choosing regions
 
 ```coda-params
-caption: Leave it empty and the source decides — which is what you want, because it knows which of its regions nest.
+caption: Leave Regions empty to get the primary set.
 neuron.roiMeshes: rois
 ```
 
-The published region list **nests**. Hemibrain lists 229 regions of which 63 tile the brain; male-CNS lists 5,619 of which 144. So "every region" is not a bigger version of the right answer — it is thousands of requests producing a picture in which every shell is drawn inside another one.
+If you leave `Regions` empty, you get the **primary** regions, i.e. the ones that together tile the brain without overlapping. That is usually what you want, because a dataset's full list of regions is nested: the hemibrain lists 229 regions of which 63 are primary, the male CNS lists 5,619 of which 144 are primary. Fetching all of them would mean thousands of requests, and a picture in which every region is drawn inside another one.
 
-An empty picker therefore means the **primary set**. Name regions explicitly when you want a few; the picker offers exactly what the connected dataset publishes.
+To fetch just a few regions, pick them by name; the list offers exactly the regions the dataset publishes.
 
-A `Neuroglancer Source` that publishes meshes but no names — FlyWire's neuropil bucket is one — has nothing to list. There the picker's `+` takes typed entries instead: type or paste the segment ids of the regions you want, and each shell arrives named by its id. Empty asks for nothing on such a source, since nothing can say what the whole set is.
+Some sources publish region meshes without names, for example FlyWire's neuropil meshes read through a `Neuroglancer Source`. There, the picker lets you type or paste the segment ids of the regions instead, and each mesh is named by its id. On such a source, leaving the picker empty fetches nothing.
 
-> [!WARNING] One request per region, and they are not small
-> A whole primary set runs to 29–62 MB — four to nine times a whole-dataset neuron index. That is
-> why this node is `expensive`: nothing is fetched until you press Run.
+> [!WARNING] Region meshes are large
+> Each region is a separate request, and the full primary set comes to 29–62 MB. The node
+> therefore only runs when you press Run.
 
-## What arrives
+## Output
 
-A `Volumes` output carrying one mesh per region, with an attribute row each:
+The `Volumes` output contains one mesh per region, with these attributes:
 
-| Column | What it is |
-| --- | --- |
-| `roi` | the region's name, which is also the mesh's own id |
-| `primary` | whether it belongs to the set that tiles the volume |
+| Column    | What it is                                              |
+| --------- | ------------------------------------------------------- |
+| `roi`     | the name of the region (also the id of the mesh)        |
+| `primary` | whether the region is one of the primary regions        |
 
-Both are ordinary columns, so `Volume colour` on the 3D View can colour by either — `by category` on `roi` gives every neuropil its own hue, and on `primary` it separates the tiling set from the ones nested inside it.
+You can use either column for `Volume colour` in the [3D View](#out.viewer3d): "by category" on `roi` gives every region its own colour, and on `primary` it distinguishes primary regions from the ones nested inside them.
 
-> [!NOTE] These are display surfaces, not measurements
-> neuPrint publishes region meshes for visualisation and says so: they are decimated, so a volume
-> or a surface area computed off one is an approximation of a drawing. Use `ROI Counts` and
-> `ROI Completeness` for anything numeric.
+> [!NOTE] For display only
+> These meshes are simplified (decimated) for visualisation, so volumes or surface areas computed
+> from them are only approximations. For numbers, use [ROI Counts](#neuron.roiCounts) or
+> [ROI Completeness](#neuron.roiCompleteness).
 
-## Where they go
+## Showing regions in the 3D View
 
-The 3D View's `Volumes` socket, which is a **second** meshes input beside `Meshes` and not the same one — that is what lets a shell and a neuron each keep their own colour and opacity. `Volume opacity` starts at 0.12, because a shell is drawn so that something else can be seen inside it.
+Wire the output into the 3D View's `Volumes` input. This is a separate input from `Meshes`, so that regions and neurons can have their own colour and opacity. `Volume opacity` starts at 0.12, so you can see the neurons inside the regions.
 
-Nothing stops you wiring these into the ordinary `Meshes` socket instead. It will draw, and it will draw opaque, in the same encoding as your neurons.
+You can also wire the regions into the ordinary `Meshes` input. They will then be drawn opaque, with the same colour settings as your neurons.

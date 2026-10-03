@@ -456,10 +456,10 @@ const STARTS: WizardOption<StartId>[] = [
     requires: 'neuronIndex',
     label: 'Interactive Search with Thumbnails',
     blurb:
-      'Uses the `Explore Dataset` node: free-form search the full neuron table in the browser, tick the ones you want.',
+      'Uses the `Explore Dataset` node: search the full neuron table in your browser and tick the neurons you want.',
     glyph: 'neuron.explore',
     hint: {
-      text: '**Search and tick neurons here**, then Run. Everything downstream reads the ticked set — a card further along saying it has no neurons is the graph waiting for you, not a mistake.',
+      text: '**Search and tick neurons here**, then Run. Everything downstream uses the ticked neurons, so until you tick some, the nodes further along will say they have no neurons.',
       tone: 'tip',
     },
   },
@@ -470,17 +470,17 @@ const STARTS: WizardOption<StartId>[] = [
       'Uses the `Find Neurons` node: filter by type, status or region. Best when you already know what to ask for.',
     glyph: 'neuron.findNeurons',
     hint: {
-      text: '**Set a filter here**, then Run \u2014 with none set this node returns no neurons, since these run against a live server. A type like `LC.*` is a regex, anchored the way the backend anchors it.',
+      text: '**Set a filter here**, then Run. With no filter set, this node returns no neurons. A type like `LC.*` is a regular expression and must match the whole name, so it matches `LC4` but not `LPLC1`.',
       tone: 'tip',
     },
   },
   {
     id: 'ids',
     label: 'Paste IDs',
-    blurb: 'Copy a list of body or root ids you already have into Coda.',
+    blurb: 'Paste a list of body or root ids you already have.',
     glyph: 'neuron.inputIds',
     hint: {
-      text: '**Paste body ids here**, one per line, then Run. Ids are text, never numbers — an 18-digit root id does not survive being parsed as one.',
+      text: '**Paste your ids here**, one per line, then Run.',
       tone: 'tip',
     },
   },
@@ -515,30 +515,30 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     id: 'partners',
     label: 'Connectivity partners',
     blurb:
-      'Fetch up- and/or downstream partners → aggregate by type and sort such that strongest partners appear first.',
+      'Fetch upstream and/or downstream partners, group them by type and sort so the strongest partners come first.',
     glyph: 'neuron.connectivity',
     hint: {
-      text: 'Connectivity → group → sort, the chain most connectivity questions are built from. `Min weight` drops the weak pairs at the server rather than after the download.',
+      text: 'Connectivity → Group By → Sort is the basis for most connectivity questions. `Min weight` filters out weak connections on the server, so less data is downloaded.',
     },
   },
   {
     id: 'matrix',
     label: 'Adjacency matrix',
     blurb:
-      'All-by-all connectivity. Can feed into heatmap, clustering or network visualization/analysis.',
+      'All-by-all connectivity. Can feed into a heatmap, clustering, or a network visualization or analysis.',
     glyph: 'neuron.adjacency',
     hint: {
-      text: 'Adjacency between the same set on both axes. Row-normalising makes each row sum to 1, so rows with very different totals can still be compared.',
+      text: 'The same neurons on both axes. Row-normalising makes each row sum to 1, so you can compare rows with very different totals.',
     },
   },
   {
     id: 'influence',
     label: 'Influence score',
     blurb:
-      'Influence → Pivot: how strongly every neuron drives your set, summed over every path rather than along one route.',
+      'Influence → Pivot: how strongly each neuron drives your neurons, summed over all paths between them.',
     glyph: 'neuron.influence',
     hint: {
-      text: 'The influence score of Bates et al., bounded to a few hops. Scores are a lower bound and the card says how much it left out. Press `?` for what the number means.',
+      text: 'The influence score from Bates et al., limited to a few hops. Scores are therefore a lower bound, and the node tells you how much was left out. Press `?` to learn what the number means.',
     },
   },
   {
@@ -557,7 +557,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     blurb: 'Type-level edges as a node-link network graph and/or the graph metrics over it.',
     glyph: 'net.build',
     hint: {
-      text: 'Grouping by both ends turns neuron-to-neuron rows into the type-level edge list a network is built from.',
+      text: 'Grouping by both ends turns the neuron-to-neuron connections into type-to-type connections, which the network is built from.',
     },
   },
   {
@@ -566,7 +566,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     blurb: 'Partner Vectors → Similarity Matrix → Linkage, over the shared partners.',
     glyph: 'neuron.partnerVectors',
     hint: {
-      text: 'Partner Vectors makes one vector per neuron. There is deliberately no Pivot in this chain — that is what keeps it from being a hundred million cells.',
+      text: 'Partner Vectors makes one vector of partner counts per neuron, Similarity Matrix compares every pair of vectors, and Linkage clusters the result.',
     },
   },
   {
@@ -576,7 +576,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     blurb: 'Skeletons and synapse locations, drawn in one scene.',
     glyph: 'neuron.skeletons',
     hint: {
-      text: 'Two queries off one search: the arbours and the synapse points, drawn in the same scene.',
+      text: 'Two queries off one search: one fetches the skeletons and the other the synapses. Both are drawn in the same 3D scene.',
     },
   },
   {
@@ -586,7 +586,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     blurb: 'All-by-all NBLAST over their skeletons → Linkage.',
     glyph: 'neuron.nblast',
     hint: {
-      text: 'NBLAST is all-by-all, so the work grows with the **square** of the set. The search above is capped for that reason; widen it deliberately.',
+      text: 'NBLAST compares every neuron with every other, so the work grows with the **square** of the number of neurons. That is why the search above is capped. Raise the limit with care.',
       tone: 'warning',
     },
   },
@@ -607,7 +607,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     blurb: 'No analysis, just the data. Build on it with your own queries and viewers.',
     glyph: 'out.table',
     hint: {
-      text: 'No analysis yet. Add nodes to the right of this one — press Tab for the node browser.',
+      text: 'No analysis yet. Add nodes to the right of this one: press Tab to open the node browser.',
     },
   },
 ]
@@ -639,7 +639,7 @@ const CROSS_ANALYSES: WizardOption<AnalysisId>[] = [
       'Match Cell Types → Compare Connectivity: the same type-to-type connection counted in each connectome, side by side.',
     glyph: 'compare.connectivity',
     hint: {
-      text: '**Check the type columns on the mapper** — they are pre-filled from what each dataset usually publishes, and a cross-reference column written in the other dataset’s namespace is what a match is made of. Read the `present` columns before the weights: 0 is a real absence, empty means the type is missing there.',
+      text: '**Check the type columns on Match Cell Types**; they are pre-filled with what each dataset usually publishes. Read the `present` columns first: a weight of 0 means no connection, an empty one means the type is missing.',
       tone: 'tip',
     },
   },
@@ -651,7 +651,7 @@ const CROSS_ANALYSES: WizardOption<AnalysisId>[] = [
       'Partner Vectors → Qualify Ids → Stack Tables → Similarity Matrix → Linkage: both connectomes’ neurons on one tree, matched by who they wire with.',
     glyph: 'core.qualifyIds',
     hint: {
-      text: 'Every neuron is a vector over the **shared** label space, which is what the mapper is wired into Partner Vectors for — a partner outside it can only exist in one dataset, so it is dropped rather than counted as a difference. A mixed clade is a matched group.',
+      text: 'Each neuron becomes a vector over the cell types **both** datasets share; partners of other types are dropped. A branch of the tree mixing neurons from both datasets is a matched group.',
       tone: 'tip',
     },
   },
@@ -664,7 +664,7 @@ const CROSS_ANALYSES: WizardOption<AnalysisId>[] = [
       'Transform Neurons into JRC2018U → Stack Neurons: every dataset’s arbours drawn in one scene.',
     glyph: 'neuron.xform',
     hint: {
-      text: 'One landmark transform per dataset, straight into the shared template. The scene colours by the column Stack Neurons adds, which is what lets you tell the brains apart.',
+      text: 'Each dataset is transformed into the shared template. The 3D scene colours neurons by the column Stack Neurons adds, so you can tell the datasets apart.',
     },
   },
   {
@@ -673,10 +673,10 @@ const CROSS_ANALYSES: WizardOption<AnalysisId>[] = [
     requiresTemplateSpace: true,
     label: 'NBLAST across datasets',
     blurb:
-      'Transform → Stack → NBLAST → Linkage: which neurons are the same shape in both brains.',
+      'Transform → Stack → NBLAST → Linkage: find neurons that have the same shape in both brains.',
     glyph: 'neuron.nblast',
     hint: {
-      text: 'NBLAST is all-by-all over the **combined** set, so the work grows with the square of every dataset’s search put together. Each search above is capped for that reason; widen them deliberately.',
+      text: 'NBLAST compares every neuron with every other across **all** datasets, so the work grows with the square of the total number of neurons. That is why each search above is capped. Raise the limits with care.',
       tone: 'warning',
     },
   },
@@ -716,7 +716,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'A table',
     blurb: 'Rows and columns, sortable and filterable in place.',
     hint: {
-      text: 'A table to inspect the data in a familiar way: filter, sort, double click to expand.',
+      text: 'A table to inspect the data in a familiar way: filter, sort, double-click to expand.',
     },
   },
   {
@@ -730,7 +730,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'A pie chart',
     blurb: 'Shares of the total, with the tail folded into one slice.',
     hint: {
-      text: 'Everything past the eighth slice folds into “Other” — a pie with forty slices is a colour key, not a chart.',
+      text: 'Everything past the eighth slice is folded into “Other”.',
     },
   },
   {
@@ -745,9 +745,9 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     id: 'heatmap',
     label: 'A heatmap',
     blurb:
-      'The matrix drawn as cells, one colour ramp. Expand for additional options (palette, filters, sorting, etc).',
+      'The matrix drawn as cells, one colour ramp. Expand for additional options (palette, filters, sorting, etc.).',
     hint: {
-      text: 'Sequential colour, because these values have a zero and only go up. Turn values on to read the numbers off the cells.',
+      text: 'Uses a sequential colour ramp, since these values start at zero and only go up. Turn on `Show values` to print the numbers in the cells.',
     },
   },
   {
@@ -755,7 +755,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'A network diagram',
     blurb: 'Nodes and links, laid out feed-forward.',
     hint: {
-      text: 'Node colour is the type, size is total outgoing weight, link width is the synapse count. Drag a node to move it; right-click for the neighbourhood.',
+      text: 'Node colour shows the type, node size the total outgoing weight, and link width the synapse count. Drag a node to move it; right-click it to select its neighbours.',
     },
   },
   {
@@ -763,15 +763,15 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'A flow chart',
     blurb: 'The circuit diagram: labelled boxes in columns, arrows as thick as the connection.',
     hint: {
-      text: 'The figure a connectome paper prints, and what a dozen-node path result wants — the Network Viewer’s force layout has nothing to arrange at this size. Feedback connections are drawn dashed rather than hidden.',
+      text: 'The kind of circuit diagram you see in connectome papers, which works well for small results like a dozen-node path. Feedback connections are drawn dashed.',
     },
   },
   {
     id: 'sankey',
     label: 'A Sankey diagram',
-    blurb: 'The drive itself, hop by hop: bands as wide as the influence that crossed.',
+    blurb: 'Influence passed on hop by hop, with bands as wide as the influence they carry.',
     hint: {
-      text: 'Every band is drive that crossed, so a column’s total is the whole of what reached that depth. The caption measures how much stops short instead of assuming the flow conserves — the card above says why it does.',
+      text: 'Each band is influence passed from one step to the next, so a column’s total is all the influence that reached that depth. The caption says how much does not carry on; the Influence node’s warnings say why.',
     },
   },
   {
@@ -779,15 +779,15 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'A rank plot',
     blurb: 'One dot per neuron, largest score first, with the running share underneath.',
     hint: {
-      text: 'Both axes are logarithmic, because influence scores span decades and a linear axis draws all but the largest as one flat line. Seeds are ringed and left out of the share below, since they carry most of it.',
+      text: 'Both axes are logarithmic because influence scores span many orders of magnitude. Your starting neurons are circled and left out of the share plotted below, since they would dominate it.',
     },
   },
   {
     id: 'metrics',
     label: 'Graph metrics',
-    blurb: 'Density, components, degree distribution — the numbers rather than the picture.',
+    blurb: 'Numbers such as density, components and the degree distribution.',
     hint: {
-      text: 'Every measure here is O(V + E), so the card is live as you edit. Centrality is a separate node, because it is not.',
+      text: 'These measures are quick to compute, so the node updates as you edit. Centrality measures are slower and live in a separate node, Network Centrality.',
     },
   },
   {
@@ -795,7 +795,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'A 3D scene',
     blurb: 'Skeletons and synapses, rendered in the browser.',
     hint: {
-      text: 'Skeletons coloured by type, synapse points by polarity. Scroll to zoom, drag to orbit.',
+      text: 'Skeletons are coloured by type, synapses by whether they are pre- or postsynaptic. Scroll to zoom, drag to rotate.',
     },
   },
   {
@@ -812,7 +812,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     blurb:
       'One neuron at a time: its arbour in 3D, its morphometrics, and where a chosen partner synapses onto it.',
     hint: {
-      text: 'Page through the neurons with ‹ ›. Pick a partner in the rail to light up exactly where it connects. The Morphometrics port carries the numbers for the whole set.',
+      text: 'Page through the neurons with ‹ ›. Pick a partner in the side panel to highlight where it connects. The Morphometrics output has the numbers for all neurons.',
     },
   },
   {
@@ -820,7 +820,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'A scatter plot',
     blurb: 'One point per type pair, each dataset’s count on an axis.',
     hint: {
-      text: 'A pair on the diagonal is wired the same in both; one far off it is the asymmetry. Both axes are log, because synapse counts span orders of magnitude — a pair absent from one dataset has no logarithm and the caption says how many were dropped.',
+      text: 'A pair on the diagonal is wired the same in both datasets; one far off it is wired differently. Both axes are logarithmic, so pairs missing from one dataset are dropped; the caption says how many.',
     },
   },
   {

@@ -299,9 +299,9 @@ export function DashboardView() {
             <strong>Nothing on {where} yet.</strong>
           </p>
           <p>
-            Add the nodes worth looking at — from <em>+ Add node</em> above, or by
-            right-clicking a card on the canvas. A cell points at the node; the graph stays the
-            source of truth.
+            Add the nodes you want to see with <em>+ Add node</em> above, or right-click a card
+            on the canvas. A cell shows that node, so changes you make on the canvas show up
+            here too.
           </p>
         </div>
       ) : (

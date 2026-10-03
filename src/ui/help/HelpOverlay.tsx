@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getNodeDef } from '../../core/registry'
 import { buildFigure, isFigureLang } from '../../help/figures'
 import type { HelpDoc } from '../../help/registry'
-import { helpImageUrl, loadHelpDoc } from '../../help/registry'
+import { hasHelp, helpImageUrl, loadHelpDoc } from '../../help/registry'
 import { seeAlsoFor } from '../../help/seeAlso'
 import { useGraphStore } from '../../store/graphStore'
 import { MarkdownBlocks, MarkdownInlines } from '../MarkdownView'
@@ -210,17 +210,24 @@ function OpenInWorkflow({ type, onOpened }: { type: string; onOpened: () => void
  * Only the name: a whole clickable row puts a click target under a sentence somebody is trying to
  * select, and the sentence is the half they are reading.
  *
+ * A related node with no document of its own is still listed, by name and description, but its
+ * name is plain text: there is nothing to open. A table limited to documented nodes left out
+ * Neuroglancer Source under Neuroglancer, and Sort, Synapses and the charts everywhere.
+ *
  * Rendered only once the document is `ready`. Under "Loading…" it would be a table of links to
  * nowhere in particular, and under the no-document message it would be the only thing on screen.
  */
 function SeeAlso({ type, onNavigate }: { type: string; onNavigate: (type: string) => void }) {
   const related = useMemo(
     () =>
-      seeAlsoFor(type, (other) => getNodeDef(other)?.label ?? other).map((other) => ({
-        type: other,
-        label: getNodeDef(other)?.label ?? other,
-        description: parseInline(getNodeDef(other)?.description ?? ''),
-      })),
+      seeAlsoFor(type, (other) => getNodeDef(other)?.label ?? other)
+        .filter((other) => getNodeDef(other))
+        .map((other) => ({
+          type: other,
+          label: getNodeDef(other)?.label ?? other,
+          documented: hasHelp(other),
+          description: parseInline(getNodeDef(other)?.description ?? ''),
+        })),
     [type],
   )
   if (!related.length) return null
@@ -239,13 +246,17 @@ function SeeAlso({ type, onNavigate }: { type: string; onNavigate: (type: string
             {related.map((entry) => (
               <tr key={entry.type}>
                 <td>
-                  <button
-                    type="button"
-                    className="help-see__item"
-                    onClick={() => onNavigate(entry.type)}
-                  >
-                    {entry.label}
-                  </button>
+                  {entry.documented ? (
+                    <button
+                      type="button"
+                      className="help-see__item"
+                      onClick={() => onNavigate(entry.type)}
+                    >
+                      {entry.label}
+                    </button>
+                  ) : (
+                    <span className="help-see__name">{entry.label}</span>
+                  )}
                 </td>
                 <td className="help-see__desc">
                   <MarkdownInlines nodes={entry.description} />

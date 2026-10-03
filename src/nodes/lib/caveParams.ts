@@ -202,13 +202,15 @@ export function caveDatastackIssues(
   const foreign = foreignBackend(inputType, 'cave')
   if (foreign) {
     return [
-      `A ${foreign} dataset names no CAVE datastack. Wire a CAVE Dataset here, or ` +
-        `unwire this input and name the datastack.`,
+      `A ${foreign} dataset has no CAVE datastack. Wire a CAVE Dataset into \`Dataset\`, or ` +
+        `unwire it and type a \`Datastack\`.`,
     ]
   }
   const datastack = String(params.datastack ?? '').trim()
   if (!inputType && !datastack) {
-    return ['Name a datastack, e.g. flywire_fafb_public:783 — or wire one to the Dataset input']
+    return [
+      'Name a datastack, e.g. flywire_fafb_public:783, or wire a CAVE Dataset into `Dataset`.',
+    ]
   }
   /*
    * The typed half. `datastack:materialization` is the whole grammar and the field's help says
@@ -218,7 +220,7 @@ export function caveDatastackIssues(
    */
   if (!inputType && !splitDatasetId(datastack)) {
     return [
-      `"${datastack}" names no materialization — CAVE numbers them, e.g. ${datastack}:783`,
+      `"${datastack}" has no materialization number. Add one after a colon, e.g. ${datastack}:783.`,
     ]
   }
   return []

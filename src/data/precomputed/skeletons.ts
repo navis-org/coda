@@ -110,7 +110,7 @@ export async function openSkeletonSource(
   const source = skeletonSourceFromInfo(base, info)
   if (!source) {
     throw new Error(
-      `${base} is ${info['@type'] ?? 'an info with no @type'}, not a skeleton source`,
+      `${base} is not a skeleton source (its info says ${info['@type'] ?? 'no @type'})`,
     )
   }
   return source

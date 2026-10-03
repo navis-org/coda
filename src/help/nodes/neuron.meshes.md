@@ -1,7 +1,9 @@
-Good for visualisation, and expensive to download and keep in memory.
+## What Meshes does
+
+Meshes fetches the surface meshes for the incoming neurons. Meshes are great for visualisation, but they are expensive to download and keep in memory. The node works just like [Skeletons](#neuron.skeletons), and the two can be shown in the same scene:
 
 ```coda-graph
-caption: Same shape as [Skeletons](#neuron.skeletons); the two can share a scene.
+caption: Find neurons, fetch their meshes and show them in 3D.
 dataset.flywire as ds
 neuron.findNeurons as find
 neuron.meshes as mesh
@@ -12,34 +14,43 @@ find -> mesh:neurons
 mesh -> v3d:meshes
 ```
 
-## Detail is a budget for the whole batch, not per neuron
+## Level of detail
 
 ```coda-params
 neuron.meshes: detail
 ```
 
-Sources with levels of detail pick the finest level that fits, so **asking for more neurons gets you coarser ones**. Drop the neuron count, or raise the budget, if a mesh looks blocky.
+Some sources publish meshes at several levels of detail. For those, `Detail` sets a triangle budget for the *whole* set of neurons, and the node picks the finest level that fits into it. That means the more neurons you ask for, the coarser each of them will be. If your meshes look blocky, either fetch fewer neurons or raise the budget.
 
-Unlike neuroglancer, which loads the coarsest level and refines it as you zoom, this node does a single download at the requested detail.
+Unlike neuroglancer, which loads the coarsest level first and refines as you zoom in, this node downloads each mesh once, at the requested detail.
 
-> [!WARNING] A source with no levels of detail ignores this
-> The node still returns a mesh, at the same detail whatever the budget.
+> [!NOTE] Sources with only one level of detail
+> If a source publishes just one level, `Detail` is greyed out and has no effect. Use `Downsample`
+> (under the advanced settings) instead: 1 keeps full resolution (the default), 0 reduces each
+> mesh only as far as needed for a 3D view to draw it, and a number above 1 is a ratio (4 keeps
+> about a quarter of the triangles). Changing it re-fetches the meshes.
 
-> [!NOTE] Not every dataset has meshes where it has skeletons
-> A precomputed volume can resolve to a directory with nothing in it, which reports as neurons
-> that have no mesh. Try [Skeletons](#neuron.skeletons) before concluding the neuron is missing.
+> [!NOTE] Missing meshes
+> Not every dataset has meshes for every neuron that has a skeleton. If neurons come back without
+> a mesh, try [Skeletons](#neuron.skeletons) before concluding the neuron is missing.
 
 ## Carry fields
 
-A collection's attribute table is not the neuron table you wired in — the fetch builds its own, and on neuPrint that is seven columns (`neuronId`, `type`, `instance`, `status`, `size`, `points`, `cableLength`) however many properties the dataset publishes. **Carry fields** names columns of the incoming table to bring along, matched by `neuronId`:
+The meshes come with their own attribute table, which is built by the fetch and is not the same as the neuron table you wired in. On neuPrint, for example, it has seven columns (`neuronId`, `type`, `instance`, `status`, `size`, `points`, `cableLength`) no matter how many properties the dataset publishes.
+
+Use `Carry fields` to bring additional columns from the incoming neuron table along, matched by `neuronId`:
 
 ```coda-params
-caption: Whatever you carry is what [Split Neurons](#neuron.splitNeurons), the 3D View's colour picker and Download can see.
+caption: Carried columns can be used by Split Neurons, the 3D View's colour picker and Download.
 neuron.meshes: carry
 ```
 
-It carries what is on that table already — the dataset's own properties, an annotation chain's labels, a column a Relabel rewrote. A neuron the incoming table has no row for keeps its geometry and carries a blank; a neuron listed twice annotates from the first row rather than doubling. A carried column **replaces** one of the same name, keeping its position, which is how you override a stale `type`.
+You can carry any column of that table: the dataset's own properties, labels from an annotation chain, or a column rewritten by a Relabel. A few details:
 
-> [!WARNING] It is part of the provenance key, so changing it re-runs the fetch
-> The per-neuron geometry cache answers most of that without going back to the server, but the
-> node does go stale.
+- A neuron without a row in the incoming table keeps its mesh and gets an empty value.
+- A neuron listed twice takes its values from the first row (it is not duplicated).
+- A carried column replaces an existing column of the same name and keeps its position. You can use this to override an outdated `type`, for example.
+
+> [!NOTE] Changing Carry fields re-runs the node
+> Most meshes will come from the cache rather than the server, but the node does need to run
+> again.

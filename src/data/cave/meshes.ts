@@ -385,7 +385,7 @@ export async function readGrapheneMesh(
   const unaddressable = fragments.length - addressable.length
   if (addressable.length === 0) {
     throw new Error(
-      `This build cannot address any of the ${fragments.length} mesh fragments the ` +
+      `Coda cannot read any of the ${fragments.length} mesh fragments the ` +
         `manifest names for ${neuronId} (first: "${fragments[0]}").`,
     )
   }

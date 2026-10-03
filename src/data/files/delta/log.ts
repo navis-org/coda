@@ -343,7 +343,7 @@ function checkProtocol(protocol: NonNullable<Action['protocol']>): void {
   const unknown = (protocol.readerFeatures ?? []).filter((f) => !READER_FEATURES.has(f))
   if (unknown.length) {
     throw new Error(
-      `This Delta table uses ${unknown.join(', ')}, which Coda does not read yet — reading it ` +
+      `This Delta table uses ${unknown.join(', ')}, which Coda does not read yet. Reading it ` +
         'anyway could return rows the table does not hold.',
     )
   }

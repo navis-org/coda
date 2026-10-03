@@ -59,7 +59,7 @@ function headers(token: string | undefined): HeadersInit {
 /** The stored token, or the sentence saying where one goes — every write starts here. */
 function requireToken(): string {
   const token = getGithubToken()
-  if (!token) throw new Error('No GitHub token — add one in Connections ▸ Sharing.')
+  if (!token) throw new Error('No GitHub token. Add one in Connections ▸ Sharing.')
   return token
 }
 
@@ -88,14 +88,14 @@ async function refuse(response: Response, what: string): Promise<never> {
   let detail = ''
   try {
     const body = (await response.json()) as { message?: string }
-    detail = body.message ? ` — ${body.message}` : ''
+    detail = body.message ? ` (${body.message})` : ''
   } catch {
     // GitHub always sends a JSON body; a missing one is not worth a second message.
   }
   if (response.status === 401) {
     reportGithubAuthFailure('GitHub rejected the token.')
     throw new Error(
-      `GitHub rejected the token${detail}. Check it in Connections ▸ Sharing — it needs the "gist" scope.`,
+      `GitHub rejected the token${detail}. Check it in Connections ▸ Sharing; it needs the "gist" scope.`,
     )
   }
   if (response.status === 403 || response.status === 429) {

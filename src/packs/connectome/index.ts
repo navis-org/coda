@@ -28,7 +28,7 @@ export const connectome: PackDefinition = {
   id: 'connectome',
   label: 'Connectome',
   description:
-    'Synaptic connectivity: partners, paths, influence, synapses, and comparing connectomes.',
+    'Nodes for synaptic connectivity: partners, paths, influence scores, synapse locations, and comparisons between connectomes.',
   keepsBuiltInIds: true,
   glyph: 'neuron.connectivity',
   // The order these twelve registered in before they moved, so they keep it among themselves.

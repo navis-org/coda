@@ -219,7 +219,7 @@ describe('which datastack, refused on the card', () => {
   it.each(both)('%s refuses a Dataset from another backend, naming it', (type) => {
     const neuprint = T.dataset('neuprint', 'hemibrain:v1.2.1')
     expect(issues(type, { datastack: '', table: 'nuclei_v1' }, neuprint)[0]).toMatch(
-      /neuPrint dataset names no CAVE datastack/,
+      /neuPrint dataset has no CAVE datastack/,
     )
   })
 
@@ -227,7 +227,7 @@ describe('which datastack, refused on the card', () => {
   // obvious thing to type; it used to reach the same throw two layers down.
   it.each(both)('%s refuses a typed datastack with no materialization', (type) => {
     expect(issues(type, { datastack: 'flywire_fafb_public', table: 'nuclei_v1' })[0]).toMatch(
-      /names no materialization.*:783/,
+      /has no materialization number.*:783/,
     )
   })
 

@@ -454,8 +454,8 @@ export function compareConnectivity(
       .join(', ')
     warn.warn(
       `Totals over the shared labels differ by a factor of ${ratio.toFixed(1)} (${spread}). ` +
-        `A ratio between these columns is a ratio between two datasets' completeness as much as ` +
-        `between two brains — normalise before comparing them.`,
+        `A ratio between these columns reflects how complete each dataset is as much as the ` +
+        `biology, so normalise the weights before comparing them.`,
     )
   }
 

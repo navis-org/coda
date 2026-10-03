@@ -64,10 +64,9 @@ registerNode({
    * about the layering lives in `src/help/nodes/out.flowChart.md`.
    */
   guide:
-    'The circuit diagram of a feed-forward pathway — boxes in columns, arrows as thick as the ' +
-    'connection is strong, the synapse count on them. Made for the dozen nodes a shortest-path ' +
-    'result comes back with, where the Network Viewer’s force layout has nothing to arrange. ' +
-    'Feedback connections are drawn dashed rather than hidden.',
+    'Draws a small network as a circuit diagram: boxes in columns, arrows scaled by connection ' +
+    'strength and labelled with the weight. Typically wired from Paths; for networks of more ' +
+    'than a few dozen nodes use the Network Viewer instead. Feedback connections are dashed.',
   cost: 'cheap',
   // A viewer's card fills its wrapper — `category: 'visualisation'` is what makes that true.
   defaultSize: { width: 560, height: 380 },
@@ -102,7 +101,7 @@ registerNode({
         { value: 'lr', label: 'left to right' },
         { value: 'tb', label: 'top to bottom' },
       ],
-      help: 'Which way the signal flows. Left to right fits more layers on a wide card; top to bottom fits more boxes per layer.',
+      help: 'Which way the signal flows. "Left to right" fits more layers; "top to bottom" fits more boxes per layer.',
     },
     {
       id: 'layerColumn',
@@ -121,7 +120,7 @@ registerNode({
       optional: true,
       presentational: true,
       group: 'layout',
-      help: 'Which column decides each box’s column in the drawing. Empty lays it out by longest path, which is right for a Paths result, whose hop column is longest-path layering already. Point it at a column of your own where the network was assembled some other way — and at one that runs in the direction the signal does, or every connection draws as feedback.',
+      help: 'The column that sets each box’s layer. Empty uses longest path, which suits a Paths result. Values must increase in the direction of the signal, or connections draw as feedback.',
     },
     {
       id: 'labelColumn',
@@ -133,7 +132,7 @@ registerNode({
       optional: true,
       presentational: true,
       group: 'node',
-      help: 'What each box says. Empty uses the node id, which on a neuron-level network is an 18-digit root id — point this at type or instance to get a readable diagram.',
+      help: 'What each box says. Empty shows the node id; pick e.g. `type` or `instance` for a readable diagram.',
     },
     {
       id: 'foldPerLayer',
@@ -144,7 +143,7 @@ registerNode({
       step: 1,
       presentational: true,
       group: 'layout',
-      help: 'Keep this many boxes per layer, the busiest first, and fold the rest into one “+N others”. 0 keeps everything. Only the drawing changes — the Network output passes through whole.',
+      help: 'Keep this many boxes per layer, the busiest first, and fold the rest into “+N others”. 0 keeps everything. Only the drawing changes; the Network output is complete.',
     },
     {
       id: 'routing',
@@ -158,7 +157,7 @@ registerNode({
         { value: 'curved', label: 'curves' },
         { value: 'straight', label: 'straight lines' },
       ],
-      help: '"Right angles" and "curves" route around the boxes in between; "straight lines" joins the two ends directly and may cross whatever is in the way.',
+      help: '"Right angles" and "curves" route around boxes; "straight lines" may cross them.',
     },
 
     // ---- Arrows ----------------------------------------------------------
@@ -169,7 +168,7 @@ registerNode({
       default: true,
       presentational: true,
       group: 'link',
-      help: 'Arrow thickness follows the connection weight. Off draws every arrow the same, which is the honest choice on a network whose weights are not comparable.',
+      help: 'Scale arrow thickness by connection weight. Turn off if the weights are not comparable.',
     },
     {
       id: 'edgeLabels',
@@ -183,7 +182,7 @@ registerNode({
         { value: 'on', label: 'always' },
         { value: 'off', label: 'never' },
       ],
-      help: 'Print the weight on each arrow. "When there is room" draws them on a small diagram and drops them on a large one, and the caption says which happened.',
+      help: 'Print the weight on each arrow. "When there is room" drops them on large diagrams; the caption says so.',
     },
     {
       id: 'edgeLabelColumn',
@@ -196,7 +195,7 @@ registerNode({
       presentational: true,
       group: 'link',
       visibleIf: (params) => params.edgeLabels !== 'off',
-      help: 'Which edge column is printed on the arrows. Empty prints the weight. Point it at weightNorm on a normalised Connectivity or Paths result to label them as fractions.',
+      help: 'The edge column printed on the arrows. Empty prints the weight; pick `weightNorm` on a normalised result to show fractions.',
     },
 
     // ---- Boxes -----------------------------------------------------------
@@ -276,9 +275,9 @@ registerNode({
      */
     if (input.nodes.length > FLOW_NODES_WARN) {
       ctx.warn(
-        `${input.nodes.length.toLocaleString()} nodes is past what a flow chart ` +
-          `separates well (${FLOW_NODES_WARN.toLocaleString()}). Raise Fold past, filter ` +
-          `upstream, or use the Network Viewer, which is built for a graph this size.`,
+        `${input.nodes.length.toLocaleString()} nodes is more than a flow chart can lay out ` +
+          `clearly (${FLOW_NODES_WARN.toLocaleString()}). Use \`Fold past\` to fold the smaller ` +
+          `boxes in each layer, filter upstream, or use the Network Viewer, which handles graphs this size.`,
       )
     }
 

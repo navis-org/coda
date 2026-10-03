@@ -132,7 +132,7 @@ export function objProblem(mesh: ParsedMesh, text: string, what: string): string
   const head = text.trim().slice(0, 80).replace(/\s+/g, ' ')
   if (!head) return `${what} came back empty.`
   if (mesh.positions.length === 0) {
-    return `${what} is not a mesh — no vertices in ${text.length} bytes starting "${head}".`
+    return `${what} is not a mesh: there are no vertices in ${text.length} bytes starting "${head}".`
   }
   return `${what} has ${mesh.positions.length / 3} vertices but no faces.`
 }

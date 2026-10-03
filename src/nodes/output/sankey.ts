@@ -52,13 +52,9 @@ registerNode({
    * every `help` string, so this line is also the assistant's only prose about the node.
    */
   description:
-    'Draw layered flow as bands whose width is the quantity — a Sankey or alluvial diagram, from a table of layer, source, target and value.',
+    'Draw layered flow as bands whose width is the quantity: a Sankey or alluvial diagram, from a table of layer, source, target and value columns.',
   guide:
-    'Layered flow drawn as bands whose width is the quantity: where something came from, what ' +
-    'it passed through, and how much. Wire it to an Influence node’s Transfers port and it ' +
-    'needs no configuration. Because the mark claims that what arrives at a node also leaves ' +
-    'it, the caption measures how far from true that is on your data rather than assuming it — ' +
-    'a flow of synapse counts does not conserve, and the figure says so instead of pretending.',
+    'Draws layered flow as bands whose width is the quantity, e.g. how drive passes through successive layers. Wired to the Transfers port of an Influence node it needs no configuration. The caption reports how far the flow is from conserved, which synapse counts usually are not.',
   cost: 'cheap',
   // A viewer's card fills its wrapper — `category: 'visualisation'` is what makes that true.
   defaultSize: { width: 580, height: 440 },
@@ -96,7 +92,7 @@ registerNode({
       optional: true,
       presentational: true,
       group: 'flow',
-      help: 'Which column says where a row sits along the flow. The source end is at this layer and the target end at the next one. Values are renumbered densely, so 0, 2 and 5 draw as three adjacent columns.',
+      help: 'The column that places each row along the flow: its band runs from this layer to the next. Gaps are closed, so 0, 2 and 5 draw as adjacent columns.',
     },
     {
       id: 'sourceColumn',
@@ -107,7 +103,7 @@ registerNode({
       optional: true,
       presentational: true,
       group: 'flow',
-      help: 'What each band leaves. A label may repeat down the diagram — the same cell type at two depths is two boxes, which is what stops the flow becoming a graph with cycles in it.',
+      help: 'Where each band starts. The same label in two layers is drawn as two boxes.',
     },
     {
       id: 'targetColumn',
@@ -130,7 +126,7 @@ registerNode({
       optional: true,
       presentational: true,
       group: 'flow',
-      help: 'The quantity a band’s width shows. Empty gives every band the same width, which draws a count of rows rather than a quantity.',
+      help: 'The column that sets each band’s width, e.g. `weight`. Leave empty to count rows instead.',
     },
 
     // ---- Style -----------------------------------------------------------
@@ -145,7 +141,7 @@ registerNode({
         { value: 'lr', label: 'left to right' },
         { value: 'tb', label: 'top to bottom' },
       ],
-      help: 'Which way the flow runs. Left to right fits more layers; top to bottom fits more boxes per layer.',
+      help: 'Which way the flow runs. "Left to right" fits more layers; "top to bottom" fits more boxes per layer.',
     },
     {
       id: 'foldPerLayer',
@@ -161,7 +157,7 @@ registerNode({
        * preserves every column total exactly, so the picture stays conserving and the caption
        * keeps reporting the same number. See `foldSankey`.
        */
-      help: 'Keep this many boxes per layer, the largest first, and fold the rest into one “+N others”. 0 keeps everything. Column totals are unchanged, so the caption still reports the same flow.',
+      help: 'Keep this many boxes per layer, the largest first, and fold the rest into “+N others”. 0 keeps everything.',
     },
     {
       id: 'labelValues',
@@ -170,7 +166,7 @@ registerNode({
       default: true,
       presentational: true,
       group: 'style',
-      help: 'Print each box’s share beside its name. Off leaves the names alone, which is what a crowded diagram wants.',
+      help: 'Print each box’s share beside its name. Turn off for a crowded diagram.',
     },
     ...colorParams({
       prefix: 'band',
@@ -195,7 +191,7 @@ registerNode({
       id: 'idColumn',
       kind: 'column',
       label: 'ID column',
-      help: 'What a selected row is called downstream. An id survives an upstream re-run where a row position does not; the row index is the fallback.',
+      help: 'Identifies each row, so a selection survives an upstream re-run. Without one, rows are identified by row number.',
       from: 'in',
       default: '',
       optional: true,

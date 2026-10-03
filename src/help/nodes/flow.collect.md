@@ -1,6 +1,8 @@
-The exit of a [For Each](#flow.forEach) loop. Each pass hands it a result; it stacks that onto what it already holds, and what comes out the far side is the whole set.
+## What Collect does
 
-Without it, the only way out of a loop is a side effect — a file written, an image saved. With it, a loop that fetches one neuron at a time can hand the whole collection to a [3D View](#out.viewer3d) or a chart.
+Collect is the end of a [For Each](#flow.forEach) loop. Every pass through the loop hands it a result, which it adds to what it already holds. Once the loop has finished, its output is the combined result of all passes.
+
+This lets you use the results of a loop downstream. For example, a loop that fetches one skeleton at a time can pass the whole set on to a [3D View](#out.viewer3d) or a chart:
 
 ```coda-graph
  caption: Fetch four hundred skeletons one at a time, then draw them all at once.
@@ -15,21 +17,25 @@ Without it, the only way out of a loop is a side effect — a file written, an i
  c -> v
 ```
 
-### It is where the loop stops
+Without a Collect, the only way to get anything out of a loop is to write files or save images along the way.
 
-Everything between a `For Each` and a `Collect` runs once per element; **everything after a `Collect` runs once**, on the finished total. That is what the dashed loop frame on the canvas is drawing — the frame ends here.
+## Where to put it
 
-So where you put it decides what repeats. A [Download](#out.download) *before* a Collect writes one file per neuron; the same node *after* one writes a single file holding all of them.
+Everything between a For Each and a Collect runs once per element. Everything after the Collect runs only once, on the combined result. The dashed frame on the canvas shows which nodes are inside the loop, and it ends at the Collect.
 
-### Passes that differ are stacked, not dropped
+This means the position of the Collect decides what is repeated. A [Download](#out.download) placed before the Collect writes one file per neuron; the same node placed after it writes a single file containing all of them.
 
-Tables stack the way [Stack Tables](#core.stack) does and geometry the way Stack Neurons does. A column that only some passes carried is kept, with `null` for the passes that had it missing.
+## How results are combined
 
-> [!WARNING] Every pass has to produce the same kind
-> If one pass yields skeletons and another a table there is nothing sensible to stack, and Collect
-> names the pass where it changed rather than silently keeping the last one — a Collect holding
-> only the final pass looks exactly like a loop that never ran.
+Collect works on tables, skeletons, meshes and points:
 
-### On its own it does nothing
+- Tables are stacked like in [Stack Tables](#core.stack).
+- Skeletons, meshes and points are stacked like in Stack Neurons.
 
-A Collect with no `For Each` above it passes its input straight through. That is a graph halfway through being built, not an error.
+If a column only appears in some of the passes, it is kept, with empty values for the passes that didn't have it.
+
+> [!WARNING] Every pass has to produce the same kind of data
+> If one pass produces skeletons and another a table, there is no sensible way to combine them.
+> In that case Collect fails with an error that names the pass where the kind changed.
+
+A Collect without a For Each upstream simply passes its input through unchanged.

@@ -137,15 +137,15 @@ registerEmitter('net.centrality', (ctx) => {
   return [
     ...(options.samples > 0 && (options.betweenness || options.closeness)
       ? ctx.note(
-          `The canvas sampled ${options.samples} source nodes. igraph has no pivot ` +
-            `sampling, so this runs the exact sweep: more precise, and considerably slower ` +
+          `Coda sampled ${options.samples} source nodes (\`Sample\`). igraph cannot sample, ` +
+            `so this computes the exact values. That is more precise, and much slower ` +
             `on a large graph.`,
         )
       : []),
     ...(options.communities
       ? ctx.note(
-          'igraph’s Louvain is undirected only, so the community pass runs on the collapsed ' +
-            'graph. The partition and the modularity are the undirected ones.',
+          'igraph’s Louvain works on undirected graphs only, so communities are found with edge ' +
+            'directions ignored. The partition and the modularity are those of the undirected graph.',
         )
       : []),
     `${out} <- ${src}`,
@@ -265,10 +265,10 @@ registerEmitter('neuron.paths', (ctx) => {
      * cannot walk a derived graph without GDS.
      */
     return ctx.todo(
-      'Paths with "Collapse types" on has no neuprintr equivalent. Coda runs the search on ' +
-        'the type-collapsed graph — every neuron of a type expanded together and aggregated ' +
-        'back to types at each hop — which finds routes no neuron-level search returns. ' +
-        'Switch the node to neuron-level to export it, or write the traversal by hand.',
+      'Paths with `Collapse types` on has no neuprintr equivalent. Coda merges all neurons of ' +
+        'a type into one node at each hop, which finds routes that a search between ' +
+        'individual neurons does not. Untick `Collapse types` to export this node, or write ' +
+        'the search by hand.',
     )
   }
 
@@ -276,9 +276,9 @@ registerEmitter('neuron.paths', (ctx) => {
   // neuprintr equivalent, and `Min fraction` changes which connections the search follows.
   if (ctx.params.normalize === true) {
     return ctx.todo(
-      'Paths with Normalize on has no neuprintr equivalent: the denominator is a whole ' +
-        "group's synapse total and Min fraction prunes the search as it grows, so an " +
-        'export without them would return different routes. Turn Normalize off to export ' +
+      'Paths with `Normalize` on has no neuprintr equivalent. The denominator is the synapse ' +
+        'total of a whole group, and `Min fraction` prunes the search as it runs, so an ' +
+        'export without them would return different routes. Untick `Normalize` to export ' +
         'this node.',
     )
   }
@@ -303,13 +303,13 @@ registerEmitter('neuron.paths', (ctx) => {
    */
   return [
     ...ctx.note(
-      'neuprintr returns every route within the hop budget. Coda also ranks them by ' +
-        'their weakest link and keeps the strongest; that ranking is not reproduced, so ' +
-        'this is the unranked set.',
+      'neuprintr returns every route within `Max hops`. Coda also ranks them by their ' +
+        'weakest link and keeps the strongest. This cell does not, so it returns every ' +
+        'route, unranked.',
     ),
     ...ctx.note(
-      'This node’s Network output is not reproduced here — only the routes table is. A cell ' +
-        'below that reads the Network port will not find it.',
+      'Only this node’s `Paths` output is reproduced here, not its `Network` output. A cell ' +
+        'below that reads `Network` will fail.',
     ),
     `${ctx.output('paths')} <- neuprint_get_paths(`,
     `  ${neuronIds(sources)},`,
@@ -372,8 +372,8 @@ registerEmitter('neuron.explore', (ctx) => {
     if (limit !== undefined) {
       lines.push(
         ...ctx.note(
-          `Coda caps this at ${limit} hits and keeps the ${limit} most *relevant*; the ` +
-            'ranking is not ported, so this keeps the first matches in table order instead.',
+          `Coda caps this at ${limit} hits and keeps the ${limit} most relevant. That ` +
+            'ranking is not reproduced, so this keeps the first matches in table order.',
         ),
         `${hits} <- ${hits} |> head(${limit})`,
       )
@@ -405,26 +405,23 @@ registerHelper({
   requires: ['dplyr'],
   source: [
     'coda_search <- function(df, query) {',
-    "  # Coda's Explore Dataset query language, matching only.",
+    "  # Filter rows with Coda's Explore Dataset search syntax.",
     '  #',
-    '  # Terms are AND-ed; a leading "!" or "-" negates one. A bare word is a substring of the',
-    '  # row\'s searchable text; a bare term starting with "/" is a regex tested against each',
-    '  # searchable field on its own, so "/^LC4$" is the anchored search a plain "^LC4$" is',
-    '  # not. "field=value" compares one column, with > < >= <= != and ~ (unanchored regex)',
-    '  # as the other operators.',
+    '  # Terms are combined with AND; a leading "!" or "-" negates a term. A bare word matches',
+    '  # as a substring of the row\'s text. A term starting with "/" is a regex tested against',
+    '  # each field separately, so "/^LC4$" matches a field that is exactly LC4.',
+    '  # "field=value" compares one column; the other operators are > < >= <= != and ~ (regex).',
     '  #',
-    '  # Two things this does NOT reproduce, both of which change which rows you get: hits are',
-    '  # in table order rather than ranked by relevance (which matters where the result is',
-    '  # capped), and a query matching nothing returns nothing where Coda retries it as a',
-    '  # subsequence.',
+    '  # Differences from Coda: hits are returned in table order, not ranked by relevance,',
+    '  # and a query that matches nothing returns nothing (Coda retries it as a subsequence).',
     '  ops <- c("==", "!=", ">=", "<=", "~", ">", "<", "=")',
     '  tokens <- scan(text = query, what = "", quiet = TRUE)',
     '  if (length(tokens) == 0) return(df)',
     '',
     '  haystack <- NULL',
     '  keep <- rep(TRUE, nrow(df))',
-    '  # The columns free text and a bare regex both look at: string columns and neuronId',
-    '  # only, so a bare "1200" finds a neuron id and not every neuron with 1200 synapses.',
+    '  # Searchable columns: text columns plus neuronId, so "1200" finds a neuron id',
+    '  # but not a synapse count of 1200.',
     '  search_cols <- names(df)[vapply(df, function(x) is.character(x) || is.factor(x), TRUE)]',
     '  search_cols <- union(search_cols, intersect("neuronId", names(df)))',
     '',
@@ -452,9 +449,8 @@ registerHelper({
     '',
     '    if (is.null(field)) {',
     '      if (startsWith(raw, "/")) {',
-    '        # A bare regex, neuroglancer-style: the closing slash is optional, and it is',
-    '        # tested per field rather than against the joined haystack, because an anchored',
-    '        # pattern is the point and "^LC4$" cannot match a row\'s joined text.',
+    '        # A bare regex (closing slash optional), tested against each field separately',
+    '        # so that anchors like "^LC4$" work.',
     '        pattern <- substring(raw, 2)',
     '        if (endsWith(pattern, "/") && !endsWith(pattern, "\\\\/")) {',
     '          pattern <- substr(pattern, 1, nchar(pattern) - 1)',
@@ -462,8 +458,7 @@ registerHelper({
     '        if (nchar(pattern) == 0) next',
     '        mask <- rep(FALSE, nrow(df))',
     '        for (col in search_cols) {',
-    '          # grepl is FALSE for NA, including against "^$" -- so a missing value is',
-    '          # skipped rather than matched as "", with no guard of our own.',
+    '          # grepl returns FALSE for NA, so missing values never match.',
     '          mask <- mask | grepl(pattern, df[[col]], ignore.case = TRUE)',
     '        }',
     '      } else {',
@@ -591,11 +586,10 @@ registerHelper({
   requires: ['neuprintr', 'dplyr'],
   source: [
     'coda_partners_by <- function(ids, query, min_weight, conn) {',
-    '  # One direction of partners counted by an edge property rather than the weight --',
-    "  # the card's Count by. neuprint_connection_table returns the weight and nothing else",
-    '  # about a connection, so `query` is the one Coda sends, with the property after the',
-    `  # weight and ${CYPHER_PLACEHOLDERS.ids} where the ids go. The property becomes the weight here, and the`,
-    '  # threshold applies to it, since that is the count the card shows.',
+    "  # Fetch partners in one direction, counted by an edge property (the card's Count by).",
+    '  #',
+    `  # \`query\` is the Cypher Coda sends, with ${CYPHER_PLACEHOLDERS.ids} where the ids go. The property`,
+    '  # replaces the weight, and min_weight applies to it.',
     `  q <- sub("${CYPHER_PLACEHOLDERS.ids}", paste0("[", paste(ids, collapse = ","), "]"), query, fixed = TRUE)`,
     '  tbl <- neuprint_fetch_custom(q, conn = conn)',
     '  if (is.null(tbl) || nrow(tbl) == 0) return(NULL)',
@@ -606,19 +600,18 @@ registerHelper({
     '',
     'coda_profile <- function(ids, min_weight = 1, top_n = 10, groups = NULL, conn,',
     '                         property_queries = NULL) {',
-    "  # Keys mirror the card's tiles: upstream_types, downstream_types, top_upstream,",
-    '  # top_downstream, regions.',
+    "  # Compute the tables shown by Coda's Neuron Profile node.",
     '  #',
-    '  # Three rules that produce a plausible wrong number rather than an error:',
-    '  #  * Untyped partners keep their own bucket. Merging them puts a fictitious type at',
-    '  #    the top of the list on male-CNS.',
-    '  #  * Synapses are summed AND distinct partners counted -- forty synapses onto one',
-    '  #    neuron is not forty onto forty.',
-    '  #  * roiInfo NESTS: a synapse in LO(R) is counted again in its parent OL(R), so the',
-    '  #    regions are filtered to the primary set before summing or the totals double.',
+    '  # Returns a list with upstream_types, downstream_types, top_upstream, top_downstream',
+    '  # and regions, one per tile on the card.',
     '  #',
-    '  # property_queries counts every partner by an edge property instead of the weight --',
-    "  # the card's Count by: the two queries Coda sends, keyed PRE and POST like `side`.",
+    '  #  * Untyped partners are kept as their own group.',
+    '  #  * Both synapses and distinct partners are counted per type.',
+    '  #  * roiInfo is nested (a synapse in LO(R) also counts in OL(R)); use primary_rois to',
+    '  #    filter regions before summing.',
+    '  #',
+    '  # property_queries counts partners by an edge property instead of the weight (the',
+    "  # card's Count by): the two queries Coda sends, keyed PRE and POST.",
     '  partners <- function(side) {',
     '    if (!is.null(property_queries)) {',
     '      return(coda_partners_by(ids, property_queries[[side]], min_weight, conn))',
@@ -674,19 +667,13 @@ registerHelper({
     '    ))',
     '  }',
     '',
-    "  # Uncapped before the fold, capped after it: capping each member's own list first would",
-    "  # rank a partner type by how often it reaches somebody's top ten rather than by how",
-    '  # strong it is. Passed as `cap = 0` at each call rather than by reassigning `top_n`, which',
-    '  # the closures above capture -- rewriting what a parameter means underneath them leaves a',
-    '  # signature saying the per-neuron frames are capped when they are not.',
+    '  # Grouped: average over all members first, then keep the top_n per group.',
     '  rank_groups <- function(df, column) {',
     '    if (is.null(df) || top_n <= 0) return(df)',
     '    df |> group_by(group) |> arrange(desc(.data[[column]]), .by_group = TRUE) |>',
     '      slice_head(n = top_n) |> ungroup()',
     '  }',
     '',
-    '  # Bound once: R has no common-subexpression elimination, so `roll_up(up)` written twice is',
-    '  # two full group_by/summarise passes over the connectivity frame in every knit.',
     '  up_types <- roll_up(up, cap = 0)',
     '  down_types <- roll_up(down, cap = 0)',
     '',
@@ -707,10 +694,7 @@ registerHelper({
     '      coda_group_means(top_of(down, cap = 0), groups, c("partner", "type"), "weight"),',
     '      "weight_mean"',
     '    ),',
-    '    # NOT folded, and the same raw roiInfo the ungrouped branch returns: neuprintr hands',
-    '    # back the nested breakdown and leaves the primary-ROI filter to the reader, so a mean',
-    '    # over it would average double-counted totals. The Python helper folds its regions',
-    '    # because it filters them first.',
+    '    # Regions stay per neuron: roiInfo is nested, so averaging it would double-count.',
     '    regions = roi,',
     '    primary_rois = primary,',
     '    upstream_types_by_neuron = up_types,',
@@ -719,19 +703,12 @@ registerHelper({
     '}',
     '',
     'coda_group_means <- function(per_neuron, groups, keys, values) {',
-    '  # Per-neuron rows folded to one row per (group, key), absent members counted as ZERO.',
+    '  # Average per-neuron rows over each group, giving one row per (group, key).',
     '  #',
-    '  # `groups` is a data frame of bodyid and group. Every member of a group is in the',
-    '  # denominator whether or not it has a row here, and that is the whole of what makes these',
-    '  # means over a cell type: a neuron that never reaches partner type X has been measured,',
-    '  # and the measurement is zero. Averaging the rows present would report the mean over the',
-    "  # members that happen to connect and print it under the type's name.",
-    '  #',
-    '  # `<value>_present` is what tells those two apart. The spread is the SAMPLE sd and is NA',
-    '  # for a group of one, where the spread of one measurement is unknown rather than zero.',
-    '  #',
-    '  # Ported from `subjectPartnerTypes` in nodes/lib/profileStats.ts, which is what the card',
-    '  # draws; `pnpm probe:r-helpers` runs this against the same numbers.',
+    '  # `groups` is a data frame of bodyid and group. A member with no row for a key counts',
+    '  # as zero, so each mean is over the whole group. `<value>_present` counts the members',
+    '  # with a non-zero value. `<value>_sd` is the sample standard deviation (NA for a',
+    "  # group of one). Matches the grouped view of Coda's Neuron Profile node.",
     '  if (is.null(per_neuron) || nrow(per_neuron) == 0) return(NULL)',
     '  sizes <- groups |> count(group, name = "n")',
     '  df <- per_neuron |> inner_join(groups, by = "bodyid")',
@@ -745,8 +722,8 @@ registerHelper({
     '                present = sum(.data[[value]] != 0), .groups = "drop") |>',
     '      left_join(sizes, by = "group") |>',
     '      mutate(mean = total / n)',
-    '    # Second pass, because a deviation needs the mean. Members with no row here each',
-    '    # contribute a full (0 - mean)^2, which is the (n - counted) term.',
+    '    # Sum of squared deviations; members with no row add (0 - mean)^2 each, the',
+    '    # (n - counted) term below.',
     '    ss <- df |>',
     '      left_join(stats, by = by) |>',
     '      group_by(across(all_of(by))) |>',
@@ -788,8 +765,8 @@ registerHelper({
  * byte-identical past its first clause. `labelNote` in the Python emitter is the same shape.
  */
 const voxelNote = (lead: string): string =>
-  `${lead} and neuprintr returns raw voxels — 8 nm on the hemibrain. Check this factor against ` +
-  `your dataset: nothing in the graph records it.`
+  `${lead}, and neuprintr returns raw voxels (8 nm on the hemibrain). Check this factor ` +
+  `against your dataset, because nothing in the graph records it.`
 
 registerEmitter('neuron.nblast', (ctx) => {
   const query = ctx.wired('query')
@@ -829,9 +806,9 @@ registerEmitter('neuron.nblast', (ctx) => {
     if (symmetry !== 'none') {
       lines.push(
         ...ctx.note(
-          `nat.nblast's nblast() scores query against target only. Coda's "${symmetry}" ` +
-            `symmetry needs the reverse call too — mind the orientation of the two matrices ` +
-            `before combining them.`,
+          `nat.nblast's nblast() scores query against target only. Coda's \`Symmetry\` ` +
+            `"${symmetry}" also needs the reverse call. Check the orientation of the two ` +
+            `matrices before combining them.`,
         ),
       )
     }
@@ -853,7 +830,7 @@ registerEmitter('neuron.nblast', (ctx) => {
   if (symmetry === 'min' || symmetry === 'max') {
     lines.push(
       ...ctx.note(
-        `nat.nblast offers raw, normalised and mean — there is no "${symmetry}". This uses ` +
+        `nat.nblast offers raw, normalised and mean, but no "${symmetry}". This uses ` +
           `the mean of both directions.`,
       ),
     )
@@ -879,10 +856,10 @@ registerEmitter('neuron.nblast', (ctx) => {
  */
 registerEmitter('neuron.nblastKnn', (ctx) =>
   ctx.todo(
-    'nat.nblast has no shortlisted k-nearest search. The honest equivalent is ' +
-      'nblast_allbyall() followed by a per-row top-k, which is the full n^2 matrix this node ' +
-      'exists to avoid — a different computation under the same name. Use the NBLAST node, ' +
-      'which exports as nblast_allbyall(), and take the top matches from its matrix.',
+    'nat.nblast has no shortlisted k-nearest search. The closest equivalent is ' +
+      'nblast_allbyall() followed by a per-row top-k, which computes the full n^2 matrix ' +
+      'this node is designed to avoid. Use the NBLAST node, which exports as ' +
+      'nblast_allbyall(), and take the top matches from its matrix.',
   ),
 )
 
@@ -918,8 +895,9 @@ const R_METHODS: Record<string, string> = {
  */
 function hclustRefusal(method: string): string {
   return (
-    `hclust’s "${method}" method expects squared Euclidean distances, which is not what ` +
-    `fastcore clustered on the canvas, so "${method}" is not translated here.`
+    `hclust’s "${method}" method expects squared Euclidean distances, but Coda clusters ` +
+    `the distances as they are, so "${method}" is not translated. Pick another method to ` +
+    `export this node.`
   )
 }
 
@@ -932,9 +910,9 @@ export function hclustMethod(method: string): Refusable<{ method: string }> {
 /** The notes a Linkage chunk can carry, keyed as `linkagePlan` decides them. */
 const LINKAGE_NOTES: Record<LinkageNote, string> = {
   symmetryOff:
-    'Symmetry is off, and `as.dist` reads the **lower** triangle where Coda and the ' +
-    'notebook export read the upper. On a matrix that is already symmetric that is the ' +
-    'same answer; on one that is not, this is the transpose of what the canvas shows.',
+    '`Symmetry` is off, and `as.dist` reads the **lower** triangle, while Coda and the ' +
+    'notebook export read the upper one. On a symmetric matrix the result is the same; ' +
+    'otherwise this clusters the transpose of what Coda used.',
 }
 
 /** Each of `linkagePlan`'s ways of making the matrix symmetric, in base R. */
@@ -959,8 +937,8 @@ registerEmitter('cluster.linkage', (ctx) => {
 
   return [
     ...ctx.note(
-      `Coda's linkage is SciPy's via navis-fastcore, and "${plan.method}" is hclust's "` +
-        `${method}". Checked on one matrix: same merge heights, same leaf order. ` +
+      `Coda's linkage is SciPy's (via navis-fastcore), and its "${plan.method}" is hclust's "` +
+        `${method}". Both give the same merge heights and leaf order on a test matrix. ` +
         `"ward.D" is a different criterion and would not agree.`,
     ),
     `m_ <- as.matrix(${src})`,
@@ -994,7 +972,8 @@ registerEmitter('cluster.cut', (ctx) => {
     `cl_ <- ${cut}`,
     ...ctx.note(
       'Coda numbers clusters left to right as the dendrogram draws them; `cutree` ' +
-        'numbers by observation order. Same grouping — this renumbers so the two agree.',
+        'numbers them by observation order. The groups are the same, and the next line ' +
+        'renumbers them so the two agree.',
     ),
     `cl_ <- match(cl_, unique(cl_[${src}$order]))`,
     ``,
@@ -1143,8 +1122,8 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
     return [
       ...ctx.note(
         'No neuron table is wired on the canvas, so the labels are read as neuron ids. ' +
-          'Unusable ids are dropped, as in Coda, and the rest kept as character — every ' +
-          'Coda id column is text.',
+          'Unusable ids are dropped, as in Coda, and the rest are kept as character, because ' +
+          'every Coda id column is text.',
       ),
       /*
        * `as.numeric` is the *filter* — how a label that is not an id is found — and `coda_ids`
@@ -1228,8 +1207,8 @@ registerEmitter('core.landmarkTransform', (ctx) => {
 
   return [
     ...ctx.note(
-      'nat::tpsreg() needs nat >= 1.9.0 and the Morpho package, which is a Suggests rather ' +
-        'than a hard dependency — install.packages("Morpho") if this fails. Coda fits the same ' +
+      'nat::tpsreg() needs nat >= 1.9.0 and the Morpho package, which nat does not install ' +
+        'for you. Run install.packages("Morpho") if this fails. Coda fits the same ' +
         'spline with navis-fastcore; the two agree to well under a nanometre.',
     ),
     `${out} <- nat::tpsreg(`,
@@ -1255,11 +1234,11 @@ registerEmitter('neuron.xform', (ctx) => {
   const supplied = ctx.input('transform')
   if (!supplied) {
     return ctx.todo(
-      'Transform Neurons uses the registrations Coda ships, which are keyed by template space ' +
-        'name. The natverse spreads its templatebrain objects across a package each — FAFB14 ' +
-        'in nat.flybrains, FlyWire in fafbseg, MANC in malevnc, MaleCNS in malecns — and the ' +
-        'hemibrain has none at all, so a faithful cell needs a space-to-package table nobody ' +
-        'has written. Wire a Landmark Transform instead and this emits. See neuron.mirror.',
+      'Transform Neurons uses the registrations built into Coda, which are looked up by ' +
+        'template space name. The natverse keeps its templatebrain objects in separate ' +
+        'packages (FAFB14 in nat.flybrains, FlyWire in fafbseg, MANC in malevnc, MaleCNS in ' +
+        'malecns) and has none for the hemibrain, so this cannot be translated automatically. ' +
+        'Wire a Landmark Transform into `Transform` instead and this node will export.',
     )
   }
   ctx.library('nat')
@@ -1291,9 +1270,9 @@ registerEmitter('neuron.xform', (ctx) => {
 
 registerEmitter('neuron.synblast', (ctx) =>
   ctx.todo(
-    'The natverse has no synapse-based NBLAST. nat.nblast scores dotprops — tangent vectors ' +
-      'fitted to skeleton points — and syNBLAST compares connector positions with the dot ' +
-      'product fixed at 1, which is a different score out of the same lookup matrix. Export ' +
+    'The natverse has no synapse-based NBLAST. nat.nblast scores dotprops (tangent vectors ' +
+      'fitted to skeleton points), while syNBLAST compares connector positions with the dot ' +
+      'product fixed at 1, which gives a different score from the same lookup matrix. Export ' +
       'this graph as a notebook instead: navis-fastcore is a Python package, so that cell ' +
       'calls the same implementation Coda ran.',
   ),
@@ -1301,19 +1280,19 @@ registerEmitter('neuron.synblast', (ctx) =>
 
 registerEmitter('neuron.cleanSkeletons', (ctx) =>
   ctx.todo(
-    'nat has resample() and stitch_neurons(), which are close to two of the four steps here, ' +
-      'but its smoothing takes a window in nodes where this node takes a Gaussian width in ' +
-      'micrometres along the neurite — a cell that ran would produce plausible neurons that ' +
-      'are not the ones on screen. Export as a notebook for the exact pipeline; it calls ' +
+    'nat has resample() and stitch_neurons(), which are close to two of the four steps here. ' +
+      'But its smoothing takes a window in nodes, while this node takes a Gaussian width in ' +
+      'micrometres along the neurite, so a translated cell would return different neurons. ' +
+      'Export as a notebook for the exact pipeline; it calls ' +
       'navis-fastcore, which is what Coda ran.',
   ),
 )
 
 registerEmitter('neuron.cleanMeshes', (ctx) =>
   ctx.todo(
-    'Mesh decimation and smoothing exist in Rvcg (vcgQEdecim, vcgSmooth) but stripping ' +
-      'invaginated internal membrane has no equivalent anywhere in R, and it is the step that ' +
-      'changes what a surface area or a volume means. Export as a notebook, which calls the ' +
+    'Mesh decimation and smoothing exist in Rvcg (vcgQEdecim, vcgSmooth), but R has no ' +
+      'equivalent for stripping invaginated internal membrane, and that step changes the ' +
+      'surface area and volume. Export as a notebook, which calls the ' +
       'same navis-fastcore functions Coda ran.',
   ),
 )
@@ -1324,8 +1303,8 @@ registerEmitter('neuron.cleanMeshes', (ctx) =>
 
 const MATCHES_NOTES: Record<MatchesNote, string> = {
   autoDirection:
-    'Best means is on "from the matrix", which Coda answers by reading what the matrix ' +
-    'says its cells are. A plain matrix has nowhere to carry that, so this assumes ' +
+    '`Best means` is set to "from the matrix", which Coda answers from what the matrix ' +
+    'says its cells are. A plain R matrix does not carry that, so this assumes ' +
     'higher is better.',
 }
 
@@ -1408,9 +1387,9 @@ registerEmitter('neuron.nblastMatches', (ctx) => {
   if (cutoff === 'percentage') {
     lines.push(
       ...ctx.note(
-        "The band is around each row's own best score, not the matrix's: 0.05 keeps " +
-          "everything within 5% of that neuron's top match. It multiplies, so it behaves " +
-          'as intended only for positive scores.',
+        "The band is relative to each row's own best score: 0.05 keeps " +
+          "everything within 5% of that neuron's top match. It multiplies, so it only works " +
+          'as intended for positive scores.',
       ),
     )
   }
@@ -1592,8 +1571,7 @@ registerEmitter('compare.connectivity', (ctx) => {
 /** The notes an Embedding chunk can carry after its UMAP call, keyed as `embedPlan` decides them. */
 const EMBED_NOTES: Record<EmbedNote, string> = {
   autoDistance:
-    'Scores are similarities, so the distance is 1 − score — the same reading the ' +
-    'Linkage chunk makes.',
+    'Scores are similarities, so the distance is 1 − score, as in the Linkage chunk.',
 }
 
 /**
@@ -1632,9 +1610,9 @@ registerEmitter('core.embed', (ctx) => {
 
   const lines: string[] = [
     ...ctx.note(
-      'Coda runs umap-js and the notebook exporter runs umap-learn; this is uwot. All three are ' +
-        'the same algorithm with the same settings, and all three draw different arrangements ' +
-        'of the same neighbourhoods — as two seeds of any one of them do.',
+      'Coda runs umap-js and the notebook exporter runs umap-learn; this is uwot. All three run ' +
+        'the same algorithm with the same settings, but each draws a different arrangement ' +
+        'of the same neighbourhoods, just as two seeds of one implementation would.',
     ),
   ]
 
@@ -1731,9 +1709,9 @@ registerEmitter('neuron.distance', (ctx) => {
   const kinds = [ctx.inputType('query')?.kind, ctx.inputType('target')?.kind]
   if (kinds.includes('meshes')) {
     return ctx.todo(
-      'Distances to a mesh surface need Rvcg::vcgClostKD, which nat only suggests, and nat has ' +
-        'no neuronlist of meshes to hang them off — neuprintr cannot fetch neuron meshes at ' +
-        'all. Use the Skeletons node, which reads the same neurons as a nat neuronlist.',
+      'Distances to a mesh surface need Rvcg::vcgClostKD, which nat does not install for ' +
+        'you, and neuprintr cannot fetch neuron meshes at all. Use the Skeletons node, which ' +
+        'reads the same neurons as a nat neuronlist.',
     )
   }
 
@@ -1773,10 +1751,10 @@ registerEmitter('neuron.distance', (ctx) => {
   if (method === 'within') {
     lines.push(
       ...ctx.note(
-        'This counts each Query node once, which is what bounds the answer by the ' +
-          "neuron's own cable. navis' cable_overlap instead sums a node once per Target " +
-          'point that picks it — a little over one per cent apart on two example neurons ' +
-          'at 2 µm.',
+        'This counts each skeleton node of `Query` once, so the answer cannot exceed the ' +
+          "neuron's own cable. navis' cable_overlap instead counts a node once for every " +
+          '`Target` point that picks it. On two example neurons at 2 µm the two differ by a ' +
+          'little over one per cent.',
       ),
     )
   }

@@ -148,7 +148,7 @@ describe('reading a downsampled level', () => {
     serveTraceChunks()
     await expect(
       fetchRecording({ product: 'traces', scale: 2, window: { start: 0, end: 4 } }),
-    ).rejects.toThrow(/Set Scale to Full/)
+    ).rejects.toThrow(/Set `Scale` to "Full"/)
   })
 
   it('refuses a level that no longer averages the one below it', async () => {

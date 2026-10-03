@@ -33,9 +33,12 @@ export const laminarProfileNode = packNode({
   label: 'Laminar Profile',
   category: 'visualisation',
   description:
-    'A depth column drawn down the cortex against the layers, split by a column, with a count per layer.',
+    'Histogram of a depth column drawn down the cortex with the layers behind it, split by ' +
+    'a column, with a count per layer.',
   guide:
-    'Bins a depth column and draws it running down the cortex, with the dataset’s layers behind it and a count per layer beside them. Split by partner type on a Cortical Depth synapse table, it is the laminar input or output profile. Click a bar or a layer’s count to send those rows on as Selected.',
+    'Bins a depth column and plots it down the cortex, with the dataset’s layers behind the bars and a count per layer. ' +
+    'Feed it the Cortical Depth table of a synapse cloud and split by partnerType for a laminar input or output profile. ' +
+    'Click bars or layer counts to send those rows on as Selected.',
   cost: 'cheap',
   defaultSize: { width: 460, height: 520 },
   inputs: [
@@ -56,7 +59,7 @@ export const laminarProfileNode = packNode({
       dtypes: NUMERIC_DTYPES,
       default: POINT_DEPTH_COLUMN,
       // Not presentational: it decides which rows a selected range catches.
-      help: 'The depth column, in µm below the pia. Also what a selected bar means, so changing it re-runs anything downstream of Selected.',
+      help: 'The depth column, in µm below the pia. Changing it changes what selected bars cover, so anything downstream of Selected re-runs.',
     },
     {
       id: 'series',
@@ -69,7 +72,7 @@ export const laminarProfileNode = packNode({
       optional: true,
       excludeIds: true,
       presentational: true,
-      help: 'A column splitting each bar into stacked series — partner type on a synapse cloud. Empty draws one series.',
+      help: 'A column splitting each bar into stacked series, e.g. partner type for synapses. Empty draws one series.',
     },
     {
       // Presentational: a click in a panel stores the facet column in the selection itself
@@ -82,7 +85,7 @@ export const laminarProfileNode = packNode({
       default: '',
       optional: true,
       presentational: true,
-      help: 'A column giving each of its values a panel of its own — `type`, or `neuronId` for one panel per neuron — on one depth axis and one scale, the largest first.',
+      help: 'A column whose values each get their own panel, e.g. `type`, or `neuronId` for one per neuron. Panels share one depth axis and scale, largest first.',
     },
     {
       id: 'facetMax',
@@ -115,7 +118,7 @@ export const laminarProfileNode = packNode({
         { value: 'percent', label: 'percent of rows' },
       ],
       presentational: true,
-      help: 'Percent makes two profiles of different sizes comparable.',
+      help: 'Whether bars show counts or percentages. "percent of rows" makes profiles of different sizes comparable.',
     },
     {
       id: 'selection',
@@ -124,7 +127,7 @@ export const laminarProfileNode = packNode({
       // Ranges rather than bins: a layer's count selects one too.
       noun: 'ranges',
       default: [],
-      help: 'Set by clicking bars or a layer’s count. Holds the depth ranges they covered, so a selection survives a change of bin width. Feeds Selected.',
+      help: 'Set by clicking bars or a layer’s count. Stores depth ranges, so it survives a change of bin width. Feeds Selected.',
     },
   ],
 
@@ -136,9 +139,14 @@ export const laminarProfileNode = packNode({
     if (noFrame) issues.push(noFrame)
     const series = ctx.column('series')
     const depth = ctx.column('depth')
-    if (series && series === depth) issues.push('Split-by and Depth are the same column')
+    if (series && series === depth)
+      issues.push(
+        '`Split by` and `Depth` are set to the same column. Pick a different column for one of them.',
+      )
     if (depth && ctx.column('facet') === depth)
-      issues.push('Facet-by and Depth are the same column')
+      issues.push(
+        '`Facet by` and `Depth` are set to the same column. Pick a different column for one of them.',
+      )
     return issues
   },
 

@@ -125,7 +125,7 @@ async function request<T>(
   const token = options.token ?? getToken()
   if (!token) {
     const message =
-      'No neuPrint token. Sign in, or paste one, in Connections — the branch icon in the toolbar.'
+      'No neuPrint token. Sign in, or paste one, in Connections (the branch icon in the toolbar).'
     reportAuthFailure(message)
     throw new NeuPrintError(message, 401)
   }
@@ -174,8 +174,8 @@ async function request<T>(
    */
   const fallback = routes.find((route) => route.kind === 'proxy')
   throw new NeuPrintError(
-    `Could not reach neuPrint at ${server}. It could not be read cross-origin — the deployment ` +
-      `may send no CORS headers, or may simply be down; a browser reports both the same way` +
+    `Could not reach neuPrint at ${server}. Either the server sends no CORS headers or it ` +
+      `is down. The browser does not say which` +
       (fallback && fallback.base !== server
         ? `. ${fallback.base} did not answer either: in development that path comes from ` +
           `vite.config.ts, so it needs \`pnpm dev\` or \`pnpm preview\`, and a static deploy ` +
@@ -215,10 +215,10 @@ async function readResponse<T>(
       (!body || looksLikeHtml(body))
     ) {
       throw new NeuPrintError(
-        `Nothing is serving ${route.base} — the request never reached neuPrint. That path has ` +
-          `to be proxied: \`pnpm dev\` and \`pnpm preview\` proxy it via vite.config.ts, and a ` +
-          `static deploy does not. Where the deployment sends CORS headers no proxy is needed ` +
-          `at all; where it does not, put one in front and name it in Connections → Base URL.`,
+        `Nothing is serving ${route.base}, so the request never reached neuPrint. That path ` +
+          `needs a proxy: \`pnpm dev\` and \`pnpm preview\` provide one via vite.config.ts, but ` +
+          `a static deploy does not. If the server sends CORS headers, no proxy is needed. ` +
+          `Otherwise, put a proxy in front of it and enter it in Connections → Base URL.`,
         404,
         { unreached: true },
       )
@@ -260,7 +260,7 @@ function authRefusal(
   }
   return {
     message:
-      `neuPrint rejected the token (${status}). It may have expired — a sign-in lasts about a ` +
+      `neuPrint rejected the token (${status}). It may have expired; a sign-in lasts about a ` +
       `week. Sign in again in Connections, or paste a new token from neuprint.janelia.org/account.`,
     credential: true,
   }

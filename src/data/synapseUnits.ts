@@ -132,9 +132,9 @@ export function synapseUnitRefusal(
 ): string | undefined {
   if (!requested || served.includes(requested)) return undefined
   return (
-    `${label} cannot return synapses as “${synapseUnitLabel(requested)}” — it offers ` +
-    `${served.map(synapseUnitLabel).join(', ')}. Set the Synapses node's Rows back to ` +
-    `Automatic, which takes whichever unit this source has.`
+    `${label} cannot return synapses as “${synapseUnitLabel(requested)}”. It offers ` +
+    `${served.map(synapseUnitLabel).join(', ')}. Set the Synapses node's \`Rows\` back to ` +
+    `"Automatic" to use whichever unit this source has.`
   )
 }
 
@@ -178,7 +178,7 @@ export function resolveSynapseUnit(
  * starts at off is one somebody has set by the time it arrives here.
  */
 export function confidenceIgnoredWarning(subject: string): string {
-  return `${subject} has no per-synapse confidence, so Min confidence was ignored — every synapse is in the result.`
+  return `${subject} has no per-synapse confidence, so \`Min confidence\` was ignored and every synapse is in the result.`
 }
 
 /** Say `confidenceIgnoredWarning` where a request set a floor — for a source with no score at all. */

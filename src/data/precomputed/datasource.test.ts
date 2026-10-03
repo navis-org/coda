@@ -371,7 +371,7 @@ describe('PrecomputedSource', () => {
         neuronIds: [],
         direction: 'outputs',
       }),
-    ).rejects.toThrow(/not connectivity/)
+    ).rejects.toThrow(/has no connectivity/)
   })
 
   it('names what it found when there is no geometry to fetch', async () => {
@@ -380,7 +380,7 @@ describe('PrecomputedSource', () => {
     const source = sourceFor('gs://em2/image')
     await expect(
       source.fetchMeshes({ datasetId: source.datasetId, neuronIds: ['1'] }),
-    ).rejects.toThrow(/publishes no meshes — it is image/)
+    ).rejects.toThrow(/publishes no meshes; it is image/)
   })
 
   /*
@@ -650,7 +650,7 @@ describe('segment properties', () => {
     serve({ [`${base}/info`]: { '@type': 'neuroglancer_legacy_mesh' } })
     const source = sourceFor('gs://nameless-refuse/seg')
     await expect(source.fetchRoiMeshes({ datasetId: source.datasetId })).rejects.toThrow(
-      /Type the segment ids of the ones you want into Regions/,
+      /Type the segment ids of the regions you want into `Regions`/,
     )
   })
 

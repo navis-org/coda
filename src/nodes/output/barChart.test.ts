@@ -160,7 +160,7 @@ describe('out.barChart — what it warns about', () => {
     // One fact, one message. The node used to add "No numeric column available to plot"
     // beside this, which is the same thing said twice on one badge.
     expect(issues(narrowed(['type']), 'bar')).toEqual([
-      'No columns of type i64/f64 available for "Value"',
+      'No columns of type i64/f64 available for `Value`.',
     ])
   })
 
@@ -177,7 +177,9 @@ describe('out.barChart — what it warns about', () => {
     let g = setNodeParam(pipeline(), 'bar', 'useSeries', true)
     g = setNodeParam(g, 'bar', 'category', 'type')
     g = setNodeParam(g, 'bar', 'series', 'type')
-    expect(issues(g, 'bar')).toEqual(['Stack-by and Category are the same column'])
+    expect(issues(g, 'bar')).toEqual([
+      '`Stack by` and `Category` are the same column. Pick a different column for one of them.',
+    ])
   })
 
   it('keeps quiet about the same pair while stacking is off', () => {

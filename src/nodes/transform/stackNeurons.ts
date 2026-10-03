@@ -62,12 +62,13 @@ registerNode({
   type: 'neuron.stack',
   label: 'Stack Neurons',
   category: 'transform',
-  description: 'Combine several sets of skeletons, meshes or points into one collection.',
+  description:
+    'Combine several sets of skeletons, meshes or points into one collection, adding a `source` column (set by Source column) that names the input each neuron came from.',
   guide:
-    'The geometry counterpart of Stack Tables: several collections end to end, with their ' +
-    'attribute tables stacked alongside. This is how neurons from two or more datasets reach ' +
-    'one 3D View — transform each into a shared space first, then stack them and colour by the ' +
-    'source column. Every input must be the same kind, in the same units and the same space.',
+    'Joins several collections of skeletons, meshes or points end to end and stacks their ' +
+    'attribute tables, as Stack Tables does for tables. Use it to show neurons from several ' +
+    'datasets in one 3D View: transform each into a shared space, stack them, and colour by ' +
+    'the source column. All inputs must be the same kind, in the same units and space.',
   // Concatenating buffers already in hand. No network, no runtime, one pass.
   cost: 'cheap',
   /*
@@ -97,7 +98,7 @@ registerNode({
        * tell which neuron came from where is the failure rather than an inconvenience.
        */
       default: 'source',
-      help: 'Adds a column naming which input each neuron came from — this is what a colour encoding reads in the 3D View. Empty adds none.',
+      help: 'Name of a column recording which input each neuron came from, e.g. to colour by in the 3D View. Leave empty to add none.',
     },
     ...stackLabelParams(['First', 'Second']),
   ],
@@ -140,7 +141,7 @@ registerNode({
       if (kind === undefined) continue
       if (!isGeometryKind(kind)) {
         issues.push(
-          `${port.label} is not geometry — Stack Neurons takes skeletons, meshes or points.`,
+          `\`${port.label}\` is not geometry. Stack Neurons takes skeletons, meshes or points.`,
         )
         continue
       }

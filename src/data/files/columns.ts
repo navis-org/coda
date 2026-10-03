@@ -171,9 +171,9 @@ function timeText(raw: unknown): CellValue {
 
 function overflowError(name: string): Error {
   return new Error(
-    `"${name}" holds integers too large to be a number column — reading them as numbers would ` +
+    `"${name}" holds integers too large for a number column. Reading them as numbers would ` +
       `round them, and a rounded id names a different neuron. On the Link Table node, untick ` +
-      `Detect id columns and choose "${name}" under Read as text — with every other id column ` +
-      `the file holds, since the list replaces the automatic choice rather than adding to it.`,
+      `\`Detect id columns\` and choose "${name}" under \`Read as text\`, along with every other ` +
+      `id column in the file, because the list replaces the automatic choice.`,
   )
 }

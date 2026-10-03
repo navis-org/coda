@@ -59,19 +59,19 @@ const POPULATION_PARAMS: readonly PopulationParamSpec[] = [
     filter: 'traced',
     id: 'tracedOnly',
     label: 'Traced only',
-    help: 'Keep neurons whose status is "Traced". OR-ed with the other two boxes, so ticking another lets more neurons through.',
+    help: 'Keep neurons whose status is "Traced". The three boxes combine with OR, so ticking another lets more neurons through.',
   },
   {
     filter: 'typed',
     id: 'typedOnly',
     label: 'Typed only',
-    help: 'Keep neurons carrying a cell type — any column whose name ends in "type". OR-ed with the other two boxes.',
+    help: 'Keep neurons with a cell type in any column whose name ends in "type". Combines with the other two boxes by OR.',
   },
   {
     filter: 'superclass',
     id: 'superclassOnly',
     label: 'Superclass only',
-    help: 'Keep neurons with a superclass, the coarsest classification, which not every dataset publishes. OR-ed with the other two boxes.',
+    help: 'Keep neurons with a superclass. Not every dataset has one. Combines with the other two boxes by OR.',
   },
 ]
 
@@ -188,15 +188,15 @@ export function populationIssues(
   if (dropped.length === 0) return []
 
   const names = dropped
-    .map((f) => POPULATION_PARAMS.find((spec) => spec.filter === f)?.label ?? f)
+    .map((f) => `\`${POPULATION_PARAMS.find((spec) => spec.filter === f)?.label ?? f}\``)
     .join(' and ')
   const where = datasetId ?? 'This dataset'
   return dropped.length === asked.length
     ? [
-        `${where} publishes no column for "${names}", so it cannot narrow this dataset — ` +
-          `every neuron the server has will come through. Clear the box to say so.`,
+        `${where} publishes no column for ${names}, so that filter cannot be applied and ` +
+          `every neuron the server has will come through. Untick ${names} to clear this warning.`,
       ]
-    : [`${where} publishes no column for "${names}", so only the other filters apply here.`]
+    : [`${where} publishes no column for ${names}, so only the other filters apply here.`]
 }
 
 /**

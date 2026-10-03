@@ -75,9 +75,11 @@ registerNode({
   label: 'Table from URL',
   category: 'utility',
   description:
-    'Fetch a CSV from a URL and read it as a table. A chosen id column is renamed `neuronId` and a chosen type column `type`.',
+    'Fetch a CSV or TSV from a URL and read it as a table. A chosen id column is renamed `neuronId` and a chosen type column `type`.',
   guide:
-    'Fetch a CSV from a URL — the reproducible counterpart to Upload Table. A colleague opening your .coda.json re-fetches and gets the same data. Trade-off: will not work on disk-only files, behind logins, or on hosts that send no CORS headers. Bump Refresh to re-fetch when the remote file changes.',
+    'Downloads a CSV or TSV file from a web address and reads it as a table. The workflow ' +
+    'stores only the address, so anyone opening it gets the same table. The host has to allow ' +
+    'cross-origin reads; GitHub file links are handled for you.',
   cost: 'expensive',
   inputs: [],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -100,7 +102,7 @@ registerNode({
       id: 'refresh',
       kind: 'int',
       label: 'Refresh',
-      help: 'Bump to fetch again. The file at a URL can change; the cache key cannot see that.',
+      help: 'Change to fetch the file again, e.g. after it was updated.',
       default: 0,
       min: 0,
       advanced: true,
@@ -126,21 +128,25 @@ registerNode({
    */
   validate: (ctx) => {
     const url = String(ctx.params.url).trim()
-    if (!url) return ['No URL yet — paste one in']
+    if (!url) return ['No URL yet. Paste the address of a file into `URL`.']
     let parsed: URL
     try {
       parsed = new URL(url)
     } catch {
-      return [`"${url}" is not a URL`]
+      return [`"${url}" is not a valid URL. Check the address in \`URL\`.`]
     }
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      return [`Only http and https can be fetched, not "${parsed.protocol.replace(':', '')}"`]
+      return [
+        `Only http and https addresses can be fetched, and this one starts with "${parsed.protocol.replace(':', '')}". Use an https address.`,
+      ]
     }
     // A warning, never a refusal — the same call `Find Neurons` makes about `limit: 0`. A page
     // served over http into an https app is blocked by the browser, but saying so is the
     // browser's job at the moment it happens, not a reason to refuse the address now.
     if (parsed.protocol === 'http:') {
-      return ['An http URL will be blocked by the browser when this app is served over https']
+      return [
+        'Browsers block http addresses when this app is served over https. Use an https address if the host has one.',
+      ]
     }
     // Once the URL has answered once, the same checks the upload node makes — including the
     // "not in this file" pair, which this node used to skip while its twin reported them.
@@ -151,7 +157,7 @@ registerNode({
     // The rewritten address from here down: it is the one that gets requested, so it is the one
     // every message about the request should name.
     const url = urlOf(ctx.params)
-    if (!url) throw new Error('No URL. Paste the address of a CSV file into the URL field.')
+    if (!url) throw new Error('No URL yet. Paste the address of a CSV file into `URL`.')
 
     ctx.progress(0, 'fetching')
     let response: Response
@@ -167,8 +173,8 @@ registerNode({
        */
       if (ctx.signal.aborted) throw err
       throw new Error(
-        `Could not fetch ${url}. The host may be unreachable or refuses cross-origin ` +
-          `reads.`,
+        `Could not fetch ${url}. Either the host is unreachable or it does not allow ` +
+          `cross-origin reads.`,
       )
     }
 
@@ -194,7 +200,7 @@ registerNode({
     const idColumn = String(ctx.params.idColumn)
     if (idColumn && !findColumn(parsed.table.schema, idColumn)) {
       throw new Error(
-        `ID column "${idColumn}" is not in ${url}. Available: ${columnNames(parsed.table.schema).join(', ')}`,
+        `\`ID column\` is set to "${idColumn}", which is not in ${url}. Pick one of: ${columnNames(parsed.table.schema).join(', ')}`,
       )
     }
 

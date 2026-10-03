@@ -185,7 +185,7 @@ describe('validate', () => {
   it('leaves the substitution to validateColumnParams, which already names it', () => {
     const ctx = inferCtx({}, { in: T.skeletons(MORPHOLOGY), table: T.table(STATS) })
     expect(validateColumnParams(def, ctx)).toEqual([
-      'Column "neuronId" is gone — using "label"',
+      'Column "neuronId" is missing, so "label" is used instead.',
     ])
     expect(def.validate?.(ctx)).toEqual([])
   })

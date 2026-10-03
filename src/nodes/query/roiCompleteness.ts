@@ -32,9 +32,11 @@ registerNode({
   label: 'ROI Completeness',
   category: 'query',
   description:
-    'How completely each region of the dataset has been reconstructed: traced synapses against the total present.',
+    'How completely each region of a dataset has been reconstructed: synapses on traced neurons against all synapses in the region.',
   guide:
-    'How completely each region has been reconstructed as a percentage of pre- and postsynapses associated with proofread neurons.',
+    'Shows how completely each brain region of a neuPrint dataset has been reconstructed: the ' +
+    'fraction of pre- and postsynapses that belong to traced neurons. Needs only a Dataset. By ' +
+    'default only primary regions are returned, since the full list is nested.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [
@@ -45,7 +47,7 @@ registerNode({
       id: 'primaryOnly',
       kind: 'boolean',
       label: 'Primary regions only',
-      help: 'Keep only the regions that tile the volume. The published list nests — a synapse in AL-DA1(R) is counted again in AL(R) — so totalling the full table double counts.',
+      help: 'Keep only the regions that tile the volume. The full list nests (AL-DA1(R) sits inside AL(R)), so totals over it double count.',
       default: true,
     },
   ],

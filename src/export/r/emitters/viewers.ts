@@ -210,9 +210,9 @@ registerEmitter('out.heatmap', (ctx) => {
   if (log) {
     lines.push(
       ...ctx.note(
-        'The colour runs on a log scale and the values do not: the fill is log10(1 + ' +
-          'value - low) and the label is the raw value. Cells past either end are clipped, ' +
-          'as on the card, and the legend stays in transformed units.',
+        'Only the colour uses a log scale: the fill is log10(1 + value - low) and the label ' +
+          'is the raw value. Cells past either end are clipped, as in Coda, and the legend ' +
+          'is in transformed units.',
       ),
     )
   }
@@ -413,9 +413,9 @@ function heatmapOrderLines(
         if (i === 0) {
           lines.push(
             ...ctx.note(
-              "The clustering is seaborn's clustermap: each row a vector across the columns. " +
-                'Coda reads an empty cell as 0 and puts a constant vector at distance 1 from ' +
-                "everything, rather than letting `cor`'s NA stop `hclust`.",
+              "The clustering follows seaborn's clustermap: each row is a vector across the columns. " +
+                'As in Coda, an empty cell counts as 0 and a constant vector is put at distance 1 ' +
+                "from everything, so `cor`'s NA does not stop `hclust`.",
             ),
             `x_ <- ${out}`,
             `x_[!is.finite(x_)] <- 0`,
@@ -671,9 +671,9 @@ registerEmitter('out.rank', (ctx) => {
   if (plan.showShare) {
     lines.push(
       ...ctx.note(
-        "The card draws the share as a second panel sharing the ranking's axis. ggplot2 " +
-          'cannot stack two panels with different y transforms, so this is a second figure ' +
-          'over the same ranking — empty where the share was withheld; see coda_rank.',
+        'Coda draws the share as a second panel below the ranking, on the same x axis. ggplot2 ' +
+          'cannot stack two panels with different y transforms, so this is a separate figure ' +
+          'over the same ranking. It is empty where Coda did not compute the share; see coda_rank.',
       ),
       ``,
       `print(`,
@@ -887,8 +887,8 @@ registerEmitter('out.distribution', (ctx) => {
     // Tukey.
     lines.push(
       ...ctx.note(
-        'The 5th–95th percentile whisker has no `geom_boxplot` equivalent — `coef` is a ' +
-          'multiple of the IQR — so this draws the full range instead.',
+        '`Whiskers` "5th–95th percentile" has no `geom_boxplot` equivalent (`coef` is a ' +
+          'multiple of the IQR), so this draws the full range instead.',
       ),
     )
   }
@@ -966,8 +966,8 @@ registerEmitter('out.network', (ctx) => {
   lines.push(
     ``,
     ...ctx.note(
-      'Coda draws this with ForceAtlas2 in the browser. igraph has no equivalent, so the ' +
-        'graph is handed over and the layout is yours to pick — uncomment one.',
+      'Coda draws this with ForceAtlas2 in the browser. igraph has no equivalent, so pick a ' +
+        'layout yourself by uncommenting one of the lines below.',
     ),
     `# plot(${out}, layout = layout_with_fr(${out}), vertex.size = 4, vertex.label = NA)`,
     `# plot(${out}, layout = layout_with_kk(${out}))`,
@@ -1120,8 +1120,8 @@ registerEmitter('out.flowChart', (ctx) => {
 
   const notes = [
     ...plan.divergences,
-    'A vertex here is a fixed-size rectangle, where Coda sizes each box to its label. Feedback ' +
-      'edges are not dashed as they are on the canvas — igraph styles edges one way per plot.',
+    'A vertex here is a fixed-size rectangle, while Coda sizes each box to its label. Feedback ' +
+      'edges are not dashed as they are in Coda, because igraph styles all edges in a plot the same way.',
   ]
   return [...notes.flatMap((note) => ctx.note(note)), ...lines]
 })
@@ -1182,8 +1182,8 @@ registerEmitter('out.copyIds', (ctx) => {
   if (quoted) lines.push(`${ids} <- paste0('"', ${ids}, '"')`)
   lines.push(
     ...ctx.note(
-      'In Coda this button puts the ids on the clipboard. A document has none, so they are ' +
-        'printed here — copy them from the output, or use the vector directly.',
+      'In Coda this button copies the ids to the clipboard. Here they are printed instead: ' +
+        'copy them from the output, or use the vector directly.',
     ),
     `writeLines(paste(${ids}, collapse = ${rStr(separator)}))`,
   )
@@ -1229,8 +1229,8 @@ registerEmitter('out.neuroglancer', (ctx) => ctx.todo(NEUROGLANCER_REFUSAL))
 // prose with no outputs, and it is on every published dataset node by default.
 registerEmitter('dataset.description', (ctx) => {
   return ctx.note(
-    "This card shows the dataset's published description and citation, which is prose rather " +
-      'than a step. Read it with neuprint_get_meta() / neuprint_datasets() if you need it here.',
+    "This card shows the dataset's published description and citation. It does no analysis, so " +
+      'nothing is exported. Read it with neuprint_get_meta() / neuprint_datasets() if you need it here.',
   )
 })
 
@@ -1248,8 +1248,8 @@ registerEmitter('out.datasetSummary', (ctx) => {
 
   return [
     ...ctx.note(
-      'The card counts the whole dataset index. `neuprint_get_meta` on every body is the ' +
-        'equivalent and is a large download — expect this chunk to take a while.',
+      'The card counts every neuron in the dataset. Fetching metadata for every body (as ' +
+        '`neuprint_get_meta` would) is a large download, so expect this chunk to take a while.',
     ),
     `${neurons} <- neuprint_fetch_custom(`,
     // Aliased: neuprint_fetch_custom names columns after the RETURN expressions.
@@ -1273,8 +1273,8 @@ registerEmitter('out.rois', (ctx) => {
 
   return [
     ...ctx.note(
-      'Region meshes are display surfaces published for visualization — a volume measured ' +
-        'off one is an approximation rather than a figure to quote.',
+      'Region meshes are published for visualization only, so a volume measured from one ' +
+        'is approximate.',
     ),
     `${ctx.name}_rois <- neuprint_ROIs(superLevel = ${primaryOnly ? 'FALSE' : 'NA'}, conn = ${conn})`,
     ``,

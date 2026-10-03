@@ -662,8 +662,8 @@ export function similarityMatrix(
   if (!METRICS[metric].signed && features.negatives > 0) {
     throw new Error(
       `A Jaccard index is not defined over negative values, and ` +
-        `${features.negatives.toLocaleString()} of these are below zero. Cosine, ` +
-        `Euclidean and Pearson all take them.`,
+        `${features.negatives.toLocaleString()} of these are below zero. Set \`Metric\` to ` +
+        `Cosine, Euclidean or Pearson, which all accept negative values.`,
     )
   }
 
@@ -678,17 +678,18 @@ export function similarityMatrix(
       count: work,
       threshold: SIMILARITY_WORK_WARN,
       unit: 'pair comparisons',
-      control: 'the size this stays interactive at',
+      control: 'the usual size for an interactive comparison',
       cost:
-        `${describeDuration(work / CONTRIBUTIONS_PER_SECOND)} of single-threaded work, ` +
-        `with no repaint. Filter out common partners upstream to reduce the workload.`,
+        `That is ${describeDuration(work / CONTRIBUTIONS_PER_SECOND)} of single-threaded ` +
+        `work, and the page will not update meanwhile. Filter out common partners upstream ` +
+        `to reduce the workload.`,
     })
   }
   if (features.duplicates > 0) {
     ctx.warn(
       `${features.duplicates.toLocaleString()} rows repeated an observation/feature ` +
-        `pair and were summed, as a Pivot set to sum would. Tell them apart upstream if ` +
-        `they were meant to be separate features.`,
+        `pair and were summed, as a Pivot set to sum would. If they were meant to be ` +
+        `separate features, give them distinct names upstream.`,
     )
   }
 
@@ -721,9 +722,9 @@ export function similarityMatrix(
   if (empty > 0) {
     ctx.warn(
       `${empty.toLocaleString()} of ${n.toLocaleString()} observations have no ` +
-        `features at all, so they are ${distance ? 'at the far end of' : 'at zero to'} ` +
-        `everything. Their rows were zero, empty or missing — filter them upstream if ` +
-        `they should not be compared.`,
+        `features at all, so they are ${distance ? 'at the maximum distance from' : 'at zero similarity to'} ` +
+        `everything. Their rows were zero, empty or missing. If they should not be compared, ` +
+        `filter them out upstream.`,
     )
   }
 

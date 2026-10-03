@@ -257,9 +257,7 @@ describe('neuron.nblastKnn — running', () => {
     // This node is the one built for large sets — its cost grows with Candidates rather than
     // with the square of the population — so refusing it on a count was the wrong verdict from
     // the wrong node. It says the number and gets on with it.
-    expect(scheduler.warning('knn')).toMatch(
-      /neurons on Query is past this node's Warn above \(2\)/,
-    )
+    expect(scheduler.warning('knn')).toMatch(/neurons on Query is past `Warn above` \(2\)/)
     expect(mockedKnn).toHaveBeenCalled()
   })
 })

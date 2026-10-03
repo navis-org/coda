@@ -1,45 +1,44 @@
-Keep the rows matching **one** condition on **one** column. Cheap, so the result re-computes as you type a threshold.
+## What Filter Table does
+
+Filter Table keeps the rows of a table that match a single condition on a single column, e.g. `pre` `≥` `100`, or `type` `starts with` `LC`. The columns are left untouched, so a filtered neuron table is still a neuron table. The node is cheap, so the result updates as you type.
 
 ```coda-params
 core.filterTable: column, op, value
 ```
 
-The operator list in `Condition` follows the column's type:
+The operators offered under `Condition` depend on the type of the column you picked:
 
-- a number gets `=`, `≠`, `>`, `≥`, `<`, `≤`
-- text gets `is`, `contains`, `matches regex`, `starts with`, `ends with`, `is empty`
-- a boolean gets `is true` / `is false`
+| Column type | Operators |
+| --- | --- |
+| number | `=`, `≠`, `>`, `≥`, `<`, `≤` |
+| text | `is`, `is not`, `contains`, `does not contain`, `matches regex`, `starts with`, `ends with`, `is empty`, `is not empty` |
+| true/false | `is true`, `is false` |
 
-> [!WARNING] `matches regex` is unanchored
-> `LC4` also matches **LPLC4** and **LC4b**. Write `^LC4$` for an exact match. This differs from
-> [Find Neurons](#neuron.findNeurons) and [Explore Dataset](#neuron.explore), whose patterns are
-> anchored for you.
+## Things to watch out for
 
-> [!WARNING] Text comparisons are case-sensitive
-> Including `is` and `contains`. This differs from the [Table viewer](#out.table)'s own header
-> filters, which are case-insensitive.
+> [!WARNING] `matches regex` is not anchored
+> `LC4` also matches `LPLC4` and `LC4b`. Write `^LC4$` if you want an exact match. This is
+> different from [Find Neurons](#neuron.findNeurons) and [Explore Dataset](#neuron.explore), which
+> anchor patterns for you.
 
-> [!WARNING] On a number column, an empty cell counts as 0
-> So `= 0` keeps the nulls and `≠ 0` drops them, where `>`, `≥`, `<`, `≤` drop nulls instead.
-> Filter on `is not empty` first if the distinction matters.
+Text comparisons are case-sensitive, including `is` and `contains`: `lc4` does not match `LC4`. The header filters in the [Table](#out.table) viewer, by contrast, ignore case.
 
-## One condition only
+On a number column, empty cells count as 0 for `=` and `≠`. So `= 0` keeps the empty cells and `≠ 0` drops them. `>`, `≥`, `<` and `≤` always drop empty cells; on a column of counts, `≥` `0` therefore removes the empty cells and keeps the zeros.
 
-For `AND`, chain two of these. For `OR`, use one `matches regex` — `^(LC4|LC6)$` — or combine two filter results with [Stack Tables](#core.stack), or use [Find Neurons](#neuron.findNeurons), which builds several rows against the backend.
+## Combining conditions
 
-Filtering never changes the schema, and a table of neurons stays a table of neurons.
+Each Filter Table applies one condition. To combine several:
 
-## Below a Link Table
+- For AND, chain two or more Filter Tables.
+- For OR on a text column, use a single `matches regex`, e.g. `^(LC4|LC6)$`.
+- Otherwise, filter twice in parallel and combine the results with [Stack Tables](#core.stack).
 
-Wired after a [Link Table](#core.linkTable), this reads nothing. The condition travels with the
-file, and whatever reads rows out of it below — [Read Rows](#core.readRows), or a
-[Custom Dataset](#connectome:customDataset)'s synapse lookup and edge list — drops the rows that
-fail it from the rows it fetched. A lookup of six neurons in a 200-million-row synapse table stays
-a lookup of six neurons; the condition sees only their synapses.
+If you are filtering neurons from a dataset, [Find Neurons](#neuron.findNeurons) lets you write several conditions at once and runs them on the server.
 
-A confidence threshold on a synapse table is the usual case: Link Table → Filter Table
-(`score` `≥` `0.5`) → the Custom Dataset's Synapses socket. Its connectivity, when counted from
-that table, counts only the synapses that pass.
+## Filtering a linked file
 
-Chained Filter Tables add their conditions together. The output is still the file, so a node that
-needs a table in memory takes it through Read Rows.
+Filter Table also works below a [Link Table](#core.linkTable). In that case it doesn't read anything itself: the condition is passed along with the file, and whichever node reads rows from it further down ([Read Rows](#core.readRows), or a [Custom Dataset](#connectome:customDataset) looking up synapses or edges) applies the condition to the rows it fetches. Looking up six neurons in a 200-million-row synapse table is still a lookup of six neurons; the condition only ever sees their synapses.
+
+The typical use is a confidence threshold on a synapse table: Link Table → Filter Table (`score` `≥` `0.5`) → the Custom Dataset's `Synapses` socket. Connectivity counted from that table then only includes synapses that pass.
+
+Chained Filter Tables combine their conditions. The output is still the file, not a table, so a node that needs the rows in memory has to get them through Read Rows.

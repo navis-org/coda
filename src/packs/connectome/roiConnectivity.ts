@@ -48,13 +48,13 @@ export const roiConnectivityNode = packNode({
   type: 'neuron.roiConnectivity',
   label: 'ROI Connectivity',
   category: 'query',
-  description: 'Region-to-region connectivity for the whole dataset, as a matrix and a table.',
+  description:
+    'Region-to-region connectivity across a whole dataset, as a matrix and as a table of ' +
+    'region pairs.',
   guide:
-    'Region-to-region connectivity for the whole dataset, precomputed on neuPrint’s side, so a ' +
-    'whole connectome answers in a few hundred kilobytes. Emits a matrix for the Heatmap and a ' +
-    'long table for everything else. The table carries both of neuPrint’s numbers and Cells ' +
-    'picks which fills the matrix; weight is scaled in a way the server does not document, so ' +
-    'the legend names the measure it drew.',
+    'Region-to-region connectivity for a whole neuPrint dataset, precomputed by neuPrint. ' +
+    'Gives you a matrix for a Heatmap and a table of region pairs for everything else. Cells ' +
+    'decides which of neuPrint’s two numbers (weight or count) fills the matrix.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [

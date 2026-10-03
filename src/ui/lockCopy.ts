@@ -19,7 +19,7 @@
 
 /** For the status bar: a refused key or gesture has nowhere else to explain itself. */
 export const LOCKED_NOTICE =
-  'The canvas is locked — use the lock button in the bottom-left rail'
+  'The canvas is locked. Unlock it with the lock button in the bottom-left rail'
 
 /** For a row or button whose label already says what it would have done. */
 export const LOCKED_HINT = 'The canvas is locked'

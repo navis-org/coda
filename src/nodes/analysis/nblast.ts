@@ -50,10 +50,9 @@ registerNode({
    * of every `guide`; this one was eight.
    */
   guide:
-    'Compare neurons by shape rather than by connectivity, scoring every pair on how well one ' +
-    'neuron’s arbor lies along the other’s. Wire one set of Skeletons for an all-by-all — the ' +
-    'usual way in — or a second set to score one group against another. The result is a ' +
-    'matrix, ready for a Heatmap or a clustering.',
+    'Compare neurons by shape: NBLAST scores every pair on how well one neuron lines up with ' +
+    'the other. Wire one set of Skeletons for an all-by-all, or a second set into Target to ' +
+    'compare two groups. The output is a matrix of scores, typically clustered with Linkage.',
   cost: 'expensive',
   inputs: [
     { id: 'query', label: 'Query', type: T.skeletons() },
@@ -68,7 +67,7 @@ registerNode({
       default: 1,
       min: 0,
       step: 0.5,
-      help: 'Space the points evenly before comparing, in micrometres. Too fine is slow, too coarse is meaningless; 1 µm is the convention. 0 leaves each skeleton as it was traced.',
+      help: 'Resample skeletons to this point spacing before comparing. 1 µm is the convention; 0 keeps each skeleton as traced.',
     },
     {
       id: 'symmetry',
@@ -76,7 +75,7 @@ registerNode({
       label: 'Symmetry',
       default: 'mean',
       options: SYMMETRY_OPTIONS,
-      help: 'A small neuron can lie entirely inside a large one, so the two directions of a pair disagree. The mean is the usual choice and makes an all-by-all matrix symmetric.',
+      help: 'How to combine the two scores of each pair. They differ because a small neuron can lie entirely inside a large one; "mean of both directions" is the usual choice.',
     },
     labelColumnParam(
       'Which attribute names each row. Neuron ids where this is empty or unset.',
@@ -105,9 +104,7 @@ registerNode({
       label: 'Weight by alpha',
       default: false,
       advanced: true,
-      help:
-        'Weight each point by how strongly its neighbourhood is a line rather than a blob, ' +
-        'which plays down tufts and branch points.',
+      help: 'Weight each point by how line-like its neighbourhood is, which plays down tufts and branch points.',
     },
     warnAboveParam({
       threshold: MAX_NEURONS,
