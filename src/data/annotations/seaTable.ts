@@ -19,15 +19,16 @@
  * The auth scheme is **`Token`**, not `Bearer`, on every one of them — a `Bearer` JWT gets
  * `403 invalid token`, which names the token rather than the scheme and sends you looking in the
  * wrong place. All four answer a browser with `Access-Control-Allow-Origin: *`, **including the
- * 403**, which is what makes the auth-failure channel work at all.
+ * 403**, which is what makes the auth-failure channel work at all — on FlyTable since its host
+ * proxy opened the two seahub paths (`docs/flytable-cors.md`).
  *
- * **The rows endpoint has no column selection, and the one that does cannot be reached from a
- * browser.** `/dtable-db/api/v1/query/` takes SQL and answers 200 — with no ACAO header, so a
- * page cannot read it. So a whole-table read is every column: FlyWire's `main.info` is 58,340
- * rows over 60 columns at **~79 MB**, in six requests of 10,000, and **SeaTable does not gzip**,
- * so that is 79 MB on the wire. The `columns` param on the node cannot change what is
- * transferred; it changes what is kept, which is what keeps the cached table and the neuron
- * index small. The download is cached in IndexedDB and paid once per base.
+ * **The rows endpoint has no column selection.** A whole-table read is every column: FlyWire's
+ * `main.info` is 58,340 rows over 60 columns at **~79 MB**, in six requests of 10,000. The
+ * `columns` param on the node cannot change what is transferred; it changes what is kept, which
+ * is what keeps the cached table and the neuron index small. The download is cached in IndexedDB
+ * and paid once per base. SQL (`/dtable-db/api/v1/query/`) *can* select rows and columns, and
+ * FlyTable opened it to browsers on 2026-10-03; the annotation editor reads through it
+ * (`targets/seaTable.ts`), where a whole table per selection would be absurd.
  *
  * **Ids are already text.** `root_id` comes back as `"720575940621522189"` — a JSON string — so
  * it round-trips exactly and meets CAVE's string ids with no conversion at all. That is the half
@@ -122,14 +123,48 @@ function routesFor(url: string): readonly { url: string; kind: RouteKind }[] {
   ])
 }
 
-async function request<T>(url: string, token: string, signal?: AbortSignal): Promise<T> {
+/** How one request goes out, and what its refusal means. */
+export interface RequestOptions {
+  signal?: AbortSignal | undefined
+  /**
+   * SQL, or a batch of row updates; every other call is a GET. A body may fall back to the dev
+   * relay like a GET does, which re-sends it only where the preflight passed and the response
+   * came back without CORS headers — harmless for both uses, a query reading and
+   * `batch-update-rows` setting values, so sending it twice lands the same cells. A future write
+   * that is not idempotent (inserting rows) must not come through here as it stands.
+   */
+  body?: { method: 'POST' | 'PUT'; json: unknown } | undefined
+  /**
+   * CAVE's `quiet` (`cave/client.ts`): throw as usual, but keep a 401/403 — or no token at all —
+   * off the auth channel, which opens Connections. For a caller that tolerates the failure.
+   */
+  quiet?: boolean | undefined
+  /**
+   * A write: a 401/403 is said as the account being able to read the base and not write it, the
+   * usual reason, rather than as a token to replace. A write is also `quiet` — a dialog asking for
+   * a new token asks for the one thing that cannot help.
+   */
+  write?: boolean | undefined
+}
+
+export async function request<T>(
+  url: string,
+  token: string,
+  options: RequestOptions = {},
+): Promise<T> {
+  const { signal, body, write } = options
+  const quiet = options.quiet || write
   const origin = new URL(url).origin
-  const headers = {
+  const headers: Record<string, string> = {
     // `Token`, not `Bearer` — a Bearer JWT answers 403 `invalid token`, which blames the
     // credential rather than the scheme.
     Authorization: `Token ${token}`,
     Accept: 'application/json',
+    ...(body ? { 'Content-Type': 'application/json' } : {}),
   }
+  const init: RequestInit = body
+    ? { method: body.method, headers, body: JSON.stringify(body.json) }
+    : { headers }
 
   /*
    * Only a *thrown* fetch moves on to the next route — `neuprint/client.ts`'s rule and
@@ -140,7 +175,7 @@ async function request<T>(url: string, token: string, signal?: AbortSignal): Pro
   let lastError: unknown
   for (const route of routesFor(url)) {
     try {
-      response = await fetch(route.url, { headers, ...(signal ? { signal } : {}) })
+      response = await fetch(route.url, { ...init, ...(signal ? { signal } : {}) })
     } catch (error) {
       // An AbortError is the scheduler cancelling. It must stay an AbortError, and must never be
       // answered by issuing the request the cancellation was meant to stop.
@@ -155,23 +190,26 @@ async function request<T>(url: string, token: string, signal?: AbortSignal): Pro
 
   if (!response) {
     throw new SeaTableError(
-      `Could not reach ${origin}. It could not be read cross-origin, or the host is down — a ` +
-        `browser reports both the same way. FlyTable currently sends no CORS headers at all, so ` +
-        `a browser blocks the request before it is sent; the relay Coda falls back to comes from ` +
-        `vite.config.ts, which means \`pnpm dev\` or \`pnpm preview\` serve it and a static ` +
-        `deploy serves nothing there. The real fix is one CORS header on the deployment. ` +
-        `(${errorMessage(lastError)})`,
+      `Could not reach ${origin}. Either the server sends no CORS headers or it is down. The ` +
+        `browser does not say which. Coda's fallback relay comes from vite.config.ts, so ` +
+        `\`pnpm dev\` and \`pnpm preview\` provide it but a static deploy does not. ` +
+        `docs/flytable-cors.md lists the headers a server needs. (${errorMessage(lastError)})`,
     )
   }
 
-  if (response.status === 401 || response.status === 403) {
-    const message =
-      `${new URL(url).origin} rejected the token (${response.status}). It may have expired, or ` +
-      `it may be a *base* API token — this needs an account token.`
-    reportAuthFailure(message)
-    throw new SeaTableError(message, response.status)
-  }
   const text = await response.text()
+  if (response.status === 401 || response.status === 403) {
+    refuse(
+      origin,
+      write
+        ? `${origin} refused this (${response.status}): ${explain(text)}. The account may be ` +
+            `allowed to read this base but not to write to it.`
+        : `${origin} rejected the token (${response.status}). It may have expired, or ` +
+            `it may be a base API token. Coda needs an account token.`,
+      response.status,
+      quiet,
+    )
+  }
   if (!response.ok) {
     throw new SeaTableError(
       `SeaTable returned ${response.status}: ${explain(text)}`,
@@ -191,14 +229,29 @@ function explain(body: string): string {
   }
 }
 
-function requireToken(host: string): string {
+/**
+ * Every refusal goes through here — a 401/403 and a missing token alike — so `quiet` cannot be
+ * honoured by one and forgotten by the other, the drift `cave/client.ts`' `refuse` records.
+ */
+function refuse(
+  host: string,
+  message: string,
+  status: number,
+  quiet: boolean | undefined,
+): never {
+  if (!quiet) reportAuthFailure(host, message)
+  throw new SeaTableError(message, status)
+}
+
+function requireToken(host: string, quiet?: boolean): string {
   const token = getToken(host)
-  if (!token) {
-    const message = `No token for ${host}. Add one in Connections — the branch icon in the toolbar.`
-    reportAuthFailure(message)
-    throw new SeaTableError(message, 401)
-  }
-  return token
+  if (token) return token
+  return refuse(
+    host,
+    `No token for ${host}. Add one in Connections (the branch icon in the toolbar).`,
+    401,
+    quiet,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +379,7 @@ export async function listBases(host: string, signal?: AbortSignal): Promise<Sea
   const listing = await request<WorkspaceListing>(
     `${root}/api/v2.1/workspaces/`,
     requireToken(root),
-    signal,
+    { signal },
   )
   const bases: SeaTableBase[] = []
   for (const workspace of listing.workspace_list ?? []) {
@@ -345,13 +398,17 @@ export async function listBases(host: string, signal?: AbortSignal): Promise<Sea
   return bases
 }
 
-interface BaseAccess {
+export interface BaseAccess {
   access_token: string
   dtable_uuid: string
   dtable_server: string
+  /** Where SQL goes. Absent from older deployments' replies; `/dtable-db/` on FlyTable. */
+  dtable_db?: string
+  /** Newer deployments route row and SQL calls through `{host}/api-gateway/` instead. */
+  use_api_gateway?: boolean
 }
 
-async function openBase(
+export async function openBase(
   host: string,
   workspace: string,
   base: string,
@@ -362,20 +419,56 @@ async function openBase(
   const access = await request<BaseAccess>(
     `${root}/api/v2.1/workspace/${encodeURIComponent(ws)}/dtable/${encodeURIComponent(base)}/access-token/`,
     requireToken(root),
-    signal,
+    { signal },
   )
-  return { ...access, dtable_server: access.dtable_server.replace(/\/+$/, '') }
+  return {
+    ...access,
+    dtable_server: access.dtable_server.replace(/\/+$/, ''),
+    ...(access.dtable_db ? { dtable_db: access.dtable_db.replace(/\/+$/, '') } : {}),
+  }
 }
 
 interface Metadata {
   metadata?: {
-    tables?: Array<{ name?: string; columns?: Array<{ name?: string; type?: string }> }>
+    tables?: Array<{
+      name?: string
+      columns?: Array<{
+        name?: string
+        type?: string
+        editable?: boolean
+        data?: { options?: Array<{ name?: string }>; format?: string } | null
+      }>
+    }>
   }
+}
+
+export interface SeaTableColumn {
+  name: string
+  type: string
+  /** The base's own switch; false where its owner locked the column. Absent reads as editable. */
+  editable?: boolean
+  /** A `single-select` or `multiple-select` column's options, by name. */
+  options?: string[]
+  /** A `date` column's display format: `YYYY-MM-DD`, or `YYYY-MM-DD HH:mm` with a time. */
+  format?: string
 }
 
 export interface SeaTableTable {
   name: string
-  columns: Array<{ name: string; type: string }>
+  columns: SeaTableColumn[]
+}
+
+/** A base's table by name, or the error naming the ones it has. */
+export function tableNamed(
+  tables: readonly SeaTableTable[],
+  base: string,
+  table: string,
+): SeaTableTable {
+  const found = tables.find((t) => t.name === table)
+  if (found) return found
+  throw new SeaTableError(
+    `"${base}" has no table called "${table}". It has: ${tables.map((t) => t.name).join(', ')}`,
+  )
 }
 
 /** The base's tables and their columns — the cheap half of discovery. */
@@ -389,18 +482,27 @@ export async function readMetadata(
 }
 
 /** The same, given a base already opened — so one read does not mint two tokens. */
-async function readMetadataWith(
+export async function readMetadataWith(
   access: BaseAccess,
   signal?: AbortSignal,
 ): Promise<SeaTableTable[]> {
   const meta = await request<Metadata>(
     `${access.dtable_server}/api/v1/dtables/${access.dtable_uuid}/metadata/`,
     access.access_token,
-    signal,
+    { signal },
   )
   return (meta.metadata?.tables ?? []).map((table) => ({
     name: table.name ?? '',
-    columns: (table.columns ?? []).map((c) => ({ name: c.name ?? '', type: c.type ?? 'text' })),
+    columns: (table.columns ?? []).map((c) => {
+      const options = c.data?.options?.flatMap((o) => (o.name ? [o.name] : []))
+      return {
+        name: c.name ?? '',
+        type: c.type ?? 'text',
+        ...(c.editable === false ? { editable: false } : {}),
+        ...(options ? { options } : {}),
+        ...(c.data?.format ? { format: c.data.format } : {}),
+      }
+    }),
   }))
 }
 
@@ -426,7 +528,7 @@ async function readAllRows(
     const url =
       `${access.dtable_server}/api/v1/dtables/${access.dtable_uuid}/rows/` +
       `?table_name=${encodeURIComponent(config.table)}&limit=${PAGE_SIZE}&start=${page * PAGE_SIZE}`
-    const body = await request<RowsPage>(url, access.access_token, options.signal)
+    const body = await request<RowsPage>(url, access.access_token, { signal: options.signal })
     const batch = body.rows ?? []
     rows.push(...batch)
     options.onProgress?.(Math.min(0.95, (page + 1) / 8), `${rows.length} rows`)
@@ -575,13 +677,7 @@ class SeaTableProvider implements AnnotationProvider {
      */
     const access = await openBase(config.host, config.workspace, config.base, options.signal)
     const tables = await readMetadataWith(access, options.signal)
-    const meta = tables.find((t) => t.name === config.table)
-    if (!meta) {
-      throw new SeaTableError(
-        `"${config.base}" has no table called "${config.table}". It has: ` +
-          `${tables.map((t) => t.name).join(', ')}`,
-      )
-    }
+    const meta = tableNamed(tables, config.base, config.table)
     discovery.set(baseKey(config), tables)
 
     const rows = await readAllRows(access, config, options)

@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   hyparquet@1.29.1:
-    hash: 2ad3398d8e6bf8ed4a3fe50c9c446290e9e8bde499dd3318e108d5a4b4db729a
+    hash: b8cb91bde03cf3d9ab63f2d1f0af57c5299b54b8ba599c497b3cae5fe456f10c
     path: patches/hyparquet@1.29.1.patch
 
 importers:
@@ -54,7 +54,7 @@ importers:
         version: 0.10.1(graphology-types@0.24.8)
       hyparquet:
         specifier: 1.29.1
-        version: 1.29.1(patch_hash=2ad3398d8e6bf8ed4a3fe50c9c446290e9e8bde499dd3318e108d5a4b4db729a)
+        version: 1.29.1(patch_hash=b8cb91bde03cf3d9ab63f2d1f0af57c5299b54b8ba599c497b3cae5fe456f10c)
       hysnappy:
         specifier: 1.1.1
         version: 1.1.1
@@ -3518,7 +3518,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  hyparquet@1.29.1(patch_hash=2ad3398d8e6bf8ed4a3fe50c9c446290e9e8bde499dd3318e108d5a4b4db729a): {}
+  hyparquet@1.29.1(patch_hash=b8cb91bde03cf3d9ab63f2d1f0af57c5299b54b8ba599c497b3cae5fe456f10c): {}
 
   hysnappy@1.1.1: {}
 

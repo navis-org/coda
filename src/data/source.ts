@@ -711,6 +711,18 @@ export interface ViewerSceneRequest {
   signal?: AbortSignal
 }
 
+export interface PlaceSegmentsRequest extends ViewerSceneRequest {
+  segments: readonly string[]
+}
+
+/** Where a published scene puts one neuron, and the colour it publishes for it. */
+export interface SegmentPlacement {
+  /** The name of the scene's layer holding it; absent for the dataset's own segmentation layer. */
+  readonly layer?: string
+  /** `#rrggbb`. */
+  readonly color?: string
+}
+
 /**
  * How much geometry to spend on one body.
  *
@@ -792,6 +804,33 @@ export type CoarseGeometry =
 export interface CoarseRefusal {
   kind: 'refused'
   reason: 'too-large'
+}
+
+/**
+ * The schema of a source with nothing to say about a kind of table but its ids — a bucket of
+ * geometry, a scene. One spelling, for invariant 8's reason.
+ */
+export const ID_ONLY: TableSchema = tableSchema(column(ID_COLUMN_NAME, 'str'))
+
+/**
+ * Nothing at all, the base a source that answers a few questions spreads its own over — so a key
+ * `SourceCapabilities` gains later starts refused there rather than missing.
+ */
+export const NO_CAPABILITIES: SourceCapabilities = {
+  rawQuery: false,
+  skeletons: false,
+  meshes: false,
+  synapses: false,
+  neuronIndex: false,
+  paths: false,
+  viewerScene: false,
+  roiSummary: false,
+  roiCounts: false,
+  roiFilter: false,
+  connectivityRois: false,
+  edgeProperties: false,
+  synapseTotals: false,
+  roiMeshes: false,
 }
 
 export interface SourceSchemas {
@@ -1074,6 +1113,15 @@ export interface DataSource {
    * called from a `cheap` node that re-runs on every restyle.
    */
   fetchViewerScene?(req: ViewerSceneRequest): Promise<NgScene | undefined>
+
+  /**
+   * Which of the published scene's layers each of these neurons belongs in, and its colour — for a
+   * scene of **several** segmentations, where `segmentationLayerIndex`'s one target would put a
+   * neuron in a volume that does not have it (a BigClust project spanning two connectomes). A
+   * segment missing from the answer goes to the target layer, as it would without this method.
+   * The answer is read by lookup and may hold more segments than were asked about.
+   */
+  placeSegments?(req: PlaceSegmentsRequest): Promise<ReadonlyMap<string, SegmentPlacement>>
 
   /**
    * Where each neuron's soma is, in nanometres — for anything that places a cell by its body

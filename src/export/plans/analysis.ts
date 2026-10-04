@@ -185,6 +185,15 @@ export function embedPlan(ctx: AnalysisContext): EmbedPlan {
   const selected = embedRoute((port) => ctx.input(port) !== undefined)
   if (!selected.ok)
     return { refusal: `This Embedding cannot be translated: ${selected.refusal}` }
+  // Refused rather than written: restricting by id across pandas and R is where `101` meets
+  // `'101.0'`, and a cell that silently keeps the wrong neurons lays out a different population.
+  if (ctx.input('only') !== undefined) {
+    return {
+      refusal:
+        'This Embedding uses `Only these`, which the export cannot write yet. Filter its ' +
+        'input to those neurons first.',
+    }
+  }
 
   const epochs = Number(ctx.params.epochs)
   const settings: EmbedSettings = {

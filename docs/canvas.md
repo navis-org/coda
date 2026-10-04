@@ -871,7 +871,7 @@ folds the answer in after the document's own: the same box, the same ×, dismiss
 key, and **Show Hints** / **Show Hints Again** bring it back. What it lacks is the ✎ — a box gets one
 only when its hint is in `node.hints`. The answer must be a module constant or an empty one,
 because `CodaNodeView` asks on every render to decide whether to mount `NodeHints` at all. Whether
-the browser remembers is `remembersLocalFiles` in `data/files/registry.ts`, the one statement the
+the browser remembers is `hasFileHandles` in `data/files/remembered.ts`, the one statement the
 card's picker and the missing-file sentence read too. It appears only once a *local* file is
 chosen: a URL survives a reload everywhere.
 

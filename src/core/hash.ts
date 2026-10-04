@@ -14,17 +14,28 @@
 /**
  * Serialised form of every array and object this has already seen.
  *
- * Keys are computed for the whole graph on every mutation, and the expensive input is an
- * Explore selection: at the documented `SELECT_ALL_WARN` of 25,000 neuron ids one param alone
- * is ~330 kB of string to build and hash, twice per settled edit, on a keystroke that did
- * not touch it. `setNodeParam` spreads the params record but keeps the *array* reference for
- * every param it did not write, so an unrelated edit hits this memo.
+ * Keys are computed for the whole graph on every mutation, and the expensive input is a viewer's
+ * selection: one param can hold 100,000 ids or more. `setNodeParam` spreads the params record but
+ * keeps the *array* reference for every param it did not write, so an unrelated edit hits this memo.
  *
  * Sound because the entries are values reached from a saved graph, which is treated as
  * immutable — the same object mutated in place would be a provenance bug with or without
  * this. Weak, so an array belonging to a deleted node is collected with it.
  */
 const serialised = new WeakMap<object, string>()
+
+/**
+ * An array this long is stood in for by a digest of its serialisation, `[#length:hash]`.
+ *
+ * The memo alone was not enough: it saves *building* a selection's string, but the params record
+ * around it is new on every edit, so the whole string was still concatenated into the record's and
+ * hashed again — measured at 2.9 ms per unrelated edit for fish2's 129,325 ids and 5.3 ms for as
+ * many CAVE root ids (`pnpm probe:selection-scale`), and the memo held each 1.5–2.7 MB string for
+ * as long as the selection lived. The digest is the same 64-bit hash a key already is, so nothing
+ * is lost to collisions that the key does not already risk, and `#` cannot begin a JSON value, so
+ * no shorter array serialises to it.
+ */
+const DIGEST_ABOVE = 1024
 
 /** Order-independent for object keys, order-preserving for arrays. */
 export function stableStringify(value: unknown): string {
@@ -40,6 +51,7 @@ export function stableStringify(value: unknown): string {
   let out: string
   if (Array.isArray(value)) {
     out = `[${value.map(stableStringify).join(',')}]`
+    if (value.length > DIGEST_ABOVE) out = `[#${value.length}:${hashString(out)}]`
   } else {
     const keys = Object.keys(value as object).sort()
     out = `{${keys

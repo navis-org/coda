@@ -31,15 +31,15 @@ import {
   holdLocalFile,
   localFileState,
   readTableFileSummary,
-  remembersLocalFiles,
 } from '../../data/files/registry'
+import { hasFileHandles } from '../../data/files/remembered'
 import { subscribeUploadLearned, uploadRevision } from '../../data/uploads'
 import { useGraphStore } from '../../store/graphStore'
 import { peekEntry, tableFileSchema } from '../../nodes/table/linkTable'
 import { formatBytes } from '../format'
 import { CacheAge, RefreshButton } from './CacheAge'
 import type { NodeBodyProps, NodeFooterProps } from './nodeBodies'
-import { SchemaListing, UploadFields } from './uploadCard'
+import { SchemaListing, UploadFields, localSourceLine } from './uploadCard'
 
 const ACCEPT = TABLE_FILE_EXTENSIONS.map((extension) => `.${extension}`).join(',')
 
@@ -88,7 +88,7 @@ export function LinkTableBody({ node, ctx, compact, setParam, onError }: NodeBod
    * remember across a reload; the plain file input everywhere else, which hands back only a file.
    */
   const choose = useCallback(async () => {
-    if (!remembersLocalFiles()) return inputRef.current?.click()
+    if (!hasFileHandles()) return inputRef.current?.click()
     try {
       const [handle] = await window.showOpenFilePicker!({
         types: [
@@ -129,25 +129,12 @@ export function LinkTableBody({ node, ctx, compact, setParam, onError }: NodeBod
     // A local file's own states first: a wait, a button (only a click may grant a read), or the
     // sentence naming the file to choose again.
     if (ref.kind === 'local') {
-      switch (localFileState(ref.id)) {
-        case 'restoring':
-          return { state: 'reading', line: `Looking for ${ref.name}…` }
-        case 'permission':
-          return {
-            state: 'missing',
-            line: (
-              <button type="button" onClick={() => void allow(ref.id, ref.name)}>
-                Allow access to {ref.name}
-              </button>
-            ),
-          }
-        // The name alone: the card's warning line says what happened and what to do, once.
-        case 'absent':
-          return {
-            state: 'missing',
-            line: <span className="upload-body__absent">{ref.name}</span>,
-          }
-      }
+      const local = localSourceLine(
+        localFileState(ref.id),
+        ref.name,
+        () => void allow(ref.id, ref.name),
+      )
+      if (local) return local
     }
     // The name alone, as for an absent file: `validate` puts the error on the card's warning
     // line, which wraps, and a second copy here ran off the card.

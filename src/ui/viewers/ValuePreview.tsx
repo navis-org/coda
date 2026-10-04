@@ -914,6 +914,16 @@ const VIEWERS: Record<string, ViewerEntry> = {
           {...(id ? { idColumn: id } : {})}
           opacity={Number(params.opacity)}
           vectorMarks={params.vectorMarks === true}
+          hoverColumns={ctx.columns('hoverColumns')}
+          {...(params.pointLabels === true
+            ? {
+                pointLabels: {
+                  limit: Number(params.labelLimit),
+                  lines: params.labelLines === true,
+                  unplaced: choice<'hide' | 'dim'>('unplacedLabels'),
+                },
+              }
+            : {})}
           trend={choice<'linear' | 'none'>('trend')}
           trendPerGroup={params.trendPerGroup !== false}
           selection={selection}

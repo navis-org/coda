@@ -7,10 +7,11 @@
  * does not preserve is distance between things that were never near each other. Two clusters
  * far apart on the card are not more different than two that are close.
  *
- * **Three input ports, one wired, and they converge on one thing.** A score matrix, a table of
+ * **Three source ports, one wired, and they converge on one thing.** A score matrix, a table of
  * feature vectors and a table of nearest neighbours are three ways of writing down a k-NN
  * graph, which is all UMAP reads. `embedOps.ts` holds the three adapters and the reason the
- * middle one is a convenience rather than a scaling win.
+ * middle one is a convenience rather than a scaling win. A fourth, **Only these**, narrows
+ * whichever is wired to a set of neurons rather than being a source.
  *
  * **More than one wired is refused rather than ranked.** Nothing here makes "the matrix wins"
  * a defensible rule, and a silent precedence on an `expensive` node is a picture somebody
@@ -45,8 +46,13 @@ import {
   embedRoute,
   embedSchema,
   embedTable,
+  droppedNeighbours,
   knnFromMatrix,
   knnFromNeighbours,
+  checkOnlyMatched,
+  onlyLines,
+  onlyNames,
+  onlyRows,
 } from '../lib/embedOps'
 import { displayLabels } from '../lib/displayLabels'
 import {
@@ -102,6 +108,13 @@ registerNode({
       required: false,
       exclusiveGroup: SOURCE_GROUP,
     },
+    /*
+     * Lay out part of the population: a selection wired here restricts whichever route is wired
+     * to the neurons it lists — neighbour rows by their `from`, feature rows by their id, a matrix
+     * by its labels — so re-embedding a lasso is one wire rather than a Join keyed by hand. Not in
+     * the exclusive group: it narrows a source rather than being one.
+     */
+    { id: 'only', label: 'Only these', type: T.table(), required: false },
     /*
      * Optional, and its two pickers are the only ones here that do not change where a point
      * lands. They are still data — `Scatter Plot` colours by a real column, so this has to be
@@ -293,7 +306,18 @@ registerNode({
         { value: 'similarity', label: 'similarities (bigger is more alike)' },
         { value: 'distance', label: 'distances (bigger is further apart)' },
       ],
-      help: 'NBLAST k-NN emits similarities, so that is the default.',
+      help: 'Whether a higher score means more alike or further apart. NBLAST k-NN gives similarities.',
+    },
+
+    {
+      id: 'onlyColumn',
+      kind: 'column',
+      label: 'Only these: column',
+      from: 'only',
+      default: ID_COLUMN_NAME,
+      whenWired: true,
+      advanced: true,
+      help: 'The column of the Only these table naming its neurons. Only those are laid out.',
     },
 
     // --- annotations ------------------------------------------------------
@@ -348,7 +372,9 @@ registerNode({
       if (query === target) return [EMBED_ISSUES.sameNeighbour]
     }
     if (ctx.inputs.annotations !== undefined && !ctx.column('labelBy')) {
-      return ['Annotations is wired but nothing is picked to label by']
+      return [
+        '`Annotations` is wired but `Label by` is empty. Pick the column to label points by.',
+      ]
     }
     /*
      * The two are one curve's parameters rather than two settings — `findABParams` fits the
@@ -372,6 +398,7 @@ registerNode({
     const route = selected.route
 
     const requested = Number(ctx.params.neighbors)
+    const only = onlyFor(ctx)
     let graph
     if (route === 'neighbours') {
       const table = ctx.input('neighbours')
@@ -386,15 +413,10 @@ registerNode({
         { query, target, score: ctx.column('scoreColumn'), scoreIs },
         requested,
         ctx,
+        only,
       )
       checkNeighbourDistances(built.graph.distances, scoreIs)
-      if (built.losses.unknownTargets > 0) {
-        ctx.warn(
-          `${built.losses.unknownTargets.toLocaleString()} rows name a neighbour that is ` +
-            `not in "${query}" and were dropped. A large number means the NBLAST compared ` +
-            `two different populations.`,
-        )
-      }
+      for (const sentence of droppedNeighbours(built.losses)) ctx.warn(sentence)
       if (built.losses.isolated > 0) {
         ctx.warn(
           `${built.losses.isolated.toLocaleString()} neurons have no neighbours at all, so ` +
@@ -403,7 +425,7 @@ registerNode({
       }
       graph = built.graph
     } else {
-      const matrix = matrixFor(ctx, route)
+      const matrix = matrixFor(ctx, route, only)
       checkEmbedMatrix(ctx, matrix)
       const transform = transformFor(matrix.measure, String(ctx.params.distance))
       /*
@@ -453,6 +475,16 @@ registerNode({
   },
 })
 
+/** The neurons an Only these table lists, or undefined where none is wired. */
+function onlyFor(ctx: EvalContext): ReadonlySet<string> | undefined {
+  const table = ctx.input('only')
+  if (table === undefined) return undefined
+  if (!isTableValue(table)) throw new Error('Only these is not a table')
+  // An unresolved column names nobody, which `checkOnlyMatched` refuses in a sentence about it.
+  const column = ctx.column('onlyColumn')
+  return column ? onlyNames(table, column) : new Set()
+}
+
 /**
  * The matrix the two matrix-shaped routes both end on.
  *
@@ -461,29 +493,40 @@ registerNode({
  * is stated in `embedOps.ts`: this is `n²`, and folding the Similarity Matrix card in does not
  * change that.
  */
-function matrixFor(ctx: EvalContext, route: string): MatrixValue {
+function matrixFor(
+  ctx: EvalContext,
+  route: string,
+  only: ReadonlySet<string> | undefined,
+): MatrixValue {
   if (route === 'matrix') {
-    const matrix = ctx.input('matrix')
-    if (!isMatrixValue(matrix)) throw new Error('Matrix input is not a matrix')
+    const wired = ctx.input('matrix')
+    if (!isMatrixValue(wired)) throw new Error('Matrix input is not a matrix')
+    const matrix = only ? onlyLines(wired, only) : wired
+    checkOnlyMatched(ctx, matrix.rowLabels.length, only)
     return matrix
   }
-  const table = ctx.input('features')
-  if (!isTableValue(table)) throw new Error('Features is not a table')
+  const wired = ctx.input('features')
+  if (!isTableValue(wired)) throw new Error('Features is not a table')
+  // Restricted before the matrix is built, which is the point on this route: it is square in the
+  // number of observations, so a selection is also what makes it affordable.
+  const restrict = (column: string) => (only ? onlyRows(wired, column, only) : wired)
 
   let features
   if (isLongLayout(ctx.params)) {
     const observations = ctx.column('observations')
     const featureColumn = ctx.column('featureColumn')
     if (!observations || !featureColumn) throw new Error(EMBED_ISSUES.longColumns)
+    const table = restrict(observations)
     features = featuresFromLong(table, observations, featureColumn, ctx.column('value'))
   } else {
     const idColumn = ctx.column('idColumn')
     const picked = ctx.columns('wideFeatures')
     if (!idColumn) throw new Error(EMBED_ISSUES.wideId)
     if (picked.length === 0) throw new Error(EMBED_ISSUES.wideFeatures)
-    features = featuresFromWide(table, idColumn, picked)
+    features = featuresFromWide(restrict(idColumn), idColumn, picked)
   }
 
+  checkOnlyMatched(ctx, features.labels.length, only)
   checkEmbedCount(ctx, features.labels.length)
   ctx.progress(0.05, `${features.labels.length.toLocaleString()} observations`)
   // Asked as distances, so the `Distance` control resolves to `none` through the same

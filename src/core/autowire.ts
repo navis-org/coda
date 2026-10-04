@@ -60,6 +60,8 @@ export function autoWireDataset(graph: CodaGraph, node: GraphNode): CodaGraph {
    * skeletons without anybody having said so, and draw them under a neuron table from somewhere
    * else entirely.
    */
+  // Asked of the *port*, where the count below asks the *category*: two questions, and they
+  // differ on purpose — this one is whether the node assembles a Dataset at all.
   if (datasetOutput(node)) return graph
   const def = getNodeDef(node.type)
   const open = (def ? inputPorts(def, node.params) : []).filter(
@@ -87,6 +89,14 @@ export function autoWireDataset(graph: CodaGraph, node: GraphNode): CodaGraph {
   let found: { nodeId: string; portId: string } | undefined
   for (const candidate of graph.nodes) {
     if (candidate.id === node.id) continue
+    /*
+     * A *dataset node*, not any node with a Dataset output: a BigClust project's Scene is a
+     * Dataset for the Neuroglancer node and answers nothing else, so counting it would wire a new
+     * query node to a source that refuses everything — or, beside hemibrain, make the canvas's one
+     * dataset two and stand auto-wiring down for every node added after. A socket type of its own
+     * for a scene is what would retire this check (and the palette test's named exception).
+     */
+    if (getNodeDef(candidate.type)?.category !== 'dataset') continue
     const portId = datasetOutput(candidate)
     if (!portId) continue
     // A second one makes the question ambiguous, and an ambiguous question goes unanswered.

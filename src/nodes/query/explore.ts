@@ -71,10 +71,10 @@ const lastRefresh = new Map<string, number>()
  * Where one "select all" click starts warning about what it is adding.
  *
  * A selection is provenance, not a view: it lands in the saved file and in the cache key of
- * every node downstream, so `stableStringify` walks the whole array on every graph edit. Ten
- * thousand neuron ids is ~110 kB of string per key computation, which is nothing; the whole of
- * male-CNS is 165,122 of them and about 1.9 MB, which is enough to make typing in an unrelated
- * node stutter.
+ * every node downstream. A key hashes a long array once and keeps the digest (`core/hash.ts`), and
+ * a document writes long integer lists compactly (`core/compactIds.ts`), so the cost of a large
+ * one is no longer per edit — but the whole of male-CNS is 165,122 ids and still a few hundred kB
+ * in every autosave, file and share link, which is worth saying at the click that adds them.
  *
  * About the *click*, deliberately, not the param. Ticking rows by hand can still carry the
  * total past it, and a graph loaded from a file is never rewritten. What this watches is the

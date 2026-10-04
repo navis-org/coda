@@ -2662,6 +2662,16 @@ held (they are usually transient, the same reason `remember` refuses to persist 
 and in-flight requests are not deduplicated, because sharing one promise would let one caller's
 `AbortSignal` reject for every other.
 
+**A host that has answered direct reads is retried, not routed, when a read comes back with
+nothing** (`retryDirect` in `fetchBytes`). A browser reports a dropped connection exactly as it
+reports a CORS refusal — an opaque `TypeError` — so the fallback chain read a reset as a refusal and
+the error said the host "refuses cross-origin reads". Found on BigClust's public example: its
+60 MB `features_0.parquet` is read in about 8,400 ranged requests, and one in a few thousand came
+back `206` and was then reset mid-body (`net::ERR_CONNECTION_RESET`, seen through the DevTools
+protocol) — one reset failing the whole project. Twice more, after 250 ms and 1 s, and an answer of
+any kind settles it as before; a host that has never answered still takes the routes. A run that
+keeps dropping says the connection dropped, naming no CORS.
+
 Checked against the live buckets (`live.test.ts`, `PRECOMPUTED_LIVE=1`):
 
     male-CNS v1.0     segmentation, mesh: multi-res-meshes (draco), skeletons: skeletons-malecns/…

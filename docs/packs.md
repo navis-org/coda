@@ -373,6 +373,195 @@ built one by hand from nothing, and read Cortex as on. Its card body is register
 `ui/nodes/nodeBodies.ts` like any other, the pack directory being imported by the headless MCP
 build.
 
+## Cell typing/annotation tools: a BigClust project in four tables and a scene
+
+`packs/annotation` — one node, `annotation:bigclust`, reading a [BigClust2](https://github.com/schlegelp/BigClust2)
+project: an extension-less JSON `info`, a `meta` table, and embeddings with the k-NN graphs and
+feature vectors they were computed from. The format and the transport are `src/data/bigclust`
+(`info.ts` the format, `project.ts` the reading, `folders.ts` a local folder, `long.ts` the worker),
+for ZapBench's reason: they are facts about the project, not about which pack draws on it. Off by
+default (switched on in the Plugins dialog), as a BigClust project is a specialist's file; nothing
+in it needs a credential.
+
+**The pack's remit is cell typing and annotation in general**, a BigClust project being one piece
+of it: id `annotation`, label *Cell typing/annotation tools*. It was `bigclust` with the node
+`bigclust:project` until the remit widened, renamed before it was ever committed, so nothing saved
+names the old ids and there is no `formerTypes`.
+
+**One embedding per node, four fixed outputs.** `Embedding` picks which of the project's embeddings
+is read (the first by default, named in the dropdown so a shared graph says which), and the outputs
+are always **Neurons** (meta), **Embedding** (`neuronId, x, y`), **Neighbours** and **Features**
+(that embedding's, empty where it has none). Several embeddings side by side are a node each and a
+Join on `neuronId`. The first version put every embedding into Neurons as `<name>_x`/`_y` column
+pairs and concatenated every k-NN and feature file with an `embedding` column — and was reported
+as confusing within the day: "3 embeddings" on the card, three outputs beside it, and no way to
+tell from either that the embeddings were columns. A node type's ports cannot follow a project's
+embeddings, so the choice was a param rather than a port per embedding.
+
+**Why a node and not a recipe of existing ones.** Two things no wiring could do, and they are the
+node's whole job. **Every file aligns with `meta` by row, not by id** — two of fish2's three
+embeddings carry no id column, and the k-NN file's neighbours are *row positions* — and Coda joins
+on ids with no row-number join. **The features are wide and sparse**: 129,325 × 1,062 at 1.1%
+non-zero, which as a table is 137M boxed cells against a crash floor of 67M. They come out long,
+zeros dropped while reading, a few columns decoded at a time, in a worker of their own; the k-NN
+graph is made long there too, with BigClust's own drops (missing, out of range, self).
+
+**Every file is an ordinary table file.** A URL is joined onto the project's address; a file of a
+chosen folder is handed to `files/registry.ts` as a local file. So footers, range reads, the
+reading worker and the 64-bit id rule are Link Table's rather than a copy. What is new for a local
+project is the **directory handle**, kept beside the file handles in `files/store.ts`: one handle
+per folder is one permission click after a reload, where a handle per file would be six. Folder
+and file share one state machine (`files/remembered.ts`: held, being looked for, waiting for a
+click, absent), written once after `folders.ts` turned out to be the registry's copied line for
+line. A folder's id is its name and its `info`, so its other files can change under the same id —
+which is why choosing a folder reads it under a new `refresh` nonce.
+
+**A run reads meta and the chosen embedding's files, all at once** — each is only ever matched to
+meta's row count, which meta's footer gives — and the long tables are written into preallocated
+columns. The first plan was "an unused output is not read", which cannot be done at the node:
+`evaluate` cannot see which outputs are wired, and its result is cached by params and inputs alone,
+so skipping an unwired output would cache a result missing it for whoever wires it next. Choosing
+the embedding is what bounds the read instead. Measured on fish2 over HTTP with Range, in a
+browser: 0.6 s for the NBLAST embedding with its 2.4M k-NN rows, 1.5 s for connectivity(type) with
+its 1.5M features, 0.5 s for one that brings neither.
+
+**A project at a URL is downloaded file by file, one request each** (`projectFile`, through the
+registry's `readTableFileSummary` with `whole`). Every file the node opens it reads in full — meta's
+every column, the k-NN graph, the features — so reading by range bought nothing and cost a request
+per column chunk: about 8,400 for BigClust's example project, whose 60 MB `features_0.parquet` is
+thousands of narrow columns, and one connection reset among them (measured, about one in a
+thousand against that nginx) failed the run and read as CORS. The transport now retries a dropped
+connection to a host that has answered (`retryDirect`), but the request count was the cause. The
+download goes through `fetchBytes`, so it takes the same routes and the same retry as a range read,
+is revalidated rather than cached unasked (`no-cache`), and is held as a blob served by `fileSpec`
+while the reference stays the URL, until ⟳. Measured on the example in a browser: four requests
+(info, meta, embedding, features) and 8.5 s, the same wall time as by range on that connection —
+what is bought is the count and the failure surface, not speed. **The one file that could be
+gigabytes is never opened** — a full distance matrix is skipped on `info` alone (`matrixNote`) — so
+there is no size ceiling to choose. Link Table does not take this route: its files are read a block
+at a time.
+
+It also settles the first real deployment's problem, which had needed an opt-in fallback of its
+own: nginx with `gzip` on for `application/octet-stream` compresses a Parquet file as it sends it
+whenever the request offers gzip, which every browser's does and no page can turn off, and a
+compressed response carries no `Content-Length` and ignores `Range` (a `curl` without
+`Accept-Encoding` gets both, which is what makes it look like Coda's fault). Link Table still
+refuses such a server with a sentence naming the cause and the server fix (`bytes.ts`' `ON_THE_FLY`); a
+BigClust project never asks it for a range, so there is nothing left to warn about.
+
+**The `neuroglancer` block becomes a fifth output, `Scene`, a Datasource for the Neuroglancer
+node's Dataset socket.** The block is not a scene but what BigClust builds one from — each neuron's
+segmentation source and colour (a meta column, a `{dataset: …}` map or one value) and a context
+mesh — so `data/bigclust/scene.ts` builds it: one segmentation layer per distinct source, named by
+the `dataset` its neurons come from, then the context mesh faint and unpickable. It is a
+`DataSource` per project and refresh nonce, registered on demand like a precomputed URL, holding
+the project's address and nothing read from it (meta stays `readMeta`'s, weakly held). Chosen over
+a `Layers` output, which would have needed a Coda dataset for the same connectome and put the
+neurons in *its* published scene, and over a BigClust viewer node, a second Neuroglancer node to
+keep in step. Two seams were added for it, both general. **`DataSource.placeSegments`**: a scene
+of several volumes says which layer each neuron is in — mcns_banc puts MCNS and BANC neurons in two
+segmentations, where `segmentationLayerIndex`'s one target would have put BANC ids in the MCNS
+volume — and `buildScene` routes them by `placements`, a segment with no layer going to the target
+as before. Its answers are shared objects, one per distinct layer and colour, so the per-neuron cost
+is the map. And the colour a source publishes is used **only while the node's colour is left on its
+default**, relabelled "the scene's own" for it; one shared by every neuron is written once
+(`segmentDefaultColor`), fish2 colouring all 129,325 `orange`. **Auto-wiring counts dataset nodes
+only** (`autowire.ts`), or a lone project would be wired into every new query node as the canvas's
+dataset, and one beside hemibrain would stand auto-wiring down. Colours arrive as `cmap.Color` accepted them — CSS names, hex, RGB(A)
+lists — so `data/foreignColor.ts` reads them at this edge, Coda's own colour columns staying
+hex-only on purpose. Two parts cannot travel in a link and the card says so: landmark
+**transforms** (a warp; neuroglancer applies affine only, so each dataset is drawn in its own space)
+and a **mesh file** as context (mcns_banc's `JRCFIB2022M.ply`).
+
+**The scene carries its own frame, read off its first volume.** Neuroglancer takes dimensions,
+position and zoom from whichever layer's coordinate space arrives first, and a mesh-only directory
+(`neuroglancer_legacy_mesh`) arrives with no bounds: BigClust's public example — the male CNS
+volume beside FlyWire's and hemibrain's transformed meshes — opened at the origin at a 1 nm scale
+with nothing on screen. **Reordering the layers did not fix it**: with the volume first, the full
+scene still opened at `[0.5, 0.5, 0.5]` in both the proxied build and neuroglancer-demo, measured.
+So `framedScene` (`data/neuroglancer/frame.ts`, nothing in it being BigClust's) reads the neuron layers' `info` files — `isVolumeInfo`, not a full probe, which would also open each volume's mesh and skeleton directories — and takes the first volume's finest scale in layer order, and writes what
+neuroglancer derives for that volume alone (resolution as `dimensions`, the box's middle as
+`position`), but with the **longest side** as `projectionScale` rather than neuroglancer's next
+power of two, which leaves the brain a thumbnail in a 560px card. A scene with no readable
+volume, or one that already says where to open, is left to neuroglancer. Only BigClust calls it: any other scene reaches a mesh-only first layer only through a Neuroglancer Source's extra layers, which has not been seen to open at the origin — measure that before moving the call into the Neuroglancer node.
+
+**Annotate (`annotation:editor`) is the pack's second node, and the first that writes.** A table
+of the incoming neurons' records in one FlyTable/SeaTable table or Clio dataset, with the fields
+chosen in the card as columns; editing a cell writes it back at once. The design record is
+[annotations.md](annotations.md#writing-back-annotation-targets); what is the node's own:
+
+- **Nothing in the node writes.** Reading and writing are the card's (`ui/nodes/AnnotateBody.tsx`),
+  on a gesture; the node is a tap passing its neurons through, and every param is presentational,
+  since none can change what `evaluate` returns. A write from `evaluate` would be replayed by
+  auto-run after any upstream edit.
+- **An undo belongs to a target.** Each undo batch names the target it was written to, and Undo
+  stands down — saying why — while the card's settings point anywhere else, a row key meaning
+  nothing in another table; the log has a `target` column for the same reason.
+- **An edit is not a document edit.** The undo stack and the log are per card and per workflow
+  (`annotateSession.ts`, keyed by `scopedKey`), outside the component so the card and its overlay
+  share one history, and outside the document: no ⌘Z, no dirty file, nothing in a share link. The
+  log downloads as CSV.
+- **Routing is per neuron.** A selection says which dataset a neuron is from by a qualified id or by
+  a dataset column beside a plain one (a BigClust project's `dataset`); `Serves` names the datasets
+  this target is for, empty taking every neuron. A neuron not served is skipped and counted, never
+  written under another dataset's id (`routing.ts`).
+- **The settings fold behind the target's name** once they name one, and open while they do not
+  or the target fails: after setup they are read far less than the table, and on a canvas card
+  they were most of it. Per mount, not stored — a viewing convenience, not a choice about the data.
+- **What "set up" means is decided once**, by `targetConfig` in the node: `validate` and the card
+  read it, so the card cannot draw a table while its badge says a setting is missing, and both say
+  the same sentence. Targets are keyed without being built (`targets/index.ts`), so the card asks
+  for one on every render and gets the same instance; a card test registers its fake under the key
+  its settings name.
+- **A write redraws the rows it touched.** Rows are memoised with stable callbacks, marks are kept
+  per row so an untouched row keeps its identity, a mark that changes nothing is not a state
+  update, and a column's suggestions are one `datalist` named for the table (`useId`), not one per
+  cell — the overlay draws every row, and a table of
+  thousands redrawn three times per edit is what that saves.
+- **Reads are debounced and capped** — a scatter selection changes on every pointer move, and above
+  2,000 neurons the card asks before reading. Writes are refused while the canvas is locked.
+- **Several targets, a tab each** (`targets.ts`). A tab is a backend and a table, stored as one
+  JSON text per tab in an `ids` param — the shape a list somebody grows takes — so every tab's
+  settings are saved and undoable. A tab is `useTargetTable` once: its reads, writes, marks and
+  undo. The card routes each neuron to the tabs whose `serves` names its dataset and counts the
+  neurons **no** tab serves; the log is the card's, and each tab's Undo takes back its own table's
+  last change (`takeUndo` searches the shared stack per target). The user chose tabs inside the node
+  over a general tab-group feature for cards. Three backends: FlyTable/SeaTable, Clio, and a **CSV
+  file on this computer**, edited in place where the browser can write (`docs/annotations.md`).
+- **Bulk fill**: tick rows (the header ticks the rows drawn — on a card, the first 40; never rows nobody can see), name a field and a value — read as a
+  cell edit is, so a fill the field cannot hold is refused before anything is sent — and the rows
+  are written as one batch, which one Undo takes back.
+- **One side effect, off until asked.** On Clio a tab can keep `instance` as `{type}_{side}` —
+  **off by default**, the user's call. A side effect is an `unchecked` change: the card never showed
+  its cell, so the write takes what is there as its `before`, and an undo restores it with the rest
+  (`withSideEffects`, verified live on Clio). FlyTable **presets** (FlyWire's `main.info`,
+  hemibrain's `hb_info`) and the initials-into-`{field}_source` effect that hung off them were built
+  and then **taken out** at the user's request (2026-10-04); a tab saved with them reads without.
+- **What the card draws besides values.** A cell this session wrote and has not undone is marked —
+  a bar and a slant, never an outline, which is a held or failed write's and can sit on the same
+  cell; derived from the session log (`editedCells`: a write counts one, an undo takes it back),
+  handed to a row as text so the row memo compares it by value. The field chooser is alphabetical
+  (case ignored, numbers as numbers). Clio's own **stamps** (`{field}_user`/`{field}_time`, two
+  thirds of its list) are not fields at all — the Clio target drops a name ending so only when the
+  field it stamps is listed beside it, so a field of its own that merely ends in `_time` survives; a
+  toggle to list them was built and taken out at the user's request. A Clio body nobody has annotated is counted as not in the dataset unless the tab
+  ticks **Unannotated** (off by default), which draws it as an empty row (`docs/annotations.md`). Clio's **Dataset** is a list read from the store — a peek, so asked only with a
+  token, quietly, and re-asked when the token changes; one listing per store and token
+  (`clioDatasets`), shared with every tab's field read — falling back to typing it where there is no
+  list.
+
+Verified in a real browser against FlyTable's scratch copy `main_test.info_test`: a repeated root
+id drawn as two numbered rows, an edit typed into a cell written, Undo writing the previous value
+back.
+
+**What it does not read**: a full square distance matrix (it does not fit at this scale, and the
+node warns which file it skipped), and the `meta` sources BigClust refreshes from. Neither the Python nor the R exporter emits it yet — a cell that aligns by row is
+exactly the kind that has to be checked by running it, so it waits for a probe that does.
+
+`pnpm probe:bigclust --project <dir>` serves a project as a bucket would and has pyarrow read it
+independently: neuron count, k-NN rows after the drops, non-zero features, and spot values in
+every embedding — so an alignment off by a row fails there however plausible the tables look.
+
 ## Wizard answers
 
 A pack adds to the Workflow Wizard through `wizard.ts`: ways to choose neurons, single-dataset

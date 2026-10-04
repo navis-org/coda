@@ -401,7 +401,19 @@ they were found:
    `patches/hyparquet@1.29.1.patch` hands such a page back as its typed array, and makes the
    dictionary dereference write into an array of the dictionary's type (a dictionary-encoded int64
    column otherwise came back as a plain array of BigInts too). Neither is fixed in 1.31.2; re-check
-   before upgrading, and drop the patch when upstream has it.
+   before upgrading, and drop the patch when upstream has it. **Two more hunks came from a wide
+   file** — a BigClust feature matrix, 115,982 rows × 19,826 dictionary-encoded int columns, which
+   took 115 s where pyarrow took 0.8 s. `getSchemaPath` rebuilt the whole schema tree for every
+   column it was asked about, quadratic in the column count and invisible at fish2's 1,063 (55 s →
+   21 s, now built once per schema, in a `WeakMap`, its children found through a name map rather than
+   a scan — the root's children are every column, so the scan was the same quadratic again). And the dictionary dereference was one loop
+   for strings, BigInts and numbers, which goes **megamorphic** once a file of strings has passed
+   through the same worker — meta does, first — and every later column then pays a generic
+   element access per cell: 59 s of a 79 s read that took 21 s on a fresh thread. Typed and plain
+   dictionaries now have a loop each, identical on purpose and commented so (two functions are two
+   sets of type feedback). Both hunks belong upstream. The second only reproduces with something else decoded first
+   in the same thread, so measure a wide read *after* a string column, not alone. The project now
+   reads in 27 s; what is left is decoding 2.3 billion cells, one worker at a time.
 2. **Matching made a BigInt per row.** `matchingRows` reads a `BigInt64Array` run's two 32-bit
    words against the probe's (`IdProbe.words`, behind a 64K bitmap of low bits that turns most
    rows away in one read); the block-index build and the edge-list build do the same. One set of

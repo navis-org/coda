@@ -41,6 +41,7 @@ import {
   addEdge,
   deserializeGraph,
   edgeInto,
+  graphText,
   nodeLabel,
   nodePorts,
   nodesById,
@@ -222,15 +223,11 @@ export function selectionAttach(selection: readonly string[]): string | undefine
  * cards, framed and unattached, rather than being refused.
  */
 export function recipeText(recipe: Recipe): string {
-  return JSON.stringify(
-    {
-      coda: RECIPE_MARKER,
-      recipe: { name: recipe.name, slots: recipe.slots },
-      ...recipe.graph,
-    },
-    null,
-    2,
-  )
+  return graphText({
+    coda: RECIPE_MARKER,
+    recipe: { name: recipe.name, slots: recipe.slots },
+    ...recipe.graph,
+  })
 }
 
 /**

@@ -401,7 +401,15 @@ async function readCapped(
   return out.buffer
 }
 
-async function attempt(url: string, options: FetchOptions): Promise<ArrayBuffer> {
+/** How a response's body is taken: a buffer for a read, a blob for a whole file held for later. */
+type BodyOf<T> = (response: Response, url: string, options: FetchOptions) => Promise<T>
+
+const asBuffer: BodyOf<ArrayBuffer> = (response, url, options) =>
+  options.maxBytes !== undefined
+    ? readCapped(response, url, options.maxBytes)
+    : response.arrayBuffer()
+
+async function attempt<T>(url: string, options: FetchOptions, body: BodyOf<T>): Promise<T> {
   const headers: Record<string, string> = { ...options.headers }
   if (options.range) headers['Range'] = `bytes=${options.range[0]}-${options.range[1]}`
   const response = await fetch(url, {
@@ -412,8 +420,7 @@ async function attempt(url: string, options: FetchOptions): Promise<ArrayBuffer>
   if (!response.ok) {
     throw new PrecomputedFetchError(`${response.status} from ${url}`, url, response.status)
   }
-  if (options.maxBytes !== undefined) return readCapped(response, url, options.maxBytes)
-  return response.arrayBuffer()
+  return body(response, url, options)
 }
 
 /**
@@ -461,10 +468,20 @@ function isRoutable(error: unknown): boolean {
  * object is missing whichever way it was asked for; `isRoutable` is that distinction and the
  * file header argues the order.
  */
-export async function fetchBytes(
-  url: string,
-  options: FetchOptions = {},
-): Promise<ArrayBuffer> {
+export function fetchBytes(url: string, options: FetchOptions = {}): Promise<ArrayBuffer> {
+  return fetchRouted(url, options, asBuffer)
+}
+
+/**
+ * A whole object as a `Blob`, by `fetchBytes`' routes and retries. For a file held for later
+ * (a BigClust project's, `files/registry.ts`): the browser keeps the body as a blob, which it may
+ * page out of the tab's heap, where a buffer copied into one would hold the file twice for a while.
+ */
+export function fetchBlob(url: string, options: FetchOptions = {}): Promise<Blob> {
+  return fetchRouted(url, options, (response) => response.blob())
+}
+
+async function fetchRouted<T>(url: string, options: FetchOptions, body: BodyOf<T>): Promise<T> {
   load()
   const container = containerOf(url)
   const mode = container ? modes.get(container) : undefined
@@ -480,20 +497,25 @@ export async function fetchBytes(
   })
 
   const remembered = fallbacks.find((route) => route.mode === mode)
-  if (remembered) return attempt(remembered.url, options)
+  if (remembered) return attempt(remembered.url, options, body)
 
   try {
-    const result = await attempt(url, options)
+    const result = await attempt(url, options, body)
     if (container && mode !== 'direct') remember(container, 'direct')
     return result
   } catch (error) {
     if (!isRoutable(error)) throw error
+    // A host that has answered direct reads already is not refusing them: nothing coming back is a
+    // connection that dropped — a reset under a burst of range reads, measured on one request in
+    // a thousand against an nginx serving a 60 MB Parquet file. Asked again rather than reported
+    // as CORS, which is what failed a whole BigClust project over one reset.
+    if (mode === 'direct') return retryDirect(url, options, container, body)
 
     // Direct failed with nothing coming back — very likely CORS. Try each route in turn.
     let last: unknown
     for (const route of fallbacks) {
       try {
-        const result = await attempt(route.url, options)
+        const result = await attempt(route.url, options, body)
         if (container) remember(container, route.mode)
         return result
       } catch (routeError) {
@@ -519,6 +541,53 @@ export async function fetchBytes(
       0,
     )
   }
+}
+
+/** Pauses before each retry of a dropped connection: a reset under load wants a moment. */
+const RETRY_DELAYS_MS = [250, 1_000]
+
+/**
+ * A direct read retried after the connection dropped, on a host known to answer direct reads.
+ * An answer of any kind — a 404 included — settles it, as it does for the first try.
+ */
+async function retryDirect<T>(
+  url: string,
+  options: FetchOptions,
+  container: string | undefined,
+  body: BodyOf<T>,
+): Promise<T> {
+  let last: unknown
+  for (const delay of RETRY_DELAYS_MS) {
+    await pause(delay, options.signal)
+    try {
+      return await attempt(url, options, body)
+    } catch (error) {
+      if (!isRoutable(error)) throw error
+      last = error
+    }
+  }
+  throw new PrecomputedFetchError(
+    `Could not read ${url}: the connection to ${container ?? 'the host'} dropped, and dropped ` +
+      `again on ${RETRY_DELAYS_MS.length} retries, although it had worked earlier. The last error was: ` +
+      `${last instanceof Error ? last.message : String(last)}`,
+    url,
+    0,
+  )
+}
+
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        reject(signal.reason)
+      },
+      { once: true },
+    )
+  })
 }
 
 /**

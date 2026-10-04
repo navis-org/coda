@@ -449,9 +449,14 @@ export function columnNames(schema: TableSchema | undefined): string[] {
  * produced by the very function that exists to prevent one. Probing for the first *free* name
  * cannot do that.
  */
-export function uniqueName(taken: Set<string>, name: string): string {
+export function uniqueName(
+  taken: Set<string>,
+  name: string,
+  /** How the `n`th repeat is told apart: `_2` for a column, ` (2)` for something read aloud. */
+  suffix: (n: number) => string = (n) => `_${n}`,
+): string {
   let out = name
-  for (let n = 2; taken.has(out); n++) out = `${name}_${n}`
+  for (let n = 2; taken.has(out); n++) out = `${name}${suffix(n)}`
   taken.add(out)
   return out
 }

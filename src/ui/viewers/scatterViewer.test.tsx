@@ -10,8 +10,8 @@
  * That is the same rule `labels thinned` and `N nodes, M links filtered` follow.
  */
 
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import { makeTable, tableFromRows } from '../../core/values'
@@ -167,5 +167,98 @@ describe('empty states', () => {
     )
     draw(empty)
     expect(screen.getByText(/the table is empty/)).toBeTruthy()
+  })
+})
+
+describe('the tooltip', () => {
+  it('lists the picked columns after its own rows, once each', () => {
+    // One point is framed at the centre of the plot, which is inset from the box by the full
+    // margins (left 50, right 14, top 10, bottom 40).
+    const { container } = draw(neurons(1), { hoverColumns: ['side', 'pre', 'type'] })
+    const surface = container.querySelector('.scatter-canvas')!
+    const box = surface.getBoundingClientRect()
+    // Through the zoom correction `tooltipPoint` applies, the stubbed box and offset sizes differing.
+    const zoom = box.width / (surface as HTMLElement).offsetWidth
+    fireEvent.pointerMove(surface, {
+      clientX: box.left + (50 + (600 - 64) / 2) * zoom,
+      clientY: box.top + (10 + (400 - 50) / 2) * zoom,
+      pointerId: 1,
+    })
+    const tip = container.querySelector('.chart-tooltip')
+    expect(tip?.textContent).toMatch(/side: L/)
+    expect(tip?.textContent).toMatch(/type: LC4/)
+    // `pre` is the x axis, already a row of its own.
+    expect(tip?.textContent?.match(/pre:/g)).toHaveLength(1)
+  })
+})
+
+describe('the search', () => {
+  function search(table = neurons(6), props = {}) {
+    const onSelectionChange = vi.fn()
+    const utils = draw(table, { onSelectionChange, labelColumn: 'type', ...props })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    const box = screen.getByRole('searchbox', { name: 'Find points' })
+    return { ...utils, onSelectionChange, box }
+  }
+
+  it('keeps a press on the strip from starting a pan, whose capture would swallow the click', () => {
+    // jsdom does not retarget a captured pointer's events, so the test is the cause: the plot
+    // must not take the pointer when the press is on one of the strip's buttons.
+    const capture = vi.spyOn(HTMLElement.prototype, 'setPointerCapture')
+    draw(neurons(6))
+    const button = screen.getByRole('button', { name: 'Search' })
+    fireEvent.pointerDown(button, { button: 0, pointerId: 1 })
+    expect(capture).not.toHaveBeenCalled()
+    capture.mockRestore()
+  })
+
+  it('counts the points whose label or id matches', () => {
+    const { box, container } = search()
+    fireEvent.change(box, { target: { value: 'lc4' } })
+    // Six neurons, alternating LC4 and LC6.
+    expect(container.querySelector('.network-strip__count')?.textContent).toBe('3')
+    fireEvent.change(box, { target: { value: '1004' } })
+    expect(container.querySelector('.network-strip__count')?.textContent).toBe('1')
+  })
+
+  it('steps through the hits, naming the one it is on in a tooltip', () => {
+    const { box, container } = search()
+    fireEvent.change(box, { target: { value: 'LC6' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(container.querySelector('.network-strip__count')?.textContent).toBe('1 / 3')
+    expect(container.querySelector('.chart-tooltip strong')?.textContent).toBe('LC6')
+    fireEvent.click(screen.getByRole('button', { name: 'Previous hit' }))
+    expect(container.querySelector('.network-strip__count')?.textContent).toBe('3 / 3')
+    // Opening the options keeps the place: the menu is not a new search.
+    fireEvent.click(screen.getByRole('button', { name: 'Search options' }))
+    expect(container.querySelector('.network-strip__count')?.textContent).toBe('3 / 3')
+  })
+
+  it('selects every hit, and adds them to the selection with Shift', () => {
+    const { box, onSelectionChange } = search(neurons(6), { selection: ['1001'] })
+    fireEvent.change(box, { target: { value: 'LC4' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Select hits' }))
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['1000', '1002', '1004'])
+    fireEvent.click(screen.getByRole('button', { name: 'Select hits' }), { shiftKey: true })
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['1001', '1000', '1002', '1004'])
+  })
+
+  it('searches one picked column instead, from its options', () => {
+    const { box, container } = search()
+    fireEvent.click(screen.getByRole('button', { name: 'Search options' }))
+    fireEvent.change(container.querySelector('.network-strip__menu select')!, {
+      target: { value: 'side' },
+    })
+    fireEvent.change(box, { target: { value: 'L' } })
+    fireEvent.click(screen.getByLabelText('Whole value only'))
+    // `side` is L for every third neuron: 0 and 3.
+    expect(container.querySelector('.network-strip__count')?.textContent).toBe('2')
+  })
+
+  it('says a pattern will not compile rather than finding nothing silently', () => {
+    const { box, container } = search()
+    fireEvent.change(box, { target: { value: '/[' } })
+    expect(container.querySelector('.network-strip__count')?.textContent).toBe('bad pattern')
+    expect(box.getAttribute('aria-invalid')).toBe('true')
   })
 })

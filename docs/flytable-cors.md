@@ -1,5 +1,13 @@
 # Reaching FlyTable from a browser
 
+**State on 2026-10-03:** the two seahub blocks below are in place — `/api/v2.1/workspaces/` and the
+`access-token` path both answer a preflight `204, *`, and keep the header on a `403`. So Coda's
+read path, and a write through `/dtable-server/` (`batch-update-rows`, preflight `204, *`), work
+from the static build with no relay. SQL was the one closed endpoint, and was opened the same day
+([the last section](#opening-sql-dtable-db)): verified from a real browser on `https://coda.science`
+— preflight `204`, a `SELECT` against `main_test` answered 200 in 51 ms, exactly one
+`Access-Control-Allow-Origin` on a 200 and on a 403, and every other `/dtable-db/` path still closed.
+
 Measured against `https://flytable.mrc-lmb.cam.ac.uk` on 2026-08-21, after the
 `app-access-token` block was added.
 
@@ -162,4 +170,76 @@ curl -i -H 'Origin: http://localhost:5173' \
 curl -si -H 'Origin: http://localhost:5173' \
   https://flytable.mrc-lmb.cam.ac.uk/dtable-server/api/v1/dtables/x/metadata/ \
   | grep -ci access-control-allow-origin
+```
+
+## Opening SQL (`/dtable-db/`)
+
+Measured 2026-10-03 against a scratch copy of FlyWire's `main.info` (`main_test.info_test`), with
+`SELECT _id, root_783, cell_type, super_class … WHERE root_783 IN (…)`:
+
+| ids | rows | bytes | time |
+| --- | --- | --- | --- |
+| 10 | 15 | 2 kB | 0.08 s |
+| 100 | 118 | 14 kB | 0.13 s |
+| 1,000 | 1,451 | 155 kB | 0.71 s |
+
+Against that, `filtered-rows` took 1.6–2.7 s for 10–100 ids and 12.9 s for 1,000, returns every
+column, and **cannot be called from a browser at all**: it takes its filters only as a JSON body
+on a GET (`400 filters required` as query parameters, `404 Cannot POST`), and browsers refuse a
+body on a GET. The whole-table read is ~79 MB in ~20 s. So SQL is what makes a per-selection read
+— the annotation editor's — possible on FlyTable.
+
+What blocks it is the opposite of the warning above: **`/dtable-db/api/v1/query/` sends no CORS
+header** on a 200, and its preflight answers `405`. The earlier note that `/dtable-db/` "emits its
+own" held for whatever was checked then and not for this path.
+
+The host proxy has **no `/dtable-db/` block** — everything not pinned falls through to `location /`
+and on to SeaTable's own nginx inside the container (whose edits are wiped on upgrade). So the
+change is one more pinned block in the host config, beside the access-token one, and
+`proxy_hide_header` makes it set exactly one header whether or not a later SeaTable version starts
+sending its own:
+
+```nginx
+    location ~ ^/dtable-db/api/v1/query/[^/]+/$ {
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin  "*"                          always;
+            add_header Access-Control-Allow-Methods "POST, OPTIONS"               always;
+            add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+            add_header Access-Control-Max-Age       600                           always;
+            add_header Content-Type   "text/plain; charset=utf-8";
+            add_header Content-Length 0;
+            return 204;
+        }
+
+        proxy_hide_header Access-Control-Allow-Origin;
+        add_header Access-Control-Allow-Origin "*" always;
+
+        proxy_pass http://localhost:8010;
+        proxy_set_header Host $host;
+    }
+```
+
+The existing comment saying not to add CORS to `/dtable-db/` should be narrowed to `/dtable-server/`
+in the same edit, or the next reader removes this block on its authority.
+
+Three things to check when applying it:
+
+- **`add_header` in a block stops inheritance** of every `add_header` from the enclosing
+  `server` block. FlyTable's sets none today; if HSTS or `X-Frame-Options` is ever added there,
+  repeat it in this block or it silently disappears from query responses.
+- **Same posture as `/dtable-server/`**: a literal `*`, no `Allow-Credentials`, and every call
+  carries the base JWT — so this exposes nothing a browser holding a token could not already read
+  through the rows endpoint, only faster and narrower.
+- **Verify**: the preflight returns 204 with the headers, a real query response carries exactly
+  one `Access-Control-Allow-Origin`, and a 401 keeps it:
+
+```bash
+curl -i -X OPTIONS -H 'Origin: http://localhost:5173' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: authorization,content-type' \
+  https://flytable.mrc-lmb.cam.ac.uk/dtable-db/api/v1/query/x/
+
+curl -si -X POST -H 'Origin: http://localhost:5173' -H 'Content-Type: application/json' \
+  -d '{"sql":"SELECT 1"}' https://flytable.mrc-lmb.cam.ac.uk/dtable-db/api/v1/query/x/ \
+  | grep -ci access-control-allow-origin    # 1, on the 401 too
 ```

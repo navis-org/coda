@@ -40,7 +40,7 @@ import { PinnedLru } from '../../core/lruMap'
 import type { ColumnSchema } from '../../core/types'
 import type { DatasetEdges } from '../../core/values'
 import type { DataSource, SourceCapabilities } from '../source'
-import { capabilityOf, getSource } from '../source'
+import { NO_CAPABILITIES, capabilityOf, getSource } from '../source'
 
 /** The one registered id. A Custom Dataset's identity is its dataset id, never its source. */
 export const CUSTOM_SOURCE_ID = 'custom'
@@ -210,24 +210,6 @@ export function resolvedPart(
   const part = partFor(datasetId, role)
   const source = part && sourceOf(part)
   return source && part.datasetId ? { source, datasetId: part.datasetId } : undefined
-}
-
-/** Nothing: what a layout can answer before the parts it has are asked. */
-const NO_CAPABILITIES: SourceCapabilities = {
-  rawQuery: false,
-  skeletons: false,
-  meshes: false,
-  synapses: false,
-  neuronIndex: false,
-  paths: false,
-  viewerScene: false,
-  roiSummary: false,
-  roiCounts: false,
-  roiFilter: false,
-  connectivityRois: false,
-  edgeProperties: false,
-  synapseTotals: false,
-  roiMeshes: false,
 }
 
 /**

@@ -48,6 +48,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { IssueText } from '../IssueText'
+import { plural } from '../format'
 
 import { listBases } from '../../data/annotations'
 import {
@@ -56,6 +57,12 @@ import {
   setToken as setSeaTableToken,
   subscribeAuthFailure as subscribeSeaTableAuthFailure,
 } from '../../data/annotations/credentials'
+import {
+  getClioToken,
+  setClioToken,
+  subscribeClioAuthFailure,
+} from '../../data/annotations/clioCredentials'
+import { listClioDatasets } from '../../data/annotations/targets/clio'
 import { listProjects } from '../../data/catmaid/api'
 import type { CatmaidInstance } from '../../data/catmaid/credentials'
 import {
@@ -236,6 +243,12 @@ const ANNOTATION_TABS: readonly [SourceTab, ...SourceTab[]] = [
         onSaved={onClose}
       />
     ),
+    // Every deployment but the hosted one: FlyTable is where a typed-in host is most likely to
+    // be, and a failure must open *some* tab rather than none.
+    subscribe: (onFailure) =>
+      subscribeSeaTableAuthFailure(
+        ({ host, message }) => host !== SEATABLE_HOSTS.seatable && onFailure(message),
+      ),
   },
   {
     id: 'seatable',
@@ -248,6 +261,18 @@ const ANNOTATION_TABS: readonly [SourceTab, ...SourceTab[]] = [
         onSaved={onClose}
       />
     ),
+    subscribe: (onFailure) =>
+      subscribeSeaTableAuthFailure(
+        ({ host, message }) => host === SEATABLE_HOSTS.seatable && onFailure(message),
+      ),
+  },
+  {
+    id: 'clio',
+    label: 'Clio',
+    // Only the Annotate card reaches Clio, so the tab goes with its pack.
+    pack: 'annotation',
+    render: ({ onClose }) => <ClioTab onSaved={onClose} />,
+    subscribe: subscribeClioAuthFailure,
   },
 ]
 
@@ -388,18 +413,18 @@ const SECTIONS: readonly [Section, ...Section[]] = [
      */
     privacy: (
       <>
-        <strong>Two ways to get AI in Coda.</strong> Either point your own client at{' '}
+        <strong>Two ways to get AI in Coda.</strong> You can point your own client at{' '}
         <a href={`${import.meta.env.BASE_URL}mcp.html`} target="_blank" rel="noreferrer">
           Coda&rsquo;s MCP server
-        </a>{' '}
-        — Claude, ChatGPT and the rest can then build workflows for you — or give a provider key
-        below and use the assistant built in.
+        </a>
+        , so Claude, ChatGPT and others can build workflows for you. Or you can enter a provider
+        key below and use the built-in assistant.
         {/* A block, not a `<br />`: these are two statements, and at 11px a bare break ran the
             second into the first. The class is what carries the gap. */}
         <span className="sources__privacy-next">
           <strong>A key here is your account and your bill.</strong> Your questions in the
-          current conversation, the graph on your canvas and — unless you switch it off in the
-          drawer — a summary of what it last produced go to the provider you pick.{' '}
+          current conversation, the graph on your canvas and a summary of what it last produced
+          go to the provider you pick. You can switch the summary off in the drawer.{' '}
           {/* Inside the block, or the `?` drops onto a line of its own under it. */}
           <Why>
             {"Keys are stored in this browser's local storage on this machine only. They are " +
@@ -420,22 +445,18 @@ const SECTIONS: readonly [Section, ...Section[]] = [
   {
     id: 'annotations',
     label: 'Annotations',
-    subscribe: (onFailure) =>
-      subscribeSeaTableAuthFailure((message) =>
-        // Which *tab* is decided by the host the failure names, because one channel serves both
-        // deployments — they are the same software and share a client.
-        onFailure(message, message.includes('seatable.io') ? 'seatable' : 'flytable'),
-      ),
+    subscribe: (onFailure) => subscribeTabs(ANNOTATION_TABS, onFailure),
     tabs: ANNOTATION_TABS,
     privacy: (
       <>
         <strong>One token per deployment, kept in this browser.</strong>
         <Why>
-          {'FlyTable and cloud.seatable.io run the same software with unrelated accounts, so ' +
-            "each needs its own. Tokens are held in this browser's local storage on this " +
-            'machine only, are never written into a saved graph or an export, and are never ' +
-            'sent to us — each goes only to the deployment it belongs to. Coda reads bases; it ' +
-            'never writes to one.'}
+          {'FlyTable and cloud.seatable.io run the same software but have separate accounts, ' +
+            'so each needs its own token, and Clio needs one of its own too. Tokens are stored ' +
+            "in this browser's local storage on this machine only. They are never written into " +
+            'a saved graph or an export and never sent to us; each goes only to the deployment ' +
+            'it belongs to. Coda only reads with them, except when you edit a cell on an ' +
+            'Annotate card: that cell is written back immediately, under your account.'}
         </Why>
       </>
     ),
@@ -848,7 +869,7 @@ function NeuPrintTab({
   return (
     <section className="sources__source">
       <p className="sources__note">
-        Janelia&rsquo;s connectome server (hemibrain, MANC, maleCNS, etc). Sign in with the
+        Janelia&rsquo;s connectome server (hemibrain, MANC, maleCNS, etc.). Sign in with the
         Google account you use for neuPrint.
         <Why>
           {"The window that opens belongs to Janelia's sign-in service, so Coda never sees your " +
@@ -945,8 +966,8 @@ function NeuPrintTab({
 
       {probe.state === 'ok' && (
         <p className="sources__result" data-tone="ok">
-          Connected — {probe.datasets} datasets ({probe.names.join(', ')}
-          {probe.datasets > probe.names.length ? ', …' : ''})
+          Connected: {plural(probe.datasets, 'dataset')} (
+          {someNames(probe.names, probe.datasets)})
         </p>
       )}
       {probe.state === 'failed' && (
@@ -1000,9 +1021,9 @@ function SharingTab({ onSaved }: { onSaved: () => void }) {
   return (
     <section className="sources__source">
       <p className="sources__note">
-        Optional. A workflow link normally carries the whole graph, which needs nothing at all —
-        this is for the case where that link gets too long to paste, and Coda uploads the
-        workflow to a gist instead. Make a token at{' '}
+        Optional. A workflow link normally contains the whole graph and needs no token. A token
+        is only needed when that link gets too long to paste, so Coda can upload the workflow to
+        a gist instead. Make a token at{' '}
         <a
           href="https://github.com/settings/tokens/new?scopes=gist&description=Coda%20workflow%20sharing"
           target="_blank"
@@ -1026,11 +1047,11 @@ function SharingTab({ onSaved }: { onSaved: () => void }) {
       </label>
       <p className="sources__note sources__note--tight">
         <strong>
-          The <code>gist</code> scope, and nothing else.
+          Give it the <code>gist</code> scope and nothing else.
         </strong>{' '}
-        A classic token carrying only that cannot read a repository, cannot push and cannot see
-        private code; a fine-grained one needs Gists set to read-and-write. The link above
-        pre-selects the right scope.
+        A classic token with only that scope cannot read a repository, push, or see private
+        code. A fine-grained token needs Gists set to read-and-write. The link above pre-selects
+        the right scope.
       </p>
 
       <div className="sources__actions">
@@ -1173,7 +1194,7 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
   return (
     <section className="sources__source">
       <p className="sources__note">
-        Configure per-CATMAID instances credentials. Access to public instances (e.g. VFB) needs
+        Configure credentials per CATMAID instance. Access to public instances (e.g. VFB) needs
         no credentials.
         <Why>
           {'GET requests work anonymously, but connectivity and neuron names are fetched over ' +
@@ -1184,7 +1205,7 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
 
       {rows.length === 0 ? (
         <p className="sources__hint">
-          None configured — Virtual Fly Brain&rsquo;s servers need none.
+          None configured. Virtual Fly Brain&rsquo;s servers don&rsquo;t need any.
           <Why>
             {'VFB publishes a read-only token for each of its instances and Coda includes it, ' +
               `so ${hostPattern(DEFAULT_CATMAID_SERVER)} and the other seven work as they are. ` +
@@ -1225,9 +1246,9 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
               <details className="sources__more">
                 <summary>HTTP basic auth (only if the server asks for it)</summary>
                 <p className="sources__hint">
-                  The <em>web server&rsquo;s</em> login, not CATMAID&rsquo;s — the browser
-                  dialog some instances show before CATMAID loads. It is sent alongside the
-                  token rather than instead of it.
+                  The login for the <em>web server</em> in front of CATMAID: the browser dialog
+                  some instances show before CATMAID loads. It is sent together with the API
+                  token.
                 </p>
                 <label className="sources__field">
                   <span>User</span>
@@ -1272,7 +1293,7 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
 
               {probe.state === 'ok' ? (
                 <p className="sources__result" data-tone="ok">
-                  Reached it — {probe.datasets} project{probe.datasets === 1 ? '' : 's'}
+                  Connected: {probe.datasets} project{probe.datasets === 1 ? '' : 's'}
                   {probe.names.length ? `: ${probe.names.join(', ')}` : ''}
                 </p>
               ) : null}
@@ -1643,8 +1664,8 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
 
               {probe.state === 'ok' && (
                 <p className="sources__result" data-tone="ok">
-                  Connected — {probe.datasets} datastacks ({probe.names.join(', ')}
-                  {probe.datasets > probe.names.length ? ', …' : ''})
+                  Connected: {plural(probe.datasets, 'datastack')} (
+                  {someNames(probe.names, probe.datasets)})
                 </p>
               )}
               {probe.state === 'failed' && (
@@ -1680,95 +1701,92 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
 }
 
 /**
- * One SeaTable deployment's token.
- *
- * Its own state, the call `CaveTab` and `SharingTab` already make. What it tests with is the
- * *base listing*, which is the useful probe here rather than a bare ping: it proves the token
- * works and shows what it can reach, and "which bases can I see" is the question somebody
- * configuring one of these nodes is about to ask anyway.
+ * A list's first few names, and that there are more — of `total`, where the caller kept only the
+ * first few names of a longer listing.
  */
-function SeaTableTab({
-  host,
+function someNames(names: readonly string[], total = names.length, shown = 6): string {
+  return `${names.slice(0, shown).join(', ')}${total > Math.min(shown, names.length) ? ', …' : ''}`
+}
+
+/**
+ * One token for one service: a field, Test, Forget and Save. SeaTable's deployments and Clio are
+ * each one of these with their own words and their own probe.
+ *
+ * **Test writes the token first and rolls it back on failure**, because the probe reads the
+ * store — the alternative is a second code path taking a token as an argument, which is how the
+ * tested request and the real one come to differ. `SharingTab`'s trade exactly.
+ */
+function TokenTab({
   note,
+  label,
+  placeholder,
+  after,
+  get,
+  set,
+  probe,
   onSaved,
 }: {
-  host: string
-  note: string
+  note: ReactNode
+  label: string
+  placeholder: string
+  /** A sentence under the field, for the token people most often get wrong. */
+  after?: ReactNode
+  get: () => string | undefined
+  set: (token: string | undefined) => void
+  /** What a working token reaches, said after "Connected — ". */
+  probe: () => Promise<string>
   onSaved: () => void
 }) {
-  const [token, setTokenField] = useState(() => getSeaTableToken(host) ?? '')
-  const [probe, setProbe] = useState<Probe<{ bases: number; names: string[] }>>({
-    state: 'idle',
-  })
+  const [token, setTokenField] = useState(() => get() ?? '')
+  const [result, setResult] = useState<Probe<{ reach: string }>>({ state: 'idle' })
   const fieldRef = useRef<HTMLInputElement>(null)
   useEffect(() => fieldRef.current?.focus(), [])
 
-  const test = useCallback(async () => {
-    setProbe({ state: 'testing' })
-    /*
-     * Written first and rolled back on failure, because `listBases` reads the store — the
-     * alternative is a second code path taking a token as an argument, which is how the tested
-     * request and the real one come to differ. `SharingTab`'s trade exactly.
-     */
-    const previous = getSeaTableToken(host)
-    setSeaTableToken(host, token)
+  // Not memoised: `get`, `set` and `probe` arrive as fresh arrows on every render anyway.
+  const test = async () => {
+    setResult({ state: 'testing' })
+    const previous = get()
+    set(token)
     try {
-      const bases = await listBases(host)
-      setProbe({
-        state: 'ok',
-        bases: bases.length,
-        names: bases.slice(0, 6).map((b) => b.name),
-      })
+      setResult({ state: 'ok', reach: await probe() })
     } catch (error) {
-      setSeaTableToken(host, previous)
-      setProbe({ state: 'failed', message: errorMessage(error) })
+      set(previous)
+      setResult({ state: 'failed', message: errorMessage(error) })
     }
-  }, [host, token])
+  }
 
   return (
     <section className="sources__source">
-      <p className="sources__note">
-        {note} Get an <strong>account</strong> token from your profile at{' '}
-        <a href={host} target="_blank" rel="noreferrer">
-          {new URL(host).host}
-        </a>
-        .
-      </p>
-
+      <p className="sources__note">{note}</p>
       <label className="sources__field">
-        <span>Account token</span>
+        <span>{label}</span>
         <input
           ref={fieldRef}
           className="field field--mono"
           value={token}
           spellCheck={false}
-          placeholder="a1b2c3…"
+          placeholder={placeholder}
           onChange={(e) => setTokenField(e.target.value)}
         />
       </label>
-      <p className="sources__note sources__note--tight">
-        <strong>An account token, not a base API token.</strong> The two look alike and only one
-        works: a base token is minted for a single base and is refused by the listing this
-        needs, with a message that blames the token rather than its kind. An account token
-        reaches every base the account can see.
-      </p>
+      {after && <p className="sources__note sources__note--tight">{after}</p>}
 
       <div className="sources__actions">
         <button
           type="button"
           className="btn btn--ghost"
           onClick={() => void test()}
-          disabled={!token.trim() || probe.state === 'testing'}
+          disabled={!token.trim() || result.state === 'testing'}
         >
-          {probe.state === 'testing' ? 'Testing…' : 'Test'}
+          {result.state === 'testing' ? 'Testing…' : 'Test'}
         </button>
         <button
           type="button"
           className="btn btn--ghost"
           onClick={() => {
-            setSeaTableToken(host, undefined)
+            set(undefined)
             setTokenField('')
-            setProbe({ state: 'idle' })
+            setResult({ state: 'idle' })
           }}
           disabled={!token}
         >
@@ -1779,7 +1797,7 @@ function SeaTableTab({
           type="button"
           className="btn btn--primary"
           onClick={() => {
-            setSeaTableToken(host, token)
+            set(token)
             onSaved()
           }}
         >
@@ -1787,18 +1805,93 @@ function SeaTableTab({
         </button>
       </div>
 
-      {probe.state === 'ok' && (
+      {result.state === 'ok' && (
         <p className="sources__result" data-tone="ok">
-          Connected — {probe.bases} bases ({probe.names.join(', ')}
-          {probe.bases > probe.names.length ? ', …' : ''})
+          Connected: {result.reach}
         </p>
       )}
-      {probe.state === 'failed' && (
+      {result.state === 'failed' && (
         <p className="sources__result" data-tone="error">
-          {probe.message}
+          {result.message}
         </p>
       )}
     </section>
+  )
+}
+
+/**
+ * One SeaTable deployment's token. What it tests with is the *base listing*, which is the useful
+ * probe here rather than a bare ping: it proves the token works and shows what it can reach, and
+ * "which bases can I see" is the question somebody configuring one of these nodes is about to ask.
+ */
+function SeaTableTab({
+  host,
+  note,
+  onSaved,
+}: {
+  host: string
+  note: string
+  onSaved: () => void
+}) {
+  return (
+    <TokenTab
+      note={
+        <>
+          {note} Get an <strong>account</strong> token from your profile at{' '}
+          <a href={host} target="_blank" rel="noreferrer">
+            {new URL(host).host}
+          </a>
+          .
+        </>
+      }
+      label="Account token"
+      placeholder="a1b2c3…"
+      after={
+        <>
+          <strong>Use an account token, not a base API token.</strong> The two look alike, but a
+          base token only works for a single base, and the base listing Coda needs refuses it
+          with an error that does not mention the kind of token. An account token reaches every
+          base the account can see.
+        </>
+      }
+      get={() => getSeaTableToken(host)}
+      set={(token) => setSeaTableToken(host, token)}
+      probe={async () => {
+        const bases = await listBases(host)
+        return `${plural(bases.length, 'base')} (${someNames(bases.map((b) => b.name))})`
+      }}
+      onSaved={onSaved}
+    />
+  )
+}
+
+/**
+ * The Clio token: one, for the one store. A ClioStore token from Clio's settings page, pasted bare
+ * or as the JSON document the page hands out — `unwrapClioToken` takes either.
+ */
+function ClioTab({ onSaved }: { onSaved: () => void }) {
+  return (
+    <TokenTab
+      note={
+        <>
+          Janelia&rsquo;s annotation store for the male CNS, MANC and their relatives. Copy the{' '}
+          <strong>ClioStore token</strong> from{' '}
+          <a href="https://clio.janelia.org/settings" target="_blank" rel="noreferrer">
+            clio.janelia.org/settings
+          </a>
+          . You can paste the token alone or the whole JSON it comes in.
+        </>
+      }
+      label="ClioStore token"
+      placeholder="eyJhbGciOi…"
+      get={getClioToken}
+      set={setClioToken}
+      probe={async () => {
+        const datasets = await listClioDatasets()
+        return `${plural(datasets.length, 'dataset')} (${someNames(datasets)})`
+      }}
+      onSaved={onSaved}
+    />
   )
 }
 
@@ -1806,8 +1899,8 @@ function MockTab() {
   return (
     <section className="sources__source">
       <p className="sources__note">
-        Synthetic and deterministic, generated in the browser. Always available — no token, no
-        network, nothing to configure. The examples use it.
+        Synthetic and deterministic, generated in the browser. Always available: no token, no
+        network, nothing to configure. The tours and node demos use it.
       </p>
     </section>
   )
@@ -2077,7 +2170,7 @@ function ProviderForm({
         </div>
         {installed?.length === 0 && (
           <span className="sources__hint">
-            Nothing pulled yet — run <code>ollama pull {provider.defaultModel}</code>, then
+            Nothing pulled yet. Run <code>ollama pull {provider.defaultModel}</code>, then
             refresh.
           </span>
         )}
@@ -2091,8 +2184,8 @@ function ProviderForm({
        * reasoning in a previous build will come back here looking for it.
        */}
       <p className="sources__hint">
-        How much is sent with each question, and whether the model reasons first, are in the
-        assistant drawer — the robot icon, or <kbd>/</kbd>.
+        How much is sent with each question, and whether the model reasons first, are set in the
+        assistant drawer (the robot icon, or <kbd>/</kbd>).
       </p>
 
       <div className="sources__actions">
@@ -2140,7 +2233,7 @@ function ProviderForm({
       {probe.state === 'ok' && (
         <>
           <p className="sources__result" data-tone="ok">
-            Works — {probe.label}
+            Works: {probe.label}
             {probe.context ? `, ${Math.round(probe.context / 1000)}k context` : ''}
           </p>
           {/* Beside the success, not instead of it: the setting works, the answers may not. */}

@@ -41,9 +41,9 @@ import {
   localFileProblem,
   peekTableFile,
   readTableFileSummary,
-  remembersLocalFiles,
   restoreLocalFile,
 } from '../../data/files/registry'
+import { hasFileHandles } from '../../data/files/remembered'
 import { rawFileUrl } from '../../data/rawFileUrl'
 
 /** Where a node's file is, or undefined while it names none. A chosen local file wins a URL. */
@@ -185,7 +185,7 @@ registerNode({
 
   // Only for a local file: a URL survives a reload in every browser.
   readerHints: (params) =>
-    tableFileRef(params)?.kind === 'local' && !remembersLocalFiles()
+    tableFileRef(params)?.kind === 'local' && !hasFileHandles()
       ? FORGETS_LOCAL_FILES
       : NO_HINTS,
 

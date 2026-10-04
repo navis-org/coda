@@ -18,6 +18,7 @@
  * broken in the other.
  */
 
+import { AnnotateBody } from './AnnotateBody'
 import { GalleryBody } from '../cortex/GalleryBody'
 import type { ComponentType } from 'react'
 
@@ -45,6 +46,7 @@ import { SplitNeuronsBody } from './SplitNeuronsBody'
 import { ForEachBody } from './ForEachBody'
 import { UploadBody } from './UploadBody'
 import { LinkTableBody, LinkTableFooter } from './LinkTableBody'
+import { BigClustProjectBody, BigClustProjectFooter } from './BigClustProjectBody'
 import { UploadMeshBody } from './UploadMeshBody'
 
 export interface NodeBodyProps {
@@ -193,6 +195,20 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * opening a file, and a wide synapse table's does not belong on a canvas.
    */
   'core.linkTable': { Component: LinkTableBody, Footer: LinkTableFooter, expandable: true },
+  /*
+   * Link Table's card for a folder, `expandable` for its reason: the list of embeddings and what
+   * each brings is what somebody checks after choosing a project.
+   */
+  'annotation:bigclust': {
+    Component: BigClustProjectBody,
+    Footer: BigClustProjectFooter,
+    expandable: true,
+  },
+  /*
+   * The table is the card, and `expandable` because a selection of any size wants more rows and
+   * wider columns than a canvas card has.
+   */
+  'annotation:editor': { Component: AnnotateBody, expandable: true },
   /*
    * Not `expandable`: the whole widget is a row of buttons and a checkbox, so an overlay of it is
    * whitespace, and what is worth looking at full size is whatever the Item port is wired to.

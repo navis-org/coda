@@ -25,12 +25,12 @@ import '../src/nodes'
 import { SELECT_ALL_WARN } from '../src/nodes/query/explore'
 import type { AnalysisId } from '../src/wizard/options'
 import { demoWorkflow } from '../src/wizard/build'
+// Both bounds apply to the per-tab slots, not to the shared key.
+import { MAX_SLOTS, MAX_SLOT_BYTES } from '../src/store/persistence'
+import { caveRootIds } from '../src/nodes/lib/__fixtures__/rng'
 
 registerBuiltinSources({ mockLatencyMs: 0 })
 
-/** From `persistence.ts`. Both bounds apply to the per-tab slots, not to the shared key. */
-const MAX_SLOTS = 6
-const MAX_SLOT_BYTES = 2_000_000
 
 const ANALYSES: AnalysisId[] = [
   'partners',
@@ -75,7 +75,7 @@ const median = ordinary.sort((a, b) => a - b)[Math.floor(ordinary.length / 2)] ?
  * CAVE root ids, because they are the long ones: 18 digits against neuPrint's 9 to 11.
  */
 function withSelection(n: number): CodaGraph {
-  const ids = Array.from({ length: n }, (_, i) => String(864691128455000000n + BigInt(i)))
+  const ids = caveRootIds(n)
   const graph = emptyGraph('Explore selection')
   graph.nodes.push({
     id: newId('n'),

@@ -18,7 +18,7 @@ import { T, column, tableSchema } from '../../core/types'
 import type { DatasetValue, TableValue, Value } from '../../core/values'
 import { asString, num, tableFromRows } from '../../core/values'
 import type { NgScene } from '../../data/neuroglancer/scene'
-import { parseSceneUrl } from '../../data/neuroglancer/scene'
+import { parseSceneUrl, layerSourceUrl } from '../../data/neuroglancer/scene'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import { registerSource, requireSource } from '../../data/source'
@@ -502,8 +502,9 @@ describe('which viewer the segmentation is authenticated for', () => {
   // By source rather than by type: the layer's *type* is one of the things this rewrites, so a
   // helper keyed on it would report "no segmentation layer" for the case that changed it.
   const grapheneLayer = (scene: NgScene): Record<string, unknown> =>
-    layersOf(scene).find((l) => String(l['source']).startsWith('graphene://'))!
-  const segmentationSource = (scene: NgScene): string => String(grapheneLayer(scene)['source'])
+    layersOf(scene).find((l) => String(layerSourceUrl(l['source'])).startsWith('graphene://'))!
+  const segmentationSource = (scene: NgScene): string =>
+    String(layerSourceUrl(grapheneLayer(scene)['source']))
 
   it('sends no middleauth+ to the deployment FlyWire itself names', async () => {
     /*

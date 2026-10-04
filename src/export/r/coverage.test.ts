@@ -14,6 +14,17 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'annotation:editor':
+    'Annotate is a card that writes a backend on an edit — there is nothing for a notebook to ' +
+    'recompute, and a cell that replayed the writes would push them again. The node itself passes ' +
+    'its neurons through unchanged.',
+  'annotation:bigclust':
+    'A BigClust project. The cell is short — `pandas.read_json` of `info`, `read_parquet` of ' +
+    'meta and each embedding, and the k-NN and features made long — but every line of it is an ' +
+    'alignment *by row*, which is the one thing a notebook gets silently wrong: a misread ' +
+    'embedding still draws a plausible cloud under the wrong neurons. So it waits for a probe ' +
+    'that runs the emitted cell against a real project and compares it with the node, as ' +
+    '`out.topology` argues an emitter must be checked.',
   'core.linkTable':
     '`arrow::open_dataset` in R. The Python exporter emits it as a `CodaTableFile` beside Read ' +
     'Rows and the Custom Dataset; R waits on a port of that helper, so the three agree about ' +

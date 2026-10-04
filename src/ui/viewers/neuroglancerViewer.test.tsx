@@ -16,7 +16,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import type { NgScene } from '../../data/neuroglancer/scene'
-import { parseSceneUrl, sceneUrl } from '../../data/neuroglancer/scene'
+import { parseSceneUrl, sceneUrl, layerSourceUrl } from '../../data/neuroglancer/scene'
 import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { RELEASE_AFTER_MS } from './persistentRoots'
@@ -1071,8 +1071,8 @@ describe('an explicit viewer type', () => {
     ],
   }
   const sourceIn = (container: HTMLElement): string => {
-    const scene = frameScene(container) as { layers: Array<{ source?: string }> } | undefined
-    return String(scene?.layers[0]?.source)
+    const scene = frameScene(container) as { layers: Array<{ source?: unknown }> } | undefined
+    return String(layerSourceUrl(scene?.layers[0]?.source))
   }
 
   it('is honoured rather than re-derived from the host', () => {

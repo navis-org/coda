@@ -161,10 +161,11 @@ function signIn(): void {
 function watchReports(): { raised: string[]; stop: () => void } {
   const raised: string[] = []
   const stops = [
-    caveCredentials.subscribeAuthFailure,
-    neuprintCredentials.subscribeAuthFailure,
-    annotationCredentials.subscribeAuthFailure,
-  ].map((subscribe) => subscribe((message: string) => raised.push(message)))
+    caveCredentials.subscribeAuthFailure((message: string) => raised.push(message)),
+    neuprintCredentials.subscribeAuthFailure((message: string) => raised.push(message)),
+    // This one names the deployment too, so the panel can open on its tab.
+    annotationCredentials.subscribeAuthFailure(({ message }) => raised.push(message)),
+  ]
   return { raised, stop: () => stops.forEach((stop) => stop()) }
 }
 
@@ -224,6 +225,8 @@ const NO_CREDENTIAL: Record<string, string> = {
   peekDatastackRecord: '`peekMaterializations`, which is swept',
   peekRefColumns: "each provider's `peekColumns`, which are swept",
   peekTableFile: "reads a URL's footer by Range request, which carries no credential",
+  peekProject:
+    "a BigClust project's info and meta footer — a public URL or a local folder, no credential",
 }
 
 it('sweeps every exported peek, or says why it need not', () => {

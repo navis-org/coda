@@ -301,7 +301,10 @@ GET  {server}/api/v1/dtables/{uuid}/rows/?table_name=…&limit=…  → the rows
   It also fixes a card refusing over something it does not draw: `workspace` is `advanced`, so
   the old requirement was a badge pointing at an inspector-only field.
 
-**FlyTable cannot be read from a browser at all, and the live test could not see it.**
+**FlyTable could not be read from a browser at all, and the live test could not see it.** (Since
+fixed on the server: on 2026-10-03 both seahub endpoints answer CORS, so the relay below is a
+fallback rather than the only route — `docs/flytable-cors.md` has the current state, and the one
+endpoint still closed, SQL.)
 `live.test.ts` runs in Node, where `fetch` does no CORS enforcement — so "probed live" covered
 every endpoint shape and none of the browser's actual constraint. Measured against the
 deployment: **zero `Access-Control-*` headers on any response**, and the `OPTIONS` preflight
@@ -796,6 +799,146 @@ existed, and it is the placement the node is for.
 
 Not exported: named in both `NO_EMITTER`s, since it is caveclient's chunkedgraph and only ever
 sits on a CAVE dataset, whose own node is excused for the same reason.
+
+### Writing back: annotation targets
+
+The Annotate card (the `annotation` pack) reads a selection's labels from a backend and writes
+edits back. Its data layer is `data/annotations/targets/`, and it is deliberately **not** an
+`AnnotationProvider`: a provider reads a whole table for a node's `evaluate`, cached by
+provenance; a target is driven by a card, reads only the rows a selection names, and *writes* —
+which nothing reached from `evaluate` may ever do, auto-run being one edit away from pushing on
+every keystroke. So an edit there is not a document edit, has no ⌘Z, and is never in a share link.
+
+**A record, not a neuron.** A read answers every *record* for the ids asked, each under the
+backend's own row key, because FlyWire's `main.info` holds one root id on up to four rows
+(measured 2026-10-02). A card showing one of them as *the* value would be showing an arbitrary
+row's opinion, so a change names the record it edits and reaching every row of an id is the
+card's decision.
+
+**Every write is checked against what was read.** A change carries the value the card showed;
+`checkedWrite` reads the records again just before sending and **holds** any cell that has moved
+since, returning it as a conflict with the value now there. It is one routine for every target,
+so the stale-value rule, the refusal rule (a read-only field, a value outside a select's options)
+and the batching cannot drift between backends. **A batch is rows, not changes**: a row's changes
+are merged into one update before sending, because two updates to one row in one SeaTable request
+keep only the last, and a row split across two requests could half-land — and both backends' limits
+(1,000 rows, 50 bodies) count rows. A batch the backend refuses is reported failed while the batches
+before it stay reported written. A cell already holding the new value is not sent at all, so
+nothing is stamped as an edit that changed nothing.
+
+**A write refused is the write's failure, not a token to ask for.** Both clients take CAVE's
+`quiet` with CAVE's meaning — keep a refusal, *or a missing token*, off the auth channel, through
+one `refuse` per client so neither branch can forget it — and a `write` flag that implies it and
+picks the sentence: a 403 on a write is usually a base or dataset the account may read and not
+write, and a dialog asking for a new token asks for the one thing that cannot help (the
+`missing_tos` rule again). Every read's 401/403 still opens Connections. SeaTable's auth channel
+names the **host** that refused, so each Annotations tab subscribes to its own deployment rather
+than the section searching the message for `seatable.io`. FlyTable's tab takes every host but the
+hosted one, which opens *a* tab for a typed-in deployment but not a fix: both tabs are pinned to
+their own host, so no form can yet hold a token for any other — a host-aware SeaTable form is the
+change that would.
+
+**SeaTable reads through SQL**, `SELECT … WHERE root_783 IN (…)`: 0.08 s for 10 ids, 0.71 s for
+1,000, only the columns shown — against ~79 MB for the whole table. `filtered-rows` is no
+substitute, taking its filters only as a body on a GET, which a browser cannot send. FlyTable
+opened SQL to browsers on 2026-10-03 (`docs/flytable-cors.md`). Three silent failures: **a query
+with no `LIMIT` stops at 100 rows**, so every query sets one and reaching it is an error; values
+are **spliced into SQL text**, so ids, row keys and column names are refused unless plainly what
+they claim rather than escaped; and an unticked checkbox reads as null, which the stale check would
+hold as moved, so it reads as `false`. Writes are `batch-update-rows` by `_id`, 1,000 rows a request;
+a deployment saying `use_api_gateway` takes both through `/api-gateway/`. The base token and the
+column list are each one shared promise carrying **nobody's** signal — a caller's Cancel stops its
+own wait (`untilAborted`) and never the request another caller is also waiting on.
+
+**A value is checked against its field before it leaves, in the card as on the write.** One rule,
+`refusal`, used by `checkedWrite` *and* by `valueFromText` beside it in `fieldValues.ts`, which
+turns what was typed into a value — nothing trimmed off, so a time typed into a day-only field is
+refused rather than dropped. The card draws a cell with `fieldText` from the same module, and the
+pair is tested to **round-trip** for every kind, since drawing a value and committing it unchanged
+must give it back: the one case that cannot is a list entry holding a comma, which a comma split
+turns into two, so such a cell is shown and not edited as text — so "abc" in a
+number column is marked on the cell with the reason and kept on screen, rather than the edit
+quietly vanishing, and anything the card accepts the write will. Numbers, whole numbers, booleans,
+dates and a select's options are each checked. **Dates are the case that cannot be left to the
+server**, measured on the scratch table: SeaTable answers `next tuesday`, `2024-13-45` and `42`
+with `200 success` and stores an **empty cell**, so a typo would erase the value it meant to
+correct — the check is a real calendar day in the column's own format (`YYYY-MM-DD`, or
+`YYYY-MM-DD HH:mm` where its format has a time). The second half was found by the probe's own
+restore: SQL answers a date as ISO with the server's offset (`2022-04-26T22:12:00+01:00`), and that
+string written back keeps the day and **drops the time**. So a date is read as the wall clock a
+write takes (`2022-04-26 22:12`), the offset dropped rather than applied, and an undo round-trips
+exactly — `live.test.ts` writes one and restores it.
+
+**Clio** is three reads and a write against the live store, whose CORS is open: the datasets
+listing (each dataset's `bodyAnnotationSchema`, which says which fields have an edit element and
+lists suggested `options` — offered by Clio's UI, not enforced, so suggestions here), the field
+list, the JSON schema the dataset's **DVID** server publishes — the only place fields are typed,
+read best-effort as clio-py does before writing (CNS's types 12 fields: nullable integers, nullable
+strings and positional `oneOf`s, which are read-only here; the male CNS's server answers 403 and
+MANC's 404, and there every field stays text) — `neurons/query` by body id, and a POST of `[{bodyid, field: value}]` in batches of 50. The
+write goes to `neurons?app=…`, which is what clio-py *sends*: its code builds `neurons?{head_tag}`
+and its own query-string handling drops a parameter with no `=`. **A body id is a JSON number on
+the wire**, so it is spelled from its text in a request, and a reply goes through `parseCaveJson`,
+whose string-aware scan quotes any integer too wide for a double before parsing — a one-line regex
+on `"bodyid"` would splice quotes into a free-text field that mentions one (invariant 8). The token is a ClioStore token sent as `Bearer`, pasted bare or
+as the JSON document Clio hands out, in Connections ▸ Annotations ▸ Clio, a tab that goes with the
+`annotation` pack.
+
+**A body nobody has annotated is not missing — but showing it is a choice.** `neurons/query`
+answers nothing for it, and the first version read that as SeaTable reads an absent row, so a fresh
+fragment, the ordinary case in cell typing, could not be typed at all (found by the one live write
+test, below). Showing every such body as an empty row fixed that and opened the opposite hole: a
+selection of FlyWire root ids routed to a Clio tab became rows you could write to, annotating ids
+the dataset never had — Clio takes the write, as it does from clio-py. So it is a per-tab choice,
+**`Unannotated`, off by default** (the user's call). The target stays honest — `read` reports the
+body missing — and offers `AnnotationTarget.blank`, an empty record for an id it would take a write
+for; SeaTable has none, a missing row there being really missing. The card merges blanks in the
+order the ids were asked and counts them (`3 not annotated yet`). A write takes a body Clio holds
+nothing for as **empty, not gone**, whatever the tab shows, so an undo after unticking still lands.
+
+**A side effect is a change nobody saw.** BigClust keeps Clio's `instance` as `{type}_{side}`;
+`withSideEffects` adds it to a batch, off unless a tab switches it on. (BigClust also writes your
+initials to `{field}_source` beside a FlyTable typing field; that was built here with FlyTable
+presets and taken out with them.) Such a change is `unchecked` — there was no cell on screen
+to hold it against — so `checkedWrite` takes whatever the cell holds as its `before`, which is
+exactly what an undo then writes back. A hand edit of the derived field in the same batch wins.
+
+**A CSV file on this computer** is the third backend (`targets/csvFile.ts`), and the user's
+choices shaped it: edits go **into the file on disk**, not into the card to be saved later; **CSV
+only**, Parquet having no writer without a new dependency; the file is **picked in the tab**; and a
+neuron the file lacks is a per-tab option (`Missing ids`, off), its first edit appending a row.
+Five rules. **Every cell is text** — a CSV has no types, and parsing an 18-digit id as a number is
+invariant 8's failure, so `parseDelimited`'s typed reader is not used; only its splitter and
+delimiter detection are (`splitRows`, `detectDelimiter`). **A record is keyed `{id}#{n}`**, the
+*n*th row for that id, never a row number, which moves when somebody sorts the file in a
+spreadsheet between two edits and would point the stale-value check at another neuron's cell. **A
+write re-reads and rewrites the whole file** through `checkedWrite`, and **writes on one file are
+queued** per file (`serialiseWrite`), not per target — two tabs on one file with different key
+columns are two targets, and two overlapping read-modify-writes would each write a file without the
+other's change. One read of the file serves the field list, the re-read and the rewrite of a write.
+A rewrite keeps the cells, delimiter, line ending and trailing newline, and quotes only a field that
+needs it. **Writing needs the handle**, not the `File` (a snapshot), with `readwrite` permission:
+`files/editable.ts` holds one by an id minted at pick time — a name-and-size id would change with
+the first write — and remembers it across a reload through `remembered.ts`, which gained a `mode`
+for this. **Chromium only, and elsewhere it refuses** rather than serving the file read-only — the
+user's call, a read-only annotation table defeating the purpose of the card; it was built read-only
+first. A pick whose writing is refused is not held either.
+
+**Testing writes.** Nothing here writes to production. SeaTable writes are exercised against a
+stub and, behind a second gate (`SEATABLE_WRITE_TEST=main_test.info_test`), against FlyTable's
+scratch copy of `main.info` — the token alone runs only the read-only live suite. Clio writes are
+exercised against a stub: clio-py's test store is gone for good, and the live store is production.
+
+**One live Clio run, 2026-10-04**, on three unannotated male CNS fragments (`CNS`: 170288404,
+953932536, 1018913331) the user named for that run alone — a further one needs asking again, so it
+is not a test in the tree. Through `ClioTarget` and `withSideEffects`: text, a whole number and
+`soma_side` written; `type` with `instance` kept in step (`CodaTestB` with no side, `CodaTestC_L`);
+a stale write held with what Clio held; the card's undo; a clear. Measured: a number comes back a
+JSON number; **writing `null` deletes the field** — the record reads `{"bodyid": …}` again — so a
+clear and an undo to empty leave nothing behind but Clio's own `{field}_time` / `{field}_user`
+stamps, which no client can remove; and a clear of what is already empty sends nothing (the
+"already what was asked for" rule), so it stamps nothing. The run is what found that a body nobody
+had annotated read as missing (above).
 
 ### What is not done
 

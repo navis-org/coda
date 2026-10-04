@@ -47,11 +47,7 @@
  * in software; `--software` measures that instead.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-
-import { asyncBufferFromFile, parquetReadObjects } from 'hyparquet'
-
+import { readFirstEmbedding } from './lib/bigclustProject.mjs'
 import { APP_MODULE, launchChrome, probeArgs, probeReport } from './lib/browserProbe.mjs'
 
 const args = probeArgs()
@@ -61,26 +57,6 @@ const software = args.all.includes('--software')
 const FRAMES = 40
 
 // ── data ────────────────────────────────────────────────────────────────────────────────────────
-
-async function readProject(dir) {
-  const info = JSON.parse(readFileSync(join(dir, 'info'), 'utf8'))
-  const entry = Array.isArray(info.embeddings) ? info.embeddings[0] : info.embeddings
-  const embeddingFile = join(dir, entry?.file ?? 'embeddings_0.parquet')
-  const xy = await parquetReadObjects({
-    file: await asyncBufferFromFile(embeddingFile),
-    columns: ['x', 'y'],
-  })
-  const metaFile = join(dir, info.meta?.file ?? 'meta.parquet')
-  const meta = existsSync(metaFile)
-    ? await parquetReadObjects({ file: await asyncBufferFromFile(metaFile), columns: ['type'] })
-    : []
-  return {
-    source: `${dir} (${entry?.name ?? 'first embedding'})`,
-    x: xy.map((r) => r.x),
-    y: xy.map((r) => r.y),
-    type: xy.map((_, i) => meta[i]?.type ?? null),
-  }
-}
 
 /** Seeded, so two runs draw the same picture. */
 function synthetic(n = 130_000, types = 400) {
@@ -101,7 +77,7 @@ function synthetic(n = 130_000, types = 400) {
   return { source: `synthetic (${n} points, ${types} types)`, x, y, type }
 }
 
-const data = project ? await readProject(project) : synthetic()
+const data = project ? await readFirstEmbedding(project, 'type') : synthetic()
 console.log(`data: ${data.source}, ${data.x.length.toLocaleString()} rows`)
 
 // ── browser ─────────────────────────────────────────────────────────────────────────────────────

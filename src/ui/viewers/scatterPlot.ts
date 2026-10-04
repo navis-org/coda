@@ -45,6 +45,15 @@ export function drawsPixels(spec: ScatterSpec): boolean {
 }
 
 /**
+ * Whether a frame is sparse enough to label — the one reading of `Label up to`, which the card's
+ * caption and the placement both ask. Its ceiling (5,000) is under `CIRCLES_MAX`, so labels never
+ * sit on the pixel pass.
+ */
+export function labelsApply(spec: ScatterSpec, limit: number): boolean {
+  return spec.visible.length <= limit
+}
+
+/**
  * The opacity a mark is composited at. One function for every painter: the pixel passes have to
  * match the path pass exactly, or the cloud's density jumps as a zoom crosses `CIRCLES_MAX`.
  */

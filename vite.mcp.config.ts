@@ -65,8 +65,14 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  * 2,900 → 2,950 on 2026-09-30, at 2,874 kB, for Delta tables — the log replay, the reader over
  * many files and the deletion-vector decoder, which the catalogue's Link Table reaches. `fzstd`,
  * the ZSTD decoder, stays external with the other readers.
+ *
+ * 2,950 → 3,050 on 2026-10-04, at 2,992 kB against 2,916 kB at the commit before it, for the
+ * Cell typing/annotation pack — BigClust Project's definition and its `data/bigclust` glue, the
+ * Annotate card's definition and target settings, both help pages — and the Scatter Plot's labels
+ * and search. Code and prose of ours: the annotation write paths (SeaTable, Clio, CSV) are reached
+ * only from the card and are not in this bundle, and the readers stay external.
  */
-const SIZE_BUDGET_KB = 2_950
+const SIZE_BUDGET_KB = 3_050
 
 /**
  * Fail the build if the bundle outgrows its budget.

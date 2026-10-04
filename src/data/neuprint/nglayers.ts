@@ -28,6 +28,7 @@
  */
 
 import type { NgScene } from '../neuroglancer/scene'
+import { layerSourceUrls } from '../neuroglancer/scene'
 import { objectStoreUrl } from '../precomputed/transport'
 import { parseNgSource } from '../neuroglancer/sourceUrl'
 import { parseDvidRef } from '../dvid/refs'
@@ -81,11 +82,7 @@ const MULTIRES_HINTS = ['multi-res-meshes', 'mesh-multi-res', 'multires', 'multi
 const MESH_HINTS = ['single-res-meshes', 'neuron_meshes', 'meshes']
 
 function urls(layer: NgLayer): string[] {
-  const source = layer.source
-  const items = Array.isArray(source) ? source : [source]
-  return items
-    .map((item) => (typeof item === 'string' ? item : item?.url))
-    .filter((url): url is string => Boolean(url))
+  return layerSourceUrls(layer.source)
 }
 
 /**

@@ -12,13 +12,9 @@
  * modification time, hashed, so picking the same file twice gives the same id and a graph naming
  * one this browser does not have says so rather than reading something else.
  *
- * **Across a reload, only Chromium remembers**, through the handle the file was chosen with
- * (`store.ts`). A reload finds the handle and asks whether reading is still allowed: often it is,
- * and the file is simply back; otherwise the browser wants a click, which only a user gesture can
- * give, so the card shows a button (`grantLocalFile`). Anywhere without handles — Firefox, Safari,
- * a graph somebody sent — the card asks for the file again, naming it. The four states are
- * `LocalFileState`'s, and "still looking" is the one that says nothing: a warning that a file is
- * missing, a moment before it is found, is one people learn to distrust.
+ * **Across a reload, only Chromium remembers**, through the handle the file was chosen with — the
+ * four states and why are `remembered.ts`', shared with a local BigClust folder. Anywhere without
+ * handles — Firefox, Safari, a graph somebody sent — the card asks for the file again, naming it.
  *
  * ## What a footer said, peeked synchronously
  *
@@ -45,27 +41,20 @@ import { memoPromise, untilAborted } from '../memoPromise'
 import { reportUploadLearned } from '../uploads'
 import type { FileSpec } from './bytes'
 import { ARROW_MAGIC, PARQUET_MAGIC, bytesOf, endsWith, httpUrl, urlHead } from './bytes'
+import { fetchBlob } from '../precomputed/transport'
 import type { DeltaSnapshot } from './delta/log'
 import { readDeltaSnapshot } from './delta/log'
 import { httpDeltaStore } from './delta/store'
 import type { FileSummary } from './columns'
-import { loadHandle, resetFileStore, saveHandle } from './store'
-
-const localFiles = new Map<string, File>()
-/** Remembered handles whose read permission the browser wants asked for again. */
-const awaitingPermission = new Map<string, FileSystemFileHandle>()
-/** Ids whose remembered handle has been looked for and not turned into a file. */
-const looked = new Set<string>()
-const restoring = new Map<string, Promise<void>>()
+import { resetFileStore } from './store'
+import type { RememberedState } from './remembered'
+import { remembered } from './remembered'
 
 /**
- * Whether this browser can remember a picked file across a reload: the File System Access picker
- * hands back a handle, which `store.ts` keeps in IndexedDB. Chromium only. The one statement of
- * it — the card's picker and Link Table's hint both ask here.
+ * The local files this tab holds, and their remembered handles (`remembered.ts`, the state machine
+ * a local project folder shares).
  */
-export function remembersLocalFiles(): boolean {
-  return typeof window !== 'undefined' && typeof window.showOpenFilePicker === 'function'
-}
+const localFiles = remembered<FileSystemFileHandle, File>((handle) => handle.getFile())
 
 /**
  * Hold a picked file, and the id a node names it by — remembering the handle it came through,
@@ -73,9 +62,7 @@ export function remembersLocalFiles(): boolean {
  */
 export function holdLocalFile(file: File, handle?: FileSystemFileHandle): string {
   const id = `file-${hashValue([file.name, file.size, file.lastModified])}`
-  localFiles.set(id, file)
-  awaitingPermission.delete(id)
-  if (handle) void saveHandle(id, handle)
+  localFiles.hold(id, file, handle)
   return id
 }
 
@@ -87,21 +74,9 @@ export function heldLocalFile(id: string): File | undefined {
  * Where a local file is: in hand, being looked for among remembered handles, remembered but
  * waiting for a click to read it again, or not in this browser at all.
  */
-export type LocalFileState = 'held' | 'restoring' | 'permission' | 'absent'
-
-/** The state, with no side effect: the one statement of it. */
-function stateOf(id: string): LocalFileState {
-  if (localFiles.has(id)) return 'held'
-  if (awaitingPermission.has(id)) return 'permission'
-  if (looked.has(id)) return 'absent'
-  return 'restoring'
-}
-
 /** Synchronously — and, the first time an id is not held, starting the look for its handle. */
-export function localFileState(id: string): LocalFileState {
-  const state = stateOf(id)
-  if (state === 'restoring') void restoreLocalFile(id)
-  return state
+export function localFileState(id: string): RememberedState {
+  return localFiles.state(id)
 }
 
 /**
@@ -109,52 +84,15 @@ export function localFileState(id: string): LocalFileState {
  * shared while in flight; what it finds is announced so the node and its card re-infer.
  */
 export function restoreLocalFile(id: string): Promise<void> {
-  if (stateOf(id) !== 'restoring') return Promise.resolve()
-  return memoPromise(
-    restoring,
-    id,
-    async () => {
-      try {
-        const found = await readRemembered(id)
-        if (found instanceof File) localFiles.set(id, found)
-        else if (found) awaitingPermission.set(id, found)
-      } finally {
-        looked.add(id)
-        reportUploadLearned()
-      }
-    },
-    { keep: 'inflight' },
-  )
-}
-
-/**
- * A remembered file read afresh through its handle where reading is still allowed; the handle
- * where the browser wants a click first; nothing where no handle is remembered, or it points at a
- * file since deleted or moved.
- */
-async function readRemembered(id: string): Promise<File | FileSystemFileHandle | undefined> {
-  try {
-    const handle = await loadHandle(id)
-    if (!handle) return undefined
-    if ((await handle.queryPermission({ mode: 'read' })) !== 'granted') return handle
-    return await handle.getFile()
-  } catch {
-    return undefined
-  }
+  return localFiles.restore(id)
 }
 
 /**
  * Ask the browser for a remembered file back — from the card's button, since only a user gesture
  * may. True where it is now held.
  */
-export async function grantLocalFile(id: string): Promise<boolean> {
-  const handle = awaitingPermission.get(id)
-  if (!handle) return localFiles.has(id)
-  if ((await handle.requestPermission({ mode: 'read' })) !== 'granted') return false
-  localFiles.set(id, await handle.getFile())
-  awaitingPermission.delete(id)
-  reportUploadLearned()
-  return true
+export function grantLocalFile(id: string): Promise<boolean> {
+  return localFiles.grant(id)
 }
 
 /** One key per place a file can be, for the summary cache. */
@@ -184,7 +122,7 @@ const pending = new Map<string, Promise<FileSummary>>()
  */
 export function peekTableFile(ref: TableFileRef, refresh = 0): SummaryEntry | undefined {
   const entry = summaries.get(refKey(ref))
-  const readable = ref.kind === 'url' || localFiles.has(ref.id)
+  const readable = ref.kind === 'url' || localFiles.get(ref.id) !== undefined
   if (!entry && readable) void readTableFileSummary(ref, { refresh }).catch(() => {})
   return entry
 }
@@ -201,12 +139,27 @@ export function peekTableFile(ref: TableFileRef, refresh = 0): SummaryEntry | un
  */
 export function readTableFileSummary(
   ref: TableFileRef,
-  options: { refresh?: number; signal?: AbortSignal } = {},
+  options: {
+    refresh?: number
+    signal?: AbortSignal
+    /**
+     * A reader that reads the file whole anyway — a BigClust project — taking a URL in **one
+     * request** rather than as a footer and then a range per column chunk: a 60 MB features file
+     * is about 8,400 of them. Every read of that URL is then served from the download (`fileSpec`)
+     * until ⟳. Not Link Table's: its files are gigabytes, read a block at a time.
+     */
+    whole?: boolean
+  } = {},
 ): Promise<FileSummary> {
   const refresh = options.refresh ?? 0
   const key = refKey(ref)
   const held = summaries.get(key)
-  if (held?.summary && held.refresh === refresh) return Promise.resolve(held.summary)
+  const refreshed = held !== undefined && held.refresh !== refresh
+  const whole = options.whole && ref.kind === 'url' ? ref.url : undefined
+  // Asked for even when the footer is known — read by a Link Table on the same URL, say — since
+  // what it serves is every read after this one. Under ⟳, the read below lets go of it first.
+  if (whole && !refreshed) holdWhole(whole)
+  if (held?.summary && !refreshed) return Promise.resolve(held.summary)
   const shared = memoPromise(
     pending,
     // A read under a new nonce is not the one in flight under the old.
@@ -215,11 +168,14 @@ export function readTableFileSummary(
       try {
         // ⟳ on a local file: the held `File` is a snapshot, which a rewrite on disk makes unreadable.
         if (held && ref.kind === 'local') await reacquireLocalFile(ref.id)
-        // ⟳ on a URL: what was learned of it let go, so a Delta table's log is read again —
-        // which is how a new commit is taken up.
-        if (held && ref.kind === 'url') tables.delete(tableRoot(ref.url))
-        const spec = await fileSpec(ref)
-        const summary = await readSummary(spec)
+        // ⟳ on a URL: what was learned of it let go — a Delta table's log, which is how a new
+        // commit is taken up, and a whole download, which is then made again.
+        if (refreshed && ref.kind === 'url') {
+          tables.delete(tableRoot(ref.url))
+          wholes.delete(ref.url)
+        }
+        if (whole) holdWhole(whole)
+        const summary = await readSummary(await fileSpec(ref))
         summaries.set(key, { summary, refresh, readAt: Date.now() })
         return summary
       } catch (error) {
@@ -244,17 +200,34 @@ export function readTableFileSummary(
 async function reacquireLocalFile(id: string): Promise<void> {
   const file = localFiles.get(id)
   if (!file) return
-  const found = await readRemembered(id)
-  if (found instanceof File) return void localFiles.set(id, found)
+  const found = await localFiles.reopen(id)
+  if (found) return void localFiles.hold(id, found)
   try {
     await file.slice(0, 1).arrayBuffer()
   } catch {
-    localFiles.delete(id)
-    looked.add(id)
+    localFiles.drop(id)
   }
 }
 
 const heads = new Map<string, Promise<{ size: number; modified?: string }>>()
+
+/**
+ * URLs downloaded in one request for a reader that reads them whole (`readTableFileSummary`'s
+ * `whole`), by URL, served by `fileSpec` to every reader of that URL until ⟳ lets one go.
+ */
+const wholes = new Map<string, Promise<Blob>>()
+
+/**
+ * Start a URL's whole download, once: through the transport a range read takes, so the routes a
+ * bucket needs and the retry on a dropped connection are the same ones, and revalidated rather
+ * than taken from the cache unasked (`no-cache`), so ⟳ reads what the server now has. Kept until
+ * ⟳; a failed download is not, so the next read tries again.
+ */
+function holdWhole(url: string): void {
+  void memoPromise(wholes, url, () => fetchBlob(httpUrl(url), { cache: 'no-cache' }), {
+    keep: 'resolved',
+  })
+}
 
 /**
  * What is at a URL with no table file's extension, by its root: a Delta table's snapshot, or
@@ -348,6 +321,8 @@ export async function fileSpec(ref: TableFileRef, signal?: AbortSignal): Promise
     if (!file) throw new Error(localFileProblem(ref.id, ref.name))
     return { kind: 'blob', blob: file }
   }
+  const whole = wholes.get(ref.url)
+  if (whole) return { kind: 'blob', blob: await untilAborted(whole, signal) }
   if (formatByName(ref) === 'delta') {
     const root = tableRoot(ref.url)
     const found = memoPromise(tables, root, () => tableAt(ref.url, root), { keep: 'resolved' })
@@ -386,13 +361,11 @@ function localFilePermission(name: string): string {
 
 /** Test seam: forget every held file, remembered-handle lookup and summary. */
 export function resetTableFiles(): void {
-  localFiles.clear()
-  awaitingPermission.clear()
-  looked.clear()
-  restoring.clear()
+  localFiles.reset()
   summaries.clear()
   pending.clear()
   heads.clear()
   tables.clear()
+  wholes.clear()
   resetFileStore()
 }

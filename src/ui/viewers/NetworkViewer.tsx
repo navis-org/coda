@@ -83,6 +83,7 @@ import { ViewerActions } from './ViewerActions'
 import { useStable } from './useStable'
 import { errorMessage } from '../../core/errors'
 import { ViewerEmpty } from './ViewerEmpty'
+import { DEFAULT_SEARCH, searchHits, searchMatcher } from './pointSearch'
 
 export interface NetworkViewerProps {
   network: NetworkValue
@@ -1360,14 +1361,15 @@ export function NetworkViewer({
    * a search asks "where are these?", and pulling in neighbours would answer a question nobody
    * typed. Links touching a match still light, which is what makes a match readable in place.
    */
+  // The Scatter Plot's matching (`pointSearch.ts`), so a `/pattern` means the same in both boxes.
   const matches = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    if (!needle) return []
-    return nodeIds.filter((id, row) => {
-      if (id.toLowerCase().includes(needle)) return true
-      const label = nodeLabels?.[row]
-      return !!label && label.toLowerCase().includes(needle)
-    })
+    const matcher = searchMatcher(query, DEFAULT_SEARCH)
+    const rows = searchHits(
+      nodeIds.length,
+      (row) => [nodeIds[row]!, nodeLabels?.[row] ?? ''],
+      matcher,
+    )
+    return rows.map((row) => nodeIds[row]!)
   }, [query, nodeIds, nodeLabels])
 
   useEffect(() => {

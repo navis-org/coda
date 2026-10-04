@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import type { NgScene } from './scene'
 import {
   buildScene,
+  layerSourceUrl,
   proxiedViewer,
   ownedLayerNames,
   spliceSegments,
@@ -26,6 +27,13 @@ import {
   viewerKind,
   splitSceneUrl,
 } from './scene'
+
+/** Layers with each source read as its URL, the spelling a link changes when the bounds are off. */
+function withSourceUrls<L extends { source?: unknown }>(
+  layers: L[],
+): Array<L & { source?: string }> {
+  return layers.map((l) => ({ ...l, source: layerSourceUrl(l.source) }))
+}
 
 /** hemibrain:v1.2.1, trimmed. No dimensions, no position, no layout — this is the whole state. */
 const HEMIBRAIN: NgScene = {
@@ -728,7 +736,13 @@ describe('the URL', () => {
     const scene = buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [1, 2] })
     const url = sceneUrl(undefined, scene)
     expect(url.startsWith('https://neuroglancer-demo.appspot.com/#!')).toBe(true)
-    expect(parseSceneUrl(url)).toEqual(scene)
+    // Everything but the spelling of the sources, which the link turns into `{ url, subsources }`
+    // to switch each volume layer's bounds off.
+    const urls = (state: unknown) => {
+      const { layers, ...rest } = state as { layers: Array<Record<string, unknown>> }
+      return { ...rest, layers: withSourceUrls(layers) }
+    }
+    expect(urls(parseSceneUrl(url))).toEqual(urls(scene))
   })
 
   it('percent-encodes, because every colour in the state contains a #', () => {
@@ -788,9 +802,15 @@ describe('which flavour of neuroglancer a deployment is', () => {
     ],
   }
 
+  // A layer as a link carries it: the source read through `layerSourceUrl`, being a `{ url, subsources }`
+  // once the bounds subsource is switched off.
   type Layer = { type?: string; source?: string }
   const stateIn = (url: string): Layer[] =>
-    (JSON.parse(decodeURIComponent(url.split(/#!\+?/).pop()!)) as { layers: Layer[] }).layers
+    (
+      JSON.parse(decodeURIComponent(url.split(/#!\+?/).pop()!)) as {
+        layers: Array<{ type?: string; source?: unknown }>
+      }
+    ).layers.map((l) => withSourceUrls([l])[0]!)
 
   // Found by its *source*, not its type — the type is one of the things under test, and a
   // helper keyed on it reports "no segmentation layer" for the very case that changed it.
@@ -924,5 +944,99 @@ describe('which flavour of neuroglancer a deployment is', () => {
     // google's neuroglancer since is the other one.
     expect(viewerKind('https://ng.example.org/')).toBe('spelunker')
     expect(viewerKind(undefined)).toBe('spelunker')
+  })
+})
+
+describe('a scene of several volumes', () => {
+  const twoVolumes: NgScene = {
+    layers: [
+      { type: 'segmentation', name: 'MCNS', source: 'precomputed://gs://mcns', segments: [] },
+      { type: 'segmentation', name: 'BANC', source: 'precomputed://gs://banc', segments: [] },
+      {
+        type: 'segmentation',
+        name: 'neuropil',
+        source: 'precomputed://gs://shell',
+        segments: ['1'],
+      },
+    ],
+  }
+  const layersOf = (scene: NgScene) => scene.layers as Record<string, unknown>[]
+
+  it('puts a placed segment in its own layer and the rest in the target, colours with them', () => {
+    const scene = buildScene(twoVolumes, {
+      datasetId: 'scene',
+      segments: ['10', '20', '30', '40'],
+      placements: new Map([
+        ['20', { layer: 'BANC' }],
+        ['30', { layer: 'nowhere' }],
+      ]),
+      segmentColors: { '10': '#111111', '20': '#222222' },
+    })
+    expect(layersOf(scene).map((l) => [l.name, l.segments, l.segmentColors])).toEqual([
+      ['MCNS', ['10', '30', '40'], { '10': '#111111' }],
+      ['BANC', ['20'], { '20': '#222222' }],
+      // Untouched: nothing was placed in it, and it is not the target.
+      ['neuropil', ['1'], undefined],
+    ])
+  })
+
+  it('keeps every layer a segment was placed in when only the segmentation is asked for', () => {
+    const scene = buildScene(twoVolumes, {
+      datasetId: 'scene',
+      segments: ['20'],
+      placements: new Map([['20', { layer: 'BANC' }]]),
+      layers: 'segmentation',
+    })
+    expect(layersOf(scene).map((l) => l.name)).toEqual(['MCNS', 'BANC'])
+  })
+})
+
+describe('bounding boxes', () => {
+  const published: NgScene = {
+    layers: [
+      {
+        type: 'segmentation',
+        name: 'seg',
+        source: {
+          url: 'precomputed://gs://a',
+          subsources: { default: true, bounds: true, mesh: true },
+        },
+        segments: [],
+      },
+      {
+        type: 'image',
+        name: 'em',
+        source: [
+          { url: 'precomputed://gs://b', subsources: { default: true } },
+          'precomputed://gs://c',
+        ],
+      },
+      { type: 'annotation', name: 'notes', source: 'local://annotations' },
+      { type: 'segmentation', name: 'fw', source: 'graphene://https://cave/table/fw' },
+    ],
+  }
+  const sentTo = (viewer: string) =>
+    (
+      parseSceneUrl(
+        sceneUrl(viewer, buildScene(published, { datasetId: 'seg', segments: [] })),
+      )!.layers as Record<string, unknown>[]
+    ).map((l) => l.source)
+
+  it('switches every volume source\u2019s bounds off in the link, bare URLs included', () => {
+    expect(sentTo('https://spelunker.cave-explorer.org')).toEqual([
+      { url: 'precomputed://gs://a', subsources: { default: true, bounds: false, mesh: true } },
+      [
+        { url: 'precomputed://gs://b', subsources: { default: true, bounds: false } },
+        { url: 'precomputed://gs://c', subsources: { bounds: false } },
+      ],
+      // An annotation layer has no bounds subsource to switch off.
+      'local://annotations',
+      // After the graphene prefix is settled, which reads the source as a string.
+      { url: 'graphene://middleauth+https://cave/table/fw', subsources: { bounds: false } },
+    ])
+  })
+
+  it('leaves the Seung-lab fork its own source spelling', () => {
+    expect(sentTo('https://ngl.flywire.ai')[3]).toBe('graphene://https://cave/table/fw')
   })
 })

@@ -31,15 +31,15 @@ import { warnOverThreshold } from '../../core/limits'
 import { warnAboveParam } from '../lib/limitParams'
 import { registerNode } from '../../core/registry'
 import type { ParamValues } from '../../core/node'
-import { idText } from '../../core/ids'
+import { idText, isSegmentId } from '../../core/ids'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue, str } from '../../core/values'
 import type { NgLayerSet, NgLayout, ViewerKind } from '../../data/neuroglancer/scene'
+import type { SegmentPlacement } from '../../data/source'
 import {
   DEFAULT_NEUROGLANCER_URL,
   buildScene,
-  isSegmentId,
   sceneUrl,
   viewerBaseFor,
 } from '../../data/neuroglancer/scene'
@@ -152,8 +152,10 @@ registerNode({
       presentational: false,
       advanced: true,
       // Neuroglancer gives every segment a distinct hash colour of its own, which is both
-      // useful and the shortest link there is: no colour data travels at all.
-      allowDefault: { label: "neuroglancer's own" },
+      // useful and the shortest link there is: no colour data travels at all. A scene that
+      // publishes colours for its neurons (`DataSource.placeSegments`, a BigClust project's) has
+      // them used here instead — so the label names the scene rather than neuroglancer.
+      allowDefault: { label: "the scene's own" },
     }),
     {
       id: 'layout',
@@ -281,6 +283,18 @@ registerNode({
       )
     }
 
+    // A scene of several volumes says which one each neuron is in, and may publish its colour —
+    // used where this node's own colour is left on neuroglancer's.
+    const placed = source.placeSegments
+      ? await source.placeSegments({
+          datasetId: dataset.datasetId,
+          segments,
+          ...(ctx.signal ? { signal: ctx.signal } : {}),
+        })
+      : undefined
+    const ownColors =
+      spec.mode === 'default' && placed ? placedColors(placed, segments) : undefined
+
     const extra = ctx.input('layers')
     if (extra !== undefined && extra.kind !== 'layers') {
       throw new Error('Extra layers input is not a layer set')
@@ -289,7 +303,8 @@ registerNode({
     const scene = buildScene(published, {
       datasetId: dataset.datasetId,
       segments,
-      ...colorFields(spec.mode, segments, colors),
+      ...(ownColors ?? colorFields(spec.mode, segments, colors)),
+      ...(placed ? { placements: placed } : {}),
       layout: String(ctx.params.layout) as NgLayout,
       layers: String(ctx.params.layers) as NgLayerSet,
       showSlices: ctx.params.showSlices === true,
@@ -303,6 +318,30 @@ registerNode({
     return { url: str(sceneUrl(viewer, scene, chosenViewerKind(ctx.params))) }
   },
 })
+
+/**
+ * The colours a source published for these segments, as `colorFields` writes them: one default
+ * where every segment has the same one (fish2's project colours all 129,325 orange, at ~40 bytes a
+ * segment of link to say so), a map otherwise. Undefined where it published none.
+ */
+function placedColors(
+  placed: ReadonlyMap<string, SegmentPlacement>,
+  segments: readonly string[],
+): ReturnType<typeof colorFields> | undefined {
+  const map: Record<string, string> = {}
+  let count = 0
+  let same: string | undefined
+  for (const id of segments) {
+    const color = placed.get(id)?.color
+    if (!color) continue
+    map[id] = color
+    same = count++ === 0 || same === color ? color : undefined
+  }
+  if (count === 0) return undefined
+  return same && count === segments.length
+    ? { segmentDefaultColor: same }
+    : { segmentColors: map }
+}
 
 /**
  * How the resolved colours are written into the layer, which differs by mode.

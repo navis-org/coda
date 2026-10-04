@@ -138,7 +138,7 @@ export class RowSplitter {
   }
 }
 
-function splitRows(text: string, delimiter: string): string[][] {
+export function splitRows(text: string, delimiter: string): string[][] {
   const splitter = new RowSplitter(delimiter)
   return [...splitter.push(text), ...splitter.finish()]
 }
@@ -152,7 +152,7 @@ function splitRows(text: string, delimiter: string): string[][] {
  * candidate producing one field count across the sample — and more than one field — wins, with
  * `DELIMITERS` order breaking the tie.
  */
-function detectDelimiter(text: string): Delimiter {
+export function detectDelimiter(text: string): Delimiter {
   const sample = text.slice(0, 64 * 1024)
   let best: Delimiter = ','
   let bestScore = -1

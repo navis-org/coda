@@ -1,7 +1,7 @@
 /**
  * The File System Access API calls Coda uses, which TypeScript's DOM library does not declare yet:
- * the picker and the two permission methods. Chromium ships them; other engines do not, so every
- * caller checks for `showOpenFilePicker` before using any of it.
+ * the two pickers and the two permission methods. Chromium ships them; other engines do not, so
+ * every caller checks for its picker before using any of it.
  */
 
 interface FilePickerAcceptType {
@@ -26,4 +26,7 @@ interface FileSystemHandle {
 
 interface Window {
   showOpenFilePicker?(options?: OpenFilePickerOptions): Promise<FileSystemFileHandle[]>
+  showDirectoryPicker?(options?: {
+    mode?: 'read' | 'readwrite'
+  }): Promise<FileSystemDirectoryHandle>
 }

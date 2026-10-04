@@ -30,10 +30,15 @@ import { formatCell, formatCompact, formatNumber, plural } from '../format'
 import { GestureMarquee } from './GestureMarquee'
 import { ColorKey, ShapeKey, SizeKey } from './LegendKeys'
 import type { LegendItem } from './scatterDraw'
-import { drawScatter, scatterToSvg } from './scatterDraw'
+import { drawScatter, measureLabel, scatterToSvg } from './scatterDraw'
+import type { PlacedLabel } from './scatterLabels'
+import { labelRequests, placePointLabels } from './scatterLabels'
+import { DEFAULT_SEARCH, searchHits, searchMatcher } from './pointSearch'
 import type { Rect, ScaleKind, ScatterMarks, ScatterSpec, Viewport } from './scatterPlot'
 import {
   buildHitIndex,
+  labelsApply,
+  reachesPlot,
   buildMarks,
   buildScatter,
   cellNumber,
@@ -46,7 +51,8 @@ import {
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { CLICK_SLOP, tooltipPoint } from './tooltipPoint'
-import { prepareCanvas } from './canvas2d'
+import { prepareCanvas, uiFontFamily } from './canvas2d'
+import { useDismissOnOutside } from '../useDismiss'
 import { useElementSize } from './useElementSize'
 import { useStable } from './useStable'
 import { useWheelZoom } from './useWheelZoom'
@@ -75,6 +81,10 @@ export interface ScatterViewerProps {
   opacity: number
   /** Every exported mark a vector shape, even past `CIRCLES_MAX`. */
   vectorMarks?: boolean
+  /** Listed in the tooltip after its own rows. */
+  hoverColumns?: readonly string[]
+  /** Labels beside the points, while at most `limit` are in view. Absent means none. */
+  pointLabels?: { limit: number; lines: boolean; unplaced: 'hide' | 'dim' }
   trend: 'none' | 'linear'
   trendPerGroup: boolean
   selection: string[]
@@ -84,6 +94,9 @@ export interface ScatterViewerProps {
   onExpand?: () => void
   onError?: (message: string) => void
 }
+
+const NO_COLUMNS: readonly string[] = []
+const NO_HITS: readonly number[] = []
 
 /** How close the pointer has to be to a mark for the tooltip to claim it. */
 const HOVER_RADIUS = 12
@@ -126,6 +139,8 @@ export function ScatterViewer({
   idColumn,
   opacity,
   vectorMarks = false,
+  hoverColumns = NO_COLUMNS,
+  pointLabels,
   trend,
   trendPerGroup,
   selection,
@@ -273,6 +288,151 @@ export function ScatterViewer({
     [keyAt, onSelectionChange, selectedKeys],
   )
 
+  // --- point labels --------------------------------------------------------
+  // Placed per frame while few enough marks are in view. The last frame's labels are kept (by the
+  // painting effect, not in here) so their slots are tried first: a pan does not flip a label from
+  // one side of its point to the other. The export draws the same labels from that ref.
+  const stableLabels = useStable(pointLabels)
+  const lastLabels = useRef<readonly PlacedLabel[] | undefined>(undefined)
+  // `withheld` while more than the limit are in view, which the caption says; undefined while
+  // labels are off.
+  const labelling = useMemo(():
+    | { withheld: true }
+    | { withheld: false; labels: readonly PlacedLabel[]; omitted: number }
+    | undefined => {
+    if (!stableLabels || !spec) return undefined
+    if (!labelsApply(spec, stableLabels.limit)) return { withheld: true }
+    const { requests, obstacles } = labelRequests(
+      spec,
+      (mark) => {
+        const row = spec.marks.rows[mark]!
+        return labelColumn
+          ? formatCell(table.data[labelColumn]?.[row] ?? null, labelColumn)
+          : keyAt(row)
+      },
+      measureLabel,
+      (mark) => (selectedIndices.has(mark) ? 0 : 1),
+    )
+    const labels = placePointLabels(requests, {
+      bounds: spec.plot,
+      obstacles,
+      leaders: stableLabels.lines,
+      unplaced: stableLabels.unplaced,
+      previous: lastLabels.current,
+    })
+    // Said on the caption: a label left out is otherwise indistinguishable from an empty cell.
+    return { withheld: false, labels, omitted: requests.length - labels.length }
+  }, [stableLabels, spec, table, labelColumn, keyAt, selectedIndices])
+  const placedLabels = labelling?.withheld === false ? labelling.labels : undefined
+
+  // The picked columns after the tooltip's own rows, leaving out any it already shows.
+  const extraTipColumns = useMemo(() => {
+    const shown = new Set([
+      labelColumn,
+      xColumn,
+      yColumn,
+      stableColor.column,
+      shapes.legend?.column,
+    ])
+    return hoverColumns.filter((name) => !shown.has(name) && name in table.data)
+  }, [hoverColumns, labelColumn, xColumn, yColumn, stableColor.column, shapes.legend, table])
+
+  // --- search --------------------------------------------------------------
+  // In a strip of its own, on the expanded card only. Matches the label and id by default, or one
+  // picked column (`pointSearch.ts`); ‹ › pan to each hit at the current zoom and ring it, and the
+  // selection is written only when somebody presses for it. The box and its menu close together;
+  // the column and options are kept while the card is open.
+  const [search, setSearch] = useState<{ term: string; menu: boolean } | null>(null)
+  const [prefs, setPrefs] = useState({ column: '', options: DEFAULT_SEARCH })
+  const searching = search !== null
+  // Keyed on the term, not the search object: opening the menu must not make a new list of hits,
+  // which would start the cursor over.
+  const term = search?.term
+  const matcher = useMemo(
+    () => (term === undefined ? undefined : searchMatcher(term, prefs.options)),
+    [term, prefs.options],
+  )
+  // The texts a point is known by, built once rather than per keystroke: formatting a number
+  // column of 129,325 rows through `toLocaleString` was 1.5 s a keystroke, matching it 4 ms.
+  const searchTexts = useMemo(() => {
+    if (!searching || !marks) return undefined
+    const column = prefs.column && prefs.column in table.data ? prefs.column : labelColumn
+    const text = (row: number) =>
+      column ? formatCell(table.data[column]?.[row] ?? null, column) : ''
+    return {
+      names: Array.from(marks.rows, text),
+      // The id alongside the label, unless one column was picked to search instead.
+      ids: prefs.column ? undefined : Array.from(marks.rows, (row) => keyAt(row)),
+    }
+  }, [searching, marks, prefs.column, table, labelColumn, keyAt])
+  const hits = useMemo(() => {
+    if (!searchTexts || !matcher) return NO_HITS
+    const { names, ids } = searchTexts
+    return searchHits(
+      names.length,
+      (mark) => (ids ? [names[mark]!, ids[mark]!] : [names[mark]!]),
+      matcher,
+    )
+  }, [searchTexts, matcher])
+  // Which hit the search is on, kept with the list it indexes, so a new list starts before its first.
+  const [cursor, setCursor] = useState({ of: NO_HITS, at: -1 })
+  const hitAt = cursor.of === hits ? cursor.at : -1
+  const currentHit = hitAt >= 0 ? hits[hitAt] : undefined
+  const searchError = matcher && 'error' in matcher ? matcher.error : undefined
+  const hitCount = searchError
+    ? 'bad pattern'
+    : !search?.term.trim()
+      ? ''
+      : hitAt >= 0
+        ? `${formatNumber(hitAt + 1)} / ${formatNumber(hits.length)}`
+        : formatNumber(hits.length)
+
+  const stepHit = (direction: 1 | -1) => {
+    if (!spec || hits.length === 0) return
+    const next =
+      hitAt < 0 && direction < 0
+        ? hits.length - 1
+        : (hitAt + direction + hits.length) % hits.length
+    setCursor({ of: hits, at: next })
+    // Centred at the zoom somebody chose: finding a point is not a reason to change the scale.
+    const mark = hits[next]!
+    const halfX = (spec.view.x.max - spec.view.x.min) / 2
+    const halfY = (spec.view.y.max - spec.view.y.min) / 2
+    const x = spec.marks.xt[mark]!
+    const y = spec.marks.yt[mark]!
+    setView({ x: { min: x - halfX, max: x + halfX }, y: { min: y - halfY, max: y + halfY } })
+  }
+  const selectHits = (additive: boolean) => {
+    if (!marks || hits.length === 0) return
+    commitRows(
+      hits.map((mark) => marks.rows[mark]!),
+      additive,
+    )
+  }
+  const searchBar = useRef<HTMLDivElement>(null)
+  const closeMenu = useCallback(
+    () => setSearch((open) => (open ? { ...open, menu: false } : open)),
+    [],
+  )
+  // Over the whole bar, so a press on ⋯ toggles rather than closing and reopening the menu.
+  useDismissOnOutside(searchBar, closeMenu, { onEscape: true, enabled: search?.menu === true })
+  /** Where the tooltip for a hit goes: over its mark, in the viewer's own coordinates. */
+  const searchTipAt = (mark: number | undefined) => {
+    const plotBox = wrapRef.current
+    if (mark === undefined || !spec || !plotBox) return null
+    const x = spec.px[mark]!
+    const y = spec.py[mark]!
+    if (!reachesPlot(spec.plot, x, y, 0)) return null
+    const box = plotBox.getBoundingClientRect()
+    // The plot's pixels to the client's, through the zoom `tooltipPoint` then takes back out.
+    const zoom = plotBox.offsetWidth > 0 ? box.width / plotBox.offsetWidth : 1
+    const point = tooltipPoint(
+      { clientX: box.left + x * zoom, clientY: box.top + y * zoom },
+      viewerRef.current,
+    )
+    return { index: mark, ...point }
+  }
+
   // --- painting ----------------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current
@@ -290,9 +450,27 @@ export function ScatterViewer({
       yLabel: yColumn,
       selected: selectedIndices,
       ...(hovered ? { hovered: hovered.index } : {}),
+      ...(placedLabels ? { labels: placedLabels } : {}),
+      ...(hits.length ? { hits } : {}),
+      ...(currentHit !== undefined ? { current: currentHit } : {}),
       compact,
     })
-  }, [spec, ink, surface, opacity, xColumn, yColumn, selectedIndices, hovered, compact, box])
+    lastLabels.current = placedLabels
+  }, [
+    spec,
+    ink,
+    surface,
+    opacity,
+    xColumn,
+    yColumn,
+    selectedIndices,
+    hovered,
+    placedLabels,
+    hits,
+    currentHit,
+    compact,
+    box,
+  ])
 
   // --- zoom --------------------------------------------------------------
   // The shared hook: a native non-passive listener, and one update per animation frame.
@@ -455,10 +633,9 @@ export function ScatterViewer({
           height: box.height,
           background: surface,
           ink,
-          font:
-            typeof getComputedStyle === 'function' && wrapRef.current
-              ? getComputedStyle(wrapRef.current).fontFamily || 'sans-serif'
-              : 'sans-serif',
+          // The face the labels and ticks were measured and painted in, not whatever the wrapper
+          // happens to inherit.
+          font: uiFontFamily(),
           opacity,
           xLabel: xColumn,
           yLabel: yColumn,
@@ -466,6 +643,7 @@ export function ScatterViewer({
           legend: legendItems,
           ...(ramp ? { ramp } : {}),
           vectorMarks,
+          ...(lastLabels.current ? { labels: lastLabels.current } : {}),
         })
       },
     }),
@@ -480,7 +658,6 @@ export function ScatterViewer({
       yColumn,
       legendItems,
       colors.legend,
-      wrapRef,
       vectorMarks,
     ],
   )
@@ -496,7 +673,9 @@ export function ScatterViewer({
   const usable = marks?.rows.length ?? 0
   const dropped = marks?.skipped ?? 0
   const singleTrend = spec?.trends.length === 1 ? spec.trends[0] : undefined
-  const hoveredRow = hovered && spec ? spec.marks.rows[hovered.index] : undefined
+  // The tooltip is the pointer's, or else the current search hit's, placed over its mark.
+  const tipped = hovered ?? searchTipAt(currentHit)
+  const hoveredRow = tipped && spec ? spec.marks.rows[tipped.index] : undefined
 
   return (
     <div className="viewer" ref={viewerRef}>
@@ -538,34 +717,155 @@ export function ScatterViewer({
             <polygon points={pairs(gesture.points)} />
           </svg>
         )}
-
-        {!compact && (
-          <div className="network-strip nodrag">
-            <button
-              type="button"
-              className="network-strip__btn"
-              title="Frame all the points (or double-click)"
-              aria-label="Fit to view"
-              onClick={fit}
-            >
-              ⤢
-            </button>
-            <button
-              type="button"
-              className="network-strip__btn"
-              title="Clear the selection"
-              aria-label="Clear selection"
-              disabled={stableSelection.length === 0}
-              onClick={() => onSelectionChange?.([])}
-            >
-              ⨯
-            </button>
-          </div>
-        )}
       </div>
 
-      {hovered && hoveredRow !== undefined && (
-        <ChartTooltip at={hovered}>
+      {/* Siblings of the plot rather than children of it: the plot takes pointer capture on every
+          press to start a pan, which would send a button's release — and its click — to the plot. */}
+      {!compact && (
+        <div className="network-strip nodrag">
+          <button
+            type="button"
+            className="network-strip__btn"
+            title="Frame all the points (or double-click)"
+            aria-label="Fit to view"
+            onClick={fit}
+          >
+            ⤢
+          </button>
+          <button
+            type="button"
+            className="network-strip__btn"
+            title="Clear the selection"
+            aria-label="Clear selection"
+            disabled={stableSelection.length === 0}
+            onClick={() => onSelectionChange?.([])}
+          >
+            ⨯
+          </button>
+          <button
+            type="button"
+            className="network-strip__btn"
+            title="Find points by name"
+            aria-label="Search"
+            aria-pressed={searching}
+            onClick={() => setSearch(searching ? null : { term: '', menu: false })}
+          >
+            ⌕
+          </button>
+        </div>
+      )}
+
+      {!compact && search && (
+        <div
+          ref={searchBar}
+          className="network-strip network-strip--below nodrag"
+          role="search"
+        >
+          <input
+            className="network-strip__find"
+            type="search"
+            value={search.term}
+            placeholder="Find…"
+            aria-label="Find points"
+            aria-invalid={searchError !== undefined}
+            // Opened by a press, so typing is what comes next.
+            autoFocus
+            onChange={(event) => setSearch({ ...search, term: event.target.value })}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') stepHit(event.shiftKey ? -1 : 1)
+              if (event.key === 'Escape') setSearch(null)
+            }}
+          />
+          <span
+            className="network-strip__count"
+            {...(searchError ? { title: searchError } : {})}
+          >
+            {hitCount}
+          </span>
+          <button
+            type="button"
+            className="network-strip__btn"
+            title="Previous hit (Shift+Enter)"
+            aria-label="Previous hit"
+            disabled={hits.length === 0}
+            onClick={() => stepHit(-1)}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="network-strip__btn"
+            title="Next hit (Enter)"
+            aria-label="Next hit"
+            disabled={hits.length === 0}
+            onClick={() => stepHit(1)}
+          >
+            ›
+          </button>
+          <button
+            type="button"
+            className="network-strip__btn"
+            title="Select every hit (Shift adds them to the selection)"
+            aria-label="Select hits"
+            disabled={hits.length === 0 || !onSelectionChange}
+            onClick={(event) => selectHits(event.shiftKey)}
+          >
+            ◎
+          </button>
+          <button
+            type="button"
+            className="network-strip__btn"
+            title="Search options"
+            aria-label="Search options"
+            aria-expanded={search.menu}
+            onClick={() => setSearch({ ...search, menu: !search.menu })}
+          >
+            ⋯
+          </button>
+          {search.menu && (
+            <div className="network-strip__menu">
+              <label>
+                Search in{' '}
+                <select
+                  value={prefs.column}
+                  onChange={(event) => setPrefs({ ...prefs, column: event.target.value })}
+                >
+                  <option value="">Label and id</option>
+                  {table.schema.columns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {(
+                [
+                  ['exact', 'Whole value only'],
+                  ['caseSensitive', 'Match case'],
+                  ['regex', 'Regular expression'],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key}>
+                  <input
+                    type="checkbox"
+                    checked={prefs.options[key]}
+                    onChange={(event) =>
+                      setPrefs({
+                        ...prefs,
+                        options: { ...prefs.options, [key]: event.target.checked },
+                      })
+                    }
+                  />{' '}
+                  {label}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tipped && hoveredRow !== undefined && (
+        <ChartTooltip at={tipped}>
           <strong>
             {labelColumn
               ? formatCell(table.data[labelColumn]?.[hoveredRow] ?? null, labelColumn)
@@ -595,6 +895,11 @@ export function ScatterViewer({
               )}
             </TooltipRow>
           )}
+          {extraTipColumns.map((name) => (
+            <TooltipRow key={name}>
+              {name}: {formatCell(table.data[name]?.[hoveredRow] ?? null, name)}
+            </TooltipRow>
+          ))}
         </ChartTooltip>
       )}
 
@@ -639,6 +944,22 @@ export function ScatterViewer({
             title="Pearson correlation, in the space the axes are drawn in."
           >
             r = {singleTrend.r.toFixed(2)}
+          </span>
+        )}
+        {labelling?.withheld && stableLabels && spec && !compact && (
+          <span
+            className="viewer__note"
+            title={`Labels are drawn once at most ${formatNumber(stableLabels.limit)} points are in view (Label up to); there are ${formatNumber(spec.visible.length)}.`}
+          >
+            zoom in for labels
+          </span>
+        )}
+        {labelling?.withheld === false && labelling.omitted > 0 && !compact && (
+          <span
+            className="viewer__note"
+            title="Labels with no free space around their point, left out rather than drawn over each other or over other points. Zoom in, or draw them faintly (Labels that do not fit)."
+          >
+            {plural(labelling.omitted, 'label')} left out
           </span>
         )}
         {!idColumn && stableSelection.length > 0 && !compact && (

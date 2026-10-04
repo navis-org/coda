@@ -133,8 +133,8 @@ rule belongs to one area, its record is in that area's doc.
   itself.** Dropping it, the old behaviour, lost the card and its wires on the next save. It holds
   everything in `params` (the original params as JSON text, its ports read off the file's edges);
   `getNodeDef` answers for it and `allNodeDefs` never lists it; its error comes from *inference*,
-  a `validate` line blocking nothing. **A new writer of graph JSON goes through `serializeGraph` or
-  `fragmentBody`**, which spell it back via `documentNode`. Alongside: a registered definition is
+  a `validate` line blocking nothing. **A new writer of graph JSON goes through `graphText`**
+  (`serializeGraph`, a fragment and a recipe all do), which spells it back via `documentNode`. Alongside: a registered definition is
   **frozen**, and a type id follows `core/nodeType.ts` — `pack:name` for a pack's node.
   See [docs/persistence.md](docs/persistence.md).
 - **A pack switched off hides, never unregisters, and only what reads the offered hooks hides.** A

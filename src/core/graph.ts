@@ -8,6 +8,7 @@
 
 import type { DashboardLayout } from './dashboard'
 import { pruneDashboard, storedDashboard, validDashboard } from './dashboard'
+import { compactParams, expandParams } from './compactIds'
 import { MISSING_TYPE, documentNode, placeholderParams } from './missing'
 import type { ParamValues, ResolvedPort } from './node'
 import { hasPortGroups, allInputPorts, inputPorts, outputPorts } from './ports'
@@ -962,6 +963,34 @@ export function reconnectEdge(
 // ---------------------------------------------------------------------------
 
 /**
+ * A graph — or a fragment of one carrying fields of its own, like a marker — as document text: the
+ * one place graph JSON is written, so every writer spells a node the same way. Each node goes out
+ * as `documentNode` spells it (a placeholder as the node it stands in for) with its long id
+ * lists compacted (`compactIds.ts`). Indented unless `compact`, because a file is read by people.
+ *
+ * `serializeGraph`, a clipboard fragment and a recipe file all end here. `fragmentBody` does not
+ * compact, being also an in-memory form a recipe keeps, where every reader expects a `string[]`.
+ */
+export function graphText<D extends { readonly nodes: readonly GraphNode[] }>(
+  doc: D,
+  compact = false,
+): string {
+  const out = { ...doc, nodes: doc.nodes.map(writtenNode) }
+  return compact ? JSON.stringify(out) : JSON.stringify(out, null, 2)
+}
+
+function writtenNode(node: GraphNode): GraphNode {
+  const written = documentNode(node)
+  // Only params declared as id lists: a list of column names or a rename map somebody typed is
+  // text a person reads in the file, whatever its entries happen to end in. A node this build does
+  // not have declares nothing, and is written as it was read.
+  const ids = getNodeDef(written.type)?.params?.filter((p) => p.kind === 'ids')
+  if (!ids?.length) return written
+  const params = compactParams(written.params, new Set(ids.map((p) => p.id)))
+  return params === written.params ? written : { ...written, params }
+}
+
+/**
  * The document as JSON.
  *
  * Indented by default, because a `.coda.json` is a file people read and diff. `compact` is for
@@ -971,21 +1000,19 @@ export function reconnectEdge(
  *
  * A placeholder for a node this build does not have is written back as **the node it stands
  * in for** (`documentNode`), so a file passing through an older build comes out able to run
- * again in the build that made it. One of two writers that must do so; the clipboard's
- * `fragmentBody` is the other.
+ * again in the build that made it — `graphText`'s, as for every writer of graph JSON.
  */
 export function serializeGraph(graph: CodaGraph, options: { compact?: boolean } = {}): string {
   // The dashboard is written in its stored form, which is not the in-memory one.
   const out: Omit<CodaGraph, 'dashboard'> & { dashboard?: unknown } = {
     ...graph,
-    nodes: graph.nodes.map(documentNode),
     version: GRAPH_FORMAT_VERSION,
     meta: { ...graph.meta, modifiedAt: new Date().toISOString() },
     // Overwritten in place rather than spread after, so the key keeps the position it had —
     // a dashboard that does not use tabs must round trip byte-identically. See `storedDashboard`.
     ...(graph.dashboard ? { dashboard: storedDashboard(graph.dashboard) } : {}),
   }
-  return options.compact ? JSON.stringify(out) : JSON.stringify(out, null, 2)
+  return graphText(out, options.compact)
 }
 
 /**
@@ -1177,7 +1204,7 @@ function droppedHandle(
  * the exception, since a rename moves its value rather than leaving a second copy behind.
  */
 function storedParams(raw: unknown, type: string): ParamValues {
-  const params = { ...((raw && typeof raw === 'object' ? raw : {}) as ParamValues) }
+  const params = expandParams({ ...(raw && typeof raw === 'object' ? raw : {}) })
   for (const param of getNodeDef(type)?.params ?? []) {
     // A value already under the new id wins: this document was written by a build that had it.
     if (param.formerId !== undefined && !(param.id in params) && param.formerId in params) {
@@ -1310,7 +1337,9 @@ export function deserializeGraph(json: string): LoadResult {
     const from = alive.get(e.source)
     const to = alive.get(e.target)
     if (!from || !to) {
-      warnings.push(`Dropped edge ${e.source} → ${e.target} (endpoint missing)`)
+      warnings.push(
+        `Dropped edge ${e.source} → ${e.target} because one of its ends is missing.`,
+      )
       continue
     }
     /*

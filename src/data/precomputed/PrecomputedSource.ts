@@ -52,7 +52,6 @@ import type {
   TableValue,
 } from '../../core/values'
 import { boundsOf, cableLength, emptyTable, makeTable, selectRows } from '../../core/values'
-import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type {
   AdjacencyRequest,
@@ -69,7 +68,7 @@ import type {
   SourceCapabilities,
   SourceSchemas,
 } from '../source'
-import { ROI_MESH_SCHEMA, requireSkeletonRoute } from '../source'
+import { ID_ONLY, ROI_MESH_SCHEMA, requireSkeletonRoute } from '../source'
 import {
   compileLabelMatch,
   matchIndexRows,
@@ -124,7 +123,6 @@ const LEGACY_WARN = 25
  * copied from `CANONICAL_SCHEMAS`, so nothing downstream can advertise a `weight` column that no
  * call here will ever fill.
  */
-const ID_ONLY: TableSchema = tableSchema(column('neuronId', 'str'))
 
 const PRECOMPUTED_SCHEMAS: SourceSchemas = {
   neurons: ID_ONLY,

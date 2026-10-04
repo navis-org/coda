@@ -33,6 +33,7 @@ import { useSyncExternalStore } from 'react'
 
 import { getNodeDef } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
+import type { RememberedState } from '../../data/files/remembered'
 import { ParamField } from '../params/ParamField'
 import { cardParams } from '../params/paramGroups'
 import type { NodeBodyProps } from './nodeBodies'
@@ -196,4 +197,35 @@ export function SchemaListing({ schema }: { schema: TableSchema }) {
       </tbody>
     </table>
   )
+}
+
+/**
+ * A local file's or folder's card line where it is not in hand: still being looked for, waiting
+ * for the click only a user gesture may give, or not in this browser — the states
+ * `data/files/remembered.ts` keeps, drawn once for Link Table's card and BigClust's. Undefined
+ * while it is held, when the card says what is in it instead. An absent one shows its name alone:
+ * the card's warning line says what happened and what to do, once.
+ */
+export function localSourceLine(
+  state: RememberedState,
+  name: string,
+  allow: () => void,
+): { state: string; line: React.ReactNode } | undefined {
+  switch (state) {
+    case 'restoring':
+      return { state: 'reading', line: `Looking for ${name}…` }
+    case 'permission':
+      return {
+        state: 'missing',
+        line: (
+          <button type="button" onClick={allow}>
+            Allow access to {name}
+          </button>
+        ),
+      }
+    case 'absent':
+      return { state: 'missing', line: <span className="upload-body__absent">{name}</span> }
+    default:
+      return undefined
+  }
 }

@@ -26,6 +26,7 @@ const {
   holdLocalFile,
   localFileState,
   peekTableFile,
+  fileSpec,
   readTableFileSummary,
   resetTableFiles,
   restoreLocalFile,
@@ -144,5 +145,47 @@ describe('a footer read', () => {
       }) as unknown as Blob
     await expect(readTableFileSummary(ref, { refresh: 1 })).rejects.toThrow()
     expect(localFileState(id)).toBe('absent')
+  })
+})
+
+describe('asking a URL its size', () => {
+  it('never takes the answer from the browser’s cache, as no range read does', async () => {
+    // A server's old reply, cached heuristically for hours, kept saying "no size" after the server
+    // was fixed — while the range reads, already `no-store`, reached the fixed one.
+    const asked: RequestInit[] = []
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      asked.push(init)
+      return new Response(null, { status: 200, headers: { 'content-length': '10' } })
+    })
+    const { urlHead } = await import('./bytes')
+    expect((await urlHead('https://example.org/meta.parquet')).size).toBe(10)
+    expect(asked[0]).toMatchObject({ method: 'HEAD', cache: 'no-store' })
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('a file a reader reads whole', () => {
+  it('is downloaded once even where its footer was already read by range', async () => {
+    // A Link Table on the same URL read the footer first; a reader then asking for the file whole
+    // must still get the download, or its column reads go back to a range per chunk.
+    const bytes = readFileSync('src/data/files/__fixtures__/synapses.parquet')
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit = {}) => {
+      const range = new Headers(init.headers).get('Range')
+      asked.push(init.method === 'HEAD' ? 'HEAD' : range ? 'range' : 'whole')
+      if (init.method === 'HEAD') {
+        return new Response(null, { headers: { 'content-length': String(bytes.length) } })
+      }
+      const [, from, to] = /bytes=(\d+)-(\d+)/.exec(range ?? '') ?? []
+      const body = range ? bytes.subarray(Number(from), Number(to) + 1) : bytes
+      return new Response(new Uint8Array(body), { status: range ? 206 : 200 })
+    })
+    const ref = { kind: 'url' as const, url: 'https://example.org/synapses.parquet' }
+    await readTableFileSummary(ref)
+    expect(asked).not.toContain('whole')
+    await readTableFileSummary(ref, { whole: true })
+    expect((await fileSpec(ref)).kind).toBe('blob')
+    expect(asked.filter((a) => a === 'whole')).toHaveLength(1)
+    vi.unstubAllGlobals()
   })
 })

@@ -479,6 +479,11 @@ export interface TextFieldProps {
   list?: string
   /** Drawn but not editable: a value somebody else supplies, such as a wire. */
   disabled?: boolean
+  /**
+   * Commit while typing, after a pause. Off for a value that is only worth having whole — a query,
+   * or a table name a half-typed prefix of which would be looked up. Defaults to `!multiline`.
+   */
+  debounce?: boolean
   onChange: (value: string) => void
 }
 
@@ -495,11 +500,12 @@ export function TextField({
   title,
   list,
   disabled,
-  onChange,
-}: TextFieldProps) {
   // Multiline fields hold queries, which are expensive to run and half-written most of the time.
   // Those commit on blur only; a debounce would fire a query mid-sentence.
-  const draft = useDraftText(value, onChange, { debounce: !multiline })
+  debounce = !multiline,
+  onChange,
+}: TextFieldProps) {
+  const draft = useDraftText(value, onChange, { debounce })
 
   const shared = {
     'aria-label': label,

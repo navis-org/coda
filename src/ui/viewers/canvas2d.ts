@@ -71,3 +71,32 @@ export function uiFontFamily(): string {
 }
 
 let uiFamily: string | undefined
+
+/**
+ * Text measured in the app's UI face at `px`, on one shared canvas per size — lifted from the flow
+ * chart when the scatter's point labels needed the same thing.
+ *
+ * **The font is read off `--font-ui` (`canvasFont`) rather than written out**, because a box sized
+ * by this measurement is drawn by a canvas or an SVG `text` that takes that variable — and two
+ * spellings of one font is a box that fits its label on the author's machine and clips it
+ * elsewhere. They agree wherever `system-ui` resolves, which is why a literal survives every check
+ * anybody would think to run; they part company exactly where `-apple-system` or `Segoe UI` answers
+ * instead. Module-level, a `<canvas>` per measuring pass being a backing store allocated to answer
+ * a question about a string; `estimate` answers where there is no canvas at all.
+ */
+export function textMeasurer(
+  px: number,
+  estimate: (text: string) => number,
+): (text: string) => number {
+  let context = measurers.get(px)
+  if (context === undefined) {
+    context =
+      typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d')
+    if (context) context.font = canvasFont(px)
+    measurers.set(px, context)
+  }
+  const measuring = context
+  return measuring ? (text) => measuring.measureText(text).width : estimate
+}
+
+const measurers = new Map<number, CanvasRenderingContext2D | null>()

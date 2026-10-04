@@ -1,6 +1,6 @@
 /**
- * What this browser keeps about table files between sessions: the handle a local file was chosen
- * through, and the block index a lookup built.
+ * What this browser keeps about table files between sessions: the handle a local file (or a folder
+ * of them) was chosen through, and the block index a lookup built.
  *
  * Neither is the file. A **handle** is Chromium's reference to a file on disk — structured-
  * cloneable, so it goes into IndexedDB as it is, and a reload can ask for the file again with one
@@ -31,12 +31,15 @@ function put(store: string, key: string, value: unknown): Promise<void> {
   )
 }
 
-export function saveHandle(id: string, handle: FileSystemFileHandle): Promise<void> {
+/** A file's or a folder's handle — ids never collide, a folder's starting `folder-`. */
+export function saveHandle(id: string, handle: FileSystemHandle): Promise<void> {
   return put(HANDLES, id, handle)
 }
 
-export function loadHandle(id: string): Promise<FileSystemFileHandle | undefined> {
-  return readKey<FileSystemFileHandle, undefined>(db, HANDLES, id, undefined)
+export function loadHandle<H extends FileSystemHandle = FileSystemFileHandle>(
+  id: string,
+): Promise<H | undefined> {
+  return readKey<H, undefined>(db, HANDLES, id, undefined)
 }
 
 const indexKey = (fingerprint: string, column: string) => `${fingerprint}\u0000${column}`

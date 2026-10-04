@@ -22,6 +22,7 @@ import type { MarkerShape } from '../encoding'
 import { markVertices } from './markGeometry'
 import { SVG_NS, XLINK_NS, element, round, svgRoot, textNode } from './svgElement'
 import type { ScatterSpec } from './scatterPlot'
+import type { PlacedLabel } from './scatterLabels'
 import {
   drawsPixels,
   inverse,
@@ -34,12 +35,76 @@ import {
 import { RING_GAP, RING_WIDTH, rasterBox, rasterizeMarks } from './scatterRaster'
 import { drawMarksGl } from './scatterGl'
 import { formatCompact } from '../format'
+import { LruMap } from '../../core/lruMap'
+import { canvasFont, textMeasurer } from './canvas2d'
+import { LABEL_HALO_WIDTH } from './networkStyle'
 
 /** Height of the legend strip appended below an exported plot. */
 const LEGEND_HEIGHT = 26
 
 /** Gap between a hovered mark and its ring, wider than the selection's so both can show. */
 const HOVER_GAP = 3.5
+
+/** The point labels' size, a size up from the ticks; the face is `canvasFont`'s (see `textMeasurer`). */
+export const LABEL_FONT_PX = 10.5
+/** Past this many search hits their rings are drawn plain rather than dashed. */
+const DASHED_HITS_MAX = 2_000
+/** What a dimmed label — one that fit nowhere — is drawn at. */
+const DIM_ALPHA = 0.3
+const LABEL_HEIGHT = Math.ceil(LABEL_FONT_PX * 1.25)
+
+const measured = new LruMap<string, number>(20_000)
+let measureText: ((text: string) => number) | undefined
+
+/** A label's box, measured once per text in the label font. */
+export function measureLabel(text: string): { width: number; height: number } {
+  let width = measured.get(text)
+  if (width === undefined) {
+    // Made on first use: there is no document to measure with when this module is imported.
+    measureText ??= textMeasurer(LABEL_FONT_PX, (t) => t.length * LABEL_FONT_PX * 0.6)
+    width = measureText(text)
+    measured.set(text, width)
+  }
+  return { width: Math.ceil(width), height: LABEL_HEIGHT }
+}
+
+/**
+ * Labels with a halo of the background behind each glyph, so a name over a grid line or a stray
+ * mark still reads; leader lines first, under every label.
+ */
+function paintLabels(
+  context: CanvasRenderingContext2D,
+  labels: readonly PlacedLabel[],
+  ink: PlotInk,
+  background: string,
+): void {
+  context.save()
+  context.lineWidth = 1
+  context.strokeStyle = ink.muted
+  context.globalAlpha = 0.7
+  context.beginPath()
+  for (const label of labels) {
+    if (!label.line) continue
+    const [x0, y0, x1, y1] = label.line
+    context.moveTo(x0, y0)
+    context.lineTo(x1, y1)
+  }
+  context.stroke()
+  context.font = canvasFont(LABEL_FONT_PX)
+  context.textAlign = 'left'
+  context.textBaseline = 'middle'
+  context.lineJoin = 'round'
+  context.lineWidth = LABEL_HALO_WIDTH
+  context.strokeStyle = background
+  context.fillStyle = ink.primary
+  for (const label of labels) {
+    context.globalAlpha = label.dim ? DIM_ALPHA : 1
+    const y = label.y + label.height / 2
+    context.strokeText(label.text, label.x, y)
+    context.fillText(label.text, label.x, y)
+  }
+  context.restore()
+}
 
 /** SVG path data for one mark. */
 export function markPath(shape: MarkerShape, x: number, y: number, r: number): string {
@@ -105,6 +170,12 @@ export interface CanvasDrawOptions {
   selected?: Set<number>
   /** Index of the hovered mark, drawn on top with a ring. */
   hovered?: number
+  /** Positions in `spec.marks` a search found, each outlined with a dashed ring. */
+  hits?: readonly number[]
+  /** The hit the search is on, ringed as a hovered mark is. */
+  current?: number
+  /** Labels beside the points, already placed (`scatterLabels.ts`). */
+  labels?: readonly PlacedLabel[]
   compact?: boolean
   showAxisTitles?: boolean
 }
@@ -194,18 +265,32 @@ export function drawScatter(
     }
     context.stroke()
   }
-  if (
-    options.hovered !== undefined &&
-    options.hovered >= 0 &&
-    options.hovered < spec.marks.rows.length
-  ) {
-    const i = options.hovered
+  // Search hits: dashed, so they read apart from a selection's solid rings, and drawn over the
+  // pixel pass too — a search on a zoomed-out embedding is where finding a point is hardest.
+  if (options.hits?.length) {
+    context.save()
+    // Dashed while there are few enough to read one at a time; past that, plain — dashing tens of
+    // thousands of arcs every frame buys a pattern nobody can see at that density.
+    if (options.hits.length <= DASHED_HITS_MAX) context.setLineDash([2, 2])
+    context.beginPath()
+    for (const i of options.hits) {
+      const r = spec.marks.radius[i]! + RING_GAP
+      if (!reachesPlot(plot, spec.px[i]!, spec.py[i]!, r)) continue
+      context.moveTo(spec.px[i]! + r, spec.py[i]!)
+      context.arc(spec.px[i]!, spec.py[i]!, r, 0, Math.PI * 2)
+    }
+    context.stroke()
+    context.restore()
+  }
+  for (const i of [options.hovered, options.current]) {
+    if (i === undefined || i < 0 || i >= spec.marks.rows.length) continue
     const r = spec.marks.radius[i]! + HOVER_GAP
     context.beginPath()
     context.moveTo(spec.px[i]! + r, spec.py[i]!)
     context.arc(spec.px[i]!, spec.py[i]!, r, 0, Math.PI * 2)
     context.stroke()
   }
+  if (options.labels?.length) paintLabels(context, options.labels, ink, background)
   context.restore()
 
   // Over the marks, so a pass that replaces the plot's pixels cannot cover the axis line.
@@ -215,7 +300,7 @@ export function drawScatter(
   // Drawn in `compact` too — see `MARGIN_COMPACT`. An axis line with no numbers against it is
   // decoration, and the card is where the scale is least obvious.
   context.fillStyle = ink.muted
-  context.font = `${options.compact ? 9 : 9.5}px system-ui, sans-serif`
+  context.font = canvasFont(options.compact ? 9 : 9.5)
   context.textAlign = 'center'
   context.textBaseline = 'top'
   for (const tick of spec.xTicks) {
@@ -243,7 +328,7 @@ export function drawScatter(
   // columns already.
   if (!options.compact && options.showAxisTitles !== false) {
     context.fillStyle = ink.secondary
-    context.font = '10px system-ui, sans-serif'
+    context.font = canvasFont(10)
     context.textAlign = 'center'
     context.textBaseline = 'bottom'
     context.fillText(options.xLabel, plot.x + plot.width / 2, plot.y + plot.height + 32)
@@ -436,6 +521,8 @@ export interface ScatterSvgSpec {
   ramp?: { label: string; stops: string[]; low: string; high: string }
   /** Every mark as a vector shape, even past `CIRCLES_MAX`. */
   vectorMarks?: boolean
+  /** Labels beside the points, as on screen. */
+  labels?: readonly PlacedLabel[]
 }
 
 /**
@@ -532,6 +619,7 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
     )
   }
   svg.append(marks)
+  if (options.labels?.length) svg.append(labelsSvg(options.labels, ink, options.background))
 
   // Over the marks, as on screen, so the image cannot cover the inner half of the axis line.
   svg.append(
@@ -662,4 +750,43 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
   }
 
   return svg
+}
+
+/** The labels as on screen: lines, then text haloed in the background (`textNode`'s outline). */
+function labelsSvg(
+  labels: readonly PlacedLabel[],
+  ink: PlotInk,
+  background: string,
+): SVGGElement {
+  const group = element('g', { 'font-size': LABEL_FONT_PX }) as SVGGElement
+  const lines = labels.flatMap((label) => (label.line ? [label.line] : []))
+  if (lines.length > 0) {
+    group.append(
+      element('path', {
+        d: lines
+          .map(([x0, y0, x1, y1]) => `M${round(x0)},${round(y0)}L${round(x1)},${round(y1)}`)
+          .join(''),
+        fill: 'none',
+        stroke: ink.muted,
+        'stroke-width': 1,
+        'stroke-opacity': 0.7,
+      }),
+    )
+  }
+  for (const label of labels) {
+    group.append(
+      textNode(
+        label.text,
+        {
+          x: label.x,
+          y: label.y + label.height / 2,
+          'dominant-baseline': 'central',
+          fill: ink.primary,
+          ...(label.dim ? { opacity: DIM_ALPHA } : {}),
+        },
+        background,
+      ),
+    )
+  }
+  return group
 }

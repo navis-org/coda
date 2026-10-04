@@ -25,3 +25,16 @@ export function cloud(count: number, spread = 10_000, seed = 1): Float32Array {
   for (let i = 0; i < count * 3; i++) positions[i] = (next() - 0.5) * spread
   return positions
 }
+
+/**
+ * `count` CAVE-shaped root ids: 18 digits spread over a span of 10^10, in no order. Neither
+ * consecutive nor evenly spaced — both are the best case of anything that stores an id as its
+ * difference from the one before (`core/compactIds.ts`), and a probe measuring that has to see the
+ * honest case. Shared by `probe-selection-scale` and `probe-autosave-budget`.
+ */
+export function caveRootIds(count: number, seed = 1): string[] {
+  const next = rng(seed)
+  return Array.from({ length: count }, () =>
+    String(864691128000000000n + BigInt(Math.floor(next() * 1e10))),
+  )
+}

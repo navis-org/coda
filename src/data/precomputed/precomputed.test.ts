@@ -668,6 +668,63 @@ describe('transport', () => {
     expect(seen).toHaveLength(1)
   })
 
+  describe('a dropped connection on a host that has answered', () => {
+    /** `fetch` answering from a script: a failure is a dropped connection, anything else bytes. */
+    function scripted(outcomes: Array<'ok' | 'drop'>): string[] {
+      const seen: string[] = []
+      globalThis.fetch = ((url: string) => {
+        seen.push(url)
+        return outcomes.shift() === 'drop'
+          ? Promise.reject(new TypeError('Failed to fetch'))
+          : Promise.resolve(ok(4))
+      }) as typeof fetch
+      return seen
+    }
+
+    it('is asked again rather than reported as a refusal', async () => {
+      vi.useFakeTimers()
+      try {
+        // One answer makes the host known to work directly; the next read drops once.
+        const seen = scripted(['ok', 'drop', 'ok'])
+        await fetchBytes('https://h.example/a')
+        const read = fetchBytes('https://h.example/b')
+        await vi.advanceTimersByTimeAsync(300)
+        expect((await read).byteLength).toBe(4)
+        expect(seen).toEqual([
+          'https://h.example/a',
+          'https://h.example/b',
+          'https://h.example/b',
+        ])
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('says the connection dropped, not that cross-origin reads are refused, when it keeps dropping', async () => {
+      vi.useFakeTimers()
+      try {
+        scripted(['ok', 'drop', 'drop', 'drop'])
+        await fetchBytes('https://h.example/a')
+        const read = fetchBytes('https://h.example/b').catch((e: Error) => e)
+        await vi.advanceTimersByTimeAsync(2_000)
+        const error = await read
+        expect((error as Error).message).toMatch(/connection to h\.example dropped/)
+        expect((error as Error).message).not.toMatch(/cross-origin/)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('stops waiting to retry when the read is cancelled', async () => {
+      scripted(['ok', 'drop', 'ok'])
+      await fetchBytes('https://h.example/a')
+      const controller = new AbortController()
+      const read = fetchBytes('https://h.example/b', { signal: controller.signal })
+      controller.abort()
+      await expect(read).rejects.toBeDefined()
+    })
+  })
+
   it('sends a byte range when asked for one', async () => {
     let headers: HeadersInit | undefined
     globalThis.fetch = ((_url: string, init: RequestInit) => {

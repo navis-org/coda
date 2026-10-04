@@ -88,12 +88,12 @@ const NEUPRINT_PROXY = {
  *
  *  - `/np/` — neuPrint deployments other than the default, so the Custom neuPrint node's Server
  *    field does something in development. `src/data/neuprint/servers.ts` builds the URLs.
- *  - `/st/` — SeaTable deployments. `cloud.seatable.io` answers a preflight 204 with
- *    `Access-Control-Allow-Origin: *` and needs none of this; **FlyTable sends no
- *    `Access-Control-*` header at all**, for any origin, so a browser blocks the request before
- *    it is sent and reports the opaque `TypeError` that means both "no CORS" and "host is down".
- *    Verified against the live deployment; the same API answers a non-browser client perfectly
- *    with the same token, which is what makes it a browser problem rather than a credential one.
+ *  - `/st/` — SeaTable deployments that send no CORS headers. `cloud.seatable.io` never needed
+ *    it, and FlyTable has not since its host proxy opened the paths Coda calls
+ *    (`docs/flytable-cors.md`, 2026-10-03) — so this is the fallback for a deployment that has
+ *    not, where a browser blocks the request before it is sent and reports the opaque `TypeError`
+ *    that means both "no CORS" and "host is down". It forwards the method and the body, so the
+ *    annotation editor's SQL reads and row updates come through as sent.
  *    `src/data/annotations/seaTable.ts` builds the URLs.
  *
  * One handler rather than two, because the SSRF guard below is the part that must not be

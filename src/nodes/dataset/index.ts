@@ -15,6 +15,7 @@
  * datastack plus which of its tables mean neurons, because nothing in a datastack says.
  */
 
+import { keptChoice } from '../lib/keptChoice'
 import type { CompanionSpec } from '../../core/companion'
 import { packNode, registerNode } from '../../core/registry'
 import type { InferContext, NodeDefinition } from '../../core/node'
@@ -661,16 +662,6 @@ function customCaveTarget(params: Record<string, unknown>): CaveTarget | undefin
     : undefined
 }
 
-/**
- * A stored choice the options do not list, kept as an option of its own so the select still
- * shows what the graph says — marked once the list is known, plain while it is not.
- */
-function keptChoice(chosen: string, listed: readonly string[] | undefined) {
-  return chosen && !listed?.includes(chosen)
-    ? [{ value: chosen, label: listed ? `${chosen} (not listed)` : chosen }]
-    : []
-}
-
 function registerCustomCaveSpec(params: Record<string, unknown>): void {
   const datastack = String(params.datastack).trim()
   if (!datastack) return
@@ -1009,7 +1000,7 @@ const customCatmaidNode = packNode({
     if (projects && !projects.some((entry) => entry.id === project)) {
       return [
         projects.length
-          ? `No project "${project}" on ${catmaidServerLabel(String(ctx.params.server ?? ''))} — it offers ${projects
+          ? `No project "${project}" on ${catmaidServerLabel(String(ctx.params.server ?? ''))}. Available: ${projects
               .map((entry) => `${entry.id} (${entry.label})`)
               .join(', ')}`
           : `${catmaidServerLabel(String(ctx.params.server ?? ''))} lists no projects`,

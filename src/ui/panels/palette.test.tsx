@@ -357,11 +357,13 @@ describe('buildNodeItems', () => {
   it('filters to nodes that can feed a dragged input type', () => {
     const items = nodeItems({ type: T.dataset(), from: 'target' })
     const types = items.map((i) => i.nodeType)
-    // Every dataset node outputs a Dataset, and nothing else does. Asked of the category rather
-    // than the id: a pack's dataset node is `pack:name` (`connectome:customDataset`).
+    // Every dataset node outputs a Dataset, and nothing else does but BigClust Project, whose
+    // Scene is a datasource for the Neuroglancer node. Asked of the category rather than the id:
+    // a pack's dataset node is `pack:name` (`connectome:customDataset`).
     expect(types).toContain('dataset.malecns')
     expect(types).toContain('dataset.neuprint')
-    expect(types.every((t) => t && getNodeDef(t)?.category === 'dataset')).toBe(true)
+    const others = types.filter((t) => getNodeDef(t ?? '')?.category !== 'dataset')
+    expect(others).toEqual(['annotation:bigclust'])
     expect(byId(items, 'node:dataset.malecns').portId).toBe('dataset')
   })
 

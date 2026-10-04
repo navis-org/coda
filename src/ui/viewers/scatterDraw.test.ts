@@ -220,3 +220,39 @@ describe('the SVG export past CIRCLES_MAX', () => {
     expect(marks.querySelectorAll('path').length).toBeGreaterThan(0)
   })
 })
+
+describe('point labels in the export', () => {
+  it('writes each label as haloed text, with its leader line under them, as on screen', () => {
+    const labels = [
+      {
+        index: 0,
+        text: 'LC4',
+        x: 60,
+        y: 40,
+        width: 20,
+        height: 13,
+        line: [50, 46, 60, 46] as const,
+      },
+      { index: 1, text: 'LC6', x: 90, y: 40, width: 20, height: 13, dim: true },
+    ]
+    const root = svg({ labels })
+    const texts = [...root.querySelectorAll('text')].filter((t) =>
+      /^LC/.test(t.textContent ?? ''),
+    )
+    expect(texts.map((t) => t.textContent)).toEqual(['LC4', 'LC6'])
+    // The halo is the background, so a label over a grid line or a mark still reads.
+    expect(texts[0]!.getAttribute('stroke')).toBe('#1a1a19')
+    expect(texts[1]!.getAttribute('opacity')).toBe('0.3')
+    const lines = [...root.querySelectorAll('path')].filter(
+      (p) => p.getAttribute('d') === 'M50,46L60,46',
+    )
+    expect(lines).toHaveLength(1)
+  })
+
+  it('writes none when the frame placed none', () => {
+    const root = svg()
+    expect(
+      [...root.querySelectorAll('text')].some((t) => /^LC/.test(t.textContent ?? '')),
+    ).toBe(false)
+  })
+})

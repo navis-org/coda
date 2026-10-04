@@ -2376,6 +2376,62 @@ state distinguishes _not known yet_ from _nothing to pick_. See invariant 5's co
 the marks have not been looked at by anyone; what is checked is the geometry, the exported SVG
 and the caption. Same standing as the WebGL viewers.
 
+### Labels beside the points, and the tooltip's extra columns
+
+From BigClust: once at most `Label up to` (400) points are in view, each is named beside its dot
+by the `Label` column. `scatterLabels.ts`' `placePointLabels` is BigClust's placement (`label_placement.py`) and its
+choices, measured against the source rather than recalled: **greedy in priority order, first
+free slot wins** — eight boxes per point, right first, then the diagonals, left, above, below;
+every mark in view an obstacle whether labelled or not, so a name never covers a neighbour's dot;
+a uniform grid for the collision test; **the previous slot tried first**, so a pan does not flip
+a label to the other side of its point; **selected marks' labels placed first**. Unplaced labels
+are left out or drawn faintly, under the rest, and the caption counts what was left out or says to
+zoom in while more than the cap are in view. Pure over positions and measured text, so jsdom
+tests it.
+
+One departure, chosen: **screen-pixel text** (`LABEL_FONT_PX`, in `canvasFont`'s `--font-ui` face
+and measured by the shared `textMeasurer`, so the SVG's `text` is the face the box was sized in), where BigClust sizes in data units
+so its labels grow with the zoom. Coda's charts keep text one readable size, so a zoom re-solves
+— `pnpm probe:scatter-labels` measured 0.4–0.9 ms for 265–664 points in view on fish2, and the
+measured box (`measureLabel`, in the painter's own font) never short of the drawn text. A label
+is haloed in the background (`textNode`'s outline in the export), and the SVG carries labels and
+leader lines as on screen. **Group labels** — one per value at each spatial cluster's centre —
+are deferred; BigClust's island split is quadratic and only safe under its cap.
+
+`Hover shows` lists columns **after** the tooltip's own rows (label, x, y, the colour and shape
+columns), leaving out any already shown: adding to the defaults rather than replacing them, so
+picking one extra column cannot make the tooltip stop naming what the colours mean. All five
+controls are presentational — none changes `Selected`.
+
+### Search, in the strip
+
+BigClust's search, on the expanded card: `⌕` opens a second bar under the strip — a box, a count,
+`‹ ›`, `◎` to select every hit (Shift adds, the lasso's own modifier rule), and `⋯` for the column
+searched (label and id by default, as the Network Viewer's Find), whole value, case and regex.
+`pointSearch.ts` is the matching and reuses Coda's grammar rather than adding a third: a leading
+`/` is a pattern (`bareRegex`), an uncompilable one is said (`regexError`), and Exact anchors as
+`anchoredPattern` does. **Stepping pans and never zooms** — finding a point is not a reason to
+change a scale somebody chose — and rings the hit with the hover ring while its tooltip opens at
+the mark; every hit is a **dashed** ring, so a search reads apart from a selection's solid ones, and
+it is drawn over the pixel pass too, a zoomed-out embedding being where finding a point is hardest.
+The search is view state: nothing reaches the document until `◎` writes a selection.
+
+**The strips are siblings of the plot box, not children of it**, as the Network Viewer's and the
+Heatmap's already were. Shipped inside it, the ⌕ did nothing to a mouse: the press bubbled to the
+plot, which starts a pan by taking pointer capture, and the browser then delivers the release — and
+so the click — to the capturing plot rather than the button. A scripted `.click()` and jsdom's
+`fireEvent` both skip that path, so the first build passed every test and opened in a probe that
+clicked from script; only `Input.dispatchMouseEvent` (a real press) reproduces it, and the fix was
+checked that way in both directions. The test pins the cause — no capture taken for a press on the
+strip — rather than the click. (The first fix stopped the events on the strip instead; moving it
+out removes the thing to stop.) The viewers built on `usePanGesture` keep their strips inside but
+capture only past the drag slop, so a click still lands. Also from that pass: the label texts are
+built once per search rather than per keystroke (formatting a numeric column of 129,325 rows was
+1.5 s a keystroke), the hit cursor is kept *with the list it indexes* so opening the menu does not
+start it over, hit rings go plain past 2,000, the menu closes on an outside press or Escape, and the
+Network Viewer's Find matches through the same `pointSearch.ts`, so `/pattern` means one thing in
+both boxes.
+
 ## Histogram, pie and box plot
 
 Three nodes — `out.histogram`, `out.pie`, `out.distribution` — added together because they make
@@ -4254,6 +4310,26 @@ Same-origin only, since it reuses the same read `spliceSegments` needs, and it d
 way: no proxy, no memory, and the embed behaves as it did. The frame in `Neuron Profile` passes no
 `viewerId` and so remembers nothing — it is a tile showing one neuron at the published framing,
 with no identity of its own to hand anything to.
+
+### No bounding boxes, written as `bounds: false` on every volume source
+
+Asked for: no scene Coda shows draws the volume's bounding box, a wireframe round the whole
+dataset that on a card is mostly box. Removing `"bounds": true` where a state said it was not
+enough, and the reason is measured: a **bare URL source gets neuroglancer's default subsources, and
+`bounds` is one** — hemibrain's segmentation as a bare URL draws the box, and as
+`{ url, subsources: { bounds: false } }` it does not while its meshes still load (screenshotted
+through the dev server's `/ng` proxy). The published neuPrint states list their subsources without
+`bounds`; the scenes Coda builds itself (a BigClust Scene, a Neuroglancer Source's layers) are bare
+URLs, which is where the box came from.
+
+So `sceneForViewer` writes `bounds: false` on every source of an **image or segmentation** layer
+(annotation layers have no such subsource), turning a bare URL into `{ url, subsources }` and
+keeping every other key. Two orderings matter. It runs **after** the graphene rewrite — and that
+rewrite now reads a source through `sourceUrl`, whichever spelling it is in, because a scene re-sent
+from a link already carries the object form; reading only strings, a FlyWire scene re-targeted to
+the Seung-lab fork kept a `middleauth+` that fork refuses (the viewer suite caught it). And **not
+for the Seung-lab fork**, whose older format is not known to take the object spelling — it gets the
+bare URL back.
 
 ### The Neuroglancer frame is handed between surfaces, not reloaded
 

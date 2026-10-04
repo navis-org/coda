@@ -140,6 +140,35 @@ export function isTypedId(value: string): value is NeuronId {
 }
 
 /**
+ * Whether a string is a segment id **neuroglancer** will take.
+ *
+ * Its own grammar rather than the transport grammar above, and narrower: `parseUint64` matches
+ * `^(?:0|[1-9][0-9]*)$`, so no sign and no leading zeros, where the transport grammar allows
+ * both because a source may legitimately hand one back. It lived beside the scene builders, as a
+ * fact about the scene format, and is here with the other id grammars, a second spelling of one
+ * being what this module exists to prevent.
+ *
+ * It is worth a check rather than a hope because of what the failure costs. A segment id the
+ * viewer cannot parse is not a dropped id: it is an exception out of
+ * `SegmentationUserLayer.restoreState`, which deletes the layer *before* it was initialised —
+ * and neuroglancer never disposes the hover subscription that layer registered while it was
+ * being constructed. So one unparseable id leaves a listener that throws
+ * `can't access property "generation" of undefined` on every mouse movement for the life of
+ * the document, long after the scene that caused it is gone. `segmentColors` on a layer is
+ * parsed by the same function, so its keys are the same rule.
+ * See [docs/viewers.md](../../docs/viewers.md).
+ *
+ * `out.neuroglancer` applies it a second time, before `buildScene` does, for the one thing that
+ * layer cannot do: **count** what it drops and say so. That is the division —
+ * `buildScene` guarantees the property, the node explains it.
+ */
+const SEGMENT_ID_GRAMMAR = /^(?:0|[1-9][0-9]*)$/
+
+export function isSegmentId(text: string): boolean {
+  return SEGMENT_ID_GRAMMAR.test(text)
+}
+
+/**
  * One table cell as an exact id, or null where it is not one.
  *
  * The single rule for turning a cell into an id, shared by the column reader, the connectivity

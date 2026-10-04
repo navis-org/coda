@@ -5784,6 +5784,33 @@ a.viewer-actions__btn {
   padding-right: 2px;
 }
 
+/* A second bar under the first: the scatter's search, opened by its ⌕. */
+.network-strip--below {
+  top: 38px;
+}
+.network-strip__find[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.network-strip__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.network-strip__menu select {
+  font-size: 11px;
+  max-width: 160px;
+}
+
 .viewer__overlay-note {
   position: absolute;
   top: 6px;
@@ -10458,6 +10485,211 @@ details[open] > summary.tile__label {
 }
 
 /* ---------------------------------------------------------------------------
+ * Annotate card
+ *
+ * `.list-body` for the settings and the foot, with a table between them. The table scrolls inside
+ * the card rather than growing it: a selection can be thousands of rows, and a card taller than
+ * the window is one nobody can reach the foot of.
+ * ------------------------------------------------------------------------- */
+
+/* A tab per target, in a row that wraps rather than widening the card. */
+/* The card's own tab strip (`coda-node__tab`), with room for the not-set-up dot. */
+.annotate__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* A tab not set up yet: a dot as well as the title, colour not being the only channel. */
+.annotate__tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-stale);
+}
+.annotate__remove {
+  justify-self: start;
+  font-size: 10px;
+}
+/* The tick column: narrow, and not part of the id's sticky header. */
+.annotate__pick {
+  width: 18px;
+  padding: 0 2px;
+}
+.annotate__row--picked {
+  background: var(--accent-soft);
+}
+.annotate__fill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+.annotate__fill .annotate__input {
+  width: auto;
+  min-width: 8em;
+  border-color: var(--border);
+}
+
+.annotate__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+}
+.annotate__target {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  /* A disclosure, not a button to press: it reads as the target's name with a caret. */
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.annotate__target:hover {
+  color: var(--text-primary);
+}
+.annotate__note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.annotate__note--error {
+  color: var(--status-error);
+}
+/*
+ * Neurons the selection holds and the tab will not show. Bold and in the refusal red — the text red,
+ * `--status-error` being under the 4.5:1 floor for small text on the dark panel.
+ */
+.annotate__file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.annotate__loss {
+  color: var(--status-refused);
+  font-weight: 600;
+}
+.annotate__chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+.annotate__chooser ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  font-size: 11px;
+}
+.annotate__chooser label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.annotate__readonly {
+  color: var(--text-muted);
+}
+.annotate__scroll {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+/* The overlay has the room the card does not. */
+.annotate--full .annotate__scroll {
+  max-height: none;
+}
+.annotate__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.annotate__table th,
+.annotate__table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.annotate__table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--canvas);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.annotate__table tbody th {
+  font-family: var(--font-mono);
+  font-weight: normal;
+  color: var(--text-secondary);
+}
+.annotate__input {
+  width: 100%;
+  min-width: 6em;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 1px 3px;
+}
+select.annotate__input {
+  min-width: 5em;
+}
+.annotate__input option {
+  background: var(--canvas);
+  color: var(--text-primary);
+}
+.annotate__input:hover,
+.annotate__input:focus {
+  border-color: var(--border-strong);
+}
+/* Marked by outline and colour together — colour alone would say nothing to a reader without it. */
+.annotate__cell--saving {
+  opacity: 0.6;
+}
+.annotate__cell--held {
+  outline: 1px dashed var(--status-stale);
+  outline-offset: -1px;
+}
+.annotate__cell--failed {
+  outline: 1px solid var(--status-error);
+  outline-offset: -1px;
+}
+/*
+ * Changed in this session: a bar and a slant, not a colour alone — and not an outline, which is
+ * how a held or failed write is drawn, so the two can show on one cell at once.
+ */
+.annotate__cell--edited {
+  box-shadow: inset 2px 0 0 var(--accent);
+  font-style: italic;
+}
+.annotate__foot {
+  align-items: center;
+}
+/* Undo with nothing to undo, a log with nothing in it: visibly off, not merely unresponsive. */
+.annotate__foot button:disabled {
+  opacity: 0.45;
+}
+.annotate__spacer {
+  flex: 1;
+}
+
+/* ---------------------------------------------------------------------------
  * Select One card
  *
  * Shares `.list-body` with the two paste-target cards — the fields and the foot line are the
@@ -12655,8 +12887,11 @@ details[open] > summary.tile__label {
   grid-template-columns: repeat(var(--dash-cols, 2), minmax(0, 1fr));
   /* The fallback is only ever painted for the frame before the observer fires. */
   grid-auto-rows: var(--dash-row, 120px);
-  gap: 10px;
-  padding: 10px;
+  /* One number for the space between cells, which the drop bar below centres itself in and the
+     row-height measurement reads back (`getComputedStyle(grid).rowGap`). */
+  --dash-gap: 5px;
+  gap: var(--dash-gap);
+  padding: var(--dash-gap);
   align-content: start;
 }
 
@@ -12685,10 +12920,10 @@ details[open] > summary.tile__label {
   pointer-events: none;
 }
 .dash-cell[data-drop='before']::after {
-  left: -6px;
+  left: calc(var(--dash-gap) / -2 - 1.5px);
 }
 .dash-cell[data-drop='after']::after {
-  right: -6px;
+  right: calc(var(--dash-gap) / -2 - 1.5px);
 }
 
 .dash-cell__panel {

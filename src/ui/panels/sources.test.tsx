@@ -52,6 +52,8 @@ import {
   resetCredentials,
 } from '../../data/neuprint/credentials'
 import { registerSource } from '../../data/source'
+import { reportClioAuthFailure } from '../../data/annotations/clioCredentials'
+import { reportAuthFailure as reportSeaTableAuthFailure } from '../../data/annotations/credentials'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 import { useGraphStore } from '../../store/graphStore'
@@ -381,6 +383,40 @@ describe('the sections', () => {
         .getAllByRole('tab')
         .map((el) => el.textContent),
     ).toEqual(['FlyTable', 'SeaTable'])
+  })
+
+  /*
+   * Clio's token is only ever used by the Annotate card, so its tab goes with that pack — and a
+   * Clio failure has to open *it*, through the tab's own channel, rather than whichever
+   * SeaTable tab the section's host-sniffing would have guessed.
+   */
+  // By the host the failure names, not by searching its wording for "seatable.io".
+  it('opens the SeaTable tab for the hosted service and FlyTable for any other host', () => {
+    render(<SourcesPanel />)
+    const tabs = () => within(screen.getByRole('tablist', { name: 'Annotations' }))
+    act(() => reportSeaTableAuthFailure('https://cloud.seatable.io', 'rejected (401)'))
+    expect(tabs().getByRole('tab', { name: 'SeaTable' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    act(() => reportSeaTableAuthFailure('tables.example.org', 'rejected (401)'))
+    expect(tabs().getByRole('tab', { name: 'FlyTable' }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+  })
+
+  it('shows a Clio tab with its pack on, and opens it on a Clio failure', () => {
+    act(() => switchPack('annotation', true))
+    render(<SourcesPanel />)
+    act(() => reportClioAuthFailure('Clio refused the token (401).'))
+    const tabs = within(screen.getByRole('tablist', { name: 'Annotations' }))
+    expect(tabs.getAllByRole('tab').map((el) => el.textContent)).toEqual([
+      'FlyTable',
+      'SeaTable',
+      'Clio',
+    ])
+    expect(tabs.getByRole('tab', { name: 'Clio' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText(/Clio refused the token/)).not.toBeNull()
+    expect(screen.getByText('ClioStore token', { selector: 'span' })).not.toBeNull()
   })
 
   it('keeps the API key out of the source list entirely', () => {

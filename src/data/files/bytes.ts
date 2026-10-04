@@ -81,6 +81,18 @@ export function exactBuffer(view: Uint8Array): ArrayBuffer {
 }
 
 /**
+ * The usual cause, said once for both refusals: a server compressing the file as it sends it.
+ * nginx's `gzip` does that for any type in `gzip_types`, and a compressed response has no
+ * `Content-Length` and ignores `Range` — while a browser always offers gzip, which a page cannot
+ * turn off. A `curl` without `Accept-Encoding` gets the size and the ranges, which is what makes it
+ * look like a Coda problem. Parquet is compressed already, so the server gains almost nothing.
+ */
+const ON_THE_FLY =
+  'This is most often the server compressing the file as it sends it (nginx: gzip with ' +
+  'application/octet-stream in gzip_types). Turn that off for these files; Parquet is ' +
+  'compressed already. Otherwise, download the file and open it locally.'
+
+/**
  * The URL a browser actually fetches: `gs://` and `s3://` mapped to their HTTP hosts, anything
  * else as written. One place, so the size probe and every range read agree.
  */
@@ -97,9 +109,13 @@ export function httpUrl(url: string): string {
  */
 export async function urlHead(url: string): Promise<{ size: number; modified?: string }> {
   // Unsignalled: the HEAD is shared (`fileSpec`), and each reader stops waiting on its own Cancel.
+  // Never from the browser's cache, as no range read is: a server whose response said
+  // `cache-control: public` with no max-age is cached heuristically for hours, so a server fixed
+  // since (one that was gzipping on the fly, say) went on answering this HEAD with the stale,
+  // sizeless reply while every range read reached the fixed one.
   let response: Response
   try {
-    response = await fetch(httpUrl(url), { method: 'HEAD' })
+    response = await fetch(httpUrl(url), { method: 'HEAD', cache: 'no-store' })
   } catch {
     // A public bucket with no CORS at its direct address still answers its JSON API — the
     // fallback its reads take too (`transport.ts`). CAVE's Delta exports are such a bucket.
@@ -111,8 +127,7 @@ export async function urlHead(url: string): Promise<{ size: number; modified?: s
   const length = Number(response.headers.get('content-length'))
   if (!Number.isSafeInteger(length) || length <= 0) {
     throw new Error(
-      `${url} does not report its size, which reading a file in pieces needs. Download it and ` +
-        `open it as a local file instead.`,
+      `${url} does not report its size, which reading a file in pieces needs. ${ON_THE_FLY}`,
     )
   }
   const modified = response.headers.get('last-modified')
@@ -178,7 +193,7 @@ function urlBytes(
 function ignoresRange(url: string): Error {
   return new Error(
     `${url} does not answer range requests, so reading part of it would mean downloading all ` +
-      `of it. Download the file and open it locally instead.`,
+      `of it. ${ON_THE_FLY}`,
   )
 }
 

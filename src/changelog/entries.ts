@@ -112,6 +112,77 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: '2026-10-04',
+    title: 'A cell typing pack, and a scatter plot to explore embeddings',
+    summary:
+      'A new Cell typing/annotation tools pack: open a BigClust project, explore it in a Scatter Plot that now names, searches and re-embeds its points, and write the cell types you settle on back to FlyTable or Clio.',
+    highlight: true,
+    features: [
+      {
+        kind: 'node',
+        date: '2026-10-04',
+        title: 'A pack for cell typing and annotation',
+        body:
+          'The new **Cell typing/annotation tools** pack brings two nodes for typing neurons: one to explore a co-clustering, one to record what you decide. It is off by default: switch it on under **Plugins**.\n\n' +
+          '**BigClust Project** reads a [BigClust](https://github.com/schlegelp/BigClust2) project, from a URL or a folder on your disk: its neurons, the coordinates of one embedding, that embedding’s k-nearest-neighbour graph and its feature vectors, each as a table. Pick the embedding in the card; for several side by side, use a node each and **Join** them on `neuronId`. Its **Scene** output is the project’s own neuroglancer scene: wire it into a **Neuroglancer** node with a selection, and the selected neurons are drawn in their own volumes and colours. To try it, paste `https://flyem.mrc-lmb.cam.ac.uk/flyconnectome/bigclust_data/examples/MaleCNS_FlyWire_hemibrain_central_brain_bigclust`, BigClust’s own example: male CNS, FlyWire and hemibrain central-brain neurons, co-clustered.\n\n' +
+          '**Annotate** takes a selection — a lasso on a Scatter Plot, a table of ids — and reads those neurons’ rows from a FlyTable or SeaTable table, their annotations from a Clio dataset, or their rows from a CSV file on your computer (edited in place; Chrome and Edge only). **Fields** picks which columns to show. Editing a cell writes it straight back; **Undo** writes the previous values back, and **Log** downloads every edit the card made. Before writing, the card reads each cell again, so a cell somebody else changed since you saw it is held and marked rather than overwritten, and a value the column cannot hold is refused before anything is sent.\n\n' +
+          'Tick rows and use **Set … to …** to give many neurons one value at once. Add a tab per table with **+**: a selection mixing datasets, as a BigClust project does, is split between the tabs by qualified id or a dataset column, and the card counts any neuron no tab takes. Cells you change are marked until you undo them. On Clio, a tab can show bodies nobody has annotated yet as empty rows, and keep `instance` in step with `type`; both are off until you switch them on. Writing needs an account on the table: add your FlyTable or Clio token under **Connections**.',
+        link: { href: 'https://github.com/schlegelp/BigClust2', label: 'BigClust on GitHub' },
+        // Taken from BigClust's example project over the network, with a selection made by hand: no
+        // `capture`, so `pnpm changelog:shots` leaves it alone.
+        image: {
+          file: 'bigclust.webp',
+          alt: 'BigClust’s example project feeding a Scatter Plot of its 87,263 neurons, ten of them selected, and a Neuroglancer card drawing those ten in the male CNS brain.',
+        },
+      },
+      {
+        kind: 'chart',
+        date: '2026-10-02',
+        title: 'Names, a search and your own tooltip on the Scatter Plot',
+        body:
+          'Tick **Labels on points** and each point is named beside it once few enough are in view (400 by default), placed so labels cover neither each other nor other points. **Hover shows** adds the columns you pick to the tooltip.\n\n' +
+          'On the expanded card, **⌕** opens a search: matches are outlined, **‹ ›** step through them, and **◎** selects them all (Shift adds them to the selection). The **⋯** menu searches one column instead, or matches whole values, case or a regular expression.',
+        demo: 'out.scatter',
+      },
+    ],
+    items: [
+      {
+        kind: 'node',
+        date: '2026-10-02',
+        title: '**Embedding** lays out part of a population.',
+        body: 'Wire a selection into its new **Only these** input to re-embed just those neurons, from a matrix, a feature table or a k-NN graph. For example, lasso a group of points on one embedding and embed just that group.',
+        demo: 'core.embed',
+      },
+      {
+        kind: 'editor',
+        date: '2026-10-01',
+        title: 'Large selections stay in the autosave.',
+        body: 'A lasso of a hundred thousand neurons is now saved about six times smaller, so it fits in the browser’s autosave and in share links. Workflows saved before open as they did.',
+      },
+      {
+        kind: 'editor',
+        date: '2026-10-02',
+        title: 'Tighter dashboards.',
+        body: 'Less space between the cells of a dashboard, so the charts get more of the screen.',
+      },
+      {
+        kind: 'chart',
+        date: '2026-10-02',
+        title: 'No bounding boxes in **Neuroglancer** scenes.',
+        body: 'Scenes opened by Coda no longer draw a box around the whole volume. On a small card, the box was most of what you saw.',
+      },
+      {
+        kind: 'chart',
+        date: '2026-10-02',
+        title: 'The **Network Viewer**’s Find takes the same search as the Scatter Plot.',
+        body: 'Start a term with `/` to search by regular expression.',
+      },
+    ],
+    fixes: [
+      'A large table file read from a URL no longer fails over one dropped connection: the read is retried. If the server keeps dropping the connection, the error now says so instead of blaming cross-origin access.',
+    ],
+  },
+  {
     date: '2026-10-01',
     title: 'Dashboards with tabs',
     summary:

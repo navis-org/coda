@@ -63,7 +63,10 @@
     "probe:flowchart": "vite-node scripts/probe-flowchart.ts && python3 scripts/probe-flowchart.py && Rscript scripts/probe-flowchart.R",
     "probe:flowchart-draw": "node scripts/probe-flowchart-draw.mjs",
     "probe:neuronbridge": "node scripts/probe-neuronbridge.mjs",
-    "probe:scatter-scale": "node scripts/probe-scatter-scale.mjs"
+    "probe:scatter-scale": "node scripts/probe-scatter-scale.mjs",
+    "probe:bigclust": "node scripts/probe-bigclust.mjs",
+    "probe:selection-scale": "vite-node scripts/probe-selection-scale.ts",
+    "probe:scatter-labels": "node scripts/probe-scatter-labels.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

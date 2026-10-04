@@ -24,6 +24,7 @@
  * stored value is an undeclared param and `normalizeParams` ignores it.
  */
 
+import type { ParamValues } from '../../core/node'
 import { registerNode } from '../../core/registry'
 import { NUMERIC_DTYPES, T, columnsOfType, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
@@ -31,6 +32,9 @@ import { colorParams, shapeParams, sizeParams } from '../lib/encodingParams'
 import { decodeLabels } from '../lib/chartSelection'
 import { rowsWithKeys } from '../lib/rowIds'
 import { tapPorts } from '../lib/tapPorts'
+
+/** The point-label controls are shown while point labels are on. */
+const labelsOn = (params: ParamValues) => params.pointLabels === true
 
 registerNode({
   type: 'out.scatter',
@@ -182,13 +186,73 @@ registerNode({
       id: 'labelBy',
       kind: 'column',
       label: 'Label',
-      help: 'Named in the tooltip under the pointer. Defaults to the ID column.',
+      help: 'Shown in the tooltip, and beside points when `Labels on points` is ticked. Defaults to the `ID column`.',
       from: 'in',
       default: '',
       optional: true,
       presentational: true,
       advanced: true,
       group: 'points',
+    },
+    {
+      id: 'hoverColumns',
+      kind: 'columns',
+      label: 'Hover shows',
+      help: 'Extra columns to list in the tooltip, after the label, x, y and any colour or shape columns.',
+      from: 'in',
+      default: [],
+      presentational: true,
+      advanced: true,
+      group: 'points',
+    },
+    {
+      id: 'pointLabels',
+      kind: 'boolean',
+      label: 'Labels on points',
+      help: 'Write each point\u2019s label beside it once few enough are in view (see `Label up to`). Zoom in to see more.',
+      default: false,
+      presentational: true,
+      group: 'points',
+    },
+    {
+      id: 'labelLimit',
+      kind: 'number',
+      label: 'Label up to',
+      help: 'Draw labels only while at most this many points are in view.',
+      default: 400,
+      min: 1,
+      max: 5000,
+      step: 50,
+      presentational: true,
+      advanced: true,
+      group: 'points',
+      visibleIf: labelsOn,
+    },
+    {
+      id: 'labelLines',
+      kind: 'boolean',
+      label: 'Label lines',
+      help: 'Draw a thin line from each point to its label.',
+      default: true,
+      presentational: true,
+      advanced: true,
+      group: 'points',
+      visibleIf: labelsOn,
+    },
+    {
+      id: 'unplacedLabels',
+      kind: 'enum',
+      label: 'Labels that do not fit',
+      help: 'A label with no free space around its point: left out, or drawn faintly beside it, under the others.',
+      default: 'hide',
+      options: [
+        { value: 'hide', label: 'Leave out' },
+        { value: 'dim', label: 'Draw faintly' },
+      ],
+      presentational: true,
+      advanced: true,
+      group: 'points',
+      visibleIf: labelsOn,
     },
     {
       id: 'vectorMarks',

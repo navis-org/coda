@@ -58,6 +58,16 @@ describe('adding a node with a Dataset input', () => {
     expect(datasetFeeding(add('neuron.findNeurons', { x: 300, y: 0 }))).toBeUndefined()
   })
 
+  it('counts dataset nodes, not every node with a Dataset output', () => {
+    // A BigClust project's Scene is a Dataset for the Neuroglancer node and answers nothing else:
+    // alone it is no dataset to wire to, and beside one it does not make the question ambiguous.
+    add('annotation:bigclust', { x: 0, y: 200 })
+    expect(datasetFeeding(add('neuron.findNeurons', { x: 300, y: 0 }))).toBeUndefined()
+
+    const ds = add('neuron.dataset', { x: 0, y: 0 })
+    expect(datasetFeeding(add('neuron.findNeurons', { x: 300, y: 200 }))).toBe(ds)
+  })
+
   it('leaves the socket empty when there is no dataset at all', () => {
     expect(datasetFeeding(add('neuron.findNeurons'))).toBeUndefined()
     expect(graph().edges).toHaveLength(0)

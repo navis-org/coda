@@ -131,8 +131,8 @@ const FEEDBACK_NUDGE_KEY = 'coda.feedbackNudge.v1'
  * All of the above: `scripts/probe-autosave-budget.ts` for the graph sizes, and the quota probe
  * written up in [docs/persistence.md](../../docs/persistence.md).
  */
-const MAX_SLOTS = 6
-const MAX_SLOT_BYTES = 2_000_000
+export const MAX_SLOTS = 6
+export const MAX_SLOT_BYTES = 2_000_000
 
 /**
  * `localStorage`, with every failure swallowed on the rule stated above — losing a *preference* is

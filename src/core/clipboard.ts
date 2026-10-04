@@ -20,7 +20,7 @@
  */
 
 import type { CodaGraph } from './graph'
-import { GRAPH_FORMAT_VERSION, deserializeGraph, newId } from './graph'
+import { GRAPH_FORMAT_VERSION, deserializeGraph, graphText, newId } from './graph'
 import { cloneCaptions, cloneGroups } from './groups'
 import { documentNode } from './missing'
 
@@ -92,7 +92,7 @@ export function subgraphOf(
 export function fragmentFrom(graph: CodaGraph, nodeIds: readonly string[]): string | undefined {
   const body = fragmentBody(graph, nodeIds)
   if (!body) return undefined
-  return JSON.stringify({ coda: FRAGMENT_MARKER, ...body }, null, 2)
+  return graphText({ coda: FRAGMENT_MARKER, ...body })
 }
 
 /**

@@ -21,6 +21,7 @@
 
 import { registerPack } from '../core/registry'
 import type { PackDefinition } from '../core/registry'
+import { annotation } from './annotation'
 import { catmaid } from './catmaid'
 import { cave } from './cave'
 import { connectome } from './connectome'
@@ -37,6 +38,7 @@ export const PACKS: readonly PackDefinition[] = [
   catmaid,
   zapbench,
   cortex,
+  annotation,
 ]
 
 for (const pack of PACKS) registerPack(pack)

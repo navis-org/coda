@@ -183,6 +183,7 @@ describe('the k-NN graph a neighbour table becomes', () => {
     // A target with no row of its own cannot be placed; carried in it would index past the end.
     expect(graph.labels).toEqual(['a', 'b', 'c', 'd'])
     expect(losses.unknownTargets).toBe(1)
+    expect(losses.outsideOnly).toBe(0)
     for (const row of graph.indices) {
       for (const index of row) expect(index).toBeLessThan(4)
     }
