@@ -29,7 +29,8 @@
  * again, and nothing has to be re-downloaded to get there.
  */
 
-import { attempt, database } from './idb'
+import type { StoredUsage } from './idb'
+import { attempt, database, usage } from './idb'
 import { memoPromise } from './memoPromise'
 
 const DB_NAME = 'coda'
@@ -299,7 +300,7 @@ export async function cacheDelete(key: string): Promise<void> {
   })
 }
 
-/** Drop everything. Used by the Sources panel's "clear cached data" action and by tests. */
+/** Drop everything. The Storage tab's Clear, and tests. */
 export async function cacheClear(): Promise<void> {
   memory.clear()
   announce(undefined)
@@ -307,6 +308,11 @@ export async function cacheClear(): Promise<void> {
     cache.clear()
     meta.clear()
   })
+}
+
+/** What the cache holds, for the Storage tab: one entry per cached value. */
+export function cacheUsage(): Promise<StoredUsage | undefined> {
+  return usage(db, STORE)
 }
 
 /** Test seam: forget the opened database so a fresh environment is picked up. */

@@ -39,8 +39,8 @@
  * earns its place at the writing end.
  */
 
-import type { RefusalWords } from '../idb'
-import { attempt, commit, database, readKey } from '../idb'
+import type { RefusalWords, StoredUsage } from '../idb'
+import { attempt, commit, database, readKey, usage } from '../idb'
 import { memoPromise, untilAborted } from '../memoPromise'
 import { LruMap, PinnedLru } from '../../core/lruMap'
 import type { DatasetEdges } from '../../core/values'
@@ -736,6 +736,15 @@ export async function requireEdgeSet(
       `not in this browser. Import the same file under \`Edge data\` on the dataset node; ` +
       `a set is identified by its contents, so the same file will match.`,
   )
+}
+
+/** What the shelf holds, for the Storage tab: one entry per edge set. */
+export function edgeSetsUsage(): Promise<StoredUsage | undefined> {
+  // Each catalogue entry carries its encoded size, so the chunks themselves are not read.
+  return usage(db, SET_STORE, {
+    skip: [PART_STORE],
+    bytes: (record) => (record as EdgeSetMeta).bytes,
+  })
 }
 
 /** Test seam: forget the opened database, the catalogue and everything resident. */

@@ -10,6 +10,7 @@
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
 import { cleanToken } from '../signIn'
+import type { StoredSignIn } from '../signIns'
 
 const KEY = 'coda.clio.token'
 
@@ -55,4 +56,11 @@ export function resetClioCredentials(): void {
   writeStorage(KEY, undefined)
   token = undefined
   loaded = false
+}
+
+/** The Storage tab's entry. */
+export const SIGN_IN: StoredSignIn = {
+  service: 'Clio',
+  keys: [KEY],
+  stored: () => getClioToken() !== undefined,
 }

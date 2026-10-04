@@ -18,6 +18,7 @@
 
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
+import type { StoredSignIn } from '../signIns'
 
 /** The two deployments Coda ships a node for. Any other is reachable by typing its host. */
 export const SEATABLE_HOSTS = {
@@ -80,4 +81,12 @@ export function resetSeaTableCredentials(hosts: readonly string[] = []): void {
     writeStorage(keyFor(host), undefined)
   }
   tokens.clear()
+}
+
+/** The Storage tab's entry: one key per host, so a stem rather than a list. */
+export const SIGN_IN: StoredSignIn = {
+  service: 'SeaTable',
+  keys: [],
+  prefixes: [KEY_PREFIX],
+  stored: () => Object.values(SEATABLE_HOSTS).some((host) => getToken(host) !== undefined),
 }

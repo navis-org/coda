@@ -8,12 +8,18 @@
  *
  * The numbers, where each comes from, and the three actions are `ui/memoryReadout.ts`; the
  * estimate is `core/valueBytes.ts`.
+ *
+ * A second tab answers the same question about disk: what Coda keeps in this browser between
+ * sessions (`ui/storageReadout.ts`). It is a tab here rather than a dialog of its own because the
+ * reader is the same person at the same moment — deciding what to let go of.
  */
 
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
 import { MEMORY_CATEGORIES } from '../../core/valueBytes'
+import type { StoredUsage } from '../../data/idb'
+import { LOCAL_STORAGE_BUDGET } from '../../store/persistence'
 import { useGraphStore } from '../../store/graphStore'
 import { formatBytes, plural } from '../format'
 import type { HeapUse, MemoryReading } from '../memoryReadout'
@@ -24,6 +30,8 @@ import {
   useMemoryReading,
 } from '../memoryReadout'
 import { Modal, ModalHeader } from '../Modal'
+import type { StorageReading } from '../storageReadout'
+import { clearDownloadedData, localTotal, measureStorage } from '../storageReadout'
 
 /** Mounted once, in `App`, and opened by a store request — `PrivacyDialog`'s idiom exactly. */
 export function MemoryDialog() {
@@ -62,29 +70,75 @@ export function MemoryMeter({ heap, label }: { heap: HeapUse; label?: string }) 
   )
 }
 
+const TABS = [
+  { id: 'memory', label: 'Memory' },
+  { id: 'storage', label: 'Storage' },
+] as const
+
+type TabId = (typeof TABS)[number]['id']
+
+/**
+ * Opens on Memory each time: the chip and the palette entry that open it both say Memory.
+ *
+ * The storage reading is held here rather than in its tab, so switching back to Storage shows the
+ * figures already read instead of walking every database again.
+ */
 function Dialog({ onClose }: { onClose: () => void }) {
-  const reading = useMemoryReading(true)
+  const [tab, setTab] = useState<TabId>('memory')
+  const [storage, setStorage] = useState<StorageReading>()
   return (
     <Modal className="overlay__panel memory" label="Memory" onClose={onClose}>
       <ModalHeader onClose={onClose}>Memory</ModalHeader>
-      <div className="sources__body memory__body">
-        {reading && (
-          <>
-            <TabSection reading={reading} />
-            <WorkflowSection reading={reading} />
-            <CacheSection reading={reading} />
-          </>
+      <div className="sources__tabs" role="tablist" aria-label="Memory or storage">
+        {TABS.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            role="tab"
+            className="sources__tab"
+            aria-selected={entry.id === tab}
+            onClick={() => setTab(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+      <div
+        className="sources__body memory__body"
+        role="tabpanel"
+        aria-label={TABS.find((entry) => entry.id === tab)?.label}
+      >
+        {tab === 'memory' ? (
+          <MemoryTab />
+        ) : (
+          <StorageTab reading={storage} onReading={setStorage} />
         )}
-        <p className="memory__foot">
-          The figures per workflow are Coda&rsquo;s own estimate. A result shared by two
-          workflows is counted once, under the first.
-        </p>
-        <p className="memory__foot">
-          Memory consumption of 3D View, Neuroglancer and other viewers can&rsquo;t be measured.
-          Closing a viewer frees the memory.
-        </p>
       </div>
     </Modal>
+  )
+}
+
+/** Its own component so the Python figure is asked for only while this tab is showing. */
+function MemoryTab() {
+  const reading = useMemoryReading(true)
+  return (
+    <>
+      {reading && (
+        <>
+          <TabSection reading={reading} />
+          <WorkflowSection reading={reading} />
+          <CacheSection reading={reading} />
+        </>
+      )}
+      <p className="memory__foot">
+        The figures per workflow are Coda&rsquo;s own estimate. A result shared by two workflows
+        is counted once, under the first.
+      </p>
+      <p className="memory__foot">
+        Memory consumption of 3D View, Neuroglancer and other viewers can&rsquo;t be measured.
+        Closing a viewer frees the memory.
+      </p>
+    </>
   )
 }
 
@@ -139,10 +193,11 @@ function Row(props: {
   tag?: string
   detail: ReactNode
   figure: string
-  action: string
-  disabled: boolean
+  /** Absent for a row that only reports — something managed elsewhere, or cleaned up on its own. */
+  action?: string
+  disabled?: boolean
   title?: string
-  onAction: () => void
+  onAction?: () => void
 }) {
   return (
     <li className="memory__row">
@@ -154,15 +209,19 @@ function Row(props: {
         <span className="memory__detail">{props.detail}</span>
       </div>
       <span className="memory__figure">{props.figure}</span>
-      <button
-        type="button"
-        className="btn"
-        disabled={props.disabled}
-        title={props.title}
-        onClick={props.onAction}
-      >
-        {props.action}
-      </button>
+      {props.action ? (
+        <button
+          type="button"
+          className="btn"
+          disabled={props.disabled}
+          title={props.title}
+          onClick={props.onAction}
+        >
+          {props.action}
+        </button>
+      ) : (
+        <span />
+      )}
     </li>
   )
 }
@@ -235,5 +294,156 @@ function CacheSection({ reading }: { reading: MemoryReading }) {
         />
       </ul>
     </section>
+  )
+}
+
+/**
+ * A database row's line: how many, then what to know about them — or plainly none, where a count
+ * of zero followed by where to manage them reads as a list that failed to load.
+ */
+function counted(usage: StoredUsage | undefined, noun: string, rest: string): string {
+  if (!usage) return 'Could not be read in this browser.'
+  if (usage.entries === 0) return 'None yet.'
+  return `${plural(usage.entries, noun)}. ${rest}`
+}
+
+/** A database's figure: Coda's estimate, so marked as one, and a dash where it could not be read. */
+function stored(usage: StoredUsage | undefined): string {
+  return usage ? `≈ ${formatBytes(usage.bytes)}` : '—'
+}
+
+/**
+ * What Coda keeps in this browser between sessions, read the first time the tab opens.
+ *
+ * One button only, on the data cache — see `ui/storageReadout.ts` for why the rest only report.
+ * Each row that is somebody's work names where it is managed instead, since a list a reader can
+ * see but not act on is the moment they ask where to go.
+ */
+function StorageTab({
+  reading,
+  onReading,
+}: {
+  reading: StorageReading | undefined
+  onReading: (next: StorageReading) => void
+}) {
+  const [clearing, setClearing] = useState(false)
+  const read = reading !== undefined
+
+  useEffect(() => {
+    if (read) return
+    let live = true
+    void measureStorage().then((next) => {
+      if (live) onReading(next)
+    })
+    return () => {
+      live = false
+    }
+  }, [read, onReading])
+
+  if (!reading) return <p className="memory__note">Counting what this browser holds…</p>
+
+  const { site, persisted, local } = reading
+  const openWorkflows = (reading.session?.bytes ?? 0) + (local?.autosave ?? 0) + reading.tab
+
+  return (
+    <>
+      <section className="memory__group">
+        <h3>This site</h3>
+        {site ? (
+          <p className="memory__total">
+            <strong>{formatBytes(site.usage)}</strong> stored, measured by the browser, which
+            allows this site up to {formatBytes(site.quota)}.
+          </p>
+        ) : (
+          <p className="memory__hint">
+            This browser does not report how much this site stores. The figures below are
+            Coda&rsquo;s own estimate.
+          </p>
+        )}
+        {persisted === true && (
+          <p className="memory__note">The browser keeps this data until you clear it.</p>
+        )}
+        {persisted === false && (
+          <p className="memory__note">
+            The browser may delete this data if the computer runs low on disk space. To keep a
+            workflow for certain, save it as a file.
+          </p>
+        )}
+      </section>
+
+      <section className="memory__group">
+        <h3>Kept by Coda</h3>
+        <ul className="memory__list">
+          <Row
+            name="Downloaded data"
+            detail={counted(
+              reading.cache,
+              'item',
+              'Neuron tables and dataset listings kept so the next session does not download them again.',
+            )}
+            figure={stored(reading.cache)}
+            action="Clear"
+            disabled={!reading.cache?.entries || clearing}
+            title="Delete these. Anything that needs them downloads them again."
+            onAction={() => {
+              setClearing(true)
+              void clearDownloadedData(reading)
+                .then(onReading)
+                .finally(() => setClearing(false))
+            }}
+          />
+          <Row
+            name="Open workflows"
+            detail={`${
+              reading.session?.entries ? `${plural(reading.session.entries, 'workflow')}. ` : ''
+            }Copies of the workflows open in this and recently closed tabs, so a reload brings them back. Cleared automatically.`}
+            figure={`≈ ${formatBytes(openWorkflows)}`}
+          />
+          {reading.shelves.map((shelf) => (
+            <Row
+              key={shelf.name}
+              name={shelf.name}
+              detail={counted(shelf.usage, shelf.noun, shelf.note)}
+              figure={stored(shelf.usage)}
+            />
+          ))}
+          <Row
+            name="Sign-ins and keys"
+            detail={
+              !local
+                ? 'Could not be read in this browser.'
+                : local.services.length
+                  ? `${local.services.join(', ')}. Manage them in Connections.`
+                  : 'None stored.'
+            }
+            figure={local ? formatBytes(local.signIns) : '—'}
+          />
+          <Row
+            name="Preferences"
+            detail="Theme, panel layout, guides you have finished, and similar settings."
+            figure={local ? formatBytes(local.preferences) : '—'}
+          />
+          {local && local.other > 0 && (
+            <Row
+              name="Other"
+              detail="Stored on this site by something other than Coda."
+              figure={formatBytes(local.other)}
+            />
+          )}
+        </ul>
+        {local && (
+          <p className="memory__note">
+            Autosaves, sign-ins and preferences share an allowance of{' '}
+            {formatBytes(LOCAL_STORAGE_BUDGET)}, of which {formatBytes(localTotal(local))} is
+            used. If it fills, the autosave stops being written.
+          </p>
+        )}
+      </section>
+      <p className="memory__foot">
+        Sizes marked &asymp; are Coda&rsquo;s own estimate, read when this tab first opened. The
+        browser&rsquo;s total also counts its own overhead, so the rows do not add up to it
+        exactly.
+      </p>
+    </>
   )
 }

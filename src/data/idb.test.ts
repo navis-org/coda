@@ -14,7 +14,7 @@ import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { attempt, commit, database } from './idb'
+import { attempt, commit, database, storedBytes, usage } from './idb'
 
 const WORDS = {
   unavailable: 'no storage',
@@ -103,5 +103,77 @@ describe('commit and attempt', () => {
     expect(
       await attempt(db, 'nope', 'readonly', (tx) => tx.objectStore('nope').get('k'), 0),
     ).toBe(0)
+  })
+})
+
+describe('usage', () => {
+  it('counts the named store and sizes every store', async () => {
+    const db = database({ name: 't', version: 1, stores: ['meta', 'body'] })
+    await commit(
+      db,
+      ['meta', 'body'],
+      (tx) => {
+        tx.objectStore('meta').put({ name: 'one' }, 'a')
+        tx.objectStore('meta').put({ name: 'two' }, 'b')
+        tx.objectStore('body').put(new Float64Array(100), 'a')
+      },
+      WORDS,
+    )
+    const held = await usage(db, 'meta')
+    expect(held?.entries).toBe(2)
+    // Two keys and two names in `meta`, the key and 800 bytes of array in `body`.
+    expect(held?.bytes).toBe(1 + 4 + 3 + 1 + 4 + 3 + 1 + 800)
+  })
+
+  it('takes a declared size for a payload store rather than reading it', async () => {
+    const db = database({ name: 't', version: 1, stores: ['meta', 'body'] })
+    await commit(
+      db,
+      ['meta', 'body'],
+      (tx) => {
+        tx.objectStore('meta').put({ size: 5000 }, 'a')
+        tx.objectStore('body').put(new Float64Array(100), 'a')
+      },
+      WORDS,
+    )
+    const held = await usage(db, 'meta', {
+      skip: ['body'],
+      bytes: (record) => (record as { size: number }).size,
+    })
+    // The meta record's key and field, plus what it declares — and nothing of the 800-byte body.
+    expect(held).toEqual({ entries: 1, bytes: 1 + 4 + 8 + 5000 })
+  })
+
+  it('does not create a database somebody has never used', async () => {
+    const db = database({ name: 'never', version: 1, stores: ['a'] })
+    expect(await usage(db, 'a')).toEqual({ entries: 0, bytes: 0 })
+    const listed = await indexedDB.databases()
+    expect(listed.map((entry) => entry.name)).not.toContain('never')
+  })
+
+  it('answers unknown, not zero, with no IndexedDB at all', async () => {
+    const db = database({ name: 't', version: 1, stores: ['a'] })
+    // @ts-expect-error deliberately removing the platform API
+    delete globalThis.indexedDB
+    expect(await usage(db, 'a')).toBeUndefined()
+  })
+})
+
+describe('storedBytes', () => {
+  it('charges a buffer once however many views share it', () => {
+    const buffer = new ArrayBuffer(400)
+    expect(storedBytes([new Uint8Array(buffer), new Float32Array(buffer)])).toBe(400)
+  })
+
+  it('charges a character outside Latin-1 two bytes, and every character of that string', () => {
+    expect(storedBytes('abc')).toBe(3)
+    expect(storedBytes('é')).toBe(1)
+    expect(storedBytes('a→b')).toBe(6)
+  })
+
+  it('survives a cycle, which a structured clone allows', () => {
+    const node: { next?: unknown } = {}
+    node.next = node
+    expect(storedBytes(node)).toBe(4)
   })
 })

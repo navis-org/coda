@@ -26,6 +26,7 @@
 
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
+import type { StoredSignIn } from '../signIns'
 
 const INSTANCES_KEY = 'coda.catmaid.instances.v1'
 
@@ -224,4 +225,11 @@ export const subscribeAuthFailure = authFailure.subscribe
 export function resetCredentials(): void {
   instances = undefined
   writeStorage(INSTANCES_KEY, undefined)
+}
+
+/** The Storage tab's entry. */
+export const SIGN_IN: StoredSignIn = {
+  service: 'CATMAID',
+  keys: [INSTANCES_KEY],
+  stored: () => listInstances().length > 0,
 }

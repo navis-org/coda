@@ -912,7 +912,60 @@ which in production loads from its own origin, so site isolation puts it in anot
 heap, chunk cache and GPU buffers this page cannot read. Under `pnpm dev` `sameOriginViewer`
 proxies it onto this origin, so a development reading may include some of it and a deployed one
 none — a development figure is not the one to calibrate against. Also uncounted: the fetching
-widgets' `keyedCache`s, and IndexedDB, which is disk.
+widgets' `keyedCache`s, and IndexedDB, which is disk and has a tab of its own.
+
+### The Storage tab
+
+The dialog's second tab answers the same question about disk: what Coda keeps in this browser
+between sessions (`ui/storageReadout.ts`). A tab rather than a dialog of its own because it is the
+same reader at the same moment, deciding what to let go of; it opens on Memory every time, since
+both ways in say Memory.
+
+**Three sources, and only the site total is measured.** `navigator.storage.estimate()` is in every
+browser and answers for the whole origin; **none breaks it down per database**. So each row is
+Coda's estimate: `idb.ts`' `usage` walks a database's records, one at a time, and `storedBytes`
+sizes each (a byte per Latin-1 character and two otherwise, a buffer once however many views share
+it). **A shelf that records a size at write time is not read**: the library's summaries carry each
+graph's JSON length, an edge set's catalogue entry its encoded bytes and an upload's meta its file
+size, so `SizedBy` skips the payload stores — reading them pulled every saved graph and every 8 MB
+edge chunk through a structured clone to learn a number already stored beside it. The data cache
+has no such figure and is walked whole, a neuron index included, which is why measuring runs the
+first time the tab opens and is then held by the dialog (a switch back to Storage re-reads
+nothing), and why Clear re-reads only the cache and the site total. The rows are marked `≈` and
+are said not to sum to the browser's figure. `localStorage` is exact, and is reported against its
+**5 MiB allowance** (`LOCAL_STORAGE_BUDGET`) in the code units that allowance counts, because
+filling it is silent: the autosave swallows the quota error by design.
+
+**Asked before opened.** Opening a database that does not exist creates it, so measuring would
+leave an empty database behind for every feature somebody never used. `usage` consults
+`indexedDB.databases()` first; where it is missing (Firefox before 126) the open goes ahead through
+the module's own `database()` spec, which is wasteful and never wrong. A database that will not open
+reads as unknown (`—`), not zero.
+
+**One button, on the data cache.** It is the only store with no bound — nothing evicts a cached
+value — and the only one whose contents can always be fetched again. Everything else is either
+somebody's work (saved workflows, recipes, uploads, edge sets, sign-ins), which the row reports and
+points at where it is managed, or the crash net (`coda-session` plus the autosave slots), which is
+bounded by `MAX_SESSIONS` and `MAX_SLOTS` and cleans itself up. The crash net stays without a
+button for a second reason: a session belongs to a tab, and nothing here can tell a closed tab from
+one open in another window, whose workflows a clear would lose on its next reload. Before this tab
+`cacheClear` had no caller at all — its comment named a Sources panel action that no longer existed.
+
+**Credentials are one row**, the services named and no value shown. **Each credentials module
+declares its own entry** (`SIGN_IN`, typed by `data/signIns.ts`): the keys it already owns as
+constants, legacy spellings included, and whether a credential is stored *by its own reading* —
+`listCredentials()`, `getToken()` and so on. The first version kept a table of key names in the UI
+plus a regex sweep of the source to catch drift, and guessed "stored" from the raw text (an empty
+`[]` left by a Forget); both were second spellings of what the module knew, and the sweep's
+naming convention already missed CATMAID's `instances` key. `SIGN_INS` lists the entries by
+import, not by registration, for the module-init-order reason. A key no module declares — the
+published `coda.catmaid.publicTokens.v1` — is a preference.
+
+Whether the browser may evict the site (`navigator.storage.persisted()`) is said and not asked —
+`persist()` is a permission prompt in Firefox, which is not something a figure should raise.
+**Uploads are never deleted**: removing the card leaves the rows in `coda-uploads`, and the tab says
+so rather than offering a delete it cannot make safe, since a saved workflow elsewhere may still
+name the upload.
 
 ## Keyboard shortcuts
 

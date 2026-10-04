@@ -12,7 +12,8 @@
  * handles and a file that was never indexed.
  */
 
-import { attempt, database, readKey } from '../idb'
+import type { StoredUsage } from '../idb'
+import { attempt, database, readKey, usage } from '../idb'
 import type { BlockIndex } from './reader'
 
 const HANDLES = 'handles'
@@ -57,6 +58,11 @@ export function saveIndex(
   index: BlockIndex,
 ): Promise<void> {
   return put(INDEXES, indexKey(fingerprint, column), index)
+}
+
+/** What the store holds, for the Storage tab: one entry per linked file. */
+export function fileLinksUsage(): Promise<StoredUsage | undefined> {
+  return usage(db, HANDLES)
 }
 
 /** Test seam: forget the connection, so a fresh `indexedDB` is picked up. */

@@ -27,6 +27,7 @@
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
 import { cleanToken } from '../signIn'
+import type { StoredSignIn } from '../signIns'
 
 const TOKEN_KEY = 'coda.github.token'
 const LOGIN_KEY = 'coda.github.login'
@@ -104,4 +105,11 @@ export function resetGithubCredentials(): void {
   login = undefined
   writeStorage(TOKEN_KEY, undefined)
   writeStorage(LOGIN_KEY, undefined)
+}
+
+/** The Storage tab's entry. The per-login scratch gist id is a preference, not a credential. */
+export const SIGN_IN: StoredSignIn = {
+  service: 'GitHub',
+  keys: [TOKEN_KEY, LOGIN_KEY],
+  stored: () => getGithubToken() !== undefined,
 }

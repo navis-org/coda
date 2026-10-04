@@ -147,6 +147,12 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
     ],
     items: [
       {
+        kind: 'editor',
+        date: '2026-10-04',
+        title: 'See what Coda keeps in your browser.',
+        body: 'Click **Memory** in the status bar and open the new **Storage** tab. It lists downloaded data, saved workflows, recipes, uploads and sign-ins, each with its size, and **Clear** empties the downloaded data.',
+      },
+      {
         kind: 'node',
         date: '2026-10-02',
         title: '**Embedding** lays out part of a population.',

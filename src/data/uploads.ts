@@ -56,7 +56,8 @@
  */
 
 import type { RefusalWords } from './idb'
-import { commit, database, readKey } from './idb'
+import type { StoredUsage } from './idb'
+import { commit, database, readKey, usage } from './idb'
 import { hashBytes, hashString } from '../core/hash'
 import type { TableSchema } from '../core/types'
 import type { TableValue } from '../core/values'
@@ -542,6 +543,15 @@ function uploadId(table: TableValue): string {
     for (const cell of data) parts.push(cell === null ? ' ' : String(cell))
   }
   return `u_${hashString(parts.join(SEP))}`
+}
+
+/** What the uploads hold, for the Storage tab: one entry per upload. */
+export function uploadsUsage(): Promise<StoredUsage | undefined> {
+  // The source file's size stands in for the parsed copy, which is not read: close, not exact.
+  return usage(db, META_STORE, {
+    skip: [TABLE_STORE, MESH_STORE],
+    bytes: (record) => (record as UploadMeta).bytes,
+  })
 }
 
 /** Test seam: forget the session's mirror and the memoised connection. */
