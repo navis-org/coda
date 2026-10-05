@@ -647,6 +647,7 @@ const BANC_CHAIN: AnnotationChain = {
     'This datastack keeps its cell typing in a CAVE table rather than on the neuron, so on its ' +
     'own it answers with root ids and no names. The table is long-format — one row per (neuron, ' +
     'kind, value) — so it has to be pivoted into a column per kind.',
+  unlabelled: 'BANC keeps its cell types in a separate CAVE table',
 }
 
 /**

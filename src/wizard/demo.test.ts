@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest'
 import '../nodes'
 import { registerBuiltinSources } from '../data/builtins'
 import { inferGraph } from '../core/inference'
+import type { IssueFix } from '../core/node'
 import { defaultInputPorts } from '../core/ports'
 import { getNodeDef, listableNodeDefs } from '../core/registry'
 import { serializeGraph, deserializeGraph, type CodaGraph } from '../core/graph'
@@ -45,9 +46,14 @@ for (const type of TYPES) {
 /** Every issue the type checker raises on a graph, flattened with the node id that raised it. */
 function issuesOf(
   graph: CodaGraph,
-): Array<{ node: string; severity: string; message: string }> {
+): Array<{ node: string; severity: string; message: string; fix?: IssueFix['action'] }> {
   return Object.entries(inferGraph(graph).nodes).flatMap(([node, types]) =>
-    types.issues.map((issue) => ({ node, severity: issue.severity, message: issue.message })),
+    types.issues.map((issue) => ({
+      node,
+      severity: issue.severity,
+      message: issue.message,
+      fix: issue.fix?.action,
+    })),
   )
 }
 
@@ -104,16 +110,20 @@ describe('the graphs themselves', () => {
   /*
    * Warnings are not failures — "no file chosen" on Upload Table is the honest state of a fresh
    * card, and a demo of that node cannot be anything else. What is worth pinning is the *count*,
-   * because it only moves when a wiring rule changes: 28 today, down from 44 as the search
+   * because it only moves when a wiring rule changes: 37 today, down from 44 as the search
    * learned to rank sources, to read a passthrough's *inferred* output, and to leave the
    * synthetic dataset for a node that is about a backend. A ceiling rather than an equality, so
    * adding a node with an unset setting of its own does not fail a test about the wiring.
+   *
+   * The annotation-chain hint is left out of the count: every demo but a dataset's own is built
+   * without the chain on purpose (`demo.ts`), so the hint is a choice the builder made rather than
+   * a wiring rule gone wrong.
    */
   it('keeps warnings to the ones a node raises about its own settings', () => {
-    const warnings = [...DEMOS.values()].flatMap(issuesOf)
-    expect(warnings.filter((issue) => issue.severity === 'warning').length).toBeLessThanOrEqual(
-      40,
-    )
+    const warnings = [...DEMOS.values()]
+      .flatMap(issuesOf)
+      .filter((issue) => issue.severity === 'warning' && issue.fix !== 'attachAnnotationChain')
+    expect(warnings.length).toBeLessThanOrEqual(40)
   })
 
   it('wires every required input of the node being demonstrated', () => {

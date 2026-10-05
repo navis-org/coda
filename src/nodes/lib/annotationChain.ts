@@ -98,7 +98,8 @@ export interface AnnotationChain {
   why: string
   /**
    * What the dataset's own labels lack, as a clause, where it has labels of its own that this
-   * chain *replaces*. Absent where the dataset has none, which is BANC's and Minnie's case.
+   * chain *replaces*. Absent where the dataset has none, which is BANC's and Minnie's case
+   * (they opt in through `unlabelled` instead).
    *
    * **The difference is whether a bare node looks right.** A datastack with no labels shows a
    * column of root ids, so its reader can see something is missing. FlyWire answers with a

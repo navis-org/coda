@@ -704,11 +704,12 @@ minnie65 are the other case: a bare node there shows root ids with no names, whi
 incomplete. So the difference is declared, as `AnnotationChain.staleBuiltin` (what the built-in
 labels lack, as a clause), and only FlyWire declares it.
 
-**minnie65 later opted in for the other reason**, as `AnnotationChain.unlabelled`: nothing on a
-bare node there misleads, but nothing on it says that one card fixes it either — the chain is a
-declaration nobody can find from the node. The same line and button, worded for absence ("No cell
-types without annotations: …"). Opt-in, because a warning on every drop claims a bare node is
-wrong, which is a per-dataset call; BANC is the same case and has not opted in.
+**minnie65 and BANC later opted in for the other reason**, as `AnnotationChain.unlabelled`: each
+keeps its typing in CAVE tables of its own, so nothing on a bare node there misleads, but nothing
+on it says that one card fixes it either — the chain is a declaration nobody can find from the
+node. The same line and button, worded for absence ("No cell types without annotations: …").
+Opt-in, because a warning on every drop claims a bare node is wrong, which is a per-dataset call —
+though every chain shipped today declares one reason or the other, so none stays silent.
 
 Three options were weighed against that and not taken:
 
