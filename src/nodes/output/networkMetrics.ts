@@ -4,6 +4,9 @@ import { registerNode } from '../../core/registry'
 import { NUMERIC_DTYPES, T, attributeSchema } from '../../core/types'
 import { isNetworkValue } from '../../core/values'
 import {
+  CATEGORICAL_DTYPES,
+  COLOR_AS_OPTIONS,
+  HISTOGRAM_MAX_BINS,
   DEFAULT_HISTOGRAM_CHOICE,
   METRIC_COLUMNS,
   TRIANGLE_WORK_WARN,
@@ -130,6 +133,75 @@ registerNode({
       advanced: true,
       help: 'The y axis of the card’s scatter.',
     },
+    /*
+     * The scatter's three other channels, all `optional`: empty is "not encoded", and on an
+     * optional picker that is a decision rather than an unset default (rule 3 would otherwise
+     * hand each the first compatible column). Presentational for the axes' reason — the ports
+     * carry the same values whatever the card draws.
+     */
+    {
+      id: 'plotColor',
+      kind: 'column',
+      label: 'Plot colour',
+      from: 'in',
+      schemaFrom: outputNodeSchema,
+      // Any kind of column: a number takes a ramp, text a palette. A carried `neuronId` is left
+      // out, being one colour per point and a legend of eighteen-digit numbers.
+      excludeIds: true,
+      default: '',
+      optional: true,
+      presentational: true,
+      advanced: true,
+      help: 'Colour the scatter’s points by a node column. Numbers take a colour ramp, text a palette.',
+    },
+    {
+      /*
+       * Whether an *integer* colour column is a quantity or a set of labels.
+       *
+       * The dtype cannot say: `degree` and `coreness` are quantities, while `component` and
+       * Centrality's `community` are labels, and a ramp over labels makes neighbouring ids look
+       * related. A float is always a value and text always a category, so this applies to `i64`
+       * alone — which is why the card shows it only beside an integer column. `visibleIf` cannot
+       * see a schema, so the inspector shows it whenever a colour column is set at all.
+       */
+      id: 'plotColorAs',
+      kind: 'enum',
+      label: 'Integer colour as',
+      default: 'value',
+      options: COLOR_AS_OPTIONS,
+      visibleIf: (params) => typeof params.plotColor === 'string' && params.plotColor !== '',
+      presentational: true,
+      advanced: true,
+      help: 'For a whole-number colour column: a ramp (`by value`, for counts like `degree`) or one colour per value (`by category`, for labels like `component`).',
+    },
+    {
+      id: 'plotSize',
+      kind: 'column',
+      label: 'Plot size',
+      from: 'in',
+      schemaFrom: outputNodeSchema,
+      dtypes: NUMERIC_DTYPES,
+      default: '',
+      optional: true,
+      presentational: true,
+      advanced: true,
+      help: 'Size the scatter’s points by a numeric node column. The value scales with the point’s area.',
+    },
+    {
+      id: 'plotShape',
+      kind: 'column',
+      label: 'Plot marker',
+      from: 'in',
+      schemaFrom: outputNodeSchema,
+      // Categorical: text, booleans and whole numbers. A float has no categories to give a mark.
+      dtypes: CATEGORICAL_DTYPES,
+      excludeIds: true,
+      default: '',
+      optional: true,
+      presentational: true,
+      advanced: true,
+      help: 'Give each value of a node column its own marker. Six markers; any further values share a dash.',
+    },
     {
       /*
        * Which of the three tables the histogram bins, as a `source:column` pair.
@@ -172,15 +244,19 @@ registerNode({
        * The default is a fixed ten rather than automatic, and that is about this card rather
        * than about binning. A bar here is a labelled *row*, so the tile's height is the bin
        * count — and Freedman–Diaconis on a heavy-tailed degree column asks for its ceiling,
-       * which would open every card on a tile taller than the card. `max` is that same ceiling
-       * (`MAX_AUTO_BINS`), so the two halves of this control agree about how far it goes.
+       * which would open every card on a tile taller than the card.
+       *
+       * `max` is a few hundred because binning is one pass whatever the count, and the drawing
+       * is what has to cope: as columns the card thins its labels to the ones that fit and puts
+       * every bar's count in its tooltip. As rows each bin is a line of its own, so hundreds of
+       * them make a very tall tile; that is the reader's choice to make, and the help says so.
        */
       default: 10,
       min: 0,
-      max: 80,
+      max: HISTOGRAM_MAX_BINS,
       advanced: true,
       presentational: true,
-      help: 'Number of histogram bars, or 0 for automatic. About a dozen is the readable maximum.',
+      help: 'Number of histogram bars, or 0 for automatic. Past a few dozen, draw them as vertical bars.',
     },
     {
       /*

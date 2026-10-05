@@ -10233,16 +10233,8 @@ details[open] > summary.tile__label {
   color: var(--text-muted);
 }
 
-/* --- the metrics card's scatter --- */
+/* --- the Network Metrics card --- */
 
-/*
- * A fixed height rather than an aspect ratio, with `preserveAspectRatio="none"` on the element.
- *
- * The two axes are unrelated quantities — degree against clustering, betweenness against
- * strength — so there is no square to preserve, and forcing one would leave most of a full-width
- * tile as margin. Height in px because this tile sits in a grid whose rows are content-sized:
- * a percentage would resolve against a track the SVG is itself defining.
- */
 /*
  * `Columns` as a histogram rather than as a completeness chart.
  *
@@ -10275,13 +10267,107 @@ details[open] > summary.tile__label {
 }
 .metrics__columns .tile__column-key {
   height: 44px;
+  /*
+   * Sideways into the neighbours, never down into the caption. Past a few dozen bins a cell is
+   * narrower than a line of text, and `thinColumns` has blanked the neighbours so the one key in
+   * every few has their room; clipped to its own cell it drew as a 1px sliver. `clip` rather than
+   * `hidden` on the other axis, the one pairing with `visible` a browser does not turn into a
+   * scroller.
+   */
+  overflow-x: visible;
+  overflow-y: clip;
+}
+/*
+ * Hundreds of bins: no gap at all. At 500 bins in a 600px card a 1px gap is 499px of the width,
+ * and the bars between them round to nothing. `thinColumns` sets the attribute.
+ */
+.metrics__columns[data-dense] .tile__columns-row,
+.metrics__columns[data-dense] .tile__columns-band {
+  gap: 0;
 }
 
+/*
+ * The Network Metrics card: the fact tiles as a grid, the two plots stacked beneath it.
+ *
+ * The scroll container moves up from `.tiles` to here, and takes over its 1px-of-border seams so
+ * the join between the grid and the plots looks like every other seam on the card. A flex column
+ * because that is what lets one child have the spare height: the scatter tile grows, and its
+ * automatic minimum (its content, the 120px plot included) is what makes a short card scroll
+ * rather than squash it.
+ */
+.metrics__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border);
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.metrics__body > .tiles {
+  flex: none;
+  overflow: visible;
+}
+/*
+ * The scatter tile takes the spare height. A wrapper class rather than a prop on `Tile`, for
+ * `.metrics__columns`' reason: the shared component does not learn a caller by name. `contents`,
+ * so the wrapper adds no box and the tile itself is the column's flex item.
+ */
+.metrics__grow {
+  display: contents;
+}
+.metrics__grow > .tile {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * The plot box, measured: the marks are placed in its pixels, so a triangle is the same triangle
+ * on every card rather than one stretched by a `preserveAspectRatio="none"` unit box.
+ *
+ * It is what takes the tile's spare height, never the axis readout under it — a basis of 0 and
+ * a 120px floor. The SVG is absolute inside it because an SVG's own
+ * automatic height is its aspect ratio (870px in an expanded panel), which would make the box
+ * size itself to the drawing it is supposed to be sizing.
+ */
+.metrics__plot {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 120px;
+  margin: 2px 0 6px;
+}
 .metrics__scatter {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
-  height: 120px;
-  margin: 2px 0 6px;
+  height: 100%;
+}
+
+/* Colour, size and marker: one row of named pickers between the heading and the plot. */
+.metrics__encodings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0 0 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.metrics__encodings label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/*
+ * `.legend` is a viewer's foot strip, ruled off from the canvas above it; inside a tile it sits
+ * between the plot and its readout, which the tile's own spacing already separates.
+ */
+.metrics__legend {
+  border-top: none;
+  padding: 0 0 4px;
 }
 
 /* --- split meter --- */

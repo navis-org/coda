@@ -62,14 +62,20 @@ Most columns are self-explanatory. The ones worth explaining:
 The plot settings are in the headings of the two plots (and also under the advanced settings):
 
 ```coda-params
-net.metrics: histColumn, plotX, plotY, bins, histVertical, logScale
+net.metrics: histColumn, plotX, plotY, plotColor, plotColorAs, plotSize, plotShape, bins, histVertical, logScale
 ```
 
 The scatter plots any two numeric node columns against each other, e.g. to check whether the hubs are also the highly clustered nodes. If you wire [Network Centrality](#net.centrality) in upstream, its columns (`betweenness`, `community`, …) show up in the same pickers.
 
+Below the scatter's heading you can also set a column for each point's colour, size and marker:
+
+- `colour` takes any column. Decimal numbers get a colour ramp and text gets one colour per value. Whole numbers can be either: `degree` is a count, while `component` and `community` are labels, so a second dropdown lets you choose `by value` (a ramp) or `by category` (one colour per value).
+- `size` takes a numeric column. The value scales with the area of the point, not its width.
+- `marker` takes text, true/false or whole-number columns. There are six markers; any further values share a dash, and the key under the plot lists them.
+
 The histogram shows the distribution of either a numeric node column, a link column, or the component sizes. Link and component entries are marked as such in the `Distribution` list, since e.g. `weight` can exist on both nodes and links. Set `Bins` to 0 to choose the number of bins automatically.
 
-By default the histogram is drawn with horizontal bars, which keeps the bin labels (ranges like `11–17`) readable. Tick `Vertical bars` to draw columns instead, but expect the labels to get crowded beyond a dozen or so bins.
+By default the histogram is drawn with horizontal bars, which keeps the bin labels (ranges like `11–17`) readable. Tick `Vertical bars` to draw columns instead. This is the better choice for more than a few dozen bins (you can set up to 500): as rows, each bin takes its own line, while as columns the card labels as many bins as fit and shows each bin's range and count when you hover over it.
 
 `Log counts` bins the values on a log10 scale and scales the bars logarithmically. This is useful because a connectome's degree distribution typically has a long tail: on a linear scale, all bars past the first couple are barely visible. Values of zero have no logarithm (for degree, those are the isolated nodes), so the plot tells you how many it left out.
 

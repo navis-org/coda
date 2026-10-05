@@ -45,6 +45,7 @@ import { chosenViewerKind } from '../../nodes/output/neuroglancer'
 import { widthModeOf } from '../../nodes/output/viewer3d'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { NetworkMetricsViewer } from './NetworkMetricsViewer'
+import { readColorAs } from '../../nodes/lib/networkMetrics'
 import { roisPrimaryOnly } from '../../nodes/lib/roiViewParams'
 import { readWeightProperty } from '../../nodes/lib/datasetParam'
 import { RoisViewer } from './RoisViewer'
@@ -544,6 +545,10 @@ const VIEWERS: Record<string, ViewerEntry> = {
           network={inputValues.in}
           plotX={ctx.column('plotX')}
           plotY={ctx.column('plotY')}
+          plotColor={ctx.column('plotColor')}
+          plotColorAs={readColorAs(params.plotColorAs)}
+          plotSize={ctx.column('plotSize')}
+          plotShape={ctx.column('plotShape')}
           histColumn={String(params.histColumn)}
           bins={Number(params.bins)}
           histVertical={params.histVertical === true}
@@ -552,7 +557,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
            * The param ids stay in the dispatcher, where every other node's are — the card knows
            * it is changing an axis, not which key that is stored under.
            *
-           * Spread rather than four `onParamChange?.(…)` arrows, because an arrow that swallows
+           * Spread rather than one `onParamChange?.(…)` arrow per control, because an arrow that swallows
            * the call is still a function: the card would see a writer on every surface and draw
            * live-looking controls that do nothing on the one surface that cannot store them.
            */
@@ -560,6 +565,10 @@ const VIEWERS: Record<string, ViewerEntry> = {
             ? {
                 onPlotX: (next: string) => onParamChange('plotX', next),
                 onPlotY: (next: string) => onParamChange('plotY', next),
+                onPlotColor: (next: string) => onParamChange('plotColor', next),
+                onPlotColorAs: (next: string) => onParamChange('plotColorAs', next),
+                onPlotSize: (next: string) => onParamChange('plotSize', next),
+                onPlotShape: (next: string) => onParamChange('plotShape', next),
                 onHistColumn: (next: string) => onParamChange('histColumn', next),
                 onBins: (next: number) => onParamChange('bins', next),
                 onHistVertical: (next: boolean) => onParamChange('histVertical', next),

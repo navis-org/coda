@@ -101,8 +101,21 @@ export interface Histogram {
  */
 export const MAX_AUTO_BINS = 80
 
-/** Hard ceiling on a hand-set bin count, matching the node param's `max`. */
-const MAX_BINS = 200
+/**
+ * Hard ceiling on a hand-set bin count — the largest `max` any node's `bins` param offers.
+ *
+ * Binning is one pass whatever the count; what a count costs is the drawing, and that is each
+ * caller's to bound with its own param.
+ */
+const MAX_BINS = 500
+
+/**
+ * How many bars a fixed bin *width* may produce before the width is doubled.
+ *
+ * Separate from `MAX_BINS`, which only bounds a count somebody typed: raising that for Network
+ * Metrics' hand-set counts must not quietly give every width-mode histogram a finer grid.
+ */
+const MAX_ALIGNED_BINS = 200
 
 /** What `scanValues` hands to `binScan`. Opaque to callers; only the two halves read it. */
 export interface ValueScan {
@@ -294,7 +307,7 @@ export function binScan(scan: ValueScan, options: HistogramOptions = {}): Histog
     /*
      * Edges at multiples of the width, and the last bar **half-open like the rest**: a value on
      * an edge opens the bar above it, so the maximum sits inside a bar rather than on its closing
-     * bound. Doubled past `MAX_BINS` rather than refused — a picture, not a failure.
+     * bound. Doubled past `MAX_ALIGNED_BINS` rather than refused — a picture, not a failure.
      */
     widthT = alignedWidth(fixedWidth, loT, hiT)
     startT = Math.floor(loT / widthT) * widthT
@@ -431,12 +444,12 @@ export function seriesFold(scan: ValueScan, missingLast = false): RankedFold {
 
 /**
  * The bin width `binScan` draws at under `HistogramOptions.width`: the one asked for, doubled
- * until the extent takes fewer than `MAX_BINS` — a picture, not a failure. Exported so a faceted
+ * until the extent takes fewer than `MAX_ALIGNED_BINS` — a picture, not a failure. Exported so a faceted
  * chart decides it once over the whole table, every panel then sharing one grid.
  */
 export function alignedWidth(width: number, lo: number, hi: number): number {
   let out = width
-  while ((hi - lo) / out >= MAX_BINS) out *= 2
+  while ((hi - lo) / out >= MAX_ALIGNED_BINS) out *= 2
   return out
 }
 
