@@ -793,6 +793,50 @@ supervoxel map is permanent and shared across runs and datasets, so a later run 
 for a row that did not move, and without the guard that row is silently rewritten. Pinned by a
 test that seeds the cache, after a mutation showed the obvious test could not see it.
 
+**A stale row it could not repair is counted, by reason.** No supervoxel, or one `roots_binary`
+answers `0` for: either way the row keeps its stale id, and the card used to go green regardless —
+a run repairing nine stale rows in ten looked exactly like one repairing all of them. Under a
+materialization the Dataset's drift check would count them eventually; a live run has nothing
+downstream to. So `ctx.warn` says it, in **rows** rather than distinct ids, a row being what
+somebody fixes in the base. A current row with no supervoxel needs nothing and is not counted.
+
+**Live is "as of the last run", and the card's ⟳ is the update.** `Update to: live` asks both
+calls about one instant taken at execution, rather than letting each take the server's "now" — a
+repair is two calls, and an edit landing between them repoints a row at a root already retired.
+That instant goes out through `ctx.reportFetched`, so the foot reads `cached 4m ago ⟳` and the
+button (Clear Cache, which this node already offers via `dataCache`) re-runs it at a new one and
+invalidates everything downstream. The instant is deliberately **not a param**: as a nonce it
+would make each update an edit, an undo step and a timestamp in the file somebody else opens —
+the cost `ctx.refresh` replaced `refreshParam` to avoid. Invariant 4 holds the way it holds for
+every `dataCache` node reading a mutable server: the result stands until ⟳ or an upstream edit.
+
+**The last full hour and the last half hour are live snapped back to a clock boundary**
+(`CLOCK_MODES`, one table read by the dropdown and by `rootsAt`, live's step being 1 ms — two lists
+of mode names was a mode offered without a step, which silently repaired to the Dataset's
+materialization), for a base whose ids are refreshed on that schedule — FlyTable's
+every thirty minutes — so the update lands on the state that base already describes. Snapped in
+epoch time, i.e. UTC: the same boundaries locally wherever the offset is a whole hour. The reported
+instant is the **boundary**, so the card's age is the age of the ids' state rather than of the run.
+The test runs at 12:47:13 and asserts both calls against 12:30 and 12:00, mutation-checked against a
+wrong step and against `ceil`.
+
+**Three lifetimes, one per `RootsAt` arm.** A materialization's answers go to IndexedDB forever. A
+live `instant` is kept by nobody. A `boundary` is held **for the session, newest only**
+(`recent`, one entry per store and segmentation, replaced when the boundary moves): it is a fixed
+past instant that every run until the next one asks about — an upstream edit then Run is the
+common case — but it is also a new instant 48 times a day, and `cache.ts` has no eviction, so
+IndexedDB is the one place it must not go. Which lifetime applies is decided once, in `askedAt`,
+and honoured only through `readKept`/`keep`. Both halves are mutation-checked: holding nothing
+re-asks inside the slot, and holding it in IndexedDB leaves an entry the test refuses.
+
+`Materialization` is `visibleIf` only under `a materialization`, which also takes it out of the key
+under the other three modes.
+
+**No warning when live ids feed a pinned Dataset**, by decision: they match *fewer* neurons there,
+every one edited since the materialization joining to nothing. It is said once, in the param's
+help and the node's help, and left to the person wiring it — live is for interactive work whose
+consumers read the live segmentation (Neuroglancer, meshes, skeletons) or for an export.
+
 Its Dataset input is a **reference** — see the reference-edges section — which is what lets it sit
 between an annotation source and the dataset it feeds. That wiring was a cycle until references
 existed, and it is the placement the node is for.

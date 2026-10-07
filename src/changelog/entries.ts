@@ -136,6 +136,14 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         },
       },
     ],
+    items: [
+      {
+        kind: 'node',
+        date: '2026-10-07',
+        title: '**Update root IDs** can bring IDs up to the live segmentation.',
+        body: 'Set **Update to** to `live` to get the newest root IDs rather than those at a materialization, or to `the last half hour` or `the last full hour` to match a table refreshed on that schedule, such as FlyTable’s. The card shows how old the IDs are; click that to update again. Live IDs will not all match a Dataset pinned to a materialization, so use them for Neuroglancer, meshes, skeletons or exports.',
+      },
+    ],
   },
   {
     date: '2026-10-04',

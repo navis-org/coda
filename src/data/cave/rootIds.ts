@@ -97,6 +97,7 @@ export function peekRootCheck(deployment: string, datasetId: string): RootCheck 
 /** Test seam, and what a Clear Cache on the dataset would reach. */
 export function resetRootChecks(): void {
   entries.clear()
+  recent.clear()
 }
 
 /**
@@ -170,7 +171,7 @@ async function run(
   // neurons on FlyTable's `main.info` — and checking one twice is a request nobody needed.
   const distinct = [...new Set(ids)].filter((id) => id !== '')
   const wanted = distinct.slice(0, MAX_ROOTS_CHECKED)
-  const { stale } = await judge(graphene, at, wanted, options)
+  const { stale } = await judge(graphene, { at, keep: 'forever' }, wanted, options)
 
   const bad = wanted.filter((id) => stale.has(id))
   return {
@@ -194,14 +195,17 @@ async function grapheneFor(
 /**
  * When a materialization was frozen, in epoch ms.
  *
- * Awaits the listing rather than peeking, which fills `versionFrozenAt` as a side effect — the
- * memo means this is free once any dataset node on the datastack has resolved.
+ * Read from memory first: a frozen instant never changes, and the listing's memo holds only the
+ * request in flight, so awaiting it each time is a fresh `/metadata` round trip per call — two
+ * per repair. Only a miss awaits the listing, which fills `versionFrozenAt` as a side effect.
  */
 async function frozenAt(
   datastack: string,
   version: number,
   options: CaveRequestOptions,
 ): Promise<number | undefined> {
+  const known = versionFrozenAt(options.deployment, datastack, version)
+  if (known !== undefined) return known
   await materializationsFor(datastack, options)
   return versionFrozenAt(options.deployment, datastack, version)
 }
@@ -218,14 +222,13 @@ async function frozenAt(
  */
 async function judge(
   graphene: GrapheneSource,
-  at: number,
+  asked: AskedAt,
   wanted: readonly string[],
   options: CaveRequestOptions,
 ): Promise<{ latest: Set<string>; stale: Set<string> }> {
+  const { at } = asked
   const key = `cave-roots:${graphene.server}|${graphene.table}|${at}`
-  const held = await cacheGet<{ latest: string[]; stale: string[] }>(key, {
-    fingerprint: `v${STORE_FORMAT}`,
-  })
+  const held = await readKept<{ latest: string[]; stale: string[] }>(key, asked)
   const latest = new Set(held?.latest ?? [])
   const stale = new Set(held?.stale ?? [])
 
@@ -239,14 +242,79 @@ async function judge(
       ;(answer[k] === false ? stale : latest).add(batch[k]!)
     }
   }
-  if (unknown.length > 0) {
-    void cacheSet(key, { latest: [...latest], stale: [...stale] }, `v${STORE_FORMAT}`)
-  }
+  if (unknown.length > 0) keep(key, { latest: [...latest], stale: [...stale] }, asked)
   return { latest, stale }
 }
 
 /**
- * Which of these root ids were **not** current when the materialization was frozen.
+ * The instant a repair asks the chunkedgraph about, in epoch ms, and how long its answers last.
+ *
+ * - `version`: a materialization's frozen instant. Its answers are good forever.
+ * - `boundary`: a past instant the caller expects to ask about again — every run until the next
+ *   one. Held for the session, newest only.
+ * - `instant`: a moment asked about once. Held by nobody.
+ *
+ * The caller picks the moment rather than each request taking the server's "now", because a repair
+ * is two calls — which ids moved, then where their supervoxels went — and both have to be about the
+ * same instant, or an edit landing between them leaves a row repointed at a root that was itself
+ * already retired.
+ */
+export type RootsAt = { version: number } | { boundary: number } | { instant: number }
+
+/**
+ * A resolved instant and where answers about it are kept.
+ *
+ * `forever` is the IndexedDB store. Nothing else may go there, because it has no eviction: a
+ * caller-picked moment is a new one every time, so a permanent entry per moment is a store that
+ * only grows. `session` is `recent`, which holds one moment per segmentation and lets the next
+ * replace it. Decided once, in `askedAt`, and honoured only through `readKept`/`keep`, so no cache
+ * user here can forget one half of it.
+ */
+interface AskedAt {
+  at: number
+  keep: 'forever' | 'session' | 'never'
+}
+
+/**
+ * Answers about the newest `boundary` asked, per store and segmentation — the key without its
+ * instant. A later boundary replaces the entry, so this never holds more than one per slot.
+ */
+const recent = new Map<string, { key: string; value: unknown }>()
+
+/** The key with its trailing instant removed: one slot per store and segmentation. */
+function slotOf(key: string): string {
+  return key.slice(0, key.lastIndexOf('|'))
+}
+
+async function askedAt(
+  datastack: string,
+  when: RootsAt,
+  options: CaveRequestOptions,
+): Promise<AskedAt | undefined> {
+  if ('instant' in when) return { at: when.instant, keep: 'never' }
+  if ('boundary' in when) return { at: when.boundary, keep: 'session' }
+  const frozen = await frozenAt(datastack, when.version, options)
+  return frozen === undefined ? undefined : { at: frozen, keep: 'forever' }
+}
+
+/** What is held about an instant, or nothing where its answers are not kept. */
+async function readKept<T>(key: string, asked: AskedAt): Promise<T | undefined> {
+  if (asked.keep === 'forever') return cacheGet<T>(key, { fingerprint: `v${STORE_FORMAT}` })
+  if (asked.keep === 'session') {
+    const held = recent.get(slotOf(key))
+    return held?.key === key ? (held.value as T) : undefined
+  }
+  return undefined
+}
+
+/** Hold answers about an instant, for as long as they are worth holding. */
+function keep(key: string, value: unknown, asked: AskedAt): void {
+  if (asked.keep === 'forever') void cacheSet(key, value, `v${STORE_FORMAT}`)
+  else if (asked.keep === 'session') recent.set(slotOf(key), { key, value })
+}
+
+/**
+ * Which of these root ids were **not** current at an instant.
  *
  * The same call and the same permanent cache the advisory uses, answering per id rather than as a
  * count — because the Update root IDs node needs to know *which* rows to repair, and asking twice
@@ -254,25 +322,26 @@ async function judge(
  */
 export async function staleRoots(
   datastack: string,
-  version: number,
+  when: RootsAt,
   ids: readonly string[],
   options: CaveRequestOptions,
 ): Promise<Set<string>> {
   const graphene = await grapheneFor(datastack, options)
-  const at = await frozenAt(datastack, version, options)
-  if (!graphene || at === undefined) return new Set()
-  const { stale } = await judge(graphene, at, [...new Set(ids)].filter(Boolean), options)
+  const asked = await askedAt(datastack, when, options)
+  if (!graphene || !asked) return new Set()
+  const { stale } = await judge(graphene, asked, [...new Set(ids)].filter(Boolean), options)
   return stale
 }
 
 /**
- * The root id each supervoxel belonged to at a materialization.
+ * The root id each supervoxel belonged to at an instant.
  *
  * `caveclient.chunkedgraph.get_roots`, which is `roots_binary` — raw `uint64` in and out, so a
  * root id crosses exactly with nothing parsed or rounded (invariant 8, for once made easy).
  *
- * **Cached permanently, like the staleness check beside it and for the same reason**: which
- * segment a supervoxel belonged to at a *past* instant never changes. A supervoxel is the atom of
+ * **Cached permanently at a materialization, like the staleness check beside it and for the same
+ * reason**: which segment a supervoxel belonged to at a *past* instant never changes. Any other
+ * moment is held for as long as `RootsAt` says, and no longer. A supervoxel is the atom of
  * the segmentation — proofreading regroups them, it does not split them — so this is the stable
  * handle a root id is not, which is the whole reason a repair is possible at all.
  *
@@ -282,20 +351,19 @@ export async function staleRoots(
  */
 export async function rootsForSupervoxels(
   datastack: string,
-  version: number,
+  when: RootsAt,
   supervoxels: readonly string[],
   options: CaveRequestOptions,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   const graphene = await grapheneFor(datastack, options)
-  const at = await frozenAt(datastack, version, options)
-  if (!graphene || at === undefined) return out
+  const asked = await askedAt(datastack, when, options)
+  if (!graphene || !asked) return out
+  const { at } = asked
 
   const wanted = [...new Set(supervoxels)].filter(Boolean)
   const key = `cave-sv-roots:${graphene.server}|${graphene.table}|${at}`
-  const held = await cacheGet<{ sv: string[]; root: string[] }>(key, {
-    fingerprint: `v${STORE_FORMAT}`,
-  })
+  const held = await readKept<{ sv: string[]; root: string[] }>(key, asked)
   for (let i = 0; i < (held?.sv.length ?? 0); i++) out.set(held!.sv[i]!, held!.root[i]!)
 
   const unknown = wanted.filter((id) => !out.has(id))
@@ -310,9 +378,7 @@ export async function rootsForSupervoxels(
       if (root !== undefined && root !== 0n) out.set(batch[k]!, String(root))
     }
   }
-  if (unknown.length > 0) {
-    void cacheSet(key, { sv: [...out.keys()], root: [...out.values()] }, `v${STORE_FORMAT}`)
-  }
+  if (unknown.length > 0) keep(key, { sv: [...out.keys()], root: [...out.values()] }, asked)
   return out
 }
 
