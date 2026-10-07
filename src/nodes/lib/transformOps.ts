@@ -485,48 +485,6 @@ export function frameClash(
 }
 
 /**
- * Refuse coordinates that are not nanometres, naming the side.
- *
- * A refusal rather than a warning, and that is forced rather than chosen: there is no run-time
- * warning channel that survives a result being restored from cache instead of recomputed. Given
- * the choice between silence and a stop, a comparison whose every number would be wrong should
- * stop.
- *
- * **Absent units are allowed through.** Absent means unknown, and no source produces it today —
- * every geometry value from either source says `nm` or `voxels`. Refusing on it would refuse on a
- * fact nobody stated, which is the same distinction `columnSchemaFor` draws between a schema that
- * is missing and one that is empty.
- *
- * Here rather than in `nblastOps.ts`, where it began, for `frameClashMessage`'s reason one line
- * down: three nodes refuse on this and nothing about the diagnosis is NBLAST's. What each of them
- * supplies is `consequence` — the one clause that genuinely differs, which for NBLAST is a
- * mis-scaled score and for `Distance between` is a number labelled µm that is out by a voxel.
- *
- * Every parameter is **required**, which is the one thing about this signature worth arguing
- * about. The type is structural — any geometry value satisfies it — so a defaulted noun means a
- * caller that forgets these strings gets a grammatically perfect error about *skeletons* when it
- * holds a set of meshes: silently wrong prose, in the one guard rail whose entire job is to name
- * the cause. Required, that caller fails to compile instead.
- */
-export function checkGeometryUnits(
-  side: string,
-  geometry: { units?: string },
-  /** What to call the geometry, and which node's footer to point at. */
-  noun: string,
-  sourceNode: string,
-  /** What goes wrong here, as a whole sentence. */
-  consequence: string,
-): void {
-  if (geometry.units === undefined || geometry.units === 'nm') return
-  throw new Error(
-    `${side} ${noun} are in ${geometry.units}. They must be in nanometres, or ${consequence} ` +
-      `This happens when the dataset's Meta has no voxelSize, or has a unit Coda does not ` +
-      `recognise, so there was nothing to convert with. The ${sourceNode} node's footer shows ` +
-      `which units it received.`,
-  )
-}
-
-/**
  * What to say about one, in the caller's own terms.
  *
  * `names` are what the two sides are called *on this card* — `Input 1` and `Input 4` for a stack,
@@ -567,7 +525,7 @@ export function frameClashMessage(
  * that one.
  *
  * So the remedy is here rather than in each caller's sentence, which is the same move
- * `checkGeometryUnits` made one function up: what genuinely differs per card is the
+ * `checkGeometryUnits` (`data/units.ts`) made one function up: what genuinely differs per card is the
  * *consequence*, and what does not is what to do about it.
  */
 export function spaceRemedy(clash: FrameClash): string {

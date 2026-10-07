@@ -5,7 +5,9 @@ import type { GraphNode } from '../../core/graph'
 import type { InferContext, ParamValue, ParamValues } from '../../core/node'
 import { enumValue } from '../../core/node'
 import { filledParams, getNodeDef } from '../../core/registry'
-import { datasetRef, schemaOf } from '../../core/types'
+import { ID_COLUMN_NAME } from '../../core/ids'
+import { datasetRef, findColumn, schemaOf } from '../../core/types'
+import { idColumn } from '../../nodes/lib/tableOps'
 import type { Value } from '../../core/values'
 import type { PartnerGrouping } from '../../nodes/lib/profileStats'
 import {
@@ -53,6 +55,8 @@ import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
 import type { RoiView } from './roiProjection'
 import { ProfileViewer } from './ProfileViewer'
 import { TopologyViewer } from './TopologyViewer'
+import type { ArborSettings } from './NeuronDendrogramViewer'
+import { NeuronDendrogramViewer } from './NeuronDendrogramViewer'
 import { NeuronBridgeViewer } from './NeuronBridgeViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { scopedKey, WorkflowScope } from './workflowScope'
@@ -794,6 +798,75 @@ const VIEWERS: Record<string, ViewerEntry> = {
           onSkeletonColor={(hex) => onParamChange?.('skeletonColor', hex)}
           onVisual={(id, next) => onParamChange?.(id, next)}
           viewerId={viewerKey}
+          {...shared}
+        />
+      )
+    },
+  },
+  'out.neuronDendrogram': {
+    readsInputs: true,
+    render: ({ node, ctx, params, choice, shared, inputValues, onParamChange, selection }) => {
+      // Drawn from the *input*, like Profile and Topology: the node's `out` port is a pass-through.
+      const neurons = inputValues?.neurons
+      const dataset = isDatasetValue(inputValues?.dataset) ? inputValues.dataset : undefined
+      const partnerTable = inputValues?.partners
+      const settings: ArborSettings = {
+        layout: choice('layout'),
+        metric: choice('metric'),
+        rm: Number(params.rm),
+        ri: Number(params.ri),
+        root: choice('root'),
+        rootNode: Number(params.rootNode),
+        order: choice('order'),
+        minTwig: Number(params.minTwig),
+        angleChange: Number(params.angleChange),
+        angleDecrease: Number(params.angleDecrease),
+        daylight: Number(params.daylight),
+        colorBy: String(params.colorBy),
+        branchColor: choice('branchColor'),
+        branchPalette: String(params.branchPalette),
+        widthBy: choice('widthBy'),
+        lineWidth: Number(params.lineWidth),
+        synapseSize: Number(params.synapseSize),
+        unlitOpacity: Number(params.unlitOpacity),
+        partnersChosen: params.partnersChosen === true,
+        grouping: choice<PartnerGrouping>('grouping'),
+        direction: choice('direction'),
+        partnerQuery: String(params.partnerQuery),
+        focus: String(params.focus),
+        tab: choice('tab'),
+        railOpen: params.railOpen !== false,
+      }
+      /*
+       * The param's own options, resolved here where the inference context is: one vocabulary for
+       * the card's control and the inspector's, rather than a second list read off the cloud.
+       */
+      const colorParam = getNodeDef(node.type)?.params?.find((p) => p.id === 'colorBy')
+      const colorOptions =
+        colorParam?.kind === 'enum'
+          ? typeof colorParam.options === 'function'
+            ? colorParam.options(ctx)
+            : colorParam.options
+          : []
+      return (
+        <NeuronDendrogramViewer
+          colorOptions={colorOptions}
+          neurons={isTableValue(neurons) ? neurons : undefined}
+          // A table without `neuronId` lights nothing; `validate` says why.
+          {...(isTableValue(partnerTable) && findColumn(partnerTable.schema, ID_COLUMN_NAME)
+            ? { partnerIds: idColumn(partnerTable) }
+            : {})}
+          sourceId={dataset?.sourceId}
+          datasetId={dataset?.datasetId}
+          annotations={dataset?.annotations}
+          edges={dataset?.edges}
+          page={Number(params.page)}
+          onPage={(next) => onParamChange?.('page', next)}
+          pinned={selection}
+          onPin={(ids) => onParamChange?.('selection', ids)}
+          partners={idList(params.partners)}
+          settings={settings}
+          onSetting={(id, value) => onParamChange?.(id, value)}
           {...shared}
         />
       )

@@ -33,7 +33,8 @@ import type { PointsValue, TableValue } from '../../core/values'
 import { getColumn, isPointsValue } from '../../core/values'
 import type { Value } from '../../core/values'
 import type { SynapseSet } from '../../pyodide/nblast'
-import { NM_PER_UM, checkNblastSize, checkNblastSpaces, checkNblastUnits } from './nblastOps'
+import { checkNblastSize, checkNblastSpaces, checkNblastUnits } from './nblastOps'
+import { NM_PER_UM } from '../../data/units'
 
 /** What a point with no `neuronId` is grouped under, and called. */
 export const UNIDENTIFIED = '(no id)'

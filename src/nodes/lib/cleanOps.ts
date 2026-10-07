@@ -48,7 +48,7 @@ import type {
   CleanSkeletonsResult,
   ThinMethod,
 } from '../../pyodide/skeletons'
-import { NM_PER_UM } from './nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import { packPositions, packSkeletons } from './skeletonPacking'
 import { geometryPointCount } from './transformOps'
 
@@ -83,6 +83,22 @@ export interface SkeletonCleanParams {
   method: ThinMethod
   spacing: number
   factor: number
+}
+
+/**
+ * Join a fragmented skeleton and do nothing else: no distance cap, no smoothing, no thinning.
+ *
+ * What the Neuron Dendrogram heals with, named here beside the card's own reader so that a step
+ * added to Clean Skeletons is a field this has to state rather than a default it silently inherits.
+ * Healing keeps node numbering (`skeletons.py`), which is what lets that card find the joins.
+ */
+export const HEAL_ONLY: SkeletonCleanParams = {
+  heal: true,
+  healMaxDist: 0,
+  smooth: 0,
+  method: 'none',
+  spacing: 0,
+  factor: 1,
 }
 
 /**

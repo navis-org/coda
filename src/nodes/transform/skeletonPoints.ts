@@ -13,7 +13,7 @@ import { registerNode } from '../../core/registry'
 import { sliced } from '../../core/slice'
 import { T } from '../../core/types'
 import { isSkeletonsValue } from '../../core/values'
-import { NM_PER_UM } from '../lib/nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import type { Placement } from '../lib/skeletonPoints'
 import {
   checkPointsSize,
@@ -21,7 +21,7 @@ import {
   skeletonPointsSchema,
   skeletonPointsValue,
 } from '../lib/skeletonPoints'
-import { checkGeometryUnits } from '../lib/transformOps'
+import { checkGeometryUnits } from '../../data/units'
 
 registerNode({
   type: 'neuron.skeletonPoints',

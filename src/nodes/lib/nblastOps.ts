@@ -33,18 +33,10 @@ import {
 } from '../../core/values'
 import type { Value } from '../../core/values'
 import { warnSideCount } from './limitParams'
-import { checkGeometryUnits, spaceRemedy } from './transformOps'
+import { NM_PER_UM } from '../../data/units'
+import { spaceRemedy } from './transformOps'
+import { checkGeometryUnits } from '../../data/units'
 import type { NblastKnnResult, NblastResult, PointSet } from '../../pyodide/nblast'
-
-/**
- * Coda's skeletons are nanometres; NBLAST's scoring matrix is micrometres.
- *
- * This is the one number in the feature that produces a confident wrong answer rather than an
- * error. The FCWB matrix fastcore embeds runs out at a 40 um distance bin, and past it every
- * cell is about -10 — so a set of neurons handed over in nanometres scores as if no two of them
- * had ever been near each other, uniformly, with nothing anywhere to say why. See `nblast.py`.
- */
-export const NM_PER_UM = 1000
 
 /**
  * Pairs a second, measured on this wheel: single-threaded in wasm at a thousand points a

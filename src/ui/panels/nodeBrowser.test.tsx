@@ -245,6 +245,7 @@ describe('NodeBrowser filtering', () => {
       'Network Metrics',
       'Network Viewer',
       'Neuroglancer',
+      'Neuron Dendrogram',
       'Neuron Profile',
       'Neuron Topology',
       'NeuronBridge',
@@ -255,7 +256,7 @@ describe('NodeBrowser filtering', () => {
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('22 nodes')).toBeTruthy()
+    expect(screen.getByText('23 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

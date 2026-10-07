@@ -57,7 +57,7 @@ import {
   skeletonsFromResult,
   usesDistance,
 } from '../lib/cleanOps'
-import { NM_PER_UM } from '../lib/nblastOps'
+import { NM_PER_UM } from '../../data/units'
 
 registerNode({
   type: 'neuron.cleanSkeletons',

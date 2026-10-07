@@ -31,12 +31,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { idText } from '../../core/ids'
 import type { DatasetAnnotations, DatasetEdges, TableValue } from '../../core/values'
-import { column, tableSchema } from '../../core/types'
-import { getRow, makeTable } from '../../core/values'
+import { getRow } from '../../core/values'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
-import { parseLabelFilter } from '../../nodes/lib/matrixShape'
 import type { PartnerGrouping } from '../../nodes/lib/profileStats'
-import { partnerTypes } from '../../nodes/lib/profileStats'
 import {
   CODE_AXON,
   CODE_DENDRITE,
@@ -45,23 +42,17 @@ import {
   sitesFrom,
   strahlerOrders,
 } from '../../nodes/lib/topologyOps'
-import { CHART_INK, currentMode, cycleColor, seriesColor, sequentialColor } from '../colors'
-import { formatMeasure, formatNumber, plural } from '../format'
+import { CHART_INK, currentMode, seriesColor, sequentialColor } from '../colors'
+import { formatMeasure, formatNumber } from '../format'
 import { LazyViewer3D } from './LazyViewers'
 import { Bars, Facts, Tile } from './Tiles'
 import { useCompartments } from './useCompartments'
 import { useStable } from './useStable'
 import { hasNeuronMeshes, useNeuronMesh } from './useNeuronMesh'
 import { useNeuronTopology } from './useNeuronTopology'
-import {
-  HIGHLIGHT_COLUMN,
-  HIGHLIGHT_OTHER,
-  highlightColumn,
-  namesPartners,
-  partnerLabel,
-  partnerLabelColumn,
-} from './synapseHighlight'
-import { hasSynapseLinks, useSynapseLinks } from './useSynapseLinks'
+import { HIGHLIGHT_COLUMN, HIGHLIGHT_OTHER } from './synapseHighlight'
+import { usePartnerHighlight } from './usePartnerHighlight'
+import { PartnerPanel, RailTabs, TopoBar } from './topoChrome'
 import { ViewerEmpty } from './ViewerEmpty'
 
 export interface TopologyViewerProps {
@@ -135,15 +126,6 @@ const TABS = [
  * highlight lights up on some sources and not others, and the card has to say which rather than
  * looking broken.
  */
-/**
- * How many partner rows are drawn at once.
- *
- * A cap on the *drawing*, not on the search — everything is still reachable by typing. Fifty is
- * about three screens of the rail, and past it the list stops being scannable long before the DOM
- * stops coping.
- */
-const PARTNER_ROWS = 50
-
 /**
  * The empty selection, hoisted.
  *
@@ -404,210 +386,36 @@ export function TopologyViewer(props: TopologyViewerProps) {
     [colorBy, labels, palette, orders, mode, maxOrder],
   )
 
-  /**
-   * Which partner names this dataset can actually place on the arbour.
-   *
-   * Read off the fetched cloud rather than assumed from the source id: what matters is whether
-   * *these* points carry a partner column, which is a fact about the value in hand.
-   */
   /*
-   * Two clouds, and which one is which matters more than it looks.
-   *
-   * `data.synapses` is the *site* cloud — one row per synapse, de-duplicated — and it is what
-   * every measurement reads: the morphometrics, and the flow centrality behind the split. The
-   * link cloud below repeats a presynaptic site once per partner it drives (6.8x on male-CNS body
-   * 10003), which is exactly right for saying *where a partner connects* and exactly wrong for
-   * counting anything.
-   *
-   * neuPrint needs the second query because it drops the partner columns; every other source
-   * carries them on the site cloud already, so `linksWanted` stays false there and no second
-   * fetch happens at all.
+   * The partner list and what it lights: `usePartnerHighlight`, shared with the Neuron Dendrogram.
+   * Gated on the list being open, the file's own idiom — see the hook.
    */
-  // Either column will do: a type is read directly, an id is joined against the connectivity
-  // table. What matters here is only whether the *second query* is needed, and neuPrint — the one
-  // source that has it — publishes neither.
-  const sitesNamePartners = useMemo(() => {
-    const schema = data?.synapses?.attributes.schema
-    return schema ? namesPartners(schema) : false
-  }, [data])
-  const linksWanted =
-    partners.length > 0 && !sitesNamePartners && hasSynapseLinks(sourceId, datasetId)
-  const links = useSynapseLinks(
+  const {
+    cloud,
+    links,
+    canHighlight,
+    partnerRows,
+    partnerNeuronCount,
+    partnerFilter,
+    shownPartners,
+    highlighted,
+    partnerOverrides,
+    colorForPartner,
+    togglePartner,
+  } = usePartnerHighlight({
+    data,
     sourceId,
     datasetId,
-    neuronId ?? undefined,
-    linksWanted,
+    neuronId: neuronId ?? undefined,
     annotations,
-  )
-
-  /** The cloud the *scene* draws. Never the one anything measures. */
-  const cloud = links.status === 'ready' ? links.points : data?.synapses
-
-  /**
-   * The partner type of every neuron this cloud could name, keyed by id.
-   *
-   * Built only when the cloud names partners by id and not by type, which today is CAVE and only
-   * CAVE. The connectivity tables are already in hand — `useNeuronTopology` fetches both
-   * directions beside the geometry — and their `partnerType` came through `typeLookup`, which
-   * reads the annotations wired to the dataset node. So the join is free, and it is what carries
-   * a FlyTable sheet's cell types onto a synapse cloud that has never heard of them.
-   *
-   * Both directions, merged: a type is a property of the partner neuron rather than of the
-   * direction it was found in, and a partner can appear in both tables. `polarityFor` in
-   * `synapseHighlight` is what keeps the *sides* apart.
-   */
-  /**
-   * A label per cloud row, in the partner list's vocabulary.
-   *
-   * `partnerLabelColumn` is headless and tested as such — the arithmetic is fifty lines and this
-   * component mounts a WebGL canvas, so a rule that can only be read through a jsdom render is a
-   * rule nothing checks.
-   *
-   * Gated on something being lit, which is the file's own idiom (`sites` on `wantsSplit`,
-   * `orders` on `colorBy`, `partnerRows` on the tab). The join walks both connectivity tables and
-   * allocates one entry per cloud row — on body 10003 that is a 57,034-element array over a
-   * 30,000-row table — and the only consumer is `highlighted`, which returns early with nothing
-   * selected. `canHighlight` deliberately does *not* read this: it is a question about the schema
-   * and must not cost an array to answer.
-   */
-  const partnerColumn = useMemo(
-    () =>
-      cloud && partners.length > 0
-        ? partnerLabelColumn(cloud.attributes, [data?.inputs, data?.outputs], grouping)
-        : undefined,
-    [cloud, data, grouping, partners],
-  )
-  /*
-   * Asked of the *source*, not only of the cloud in hand. On neuPrint the site cloud never names
-   * a partner, so a check on the value alone would report "this dataset cannot" on exactly the
-   * dataset where the second query can - and the list would say so before anyone had clicked the
-   * thing that would fetch it.
-   */
-  const canHighlight =
-    (cloud !== undefined && namesPartners(cloud.attributes.schema)) ||
-    hasSynapseLinks(sourceId, datasetId)
-
-  /*
-   * **Every** partner, not the top forty.
-   *
-   * The cap used to be applied here, which made the list a leaderboard rather than an index: a
-   * partner outside the top forty could not be reached at all, and on body 10003 that is 14,983
-   * of them. `topN` absent keeps the whole sorted list; the cap now belongs to what is *drawn*,
-   * after the filter has had its say, so searching can reach anything.
-   */
-  const partnerRows = useMemo(() => {
-    /*
-     * Gated on the tab, `sites` and `orders`' rule. This walks the whole connectivity table
-     * building a bucket and a `Set` per type — on body 10003's outgoing table that is ~30,000
-     * rows and 14,983 partner ids — and its only readers are `partnerNeuronCount` and
-     * `shownPartners`, both of which feed `PartnerList` alone. So with the rail folded away or
-     * another tab up it was allocating all of that per page turn to be thrown away. Lighting a
-     * partner does *not* need it: the highlight reads `partnerColumn` off the cloud.
-     */
-    if (!railOpen || tab !== 'partners') return []
-    const table = direction === 'inputs' ? data?.inputs : data?.outputs
-    return partnerTypes(table, { minWeight: 1, grouping })
-  }, [data, direction, railOpen, tab, grouping])
-
-  /*
-   * Summed off the rolled-up types rather than by building the per-neuron list. Each partner
-   * neuron belongs to exactly one type bucket, so the sum is the count — and `topPartners` over
-   * fifteen thousand partners would allocate that array to read `.length` off it.
-   */
-  const partnerNeuronCount = useMemo(
-    () => partnerRows.reduce((sum, row) => sum + row.partners, 0),
-    [partnerRows],
-  )
-
-  const partnerFilter = useMemo(() => parseLabelFilter(partnerQuery), [partnerQuery])
-
-  /**
-   * The rows the list draws: the filter's matches, capped, with anything lit kept visible.
-   *
-   * A selected partner survives a filter that excludes it, because it is the only control that
-   * can *un*-select it — a search that hid the thing you had just lit would leave the picture
-   * with no way back except clearing the box.
-   */
-  const shownPartners = useMemo(() => {
-    const test = partnerFilter.filter
-    const selected = new Set(partners)
-    /*
-     * The filter reads the cell type too, which a row carries only once it is keyed by an id. Typing
-     * `Tm3` with one row per neuron would otherwise match nothing at all — every label is
-     * eighteen digits — and the reader has no way to know the type is still there.
-     */
-    const matched = test
-      ? partnerRows.filter((row) => {
-          // Once per row, not twice: ungrouped this runs over ~15,000 rows per keystroke.
-          const label = partnerLabel(row.type)
-          return (
-            selected.has(label) ||
-            test.test(label) ||
-            (row.partnerType !== undefined && test.test(row.partnerType))
-          )
-        })
-      : partnerRows
-    return { rows: matched.slice(0, PARTNER_ROWS), matched: matched.length }
-  }, [partnerRows, partnerFilter, partners])
-
-  /**
-   * The cloud with a column of *our* vocabulary written onto it, and the count that is lit.
-   *
-   * This replaces overriding a colour for every value the partner column happened to hold. That
-   * version keyed nulls as `''` where `resolveColor` keys them `'—'`, so every synapse whose
-   * partner has no cell type missed its override and kept a bright palette colour — 13,621 of
-   * male-cns body 10003's 57,034 rows, lit on every render and identical whatever was selected,
-   * against the 38 the partner actually picked has. See `synapseHighlight.ts`, which is where
-   * that rule now lives with tests on it.
-   */
-  const highlighted = useMemo(() => {
-    if (!cloud || !partnerColumn || partners.length === 0) return undefined
-    const { values, lit } = highlightColumn(cloud.attributes, partnerColumn, {
-      partners,
-      direction,
-    })
-    const schema = tableSchema(
-      ...cloud.attributes.schema.columns,
-      column(HIGHLIGHT_COLUMN, 'str'),
-    )
-    const attributes = makeTable(schema, {
-      ...cloud.attributes.data,
-      [HIGHLIGHT_COLUMN]: values,
-    })
-    // `values` rides along so the emphasis predicate reads the labels that were actually
-    // written, rather than recomputing the match and risking a second answer.
-    return { points: { ...cloud, attributes }, lit, values }
-  }, [cloud, partnerColumn, partners, direction])
-
-  /**
-   * The colour every lit partner is drawn in — **one map, two readers**.
-   *
-   * The rail's swatch and the 3D dot have to be the same colour or the highlight says nothing,
-   * and `resolveColor` ranks categories by frequency, so the slot a partner would get on its own
-   * is not the slot it has in this list. Pinning them through `ColorSpec.overrides` is the
-   * mechanism the encoding layer provides for exactly that.
-   *
-   * The map is now small and closed — one entry per selected partner plus `other` — because the
-   * column it keys is one this component wrote. Nothing here depends on how the *data's* values
-   * are spelled, which is the property that was missing.
-   */
-  const partnerOverrides = useMemo(() => {
-    if (!highlighted) return undefined
-    const overrides: Record<string, string> = { [HIGHLIGHT_OTHER]: CHART_INK[mode].muted }
-    partners.forEach((name, i) => {
-      overrides[name] = cycleColor(i, mode)
-    })
-    return overrides
-  }, [highlighted, partners, mode])
-
-  /** A selected partner's colour, for the rail's swatch. Same map, same order. */
-  const colorForPartner = useCallback(
-    (name: string): string | undefined => {
-      const at = partners.indexOf(name)
-      return at < 0 ? undefined : cycleColor(at, mode)
-    },
-    [partners, mode],
-  )
+    partners,
+    onPartners,
+    grouping,
+    direction,
+    partnerQuery,
+    listing: railOpen && tab === 'partners',
+    mode,
+  })
 
   /*
    * Colour the cloud by partner while any are lit, and by polarity otherwise. `overrides` carries
@@ -639,16 +447,6 @@ export function TopologyViewer(props: TopologyViewerProps) {
     [partnerOverrides, mode],
   )
 
-  const togglePartner = useCallback(
-    (name: string) => {
-      const next = partners.includes(name)
-        ? partners.filter((p) => p !== name)
-        : [...partners, name]
-      onPartners(next)
-    },
-    [partners, onPartners],
-  )
-
   if (!neurons) {
     return <ViewerEmpty>Connect a table of neurons to measure them.</ViewerEmpty>
   }
@@ -656,57 +454,21 @@ export function TopologyViewer(props: TopologyViewerProps) {
     return <ViewerEmpty>No neurons in the incoming table.</ViewerEmpty>
   }
 
-  const isPinned = neuronId !== null && pinned.includes(neuronId)
   const name = String(row?.['type'] ?? row?.['instance'] ?? neuronId ?? '—')
 
   return (
     <div className="viewer topo nodrag" data-rail={railOpen ? 'open' : 'closed'}>
-      <div className="topo__bar">
-        <button
-          type="button"
-          className="topo__page"
-          aria-label="Previous neuron"
-          disabled={index <= 0}
-          onClick={() => onPage(index - 1)}
-        >
-          ‹
-        </button>
-        <span className="topo__count">
-          {index + 1} / {total}
-        </span>
-        <button
-          type="button"
-          className="topo__page"
-          aria-label="Next neuron"
-          disabled={index >= total - 1}
-          onClick={() => onPage(index + 1)}
-        >
-          ›
-        </button>
-        <span className="topo__name" title={name}>
-          {name}
-        </span>
-        {neuronId && <code className="topo__id">{neuronId}</code>}
-        <span className="topo__spacer" />
-        <button
-          type="button"
-          className="topo__pin"
-          aria-pressed={isPinned}
-          title="Emit this neuron from the Current port"
-          onClick={() => onPin(isPinned ? [] : neuronId ? [neuronId] : [])}
-        >
-          {isPinned ? 'Pinned' : 'Pin'}
-        </button>
-        <button
-          type="button"
-          className="topo__pin"
-          aria-pressed={railOpen}
-          title={railOpen ? 'Hide the data rail' : 'Show the data rail'}
-          onClick={() => onRailOpen(!railOpen)}
-        >
-          Data
-        </button>
-      </div>
+      <TopoBar
+        index={index}
+        total={total}
+        onPage={onPage}
+        name={name}
+        neuronId={neuronId}
+        pinned={pinned}
+        onPin={onPin}
+        railOpen={railOpen}
+        onRailOpen={onRailOpen}
+      />
 
       <div className="topo__stage">
         <div className="topo__scene">
@@ -837,77 +599,19 @@ export function TopologyViewer(props: TopologyViewerProps) {
 
         {railOpen && (
           <aside className="topo__rail">
-            <nav className="topo__tabs" role="tablist">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === t.id}
-                  onClick={() => onTab(t.id)}
-                >
-                  {t.label}
-                </button>
-              ))}
-              <span className="topo__spacer" />
-              <button
-                type="button"
-                className="topo__close"
-                aria-label="Hide the data rail"
-                onClick={() => onRailOpen(false)}
-              >
-                ×
-              </button>
-            </nav>
+            <RailTabs tabs={TABS} tab={tab} onTab={onTab} onClose={() => onRailOpen(false)} />
 
             {tab === 'partners' && (
-              <div className="topo__panel">
-                <div className="topo__seg">
-                  <button
-                    type="button"
-                    aria-pressed={direction === 'inputs'}
-                    onClick={() => onDirection('inputs')}
-                  >
-                    Inputs
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={direction === 'outputs'}
-                    onClick={() => onDirection('outputs')}
-                  >
-                    Outputs
-                  </button>
-                  <input
-                    className="topo__search"
-                    type="search"
-                    value={partnerQuery}
-                    placeholder="Filter partners…"
-                    aria-label="Filter partners"
-                    onChange={(e) => onPartnerQuery(e.target.value)}
-                  />
-                </div>
-                {/*
-                 * A select and not two checkboxes, for the reason `PartnerGrouping` records:
-                 * "split the untyped" and "don't group" have a fourth state between them that
-                 * means nothing. Its own row rather than beside the direction toggle — the rail
-                 * is 216px at its narrowest and that row already carries a segmented control and
-                 * a search box.
-                 */}
-                <div className="topo__seg topo__seg--group">
-                  <select
-                    className="topo__select"
-                    aria-label="Group partners by"
-                    value={grouping}
-                    onChange={(e) => onGrouping(e.target.value as PartnerGrouping)}
-                  >
-                    <option value="type">Group: cell type</option>
-                    <option value="typed">Group: cell type, untyped apart</option>
-                    <option value="neuron">Group: none, one row per neuron</option>
-                  </select>
-                </div>
-                <PartnerList
-                  rows={shownPartners.rows}
-                  note={{
+              <PartnerPanel
+                direction={direction}
+                onDirection={onDirection}
+                query={partnerQuery}
+                onQuery={onPartnerQuery}
+                grouping={grouping}
+                onGrouping={onGrouping}
+                list={{
+                  rows: shownPartners.rows,
+                  note: {
                     canHighlight,
                     linksState: links.status,
                     selected: partners,
@@ -916,13 +620,13 @@ export function TopologyViewer(props: TopologyViewerProps) {
                     matched: shownPartners.matched,
                     total: partnerRows.length,
                     neuronCount: partnerNeuronCount,
-                  }}
-                  onToggle={togglePartner}
-                  colorFor={colorForPartner}
-                  loading={loaded.status === 'loading'}
-                  {...(partnerFilter.error ? { filterError: partnerFilter.error } : {})}
-                />
-              </div>
+                  },
+                  onToggle: togglePartner,
+                  colorFor: colorForPartner,
+                  loading: loaded.status === 'loading',
+                  ...(partnerFilter.error ? { filterError: partnerFilter.error } : {}),
+                }}
+              />
             )}
 
             {tab === 'morphology' && (
@@ -1195,160 +899,6 @@ function Slider<Id extends string>({
       />
       <span className="topo__slider-value">{format ? format(shown) : shown}</span>
     </label>
-  )
-}
-
-/**
- * What the line under the partner list says.
- *
- * A function with five early returns rather than the nested ternary this was, which had to be
- * read backwards through four negations to find its default case — and which could not be tested
- * without mounting the 3D stage.
- */
-interface PartnerNote {
-  canHighlight: boolean
-  linksState: 'idle' | 'loading' | 'ready' | 'error'
-  selected: readonly string[]
-  lit: number | undefined
-  filtered: boolean
-  matched: number
-  total: number
-  neuronCount: number
-}
-
-export function partnerNote(n: PartnerNote): string {
-  if (!n.canHighlight) {
-    /*
-     * Narrowed, because this used to be said about CAVE — whose synapse rows carry a partner
-     * *id* and no type. The card looked for one column, found nothing, and reported it as a fact
-     * about the dataset. Today it is true of CATMAID alone, whose synapse schema declines
-     * `partnerId` on purpose: naming the far end of a connector is a second POST per connector
-     * set, which a cloud drawn in 3D does not need.
-     */
-    return (
-      'This dataset’s synapses carry no partner on the far side of the cleft, so picking one ' +
-      'cannot light it up on the arbour.'
-    )
-  }
-  if (n.linksState === 'loading') {
-    return (
-      'Finding where these partners connect… on neuPrint that is a second query, and on a big ' +
-      'cell it returns tens of thousands of connections.'
-    )
-  }
-  if (n.linksState === 'error')
-    return 'Could not load partner-resolved synapses for this neuron.'
-  if (n.selected.length > 0) {
-    // `plural` rather than a `?? 's'`: `lit` reaches five figures on a dense cell, and it carries
-    // the thousands separator this was printing without.
-    return (
-      `${plural(n.lit ?? 0, 'synapse')} lit — ${n.selected.join(', ')}. Every other synapse ` +
-      'stays grey, so you can see where these sit among the rest.'
-    )
-  }
-  // With a filter up, the unfiltered totals describe a list nobody is looking at.
-  if (n.filtered) return `${n.matched} of ${n.total} partner types match.`
-  return (
-    `${n.neuronCount} partner neurons across ${n.total} types. Type to filter; a plain word ` +
-    'matches anywhere, /^LC is a pattern, !Tm excludes.'
-  )
-}
-
-function PartnerList({
-  rows,
-  note,
-  onToggle,
-  colorFor,
-  loading,
-  filterError,
-}: {
-  /** Already filtered and capped — see `PARTNER_ROWS`. */
-  rows: ReturnType<typeof partnerTypes>
-  /**
-   * Everything the line under the list says, as one value.
-   *
-   * Eight of these were separate props, and each was spelled four times over — in the prop type,
-   * in the destructure, in the object literal that put them straight back together, and at the
-   * call site. `partnerNote` already takes exactly this shape and is where every one of them is
-   * documented; passing it whole means a ninth thing to say costs one field rather than four
-   * edits, and nothing in this component reads any of them individually.
-   */
-  note: PartnerNote
-  onToggle: (name: string) => void
-  /** The colour this partner is drawn in on the arbour, or undefined when it is not lit. */
-  colorFor: (name: string) => string | undefined
-  loading: boolean
-  /** Why the typed pattern will not compile. The list is left whole and this is said. */
-  filterError?: string
-}) {
-  if (rows.length === 0) {
-    return (
-      <p className="topo__pending">
-        {loading
-          ? 'Loading partners…'
-          : note.total === 0
-            ? 'No partners in this direction.'
-            : 'No partner matches that filter.'}
-      </p>
-    )
-  }
-  const max = Math.max(...rows.map((r) => r.synapses), 1)
-  return (
-    <>
-      <ul className="topo__partners">
-        {rows.map((row) => {
-          const name = partnerLabel(row.type)
-          const color = colorFor(name)
-          return (
-            <li key={name}>
-              <button
-                type="button"
-                className="topo__partner"
-                data-on={color ? true : undefined}
-                // Both, because the name alone is an id once the list is ungrouped and the type
-                // is the half a reader recognises.
-                title={row.partnerType ? `${row.partnerType} · ${name}` : name}
-                onClick={() => onToggle(name)}
-              >
-                <i style={{ background: color ?? 'transparent' }} />
-                <span className="topo__partner-name">
-                  {name}
-                  {row.partnerType && <em className="topo__partner-sub">{row.partnerType}</em>}
-                </span>
-                <span className="topo__partner-track">
-                  <span
-                    style={{
-                      width: `${(row.synapses / max) * 100}%`,
-                      // The bar takes the *same* colour as the dots on the arbour, from the same
-                      // map. A swatch that disagreed with the picture would be worse than none.
-                      background: color ?? 'var(--text-muted)',
-                    }}
-                  />
-                </span>
-                <span className="topo__partner-weight">{formatNumber(row.synapses)}</span>
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-      {/*
-       * What the list is *not* showing, said rather than implied. A cap that quietly hid the
-       * partner somebody was looking for is the failure this whole control exists to fix, so a
-       * truncated list has to admit it — the rule `+N more` and `colours repeat` already follow.
-       */}
-      {note.matched > rows.length && (
-        <p className="topo__note topo__note--block">
-          Showing the {rows.length} strongest of {note.matched} matches. Narrow the filter to
-          reach the rest.
-        </p>
-      )}
-      {filterError && (
-        <p className="topo__note topo__note--block topo__note--warn">
-          {filterError} — showing every partner.
-        </p>
-      )}
-      <p className="topo__note topo__note--block">{partnerNote(note)}</p>
-    </>
   )
 }
 

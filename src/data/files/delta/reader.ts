@@ -20,6 +20,7 @@
  *    runs the fast paths read, since its rows are no longer the file's.
  */
 
+import { lowerBound } from '../../../core/stats'
 import type { TableFileColumn } from '../../../core/values'
 import type { ByteSource } from '../bytes'
 import { withTail } from '../bytes'
@@ -28,7 +29,7 @@ import { pastSafe, wideDecimal } from '../columns'
 import type { ParquetReader } from '../parquet'
 import { openParquet } from '../parquet'
 import type { ColumnRun, IdProbe, Matches, RawBlock, TableFileReader } from '../reader'
-import { lowerBound, matchesByColumns, mayHoldRange, runGetter } from '../reader'
+import { matchesByColumns, mayHoldRange, runGetter } from '../reader'
 import {
   deletedRows,
   deletionVectorFile,

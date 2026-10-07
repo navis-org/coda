@@ -7,9 +7,9 @@
  * refinement back out.
  */
 
-import type { CodaType, PopulationFilter } from '../../core/types'
+import type { CodaType, PopulationFilter, TableSchema } from '../../core/types'
 import type { EnumOption } from '../../core/node'
-import { datasetRef } from '../../core/types'
+import { datasetRef, schemaOf } from '../../core/types'
 import type { DatasetValue, Value } from '../../core/values'
 import { isDatasetValue } from '../../core/values'
 import type {
@@ -503,4 +503,18 @@ export function publishedNeurons(
         }),
       ),
     )
+}
+
+/**
+ * A single-neuron card's `Current` schema: the incoming table's own first, then the dataset's.
+ *
+ * `profileSchema`'s rule and for its reason: a table that has been through Select carries fewer
+ * columns than the dataset publishes, and advertising the dataset's full set would promise fields
+ * the card then draws as blanks. Shared by Neuron Topology and the Neuron Dendrogram.
+ */
+export function neuronSchemaOf(inputs: {
+  neurons?: CodaType | undefined
+  dataset?: CodaType | undefined
+}): TableSchema {
+  return schemaOf(inputs.neurons) ?? schemasFromType(inputs.dataset).neurons
 }

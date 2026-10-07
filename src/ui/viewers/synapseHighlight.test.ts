@@ -10,8 +10,8 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
+import { namesPartners } from '../../nodes/lib/topologyOps'
 import {
-  namesPartners,
   partnerLabelColumn,
   HIGHLIGHT_OTHER,
   highlightColumn,

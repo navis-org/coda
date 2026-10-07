@@ -13894,6 +13894,122 @@ select.annotate__input {
 }
 
 /* --------------------------------------------------------------------------
+ * Neuron Dendrogram: Topology's card with a flat stage
+ *
+ * The bar, the tools and the rail are `.topo`'s. What is here is the plot, which stops at the
+ * rail rather than running under it — a 3D scene can be orbited out from behind the rail, a flat
+ * drawing cannot — and the two things only this card has, the distal table and the settings rows.
+ * -------------------------------------------------------------------------- */
+
+.arbor .topo__stage {
+  display: flex;
+  flex-direction: column;
+}
+/*
+ * The tools in flow above the plot rather than floating over it, as they do on Topology's 3D
+ * stage: a flat drawing cannot be orbited out from under them, and a fixed inset guessed at one
+ * row's height is covered again the moment a narrow card wraps them onto two.
+ */
+.arbor .topo__tools {
+  position: static;
+  padding: 8px 8px 4px;
+  margin-right: var(--topo-rail-space);
+}
+/*
+ * The ⤓ sits in the tools row at the top of this card, where every other viewer has it in its
+ * foot. Its menu opens upwards from its right edge for the foot; here that put half of it under
+ * the card's header, so it opens downwards from its left edge instead.
+ */
+.arbor .viewer-actions__menu {
+  top: calc(100% + 4px);
+  bottom: auto;
+  left: 0;
+  right: auto;
+}
+.arbor__plot {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-right: var(--topo-rail-space);
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+}
+.arbor__plot[data-zoomed] {
+  cursor: grab;
+}
+.arbor__plot[data-panning] {
+  cursor: grabbing;
+  user-select: none;
+}
+.arbor__canvas {
+  position: absolute;
+  inset: 0;
+}
+.arbor__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.arbor__overlay line {
+  stroke: var(--text-secondary);
+  stroke-width: 1.5;
+}
+.arbor__overlay text {
+  fill: var(--text-secondary);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.arbor__table {
+  width: calc(100% - 24px);
+  margin-left: 12px;
+  margin-right: 12px;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 8px;
+}
+.arbor__table caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 2px;
+}
+.arbor__table th,
+.arbor__table td {
+  padding: 1px 4px;
+  text-align: right;
+  white-space: nowrap;
+}
+.arbor__table th[scope='row'] {
+  text-align: left;
+  font-weight: 400;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arbor__table thead th {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+/* Inset to the same 9–12px the Partners tab's rows sit at; flush, the labels touched the rail. */
+.arbor__settings {
+  padding: 8px 12px 4px;
+}
+.arbor__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  padding: 4px 0;
+}
+.arbor__field input,
+.arbor__field select {
+  width: 120px;
+  font-size: 11px;
+}
+
+/* --------------------------------------------------------------------------
  * Recipes: Save as Recipe, and Manage Recipes
  *
  * Both borrow `.sources`' body, fields, notes and result lines, as the share and feedback dialogs

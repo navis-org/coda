@@ -7,6 +7,7 @@
 
 import { hashBytes } from '../../core/hash'
 import { idText, isNeuronId } from '../../core/ids'
+import { lowerBound } from '../../core/stats'
 import type { ByteSource } from './bytes'
 import { TAIL_READ } from './bytes'
 import type { FileSummary } from './columns'
@@ -340,21 +341,6 @@ function textBound(bound: unknown): string | undefined {
   if (typeof bound === 'string') return bound
   if (bound instanceof Uint8Array) return utf8.decode(bound)
   return undefined
-}
-
-/** The first index whose element is not below `target`. */
-export function lowerBound<T extends bigint | string | number>(
-  sorted: ArrayLike<T>,
-  target: T,
-): number {
-  let lo = 0
-  let hi = sorted.length
-  while (lo < hi) {
-    const mid = (lo + hi) >>> 1
-    if (sorted[mid]! < target) lo = mid + 1
-    else hi = mid
-  }
-  return lo
 }
 
 /**

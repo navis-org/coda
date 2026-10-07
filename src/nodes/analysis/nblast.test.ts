@@ -31,8 +31,8 @@ import {
   checkNblastSpaces,
   checkNblastUnits,
   dotpropSetFrom,
-  NM_PER_UM,
 } from '../lib/nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import { geometryLabels } from '../lib/geometryLabels'
 import '../index'
 import { searchFor } from '../../test/findNeurons'

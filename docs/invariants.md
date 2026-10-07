@@ -6,7 +6,9 @@ verbatim. Read the entry before arguing with the rule.
 ## Invariants — don't break these silently
 
 1. **`src/core` and `src/data` are headless.** No React, no zustand, no store, no UI
-   imports. Enforced by a lint rule in `eslint.config.js`. The reason is a future non-React
+   imports. Enforced by a lint rule in `eslint.config.js`, per file, and transitively by
+   `src/test/importGraph.test.ts`, which also holds every Web Worker off the UI and, outside
+   `src/pyodide`, off Python. The reason is a future non-React
    consumer (CLI runner, Python-side executor over the same graph JSON), plus DOM-free unit
    tests.
 

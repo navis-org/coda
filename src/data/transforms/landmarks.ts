@@ -22,6 +22,7 @@
  */
 
 import { memoPromise } from '../memoPromise'
+import { NM_PER_UM } from '../units'
 import { spaceById } from './spaces'
 import type { LandmarkSetSpec, SpaceUnits } from './spaces'
 
@@ -34,8 +35,6 @@ export interface LandmarkPairs {
   readonly target: Float64Array
   readonly count: number
 }
-
-export const NM_PER_UM = 1000
 
 export function scaleFor(units: SpaceUnits): number {
   return units === 'um' ? NM_PER_UM : 1

@@ -597,6 +597,13 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M8.9 15.7 12 12.3M12 12.3l3.1-3.4M12 12.3l1 3.7M15.1 8.9l2.5-1.3M15.1 8.9l-.4-2.5M13 16l2.7 1.2' }],
     ['path', { d: 'M4.9 9.6 3.1 12l1.8 2.4M19.1 9.6l1.8 2.4-1.8 2.4' }],
   ],
+  // The arbour laid flat: a soma disc, a dendrogram's elbows, and ticks across two branches for
+  // the synapses on them — the card's own drawing, small.
+  'out.neuronDendrogram': [
+    ['circle', { cx: '4.5', cy: '12', r: '1.5' }],
+    ['path', { d: 'M6 12h3.5M9.5 6.5v11M9.5 6.5h10M9.5 17.5h5M14.5 17.5v-3h5M14.5 17.5v2.5h4.5' }],
+    ['path', { d: 'M13.5 5v3M16.5 5v3M17.5 13v3' }],
+  ],
 
   // --- The node-link graph ---------------------------------------------------------------
   // Circles and wires. Weight says role: a larger or filled disc is the node the question is

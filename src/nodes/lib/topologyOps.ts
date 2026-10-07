@@ -47,7 +47,7 @@ import type {
 } from '../../core/values'
 import type { SplitStatus } from '../../pyodide/topology'
 import { cableLength, getColumn, makeTable } from '../../core/values'
-import { NM_PER_UM } from './nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import { packPositions, packSkeletons } from './skeletonPacking'
 
 /**
@@ -491,6 +491,18 @@ export function siteAt(
     z: points.positions[i * 3 + 2] ?? 0,
     polarity: String(polarity?.[i] ?? ''),
   }
+}
+
+/**
+ * Whether a synapse cloud names the neuron on the far side of each synapse — by type or by id.
+ * neuPrint's site cloud does not, which is when a card asks `fetchSynapseLinks` instead. Here,
+ * headless, because the Neuron Dendrogram's `evaluate` asks it as well as the cards do.
+ */
+export function namesPartners(schema: TableSchema): boolean {
+  return (
+    findColumn(schema, 'partnerType') !== undefined ||
+    findColumn(schema, 'partnerId') !== undefined
+  )
 }
 
 /** Every synapse row of a cloud, in order. */

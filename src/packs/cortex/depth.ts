@@ -24,7 +24,7 @@ import { isPointsValue } from '../../core/values'
 import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
 import { displayLabels } from '../../nodes/lib/displayLabels'
 import { requireDataset } from '../../nodes/lib/datasetParam'
-import { checkGeometryUnits } from '../../nodes/lib/transformOps'
+import { checkGeometryUnits } from '../../data/units'
 import {
   NO_CELL_TYPES,
   cellTypeAnnotations,

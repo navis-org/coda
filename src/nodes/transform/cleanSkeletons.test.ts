@@ -37,7 +37,7 @@ import {
   skeletonsFromResult,
   usesDistance,
 } from '../lib/cleanOps'
-import { NM_PER_UM } from '../lib/nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
 import { node } from '../../test/graph'

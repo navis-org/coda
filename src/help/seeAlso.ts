@@ -162,6 +162,8 @@ const RELATED: readonly (readonly string[])[] = [
   // --- single neurons -------------------------------------------------------
   ['out.profile', 'neuron.connectivity', 'neuron.roiCounts'],
   ['out.profile', 'out.topology', 'out.neuronbridge'],
+  // One neuron's arbour: its skeleton, measured, drawn flat, or drawn in 3D.
+  ['out.neuronDendrogram', 'out.topology', 'neuron.skeletons', 'out.viewer3d'],
 
   // --- charts ---------------------------------------------------------------
   ['out.barChart', 'out.pie', 'out.histogram', 'out.distribution', 'out.rank'],

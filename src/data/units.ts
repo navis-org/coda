@@ -105,3 +105,80 @@ export function scaleRadii(radii: Float32Array, scale: VoxelScale): Float32Array
   for (let i = 0; i < radii.length; i++) radii[i] = radii[i]! * mean
   return radii
 }
+
+/*
+ * Nanometres to micrometres, and the nanometre check, as text.
+ *
+ * Here, in the one module with no Python and no UI behind it, because both are read from inside
+ * the Neuron Dendrogram's daylight worker (`arborOps`, `topologyOps`) as well as by every node
+ * that prints a µm or hands NBLAST its micrometres — one spelling of the number for all of them.
+ */
+
+/**
+ * Coda's skeletons are nanometres; NBLAST's scoring matrix, and every µm a card prints, are
+ * micrometres.
+ *
+ * This is the one number in the feature that produces a confident wrong answer rather than an
+ * error. The FCWB matrix fastcore embeds runs out at a 40 um distance bin, and past it every
+ * cell is about -10 — so a set of neurons handed over in nanometres scores as if no two of them
+ * had ever been near each other, uniformly, with nothing anywhere to say why. See `nblast.py`.
+ */
+export const NM_PER_UM = 1000
+
+/**
+ * Refuse coordinates that are not nanometres, naming the side.
+ *
+ * A refusal rather than a warning, and that is forced rather than chosen: there is no run-time
+ * warning channel that survives a result being restored from cache instead of recomputed. Given
+ * the choice between silence and a stop, a comparison whose every number would be wrong should
+ * stop.
+ *
+ * **Absent units are allowed through.** Absent means unknown, and no source produces it today —
+ * every geometry value from either source says `nm` or `voxels`. Refusing on it would refuse on a
+ * fact nobody stated, which is the same distinction `columnSchemaFor` draws between a schema that
+ * is missing and one that is empty.
+ *
+ * Shared rather than in `nblastOps.ts`, where it began, for `transformOps`' `frameClashMessage`'s
+ * reason: several nodes refuse on this and nothing about the diagnosis is NBLAST's. What each of them
+ * supplies is `consequence` — the one clause that genuinely differs, which for NBLAST is a
+ * mis-scaled score and for `Distance between` is a number labelled µm that is out by a voxel.
+ *
+ * Every parameter is **required**, which is the one thing about this signature worth arguing
+ * about. The type is structural — any geometry value satisfies it — so a defaulted noun means a
+ * caller that forgets these strings gets a grammatically perfect error about *skeletons* when it
+ * holds a set of meshes: silently wrong prose, in the one guard rail whose entire job is to name
+ * the cause. Required, that caller fails to compile instead.
+ */
+export function checkGeometryUnits(
+  side: string,
+  geometry: { units?: string },
+  /** What to call the geometry, and which node's footer to point at. */
+  noun: string,
+  sourceNode: string,
+  /** What goes wrong here, as a whole sentence. */
+  consequence: string,
+): void {
+  const problem = geometryUnitsProblem(side, geometry, noun, sourceNode, consequence)
+  if (problem) throw new Error(problem)
+}
+
+/**
+ * `checkGeometryUnits` as an answer rather than a throw, for a caller with nowhere to throw to —
+ * a card computing on a value it holds. One message for both, and its parameters are required for
+ * the reason given there.
+ */
+export function geometryUnitsProblem(
+  side: string,
+  geometry: { units?: string },
+  noun: string,
+  sourceNode: string,
+  consequence: string,
+): string | undefined {
+  if (geometry.units === undefined || geometry.units === 'nm') return undefined
+  return (
+    `${side} ${noun} are in ${geometry.units}. They must be in nanometres, or ${consequence} ` +
+    `This happens when the dataset's Meta has no voxelSize, or has a unit Coda does not ` +
+    `recognise, so there was nothing to convert with. The ${sourceNode} node's footer shows ` +
+    `which units it received.`
+  )
+}

@@ -27,7 +27,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import type * as NblastBridge from '../../pyodide/nblast'
 import type { SynblastRequest } from '../../pyodide/nblast'
-import { NM_PER_UM } from '../../nodes/lib/nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import {
   UNIDENTIFIED,
   groupSynapses,

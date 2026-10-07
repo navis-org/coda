@@ -30,7 +30,7 @@
  * plausible column of wrong layers. Beyond the allowance a depth has no layer.
  */
 
-import { NM_PER_UM } from '../../data/transforms/landmarks'
+import { NM_PER_UM } from '../../data/units'
 import { inRange } from '../../nodes/lib/chartSelection'
 import type { DatasetBinding } from '../../data/transforms/spaces'
 import { bindingFor } from '../../data/transforms/spaces'

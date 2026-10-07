@@ -37,7 +37,6 @@
  */
 
 import { registerNode } from '../../core/registry'
-import type { TableSchema } from '../../core/types'
 import { T, columnNames, isTabular, schemaOf } from '../../core/types'
 import type { PointsValue } from '../../core/values'
 import { isSkeletonsValue, isTableValue } from '../../core/values'
@@ -46,8 +45,8 @@ import { synapseUnitsOf } from '../../data/source'
 import { asSkeletonRoute } from '../../data/skeletonRoutes'
 import {
   datasetRequest,
+  neuronSchemaOf,
   requireDataset,
-  schemasFromType,
   sourceSupports,
 } from '../lib/datasetParam'
 import { warnAboveParam } from '../lib/limitParams'
@@ -83,20 +82,6 @@ import { runSplitCompartments, splitStatusOf } from '../../pyodide/topology'
 /** Whether the split is on, read once — three places ask and they must agree. */
 function splitting(params: Record<string, unknown>): boolean {
   return params['split'] === true
-}
-
-/**
- * The incoming table's own schema first, then the dataset's.
- *
- * `profileSchema`'s rule and for its reason: a table that has been through Select carries fewer
- * columns than the dataset publishes, and advertising the dataset's full set would promise
- * fields the card then draws as blanks.
- */
-function neuronSchema(ctx: { inputs: { neurons?: unknown; dataset?: unknown } }): TableSchema {
-  return (
-    schemaOf(ctx.inputs.neurons as never) ??
-    schemasFromType(ctx.inputs.dataset as never).neurons
-  )
 }
 
 registerNode({
@@ -573,7 +558,7 @@ registerNode({
       // Passed through as whatever came in, so dropping this between two nodes does not
       // downgrade a Neurons edge into a Table one.
       out: input?.kind === 'neurons' ? T.neurons(schemaOf(input)) : T.table(schemaOf(input)),
-      current: T.neurons(neuronSchema(ctx)),
+      current: T.neurons(neuronSchemaOf(ctx.inputs)),
       /*
        * Advertised at edit time, split columns included when the param is on — which is what
        * lets a downstream column picker offer `cableAxon` before anything has run. Both halves

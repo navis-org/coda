@@ -49,7 +49,7 @@ import type {
 } from '../../core/values'
 import { boundsOf, compartmentName, makeTable } from '../../core/values'
 import { samplesOf } from './geometryDistance'
-import { NM_PER_UM } from './nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import { foldColumns } from './tableOps'
 import type { SkeletonTree } from './topologyOps'
 import { parentDistances, rootDistances, skeletonTree, strahlerOrders } from './topologyOps'

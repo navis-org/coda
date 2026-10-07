@@ -99,6 +99,8 @@ export default tseslint.config(
       // The build the MCP server runs in Node. It has no DOM to reach for, so an import of the
       // UI or the store would build green and throw on load in somebody else's process.
       'src/mcp/**/*.ts',
+      // Not the Web Workers: what a worker may reach is transitive and wider than this rule
+      // (Python as well as the UI), so `src/test/importGraph.test.ts` walks every one's graph.
     ],
     rules: {
       'no-restricted-imports': [

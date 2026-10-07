@@ -33,7 +33,8 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 **Read it before deciding a rule does not apply to your case.**
 
 1. **`src/core` and `src/data` are headless.** No React, no zustand, no store, no UI
-   imports. Enforced by a lint rule in `eslint.config.js`. The reason is a future
+   imports. Enforced by a lint rule in `eslint.config.js` and, transitively and for every Web
+   Worker, by `src/test/importGraph.test.ts`. The reason is a future
    non-React consumer, plus DOM-free unit tests.
 
 2. **`inferOutputs` must never throw and must not fetch.** It runs on every graph

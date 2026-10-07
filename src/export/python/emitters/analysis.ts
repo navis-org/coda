@@ -9,7 +9,7 @@ import { MAX_SERIES } from '../../../ui/colors'
 import { clusterColor } from '../../../ui/encoding'
 import { pyList, pyStr, pyValue } from '../py'
 import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib/cleanOps'
-import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
+import { NM_PER_UM } from '../../../data/units'
 import {
   distanceKindOf,
   distanceParamsFrom,

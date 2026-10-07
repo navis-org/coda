@@ -75,8 +75,9 @@ import { boxesOf, cableLength, triangleArea } from '../../core/values'
 import type { KdTree } from './kdTree'
 import { anyPairWithin, closestPair, medianOfThree } from './kdTree'
 
-import { NM_PER_UM } from './nblastOps'
-import { checkGeometryUnits, frameClash, frameClashMessage } from './transformOps'
+import { NM_PER_UM } from '../../data/units'
+import { frameClash, frameClashMessage } from './transformOps'
+import { checkGeometryUnits } from '../../data/units'
 
 /**
  * Skeletons and meshes, and a **fifth** kind list rather than a reuse of `SPLIT_KINDS`, which

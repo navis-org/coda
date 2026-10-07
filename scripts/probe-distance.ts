@@ -27,39 +27,16 @@
  *     pnpm probe:distance
  */
 
-import type { MeshGeometry, MeshesValue, SkeletonGeometry } from '../src/core/values'
+import type { MeshGeometry, MeshesValue } from '../src/core/values'
 import { column, tableSchema } from '../src/core/types'
 import { makeTable } from '../src/core/values'
+import { arbour } from '../src/nodes/lib/__fixtures__/arbour'
 import { cloud, rng } from '../src/nodes/lib/__fixtures__/rng'
 import { buildTargetIndexes } from '../src/nodes/lib/geometryIndex'
 import type { KdTree } from '../src/nodes/lib/kdTree'
 import { LEAF_SIZE, buildKdTree } from '../src/nodes/lib/kdTree'
 import { distanceParamsFrom, distanceValues } from '../src/nodes/lib/geometryDistance'
 import type { SkeletonsValue } from '../src/core/values'
-
-/**
- * A branching arbour rather than a cloud: a k-d tree over uniform noise is the *easy* case, and a
- * real skeleton is a thin tree in a large box — long thin structures are what make a median split
- * produce boxes a query has to descend more than one of.
- */
-function arbour(nodes: number, seed = 1, spread = 0): SkeletonGeometry {
-  const next = rng(seed)
-  const positions = new Float32Array(nodes * 3)
-  const parents = new Int32Array(nodes)
-  parents[0] = -1
-  // Where this neuron's root sits. `spread` 0 puts every one at the origin, which is every pair
-  // interpenetrating — the worst case for anything that prunes, and not a brain.
-  for (let a = 0; a < 3; a++) positions[a] = next() * spread
-  for (let i = 1; i < nodes; i++) {
-    // Mostly continue the current branch; occasionally jump back to an earlier node.
-    const parent = next() < 0.02 ? Math.floor(next() * i) : i - 1
-    parents[i] = parent
-    for (let a = 0; a < 3; a++) {
-      positions[i * 3 + a] = positions[parent * 3 + a]! + (next() - 0.5) * 600
-    }
-  }
-  return { id: 'n', positions, radii: new Float32Array(nodes), parents }
-}
 
 /** A closed-ish surface: a sphere of `rings²` quads, which is what a neuron mesh looks like to a tree. */
 function sphere(rings: number, radius: number, centre: readonly number[] = [0, 0, 0]): MeshGeometry {
@@ -234,7 +211,7 @@ for (const { arrangement, spread } of ARRANGEMENTS) {
   for (const kind of ['skeletons', 'meshes'] as const) {
     const items =
       kind === 'skeletons'
-        ? Array.from({ length: 24 }, (_, k) => arbour(2_000, k + 101, spread))
+        ? Array.from({ length: 24 }, (_, k) => arbour(2_000, k + 101, { spread }))
         : Array.from({ length: 12 }, (_, k) => blob(24, k + 201, spread))
     const value = {
       kind,
@@ -319,7 +296,7 @@ console.error('| --- | --- | --- | --- | --- | --- |')
    * ordering and **minus nine bytes a point** on another. Nothing about the reading looks wrong.
    */
   const geometries = CASES.map(({ neurons, nodes }) =>
-    Array.from({ length: neurons }, (_, k) => arbour(nodes, k + 301, 250_000)),
+    Array.from({ length: neurons }, (_, k) => arbour(nodes, k + 301, { spread: 250_000 })),
   )
   /*
    * **Held in a binding this loop clears by hand**, which is the second half of the same trap. A
