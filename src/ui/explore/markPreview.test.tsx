@@ -12,7 +12,7 @@
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
-import { OTHER_LABEL, seriesColor } from '../colors'
+import { OTHER_LABEL, seriesColor } from '../../style/colors'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import {
   ConfidencePreview,

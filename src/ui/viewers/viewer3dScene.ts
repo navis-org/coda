@@ -14,9 +14,9 @@
 import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from '../../core/values'
 import { downsamples } from '../../data/meshDecimate'
 import { boundsCenter, boundsSize } from '../../core/values'
-import { CHART_INK, chartSurface, rgbToHex } from '../colors'
-import type { Mode } from '../colors'
-import { hexToLinearRgb } from '../encoding'
+import { CHART_INK, chartSurface, rgbToHex } from '../../style/colors'
+import type { Mode } from '../../style/colors'
+import { hexToLinearRgb } from '../../style/encoding'
 
 /** How the scene's background is chosen. `theme` follows the app; the others pin it. */
 export type BackgroundChoice = 'theme' | 'dark' | 'light' | 'black'

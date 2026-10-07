@@ -2,8 +2,8 @@
 
 // An emitter may reach `src/ui` — see the notebook emitter for why the palette lives there.
 import { profileExportPin } from '../../plans/profile'
-import { MAX_SERIES } from '../../../ui/colors'
-import { clusterColor } from '../../../ui/encoding'
+import { MAX_SERIES } from '../../../style/colors'
+import { clusterColor } from '../../../style/encoding'
 import { rCol as col, rStr, rValue, rVector } from '../r'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { portIdAt } from '../../../core/ports'

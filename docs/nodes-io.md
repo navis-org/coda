@@ -61,7 +61,7 @@ would be unselectable except by accident; and the frame comes back while the tex
 because an edit needs a visible target. Absent means on, so a note saved before the param existed
 keeps the frame it was drawn with.
 
-**The text goes through `ui/markdown.ts`**, the same subset the Description card renders, rather
+**The text goes through `core/markdown.ts`**, the same subset the Description card renders, rather
 than a second parser. That module exists because a blurb from a foreign deployment must not be
 able to become markup, and text pasted into a graph that is then shared has exactly the same
 property — raw HTML stays text by construction.

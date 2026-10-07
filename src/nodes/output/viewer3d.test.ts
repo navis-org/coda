@@ -164,7 +164,7 @@ describe('colour defaults', () => {
 describe('by value', () => {
   /*
    * `colorParams({ valueScale })` on all four sockets: a ramp, both ends, a centre and a log. The
-   * resolution is `resolveColor`'s and is tested in `ui/encoding.test.ts`; what belongs here is
+   * resolution is `resolveColor`'s and is tested in `style/encoding.test.ts`; what belongs here is
    * that every socket offers them, where they sit, and when each is on screen.
    */
   const GROUP: Record<string, string> = {

@@ -8,8 +8,8 @@
  * two never disagree about which colour means axon.
  */
 
-import type { Mode } from './colors'
-import { cycleColor } from './colors'
+import type { Mode } from '../style/colors'
+import { cycleColor } from '../style/colors'
 
 export function axonDendriteInk(mode: Mode): { axon: string; dendrite: string } {
   return { dendrite: cycleColor(0, mode), axon: cycleColor(1, mode) }

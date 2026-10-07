@@ -387,7 +387,7 @@ describe('serialisation', () => {
    * Hints, which arrive in files somebody was mailed exactly as group colours do.
    *
    * Two of the three checks here are about that provenance rather than about tidiness. A **tone
-   * is a name** off `HINT_TONES` and an unknown one falls back rather than reaching a stylesheet
+   * is a name** off `CALLOUT_TONES` and an unknown one falls back rather than reaching a stylesheet
    * — see the note on the constant, which is the same safety property `GROUP_COLORS` has. And the
    * **cap is a refusal**, the one in this file that is: a hint stack is docked to a card's border,
    * so a file claiming forty of them papers the canvas around one node with boxes the reader has

@@ -25,7 +25,7 @@ import { writeScratchGist } from '../../data/share/gist'
 import type { CytoscapeChoice } from '../cytoscapeWeb'
 import { cytoscapeCx2, dataLink, importLink, mayFitInLink } from '../cytoscapeWeb'
 import type { Cx2Options } from '../exportValue'
-import { formatBytes, plural } from '../format'
+import { formatBytes, plural } from '../../style/format'
 import { UNLISTED_GIST, WhereTheTokenGoes } from '../githubGistNotes'
 import { Modal, ModalHeader } from '../Modal'
 

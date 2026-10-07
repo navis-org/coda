@@ -21,14 +21,14 @@
  *
  * ## Documents are text, not code
  *
- * A document is markdown, parsed by `src/ui/markdown.ts` in its extended mode, and everything
+ * A document is markdown, parsed by `src/core/markdown.ts` in its extended mode, and everything
  * that makes a figure appear is a fenced block resolved against the node registry — see
  * `figures.ts`. There is no path by which a document executes anything, which is what makes
  * "drop a file in a folder" a safe contribution model.
  */
 
-import type { MarkdownBlock } from '../ui/markdown'
-import { parseMarkdown } from '../ui/markdown'
+import type { MarkdownBlock } from '../core/markdown'
+import { parseMarkdown } from '../core/markdown'
 
 /**
  * Every document, keyed by the node type its filename names.

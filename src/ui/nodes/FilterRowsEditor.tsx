@@ -44,7 +44,7 @@ import { arityOf, resolveRows, rowOpsForDType } from '../../data/filterRows'
 import { resolveColumn } from '../../data/terms'
 import { FILTERS_PARAM_ID, rowsParamValue } from '../../nodes/lib/filterRowParams'
 import { parseTypedLabels } from '../../nodes/lib/labelLookup'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import { SelectField, TextField } from '../params/ParamField'
 
 const BLANK: FilterRow = { field: '', op: 'is', values: [] }

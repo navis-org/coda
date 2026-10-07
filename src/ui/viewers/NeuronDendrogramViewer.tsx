@@ -56,16 +56,21 @@ import { BRANCH_PALETTE_OPTIONS } from '../../nodes/output/neuronDendrogram'
 import {
   CHART_INK,
   chartSurface,
-  currentMode,
   heatmapSequentialColor,
   seriesColor,
   sequentialColor,
-} from '../colors'
-import { LEGEND_KEYS, resolveColor } from '../encoding'
+} from '../../style/colors'
+import { REDUCED_MOTION, currentMode } from '../useThemeMode'
+import { LEGEND_KEYS, resolveColor } from '../../style/encoding'
 import { exportBaseName } from '../export'
-import { formatCompact, formatMeasure, formatNumber, niceTicks, plural } from '../format'
+import {
+  formatCompact,
+  formatMeasure,
+  formatNumber,
+  niceTicks,
+  plural,
+} from '../../style/format'
 import { mediaMatches } from '../mediaQuery'
-import { REDUCED_MOTION } from '../useThemeMode'
 import type { ArborView, PieceGeometry, PlotTransform, SubSegments } from './arborPlot'
 import {
   arborPointAt,

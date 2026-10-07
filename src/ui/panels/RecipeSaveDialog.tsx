@@ -24,7 +24,7 @@ import type { RecipeSlot } from '../../core/recipes'
 import { recipeSlots } from '../../core/recipes'
 import { useGraphStore } from '../../store/graphStore'
 import { findByName } from '../../store/shelf'
-import { formatAgo, plural } from '../format'
+import { formatAgo, plural } from '../../style/format'
 import { Modal, ModalHeader } from '../Modal'
 
 export function RecipeSaveDialog() {

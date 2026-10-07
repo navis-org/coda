@@ -13,7 +13,7 @@
  * second document model; what makes it "not a node" is the absence of dataflow, plus a card that
  * looks nothing like one (`ui/nodes/NoteCard.tsx`).
  *
- * **The text is markdown**, rendered through the same `ui/markdown.ts` subset the dataset
+ * **The text is markdown**, rendered through the same `core/markdown.ts` subset the dataset
  * Description card uses. Reused rather than re-parsed: that module exists because a blurb from a
  * foreign deployment must not be able to become markup, and text someone pastes into a graph they
  * then share has exactly the same property. Headings, lists, emphasis, code and links, and raw

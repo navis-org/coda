@@ -21,9 +21,8 @@
 import type { TableValue } from '../../core/values'
 import { MISSING_LABEL, markLabel, numericCell } from '../../nodes/lib/chartSelection'
 import type { ValueRange } from '../../nodes/lib/chartSelection'
-import type { RankedFold } from '../colors'
-import { foldByRank } from '../colors'
-import { MAX_SERIES, OTHER_LABEL } from '../colors'
+import type { RankedFold } from '../../style/colors'
+import { MAX_SERIES, OTHER_LABEL, foldByRank } from '../../style/colors'
 import { quantileSorted } from '../../core/stats'
 
 export type Normalize = 'count' | 'percent' | 'density'

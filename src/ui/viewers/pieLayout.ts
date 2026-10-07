@@ -19,7 +19,7 @@
 
 import type { TableValue } from '../../core/values'
 import { markLabel, numericCell } from '../../nodes/lib/chartSelection'
-import { MAX_SERIES, OTHER_LABEL, foldByRank } from '../colors'
+import { MAX_SERIES, OTHER_LABEL, foldByRank } from '../../style/colors'
 
 export interface PieSlice {
   label: string

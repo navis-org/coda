@@ -3,7 +3,7 @@
  *
  * Declared once and reused by every viewer that supports encoding, so "colour by a column"
  * means the same thing, has the same param ids, and behaves the same everywhere. The
- * resolution half lives in `ui/encoding.ts`; this half stays headless so `src/nodes` can
+ * resolution half lives in `style/encoding.ts`; this half stays headless so `src/nodes` can
  * declare params without pulling in the palette.
  *
  * These are `presentational` by default: an encoding changes how a result is drawn, never
@@ -14,7 +14,6 @@
 import type { AttributePart, DType } from '../../core/types'
 import { NUMERIC_DTYPES } from '../../core/types'
 import type { CompositeRef, EnumOption, ParamDef, ParamValues } from '../../core/node'
-import { ALL_SHAPES } from '../../ui/encoding'
 import type { ColorLimits, DivergingPalette, SequentialPalette } from './heatmapParams'
 import {
   DIVERGING_PALETTE_OPTIONS,
@@ -36,7 +35,7 @@ export type ColorMode =
   | 'categorical'
   | 'sequential'
   | 'literal'
-  /** One colour per distinct value, derived from the value. See `ui/segmentColor.ts`. */
+  /** One colour per distinct value, derived from the value. See `style/segmentColor.ts`. */
   | 'hash'
   /**
    * One colour per connected component of a network. Nodes only, and network-only — see
@@ -58,7 +57,7 @@ export type ColorMode =
 /**
  * Which categorical palette an encoding cycles through.
  *
- * Names only — the hex values live in `ui/colors.ts`, because this half stays headless so
+ * Names only — the hex values live in `style/colors.ts`, because this half stays headless so
  * `src/nodes` can declare params without pulling in the palette. Same split as
  * `CONSTANT_COLOR_OPTIONS`, which names slots and knows no colours either.
  */
@@ -227,7 +226,7 @@ export interface ColorParamOptions {
    * whose `visibleIf` cannot see a schema. Without the narrowing a text column under `by value`
    * lands on the flat fallback with every control beside it inert.
    *
-   * The vocabulary is `heatmapParams.ts`' and the arithmetic is `ui/encoding.ts`' `valueDomain`
+   * The vocabulary is `heatmapParams.ts`' and the arithmetic is `style/encoding.ts`' `valueDomain`
    * over the Heatmap's own `normalize`, so a ramp named here is the ramp a Heatmap draws and a
    * typed limit that one ignores this one ignores too. **One departure, which is the default
    * rather than the rule**: an automatic bottom is the data's minimum, as `by value` has always
@@ -674,16 +673,34 @@ export interface ShapeSpec {
 }
 
 /**
+ * Every mark that can be drawn, in the order the renderers number them.
+ *
+ * One list, and everything else is derived from it: `MarkerShape` and `SHAPE_OPTIONS` here,
+ * the six assignable marks in `style/encoding.ts`, and the index the renderers send into a vertex
+ * buffer. A second spelling of the vocabulary is a second thing to keep in step, and the one that
+ * reaches a shader is the one that fails silently.
+ *
+ * **Append only** — the index is in a vertex buffer. Here rather than in `style/encoding.ts` so
+ * the dependency runs one way: `src/style` may import a node's param vocabulary, and `nodes/lib`
+ * never imports `src/style`.
+ */
+export const ALL_SHAPES = [
+  'circle',
+  'square',
+  'triangle',
+  'diamond',
+  'cross',
+  'plus',
+  'dash',
+] as const
+
+export type MarkerShape = (typeof ALL_SHAPES)[number]
+
+/**
  * The shapes a picker offers, in assignment order.
  *
- * Derived from `ALL_SHAPES` rather than transcribed. It was written out here on the grounds
- * that `src/nodes` must not reach into `src/ui` — which is not a rule this repo holds:
- * `eslint.config.js` scopes that boundary to `src/core`, `src/data`, `src/assistant`,
- * `src/layout` and `src/pyodide`, and `output/neuroglancer.ts` and `output/dendrogram.ts`
- * already import from `src/ui/encoding`. So the copy bought nothing and cost a hand-maintained
- * second list plus a test to keep the two in step.
- *
- * The reverse import is type-only and erases, so this adds no runtime cycle.
+ * Derived from `ALL_SHAPES` rather than transcribed: a hand-maintained second list once sat here
+ * with a test to keep the two in step.
  */
 export const SHAPE_OPTIONS: EnumOption[] = ALL_SHAPES.map((value) => ({
   value,

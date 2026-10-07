@@ -22,7 +22,7 @@ import { parseSceneUrl, layerSourceUrl } from '../../data/neuroglancer/scene'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import { registerSource, requireSource } from '../../data/source'
-import { resolveColor } from '../../ui/encoding'
+import { resolveColor } from '../../style/encoding'
 import { readColorSpec } from '../lib/encodingParams'
 import '../index'
 

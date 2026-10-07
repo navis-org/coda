@@ -13,6 +13,8 @@ import { MISSING_TYPE, documentNode, placeholderParams } from './missing'
 import type { ParamValues, ResolvedPort } from './node'
 import { hasPortGroups, allInputPorts, inputPorts, outputPorts } from './ports'
 import { currentType, getNodeDef, typesWithLoops, typesWithReferenceInputs } from './registry'
+import type { CalloutTone } from './markdown'
+import { CALLOUT_TONES } from './markdown'
 
 export const GRAPH_FORMAT_VERSION = 1
 
@@ -74,36 +76,26 @@ export interface GraphNode {
   captionOf?: string
 }
 
-/**
- * The tones a hint may be drawn in, by name.
+/*
+ * A hint's tone is one of `markdown.ts`'s `CALLOUT_TONES`, by name.
  *
  * **A name and not a colour**, for the reason `GROUP_COLORS` is: a `.coda.json` arrives from a
  * gist, from the Zoo, from a mailed file, and a tone spent straight into an inline `style` is a
  * CSS injection with a `--var` and a `url()` in it. These resolve to tokens in `theme.css` at
  * render time.
  *
- * The vocabulary is `markdown.ts`'s `CalloutTone` deliberately — the help documents already draw
+ * The vocabulary is the callout tones, imported rather than restated — the help documents already draw
  * admonitions in exactly these three, and a second three-word list meaning the same thing is how
- * "tip" comes to be blue in one place and green in another.
- *
- * **Stated twice rather than imported, and `src/core` being headless is only half the reason.**
- * That rules out `core` importing from `ui`; it does not rule out the reverse, which is allowed
- * and used everywhere. What rules the reverse out is that `markdown.ts` has **no imports at all**
- * and feeds `src/help/registry.ts`, which is the `nodes.html` entry — pulling `core/graph.ts` in
- * would drag the node registry and the dashboard model into a page bundle that `docs/pages.md`
- * requires to stay out of the main chunk, to save three words. So the two lists are held together
- * by a type-level assertion in `ui/nodes/nodeHints.test.tsx` instead, which fails to compile the
- * moment either gains a tone the other lacks. The stylesheet agrees by sharing one `--cal`.
+ * "tip" comes to be blue in one place and green in another. The stylesheet agrees by sharing one
+ * `--cal`.
  */
-export const HINT_TONES = ['note', 'tip', 'warning'] as const
-export type HintTone = (typeof HINT_TONES)[number]
 
 /** Which border a hint docks to. */
 export const HINT_SIDES = ['top', 'bottom'] as const
 export type HintSide = (typeof HINT_SIDES)[number]
 
 /** What an absent `NodeHint.tone` and `NodeHint.side` mean — the one spelling of each default. */
-export const DEFAULT_HINT_TONE: HintTone = 'note'
+export const DEFAULT_HINT_TONE: CalloutTone = 'note'
 export const DEFAULT_HINT_SIDE: HintSide = 'bottom'
 
 /**
@@ -155,7 +147,7 @@ export interface NodeHint {
    */
   text: string
   /** Absent means `DEFAULT_HINT_TONE`. */
-  tone?: HintTone
+  tone?: CalloutTone
   /** Absent means `DEFAULT_HINT_SIDE` — under the card, where the wire out of it is not. */
   side?: HintSide
 }
@@ -179,7 +171,7 @@ export type Wire = readonly [from: string, fromPort: string, to: string, toPort:
  * spent straight into an inline `style`, where an arbitrary string is a CSS injection with a
  * `--var` and a `url()` in it. A name off this list resolves to a token in `theme.css` at render
  * time, so the document carries a choice rather than a value, and the two themes each get the
- * hue that was validated for them (`ui/colors.ts`).
+ * hue that was validated for them (`style/colors.ts`).
  */
 export const GROUP_COLORS = ['grey', 'blue', 'orange', 'green', 'pink', 'violet'] as const
 export type GroupColor = (typeof GROUP_COLORS)[number]
@@ -1035,7 +1027,7 @@ function validSize(raw: unknown): { width: number; height: number } | undefined 
  *
  * The same lenient-but-checked pass `validSize` and `validGroups` give the rest of the file, and
  * the two checks here are the ones that matter for a document somebody was mailed. A **tone is a
- * name off `HINT_TONES`** and an unknown one falls back to the default rather than reaching a
+ * name off `CALLOUT_TONES`** and an unknown one falls back to the default rather than reaching a
  * stylesheet — the note on the constant says why that is a safety property and not a theming
  * convenience. And an **empty hint is dropped**, because a box with nothing in it is a bar across
  * a card with a × on it and no way to tell what it was for.
@@ -1084,7 +1076,7 @@ function validHints(raw: unknown): NodeHint[] {
     if (!h || typeof h !== 'object') continue
     const { text, tone, side } = h as Record<string, unknown>
     if (typeof text !== 'string' || !text.trim()) continue
-    const named = HINT_TONES.find((t) => t === tone)
+    const named = CALLOUT_TONES.find((t) => t === tone)
     const docked = HINT_SIDES.find((s) => s === side)
     hints.push(normalHint({ text, tone: named, side: docked }))
     if (hints.length === MAX_HINTS) break

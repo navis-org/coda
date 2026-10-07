@@ -21,10 +21,10 @@ import type { NetworkValue } from '../../core/values'
 import { getColumn, makeTable } from '../../core/values'
 import { connectedComponents } from '../../nodes/lib/networkOps'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
-import { CHART_INK } from '../colors'
-import type { Mode } from '../colors'
-import type { ResolvedColor } from '../encoding'
-import { resolveColor } from '../encoding'
+import { CHART_INK } from '../../style/colors'
+import type { Mode } from '../../style/colors'
+import type { ResolvedColor } from '../../style/encoding'
+import { resolveColor } from '../../style/encoding'
 
 /**
  * The derived column's name, which is also the legend group's title.

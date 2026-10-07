@@ -260,7 +260,7 @@ export function decodeMatrixSelection(selection: unknown): Record<MatrixAxis, Se
  *
  * `Number(null)`, `Number('')` and `Number(false)` are all 0, so a plain conversion would put
  * every empty cell in whichever bar contains zero — a dense bar of data that does not exist.
- * Same trap `numeric()` in `ui/encoding.ts` and `cellNumber()` in `ui/viewers/scatterPlot.ts`
+ * Same trap `numeric()` in `style/encoding.ts` and `cellNumber()` in `ui/viewers/scatterPlot.ts`
  * exist for; **not** the same answer, and the difference is deliberate rather than a drift.
  * Those two answer `NaN` and map `false` to 0, because a size channel has to put an
  * unplottable row *somewhere*. Binning does not: a row with no number belongs in no bar, so

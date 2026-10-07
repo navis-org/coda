@@ -18,7 +18,7 @@
 import type { ReactNode } from 'react'
 
 import type { CellValue } from '../../core/values'
-import { formatCell, formatShare } from '../format'
+import { formatCell, formatShare } from '../../style/format'
 
 export function Tile({
   label,

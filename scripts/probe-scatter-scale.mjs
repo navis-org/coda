@@ -118,9 +118,9 @@ const run = (scenario) =>
   const load = ${APP_MODULE}
   const plotMod = await load('/src/ui/viewers/scatterPlot.ts')
   const drawMod = await load('/src/ui/viewers/scatterDraw.ts')
-  const enc = await load('/src/ui/encoding.ts')
+  const enc = await load('/src/style/encoding.ts')
   const c2d = await load('/src/ui/viewers/canvas2d.ts')
-  const colors = await load('/src/ui/colors.ts')
+  const colors = await load('/src/style/colors.ts')
   const s = ${JSON.stringify(scenario)}
   const d = window.__scatterData
   const n = Math.min(s.n, d.x.length)
@@ -263,7 +263,7 @@ const parity = await evaluate(`(async () => {
   const plotMod = await load('/src/ui/viewers/scatterPlot.ts')
   const drawMod = await load('/src/ui/viewers/scatterDraw.ts')
   const c2d = await load('/src/ui/viewers/canvas2d.ts')
-  const colors = await load('/src/ui/colors.ts')
+  const colors = await load('/src/style/colors.ts')
   const W = 600, H = 400
   const plot = { x: 44, y: 12, width: W - 56, height: H - 52 }
   const ink = colors.CHART_INK.dark, surface = colors.chartSurface('dark')
@@ -325,7 +325,7 @@ const exported = await evaluate(`(async () => {
   const load = ${APP_MODULE}
   const plotMod = await load('/src/ui/viewers/scatterPlot.ts')
   const drawMod = await load('/src/ui/viewers/scatterDraw.ts')
-  const colors = await load('/src/ui/colors.ts')
+  const colors = await load('/src/style/colors.ts')
   const d = window.__scatterData
   const plot = { x: 50, y: 10, width: 1136, height: 750 }
   const marks = plotMod.buildMarks({

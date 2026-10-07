@@ -4,7 +4,7 @@
  */
 
 import type { partnerTypes } from '../../nodes/lib/profileStats'
-import { formatNumber, plural } from '../format'
+import { formatNumber, plural } from '../../style/format'
 import { partnerLabel } from './synapseHighlight'
 
 /**

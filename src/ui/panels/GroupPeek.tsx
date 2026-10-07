@@ -59,7 +59,7 @@ import { CARD_TYPES, cardShape } from '../nodes/cardNode'
 import { CARD_POINTERS } from '../nodes/cardPointers'
 import { EDGE_TYPES } from '../CodaEdge'
 import { useGraphStore } from '../../store/graphStore'
-import { wireStyle } from '../socketStyle'
+import { wireStyle } from '../../style/socketStyle'
 import { Modal } from '../Modal'
 
 /**

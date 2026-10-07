@@ -183,7 +183,7 @@ session that never presses the button never pays for the wizard and the inferenc
 
 ## The format
 
-`src/ui/markdown.ts` gained four block kinds, and they are **off by default**. That is a safety
+`src/core/markdown.ts` gained four block kinds, and they are **off by default**. That is a safety
 property rather than a default: the parser's original job is a dataset blurb from whatever
 deployment a Custom node is pointed at, and each extended kind hands that source something it
 should not have — a fence is a directive some renderer may act on, and an image is an outbound

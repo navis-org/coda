@@ -6,18 +6,35 @@
  * handed down, it is one. It also fixes the marks going stale on a theme flip, which is the same
  * failure this hook exists for on the tiles.
  *
- * **The subscription is one; the *snapshot* was not, and that is worth separating.** This file
- * used to claim the whole problem was solved here, while `currentMode()` — the `getSnapshot` React
- * calls several times per subscriber per render — still built a fresh `MediaQueryList` on every
- * call under the default `system` preference. That belonged in `currentMode` rather than in a
- * hook, since every other caller reads it too; `colors.ts` has the measurement.
+ * `currentMode` lives here rather than beside the palette in `style/colors.ts`, which is headless:
+ * it is the one colour question that has to ask the browser.
  */
 
 import { useSyncExternalStore } from 'react'
 
-import type { Mode } from './colors'
-import { DARK_SCHEME, currentMode } from './colors'
-import { subscribeMedia, useMediaQuery } from './mediaQuery'
+import type { Mode } from '../style/colors'
+import { mediaMatches, subscribeMedia, useMediaQuery } from './mediaQuery'
+
+/** The OS half of the theme, for the `system` preference where nothing is stamped. */
+const DARK_SCHEME = '(prefers-color-scheme: dark)'
+
+/**
+ * Read the mode the document is actually rendering in.
+ *
+ * **Through `mediaMatches`, because this is a snapshot and snapshots are read constantly.** It is
+ * the hook's `getSnapshot` below, which React calls a few times per subscriber per render pass —
+ * and a `window.matchMedia(…)` here mints a fresh `MediaQueryList` every one of those. Measured on
+ * an expanded Explore page with 26 subscribers: **79 constructions on mount and 78 per re-render**,
+ * i.e. per search keystroke, at 0.46–0.69 µs each against 0.035–0.055 µs for a cached list's
+ * `.matches`. `DatasetSummaryViewer` reads it during render too. Subscribing once did not cover
+ * this: the snapshot is what every caller reads.
+ */
+export function currentMode(): Mode {
+  if (typeof document === 'undefined') return 'dark'
+  const stamped = document.documentElement.dataset.theme
+  if (stamped === 'light' || stamped === 'dark') return stamped
+  return mediaMatches(DARK_SCHEME) ? 'dark' : 'light'
+}
 
 /** Asked through the shared registry, so every caller on a page shares one `MediaQueryList`. */
 export const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'

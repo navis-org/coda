@@ -29,15 +29,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
-import type { GraphNode, HintTone, NodeHint } from '../../core/graph'
-import { HINT_TONES } from '../../core/graph'
+import type { GraphNode, NodeHint } from '../../core/graph'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { hintKey, readerHints, resetHintsForTest } from '../hints'
-import type { CalloutTone } from '../markdown'
 
 beforeAll(() => {
   installJsdomStubs({ width: 1000, height: 700 })
@@ -206,30 +204,6 @@ describe('dismissing one', () => {
     // One back, not both: a right-click on one card is not a request about the whole canvas.
     await waitFor(() => expect(boxes()).toHaveLength(1))
     expect(boxes()[0]!.textContent).toContain('On this card.')
-  })
-})
-
-/**
- * The one thing about a hint that is stated in two files and checked in neither.
- *
- * `HINT_TONES` is in `src/core`, which is headless and cannot import `CalloutTone` from
- * `src/ui/markdown.ts`; the vocabulary is the same three words on purpose, because the help
- * documents already draw admonitions in exactly these and a second three-word list meaning the
- * same thing is how "tip" comes to be blue in one place and green in another. A type is not
- * enumerable at runtime, so the agreement is asserted where it lives: in the type system.
- */
-type Extends<_A extends B, B> = true
-
-describe('the tones', () => {
-  it('are the same three words the help documents use', () => {
-    // Mutual assignability, which for two unions is equality. Either list gaining a word the
-    // other lacks stops this compiling — the only place that mistake can be caught.
-    const bothWays: [Extends<HintTone, CalloutTone>, Extends<CalloutTone, HintTone>] = [
-      true,
-      true,
-    ]
-    expect(bothWays).toEqual([true, true])
-    expect([...HINT_TONES].sort()).toEqual(['note', 'tip', 'warning'])
   })
 })
 

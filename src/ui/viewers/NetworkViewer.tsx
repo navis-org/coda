@@ -24,13 +24,19 @@ import type Sigma from 'sigma'
 
 import type { NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
-import type { ColorSpec, ShapeSpec, SizeSpec } from '../../nodes/lib/encodingParams'
+import type {
+  ColorSpec,
+  MarkerShape,
+  ShapeSpec,
+  SizeSpec,
+} from '../../nodes/lib/encodingParams'
 import { writeOverrides } from '../../nodes/lib/encodingParams'
 import { joinIds } from '../../nodes/lib/copyIds'
-import type { Mode } from '../colors'
-import { CHART_INK, chartSurface, currentMode, withAlpha } from '../colors'
-import type { MarkerShape, ResolvedColor, ResolvedShape, ResolvedSize } from '../encoding'
-import { resolveShape, resolveSize } from '../encoding'
+import type { Mode } from '../../style/colors'
+import { CHART_INK, chartSurface, withAlpha } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
+import type { ResolvedColor, ResolvedShape, ResolvedSize } from '../../style/encoding'
+import { resolveShape, resolveSize } from '../../style/encoding'
 import {
   COMPONENT_CHANNEL,
   resolveNetworkEdgeColor,
@@ -39,7 +45,7 @@ import {
 import { copyText, exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { cx2Files, networkToGraphml } from '../exportValue'
 import { CytoscapeDialog } from './CytoscapeDialog'
-import { formatCell } from '../format'
+import { formatCell } from '../../style/format'
 import { NetworkLegend } from './NetworkLegend'
 import type { SvgEdge, SvgNode } from './networkDraw'
 import { assignCurvatures, networkToSvg } from './networkDraw'

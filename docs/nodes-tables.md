@@ -571,7 +571,7 @@ broken form, so the fix is measured rather than asserted.
 
 ### The palettes
 
-Names in `nodes/lib/heatmapParams.ts`, hex in `ui/colors.ts`, which is `encodingParams.ts`'s
+Names in `nodes/lib/heatmapParams.ts`, hex in `style/colors.ts`, which is `encodingParams.ts`'s
 arrangement for the categorical sets. Two lists because they are two kinds of thing — a diverging
 ramp has a middle — and two params so a choice survives toggling the scale and back;
 `heatmapPaletteOf` is the one reader, so a name from the wrong list degrades to Coda's ramp

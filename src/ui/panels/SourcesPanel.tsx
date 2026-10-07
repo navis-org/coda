@@ -48,7 +48,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { IssueText } from '../IssueText'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 
 import { listBases } from '../../data/annotations'
 import {

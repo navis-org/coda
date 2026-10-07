@@ -49,7 +49,7 @@ import {
  * Reusing it is what makes a neuron the same colour in the 3D view and in neuroglancer.
  * Both modules are pure — no DOM, no React — so this stays testable headlessly.
  */
-import { resolveColor } from '../../ui/encoding'
+import { resolveColor } from '../../style/encoding'
 import { requireDataset, sourceSupports } from '../lib/datasetParam'
 import type { ColorMode } from '../lib/encodingParams'
 import { colorParams, readColorSpec } from '../lib/encodingParams'

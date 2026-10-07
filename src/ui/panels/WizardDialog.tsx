@@ -58,7 +58,7 @@ import {
 } from '../../wizard/options'
 import { activeTab } from '../../core/dashboard'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../../core/registry'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import type { CodaGraph } from '../../core/graph'
 import { Modal, ModalHeader } from '../Modal'
 import { useOfferedForNewWork } from '../packSwitches'

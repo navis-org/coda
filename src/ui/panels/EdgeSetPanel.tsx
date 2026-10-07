@@ -31,7 +31,7 @@ import type { EdgeSourcePreview } from '../../data/edges/importer'
 import { importEdges, previewEdgeSource } from '../../data/edges/importer'
 import type { EdgeColumnChoice } from '../../data/edges/read'
 import { useGraphStore } from '../../store/graphStore'
-import { formatBytes, formatNumber } from '../format'
+import { formatBytes, formatNumber } from '../../style/format'
 import { Modal, ModalHeader } from '../Modal'
 
 /** What the panel is doing. Anything but `idle` owns the lower half of the dialog. */

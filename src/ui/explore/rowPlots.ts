@@ -17,7 +17,7 @@
  */
 
 import type { CellValue, TableValue } from '../../core/values'
-import { normalize } from '../encoding'
+import { normalize } from '../../style/encoding'
 
 /** Where a value sits in a column, 0 at the smallest and 1 at the largest. */
 export interface Percentile {

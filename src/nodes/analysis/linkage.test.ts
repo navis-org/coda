@@ -25,7 +25,7 @@ import {
   makeMatrix,
 } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
-import { clusterColor } from '../../ui/encoding'
+import { clusterColor } from '../../style/encoding'
 import type { DataSource } from '../../data/source'
 import type { LinkageRequest } from '../../pyodide/linkage'
 import '../index'

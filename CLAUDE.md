@@ -32,10 +32,11 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 [docs/invariants.md](docs/invariants.md) has the incident behind each in full.
 **Read it before deciding a rule does not apply to your case.**
 
-1. **`src/core` and `src/data` are headless.** No React, no zustand, no store, no UI
-   imports. Enforced by a lint rule in `eslint.config.js` and, transitively and for every Web
-   Worker, by `src/test/importGraph.test.ts`. The reason is a future
-   non-React consumer, plus DOM-free unit tests.
+1. **The headless areas — `src/core`, `src/data`, `src/nodes`, `src/style` and the rest listed in
+   `eslint.config.js` — import no React, zustand, store or UI**, nor does `nodes/lib` import
+   `src/style`. Enforced per file by lint and, transitively and for every Web Worker, by
+   `src/test/importGraph.test.ts`. The reason is non-React consumers (the MCP server today) plus
+   DOM-free tests.
 
 2. **`inferOutputs` must never throw and must not fetch.** It runs on every graph
    mutation; failures degrade to "unknown type", which silently kills column pickers.
@@ -791,7 +792,7 @@ rule belongs to one area, its record is in that area's doc.
   **monotonic**. seaborn's **`annot` takes a frame of its own** and ggplot gets a `fill_` column
   beside the untouched `value`: that is how the numbers stay raw under a transformed fill.
 - **`by value` on the 3D, Scatter and Network viewers is the Heatmap's colour domain, not a copy.**
-  `colorParams({ valueScale })` adds a ramp, both ends, a centre and a log, and `ui/encoding.ts`
+  `colorParams({ valueScale })` adds a ramp, both ends, a centre and a log, and `style/encoding.ts`
   holds them for both. Three rules: an automatic bottom is the **data's minimum** (the Heatmap's is
   zero), so a node on the defaults draws what it always drew; a centred ramp is **symmetric** about
   its centre, so it has no `Min` and no log; and "numeric columns only" is `ColorBy`'s `dtypes` as a
@@ -1318,7 +1319,7 @@ rule belongs to one area, its record is in that area's doc.
 
 ## Chart colours
 
-Do not pick chart colours by eye. The palette in `src/ui/colors.ts` was validated with the
+Do not pick chart colours by eye. The palette in `src/style/colors.ts` was validated with the
 `dataviz` skill's validator; the header comment records what passed and what didn't. If you
 change the palette, re-run the validator; don't reason about ΔE.
 

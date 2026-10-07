@@ -18,15 +18,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { ColorSpec, ShapeSpec, SizeSpec } from '../../nodes/lib/encodingParams'
+import type {
+  ColorSpec,
+  MarkerShape,
+  ShapeSpec,
+  SizeSpec,
+} from '../../nodes/lib/encodingParams'
 import { writeOverrides } from '../../nodes/lib/encodingParams'
 import { rowKeys } from '../../nodes/lib/rowIds'
 import type { TableValue } from '../../core/values'
-import { CHART_INK, chartSurface, currentMode } from '../colors'
-import type { MarkerShape } from '../encoding'
-import { rampLabel, resolveColor, resolveShape, resolveSize } from '../encoding'
+import { CHART_INK, chartSurface } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
+import { rampLabel, resolveColor, resolveShape, resolveSize } from '../../style/encoding'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
-import { formatCell, formatCompact, formatNumber, plural } from '../format'
+import { formatCell, formatCompact, formatNumber, plural } from '../../style/format'
 import { GestureMarquee } from './GestureMarquee'
 import { ColorKey, ShapeKey, SizeKey } from './LegendKeys'
 import type { LegendItem } from './scatterDraw'

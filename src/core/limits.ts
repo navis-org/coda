@@ -153,9 +153,9 @@ export function crashFloorIssue(
 /**
  * Bytes as a short human string.
  *
- * A second spelling of `ui/format.ts`'s, and the duplication is the boundary rather than an
- * oversight: `src/core` and `src/data` must not import from `src/ui` (invariant 1), and these
- * messages are written by nodes and by backends. The two round differently — `512 MB` here
+ * A second spelling of `style/format.ts`'s, and the duplication is the boundary rather than an
+ * oversight: `src/style` reads `nodes/lib`, which `src/core` sits beneath, and these messages are
+ * written by nodes and by backends. The two round differently — `512 MB` here
  * against `512.0 MB` there — because this one appears mid-sentence in prose and that one in a
  * file-size readout.
  */

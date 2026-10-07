@@ -12,7 +12,7 @@
 import type { TableValue } from '../../core/values'
 import type { ValueRange } from '../../nodes/lib/chartSelection'
 import { MISSING_LABEL, inRange, markLabel } from '../../nodes/lib/chartSelection'
-import { foldByRank } from '../colors'
+import { foldByRank } from '../../style/colors'
 import type { CorticalFrame } from '../../packs/cortex/frames'
 import { layerRanges } from '../../packs/cortex/frames'
 import type { RowScale } from './wall'

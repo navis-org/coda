@@ -91,7 +91,7 @@ already knows roughly what they want and is scanning for the name.
 somebody deciding whether this is the node at all. Say what it is for, what it hands on, and the
 one thing that surprises people about it — the trade you made, the parameter that is not what it
 looks like, the failure it is easy to walk into. It is prose, not markdown: the guide renders it
-as a paragraph, and a subset parser there would be a second copy of `ui/markdown.ts` on a page
+as a paragraph, and a subset parser there would be a second copy of `core/markdown.ts` on a page
 that deliberately imports nothing.
 
 Collapsing the two would make one of them wrong: a palette row wrapping to four lines, or a guide

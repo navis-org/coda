@@ -181,7 +181,7 @@ registerNode({
       group: 'skeletons',
       /*
        * One colour per neuron, from the id — and it is the same colour neuroglancer gives that
-       * neuron, because it is neuroglancer's hash (see `ui/segmentColor.ts`).
+       * neuron, because it is neuroglancer's hash (see `style/segmentColor.ts`).
        *
        * This was `categorical` on `neuronId`, which is the palette answering a question it was
        * not built for: eight validated slots and a grey `Other`, so a scene of twenty neurons

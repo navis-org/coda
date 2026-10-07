@@ -15,10 +15,10 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CHART_INK, chartSurface } from '../colors'
+import { CHART_INK, chartSurface } from '../../style/colors'
 import { serializeSvg } from '../export'
 import { makeMatrix } from '../../core/values'
-import { rampColors } from '../encoding'
+import { rampColors } from '../../style/encoding'
 import { buildHeatmapSpec } from './heatmapPlot'
 import { heatmapToSvg } from './heatmapDraw'
 import { networkToSvg } from './networkDraw'

@@ -554,7 +554,7 @@ dataset node that has just done it.
 
 ### Rendering someone else's markdown
 
-`ui/markdown.ts` parses a subset to an AST; `MarkdownView.tsx` turns that into React elements.
+`core/markdown.ts` parses a subset to an AST; `MarkdownView.tsx` turns that into React elements.
 
 **The AST is the security boundary, and it is why there is no markdown dependency.** Every
 library in that shape emits an **HTML string**, so safety rests on a sanitiser being configured

@@ -2,9 +2,15 @@ import { useMemo } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
 import type { TableValue } from '../../core/values'
-import { MAX_BAR_THICKNESS, seriesColor } from '../colors'
+import { MAX_BAR_THICKNESS, seriesColor } from '../../style/colors'
 import { exportBaseName as makeBaseName } from '../export'
-import { formatCompact, formatNumber, labelGutter, plural, truncateLabel } from '../format'
+import {
+  formatCompact,
+  formatNumber,
+  labelGutter,
+  plural,
+  truncateLabel,
+} from '../../style/format'
 import { ClearSelection } from './LegendKeys'
 import type { GroupDistribution, WhiskerRule } from './boxStats'
 import { MAX_GROUPS_DEFAULT, groupValues, summarise, swarmOffsets } from './boxStats'

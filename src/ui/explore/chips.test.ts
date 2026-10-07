@@ -17,8 +17,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { MAX_SERIES, seriesColor } from '../colors'
-import type { Mode } from '../colors'
+import { MAX_SERIES, seriesColor } from '../../style/colors'
+import type { Mode } from '../../style/colors'
 import { chipKey, chipSlots, rowFields, splitTags } from './rowFields'
 import { column, tableSchema } from '../../core/types'
 

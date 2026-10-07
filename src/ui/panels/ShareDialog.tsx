@@ -27,7 +27,7 @@ import { errorMessage } from '../../core/errors'
 import { useGraphStore } from '../../store/graphStore'
 import { LONG_LINK_CHARS, shareAdvisories } from '../shareAdvisories'
 import { copyText, slugify } from '../export'
-import { formatNumber } from '../format'
+import { formatNumber } from '../../style/format'
 import { UNLISTED_GIST, WhereTheTokenGoes } from '../githubGistNotes'
 import { Modal, ModalHeader } from '../Modal'
 

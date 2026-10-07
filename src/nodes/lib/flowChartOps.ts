@@ -278,7 +278,7 @@ function longestPathLayers(count: number, wiring: Wiring): Int32Array {
  * *order* is what the column says and the only thing taken from it.
  *
  * A row with no number lands in its own layer after every numbered one, rather than in layer 0.
- * Null is not zero — the trap `ui/encoding.ts`'s `numeric()` exists for — and a neuron the
+ * Null is not zero — the trap `style/encoding.ts`'s `numeric()` exists for — and a neuron the
  * traversal never reached being drawn in the seed's column is the specific lie that matters here.
  */
 export function columnLayers(values: readonly unknown[], count: number): Int32Array {

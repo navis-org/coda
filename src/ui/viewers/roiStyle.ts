@@ -6,8 +6,8 @@
  * of the component because jsdom has no layout and anything inside one is covered by nothing.
  */
 
-import { sequentialColor } from '../colors'
-import type { Mode, SequentialHue } from '../colors'
+import { sequentialColor } from '../../style/colors'
+import type { Mode, SequentialHue } from '../../style/colors'
 // `regionSide` lives with the explode: it stopped being a presentation detail the moment the
 // relaxation started pairing homologous regions with it.
 import { homologyKey, regionSide } from './roiProjection'

@@ -26,7 +26,8 @@ import type { DataSource } from '../../data/source'
 import type { PartnerGrouping } from '../../nodes/lib/profileStats'
 import { registerSource } from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
-import { currentMode, sequentialColor } from '../colors'
+import { sequentialColor } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
 
 /** Relative luminance of a `#rrggbb`, for asserting that a ramp actually runs somewhere. */
 function luminance(hex: string): number {

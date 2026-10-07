@@ -14,7 +14,7 @@ import { column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { makeTable } from '../../core/values'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
-import { CHART_INK } from '../colors'
+import { CHART_INK } from '../../style/colors'
 import { resolveNetworkEdgeColor, resolveNetworkNodeColor } from './networkColor'
 
 const NODE_SCHEMA = tableSchema(column('id', 'str'), column('type', 'str'))

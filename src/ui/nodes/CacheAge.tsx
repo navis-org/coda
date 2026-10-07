@@ -21,7 +21,7 @@
 
 import { type ReactNode, useEffect, useState } from 'react'
 
-import { formatAge } from '../format'
+import { formatAge } from '../../style/format'
 
 /** How often the label re-reads the clock. A minute, since the unit never changes faster. */
 const TICK_MS = 60_000

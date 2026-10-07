@@ -19,7 +19,7 @@ import type { NgScene } from '../../data/neuroglancer/scene'
 import { buildScene, sceneUrl, viewerBaseFor } from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
-import { formatNumber, plural } from '../format'
+import { formatNumber, plural } from '../../style/format'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { errorMessage } from '../../core/errors'
 

@@ -1,7 +1,7 @@
 /**
  * A colour as somebody else's file spells it, read into the `#rrggbb` Coda draws with.
  *
- * Coda's own colour columns take hex only (`literalColor` in `ui/encoding.ts`), deliberately: a
+ * Coda's own colour columns take hex only (`literalColor` in `style/encoding.ts`), deliberately: a
  * column of cell types read as colours is a mistake, and guessing a hue from the text would hide
  * it. A file *written by another tool* is different — BigClust's `color` column holds whatever
  * Python's `cmap.Color` accepted, which is CSS names (`orange`), hex, and RGB(A) tuples in 0–1 or

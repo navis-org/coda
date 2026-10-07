@@ -54,11 +54,12 @@ import type {
   SubjectRegionRow,
   SubjectTypeRow,
 } from '../../nodes/lib/profileStats'
-import { CHART_INK, currentMode, seriesColor } from '../colors'
+import { CHART_INK, seriesColor } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
 import { chipKey, chipSlots, rowFields } from '../explore/rowFields'
 import { NeuronThumbnail } from '../explore/NeuronThumbnail'
 import { tableToCsvParts } from '../export'
-import { formatCell, formatCompact, formatNumber, plural } from '../format'
+import { formatCell, formatCompact, formatNumber, plural } from '../../style/format'
 import { NeuroglancerProfileFrame } from './NeuroglancerProfileFrame'
 import { Pager } from './Pager'
 import { Bars, Facts, Loadable, Tile } from './Tiles'

@@ -45,7 +45,7 @@ import {
 } from '../../packs/annotation/targets'
 import { useGraphStore } from '../../store/graphStore'
 import { downloadCsv, exportBaseName, tableToCsvParts } from '../export'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import { ParamField, TextField } from '../params/ParamField'
 import { cardParams } from '../params/paramGroups'
 import { useSettledFetch } from '../viewers/useSettledFetch'

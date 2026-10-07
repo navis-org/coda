@@ -12,7 +12,7 @@
  * **No colour carries information here.** A card's accent is its backend, which `theme.css`
  * already assigns and which the node's name says in words anyway; strengths and caveats are told
  * apart by their heading and their mark, not by a red/green pair that would be the page's only
- * new hue and would fail the same colourblind gate `src/ui/colors.ts` records.
+ * new hue and would fail the same colourblind gate `src/style/colors.ts` records.
  */
 
 @import '../ui/theme.css';

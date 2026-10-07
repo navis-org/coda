@@ -18,7 +18,7 @@ import { encodeShareFragment, shareUrl } from '../../data/share/fragment'
 import type { FeedbackCategory } from '../../data/feedback'
 import { buildFeedbackDiagnostics, submitFeedback } from '../../data/feedback'
 import { useGraphStore } from '../../store/graphStore'
-import { formatNumber } from '../format'
+import { formatNumber } from '../../style/format'
 import { LONG_LINK_CHARS } from '../shareAdvisories'
 import { Modal, ModalHeader } from '../Modal'
 

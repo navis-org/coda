@@ -4,8 +4,8 @@
  *
  * Cohesive by *audience* rather than by technology — every export here has exactly the same two
  * consumers and is always imported with the others. `checkUploadSize` looks pure enough to live a
- * layer down, and cannot: it takes DOM `File`s and builds copy through `ui/format`, both of which
- * invariant 1 closes `src/data` and `src/nodes` to.
+ * layer down, and cannot: it takes DOM `File`s, which invariant 1 closes `src/data` and `src/nodes`
+ * to.
  *
  * Shared by `UploadBody` and `UploadMeshBody`, which are otherwise different cards — one picks a
  * CSV and asks what its columns mean, the other picks mesh files and asks what units they are in.
@@ -48,7 +48,7 @@ import {
   uploadPeekSettled,
   uploadRevision,
 } from '../../data/uploads'
-import { formatBytes, plural } from '../format'
+import { formatBytes, plural } from '../../style/format'
 
 type UploadState = 'empty' | 'loading' | 'ready' | 'absent'
 

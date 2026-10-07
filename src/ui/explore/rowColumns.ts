@@ -24,7 +24,7 @@
 import type { TableSchema } from '../../core/types'
 import { findColumn, isNumericDType } from '../../core/types'
 import { ID_COLUMN_NAME } from '../../core/ids'
-import { MAX_SERIES } from '../colors'
+import { MAX_SERIES } from '../../style/colors'
 import type { RowFields } from './rowFields'
 import { statUnit } from './rowFields'
 import type { PlotSpec } from './rowPlots'

@@ -15,11 +15,17 @@ import { memo } from 'react'
 
 import { idText } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
-import { formatCell, formatExact, formatMeasure, formatNumber, formatShare } from '../format'
+import {
+  formatCell,
+  formatExact,
+  formatMeasure,
+  formatNumber,
+  formatShare,
+} from '../../style/format'
 import { NeuronThumbnail, TILE_COMPACT_PX, TILE_PX } from './NeuronThumbnail'
 import type { RowFields } from './rowFields'
 import { chipKey, chipSlots, splitTags, statUnit } from './rowFields'
-import type { Mode } from '../colors'
+import type { Mode } from '../../style/colors'
 import type { Distributions, Spread, SpreadScale } from './rowPlots'
 import { barFraction, percentileOf, sharesOf, spreadFor } from './rowPlots'
 import { ConfidenceBar, PartsMark, PercentileTick, ShareRing, ValueBar } from './RowMarks'

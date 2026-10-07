@@ -19,11 +19,12 @@ import {
   foldFlowGraph,
   showsEdgeLabels,
 } from '../../nodes/lib/flowChartOps'
-import { CHART_INK, chartSurface, currentMode, inkOn } from '../colors'
-import type { ResolvedColor } from '../encoding'
-import { resolveColor } from '../encoding'
+import { CHART_INK, chartSurface, inkOn } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
+import type { ResolvedColor } from '../../style/encoding'
+import { resolveColor } from '../../style/encoding'
 import { exportBaseName as makeBaseName } from '../export'
-import { formatNumber, truncateLabel } from '../format'
+import { formatNumber, truncateLabel } from '../../style/format'
 import { ChartTooltip, TooltipRow } from './ChartTooltip'
 import { ColorKey } from './LegendKeys'
 import { tooltipPoint } from './tooltipPoint'
@@ -268,7 +269,7 @@ export function FlowChartViewer({
    * Colour resolves against the network's **own** node table, by the row each box remembers —
    * never against the folded graph, which has boxes that are not rows. `resolveColor` owns the
    * palette, the eight slots, the cycling, the null grey and the overrides; re-deriving any of
-   * that here is what `ui/encoding.ts` exists to prevent.
+   * that here is what `style/encoding.ts` exists to prevent.
    */
   // `useStable`, because `readColorSpec` mints a fresh object on every `ValuePreview` render —
   // the hazard `networkRebuild.test.tsx` records, and without it this memo never bites.

@@ -49,8 +49,8 @@ import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
  */
 import { paramIsPicker, paramValueLabel } from '../help/paramText'
 import { kindSetLabel } from '../core/types'
-import { portStyle } from '../ui/socketStyle'
-import type { SocketFamily, SocketShape } from '../ui/socketStyle'
+import { portStyle } from '../style/socketStyle'
+import type { SocketFamily, SocketShape } from '../style/socketStyle'
 
 export interface GuidePort {
   id: string

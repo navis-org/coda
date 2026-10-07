@@ -1,5 +1,5 @@
 import { useGraphStore, useStaleCount } from '../../store/graphStore'
-import { formatBytes, formatDuration, formatShare, plural } from '../format'
+import { formatBytes, formatDuration, formatShare, plural } from '../../style/format'
 import { useMemoryReading } from '../memoryReadout'
 import { STATUS_BAR_HINTS, shortcutHint } from '../shortcuts'
 import { MemoryMeter } from './MemoryDialog'

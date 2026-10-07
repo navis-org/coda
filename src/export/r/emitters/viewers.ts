@@ -11,7 +11,7 @@ import { readColorSpec, readShapeSpec, readSizeSpec } from '../../../nodes/lib/e
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
-import { CHART_INK } from '../../../ui/colors'
+import { CHART_INK } from '../../../style/colors'
 import { rCol as col, rStr, rVector } from '../r'
 import { hclustMethod } from './analysis'
 import { registerEmitter } from '../registry'

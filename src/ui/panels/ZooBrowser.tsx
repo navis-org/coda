@@ -36,7 +36,7 @@ import {
 } from '../../data/zoo/source'
 import { backendName } from '../../nodes/lib/datasetFamilies'
 import { useGraphStore } from '../../store/graphStore'
-import { formatAgo, plural } from '../format'
+import { formatAgo, plural } from '../../style/format'
 import { MarkdownView } from '../MarkdownView'
 import { useListNav } from '../useListNav'
 import { Highlight } from './Highlight'

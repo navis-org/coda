@@ -14,8 +14,8 @@
  */
 
 import type { CorticalFrame } from '../../packs/cortex/frames'
-import type { Mode } from '../colors'
-import { CHART_INK, chartSurface } from '../colors'
+import type { Mode } from '../../style/colors'
+import { CHART_INK, chartSurface } from '../../style/colors'
 import { uiFontFamily } from '../viewers/canvas2d'
 import { element, SVG_NS, svgRoot, textNode } from '../viewers/svgElement'
 import type { CellGeometry, RowMetrics, RowScale, WallLayout } from './wall'

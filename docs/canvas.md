@@ -815,22 +815,14 @@ inference error over a run warning over a type warning and shows one at a time, 
 A hint is what an *author* has to say. Sharing a band would make "the graph is broken" and "here is
 where to start" the same kind of object, and a reader who cannot tell them apart acts on neither.
 
-**The tone is a name off `HINT_TONES`, never a colour.** A `.coda.json` arrives from a gist, from
-the Zoo, from a mailed file, and a tone spent into an inline `style` is a CSS injection — the same
-reasoning `GROUP_COLORS` records, and `deserializeGraph` drops an unknown one rather than passing
-it through. The vocabulary is `markdown.ts`'s `CalloutTone` deliberately (`note` / `tip` /
-`warning`), because the help documents already draw admonitions in exactly those three and a
-second three-word list is how "tip" comes to be blue in one place and green in another.
-
-**Stated twice rather than imported, and the headless rule is only half of why.** It stops `core`
-importing from `ui`; it says nothing about the reverse, which is allowed and used everywhere. What
-stops the reverse is that `ui/markdown.ts` has **no imports at all** and feeds `help/registry.ts`,
-the `nodes.html` entry — importing `core/graph.ts` there would drag the node registry and the
-dashboard model into a page bundle `docs/pages.md` requires to stay out of the main chunk, to save
-three words. So the lists are held together by a type-level assertion in
-`ui/nodes/nodeHints.test.tsx`, which stops compiling the moment either gains a tone the other
-lacks, and the stylesheet agrees by sharing `.markdown__callout`'s own `--cal` token and its tone
-table rather than carrying a second one.
+**The tone is a name off `markdown.ts`'s `CALLOUT_TONES`, never a colour.** A `.coda.json` arrives
+from a gist, from the Zoo, from a mailed file, and a tone spent into an inline `style` is a CSS
+injection — the same reasoning `GROUP_COLORS` records, and `deserializeGraph` falls back to the
+default for an unknown one rather than passing it through. The vocabulary is the help documents'
+own (`note` / `tip` / `warning`), because they already draw admonitions in exactly those three and
+a second three-word list is how "tip" comes to be blue in one place and green in another. The
+stylesheet agrees by sharing `.markdown__callout`'s own `--cal` token and its tone table rather
+than carrying a second one.
 
 **Writing one is an edit, and dismissing one still is not.** The node menu's **Add Hint…** and the
 ✎ on a box open `ui/panels/HintEditor.tsx`, a popover hung under the card with the text, a tone, a
@@ -1577,7 +1569,7 @@ because their sets have no name and no set at all respectively.
 **`familyColorVar` answers it for the wire and a `data-family` rule answers it for the socket,
 and they disagreed.** `socketStyle.ts` maps six families onto four tokens — geometry shares the
 dataset hue, since only three chromatic families clear the all-pairs colourblind gate and shape
-carries the rest (see [colors.ts](../src/ui/colors.ts)). `editor.css` transcribed that table and
+carries the rest (see [colors.ts](../src/style/colors.ts)). `editor.css` transcribed that table and
 **had no `geometry` arm**, so every Skeletons, Meshes, Points and Transform socket fell through
 to the base rule's `--socket-any` and drew grey, while the wire leaving it drew
 `--socket-dataset` green.
@@ -1662,7 +1654,7 @@ That was the state for as long as there were sockets: `.coda-node` clipped with
 `overflow: hidden`, an 11px disc centred on the border came out as a 5.5px tab, and it looked
 deliberate — a tab flush with the card is a perfectly plausible design. What it actually cost is
 a channel. Colour cannot carry type identity here (only three chromatic families clear the
-all-pairs colourblind gate — see [colors.ts](../src/ui/colors.ts)), so the *shape* is load-bearing:
+all-pairs colourblind gate — see [colors.ts](../src/style/colors.ts)), so the *shape* is load-bearing:
 `socketStyle.ts` distinguishes circle, ring, diamond, square, hex and dot, and half a diamond and
 half a square are the same silhouette. Blender draws the whole symbol; so do we.
 

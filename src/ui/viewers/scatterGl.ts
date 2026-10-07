@@ -36,8 +36,8 @@
  * remains the export path.
  */
 
-import type { MarkerShape } from '../encoding'
-import { ALL_SHAPES } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
+import { ALL_SHAPES } from '../../nodes/lib/encodingParams'
 import type { ScatterMarks, ScatterSpec } from './scatterPlot'
 import { markAlpha, viewAffine } from './scatterPlot'
 import { RING_GAP, RING_WIDTH, markRgb, markStamp } from './scatterRaster'

@@ -19,7 +19,7 @@ import { packsNeeding } from '../../core/packs'
 import { getPack, registeredPacks } from '../../core/registry'
 import type { PackDefinition } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import { GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX } from '../glyphs'
 import { Modal, ModalHeader } from '../Modal'
 import {

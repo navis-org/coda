@@ -40,9 +40,9 @@ const run = (zoom) =>
   const plotMod = await load('/src/ui/viewers/scatterPlot.ts')
   const drawMod = await load('/src/ui/viewers/scatterDraw.ts')
   const labelsMod = await load('/src/ui/viewers/scatterLabels.ts')
-  const enc = await load('/src/ui/encoding.ts')
+  const enc = await load('/src/style/encoding.ts')
   const c2d = await load('/src/ui/viewers/canvas2d.ts')
-  const colors = await load('/src/ui/colors.ts')
+  const colors = await load('/src/style/colors.ts')
   const d = window.__labelData
   const n = d.x.length
   const table = {

@@ -32,9 +32,15 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { rowKeys } from '../../nodes/lib/rowIds'
 import type { TableValue } from '../../core/values'
-import { resolveColor } from '../encoding'
+import { resolveColor } from '../../style/encoding'
 import { exportBaseName as makeBaseName } from '../export'
-import { formatCompact, formatNumber, formatShare, plural, truncateLabel } from '../format'
+import {
+  formatCompact,
+  formatNumber,
+  formatShare,
+  plural,
+  truncateLabel,
+} from '../../style/format'
 import { ChartTooltip, TooltipRow } from './ChartTooltip'
 import { GestureMarquee } from './GestureMarquee'
 import { ColorKey } from './LegendKeys'

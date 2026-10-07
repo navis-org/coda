@@ -22,7 +22,7 @@ import type {
   TargetRecord,
 } from '../../data/annotations/targets/types'
 import { FilterInput, NoMatch, matching } from '../explore/fieldPopover'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import type { CellMark, Marks, OnCommit, OnInvalid, OnSelect } from './useTargetTable'
 
 const readOnlyNote = (field: TargetField) =>

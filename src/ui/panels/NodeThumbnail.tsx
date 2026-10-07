@@ -27,9 +27,9 @@ import {
 } from '../../nodes/lib/datasetFamilies'
 import { GLYPH_BOX, GLYPH_STROKE_WIDTH, glyphShapes } from '../glyphs'
 import { glyphElements } from '../glyphElements'
-import { familyColorVar, nodeTintVar, portStyle } from '../socketStyle'
-import type { SocketShape } from '../socketStyle'
-import { plural } from '../format'
+import { familyColorVar, nodeTintVar, portStyle } from '../../style/socketStyle'
+import type { SocketShape } from '../../style/socketStyle'
+import { plural } from '../../style/format'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 
 const WIDTH = 78

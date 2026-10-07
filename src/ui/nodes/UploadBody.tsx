@@ -23,7 +23,7 @@ import { useCallback, useRef, useState } from 'react'
 
 import { parseDelimited } from '../../data/csv'
 import { putUpload } from '../../data/uploads'
-import { formatBytes, formatNumber } from '../format'
+import { formatBytes, formatNumber } from '../../style/format'
 import type { NodeBodyProps } from './nodeBodies'
 import {
   SchemaListing,

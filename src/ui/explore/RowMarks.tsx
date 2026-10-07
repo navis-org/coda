@@ -3,7 +3,7 @@
  *
  * Plain SVG and no library: each is a handful of rectangles, and `rowPlots.ts` has already decided
  * what they mean. Colour comes from `CHART_INK` and the categorical palette rather than from
- * anything chosen here — see `src/ui/colors.ts` for why hues are not picked by eye.
+ * anything chosen here — see `src/style/colors.ts` for why hues are not picked by eye.
  *
  * The theme arrives as a prop rather than being read per mark. Four `currentMode()` calls a row is
  * a hundred a page, and on the default `system` preference — no `data-theme` stamped — every one
@@ -27,12 +27,12 @@
 
 import type React from 'react'
 
-import type { Mode } from '../colors'
-import { CHART_INK, seriesColor } from '../colors'
+import type { Mode } from '../../style/colors'
+import { CHART_INK, seriesColor } from '../../style/colors'
 import { MARK_W } from './rowPlots'
 import type { RegionShare } from './rowRois'
 import { donutArcs } from './rowRois'
-import { formatMeasure, formatNumber, formatShare } from '../format'
+import { formatMeasure, formatNumber, formatShare } from '../../style/format'
 import type { Part, Percentile } from './rowPlots'
 
 /** Bar geometry. `MARK_W` is `rowPlots`', which is also what sizes the grid track and the labels. */

@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
 import { MAX_REGIONS, donutArcs, regionShares } from './rowRois'
-import { OTHER_LABEL } from '../colors'
+import { OTHER_LABEL } from '../../style/colors'
 
 const SCHEMA = tableSchema(
   column('neuronId', 'str'),

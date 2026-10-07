@@ -1524,7 +1524,7 @@ export interface RoiMeshRequest {
  * **The two fractions are null rather than zero where there is nothing to divide.** A region
  * with no synapses at all has *undefined* completeness, and `0` there would draw a confident
  * empty bar for a region nobody has looked at — the same reason `numeric()` exists in
- * `ui/encoding.ts`.
+ * `style/encoding.ts`.
  */
 export const ROI_COMPLETENESS_SCHEMA: TableSchema = tableSchema(
   column('roi', 'str'),

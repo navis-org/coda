@@ -32,8 +32,8 @@ import { useMemo } from 'react'
 import { getNodeDef, isAnnotation, liveType } from '../../core/registry'
 import type { ZooLayout } from '../../data/zoo/format'
 import { filterLayout } from '../../data/zoo/format'
-import { CHART_INK } from '../colors'
-import { nodeTintVar } from '../socketStyle'
+import { CHART_INK } from '../../style/colors'
+import { nodeTintVar } from '../../style/socketStyle'
 
 /**
  * Read off `dark` and used in both themes, which is not a shortcut: `muted` is the one ink that

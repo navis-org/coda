@@ -82,13 +82,13 @@ import {
 } from '../../data/neuroglancer/scene'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { errorMessage } from '../../core/errors'
-import { describeLegend, resolveColor } from '../encoding'
+import { describeLegend, resolveColor } from '../../style/encoding'
 import { copyText } from '../export'
 import { RootRegistry } from './persistentRoots'
 import type { RootLease } from './persistentRoots'
 import { forgetScene, recallScene, rememberScene } from './sceneMemo'
 import { ViewerActions } from './ViewerActions'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import { ViewerEmpty } from './ViewerEmpty'
 
 export interface NeuroglancerViewerProps {

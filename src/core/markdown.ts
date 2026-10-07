@@ -11,7 +11,7 @@
  * sanitiser is ~50 kB for a feature that renders three block kinds, against ~250 lines here.
  * More importantly, every library in that shape produces an **HTML string**, so the safety of
  * the whole path rests on a sanitiser being configured correctly and staying that way. This
- * produces an AST that `Markdown.tsx` turns into React elements, so there is no
+ * produces an AST that `ui/MarkdownView.tsx` turns into React elements, so there is no
  * `dangerouslySetInnerHTML` anywhere and raw HTML in the source is text rather than markup. A
  * hostile blurb — from a compromised deployment someone points a Custom neuPrint node at —
  * cannot inject a script by construction rather than by configuration.
@@ -59,7 +59,9 @@ export interface MarkdownFence {
   text: string
 }
 
-export type CalloutTone = 'note' | 'warning' | 'tip'
+/** The admonition tones, in the order a picker offers them — also the hint tones on a card. */
+export const CALLOUT_TONES = ['note', 'tip', 'warning'] as const
+export type CalloutTone = (typeof CALLOUT_TONES)[number]
 
 /** `> [!WARNING]` and the block quote under it. */
 export interface MarkdownCallout {
@@ -170,7 +172,7 @@ function indentWidth(prefix: string): number {
 /** ```` ```lang ```` — three or more backticks, with an optional info string. */
 const FENCE_LINE = /^(\s*)(`{3,})\s*([^`]*)$/
 /** `> [!NOTE]`, `> [!WARNING] with a title`. */
-const CALLOUT_LINE = /^>\s*\[!(note|warning|tip)\]\s*(.*)$/i
+const CALLOUT_LINE = new RegExp(`^>\\s*\\[!(${CALLOUT_TONES.join('|')})\\]\\s*(.*)$`, 'i')
 /** `![alt](src)` alone on a line. */
 const IMAGE_LINE = /^!\[([^\]]*)\]\(([^)]*)\)$/
 /** `---`, `:--`, `--:`, `:-:`, piped — the row that makes the line above it a header. */

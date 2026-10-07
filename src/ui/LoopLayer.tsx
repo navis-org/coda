@@ -36,7 +36,7 @@ import { loopBoxes } from '../layout/groupBounds'
 import { isIterableValue } from '../nodes/lib/iterables'
 import { loopPlanOf } from '../nodes/flow/plan'
 import { useGraphStore } from '../store/graphStore'
-import { formatNumber } from './format'
+import { formatNumber } from '../style/format'
 
 export interface LoopLayerProps {
   /** What React Flow last measured for each card. Without it every box fits the fallback size. */

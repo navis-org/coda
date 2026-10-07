@@ -12,7 +12,14 @@
 
 import type { CellValue, TableValue } from '../core/values'
 import { getColumn } from '../core/values'
-import type { ColorSpec, ShapeSpec, SizeSpec, ValueScale } from '../nodes/lib/encodingParams'
+import type {
+  ColorSpec,
+  MarkerShape,
+  ShapeSpec,
+  SizeSpec,
+  ValueScale,
+} from '../nodes/lib/encodingParams'
+import { ALL_SHAPES } from '../nodes/lib/encodingParams'
 import type { ColorLimits, HeatmapPalette } from '../nodes/lib/heatmapParams'
 import { isDivergingPalette, isSequentialPalette } from '../nodes/lib/heatmapParams'
 import type { Mode } from './colors'
@@ -87,29 +94,6 @@ export type Legend = CategoricalLegend | SequentialLegend | undefined
 // ---------------------------------------------------------------------------
 // Shape
 // ---------------------------------------------------------------------------
-
-/**
- * Every mark that can be drawn, in the order the renderers number them.
- *
- * One list, and everything else here is derived from it: the union type, the six assignable
- * marks, and the index the node program sends into a vertex buffer. A second spelling of the
- * vocabulary is a second thing to keep in step, and the one that reaches a shader is the one
- * that fails silently.
- *
- * **Append only** — the index is in a vertex buffer, and `SHAPE_OPTIONS` in
- * `src/nodes/lib/encodingParams.ts` is built from this array.
- */
-export const ALL_SHAPES = [
-  'circle',
-  'square',
-  'triangle',
-  'diamond',
-  'cross',
-  'plus',
-  'dash',
-] as const
-
-export type MarkerShape = (typeof ALL_SHAPES)[number]
 
 /**
  * The shape everything past the cap takes.

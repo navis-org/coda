@@ -5,12 +5,20 @@ verbatim. Read the entry before arguing with the rule.
 
 ## Invariants — don't break these silently
 
-1. **`src/core` and `src/data` are headless.** No React, no zustand, no store, no UI
-   imports. Enforced by a lint rule in `eslint.config.js`, per file, and transitively by
-   `src/test/importGraph.test.ts`, which also holds every Web Worker off the UI and, outside
-   `src/pyodide`, off Python. The reason is a future non-React
-   consumer (CLI runner, Python-side executor over the same graph JSON), plus DOM-free unit
-   tests.
+1. **The headless areas — `src/core`, `src/data`, `src/nodes`, `src/style` and the rest listed in
+   `eslint.config.js` — import no React, zustand, store or UI.** Enforced per file by that lint
+   rule, and transitively by `src/test/importGraph.test.ts`, which also holds every Web Worker off
+   the UI and, outside `src/pyodide`, off Python. The reason is non-React consumers — the MCP
+   server's Node build today; a CLI runner or a Python-side executor over the same graph JSON
+   later — plus DOM-free unit tests.
+
+   The walk found the MCP build reaching React through three nodes taking a colour from
+   `ui/encoding` (whose palette asked the browser for the theme) and the help pages parsing
+   through `ui/markdown`, which `src/nodes` and `src/help` not being linted had let through. The
+   palette, encodings and formatting moved to `src/style`, the parser to `src/core`, and only
+   `currentMode` stayed in `src/ui`. `src/style` reads `nodes/lib`'s param vocabulary
+   (`encodingParams`, `heatmapParams`), so **`nodes/lib` never imports `src/style`** — the same
+   test holds that edge one way; anything else in `src/nodes` may use the palette.
 
 2. **`inferOutputs` must never throw and must not fetch.** It runs on every graph
    mutation. Failures degrade to "unknown type", which silently kills column pickers.

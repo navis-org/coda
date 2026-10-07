@@ -10,10 +10,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { CHART_INK } from '../colors'
+import { CHART_INK } from '../../style/colors'
 import { markPath, scatterToSvg } from './scatterDraw'
-import type { MarkerShape } from '../encoding'
-import { MARKER_SHAPES, OTHER_SHAPE } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
+import { MARKER_SHAPES, OTHER_SHAPE } from '../../style/encoding'
 import type { ScatterSpec } from './scatterPlot'
 import type { MarksOptions } from './scatterPlot'
 import { CIRCLES_MAX, buildMarks, buildScatter } from './scatterPlot'

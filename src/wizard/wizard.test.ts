@@ -41,7 +41,7 @@ import { DATASET_FAMILIES, datasetFamily, starterFamilies } from '../nodes/lib/d
 import { STACK_MAX_INPUTS, stackLabelParamId } from '../nodes/lib/stackParams'
 import type { BuildOptions } from './build'
 import { CROSS_SETS, GROWING_CROSS_SETS } from '../test/crossSets'
-import { parseMarkdown } from '../ui/markdown'
+import { parseMarkdown } from '../core/markdown'
 import '../nodes'
 import {
   DEMO_DATASET,

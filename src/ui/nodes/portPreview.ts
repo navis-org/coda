@@ -25,7 +25,7 @@
 
 import type { MatrixValue, NetworkValue, TableValue, Value } from '../../core/values'
 import { describeValue } from '../../core/values'
-import { formatBytes, formatCell, truncateLabel } from '../format'
+import { formatBytes, formatCell, truncateLabel } from '../../style/format'
 
 /**
  * The most fields drawn down the panel, across every table in it.

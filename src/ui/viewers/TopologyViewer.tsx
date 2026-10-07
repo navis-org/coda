@@ -42,8 +42,9 @@ import {
   sitesFrom,
   strahlerOrders,
 } from '../../nodes/lib/topologyOps'
-import { CHART_INK, currentMode, seriesColor, sequentialColor } from '../colors'
-import { formatMeasure, formatNumber } from '../format'
+import { CHART_INK, seriesColor, sequentialColor } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
+import { formatMeasure, formatNumber } from '../../style/format'
 import { LazyViewer3D } from './LazyViewers'
 import { Bars, Facts, Tile } from './Tiles'
 import { useCompartments } from './useCompartments'

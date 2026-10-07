@@ -56,7 +56,7 @@ import { leafPositions } from '../lib/linkageOps'
  * much as to a viewer, and importing the rule is what makes a neuron the colour of the branch
  * it hung off. Both modules are pure, so it stays testable headlessly.
  */
-import { clusterColor } from '../../ui/encoding'
+import { clusterColor } from '../../style/encoding'
 
 /**
  * What a selected branch hands on.

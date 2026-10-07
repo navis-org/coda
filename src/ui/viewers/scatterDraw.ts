@@ -18,7 +18,7 @@
  * traces directly, because a `Path2D` per point is fifty thousand allocations per frame.
  */
 
-import type { MarkerShape } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
 import { markVertices } from './markGeometry'
 import { SVG_NS, XLINK_NS, element, round, svgRoot, textNode } from './svgElement'
 import type { ScatterSpec } from './scatterPlot'
@@ -34,7 +34,7 @@ import {
 } from './scatterPlot'
 import { RING_GAP, RING_WIDTH, rasterBox, rasterizeMarks } from './scatterRaster'
 import { drawMarksGl } from './scatterGl'
-import { formatCompact } from '../format'
+import { formatCompact } from '../../style/format'
 import { LruMap } from '../../core/lruMap'
 import { canvasFont, textMeasurer } from './canvas2d'
 import { LABEL_HALO_WIDTH } from './networkStyle'

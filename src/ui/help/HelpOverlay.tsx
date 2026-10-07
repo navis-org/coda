@@ -29,7 +29,7 @@ import { seeAlsoFor } from '../../help/seeAlso'
 import { useGraphStore } from '../../store/graphStore'
 import { MarkdownBlocks, MarkdownInlines } from '../MarkdownView'
 import type { MarkdownRenderOptions } from '../MarkdownView'
-import { parseInline } from '../markdown'
+import { parseInline } from '../../core/markdown'
 import { FigureView } from './FigureView'
 import { Modal } from '../Modal'
 

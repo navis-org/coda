@@ -18,7 +18,7 @@
  */
 
 import type { ColumnData } from '../../core/values'
-import type { MarkerShape } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
 
 // ---------------------------------------------------------------------------
 // Marks

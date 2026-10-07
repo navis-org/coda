@@ -3,6 +3,9 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
+/** How the boundary's messages start: naming one or two areas read as the rule misfiring. */
+const HEADLESS_AREA = 'A headless area (see eslint.config.js)'
+
 /*
  * What a drawing table may not import: `ui/glyphs.ts` and every pack's `glyphs.ts` are drawn by
  * `nodes.html`, which has no React and no editor. One list, since flat config's later
@@ -69,13 +72,13 @@ export default tseslint.config(
   },
 
   /*
-   * The architectural boundary.
+   * The architectural boundary: the headless areas listed below.
    *
    * `src/core` is the graph engine: type system, inference, scheduler. It must stay
-   * headless so it can be unit-tested without a DOM and, later, reused by a non-React
-   * consumer (a CLI runner, or a Python-side executor consuming the same graph JSON).
-   * `src/data` is the same deal for backends. Enforced here rather than trusted to
-   * discipline, because this is exactly the boundary that erodes first.
+   * headless so it can be unit-tested without a DOM and reused by a non-React consumer —
+   * the MCP server already is one. `src/data` is the same deal for backends, and the rest
+   * say below why each is in. Enforced here rather than trusted to discipline, because this
+   * is exactly the boundary that erodes first.
    *
    * `src/assistant` is in for the same reason and one of its own: it turns a model's reply
    * into a graph, and the one thing that keeps that safe is that it cannot commit anything —
@@ -99,6 +102,16 @@ export default tseslint.config(
       // The build the MCP server runs in Node. It has no DOM to reach for, so an import of the
       // UI or the store would build green and throw on load in somebody else's process.
       'src/mcp/**/*.ts',
+      // The nodes, and the two things that read them outside the browser: the notebook exporters,
+      // and the help pages the MCP server serves (`docs/invariants.md` has the incident).
+      'src/nodes/**/*.ts',
+      'src/export/**/*.ts',
+      'src/help/**/*.ts',
+      // The palette, the colour, size and socket encodings and number formatting: rules every
+      // viewer draws by and that nodes need too — the Dendrogram writes a leaf's colour into its
+      // output. Below the viewers and above `nodes/lib`, whose param vocabulary they read and
+      // which never imports them (`src/test/importGraph.test.ts`).
+      'src/style/**/*.ts',
       // Not the Web Workers: what a worker may reach is transitive and wider than this rule
       // (Python as well as the UI), so `src/test/importGraph.test.ts` walks every one's graph.
     ],
@@ -107,10 +120,10 @@ export default tseslint.config(
         'error',
         {
           paths: [
-            { name: 'react', message: 'src/core and src/data must stay headless.' },
-            { name: 'react-dom', message: 'src/core and src/data must stay headless.' },
+            { name: 'react', message: `${HEADLESS_AREA} must not use React.` },
+            { name: 'react-dom', message: `${HEADLESS_AREA} must not use React.` },
             { name: 'zustand', message: 'State management belongs in src/store.' },
-            { name: '@xyflow/react', message: 'src/core must not know about the editor.' },
+            { name: '@xyflow/react', message: `${HEADLESS_AREA} must not know about the editor.` },
           ],
           patterns: [
             {
@@ -120,7 +133,7 @@ export default tseslint.config(
                * would have escaped the rule silently.
                */
               group: ['**/ui/*', '**/store/*', '@/ui/*', '@/store/*'],
-              message: 'src/core and src/data must not depend on the UI or the store.',
+              message: `${HEADLESS_AREA} must not depend on the UI or the store.`,
             },
           ],
         },

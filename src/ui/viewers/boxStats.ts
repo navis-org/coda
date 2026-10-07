@@ -28,7 +28,7 @@
 import { quantileSorted } from '../../core/stats'
 import type { TableValue } from '../../core/values'
 import { markLabel, numericCell } from '../../nodes/lib/chartSelection'
-import { foldByRank } from '../colors'
+import { foldByRank } from '../../style/colors'
 
 export type WhiskerRule = 'tukey' | 'minmax' | 'p5p95'
 

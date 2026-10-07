@@ -17,10 +17,11 @@
 import { SVG_NS, element, round, svgRoot, textNode } from './svgElement'
 import type { NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
-import type { Legend, MarkerShape } from '../encoding'
-import { rampLabel } from '../encoding'
+import type { Legend } from '../../style/encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
+import { rampLabel } from '../../style/encoding'
 import { markPath } from './scatterDraw'
-import { formatNumber } from '../format'
+import { formatNumber } from '../../style/format'
 
 /**
  * How far a reciprocal pair bows apart, as a fraction of the distance between its two

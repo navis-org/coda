@@ -1178,7 +1178,7 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * a palette row wrapping to four lines, or a guide entry that says nothing.
    *
    * Prose, not markdown: the guide renders it as a paragraph, and a subset parser there would
-   * be a second copy of `ui/markdown.ts` on a page that deliberately imports nothing.
+   * be a second copy of `core/markdown.ts` on a page that deliberately imports nothing.
    */
   guide?: string
   cost: NodeCost

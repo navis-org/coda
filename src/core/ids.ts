@@ -67,7 +67,7 @@ export const ID_COLUMN_NAME = 'neuronId'
 /**
  * Whether a column's name says it holds neuron identities.
  *
- * Here rather than in `ui/format.ts`, where it was, because `src/data` needs it and may not
+ * Here rather than in `ui/format.ts`, where it was, because `src/data` needs it and could not
  * import the UI — `neuprint/decode.ts` types a Raw Cypher result by sniffing the values, and a
  * column of body ids sniffs as `i64`, which is the one dtype an id must never land in. It sits
  * beside `ID_COLUMN_NAME` for that entry's reason: this is a cross-layer agreement about a
@@ -81,7 +81,7 @@ export const ID_COLUMN_NAME = 'neuronId'
  *
  * What it deliberately does **not** know about is aggregates. `countDistinct_partnerId` counts
  * partners, and whether that is printed with a thousands separator is a question about
- * *display* — so `ui/format.ts` composes this with its own prefix test rather than this
+ * *display* — so `style/format.ts` composes this with its own prefix test rather than this
  * carrying one. It could not carry one anyway: the prefixes are derived from `AGG_OPTIONS` in
  * `nodes/lib/tableOps.ts`, and `src/core` importing `src/nodes` inverts the layering that lets
  * a node registry exist at all.

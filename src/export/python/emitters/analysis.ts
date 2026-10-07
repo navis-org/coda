@@ -5,8 +5,8 @@
 
 // An emitter may reach `src/ui`, which is what keeps the palette in one place rather than
 // transcribed into two exporters — the same licence `out.scatter`'s emitter takes.
-import { MAX_SERIES } from '../../../ui/colors'
-import { clusterColor } from '../../../ui/encoding'
+import { MAX_SERIES } from '../../../style/colors'
+import { clusterColor } from '../../../style/encoding'
 import { pyList, pyStr, pyValue } from '../py'
 import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib/cleanOps'
 import { NM_PER_UM } from '../../../data/units'

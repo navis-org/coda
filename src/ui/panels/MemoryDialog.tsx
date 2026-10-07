@@ -21,7 +21,7 @@ import { MEMORY_CATEGORIES } from '../../core/valueBytes'
 import type { StoredUsage } from '../../data/idb'
 import { LOCAL_STORAGE_BUDGET } from '../../store/persistence'
 import { useGraphStore } from '../../store/graphStore'
-import { formatBytes, plural } from '../format'
+import { formatBytes, plural } from '../../style/format'
 import type { HeapUse, MemoryReading } from '../memoryReadout'
 import {
   dropGeometry,

@@ -53,7 +53,7 @@ import {
 } from '../../nodes/lib/neuronbridgePins'
 import { idColumn } from '../../nodes/lib/tableOps'
 import { tableToCsvParts } from '../export'
-import { formatNumber, plural } from '../format'
+import { formatNumber, plural } from '../../style/format'
 import { revealIn } from '../reveal'
 import { useLatest } from '../useLatest'
 import type { NbView, SetView } from './NeuronBridgeCompare'

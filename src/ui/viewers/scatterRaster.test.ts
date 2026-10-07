@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { MarkerShape } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
 import type { ScatterSpec } from './scatterPlot'
 import { buildMarks, buildScatter } from './scatterPlot'
 import type { PixelBuffer } from './scatterRaster'

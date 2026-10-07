@@ -20,9 +20,9 @@
  * The shaders are verified by looking at a real browser, the rule the 3D viewer already lives
  * under.
  *
- * What *is* testable is kept out of the shader on purpose: the shape vocabulary and its
- * assignment live in `src/ui/encoding.ts`, and the number the buffer carries is that module's
- * `ALL_SHAPES` index rather than a table here that could drift from it.
+ * What *is* testable is kept out of the shader on purpose: the shape vocabulary (`ALL_SHAPES`, in
+ * `nodes/lib/encodingParams.ts`) and its assignment (`style/encoding.ts`) live outside it, and the
+ * number the buffer carries is the `ALL_SHAPES` index rather than a table here that could drift.
  */
 
 import { NodeProgram } from 'sigma/rendering'
@@ -30,8 +30,8 @@ import type { NodeDisplayData, RenderParams } from 'sigma/types'
 import { numberToGLSLFloat } from 'sigma/rendering'
 import { floatColor } from 'sigma/utils'
 
-import type { MarkerShape } from '../encoding'
-import { ALL_SHAPES } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
+import { ALL_SHAPES } from '../../nodes/lib/encodingParams'
 import { MARK_EXTENT, SHAPE_SDF } from './markGeometry'
 
 /**

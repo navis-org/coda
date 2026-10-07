@@ -1791,8 +1791,8 @@ function descendantsOf(graph: CodaGraph, nodeId: string): Set<string> {
 /**
  * A count, grouped, for a progress line and a warning that both read as prose.
  *
- * Local rather than `ui/format.ts`'s `formatNumber`: `src/core` is headless and must not reach
- * into the UI layer, and what is wanted here is the one rule (group thousands) rather than that
+ * Local rather than `style/format.ts`'s `formatNumber`: `src/style` reads `nodes/lib`, which
+ * `src/core` sits beneath, and what is wanted here is the one rule (group thousands) rather than that
  * module's whole ladder of unit- and dtype-aware cases.
  */
 function formatCount(n: number): string {

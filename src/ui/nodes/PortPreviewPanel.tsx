@@ -21,7 +21,7 @@
 import { useMemo } from 'react'
 
 import { useGraphStore } from '../../store/graphStore'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import type { Rect } from '../hoverPlacement'
 import { usePlacedPanel } from '../useHoverPanel'
 import { portPreview } from './portPreview'

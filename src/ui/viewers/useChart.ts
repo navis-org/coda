@@ -9,7 +9,8 @@
 import { useMemo, useRef, useState } from 'react'
 
 import type { TableValue } from '../../core/values'
-import { CHART_INK, chartSurface, currentMode } from '../colors'
+import { CHART_INK, chartSurface } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
 import { tableToCsvParts } from '../export'
 import type { ExportSource } from './ViewerActions'
 import { useElementSize } from './useElementSize'

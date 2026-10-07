@@ -1,14 +1,14 @@
 /**
  * The Heatmap node's colour vocabulary — palette names the node offers and the viewer resolves.
  *
- * Names here, hex in `ui/colors.ts`, which is `encodingParams.ts`'s arrangement for the
+ * Names here, hex in `style/colors.ts`, which is `encodingParams.ts`'s arrangement for the
  * categorical palettes and for the same reason: a node definition is headless and cannot import
  * the colour module, while the colour module may import a list of names.
  *
  * **Every palette but `coda` is a published set, transcribed.** Coda's own sequential and
- * diverging ramps are the validated ones (see the header of `ui/colors.ts`), and they are the
+ * diverging ramps are the validated ones (see the header of `style/colors.ts`), and they are the
  * default. The rest are matplotlib's and seaborn's, sampled mechanically from the installed
- * packages rather than typed in — see `HEATMAP_SEQUENTIAL` in `ui/colors.ts` — and chosen for
+ * packages rather than typed in — see `HEATMAP_SEQUENTIAL` in `style/colors.ts` — and chosen for
  * being spelled the same way in Python and in R's viridisLite / ColorBrewer, so the exporters
  * can name the palette somebody picked rather than substituting one.
  *

@@ -16,7 +16,7 @@ import type { TableSchema } from '../../core/types'
 import type { CellValue } from '../../core/values'
 import { isNumericDType } from '../../core/types'
 import { JOIN_SEPARATOR } from '../../core/values'
-import { MAX_SERIES } from '../colors'
+import { MAX_SERIES } from '../../style/colors'
 
 /**
  * Candidate columns in priority order. First match wins for `primary`; the rest fill up to

@@ -89,7 +89,7 @@ export const CARRY_PARAM_ID = 'carry'
  * What the node calls one of the things it fetches, singular and plural.
  *
  * A table rather than `${noun}s`, which is how the first draft said "meshs" — the same reason
- * `plural` takes an explicit plural for the irregular cases (`ui/format.ts`), stated here because
+ * `plural` takes an explicit plural for the irregular cases (`style/format.ts`), stated here because
  * this file cannot import the UI.
  */
 type CarryNoun = 'skeleton' | 'mesh'

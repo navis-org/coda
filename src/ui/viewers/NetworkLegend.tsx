@@ -14,7 +14,8 @@
  * drawing, so labelling both halves spends the strip's width restating that.
  */
 
-import type { MarkerShape, ResolvedColor, ResolvedShape } from '../encoding'
+import type { ResolvedColor, ResolvedShape } from '../../style/encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
 import type { SizeChannel } from './LegendKeys'
 import { ColorKey, ShapeKey, SizeKey } from './LegendKeys'
 

@@ -12,7 +12,7 @@ import {
 } from '../../nodes/lib/tableFilter'
 import { sortedRowIndices } from '../../nodes/lib/tableOps'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
-import { formatCell } from '../format'
+import { formatCell } from '../../style/format'
 import { FilterIcon } from '../Icons'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'

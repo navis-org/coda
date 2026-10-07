@@ -15,8 +15,8 @@ import { describe, expect, it } from 'vitest'
 
 import '../nodes'
 import { getNodeDef } from '../core/registry'
-import type { MarkdownBlock } from '../ui/markdown'
-import { parseMarkdown } from '../ui/markdown'
+import type { MarkdownBlock } from '../core/markdown'
+import { parseMarkdown } from '../core/markdown'
 import { FIGURE_FIT_WIDTH, buildFigure, isFigureLang, parseFigureSource } from './figures'
 import { helpImageUrl, helpTypes, loadHelpDoc } from './registry'
 

@@ -44,7 +44,7 @@ import { socketLabel } from '../../core/sockets'
 import { useGraphStore } from '../../store/graphStore'
 import { HOVER_DELAY_MS, useHoverPanel } from '../useHoverPanel'
 import { PortPreviewPanel } from './PortPreviewPanel'
-import type { SocketStyle } from '../socketStyle'
+import type { SocketStyle } from '../../style/socketStyle'
 
 export interface OutputPortProps {
   nodeId: string

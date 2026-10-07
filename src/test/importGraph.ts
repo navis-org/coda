@@ -48,7 +48,7 @@ export function resolveImport(from: string, spec: string): string | undefined {
 }
 
 export interface Reach {
-  /** One line per forbidden module reached: the import chain to it, `src`-relative. */
+  /** One line per import of a forbidden module: the chain to it, `src`-relative. */
   readonly offenders: string[]
   /** How many modules the walk visited — a walk that saw almost nothing passes for no reason. */
   readonly visited: number
@@ -70,10 +70,6 @@ export function reach(
     if (seen.has(file)) return
     seen.add(file)
     const rel = file.slice(SRC.length)
-    if (forbidden(rel)) {
-      offenders.push([...trail, rel].join(' → '))
-      return
-    }
     const source = readFileSync(file, 'utf8')
     const specs: string[] = []
     for (const [, type, spec] of source.matchAll(STATIC)) {
@@ -84,9 +80,18 @@ export function reach(
     const here = [...trail, rel]
     for (const spec of specs) {
       const next = resolveImport(file, spec)
-      if (next && !seen.has(next)) walk(next, here)
+      if (!next) continue
+      // Every edge into a forbidden module is reported, not only the first path to it: a fix that
+      // cuts one import leaves the others, and a report naming one hid two more.
+      const target = next.slice(SRC.length)
+      if (forbidden(target)) offenders.push([...here, target].join(' → '))
+      else if (!seen.has(next)) walk(next, here)
     }
   }
-  for (const entry of entries) walk(entry, [])
+  for (const entry of entries) {
+    const rel = entry.slice(SRC.length)
+    if (forbidden(rel)) offenders.push(rel)
+    else walk(entry, [])
+  }
   return { offenders, visited: seen.size }
 }

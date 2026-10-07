@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { ALL_SHAPES } from '../encoding'
-import type { MarkerShape } from '../encoding'
+import { ALL_SHAPES } from '../../nodes/lib/encodingParams'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
 import {
   ARM,
   DASH,

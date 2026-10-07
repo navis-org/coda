@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from '../../core/values'
 import { makeTable } from '../../core/values'
-import { CHART_INK, chartSurface, parseHex } from '../colors'
+import { CHART_INK, chartSurface, parseHex } from '../../style/colors'
 import {
   DIM_SCALE,
   emphasisSizes,

@@ -62,7 +62,7 @@ export function anchor(key: string): string {
 /**
  * The inline markdown `DatasetGuideEntry.about` is allowed to use.
  *
- * Four constructs — link, bold, italic, code — and deliberately not `ui/markdown.ts`, which
+ * Four constructs — link, bold, italic, code — and deliberately not `core/markdown.ts`, which
  * parses to blocks a React component renders and would have to be paired with a second renderer
  * here. What it does share is the rule that matters: **an href is either `http`/`https` or a
  * `./` path on this site, and nothing else is linked at all** — so a URL typed wrong renders as

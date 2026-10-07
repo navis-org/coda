@@ -193,7 +193,7 @@ own `.download-button` positioning context, the menu being absolute against it.
 **`3M`** — a suffix meaning *million* beside a stored unit meaning *nano*, next to the figure every
 paper about a fly neuron quotes in millimetres.
 
-`formatMeasure(value, unit)` (`ui/format.ts`) walks nm → µm → mm → m, taking the coarsest rung the
+`formatMeasure(value, unit)` (`style/format.ts`) walks nm → µm → mm → m, taking the coarsest rung the
 value fills and **flooring at the finest** so a sub-nanometre length does not become `0 µm`:
 `2,980,158.182` reads `2.98 mm`, the giant fibre's `22,484,326` reads `22.48 mm`. Four rules:
 
@@ -248,7 +248,7 @@ has always been `String(cell)`, so before this the hover and the cell under it d
 
 **The rule is the name, because nothing in a `DType` can say it** — the gap `BuildNetwork`'s merge
 rule documents ("summing added `preId` up to 24093454514") and the one the upload node's
-`Text columns` exists for. `isIdentifierColumn` (`ui/format.ts`) reads the name's **last word**,
+`Text columns` exists for. `isIdentifierColumn` (`core/ids.ts`) reads the name's **last word**,
 split on separators and camelCase, covering `neuronId`, `preId`/`postId`, `partnerId`,
 `sourceId`/`targetId` and the `root_id` / `pt_root_id` spellings an uploaded CSV arrives under with
 no list to keep in step. A plain `endsWith('id')` is a different rule and a wrong one: `centroid` and
@@ -540,7 +540,7 @@ had to mean "all" for those files to gain anything.
 The viewer was never the culprit: `out.network` passes the network through and `filterNetwork`
 uses `selectRows`, which preserves the schema whole.
 
-**Encodings** live in `ui/encoding.ts` (resolution) and `nodes/lib/encodingParams.ts` (param
+**Encodings** live in `style/encoding.ts` (resolution) and `nodes/lib/encodingParams.ts` (param
 factories, headless). Never re-implement colour mapping in a viewer — the 8-slot cap, the
 achromatic Other fold, area-scaled sizes and null-as-grey are enforced in one place.
 `numeric()` exists because `Number(null)` is `0`, which silently painted missing data as the
@@ -687,7 +687,7 @@ saying why is the failure that note already exists to avoid.
 ### Shape, the channel that survives without colour
 
 **Six marks, and the sixth is the last one.** `resolveShape` sits beside `resolveColor` in
-`src/ui/encoding.ts` and mirrors it exactly — same frequency ranking so the commonest value gets
+`src/style/encoding.ts` and mirrors it exactly — same frequency ranking so the commonest value gets
 the most distinguishable mark, same `—` key for a null, same `Other` label, same override-wins
 rule — with one deliberate departure: **it folds where colour cycles.** Cycling a hue is
 survivable because there are twenty of them, the eye reads position too, and the caption admits
@@ -2078,7 +2078,7 @@ On for all four 3D sockets, Scatter's point colour and Network's **node** colour
 whose `by value` was withheld for the hairline measurement recorded above.
 
 **One arithmetic, lifted rather than copied.** `ColorDomain`, `normalize`, `rampDomain`,
-`RAMP_STEPS`, `bucketOf` and `rampColors` live in `ui/encoding.ts`, and the Heatmap and
+`RAMP_STEPS`, `bucketOf` and `rampColors` live in `style/encoding.ts`, and the Heatmap and
 `resolveColor` both read them; the typed ends go through `parseColorLimits`, which
 `readColorLimits` is now a caller of. So a palette name, an inverted pair being ignored, the
 symmetric centred ramp and the log's `log1p(v − lo) / log1p(span)` each mean one thing app-wide.
@@ -3257,7 +3257,7 @@ Width is already the quantity, and on a diagram of thirty labels a categorical p
 stops meaning anything. Pointing `Band colour` at the from or to column is one click for somebody
 tracing a stream, and then it earns its place. The bands take their colour from the row they came
 from, through `resolveColor` on the input table — so the palette, the frequency ranking, the
-cycling and the legend are all `ui/encoding.ts`' and none of it is re-derived here.
+cycling and the legend are all `style/encoding.ts`' and none of it is re-derived here.
 
 ### What was checked in a real browser
 
