@@ -26,22 +26,15 @@
  * it is the one thing here behind a ~10 MB download.
  */
 
-import { axonDendriteInk } from '../compartmentInk'
+import { splitInks } from '../compartmentInk'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { idText } from '../../core/ids'
 import type { DatasetAnnotations, DatasetEdges, TableValue } from '../../core/values'
-import { getRow } from '../../core/values'
+import { CODE_AXON, CODE_DENDRITE, CODE_LINKER, getRow, splitName } from '../../core/values'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import type { PartnerGrouping } from '../../nodes/lib/profileStats'
-import {
-  CODE_AXON,
-  CODE_DENDRITE,
-  CODE_LINKER,
-  morphometrics,
-  sitesFrom,
-  strahlerOrders,
-} from '../../nodes/lib/topologyOps'
+import { morphometrics, sitesFrom, strahlerOrders } from '../../nodes/lib/topologyOps'
 import { CHART_INK, seriesColor, sequentialColor } from '../../style/colors'
 import { currentMode } from '../useThemeMode'
 import { formatMeasure, formatNumber } from '../../style/format'
@@ -163,16 +156,6 @@ type LayerParam = 'showMesh' | 'showSkeleton' | 'showSynapses'
  */
 type SplitParam = 'flowThresh' | 'splitVal'
 
-/** The compartment palette: `axonDendriteInk`, and a muted linker. Why not `seriesColor` is there. */
-function compartmentColors(mode: ReturnType<typeof currentMode>): Record<number, string> {
-  const { axon, dendrite } = axonDendriteInk(mode)
-  return {
-    [CODE_DENDRITE]: dendrite,
-    [CODE_AXON]: axon,
-    [CODE_LINKER]: CHART_INK[mode].muted,
-  }
-}
-
 /** A `ColorSpec` that is just one colour. Spelled once; the interface requires every field. */
 function constantColor(constant: string): ColorSpec {
   return { mode: 'constant', column: undefined, constant }
@@ -202,10 +185,10 @@ function strahlerColor(order: number, maxOrder: number, mode: ReturnType<typeof 
   return sequentialColor(t, mode)
 }
 
-const COMPARTMENT_NAMES: Record<number, string> = {
-  [CODE_DENDRITE]: 'Dendrite',
-  [CODE_AXON]: 'Axon',
-  [CODE_LINKER]: 'Linker',
+/** A code as a key's label: `splitName`'s word, capitalised for a legend. */
+function compartmentLabel(code: number): string {
+  const name = splitName(code) ?? 'unassigned'
+  return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
 export function TopologyViewer(props: TopologyViewerProps) {
@@ -359,7 +342,7 @@ export function TopologyViewer(props: TopologyViewerProps) {
   const labels = compartments.status === 'ready' ? compartments.data : undefined
 
   const mode = currentMode()
-  const palette = useMemo(() => compartmentColors(mode), [mode])
+  const palette = useMemo(() => splitInks(mode), [mode])
 
   /**
    * The per-node colour channel — the one thing `ColorSpec` cannot express, since it resolves
@@ -592,7 +575,7 @@ export function TopologyViewer(props: TopologyViewerProps) {
             {[CODE_DENDRITE, CODE_AXON, CODE_LINKER].map((code) => (
               <span key={code} className="topo__key">
                 <i style={{ background: palette[code] }} />
-                {COMPARTMENT_NAMES[code]}
+                {compartmentLabel(code)}
               </span>
             ))}
           </div>
@@ -1077,7 +1060,7 @@ function CompartmentTable({
   data,
   palette,
 }: {
-  data: { labels: Int32Array; synapses: { pre: Uint32Array; post: Uint32Array } }
+  data: { labels: Uint8Array; synapses: { pre: Uint32Array; post: Uint32Array } }
   palette: Record<number, string>
 }) {
   /*
@@ -1117,7 +1100,7 @@ function CompartmentTable({
             <tr key={code}>
               <td>
                 <i className="topo__swatch" style={{ background: palette[code] }} />
-                {COMPARTMENT_NAMES[code]}
+                {compartmentLabel(code)}
               </td>
               <td>{formatNumber(counts[code]!.nodes)}</td>
               <td>{formatNumber(counts[code]!.pre)}</td>

@@ -323,12 +323,15 @@ def coda_split_compartments(request, report=None):
 
     compartment = np.full(len(parents), UNASSIGNED, dtype=np.int32)
     status = np.zeros(max(count, 0), dtype=np.int32)
+    # Opt-in, for the reason the return below records: a float per node is the largest thing this
+    # call can send back, and only a caller that draws the flow wants it.
+    flow = np.zeros(len(parents), dtype=np.float32) if req.get("flow") else None
 
     for i in range(count):
         a, b = int(offsets[i]), int(offsets[i + 1])
         if b <= a:
             continue
-        comp_i, _flow_i, status_i = _split_one(
+        comp_i, flow_i, status_i = _split_one(
             parents[a:b],
             presynapses[a:b],
             postsynapses[a:b],
@@ -338,14 +341,19 @@ def coda_split_compartments(request, report=None):
         )
         compartment[a:b] = comp_i
         status[i] = status_i
+        if flow is not None:
+            flow[a:b] = flow_i
         if report is not None:
             report((i + 1) / count, f"neuron {i + 1} of {count}")
 
-    # `flow` is deliberately *not* returned. `_split_one` still computes and returns it — the
-    # probe compares it against navis, and it is what the threshold is applied to — but nothing
-    # on the JavaScript side reads it, and shipping a float per node across the bridge is four
-    # bytes times every node of every neuron in a Run to deliver a field with no consumer.
-    return {
+    # `flow` crosses only when asked for. It is the number the linker threshold was applied to —
+    # navis's sum-mode flow with the branch-point correction, floored — and shipping it is four
+    # bytes times every node of every neuron in a Run, so a caller that does not draw it does not
+    # pay for it. Zero for a neuron that was not split.
+    out = {
         "compartment": np.ascontiguousarray(compartment, dtype=np.int32),
         "status": np.ascontiguousarray(status, dtype=np.int32),
     }
+    if flow is not None:
+        out["flow"] = np.ascontiguousarray(flow, dtype=np.float32)
+    return out

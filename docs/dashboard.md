@@ -223,6 +223,14 @@ overlay; a grid sharing it would open every rail at once. Naming the property ra
 caller is what lets a dock dragged to its 360px floor ask for the same treatment without a
 `variant: 'dock-narrow'` being invented for it.
 
+**And it is stored on the cell, in the document** (`DashboardCell.rail`, written only when open).
+It began as component state, and the grid unmounts every cell whenever the canvas takes its place,
+so a rail somebody had opened to tune a node — Split Axon/Dendrite's thresholds beside a 3D View —
+was shut on every return. Beside the cell's size because it is the same kind of fact: how the page
+was arranged, which a reload and a share link should keep. Not an undo step, `setDashboardTab`'s
+rule. `setSpan` builds the resized cell *from* the cell for this reason; it used to rebuild it from
+`nodeId`, `w` and `h`, which would have closed the rail on every resize.
+
 **Density is not on that list.** How tight a cell's header and rail are is CSS's, selected off
 `.dash-cell__panel` — a frame wears `.viewer-surface` *and* a class of its own, which is exactly
 the mechanism `editor.css` records for letting a frame restyle the inside without the shared
@@ -234,9 +242,18 @@ deletes or moves a card. `✕` removes the *cell*, not the node, and the title s
 one keystroke apart on every other surface in the app, and confusing them here costs somebody a
 subtree.
 
-Presentational params only, so restyling from a cell re-renders instantly and stales nothing
+Presentational params, so restyling from a cell re-renders instantly and stales nothing
 (invariant 4). That is what makes the grid usable as an inspection surface rather than a thing you
 are afraid to touch.
+
+**The one exception is the node's to make, and it is the one the sidebar already honours.** A param
+in a group the node marks `affectsData` reaches the rail too (`railParams` reads `paramsForPanel`,
+the sidebar's rule). Split Axon/Dendrite is why: its thresholds are found by moving them while
+looking at the arbour, and a cell beside a 3D View is where that looking happens — with the rail
+it had, the cell showed none of them. The Heatmap's Labels/Filter/Order/Selection tabs and the
+Network Viewer's Filter came along, being the same declaration. The rail marks each such item with
+the stale-state edge the sidebar's note uses, and its title says downstream re-runs. On a `cheap`
+node that re-run is automatic, which is what makes it a knob rather than a trap.
 
 ## A run that happens underneath the grid
 

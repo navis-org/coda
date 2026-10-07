@@ -58,8 +58,9 @@ describe('groupParams over out.network', () => {
     // `railParams`, not a copy of its filter. This restated the rule inline, which meant the rail
     // could grow a clause — `ownControls` did exactly that — and this test would go on comparing
     // the sidebar against a rule the rail no longer followed.
+    // Both read `paramsForPanel`, so the sidebar's Filter tab — a data group — is on the rail too.
     const rail = railParams(def, base).map((p) => p.id)
-    expect([...shownIds(groupParams(def, base, presentational))].sort()).toEqual(
+    expect([...shownIds(groupParams(def, base, paramsForPanel(def)))].sort()).toEqual(
       [...rail].sort(),
     )
   })
@@ -444,7 +445,7 @@ describe('bucketParams over compare.connectivity, the card filter', () => {
   })
 })
 
-describe('which presentational controls a generic surface draws', () => {
+describe('which controls a generic surface draws', () => {
   const param = (over: Partial<ParamDef>): ParamDef =>
     ({ id: 'p', kind: 'boolean', label: 'P', default: false, ...over }) as ParamDef
 
@@ -459,6 +460,31 @@ describe('which presentational controls a generic surface draws', () => {
       param({ id: 'minWeight' }),
     ])
     expect(railParams(def, {}).map((p) => p.id)).toEqual(['colour'])
+  })
+
+  it('draws a data group the node declares, since that is the node opting its knobs in', () => {
+    // The dashboard cell only ever gets this rail, so without it a node's deliberately exposed
+    // data controls — Split Axon/Dendrite's thresholds, a heatmap's order — reach no cell.
+    const def = defOf(
+      [
+        param({ id: 'colour', presentational: true }),
+        param({ id: 'threshold', group: 'tune' }),
+        param({ id: 'minWeight', group: 'plain' }),
+      ],
+      {
+        paramGroups: [
+          { id: 'tune', label: 'Tune', affectsData: true },
+          { id: 'plain', label: 'Plain' },
+        ],
+      },
+    )
+    expect(railParams(def, {}).map((p) => p.id)).toEqual(['colour', 'threshold'])
+  })
+
+  it('puts Split Axon/Dendrite’s controls on its rail, flow and the synapse toggle included', () => {
+    expect(railParams(requireNodeDef('neuron.splitCompartments'), {}).map((p) => p.id)).toEqual(
+      ['flowThresh', 'splitVal', 'heal', 'flow', 'showSynapses'],
+    )
   })
 
   it('honours visibleIf, so a hidden control is not drawn somewhere else', () => {
@@ -494,5 +520,28 @@ describe('which presentational controls a generic surface draws', () => {
       ).toBe(undefined)
       expect(railParams(requireNodeDef(type), {}).length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('the 3D View’s per-node colour modes', () => {
+  it('offers by compartment and by node value on skeletons, with the ramp under the second', () => {
+    const def = requireNodeDef('out.viewer3d')
+    const mode = def.params?.find((p) => p.id === 'skeletonColorMode')
+    if (mode?.kind !== 'enum' || !Array.isArray(mode.options))
+      throw new Error('expected options')
+    expect(mode.options.map((o) => o.value)).toEqual(
+      expect.arrayContaining(['compartment', 'nodeValue']),
+    )
+    const shown = visibleParams(def, {
+      ...defaultParams(def),
+      skeletonColorMode: 'nodeValue',
+    }).map((p) => p.id)
+    expect(shown).toEqual(expect.arrayContaining(['skeletonNodeValue', 'skeletonColorRamp']))
+    expect(shown).not.toContain('skeletonColorBy')
+    // Points have no per-node values to colour by.
+    const points = def.params?.find((p) => p.id === 'pointColorMode')
+    if (points?.kind !== 'enum' || !Array.isArray(points.options))
+      throw new Error('expected options')
+    expect(points.options.map((o) => o.value)).not.toContain('nodeValue')
   })
 })

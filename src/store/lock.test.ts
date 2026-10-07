@@ -193,6 +193,7 @@ describe('a locked canvas', () => {
     store().addToDashboard(['view', 'src'])
     store().setDashboardColumns(3)
     store().setDashboardSpan('view', { w: 2 })
+    store().setDashboardRail('view', true)
     store().moveDashboardCell('view', 1)
     expect(store().dashboardOpen).toBe(true)
     // `open: true` rides along because the grid was the view while the cells were placed — see
@@ -200,12 +201,16 @@ describe('a locked canvas', () => {
     // the two from capturing a dashboard that does not know it is being looked at.
     expect(graph().dashboard).toEqual({
       tabs: [
-        { id: FIRST_TAB_ID, columns: 3, cells: [{ nodeId: 'src' }, { nodeId: 'view', w: 2 }] },
+        {
+          id: FIRST_TAB_ID,
+          columns: 3,
+          cells: [{ nodeId: 'src' }, { nodeId: 'view', w: 2, rail: true }],
+        },
       ],
       open: true,
     })
     store().removeFromDashboard(['src'])
-    expect(activeTab(graph()).cells).toEqual([{ nodeId: 'view', w: 2 }])
+    expect(activeTab(graph()).cells).toEqual([{ nodeId: 'view', w: 2, rail: true }])
     // The tabs, too: a second page, named, switched away from and back, then taken off.
     store().addDashboardTab(['src'])
     store().renameDashboardTab('t2', 'Inputs')
@@ -391,6 +396,7 @@ describe('every store action is on one side of the lock', () => {
     'removeFromDashboard',
     'moveDashboardCell',
     'setDashboardSpan',
+    'setDashboardRail',
     'setDashboardColumns',
     'setDashboardTab',
     'addDashboardTab',

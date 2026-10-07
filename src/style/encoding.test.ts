@@ -396,6 +396,16 @@ describe('resolveColor — by value, with the value controls', () => {
     ).toMatchObject({ palette: 'viridis' })
   })
 
+  it('reads by node value as the ramp over a named per-node number, with no column', () => {
+    const spec = readColorSpec(
+      'p',
+      { pColorMode: 'nodeValue', pNodeValue: 'flow', pColorRamp: 'viridis', pColorLog: true },
+      () => 'weight',
+    )
+    expect(spec).toMatchObject({ mode: 'nodeValue', nodeValue: 'flow', column: undefined })
+    expect(spec.scale).toMatchObject({ palette: 'viridis', log: true })
+  })
+
   it('titles an exported colour bar with what the screen says in notes', () => {
     expect(
       rampLabel(

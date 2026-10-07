@@ -789,6 +789,17 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '20.4', cy: '6.4', r: '1.3' }],
   ],
   /*
+   * Clean Skeletons' arbour cut in two at the trunk: one side solid and the other faint, with a gap
+   * where the linker is. Opacity rather than a dash, the dashed outline being "a user's selection";
+   * colour is not a channel here, which is exactly why the 3D View's compartment ink is not drawn.
+   */
+  'neuron.splitCompartments': [
+    ['path', { d: 'M12 20.4v-4.6' }],
+    ['path', { d: 'M12 13.2 6.4 6.4M9.2 9.8 8.6 6.6' }],
+    ['path', { d: 'M12 13.2l5.6-6.8M14.8 9.8l.6-3.2', strokeOpacity: '.4' }],
+    ['path', { d: 'M10.2 14.5h3.6' }],
+  ],
+  /*
    * Clean Skeletons' arbour, drawn as the discs it becomes: the same branching stroke faint
    * underneath, and a point at the middle of each piece of it.
    */

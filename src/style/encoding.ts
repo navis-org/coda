@@ -249,6 +249,13 @@ export interface ResolvedColor {
    * encoding is not addressable by key" rather than as an error.
    */
   labelAt?(rowIndex: number): string | undefined
+  /**
+   * Colour for one *node* of a row's geometry, where the encoding varies along it; undefined for a
+   * node falls back to `at`. Only a skeleton channel coloured per node sets it (by compartment, by
+   * node value) — a colour that changes along one neuron, which an attribute table with a row per
+   * neuron cannot hold. It then comes without `labelAt`, its key addressing no rows.
+   */
+  nodeAt?(rowIndex: number, nodeIndex: number): string | undefined
 }
 
 /**
@@ -259,7 +266,7 @@ export interface ResolvedColor {
  * Achromatic and identical in both modes, which is why it needs no `mode` argument: it must
  * never compete with a categorical encoding.
  */
-const MUTED = CHART_INK.dark.muted
+export const MUTED = CHART_INK.dark.muted
 
 /** What a null cell is keyed under, in every mode that has keys. */
 const NULL_KEY = '—'
@@ -368,6 +375,47 @@ export function rampDomain(
   const lo = limits.min ?? (options.floor === 'zero' ? Math.min(0, extent.min) : extent.min)
   const hi = limits.max ?? extent.max
   return { lo, hi, neutral: lo, ...(options.log ? { log: true } : {}) }
+}
+
+/**
+ * `by value`'s colouring of a numeric extent: a colour per value, and the key — the one place the
+ * ramp, the typed ends, the centre and the log are applied, whichever numbers they are applied to.
+ * A column's cells (`resolveColor`) and a skeleton's per-node values (the 3D View's `by node value`)
+ * both come through here, so a palette, a limit or a log means the same thing on either. Undefined
+ * when there is no finite extent to colour. A missing value is the caller's to draw, in `MUTED`.
+ */
+export function valueRamp(
+  extent: { min: number; max: number },
+  scale: ValueScale | undefined,
+  mode: Mode,
+  /** What the key names — a column, or a per-node value. */
+  column: string,
+): { colorOf(value: number): string; legend: SequentialLegend } | undefined {
+  const { min, max } = extent
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return undefined
+  const { domain, problem } = valueDomain({ min, max }, scale)
+  /*
+   * The Heatmap's lookup table, so a palette name means one set of colours app-wide and a value
+   * costs arithmetic rather than a ramp sample — see `RAMP_STEPS`. `coda` sequential is
+   * `sequentialColor` itself, which keeps a node that never opted in on the ramp it drew.
+   */
+  const kind = scale?.diverging ? 'diverging' : 'sequential'
+  const ramp = rampColors(kind, mode, RAMP_STEPS, scale?.palette)
+  const clipped = min < domain.lo || max > domain.hi
+  return {
+    colorOf: (value) => ramp[bucketOf(value, domain)]!,
+    legend: {
+      kind: 'sequential',
+      column,
+      domain: [domain.lo, domain.hi],
+      // Nine stops, an odd count, so a centred ramp's bar has its middle colour on a stop.
+      stops: rampColors(kind, mode, 9, scale?.palette),
+      ...(scale?.diverging ? { center: domain.neutral } : {}),
+      ...(domain.log ? { log: true } : {}),
+      ...(clipped ? { clipped: true } : {}),
+      ...(problem ? { problem } : {}),
+    },
+  }
 }
 
 /**
@@ -643,33 +691,14 @@ export function resolveColor(
       if (v < min) min = v
       if (v > max) max = v
     }
-    if (!Number.isFinite(min)) return fallback
-    const { scale } = spec
-    const { domain, problem } = valueDomain({ min, max }, scale)
-    /*
-     * The Heatmap's lookup table, so a palette name means one set of colours app-wide and a row
-     * costs arithmetic rather than a ramp sample — see `RAMP_STEPS`. `coda` sequential is
-     * `sequentialColor` itself, which keeps a node that never opted in on the ramp it drew.
-     */
-    const kind = scale?.diverging ? 'diverging' : 'sequential'
-    const ramp = rampColors(kind, mode, RAMP_STEPS, scale?.palette)
-    const clipped = min < domain.lo || max > domain.hi
+    const ramp = valueRamp({ min, max }, spec.scale, mode, spec.column)
+    if (!ramp) return fallback
     return {
       at: (rowIndex) => {
         const v = numeric(data[rowIndex])
-        return v === undefined ? MUTED : ramp[bucketOf(v, domain)]!
+        return v === undefined ? MUTED : ramp.colorOf(v)
       },
-      legend: {
-        kind: 'sequential',
-        column: spec.column,
-        domain: [domain.lo, domain.hi],
-        // Nine stops, an odd count, so a centred ramp's bar has its middle colour on a stop.
-        stops: rampColors(kind, mode, 9, scale?.palette),
-        ...(scale?.diverging ? { center: domain.neutral } : {}),
-        ...(domain.log ? { log: true } : {}),
-        ...(clipped ? { clipped: true } : {}),
-        ...(problem ? { problem } : {}),
-      },
+      legend: ramp.legend,
     }
   }
 

@@ -4558,6 +4558,14 @@ input.field--combo {
   font-size: 11px;
   color: var(--text-secondary);
 }
+/*
+ * A rail item that changes the data: the `.style-warning` mark, on the item rather than a tab.
+ * The same token the node badge uses for the state an edit here puts downstream nodes in.
+ */
+.overlay__rail-item--data {
+  padding-left: 6px;
+  border-left: 2px solid var(--status-stale);
+}
 /* Fields in the rail need a usable width without stretching across the panel. */
 .overlay__rail-item .field {
   width: auto;
@@ -13950,6 +13958,57 @@ select.annotate__input {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/*
+ * Split Axon/Dendrite's expanded view: a pager over a dendrogram, the corrections beside it. The
+ * plot is `.arbor__plot` — the Neuron Dendrogram's stage, cursors and all — so the two read alike.
+ */
+.split-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.split-editor__keys {
+  display: inline-flex;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+.split-editor__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.split-editor__list {
+  flex: 0 0 220px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-left: 1px solid var(--border);
+  font-size: 12px;
+}
+.split-editor__list h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.split-editor__list ol {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.split-editor__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+.split-editor__hint {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.4;
 }
 .arbor__overlay line {
   stroke: var(--text-secondary);

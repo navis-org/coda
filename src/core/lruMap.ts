@@ -18,7 +18,8 @@
  * Hand-written loops remain, deliberately, and they divide into two kinds. `ui/viewers/keyedCache.ts`
  * and `data/precomputed/sharded.ts` are the odd ones out on *mechanism*: the first evicts against a
  * **weight** budget rather than a count, so one insert may drop several entries, and the second caps
- * a map it hands to `memoPromise`, which takes a real `Map`.
+ * a map it hands to `memoPromise`, which takes a real `Map` — as does Split Axon/Dendrite's
+ * automatic-split cache (`nodes/transform/splitCompartments.ts`), for the same reason.
  *
  * The other kind is a **byte-budgeted, read-promoting** cache — `data/geometryCache.ts` and
  * `data/zapbench/traces.ts` — and both differ from this class on the rule above rather than on the

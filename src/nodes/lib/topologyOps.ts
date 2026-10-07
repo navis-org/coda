@@ -36,7 +36,7 @@
  * that still knows what the numbers are is the side that should convert.
  */
 
-import type { TableSchema } from '../../core/types'
+import type { ColumnSchema, TableSchema } from '../../core/types'
 import { column, findColumn, tableSchema } from '../../core/types'
 import type {
   ColumnData,
@@ -46,7 +46,14 @@ import type {
   TableValue,
 } from '../../core/values'
 import type { SplitStatus } from '../../pyodide/topology'
-import { cableLength, getColumn, makeTable } from '../../core/values'
+import {
+  CODE_AXON,
+  CODE_DENDRITE,
+  CODE_LINKER,
+  cableLength,
+  getColumn,
+  makeTable,
+} from '../../core/values'
 import { NM_PER_UM } from '../../data/units'
 import { packPositions, packSkeletons } from './skeletonPacking'
 
@@ -318,9 +325,11 @@ export interface Morphometrics {
   readonly cableByStrahler: readonly number[]
 }
 
-export function morphometrics(skeleton: SkeletonGeometry): Morphometrics {
+export function morphometrics(
+  skeleton: SkeletonGeometry,
+  distances = parentDistances(skeleton),
+): Morphometrics {
   const tree = skeletonTree(skeleton)
-  const distances = parentDistances(skeleton)
   const orders = strahlerOrders(skeleton, tree)
   const kinds = classifyNodes(skeleton, tree)
   const runs = segmentStats(skeleton, tree, distances)
@@ -676,6 +685,8 @@ export interface CompartmentStats {
   readonly postAxon: number
   readonly preDendrite: number
   readonly postDendrite: number
+  /** `segregationIndex` over the axon and the dendrite; null where it is undefined. */
+  readonly segregationIndex: number | null
 }
 
 const NO_SPLIT: CompartmentStats = {
@@ -687,23 +698,8 @@ const NO_SPLIT: CompartmentStats = {
   postAxon: 0,
   preDendrite: 0,
   postDendrite: 0,
+  segregationIndex: null,
 }
-
-/*
- * The compartment codes, restated rather than imported.
- *
- * `src/nodes` importing from `src/pyodide` is not forbidden by the lint rule — both are headless
- * — but importing the *values* would put a worker-shaped module in the dependency graph of every
- * table op. (The `SplitStatus` import above is `import type`, which is erased.)
- *
- * That trade is only sound while something checks the two agree, and for a while nothing did:
- * `pyodide/topology.test.ts` tied `COMPARTMENT_*` to the Python and said nothing about these, so
- * a consistent renumbering of both would have left every test green while axon cable was filed
- * under the dendrite column. That test now pins all three spellings together.
- */
-export const CODE_DENDRITE = 1
-export const CODE_AXON = 2
-export const CODE_LINKER = 3
 
 /**
  * Cable and synapses per compartment.
@@ -715,7 +711,7 @@ export const CODE_LINKER = 3
  */
 export function compartmentStats(
   skeleton: SkeletonGeometry,
-  compartment: Int32Array | undefined,
+  compartment: ArrayLike<number> | undefined,
   synapses: SynapseAssignment | undefined,
   status: SplitStatus,
   distances = parentDistances(skeleton),
@@ -758,19 +754,49 @@ export function compartmentStats(
     postAxon,
     preDendrite,
     postDendrite,
+    segregationIndex: segregationIndex([
+      { pre: preAxon, post: postAxon },
+      { pre: preDendrite, post: postDendrite },
+    ]),
   }
 }
 
 /**
- * One neuron's row: the tree measurements, and the split's if it ran.
+ * How cleanly a neuron's inputs and outputs are separated between its compartments — 1 for an
+ * axon of outputs and a dendrite of inputs, 0 for the same mixture everywhere (Schneider-Mizell et
+ * al., eLife 2016).
  *
- * Two objects rather than one flattened interface, because the split half is genuinely optional
- * and a `cableAxon: 0` on a neuron nobody split is the manufactured measurement `meanRadius`
- * already refuses to produce.
+ * `navis.segregation_index` line for line, because this is a number people cite: each part's
+ * input/output entropy (natural log), weighted by its share of the synapses, over the whole
+ * neuron's. Two cases follow navis rather than a reading of the paper. A neuron whose parts are
+ * all one polarity has no entropy to normalise by, and navis answers **0** there, not an absence.
+ * And the parts are the axon and the dendrite only — what navis is handed after a split — so the
+ * linker's synapses are in neither. Where those two hold none at all navis divides by zero; that
+ * is the one case answered null.
  */
-export interface TopologyRow {
-  readonly metrics: Morphometrics
-  readonly split?: CompartmentStats
+export function segregationIndex(
+  parts: readonly { readonly pre: number; readonly post: number }[],
+): number | null {
+  let pre = 0
+  let post = 0
+  for (const part of parts) {
+    pre += part.pre
+    post += part.post
+  }
+  const total = pre + post
+  if (total === 0) return null
+  let mixed = 0
+  for (const part of parts) {
+    const n = part.pre + part.post
+    if (n > 0) mixed += n * binaryEntropy(part.post / n)
+  }
+  const whole = binaryEntropy(post / total)
+  return whole > 0 ? 1 - mixed / total / whole : 0
+}
+
+/** Entropy of a two-way split in nats; 0 at either end, as navis has it. */
+function binaryEntropy(p: number): number {
+  return p > 0 && p < 1 ? -(p * Math.log(p) + (1 - p) * Math.log(1 - p)) : 0
 }
 
 /*
@@ -783,8 +809,30 @@ export interface TopologyRow {
 export function topologySchema(withSplit: boolean): TableSchema {
   const base = morphometricsSchema()
   if (!withSplit) return base
-  return tableSchema(
-    ...base.columns,
+  return tableSchema(...base.columns, ...splitColumns())
+}
+
+/**
+ * One row per neuron: the tree measurements, then the split's where it ran. `split` is index-aligned
+ * with `metrics` and absent when the split is off — the same flag `topologySchema` takes, since a
+ * neuron nobody split has no split columns rather than a `cableAxon: 0`.
+ */
+export function topologyTable(
+  metrics: readonly Morphometrics[],
+  split?: readonly CompartmentStats[],
+): TableValue {
+  const base = morphometricsTable(metrics)
+  if (!split) return base
+  return makeTable(topologySchema(true), { ...base.data, ...splitColumnData(split) })
+}
+
+/**
+ * The split's per-neuron columns, in order — the schema half of a pair with `splitColumnData`,
+ * and the one list Neuron Topology's Morphometrics and Split Axon/Dendrite's Summary both append,
+ * so a column named on one is named the same on the other.
+ */
+export function splitColumns(): ColumnSchema[] {
+  return [
     column('splitStatus', 'str'),
     column('cableAxon', 'f64', 'µm'),
     column('cableDendrite', 'f64', 'µm'),
@@ -793,33 +841,33 @@ export function topologySchema(withSplit: boolean): TableSchema {
     column('postAxon', 'i64'),
     column('preDendrite', 'i64'),
     column('postDendrite', 'i64'),
-  )
+    column('segregationIndex', 'f64'),
+  ]
 }
 
-export function topologyTable(rows: readonly TopologyRow[], withSplit: boolean): TableValue {
-  const base = morphometricsTable(rows.map((r) => r.metrics))
-  if (!withSplit) return base
-
-  const data: Record<string, ColumnData> = { ...base.data }
-  const split = rows.map((r) => r.split ?? NO_SPLIT)
-  data['splitStatus'] = split.map((s) => s.status)
+/** `splitColumns`' value half: one entry per column, one cell per neuron. */
+export function splitColumnData(
+  stats: readonly CompartmentStats[],
+): Record<string, ColumnData> {
   /*
    * Null, not zero, wherever the split did not run for this neuron. A multi-rooted
    * reconstruction has an axon; what it does not have is an answer, and a 0 µm axon beside real
    * ones is a measurement claiming otherwise — `Group By`'s rule about a mean over an all-absent
    * group, applied one layer up.
    */
-  const measured = <T>(pick: (s: CompartmentStats) => T): ColumnData =>
-    split.map((s) => (s.status === 'ok' ? (pick(s) as never) : null))
-  data['cableAxon'] = measured((s) => s.cableAxon)
-  data['cableDendrite'] = measured((s) => s.cableDendrite)
-  data['cableLinker'] = measured((s) => s.cableLinker)
-  data['preAxon'] = measured((s) => s.preAxon)
-  data['postAxon'] = measured((s) => s.postAxon)
-  data['preDendrite'] = measured((s) => s.preDendrite)
-  data['postDendrite'] = measured((s) => s.postDendrite)
-
-  return makeTable(topologySchema(true), data)
+  const measured = (pick: (s: CompartmentStats) => number | null): ColumnData =>
+    stats.map((s) => (s.status === 'ok' ? pick(s) : null))
+  return {
+    splitStatus: stats.map((s) => s.status),
+    cableAxon: measured((s) => s.cableAxon),
+    cableDendrite: measured((s) => s.cableDendrite),
+    cableLinker: measured((s) => s.cableLinker),
+    preAxon: measured((s) => s.preAxon),
+    postAxon: measured((s) => s.postAxon),
+    preDendrite: measured((s) => s.preDendrite),
+    postDendrite: measured((s) => s.postDendrite),
+    segregationIndex: measured((s) => s.segregationIndex),
+  }
 }
 
 /**
@@ -831,7 +879,7 @@ export function topologyTable(rows: readonly TopologyRow[], withSplit: boolean):
  * the wrong neuron — and in a node file nothing in this module's test suite could reach it.
  */
 export function flattenForSplit(
-  skeletons: SkeletonsValue,
+  skeletons: Pick<SkeletonsValue, 'items'>,
   assignments: readonly SynapseAssignment[],
   /** Pack the coordinates too — only healing reads them, so they are empty otherwise. */
   withPoints = false,

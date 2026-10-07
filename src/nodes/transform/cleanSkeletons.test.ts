@@ -368,6 +368,57 @@ describe('neuron.cleanSkeletons — types and params', () => {
   })
 })
 
+describe('neuron.cleanSkeletons — a computed split', () => {
+  /** The node's own `evaluate`, with a warn spy: no scheduler, so the input can carry a split. */
+  async function clean(value: SkeletonsValue, params: Partial<SkeletonCleanParams>) {
+    const def = requireNodeDef('neuron.cleanSkeletons')
+    const warnings: string[] = []
+    const outputs = await def.evaluate({
+      params: { ...defaultParams(def), ...params } as ParamValues,
+      refresh: false,
+      reportFetched: () => undefined,
+      warn: (message: string) => warnings.push(message),
+      publish: () => undefined,
+      input: () => value,
+      inputKey: () => 'in-key',
+      column: () => undefined,
+      columns: () => [],
+      inputPorts: () => [],
+      outputPorts: () => [],
+      resolveSource: () => new MockSource(),
+      signal: new AbortController().signal,
+      progress: () => {},
+    })
+    return { out: outputs['out'] as SkeletonsValue, warnings }
+  }
+
+  function withSplit(): SkeletonsValue {
+    const value = skeletonsFixture()
+    return {
+      ...value,
+      items: value.items.map((item, i) =>
+        i === 0 ? { ...item, split: new Uint8Array([1, 3, 2]) } : item,
+      ),
+    }
+  }
+
+  it('drops it, since cleaning renumbers the nodes it labels, and says so', async () => {
+    mockedRun.mockImplementation((request: CleanSkeletonsRequest) =>
+      Promise.resolve(passThrough(request)),
+    )
+    const { out, warnings } = await clean(withSplit(), { smooth: 1 })
+    expect(out.items.every((item) => item.split === undefined)).toBe(true)
+    expect(warnings.join(' ')).toMatch(/1 of 3 neurons carried an axon\/dendrite split/)
+  })
+
+  it('keeps it on a pass-through, where no node moved', async () => {
+    const value = withSplit()
+    const { out, warnings } = await clean(value, {})
+    expect(out).toBe(value)
+    expect(warnings).toEqual([])
+  })
+})
+
 describe('neuron.cleanSkeletons — running', () => {
   it('passes the skeletons through untouched when nothing is on, without calling Python', async () => {
     const s = scheduler()

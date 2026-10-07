@@ -110,6 +110,15 @@ export interface DashboardCell {
   w?: number
   /** Height in row tracks, one of `ROW_SPANS`. Absent means `DEFAULT_ROW_SPAN` — see there. */
   h?: number
+  /**
+   * The cell's control rail is open. Absent means closed, and only `true` is ever written.
+   *
+   * In the document beside the cell's size rather than in component state, because a cell is
+   * unmounted every time the grid gives way to the canvas, and a rail somebody opened to tune a
+   * node — Split Axon/Dendrite's thresholds beside a 3D View — is part of how they arranged the
+   * page. So it survives switching views, a reload and a share link alike.
+   */
+  rail?: true
 }
 
 /**
@@ -213,6 +222,8 @@ export function clampSpan(cell: DashboardCell, columns: number): DashboardCell {
     nodeId: cell.nodeId,
     ...(w > 1 ? { w } : {}),
     ...(h !== DEFAULT_ROW_SPAN ? { h } : {}),
+    // Carried, not clamped: every cell this builds goes through here, a resize included.
+    ...(cell.rail ? { rail: true as const } : {}),
   }
 }
 
@@ -512,7 +523,8 @@ export function setSpan(
     let changed = false
     const cells = tab.cells.map((cell) => {
       if (cell.nodeId !== nodeId) return cell
-      const next = clampSpan({ nodeId, w: span.w ?? cell.w, h: span.h ?? cell.h }, tab.columns)
+      // From the cell, so whatever else it carries (an open rail) rides through the resize.
+      const next = clampSpan({ ...cell, w: span.w ?? cell.w, h: span.h ?? cell.h }, tab.columns)
       if (
         (next.w ?? 1) === (cell.w ?? 1) &&
         (next.h ?? DEFAULT_ROW_SPAN) === (cell.h ?? DEFAULT_ROW_SPAN)
@@ -520,6 +532,25 @@ export function setSpan(
         return cell
       changed = true
       return next
+    })
+    return changed ? { ...tab, cells } : tab
+  })
+}
+
+/** Open or close one cell's control rail. Unchanged returns the same graph. */
+export function setRail(
+  graph: CodaGraph,
+  nodeId: string,
+  open: boolean,
+  tabId?: string,
+): CodaGraph {
+  return updateTab(graph, tabId, (tab) => {
+    let changed = false
+    const cells = tab.cells.map((cell) => {
+      if (cell.nodeId !== nodeId || (cell.rail === true) === open) return cell
+      changed = true
+      const { rail: _was, ...rest } = cell
+      return open ? { ...rest, rail: true as const } : rest
     })
     return changed ? { ...tab, cells } : tab
   })
@@ -722,7 +753,7 @@ function validGrid(
   const kept: DashboardCell[] = []
   for (const cell of Array.isArray(cells) ? cells : []) {
     if (!cell || typeof cell !== 'object') continue
-    const { nodeId, w, h } = cell as Record<string, unknown>
+    const { nodeId, w, h, rail } = cell as Record<string, unknown>
     if (typeof nodeId !== 'string' || seen.has(nodeId)) continue
     const node = alive.get(nodeId)
     if (!node || !canHaveCell(node)) continue
@@ -733,6 +764,8 @@ function validGrid(
           nodeId,
           ...(typeof w === 'number' && Number.isFinite(w) ? { w } : {}),
           ...(typeof h === 'number' && Number.isFinite(h) ? { h } : {}),
+          // `=== true`, the `open` flag's rule: a hand-edited `"rail": "yes"` decides nothing.
+          ...(rail === true ? { rail: true as const } : {}),
         },
         tracks,
       ),

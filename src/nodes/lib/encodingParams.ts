@@ -12,6 +12,7 @@
  */
 
 import type { AttributePart, DType } from '../../core/types'
+import { NODE_VALUES } from '../../core/values'
 import { NUMERIC_DTYPES } from '../../core/types'
 import type { CompositeRef, EnumOption, ParamDef, ParamValues } from '../../core/node'
 import type { ColorLimits, DivergingPalette, SequentialPalette } from './heatmapParams'
@@ -53,6 +54,22 @@ export type ColorMode =
    */
   | 'sourceNode'
   | 'targetNode'
+  /**
+   * A colour per skeleton *node*: axon, dendrite, linker — Skeletons only, see `allowCompartment`.
+   *
+   * Another mode no column can express, and for the plainest reason: the attribute table has a
+   * row per neuron, and a compartment varies *along* one neuron. What it reads is the geometry's
+   * own labels, `SkeletonGeometry.split` where the arbour was split and the source's
+   * `compartments` otherwise.
+   */
+  | 'compartment'
+  /**
+   * A colour per skeleton *node*, from one of its computed per-node numbers
+   * (`SkeletonGeometry.nodeValues`, e.g. synapse flow) on the `by value` ramp. Skeletons only — see
+   * `allowNodeValue`. A mode rather than a column for `compartment`'s reason: the number varies
+   * along one neuron, and the attribute table has a row per neuron.
+   */
+  | 'nodeValue'
 
 /**
  * Which categorical palette an encoding cycles through.
@@ -108,7 +125,8 @@ export const CONSTANT_COLOR_OPTIONS = [
  * The three network modes are here for a different reason from `constant` and `default`: they
  * do map data, just not a *column* of the table being encoded. A component is derived from the
  * link set and a link's endpoint colour comes from the node table, so in both cases a picker
- * over this table's columns has nothing to say.
+ * over this table's columns has nothing to say. `compartment` is the same case one step further
+ * out: it reads the geometry's per-node labels, which no table has.
  */
 const DATALESS_MODES = new Set<string>([
   'constant',
@@ -116,6 +134,8 @@ const DATALESS_MODES = new Set<string>([
   'component',
   'sourceNode',
   'targetNode',
+  'compartment',
+  'nodeValue',
 ])
 
 export interface ColorParamOptions {
@@ -209,6 +229,20 @@ export interface ColorParamOptions {
    * "links" is the stutter `NetworkLegend` exists to avoid.
    */
   allowEndpoints?: boolean
+  /**
+   * Offer `compartment`: each skeleton node coloured by the compartment it is labelled with.
+   *
+   * Skeletons only — the one encoded thing here whose labels live on its nodes — and opt-in for
+   * the reason `allowComponent` is: on a channel that has no per-node labels it would be one
+   * grey for everything, a control that teaches people not to trust the picker.
+   */
+  allowCompartment?: boolean
+  /**
+   * Offer `nodeValue`: each skeleton node coloured by a per-node number, on the `by value` ramp.
+   * Skeletons only, opt-in for `allowCompartment`'s reason; meaningful with `valueScale`, whose
+   * ramp, ends and log it uses.
+   */
+  allowNodeValue?: boolean
   /**
    * Offer a palette dropdown for the categorical modes.
    *
@@ -330,6 +364,11 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
         ...(options.allowComponent
           ? [{ value: 'component', label: 'by connected component' }]
           : []),
+        // Beside the other mode that reads the geometry rather than a column.
+        ...(options.allowCompartment
+          ? [{ value: 'compartment', label: 'by compartment (axon/dendrite)' }]
+          : []),
+        ...(options.allowNodeValue ? [{ value: 'nodeValue', label: 'by node value' }] : []),
         ...(options.allowEndpoints
           ? [
               { value: 'sourceNode', label: 'by upstream node' },
@@ -373,6 +412,25 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       options: CONSTANT_COLOR_OPTIONS,
       visibleIf: (params) => params[modeId] === 'constant',
     },
+    ...(options.allowNodeValue
+      ? ([
+          {
+            ...base,
+            // The colour row's value slot, as the column and the swatch are: under `nodeValue`
+            // what is picked is which per-node number, and the three are `visibleIf`-exclusive.
+            composite: facet('value'),
+            id: `${prefix}NodeValue`,
+            kind: 'enum',
+            label: `${label} node value`,
+            default: NODE_VALUES[0].value,
+            options: NODE_VALUES.map(({ value, label: name }) => ({ value, label: name })),
+            help:
+              'Which per-node number to colour by. ' +
+              NODE_VALUES.map((v) => `${v.label}: from ${v.source}.`).join(' '),
+            visibleIf: (params) => params[modeId] === 'nodeValue',
+          },
+        ] satisfies ParamDef[])
+      : []),
     ...(options.palettes
       ? ([
           {
@@ -474,9 +532,10 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
   ]
 }
 
-/** Whether an encoding's mode is `by value`, which is what every value control turns on. */
-function isByValue(params: ParamValues, modeId: string): boolean {
-  return String(params[modeId]) === 'sequential'
+/** Whether the `by value` ramp is in force — over a column, or over a per-node number. */
+function isByValue(params: Readonly<Record<string, unknown>>, modeId: string): boolean {
+  const mode = String(params[modeId])
+  return mode === 'sequential' || mode === 'nodeValue'
 }
 
 /**
@@ -913,6 +972,8 @@ export interface ColorSpec {
    * under every other mode — which leaves the old ramp, data minimum to maximum on Coda blue.
    */
   scale?: ValueScale
+  /** Under `nodeValue`, which per-node number (`SkeletonGeometry.nodeValues`) is coloured. */
+  nodeValue?: string
 }
 
 /**
@@ -991,12 +1052,17 @@ export function readColorSpec(
 ): ColorSpec {
   const mode = String(params[`${prefix}ColorMode`] ?? 'constant') as ColorMode
   const overrides = readOverrides(params[`${prefix}ColorOverrides`])
-  const scale = mode === 'sequential' ? readValueScale(prefix, params) : undefined
+  const scale = isByValue(params, `${prefix}ColorMode`)
+    ? readValueScale(prefix, params)
+    : undefined
   return {
     mode,
     ...(scale ? { scale } : {}),
     column: DATALESS_MODES.has(mode) ? undefined : resolveColumn(`${prefix}ColorBy`),
     constant: String(params[`${prefix}Color`] ?? '0'),
+    ...(mode === 'nodeValue'
+      ? { nodeValue: String(params[`${prefix}NodeValue`] ?? NODE_VALUES[0].value) }
+      : {}),
     // Tolerant like the rest of this reader: a graph saved before the dropdown existed has no
     // key at all, and `paletteColors` reads a missing or unknown name as `coda`.
     ...(params[`${prefix}Palette`]

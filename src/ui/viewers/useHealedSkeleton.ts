@@ -33,9 +33,9 @@ export function useHealedSkeleton(value: SkeletonsValue | undefined): HealState 
   const [settled, setSettled] = useState<Settled | undefined>()
 
   useEffect(() => {
-    if (!value || !skeleton || !now || 'skeleton' in now) return
+    if (!skeleton || !now || 'skeleton' in now) return
     const controller = new AbortController()
-    healSkeleton(value, skeleton, controller.signal).then(
+    healSkeleton(skeleton, controller.signal).then(
       (data) => setSettled({ for: skeleton, status: 'ready', data }),
       (error: unknown) => {
         if (!controller.signal.aborted) {
@@ -44,7 +44,7 @@ export function useHealedSkeleton(value: SkeletonsValue | undefined): HealState 
       },
     )
     return () => controller.abort()
-  }, [value, skeleton, now])
+  }, [skeleton, now])
 
   if (!now) return { status: 'idle' }
   if ('skeleton' in now) return { status: 'ready', data: now }

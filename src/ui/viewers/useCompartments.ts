@@ -2,8 +2,8 @@
  * The axon/dendrite split for the neuron on screen, run live.
  *
  * The node splits the whole incoming set on Run; this splits the one neuron you are looking at,
- * as you look at it. Both call `runSplitCompartments`, so there is one implementation and the
- * card cannot disagree with the port beside it.
+ * as you look at it. Both call `splitSkeletons` — the assignment, the packing and the bridge — so
+ * there is one implementation and the card cannot disagree with the port beside it.
  *
  * **It is opt-in and stays opt-in**, which is the only interesting thing here. The split needs
  * Pyodide, and that is ~10 MB the first time anything in the session uses it — so this hook does
@@ -22,14 +22,13 @@ import { useEffect, useState } from 'react'
 
 import { errorMessage } from '../../core/errors'
 import type { SkeletonGeometry } from '../../core/values'
+import { splitSkeletons } from '../../nodes/lib/compartmentOps'
 import type { SynapseAssignment, SynapseSite } from '../../nodes/lib/topologyOps'
-import { assignSynapses } from '../../nodes/lib/topologyOps'
 import type { SplitStatus } from '../../pyodide/topology'
-import { runSplitCompartments, splitStatusOf } from '../../pyodide/topology'
 
 export interface Compartments {
-  /** One compartment code per skeleton node — `COMPARTMENT_*` in `pyodide/topology.ts`. */
-  readonly labels: Int32Array
+  /** One compartment code per skeleton node — `CODE_*` in `core/values.ts`. */
+  readonly labels: Uint8Array
   readonly status: SplitStatus
   /** Where each synapse landed, so the tabs can report per-compartment counts. */
   readonly synapses: SynapseAssignment
@@ -85,29 +84,15 @@ export function useCompartments(
 
     void (async () => {
       try {
-        const assignment = assignSynapses(skeleton, sites ?? [])
-        /*
-         * Statically imported. This was a dynamic `import()` guarding against `engine.ts`
-         * constructing a `Worker` at module scope — but it does not: `ensureWorker()` is called
-         * from inside `callPython`, and this file was already importing the status constants
-         * statically, so the module was loaded either way and the guard bought nothing.
-         */
-        const nodeCount = skeleton.parents.length
-        const result = await runSplitCompartments({
-          parents: skeleton.parents.slice(),
-          presynapses: assignment.pre.slice(),
-          postsynapses: assignment.post.slice(),
-          offsets: new Int32Array([0, nodeCount]),
-          flowThresh,
-          splitVal,
-          heal,
-          // A copy, like every buffer above: the call transfers, and this is the drawn geometry.
-          points: heal ? skeleton.positions.slice(0, nodeCount * 3) : new Float32Array(0),
-        })
+        const split = await splitSkeletons(
+          { items: [skeleton] },
+          new Map([[skeleton.id, { sites: sites ?? [] }]]),
+          { flowThresh, splitVal, heal },
+        )
         const data: Compartments = {
-          labels: result.compartment,
-          status: splitStatusOf(result.status[0]),
-          synapses: assignment,
+          labels: split.labels[0]!,
+          status: split.status[0]!,
+          synapses: split.assignments[0]!,
         }
         const bySettings = memory.get(skeleton) ?? new Map<string, Compartments>()
         bySettings.set(key, data)

@@ -198,13 +198,18 @@ export function paramsForPanel(def: NodeDefinition): (param: ParamDef) => boolea
  *   body is already a control surface, and the rail would then be the same knobs a second time
  *   a few pixels away. Neuron Topology is the case: seventeen presentational params, every one
  *   of them drawn by its pager, its stage toolbar or one of its three tabs.
- * - **Presentational only**, and only where `visibleIf` admits it. Anything that changes what
- *   the node *returns* belongs on the node, where changing it marks the graph stale — a rail
- *   that could edit `Min weight` would restyle a result into being wrong.
+ * - **What the sidebar admits, `paramsForPanel`**, and only where `visibleIf` admits it:
+ *   presentational params, plus those in a group the node marks `affectsData`. Anything else that
+ *   changes what the node *returns* belongs on the node, where changing it marks the graph stale —
+ *   a rail that could edit `Min weight` would restyle a result into being wrong. A data group is
+ *   the node saying the opposite on purpose: these are the knobs worth turning while looking at
+ *   the result (a heatmap's order, a split's thresholds), and a dashboard cell, which only ever
+ *   gets this rail, is where that looking happens. The rail marks each such item, as the sidebar
+ *   puts a note on the tab.
  */
 export function railParams(def: NodeDefinition, params: ParamValues): ParamDef[] {
   if (def.ownControls) return []
-  return visibleParams(def, params).filter((param) => param.presentational === true)
+  return visibleParams(def, params).filter(paramsForPanel(def))
 }
 
 /**

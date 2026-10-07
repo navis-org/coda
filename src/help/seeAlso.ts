@@ -138,6 +138,10 @@ const RELATED: readonly (readonly string[])[] = [
   // What a dataset hands you in space, and where it is drawn.
   ['neuron.skeletons', 'neuron.meshes', 'out.viewer3d'],
   ['neuron.skeletons', 'neuron.cleanSkeletons', 'neuron.skeletonPoints'],
+  // Splitting a neuron, what to split it from, and where the split is drawn.
+  ['neuron.splitCompartments', 'neuron.synapses', 'out.viewer3d'],
+  ['neuron.splitCompartments', 'out.topology'],
+  ['neuron.splitCompartments', 'neuron.cleanSkeletons'],
   ['neuron.meshes', 'neuron.cleanMeshes'],
   // How alike two neurons are in shape vs. how far apart they are.
   ['neuron.distance', 'neuron.nblast'],

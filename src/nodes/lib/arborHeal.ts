@@ -13,7 +13,7 @@
  * neuron does not heal it again.
  */
 
-import type { SkeletonGeometry, SkeletonsValue } from '../../core/values'
+import type { SkeletonGeometry } from '../../core/values'
 import { memoPromise, untilAborted } from '../../data/memoPromise'
 import { runCleanSkeletons } from '../../pyodide/skeletons'
 import { healedBridges, skeletonRoots } from './arborOps'
@@ -49,12 +49,11 @@ export function healedNow(skeleton: SkeletonGeometry): Healed | { pieces: number
 const inflight = new Map<SkeletonGeometry, Promise<Healed>>()
 
 /**
- * `skeleton` (an item of `value`) joined into one tree where it arrived in pieces. A heal already
+ * `skeleton` joined into one tree where it arrived in pieces. A heal already
  * under way for it — the card's, when Run arrives first — is joined rather than started again, and
  * `signal` stops only this caller waiting, never a heal somebody else is still waiting on.
  */
 export function healSkeleton(
-  value: SkeletonsValue,
   skeleton: SkeletonGeometry,
   signal?: AbortSignal,
 ): Promise<Healed> {
@@ -64,9 +63,7 @@ export function healSkeleton(
     inflight,
     skeleton,
     async () => {
-      const result = await runCleanSkeletons(
-        cleanRequestFrom({ ...value, items: [skeleton] }, HEAL_ONLY),
-      )
+      const result = await runCleanSkeletons(cleanRequestFrom({ items: [skeleton] }, HEAL_ONLY))
       // Healing renumbers nothing, so the coordinates and radii are the ones already held — which
       // is checked rather than trusted, a renumbered tree being a wrong arbour with no error.
       if (result.parents.length !== skeleton.parents.length) {

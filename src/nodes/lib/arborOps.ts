@@ -32,14 +32,11 @@ import { quantileSorted } from '../../core/stats'
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { GeometryUnits, PointsValue, SkeletonGeometry } from '../../core/values'
-import { makeTable } from '../../core/values'
+import { SWC_SOMA, makeTable } from '../../core/values'
 import type { SynapseSite } from './topologyOps'
 import { assignSynapses } from './topologyOps'
 import { selectPoints } from './iterables'
 import { NM_PER_UM, geometryUnitsProblem } from '../../data/units'
-
-/** SWC's soma code — `SkeletonGeometry.compartments`' vocabulary. */
-const SWC_SOMA = 1
 
 /** A neuron re-rooted at one node, with the arrays every walk over it needs. */
 export interface Arbor {
@@ -753,6 +750,15 @@ export function orientPlacement(arbor: Arbor, projection: SynapseProjection): Pl
 export interface ArborPoint {
   readonly node: number
   readonly t: number
+}
+
+/**
+ * The node a "Make root" on a clicked point means: whichever end of its edge it is nearer. One
+ * rule for every surface that re-roots from a click — the Neuron Dendrogram and the split editor.
+ */
+export function rootNodeFor(point: ArborPoint, parent: Int32Array): number {
+  const p = parent[point.node]!
+  return point.t >= 0.5 || p < 0 ? point.node : p
 }
 
 /** The distance of a tree point from the root, under a per-node distance array. */

@@ -19,10 +19,11 @@
  * being invented for it. Density is *not* on that list: a frame wears `.viewer-surface` and has a
  * class of its own, so it can select its own header — see `.dash-cell__panel` in `editor.css`.
  *
- * The controls expose the node's *presentational* params only. Those are excluded from the
- * provenance key, so fiddling with a colour scale here re-renders instantly and never marks the
- * graph stale — which is what makes this usable as an inspection surface rather than a thing
- * you're afraid to touch.
+ * The controls expose the node's *presentational* params, plus any in a group it marks
+ * `affectsData` (`railParams`). The first are excluded from the provenance key, so fiddling with a
+ * colour scale here re-renders instantly and never marks the graph stale — which is what makes
+ * this usable as an inspection surface rather than a thing you're afraid to touch. The second are
+ * a node's deliberate exception, and both shapes say so where they draw them.
  *
  * They arrive in one of two shapes. A node declaring `paramGroups` gets a **tabbed styling
  * sidebar**, Cytoscape's Style panel being the reference: a tab per half of the thing being
@@ -53,6 +54,9 @@ import { nodeBody } from '../nodes/nodeBodies'
 import { ParamField } from '../params/ParamField'
 import { ParamRows } from '../params/ParamRows'
 import { panelTabs, railParams } from '../params/paramGroups'
+
+/** What a data-group control costs, said once for the sidebar's tab note and the rail's items. */
+const CHANGES_DATA = 'These change the data, not just the drawing — downstream nodes go stale.'
 import { NodeMap } from '../tour/NodeMap'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { ExportNodeContext } from '../viewers/exportRegistry'
@@ -304,8 +308,18 @@ export function ViewerSurface({
       {showRail && (
         <div className="overlay__rail">
           {rail.map((param) => (
-            <div key={param.id} className="overlay__rail-item">
-              <span className="param__label" title={param.help ?? param.label}>
+            <div
+              key={param.id}
+              className={`overlay__rail-item${param.presentational ? '' : ' overlay__rail-item--data'}`}
+            >
+              {/*
+               * A data-group param says so on its label: the sidebar puts a note on the tab, and a
+               * rail has no tab, so the item carries the mark and the reason is in its title.
+               */}
+              <span
+                className="param__label"
+                title={`${param.help ?? param.label}${param.presentational ? '' : ` ${CHANGES_DATA}`}`}
+              >
                 {param.label}
               </span>
               {/*
@@ -383,9 +397,7 @@ export function ViewerSurface({
                  * more. This one does not, and a graph quietly going stale with no visible
                  * cause is exactly the confusion the note exists to prevent.
                  */
-                <p className="style-warning">
-                  These change the data, not just the drawing — downstream nodes go stale.
-                </p>
+                <p className="style-warning">{CHANGES_DATA}</p>
               )}
               <ParamRows
                 rows={activeTab.rows}

@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SkeletonGeometry } from '../../core/values'
+import { splitName } from '../../core/values'
 import {
   GRID_SPREAD,
   cellKey,
@@ -19,13 +20,17 @@ import {
   NODE_ROOT,
   NODE_SLAB,
   classifyNodes,
+  compartmentStats,
   maxRootDistance,
   morphometrics,
   morphometricsSchema,
   morphometricsTable,
   parentDistances,
   segmentStats,
+  segregationIndex,
   skeletonTree,
+  splitColumnData,
+  splitColumns,
   strahlerOrders,
 } from './topologyOps'
 
@@ -382,5 +387,97 @@ describe('the synapse grid key', () => {
       cellKey(1, 1, 1),
     ]
     expect(new Set(keys).size).toBe(keys.length)
+  })
+})
+
+describe('segregationIndex', () => {
+  /*
+   * Every expectation is `navis.segregation_index` run on the same counts (navis 2.0.0-rc.1) —
+   * the number is cited, so it is held to the reference rather than to a reading of the paper.
+   */
+  it.each([
+    [
+      [
+        [10, 320],
+        [103, 21],
+      ],
+      0.6026884788288553,
+    ],
+    [
+      [
+        [100, 0],
+        [0, 100],
+      ],
+      1,
+    ],
+    [
+      [
+        [5, 5],
+        [5, 5],
+      ],
+      0,
+    ],
+    // Every synapse one polarity: no entropy to normalise by, and navis answers 0, not nothing.
+    [
+      [
+        [0, 7],
+        [0, 3],
+      ],
+      0,
+    ],
+    [
+      [
+        [3, 0],
+        [0, 0],
+      ],
+      0,
+    ],
+  ])('matches navis on %j', (parts, expected) => {
+    const index = segregationIndex(parts.map(([pre, post]) => ({ pre: pre!, post: post! })))
+    expect(index).toBeCloseTo(expected, 12)
+  })
+
+  it('has no answer where the parts hold no synapse at all, where navis divides by zero', () => {
+    expect(segregationIndex([{ pre: 0, post: 0 }])).toBeNull()
+  })
+})
+
+describe('the split columns', () => {
+  /** Root, then three nodes 1 µm apart along x: dendrite, linker, axon. */
+  const line: SkeletonGeometry = {
+    id: '1',
+    positions: new Float32Array([0, 0, 0, 1000, 0, 0, 2000, 0, 0, 3000, 0, 0]),
+    radii: new Float32Array(4),
+    parents: new Int32Array([-1, 0, 1, 2]),
+  }
+  const labels = new Uint8Array([1, 1, 3, 2])
+  const synapses = {
+    nodeOf: new Int32Array([1, 3, 3]),
+    pre: new Uint32Array([0, 0, 0, 2]),
+    post: new Uint32Array([0, 1, 0, 0]),
+  }
+
+  it('gives each edge to its child, so the three cables sum to the whole', () => {
+    const stats = compartmentStats(line, labels, synapses, 'ok')
+    expect(stats.cableDendrite).toBeCloseTo(1)
+    expect(stats.cableLinker).toBeCloseTo(1)
+    expect(stats.cableAxon).toBeCloseTo(1)
+    expect([stats.preAxon, stats.postDendrite]).toEqual([2, 1])
+    expect(stats.segregationIndex).toBeCloseTo(1)
+  })
+
+  it('declares exactly the columns it fills, null wherever the split did not run', () => {
+    const data = splitColumnData([
+      compartmentStats(line, labels, synapses, 'ok'),
+      compartmentStats(line, undefined, undefined, 'multiple roots'),
+    ])
+    expect(Object.keys(data)).toEqual(splitColumns().map((c) => c.name))
+    expect(data['splitStatus']).toEqual(['ok', 'multiple roots'])
+    expect(data['cableAxon']![1]).toBeNull()
+    expect(data['segregationIndex']![1]).toBeNull()
+  })
+
+  it('names the codes, and leaves an unassigned node unnamed', () => {
+    expect([0, 1, 2, 3, 9].map(splitName)).toEqual([null, 'dendrite', 'axon', 'linker', null])
   })
 })

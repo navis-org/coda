@@ -49,6 +49,7 @@ import {
   setViewOpen,
   setColumns as setDashboardTracks,
   setSpan as setCellSpan,
+  setRail as setCellRail,
 } from '../core/dashboard'
 import {
   createGroup,
@@ -887,6 +888,12 @@ export interface GraphState {
   moveDashboardCell(nodeId: string, toIndex: number): void
   /** Resize one cell on the active tab. Spans are clamped, never refused — see `clampSpan`. */
   setDashboardSpan(nodeId: string, span: { w?: number; h?: number }): void
+  /**
+   * Open or close a cell's control rail on the active tab. Held in the document, so it survives
+   * leaving the grid; **not an undo step**, for `setDashboardTab`'s reason — undo would otherwise
+   * spend its steps opening and closing panels between the edits somebody wants back.
+   */
+  setDashboardRail(nodeId: string, open: boolean): void
   setDashboardColumns(columns: number): void
   /**
    * Put a tab on screen. Not an undo step, for `setDashboardOpen`'s reason, and held only in the
@@ -2496,6 +2503,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
     setDashboardSpan: (nodeId, span) => {
       const tab = activeTab(get().graph).id
       commitLayout((g) => setCellSpan(g, nodeId, span, tab), `cell-span:${tab}:${nodeId}`)
+    },
+
+    setDashboardRail: (nodeId, open) => {
+      const tab = activeTab(get().graph).id
+      commit((g) => setCellRail(g, nodeId, open, tab), { history: false, autoRun: false })
     },
 
     setDashboardColumns: (columns) => {

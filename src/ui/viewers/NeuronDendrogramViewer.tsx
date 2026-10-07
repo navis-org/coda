@@ -28,7 +28,7 @@ import { getColumn, getRow, makeTable } from '../../core/values'
 import { NM_PER_UM } from '../../data/units'
 import type { ArborLayoutKind, ArborOrder, ArborShape } from '../../nodes/lib/arborLayout'
 import { SUBWAY_DEFAULTS } from '../../nodes/lib/arborLayout'
-import type { Arbor, ArborPoint, DistalRow, KeyTree } from '../../nodes/lib/arborOps'
+import type { Arbor, DistalRow, KeyTree } from '../../nodes/lib/arborOps'
 import {
   buildArbor,
   distalSynapses,
@@ -43,6 +43,7 @@ import {
   pruneTwigs,
   resolveRoot,
   rootChoiceOf,
+  rootNodeFor,
   stampedRadius,
   summariseDistal,
   synapseFlow,
@@ -1272,12 +1273,6 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
       </div>
     </div>
   )
-}
-
-/** The node a "Make root" on a clicked point means: whichever end of its edge it is nearer. */
-function rootNodeFor(point: ArborPoint, parent: Int32Array): number {
-  const p = parent[point.node]!
-  return point.t >= 0.5 || p < 0 ? point.node : p
 }
 
 function DistalTable({

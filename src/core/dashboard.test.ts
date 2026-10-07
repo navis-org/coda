@@ -26,6 +26,7 @@ import {
   pruneDashboard,
   removeCells,
   setColumns,
+  setRail,
   setSpan,
   placeableIds,
   setViewOpen,
@@ -218,6 +219,31 @@ describe('spans', () => {
     expect(activeTab(setColumns(g, 99)).columns).toBe(6)
     expect(activeTab(setColumns(g, 0)).columns).toBe(1)
     expect(activeTab(setColumns(g, Number.NaN)).columns).toBe(DEFAULT_COLUMNS)
+  })
+})
+
+describe('a cell’s control rail', () => {
+  it('is stored only while open, and leaves the graph alone when nothing changes', () => {
+    const g = addCells(graphWith(['a']), ['a'])
+    const open = setRail(g, 'a', true)
+    expect(cellsOf(open)).toEqual([{ nodeId: 'a', rail: true }])
+    expect(setRail(open, 'a', true)).toBe(open)
+    expect(cellsOf(setRail(open, 'a', false))).toEqual([{ nodeId: 'a' }])
+    expect(setRail(g, 'a', false)).toBe(g)
+  })
+
+  it('survives a resize, which rebuilds the cell through clampSpan', () => {
+    const g = setSpan(setRail(addCells(graphWith(['a']), ['a']), 'a', true), 'a', { w: 2 })
+    expect(cellsOf(g)).toEqual([{ nodeId: 'a', w: 2, rail: true }])
+  })
+
+  it('round-trips through a stored layout, and a hand-edited non-true value is ignored', () => {
+    const node = { id: 'a', type: 'out.table', position: { x: 0, y: 0 }, params: {} }
+    const alive = new Map([['a', node]])
+    const stored = (rail: unknown) =>
+      validDashboard({ columns: 2, cells: [{ nodeId: 'a', rail }] }, alive)
+    expect(stored(true)?.tabs[0]!.cells).toEqual([{ nodeId: 'a', rail: true }])
+    expect(stored('yes')?.tabs[0]!.cells).toEqual([{ nodeId: 'a' }])
   })
 })
 

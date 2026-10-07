@@ -29,7 +29,7 @@ import {
 import type { ColumnWidths, Proofread, WallGroup, WallOrder } from '../../packs/cortex/cells'
 import type { CorticalFrame } from '../../packs/cortex/frames'
 import type { Mode } from '../../style/colors'
-import { axonDendriteInk } from '../compartmentInk'
+import { compartmentInks } from '../compartmentInk'
 import type { ResolvedColor } from '../../style/encoding'
 import { resolveColor } from '../../style/encoding'
 import { formatNumber, plural } from '../../style/format'
@@ -358,7 +358,7 @@ export function GalleryBody({ node, ctx, inputValues, compact, setParam }: NodeB
 
 /** The axon and dendrite key, the one both legends open with — on screen and in a figure. */
 function inkEntries(mode: Mode): { label: string; color: string }[] {
-  const { axon, dendrite } = axonDendriteInk(mode)
+  const { axon, dendrite } = compartmentInks(mode)
   return [
     { label: 'dendrite', color: dendrite },
     { label: 'axon', color: axon },

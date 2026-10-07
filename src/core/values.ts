@@ -264,21 +264,133 @@ export interface SkeletonGeometry {
    * one the source measured. Where present it is exactly as long as `radii`.
    */
   readonly compartments?: Uint8Array
+  /**
+   * A *computed* axon/dendrite split, one code per point — 0 unassigned, 1 dendrite, 2 axon,
+   * 3 linker, `pyodide/topology.py`'s numbers (pinned there by `topology.test.ts`).
+   *
+   * A field of its own rather than codes written into `compartments`, which is the rule above
+   * kept rather than bent: a source's labels and a result computed from synapses stay apart, so a
+   * reader can always say which it drew. MICrONS' skeleton service already ships an automatic
+   * split in `compartments`, and with one field the two would be indistinguishable. SWC also has
+   * no code for the linker.
+   *
+   * **Absent means nobody split this skeleton.** No source sets it. It is a property of *this*
+   * tree's nodes, so anything that renumbers them (Clean Skeletons) drops it; anything that only
+   * moves them (mirror, warp, heal) keeps it. Where present it is exactly as long as `radii`.
+   */
+  readonly split?: Uint8Array
+  /**
+   * Computed numbers per point, by name — `flow` being the first (`NODE_VALUES`). Each array is
+   * exactly as long as `radii`.
+   *
+   * One map rather than a field per measure, so the next per-node number (Strahler order, distance
+   * from the soma) needs no new field, no new viewer mode and no new entry in `skeletonBuffers`.
+   * Like `split` these are results computed for *this* tree's nodes: never set by a source, kept by
+   * a transform that only moves the nodes, dropped by one that renumbers them.
+   */
+  readonly nodeValues?: Readonly<Record<string, Float32Array>>
 }
+
+/**
+ * A memo slot per skeleton geometry, for a cache that has to outlive the item object.
+ *
+ * Keyed on `parents` and `positions` by reference rather than on the item, because a node that
+ * re-labels a set (`withSplit`) mints a new item per run around the same two arrays — and on both,
+ * because a heal replaces `parents` and keeps `positions` while a mirror does the opposite, and a
+ * cache keyed on either alone would hand the changed tree the old one's answer. Weak at both
+ * levels, so a slot lives exactly as long as its geometry. Each caller keeps its own inner key in
+ * the slot `make` builds — a root number in a `Map`, a synapse list in a `WeakMap`.
+ */
+export function perGeometry<V>(make: () => V): (skeleton: SkeletonGeometry) => V {
+  const byParents = new WeakMap<Int32Array, WeakMap<Float32Array, V>>()
+  return (skeleton) => {
+    let byPositions = byParents.get(skeleton.parents)
+    if (!byPositions) byParents.set(skeleton.parents, (byPositions = new WeakMap()))
+    let slot = byPositions.get(skeleton.positions)
+    if (slot === undefined) byPositions.set(skeleton.positions, (slot = make()))
+    return slot
+  }
+}
+
+/**
+ * The per-node values Coda computes, and what each is called where somebody picks one. A fixed list
+ * rather than discovery, because the 3D View's picker is drawn at edit time and a type carries no
+ * geometry to discover them from.
+ */
+export const NODE_VALUES = [
+  {
+    value: 'flow',
+    label: 'synapse flow (fraction of peak)',
+    /** Where the value comes from — so a picker can say it without naming nodes itself. */
+    source: 'Split Axon/Dendrite, with Write synapse flow on',
+  },
+] as const satisfies readonly { value: string; label: string; source: string }[]
+
+/** SWC's structure codes — `SkeletonGeometry.compartments`' vocabulary, named once. */
+export const SWC_SOMA = 1
+export const SWC_AXON = 2
+export const SWC_BASAL = 3
+export const SWC_APICAL = 4
 
 /**
  * `SkeletonGeometry.compartments`' codes as words, for a column a Split by or a Filter reads. 0 is
  * unlabelled and reads null; a code past SWC's standard four keeps its number rather than being
  * guessed at. A table so those `swc N` fallbacks are built once rather than once per point.
  */
+const SWC_WORDS: Readonly<Record<number, string>> = {
+  [SWC_SOMA]: 'soma',
+  [SWC_AXON]: 'axon',
+  [SWC_BASAL]: 'basal dendrite',
+  [SWC_APICAL]: 'apical dendrite',
+}
 const SWC_NAMES: readonly (string | null)[] = Array.from({ length: 256 }, (_, code) =>
-  code === 0
-    ? null
-    : (['soma', 'axon', 'basal dendrite', 'apical dendrite'][code - 1] ?? `swc ${code}`),
+  code === 0 ? null : (SWC_WORDS[code] ?? `swc ${code}`),
 )
 
 export function compartmentName(code: number): string | null {
   return SWC_NAMES[code] ?? null
+}
+
+/*
+ * `SkeletonGeometry.split`'s codes — the one TypeScript spelling, here because this file declares
+ * the field they label, beside the SWC codes `compartments` speaks.
+ *
+ * The split itself is `pyodide/topology.py`, which names the same numbers in Python. Two languages
+ * cannot share a constant, so `pyodide/topology.test.ts` reads the Python source and holds it to
+ * these: a renumbering on either side fails a test rather than filing axon cable under the
+ * dendrite column with nothing thrown anywhere.
+ */
+export const CODE_UNASSIGNED = 0
+export const CODE_DENDRITE = 1
+export const CODE_AXON = 2
+export const CODE_LINKER = 3
+
+/**
+ * A split code as a word, for a column a Group By, a Filter or a colour reads. Unassigned — and any
+ * code this vocabulary does not have — is null rather than a guess.
+ */
+export function splitName(code: number): 'dendrite' | 'axon' | 'linker' | null {
+  if (code === CODE_DENDRITE) return 'dendrite'
+  if (code === CODE_AXON) return 'axon'
+  if (code === CODE_LINKER) return 'linker'
+  return null
+}
+
+/** What a compartment label can mean, in either vocabulary a skeleton carries. */
+export type CompartmentKey = 'axon' | 'dendrite' | 'linker' | 'soma'
+
+/**
+ * A node's label as a compartment, read in the vocabulary it is in: a computed split
+ * (`SkeletonGeometry.split`, `CODE_*`) or the source's SWC codes (`compartments`), where basal and
+ * apical are both dendrite. The one mapping every surface that draws compartments reads, so the 3D
+ * View, Topology's card and the Cortex wall cannot disagree about what a code is.
+ */
+export function compartmentKey(code: number, computed: boolean): CompartmentKey | undefined {
+  if (computed) return splitName(code) ?? undefined
+  if (code === SWC_AXON) return 'axon'
+  if (code === SWC_BASAL || code === SWC_APICAL) return 'dendrite'
+  if (code === SWC_SOMA) return 'soma'
+  return undefined
 }
 
 /**
@@ -287,9 +399,11 @@ export function compartmentName(code: number): string | null {
  * somebody remembered to edit.
  */
 export function skeletonBuffers(s: Omit<SkeletonGeometry, 'id'>): ArrayBufferView[] {
-  return s.compartments
-    ? [s.positions, s.radii, s.parents, s.compartments]
-    : [s.positions, s.radii, s.parents]
+  const buffers: ArrayBufferView[] = [s.positions, s.radii, s.parents]
+  if (s.compartments) buffers.push(s.compartments)
+  if (s.split) buffers.push(s.split)
+  if (s.nodeValues) buffers.push(...Object.values(s.nodeValues))
+  return buffers
 }
 
 /**
@@ -968,7 +1082,7 @@ export function isPointsValue(v: Value | undefined): v is PointsValue {
 }
 
 /** Total point count across a skeleton collection, for summaries and guard rails. */
-export function skeletonPointCount(v: SkeletonsValue): number {
+export function skeletonPointCount(v: Pick<SkeletonsValue, 'items'>): number {
   return v.items.reduce((sum, item) => sum + item.parents.length, 0)
 }
 

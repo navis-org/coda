@@ -151,7 +151,7 @@ export function isNoOp(params: SkeletonCleanParams): boolean {
  * result for the node above and leave it empty on the next render.
  */
 export function cleanRequestFrom(
-  skeletons: SkeletonsValue,
+  skeletons: Pick<SkeletonsValue, 'items'>,
   params: SkeletonCleanParams,
 ): CleanSkeletonsRequest {
   // `parents`, `offsets` and `points` are `skeletonPacking.ts`' — that layout and both of its
@@ -226,6 +226,12 @@ export function skeletonsFromResult(
       radii: result.radii.slice(from, to),
       parents: result.parents.slice(from, to),
       ...labelled(item.compartments && result.compartments.slice(from, to)),
+      /*
+       * `split` and `nodeValues` deliberately not carried. They label the nodes of the tree they
+       * were computed on, and cleaning renumbers them — where the source's `compartments` above
+       * are positional labels the Python resamples with the geometry. The node warns when either
+       * is dropped.
+       */
     }
   })
 

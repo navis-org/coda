@@ -57,6 +57,8 @@ import { ProfileViewer } from './ProfileViewer'
 import { TopologyViewer } from './TopologyViewer'
 import type { ArborSettings } from './NeuronDendrogramViewer'
 import { NeuronDendrogramViewer } from './NeuronDendrogramViewer'
+import { SplitEditor } from './SplitEditor'
+import { CORRECTIONS_PARAM } from '../../nodes/lib/splitCorrections'
 import { NeuronBridgeViewer } from './NeuronBridgeViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { scopedKey, WorkflowScope } from './workflowScope'
@@ -112,8 +114,8 @@ export interface ValuePreviewProps {
    * `TableSummary` turns the same information ninety degrees and fits it. Reading the table
    * itself is the Table node's job, and the overlay's.
    *
-   * Only the *fallback* table branch honours it: a node with a viewer of its own — a scatter, a
-   * heatmap, a profile — keeps it, because those already draw something sized to their box.
+   * The fallback table branch honours it, and so does an entry declaring `inSummary`; any other
+   * viewer — a scatter, a heatmap, a profile — keeps its drawing, sized to its box already.
    */
   summary?: boolean
 }
@@ -203,28 +205,18 @@ function ValuePreviewInner({
   const viewerKey = scopedKey(useContext(WorkflowScope), node.id)
 
   /*
-   * A summary means "no second renderer", not just "no grid".
-   *
-   * `summary` was introduced for the table — a 60-column grid in a 320px panel is three
-   * columns behind a sideways scrollbar, where `TableSummary` turns it ninety degrees and
-   * fits. The note beside the prop says a viewer with a drawing of its own keeps it, "because
-   * those already draw something sized to their box". True of an SVG or a canvas, and false of
-   * these two in the way that matters: a WebGL viewer is a *renderer*, and drawing one twice
-   * is two graphics contexts, two copies of the geometry on the GPU and two redraws on every
-   * invalidation. Measured on a 21-neuron scene with the card, the inspector and the overlay
-   * up: 3 contexts, 170 kB uploaded into each, and one background change costing 154 draw
-   * calls across the three.
-   *
-   * So the panel names what it would have drawn and offers the way to see it properly. Which
-   * is close to what it was worth in a 320 × 300 box beside the card already showing it.
+   * A summary means "no second renderer", not just "no grid": an entry declaring `inSummary` is
+   * replaced here, by a line naming what is drawn on its card or by the value's ordinary preview.
+   * Why each, and what was measured, is on the field.
    */
-  if (summary && node.type in HAS_OWN_CONTEXT) {
-    return <DrawnElsewhere type={node.type} {...(onExpand ? { onExpand } : {})} />
+  const viewer = VIEWERS[node.type]
+  const standIn = summary ? viewer?.inSummary : undefined
+  if (standIn && standIn !== 'preview') {
+    return <DrawnElsewhere noun={standIn.drawnElsewhere} {...(onExpand ? { onExpand } : {})} />
   }
 
   // An entry drawing from its inputs goes ahead of the guard; one that declines falls through.
-  const viewer = VIEWERS[node.type]
-  if (viewer && (value || viewer.withoutValue)) {
+  if (viewer && standIn !== 'preview' && (value || viewer.withoutValue)) {
     const drawn = viewer.render({
       node,
       value,
@@ -360,6 +352,19 @@ interface ViewerEntry {
    * guard, unlike `withoutValue`. Profile and Neuroglancer.
    */
   readsInputs?: boolean
+  /**
+   * What the inspector's `summary` shows instead of this entry; absent, the entry as anywhere else.
+   *
+   * - **A noun** — a line saying the thing is drawn on its card, for a viewer that costs a graphics
+   *   context. A second copy of a WebGL renderer is not free the way a second `<svg>` is: measured
+   *   on a 21-neuron scene with the card, the inspector and the overlay up, 3 contexts, 170 kB
+   *   uploaded into each, and one background change costing 154 draw calls across the three. The
+   *   noun is what the line calls it, kept on the entry so the two cannot name different things.
+   * - **`'preview'`** — the value's ordinary preview, for an entry that *stands in* for that preview
+   *   on full-size surfaces: a transform whose full-size view is an editor of its output (Split
+   *   Axon/Dendrite). Its card has no preview to keep, so the inspector keeps the generic one.
+   */
+  inSummary?: 'preview' | { drawnElsewhere: string }
   /** The picture, or `undefined` to decline: dispatch carries on as though there were no entry. */
   render: (props: ViewerProps) => ReactNode
 }
@@ -368,7 +373,8 @@ interface ViewerEntry {
  * The node types with a viewer of their own, and how each is drawn — `NODE_BODIES`' shape, for
  * `ValuePreview`: one entry per type rather than a chain of `node.type ===` branches.
  *
- * **`withoutValue` is the one structural fact an entry carries.** Four viewers draw before the
+ * **`withoutValue` and `inSummary` are the structural facts an entry carries** — the second is
+ * what the inspector draws instead, and is documented on the field. Four viewers draw before the
  * "No result yet" guard because their picture is on their *inputs*: two have no outputs, and so
  * never a value (Dataset Summary, ROI Viewer), and two have an output that arrives a scheduler
  * step after the thing they draw (3D View, Graph Metrics). Every other entry is handed a value.
@@ -459,6 +465,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
    * draw nothing.
    */
   'out.viewer3d': {
+    inSummary: { drawnElsewhere: 'This 3D scene' },
     withoutValue: true,
     render: ({
       ctx,
@@ -584,6 +591,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
     },
   },
   'out.network': {
+    inSummary: { drawnElsewhere: 'This network' },
     render: ({
       node,
       value,
@@ -802,6 +810,26 @@ const VIEWERS: Record<string, ViewerEntry> = {
         />
       )
     },
+  },
+  /*
+   * Not a viewer — a transform — so its card has no preview and keeps its threshold rows; this is
+   * what its *full-size* surfaces draw instead of the generic geometry preview: the split on a
+   * dendrogram, with the corrections editor. A dashboard cell is one of those surfaces, so the
+   * thresholds on the rail and the branches below them are tuned in one place. Draws the node's own
+   * `Skeletons` output, labelled and corrected, so the picture is what flows downstream.
+   */
+  'neuron.splitCompartments': {
+    inSummary: 'preview',
+    render: ({ value, params, inputValues, onParamChange }) =>
+      isSkeletonsValue(value) ? (
+        <SplitEditor
+          skeletons={value}
+          synapses={isPointsValue(inputValues?.synapses) ? inputValues.synapses : undefined}
+          corrections={params[CORRECTIONS_PARAM]}
+          showSynapses={params.showSynapses === true}
+          onParamChange={onParamChange}
+        />
+      ) : undefined,
   },
   'out.neuronDendrogram': {
     readsInputs: true,
@@ -1229,29 +1257,17 @@ export function drawsFromInputs(type: string): boolean {
 }
 
 /**
- * Viewers that cost a graphics context, so a second copy of one is not free the way a second
- * `<svg>` is.
+ * What the inspector shows in place of a second renderer — `ViewerEntry.inSummary`'s noun.
  *
- * A list rather than a flag on the definition, and a short one on purpose: what it is really
- * naming is "renders through WebGL", which is a property of the viewer component rather than
- * of the node, and nothing on a `NodeDefinition` knows it. `LazyViewers.tsx` is the other
- * place that knows, for the same reason and about the same two.
- *
- * The value is the noun the stand-down message uses. One table rather than a `Set` beside a
- * `Record`: two lists of the same two node types are two lists that can disagree, and the way
- * they disagree is a panel that stands down and then calls the thing "This viewer".
+ * On the entry rather than on the definition because what it names is "renders through WebGL", a
+ * property of the viewer component, which nothing on a `NodeDefinition` knows. `LazyViewers.tsx`
+ * is the other place that knows, for the same reason and about the same two.
  */
-const HAS_OWN_CONTEXT: Record<string, string> = {
-  'out.viewer3d': 'This 3D scene',
-  'out.network': 'This network',
-}
-
-/** What the inspector shows in place of a second renderer. */
-function DrawnElsewhere({ type, onExpand }: { type: string; onExpand?: () => void }) {
+function DrawnElsewhere({ noun, onExpand }: { noun: string; onExpand?: () => void }) {
   return (
     <ViewerEmpty stacked>
       <span title="A WebGL viewer takes a graphics context and its own copy of the geometry on the GPU, so it is drawn in one place at a time.">
-        {HAS_OWN_CONTEXT[type] ?? 'This viewer'} is drawn on its card.
+        {noun} is drawn on its card.
       </span>
       {onExpand && (
         <button type="button" className="btn btn--ghost" onClick={onExpand}>

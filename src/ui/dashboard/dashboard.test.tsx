@@ -321,6 +321,26 @@ describe('a cell', () => {
     await waitFor(() => expect(cell().querySelector('.overlay__rail')).not.toBeNull())
     expect(store().needsRun('view')).toBe(false)
   })
+
+  /*
+   * The canvas and the grid replace each other, so every cell is unmounted on the way out. The
+   * rail is the cell's own, stored beside its size, and must still be open on the way back.
+   */
+  it('keeps a cell’s display settings open across leaving the dashboard and coming back', async () => {
+    await withCells(['view'])
+    const cell = () => cellFor('view') as HTMLElement
+    const historyBefore = store().past.length
+    fireEvent.click(within(cell()).getByLabelText('Display settings'))
+    await waitFor(() => expect(cell().querySelector('.overlay__rail')).not.toBeNull())
+    expect(activeTab(store().graph).cells).toEqual([{ nodeId: 'view', rail: true }])
+    // A panel opening is not something undo should step back through.
+    expect(store().past.length).toBe(historyBefore)
+
+    act(() => store().setDashboardOpen(false))
+    expect(cellFor('view')).toBeNull()
+    act(() => store().setDashboardOpen(true))
+    await waitFor(() => expect(cell().querySelector('.overlay__rail')).not.toBeNull())
+  })
 })
 
 /**

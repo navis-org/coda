@@ -216,6 +216,32 @@ describe('synapsePosition', () => {
   })
 })
 
+describe('synapsePosition — segregated by polarity', () => {
+  /*
+   * What makes an axon/dendrite split of the demo data mean anything. The generator grows one
+   * arbour where the primary neurite lands and one near the soma; outputs belong on the first.
+   * Measured as distance from the soma rather than by node index, because the node lists are
+   * internal and the geometry is what a split sees.
+   */
+  it('puts most outputs on the far arbour and most inputs on the near one', () => {
+    const skeleton = generateSkeleton(4242, ['LO(R)', 'PVLP(R)'])
+    const soma = [skeleton.positions[0]!, skeleton.positions[1]!, skeleton.positions[2]!]
+    const fromSoma = ([x, y, z]: [number, number, number]) =>
+      Math.hypot(x - soma[0]!, y - soma[1]!, z - soma[2]!)
+    const mean = (polarity: 'pre' | 'post') => {
+      let total = 0
+      for (let i = 0; i < 200; i++) total += fromSoma(synapsePosition(skeleton, i, polarity))
+      return total / 200
+    }
+    expect(mean('pre')).toBeGreaterThan(2 * mean('post'))
+  })
+
+  it('stays deterministic per (neuron, index, polarity)', () => {
+    const skeleton = generateSkeleton(2024, ['LO(R)', 'PVLP(R)'])
+    expect(synapsePosition(skeleton, 7, 'pre')).toEqual(synapsePosition(skeleton, 7, 'pre'))
+  })
+})
+
 describe('MockSource morphology', () => {
   it('fetches skeletons with an attribute row per neuron', async () => {
     const neuronIds = someNeuronIds(3)

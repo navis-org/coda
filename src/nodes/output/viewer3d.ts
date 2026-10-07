@@ -189,6 +189,11 @@ registerNode({
        * category` is one click away for the times it is genuinely a group.
        */
       defaultMode: 'hash',
+      // Wire Split Axon/Dendrite in front to give every arbour labels; CAVE skeleton-service and
+      // SWC skeletons bring their own.
+      allowCompartment: true,
+      // Split Axon/Dendrite's `Write synapse flow` puts `flow` here; the ramp is `by value`'s.
+      allowNodeValue: true,
       /*
        * Named rather than left to "first compatible column", which happens to resolve here and
        * would stop the day a source publishes a different first column.

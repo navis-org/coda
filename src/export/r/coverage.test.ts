@@ -85,6 +85,8 @@ const NO_EMITTER: Record<string, string> = {
     'columns, so a reader has everything they need to draw this in whichever package they have.',
   'out.neuronDendrogram':
     'Neuron Dendrogram \u2014 see the Python note. The natverse has no flat dendrogram of a neuron at all, so there is nothing to emit that would draw the same picture.',
+  'neuron.splitCompartments':
+    'Split Axon/Dendrite \u2014 see `out.topology`\u2019s note: the natverse has no synapse flow centrality split that agrees with navis node for node, and this node is that split.',
   'out.topology':
     'Neuron Topology \u2014 see the Python note. The natverse has the pieces (`nat::strahler_order`, `nat::seglengths`), but the axon/dendrite split is navis\u2019s synapse flow centrality with a branch-point correction and a fragment-stitching pass, and R has no counterpart that agrees with it node for node. Emitting an R split that quietly differs from the card is the failure this entry exists to avoid.',
   'compare.matchTypes':

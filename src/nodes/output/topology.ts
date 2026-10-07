@@ -62,22 +62,21 @@ import {
   synapseUnitProblem,
 } from '../lib/synapseParams'
 import { MAX_NEURONS, neuronIdsFrom } from '../lib/limitParams'
-import { UNIDENTIFIED, groupSynapses } from '../lib/synblastOps'
 import { rowsWithIds } from '../lib/tableOps'
-import type { TopologyRow } from '../lib/topologyOps'
 import {
-  assignSynapses,
-  compartmentStats,
-  flattenForSplit,
   morphometrics,
   parentDistances,
-  polarityColumn,
-  siteAt,
   topologySchema,
   topologyTable,
 } from '../lib/topologyOps'
-import type { SynapseSite } from '../lib/topologyOps'
-import { runSplitCompartments, splitStatusOf } from '../../pyodide/topology'
+import {
+  readSplitSettings,
+  sitesByNeuron,
+  splitParams,
+  splitSkeletons,
+  splitStats,
+  splitWarning,
+} from '../lib/compartmentOps'
 
 /** Whether the split is on, read once — three places ask and they must agree. */
 function splitting(params: Record<string, unknown>): boolean {
@@ -138,67 +137,14 @@ registerNode({
       advanced: true,
     },
     /*
-     * navis's two tuning knobs, and the pair is deliberate: between them they cover both ways a
-     * split comes out wrong. `flowThresh` decides *where* the neuron is cut, `splitVal` decides
-     * *which side is which*. The Compartments tab draws both as sliders, because the honest way
-     * to set either is to move it and look at the arbour.
-     *
-     * Both stay `visibleIf` the split — which is not tidying, it is invariant 4. `normalizeParams`
-     * drops a hidden param from the provenance key, so with the checkbox off these two are out of
-     * the key and tuning the *live* split on the card marks nothing stale. Turn the checkbox on
-     * and they enter the key, because now they decide what `Morphometrics` carries.
+     * The split's three controls, `compartmentOps`' declaration so Split Axon/Dendrite draws the
+     * same ones. All `visibleIf` the split — which is not tidying, it is invariant 4.
+     * `normalizeParams` drops a hidden param from the provenance key, so with the checkbox off they
+     * are out of the key and tuning the *live* split on the card marks nothing stale. Turn the
+     * checkbox on and they enter it, because now they decide what `Morphometrics` carries. Absent
+     * `heal` means off, which is what a graph stored before it existed did.
      */
-    {
-      id: 'flowThresh',
-      kind: 'number',
-      label: 'Linker threshold',
-      help: 'Nodes at or above this fraction of peak synapse flow are linker. navis’s default is 0.9; lower it to mark more as linker.',
-      default: 0.9,
-      min: 0.1,
-      max: 1,
-      step: 0.05,
-      advanced: true,
-      visibleIf: (params) => params['split'] === true,
-    },
-    {
-      /*
-       * navis's `split='prepost:X'`, which its docstring documents and its signature hides — the
-       * argument reads as a plain enum until you notice the colon. Worth exposing because it is
-       * the knob for the failure that looks most like a bug: a neuron whose axon and dendrite
-       * come out swapped, or whose linker-adjacent twigs all land on one side. Lowering it calls
-       * more of the cell axon, raising it calls more of it dendrite.
-       */
-      id: 'splitVal',
-      kind: 'number',
-      label: 'Axon threshold',
-      help: 'A fragment is axon if its output-to-input ratio is at least this. navis’s default is 1; lower favours axon, higher favours dendrite.',
-      default: 1,
-      min: 0.1,
-      max: 3,
-      step: 0.05,
-      advanced: true,
-      visibleIf: (params) => params['split'] === true,
-    },
-    {
-      /*
-       * Opt-in, because a bridge is an edge nobody traced — and it carries synapse flow, so it can
-       * move the linker. A skeleton derived from a segmentation routinely arrives as a forest
-       * (every fish2 body sampled was 13 to 627 pieces), which the split refuses outright; this
-       * joins the pieces first with fastcore's `heal_skeleton`, no distance cap. The joins exist
-       * only inside the split: the skeleton drawn and measured, and the cable in every
-       * per-compartment column, are the traced edges alone.
-       *
-       * `visibleIf` the split for `flowThresh`'s reason — out of the provenance key until it
-       * decides what `Morphometrics` carries. Absent means off, which is what a stored graph did.
-       */
-      id: 'heal',
-      kind: 'boolean',
-      label: 'Heal fragmented skeletons',
-      help: 'Join a skeleton that arrived in pieces before splitting it; a fragmented neuron cannot be split otherwise. The skeleton drawn and measured is unchanged.',
-      default: false,
-      advanced: true,
-      visibleIf: (params) => params['split'] === true,
-    },
+    ...splitParams({ advanced: true, visibleIf: (params) => params['split'] === true }),
     /*
      * Both `advanced`, which is a departure from `neuron.skeletons` and `neuron.synapses` where
      * the same two helpers are the card's only real controls and belong on it. Here the card is a
@@ -681,124 +627,49 @@ registerNode({
     if (!isSkeletonsValue(skeletons)) throw new Error('Skeleton fetch returned no geometry')
 
     /*
-     * One `parentDistances` per neuron, threaded through. `morphometrics`, `assignSynapses` and
-     * `compartmentStats` each default that argument, so left alone the same `Math.hypot` pass
-     * over every node ran three times per neuron — twice of it thrown away, across the whole set.
+     * One `parentDistances` per neuron, threaded through. `morphometrics` and the split (its
+     * assignment and its cable totals) each default that argument, so left alone the same
+     * `Math.hypot` pass over every node ran three times per neuron.
      */
     const distances = skeletons.items.map((item) => parentDistances(item))
-    const rows: TopologyRow[] = skeletons.items.map((item) => ({
-      metrics: morphometrics(item),
-    }))
+    const metrics = skeletons.items.map((item, i) => morphometrics(item, distances[i]))
 
     if (!withSplit) {
       return {
         out: table,
         current: rowsWithIds(table, ctx.params.selection),
-        morphometrics: topologyTable(rows, false),
+        morphometrics: topologyTable(metrics),
       }
     }
 
     /*
-     * The split's three steps, in the order the cost falls: one synapse query for the whole set,
-     * a nearest-node assignment per neuron here, then one crossing of the Python bridge.
+     * One synapse query for the whole set, then `splitSkeletons` — the nearest-node assignment and
+     * one crossing of the Python bridge, shared with every other split surface.
      */
     ctx.progress(0.55, 'synapses')
     const points = await synapsesPending!
 
-    ctx.progress(0.78, 'assigning synapses to nodes')
-    const byNeuron = groupSites(points)
-    const assignments = skeletons.items.map((item, i) =>
-      assignSynapses(item, byNeuron.get(item.id) ?? [], distances[i]),
-    )
-
-    const heal = ctx.params.heal === true
-    const packed = flattenForSplit(skeletons, assignments, heal)
-    // Read before the call: `transferable` detaches every buffer the moment it is posted —
-    // `offsets` included, which is why it is copied out for the scatter below.
-    const neuronCount = skeletons.items.length
-    const offsets = packed.offsets.slice()
-
-    ctx.progress(0.82, 'splitting')
-    const split = await runSplitCompartments(
+    const split = await splitSkeletons(
+      skeletons,
+      sitesByNeuron(points),
+      readSplitSettings(ctx.params),
       {
-        ...packed,
-        flowThresh: Number(ctx.params.flowThresh),
-        splitVal: Number(ctx.params.splitVal),
-        heal,
-      },
-      {
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
-        onProgress: (fraction, note) => ctx.progress(0.82 + fraction * 0.16, note),
+        distances,
+        signal: ctx.signal,
+        onProgress: (fraction, note) => ctx.progress(0.78 + fraction * 0.2, note),
       },
     )
 
-    let unsplit = 0
-    let fragmented = 0
-    const withCompartments: TopologyRow[] = rows.map((row, i) => {
-      const status = splitStatusOf(split.status[i])
-      if (status !== 'ok') unsplit++
-      if (status === 'multiple roots') fragmented++
-      const item = skeletons.items[i]!
-      const from = offsets[i]!
-      const to = offsets[i + 1]!
-      return {
-        metrics: row.metrics,
-        split: compartmentStats(
-          item,
-          split.compartment.subarray(from, to),
-          assignments[i],
-          status,
-          distances[i],
-        ),
-      }
+    const unsplit = splitWarning(split.status, {
+      column: 'the `splitStatus` column',
+      heal: ' on the Compartments tab',
     })
-
-    /*
-     * Said out loud rather than left in a column nobody reads. navis refuses a multi-rooted
-     * neuron outright; reporting it instead is only an improvement if the count reaches the card
-     * — otherwise a run that silently split three of forty neurons looks exactly like one that
-     * split all forty.
-     */
-    if (unsplit > 0 && neuronCount > 0) {
-      ctx.warn(
-        `${unsplit} of ${neuronCount} neurons could not be split. See the \`splitStatus\` column.` +
-          (fragmented > 0
-            ? ` ${fragmented} of them arrived in several pieces. Tick \`Heal fragmented skeletons\` ` +
-              `on the Compartments tab to join them first.`
-            : ''),
-      )
-    }
+    if (unsplit) ctx.warn(unsplit)
 
     return {
       out: table,
       current: rowsWithIds(table, ctx.params.selection),
-      morphometrics: topologyTable(withCompartments, true),
+      morphometrics: topologyTable(metrics, splitStats(skeletons, split)),
     }
   },
 })
-
-/**
- * Synapse sites grouped by the neuron they belong to.
- *
- * The bucketing is `groupSynapses` from `synblastOps.ts` — a cloud is one flat table with the
- * neuron in a column, and "which neuron is this row" is a question that already had one answer,
- * including the `idText` rule invariant 8 asks for. Written again here the two immediately
- * differed on unidentified rows.
- *
- * What is local is only the projection: syNBLAST wants row *indices* into the cloud it scores,
- * this wants `SynapseSite`s for the nearest-node pass. `UNIDENTIFIED` is dropped rather than
- * kept as a bucket, because the id is the join key against a skeleton and there is no skeleton
- * for a row whose neuron could not be read.
- */
-function groupSites(points: PointsValue): Map<string, SynapseSite[]> {
-  const polarity = polarityColumn(points)
-  const out = new Map<string, SynapseSite[]>()
-  for (const group of groupSynapses(points)) {
-    if (group.id === UNIDENTIFIED) continue
-    out.set(
-      group.id,
-      group.rows.map((row) => siteAt(points, row, polarity)),
-    )
-  }
-  return out
-}

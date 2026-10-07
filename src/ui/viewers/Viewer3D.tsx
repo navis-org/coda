@@ -53,6 +53,8 @@ import type { MeshesValue, PointsValue, SkeletonsValue } from '../../core/values
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { writeOverrides } from '../../nodes/lib/encodingParams'
 import { CHART_INK } from '../../style/colors'
+import { compartmentShading } from '../compartmentInk'
+import { nodeValueShading } from '../nodeValueShading'
 import { currentMode } from '../useThemeMode'
 import { plural } from '../../style/format'
 import type { ResolvedColor } from '../../style/encoding'
@@ -75,6 +77,7 @@ import {
   buildPoints,
   buildSkeletonSegments,
   compassLayout,
+  compartmentNote,
   detailNote,
   emphasisSizes,
   framingFor,
@@ -360,15 +363,31 @@ export function Viewer3D(props: Viewer3DProps) {
   const shown = useStable(props.shown)
 
   /*
-   * All three encodings resolve here rather than inside the canvas, because the legend needs
-   * them and the legend is not in the canvas. Colouring meshes used to be resolved down in
+   * Skeletons by compartment or by node value, the two encodings that colour per *node* rather than
+   * per row — so they read the geometry instead of the attribute table, and `resolveColor` never
+   * sees them.
+   */
+  const shading = useMemo(() => {
+    if (skeletonColor.mode === 'compartment') {
+      const resolved = compartmentShading(skeletons, skeletonColor, mode)
+      // Which labels were drawn — see `compartmentNote`.
+      return { resolved, note: compartmentNote(resolved.drawn) }
+    }
+    if (skeletonColor.mode === 'nodeValue') {
+      return { resolved: nodeValueShading(skeletons, skeletonColor, mode), note: undefined }
+    }
+    return undefined
+  }, [skeletons, skeletonColor, mode])
+  /*
+   * All the encodings resolve here rather than inside the canvas, because the legend needs them
+   * and the legend is not in the canvas. Colouring meshes used to be resolved down in
    * `SceneContents`, which is exactly why mesh and point encodings had no key on screen: the
    * strip could not see them.
    */
   const colors: SceneColors = {
     skeletons: useMemo(
-      () => resolveColor(skeletons?.attributes, skeletonColor, mode),
-      [skeletons, skeletonColor, mode],
+      () => shading?.resolved ?? resolveColor(skeletons?.attributes, skeletonColor, mode),
+      [shading, skeletons, skeletonColor, mode],
     ),
     meshes: useMemo(
       () => resolveColor(meshes?.attributes, meshColor, mode),
@@ -596,11 +615,18 @@ export function Viewer3D(props: Viewer3DProps) {
       hidden: new Set(hidden[prefix]),
       ...(onParamChange
         ? {
-            onToggleHidden: (label, solo) =>
-              onParamChange(
-                `${prefix}Hidden`,
-                toggleHiddenLabel(hidden[prefix], labels, label, solo),
-              ),
+            /*
+             * Hiding works on whole rows, so the eye is offered only where a key can say which rows
+             * it stands for. A key that addresses nodes (compartments) has no `labelAt`, and would
+             * otherwise grey itself and hide nothing.
+             */
+            onToggleHidden: resolved.labelAt
+              ? (label, solo) =>
+                  onParamChange(
+                    `${prefix}Hidden`,
+                    toggleHiddenLabel(hidden[prefix], labels, label, solo),
+                  )
+              : undefined,
             onRecolor: (label, hex) =>
               onParamChange(
                 `${prefix}ColorOverrides`,
@@ -701,6 +727,7 @@ export function Viewer3D(props: Viewer3DProps) {
           <PointerGestures>
             <SceneContents
               {...props}
+              skeletonNodeColor={props.skeletonNodeColor ?? colors.skeletons.nodeAt}
               shown={shown}
               colors={colors}
               visible={visible}
@@ -859,6 +886,11 @@ export function Viewer3D(props: Viewer3DProps) {
         {detail && !compact && (
           <span className="viewer__note" title={detail.title}>
             {detail.label}
+          </span>
+        )}
+        {shading?.note && !compact && (
+          <span className="viewer__note" title={shading.note.title}>
+            {shading.note.label}
           </span>
         )}
         {/*

@@ -842,7 +842,7 @@ export class MockSource implements DataSource {
       let index = 0
       const emit = (partnerId: number, weight: number, polarity: 'pre' | 'post') => {
         if (req.polarity && req.polarity !== polarity) return
-        const [x, y, z] = synapsePosition(skeleton, index++)
+        const [x, y, z] = synapsePosition(skeleton, index++, polarity)
         positions.push(x, y, z)
         rows.push({
           neuronId: publishedId(neuronId),
@@ -917,7 +917,11 @@ export class MockSource implements DataSource {
       const drawnOn = req.location === 'post' ? edge.post : edge.pre
       const other = req.location === 'post' ? edge.pre : edge.post
       for (let k = 0; k < edge.weight; k++) {
-        const [x, y, z] = synapsePosition(skeletonOf(drawnOn), (other % 65521) * 64 + k)
+        const [x, y, z] = synapsePosition(
+          skeletonOf(drawnOn),
+          (other % 65521) * 64 + k,
+          req.location,
+        )
         positions.push(x, y, z)
         rows.push({
           [ID_COLUMN_NAME]: publishedId(edge.pre),

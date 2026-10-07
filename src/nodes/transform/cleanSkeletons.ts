@@ -198,6 +198,14 @@ registerNode({
           `the collection so the attribute table lines up, but draw nothing.`,
       )
     }
+    // Said out loud, since `skeletonsFromResult` drops it: an arbour that stops shading is not.
+    const computed = value.items.filter((item) => item.split || item.nodeValues).length
+    if (computed > 0) {
+      ctx.warn(
+        `${computed} of ${value.items.length} neurons carried an axon/dendrite split or per-node ` +
+          `values, which cleaning discards because it renumbers the nodes. Split after cleaning instead.`,
+      )
+    }
     return { out: skeletonsFromResult(value, result) }
   },
 })

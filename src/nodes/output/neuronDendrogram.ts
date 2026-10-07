@@ -538,7 +538,7 @@ registerNode({
       const raw = skeletons.items[0]
       if (!raw) throw new Error(`${source.label} returned no skeleton for neuron ${neuronId}`)
       ctx.progress(0.3, 'arbour')
-      const { skeleton, bridges } = await healSkeleton(skeletons, raw, signal)
+      const { skeleton, bridges } = await healSkeleton(raw, signal)
       const rooted = resolveRoot(
         skeleton,
         rootChoiceOf(String(ctx.params.root), Number(ctx.params.rootNode)),
