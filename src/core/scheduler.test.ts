@@ -1335,3 +1335,184 @@ describe('a run’s progress', () => {
     expect(seen.at(-1)).toEqual({ done: 1, total: 1 })
   })
 })
+
+/**
+ * An evaluation belongs to its key, not to the run that started it — so an edit that leaves the
+ * key alone must not cost the work. A ten-minute NBLAST stopped by somebody dragging a card, or by
+ * a label typed on the Table under it, is what this was written for.
+ */
+describe('an evaluation in flight', () => {
+  /** Calls to the slow node, and the gate each one is waiting on, in call order. */
+  const calls: Array<{ release: () => void; signal: AbortSignal }> = []
+  const tails: string[] = []
+
+  registerNode({
+    type: 'test.inflight.slow',
+    label: 'slow',
+    category: 'utility',
+    cost: 'expensive',
+    inputs: [],
+    outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+    params: [{ id: 'k', label: 'K', kind: 'number', default: 1 }],
+    inferOutputs: () => ({ out: T.table() }),
+    evaluate: (ctx) =>
+      new Promise((resolve, reject) => {
+        const release = () =>
+          resolve({
+            out: tableFromRows(tableSchema(column('k', 'f64')), [{ k: Number(ctx.params.k) }]),
+          })
+        ctx.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+          once: true,
+        })
+        calls.push({ release, signal: ctx.signal! })
+      }),
+  })
+  for (const cost of ['cheap', 'expensive'] as const) {
+    registerNode({
+      type: `test.inflight.tail.${cost}`,
+      label: `tail ${cost}`,
+      category: 'utility',
+      cost,
+      inputs: [{ id: 'in', label: 'In', type: T.table() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      params: [{ id: 'label', label: 'Label', kind: 'string', default: '' }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: (ctx) => {
+        tails.push(`${cost}:${String(ctx.params.label)}`)
+        return { out: ctx.input('in')! }
+      },
+    })
+  }
+  // The node wired to nothing, whose label is the unrelated edit.
+  registerNode({
+    type: 'test.inflight.lone',
+    label: 'lone',
+    category: 'utility',
+    cost: 'cheap',
+    inputs: [],
+    outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+    params: [{ id: 'label', label: 'Label', kind: 'string', default: '' }],
+    inferOutputs: () => ({ out: T.table() }),
+    evaluate: () => ({ out: tableFromRows(tableSchema(column('x', 'i64')), [{ x: 1 }]) }),
+  })
+
+  beforeEach(() => {
+    calls.length = 0
+    tails.length = 0
+  })
+
+  /** Let every pending microtask and timer-free await settle. */
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+
+  /** A full run over slow -> tail (plus a node wired to nothing), with `slow` mid-flight. */
+  async function started(tail: 'cheap' | 'expensive' = 'cheap') {
+    let g = emptyGraph('inflight')
+    g = addNode(g, node('slow', 'test.inflight.slow', {}))
+    g = addNode(g, node('tail', `test.inflight.tail.${tail}`, {}))
+    g = addNode(g, node('alone', 'test.inflight.lone', {}))
+    g = addEdge(g, { source: 'slow', sourceHandle: 'out', target: 'tail', targetHandle: 'in' })
+    const scheduler = makeScheduler()
+    const first = scheduler.run(g, { mode: 'full' })
+    await tick()
+    return { scheduler, g, first }
+  }
+
+  it('keeps its running badge when a card is dragged', async () => {
+    const { scheduler, g, first } = await started()
+    scheduler.refreshStates({
+      ...g,
+      nodes: g.nodes.map((n) =>
+        n.id === 'alone' ? { ...n, position: { x: 500, y: 500 } } : n,
+      ),
+    })
+    expect(scheduler.info('slow').state).toBe('running')
+    // Downstream of work that is coming is waiting for it, not blocked by it.
+    expect(scheduler.info('tail').state).toBe('stale')
+
+    calls[0]!.release()
+    expect((await first).cancelled).toBe(false)
+    expect(scheduler.info('tail').state).toBe('ok')
+  })
+
+  it('survives a run started by an edit downstream of it, and is not started twice', async () => {
+    const { scheduler, g, first } = await started()
+    const edited = setNodeParam(g, 'tail', 'label', 'renamed')
+    scheduler.refreshStates(edited)
+    const second = scheduler.run(edited, { mode: 'full' })
+    await tick()
+    expect(calls[0]!.signal.aborted).toBe(false)
+
+    calls[0]!.release()
+    expect((await first).cancelled).toBe(true)
+    await second
+    expect(calls).toHaveLength(1)
+    expect(tails).toContain('cheap:renamed')
+  })
+
+  it('is stopped by an edit to its own params, at the edit', async () => {
+    const { scheduler, g, first } = await started()
+    scheduler.refreshStates(setNodeParam(g, 'slow', 'k', 2))
+    expect(calls[0]!.signal.aborted).toBe(true)
+    expect(scheduler.info('slow').state).toBe('stale')
+
+    const summary = await first
+    // Retired rather than cancelled: the walk went on with whatever else it had.
+    expect(summary.cancelled).toBe(false)
+    expect(scheduler.outputs('slow')).toBeUndefined()
+    expect(scheduler.owesFullRun).toBe(false)
+  })
+
+  it('is started afresh after an undo, never adopted once stopped', async () => {
+    const { scheduler, g, first } = await started()
+    scheduler.refreshStates(setNodeParam(g, 'slow', 'k', 2))
+    // The undo brings the first key back while the stopped evaluation is still registered.
+    scheduler.refreshStates(g)
+    const again = scheduler.run(g, { mode: 'full' })
+    await tick()
+    await first
+    expect(calls).toHaveLength(2)
+    calls[1]!.release()
+    await again
+    expect(scheduler.info('slow').state).toBe('ok')
+  })
+
+  it('finishes the Run it was part of when a cheap pass takes over', async () => {
+    const { scheduler, g, first } = await started('expensive')
+    // Auto-run off: an edit elsewhere schedules a cheap pass, which used to defer `tail`.
+    const edited = setNodeParam(g, 'alone', 'label', 'x')
+    scheduler.refreshStates(edited)
+    const second = scheduler.run(edited, { mode: 'auto' })
+    await tick()
+    expect(scheduler.owesFullRun).toBe(true)
+    calls[0]!.release()
+    await first
+    const summary = await second
+
+    expect(calls).toHaveLength(1)
+    expect(summary.deferred).not.toContain('tail')
+    expect(scheduler.info('tail').state).toBe('ok')
+    expect(scheduler.owesFullRun).toBe(false)
+  })
+
+  it('does not restart a full run’s retired node from a cheap pass', async () => {
+    const { scheduler, g, first } = await started('expensive')
+    const edited = setNodeParam(g, 'slow', 'k', 2)
+    scheduler.refreshStates(edited)
+    const second = scheduler.run(edited, { mode: 'auto' })
+    await first
+    const summary = await second
+    expect(calls).toHaveLength(1)
+    expect(summary.deferred).toContain('slow')
+  })
+
+  it('is stopped by Cancel, which leaves nothing busy or owed', async () => {
+    const { scheduler, first } = await started()
+    expect(scheduler.busy).toBe(true)
+    scheduler.cancel()
+    expect((await first).cancelled).toBe(true)
+    expect(calls[0]!.signal.aborted).toBe(true)
+    expect(scheduler.info('slow').state).toBe('stale')
+    expect(scheduler.busy).toBe(false)
+    expect(scheduler.owesFullRun).toBe(false)
+  })
+})

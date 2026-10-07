@@ -228,15 +228,17 @@ opt-out for a graph where even that is too much.
 
 **One timer, not two.** With auto-run on, `afterGraphChange` schedules _only_ the full pass, at
 `AUTO_FULL_RUN_DELAY_MS` (700ms, against 180ms for the cheap pass). Scheduling the cheap pass as
-well would have it supersede an in-flight full run — `scheduler.run` aborts whatever is running —
-so a slow query would be cancelled and restarted by the very keystroke meant to refine it. The
-cost is that cheap edits also wait 700ms while auto-run is on; the alternative is thrashing.
+well would supersede the full run twice per edit for nothing. The cost is that cheap edits also
+wait 700ms while auto-run is on.
 
 **`runFull` carries a token, and that is load-bearing.** `scheduler.run` supersedes an in-flight
-run by aborting it, so the superseded call's `finally` lands _after_ the newer one has set
+run by aborting its walk, so the superseded call's `finally` lands _after_ the newer one has set
 `busy: true`. Clearing `busy` there leaves the UI idle-looking — no Cancel button, an enabled Run
 — with a run still going. Only the newest token writes `busy` or `lastRun`. This also fixes the
-same latent race in a fast double-click on Run, which predates auto-run.
+same latent race in a fast double-click on Run, which predates auto-run. **A cheap pass that
+arrives while something is running goes through `runFull` too** (`mode: 'auto'`), because it
+finishes the Run's unfinished work (below) and therefore its `busy` and its `lastRun` — without
+the second, a Download the Run had not yet reached would finish and never write its file.
 
 Switching it on runs immediately rather than waiting for the next edit: a stale graph that stays
 stale until you touch something reads as the setting not working.
@@ -246,6 +248,66 @@ ordinary pass re-runs it either way. Only an expensive node's param distinguishe
 And a Find Neurons whose filters match nothing — or which has none, since that now returns no
 neurons — makes Connectivity error ("No neuronIds…") and blocks everything downstream, so a test
 that waits for zero stale nodes will hang on it.
+
+## A new run supersedes the walk, not the work
+
+Every run used to own one `AbortController` and hand its signal to every `evaluate`, so anything
+that started a run stopped whatever was mid-flight. In practice that was an NBLAST ten minutes in,
+cancelled by a label typed on the Table under it (auto-run off: the edit schedules a cheap pass,
+which superseded the Run) or by any edit on an unrelated branch. Dragging a card did not abort
+anything — positions are not in any key and a move passes `autoRun: false` — but `refreshStates`
+rewrote the running node's badge to `stale` because its cache entry was not fresh, which looked
+exactly like a stopped run and invited pressing Run again.
+
+**An evaluation belongs to its provenance key, not to the run that started it.** That is invariant
+4 read the other way round: the key is the whole of what the work answers, so the work is worth
+having for exactly as long as the graph still asks for that key. Each top-level evaluation is an
+`Evaluation` with its own controller, registered by node, writing its own cache entry whoever is
+waiting for it. Three rules:
+
+- **A newer walk reaching the node adopts it** — awaits the same promise — rather than starting it
+  again. The adoption sits ahead of the cost deferral, so a cheap pass waits on an expensive node
+  already in flight instead of stopping above it.
+- **An edit that moves the key retires it, at the edit.** `retireMoved` runs in `refreshStates`
+  (every edit's hook) and at the top of every run, and also retires an evaluation whose node was
+  deleted, muted or became invalid. The walk that held it records `skipped` and carries on with
+  every other branch; its descendants are blocked as for any node not yet reached. A retired
+  evaluation stays registered until it unwinds and is **never adopted**, since an undo straight
+  after brings the same key back to work that is going to answer nothing.
+- **Cancel stops everything**: the walk and every evaluation.
+
+**A full run's request outlives its walk** (`requestedFull`, a per-node set on the Scheduler in
+`forceRefresh`'s pattern): a full run adds its scope, every walk takes the set into its scope and
+runs its expensive members even when that walk is `auto`, and a node leaves the set when a walk
+settles it, when it is retired, when it is deleted, or on Cancel. Without it, a cheap pass adopting the NBLAST would
+stop at the expensive node below it and the rest of the Run would go back to `stale`. The intent
+was first handed from one run to the next as a `Carry` diffed out of the old pass at every
+supersede; that took four `RunPass` fields kept in sync at every place a walk records a node, and
+was replaced by the set. A retired node leaves the set because the edit that retired it is what the
+newer run is for, and restarting a long evaluation on an accidental keystroke with auto-run off is
+the cost this was written to remove. A consequence worth knowing: every evaluation in flight is in
+the scope of whichever walk is current, so a walk never finishes while work it would adopt is still
+running, and `busy` stays a fact about walks.
+
+The superseded walk still has to **unwind immediately**, so the newer run can start and adopt:
+`adopt` waits through `untilAborted`, the shared-request helper, against the walk's own signal.
+A retired evaluation is told from a cancelled one by its **abort reason** (`RETIRED`), not by a
+flag beside the abort.
+
+**An evaluation must not hold the pass that started it**, since it outlives that walk and the pass
+is the walk's whole graph, inference and key map. Three places, each of which held it once:
+`Evaluation` carries a three-field `Walk` record (`steps`, `generation`, `controller`) rather than
+the `RunPass`; no `makeEvalContext` closure names the pass, V8 giving every closure in one scope the
+same context; and `evaluate` is **two halves**, a synchronous one that reads the pass and an async
+`finish` that is never handed it. The last was first written as "read everything before the await",
+which frees nothing — a suspended async frame keeps its parameters whether or not they are read
+again (measured under Node 26 with a `WeakRef`: retained when read before the await, freed when
+split).
+
+**Loops are deliberately left out.** A `For Each` re-keys its region on every pass, so a region
+node's evaluation takes the run's signal as before, and a newer run still stops a loop. Making a
+running loop survive an edit outside its region is the obvious next step and was put off, not
+refused.
 
 ## Variadic ports — a port set sized by a param
 

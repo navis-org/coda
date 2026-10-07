@@ -1550,9 +1550,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     if (options.autoRun !== false) {
       if (autoRunTimer) clearTimeout(autoRunTimer)
       /*
-       * One timer, not two. Scheduling the cheap pass *as well* would have it supersede an
-       * in-flight full run — `scheduler.run` aborts whatever is running — so a slow query would
-       * be cancelled and restarted by the very keystroke that was meant to refine it.
+       * One timer, not two. Scheduling the cheap pass *as well* would supersede the full run
+       * twice per edit for nothing.
        */
       const full = get().autoRun
       autoRunTimer = setTimeout(
@@ -1561,8 +1560,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
            * `automatic`, so a `For Each` still defers. Auto-run means "re-run the full pass for
            * me", which is right for an ordinary expensive node and wrong for a loop: four
            * hundred queries and four hundred files, 700ms after a keystroke. See `RunOptions`.
+           *
+           * A cheap pass arriving during a Run finishes that Run's work as well as its own (the
+           * scheduler's `requestedFull`), so it has to own what the Run owned: `busy`, or the
+           * Cancel button vanishes over a ten-minute NBLAST, and `lastRun`, or a Download the
+           * Run was about to reach never writes its file.
            */
           if (get().autoRun) void runFull(undefined, { automatic: true })
+          else if (sched().owesFullRun) void runFull(undefined, { mode: 'auto' })
           else void sched().run(get().graph, { mode: 'auto' })
         },
         full ? AUTO_FULL_RUN_DELAY_MS : AUTO_RUN_DELAY_MS,
@@ -1583,14 +1588,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
    */
   async function runFull(
     targets?: string[],
-    options: { automatic?: boolean } = {},
+    options: { automatic?: boolean; mode?: 'auto' | 'full' } = {},
   ): Promise<RunSummary> {
     if (autoRunTimer) clearTimeout(autoRunTimer)
     const token = ++runToken
     set({ busy: true })
     try {
       const summary = await sched().run(get().graph, {
-        mode: 'full',
+        mode: options.mode ?? 'full',
         ...(targets ? { targets } : {}),
         ...(options.automatic ? { automatic: true } : {}),
       })

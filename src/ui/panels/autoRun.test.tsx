@@ -194,7 +194,7 @@ describe('when on', () => {
 describe('overlapping runs', () => {
   it('does not leave busy stuck on after a superseded run', async () => {
     /*
-     * `scheduler.run` supersedes an in-flight run by aborting it, so the superseded call's
+     * `scheduler.run` supersedes an in-flight run by aborting its walk, so the superseded call's
      * cleanup lands *after* the newer one has already claimed `busy`. Clearing it there would
      * leave the UI idle-looking — no Cancel button, an enabled Run — with a run still going.
      */
@@ -212,5 +212,46 @@ describe('overlapping runs', () => {
     await Promise.all([first, second])
     expect(useGraphStore.getState().busy).toBe(false)
     expect(useGraphStore.getState().lastRun).toBeDefined()
+  })
+})
+
+describe('an edit during a Run', () => {
+  /**
+   * Auto-run off, so the edit schedules a cheap pass, and a cheap pass used to supersede the Run:
+   * Connectivity's query was abandoned mid-flight and everything the Run had not reached went
+   * back to stale. The pass now adopts the query and finishes the Run — and has to own `busy`
+   * while it does, or Cancel disappears over a query still going.
+   */
+  it('neither restarts the query nor drops the Cancel button', async () => {
+    render(<App />)
+    const source = getSource('mock')!
+    const original = source.fetchConnectivity.bind(source)
+    // Held until released, so the query is still out whatever the machine's speed.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const queries = vi
+      .spyOn(source, 'fetchConnectivity')
+      .mockImplementation(async (...args: Parameters<typeof original>) => {
+        await gate
+        return original(...args)
+      })
+
+    const store = useGraphStore.getState()
+    const run = store.runAll()
+    await waitFor(() => expect(queries).toHaveBeenCalledTimes(1))
+
+    const sort = store.graph.nodes.find((n) => n.type === 'core.sort')!
+    act(() => store.setParam(sort.id, 'descending', false))
+    // Past the cheap pass's 180ms debounce, with the query still out.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(useGraphStore.getState().busy).toBe(true)
+
+    release()
+    await run
+    await waitFor(() => expect(useGraphStore.getState().busy).toBe(false), { timeout: 4000 })
+    expect(queries).toHaveBeenCalledTimes(1)
+    expect(staleCount()).toBe(0)
+    expect(useGraphStore.getState().lastRun?.executed).toContain('conn')
+    queries.mockRestore()
   })
 })

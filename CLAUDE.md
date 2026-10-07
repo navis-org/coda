@@ -1207,6 +1207,12 @@ rule belongs to one area, its record is in that area's doc.
 
 ### The scheduler and loops — [docs/core.md](docs/core.md), [docs/loops.md](docs/loops.md)
 
+- **A new run supersedes the walk, never the work.** A top-level evaluation is owned by its
+  provenance key: a newer walk **adopts** it, an edit that moves the key **retires** it at the edit
+  (`retireMoved`), and only Cancel stops everything. `refreshStates` must leave a live evaluation's
+  `running` badge alone — overwriting it is what made a drag look like it had stopped an NBLAST.
+  A cheap pass during a Run finishes the Run's work (`requestedFull`), so it goes through
+  `runFull`. Loops are excluded on purpose.
 - **A `reference` port that resolved to nothing is refused by the scheduler, and the two states it
   tells apart are invisible to the node.** `datasetIdentity` hands `evaluate` the same `undefined`
   for "nothing wired" and "a wire whose dataset node cannot yet say which dataset it is", so a
