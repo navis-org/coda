@@ -112,6 +112,32 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: '2026-10-07',
+    title: 'A neuron, drawn flat',
+    summary:
+      'The new Neuron Dendrogram node lays one neuron out flat with its synapses on it. Click a branch to list the inputs and outputs beyond it, at geodesic or electrotonic distance.',
+    highlight: true,
+    features: [
+      {
+        kind: 'chart',
+        date: '2026-10-07',
+        title: 'Neuron Dendrogram',
+        body:
+          '**Neuron Dendrogram** draws one neuron’s arbour flat, with every synapse marked as a tick on its branch: inputs on one side, outputs on the other. Wire in a dataset and a table of neurons, and page through them on the card. It fetches each neuron’s skeleton and synapses itself, so nothing needs to run to see the drawing.\n\n' +
+          'Four layouts, after navis’s `plot_flat`: a dendrogram with distance from the root along one axis, a radial version of it, navis’s subway layout, and an unrooted layout that keeps every branch at its true length. **Distance** switches between cable length and electrotonic distance, computed from the skeleton’s radii; where a dataset has no radii, the card says so and stays on cable length. **Colour branches by** shades the arbour by Strahler order, synapse flow centrality or distance to the root.\n\n' +
+          'Click anywhere on the arbour and the **Distal** tab lists the inputs and outputs beyond that point by partner type, with the nearest, median and farthest distance for each. The **Partners** tab lights the synapses of the partners you pick, and **Run** puts the synapses beyond the clicked point on the node’s **Points** output, ready for a 3D View.',
+        demo: 'out.neuronDendrogram',
+        // A real neuron, hemibrain's DA1_lPN, on the Unrooted layout and taken by hand with a
+        // neuPrint token: no `capture`, because `pnpm changelog:shots` runs demos on the synthetic
+        // dataset, whose neurons are a couple of dozen branches with one synapse per connection.
+        image: {
+          file: 'neuron-dendrogram.webp',
+          alt: 'Hemibrain neuron DA1_lPN drawn flat on the Unrooted layout: its antennal-lobe dendrite dense with inputs, a long axon, and its outputs in the lateral horn and calyx, beside the card’s list of input partners led by ORN_DA1.',
+        },
+      },
+    ],
+  },
+  {
     date: '2026-10-04',
     title: 'A cell typing pack, and a scatter plot to explore embeddings',
     summary:
