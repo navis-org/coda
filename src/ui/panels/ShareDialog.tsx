@@ -27,7 +27,7 @@ import { errorMessage } from '../../core/errors'
 import { useGraphStore } from '../../store/graphStore'
 import { LONG_LINK_CHARS, shareAdvisories } from '../shareAdvisories'
 import { copyText, slugify } from '../export'
-import { formatNumber } from '../format'
+import { formatNumber } from '../../style/format'
 import { UNLISTED_GIST, WhereTheTokenGoes } from '../githubGistNotes'
 import { Modal, ModalHeader } from '../Modal'
 
@@ -240,14 +240,15 @@ function Dialog({ onClose }: { onClose: () => void }) {
       <div className="sources__body share__body" role="tabpanel">
         {mode === 'link' ? (
           <p className="sources__note">
-            The workflow travels inside the address — no account, no server, nothing to keep
-            alive. Anyone who opens it gets your graph exactly as it is on the canvas.
+            The whole workflow is packed into the link itself, so there is no account, no server
+            and nothing to keep online. Anyone who opens it gets your graph exactly as it is on
+            the canvas.
           </p>
         ) : (
           <p className="sources__note">
-            The workflow is stored in a gist on your GitHub account and the link points at it.
-            Forty characters however large the graph, and you can update it later. Reading one
-            needs no token, so the link works for anybody.
+            The workflow is saved as a gist on your GitHub account, and the link points to it.
+            The link is about forty characters however large the graph is, and you can update
+            the gist later. Opening it needs no token, so the link works for anyone.
           </p>
         )}
 
@@ -291,14 +292,16 @@ function Dialog({ onClose }: { onClose: () => void }) {
         {mode === 'link' && linkUrl ? (
           <p className="share__size">
             {formatNumber(linkUrl.length)} characters
-            {linkUrl.length > LONG_LINK_CHARS ? ' — longer than most clients carry' : ''}
+            {linkUrl.length > LONG_LINK_CHARS
+              ? ' (longer than most mail and chat clients handle)'
+              : ''}
           </p>
         ) : null}
 
         {gist.state === 'done' ? (
           <p className="sources__result" data-tone="ok">
-            {gist.updated ? 'Gist updated.' : 'Gist created.'} Pressing Share again updates this
-            same gist, so the link you have already sent stays current.
+            {gist.updated ? 'Gist updated.' : 'Gist created.'} Sharing this workflow again
+            updates the same gist, so a link you have already sent shows the latest version.
           </p>
         ) : null}
         {gist.state === 'error' ? (
@@ -309,9 +312,9 @@ function Dialog({ onClose }: { onClose: () => void }) {
 
         {local ? (
           <p className="share__advisory">
-            This link points at <code>{window.location.host || 'this machine'}</code>, so it
-            only opens where Coda is running now. Share from the deployed site to send it
-            anywhere else.
+            This link points to <code>{window.location.host || 'this machine'}</code>, so it
+            only opens where Coda is running now. To send it anywhere else, share from the
+            deployed site.
           </p>
         ) : null}
 

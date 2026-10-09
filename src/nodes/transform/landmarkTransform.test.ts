@@ -71,7 +71,7 @@ describe('core.landmarkTransform — the six pickers', () => {
      * the browser peek settles. See the node's header.
      */
     const issues = inferGraph(pipeline()).nodes['lm']?.issues ?? []
-    expect(issues.map((i) => i.message).join(' ')).toMatch(/must be different|Pick all six/)
+    expect(issues.map((i) => i.message).join(' ')).toMatch(/must all be different|Pick all six/)
   })
 
   it('keeps an explicit choice even where the schema cannot be seen', () => {
@@ -124,7 +124,7 @@ describe('reading landmarks off a table', () => {
     const holed = makeTable(table.schema, { ...table.data, y: [0, null, 2, 3] })
     expect(() => landmarkTriple(holed, ['x', 'y', 'z'], 1)).toThrow(/Row 2 of "y"/)
     expect(() => landmarkTriple(holed, ['x', 'y', 'z'], 1)).toThrow(
-      /interpolates its landmarks/,
+      /passes exactly through its landmarks/,
     )
   })
 

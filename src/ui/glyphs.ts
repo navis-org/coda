@@ -276,6 +276,27 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['rect', { x: '4.4', y: '12.6', width: '15.2', height: '6.9', rx: '1.4' }],
     ['path', { d: 'M4.4 15.7h15.2' }],
   ],
+  /*
+   * A table under a chain link: `core.tableFromUrl`'s table with a link where its globe is, since
+   * what the node holds is a reference to a file rather than its rows. The link is scaled into the
+   * top half with its stroke put back (`GLYPH_STROKE_WIDTH / 0.55`), `core.uploadMesh`'s rule.
+   */
+  'core.linkTable': [
+    ['g', { transform: 'translate(5.4 -.5) scale(0.55)', strokeWidth: '2.91' }, [
+      ['path', { d: 'M9 17H7A5 5 0 0 1 7 7h2' }],
+      ['path', { d: 'M15 7h2a5 5 0 1 1 0 10h-2' }],
+      ['path', { d: 'M8 12h8' }],
+    ]],
+    ['rect', { x: '4.4', y: '12.6', width: '15.2', height: '6.9', rx: '1.4' }],
+    ['path', { d: 'M4.4 15.7h15.2' }],
+  ],
+  // A table with one of its rows drawn out past its edge: the rows a lookup keeps, as a table.
+  'core.readRows': [
+    ['rect', { x: '3.5', y: '4.5', width: '11', height: '15', rx: '1.5' }],
+    ['path', { d: 'M3.5 8.5h11' }],
+    ['path', { d: 'M5.8 15.5h6.4' }],
+    ['path', { d: 'M5.8 12h14.4M18.1 9.9l2.1 2.1-2.1 2.1' }],
+  ],
   'cave.updateRootIds': [
     ['rect', { x: '3.5', y: '5', width: '11', height: '14', rx: '1.5' }],
     ['path', { d: 'M3.5 9h11' }],
@@ -576,6 +597,13 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M8.9 15.7 12 12.3M12 12.3l3.1-3.4M12 12.3l1 3.7M15.1 8.9l2.5-1.3M15.1 8.9l-.4-2.5M13 16l2.7 1.2' }],
     ['path', { d: 'M4.9 9.6 3.1 12l1.8 2.4M19.1 9.6l1.8 2.4-1.8 2.4' }],
   ],
+  // The arbour laid flat: a soma disc, a dendrogram's elbows, and ticks across two branches for
+  // the synapses on them — the card's own drawing, small.
+  'out.neuronDendrogram': [
+    ['circle', { cx: '4.5', cy: '12', r: '1.5' }],
+    ['path', { d: 'M6 12h3.5M9.5 6.5v11M9.5 6.5h10M9.5 17.5h5M14.5 17.5v-3h5M14.5 17.5v2.5h4.5' }],
+    ['path', { d: 'M13.5 5v3M16.5 5v3M17.5 13v3' }],
+  ],
 
   // --- The node-link graph ---------------------------------------------------------------
   // Circles and wires. Weight says role: a larger or filled disc is the node the question is
@@ -766,6 +794,17 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '10.4', cy: '10.6', r: '1.3', fill: 'currentColor', stroke: 'none' }],
     ['circle', { cx: '14.6', cy: '13.4', r: '1.3', fill: 'currentColor', stroke: 'none' }],
     ['circle', { cx: '20.4', cy: '6.4', r: '1.3' }],
+  ],
+  /*
+   * Clean Skeletons' arbour cut in two at the trunk: one side solid and the other faint, with a gap
+   * where the linker is. Opacity rather than a dash, the dashed outline being "a user's selection";
+   * colour is not a channel here, which is exactly why the 3D View's compartment ink is not drawn.
+   */
+  'neuron.splitCompartments': [
+    ['path', { d: 'M12 20.4v-4.6' }],
+    ['path', { d: 'M12 13.2 6.4 6.4M9.2 9.8 8.6 6.6' }],
+    ['path', { d: 'M12 13.2l5.6-6.8M14.8 9.8l.6-3.2', strokeOpacity: '.4' }],
+    ['path', { d: 'M10.2 14.5h3.6' }],
   ],
   /*
    * Clean Skeletons' arbour, drawn as the discs it becomes: the same branching stroke faint

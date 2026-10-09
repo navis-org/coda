@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  hyparquet@1.29.1:
+    hash: b8cb91bde03cf3d9ab63f2d1f0af57c5299b54b8ba599c497b3cae5fe456f10c
+    path: patches/hyparquet@1.29.1.patch
+
 importers:
 
   .:
@@ -32,6 +37,9 @@ importers:
       elkjs:
         specifier: ^0.12.0
         version: 0.12.0
+      fzstd:
+        specifier: 0.1.1
+        version: 0.1.1
       graphology:
         specifier: ^0.26.0
         version: 0.26.0(graphology-types@0.24.8)
@@ -45,8 +53,11 @@ importers:
         specifier: ^0.10.1
         version: 0.10.1(graphology-types@0.24.8)
       hyparquet:
-        specifier: ^1.29.1
-        version: 1.29.1
+        specifier: 1.29.1
+        version: 1.29.1(patch_hash=b8cb91bde03cf3d9ab63f2d1f0af57c5299b54b8ba599c497b3cae5fe456f10c)
+      hysnappy:
+        specifier: 1.1.1
+        version: 1.1.1
       lz4js:
         specifier: ^0.2.0
         version: 0.2.0
@@ -1391,6 +1402,9 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  fzstd@0.1.1:
+    resolution: {integrity: sha512-dkuVSOKKwh3eas5VkJy1AW1vFpet8TA/fGmVA5krThl8YcOVE/8ZIoEA1+U1vEn5ckxxhLirSdY837azmbaNHA==}
+
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
@@ -1468,6 +1482,9 @@ packages:
 
   hyparquet@1.29.1:
     resolution: {integrity: sha512-Wa57A2KxGFtRTeDTJp4pT0TaqN8btb7/XTrMs17iM+xJxsbBxRyzaGaRRPQ4lOPbmso/qohDafJD7b+cFMZq8A==}
+
+  hysnappy@1.1.1:
+    resolution: {integrity: sha512-/V9XcN2NtRyWjR4LYMfvnvasVVF8jbT/ej0eofBQjZel91E3D813FQ3mQC6gDSMMTCq/FJh28XHeyqr3I/oBRw==}
 
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
@@ -3425,6 +3442,8 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
+  fzstd@0.1.1: {}
+
   gensync@1.0.0-beta.2: {}
 
   glob-parent@5.1.2:
@@ -3499,7 +3518,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  hyparquet@1.29.1: {}
+  hyparquet@1.29.1(patch_hash=b8cb91bde03cf3d9ab63f2d1f0af57c5299b54b8ba599c497b3cae5fe456f10c): {}
+
+  hysnappy@1.1.1: {}
 
   iconv-lite@0.6.3:
     dependencies:

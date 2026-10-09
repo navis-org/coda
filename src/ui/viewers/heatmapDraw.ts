@@ -30,7 +30,7 @@
 
 import { axisMarks, circleScale, clipZones, drawnCellSize, valueMarks } from './heatmapPlot'
 import type { HeatmapSpec, TextMark } from './heatmapPlot'
-import { parseHex } from '../colors'
+import { parseHex } from '../../style/colors'
 import type { PlotInk } from './scatterDraw'
 import { SVG_NS, element, round, svgRoot, textNode } from './svgElement'
 

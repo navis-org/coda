@@ -12,9 +12,12 @@ registerNode({
   type: 'core.normalize',
   label: 'Normalize',
   category: 'analysis',
-  description: 'Rescale matrix values by row, column, global max, or log.',
+  description:
+    'Rescale a matrix by its row or column totals, by its global maximum, or on a log scale.',
   guide:
-    'Rescale a matrix by row, by column, against the global maximum, or logarithmically. Raw synapse counts are dominated by whichever cell type happens to be numerous, so row fraction is usually what turns an unreadable connectivity matrix into a picture — each row then reads as “where does this type send its output”, which is the question being asked.',
+    'Rescales a matrix: as fractions of each row or column total, as a fraction of the global ' +
+    'maximum, or on a log scale. Usually sits between a Pivot of connectivity and a Heatmap or ' +
+    'Linkage; row fractions stop numerous cell types from dominating the picture.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Matrix', type: T.matrix() }],
   outputs: [{ id: 'out', label: 'Matrix', type: T.matrix() }],

@@ -59,9 +59,12 @@ export const neuronsNode = packNode({
   category: 'query',
   cardWidth: 300,
   description:
-    'The fish2 neurons matched to ZapBench cells — from a Heatmap selection or a list.',
+    'The fish2 neurons matched to a set of ZapBench cells, taken from a Heatmap selection ' +
+    'or a list of cell ids.',
   guide:
-    'Looks up the fish2 neurons whose zapbenchId matches a set of ZapBench cells, for Skeletons or Meshes. Wire a Heatmap’s Selected Rows into Cells — a downsampled row’s label is read as every cell it averages — or type cell ids. About one cell in eight has no EM neuron; those are counted, not errors. Wire it to a fish2 Dataset.',
+    'Looks up the fish2 neurons matching a set of ZapBench cells, e.g. for Skeletons or Meshes. ' +
+    'Wire a Heatmap’s Selected Rows into Cells or type cell ids, and wire a fish2 Dataset. ' +
+    'Cells without an EM neuron (about one in eight) are counted in a warning.',
   cost: 'expensive',
 
   inputs: [
@@ -127,8 +130,8 @@ export const neuronsNode = packNode({
     if (outside.length > 0) throw new Error(cellsOutsideRelease(outside))
     if (unparsed > 0 && ids.length === 0) {
       throw new Error(
-        `"${columnName}" holds no ZapBench cell ids. Pick the column that does — a ` +
-          `ZapBench Traces selection label, or a zapbenchId.`,
+        `"${columnName}" holds no ZapBench cell ids. Set \`Cell column\` to a column that ` +
+          `does, such as the label column of a ZapBench Traces selection or a zapbenchId column.`,
       )
     }
 
@@ -164,8 +167,8 @@ export const neuronsNode = packNode({
     const found = concatBatches(tables)
     if (!findColumn(found.schema, ZAPBENCH_ID_COLUMN)) {
       throw new Error(
-        `${dataset.datasetId} publishes no ${ZAPBENCH_ID_COLUMN}, so none of its neurons can ` +
-          `be matched to a ZapBench cell. ZapBench is matched to fish2.`,
+        `${dataset.datasetId} has no ${ZAPBENCH_ID_COLUMN} column, so none of its neurons can ` +
+          `be matched to a ZapBench cell. ZapBench cells are matched to fish2 neurons.`,
       )
     }
 

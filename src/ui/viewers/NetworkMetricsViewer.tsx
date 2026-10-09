@@ -30,7 +30,7 @@
  *
  * **The controls are on the tiles they change.** `CompletenessTile`'s arrangement, for its
  * reason: a control that changes what a plot *says* belongs where the plot is, not in a band
- * above the card where the plot is out of sight. Which is why all five params are `advanced` —
+ * above the card where the plot is out of sight. Which is why the plot params are all `advanced` —
  * they are inspector-only precisely so that the card is the only place they appear twice.
  *
  * **The card reads the node's *input*, not its output.** Both carry the same topology, but
@@ -55,27 +55,40 @@
  * house rule is that a cap is stated (docs/limits.md).
  */
 
+import type { ReactNode } from 'react'
 import { useMemo } from 'react'
 
-import { CHART_INK, currentMode, seriesColor } from '../colors'
+import type { Mode } from '../../style/colors'
+import { CHART_INK, seriesColor } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
+import { resolveColor, resolveShape, resolveSize } from '../../style/encoding'
 import { tableToCsvParts } from '../export'
-import { formatCompact, formatNumber, formatShare } from '../format'
-import type { CellValue, NetworkValue, TableValue } from '../../core/values'
-import { column, isNumericDType, tableSchema } from '../../core/types'
+import { formatCompact, formatNumber, formatShare, labelStep, plural } from '../../style/format'
+import type { CellValue, ColumnData, NetworkValue, TableValue } from '../../core/values'
+import type { ColumnSchema, DType } from '../../core/types'
+import { NUMERIC_DTYPES, column, columnsOfType, tableSchema } from '../../core/types'
 import { getRow, makeTable } from '../../core/values'
-import { numericCell } from '../../nodes/lib/chartSelection'
+import type { ColorAs } from '../../nodes/lib/networkMetrics'
 import {
+  CATEGORICAL_DTYPES,
+  COLOR_AS_OPTIONS,
   COMPONENT_SIZE_COLUMN,
+  HISTOGRAM_MAX_BINS,
   histogramChoices,
   networkMetrics,
   parseHistogramChoice,
 } from '../../nodes/lib/networkMetrics'
+import { ID_COLUMN_NAME } from '../../core/ids'
+import { ColorKey, ShapeKey, SizeKey } from './LegendKeys'
+import { markPath } from './scatterDraw'
+import { buildMarks, viewAffine } from './scatterPlot'
 import type { BarRow } from './Tiles'
 import { Bars, Columns, Facts, Tile } from './Tiles'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import type { Histogram } from './histogramBins'
 import { binScan, columnStats, scanValues } from './histogramBins'
+import { useElementSize } from './useElementSize'
 
 export interface NetworkMetricsViewerProps {
   /** The node's *input* network — see the header on why not its output. */
@@ -83,6 +96,12 @@ export interface NetworkMetricsViewerProps {
   /** Scatter axes, resolved columns of the node table (metrics included). */
   plotX?: string
   plotY?: string
+  /** The scatter's other channels, resolved columns; undefined is "not encoded". */
+  plotColor?: string
+  /** Whether an integer colour column is a ramp or a palette — see `scatterColorMode`. */
+  plotColorAs: ColorAs
+  plotSize?: string
+  plotShape?: string
   /** The histogram's `source:column` pair. See `parseHistogramChoice`. */
   histColumn: string
   /** Bars in the histogram; 0 is the automatic rule. */
@@ -91,13 +110,17 @@ export interface NetworkMetricsViewerProps {
   histVertical: boolean
   logScale: boolean
   /*
-   * Four writers rather than one `onParamChange`, which is `DatasetSummaryViewer`'s call and
+   * One writer per control rather than one `onParamChange`, which is `DatasetSummaryViewer`'s call and
    * keeps the param ids in the dispatcher where the rest of this node's are. Optional, because
    * a surface that cannot write params still draws the card — the controls then show the state
    * and refuse to change it, rather than the plots losing their headings.
    */
   onPlotX?: (column: string) => void
   onPlotY?: (column: string) => void
+  onPlotColor?: (column: string) => void
+  onPlotColorAs?: (as: string) => void
+  onPlotSize?: (column: string) => void
+  onPlotShape?: (column: string) => void
   onHistColumn?: (choice: string) => void
   onBins?: (bins: number) => void
   onHistVertical?: (vertical: boolean) => void
@@ -213,6 +236,84 @@ function binRows(histogram: Histogram, log: boolean): BarRow[] {
   }))
 }
 
+/*
+ * What a column's two labels need, in px. A count is 8.5px monospace, about 5.2px a character;
+ * a range key is set vertically in 9px type, so it needs a line's height across, not its length.
+ */
+const VALUE_CHAR_PX = 5.2
+const KEY_LINE_PX = 14
+/** Below this many px per bar a 1px gap is a fifth of the bar or more, so the bars touch. */
+const DENSE_BAR_PX = 4
+
+/** How a column chart at this width is labelled. Primitives, so a resize that changes none of them costs nothing. */
+export interface ThinPlan {
+  /** Print the counts above the bars. */
+  values: boolean
+  /** Print every `stride`-th range key. */
+  stride: number
+  /** Bars too narrow for a gap between them. */
+  dense: boolean
+}
+
+const UNTHINNED: ThinPlan = { values: true, stride: 1, dense: false }
+
+/**
+ * Columns at a bin count their labels cannot all fit, labelled with the ones that do.
+ *
+ * The counts above the bars go **all or nothing**: a row holding every third count reads as
+ * three-in-a-row being empty. The range keys under them are an axis, so they thin to every
+ * `stride`-th bar through `labelStep`, the rule the heatmap, dendrogram and Histogram node thin
+ * their axes by. Nothing is lost either way — each bar keeps its full `title`, range and count,
+ * for the hover.
+ *
+ * `width` 0 is "not measured yet" (and jsdom, always), and draws everything: thinning before
+ * the first measurement would flash a bare axis on every mount.
+ */
+export function thinPlan(rows: BarRow[], width: number): ThinPlan {
+  if (width <= 0 || rows.length === 0) return UNTHINNED
+  const cell = width / rows.length
+  let longest = 0
+  for (const row of rows) longest = Math.max(longest, row.value.length)
+  return {
+    values: longest * VALUE_CHAR_PX <= cell,
+    stride: labelStep(rows.length, width, KEY_LINE_PX),
+    dense: cell < DENSE_BAR_PX,
+  }
+}
+
+/** The rows with what `plan` leaves out blanked. The same array when it leaves out nothing. */
+export function thinColumns(
+  rows: BarRow[],
+  { values, stride }: Pick<ThinPlan, 'values' | 'stride'>,
+): BarRow[] {
+  if (values && stride === 1) return rows
+  return rows.map((row, i) => ({
+    ...row,
+    value: values ? row.value : '',
+    label: i % stride === 0 ? row.label : '',
+  }))
+}
+
+/** `Columns` at whatever width it is given — see `thinPlan`. */
+function ThinnedColumns({ rows, color }: { rows: BarRow[]; color: string }) {
+  const [ref, size] = useElementSize<HTMLDivElement>()
+  const { values, stride, dense } = thinPlan(rows, size.width)
+  // Keyed on the plan's fields rather than the width, so a resize re-maps the rows only when the
+  // stride actually steps.
+  const bars = useMemo(() => thinColumns(rows, { values, stride }), [rows, values, stride])
+  /*
+   * Wrapped in a class rather than given a prop, which is the dashboard's rule for the same
+   * situation: density is CSS's, and the frame restyles the inside without the shared component
+   * learning a caller by name. Three of `Columns`' numbers are sized for a six-region
+   * completeness chart and wrong for a histogram — see the stylesheet.
+   */
+  return (
+    <div ref={ref} className="metrics__columns" data-dense={dense || undefined}>
+      <Columns bars={bars} color={color} />
+    </div>
+  )
+}
+
 /**
  * The histogram, pointed wherever the picker says.
  *
@@ -303,7 +404,6 @@ function Distribution({
     <Tile
       label="Distribution"
       qualifier={note || undefined}
-      wide
       action={
         <>
           <Picker
@@ -313,8 +413,8 @@ function Distribution({
             onChange={onChoose}
           />
           {/*
-           * A number rather than a second `<select>` of preset counts: the useful range is 4 to
-           * about 40 and somebody comparing two graphs wants the same count on both, which a
+           * A number rather than a second `<select>` of preset counts: the useful range runs from
+           * 4 to a few hundred and somebody comparing two graphs wants the same count on both, which a
            * list of presets can only approximate. 0 is the automatic rule — see the node's own
            * note on why that is a sentinel rather than a mode param beside it.
            */}
@@ -322,7 +422,7 @@ function Distribution({
             className="tile__bins"
             type="number"
             min={0}
-            max={80}
+            max={HISTOGRAM_MAX_BINS}
             step={1}
             value={bins}
             aria-label="Bin count"
@@ -354,15 +454,7 @@ function Distribution({
         // One row set, two shapes: `ColumnBar` is `BarRow` minus the fields the rows use, so the
         // binning does not have to know which way up the tile is drawing it.
         vertical ? (
-          /*
-           * Wrapped in a class rather than given a prop, which is the dashboard's rule for the
-           * same situation: density is CSS's, and the frame restyles the inside without the
-           * shared component learning a caller by name. Three of `Columns`' numbers are sized
-           * for a six-region completeness chart and wrong for a histogram — see the stylesheet.
-           */
-          <div className="metrics__columns">
-            <Columns bars={rows} color={color} />
-          </div>
+          <ThinnedColumns rows={rows} color={color} />
         ) : (
           <Bars rows={rows} color={color} />
         )
@@ -376,85 +468,203 @@ function Distribution({
 }
 
 /**
- * Two per-node columns against each other.
+ * Point diameters in px: the smallest and largest value's marks under a size column, and the
+ * smallest for every point without one — `resolveSize`'s own answer to "no column".
+ */
+const SIZE_RANGE = { min: 3, max: 12 }
+/** Before the plot is measured, and in jsdom, which measures nothing. */
+const FALLBACK_PLOT = { width: 300, height: 120 }
+
+type Option = { value: string; label: string }
+const NONE: Option = { value: '', label: 'none' }
+
+/**
+ * How the scatter colours a column of this dtype.
+ *
+ * A float is a value and text a category whatever `plotColorAs` says; an integer is either, and
+ * only the reader knows which — `degree` is a count, `component` a label. Which is also why the
+ * card offers the switch beside an integer column and nowhere else.
+ */
+export function scatterColorMode(
+  dtype: DType | undefined,
+  as: ColorAs,
+): 'sequential' | 'categorical' {
+  if (dtype === 'f64') return 'sequential'
+  if (dtype === 'i64') return as === 'category' ? 'categorical' : 'sequential'
+  return 'categorical'
+}
+
+/** Every `stride`-th cell — the scatter's sample of a column. */
+function sampled(data: ColumnData, stride: number): ColumnData {
+  if (stride === 1) return data
+  const out: ColumnData = []
+  for (let row = 0; row < data.length; row += stride) out.push(data[row]!)
+  return out
+}
+
+/** A channel's picker, with its name written out beside it. */
+function ChannelPicker({
+  name,
+  value,
+  options,
+  onChange,
+  children,
+}: {
+  name: string
+  value: string | undefined
+  options: Option[]
+  onChange?: ((column: string) => void) | undefined
+  children?: ReactNode
+}) {
+  return (
+    <label>
+      {name}
+      <Picker
+        label={`Scatter ${name}`}
+        value={value ?? ''}
+        options={[NONE, ...options]}
+        onChange={onChange}
+      />
+      {children}
+    </label>
+  )
+}
+
+/**
+ * Two per-node columns against each other, with colour, size and marker as three more.
  *
  * Hand-drawn rather than `ScatterViewer` in a tile: that component owns a canvas, a selection,
- * an export registration and an axis pair sized for a card of its own, none of which a 190px
- * grid cell has room for. What is wanted here is the *shape* — whether the hubs are the
- * clustered ones — at a size where a legend would not fit anyway.
+ * an export registration and an axis pair sized for a card of its own, none of which a grid
+ * cell has room for. What is wanted here is the *shape* — whether the hubs are the clustered
+ * ones, and now whether they are one component's or one community's.
+ *
+ * **The marks are the Scatter Plot's**: `resolveColor` / `resolveSize` / `resolveShape` for the
+ * encodings, `buildMarks` for the points and their colour-and-shape buckets — whose order is the
+ * stacking order every scatter painter shares — `viewAffine` for where a value lands, and
+ * `LegendKeys` for the keys. So a categorical column cycles the palette and a seventh category
+ * folds to a dash here exactly as it does there.
  */
 function Scatter({
   nodes,
   x,
   y,
+  plotColor,
+  plotColorAs,
+  plotSize,
+  plotShape,
   columns,
+  colorColumns,
+  shapeColumns,
   onX,
   onY,
-  color,
-  ink,
+  onColor,
+  onColorAs,
+  onSize,
+  onShape,
+  mode,
 }: {
   nodes: TableValue
   x: string | undefined
   y: string | undefined
-  columns: Array<{ value: string; label: string }>
+  plotColor: string | undefined
+  plotColorAs: ColorAs
+  plotSize: string | undefined
+  plotShape: string | undefined
+  columns: Option[]
+  colorColumns: Option[]
+  shapeColumns: Option[]
   onX?: ((column: string) => void) | undefined
   onY?: ((column: string) => void) | undefined
-  color: string
-  ink: string
+  onColor?: ((column: string) => void) | undefined
+  onColorAs?: ((as: string) => void) | undefined
+  onSize?: ((column: string) => void) | undefined
+  onShape?: ((column: string) => void) | undefined
+  mode: Mode
 }) {
-  const plot = useMemo(() => {
+  const [ref, measured] = useElementSize<HTMLDivElement>()
+  const box = measured.width > 0 && measured.height > 0 ? measured : FALLBACK_PLOT
+
+  const colorDtype = plotColor
+    ? nodes.schema.columns.find((c) => c.name === plotColor)?.dtype
+    : undefined
+  const colorMode = plotColor ? scatterColorMode(colorDtype, plotColorAs) : 'constant'
+
+  /*
+   * The three channels, each resolved over the *whole* node table rather than the strided rows,
+   * so a ramp's ends and a palette's ranking do not move when the stride does — and each on its
+   * own, so picking a size column does not re-rank the colours.
+   */
+  const colors = useMemo(
+    () =>
+      resolveColor(
+        nodes,
+        { mode: colorMode, column: plotColor, constant: seriesColor(3, mode) },
+        mode,
+      ),
+    [nodes, colorMode, plotColor, mode],
+  )
+  const sizes = useMemo(
+    () => resolveSize(nodes, { column: plotSize, ...SIZE_RANGE }),
+    [nodes, plotSize],
+  )
+  const shapes = useMemo(
+    () => resolveShape(nodes, { mode: 'categorical', column: plotShape, constant: 'circle' }),
+    [nodes, plotShape],
+  )
+
+  /*
+   * The data half, apart from the box: which points, where in value space, and how each is marked.
+   * A resize re-places the marks below and must not re-scan, re-resolve or re-bucket a column.
+   */
+  const stride = Math.max(1, Math.ceil(nodes.length / MAX_POINTS))
+  const marks = useMemo(() => {
     if (!x || !y || !nodes.data[x] || !nodes.data[y]) return undefined
-    const xs = nodes.data[x]!
-    const ys = nodes.data[y]!
-    const stride = Math.max(1, Math.ceil(nodes.length / MAX_POINTS))
-    const points: Array<[number, number]> = []
-    let skipped = 0
-    for (let row = 0; row < nodes.length; row += stride) {
-      const a = numericCell(xs[row])
-      const b = numericCell(ys[row])
-      // A null on either axis is a point with no position, not a point at zero. Counted, so the
-      // caption can say a third of the nodes are missing from the picture.
-      if (a === undefined || b === undefined) {
-        skipped++
-        continue
-      }
-      points.push([a, b])
-    }
-    if (points.length === 0) return undefined
-    let loX = Infinity
-    let hiX = -Infinity
-    let loY = Infinity
-    let hiY = -Infinity
-    for (const [a, b] of points) {
-      if (a < loX) loX = a
-      if (a > hiX) hiX = a
-      if (b < loY) loY = b
-      if (b > hiY) hiY = b
-    }
-    const spanX = hiX > loX ? hiX - loX : 1
-    const spanY = hiY > loY ? hiY - loY : 1
-    /*
-     * One path string rather than 3,000 elements.
-     *
-     * The marks were `<line>` elements built in the render body, so every store tick created
-     * 3,000 elements and reconciled them against 3,000 fibers — including ticks that changed
-     * nothing about this node. Built here, the string is memoised with the points it describes
-     * and the DOM holds one node.
-     *
-     * A zero-length subpath with a round cap is a dot, and `vector-effect` keeps the stroke in
-     * screen pixels — which is the whole trick, since `preserveAspectRatio="none"` scales x and
-     * y by different factors and would draw a `<circle>` as an ellipse.
-     */
-    const marks = points
-      .map(([a, b]) => {
-        const px = ((a - loX) / spanX) * 96 + 2
-        // SVG's y runs down and a plot's runs up.
-        const py = 60 - (((b - loY) / spanY) * 56 + 2)
-        return `M${px.toFixed(2)} ${py.toFixed(2)}l0 0`
-      })
-      .join('')
-    return { marks, loX, hiX, loY, hiY, skipped, shown: points.length, total: nodes.length }
-  }, [nodes, x, y])
+    const xs = sampled(nodes.data[x]!, stride)
+    // Indices into the sample; the resolvers are over the whole table, hence the stride back.
+    return buildMarks({
+      xValues: xs,
+      yValues: sampled(nodes.data[y]!, stride),
+      length: xs.length,
+      xScale: 'linear',
+      yScale: 'linear',
+      style: {
+        colorAt: (i) => colors.at(i * stride),
+        radiusAt: (i) => sizes.at(i * stride) / 2,
+        shapeAt: (i) => shapes.at(i * stride),
+      },
+    })
+  }, [nodes, x, y, stride, colors, sizes, shapes])
+
+  /*
+   * One path per colour-and-shape bucket rather than one element per point, in pixel space:
+   * a stretched unit box would draw a triangle as a different triangle on every card. Inset by
+   * the largest mark, so a point at an extreme is drawn whole inside the frame.
+   */
+  const plot = useMemo(() => {
+    if (!marks?.extent) return undefined
+    const pad = marks.largestRadius + 2
+    const { sx, ox, sy, oy } = viewAffine(marks.extent, {
+      x: pad,
+      y: pad,
+      width: Math.max(1, box.width - 2 * pad),
+      height: Math.max(1, box.height - 2 * pad),
+    })
+    const paths = marks.buckets.map((bucket, key) => ({
+      key,
+      fill: bucket.color,
+      d: bucket.indices
+        .map((i) =>
+          markPath(
+            bucket.shape,
+            marks.xt[i]! * sx + ox,
+            marks.yt[i]! * sy + oy,
+            marks.radius[i]!,
+          ),
+        )
+        .join(''),
+    }))
+    return { paths, extent: marks.extent, drawn: marks.rows.length }
+  }, [marks, box.width, box.height])
 
   /*
    * The axis pickers ride on the tile whatever state the plot is in, and that is the point of
@@ -468,68 +678,107 @@ function Scatter({
     </>
   )
 
-  if (!x || !y) {
-    return (
-      <Tile label="Scatter" wide action={action}>
-        <p className="tile__pending">Pick two numeric node columns</p>
-      </Tile>
-    )
-  }
-  if (!plot) {
-    return (
-      <Tile label="Scatter" qualifier={`${y} × ${x}`} wide action={action}>
-        <p className="tile__pending">No node has both</p>
-      </Tile>
-    )
-  }
-
-  // A unit box the CSS scales; `preserveAspectRatio="none"` because the axes are unrelated
-  // quantities and forcing them square would waste most of a wide tile.
-  const note =
-    plot.shown < plot.total
-      ? `${formatNumber(plot.shown)} of ${formatNumber(plot.total)} nodes`
-      : `${formatNumber(plot.shown)} nodes`
-
+  const ink = CHART_INK[mode].muted
   return (
-    <Tile label="Scatter" qualifier={`${y} × ${x}`} wide action={action}>
-      <svg
-        className="metrics__scatter"
-        viewBox="0 0 100 60"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={`${y} against ${x}`}
-      >
-        <rect x="0" y="0" width="100" height="60" fill="none" stroke={ink} strokeWidth="0.3" />
-        {/* The marks, as one path. See `marks` in the memo above for why it is a path. */}
-        <path
-          d={plot.marks}
-          fill="none"
-          stroke={color}
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeOpacity="0.55"
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
-      <dl className="tile__facts">
-        <div className="tile__fact">
-          <dt>{x}</dt>
-          <dd>
-            {formatCompact(plot.loX)} – {formatCompact(plot.hiX)}
-          </dd>
+    <div className="metrics__grow">
+      <Tile label="Scatter" qualifier={x && y ? `${y} × ${x}` : undefined} action={action}>
+        {/*
+          The other three channels on a row of their own, with their names written out: the
+          qualifier already says which column each axis is, and three more unlabelled selects
+          reading `none` in the heading would not say which channel each one is.
+        */}
+        <div className="metrics__encodings">
+          <ChannelPicker
+            name="colour"
+            value={plotColor}
+            options={colorColumns}
+            onChange={onColor}
+          >
+            {colorDtype === 'i64' && (
+              <Picker
+                label="Scatter colour as"
+                value={plotColorAs}
+                options={COLOR_AS_OPTIONS}
+                onChange={onColorAs}
+              />
+            )}
+          </ChannelPicker>
+          <ChannelPicker name="size" value={plotSize} options={columns} onChange={onSize} />
+          <ChannelPicker
+            name="marker"
+            value={plotShape}
+            options={shapeColumns}
+            onChange={onShape}
+          />
         </div>
-        <div className="tile__fact">
-          <dt>{y}</dt>
-          <dd>
-            {formatCompact(plot.loY)} – {formatCompact(plot.hiY)}
-          </dd>
-        </div>
-        <div className="tile__fact">
-          <dt>drawn</dt>
-          <dd>{note}</dd>
-        </div>
-      </dl>
-    </Tile>
+        {!x || !y ? (
+          <p className="tile__pending">Pick two numeric node columns</p>
+        ) : !plot ? (
+          <p className="tile__pending">No node has both</p>
+        ) : (
+          <>
+            <div ref={ref} className="metrics__plot">
+              <svg
+                className="metrics__scatter"
+                viewBox={`0 0 ${box.width} ${box.height}`}
+                role="img"
+                aria-label={`${y} against ${x}`}
+              >
+                <rect
+                  x="0.5"
+                  y="0.5"
+                  width={box.width - 1}
+                  height={box.height - 1}
+                  fill="none"
+                  stroke={ink}
+                />
+                {plot.paths.map((path) => (
+                  <path key={path.key} d={path.d} fill={path.fill} fillOpacity="0.7" />
+                ))}
+              </svg>
+            </div>
+            {(colors.legend || sizes.domain || shapes.legend) && (
+              <div className="legend metrics__legend">
+                {/* A ramp names its own column; a set of keys needs the name given. */}
+                <ColorKey
+                  colors={colors}
+                  {...(colors.legend?.kind === 'categorical' ? { name: plotColor! } : {})}
+                />
+                <SizeKey
+                  channel={{ spec: { column: plotSize, ...SIZE_RANGE }, resolved: sizes }}
+                  name="size"
+                />
+                {shapes.legend && (
+                  <ShapeKey column={shapes.legend.column} entries={shapes.legend.entries} />
+                )}
+              </div>
+            )}
+            <dl className="tile__facts">
+              <div className="tile__fact">
+                <dt>{x}</dt>
+                <dd>
+                  {formatCompact(plot.extent.x.min)} – {formatCompact(plot.extent.x.max)}
+                </dd>
+              </div>
+              <div className="tile__fact">
+                <dt>{y}</dt>
+                <dd>
+                  {formatCompact(plot.extent.y.min)} – {formatCompact(plot.extent.y.max)}
+                </dd>
+              </div>
+              <div className="tile__fact">
+                <dt>drawn</dt>
+                <dd>
+                  {plot.drawn < nodes.length
+                    ? `${formatNumber(plot.drawn)} of ${plural(nodes.length, 'node')}`
+                    : plural(plot.drawn, 'node')}
+                </dd>
+              </div>
+            </dl>
+          </>
+        )}
+      </Tile>
+    </div>
   )
 }
 
@@ -539,12 +788,20 @@ export function NetworkMetricsViewer({
   network,
   plotX,
   plotY,
+  plotColor,
+  plotColorAs,
+  plotSize,
+  plotShape,
   histColumn,
   bins,
   histVertical,
   logScale,
   onPlotX,
   onPlotY,
+  onPlotColor,
+  onPlotColorAs,
+  onPlotSize,
+  onPlotShape,
   onHistColumn,
   onBins,
   onHistVertical,
@@ -554,7 +811,6 @@ export function NetworkMetricsViewer({
   onError,
 }: NetworkMetricsViewerProps) {
   const mode = currentMode()
-  const ink = CHART_INK[mode]
   const metrics = useMemo(() => networkMetrics(network), [network])
   // `getRow` rather than a local re-spelling of it; the summary is always exactly one row.
   const row = useMemo(() => getRow(metrics.summary, 0), [metrics])
@@ -584,13 +840,23 @@ export function NetworkMetricsViewer({
     () => histogramChoices(nodes.schema, edges.schema),
     [nodes.schema, edges.schema],
   )
-  const nodeColumns = useMemo(
-    () =>
-      nodes.schema.columns
-        .filter((col) => isNumericDType(col.dtype))
-        .map((col) => ({ value: col.name, label: col.name })),
-    [nodes.schema],
-  )
+  /*
+   * The scatter's three column vocabularies, by the node params' own rules: axes and size take
+   * numbers, a marker the categorical dtypes, colour anything — and none offering the column
+   * `excludeIds` drops, so the card and the inspector offer the same lists. (On the numeric two
+   * that is a no-op: the id is text.)
+   */
+  const { nodeColumns, colorColumns, shapeColumns } = useMemo(() => {
+    const options = (cols: readonly ColumnSchema[]) =>
+      cols
+        .filter((col) => col.name !== ID_COLUMN_NAME)
+        .map((col) => ({ value: col.name, label: col.name }))
+    return {
+      nodeColumns: options(columnsOfType(nodes.schema, NUMERIC_DTYPES)),
+      colorColumns: options(nodes.schema.columns),
+      shapeColumns: options(columnsOfType(nodes.schema, CATEGORICAL_DTYPES)),
+    }
+  }, [nodes.schema])
 
   const choice = parseHistogramChoice(histColumn)
   const histTable =
@@ -620,80 +886,91 @@ export function NetworkMetricsViewer({
 
   return (
     <div className="viewer summary">
-      <div className="tiles nowheel">
-        <Tile label="Graph">
-          <Facts
-            rows={[
-              ['nodes', count(row['nodes'])],
-              ['links', count(row['links'])],
-              ['density', decimal(row['density'], 4)],
-              ['isolated', count(row['isolated'])],
-              ['self-loops', count(row['selfLoops'])],
-              // Only when there are some: a `0` here is a row spent saying nothing, and a
-              // network out of Build Network with merging on can never have any.
-              [
-                'parallel',
-                Number(row['parallelLinks']) > 0 ? count(row['parallelLinks']) : undefined,
-              ],
-            ]}
-          />
-        </Tile>
+      {/*
+        Two layers rather than one grid, so the scatter can take the card's spare height.
 
-        {/*
+        The tile grid's rows are content-sized, and which row the scatter lands on depends on how
+        many columns the width allows — so no track can be named `1fr`. The fact tiles stay a
+        grid; the two plots stack under it in a flex column, where the scatter grows and the
+        histogram keeps its own height. The scroll container is the outer layer, so a short card
+        still scrolls rather than squeezing the plot below its floor.
+      */}
+      <div className="metrics__body nowheel">
+        <div className="tiles">
+          <Tile label="Graph">
+            <Facts
+              rows={[
+                ['nodes', count(row['nodes'])],
+                ['links', count(row['links'])],
+                ['density', decimal(row['density'], 4)],
+                ['isolated', count(row['isolated'])],
+                ['self-loops', count(row['selfLoops'])],
+                // Only when there are some: a `0` here is a row spent saying nothing, and a
+                // network out of Build Network with merging on can never have any.
+                [
+                  'parallel',
+                  Number(row['parallelLinks']) > 0 ? count(row['parallelLinks']) : undefined,
+                ],
+              ]}
+            />
+          </Tile>
+
+          {/*
           Degree and link weight are tiles of their own because the histogram is now a question
           rather than three fixed answers: pointed at `clustering`, it would otherwise take the
           only mean degree on the card with it. Numbers a reader compares across graphs should
           not depend on which plot happens to be open.
         */}
-        <Tile label="Degree" qualifier="in + out">
-          <Facts
-            rows={[
-              ['mean', decimal(row['meanDegree'], 1)],
-              ['median', decimal(row['medianDegree'], 1)],
-              ['max', count(row['maxDegree'])],
-            ]}
-          />
-        </Tile>
+          <Tile label="Degree" qualifier="in + out">
+            <Facts
+              rows={[
+                ['mean', decimal(row['meanDegree'], 1)],
+                ['median', decimal(row['medianDegree'], 1)],
+                ['max', count(row['maxDegree'])],
+              ]}
+            />
+          </Tile>
 
-        <Tile label="Link weight">
-          <Facts
-            rows={[
-              ['total', count(row['totalWeight'])],
-              ['mean', decimal(row['meanWeight'], 1)],
-              ['median', decimal(row['medianWeight'], 1)],
-              ['max', count(row['maxWeight'])],
-            ]}
-          />
-        </Tile>
+          <Tile label="Link weight">
+            <Facts
+              rows={[
+                ['total', count(row['totalWeight'])],
+                ['mean', decimal(row['meanWeight'], 1)],
+                ['median', decimal(row['medianWeight'], 1)],
+                ['max', count(row['maxWeight'])],
+              ]}
+            />
+          </Tile>
 
-        <Tile label="Structure" qualifier={row['directed'] ? 'directed' : 'undirected'}>
-          <Facts
-            rows={[
-              // Null where the question does not apply — undirected reciprocity, a regular
-              // graph's assortativity — and `Facts` drops a row with no value, so the tile
-              // shows three facts rather than three em-dashes.
-              ['reciprocity', percent(row['reciprocity'])],
-              ['clustering', decimal(row['meanClustering'])],
-              ['transitivity', decimal(row['transitivity'])],
-              ['assortativity', decimal(row['assortativity'])],
-            ]}
-          />
-        </Tile>
+          <Tile label="Structure" qualifier={row['directed'] ? 'directed' : 'undirected'}>
+            <Facts
+              rows={[
+                // Null where the question does not apply — undirected reciprocity, a regular
+                // graph's assortativity — and `Facts` drops a row with no value, so the tile
+                // shows three facts rather than three em-dashes.
+                ['reciprocity', percent(row['reciprocity'])],
+                ['clustering', decimal(row['meanClustering'])],
+                ['transitivity', decimal(row['transitivity'])],
+                ['assortativity', decimal(row['assortativity'])],
+              ]}
+            />
+          </Tile>
 
-        <Tile label="Components">
-          <Facts
-            rows={[
-              ['count', count(row['components'])],
-              ['largest', count(row['largestComponent'])],
-              [
-                'in largest',
-                Number(row['nodes']) > 0
-                  ? percent(Number(row['largestComponent']) / Number(row['nodes']))
-                  : undefined,
-              ],
-            ]}
-          />
-        </Tile>
+          <Tile label="Components">
+            <Facts
+              rows={[
+                ['count', count(row['components'])],
+                ['largest', count(row['largestComponent'])],
+                [
+                  'in largest',
+                  Number(row['nodes']) > 0
+                    ? percent(Number(row['largestComponent']) / Number(row['nodes']))
+                    : undefined,
+                ],
+              ]}
+            />
+          </Tile>
+        </div>
 
         {/*
           The scatter sits above the histogram, and that order is a measurement rather than a
@@ -706,11 +983,20 @@ export function NetworkMetricsViewer({
           nodes={nodes}
           x={plotX}
           y={plotY}
+          plotColor={plotColor}
+          plotColorAs={plotColorAs}
+          plotSize={plotSize}
+          plotShape={plotShape}
           columns={nodeColumns}
+          colorColumns={colorColumns}
+          shapeColumns={shapeColumns}
           onX={onPlotX}
           onY={onPlotY}
-          color={seriesColor(3, mode)}
-          ink={ink.muted}
+          onColor={onPlotColor}
+          onColorAs={onPlotColorAs}
+          onSize={onPlotSize}
+          onShape={onPlotShape}
+          mode={mode}
         />
 
         <Distribution

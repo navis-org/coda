@@ -64,7 +64,9 @@ registerNode({
   cardWidth: 300,
   description: 'Step through a table, skeletons or meshes and emit one element at a time.',
   guide:
-    'Step through a collection one element at a time — the manual For each. Explore Dataset → Select One → Skeletons → 3D View. Stepping is free (arrows move the card), Use this commits (re-runs downstream). Live mode couples browsing and committing.',
+    'Steps through a table, skeletons or meshes and passes on one element at a time, e.g. ' +
+    'Explore Dataset → Select One → Skeletons → 3D View. Browse with the arrows and press Use ' +
+    'this to send the element downstream, or turn on Live to send each one as you go.',
   // No network and no serious CPU: taking one element of a collection already in hand.
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Items', type: T.any(), kinds: ITERABLE_KINDS }],
@@ -78,7 +80,7 @@ registerNode({
       id: 'live',
       kind: 'boolean',
       label: 'Live',
-      help: 'Arrows update the output directly. Off, stepping is free and “Use this” commits — which is what you want with an expensive node downstream.',
+      help: 'Arrows update the output directly. Turn off when an expensive node is downstream, then press “Use this” to send the element shown.',
       default: false,
       // It cannot change a byte of what `evaluate` returns; it decides what the *buttons write*.
       // In the key it would make switching modes invalidate every downstream result.
@@ -88,7 +90,7 @@ registerNode({
       id: 'index',
       kind: 'int',
       label: 'Showing',
-      help: 'Which element the card is showing. Browsing never invalidates anything.',
+      help: 'Which element the card is showing.',
       default: 0,
       min: 0,
       // The whole point of the split: looking is not deciding, so this stays out of the
@@ -127,8 +129,8 @@ registerNode({
     // scheduler already reports as `blocked`.
     if (!input || isIterableKind(input.kind)) return []
     return [
-      `Select One steps through a Table, Skeletons or Meshes. A ${input.kind} has no ` +
-        `elements.`,
+      `Select One steps through a table, skeletons or meshes. A ${input.kind} has no ` +
+        `elements to step through.`,
     ]
   },
 
@@ -136,7 +138,7 @@ registerNode({
     const value = ctx.input('in')
     if (!isIterableValue(value)) {
       throw new Error(
-        'Select One needs a Table, Skeletons or Meshes — this input carries something else.',
+        'Select One takes a table, skeletons or meshes, and this input is something else.',
       )
     }
 

@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { activeTab, addCells, setRail, setSpan } from '../../core/dashboard'
 import { deserializeGraph, emptyGraph, newId, type CodaGraph } from '../../core/graph'
 import {
   ShareLinkError,
@@ -74,6 +75,26 @@ describe('the packed form', () => {
     expect(back.nodes.map((n) => n.id)).toEqual(graph.nodes.map((n) => n.id))
     expect(back.edges).toHaveLength(graph.edges.length)
     expect(back.meta?.name).toBe('Partner sweep')
+  })
+
+  it('carries the dashboard, an open control rail included', async () => {
+    // What somebody arranged for the people they send it to — cells, sizes and which rails are
+    // open — is part of the document, so a packed link has to arrive with all of it.
+    const graph = sampleGraph()
+    const [first, second] = graph.nodes.map((n) => n.id)
+    const arranged = setSpan(
+      setRail(addCells(graph, [first!, second!]), first!, true),
+      second!,
+      { w: 2 },
+    )
+    const ref = parseShareFragment(await encodeShareFragment(arranged))
+    if (ref.kind !== 'packed') throw new Error('expected a packed link')
+
+    const { graph: back } = deserializeGraph(await decodePacked(ref.blob))
+    expect(activeTab(back).cells).toEqual([
+      { nodeId: first, rail: true },
+      { nodeId: second, w: 2 },
+    ])
   })
 
   it('is base64url — nothing in it needs escaping in a URL', async () => {

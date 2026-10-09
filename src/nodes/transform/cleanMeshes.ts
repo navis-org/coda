@@ -58,14 +58,13 @@ registerNode({
   type: 'neuron.cleanMeshes',
   label: 'Clean Meshes',
   category: 'transform',
-  description: 'Strip internal membrane, cap holes, decimate and smooth mesh surfaces.',
+  description: 'Remove internal membrane, fill holes, decimate and smooth meshes.',
   guide:
-    'Four repairs an EM mesh usually wants, in the order they compose: strip the invaginated ' +
-    'membrane folded into the cell, cap what is left open, decimate to a fraction of the ' +
-    'faces, and smooth. Stripping internals is the one that changes a number rather than a ' +
-    'picture — a raw segmentation mesh has far more surface inside it than around it, so any ' +
-    'area or volume measured from one is wrong until this has run. It is also by far the ' +
-    'slowest, being a ray cast per face.',
+    'Four optional repairs for EM meshes, applied in this order: remove the membrane folded ' +
+    'inside the cell, fill the holes that leaves, decimate to a fraction of the faces, and ' +
+    'smooth. Remove internal membrane before measuring surface area or volume, since a raw ' +
+    'segmentation mesh has more surface inside the cell than around it. It is by far the ' +
+    'slowest step.',
   cost: 'expensive',
   inputs: [{ id: 'in', label: 'Meshes', type: T.meshes() }],
   outputs: [{ id: 'out', label: 'Meshes', type: T.meshes() }],
@@ -75,7 +74,7 @@ registerNode({
       kind: 'boolean',
       label: 'Drop internal membrane',
       default: false,
-      help: 'Cut away the surface folded inside the cell rather than bounding it, and cap what that opens — which is what makes a surface area or a volume mean anything. Off by default: it is the expensive one.',
+      help: 'Remove membrane folded inside the cell and cap the openings. Needed for a meaningful surface area or volume. Slow.',
     },
     {
       id: 'openness',
@@ -87,7 +86,7 @@ registerNode({
       step: 0.01,
       advanced: true,
       visibleIf: (params) => params.dropInternals === true,
-      help: 'A face is cut when this fraction or fewer of the rays leaving it escape the mesh. Anything in 0.05–0.10 finds the same faces; above about 0.1 the cut starts eating real membrane.',
+      help: 'A face is removed when this fraction or fewer of the rays cast from it escape the mesh. Above about 0.1, real membrane starts being removed.',
     },
     {
       id: 'rays',
@@ -99,7 +98,7 @@ registerNode({
       step: 4,
       advanced: true,
       visibleIf: (params) => params.dropInternals === true,
-      help: 'The signal is bimodal, so this only has to tell "none got out" from "some did". 8 halves the cost for no measured difference; 4 is visibly too few.',
+      help: 'Rays cast per face to test whether it is internal. 8 is about twice as fast with no measured difference; 4 is too few.',
     },
     {
       id: 'passes',
@@ -111,14 +110,14 @@ registerNode({
       step: 1,
       advanced: true,
       visibleIf: (params) => params.dropInternals === true,
-      help: 'Capping a pocket mouth turns a partly-open neighbour into a buried one, so this repeats. It converges fast: 18.7% of faces buried on the first pass, 0.5% on the second.',
+      help: 'How many rounds of removal to run, since capping one pocket can bury another. The default is usually enough.',
     },
     {
       id: 'fillHoles',
       kind: 'boolean',
       label: 'Fill holes',
       default: false,
-      help: 'Triangulate every boundary ring, including the ones the mesh arrived with. Needed before anything asks the mesh for an enclosed volume, since an open surface does not have one.',
+      help: 'Close every hole in the mesh, including any it arrived with. Needed before measuring an enclosed volume.',
     },
     {
       id: 'ratio',
@@ -128,7 +127,7 @@ registerNode({
       min: 0.01,
       max: 1,
       step: 0.05,
-      help: 'Fraction of the triangles to keep, collapsing whichever edge costs least; 1 leaves the mesh alone. This is what makes a large scene draw. A small disconnected fragment can be consumed entirely at a tight budget.',
+      help: 'Fraction of triangles to keep; 1 leaves the mesh alone. Lower values help large scenes draw. At low values, small disconnected fragments can disappear.',
     },
     {
       id: 'smooth',
@@ -138,7 +137,7 @@ registerNode({
       min: 0,
       max: 50,
       step: 1,
-      help: 'How many passes of the filter below; 0 leaves the vertices alone. Vertex count, face array and vertex order all come back unchanged.',
+      help: 'How many smoothing passes to run; 0 leaves the vertices alone. Vertex count and order do not change.',
     },
     {
       id: 'method',
@@ -152,7 +151,7 @@ registerNode({
       ],
       advanced: true,
       visibleIf: (params) => Number(params.smooth) > 0,
-      help: 'Taubin alternates a shrink and an inflate pass tuned to cancel, which is why it is the default. Plain Laplacian loses most of a neuron’s enclosed volume at five passes.',
+      help: 'The smoothing filter. "Laplacian — plain, shrinks" loses most of a neuron’s volume within five passes.',
     },
     {
       id: 'volumeCorrection',
@@ -161,7 +160,7 @@ registerNode({
       default: false,
       advanced: true,
       visibleIf: (params) => Number(params.smooth) > 0,
-      help: 'Rescale the smoothed mesh about its own centroid so the enclosed volume matches what went in. Worth turning on with Laplacian, rarely needed with Taubin. A mesh with no usable volume comes back unscaled.',
+      help: 'Rescale the smoothed mesh so its volume matches the original. Worth turning on with Laplacian, rarely needed with Taubin.',
     },
   ],
 
@@ -172,11 +171,13 @@ registerNode({
     const params = meshCleanParamsFrom(ctx.params)
     const issues: string[] = []
     if (isMeshNoOp(params)) {
-      issues.push('Nothing is switched on, so this passes the meshes through')
+      issues.push('No cleaning step is switched on, so the meshes pass through unchanged.')
     }
     if (params.smooth > 0 && params.method === 'laplacian' && !params.volumeCorrection) {
       // The one combination that quietly changes a measurement rather than a picture.
-      issues.push('Laplacian shrinks — turn Correct volume on if the volume matters')
+      issues.push(
+        'The "Laplacian" filter shrinks meshes. Turn on `Correct volume` if you need the volume to stay accurate.',
+      )
     }
     return issues
   },
@@ -205,9 +206,9 @@ registerNode({
     const empty = emptiedItems(result.faceOffsets)
     if (empty > 0) {
       ctx.warn(
-        `${empty} of ${value.items.length} meshes came back with no faces; they stay in ` +
-          `the collection so the attribute table lines up. An inward-wound mesh is the ` +
-          `usual cause — Drop internal membrane reads it as entirely internal.`,
+        `${empty} of ${value.items.length} meshes came back with no faces. They stay in ` +
+          `the collection so the attribute table lines up. The usual cause is a mesh wound ` +
+          `inside out, which \`Drop internal membrane\` removes as entirely internal.`,
       )
     }
     return { out: meshesFromResult(value, result, !changesFaces(params)) }

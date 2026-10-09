@@ -1,3 +1,7 @@
+## What Neuron Profile does
+
+Neuron Profile shows a summary of one neuron at a time: who it is, its up- and downstream partners grouped by type, where its synapses are, its predicted transmitter and its shape in 3D. Use the pager on the card to step through the neurons in the incoming table.
+
 ```coda-graph
 caption: Search in Explore Dataset and get a per-neuron summary.
 neuron.explore as exp
@@ -7,44 +11,43 @@ exp:selected -> ngl
 exp:selected -> prof
 ```
 
-What this node can show depends on the dataset — richest for neuPrint, because of the precomputed information it publishes. For CAVE and CATMAID some panels stay empty.
+How much the card can show depends on the dataset. neuPrint datasets give the fullest picture because they publish a lot of precomputed information. For CAVE and CATMAID datasets some panels stay empty.
+
+## Thresholds
+
+`Min synapses` drops partner connections below that number from the lists and counts, and `Rows per list` sets how many entries each list shows. Both take effect immediately without re-running anything.
 
 ```coda-params
-caption: Threshold controls — instant filtering.
 out.profile: minWeight, topN
 ```
 
 ## Counting by an edge property
 
-`Count by` makes every partner list count a property of the connection rather than its synapses —
-on fish2, `weightAxonDendrite` ranks partners by the synapses that land axon→dendrite. The options
-are what the dataset publishes on a connection, and `Min synapses` applies to the chosen count.
+By default the partner lists count synapses. `Count by` lets you count a property that the dataset publishes for each connection instead. On fish2, for example, "weightAxonDendrite" ranks partners by the number of synapses that go from axon to dendrite. `Min synapses` then applies to whatever you chose here.
 
 ```coda-params
 out.profile: countBy
 ```
 
-## One cell, or one cell type
+## Profiling groups of neurons
 
-Leave **Group by** empty and the pager walks neurons, one row at a time. Point it at a column — `type`, `hemilineage`, `class`, a cluster id from Cut Tree, a shared label from Match Cell Types — and it walks *groups* instead: every tile then shows a mean across the members with a sample standard deviation beside it.
-
-A column rather than a `Show types` switch, because datasets do not agree on what the column is called and the interesting groupings are not always cell types.
+With `Group by` empty, the pager steps through individual neurons. Pick a column (e.g. `type`, `hemilineage`, `class`, a cluster id from [Cut Tree](#cluster.cut) or a shared label from [Match Cell Types](#compare.matchTypes)) and it steps through groups instead. Each panel then shows the mean across the group's members, with the standard deviation next to it.
 
 ```coda-params
-caption: Empty pages neurons; a column pages groups.
 out.profile: groupBy
 ```
 
-Four things about the numbers, each a place where a plausible wrong answer is easy to produce:
+A few things to keep in mind when reading the numbers for a group:
 
-- **The denominator is the whole group.** A member with no connection to a partner type counts as a zero, not as a gap — it was measured, and the measurement is zero. Each bar's tooltip says how many members contributed, which separates "4 synapses on average, all thirty of them" from "4 on average, two of them".
-- **A group of one has no spread.** It shows its value and no `±`, and no whisker: the spread of a single measurement is unknown rather than zero.
-- **In the ranked lists the number is the mean and the spread is the line through the bar** — ±1 sd, clamped at zero. Hover a row for the figures. The headline totals in the Connectivity tile print `mean ± sd` in full.
-- **A transmitter call is not averaged.** The tile lists every call the group makes with a count — a type that is 28 cholinergic and 2 GABAergic is interesting exactly where a single answer would round it away. The probability bars and the confidence *are* means, and average over the members that publish a value rather than over the whole group: a neuron the model declined to score has not been measured.
+- Members without any connection to a given partner type count as zero. Each bar's tooltip tells you how many members actually contributed, so you can tell "4 synapses on average across all thirty" from "4 on average, from two of them".
+- A group with a single member shows its value with no `±` and no whisker.
+- In the ranked lists, the bar shows the mean and the line through it shows ±1 standard deviation (clamped at zero). Hover a row to see the numbers. The totals at the top of the Connectivity panel are printed in full as `mean ± sd`.
+- Transmitter calls are not averaged. Instead, the panel lists every call within the group with a count, e.g. 28 cholinergic and 2 GABAergic. The probability bars and the confidence are means, taken over the members that have a prediction.
 
-Pinning a group sends **all** of its neurons out of the Current port, so a downstream Skeletons or Connectivity node receives the whole type.
+> [!NOTE] Large groups
+> Groups with more than fifty neurons are not loaded automatically. The card shows the group's
+> name and size and lets you load it with a click.
 
-> [!NOTE] Past fifty neurons a group is not fetched until you ask
-> Nothing is refused — the card names the group and its size and offers to load it — but paging
-> through large types would otherwise ask the connectome a very large question between two
-> presses of ›.
+## Pinning
+
+The `Current` output emits whatever you have pinned on the card. When grouping, pinning a group sends all of its neurons, so a downstream [Skeletons](#neuron.skeletons) or [Connectivity](#neuron.connectivity) node receives the whole type. Paging through neurons does not change any output; pinning does, and downstream nodes will need to re-run.

@@ -588,6 +588,51 @@ The write cost is nothing and was checked rather than assumed: serialise plus tw
 0.5 ms at ten thousand ids and 1.5 ms at twenty-five thousand, on the main thread, once per
 autosave tick.
 
+### A long list of integer ids is written as deltas — at the document edge, and in order
+
+The unbounded end above arrived with embeddings: a lasso round a cluster of a whole-connectome
+UMAP is six figures of ids in a Scatter Plot's `selection`. `pnpm probe:selection-scale` measured
+fish2's 129,325 ids at **1,516 kB** of autosave and as many CAVE root ids at **2,653 kB** — the
+second over a tab's 2M slot, and written twice into a 5 MiB quota.
+
+So a document spells any param **declared as an id list** (`kind: 'ids'`) of at least
+`MIN_COMPACT` (64) entries ending in an integer as `{ "compactIds": "<text>" }` — declared, not
+recognised by shape, since a list of column names or a rename map is text a person reads in the
+file whatever its entries end in. Each id's difference from the one before,
+zigzagged, as a base64url varint (`core/compactIds.ts`). fish2's selection is **242 kB**; the CAVE
+one **872 kB**, measured on ids spread over 10^10 in no order. That is the honest case and the
+worst: the first version of the probe used evenly spaced ids and reported 380 kB, a difference
+being all the spelling stores. Four decisions:
+
+- **Order is kept**, not sorted. A sorted list compresses better only when the table was not
+  already in id order, and a lasso writes rows in table order — fish2 measures the same 241 kB
+  either way, 50,000 shuffled CAVE ids 399 kB in order against 264 kB sorted. Keeping order is
+  what makes a reload hand back the *identical* array, so no reader and no provenance key had to
+  learn anything.
+- **At the edge, never in memory.** Every graph written as text goes through `graphText` —
+  `serializeGraph`, `fragmentFrom` and `recipeText` — and `storedParams` reads through
+  `expandParams`, ahead of `formerId`. Deliberately not `fragmentBody`, whose result a recipe keeps
+  in memory where every reader expects `string[]`.
+- **An entry is a prefix and the integer it ends in**, so a comparative workflow's qualified ids
+  compact too. The first version took canonical integers only, and 129,325 qualified ids stayed
+  ~4 MB of JSON, over a tab's slot; now they are **689 kB** (`pnpm probe:selection-scale`, two
+  connectomes interleaved). The distinct prefixes are written once (`prefixes`, absent for plain
+  integers, so lists written before still read), each entry as its prefix's index and its delta
+  from the previous id *with that prefix* — interleaved datasets would otherwise jump between two
+  id ranges on every entry. The split keeps leading zeros in the prefix (`x007` → `x00`, `7`), so
+  it is exact for any text; the rule for compacting is only that every entry ends in a digit and
+  the result is the shorter, which a list of cell types usually is not. A value that does not
+  decode is **dropped**, so the param reads as its default rather than as an object.
+- **No format version bump.** An older build reads the object as a selection of nothing; the site
+  is the one build anybody runs, and the MCP bundle is deployed with it.
+
+The arithmetic is doubles while an id fits one and `BigInt` from the first that does not, the text
+being the same either way. A `BigInt`-only first version decoded fish2 in ~20 ms against 5.5 ms for
+the plain JSON; with the double path it is **4.2 ms**, and 129,325 CAVE ids, which need the exact
+path, **21.5 ms** — once per open. The key half is `core/hash.ts`' digest: a list over 1,024 entries is
+hashed once and stood in for by `[#length:hash]`, which took an unrelated edit from **2.9 ms /
+5.3 ms to 0.04 ms** at those two sizes.
+
 ### The autosave is `compact`, and it is the only caller that is
 
 `serializeGraph` writes two-space JSON unless asked otherwise, and the indentation is **34% of the

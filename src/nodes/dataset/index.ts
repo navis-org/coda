@@ -15,6 +15,7 @@
  * datastack plus which of its tables mean neurons, because nothing in a datastack says.
  */
 
+import { keptChoice } from '../lib/keptChoice'
 import type { CompanionSpec } from '../../core/companion'
 import { packNode, registerNode } from '../../core/registry'
 import type { InferContext, NodeDefinition } from '../../core/node'
@@ -148,7 +149,7 @@ function datasetIssues(family: DatasetFamily, ctx: InferContext): string[] {
   const chosen = String(ctx.params.version)
   if (chosen && !versions.some((v) => v.version === chosen)) {
     return [
-      `${familyLabel(family)} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
+      `${familyLabel(family)} ${chosen} is not on this server. Available versions: ${versions.map((v) => v.version).join(', ')}`,
     ]
   }
   return [
@@ -313,12 +314,11 @@ const customCaveNode = packNode({
   // Measured in a browser on a cold session, as `DATASET_CARD_HEIGHTS` is for the families, so a
   // change to the card's rows means measuring it again.
   cardHeight: 345,
-  description: 'Any CAVE datastack configured by hand.',
+  description: 'Any CAVE datastack, configured by hand.',
   guide:
-    'For CAVE datastacks Coda ships no node for. Name the global server that lists the ' +
-    'datastack (H01 is on global.brain-wire-test.org), the datastack, and — since nothing in a ' +
-    'datastack marks one table as the neurons — that table and its root-id column. Each ' +
-    'deployment has its own sign-in. Materializations expire, so pin one you have checked.',
+    'Connects to any CAVE datastack Coda has no dedicated node for. Name the global server ' +
+    '(H01 is on global.brain-wire-test.org), the datastack and, optionally, a table with one row ' +
+    'per neuron and its root-id column. Wire labels in through Annotations, e.g. from a CAVE table.',
   companion: DESCRIPTION_COMPANION,
   cost: 'cheap',
   inputs: [ANNOTATIONS_INPUT],
@@ -349,7 +349,7 @@ const customCaveNode = packNode({
       kind: 'string',
       label: 'Datastack',
       placeholder: 'flywire_fafb_public',
-      help: 'Datastack name exactly as the CAVE info service lists it. Once a token is saved for this deployment, the field completes from the datastacks that token can see.',
+      help: 'Datastack name exactly as CAVE lists it. Suggestions appear once a token for this deployment is saved.',
       default: '',
       /*
        * Free text with a list (`ComboField`) rather than the `enum` its neighbour above is, and the difference is the
@@ -370,7 +370,7 @@ const customCaveNode = packNode({
       id: 'version',
       kind: 'enum',
       label: 'Materialization',
-      help: 'Which materialization to query. Empty tracks the newest the datastack reports. These expire, so a pinned one eventually stops working; the card says so.',
+      help: 'Which materialization to query. Leave empty for the newest. A pinned one eventually expires and stops working.',
       default: '',
       /*
        * Filled from `peekMaterializations`, which is empty until the datastack has been named
@@ -402,7 +402,7 @@ const customCaveNode = packNode({
       kind: 'string',
       label: 'Neuron table',
       placeholder: '',
-      help: 'Any table with one row per neuron carrying a root id — a proofreading list, a nuclei table, an annotation table. Leave empty where the datastack has none.',
+      help: 'Any table with one row per neuron and a root id, e.g. a proofreading list or nuclei table. Leave empty if the datastack has none.',
       default: '',
     },
     {
@@ -464,7 +464,7 @@ const customCaveNode = packNode({
 
   validate: (ctx) => {
     const datastack = String(ctx.params.datastack).trim()
-    if (!datastack) return ['Name a datastack, e.g. flywire_fafb_public']
+    if (!datastack) return ['Name a datastack in `Datastack`, e.g. flywire_fafb_public.']
     const deployment = customCaveServer(ctx.params)
     /*
      * Checked before anything else on the card, because it makes everything else on the card
@@ -476,13 +476,13 @@ const customCaveNode = packNode({
      */
     if (shippedSpecFor(deployment, datastack)) {
       return [
-        `Coda ships a node for "${datastack}" — use that instead. This card's table and ` +
-          `column settings are ignored for a datastack that has a spec.`,
+        `Coda already has a node for "${datastack}", so use that instead. This card's table ` +
+          `and column settings are ignored for this datastack.`,
       ]
     }
     const version = String(ctx.params.version).trim()
     if (version && !Number.isInteger(Number(version))) {
-      return [`"${version}" is not a materialization number — CAVE numbers them, e.g. 783`]
+      return [`"${version}" is not a materialization number. CAVE numbers them, e.g. 783.`]
     }
     /*
      * A neuron table or a wired chain, but not neither: those are the only two things that can
@@ -492,8 +492,8 @@ const customCaveNode = packNode({
      */
     if (!String(ctx.params.neuronTable).trim() && !ctx.inputs.annotations) {
       return [
-        "Name a table listing this datastack's neurons (e.g. proofread_neurons), or wire " +
-          'an Annotations source to supply the list.',
+        "Set `Neuron table` to a table listing this datastack's neurons (e.g. " +
+          'proofread_neurons), or wire an Annotations source into `Annotations` to supply the list.',
       ]
     }
     /*
@@ -505,8 +505,8 @@ const customCaveNode = packNode({
     if (known && version && !known.includes(Number(version))) {
       return [
         known.length
-          ? `Materialization ${version} is not on ${datastack} — it offers ${known.slice(0, 8).join(', ')}${known.length > 8 ? ', \u2026' : ''}`
-          : `${datastack} reports no usable materializations`,
+          ? `Materialization ${version} is not available for ${datastack}. Available: ${known.slice(0, 8).join(', ')}${known.length > 8 ? ', \u2026' : ''}`
+          : `${datastack} has no usable materializations.`,
       ]
     }
     return [
@@ -521,7 +521,8 @@ const customCaveNode = packNode({
 
   evaluate: async (ctx) => {
     const datastack = String(ctx.params.datastack).trim()
-    if (!datastack) throw new Error('Name a datastack, e.g. flywire_fafb_public')
+    if (!datastack)
+      throw new Error('Name a datastack in `Datastack`, e.g. flywire_fafb_public.')
     const pinned = String(ctx.params.version).trim()
     /*
      * Resolved by *fetching* rather than by peeking. `evaluate` may await where inference may
@@ -536,9 +537,9 @@ const customCaveNode = packNode({
       : (await materializationsFor(datastack, { deployment, signal: ctx.signal }))[0]
     if (version === undefined || !Number.isInteger(version)) {
       throw new Error(
-        `${datastack} reports no usable materializations on ` +
-          `${caveServerLabel(deployment)}. Check the datastack name, the global server, ` +
-          `and that your token can see it.`,
+        `${datastack} has no usable materializations on ` +
+          `${caveServerLabel(deployment)}. Check the datastack name, the \`Global server\`, ` +
+          `and that your token has access to it.`,
       )
     }
     const datasetId = datasetIdFor(datastack, version)
@@ -620,9 +621,9 @@ function rootDriftIssues(sourceId: string, datasetId: string | undefined): strin
    * supervoxel column most people have never had a reason to look at.
    */
   return [
-    `${check.stale.toLocaleString()}${part} annotation ids are not current at this ` +
-      `materialization (e.g. ${some}), so those rows will not match a neuron. Use ` +
-      `"Update root IDs", or pin a matching materialization.`,
+    `${check.stale.toLocaleString()}${part} annotation ids are out of date at this ` +
+      `materialization (e.g. ${some}), so those rows will not match a neuron. Fix them with ` +
+      `the Update root IDs node, or pin a matching materialization.`,
   ]
 }
 
@@ -659,16 +660,6 @@ function customCaveTarget(params: Record<string, unknown>): CaveTarget | undefin
   return version !== undefined && Number.isInteger(version)
     ? { deployment, datastack, version }
     : undefined
-}
-
-/**
- * A stored choice the options do not list, kept as an option of its own so the select still
- * shows what the graph says — marked once the list is known, plain while it is not.
- */
-function keptChoice(chosen: string, listed: readonly string[] | undefined) {
-  return chosen && !listed?.includes(chosen)
-    ? [{ value: chosen, label: listed ? `${chosen} (not listed)` : chosen }]
-    : []
 }
 
 function registerCustomCaveSpec(params: Record<string, unknown>): void {
@@ -791,13 +782,12 @@ const customNeuprintNode = packNode({
   cardHeight: 327,
   // 20px wider than `DATASET_CARD_WIDTH`, for no recorded reason.
   cardWidth: 268,
-  description: 'Configure a neuPrint dataset by hand.',
+  description: 'Any neuPrint dataset, configured by hand.',
   guide:
-    'The escape hatch for a dataset Coda ships no preset for: a release newer than this build, a ' +
-    'private dataset, or a neuPrint instance somewhere else entirely. Type the server and the ' +
-    'dataset id exactly as that server names it, version included. Note that Server here means a ' +
-    'neuPrint deployment, not the Base URL override under Connections — the two are different ' +
-    'settings and naming one does not set the other.',
+    'Connects to a neuPrint dataset that has no node of its own: a release newer than this build, ' +
+    'a private dataset, or another neuPrint server. Type the server and the dataset id exactly as ' +
+    'the server names it, version included. Server is a neuPrint deployment and is a separate ' +
+    'setting from the Base URL override under Connections.',
   companion: DESCRIPTION_COMPANION,
   cost: 'cheap',
   outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
@@ -862,7 +852,7 @@ const customNeuprintNode = packNode({
     const registered = neuPrintSourceFor(server)
     const source = ctx.resolveSource(registered.id)
     const datasetId = String(ctx.params.dataset).trim()
-    if (!datasetId) throw new Error('No dataset named')
+    if (!datasetId) throw new Error('Name a dataset, e.g. hemibrain:v1.2.1')
 
     const datasets = await source.listDatasets(ctx.signal)
     const info = datasets.find((d) => d.id === datasetId)
@@ -919,12 +909,10 @@ const customCatmaidNode = packNode({
   cardHeight: 161,
   description: 'Any CATMAID project, configured by hand.',
   guide:
-    'The escape hatch for a CATMAID server Coda ships no node for — a lab instance, or a second ' +
-    'project on one it does know. Type the server URL and pick a project from the list the ' +
-    'server answers with; project ids are per-instance, so the list is the only way to know ' +
-    'which number is which volume. Reading a public instance needs no credential, but a server ' +
-    'behind a login or basic auth wants a row under Connections ▸ CATMAID before the list ' +
-    'appears — credentials there are per host, since two instances are two unrelated accounts.',
+    'Connects to a CATMAID project that has no node of its own, e.g. on a lab server. Type the ' +
+    'server URL and pick the project from the list the server returns (project ids differ ' +
+    'between servers). Public servers need no credentials; for one behind a login, add the host ' +
+    'under Connections ▸ CATMAID first.',
   companion: DESCRIPTION_COMPANION,
   cost: 'cheap',
   outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
@@ -944,7 +932,7 @@ const customCatmaidNode = packNode({
       id: 'project',
       kind: 'enum',
       label: 'Project',
-      help: 'Which project on this server. Ids are per-instance, so the list comes from the server rather than from a name you could type.',
+      help: 'Which project on this server. The list is read from the server.',
       default: '',
       /*
        * Three states, said apart, because a dropdown that is empty for two different reasons is a
@@ -1004,14 +992,15 @@ const customCatmaidNode = packNode({
   validate: (ctx) => {
     const source = catmaidSourceFor(String(ctx.params.server))
     const project = String(ctx.params.project).trim()
-    if (!project) return ['Pick a project — the list fills in once the server answers']
+    if (!project)
+      return ['Pick a project from `Project`. The list fills in once the server answers.']
     const projects = source.peekDatasets()
     // Undefined means the listing has not arrived, which is not a problem to report: the same
     // silence `versionsFor` keeps, and without it every card warns for the first second of a load.
     if (projects && !projects.some((entry) => entry.id === project)) {
       return [
         projects.length
-          ? `No project "${project}" on ${catmaidServerLabel(String(ctx.params.server ?? ''))} — it offers ${projects
+          ? `No project "${project}" on ${catmaidServerLabel(String(ctx.params.server ?? ''))}. Available: ${projects
               .map((entry) => `${entry.id} (${entry.label})`)
               .join(', ')}`
           : `${catmaidServerLabel(String(ctx.params.server ?? ''))} lists no projects`,
@@ -1024,7 +1013,7 @@ const customCatmaidNode = packNode({
     const registered = catmaidSourceFor(String(ctx.params.server))
     const source = ctx.resolveSource(registered.id)
     const project = String(ctx.params.project).trim()
-    if (!project) throw new Error('No project chosen')
+    if (!project) throw new Error('Pick a project from `Project`.')
 
     const projects = await source.listDatasets(ctx.signal)
     const info = projects.find((entry) => entry.id === project)

@@ -154,7 +154,7 @@ describe('settings', () => {
 
   it('carries help text where the definition has it', () => {
     const hops = byType.get('neuron.connectivity')!.params.find((p) => p.id === 'hops')!
-    expect(hops.help).toContain('1 is direct partners')
+    expect(hops.help).toContain('1 returns direct partners')
   })
 
   it('reports presentational params, since editing one stales nothing', () => {

@@ -25,6 +25,8 @@
  * curated context is worth having until you want to paste the link somewhere.
  */
 
+import type { SegmentPlacement } from '../source'
+import { isSegmentId } from '../../core/ids'
 import { uniqueName } from '../../core/types'
 
 /** A neuroglancer viewer state. Opaque apart from the handful of keys touched here. */
@@ -34,6 +36,25 @@ interface NgLayer {
   type?: string
   name?: string
   [key: string]: unknown
+}
+
+/**
+ * Neuroglancer `dimensions` from a nanometre-per-voxel triple, or undefined unless all three are
+ * finite and positive — a wrong scale silently misplaces everything, so none is guessed.
+ *
+ * Divided, not multiplied by 1e-9: `45 * 1e-9` is 4.5000000000000006e-8 in float64 and that
+ * artefact would be serialised into the URL verbatim. `45 / 1e9` is exactly 4.5e-8. Same for 50;
+ * 16, 4, 40 and 8 are unaffected either way, which is why it survived the first reading.
+ */
+export function nanometreDimensions(
+  nm: readonly unknown[],
+): Record<string, [number, string]> | undefined {
+  if (nm.length !== 3) return undefined
+  if (!nm.every((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0)) {
+    return undefined
+  }
+  const [x, y, z] = nm as [number, number, number]
+  return { x: [x / 1e9, 'm'], y: [y / 1e9, 'm'], z: [z / 1e9, 'm'] }
 }
 
 /**
@@ -74,6 +95,12 @@ export interface SceneOptions {
    * published context to be trimmed.
    */
   extraLayers?: ReadonlyArray<Readonly<Record<string, unknown>>> | undefined
+  /**
+   * Where the source puts each segment — `DataSource.placeSegments`, for a scene of several
+   * volumes; read for its `layer`. A segment without one, or naming a layer the scene does not
+   * have, goes to the target layer as every segment otherwise does.
+   */
+  placements?: ReadonlyMap<string, SegmentPlacement> | undefined
 }
 
 /**
@@ -138,18 +165,36 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
    */
   const segments = options.segments.map(String).filter(isSegmentId)
 
+  // The layer each segment goes in: its own where the source placed it, the target otherwise.
+  const indexByName = new Map<string, number>()
+  layers.forEach((layer, index) => {
+    if (layer.type === 'segmentation' && typeof layer.name === 'string') {
+      if (!indexByName.has(layer.name)) indexByName.set(layer.name, index)
+    }
+  })
+  const byLayer = new Map<number, string[]>()
+  for (const segment of segments) {
+    const named = options.placements?.get(segment)?.layer
+    const index = (named !== undefined ? indexByName.get(named) : undefined) ?? target
+    const list = byLayer.get(index)
+    if (list) list.push(segment)
+    else byLayer.set(index, [segment])
+  }
+  const colors = options.segmentColors
+
   const decorated = layers.map((layer, index) => {
-    if (index !== target) return layer
-    // The same rule over the keys, which `parseUint64` parses exactly as it parses `segments`.
-    const colors = pickSegmentColors(options.segmentColors)
+    if (index !== target && !byLayer.has(index)) return layer
+    const own = byLayer.get(index) ?? []
+    // Read only for segments that passed the grammar, so a colour keyed by an id neuroglancer could
+    // not parse never reaches a layer.
+    const ownColors =
+      colors && Object.fromEntries(own.flatMap((id) => (colors[id] ? [[id, colors[id]]] : [])))
     return {
       ...layer,
-      segments,
+      segments: own,
       // Explicitly cleared rather than left behind: manc publishes a `segmentColors` entry
       // for one body, which would otherwise survive as a stray colour nobody chose.
-      ...(colors && Object.keys(colors).length > 0
-        ? { segmentColors: colors }
-        : { segmentColors: {} }),
+      segmentColors: ownColors ?? {},
       ...(options.segmentDefaultColor
         ? { segmentDefaultColor: options.segmentDefaultColor }
         : {}),
@@ -158,7 +203,7 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
 
   const kept =
     options.layers === 'segmentation' && target >= 0
-      ? decorated.filter((_, index) => index === target)
+      ? decorated.filter((_, index) => index === target || byLayer.has(index))
       : decorated
 
   const scene: Record<string, unknown> = { ...base }
@@ -192,13 +237,41 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
   return scene
 }
 
-/** `segmentColors` with any key the viewer could not parse dropped. Undefined stays undefined. */
-function pickSegmentColors(
-  colors: Readonly<Record<string, string>> | undefined,
-): Readonly<Record<string, string>> | undefined {
-  if (!colors) return undefined
-  const entries = Object.entries(colors).filter(([id]) => isSegmentId(id))
-  return entries.length === Object.keys(colors).length ? colors : Object.fromEntries(entries)
+/**
+ * The scene with neuroglancer's layer bar — the strip of layer chips along the top — shown or
+ * hidden.
+ *
+ * Which one is a fact about the *surface*, not the scene: a compact one (a node card, the Neuron
+ * Profile tile) cannot spare the strip, the overlay can. Hence not a `buildScene` option — the scene
+ * is also the link ↗ and ⧉ hand out, and whoever opens that in a tab of its own has the room. So
+ * `NeuroglancerViewer` applies this to what it points the *frame* at and nothing else, and a kept
+ * frame moving between surfaces is flipped with `layerPanelPatch`.
+ *
+ * Shown means the key is *removed*, not set to true: a full navigation resets first, so absent is
+ * neuroglancer's own default, and an untouched scene comes back as itself. That matters for a state
+ * resumed from a card, which carries the card's `false`.
+ *
+ * `showLayerPanel` is the only entry `uiControlVisibility` has in the viewer state (the other
+ * `show*` controls are constructor options). Checked against the deployed bundles: the demo
+ * deployment and spelunker restore it as state; `ngl.flywire.ai` has the control only as a
+ * constructor option, so there the key is ignored and the bar stays. That is the whole of the
+ * degrade — an unknown top-level key is skipped, not refused.
+ */
+export function withLayerPanel(scene: NgScene, shown: boolean): NgScene {
+  const { uiControlVisibility: ui, ...rest } = scene
+  if (shown && ui === undefined) return scene
+  const others = ui && typeof ui === 'object' && !Array.isArray(ui) ? { ...ui } : {}
+  if (!shown) return { ...rest, uiControlVisibility: { ...others, showLayerPanel: false } }
+  delete (others as Record<string, unknown>)['showLayerPanel']
+  return Object.keys(others).length > 0 ? { ...rest, uiControlVisibility: others } : rest
+}
+
+/**
+ * The layer bar's setting as `#!+` patch content. Explicit either way, unlike `withLayerPanel`: a
+ * merge leaves an absent key alone, so omitting it would keep a card's hidden bar in the overlay.
+ */
+export function layerPanelPatch(shown: boolean): NgScene {
+  return { uiControlVisibility: { showLayerPanel: shown } }
 }
 
 /**
@@ -382,21 +455,73 @@ function sceneForViewer(scene: NgScene, kind: ViewerKind): NgScene {
   if (!Array.isArray(layers)) return scene
   return {
     ...scene,
-    layers: layers.map((layer) => {
-      const l = layer as NgLayer
-      // Only a graphene layer: `precomputed://` is prefixed by caveclient for the annotation and
-      // segment-property URLs CAVE serves itself, neither of which a scene built here carries,
-      // and the layer *type* is a fact about a chunked-graph source specifically.
-      if (typeof l.source !== 'string' || !l.source.startsWith(GRAPHENE)) return layer
-      return {
-        ...l,
-        source: grapheneFor(l.source, kind),
-        // Left alone unless it is already a segmentation under one of its two names — an image
-        // layer is not turned into one by having a source this recognises.
-        type: SEGMENTATION_TYPES.has(String(l.type)) ? GRAPHENE_LAYER_TYPE[kind] : l.type,
-      }
-    }),
+    layers: layers.map((layer) => layerForViewer(layer as NgLayer, kind)),
   }
+}
+
+/**
+ * One layer as this viewer needs it, in one pass: a graphene source's prefix and layer type, then
+ * the volume's bounding box off.
+ *
+ * **The graphene half** reads the source whichever spelling it arrives in — a scene re-sent from a
+ * link already carries `{ url, … }` — and settles a bare URL. Only a graphene layer:
+ * `precomputed://` is prefixed by caveclient for the annotation and segment-property URLs CAVE
+ * serves itself, neither of which a scene built here carries, and the layer *type* is a fact about
+ * a chunked-graph source specifically.
+ *
+ * **The bounds half** writes `bounds: false` explicitly on every source of an image or segmentation
+ * layer, not only where a state said `true`: a bare URL, or a `{ url }` with no subsources, gets
+ * neuroglancer's default subsources, and `bounds` is among them (measured: hemibrain's segmentation
+ * draws the box as a bare URL and does not with `bounds: false`). So a bare URL becomes
+ * `{ url, subsources: { bounds: false } }`, every other default left on. **Not for the Seung-lab
+ * fork**, whose older format is not known to take the object spelling — it gets the bare URL — and
+ * not for annotation or other layers, which have no such subsource.
+ */
+function layerForViewer(layer: NgLayer, kind: ViewerKind): NgLayer {
+  let out = layer
+  const url = Array.isArray(layer.source) ? undefined : layerSourceUrl(layer.source)
+  if (url?.startsWith(GRAPHENE)) {
+    out = {
+      ...layer,
+      // Settled to the bare URL; the bounds half below spells it as an object where it may.
+      source: grapheneFor(url, kind),
+      // Left alone unless it is already a segmentation under one of its two names — an image
+      // layer is not turned into one by having a source this recognises.
+      type: SEGMENTATION_TYPES.has(String(layer.type)) ? GRAPHENE_LAYER_TYPE[kind] : layer.type,
+    }
+  }
+  if (kind === 'seunglab' || !BOUNDED_TYPES.has(String(out.type)) || !('source' in out))
+    return out
+  return { ...out, source: boundsOff(out.source) }
+}
+
+/** The layer types whose sources carry a `bounds` subsource: a volume's. */
+const BOUNDED_TYPES: ReadonlySet<string> = new Set(['image', ...SEGMENTATION_TYPES])
+
+/**
+ * Every URL a layer source names, whichever spelling: a bare URL, `{ url, subsources }` (the form a
+ * link takes once the bounds are off), or a list of either. `nglayers.ts` reads published layers
+ * through it too.
+ */
+export function layerSourceUrls(source: unknown): string[] {
+  return (Array.isArray(source) ? source : [source]).flatMap((item) => {
+    const url = typeof item === 'string' ? item : (item as { url?: unknown } | null)?.url
+    return typeof url === 'string' && url ? [url] : []
+  })
+}
+
+/** The first URL a layer source names. */
+export function layerSourceUrl(source: unknown): string | undefined {
+  return layerSourceUrls(source)[0]
+}
+
+function boundsOff(source: unknown): unknown {
+  if (Array.isArray(source)) return source.map(boundsOff)
+  if (typeof source === 'string') return { url: source, subsources: { bounds: false } }
+  if (!source || typeof source !== 'object') return source
+  const given = (source as { subsources?: unknown }).subsources
+  const subsources = given && typeof given === 'object' ? given : {}
+  return { ...source, subsources: { ...subsources, bounds: false } }
 }
 
 export function sceneUrl(
@@ -455,6 +580,8 @@ export function scenePatchUrl(
   viewerBase: string | undefined,
   scene: NgScene,
   kind: ViewerKind = viewerKind(viewerBase),
+  /** Keys sent verbatim beside the owned ones — `layerPanelPatch`, riding along with a selection. */
+  extra?: NgScene,
 ): string {
   // Through the same rewrite as a full navigation: `layers` is the one key a patch carries, so
   // it carries the sources, and a merge sending the wrong prefix breaks the segmentation exactly
@@ -464,6 +591,11 @@ export function scenePatchUrl(
   for (const key of SCENE_PATCH_KEYS) {
     if (state[key] !== undefined) patch[key] = state[key]
   }
+  return patchUrl(viewerBase, { ...patch, ...extra })
+}
+
+/** A `#!+` merge URL carrying exactly `patch` — no key picking, no source rewrite. */
+export function patchUrl(viewerBase: string | undefined, patch: NgScene): string {
   return `${viewerRoot(viewerBase)}/#!+${encodeURIComponent(JSON.stringify(patch))}`
 }
 
@@ -504,34 +636,6 @@ const VIEWER_PROXIES: ReadonlyArray<{ origin: string; prefix: string }> = [
 export function proxiedViewer(viewerBase: string | undefined): string | undefined {
   const root = viewerRoot(viewerBase)
   return VIEWER_PROXIES.find((p) => p.origin === root)?.prefix
-}
-
-/**
- * Whether a string is a segment id **neuroglancer** will take.
- *
- * Its own grammar rather than `core/ids.ts`'s, and narrower: `parseUint64` matches
- * `^(?:0|[1-9][0-9]*)$`, so no sign and no leading zeros, where the transport grammar allows
- * both because a source may legitimately hand one back. Here beside the scene builders because
- * it is a fact about the scene format, and every scene this module produces has to satisfy it.
- *
- * It is worth a check rather than a hope because of what the failure costs. A segment id the
- * viewer cannot parse is not a dropped id: it is an exception out of
- * `SegmentationUserLayer.restoreState`, which deletes the layer *before* it was initialised —
- * and neuroglancer never disposes the hover subscription that layer registered while it was
- * being constructed. So one unparseable id leaves a listener that throws
- * `can't access property "generation" of undefined` on every mouse movement for the life of
- * the document, long after the scene that caused it is gone. `segmentColors` on a layer is
- * parsed by the same function, so its keys are the same rule.
- * See [docs/viewers.md](../../../docs/viewers.md).
- *
- * Exported because `out.neuroglancer` applies it a second time, before `buildScene` does, for
- * the one thing this layer cannot do: **count** what it drops and say so. That is the division —
- * `buildScene` guarantees the property, the node explains it.
- */
-const SEGMENT_ID_GRAMMAR = /^(?:0|[1-9][0-9]*)$/
-
-export function isSegmentId(text: string): boolean {
-  return SEGMENT_ID_GRAMMAR.test(text)
 }
 
 /** Layer keys that carry a selection. Copied as a set, so a mode change cannot leave a stray. */

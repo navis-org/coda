@@ -315,7 +315,7 @@ A card's accent is its backend, and the four tokens are `theme.css`' own
 onto `--cat` in `datasetguide.css` because `theme.css` gives `[data-backend]` only `--cat-head`
 and `--cat-ink`, which is what a node *card* reads. Strengths and caveats are told apart by their
 heading and by a `+` / `−` marker, never by a red/green pair: that would be the page's only new
-hue and would fail the same colourblind gate `src/ui/colors.ts` records.
+hue and would fail the same colourblind gate `src/style/colors.ts` records.
 
 ### What is still open
 

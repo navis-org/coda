@@ -8,29 +8,29 @@
  * drawing available without a GPU, exactly as `networkDraw.test.ts` is for the network.
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { CHART_INK } from '../colors'
+import { CHART_INK } from '../../style/colors'
 import { markPath, scatterToSvg } from './scatterDraw'
-import type { MarkerShape } from '../encoding'
-import { MARKER_SHAPES, OTHER_SHAPE } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
+import { MARKER_SHAPES, OTHER_SHAPE } from '../../style/encoding'
 import type { ScatterSpec } from './scatterPlot'
-import { buildScatter } from './scatterPlot'
+import type { MarksOptions } from './scatterPlot'
+import { CIRCLES_MAX, buildMarks, buildScatter } from './scatterPlot'
+import { installJsdomStubs } from '../../test/jsdomStubs'
 
 const PLOT = { x: 40, y: 10, width: 240, height: 160 }
 const INK = CHART_INK.dark
 
-function spec(options: Partial<Parameters<typeof buildScatter>[0]> = {}): ScatterSpec {
+function spec(options: Partial<MarksOptions> = {}): ScatterSpec {
   const xs = Array.from({ length: 40 }, (_, i) => i)
   const ys = xs.map((x) => x * 2)
-  return buildScatter({
+  const marks = buildMarks({
     xValues: xs,
     yValues: ys,
     length: xs.length,
     xScale: 'linear',
     yScale: 'linear',
-    plot: PLOT,
-    trendColor: '#ffffff',
     style: {
       colorAt: (row) => (row % 2 === 0 ? '#3987e5' : '#d95926'),
       radiusAt: () => 3,
@@ -38,6 +38,7 @@ function spec(options: Partial<Parameters<typeof buildScatter>[0]> = {}): Scatte
     },
     ...options,
   })
+  return buildScatter({ marks, plot: PLOT, trendColor: '#ffffff' })
 }
 
 function svg(overrides: Partial<Parameters<typeof scatterToSvg>[0]> = {}) {
@@ -168,5 +169,90 @@ describe('the SVG export', () => {
     expect(svg({ title: 'post against pre' }).querySelector('title')?.textContent).toBe(
       'post against pre',
     )
+  })
+})
+
+describe('the SVG export past CIRCLES_MAX', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  /** A grid one mark wider than the threshold, all of it in view. */
+  function crowded(): ScatterSpec {
+    const n = CIRCLES_MAX + 1
+    const side = Math.ceil(Math.sqrt(n))
+    const xs = Array.from({ length: n }, (_, i) => i % side)
+    const ys = Array.from({ length: n }, (_, i) => Math.floor(i / side))
+    return spec({ xValues: xs, yValues: ys, length: n })
+  }
+
+  function encodable() {
+    installJsdomStubs()
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/png;base64,AA',
+    )
+  }
+
+  it('embeds the marks as one image and keeps the rest vector', () => {
+    encodable()
+    const element = svg({ spec: crowded() })
+    const marks = element.querySelector('g[clip-path]')!
+    const image = marks.querySelector('image')!
+    expect(image.getAttribute('href')).toBe('data:image/png;base64,AA')
+    expect(image.getAttributeNS('http://www.w3.org/1999/xlink', 'href')).toBe(
+      'data:image/png;base64,AA',
+    )
+    expect(marks.querySelectorAll('path')).toHaveLength(0)
+    // Axes and labels are still text, not pixels.
+    expect(element.querySelectorAll('text').length).toBeGreaterThan(4)
+  })
+
+  it('writes every mark as a shape when Vector marks is ticked', () => {
+    encodable()
+    const marks = svg({ spec: crowded(), vectorMarks: true }).querySelector('g[clip-path]')!
+    expect(marks.querySelector('image')).toBeNull()
+    expect(marks.querySelectorAll('path').length).toBeGreaterThan(0)
+  })
+
+  it('falls back to vector marks where no PNG can be encoded, rather than to none', () => {
+    installJsdomStubs()
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:,')
+    const marks = svg({ spec: crowded() }).querySelector('g[clip-path]')!
+    expect(marks.querySelector('image')).toBeNull()
+    expect(marks.querySelectorAll('path').length).toBeGreaterThan(0)
+  })
+})
+
+describe('point labels in the export', () => {
+  it('writes each label as haloed text, with its leader line under them, as on screen', () => {
+    const labels = [
+      {
+        index: 0,
+        text: 'LC4',
+        x: 60,
+        y: 40,
+        width: 20,
+        height: 13,
+        line: [50, 46, 60, 46] as const,
+      },
+      { index: 1, text: 'LC6', x: 90, y: 40, width: 20, height: 13, dim: true },
+    ]
+    const root = svg({ labels })
+    const texts = [...root.querySelectorAll('text')].filter((t) =>
+      /^LC/.test(t.textContent ?? ''),
+    )
+    expect(texts.map((t) => t.textContent)).toEqual(['LC4', 'LC6'])
+    // The halo is the background, so a label over a grid line or a mark still reads.
+    expect(texts[0]!.getAttribute('stroke')).toBe('#1a1a19')
+    expect(texts[1]!.getAttribute('opacity')).toBe('0.3')
+    const lines = [...root.querySelectorAll('path')].filter(
+      (p) => p.getAttribute('d') === 'M50,46L60,46',
+    )
+    expect(lines).toHaveLength(1)
+  })
+
+  it('writes none when the frame placed none', () => {
+    const root = svg()
+    expect(
+      [...root.querySelectorAll('text')].some((t) => /^LC/.test(t.textContent ?? '')),
+    ).toBe(false)
   })
 })

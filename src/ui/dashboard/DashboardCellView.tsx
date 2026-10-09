@@ -26,10 +26,10 @@
  * on every other surface in the app, and getting them confused here costs somebody a subtree.
  */
 
-import { memo, useCallback, useRef, useState } from 'react'
+import { memo, useCallback, useRef } from 'react'
 
 import type { DashboardCell } from '../../core/dashboard'
-import { DEFAULT_ROW_SPAN, ROW_TRACKS } from '../../core/dashboard'
+import { DEFAULT_ROW_SPAN, ROW_TRACKS, dashboardOf, pageNoun } from '../../core/dashboard'
 import { useGraphStore } from '../../store/graphStore'
 import { ViewerSurface } from '../panels/ViewerSurface'
 import { spanFromDrag } from './gridGeometry'
@@ -82,11 +82,16 @@ function DashboardCellViewInner({
   const expandNode = useGraphStore((s) => s.expandNode)
   const removeFromDashboard = useGraphStore((s) => s.removeFromDashboard)
   const setDashboardSpan = useGraphStore((s) => s.setDashboardSpan)
+  const setDashboardRail = useGraphStore((s) => s.setDashboardRail)
+  // A string from a two-value union — a primitive, invariant 7. The ✕ removes the cell from the
+  // page on screen, which is not "the dashboard" once a node can sit on several.
+  const where = useGraphStore((s) => pageNoun(dashboardOf(s.graph)))
   // A primitive — invariant 7. The cell stands down while the overlay draws this same node,
   // which is `showPreview`'s rule reaching its third surface rather than a new one.
   const expanded = useGraphStore((s) => s.expandedNodeId === nodeId)
 
-  const [railOpen, setRailOpen] = useState(false)
+  // The cell's own, in the document — so it is still open after the grid has been away.
+  const railOpen = cell.rail === true
   const frameRef = useRef<HTMLElement>(null)
   const resizeRef = useRef<ResizeDrag | undefined>(undefined)
 
@@ -206,7 +211,7 @@ function DashboardCellViewInner({
                   type="button"
                   className="btn btn--ghost"
                   aria-pressed={railOpen}
-                  onClick={() => setRailOpen((open) => !open)}
+                  onClick={() => setDashboardRail(nodeId, !railOpen)}
                   title={railOpen ? 'Hide the display settings' : 'Display settings'}
                   aria-label="Display settings"
                 >
@@ -225,7 +230,7 @@ function DashboardCellViewInner({
                   type="button"
                   className="btn btn--ghost"
                   onClick={() => expandNode(nodeId)}
-                  title="Open full size — every setting, including the style panel"
+                  title="Open full size, with every setting and the style panel"
                   aria-label="Expand"
                 >
                   ⤢
@@ -234,8 +239,8 @@ function DashboardCellViewInner({
                   type="button"
                   className="btn btn--ghost"
                   onClick={() => removeFromDashboard([nodeId])}
-                  title="Take this off the dashboard — the node stays on the canvas"
-                  aria-label="Remove from dashboard"
+                  title={`Remove from ${where}. The node stays on the canvas`}
+                  aria-label={`Remove from ${where}`}
                 >
                   ✕
                 </button>

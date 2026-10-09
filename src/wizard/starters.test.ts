@@ -305,7 +305,7 @@ describe('the FlyWire starter', () => {
      * Pinned exactly, so a second issue fails this rather than hiding behind the first.
      */
     const graph = buildStarter(spec)
-    expect(issuesIn(graph)).toEqual(['explore: warning: Column "join_tag" is gone'])
+    expect(issuesIn(graph)).toEqual(['explore: warning: Column "join_tag" is missing.'])
     expect(inferGraph(graph).ok).toBe(true)
   })
 

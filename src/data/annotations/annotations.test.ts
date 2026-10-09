@@ -155,7 +155,7 @@ describe('reading a SeaTable deployment', () => {
     installFetch()
     resetSeaTableCredentials()
     const seen: string[] = []
-    const stop = subscribeAuthFailure((m) => seen.push(m))
+    const stop = subscribeAuthFailure((m) => seen.push(m.message))
 
     await expect(listBases(HOST)).rejects.toThrow(/No token for/)
     expect(seen[0]).toMatch(/Add one in Connections/)
@@ -172,7 +172,9 @@ describe('reading a SeaTable deployment', () => {
     )
     // `Permission denied` is what a *base* API token gets from the account listing, and taken at
     // face value it reads as an expired credential. Four probes went that way.
-    await expect(listBases(HOST)).rejects.toThrow(/it may be a \*base\* API token/)
+    await expect(listBases(HOST)).rejects.toThrow(
+      /it may be a base API token\. Coda needs an account token/,
+    )
   })
 })
 

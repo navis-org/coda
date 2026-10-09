@@ -816,11 +816,18 @@ function grow(
  * nothing re-registers, which is what `core/ports.ts` memoises on one layer down.
  */
 const producers = once((): NodeDefinition[] => {
-  const order: NodeDefinition['category'][] = ['query', 'transform', 'analysis']
+  /*
+   * `utility` last, and only a node needing no input — which is a source somebody configures, like
+   * Link Table: the one producer of a `tableFile`, so Read Rows had no demo without it. Last,
+   * so it is reached only for a kind nothing else makes, and no demo that already had a producer
+   * changes; its card then asks for its file, which is what the demo is showing.
+   */
+  const order: NodeDefinition['category'][] = ['query', 'transform', 'analysis', 'utility']
   const needed = (def: NodeDefinition): number =>
     defaultInputPorts(def).filter((port) => port.required !== false).length
   return listableNodeDefs()
     .filter((def) => order.includes(def.category))
+    .filter((def) => def.category !== 'utility' || needed(def) === 0)
     .sort(
       (a, b) => order.indexOf(a.category) - order.indexOf(b.category) || needed(b) - needed(a),
     )

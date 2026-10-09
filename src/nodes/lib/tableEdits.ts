@@ -307,8 +307,8 @@ function resolveWhere(schema: TableSchema | undefined, where: string): ResolvedW
       // column rather than against all of them.
       problems.push(
         term.kind === 'regex'
-          ? `"/${term.value}" would match any column — write it as column~${term.value}`
-          : `"${term.value}" would match any column — write it as column==value`,
+          ? `"/${term.value}" would match any column. Name one, as column~${term.value}`
+          : `"${term.value}" would match any column. Name one, as column==value`,
       )
       continue
     }
@@ -426,7 +426,7 @@ export function editPlan(
       return
     }
     if (text === undefined) {
-      issues.push(`Edit ${index + 1}: no value for "${setter.column}" — use "" to clear it`)
+      issues.push(`Edit ${index + 1}: no value for "${setter.column}". To clear it, use ""`)
       return
     }
     // Resolved once and carried, not looked up again below: `resolveColumn` matches
@@ -653,7 +653,7 @@ export function editTable(
 export function disabledEditNote(target: EditTarget): string {
   return (
     `Edit ${target.index + 1} (${target.setter.where.trim() || 'all rows'} → ${target.column}) ` +
-    `changes nothing in Coda: ${target.problems.join('; ')}. It is left out here too rather ` +
-    'than translated into a rule that edits more rows.'
+    `changes nothing in Coda: ${target.problems.join('; ')}. It is left out here too, so ` +
+    'that the exported rule does not edit more rows.'
   )
 }

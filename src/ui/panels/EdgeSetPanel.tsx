@@ -31,7 +31,7 @@ import type { EdgeSourcePreview } from '../../data/edges/importer'
 import { importEdges, previewEdgeSource } from '../../data/edges/importer'
 import type { EdgeColumnChoice } from '../../data/edges/read'
 import { useGraphStore } from '../../store/graphStore'
-import { formatBytes, formatNumber } from '../format'
+import { formatBytes, formatNumber } from '../../style/format'
 import { Modal, ModalHeader } from '../Modal'
 
 /** What the panel is doing. Anything but `idle` owns the lower half of the dialog. */
@@ -155,10 +155,10 @@ function Dialog({ nodeId }: { nodeId: string }) {
       <ModalHeader onClose={dismiss}>Edge data</ModalHeader>
 
       <p className="sources__privacy">
-        An edge set replaces every connectivity answer for {title} — Connectivity, Adjacency,
-        Paths and Neuron Profile all read it. It is kept in this browser and never travels in a
-        saved graph; what travels is its name and a content id, so the same file opened
-        elsewhere matches.
+        An edge set replaces all connectivity data for {title}: Connectivity, Adjacency, Paths
+        and Neuron Profile all read from it instead. The edges are kept in this browser and are
+        never included in a saved graph. The graph stores only the set’s name and a content id,
+        so another browser that has imported the same file picks it up.
       </p>
 
       {error && (
@@ -222,7 +222,7 @@ function Shelf({
               checked={attachedId === ''}
               onChange={() => onAttach(undefined)}
             />
-            <span className="edges__name">None — use this dataset’s own connectivity</span>
+            <span className="edges__name">None (use this dataset’s own connectivity)</span>
           </label>
         </li>
         {sets === undefined && <li className="sources__note">Looking…</li>}
@@ -289,8 +289,8 @@ function Shelf({
       </ul>
       {sets?.length === 0 && (
         <p className="sources__note sources__note--tight">
-          Nothing imported yet. An edge list is a table of two neuron ids and a weight — CSV,
-          TSV, Parquet or Feather.
+          Nothing imported yet. An edge list is a table with two neuron id columns and an
+          optional weight column, as CSV, TSV, Parquet or Feather.
         </p>
       )}
     </section>
@@ -459,7 +459,7 @@ function Mapping({
         >
           {/* An unweighted edge list is an ordinary shape, so "none" is an answer rather than a
               missing selection — every edge then weighs 1. */}
-          <option value="">none — every edge weighs 1</option>
+          <option value="">none (every edge weighs 1)</option>
           {options}
         </select>
       </label>

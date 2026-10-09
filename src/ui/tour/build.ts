@@ -125,13 +125,13 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
       'This guide will teach you how to build a simple analysis pipeline in Coda: find a set of ' +
       'neurons, pull everything they connect to, and add up the synapses per partner type. ' +
       'We will use demo data to illustrate the process, so you do not need an account. Just replace the ' +
-      'demo dataset node with an actual dataset to see real data.',
+      'demo dataset node with a real dataset to see real data.',
   },
   {
     id: 'blank',
     title: 'Starting from a blank canvas',
     body:
-      'Our graph starts with a dataset — the node that defines where the data comes from ' +
+      'Our graph starts with a dataset - the node that defines where the data comes from. ' +
       'Everything else hangs off it.',
     before: () => {
       const store = useGraphStore.getState()
@@ -145,10 +145,9 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'dataset',
     title: 'The dataset node',
     body:
-      'Demo Data is synthetic and generated right here in your browser, so this tour ' +
-      'needs no token and no network — and so the numbers it produces are a demonstration rather ' +
-      'than a result. Swap it for Hemibrain, FlyWire or MANC later: every node downstream of it ' +
-      'stays exactly the same, and then the answers mean something.',
+      'Demo Data is synthetic and generated right here in your browser, so you need neither a ' +
+      'token nor a network connection. The flip side is that its numbers are made up. Later you ' +
+      'can swap it for Hemibrain, FlyWire or MANC, and every node downstream stays exactly the same.',
     before: () => {
       b.ensure(DATASET)
       b.reveal(DATASET)
@@ -177,8 +176,8 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'open-menu',
     title: 'Your turn: open the add menu',
     body:
-      'Press the **+** button in the corner. It fans out into the node categories. (If you ' +
-      'would rather watch, Next does it for you.)',
+      'Press the + button in the corner. It fans out into the node categories. (If you ' +
+      'would rather watch, press Next and the tour does it for you.)',
     // The stack, so the **+** and the rail it unfolds are both inside the live subtree.
     anchor: () => byTour('add'),
     // `top`: the anchor is at the bottom of the canvas.
@@ -189,11 +188,10 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
   },
   {
     id: 'pick-category',
-    title: 'Your turn: choose Queries',
+    title: 'Your turn: choose Query',
     body:
-      'Each circle is a category. Pick **Queries** — the magnifier — and its nodes appear along ' +
-      'the bottom. The bottom button opens the full browser instead, which is also what `Tab` ' +
-      'does.',
+      'Each circle is a category. Pick Query (the magnifying glass) and its nodes appear along ' +
+      'the bottom. The bottom button (or Tab) opens the full node browser instead.',
     before: () => useGraphStore.getState().setAddMenu(true),
     anchor: () => document.querySelector('.fab-menu__rail'),
     side: 'left',
@@ -205,8 +203,8 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'pick-find',
     title: 'Your turn: add Find Neurons',
     body:
-      'Pick **Find Neurons**. It is the node that turns a search into a set of neurons — nearly ' +
-      'every pipeline starts with one.',
+      'Pick Find Neurons. It turns a search into a set of neurons, and most pipelines start ' +
+      'with one.',
     before: () => useGraphStore.getState().setAddMenu(true, 'query'),
     anchor: () => bandFor('query'),
     after: () => useGraphStore.getState().setAddMenu(false),
@@ -219,9 +217,9 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'auto-wire',
     title: 'It wired itself',
     body:
-      'Notice the wire: a node with a Dataset socket gets fed automatically when there is ' +
-      'exactly one dataset on the canvas — Coda does the obvious connection so you do not have ' +
-      'to. Everything else you drag socket to socket.',
+      'Notice the wire: if there is exactly one dataset on the canvas, a new node with a Dataset ' +
+      'input is connected to it automatically. Everything else you wire yourself by dragging ' +
+      'from socket to socket.',
     before: () => {
       b.ensure(FIND)
       b.wire(DATASET, 'dataset', FIND, 'dataset')
@@ -237,9 +235,9 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'search',
     title: 'Define search criteria',
     body:
-      'I have set two filters: `type` matching `LC.*`, and `status` = Traced. The pattern is a ' +
-      'regex, anchored the way neuPrint anchors it — `LC.*` matches LC4 and LC6 but *not* ' +
-      'LPLC1. What fields are available depends on the dataset.',
+      'I have set two filters: type matching LC.* and status = Traced. The pattern is a ' +
+      'regex that has to match the whole name (the way neuPrint does it), so LC.* matches LC4 ' +
+      'and LC6 but not LPLC1. Which fields are available depends on the dataset.',
     before: () => {
       b.setParams(FIND)
       b.reveal(FIND)
@@ -253,7 +251,8 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     title: 'Who do they talk to?',
     body:
       'Connectivity takes those neurons and returns one row per connected pair, ' +
-      'downstream by default. Look at its sockets: it takes *two* inputs, and both got wired.',
+      'downstream by default. Look at its sockets: it takes two inputs, the dataset and the ' +
+      'neurons, and both have been wired.',
     before: () => {
       b.ensure(CONNECTIVITY)
       b.wire(DATASET, 'dataset', CONNECTIVITY, 'dataset')
@@ -269,9 +268,9 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'run-first',
     title: 'Your turn: press Run',
     body:
-      'Nothing has been fetched yet — a node holds a recipe until you ask. Press `Run` and ' +
-      'watch the badges go green. (Only the two query nodes will run; the dataset node has ' +
-      'nothing to fetch until somebody asks it something.)',
+      'Nothing has been fetched yet: nodes only fetch data when you ask them to. Press Run and ' +
+      'watch the badges turn green. Only the two query nodes will run; the dataset node itself ' +
+      'has nothing to fetch.',
     anchor: () => byTour('run'),
     side: 'bottom',
     align: 'end',
@@ -282,7 +281,7 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'too-much',
     title: 'That is a lot of rows',
     body:
-      'Note the footer of the node: 278 rows - each representing a neuron-to-neuron connection. ' +
+      'Note the footer of the node: 278 rows, each representing a neuron-to-neuron connection. ' +
       'Did you spot the download (⤓) button? It lets you save the table to disk if you want.',
     before: () => {
       runIfStale()
@@ -297,9 +296,9 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     title: 'Look at what came out',
     body:
       'A Table, so you can actually read the rows: one per connected pair, including columns with ' +
-      'the partner type and the synapse count. Viewer node such as this one pass their input straight ' +
+      'the partner type and the synapse count. Viewer nodes such as this one pass their input straight ' +
       'through, so they can sit in the middle of a chain. Note that this Table also allows you to sort ' +
-      'and apply filters. Like many other nodes, double clicking the body expands it.',
+      'and apply filters. Like many other nodes, it expands when you double-click its body.',
     before: () => {
       b.ensure(TABLE)
       b.wire(CONNECTIVITY, 'connections', TABLE, 'in')
@@ -313,8 +312,9 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'group',
     title: 'Sum by partner type',
     body:
-      'Group By collapses every row onto its partner type and adds up the weight. This gives ' +
-      'us the type-to-type connectivity which is usually more manageable.',
+      'Group By collapses all rows with the same partner type into one and adds up their ' +
+      'weights. This gives us the number of synapses onto each partner type, which is usually ' +
+      'more manageable than individual neurons.',
     before: () => {
       b.ensure(GROUP)
       b.wire(TABLE, 'out', GROUP, 'in')
@@ -327,10 +327,10 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
   },
   {
     id: 'chart',
-    title: 'Look at it',
+    title: 'Plot it',
     body:
-      'A Bar Chart, plotting the summed weight against the partner type — the same numbers the ' +
-      'Group By produced, in the shape you can read at a glance.',
+      'A Bar Chart showing the summed weight for each partner type. These are the same numbers ' +
+      'Group By produced, just easier to read.',
     before: () => {
       b.ensure(CHART)
       b.wire(GROUP, 'out', CHART, 'in')
@@ -354,23 +354,24 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
      * where the reader has just watched it happen to them.
      */
     id: 'cheap',
-    title: 'Notice what you did not have to do',
+    title: 'Cheap and expensive nodes',
     body:
-      'You never pressed Run for those last three, and the button has gone quiet — everything ' +
-      'is already up to date. Table, Group By and Bar Chart are *cheap* nodes: pure table ' +
-      'work, no server, so Coda re-runs them for you on every edit. Find Neurons and ' +
-      'Connectivity are *expensive* — they query a backend, so they wait until you ask.',
+      'You never pressed Run for the last three nodes, yet everything is already up to date. ' +
+      'Table, Group By and Bar Chart are cheap nodes: they only work on tables that are already ' +
+      'loaded, so Coda re-runs them for you on every edit. Find Neurons and Connectivity are ' +
+      'expensive: they query a server, so they wait until you press Run.',
     anchor: () => byTour('run'),
     side: 'bottom',
     align: 'end',
   },
   {
     id: 'done',
-    title: 'That is a pipeline',
+    title: "That's it!",
     body:
-      'Double-click the chart to open it full size. From here: swap the dataset node for a real ' +
-      'one, press Share to send the graph to somebody, or Save ▸ Notebook to get the same ' +
-      'analysis as Python. The Node Guide in the `?` menu documents every node there is.',
+      'Double-click the chart to open it full size. From here you can swap the dataset node for ' +
+      'a real one, press Share to send the workflow to someone, or use Save ▸ Export as Jupyter ' +
+      'Notebook to get the same analysis in Python. The Node Guide (under ? ▸ Documentation) ' +
+      'documents every node.',
     before: () => {
       runIfStale()
       useGraphStore.getState().setSelection([])
@@ -415,8 +416,8 @@ export const BUILD_SPEC: TourSpec = {
     if (store.autoRun) {
       store.setAutoRun(false)
       notes.push(
-        'I have also switched Auto-run off, so that Run has something to do when we get to it ' +
-          '— it goes back on at the end.',
+        'I have also switched Auto-run off so that Run has something to do when we get to it. ' +
+          'It goes back on at the end.',
       )
     }
     return notes.length ? ` ${notes.join(' ')}` : ''

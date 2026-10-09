@@ -68,7 +68,7 @@ import {
 } from '../../layout/collapse'
 import { useAnyNodeState, useGraphStore, useNodeStateCount } from '../../store/graphStore'
 import { union } from '../../layout/place'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import { useGroupDrag } from '../groupDrag'
 import { NodeRunRing } from './NodeRunRing'
 import { STATE_GLYPH } from './runState'

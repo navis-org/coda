@@ -13,6 +13,13 @@
 
 export const CHANNEL_URL = 'https://www.youtube.com/@coda-science'
 
+/**
+ * The "Coda Tutorials" playlist. A video opened *in* it — on YouTube or in the embedded player —
+ * carries on into the next tutorial, which is the point: the introduction is the first of a
+ * series, and a link to it alone leaves somebody at the end of it with nowhere obvious to go.
+ */
+export const PLAYLIST_ID = 'PLV8BfQPvTPmc'
+
 export interface Video {
   /** YouTube's id, the part after `youtu.be/`. */
   id: string
@@ -21,6 +28,8 @@ export interface Video {
   duration: string
   /** A local still, under `public/`. */
   poster: string
+  /** The playlist it is watched in, so the next tutorial follows it. */
+  playlist?: string
 }
 
 export const FIRST_WORKFLOW: Video = {
@@ -28,11 +37,13 @@ export const FIRST_WORKFLOW: Video = {
   title: 'Your first workflow',
   duration: '2:22',
   poster: `${import.meta.env.BASE_URL}video/first-workflow.jpg`,
+  playlist: PLAYLIST_ID,
 }
 
-/** The video's page on YouTube, for a link that leaves the app. */
+/** The video's page on YouTube, in its playlist when it has one, for a link that leaves the app. */
 export function watchUrl(video: Video): string {
-  return `https://youtu.be/${video.id}`
+  const list = video.playlist ? `&list=${video.playlist}` : ''
+  return `https://www.youtube.com/watch?v=${video.id}${list}`
 }
 
 /**
@@ -42,5 +53,6 @@ export function watchUrl(video: Video): string {
  * question already answered; `rel=0` keeps the end screen to this channel's own videos.
  */
 export function embedUrl(video: Video): string {
-  return `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=1&rel=0`
+  const list = video.playlist ? `&list=${video.playlist}` : ''
+  return `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=1&rel=0${list}`
 }

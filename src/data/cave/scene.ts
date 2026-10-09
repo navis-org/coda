@@ -18,6 +18,7 @@
  */
 
 import type { NgScene } from '../neuroglancer/scene'
+import { nanometreDimensions } from '../neuroglancer/scene'
 import type { DatastackInfo } from './api'
 
 /**
@@ -42,15 +43,11 @@ function imageSource(raw: string): string {
  * would silently misplace everything.
  */
 function dimensionsOf(info: DatastackInfo): Record<string, [number, string]> | undefined {
-  const nm = [info.viewer_resolution_x, info.viewer_resolution_y, info.viewer_resolution_z]
-  if (!nm.every((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0)) {
-    return undefined
-  }
-  const [x, y, z] = nm as [number, number, number]
-  // Divided, not multiplied by 1e-9: `45 * 1e-9` is 4.5000000000000006e-8 in float64 and that
-  // artefact would be serialised into the URL verbatim. `45 / 1e9` is exactly 4.5e-8. Same for
-  // 50; 16, 4, 40 and 8 are unaffected either way, which is why it survived the first reading.
-  return { x: [x / 1e9, 'm'], y: [y / 1e9, 'm'], z: [z / 1e9, 'm'] }
+  return nanometreDimensions([
+    info.viewer_resolution_x,
+    info.viewer_resolution_y,
+    info.viewer_resolution_z,
+  ])
 }
 
 /**

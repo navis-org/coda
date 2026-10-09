@@ -112,6 +112,195 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: '2026-10-07',
+    title: 'A neuron, drawn flat',
+    summary:
+      'The new Neuron Dendrogram node lays one neuron out flat with its synapses on it. Click a branch to list the inputs and outputs beyond it, at geodesic or electrotonic distance.',
+    highlight: true,
+    features: [
+      {
+        kind: 'chart',
+        date: '2026-10-07',
+        title: 'Neuron Dendrogram',
+        body:
+          '**Neuron Dendrogram** draws one neuron’s arbour flat, with every synapse marked as a tick on its branch: inputs on one side, outputs on the other. Wire in a dataset and a table of neurons, and page through them on the card. It fetches each neuron’s skeleton and synapses itself, so nothing needs to run to see the drawing.\n\n' +
+          'Four layouts, after navis’s `plot_flat`: a dendrogram with distance from the root along one axis, a radial version of it, navis’s subway layout, and an unrooted layout that keeps every branch at its true length. **Distance** switches between cable length and electrotonic distance, computed from the skeleton’s radii; where a dataset has no radii, the card says so and stays on cable length. **Colour branches by** shades the arbour by Strahler order, synapse flow centrality or distance to the root.\n\n' +
+          'Click anywhere on the arbour and the **Distal** tab lists the inputs and outputs beyond that point by partner type, with the nearest, median and farthest distance for each. The **Partners** tab lights the synapses of the partners you pick, and **Run** puts the synapses beyond the clicked point on the node’s **Points** output, ready for a 3D View.',
+        demo: 'out.neuronDendrogram',
+        // A real neuron, hemibrain's DA1_lPN, on the Unrooted layout and taken by hand with a
+        // neuPrint token: no `capture`, because `pnpm changelog:shots` runs demos on the synthetic
+        // dataset, whose neurons are a couple of dozen branches with one synapse per connection.
+        image: {
+          file: 'neuron-dendrogram.webp',
+          alt: 'Hemibrain neuron DA1_lPN drawn flat on the Unrooted layout: its antennal-lobe dendrite dense with inputs, a long axon, and its outputs in the lateral horn and calyx, beside the card’s list of input partners led by ORN_DA1.',
+        },
+      },
+    ],
+    items: [
+      {
+        kind: 'node',
+        date: '2026-10-07',
+        title: '**Update root IDs** can bring IDs up to the live segmentation.',
+        body: 'Set **Update to** to `live` to get the newest root IDs rather than those at a materialization, or to `the last half hour` or `the last full hour` to match a table refreshed on that schedule, such as FlyTable’s. The card shows how old the IDs are; click that to update again. Live IDs will not all match a Dataset pinned to a materialization, so use them for Neuroglancer, meshes, skeletons or exports.',
+      },
+    ],
+  },
+  {
+    date: '2026-10-04',
+    title: 'A cell typing pack, and a scatter plot to explore embeddings',
+    summary:
+      'A new Cell typing/annotation tools pack: open a BigClust project, explore it in a Scatter Plot that now names, searches and re-embeds its points, and write the cell types you settle on back to FlyTable or Clio.',
+    highlight: true,
+    features: [
+      {
+        kind: 'node',
+        date: '2026-10-04',
+        title: 'A pack for cell typing and annotation',
+        body:
+          'The new **Cell typing/annotation tools** pack brings two nodes for typing neurons: one to explore a co-clustering, one to record what you decide. It is off by default: switch it on under **Plugins**.\n\n' +
+          '**BigClust Project** reads a [BigClust](https://github.com/schlegelp/BigClust2) project, from a URL or a folder on your disk: its neurons, the coordinates of one embedding, that embedding’s k-nearest-neighbour graph and its feature vectors, each as a table. Pick the embedding in the card; for several side by side, use a node each and **Join** them on `neuronId`. Its **Scene** output is the project’s own neuroglancer scene: wire it into a **Neuroglancer** node with a selection, and the selected neurons are drawn in their own volumes and colours. To try it, paste `https://flyem.mrc-lmb.cam.ac.uk/flyconnectome/bigclust_data/examples/MaleCNS_FlyWire_hemibrain_central_brain_bigclust`, BigClust’s own example: male CNS, FlyWire and hemibrain central-brain neurons, co-clustered.\n\n' +
+          '**Annotate** takes a selection — a lasso on a Scatter Plot, a table of ids — and reads those neurons’ rows from a FlyTable or SeaTable table, their annotations from a Clio dataset, or their rows from a CSV file on your computer (edited in place; Chrome and Edge only). **Fields** picks which columns to show. Editing a cell writes it straight back; **Undo** writes the previous values back, and **Log** downloads every edit the card made. Before writing, the card reads each cell again, so a cell somebody else changed since you saw it is held and marked rather than overwritten, and a value the column cannot hold is refused before anything is sent.\n\n' +
+          'Tick rows and use **Set … to …** to give many neurons one value at once. Add a tab per table with **+**: a selection mixing datasets, as a BigClust project does, is split between the tabs by qualified id or a dataset column, and the card counts any neuron no tab takes. Cells you change are marked until you undo them. On Clio, a tab can show bodies nobody has annotated yet as empty rows, and keep `instance` in step with `type`; both are off until you switch them on. Writing needs an account on the table: add your FlyTable or Clio token under **Connections**.',
+        link: { href: 'https://github.com/schlegelp/BigClust2', label: 'BigClust on GitHub' },
+        // Taken from BigClust's example project over the network, with a selection made by hand: no
+        // `capture`, so `pnpm changelog:shots` leaves it alone.
+        image: {
+          file: 'bigclust.webp',
+          alt: 'BigClust’s example project feeding a Scatter Plot of its 87,263 neurons, ten of them selected, and a Neuroglancer card drawing those ten in the male CNS brain.',
+        },
+      },
+      {
+        kind: 'chart',
+        date: '2026-10-02',
+        title: 'Names, a search and your own tooltip on the Scatter Plot',
+        body:
+          'Tick **Labels on points** and each point is named beside it once few enough are in view (400 by default), placed so labels cover neither each other nor other points. **Hover shows** adds the columns you pick to the tooltip.\n\n' +
+          'On the expanded card, **⌕** opens a search: matches are outlined, **‹ ›** step through them, and **◎** selects them all (Shift adds them to the selection). The **⋯** menu searches one column instead, or matches whole values, case or a regular expression.',
+        demo: 'out.scatter',
+      },
+    ],
+    items: [
+      {
+        kind: 'editor',
+        date: '2026-10-04',
+        title: 'See what Coda keeps in your browser.',
+        body: 'Click **Memory** in the status bar and open the new **Storage** tab. It lists downloaded data, saved workflows, recipes, uploads and sign-ins, each with its size, and **Clear** empties the downloaded data.',
+      },
+      {
+        kind: 'node',
+        date: '2026-10-02',
+        title: '**Embedding** lays out part of a population.',
+        body: 'Wire a selection into its new **Only these** input to re-embed just those neurons, from a matrix, a feature table or a k-NN graph. For example, lasso a group of points on one embedding and embed just that group.',
+        demo: 'core.embed',
+      },
+      {
+        kind: 'editor',
+        date: '2026-10-01',
+        title: 'Large selections stay in the autosave.',
+        body: 'A lasso of a hundred thousand neurons is now saved about six times smaller, so it fits in the browser’s autosave and in share links. Workflows saved before open as they did.',
+      },
+      {
+        kind: 'editor',
+        date: '2026-10-02',
+        title: 'Tighter dashboards.',
+        body: 'Less space between the cells of a dashboard, so the charts get more of the screen.',
+      },
+      {
+        kind: 'chart',
+        date: '2026-10-02',
+        title: 'No bounding boxes in **Neuroglancer** scenes.',
+        body: 'Scenes opened by Coda no longer draw a box around the whole volume. On a small card, the box was most of what you saw.',
+      },
+      {
+        kind: 'chart',
+        date: '2026-10-02',
+        title: 'The **Network Viewer**’s Find takes the same search as the Scatter Plot.',
+        body: 'Start a term with `/` to search by regular expression.',
+      },
+    ],
+    fixes: [
+      'A large table file read from a URL no longer fails over one dropped connection: the read is retried. If the server keeps dropping the connection, the error now says so instead of blaming cross-origin access.',
+    ],
+  },
+  {
+    date: '2026-10-01',
+    title: 'Dashboards with tabs',
+    summary:
+      'Build several dashboards from one workflow: an overview, a page of tables, a page of 3D views, each with its own grid.',
+    highlight: false,
+    features: [
+      {
+        kind: 'editor',
+        date: '2026-10-01',
+        title: 'Tabs on the dashboard',
+        body:
+          'Press **+** beside the dashboard’s title to add a page. Each tab has its own cells and its own number of columns, and a node can sit on as many tabs as you like. Double-click a tab to rename it; right-click it to duplicate, move or delete it.\n\n' +
+          'On the canvas, right-click a card and pick which tabs it goes on. A workflow saved from the dashboard opens on the tab it was saved from.',
+        // Taken by hand from the running app: a capture can only crop to a dialog or the whole
+        // window, and the subject here is one bar.
+        image: {
+          file: 'dashboard-tabs.webp',
+          alt: 'The dashboard’s bar with three tabs — Overview, Partners and Tables — a + to add another, and the column slider, Add node and Canvas buttons on the right.',
+        },
+      },
+    ],
+    items: [
+      {
+        kind: 'chart',
+        date: '2026-10-01',
+        title: '**Scatter Plot** draws every point, however many',
+        body: 'An embedding of a whole dataset — a hundred thousand neurons and more — now draws in full and pans smoothly, so `Max points` is gone. Exported, more than 10,000 points in view become one embedded image inside the SVG; tick **Vector marks** to keep every point a shape.',
+        demo: 'out.scatter',
+      },
+    ],
+  },
+  {
+    date: '2026-09-30',
+    title: 'Your own connectome, from your own files',
+    summary:
+      'Assemble a dataset from your own tables and files, and query it with the same nodes you use on a published one. Parquet and Feather files of any size are read where they are, never loaded whole.',
+    highlight: true,
+    features: [
+      {
+        kind: 'node',
+        date: '2026-09-30',
+        title: 'Custom Dataset: a connectome from parts',
+        body:
+          'Wire in whichever parts you have: a neuron table, an edge list, a synapse table, and meshes or skeletons borrowed from any other dataset (a Neuroglancer Source, neuPrint, CAVE). **Find Neurons**, **Explore Dataset**, **Connectivity**, **Paths**, **Synapses** and the rest then work on it as on a published dataset.\n\n' +
+          'With a synapse table and no edge list, connectivity is counted from the synapses. **Open example** builds one out of the synthetic connectome; swap any part for your own.',
+        // Taken from a FlyWire workflow on local files, which no capture can reproduce: no
+        // `capture`, so `pnpm changelog:shots` leaves it alone.
+        image: {
+          file: 'custom-dataset.webp',
+          alt: 'A Custom Dataset assembled from FlyWire parts: a cell-type table as Neurons, two Link Table files as the edge list and the 192-million-row synapse table, and a Neuroglancer Source lending meshes and skeletons. Explore Dataset lists its neurons, and a Synapses node returns 124,747 synapses for the 25 selected.',
+        },
+        demo: 'connectome:customDataset',
+      },
+      {
+        kind: 'node',
+        date: '2026-09-30',
+        title: 'Link Table and Read Rows: files too large to load',
+        body:
+          '**Link Table** points at a Parquet or Feather file, on your disk or at a URL, and reads only its footer, so its columns are in every picker below it at once. **Read Rows** pulls out the columns and the rows you ask for, for example by neuron id, and a Custom Dataset reads its Edges and Synapses from a Link Table the same way.\n\n' +
+          'A lookup of a few neurons in a 190-million-row synapse table takes about a second when the file is sorted by the id column. In Chrome and Edge a local file comes back after a reload; in other browsers you choose it again. It also takes the URL of a Delta Lake table’s folder, such as CAVE’s exports.',
+      },
+    ],
+    items: [
+      {
+        kind: 'node',
+        date: '2026-09-30',
+        title: '**Filter Table** works on a Link Table file.',
+        body: 'Between a Link Table and whatever reads it, it drops rows as they are read, a confidence threshold on a synapse file for example, without scanning the whole file.',
+      },
+      {
+        kind: 'data',
+        date: '2026-09-30',
+        title: 'Notebook export for the new nodes.',
+        body: 'A Python notebook exported from a workflow with a Custom Dataset reads the same files with pyarrow. The R export does not cover them yet.',
+      },
+    ],
+  },
+  {
     date: '2026-09-26',
     title: 'Laminar profiles, and Cortex in the Workflow Wizard',
     summary:
@@ -123,8 +312,8 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         date: '2026-09-26',
         title: 'Laminar Profile: synapses against the layers',
         body:
-          'Two new nodes in the **Cortex** plugin. **Cortical Depth** takes coordinates (princpially from synapses) and assigns depth below the pia, its layer. **Laminar Profile** draws that depth with the layers marked behind it.\n\n' +
-          'Can be facetted to e.g. compare types. Click a bar or a layer’s share to pass those synapses on. ' +
+          'Two new nodes in the **Cortex** plugin. **Cortical Depth** takes coordinates (typically synapses) and assigns each its depth below the pia and its layer. **Laminar Profile** draws that depth with the layers marked behind it.\n\n' +
+          'Facet the profile to compare e.g. partner types, and click a bar or a layer’s share to pass those synapses on. ' +
           'Works on MICrONS minnie65. **Open example** loads three cells whose inputs sit in different layers; it needs a CAVE sign-in.',
         image: {
           file: 'laminar-profile.webp',
@@ -155,7 +344,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         kind: 'data',
         date: '2026-09-26',
         title: 'CAVE table reads views.',
-        body: 'Previously the `CAVE table` node listed only tables. Now it also lists views and picks up their columns. A bare MICrONS Minnie65 node now has a button that adds the recommended cell-type annotations.',
+        body: 'The `CAVE table` node now lists views as well as tables, along with their columns. A bare MICrONS Minnie65 node now has a button that adds the recommended cell-type annotations.',
       },
     ],
     fixes: [
@@ -177,7 +366,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         date: '2026-09-25',
         title: 'Coda grew a Changelog',
         body:
-          'Chronologically list of all changes to Coda. Where a change can be tried, **Open example** loads a working workflow in the editor. \n\n' +
+          'A chronological list of all changes to Coda. Where a change can be tried, **Open example** loads a working workflow in the editor.\n\n' +
           'When a new feature drops, Coda shows a short note the next time you open it. You can find the note again under **? ▸ What’s New**.',
         image: {
           file: 'whats-new.webp',
@@ -224,7 +413,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         kind: 'data',
         date: '2026-09-25',
         title: 'MICrONS connectivity now uses an aggregated view.',
-        body: 'Speeds up all connectivity queries.',
+        body: 'This speeds up all connectivity queries.',
       },
       {
         kind: 'node',
@@ -479,7 +668,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
       'Very thin neurons now get a thumbnail in Explore Dataset.',
       'Clearer error when a CAVE service is likely down.',
       'Collapsed groups line up correctly.',
-      'Default point size in the 3D View.',
+      'Synapse points in the 3D View are drawn at a visible size by default (800 nm).',
     ],
   },
   {

@@ -111,9 +111,12 @@ registerNode({
   type: 'out.viewer3d',
   label: '3D View',
   category: 'visualisation',
-  description: 'Render skeletons, meshes and synapses in 3D, with data-driven colour.',
+  description:
+    'Render skeletons, meshes, synapses and neuropil volumes in 3D, with data-driven colour.',
   guide:
-    'Skeletons, meshes, synapse points and neuropil volumes in one 3D scene, each with its own colour encoding — so neurons can be coloured by cell type while their synapses are coloured by polarity, inside the region they innervate. Only one socket needs filling. Everything arrives in nanometres, so geometry from different queries lines up.',
+    'Draws skeletons, meshes, synapse points and neuropil volumes together in one 3D scene. ' +
+    'Wire in any of them, e.g. from the Skeletons, Meshes, Synapses and ROI Meshes nodes; each ' +
+    'socket has its own colour setting, so you can colour neurons by cell type and synapses by polarity.',
   cost: 'cheap',
   /*
    * Big, because a card's preview gets what the params leave it and this node has three
@@ -164,12 +167,7 @@ registerNode({
     { id: 'scene', label: 'Scene' },
   ],
   params: [
-    showParam(
-      'showSkeletons',
-      'Show skeletons',
-      'skeletons',
-      'Draw the Skeletons socket. Off removes the geometry rather than hiding it.',
-    ),
+    showParam('showSkeletons', 'Show skeletons', 'skeletons', 'Draw the skeletons wired in.'),
     ...colorParams({
       prefix: 'skeleton',
       allowLiteral: true,
@@ -183,7 +181,7 @@ registerNode({
       group: 'skeletons',
       /*
        * One colour per neuron, from the id — and it is the same colour neuroglancer gives that
-       * neuron, because it is neuroglancer's hash (see `ui/segmentColor.ts`).
+       * neuron, because it is neuroglancer's hash (see `style/segmentColor.ts`).
        *
        * This was `categorical` on `neuronId`, which is the palette answering a question it was
        * not built for: eight validated slots and a grey `Other`, so a scene of twenty neurons
@@ -191,6 +189,11 @@ registerNode({
        * category` is one click away for the times it is genuinely a group.
        */
       defaultMode: 'hash',
+      // Wire Split Axon/Dendrite in front to give every arbour labels; CAVE skeleton-service and
+      // SWC skeletons bring their own.
+      allowCompartment: true,
+      // Split Axon/Dendrite's `Write synapse flow` puts `flow` here; the ramp is `by value`'s.
+      allowNodeValue: true,
       /*
        * Named rather than left to "first compatible column", which happens to resolve here and
        * would stop the day a source publishes a different first column.
@@ -233,7 +236,7 @@ registerNode({
       advanced: true,
       composite: { key: 'skeletonLineWidth', role: 'primary', label: 'Line width' },
       help:
-        '"By radius" (in pixels) and "To scale" (in nanometres, so it thickens as you zoom) ' +
+        '"by radius" (in pixels) and "to scale" (in nanometres, so it thickens as you zoom) ' +
         'draw each neurite at its recorded radius. Missing radii fall back to one width.',
     },
     widthParam('uniform', {
@@ -275,14 +278,14 @@ registerNode({
       max: 8,
       step: 0.25,
       help:
-        'Multiplies the recorded radius; 1 draws every neurite at its true calibre. Nodes ' +
-        'with no recorded radius stay a hairline.',
+        'Multiplies the recorded radius; 1 is the true thickness. Nodes with no radius stay ' +
+        'a hairline.',
     }),
     showParam(
       'showMeshes',
       'Show meshes',
       'meshes',
-      'Draw the Meshes socket. Turn it off to see skeletons inside the same neurons.',
+      'Draw the meshes wired in. Turn off to see skeletons inside the same neurons.',
     ),
     ...colorParams({
       prefix: 'mesh',
@@ -310,14 +313,14 @@ registerNode({
        */
       alpha: {
         default: 1,
-        help: 'Below 1 the surfaces turn translucent, so skeletons and synapses inside them show through.',
+        help: 'Below 1 the meshes turn translucent, showing skeletons and synapses inside.',
       },
     }),
     showParam(
       'showPoints',
       'Show points',
       'points',
-      'Draw the Points socket. A synapse cloud often hides the morphology under it.',
+      'Draw the points wired in. A synapse cloud often hides the morphology under it.',
     ),
     ...colorParams({
       prefix: 'point',
@@ -339,12 +342,7 @@ registerNode({
       advanced: true,
       legend: true,
     }),
-    showParam(
-      'showVolumes',
-      'Show volumes',
-      'volumes',
-      'Draw the Volumes socket. The only way to hide it: a constant colour has no legend keys.',
-    ),
+    showParam('showVolumes', 'Show volumes', 'volumes', 'Draw the volumes wired in.'),
     ...colorParams({
       prefix: 'volume',
       allowLiteral: true,
@@ -372,7 +370,7 @@ registerNode({
        */
       alpha: {
         default: 0.12,
-        help: 'Neuropil shells start nearly transparent, as context. Raise it to make the region the subject.',
+        help: 'Volumes start nearly transparent. Raise it to make them stand out.',
       },
     }),
     {
@@ -419,7 +417,7 @@ registerNode({
       default: false,
       presentational: true,
       advanced: true,
-      help: 'Re-frame the camera whenever the scene changes. Off keeps one camera, so a set of images can be compared.',
+      help: 'Re-frame the camera whenever the scene changes. Turn off to keep one camera for comparing images.',
     },
     {
       /*
@@ -470,7 +468,7 @@ registerNode({
       slider: true,
       presentational: true,
       advanced: true,
-      help: 'Brightness of the scene lighting; 1 is the calibrated default. Past about 1.4 the brightest surfaces start to clip.',
+      help: 'Brightness of the lighting; 1 is the default. Above about 1.4 the brightest surfaces start to clip.',
     },
     {
       /*
@@ -513,7 +511,7 @@ registerNode({
       slider: true,
       presentational: true,
       advanced: true,
-      help: 'How strongly creases and cavities are darkened; 0 turns the effect off. Only opaque meshes and volumes can cast it.',
+      help: 'How strongly creases and cavities are darkened; 0 turns it off. Only opaque meshes and volumes cast it.',
     },
     {
       /*

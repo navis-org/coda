@@ -51,6 +51,7 @@
  * demonstrate the feature and not the point.
  */
 
+import { activeTab } from '../../core/dashboard'
 import { emptyGraph } from '../../core/graph'
 import { getToken } from '../../data/neuprint/credentials'
 import { useGraphStore } from '../../store/graphStore'
@@ -131,7 +132,7 @@ function arrange(): void {
 
 /** How many of the three are on the dashboard. The predicate the "your turn" step waits on. */
 function celled(): number {
-  const cells = useGraphStore.getState().graph.dashboard?.cells ?? []
+  const { cells } = activeTab(useGraphStore.getState().graph)
   const ids = new Set(CELLS.map((type) => b.idOf(type)))
   return cells.filter((c) => ids.has(c.nodeId)).length
 }
@@ -204,10 +205,10 @@ const TOKEN_STEP: TourStep = {
   id: 'token',
   title: 'This one needs a neuPrint sign-in',
   body:
-    'MaleCNS lives on Janelia’s neuPrint, and this browser has no token for it. Press Sign in ' +
-    'with Google here — or paste a token from neuprint.janelia.org/account and press Save — and ' +
-    'the tour carries on by itself. No token is fine too: press Next and every step still works, ' +
-    'the three cells simply stay empty.',
+    'MaleCNS is hosted on Janelia’s neuPrint server, and this browser has no token for it yet. ' +
+    'Press Sign in with Google, or paste a token from neuprint.janelia.org/account and press ' +
+    'Save, and the tour continues by itself. You can also press Next without a token: every ' +
+    'step still works, but the three cells will stay empty.',
   when: () => !getToken(),
   // Asked for by name, so the tab shows even with neuPrint switched off — this step comes before
   // the tour has built anything that would keep it offered.
@@ -225,16 +226,16 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
     id: 'intro',
     title: "Let's build a dashboard",
     body:
-      'Once you built your pipeline, you may realize that only a small set of nodes are actually interesting - ' +
-      'the rest is just supporting infrastructure. This when you want to create a dashboard for your workflow!',
+      'Once you have built your pipeline, you may realize that only a small set of nodes are actually interesting - ' +
+      'the rest is just supporting infrastructure. This is when you want to create a dashboard for your workflow!',
   },
   TOKEN_STEP,
   {
     id: 'blank',
     title: 'Starting from a blank canvas',
     body:
-      'Three nodes is the whole graph. A dashboard is worth building for a small pipeline, which ' +
-      'is why this one stays small.',
+      'The graph for this tour has just four nodes, three of which will end up on the ' +
+      'dashboard. Dashboards are useful for small pipelines too.',
     before: () => {
       const store = useGraphStore.getState()
       if (store.graph.nodes.length) store.setGraph(emptyGraph('Dashboard'))
@@ -247,9 +248,9 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
     id: 'dataset',
     title: 'MaleCNS, on neuPrint',
     body:
-      'A real dataset this time, not the synthetic one the build tour uses — because ' +
-      'Neuroglancer needs a segmentation layer to draw, and only a real deployment publishes ' +
-      'one. Everything else here works the same against any dataset.',
+      'This time we use a real dataset instead of the synthetic Demo Data, because Neuroglancer ' +
+      'needs a segmentation layer to draw the neurons. Everything else works the same with any ' +
+      'dataset.',
     before: () => {
       b.ensure(DATASET)
       b.setParams(DATASET)
@@ -261,11 +262,11 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
   },
   {
     id: 'explore',
-    title: 'Explore Dataset browses what is there',
+    title: 'Explore Dataset',
     body:
-      'It downloads the dataset’s neuron table once and searches it in the browser as you type. ' +
-      'Three outputs: Hits for the query, Selected for what you tick, and All for grouping and ' +
-      'charting. We want Selected — that is the one that makes a dashboard interactive.',
+      'Explore Dataset downloads the dataset’s neuron table once and lets you search it as you ' +
+      'type. It has three outputs: Hits for the search results, Selected for the rows you tick, ' +
+      'and All for the whole table. We will use Selected.',
     before: () => {
       b.ensure(EXPLORE)
       b.wire(DATASET, 'dataset', EXPLORE, 'dataset')
@@ -278,11 +279,11 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
   },
   {
     id: 'table',
-    title: 'A table of whatever is ticked',
+    title: 'A table of the selected neurons',
     body:
-      'Wired to Selected rather than to Hits, so it shows what you picked and not what you ' +
-      'searched for. This is the first half of the pattern every interactive dashboard uses: one ' +
-      'widget chooses, the others follow.',
+      'The Table is wired to Selected, so it shows the neurons you tick in Explore. This is the ' +
+      'basic pattern for an interactive dashboard: one node picks the neurons, the others ' +
+      'display them.',
     before: () => {
       b.ensure(TABLE)
       b.wire(EXPLORE, 'selected', TABLE, 'in')
@@ -296,8 +297,8 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
     id: 'scene',
     title: 'And the same neurons in Neuroglancer',
     body:
-      'Off the same socket. Two nodes now read one selection, so ticking a neuron in Explore ' +
-      'moves both — no wire between them and nothing to keep in step by hand.',
+      'Neuroglancer is wired to the same Selected output. Ticking a neuron in Explore now ' +
+      'updates both the table and the 3D view.',
     before: () => {
       b.ensure(SCENE)
       b.wire(DATASET, 'dataset', SCENE, 'dataset')
@@ -312,9 +313,9 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
     id: 'run',
     title: 'Your turn: Run',
     body:
-      'Press Run — or ⇧R. Explore fetches the neuron table; nothing else has anything to do ' +
-      'until you tick something. Without a neuPrint token this is the step that will say so — ' +
-      'press Next instead and the rest of the tour carries on with empty cells.',
+      'Press Run (or ⇧R). Explore fetches the neuron table; the other nodes have nothing to do ' +
+      'until you tick something. Without a neuPrint token this step will fail. In that case, ' +
+      'press Next and the tour carries on with empty cells.',
     anchor: () => byTour('run'),
     side: 'bottom',
     align: 'end',
@@ -325,9 +326,9 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
     id: 'pick',
     title: 'Your turn: tick a few neurons',
     body:
-      'Search the Explore card and tick two or three rows. The table and the scene fill in ' +
-      'behind you. If there is nothing to tick, the dataset needs a neuPrint token — the rest of ' +
-      'this tour works regardless.',
+      'Tick two or three rows in the Explore card. The search is already set to LC. The table ' +
+      'and Neuroglancer will fill in as you go. If there is nothing to tick, you need a neuPrint ' +
+      'token; the rest of this tour works regardless.',
     before: () => {
       runIfPossible()
       b.reveal(EXPLORE)
@@ -342,8 +343,8 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
     id: 'open',
     title: 'Your turn: open the dashboard',
     body:
-      'Press D — or the grid button in the toolbar. The canvas gives way; the graph is still ' +
-      'there, you are just looking at it another way.',
+      'Press D or the grid button in the toolbar. The dashboard replaces the canvas. Your ' +
+      'graph is still there, you are just looking at it in a different way.',
     // The catch-up for a reader who pressed Next on the last step: nothing can tick a neuron for
     // them, so what this does is frame the three cards, which is the state the next step assumes.
     before: () => b.reveal(EXPLORE, TABLE, SCENE),
@@ -357,9 +358,9 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
     id: 'empty',
     title: 'Your turn: add a cell',
     body:
-      'A dashboard starts empty, because which nodes are worth watching is an editorial decision ' +
-      'and not one Coda can make for you. Press + Add node and pick any of the three — or right- ' +
-      'click a card back on the canvas. (Next adds all three and arranges them.)',
+      'A new dashboard is empty: you decide which nodes go on it. Press + Add node and pick any ' +
+      'of the three, or right-click a node back on the canvas. (Next adds all three and ' +
+      'arranges them for you.)',
     before: () => {
       if (!useGraphStore.getState().dashboardOpen)
         useGraphStore.getState().setDashboardOpen(true)
@@ -379,9 +380,9 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
     id: 'arrange',
     title: 'Three cells, arranged',
     body:
-      'Explore top left, what you ticked underneath it, and the same neurons down the right at ' +
-      'full height. Drag a cell’s ⠿ to reorder, drag its bottom-right corner to resize — a cell ' +
-      'is a third, a half, two thirds or the whole height.',
+      'Explore is top left with the table of ticked neurons below it, and Neuroglancer runs down ' +
+      'the right at full height. Drag a cell’s ⠿ handle to move it, and its bottom-right corner ' +
+      'to resize it. Heights snap to a third, a half, two thirds or the full height.',
     before: arrange,
     anchor: () => document.querySelector('.dashboard__grid'),
     side: 'top',
@@ -389,11 +390,11 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
   },
   {
     id: 'live',
-    title: 'The cells are live, not pictures',
+    title: 'The cells are live',
     body:
-      'Sort the table, rotate the scene, tick another neuron in Explore and watch the other two ' +
-      'follow. ⚙ opens a cell’s display settings, ▸ runs that node alone, ⤢ opens it full size ' +
-      'and ✕ takes it off the grid — the node stays on the canvas.',
+      'You can sort the table, rotate the 3D view, or tick another neuron in Explore and watch ' +
+      'the other two update. In each cell, ⚙ opens the display settings, ▸ runs just that node, ' +
+      '⤢ opens it full size and ✕ removes it from the dashboard (the node stays on the canvas).',
     before: () => {
       if (!useGraphStore.getState().dashboardOpen)
         useGraphStore.getState().setDashboardOpen(true)
@@ -405,11 +406,11 @@ export const BUILD_A_DASHBOARD: readonly TourStep[] = [
   },
   {
     id: 'saved',
-    title: 'It is saved with the workflow',
+    title: 'Saving the dashboard',
     body:
-      'The layout travels in the .coda.json and in a share link — and because you are looking at ' +
-      'the dashboard now, saving from here means it opens here too. Press D to go back to the ' +
-      'canvas; the graph is exactly where you left it.',
+      'The dashboard is saved in the .coda.json file and in share links. If you save while the ' +
+      'dashboard is open, the workflow will also open on the dashboard. Press D to go back to ' +
+      'the canvas.',
     anchor: () => byTour('share'),
     side: 'bottom',
     align: 'end',
@@ -445,9 +446,8 @@ export const DASHBOARD_SPEC: TourSpec = {
     if (!getToken()) {
       notes.push(
         'One thing first: this tour uses MaleCNS on neuPrint, and this browser has no token for ' +
-          'it — so the next step opens Connections so you can paste one in. Skipping it is fine: ' +
-          'every step still works and the three cells simply stay empty, since what is being ' +
-          'taught here is the layout.',
+          'it. The next step opens Connections so you can add one. You can skip that: every step ' +
+          'still works, the three cells will just stay empty.',
       )
     }
     if (store.graph.nodes.length) {
@@ -464,8 +464,8 @@ export const DASHBOARD_SPEC: TourSpec = {
     if (store.autoRun) {
       store.setAutoRun(false)
       notes.push(
-        'I have also switched Auto-run off, so that Run has something to do when we get to it — ' +
-          'it goes back on at the end.',
+        'I have also switched Auto-run off so that Run has something to do when we get to it. ' +
+          'It goes back on at the end.',
       )
     }
     return notes.length ? ` ${notes.join(' ')}` : ''

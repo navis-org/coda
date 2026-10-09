@@ -116,9 +116,11 @@ registerNode({
   // tooltip, since it is what a colleague opening a shared graph sees. `Upload Table`'s width.
   cardWidth: 300,
   description:
-    'Bring in your own region meshes — OBJ, STL or PLY — as Volumes the 3D View can draw.',
+    'Loads your own region meshes from OBJ, STL or PLY files as Volumes the 3D View can draw.',
   guide:
-    'Your own neuropil shells: OBJ, STL or PLY, one mesh per file and named after it. The output is the same Volumes ROI Meshes produces, so everything downstream takes it unchanged. Set Units to whatever the file is in. Meshes live in this browser rather than in the graph, so a workflow sent to a colleague arrives without them.',
+    'Loads your own region meshes from OBJ, STL or PLY files, one mesh per file, as Volumes ' +
+    'for the 3D View or Points in Volumes. Set Units to whatever the files are in. The meshes ' +
+    'are stored in this browser, not in the workflow.',
   // No network and no parse: `evaluate` is one IndexedDB read of already-parsed geometry.
   cost: 'cheap',
   inputs: [],
@@ -159,7 +161,7 @@ registerNode({
         // mid-sentence — one spelling of the word, one place that capitalises it.
         label: unit.label[0]!.toUpperCase() + unit.label.slice(1),
       })),
-      help: 'What one unit in the file means. Everything in Coda is nanometres, so a file in microns drawn as nanometres sits a thousand times too small beside your neurons — with nothing failing, because it is internally consistent.',
+      help: 'What one unit in the file means. Coda works in nanometres, so a file in microns read as nanometres sits a thousand times too small, with no error.',
     },
   ],
 
@@ -181,7 +183,7 @@ registerNode({
    */
   validate: (ctx) => {
     const dataId = String(ctx.params.dataId)
-    if (!dataId) return ['No mesh chosen — use the button on the node']
+    if (!dataId) return ['No mesh chosen. Use the button on the node to pick a file.']
     if (!uploadPeekSettled(dataId) || peekMeshUpload(dataId)) return []
     return [uploadMissingBadge(String(ctx.params.fileName), 'meshes')]
   },

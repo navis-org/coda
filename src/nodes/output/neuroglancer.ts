@@ -31,15 +31,15 @@ import { warnOverThreshold } from '../../core/limits'
 import { warnAboveParam } from '../lib/limitParams'
 import { registerNode } from '../../core/registry'
 import type { ParamValues } from '../../core/node'
-import { idText } from '../../core/ids'
+import { idText, isSegmentId } from '../../core/ids'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue, str } from '../../core/values'
 import type { NgLayerSet, NgLayout, ViewerKind } from '../../data/neuroglancer/scene'
+import type { SegmentPlacement } from '../../data/source'
 import {
   DEFAULT_NEUROGLANCER_URL,
   buildScene,
-  isSegmentId,
   sceneUrl,
   viewerBaseFor,
 } from '../../data/neuroglancer/scene'
@@ -49,7 +49,7 @@ import {
  * Reusing it is what makes a neuron the same colour in the 3D view and in neuroglancer.
  * Both modules are pure — no DOM, no React — so this stays testable headlessly.
  */
-import { resolveColor } from '../../ui/encoding'
+import { resolveColor } from '../../style/encoding'
 import { requireDataset, sourceSupports } from '../lib/datasetParam'
 import type { ColorMode } from '../lib/encodingParams'
 import { colorParams, readColorSpec } from '../lib/encodingParams'
@@ -90,10 +90,9 @@ registerNode({
   category: 'visualisation',
   description: "View neurons in the dataset's own neuroglancer scene.",
   guide:
-    'View neurons in the dataset’s own published neuroglancer scene — the EM volume, the region ' +
-    'meshes and the synapse layers that scene already carries, with your neurons added to it. ' +
-    'Emits a URL that works both as a viewer and as a shareable link, and the card embeds it. ' +
-    'Every setting is inspector-only, so the embed keeps the space somebody opened the node for.',
+    'Shows neurons in the dataset’s own neuroglancer scene, embedded in the card. Wire in a ' +
+    'dataset and, optionally, a neuron table such as the selection from Explore Dataset. The ' +
+    'output is the scene URL, which you can open or share; all settings are in the inspector.',
   cost: 'cheap',
   /*
    * Big enough that the embed is worth having on the canvas at all. Only a starting point —
@@ -153,8 +152,10 @@ registerNode({
       presentational: false,
       advanced: true,
       // Neuroglancer gives every segment a distinct hash colour of its own, which is both
-      // useful and the shortest link there is: no colour data travels at all.
-      allowDefault: { label: "neuroglancer's own" },
+      // useful and the shortest link there is: no colour data travels at all. A scene that
+      // publishes colours for its neurons (`DataSource.placeSegments`, a BigClust project's) has
+      // them used here instead — so the label names the scene rather than neuroglancer.
+      allowDefault: { label: "the scene's own" },
     }),
     {
       id: 'layout',
@@ -175,7 +176,7 @@ registerNode({
       label: 'Layers',
       default: 'all',
       advanced: true,
-      help: 'How much of what the dataset publishes to carry — EM, ROI meshes, synapses — or just the neurons, which makes a far shorter link. Extra layers are added either way.',
+      help: 'Include everything the dataset publishes (EM, ROI meshes, synapses), or "neurons only" for a much shorter link. Extra layers are added either way.',
       options: [
         { value: 'all', label: 'as published' },
         { value: 'segmentation', label: 'neurons only' },
@@ -194,7 +195,7 @@ registerNode({
        * panels take less of the card and the scene gets the room. It also means more pixels
        * to render, which is the trade at the bottom of the range.
        */
-      help: 'Scales neuroglancer’s whole frame, so its toolbar and panels take up less of the card. Not the camera zoom inside it.',
+      help: 'Scales neuroglancer’s toolbar and panels so they take up less of the card. Does not zoom the camera.',
       default: 0.75,
       min: 0.5,
       max: 1.5,
@@ -224,7 +225,7 @@ registerNode({
       default: '',
       advanced: true,
       placeholder: DEFAULT_NEUROGLANCER_URL,
-      help: 'Which neuroglancer deployment to open. Empty uses the one the dataset names. The scene travels in the URL fragment, so the instance must allow being embedded.',
+      help: 'Which neuroglancer deployment to open. Empty uses the dataset’s own. The deployment must allow embedding.',
     },
     {
       id: 'viewerType',
@@ -243,7 +244,7 @@ registerNode({
        * with no segmentation in it and nothing naming the cause — which has happened once
        * already, in the other direction.
        */
-      help: 'How a CAVE segmentation is authenticated. Spelunker builds need a middleauth+ prefix on the source; the Seung-lab fork runs its own login and refuses it. "Automatic" reads it off the deployment.',
+      help: 'How a CAVE segmentation is authenticated: Spelunker builds need a middleauth+ source prefix, which the Seung-lab fork refuses. "Automatic" works it out from the deployment.',
     },
   ],
 
@@ -278,9 +279,21 @@ registerNode({
     })
     if (!published) {
       throw new Error(
-        `${dataset.label} publishes no neuroglancer scene, so there is nothing to point a viewer at.`,
+        `${dataset.label} publishes no neuroglancer scene, so there is nothing to show.`,
       )
     }
+
+    // A scene of several volumes says which one each neuron is in, and may publish its colour —
+    // used where this node's own colour is left on neuroglancer's.
+    const placed = source.placeSegments
+      ? await source.placeSegments({
+          datasetId: dataset.datasetId,
+          segments,
+          ...(ctx.signal ? { signal: ctx.signal } : {}),
+        })
+      : undefined
+    const ownColors =
+      spec.mode === 'default' && placed ? placedColors(placed, segments) : undefined
 
     const extra = ctx.input('layers')
     if (extra !== undefined && extra.kind !== 'layers') {
@@ -290,7 +303,8 @@ registerNode({
     const scene = buildScene(published, {
       datasetId: dataset.datasetId,
       segments,
-      ...colorFields(spec.mode, segments, colors),
+      ...(ownColors ?? colorFields(spec.mode, segments, colors)),
+      ...(placed ? { placements: placed } : {}),
       layout: String(ctx.params.layout) as NgLayout,
       layers: String(ctx.params.layers) as NgLayerSet,
       showSlices: ctx.params.showSlices === true,
@@ -304,6 +318,30 @@ registerNode({
     return { url: str(sceneUrl(viewer, scene, chosenViewerKind(ctx.params))) }
   },
 })
+
+/**
+ * The colours a source published for these segments, as `colorFields` writes them: one default
+ * where every segment has the same one (fish2's project colours all 129,325 orange, at ~40 bytes a
+ * segment of link to say so), a map otherwise. Undefined where it published none.
+ */
+function placedColors(
+  placed: ReadonlyMap<string, SegmentPlacement>,
+  segments: readonly string[],
+): ReturnType<typeof colorFields> | undefined {
+  const map: Record<string, string> = {}
+  let count = 0
+  let same: string | undefined
+  for (const id of segments) {
+    const color = placed.get(id)?.color
+    if (!color) continue
+    map[id] = color
+    same = count++ === 0 || same === color ? color : undefined
+  }
+  if (count === 0) return undefined
+  return same && count === segments.length
+    ? { segmentDefaultColor: same }
+    : { segmentColors: map }
+}
 
 /**
  * How the resolved colours are written into the layer, which differs by mode.
@@ -383,8 +421,7 @@ function segmentColors(
   if (unreadable > 0) {
     ctx.warn(
       `${unreadable} of ${neurons.length} rows have an id neuroglancer cannot use and ` +
-        `were left out. It takes plain whole numbers only, and one bad id costs the ` +
-        `whole layer.`,
+        `were left out. Neuroglancer only accepts ids that are plain whole numbers.`,
     )
   }
 

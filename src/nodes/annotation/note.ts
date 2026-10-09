@@ -13,7 +13,7 @@
  * second document model; what makes it "not a node" is the absence of dataflow, plus a card that
  * looks nothing like one (`ui/nodes/NoteCard.tsx`).
  *
- * **The text is markdown**, rendered through the same `ui/markdown.ts` subset the dataset
+ * **The text is markdown**, rendered through the same `core/markdown.ts` subset the dataset
  * Description card uses. Reused rather than re-parsed: that module exists because a blurb from a
  * foreign deployment must not be able to become markup, and text someone pastes into a graph they
  * then share has exactly the same property. Headings, lists, emphasis, code and links, and raw
@@ -33,9 +33,10 @@ registerNode({
   type: 'note.text',
   label: 'Text',
   category: 'utility',
-  description: 'A block of text on the canvas — what a graph is for, in words. Markdown.',
+  description:
+    'A block of Markdown text on the canvas, e.g. to explain what a workflow is for.',
   guide:
-    'A block of markdown on the canvas: what a graph is for, why this threshold, what the chart at the end is meant to show. It is not part of the pipeline — no sockets, never evaluated, never counted as stale — which is exactly what makes it safe to leave anywhere. Double-click to edit, Escape to abandon the edit; drag it anywhere in read mode.',
+    'A Markdown note on the canvas, e.g. to say what a workflow is for or why a threshold was chosen. It has no sockets and never runs or goes stale. Double-click to edit and press Escape to cancel the edit; in read mode, drag it anywhere.',
   annotation: true,
   cost: 'cheap',
   inputs: [],
@@ -69,7 +70,7 @@ registerNode({
        * for a caption that should read as writing on the canvas rather than as a card on it.
        */
       advanced: true,
-      help: 'Off draws the text with no frame, paper or shadow — a caption rather than a card.',
+      help: 'Draw the note as a card. Untick to show the text alone, with no frame or shadow.',
     },
   ],
 

@@ -232,7 +232,7 @@ describe('the node around it', () => {
     const { matched, rest, warnings } = run([])
     expect(matched.items).toHaveLength(0)
     expect(rest.items).toHaveLength(5)
-    expect(warnings.join(' ')).toContain('every neuron leaves on Rest')
+    expect(warnings.join(' ')).toContain('every neuron goes to `Rest`')
   })
 
   /*

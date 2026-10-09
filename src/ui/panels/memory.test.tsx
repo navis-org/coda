@@ -11,10 +11,23 @@
  * readout exists for: near the limit, it says so.
  */
 
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import 'fake-indexeddb/auto'
+import { IDBFactory } from 'fake-indexeddb'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
+import { emptyGraph } from '../../core/graph'
+import { cacheSet, resetCache } from '../../data/cache'
+import { resetLibrary, saveWorkflow } from '../../store/library'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -26,6 +39,9 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory()
+  resetCache()
+  resetLibrary()
   installStorageStub()
   clearStorage()
 })
@@ -80,5 +96,47 @@ describe('memory readout', () => {
     const dialog = screen.getByRole('dialog', { name: 'Memory' })
     expect(within(dialog).getByRole('meter').getAttribute('aria-valuenow')).toBe('95')
     expect(within(dialog).getByText(/Drop results you no longer need/)).toBeTruthy()
+  })
+})
+
+describe('storage tab', () => {
+  function openStorage(): HTMLElement {
+    act(() => {
+      fireEvent.click(readout())
+    })
+    const dialog = screen.getByRole('dialog', { name: 'Memory' })
+    act(() => {
+      fireEvent.click(within(dialog).getByRole('tab', { name: 'Storage' }))
+    })
+    return dialog
+  }
+
+  it('lists what Coda keeps, and clears only the downloaded data', async () => {
+    await cacheSet('neurons:test', { ids: ['1', '2'] })
+    await saveWorkflow(emptyGraph('Kept'))
+    render(<App />)
+    const dialog = openStorage()
+    const clear = await within(dialog).findByRole('button', { name: 'Clear' })
+    const row = (name: string) => within(dialog).getByText(name).closest('li')!
+    expect(within(row('Downloaded data')).getByText(/^1 item\./)).toBeTruthy()
+    // Somebody's work reports where it is managed, and carries no button here.
+    expect(
+      within(row('Saved workflows')).getByText(
+        '1 workflow. Manage them under Open ▸ Saved in this browser.',
+      ),
+    ).toBeTruthy()
+    expect(within(dialog).getAllByRole('button', { name: 'Clear' })).toHaveLength(1)
+
+    act(() => {
+      fireEvent.click(clear)
+    })
+    await waitFor(() => {
+      expect(within(row('Downloaded data')).getByText('None yet.')).toBeTruthy()
+    })
+    expect(
+      (within(dialog).getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    // The library is untouched by a clear.
+    expect(within(row('Saved workflows')).getByText(/^1 workflow\./)).toBeTruthy()
   })
 })

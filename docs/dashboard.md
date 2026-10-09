@@ -57,6 +57,84 @@ reason: a graph nobody has put a node on — or has put nodes on but never resiz
 trip byte-identically, or every file in the Zoo changes bytes on its next save for a feature it
 does not use.
 
+## Tabs: several pages of one dashboard
+
+One workflow, several walls of results — an overview, a morphology page, a page of tables. A tab
+is a page of the **same layout**, not a second document: each has its own `columns` and `cells`,
+and all of them reference nodes of the one graph.
+
+```jsonc
+"dashboard": {
+  "open": true,
+  "active": "t2",              // absent means the first tab
+  "tabs": [
+    { "id": "main", "title": "Overview", "columns": 3, "cells": [ … ] },
+    { "id": "t2",   "title": "Morphology", "columns": 2, "cells": [ … ] }
+  ]
+}
+```
+
+**A single untitled tab is written in the form every dashboard had before tabs** —
+`{ columns, cells, open }`, in that key order. In memory a layout is always a list of tabs;
+`storedDashboard` collapses the degenerate case on the way out and `validDashboard` reads both
+forms. That is `w`'s rule (absence is the default) applied to the whole layout, and it is what
+keeps every dashboard that never grows a second page byte-identical on disk. The test that pins it
+saves a pre-tabs file, loads it, saves it again and compares the bytes. The cost: a pre-tabs build
+reading the list form finds no `cells` and drops the dashboard silently — accepted, because the
+deployed app and the MCP bundle ship together.
+
+**One cell per node *per tab*.** The rule was always about mount sites, and only the active tab is
+mounted. So a node may sit on several pages, and Duplicate Tab is legal at all.
+
+**The grid is not keyed on the tab.** Switching unmounts every cell whose node is not on the new
+page — unmounted, never hidden, the memory rule — while a node on *both* keeps its cell. Measured in
+headless Chrome with a 3D View on two of three tabs: switching between the two creates **no** WebGL
+context and keeps the same `<canvas>` element; switching away to the third and back within five
+seconds also creates none (`PersistentCanvas` parks the root); after 6.5 s the root has been released
+and one context is created on return. Keying the grid would have rebuilt the scene on every switch.
+
+**The active tab lives only in the document.** `DashboardLayout.active`, written only when it is not
+the first — and no live copy in the store, unlike `dashboardOpen`. History holds whole graphs, so the
+snapshot from before an edit on tab A says A, and an undo puts that page back on screen. A second
+copy would have to choose between agreeing with the snapshot and agreeing with the screen. Switching
+is `history: false`, for `open`'s reason, and never mints a layout.
+
+**A tab may be empty, and an emptied one is kept.** A new tab starts empty, and a page somebody named
+must not vanish because its last node was deleted on the canvas. What is dropped is the layout as a
+whole, and only when it has come down to one untitled tab with no cells — which is indistinguishable
+from no dashboard, so it must serialise as none. The only tab cannot be deleted; emptying it is
+taking its cells off.
+
+**Ids, not positions.** A tab has an id (`main`, then the smallest free `t<n>`) that is never shown.
+`active`, the undo tags (`cell-span:<tab>:<node>`, `dash-columns:<tab>`, `tab-title:<tab>`) and the
+canvas submenu all name a tab by it, because position is exactly what a reorder changes. A move pins
+`active` by id, since its absence means "the first" and the first is what moved. A hand-edited tab
+with a missing or repeated id gets a fresh one rather than losing its cells.
+
+**In use as pages is one predicate.** `isTabbed` — several tabs, or one somebody named — decides
+the form a layout is written in *and* every surface that words or lays itself out differently for
+pages. It was a tab count in the UI and "several, or titled" on disk at first, so a lone tab named
+*Overview* drew its name in the strip and was "the dashboard" in every sentence around it.
+
+**The strip.** It replaces the bar's title; one untitled tab reads "Dashboard", so a dashboard that
+never grows a page looks as it did, and an untitled tab among several reads "Tab n" by position. `+` appends,
+a double-click renames (`RenameInput`), a right-click offers Rename, Duplicate, Move and Delete, and
+the arrow keys move along it activating as they go. Two layout findings, both from a browser:
+
+- With seventeen tabs the list scrolled the `+` out of reach with it. The scroller is now the list
+  alone, `+` sits after it, and the active tab is scrolled into view when it changes.
+- On a 412px phone the strip's `min-width: 0` let the bar's other controls squeeze it to **zero
+  width**, with the document 419 wide. Below `NARROW_QUERY`'s width the bar wraps and the strip takes
+  a row of its own: document 412, list 362.
+
+**From the canvas.** Until the dashboard is in use as pages, a card's right-click keeps the single
+Add/Remove row. After, it becomes a `Dashboard ▸` section opening in place (`ContextMenuSection`,
+shared with the group menu's controls picker) listing every tab, ticked where the selection is,
+toggling without closing — ticking a node onto two pages is ordinary — and `+ New Tab` at the foot.
+The palette's add/remove acts on the active tab, naming it once there are pages, and while the grid
+is up it offers a row per other tab. Whether a row reads Add or Remove is `allOnTab` in both, so the
+two cannot disagree.
+
 ## The mode replaces the canvas
 
 `App.tsx` renders `DashboardView` **or** `Editor` into the same grid area. React Flow unmounts,
@@ -145,20 +223,37 @@ overlay; a grid sharing it would open every rail at once. Naming the property ra
 caller is what lets a dock dragged to its 360px floor ask for the same treatment without a
 `variant: 'dock-narrow'` being invented for it.
 
+**And it is stored on the cell, in the document** (`DashboardCell.rail`, written only when open).
+It began as component state, and the grid unmounts every cell whenever the canvas takes its place,
+so a rail somebody had opened to tune a node — Split Axon/Dendrite's thresholds beside a 3D View —
+was shut on every return. Beside the cell's size because it is the same kind of fact: how the page
+was arranged, which a reload and a share link should keep. Not an undo step, `setDashboardTab`'s
+rule. `setSpan` builds the resized cell *from* the cell for this reason; it used to rebuild it from
+`nodeId`, `w` and `h`, which would have closed the rail on every resize.
+
 **Density is not on that list.** How tight a cell's header and rail are is CSS's, selected off
 `.dash-cell__panel` — a frame wears `.viewer-surface` *and* a class of its own, which is exactly
 the mechanism `editor.css` records for letting a frame restyle the inside without the shared
 component knowing a caller by name.
 
 **The interaction contract is look, restyle, run — never restructure.** `⚙` shows the rail, `▸`
-runs this node, `⤢` opens it full size, `✕` takes the cell off the dashboard. Nothing here rewires,
+runs this node, `⤢` opens it full size, `✕` takes the cell off the page on screen. Nothing here rewires,
 deletes or moves a card. `✕` removes the *cell*, not the node, and the title says so — the two are
 one keystroke apart on every other surface in the app, and confusing them here costs somebody a
 subtree.
 
-Presentational params only, so restyling from a cell re-renders instantly and stales nothing
+Presentational params, so restyling from a cell re-renders instantly and stales nothing
 (invariant 4). That is what makes the grid usable as an inspection surface rather than a thing you
 are afraid to touch.
+
+**The one exception is the node's to make, and it is the one the sidebar already honours.** A param
+in a group the node marks `affectsData` reaches the rail too (`railParams` reads `paramsForPanel`,
+the sidebar's rule). Split Axon/Dendrite is why: its thresholds are found by moving them while
+looking at the arbour, and a cell beside a 3D View is where that looking happens — with the rail
+it had, the cell showed none of them. The Heatmap's Labels/Filter/Order/Selection tabs and the
+Network Viewer's Filter came along, being the same declaration. The rail marks each such item with
+the stale-state edge the sidebar's note uses, and its title says downstream re-runs. On a `cheap`
+node that re-run is automatic, which is what makes it a knob rather than a trap.
 
 ## A run that happens underneath the grid
 
@@ -593,6 +688,10 @@ dashboard is exactly the graph where the flag is absent.
 registered for the full-size surfaces, so a cell for one would draw a header over an empty box.
 `DashboardView`'s candidate list excludes annotations. If a caption is wanted later, the change is
 teaching `nodeBodies` about `NoteCard` — the canvas's side of the house, not this one.
+
+Not built with tabs: no keyboard shortcut for switching (⌥1–9 would collide with the planned
+saved-views keys), no dragging a cell onto another tab, and the wizard still builds one page even
+for a comparison.
 
 Smaller things not built: no per-cell title override (the node's title is the cell's), no way to
 drop a cell onto the *end* of the grid except via the last cell's right half, and the reorder is

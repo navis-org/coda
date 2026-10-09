@@ -219,7 +219,7 @@ describe('Synapses Between', () => {
     const def = requireNodeDef('neuron.synapsesBetween')
     const issues = (inputs: Record<string, ReturnType<typeof T.neurons>>) =>
       def.validate!(makeInferContext(def, defaultParams(def), inputs)).join(' ')
-    expect(issues({})).toMatch(/Wire Sources, Targets or both/)
+    expect(issues({})).toMatch(/Wire a neuron table into `Sources`, `Targets` or both/)
     expect(issues({ sources: T.neurons() })).toBe('')
     expect(issues({ targets: T.neurons() })).toBe('')
   })
@@ -304,8 +304,8 @@ describe('an oversized set', () => {
     // The whole change: there is a result under the sentence. It used to be `error`, and
     // everything downstream was blocked by a wait somebody had not been asked about.
     expect(info.error ?? info.state).toBe('ok')
-    expect(sched.warning('geo')).toMatch(/neurons is past this node's Warn above \(1\)/)
-    expect(sched.warning('geo')).toMatch(/cancel if that is not what you wanted/)
+    expect(sched.warning('geo')).toMatch(/neurons is past `Warn above` \(1\)/)
+    expect(sched.warning('geo')).toMatch(/cancel if this is not what you wanted/)
     // The message used to say this, and both halves of it were wrong.
     expect(sched.warning('geo')).not.toMatch(/this viewer can draw/)
   })
@@ -472,7 +472,9 @@ describe('Carry fields', () => {
         neurons: T.neurons(tableSchema(column('neuronId', 'str'), column('pre', 'i64'))),
       },
     )
-    expect(validateColumnParams(def, ctx)).toEqual(['Missing column(s): hemilineage'])
+    expect(validateColumnParams(def, ctx)).toEqual([
+      'Columns missing from the input: hemilineage.',
+    ])
     // And the schema half does not promise what the join will not carry.
     const types = def.inferOutputs!(ctx)
     const schema = types.skeletons?.kind === 'skeletons' ? types.skeletons.schema : undefined
@@ -583,7 +585,7 @@ describe('the Source control', () => {
           { dataset: type },
         ),
       ) ?? []
-    expect(issues.join(' ')).toMatch(/no “published” skeletons.*level-2 chunk graph/s)
+    expect(issues.join(' ')).toMatch(/no "published" skeletons.*level-2 chunk graph/s)
     // Still listed, so the card shows what the graph actually says.
     expect(optionsFor(type, 'published').map((o) => o.value)).toContain('published')
   })
@@ -729,7 +731,7 @@ describe('the Synapses node’s controls', () => {
         ),
       ) ?? []
     expect(issues.join(' ')).toContain('cannot return synapses as “one row per site”')
-    expect(issues.join(' ')).toContain('it offers one row per connection')
+    expect(issues.join(' ')).toContain('It offers one row per connection')
   })
 
   it('keeps its own label for a pinned unit the source serves but did not list', () => {

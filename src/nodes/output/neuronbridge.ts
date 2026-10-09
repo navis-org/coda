@@ -49,13 +49,11 @@ registerNode({
   label: 'NeuronBridge',
   category: 'visualisation',
   description:
-    'Page through neurons and see the light-microscopy images NeuronBridge matched to each — ' +
-    'split-GAL4 and MCFO lines, best image per line. Pin matches to send them downstream.',
+    'Page through neurons and see the light-microscopy images NeuronBridge matched to each (split-GAL4 and MCFO lines, best image per line). Pin matches to send them downstream.',
   guide:
-    'Finds driver lines for EM neurons. For the neuron on screen, shows NeuronBridge’s ' +
-    'precomputed colour-depth matches from FlyLight’s split-GAL4 and MCFO collections, one tile ' +
-    'per line at its best image, with the rest one click away. Covers hemibrain, male CNS, MANC, ' +
-    'FlyWire and BANC. Paging is free; ☆ pins a match to the Pinned port.',
+    'Shows NeuronBridge’s light-microscopy matches for one EM neuron at a time, one tile per ' +
+    'split-GAL4 or MCFO line, to help you find a driver line that labels it. Typically wired ' +
+    'to the Selected output of Explore Dataset; matches you pin with ☆ come out of Pinned.',
   cost: 'cheap',
   defaultSize: { width: 620, height: 640 },
   inputs: [
@@ -71,7 +69,7 @@ registerNode({
       id: 'page',
       kind: 'int',
       label: 'Neuron',
-      help: 'Which neuron of the incoming table is shown. Browsing never invalidates anything.',
+      help: 'Which neuron of the incoming table is shown. Browsing re-runs nothing.',
       default: 0,
       min: 0,
       presentational: true,
@@ -82,7 +80,7 @@ registerNode({
       id: 'collections',
       kind: 'multiEnum',
       label: 'Collections',
-      help: 'Which FlyLight image collections to show matches from. Split-GAL4 Drivers are published, stable lines; Omnibus Broad is a larger release of further split lines; the two MCFO sets are sparse single-cell images of Gen1 GAL4 lines.',
+      help: 'Which FlyLight image collections to show matches from. The two Split-GAL4 sets are driver lines; the two MCFO sets are sparse single-cell images of Gen1 GAL4 lines.',
       default: COLLECTIONS.map((c) => c.id),
       options: COLLECTIONS.map((c) => ({ value: c.id, label: c.label })),
       optionsWithoutPeek: true,
@@ -97,7 +95,7 @@ registerNode({
       id: 'method',
       kind: 'enum',
       label: 'Method',
-      help: 'Which of NeuronBridge’s matching algorithms to show. Colour depth search (CDS) covers every dataset; PPPM is precomputed for hemibrain only and ranks MCFO images.',
+      help: 'Which NeuronBridge matching algorithm to show. CDS covers every dataset; PPPM covers hemibrain only and ranks MCFO images.',
       default: 'cds',
       options: [
         { value: 'cds', label: 'Colour depth search (CDS)' },
@@ -112,7 +110,7 @@ registerNode({
       id: 'compare',
       kind: 'enum',
       label: 'Compare',
-      help: 'How an opened match is drawn: the EM neuron beside the light-microscopy image, the LM image alone, or the EM neuron laid over it. A mirrored match flips the EM image, never the LM one.',
+      help: 'How an opened match is drawn. A mirrored match flips the EM image.',
       default: 'side',
       options: COMPARE_MODES.map((m) => ({ value: m.id, label: m.label })),
       optionsWithoutPeek: true,
@@ -123,7 +121,7 @@ registerNode({
       id: 'lmView',
       kind: 'enum',
       label: 'LM image',
-      help: 'Which light-microscopy image: the segmented hit NeuronBridge compared, the whole sample it was cut from, or the hit in colour over the whole sample in grey. PPPM has no hit that can be laid over the sample.',
+      help: 'Which light-microscopy image to show: the matched "Hit", the "Whole line" sample, or both. "Hit + line" is not available for PPPM.',
       default: 'hit',
       options: LM_VIEWS.map((v) => ({ value: v.id, label: v.label })),
       optionsWithoutPeek: true,
@@ -147,7 +145,7 @@ registerNode({
       id: 'emTint',
       kind: 'enum',
       label: 'EM drawn in',
-      help: 'The EM neuron in an overlay: in white, so it stands apart from the light-microscopy image, or in its own depth colours, where a good match coincides with the hit colour for colour.',
+      help: 'Colour of the EM neuron in an overlay. White stands out from the LM image; depth colours line up with the hit when the match is good.',
       default: 'white',
       options: [
         { value: 'white', label: 'White' },
@@ -161,7 +159,7 @@ registerNode({
       id: 'freeze',
       kind: 'boolean',
       label: 'Keep comparison in view',
-      help: 'Hold an opened match above the tiles while they scroll, rather than scrolling it away with them.',
+      help: 'Keep an opened match pinned above the tiles while they scroll.',
       default: true,
       presentational: true,
       advanced: true,
@@ -182,7 +180,7 @@ registerNode({
       id: 'version',
       kind: 'enum',
       label: 'Data version',
-      help: 'Which NeuronBridge data release to read. Latest follows NeuronBridge; pin a version to keep a shared workflow showing what it showed you. A pinned match records the version it came from either way.',
+      help: 'Which NeuronBridge data release to read. Pin a version to keep a shared workflow showing the same matches.',
       default: '',
       options: () => {
         const current = peekCurrentVersion()
@@ -201,7 +199,7 @@ registerNode({
       kind: 'ids',
       label: 'Pinned',
       noun: 'matches',
-      help: 'The matches the Pinned port emits. Written by the ☆ on each tile.',
+      help: 'The matches the Pinned output emits. Set with the ☆ on each tile.',
       default: [],
     },
   ],

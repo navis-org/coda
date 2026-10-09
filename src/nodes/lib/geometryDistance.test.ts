@@ -1178,7 +1178,7 @@ describe('what it says it will cost', () => {
     // count past the threshold and once in the sentence explaining it.
     expect(closest.seen[0]!.match(/10 minutes/g)).toHaveLength(1)
     expect(closest.seen[0]).toBe(
-      'A 500 × 500 comparison is about 10 minutes of searching. Running anyway; cancel if ' +
+      'A 500 × 500 comparison will take about 10 minutes. Running anyway; cancel if ' +
         'that is not what you wanted.',
     )
   })

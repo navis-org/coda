@@ -30,13 +30,16 @@ import {
   MAX_COLUMNS,
   MIN_COLUMNS,
   ROW_TRACKS,
+  activeTab,
   dashboardOf,
+  pageNoun,
   unplacedNodes,
 } from '../../core/dashboard'
 import { getNodeDef } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { useDismissOnOutside } from '../useDismiss'
 import { DashboardCellView } from './DashboardCellView'
+import { DashboardTabs } from './DashboardTabs'
 import { RunProgressBar } from './RunProgressBar'
 import { dropIndex, rowHeight } from './gridGeometry'
 
@@ -67,12 +70,23 @@ export function DashboardView() {
   const closeAdd = useCallback(() => setAddOpen(false), [])
   useDismissOnOutside(addRef, closeAdd, { onEscape: true, enabled: addOpen })
 
-  const layout = useMemo(() => dashboardOf(graph), [graph])
-  // Keyed on `cells` rather than on `layout`, which changes identity whenever the graph does —
+  const layout = dashboardOf(graph)
+  /*
+   * The page on screen. Everything below this line is about one tab — its cells, its columns, its
+   * add menu — and the strip is the only thing that sees the others.
+   *
+   * **The grid is not keyed on the tab.** Switching tabs unmounts every cell whose node is not on
+   * the new page, which is the memory rule — unmounted, never hidden — and keeps the cell of a
+   * node that is on both, renderer and all, rather than tearing a WebGL scene down to build the
+   * same one again a frame later.
+   */
+  const tab = activeTab(graph)
+  const where = pageNoun(layout)
+  // Keyed on `cells` rather than on the tab, which changes identity whenever the graph does —
   // including on every committed sample of a resize drag.
-  const order = useMemo(() => layout.cells.map((c) => c.nodeId), [layout.cells])
+  const order = useMemo(() => tab.cells.map((c) => c.nodeId), [tab.cells])
   /* The grid element only exists when there is something in it — see the empty state below. */
-  const hasCells = layout.cells.length > 0
+  const hasCells = tab.cells.length > 0
 
   /**
    * Nodes that could be added, and how many there are.
@@ -180,9 +194,9 @@ export function DashboardView() {
   return (
     <div className="dashboard" data-tour="dashboard">
       <div className="dashboard__bar">
-        <strong className="dashboard__title">Dashboard</strong>
+        <DashboardTabs layout={layout} activeId={tab.id} />
         <span className="dashboard__count">
-          {layout.cells.length} of {graph.nodes.length} nodes
+          {tab.cells.length} of {graph.nodes.length} nodes
         </span>
 
         <div className="dashboard__spacer" />
@@ -194,11 +208,11 @@ export function DashboardView() {
             min={MIN_COLUMNS}
             max={MAX_COLUMNS}
             step={1}
-            value={layout.columns}
+            value={tab.columns}
             onChange={(e) => setDashboardColumns(Number(e.target.value))}
             aria-label="Grid columns"
           />
-          <span>{layout.columns}</span>
+          <span>{tab.columns}</span>
         </label>
 
         {/*
@@ -216,8 +230,8 @@ export function DashboardView() {
             disabled={candidateCount === 0}
             title={
               candidateCount === 0
-                ? 'Every node is already on the dashboard'
-                : 'Put another node on the dashboard'
+                ? `Every node is already on ${where}`
+                : `Put another node on ${where}`
             }
             onClick={() => setAddOpen((open) => !open)}
           >
@@ -282,30 +296,30 @@ export function DashboardView() {
       {!hasCells ? (
         <div className="dashboard__empty">
           <p>
-            <strong>Nothing on the dashboard yet.</strong>
+            <strong>Nothing on {where} yet.</strong>
           </p>
           <p>
-            Add the nodes worth looking at — from <em>+ Add node</em> above, or by
-            right-clicking a card on the canvas. A cell points at the node; the graph stays the
-            source of truth.
+            Add the nodes you want to see with <em>+ Add node</em> above, or right-click a card
+            on the canvas. A cell shows that node, so changes you make on the canvas show up
+            here too.
           </p>
         </div>
       ) : (
         <div
           ref={gridRef}
           className="dashboard__grid"
-          style={{ '--dash-cols': layout.columns } as React.CSSProperties}
+          style={{ '--dash-cols': tab.columns } as React.CSSProperties}
           onDragOver={(event) => {
             // The grid's own handler catches the gaps between cells, so a drag that strays into
             // one keeps its `dropEffect` rather than flickering to "no drop" and back.
             if (dragging) event.preventDefault()
           }}
         >
-          {layout.cells.map((cell) => (
+          {tab.cells.map((cell) => (
             <DashboardCellView
               key={cell.nodeId}
               cell={cell}
-              columns={layout.columns}
+              columns={tab.columns}
               dragging={dragging}
               dropSide={
                 over?.nodeId === cell.nodeId ? (over.after ? 'after' : 'before') : undefined

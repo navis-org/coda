@@ -110,10 +110,10 @@ const BODY_ID_FLOOR = 1_000_000
  */
 export function cellsOutsideRelease(ids: readonly number[]): string {
   return (
-    `No ZapBench cell is numbered ${some(ids)} — this release numbers its ` +
+    `No ZapBench cell is numbered ${some(ids)}. This release numbers its ` +
     `${TRACE_COLUMNS.toLocaleString()} cells from 1.` +
     (ids.some((id) => id >= BODY_ID_FLOOR)
-      ? ' Those look like neuron ids — Selected to Neurons reads a selection of neurons.'
+      ? ' These look like neuron ids. To read a selection of neurons, use Selected to Neurons.'
       : '')
   )
 }
@@ -126,7 +126,7 @@ export const CELL_IDS_PARAM: StringParam = {
   multiline: true,
   placeholder: '1203, 4410\n5000-5100',
   default: '',
-  help: 'ZapBench cell ids — fish2’s zapbenchId — separated by commas or new lines. A range like 5000-5100 includes both ends.',
+  help: 'ZapBench cell ids (fish2’s zapbenchId), separated by commas or new lines. A range like 5000-5100 includes both ends.',
 }
 
 export interface CellListRead {
@@ -216,11 +216,11 @@ export function traceCostWarning(traces: number, cost: TraceCost): string | unde
   if (cost.bytes <= TRACE_BYTES_WARN) return undefined
   return cost.layout === 'plain'
     ? `${traces.toLocaleString()} traces land in ${cost.blocks.toLocaleString()} of the ` +
-        `array’s 512-neuron blocks, so this reads about ${formatBytes(cost.bytes)}. Neurons ` +
-        `sit on the contiguous axis of that copy, so the cost follows the blocks rather than ` +
-        `the neuron count — narrowing Condition is what makes it smaller. Reading it anyway.`
+        `array’s 512-neuron blocks, so this reads about ${formatBytes(cost.bytes)}. A block ` +
+        `costs the same however few of its neurons you need, so pick a narrower ` +
+        `\`Condition\` to make the read smaller. Reading it anyway.`
     : `${traces.toLocaleString()} traces come to about ${formatBytes(cost.bytes)} in ` +
-        `${cost.reads.toLocaleString()} reads. Narrowing Condition is what makes it smaller. ` +
+        `${cost.reads.toLocaleString()} reads. Pick a narrower \`Condition\` to make it smaller. ` +
         `Reading it anyway.`
 }
 
@@ -228,7 +228,8 @@ export function traceCostWarning(traces: number, cost: TraceCost): string | unde
 export function recordingCostWarning(cost: TraceCost): string | undefined {
   if (cost.bytes <= TRACE_BYTES_WARN) return undefined
   return (
-    `Every cell comes to about ${formatBytes(cost.bytes)} in ${cost.reads.toLocaleString()} ` +
-    `reads. Narrowing Condition or reducing Scale is what makes it smaller. Reading it anyway.`
+    `Reading every cell comes to about ${formatBytes(cost.bytes)} in ` +
+    `${cost.reads.toLocaleString()} reads. Pick a narrower \`Condition\` or a coarser ` +
+    `\`Scale\` to make it smaller. Reading it anyway.`
   )
 }

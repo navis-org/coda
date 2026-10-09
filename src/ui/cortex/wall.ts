@@ -8,13 +8,14 @@
  */
 
 import type { SkeletonGeometry } from '../../core/values'
+import { SWC_SOMA, compartmentKey } from '../../core/values'
 import { quantileSorted } from '../../core/stats'
 import type { ColumnWidths } from '../../packs/cortex/cells'
 import type { CorticalFrame } from '../../packs/cortex/frames'
 import { projector } from '../../packs/cortex/frames'
-import type { Mode } from '../colors'
-import { CHART_INK } from '../colors'
-import { axonDendriteInk } from '../compartmentInk'
+import type { Mode } from '../../style/colors'
+import { CHART_INK } from '../../style/colors'
+import { compartmentInks } from '../compartmentInk'
 import { canvasFont } from '../viewers/canvas2d'
 
 /** Which ink a segment takes, from the SWC code of its child point. */
@@ -33,8 +34,11 @@ export interface CellGeometry {
 
 const projected = new WeakMap<SkeletonGeometry, CellGeometry>()
 
-const inkOf = (code: number): Ink =>
-  code === 2 ? 'axon' : code === 3 || code === 4 ? 'dendrite' : 'neutral'
+/** The source's label as one of the wall's two inks; a soma or an unlabelled point is neither. */
+const inkOf = (code: number): Ink => {
+  const key = compartmentKey(code, false)
+  return key === 'axon' || key === 'dendrite' ? key : 'neutral'
+}
 
 /**
  * A skeleton in the frame. Remembered per skeleton object, so a re-render, a resize or a re-layout
@@ -50,7 +54,7 @@ export function cellGeometry(skeleton: SkeletonGeometry, frame: CorticalFrame): 
   const points = projector(frame).project(skeleton.positions)
   const count = skeleton.parents.length
   const labels = skeleton.compartments
-  const labelledSoma = labels ? labels.indexOf(1) : -1
+  const labelledSoma = labels ? labels.indexOf(SWC_SOMA) : -1
   const soma = labelledSoma >= 0 ? labelledSoma : Math.max(0, skeleton.parents.indexOf(-1))
   const somaLateral = points[soma * 3] ?? 0
 
@@ -290,11 +294,8 @@ export function layoutWall(
 
 /** Which ink a segment draws in, and the soma's — one table for the canvas and the SVG export. */
 export function cellInks(mode: Mode): Record<Ink, string> & { soma: string } {
-  return {
-    ...axonDendriteInk(mode),
-    neutral: CHART_INK[mode].secondary,
-    soma: CHART_INK[mode].primary,
-  }
+  const { axon, dendrite, soma, unlabelled } = compartmentInks(mode)
+  return { axon, dendrite, soma, neutral: unlabelled }
 }
 
 /** The order inks are drawn in: the unlabelled first, so the labelled lie over it. */

@@ -80,11 +80,10 @@ registerNode({
    * weighting, the two directions, the soma that is not there — is in that document.
    */
   guide:
-    'Measures how far apart neurons are: the closest approach, the mean or median separation, ' +
-    'the distance between centroids, or how much cable or surface of one lies within a given ' +
-    'distance of the other. Wire one set of skeletons or meshes for an all-by-all, or a second ' +
-    'for one group against another. The averages are weighted by cable or by surface, so ' +
-    'resampling upstream does not move them.',
+    'Measures how far apart neurons are in space, as a matrix in micrometres: closest approach, ' +
+    'mean separation, distance between centroids, or how much cable lies within a given ' +
+    'distance of the other neuron. Wire skeletons or meshes into Query for an all-by-all, or a ' +
+    'second set into Target. The result can go straight into Linkage.',
   cost: 'expensive',
   inputs: [
     { id: 'query', label: 'Query', type: T.any(), kinds: DISTANCE_KINDS },
@@ -98,7 +97,7 @@ registerNode({
       label: 'Measure',
       default: 'nearest',
       options: METHOD_OPTIONS,
-      help: 'Nearest-point works from every part of the Query to the closest part of the Target. Centroid compares one point per neuron — the centre of mass of its cable or surface. Within counts how much of a neuron lies close to the other.',
+      help: '"nearest-point distance" measures from every part of the Query to the closest part of the Target. "centroid distance" compares each neuron’s centre of mass. "cable or area within a distance" measures how much of a neuron lies close to the other.',
     },
     {
       id: 'statistic',
@@ -107,7 +106,7 @@ registerNode({
       default: 'min',
       options: STATISTIC_OPTIONS,
       visibleIf: (params) => params.method === 'nearest',
-      help: 'Reduces one neuron’s nearest-point distances to a single number. These are distances to the *nearest* part of the other neuron, never between every pair of points: an all-pairs mean measures how big each neuron is more than how near the two are.',
+      help: 'How to summarise the distances from each part of a neuron to the nearest part of the other as one number.',
     },
     {
       id: 'within',
@@ -117,7 +116,7 @@ registerNode({
       min: 0,
       step: 0.5,
       visibleIf: (params) => params.method === 'within',
-      help: 'How close counts as close. 2 µm is navis’s default for cable overlap and is about the distance across which a synapse could plausibly be made.',
+      help: 'How close counts as close. 2 µm is navis’s default for cable overlap, roughly the range at which a synapse could form.',
     },
     {
       id: 'report',
@@ -126,7 +125,7 @@ registerNode({
       default: 'absolute',
       options: REPORT_OPTIONS,
       visibleIf: (params) => params.method === 'within',
-      help: 'Absolute is µm of cable or µm² of surface. A fraction divides by the neuron’s own total, which is what makes two neurons of different sizes comparable — and is the only form a clustering can use directly, an absolute overlap being unbounded.',
+      help: '"absolute" gives µm of cable or µm² of surface. "fraction of the neuron" divides by the neuron’s total, which makes neurons of different sizes comparable and is the form to use for clustering.',
     },
     {
       id: 'symmetry',
@@ -156,7 +155,7 @@ registerNode({
       // Hidden for `centroid`, which has one direction by construction. Hidden params are out of
       // the cache key, so switching to centroid and back cannot leave a stale one in it.
       visibleIf: (params) => params.method !== 'centroid',
-      help: 'A small neuron can lie entirely alongside a large one, so the two directions of a pair disagree — and only the Query side is sampled at all, so they disagree by how each was reconstructed too. The mean is the usual choice and makes an all-by-all matrix symmetric.',
+      help: 'How to combine the two directions of each pair, which differ when a small neuron lies alongside a large one. "mean of both directions" is the usual choice.',
     },
     labelColumnParam(
       'Which attribute names each row. Neuron ids where this is empty or unset.',

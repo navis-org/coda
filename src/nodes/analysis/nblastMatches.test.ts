@@ -98,8 +98,8 @@ describe('matchOps — clamping, which is the alternative to a stack trace', () 
   it('says so when it clamped, with both numbers', () => {
     const said: string[] = []
     checkMatchSize({ warn: (m) => said.push(m) }, matrix(5, 4), { ...PARAMS, n: 20 })
-    expect(said.join(' ')).toMatch(/top 20/)
-    expect(said.join(' ')).toMatch(/returned 3/)
+    expect(said.join(' ')).toMatch(/`Matches per neuron` is 20/)
+    expect(said.join(' ')).toMatch(/so 3 were returned/)
   })
 
   it('says nothing when it did not clamp', () => {
@@ -111,7 +111,7 @@ describe('matchOps — clamping, which is the alternative to a stack trace', () 
 
 describe('matchOps — the self-skip', () => {
   it('refuses a rectangular matrix, which has no diagonal to skip', () => {
-    expect(() => checkSkipSelf(matrix(5, 9), true)).toThrow(/means the diagonal/)
+    expect(() => checkSkipSelf(matrix(5, 9), true)).toThrow(/skips the diagonal/)
   })
 
   it('allows it on a square one, and allows it off on any', () => {

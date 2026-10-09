@@ -63,13 +63,11 @@ registerNode({
   label: 'Network Centrality',
   category: 'analysis',
   description:
-    'Betweenness, closeness, PageRank and communities for a network’s nodes. Each measure switched on adds its own column: `betweenness`, `closeness`, `pagerank`, `eigenvector`, `community`.',
+    'Betweenness, closeness, PageRank, eigenvector centrality and communities for a network’s nodes. Each measure switched on adds its own column: `betweenness`, `closeness`, `pagerank`, `eigenvector`, `community`.',
   guide:
-    'Adds centrality columns to a network’s nodes: betweenness and harmonic closeness from a ' +
-    'shortest-path sweep, PageRank, eigenvector centrality and Louvain communities. Expensive ' +
-    'by nature — the sweep walks every link once per source node — so it runs only on Run, and ' +
-    'Sample trades an exact answer for a much faster one. The network passes through carrying ' +
-    'the new columns.',
+    'Adds betweenness, closeness, PageRank, eigenvector centrality and Louvain communities as ' +
+    'columns to a network from Build Network. Slow on large networks, so it only runs on Run; ' +
+    'use Sample to trade exactness for speed. Plot the columns with Network Metrics.',
   cost: 'expensive',
   inputs: [{ id: 'in', label: 'Network', type: T.network() }],
   outputs: [
@@ -83,21 +81,21 @@ registerNode({
       kind: 'boolean',
       label: 'Betweenness',
       default: true,
-      help: 'Share of shortest paths running through each node. The expensive one.',
+      help: 'Share of shortest paths that run through each node. The slowest measure to compute.',
     },
     {
       id: 'closeness',
       kind: 'boolean',
       label: 'Closeness',
       default: true,
-      help: 'Harmonic closeness: how short the incoming paths to a node are, averaged. Free once betweenness is running.',
+      help: 'Harmonic closeness: how short the paths into each node are on average. Adds no time when `Betweenness` is on.',
     },
     {
       id: 'pagerank',
       kind: 'boolean',
       label: 'PageRank',
       default: true,
-      help: 'Weight flowing in from upstream partners, and from theirs. Linear per iteration.',
+      help: 'How much weight flows into each node from its upstream partners, and from theirs.',
     },
     {
       /*
@@ -138,7 +136,7 @@ registerNode({
       min: 0,
       step: 50,
       visibleIf: (params) => params['betweenness'] !== false || params['closeness'] !== false,
-      help: 'Source nodes to sweep from. 0 sweeps every node — exact, and nodes × links of work. A few hundred is usually within a percent.',
+      help: 'How many source nodes to sample paths from. 0 uses every node, which is exact but slow on large networks; a few hundred is usually within a percent.',
     },
     {
       id: 'seed',
@@ -148,7 +146,7 @@ registerNode({
       min: 0,
       advanced: true,
       visibleIf: (params) => Number(params['samples']) > 0 || params['communities'] !== false,
-      help: 'Pins the pivot draw and Louvain’s walk, so a re-run gives the same answer.',
+      help: 'Fixes the random sampling and community detection, so a re-run gives the same answer.',
     },
     {
       id: 'resolution',
@@ -172,7 +170,7 @@ registerNode({
       step: 0.05,
       advanced: true,
       visibleIf: (params) => params['pagerank'] !== false,
-      help: 'PageRank’s damping factor — the chance of following a link rather than restarting.',
+      help: 'PageRank’s damping factor: the probability of following a link at each step.',
     },
   ],
 
@@ -198,7 +196,9 @@ registerNode({
       !options.eigenvector &&
       !options.communities
     ) {
-      return ['Nothing selected — turn on at least one measure']
+      return [
+        'No measure is turned on. Turn on at least one measure, such as `Betweenness` or `PageRank`.',
+      ]
     }
     return []
   },
@@ -220,10 +220,10 @@ registerNode({
         count: sweepWork,
         threshold: SWEEP_WORK_WARN,
         unit: 'source-link steps',
-        control: 'the size an exact shortest-path sweep is usually run over',
+        control: 'the usual size for an exact shortest-path sweep',
         cost:
-          'Betweenness walks every link once per source node, so the cost is nodes × ' +
-          'links. Set Sample to a few hundred pivots for an estimate.',
+          '`Betweenness` walks every link once per source node, so the cost is nodes × ' +
+          'links. Set `Sample` to a few hundred to get a faster estimate.',
       })
     }
 

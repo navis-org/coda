@@ -57,7 +57,7 @@ import {
   skeletonsFromResult,
   usesDistance,
 } from '../lib/cleanOps'
-import { NM_PER_UM } from '../lib/nblastOps'
+import { NM_PER_UM } from '../../data/units'
 
 registerNode({
   type: 'neuron.cleanSkeletons',
@@ -65,12 +65,11 @@ registerNode({
   category: 'transform',
   description: 'Heal, smooth and re-sample skeletons before measuring or comparing them.',
   guide:
-    'Four repairs a traced skeleton usually wants, in the one order they compose: reconnect ' +
-    'its fragments, smooth the tracing jitter out, then either re-sample it to an even node ' +
-    'spacing or keep every Nth node. Re-sampling is what most morphometrics want in front of ' +
-    'them, since anything averaged per node is otherwise weighted by how finely each neurite ' +
-    'was traced. Distances are micrometres, and the node count changes while the neuron count ' +
-    'never does.',
+    'Four optional repairs for traced skeletons, applied in this order: reconnect fragments, ' +
+    'smooth out tracing jitter, then either re-sample to an even node spacing or keep every ' +
+    'Nth node. Re-sample before morphometrics that average per node, which are otherwise ' +
+    'weighted by how finely each neurite was traced. Distances are in micrometres. The number ' +
+    'of nodes changes; the number of neurons does not.',
   /*
    * `expensive` and not close: this runs in a Python runtime that is a ten megabyte download
    * on first use. There is no cheap path — every one of the four operations is a fastcore
@@ -85,7 +84,7 @@ registerNode({
       kind: 'boolean',
       label: 'Heal fragments',
       default: false,
-      help: 'Reconnect the disconnected pieces a reconstruction arrived in, by the shortest set of bridges. Off by default because it is a claim about the data: a skeleton is sometimes several fragments because it genuinely is.',
+      help: 'Join disconnected fragments with the shortest bridges. Off by default because some skeletons genuinely are several pieces.',
     },
     {
       id: 'healMaxDist',
@@ -95,7 +94,7 @@ registerNode({
       min: 0,
       step: 1,
       visibleIf: (params) => params.heal === true,
-      help: 'Refuse to build a bridge longer than this, leaving those fragments apart. 0 means no limit, which always produces one tree — including where the nearest fragment belongs to somebody else.',
+      help: 'Leave fragments further apart than this unjoined. 0 means no limit: you always get one tree, even if that joins a fragment of another neuron.',
     },
     {
       id: 'smooth',
@@ -104,7 +103,7 @@ registerNode({
       default: 0,
       min: 0,
       step: 0.5,
-      help: 'Gaussian kernel width, measured along the neurite rather than through space. Roots, branch points and leaves stay put; 0 leaves the coordinates as traced.',
+      help: 'Width of the Gaussian smoothing, measured along the neurite. Roots, branch points and leaves stay put; 0 turns smoothing off.',
     },
     {
       id: 'method',
@@ -116,7 +115,7 @@ registerNode({
         { value: 'resample', label: 're-sample to an even spacing' },
         { value: 'downsample', label: 'keep every Nth node' },
       ],
-      help: '"Re-sampling" lays fresh nodes at a fixed distance apart, so an unevenly traced neuron comes out even. "Every Nth node" ignores geometry but always keeps roots, branch points and leaves. One or the other.',
+      help: '"re-sample to an even spacing" places new nodes a fixed distance apart. "keep every Nth node" ignores geometry but always keeps roots, branch points and leaves.',
     },
     {
       id: 'spacing',
@@ -126,7 +125,7 @@ registerNode({
       min: 0,
       step: 0.5,
       visibleIf: (params) => params.method === 'resample',
-      help: 'Target distance between adjacent nodes; 1 µm is the convention NBLAST uses. The node count is total cable length divided by this, so halving it doubles the geometry.',
+      help: 'Distance between adjacent nodes; 1 µm is the convention for NBLAST. Halving it doubles the node count.',
     },
     {
       id: 'factor',
@@ -137,7 +136,7 @@ registerNode({
       max: 100,
       step: 1,
       visibleIf: (params) => params.method === 'downsample',
-      help: 'Keep one node in every N along each unbranched stretch, counting from its far end. A factor nothing can satisfy leaves just the roots, branch points and leaves.',
+      help: 'Keep one node in every N along each unbranched stretch. Roots, branch points and leaves are always kept.',
     },
   ],
 
@@ -152,13 +151,13 @@ registerNode({
     const params = skeletonCleanParamsFrom(ctx.params)
     const issues: string[] = []
     if (isNoOp(params))
-      issues.push('Nothing is switched on, so this passes the skeletons through')
+      issues.push('No cleaning step is switched on, so the skeletons pass through unchanged.')
     if (params.method === 'resample' && params.spacing > 0 && params.spacing < 0.1) {
       // Not a refusal — `checkResampleSize` handles the case that would actually fail — but a
       // spacing this fine is nearly always a µm/nm mix-up, and saying so at edit time is
       // cheaper than saying it after the wait.
       issues.push(
-        `Spacing is ${params.spacing} µm; this control is micrometres, not nanometres`,
+        `\`Spacing (µm)\` is ${params.spacing} µm. This setting is in micrometres; check you did not enter nanometres.`,
       )
     }
     return issues
@@ -196,7 +195,15 @@ registerNode({
     if (empty > 0) {
       ctx.warn(
         `${empty} of ${value.items.length} neurons came back with no nodes. They stay in ` +
-          `the collection so the attribute table lines up, and draw nothing.`,
+          `the collection so the attribute table lines up, but draw nothing.`,
+      )
+    }
+    // Said out loud, since `skeletonsFromResult` drops it: an arbour that stops shading is not.
+    const computed = value.items.filter((item) => item.split || item.nodeValues).length
+    if (computed > 0) {
+      ctx.warn(
+        `${computed} of ${value.items.length} neurons carried an axon/dendrite split or per-node ` +
+          `values, which cleaning discards because it renumbers the nodes. Split after cleaning instead.`,
       )
     }
     return { out: skeletonsFromResult(value, result) }

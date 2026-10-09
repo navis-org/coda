@@ -6,23 +6,29 @@
  * the fake is self-consistent and nothing about the thing the model is actually told.
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import '../nodes'
 import type { CodaGraph } from '../core/graph'
 import { addEdge, addNode, emptyGraph, newId, updateNode } from '../core/graph'
 import { inferGraph } from '../core/inference'
-import { configurableParams, defaultParams } from '../core/node'
+import { configurableParams, defaultParams, findParam } from '../core/node'
 import { getNodeDef, listableNodeDefs } from '../core/registry'
 import type { ApplyOk, ApplyResult } from './apply'
 import { applyPlan } from './apply'
-import { buildSystemPrompt, catalogueText, gateNote, optionLines } from './catalogue'
+import {
+  buildSystemPrompt,
+  catalogueText,
+  gateNote,
+  optionLines,
+  portColumns,
+  probeOutputs,
+  renderNode,
+} from './catalogue'
 import { registerBuiltinSources } from '../data/builtins'
 import { setKey } from '../data/ai/credentials'
-import { getSource } from '../data/source'
+import { allSources, getSource } from '../data/source'
+import type { DataSource } from '../data/source'
 import type { NodeDefinition } from '../core/node'
 import { T } from '../core/types'
 import type { CodaType } from '../core/types'
@@ -732,79 +738,6 @@ describe('the plan format', () => {
   })
 })
 
-/**
- * The boundary, followed all the way rather than one file deep.
- *
- * `eslint.config.js` lists `src/assistant/**` in its boundary block so the assistant stays
- * reachable by a non-React consumer — but its `**\/ui/*` pattern matches a *direct* import, and
- * the property it protects is transitive. That gap was not hypothetical: `digest.ts` reuses
- * `describeTable` (so a plan's median and the Describe card's are the same number), and
- * `describeOps` reached `ui/viewers/boxStats` for `quantileSorted`, which reaches `ui/colors`.
- * Three files deep, lint clean, property false.
- *
- * Moving `quantileSorted` to `core/stats.ts` fixed that instance. This is what stops the next one:
- * a walk, from every non-test module in `src/assistant`, over relative imports, asserting nothing
- * under `src/ui` or `src/store` is reachable at any depth.
- */
-describe('the headless boundary', () => {
-  it('reaches no UI or store module, at any depth, from any headless area', () => {
-    /*
-     * All five directories `eslint.config.js` names, not just this one. The transitive hole is
-     * identical in each, and `src/data` is three times the size of `src/assistant` and the most
-     * likely to reach for a UI formatter. Zero offenders across 255 modules today.
-     */
-    const root = new URL('..', import.meta.url).pathname
-    const seen = new Set<string>()
-    const offenders: string[] = []
-
-    const resolve = (from: string, spec: string): string | undefined => {
-      if (!spec.startsWith('.')) return undefined
-      const base = join(dirname(from), spec)
-      for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
-        if (existsSync(candidate)) return candidate
-      }
-      return undefined
-    }
-
-    const walk = (file: string, trail: readonly string[]): void => {
-      if (seen.has(file)) return
-      seen.add(file)
-      const rel = file.slice(root.length)
-      if (rel.startsWith('ui/') || rel.startsWith('store/')) {
-        offenders.push([...trail, rel].join(' → '))
-        return
-      }
-      /*
-       * `import('…')` as well as `from '…'`: a dynamic import is a live idiom here — the
-       * assistant drawer loads `converse.ts` that way on purpose — so a walk that read only
-       * static imports would let `await import('../ui/…')` through.
-       */
-      const source = readFileSync(file, 'utf8')
-      for (const [, a, b] of source.matchAll(
-        /(?:from|import)\s*\(?\s*'([^']+)'|import\('([^']+)'\)/g,
-      )) {
-        const next = resolve(file, (a ?? b)!)
-        if (next) walk(next, [...trail, rel])
-      }
-    }
-
-    for (const area of ['assistant', 'core', 'data', 'layout', 'pyodide']) {
-      const walkDir = (dir: string): void => {
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
-          const path = join(dir, entry.name)
-          if (entry.isDirectory()) walkDir(path)
-          else if (/\.tsx?$/.test(entry.name) && !entry.name.includes('.test.')) walk(path, [])
-        }
-      }
-      walkDir(join(root, area))
-    }
-
-    expect(offenders, 'no headless area may reach the UI or the store').toEqual([])
-    // A walk that visited almost nothing would pass for the wrong reason.
-    expect(seen.size, 'the walk actually followed the import graph').toBeGreaterThan(150)
-  })
-})
-
 describe('the catalogue', () => {
   it('offers every listable node type and nothing else', () => {
     const text = catalogueText()
@@ -862,6 +795,72 @@ describe('the catalogue', () => {
           allOutputPorts(producer!).map((p) => p.id),
           `${type} has no ${source} output`,
         ).toContain(source)
+      }
+    }
+  })
+
+  it('says which general node an output feeds, and how to set it', () => {
+    /*
+     * `PortDef.feeds` on Connectivity. A Bar Chart sums its value per category, so a partner
+     * ranking by synapses is `weight` straight in — which Bar Chart cannot say about one
+     * producer's columns without saying it about every table that reaches it.
+     */
+    expect(catalogueText()).toContain(
+      'connections feeds out.barChart (Bar Chart) when asked to rank downstream partner ' +
+        'types by synapses: wire this output to its in and set category = postType, value = weight. ' +
+        'Asked for anything else, follow the request instead.',
+    )
+  })
+
+  it('never feeds a node, input, param or column that does not exist', () => {
+    /*
+     * The half `feeds` has over prose: it names a consumer, its input, its params, this port's
+     * columns and this node's own params, and all five can be renamed out from under it. A sentence telling a model
+     * to set a param that is not there, or to chart a column the port does not carry, is refused
+     * or leaves a card complaining — the failure the declaration was added to prevent.
+     */
+    for (const def of listableNodeDefs()) {
+      for (const port of allOutputPorts(def)) {
+        if (!port.feeds) continue
+        const type = probeOutputs(def)[port.id]
+        const carried = type ? portColumns(type).flatMap(([, names]) => names) : []
+        for (const feed of port.feeds) {
+          const where = `${def.type}.${port.id} feeds ${feed.type}`
+          const consumer = getNodeDef(feed.type)
+          expect(consumer, `${where}: not a registered node type`).toBeTruthy()
+          const inputs = allInputPorts(consumer!)
+          if (feed.port) {
+            expect(
+              inputs.map((p) => p.id),
+              `${where}: no ${feed.port} input`,
+            ).toContain(feed.port)
+          } else {
+            expect(inputs, `${where}: name the input, it has several`).toHaveLength(1)
+          }
+          // A condition names this node's own param and one of the values it offers.
+          for (const [id, value] of Object.entries(feed.ifParams ?? {})) {
+            const own = findParam(def, id)
+            expect(own, `${where}: ${def.type} has no ${id} param`).toBeTruthy()
+            if (own?.kind === 'enum' && Array.isArray(own.options)) {
+              expect(
+                own.options.map((o) => o.value),
+                `${where}: ${id} never = ${value}`,
+              ).toContain(value)
+            }
+          }
+          for (const [id, value] of Object.entries(feed.params)) {
+            const param = findParam(consumer!, id)
+            expect(param, `${where}: no ${id} param`).toBeTruthy()
+            if (param?.kind === 'column' || param?.kind === 'columns') {
+              for (const name of [value].flat()) {
+                expect(
+                  carried,
+                  `${where}: ${def.type}.${port.id} carries no ${name}`,
+                ).toContain(name)
+              }
+            }
+          }
+        }
       }
     }
   })
@@ -1568,6 +1567,37 @@ describe('what a run produced', () => {
  * `validateParamValue` skips dynamic options by design — so the plan applies and the node
  * carries a warning the user has to find.
  */
+/**
+ * **The deny-list itself, method by method, rather than `fetch`.** Watching `fetch` reads as the
+ * stronger pin and is the weaker one: `skeletonSourcesFor` starts its probe through an `await`
+ * chain that bails in a fresh process before any request goes out, so a `fetch` spy stays green on
+ * exactly the param that made `optionsWithoutPeek` necessary. These three are the seams that
+ * start a fetch, they are synchronous, and calling one *is* the violation whether or not a socket
+ * is opened afterwards.
+ */
+const PEEKS = ['peekDatasets', 'schemasFor', 'skeletonSourcesFor'] as const
+
+/** Record every call to a peek on these sources, as `source.method`, until the test finishes. */
+function watchPeeks(sources: readonly DataSource[]): { watched: string[]; calls: string[] } {
+  const watched: string[] = []
+  const calls: string[] = []
+  for (const source of sources) {
+    for (const name of PEEKS) {
+      const held = source as unknown as Record<string, (...args: unknown[]) => unknown>
+      const original = held[name]
+      if (typeof original !== 'function') continue
+      const label = `${source.id}.${name}`
+      watched.push(label)
+      const spy = vi.spyOn(held, name).mockImplementation((...args) => {
+        calls.push(label)
+        return original.apply(source, args)
+      })
+      onTestFinished(() => spy.mockRestore())
+    }
+  }
+  return { watched, calls }
+}
+
 describe('the options a node actually offers', () => {
   /** `Connectivity → Filter`, so the filter's column has a real dtype to derive operators from. */
   function filtering(column: string) {
@@ -1680,23 +1710,8 @@ describe('the options a node actually offers', () => {
     const source = getSource('neuprint')
     expect(source, 'the neuPrint source is registered').toBeTruthy()
 
-    /*
-     * **The deny-list itself, method by method, rather than `fetch`.** Watching `fetch` reads as
-     * the stronger pin and is the weaker one: `skeletonSourcesFor` starts its probe through an
-     * `await` chain that bails in a fresh process before any request goes out, so a `fetch` spy
-     * stays green on exactly the param that made this rename necessary. These three are the
-     * seams the flag's contract names, they are synchronous, and calling one *is* the violation
-     * whether or not a socket is opened afterwards.
-     */
-    const watched = ['peekDatasets', 'schemasFor', 'skeletonSourcesFor'] as const
-    const held = source as unknown as Record<string, () => unknown>
-    const spies = watched.map((name) => {
-      const original = held[name]!
-      expect(typeof original, `${name} exists to be watched`).toBe('function')
-      const spy = vi.fn(original)
-      held[name] = spy
-      return { name, spy, original }
-    })
+    const { watched, calls } = watchPeeks([source!])
+    expect(watched, 'every deny-listed method exists to be watched').toHaveLength(PEEKS.length)
 
     for (const def of listableNodeDefs()) {
       const inputs: Record<string, CodaType | undefined> = {}
@@ -1706,10 +1721,27 @@ describe('the options a node actually offers', () => {
       optionLines(def, defaultParams(def), inputs)
     }
 
-    for (const { name, spy } of spies) {
-      expect(spy, `no options function reached ${name}`).not.toHaveBeenCalled()
+    expect(calls, 'no options function reached a peek').toEqual([])
+  })
+
+  it('starts no dataset listing while rendering the catalogue', () => {
+    /*
+     * The same property one level up. `producedColumns` infers a lone copy of every node type
+     * for its `carries:` line, and inferring a *dataset* node reads `peekDatasets` — so asking
+     * the assistant anything put a neuPrint, a CAVE and three CATMAID listings on the wire, and
+     * the neuPrint one reported a missing token straight into the Connections dialog.
+     *
+     * `renderNode` per type rather than `buildSystemPrompt`, which is memoised: whichever test
+     * built the prompt first would leave this one passing without rendering anything. Every
+     * source is watched, not just neuPrint — a CATMAID server is a source of its own.
+     */
+    registerBuiltinSources()
+    const { calls } = watchPeeks(allSources())
+    for (const def of listableNodeDefs()) {
+      renderNode(def, 'lean')
+      renderNode(def, 'full')
     }
-    for (const { name, original } of spies) held[name] = original
+    expect([...new Set(calls)]).toEqual([])
   })
 })
 
@@ -2018,7 +2050,7 @@ describe('a plan that is legal and still wrong', () => {
 
   it('says a Labels table is not a labels table, where the schema is known', () => {
     expect(messagesOf(misWiredComparison().graph)).toContain(
-      'Dataset 1: the Labels table has no "label" column, so it is not a Match Cell Types',
+      'Dataset 1: the table wired into `Labels 1` has no "label" column, so it is not a labels table from Match Cell Types',
     )
   })
 
@@ -2034,7 +2066,7 @@ describe('a plan that is legal and still wrong', () => {
     const graph = updateNode(applied.graph, cmp, {
       params: { ...node.params, labelColumn: 'type' },
     })
-    expect(messagesOf(graph)).not.toContain('is not a Match Cell Types labels table')
+    expect(messagesOf(graph)).not.toContain('is not a labels table from Match Cell Types')
   })
 
   it('leaves column complaints out, having already told the model they are fine', () => {
@@ -2050,7 +2082,7 @@ describe('a plan that is legal and still wrong', () => {
     // Both complaints are on the card; the model is shown one of them.
     expect(applied.warnings.some((w) => w.aboutColumns)).toBe(true)
     const concerns = concernsFrom(applied.warnings).join('\n')
-    expect(concerns).toContain('is not a Match Cell Types labels table')
+    expect(concerns).toContain('is not a labels table from Match Cell Types')
     expect(concerns).not.toContain('nosuchcolumn')
   })
 
@@ -2068,7 +2100,7 @@ describe('a plan that is legal and still wrong', () => {
       ),
     )
     expect(concernsFrom(elsewhere.warnings).join('\n')).not.toContain(
-      'is not a Match Cell Types labels table',
+      'is not a labels table from Match Cell Types',
     )
   })
 

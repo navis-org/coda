@@ -46,6 +46,17 @@ export interface FetchTextMessages {
   signal?: AbortSignal
 }
 
+/**
+ * A request that never got an answer, in the one sentence for it — `fetchText`'s own, and that of
+ * any other cross-origin read that has to say the same (a table file's HEAD).
+ */
+export function unreachable(url: string, hint?: string): Error {
+  return new Error(
+    `Could not fetch ${url}. The host may be unreachable, or may refuse cross-origin ` +
+      `reads. The browser does not say which.${hint ? ` ${hint}` : ''}`,
+  )
+}
+
 export async function fetchText(
   url: string,
   messages: FetchTextMessages = {},
@@ -59,10 +70,7 @@ export async function fetchText(
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new Error(
-      `Could not fetch ${url}. The host may be unreachable, or may refuse cross-origin ` +
-        `reads — a browser gives no reason.${messages.hint ? ` ${messages.hint}` : ''}`,
-    )
+    throw unreachable(url, messages.hint)
   }
   if (response.status === 404) {
     throw new NotFoundError(

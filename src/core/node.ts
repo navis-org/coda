@@ -15,6 +15,7 @@
 
 import type { DataSource } from '../data/source'
 import type { CompanionSpec } from './companion'
+import type { NodeHint } from './graph'
 import { ID_COLUMN_NAME } from './ids'
 import type { AttributePart, CodaType, DType, Kind, TableSchema } from './types'
 import { attributeSchema, columnsOfType, schemaOf } from './types'
@@ -37,6 +38,24 @@ export type NodeCost = 'cheap' | 'expensive'
  */
 export type NodeCategory =
   'dataset' | 'query' | 'transform' | 'analysis' | 'visualisation' | 'utility'
+
+/** One entry of `PortDef.feeds`. */
+export interface PortFeed {
+  /** The consumer's node type. */
+  type: string
+  /** The consumer's input. Defaults to its only input; the registry test refuses the ambiguity. */
+  port?: string
+  /** What the pairing is for, as a clause: "to rank downstream partner types by synapses". */
+  when: string
+  /** The consumer's params, set as a plan would set them. */
+  params: Readonly<Record<string, ParamValue>>
+  /**
+   * This node's params the entry applies under, where it depends on them — Connectivity's
+   * partner column is `post*` downstream and `pre*` upstream. Rendered after `when` and checked
+   * against this node's declared options, where prose in `when` is checked by nothing.
+   */
+  ifParams?: Readonly<Record<string, ParamValue>>
+}
 
 export interface PortDef {
   id: string
@@ -99,6 +118,28 @@ export interface PortDef {
    * since a producer may register after its consumer.
    */
   producedBy?: { type: string; port?: string }
+  /**
+   * Outputs only: a node this output is commonly wired into, what for, and how to set it up.
+   *
+   * `producedBy` from the other end, and for the other half of the same gap. That one names the
+   * node an *input* needs; this names what a general-purpose consumer should be told about *this*
+   * output's columns — which the consumer cannot say itself without learning about every
+   * producer. Found on Bar Chart: a model charting "top partner types" off Connectivity counted
+   * rows through a Group By, and the fix that measured (`weight` straight into the chart) named
+   * `postType` and `weight` in Bar Chart's own description, where a table of anything arrives.
+   * So the pairing lives here, on the node whose columns it names.
+   *
+   * Not a constraint and not a default — nothing is wired or set because of it. The assistant
+   * catalogue renders each entry as a sentence under the ports (`feedLines`), and
+   * `assistant.test.ts` checks it against the registry: the consumer and its input exist, every
+   * param is one it declares, and every column-valued param names a column this port carries.
+   *
+   * **Declare the other reading of the request too.** With only the ranking entry, a request to
+   * count rows per partner type charted `weight` 5 of 5 — one recipe on the page beats the
+   * request, conditioned or not. Adding the count as a Group By entry beside it made that 5 of 5
+   * `n` with the ranking still 10 of 10. Numbers in `docs/assistant.md`.
+   */
+  feeds?: readonly PortFeed[]
   /**
    * Inputs only: this port and the others naming the same group are **alternatives**, and at
    * most one of them may be wired.
@@ -308,6 +349,26 @@ interface ParamBase {
   internal?: boolean
   /** Conditional visibility, evaluated against the node's current params. */
   visibleIf?: (params: ParamValues) => boolean
+  /**
+   * Drawn only while this input port carries a wire — on the card and in the inspector alike.
+   *
+   * For a node with several optional sockets, each with its own settings: the Custom Dataset's
+   * synapse pickers mean nothing until a synapse table is wired, and drawn beside every other
+   * socket's they made a card taller than the graph around it. `visibleIf` cannot say this — it
+   * sees params, never wiring — and a node body would be a whole card to say one thing.
+   *
+   * **Display only, and deliberately not `visibleIf`'s other half:** a param hidden this way stays
+   * in the provenance key (`normalizeParams` knows nothing of wiring), which costs nothing — an
+   * unwired socket's settings reach no `evaluate` — and keeps the key a function of params alone.
+   * `registerNode` refuses a port the node does not declare. `true` names a column picker's own
+   * `from` port, which is nearly always the one meant.
+   *
+   * Read by the card, its `… N more` count and the inspector. Not by a node **body**, which is
+   * handed no wiring — `paramFold.test.tsx` refuses the flag on a type with one — nor by the
+   * readers that list params rather than draw them (the assistant catalogue, help figures, a
+   * frame's exposed params), which is deliberate: a hidden control is still a setting.
+   */
+  whenWired?: string | true
   /**
    * Affects only how a result is *displayed*, never what `evaluate` returns.
    *
@@ -1117,7 +1178,7 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * a palette row wrapping to four lines, or a guide entry that says nothing.
    *
    * Prose, not markdown: the guide renders it as a paragraph, and a subset parser there would
-   * be a second copy of `ui/markdown.ts` on a page that deliberately imports nothing.
+   * be a second copy of `core/markdown.ts` on a page that deliberately imports nothing.
    */
   guide?: string
   cost: NodeCost
@@ -1293,6 +1354,17 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * B registered to claim A, so a file saved under A opens only if C lists both.
    */
   formerTypes?: readonly string[]
+  /**
+   * Hints true of the **reader's browser** rather than of the workflow — Link Table's "this browser
+   * cannot keep a local file across a reload". Drawn on the card beside the document's own hints
+   * (`NodeHint`) with the same box and the same dismissal, and never written to the document: a
+   * sentence saved when a Firefox user added the node would ride a share link to a Chrome user,
+   * for whom it is false. See "Hints on a card" in `docs/canvas.md`.
+   *
+   * **Return a module-level constant**, or an empty one: the card asks on every render to decide
+   * whether to mount its hint stack at all.
+   */
+  readerHints?(params: P): readonly NodeHint[]
   /**
    * Output types given input types and params. Omit for nodes whose outputs are fully
    * described by their static `outputs[].type`. Must not throw — return the static type
@@ -1579,6 +1651,21 @@ export function hiddenParams(def: NodeDefinition, values: ParamValues): ParamDef
   return configurableParams(def, values).filter((p) => p.advanced === true)
 }
 
+/** The port a param's `whenWired` names — its own `from` for `true` — or undefined for none. */
+export function whenWiredPort(param: ParamDef): string | undefined {
+  if (param.whenWired !== true) return param.whenWired
+  return 'from' in param && typeof param.from === 'string' ? param.from : undefined
+}
+
+/**
+ * Whether a param is drawn, given which input ports carry a wire — `ParamBase.whenWired`'s rule,
+ * once, for the card, its "… N more" count and the inspector.
+ */
+export function shownWhenWired(param: ParamDef, wired: ReadonlySet<string>): boolean {
+  const port = whenWiredPort(param)
+  return port === undefined || wired.has(port)
+}
+
 /**
  * Of `params`, those carrying a value somebody chose.
  *
@@ -1631,7 +1718,9 @@ function differsFromDefault(value: ParamValue | undefined, fallback: ParamValue 
  * about the column you picked beats a quiet success on one you did not.
  *
  * `optional` still answers *off*, and before rule 2 — that is what optional means, and a
- * decoration pointed at a missing column has a sensible nothing to do.
+ * decoration pointed at a missing column has a sensible nothing to do. But only against a schema
+ * that is *known*: while it is not, an optional picker holding a column keeps it like any other
+ * (below), since off needs a schema to be off against.
  *
  * **Rule 3 is skipped entirely when the schema is unknown**, which is `resolveColumns`' guard in
  * the form that fits the singular and was missing here. "The first compatible column" is an
@@ -1674,11 +1763,17 @@ export function resolveColumn(
    */
   const chosen = saved || columnAbsence(param)
   if (chosen && available.includes(chosen)) return chosen
+  /*
+   * A schema this picker cannot see is not a schema without this column in it, so there is
+   * nothing here to pick a first compatible column *from* — and nothing to turn an optional one
+   * off over. Asked before the optional rule, which it used to follow: an optional picker holding
+   * a column read as *off* until its upstream had run, so a node below a table file answered its
+   * first Run without its match column and its second with it, re-keyed in between. Empty on an
+   * optional picker is still a choice — `chosen` is `''` there and this answers undefined.
+   */
+  if (!columnsKnown(param, inputs, params)) return chosen || undefined
   if (param.optional) return undefined
   if (chosen && chosen !== param.default) return chosen
-  // A schema this picker cannot see is not a schema without this column in it, so there is
-  // nothing here to pick a first compatible column *from*.
-  if (!columnsKnown(param, inputs, params)) return chosen || undefined
   // Undefined when there is nothing to offer, which every caller already handles.
   return available[0]
 }
@@ -1814,7 +1909,7 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
       if (p.optional) continue
       const dtypes = dtypesOf(p, ctx.params)
       const restriction = dtypes ? ` of type ${dtypes.join('/')}` : ''
-      issues.push(`No columns${restriction} available for "${p.label}"`)
+      issues.push(`No columns${restriction} available for \`${p.label}\`.`)
       continue
     }
     if (p.kind === 'column') {
@@ -1848,24 +1943,25 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
           columnSchemaFor(p, ctx.inputs, ctx.params)?.columns.some(
             (c) => c.name === stored && !dtypes.includes(c.dtype),
           ) === true
-        const gone = narrowed && dtypes ? `is not ${dtypes.join('/')}` : 'is gone'
+        const gone = narrowed && dtypes ? `is not ${dtypes.join('/')}` : 'is missing'
         if (p.optional) {
-          if (stored !== p.default) issues.push(`Column "${stored}" ${gone}`)
+          if (stored !== p.default) issues.push(`Column "${stored}" ${gone}.`)
         } else if (stored !== p.default) {
           issues.push(
             narrowed
-              ? `Column "${stored}" ${gone}, which "${p.label}" needs`
-              : `Missing column: ${stored}`,
+              ? `Column "${stored}" ${gone}, which \`${p.label}\` needs.`
+              : `Column "${stored}" is missing from the input.`,
           )
         } else if (!narrowed) {
-          issues.push(`Column "${stored}" is gone — using "${available[0]}"`)
+          issues.push(`Column "${stored}" is missing, so "${available[0]}" is used instead.`)
         }
       }
     } else {
       const stored = ctx.params[p.id]
       if (Array.isArray(stored)) {
         const missing = stored.filter((n) => !available.includes(n))
-        if (missing.length) issues.push(`Missing column(s): ${missing.join(', ')}`)
+        if (missing.length)
+          issues.push(`Columns missing from the input: ${missing.join(', ')}.`)
       }
     }
   }

@@ -32,31 +32,31 @@ export const SECTIONS: readonly Section[] = [
   {
     n: '1',
     title: 'Datasets',
-    note: 'Where the data comes from. One node per published connectome, plus a custom deployment.',
+    note: 'Where the data comes from: the published connectomes, your own deployments and annotation tables.',
     cats: ['dataset'],
   },
   {
     n: '2',
     title: 'Query',
-    note: 'Ask a dataset a question. These reach the network, so they go stale and wait for Run.',
+    note: 'Ask a dataset a question. Most of these fetch from a server, so they wait for you to press Run.',
     cats: ['query'],
   },
   {
     n: '3',
     title: 'Transform',
-    note: 'Reshape what came back — filter, join, aggregate, pivot, build a network.',
+    note: 'Work with what came back: filter, join, aggregate, pivot or build a network.',
     cats: ['transform', 'analysis'],
   },
   {
     n: '4',
     title: 'Visualise & output',
-    note: 'Draw it. Every viewer passes its input through, so it can sit anywhere in the chain.',
+    note: 'Plot your results. Viewers pass their input through, so you can put them anywhere in a chain.',
     cats: ['visualisation'],
   },
   {
     n: '',
     title: 'Utility',
-    note: 'Outside the pipeline: bring your own table, write a file, leave a note on the canvas.',
+    note: 'Everything else: load your own tables, save files, run loops and leave notes on the canvas.',
     cats: ['utility'],
   },
 ]

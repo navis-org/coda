@@ -11,10 +11,11 @@
  * because what stands down in a card preview is a per-viewer judgement.
  */
 
-import type { SizeSpec } from '../../nodes/lib/encodingParams'
-import type { MarkerShape, ResolvedColor, ResolvedSize } from '../encoding'
-import { ALL_SHAPES, rampNotes } from '../encoding'
-import { formatCompact } from '../format'
+import type { MarkerShape, SizeSpec } from '../../nodes/lib/encodingParams'
+import { ALL_SHAPES } from '../../nodes/lib/encodingParams'
+import type { ResolvedColor, ResolvedSize } from '../../style/encoding'
+import { rampNotes } from '../../style/encoding'
+import { formatCompact } from '../../style/format'
 import { markPath } from './scatterDraw'
 
 /**

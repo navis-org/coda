@@ -27,7 +27,7 @@ import { useEffect, useRef } from 'react'
 
 import type { RunSummary } from '../core/scheduler'
 import { useGraphStore } from '../store/graphStore'
-import { formatDuration, plural } from './format'
+import { formatDuration, plural } from '../style/format'
 
 /**
  * How long a run must have taken before finishing it is worth saying anything about.

@@ -371,7 +371,7 @@ describe('PrecomputedSource', () => {
         neuronIds: [],
         direction: 'outputs',
       }),
-    ).rejects.toThrow(/not connectivity/)
+    ).rejects.toThrow(/has no connectivity/)
   })
 
   it('names what it found when there is no geometry to fetch', async () => {
@@ -380,7 +380,37 @@ describe('PrecomputedSource', () => {
     const source = sourceFor('gs://em2/image')
     await expect(
       source.fetchMeshes({ datasetId: source.datasetId, neuronIds: ['1'] }),
-    ).rejects.toThrow(/publishes no meshes — it is image/)
+    ).rejects.toThrow(/publishes no meshes; it is image/)
+  })
+
+  /*
+   * A thumbnail, for Explore's tiles over a Custom Dataset whose geometry part is this source.
+   * The mesh path itself — a coarsest-level read of a Draco pyramid — is `fetchCoarseMesh`, which
+   * `precomputed.test.ts` covers against real bytes; what is pinned here is the choice around it.
+   */
+  it('answers a thumbnail with nothing, and no download, where there is no pyramid or skeleton', async () => {
+    const base = 'https://storage.googleapis.com/em2/seg'
+    const served = serve({
+      [`${base}/info`]: volumeInfo({ mesh: 'mesh' }),
+      [`${base}/mesh/info`]: { '@type': 'neuroglancer_legacy_mesh' },
+    })
+    const source = sourceFor('gs://em2/seg')
+    const coarse = await source.fetchCoarseGeometry({
+      datasetId: source.datasetId,
+      neuronId: '7',
+    })
+    expect(coarse).toBeUndefined()
+    // A legacy directory holds a whole neuron per row: not one fragment of it was asked for.
+    expect(served.urls.some((url) => url.includes('/mesh/7'))).toBe(false)
+  })
+
+  it('answers an image volume’s thumbnail with nothing rather than refusing', async () => {
+    const base = 'https://storage.googleapis.com/em2/image'
+    serve({ [`${base}/info`]: volumeInfo({ type: 'image' }) })
+    const source = sourceFor('gs://em2/image')
+    await expect(
+      source.fetchCoarseGeometry({ datasetId: source.datasetId, neuronId: '1' }),
+    ).resolves.toBeUndefined()
   })
 
   it('answers an empty id list without touching the network', async () => {
@@ -620,7 +650,7 @@ describe('segment properties', () => {
     serve({ [`${base}/info`]: { '@type': 'neuroglancer_legacy_mesh' } })
     const source = sourceFor('gs://nameless-refuse/seg')
     await expect(source.fetchRoiMeshes({ datasetId: source.datasetId })).rejects.toThrow(
-      /Type the segment ids of the ones you want into Regions/,
+      /Type the segment ids of the regions you want into `Regions`/,
     )
   })
 

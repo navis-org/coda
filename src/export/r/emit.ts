@@ -150,7 +150,7 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     const unknown = unknownTypeOf(node, def)
     if (!def || unknown !== undefined) {
       const type = unknown ?? node.type
-      warnings.push(`Unknown node type "${type}" — emitted as a comment.`)
+      warnings.push(`Unknown node type "${type}". It was written as a comment.`)
       // It binds nothing, so everything downstream is blocked — which is exactly what a TODO
       // step is, and a surface warning about them would otherwise miss the worst case there is.
       todos.push({ nodeId, label: node.title || type })
@@ -174,9 +174,9 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
         source: [
           header,
           ...rComment(
-            'Muted on the canvas, so it produced nothing and nothing downstream of it ' +
-              'ran. Left here rather than dropped, because a node missing from the ' +
-              'document and a node deliberately switched off look identical otherwise.',
+            'This node is muted on the canvas, so it produced nothing and nothing downstream of it ' +
+              'ran. It is kept here so a muted node is not mistaken for one missing from ' +
+              'the document.',
           ),
         ],
       })
@@ -287,7 +287,7 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     } else if (blockedBy.length > 0) {
       blockedHere = true
       body = ctx.todo(
-        `nothing upstream produced a value — ${quoted([...new Set(blockedBy)])} ` +
+        `nothing upstream produced a value, because ${quoted([...new Set(blockedBy)])} ` +
           `${blockedBy.length === 1 ? 'was' : 'were'} not translated.`,
       )
     } else if (!emitter) {

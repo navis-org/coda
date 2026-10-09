@@ -99,7 +99,10 @@ export function tableViewerPlan(
     ctx.schema('in'),
     decodeClauses(ctx.params.filters),
   )
-  return { terms, ignored: problems.map((problem) => `${problem.message} — not applied.`) }
+  return {
+    terms,
+    ignored: problems.map((problem) => `${problem.message}, so this filter is not applied.`),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -351,8 +354,8 @@ export function flowChartPlan(ctx: ChartContext): FlowChartPlan {
     // reimplemented: `foldFlowGraph`'s ranking and edge merging is a page of code to reproduce
     // for a figure whose author can filter upstream instead.
     divergences.push(
-      `The canvas folds each layer past ${fold} boxes into one "+N others". That is a drawing ` +
-        `control, so this figure shows every box — filter upstream to match it.`,
+      `The card merges each layer past ${fold} boxes into one "+N others" box (\`Fold past\`). ` +
+        `This figure shows every box. Filter upstream to match the card.`,
     )
   }
   return {

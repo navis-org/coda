@@ -60,15 +60,9 @@ registerNode({
   label: 'Unpivot',
   category: 'transform',
   description:
-    'Fold wide columns into one name column and one value column. The two are named by `Name into` and `Value into` — `name` and `value` unless you say otherwise.',
+    'Fold wide columns into rows: one new column holds the original column name, another the cell value. The two are named by Name column and Value column, `name` and `value` by default.',
   guide:
-    'Fold a wide table into a long one: pick the columns to fold and each becomes rows, with ' +
-    'the column name in one new column and the cell in another. This is the direction Pivot ' +
-    'does not go, and it is what makes an already-pivoted CSV usable — Group By, Filter Table ' +
-    'and every chart that colours by a category want the value in one column. The columns you ' +
-    'do not fold are repeated on every row it produces, so leaving Keep empty keeps the rest ' +
-    'of the table as it is. Note that it does not undo a Pivot: a pivot aggregated several ' +
-    'rows into each cell, and unfolding gives one row back rather than the several.',
+    'Turns a wide table into a long one: each column you fold becomes rows, with its name in one new column and its value in another, and the columns you keep are repeated on every row. Use it on an already-pivoted CSV so Group By, Filter Table or a chart can treat those column names as a category.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],

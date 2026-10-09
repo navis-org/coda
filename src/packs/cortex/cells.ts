@@ -83,7 +83,8 @@ export function proofreadingMissing(
 ): string | undefined {
   if (level === 'any') return undefined
   const flags = frame.proofreading
-  if (!flags) return 'Showing every cell: this dataset publishes no proofreading status.'
+  if (!flags)
+    return 'Showing every cell, because this dataset publishes no proofreading status.'
   // Only the columns this level reads: asking for a dendrite does not need the axon's strategy.
   const wanted = [
     flags.dendrite,
@@ -92,8 +93,8 @@ export function proofreadingMissing(
   ]
   const absent = wanted.filter((name) => !(name in cells.data))
   return absent.length > 0
-    ? `Showing every cell, proofread or not: ${flags.table} no longer has ` +
-        `${absent.join(' or ')}, which the Proofread filter reads.`
+    ? `Showing every cell, proofread or not, because ${flags.table} no longer has the ` +
+        `column ${absent.join(' or ')} that \`Proofread\` reads.`
     : undefined
 }
 
@@ -269,12 +270,15 @@ export function readColumnWidths(params: Readonly<Record<string, unknown>>): {
   if (params.columnMode !== 'even') return { widths: { mode: 'fit' } }
   const { value, problem } = readLimit(params.columnUm)
   if (problem)
-    return { widths: { mode: 'even' }, problem: `Width: ${problem}, so it is automatic.` }
+    return {
+      widths: { mode: 'even' },
+      problem: `\`Width (µm)\`: ${problem}, so the width is set automatically.`,
+    }
   if (value === undefined) return { widths: { mode: 'even' } }
   if (value <= 0) {
     return {
       widths: { mode: 'even' },
-      problem: `Width: ${value} µm is not a width, so it is automatic.`,
+      problem: `\`Width (µm)\` must be above 0, so the width is set automatically. Enter a positive number or leave it empty.`,
     }
   }
   return { widths: { mode: 'even', um: value } }

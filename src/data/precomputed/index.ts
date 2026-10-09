@@ -23,9 +23,9 @@ import {
   fragmentsUrl,
 } from './multires'
 import type { FetchOptions, Oversize } from './transport'
-import { OVERSIZE, PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
+import { OVERSIZE, fetchBytes, fetchInfo, isNotFound } from './transport'
 import { mapWithConcurrency } from '../concurrency'
-import type { GeometryDetail } from '../source'
+import type { CoarseGeometry, CoarseRefusal, GeometryDetail } from '../source'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 
 /**
@@ -173,7 +173,7 @@ export async function openMeshDir(
 ): Promise<MeshSource> {
   const base = url.replace(/\/+$/, '')
   const info = await fetchInfo<RawInfo>(base, options).catch((error: unknown) => {
-    if (error instanceof PrecomputedFetchError && error.status === 404) return {} as RawInfo
+    if (isNotFound(error)) return {} as RawInfo
     throw error
   })
   if (info['@type'] === 'neuroglancer_multilod_draco') {
@@ -667,7 +667,9 @@ export function meshFormatHasLevels(format: MeshFormat | undefined): boolean {
 export const FINE_TRIANGLE_BUDGET = 150_000
 
 /**
- * The coarsest level of one body, for a thumbnail — or nothing cheap enough to draw.
+ * The coarsest level of one body, for a thumbnail — or nothing cheap enough to draw. Answered in
+ * the seam's own terms (`CoarseGeometry`), so a source hands it straight back from its
+ * `fetchCoarseGeometry`.
  *
  * Every caller of this is a list of rows, so the two refusals matter more than the success. A
  * source with no pyramid answers `undefined` rather than its only level: `DataSource
@@ -675,11 +677,12 @@ export const FINE_TRIANGLE_BUDGET = 150_000
  * hand back several megabytes each. And `thumbnailCeiling` turns down a single pathological
  * body — off the manifest where there is one, so the refusal costs no download.
  *
- * **A refusal is `OVERSIZE` and an absence is `undefined`**, which every layer below this folded
- * into one until a tile needed to say which. See `readKey`.
+ * **A refusal is a `CoarseRefusal` and an absence is `undefined`**, which every layer below
+ * this folded into one until a tile needed to say which. See `readKey`.
  *
- * Shared because it was written twice: neuPrint reads a published bucket and CAVE reads the flat
- * segmentation beside a datastack, and both want exactly this call. A triangle budget of one
+ * Shared because three sources want exactly this call: neuPrint reads a published bucket, CAVE
+ * the flat segmentation beside a datastack, and the Neuroglancer Source whatever bucket it points
+ * at. A triangle budget of one
  * cannot be met by any level, and `chooseLod` answers that with the coarsest — which is the
  * level wanted here, so the budget is a way of asking rather than a limit.
  */
@@ -688,7 +691,7 @@ export async function fetchCoarseMesh(
   neuronId: string,
   options: FetchOptions = {},
   detail: GeometryDetail = 'coarsest',
-): Promise<MeshBody | Oversize | undefined> {
+): Promise<CoarseGeometry | CoarseRefusal | undefined> {
   /*
    * `legacy` is still refused and `dvid-ngmesh` is not, which is not an inconsistency: the
    * question is whether the *download* can be bounded, not whether the format has levels.
@@ -713,13 +716,9 @@ export async function fetchCoarseMesh(
     concurrency: 1,
     maxBytesPerBody: thumbnailCeiling(source),
   })
-  if (result.oversize.length > 0) return OVERSIZE
+  if (result.oversize.length > 0) return { kind: 'refused', reason: 'too-large' }
   const mesh = result.meshes[0]
-  // Untagged, and the caller adds `kind`. This module's own header promises it knows nothing
-  // about any particular source, and importing `CoarseGeometry` to stamp one word would spend
-  // that for no safety: `kind` is a *required* discriminant, so a `fetchCoarseGeometry` handing
-  // this straight back is a compile error rather than a silent fall-through to the mesh branch.
-  return mesh ? { positions: mesh.positions, indices: mesh.indices } : undefined
+  return mesh && { kind: 'mesh', positions: mesh.positions, indices: mesh.indices }
 }
 
 export { parseLegacyFragment } from './legacy'

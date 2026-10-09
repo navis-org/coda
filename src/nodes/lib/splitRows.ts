@@ -122,8 +122,8 @@ export function matchesNothing(rows: readonly FilterRow[]): boolean {
  */
 export function nothingMatchesReason(): string {
   return (
-    'This Split Neurons has no filters, so nothing matches: every neuron leaves on Rest and ' +
-    'Matching is empty.'
+    'This Split Neurons has no filters, so nothing matches: every neuron goes to `Rest` and ' +
+    '`Matching` is empty.'
   )
 }
 
@@ -144,9 +144,8 @@ export function unresolvedRowsReason(
   columns: readonly string[],
 ): string {
   const why =
-    `${problems.map((problem) => problem.message).join('; ')} — a split cannot drop a filter ` +
-    'row and answer anyway: the two halves would still partition the collection, of a different ' +
-    'question.'
+    `${problems.map((problem) => problem.message).join('; ')}. A split cannot skip a filter ` +
+    'row, because the two halves would then answer a different question. Fix or remove that row.'
   return columns.length > 0 ? `${why} These neurons carry: ${columns.join(', ')}` : why
 }
 
@@ -167,8 +166,9 @@ export function wrongKindReason(kind: CodaType['kind'] | undefined): string {
   if (kind === 'points') {
     return (
       'Split Neurons takes skeletons or meshes. A synapse cloud has one attribute row per ' +
-      'connector rather than per neuron, so splitting it would divide synapses, not neurons.'
+      'connector, so splitting it would split individual synapses. Filter the neuron table ' +
+      'above the node that fetched the synapses instead.'
     )
   }
-  return `Split Neurons takes skeletons or meshes, not ${kind ?? 'this'}.`
+  return `Split Neurons takes skeletons or meshes${kind ? `, and this input is ${kind}` : ''}.`
 }

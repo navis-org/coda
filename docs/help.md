@@ -54,36 +54,45 @@ document — a cross-reference that opens an empty page is a broken link, and th
 
 ## Voice
 
-The corpus was rewritten to this once, across all 66 documents: **34,060 words to 28,528**, and
-the cut tracked how much of a document was not about the node. `out.viewer3d` went 2,952 → 1,806
-and `core.sample` 176 → 96, where `neuron.skeletons` moved 4%. So these are not a length target.
-They are five things that were in the way, in the order they cost the most.
+**The model is navis** — its docstrings and its tutorials ([navis-org/navis](https://github.com/navis-org/navis), `docs/examples/`). The
+corpus was rewritten to that voice in October 2026, after an earlier pass (34,060 → 28,528 words)
+had cut the content that was not about the node but left the register: headings that were claims,
+"X, not Y" antitheses, epigrams, and design rationale. Readers said it still sounded generated.
+`cluster.linkage`, `core.groupBy` and `core.embed` were the three samples the user approved first;
+read one against its `git log -p` predecessor before writing.
 
 **Write for somebody who knows the field.** The reader is a connectomics researcher who came to
 this node from a workflow they are building. They know what sorting, clustering, a regex and a
-synapse are. `core.sample` read *"**Top** takes the first N rows — the strongest results after a
-Sort"*; the clause after the dash is a definition of Sort, and it is now *"**Top** takes the first
-N rows."*
+synapse are. Don't define them.
 
-**Cut why the code is the way it is; keep why the node behaves the way it does.** The distinction
-is whether it changes what the reader would *do*. "Clicking is off by default because a stray
-click while turning the scene re-runs everything downstream" stays — it tells you when to turn it
-on. "`Volumes` is a second socket because sharing one would mean one opacity and one colour
-encoding for both" was a four-line callout and is now half a sentence; the rest of that argument
-belongs in [canvas.md](canvas.md), where the decision was made.
+**Open with what the node does**, in a sentence or two, before any caveat. Where the method is not
+obvious, a short paragraph on how it works is welcome — navis explains NBLAST before running it.
 
-**No historical notes.** A reader arriving today has no "before" to compare against, so *"until
-this it was the one thing on screen with no control that could remove it"* and *"a framing is
-something you arrange, and the two of those used to throw it away"* are sentences about a diff.
-The exception is a fact about *their* saved file — "a workflow saved before this control existed
-included fragments and still does" is behaviour they can observe.
+**Headings are labels.** "Choosing a method", "Inputs", "Missing values" — never a claim ("Scores
+are not distances, and you do not have to worry about that") or a count ("Three ways in, and only
+one of them is wired").
 
-**Say it once.** `out.viewer3d` stated that the selection is presentational and joins the
-provenance key in three places, which reads as three different claims until you notice it is one.
+**Talk to the reader.** "You" for the reader, "we" for a recommendation ("If in doubt, stick with
+`ward`"). Plainly informal is fine. Be frank about a limit and say what to do about it.
 
-**Name a setting in the UI's own words**, in double quotes or backticks, and let the option list
-do the rest: `"Leaves on the right" reads labels horizontally`, not a paragraph reconstructing
-what the dropdown already says.
+**Give concrete examples**: real column names and numbers ("grouping by `postType` and summing
+`weight` gives you the total number of synapses onto each cell type").
+
+**Cut why the code is the way it is; keep why the node behaves the way it does.** The test is
+whether it changes what the reader would *do*. The argument behind a design belongs in the area doc
+where the decision was made.
+
+**No historical notes**, except a fact about the reader's own saved file ("a workflow saved before
+this control existed…"), which is behaviour they can observe.
+
+**Callouts carry practical advice or surprising behaviour**, with short titles — never a design
+decision.
+
+**Name a setting in the UI's own words**: the label in backticks, an option value in double quotes,
+and let the option list do the rest.
+
+The `guide` string printed above a document as TL;DR follows the same voice: two or three sentences
+saying what the node does and how it is usually wired.
 
 ## "See also"
 
@@ -122,15 +131,20 @@ node *is*, and a person knows which other one you actually wanted. A See Also de
 shared category or socket type would relate every viewer to every other, since they all take a
 table and almost none are alternatives.
 
-**Groups, not pairs.** A group means every member is worth reading next to every other, so a set of
-four is one line rather than six — five of which somebody would forget, which is how the relation
-comes to be asymmetric in the first place. Mirroring is by construction; `seeAlso.test.ts` asserts
-symmetry, that every entry has a document to open, and that **no documented node is a dead end**,
-which is the coverage claim the feature exists for.
+**Groups, not pairs, and every group is a clique.** Every member of a group is listed under every
+other, so the relation is symmetric by construction. The cost is that a careless group relates
+nodes nobody would read together: "3D View, Neuroglancer, Skeletons" put Skeletons under
+Neuroglancer. If one node relates to several that do not relate to each other (a star), write it
+as several small groups. `seeAlso.test.ts` asserts symmetry, that every name is a registered
+node, a ceiling of ten entries, and that **no documented node is a dead end**.
 
-A group may name a node whose document has not been written yet — it is dropped rather than being
-an error, so writing a document does not mean remembering to come back here. What it may not name
-is a type the registry has never heard of, which is a typo rather than a plan.
+**Undocumented nodes are listed too, unlinked.** Originally an entry had to have a document to
+open, and undocumented types were silently dropped from a group. With 46 of 129 nodes
+undocumented, that left out exactly the ones a reader wanted: Neuroglancer Source under
+Neuroglancer, and Sort, Synapses, Adjacency and the charts everywhere. Now any registered node may
+be listed; the overlay draws the name as a button when there is a document and as plain text when
+there is not, with the registry's description beside it either way. A *prose* cross-reference
+still has to point at a document (`help.test.ts`); name an undocumented node in plain text.
 
 One thing this changed in the suite: the cross-reference tests now scope their lookups to
 `.help-doc__body`, because See Also offers the same node labels as buttons. That is deliberate —
@@ -169,7 +183,7 @@ session that never presses the button never pays for the wizard and the inferenc
 
 ## The format
 
-`src/ui/markdown.ts` gained four block kinds, and they are **off by default**. That is a safety
+`src/core/markdown.ts` gained four block kinds, and they are **off by default**. That is a safety
 property rather than a default: the parser's original job is a dataset blurb from whatever
 deployment a Custom node is pointed at, and each extended kind hands that source something it
 should not have — a fence is a directive some renderer may act on, and an image is an outbound

@@ -35,13 +35,11 @@ registerNode({
   label: 'Cut Tree',
   category: 'analysis',
   description:
-    'Take groups out of a merge tree, by count or by distance. The Clusters table is `label`, `cluster`, `order` and `size`.',
+    'Cut a merge tree into groups, by number of clusters or by distance. The Clusters table has the columns `label`, `cluster`, `order` and `size`.',
   guide:
-    'Cut a tree into groups by count (exactly N clusters), by distance threshold, or — for two ' +
-    'connectomes clustered together — wherever a group is lopsided, so every group draws from ' +
-    'both brains. Cheap, just union-find and no Python, so you can retry it while looking at ' +
-    'the dendrogram. Clusters joins back onto neurons; Tree carries the cut for Dendrogram to ' +
-    'colour branches by group.',
+    'Cuts a Linkage tree into groups: either a fixed number of clusters, at a distance ' +
+    'threshold, or (for two connectomes clustered together) into groups that contain neurons from ' +
+    'every dataset. Fast, so you can try different cuts while looking at the Dendrogram.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Tree', type: T.linkage() }],
   outputs: [
@@ -59,7 +57,7 @@ registerNode({
         { value: 'height', label: 'distance' },
         { value: 'mixed', label: 'groups drawing from every dataset' },
       ],
-      help: 'The third is for co-clustering two connectomes: it cuts wherever a group is lopsided rather than to a number.',
+      help: 'How to cut the tree. Use "groups drawing from every dataset" when co-clustering connectomes: it returns the tightest groups that mix all datasets.',
     },
     {
       id: 'count',
@@ -72,7 +70,7 @@ registerNode({
       // limit standing in for the tree's.
       max: 10_000,
       visibleIf: (params) => params.mode === 'count',
-      help: 'Exactly this many groups come back. A tree with fewer leaves gives one cluster per leaf.',
+      help: 'Number of clusters to return. A tree with fewer leaves gives one cluster per leaf.',
     },
     {
       id: 'height',
@@ -82,7 +80,7 @@ registerNode({
       min: 0,
       step: 0.05,
       visibleIf: (params) => params.mode === 'height',
-      help: 'Everything joined at or below this distance stays together. With NBLAST scores a distance of 0.5 is a score of 0.5, so smaller means stricter.',
+      help: 'Neurons joined at or below this distance stay in one cluster. Smaller is stricter.',
     },
     {
       id: 'maxShare',
@@ -94,7 +92,7 @@ registerNode({
       step: 0.05,
       slider: true,
       visibleIf: (params) => params.mode === 'mixed',
-      help: 'A group is kept once no dataset holds more than this much of it and every dataset is present. 0.8 means no group may be more than four-fifths one brain.',
+      help: 'The largest share of a group any one dataset may hold; every dataset must also be present. 0.8 means at most four-fifths from one dataset.',
     },
   ],
 
@@ -104,7 +102,9 @@ registerNode({
     // The one thing knowable at edit time. A negative distance cuts nothing and gives one
     // cluster per leaf, which reads as a broken node rather than as a number to change.
     if (String(ctx.params.mode) === 'height' && Number(ctx.params.height) < 0) {
-      return ['Distance is negative, so nothing is joined and every neuron is its own cluster']
+      return [
+        '`Distance` is negative, so nothing is joined and every neuron is its own cluster. Set it to 0 or more.',
+      ]
     }
     /*
      * The `mixed` mode reads the dataset off the *label*, which is what a qualified id carries.
@@ -113,8 +113,8 @@ registerNode({
      */
     if (String(ctx.params.mode) === 'mixed') {
       return [
-        "Reads each neuron's dataset from its qualified id (dataset:id). Without one " +
-          'every group comes back a singleton — put a Qualify Ids before the Stack Tables.',
+        "This mode reads each neuron's dataset from its qualified id (dataset:id). Without " +
+          'qualified ids every neuron ends up in its own cluster, so put a Qualify Ids node before the Stack Tables node.',
       ]
     }
     return []
@@ -138,14 +138,13 @@ registerNode({
        */
       if (datasets < 2) {
         ctx.warn(
-          'Inputs seemingly carry only one dataset, so no group can draw from two. Put a ' +
-            'Qualify Ids before the Stack Tables that combined them.',
+          'The tree seems to hold neurons from only one dataset, so no group can mix datasets. Put a ' +
+            'Qualify Ids node before the Stack Tables node that combined them.',
         )
       } else if (singletons > 0) {
         ctx.warn(
-          `${singletons.toLocaleString()} neurons ended up alone — what a neuron with no ` +
-            `counterpart in the other dataset looks like. That is a result, not a setting to ` +
-            `tune.`,
+          `${singletons.toLocaleString()} neurons ended up in a cluster of their own because they ` +
+            `have no counterpart in the other dataset. Changing the settings will not change this.`,
         )
       }
       return { clusters: clusterTable(tree, clusters), tree: withClusters(tree, clusters) }

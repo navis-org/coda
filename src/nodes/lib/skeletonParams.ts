@@ -84,7 +84,7 @@ export function skeletonSourceParam(): ParamDef {
     id: SKELETON_SOURCE_PARAM,
     kind: 'enum',
     label: 'Source',
-    help: 'Where the skeletons come from. A dataset often has more than one, differing in detail and in whether they carry radii. "Automatic" takes the best available and says which it used.',
+    help: 'Where the skeletons come from. Sources can differ in detail and in whether they have radii. "Automatic" picks the best available and says which.',
     default: '',
     /*
      * The vocabulary the catalogue cannot get from the options function, which is dynamic and
@@ -124,7 +124,7 @@ export function skeletonSourceProblem(
   if (!routes || routes.length === 0) return undefined
   if (routes.some((r) => r.id === chosen)) return undefined
   return (
-    `This dataset has no “${chosen}” skeletons. It offers ` +
-    `${routes.map((r) => r.label).join(', ')} — pick one, or Automatic.`
+    `This dataset has no "${chosen}" skeletons. Set \`Source\` to one it offers ` +
+    `(${routes.map((r) => r.label).join(', ')}), or to Automatic.`
   )
 }

@@ -5,11 +5,11 @@
 
 // An emitter may reach `src/ui`, which is what keeps the palette in one place rather than
 // transcribed into two exporters — the same licence `out.scatter`'s emitter takes.
-import { MAX_SERIES } from '../../../ui/colors'
-import { clusterColor } from '../../../ui/encoding'
+import { MAX_SERIES } from '../../../style/colors'
+import { clusterColor } from '../../../style/encoding'
 import { pyList, pyStr, pyValue } from '../py'
 import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib/cleanOps'
-import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
+import { NM_PER_UM } from '../../../data/units'
 import {
   distanceKindOf,
   distanceParamsFrom,
@@ -193,15 +193,15 @@ registerEmitter('net.centrality', (ctx) => {
   return [
     ...(options.samples > 0 && (options.betweenness || options.closeness)
       ? ctx.note(
-          `Betweenness is sampled from ${options.samples} source nodes, as on the canvas. ` +
-            `Mean path length and diameter are left empty: networkx does not return the ` +
-            `distances its pivots visited, and sweeping every pair is what sampling avoids.`,
+          `Betweenness is sampled from ${options.samples} source nodes (\`Sample\`), as in Coda. ` +
+            `Mean path length and diameter are left empty, because networkx does not return ` +
+            `the distances it measured while sampling.`,
         )
       : []),
     ...(options.communities
       ? ctx.note(
-          "Communities come from networkx's Louvain rather than graphology's, so the " +
-            'partition can differ from the canvas while scoring the same modularity.',
+          "Communities come from networkx's Louvain implementation, and Coda uses " +
+            "graphology's. Both optimise modularity, but the partition can differ.",
         )
       : []),
     `${out} = ${src}`,
@@ -328,8 +328,8 @@ registerEmitter('core.uploadTable', (ctx) => {
      */
     ...ctx.note(
       fileName
-        ? `Coda stores an uploaded table in the browser, not in the graph, so the rows are ` +
-            `not in this notebook. Point this at your copy of "${fileName}".`
+        ? `Coda keeps uploaded tables in the browser, so the rows are not in this ` +
+            `notebook. Point this at your copy of "${fileName}".`
         : 'This Upload Table node has no file. Point the path below at your CSV.',
     ),
     `${out} = pd.read_csv(${pyStr(fileName || 'your-table.csv')})`,
@@ -363,8 +363,8 @@ registerEmitter('core.uploadMesh', (ctx) => {
   return [
     ...ctx.note(
       fileName
-        ? `Coda stores uploaded meshes in the browser, not in the graph, so the geometry is ` +
-            `not in this notebook. Point this at your copy of "${fileName}".`
+        ? `Coda keeps uploaded meshes in the browser, so the geometry is not in this ` +
+            `notebook. Point this at your copy of "${fileName}".`
         : 'This Upload Mesh node has no files. Point the paths below at your OBJ, STL or PLY.',
     ),
     `_paths = [${pyStr(fileName || 'your-region.obj')}]`,
@@ -373,8 +373,8 @@ registerEmitter('core.uploadMesh', (ctx) => {
       ? []
       : [
           ``,
-          `# Coda's Units param, applied: everything downstream is nanometres, and these`,
-          `# files are in ${unit.label}.`,
+          `# These files are in ${unit.label} (Coda's \`Units\` setting), and everything`,
+          `# downstream expects nanometres, so scale them.`,
           `for _v in ${out}:`,
           `    _v.vertices = _v.vertices * ${unit.nm}`,
         ]),
@@ -447,7 +447,7 @@ registerEmitter('neuron.paths', (ctx) => {
   const c = ctx.wired('dataset')
   const sources = ctx.wired('sources')
   const targets = ctx.wired('targets')
-  if (!sources || !targets) return ctx.todo('Paths needs both Sources and Targets wired.')
+  if (!sources || !targets) return ctx.todo('Paths needs both `Sources` and `Targets` wired.')
 
   const collapse = ctx.params.collapseTypes !== false
   const maxHops = Number(ctx.params.maxHops)
@@ -465,11 +465,10 @@ registerEmitter('neuron.paths', (ctx) => {
      * nor `fetch_paths` can express it.
      */
     return ctx.todo(
-      'Paths with "Collapse types" on has no neuprint-python equivalent. Coda runs the ' +
-        'search on the type-collapsed graph — every neuron of a type expanded together and ' +
-        'aggregated back to types at each hop — which finds routes no neuron-level search ' +
-        'returns, and which Cypher cannot express without GDS. Switch the node to ' +
-        'neuron-level to export it, or write the traversal by hand.',
+      'Paths with `Collapse types` ticked has no neuprint-python equivalent. Coda searches ' +
+        'a graph in which all neurons of a cell type count as one node, which finds routes ' +
+        'that a search between individual neurons does not, and Cypher cannot express this ' +
+        'without GDS. Untick `Collapse types` to export this node, or write the search by hand.',
     )
   }
 
@@ -482,10 +481,10 @@ registerEmitter('neuron.paths', (ctx) => {
    */
   if (ctx.params.normalize === true) {
     return ctx.todo(
-      'Paths with Normalize on has no neuprint-python equivalent. The denominator is a whole ' +
-        "group's synapse total and Min fraction prunes the search as it grows, so an export " +
-        'without them would follow different connections and return different routes — not the ' +
-        'same routes missing two columns. Turn Normalize off to export this node.',
+      'Paths with `Normalize` ticked has no neuprint-python equivalent. Its denominator is ' +
+        'the synapse total of a whole group, and `Min fraction` prunes the search as it runs, ' +
+        'so an export without them would return different routes. Untick `Normalize` to ' +
+        'export this node.',
     )
   }
 
@@ -508,9 +507,9 @@ registerEmitter('neuron.paths', (ctx) => {
 
   return [
     ...ctx.note(
-      "neuprint's `fetch_paths` returns every route within the hop budget. Coda also " +
-        'ranks them by their weakest link and keeps the strongest; that ranking is not ' +
-        'reproduced, so this is the unranked set.',
+      "neuprint's `fetch_paths` returns every route within `Max hops`. Coda also ranks " +
+        'routes by their weakest link and keeps the strongest. This cell does not, so it ' +
+        'returns all routes, unranked.',
     ),
     `${out} = fetch_paths(`,
     `    ${sources}['neuronId'].tolist(),`,
@@ -541,13 +540,12 @@ registerEmitter('neuron.paths', (ctx) => {
  * two of them, which is how the third comes to say something slightly different.
  */
 const labelNote = (label: string): string =>
-  `Coda labels the rows by "${label}"; this frame is indexed by neuron id, which is what every ` +
-  `other navis call takes.`
+  `Coda labels the rows by "${label}". This frame is indexed by neuron id, which is what ` +
+  `other navis functions expect.`
 
 const MICRON_NOTE =
-  'NBLAST is calibrated in micrometres — navis: "Neurons should be in microns as NBLAST is ' +
-  'optimized for that". This converts through the units navis carries on the neuron rather ' +
-  'than assuming a factor.'
+  'NBLAST is calibrated in micrometres (navis: "Neurons should be in microns as NBLAST is ' +
+  'optimized for that"). This cell converts using the units navis stores on each neuron.'
 
 function dotpropsLines(from: string, name: string, k: number, resample: number): string[] {
   return [
@@ -606,8 +604,9 @@ registerEmitter('neuron.nblast', (ctx) => {
     if (!target) {
       lines.push(
         ...ctx.note(
-          `nblast_allbyall has no symmetry option, so the symmetric case goes through ` +
-            `nblast(x, x, scores='${symmetry}'). Same scores, a little more work.`,
+          `nblast_allbyall has no symmetry option, so this cell uses ` +
+            `nblast(x, x, scores='${symmetry}') instead. The scores are the same; it is ` +
+            `slightly slower.`,
         ),
       )
     }
@@ -676,8 +675,8 @@ registerEmitter('neuron.nblastKnn', (ctx) => {
   if (label) {
     lines.push(
       ...ctx.note(
-        `Coda also carries "${label}" for each side as queryLabel / targetLabel. Join them ` +
-          `back on from the neuron table if you need them here.`,
+        `Coda also adds "${label}" for each side as queryLabel / targetLabel. To get them ` +
+          `here, join them from the neuron table.`,
       ),
     )
   }
@@ -717,9 +716,9 @@ function companions(variable: string): { labels: string; order: string; clusters
  */
 const LINKAGE_NOTES: Record<LinkageNote, string> = {
   symmetryOff:
-    'Symmetry is off, so only the upper triangle is read — `squareform` ignores the ' +
-    'lower half exactly as fastcore does. On a matrix that is not already symmetric ' +
-    'that discards data rather than combining it.',
+    '`Symmetry` is "use the matrix as it is", so only the upper triangle is read: ' +
+    '`squareform` ignores the lower half, as fastcore does. If the matrix is not ' +
+    'symmetric, the values in the lower half are discarded.',
 }
 
 /** Each of `linkagePlan`'s ways of making the matrix symmetric, in numpy. */
@@ -746,8 +745,8 @@ registerEmitter('cluster.linkage', (ctx) => {
 
   return [
     ...ctx.note(
-      "Coda runs navis-fastcore, whose linkage matrix is SciPy's — checked against " +
-        'scipy.cluster.hierarchy.linkage on NBLAST-shaped matrices: identical merge ' +
+      'Coda runs navis-fastcore, which produces the same linkage matrix as SciPy. Checked ' +
+        'against scipy.cluster.hierarchy.linkage on NBLAST-shaped matrices: identical merge ' +
         'order, heights agreeing to 1e-15.',
     ),
     `_m = np.asarray(${src}, dtype=float)`,
@@ -799,8 +798,8 @@ registerEmitter('cluster.cut', (ctx) => {
     ...ctx.note(plan.note),
     `_raw = np.asarray(${cut})`,
     ...ctx.note(
-      'Coda numbers clusters left to right as the dendrogram draws them; SciPy numbers ' +
-        'them by its own bookkeeping. Same grouping — this renumbers so the two agree.',
+      'Coda numbers clusters left to right as the dendrogram draws them, and SciPy numbers ' +
+        'them differently. The groups are the same; this cell renumbers them to match Coda.',
     ),
     `_renumber = {c: i + 1 for i, c in enumerate(dict.fromkeys(_raw[${order}]))}`,
     `_cluster = [_renumber[c] for c in _raw]`,
@@ -982,8 +981,8 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
     ctx.require('numpy')
     return [
       ...ctx.note(
-        'No neuron table is wired on the canvas, so the labels are read as neuron ids. ' +
-          'Rows that are not usable ids are dropped, as in Coda.',
+        'No neuron table is wired to `Neurons`, so the labels are read as neuron ids. ' +
+          'Rows that are not valid ids are dropped, as in Coda.',
       ),
       /*
        * Ends in `coda_ids`, like every other seam that mints a Coda id column. It used to end
@@ -1008,8 +1007,8 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
   const matchColumn = ctx.column('matchColumn') ?? 'neuronId'
   return [
     ...ctx.note(
-      'Coda matches labels as text, so both sides go through a string key: "722817260" ' +
-        'against an int64 column merges to nothing.',
+      'Coda matches labels as text, so both sides are converted to strings first. ' +
+        'Otherwise "722817260" would match nothing in an int64 column.',
     ),
     `_left = ${neurons}.assign(_key=${neurons}[${pyStr(matchColumn)}].astype(str))`,
     `_right = ${labels}.assign(_key=${labels}[${pyStr(labelColumn)}].astype(str))`,
@@ -1069,8 +1068,8 @@ registerEmitter('neuron.mirror', (ctx) => {
    */
   if (!space) {
     return ctx.todo(
-      'Mirror Neurons read the template space off the geometry, which this exporter cannot ' +
-        'see. Set Space on the node, or pass template= here by hand.',
+      'Mirror Neurons reads the template space from the neurons themselves, which the ' +
+        'exporter cannot see. Set `Space` on the node, or pass template= here by hand.',
     )
   }
 
@@ -1078,9 +1077,7 @@ registerEmitter('neuron.mirror', (ctx) => {
   // package registers, which fails in the notebook rather than on the canvas.
   const template = spaceById(space)
   if (!template?.mirror) {
-    return ctx.todo(
-      `Coda ships no mirror for "${space}", so there is no template to name here.`,
-    )
+    return ctx.todo(`Coda has no mirror for "${space}", so there is no template to use here.`)
   }
 
   ctx.require('navis')
@@ -1156,8 +1153,8 @@ registerEmitter('neuron.xform', (ctx) => {
    */
   if (!space) {
     return ctx.todo(
-      'Transform Neurons read the source space off the geometry, which this exporter cannot ' +
-        'see. Set Space on the node, or pass source= here by hand.',
+      'Transform Neurons reads the source space from the neurons themselves, which the ' +
+        'exporter cannot see. Set `Space` on the node, or pass source= here by hand.',
     )
   }
 
@@ -1165,11 +1162,11 @@ registerEmitter('neuron.xform', (ctx) => {
 
   if (target === COMMON_SPACE.id && nerveCordIn(space).any) {
     return ctx.todo(
-      `${space} contains a nerve cord, and ${COMMON_SPACE.id} is a brain template with none. ` +
-        'Coda registers the VNC to JRCVNC2018U and places it beside the brain by a fixed ' +
-        'affine; navis has no equivalent registration and would route it through a brain ' +
-        'deformation field, which returns coordinates ~97 µm away with only a warning. ' +
-        'Transform to JRCVNC2018U instead, or place it yourself with ' +
+      `${space} contains a nerve cord, but ${COMMON_SPACE.id} is a brain-only template. ` +
+        'Coda registers the VNC to JRCVNC2018U and places it beside the brain with a fixed ' +
+        'affine. navis has no equivalent: it would send the VNC through a brain deformation ' +
+        'field and return coordinates about 97 µm off, with only a warning. Transform to ' +
+        'JRCVNC2018U instead, or place the VNC yourself with ' +
         'navis.transforms.AffineTransform.',
     )
   }
@@ -1178,15 +1175,14 @@ registerEmitter('neuron.xform', (ctx) => {
   ctx.require('flybrains')
   const note =
     target === COMMON_SPACE.id
-      ? 'navis walks its full bridging graph here, where Coda fitted one spline through ' +
-        'landmarks sampled from that same graph. The two agree to about 0.9 µm; this is the ' +
-        'more accurate of the pair. Note the result is in micrometres, which navis carries on ' +
-        'the neuron — anything downstream needing nanometres should convert rather than assume.'
-      : `Coda goes out through ${COMMON_SPACE.id} and back where navis routes directly, so ` +
-        'expect one to two micrometres of disagreement — about the sum of the two one-hop ' +
-        'errors, which is what composing splines costs. Where the target does not cover the ' +
-        'neuron (the hemibrain is one hemisphere) neither answer means much; navis warns about ' +
-        'that region itself.'
+      ? 'navis uses its full bridging graph here, while Coda uses a single spline fitted to ' +
+        'landmarks sampled from that graph. The two agree to about 0.9 µm, and this cell is ' +
+        'the more accurate. The result is in micrometres, which navis records on each neuron, ' +
+        'so convert explicitly anywhere downstream that needs nanometres.'
+      : `Coda transforms via ${COMMON_SPACE.id} and navis transforms directly, so expect ` +
+        'the two to differ by one to two micrometres. Where the target does not cover the ' +
+        'neuron (the hemibrain is one hemisphere), neither answer is reliable; navis warns ' +
+        'about this itself.'
   return [
     ...ctx.note(note),
     `${out} = navis.xform_brain(${src}, source="${space}", target="${target}")`,
@@ -1263,8 +1259,8 @@ registerEmitter('neuron.synblast', (ctx) => {
   const lines: string[] = [
     ...ctx.note(
       'syNBLAST is calibrated in micrometres like NBLAST, and neuprint-python returns synapse ' +
-        'locations in raw voxels — 8 nm on the hemibrain. Check this factor against your ' +
-        'dataset: nothing in the graph records it.',
+        'locations in raw voxels (8 nm on the hemibrain). Check that this factor is right for ' +
+        'your dataset.',
     ),
     `${voxelUm} = 8 / 1000`,
     ``,
@@ -1304,9 +1300,9 @@ registerEmitter('neuron.synblast', (ctx) => {
   if (label) {
     lines.push(
       ...ctx.note(
-        `Coda labels the rows by "${label}". neuprint-python's synapse frame carries ` +
-          `fewer columns — notably no cell type — so this falls back to the neuron id. ` +
-          `Join it on from a neuron table to match.`,
+        `Coda labels the rows by "${label}". neuprint-python's synapse table has fewer ` +
+          `columns (no cell type, for example), so where the column is missing this uses ` +
+          `the neuron id. Join it from a neuron table to match Coda.`,
       ),
     )
   }
@@ -1314,8 +1310,8 @@ registerEmitter('neuron.synblast', (ctx) => {
   if (!polarity) {
     lines.push(
       ...ctx.note(
-        'No polarity column is set on this node, so every connector is one pool and an input ' +
-          'is compared against an output. `by_type` is off to match.',
+        '`Polarity` is not set, so inputs and outputs are pooled together and compared ' +
+          'with each other. `by_type` is off to match.',
       ),
     )
   }
@@ -1346,8 +1342,8 @@ registerEmitter('neuron.synblast', (ctx) => {
 
 const MATCHES_NOTES: Record<MatchesNote, string> = {
   autoDirection:
-    'Best means is on "from the matrix", which Coda answers by reading what the matrix ' +
-    'says its cells are. A DataFrame has nowhere to carry that, so this assumes higher ' +
+    '`Best means` is "from the matrix", so Coda reads from the matrix whether its values ' +
+    'are scores or distances. A DataFrame cannot record that, so this cell assumes higher ' +
     'is better. Set distances=True below if this is a distance matrix.',
 }
 
@@ -1494,9 +1490,9 @@ registerEmitter('neuron.nblastMatches', (ctx) => {
  */
 
 const CLEAN_UNITS_NOTE =
-  'Coda holds coordinates in nanometres and these controls are micrometres, so the distances ' +
-  'below are the card’s values times 1000. If your neurons are in other units — neuprintr and ' +
-  'raw neuprint-python both return voxels — scale them to match.'
+  'Coda stores coordinates in nanometres and these settings are in micrometres, so the ' +
+  'distances below are the card’s values times 1000. If your neurons are in other units ' +
+  '(neuprintr and neuprint-python both return voxels), scale them to match.'
 
 registerEmitter('neuron.cleanSkeletons', (ctx) => {
   const src = ctx.wired('in')
@@ -1586,6 +1582,7 @@ registerEmitter('neuron.cleanMeshes', (ctx) => {
   ctx.require('fastcore')
   ctx.require('numpy')
   ctx.require('navis')
+  ctx.helper('coda_mesh')
 
   const out = ctx.output('out')
   const p = meshCleanParamsFrom(ctx.params)
@@ -1637,15 +1634,15 @@ registerEmitter('neuron.cleanMeshes', (ctx) => {
   return [
     ...(dropInternals
       ? ctx.note(
-          'Faces must be wound outward for Drop internal membrane: rays fire into the ' +
-            'hemisphere each normal points into, so an inward-wound mesh comes back empty ' +
-            'and an inconsistently wound one loses healthy membrane silently.',
+          '`Drop internal membrane` needs faces wound outward, because rays are cast in the ' +
+            'direction each face normal points. A mesh wound inward comes back empty, and one ' +
+            'wound inconsistently silently loses parts of its surface.',
         )
       : []),
     `_cleaned = []`,
     `for _neuron in navis.NeuronList(${src}):`,
     ...body,
-    `    _cleaned.append(navis.Mesh((v, f), id=_neuron.id, units=_neuron.units))`,
+    `    _cleaned.append(coda_mesh((v, f), id=_neuron.id, units=_neuron.units))`,
     `${out} = navis.NeuronList(_cleaned)`,
   ]
 })
@@ -1803,8 +1800,8 @@ registerEmitter('compare.connectivity', (ctx) => {
 /** The notes an Embedding cell can carry after its UMAP call, keyed as `embedPlan` decides them. */
 const EMBED_NOTES: Record<EmbedNote, string> = {
   autoDistance:
-    'Scores are similarities, so the distance is 1 − score — the same reading the ' +
-    'Linkage node makes. A matrix that already carries distances is used as it stands.',
+    'Scores are similarities, so the distance is 1 − score, as in the Linkage node. ' +
+    'A matrix that already holds distances is used as it is.',
 }
 
 /**
@@ -1846,10 +1843,10 @@ registerEmitter('core.embed', (ctx) => {
   ]
 
   const lines: string[] = ctx.note(
-    'Coda runs umap-js, a JavaScript port, because umap-learn needs numba and the in-browser ' +
-      'Python runtime has none. The settings below are the ones the card used and the ' +
-      'neighbourhoods are the same; the arrangement will differ in detail, exactly as two ' +
-      'seeds of one implementation do.',
+    'Coda runs umap-js, a JavaScript port of umap-learn, because umap-learn needs numba, ' +
+      'which is not available in the browser. The settings below match the card and the ' +
+      'neighbourhoods are the same, but the layout will differ in detail, just as two runs ' +
+      'with different seeds would.',
   )
 
   if (input.route === 'neighbours') {
@@ -1971,27 +1968,27 @@ registerEmitter('neuron.distance', (ctx) => {
      * has to use the factor, its own geometry being nanometres by construction.
      */
     ...ctx.note(
-      'Coda reports micrometres — and square micrometres where this measures surface. This ' +
-        'converts through the units navis carries on the neuron rather than assuming a factor.',
+      'Coda reports micrometres (square micrometres for surface measures). This cell ' +
+        'converts using the units navis stores on each neuron.',
     ),
   ]
 
   if (kinds.includes('meshes')) {
     lines.push(
       ...ctx.note(
-        "Distances are to a mesh's surface, not its nearest vertex, which is what makes " +
-          'them independent of tessellation. trimesh needs **rtree** for that (`pip ' +
-          'install rtree`); without it every point is scanned against every triangle — 131 ' +
-          'points a second on a 71,424-face neuron.',
+        "Distances are measured to the nearest point on a mesh's surface, so they do not " +
+          'depend on how finely the mesh is triangulated. trimesh needs **rtree** for this ' +
+          '(`pip install rtree`). Without it, every point is checked against every ' +
+          'triangle, at 131 points a second on a 71,424-face neuron.',
       ),
     )
   }
   if (method === 'within') {
     lines.push(
       ...ctx.note(
-        'navis.cable_overlap answers a near neighbour of this, not the same number: it ' +
-          'sums each query node once per target point that picks it. On two example ' +
-          'neurons at 2 µm, 1378.68 against 1361.03.',
+        'navis.cable_overlap computes a similar but different number: it counts each ' +
+          'query node once for every target point that picks it. On two example neurons ' +
+          'at 2 µm the two give 1378.68 and 1361.03.',
       ),
     )
   }

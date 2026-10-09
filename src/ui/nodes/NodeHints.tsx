@@ -73,7 +73,7 @@ export function HintBox({ hint, children }: { hint: NodeHint; children?: ReactNo
   )
 }
 
-function Stack({ nodeId, side, hints }: { nodeId: string; side: HintSide; hints: NodeHint[] }) {
+function Stack({ node, side, hints }: { node: GraphNode; side: HintSide; hints: NodeHint[] }) {
   if (hints.length === 0) return null
   return (
     <div className="node-hints nodrag" data-side={side}>
@@ -83,19 +83,22 @@ function Stack({ nodeId, side, hints }: { nodeId: string; side: HintSide; hints:
          * must leave the second drawing the same box rather than re-mounting it as the first.
          */
         <HintBox key={hintKey(hint)} hint={hint}>
-          <button
-            type="button"
-            className="node-hint__edit"
-            title="Edit or delete this hint, for everybody who opens the workflow"
-            aria-label="Edit hint"
-            onClick={(event) => {
-              event.stopPropagation()
-              // The object itself — `splitHints` hands back the node's own — see `HintTarget`.
-              useGraphStore.getState().editHint({ nodeId, hint })
-            }}
-          >
-            ✎
-          </button>
+          {/* A hint derived from this browser is in no document, so there is nothing to edit. */}
+          {node.hints?.includes(hint) && (
+            <button
+              type="button"
+              className="node-hint__edit"
+              title="Edit or delete this hint, for everybody who opens the workflow"
+              aria-label="Edit hint"
+              onClick={(event) => {
+                event.stopPropagation()
+                // The object itself — `splitHints` hands back the node's own — see `HintTarget`.
+                useGraphStore.getState().editHint({ nodeId: node.id, hint })
+              }}
+            >
+              ✎
+            </button>
+          )}
           <button
             type="button"
             className="node-hint__close"
@@ -122,7 +125,7 @@ function NodeHintsImpl({ node }: NodeHintsProps) {
   return (
     <>
       {HINT_SIDES.map((side) => (
-        <Stack key={side} nodeId={node.id} side={side} hints={unread[side]} />
+        <Stack key={side} node={node} side={side} hints={unread[side]} />
       ))}
     </>
   )

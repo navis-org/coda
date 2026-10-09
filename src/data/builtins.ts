@@ -24,6 +24,7 @@ import { caveSourceFor } from './cave/registry'
 import { specDeployments } from './cave/spec'
 import { L1_CATMAID_SERVER } from './catmaid/credentials'
 import { catmaidSourceFor } from './catmaid/registry'
+import { CompositeSource } from './custom/CompositeSource'
 import { MockSource } from './mock/MockSource'
 import { NeuPrintSource } from './neuprint/NeuPrintSource'
 import { registerSource } from './source'
@@ -56,4 +57,9 @@ export function registerBuiltinSources(options: BuiltinSourceOptions = {}): void
    */
   catmaidSourceFor(undefined)
   catmaidSourceFor(L1_CATMAID_SERVER)
+  /*
+   * One instance for every Custom Dataset: which parts a dataset is made of is looked up per
+   * dataset id (`custom/layout.ts`), so there is nothing to key a second instance on.
+   */
+  registerSource(new CompositeSource())
 }

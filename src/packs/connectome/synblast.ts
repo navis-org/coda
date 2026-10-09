@@ -43,13 +43,14 @@ export const synblastNode = packNode({
   type: 'neuron.synblast',
   label: 'syNBLAST',
   category: 'analysis',
-  description: 'Score how alike neurons are by where their synapses sit, as a matrix.',
+  description:
+    'Score how similar neurons are by the positions of their synapses (syNBLAST), as a ' +
+    'matrix.',
   guide:
-    'Compare neurons by their synapses rather than by their shape: for each connector, how far ' +
-    'away the nearest connector of the same polarity on the other neuron is. Wire one set of ' +
-    'Synapses for an all-by-all, or two to score one group against another. Two cells with the ' +
-    'same arbor that talk to different partners score low here and high on NBLAST, which is ' +
-    'the reason to run both.',
+    'Compares neurons by where their synapses are: for each synapse, the distance to the ' +
+    'nearest synapse of the same polarity on the other neuron. Wire one Synapses cloud for ' +
+    'an all-by-all matrix, or a second into Target to score one group against another. Two ' +
+    'neurons with the same shape but different partners score high on NBLAST and low here.',
   cost: 'expensive',
   inputs: [
     { id: 'query', label: 'Query', type: T.points() },
@@ -63,7 +64,7 @@ export const synblastNode = packNode({
       label: 'Symmetry',
       default: 'mean',
       options: SYMMETRY_OPTIONS,
-      help: 'A neuron with few synapses can sit entirely inside the cloud of one with many, so the two directions of a pair disagree. The mean is the usual choice and makes an all-by-all matrix symmetric.',
+      help: 'How to combine the two directions of a pair, which differ when one neuron has far fewer synapses. "mean of both directions" is the usual choice and gives a symmetric matrix.',
     },
     {
       id: 'polarityColumn',
@@ -72,10 +73,10 @@ export const synblastNode = packNode({
       from: 'query',
       default: 'polarity',
       optional: true,
-      help: 'Which column says whether a synapse is an input or an output. Set, a presynapse is only compared against presynapses, which is the standard way to run this. Cleared, every connector is one pool.',
+      help: 'The column saying whether a synapse is an input or an output, so presynapses are only compared with presynapses. Clear it to pool all synapses.',
     },
     labelColumnParam(
-      'Which attribute names each row. Read at each neuron’s first synapse, so a column that varies within a neuron gives whichever value came back first. Neuron ids when empty.',
+      'The column naming each row; empty uses neuron ids. It is read from each neuron’s first synapse, so pick one that is constant per neuron.',
     ),
     {
       id: 'normalize',
@@ -106,7 +107,9 @@ export const synblastNode = packNode({
      */
     return ctx.column('polarityColumn')
       ? []
-      : ['No polarity column, so inputs and outputs are compared against each other']
+      : [
+          'No `Polarity` column is set, so input and output synapses are compared with each other. Pick a polarity column to compare them separately.',
+        ]
   },
 
   evaluate: async (ctx) => {

@@ -32,6 +32,9 @@ import { T, column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
 import { installJsdomStubs } from '../../test/jsdomStubs'
+import { readColorAs } from '../../nodes/lib/networkMetrics'
+import { scatterColorMode, thinColumns, thinPlan } from './NetworkMetricsViewer'
+import type { BarRow } from './Tiles'
 import { ValuePreview } from './ValuePreview'
 import '../../nodes'
 
@@ -268,5 +271,142 @@ describe('the controls on the tiles', () => {
     expect((screen.getByLabelText('Distribution column') as HTMLSelectElement).disabled).toBe(
       true,
     )
+  })
+})
+
+describe('columns at hundreds of bins', () => {
+  // Pure over a width handed in, because jsdom lays nothing out — `pnpm dev` is where the
+  // drawing itself was looked at, at 300 bins in the expanded panel.
+  const rows = (n: number, value = '12'): BarRow[] =>
+    Array.from({ length: n }, (_, i) => ({
+      key: `${i}`,
+      label: `${i}`,
+      fraction: 1,
+      value,
+      title: `${i}: ${value}`,
+    }))
+
+  const thin = (input: BarRow[], width: number) => thinColumns(input, thinPlan(input, width))
+
+  it('leaves a chart whose labels fit exactly as it was', () => {
+    const input = rows(10)
+    expect(thinPlan(input, 600)).toEqual({ values: true, stride: 1, dense: false })
+    expect(thin(input, 600)).toBe(input)
+  })
+
+  it('draws everything before the first measurement', () => {
+    const input = rows(300)
+    expect(thin(input, 0)).toBe(input)
+  })
+
+  it('thins the range keys to a stride, and drops the counts all together', () => {
+    // 300 bars in 1450px is ~4.8px a bar: `labelStep` fits 103 keys of 14px, so every third
+    // bar is labelled, and there is no room for a count.
+    const plan = thinPlan(rows(300), 1450)
+    expect(plan).toEqual({ values: false, stride: 3, dense: false })
+    const bars = thinColumns(rows(300), plan)
+    const labelled = bars.filter((bar) => bar.label !== '')
+    expect(labelled.map((bar) => bar.label).slice(0, 3)).toEqual(['0', '3', '6'])
+    expect(bars.every((bar) => bar.value === '')).toBe(true)
+    // The hover keeps every bar's own range and count.
+    expect(bars[1]!.title).toBe('1: 12')
+    // 500 bars in 600px is 1.2px a bar, and a 1px gap would be most of it.
+    expect(thinPlan(rows(500), 600).dense).toBe(true)
+  })
+
+  it('keeps the counts while the longest one still fits, and none once it does not', () => {
+    // 40 bars in 600px: 15px each, which holds `12` and not `1,234`.
+    expect(thin(rows(40), 600).every((bar) => bar.value === '12')).toBe(true)
+    const wide = rows(40)
+    wide[7] = { ...wide[7]!, value: '1,234' }
+    expect(thin(wide, 600).every((bar) => bar.value === '')).toBe(true)
+  })
+})
+
+describe('scatterColorMode', () => {
+  it('reads a float as a value and text as a category, whatever the switch says', () => {
+    expect(scatterColorMode('f64', 'category')).toBe('sequential')
+    expect(scatterColorMode('str', 'value')).toBe('categorical')
+    expect(scatterColorMode('bool', 'value')).toBe('categorical')
+  })
+
+  it('leaves an integer to the switch, a value by default', () => {
+    expect(scatterColorMode('i64', 'value')).toBe('sequential')
+    // An unset or unreadable stored switch reads as `value`.
+    expect(scatterColorMode('i64', readColorAs(undefined))).toBe('sequential')
+    expect(scatterColorMode('i64', readColorAs('nonsense'))).toBe('sequential')
+    expect(scatterColorMode('i64', 'category')).toBe('categorical')
+  })
+})
+
+describe('the scatter’s colour, size and marker', () => {
+  const options = (label: string) =>
+    [...(screen.getByLabelText(label) as HTMLSelectElement).options].map(
+      (option) => option.value,
+    )
+
+  it('starts with nothing encoded, and draws one flat colour', () => {
+    const { container } = draw(sample())
+    for (const label of ['Scatter colour', 'Scatter size', 'Scatter marker']) {
+      expect((screen.getByLabelText(label) as HTMLSelectElement).value).toBe('')
+    }
+    expect(container.querySelectorAll('.metrics__scatter path')).toHaveLength(1)
+    expect(container.querySelector('.metrics__legend')).toBeNull()
+  })
+
+  it('offers each channel the columns its kind can encode', () => {
+    draw(sample())
+    // Colour takes anything, text included.
+    expect(options('Scatter colour')).toEqual(expect.arrayContaining(['', 'id', 'clustering']))
+    // Size is numeric only.
+    expect(options('Scatter size')).toContain('degree')
+    expect(options('Scatter size')).not.toContain('id')
+    // A marker is categorical: whole numbers yes, a float never.
+    expect(options('Scatter marker')).toContain('component')
+    expect(options('Scatter marker')).not.toContain('clustering')
+  })
+
+  it('writes each channel back onto the node', () => {
+    const onParamChange = vi.fn()
+    draw(sample(), {}, onParamChange)
+    fireEvent.change(screen.getByLabelText('Scatter colour'), {
+      target: { value: 'component' },
+    })
+    fireEvent.change(screen.getByLabelText('Scatter size'), { target: { value: 'strength' } })
+    fireEvent.change(screen.getByLabelText('Scatter marker'), {
+      target: { value: 'component' },
+    })
+    expect(onParamChange).toHaveBeenCalledWith('plotColor', 'component')
+    expect(onParamChange).toHaveBeenCalledWith('plotSize', 'strength')
+    expect(onParamChange).toHaveBeenCalledWith('plotShape', 'component')
+  })
+
+  it('offers the integer switch beside an integer colour column, and nowhere else', () => {
+    const onParamChange = vi.fn()
+    draw(sample(), { plotColor: 'component' }, onParamChange)
+    fireEvent.change(screen.getByLabelText('Scatter colour as'), {
+      target: { value: 'category' },
+    })
+    expect(onParamChange).toHaveBeenCalledWith('plotColorAs', 'category')
+    cleanup()
+    draw(sample(), { plotColor: 'clustering' })
+    expect(screen.queryByLabelText('Scatter colour as')).toBeNull()
+  })
+
+  it('keys an integer column as categories only when asked to', () => {
+    // `component` on the sample is two values: the triangle-and-pendant and the island. On
+    // `coreness`, because the island has no `clustering` and so would not be drawn at all.
+    const { container } = draw(sample(), {
+      plotY: 'coreness',
+      plotColor: 'component',
+      plotColorAs: 'category',
+    })
+    // One path per colour, and a key per category under the plot.
+    expect(container.querySelectorAll('.metrics__scatter path').length).toBeGreaterThan(1)
+    expect(container.querySelector('.metrics__legend')).not.toBeNull()
+    cleanup()
+    const ramp = draw(sample(), { plotY: 'coreness', plotColor: 'component' })
+    // By value, the same column is a ramp: a colour bar, no per-value keys.
+    expect(ramp.container.querySelector('.metrics__legend')).not.toBeNull()
   })
 })

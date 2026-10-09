@@ -130,8 +130,8 @@ function matrixFill(unmatched: TraceUnmatched): number {
  */
 function noIdColumn(available?: string): string {
   return (
-    'No ZapBench ID column selected. On fish2 that column is "zapbenchId"' +
-    (available === undefined ? '.' : `; this table has: ${available || '(none)'}`)
+    '`ZapBench ID` is not set. On fish2 the ZapBench ids are in "zapbenchId".' +
+    (available === undefined ? '' : ` This table has: ${available || '(none)'}.`)
   )
 }
 
@@ -159,9 +159,11 @@ export const neuronTracesNode = packNode({
   category: 'query',
   cardWidth: 300,
   description:
-    'Calcium-imaging traces from ZapBench for the fish2 neurons that carry a zapbenchId.',
+    'Calcium-imaging traces from ZapBench, as a matrix, for the fish2 neurons that carry a ' +
+    '`zapbenchId`.',
   guide:
-    'Reads the released ZapBench calcium traces for the neurons in a fish2 table that carry a zapbenchId, as a matrix for the Heatmap or Reduce Matrix. A read is priced in 512-cell blocks of the array, not in neurons — about 16 MiB a block over the whole recording — and Condition is the only setting that makes it smaller.',
+    'Fetches the ZapBench calcium traces for the neurons in a fish2 table that have a zapbenchId, as a matrix for a Heatmap or Reduce Matrix. ' +
+    'Reads are priced in 512-cell blocks (about 16 MiB each over the whole recording); pick a Condition to make them smaller.',
   cost: 'expensive',
   // The session cache in `data/zapbench/traces.ts` is in memory, not `loadCachedTable`'s
   // IndexedDB layer, so this deliberately does not declare `dataCache`: the Clear Cache button
@@ -185,7 +187,7 @@ export const neuronTracesNode = packNode({
        * catches a wrong column.
        */
       excludeIds: true,
-      help: 'The column holding each neuron’s ZapBench cell id. On fish2 that is zapbenchId, and only some neurons have one — the rest are left out and counted.',
+      help: 'The column holding each neuron’s ZapBench cell id, e.g. zapbenchId on fish2. Only some fish2 neurons have one; `Unmatched neurons` decides what happens to the rest.',
     },
     {
       id: 'labelColumn',
@@ -193,7 +195,7 @@ export const neuronTracesNode = packNode({
       label: 'Label by',
       from: 'in',
       default: 'neuronId',
-      help: 'What names each row of the matrix. Data rather than decoration: it is what a Heatmap filter matches and what Reduce Matrix names its rows by.',
+      help: 'The column naming each matrix row. Heatmap filters and Reduce Matrix use these names.',
     },
     {
       id: 'condition',
@@ -201,7 +203,7 @@ export const neuronTracesNode = packNode({
       label: 'Condition',
       default: WHOLE_RECORDING_ID,
       options: CONDITION_OPTIONS,
-      help: 'Which stimulus block to read, trimmed one timestep at each end exactly as zapbench’s own get_condition_bounds trims it. The whole recording costs about 16 MiB per 512-neuron block; a single condition costs a fraction of that.',
+      help: 'Which stimulus block to read, trimmed by one timestep at each end as zapbench’s get_condition_bounds does. The whole recording costs about 16 MiB per block of 512 neurons; one condition costs a fraction of that.',
     },
     {
       id: 'unmatched',
@@ -209,7 +211,7 @@ export const neuronTracesNode = packNode({
       label: 'Unmatched neurons',
       default: 'drop',
       options: TRACE_UNMATCHED_OPTIONS,
-      help: 'Most of fish2 carries no ZapBench id. Drop them for a matrix of real measurements; keep them to hold the input’s row order and count, which is what a downstream join or colour channel needs. “No values” is the honest keep — nothing downstream will mistake it for a measurement. Zeros are easier to feed to code that cannot handle gaps, and are indistinguishable afterwards from a neuron that was recorded and did nothing.',
+      help: 'What to do with neurons that have no ZapBench id (most of fish2). Keep them to preserve the input’s rows, e.g. for a join. “Keep, as zeros” cannot later be told apart from a recorded neuron that was silent.',
     },
     {
       id: 'product',
@@ -243,8 +245,8 @@ export const neuronTracesNode = packNode({
      */
     if (idColumn && idColumn !== ZAPBENCH_ID_COLUMN) {
       issues.push(
-        `Reading ZapBench ids from "${idColumn}", not "zapbenchId". ` +
-          `Check that is the column you meant.`,
+        `Reading ZapBench ids from "${idColumn}". On fish2 they are in "zapbenchId", so ` +
+          `check that this is the column you meant.`,
       )
     }
     const condition = String(ctx.params.condition)
@@ -332,10 +334,10 @@ export const neuronTracesNode = packNode({
           hi = Math.max(hi, value)
         }
         throw new Error(
-          `"${idColumnName}" holds ${lo.toLocaleString()}–${hi.toLocaleString()}, which ` +
-            `are not ZapBench cell ids — this release has ${TRACE_COLUMNS.toLocaleString()} ` +
-            `cells, numbered 1 to ${TRACE_COLUMNS.toLocaleString()}. On fish2 the column is ` +
-            `"zapbenchId"; a bodyId will not do.`,
+          `"${idColumnName}" holds values from ${lo.toLocaleString()} to ${hi.toLocaleString()}, ` +
+            `which are not ZapBench cell ids. This release has ${TRACE_COLUMNS.toLocaleString()} ` +
+            `cells, numbered 1 to ${TRACE_COLUMNS.toLocaleString()}. On fish2, set ` +
+            `\`ZapBench ID\` to "zapbenchId"; a bodyId will not work.`,
         )
       }
       // A blank label would collide with every other blank on an axis the Heatmap filters, so
@@ -350,8 +352,8 @@ export const neuronTracesNode = packNode({
      */
     if (columns.length === 0) {
       throw new Error(
-        `No neuron in this table carries a ZapBench id in "${idColumnName}". ` +
-          `Only some of fish2 does — filter for rows that have one, or check the column.`,
+        `No neuron in this table has a ZapBench id in "${idColumnName}". ` +
+          `Only some fish2 neurons have one. Filter for rows that do, or check \`ZapBench ID\`.`,
       )
     }
 
@@ -389,7 +391,7 @@ export const neuronTracesNode = packNode({
           ? 'and are left out'
           : unmatched === 'null'
             ? 'and are kept with no values'
-            : 'and are kept as zeros, which nothing downstream can tell from a measurement'
+            : 'and are kept as zeros, which look like real measurements to anything downstream'
       ctx.warn(
         `${without.toLocaleString()} of ${ids.length.toLocaleString()} neurons carry no ` +
           `ZapBench id in "${idColumnName}" ${tail}` +

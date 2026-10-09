@@ -1,7 +1,10 @@
 /**
- * Small numeric helpers that more than one layer needs, and that none of them owns.
+ * Small helpers over sorted numbers that more than one layer needs, and that none of them owns:
+ * `quantileSorted`, and `lowerBound` — a binary search the table-file readers and the Neuron
+ * Dendrogram card both use, moved here out of `data/files/reader.ts` so a viewer need not import
+ * a Parquet reader for it.
  *
- * One function so far, and it is here for a boundary rather than for tidiness. `quantileSorted`
+ * The first is here for a boundary rather than for tidiness. `quantileSorted`
  * lived in `ui/viewers/boxStats.ts` and was reached from `nodes/lib/describeOps.ts` and
  * `nodes/lib/networkMetrics.ts` — a documented, deliberate upward reach, taken because the
  * alternative was a second median beside the first and "which of the nine quantile definitions"
@@ -15,8 +18,8 @@
  * rule reported clean, because the lint pattern catches only *direct* imports.
  *
  * So the shared arithmetic moved down instead of the reach going sideways. `src/core` is in the
- * boundary block, so the property is now enforced rather than asserted — and `assistant.test.ts`
- * walks the assistant's transitive imports as well, since lint cannot follow an edge two files
+ * boundary block, so the property is now enforced rather than asserted — and
+ * `src/test/importGraph.test.ts` walks the transitive imports as well, since lint cannot follow an edge two files
  * deep.
  */
 
@@ -35,4 +38,19 @@ export function quantileSorted(sorted: ArrayLike<number>, p: number): number {
   const lower = Math.floor(position)
   const upper = Math.min(n - 1, lower + 1)
   return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (position - lower)
+}
+
+/** The first index whose element is not below `target`. */
+export function lowerBound<T extends bigint | string | number>(
+  sorted: ArrayLike<T>,
+  target: T,
+): number {
+  let lo = 0
+  let hi = sorted.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (sorted[mid]! < target) lo = mid + 1
+    else hi = mid
+  }
+  return lo
 }

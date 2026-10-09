@@ -27,7 +27,7 @@ import {
   isIterableValue,
 } from '../../nodes/lib/iterables'
 import { useGraphStore } from '../../store/graphStore'
-import { formatNumber } from '../format'
+import { formatNumber } from '../../style/format'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
 import { cardParams } from '../params/paramGroups'

@@ -14,9 +14,10 @@
 import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from '../../core/values'
 import { downsamples } from '../../data/meshDecimate'
 import { boundsCenter, boundsSize } from '../../core/values'
-import { CHART_INK, chartSurface, rgbToHex } from '../colors'
-import type { Mode } from '../colors'
-import { hexToLinearRgb } from '../encoding'
+import { CHART_INK, chartSurface, rgbToHex } from '../../style/colors'
+import type { Mode } from '../../style/colors'
+import { hexToLinearRgb } from '../../style/encoding'
+import { plural } from '../../style/format'
 
 /** How the scene's background is chosen. `theme` follows the app; the others pin it. */
 export type BackgroundChoice = 'theme' | 'dark' | 'light' | 'black'
@@ -1186,6 +1187,32 @@ export function skeletonNote(
   return {
     label: provenance.label,
     title: `${provenance.detail ?? provenance.label} Change it with Source on the Skeletons node.`,
+  }
+}
+
+/**
+ * Which labels the compartment colours were drawn from, for the caption — the legend has nowhere
+ * to say it, and a computed split and a source's own labels are both drawn in the same inks.
+ * Undefined when nothing is labelled, the legend's `unlabelled` key already saying that.
+ */
+export function compartmentNote(drawn: {
+  readonly split: number
+  readonly source: number
+}): { label: string; title: string } | undefined {
+  const { split, source } = drawn
+  const parts = [
+    { label: 'computed split', by: 'by Split Axon/Dendrite', count: split },
+    { label: 'source labels', by: 'by the source’s own labels', count: source },
+  ].filter((part) => part.count > 0)
+  if (parts.length === 0) return undefined
+  return {
+    label: parts.map((part) => part.label).join(' · '),
+    title: [
+      ...parts.map((part) => `${plural(part.count, 'skeleton')} coloured ${part.by}.`),
+      ...(parts.length > 1
+        ? ['Where a skeleton carries both, the computed split is drawn.']
+        : []),
+    ].join(' '),
   }
 }
 

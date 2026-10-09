@@ -50,7 +50,10 @@ export function FeedbackNudge() {
 
   return (
     <div className="feedback-nudge" role="note">
-      <p>Coda is in beta — got a minute for feedback? It shapes what we build next.</p>
+      <p>
+        Coda is in beta. Got a minute to tell us what you think? Your feedback shapes what we
+        build next.
+      </p>
       <div className="feedback-nudge__actions">
         <button
           type="button"

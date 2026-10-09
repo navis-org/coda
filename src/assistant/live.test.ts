@@ -54,6 +54,8 @@ import { searchFor } from '../test/findNeurons'
 import { asSkeletonRoute } from '../data/skeletonRoutes'
 import { SKELETON_SOURCE_PARAM } from '../nodes/lib/skeletonParams'
 import { emptyPlan } from './planShape'
+import { defaultParams } from '../core/node'
+import { requireNodeDef } from '../core/registry'
 import type { ResultReader } from './digest'
 import { setKey, setModel, setProviderId } from '../data/ai/credentials'
 import { providerFor } from '../data/ai/registry'
@@ -92,6 +94,9 @@ const CATALOGUE = (process.env.CODA_ASSISTANT_CATALOGUE ?? 'full') as CatalogueD
  * hang that looks exactly like a wedged process.
  */
 const LIVE = Boolean(process.env.ASSISTANT_LIVE)
+
+/** The dataset card a case starts from, where it starts from one: the mock unless asked. */
+const LIVE_DATASET = process.env.CODA_ASSISTANT_DATASET ?? 'dataset.mock.opticlobe'
 
 /**
  * Whether there is anything to run against.
@@ -133,6 +138,35 @@ beforeAll(() => {
   if (KEY) setKey(PROVIDER, KEY)
   if (MODEL) setModel(PROVIDER, MODEL)
 })
+
+/**
+ * A canvas holding one `LIVE_DATASET` card and no Description companion, the report's setup.
+ * Registers the sources as the app has them, or the card's "not registered" joins the advisory
+ * round and changes what the model is handed.
+ */
+function datasetStart(): CodaGraph {
+  registerBuiltinSources()
+  return {
+    ...emptyGraph(),
+    nodes: [
+      {
+        id: 'n1_ds',
+        type: LIVE_DATASET,
+        position: { x: 0, y: 0 },
+        params: defaultParams(requireNodeDef(LIVE_DATASET)),
+      },
+    ],
+  }
+}
+
+/** The value column of every Bar Chart in a graph, printed for counting across runs. */
+function chartedValues(graph: CodaGraph): string[] {
+  const charted = graph.nodes
+    .filter((n) => n.type === 'out.barChart')
+    .map((n) => String(n.params.value ?? ''))
+  console.log(`  CHARTED: ${charted.join(', ') || '(no bar chart)'}`)
+  return charted
+}
 
 /**
  * Ask, through the *shipped* loop.
@@ -463,6 +497,64 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
         'On the mini hemibrain, compare the connectivity of two cell types.',
       )
       expect(plan.question ?? '').not.toBe('')
+    },
+    PER_QUESTION_MS,
+  )
+
+  it(
+    'charts a column the plan itself made',
+    async () => {
+      /*
+       * `core.groupBy` names a row count `n`, the one aggregate outside `<agg>_<column>`, and the
+       * model was reaching for `count` or `count_postType` instead: 4 in 5 on 2026-09-28, with a
+       * dataset card already on the canvas. The name is in Group By's `description`; what the
+       * plan gets wrong is wiring a chart to it in the same plan that creates the Group By, before
+       * any listing can show it. A column complaint on a chart is the failure, whichever node
+       * minted the column.
+       */
+      const { graph } = await ask(
+        datasetStart(),
+        'Find the LC4 neurons and chart their top downstream partner types.',
+      )
+      console.log(`\n${describeGraph(graph)}\n`)
+      const inference = inferGraph(graph)
+      const complaints = graph.nodes
+        .filter((n) => n.type.startsWith('out.'))
+        .flatMap((n) => inference.nodes[n.id]?.issues ?? [])
+        .filter((issue) => issue.aboutColumns)
+        .map((issue) => issue.message)
+      console.log(`  CHART COLUMNS: ${complaints.length ? complaints.join(' | ') : 'ok'}`)
+      expect(complaints).toEqual([])
+      /*
+       * And the quantity is synapses. "Top partner types" is a ranking by connection strength,
+       * so a chart of `n` counts partners — which a Group By description saying how to chart a
+       * count steered every run towards, and was not wanted. Summed `weight`, directly or through a Group By, is right.
+       */
+      const charted = chartedValues(graph)
+      expect(charted.length).toBeGreaterThan(0)
+      for (const value of charted) expect(['weight', 'sum_weight']).toContain(value)
+    },
+    PER_QUESTION_MS,
+  )
+
+  it(
+    'names a row count n when the request is for a count',
+    async () => {
+      /*
+       * The other half of the case above, which now charts `weight` off Connectivity and never
+       * builds a Group By — so on its own it no longer exercises the name it was written about.
+       * Asked for a count outright, the Group By is the pipeline, and its count is `n`. Spelled
+       * out as *rows*, because "how many connections" is not a count here: `weight` is a synapse
+       * count already, and 5 of 5 runs charted it — a fair reading, and not this case's question.
+       */
+      const { graph } = await ask(
+        datasetStart(),
+        'Find the LC4 neurons, get their downstream connections, count the rows per partner ' +
+          'type and chart that count.',
+      )
+      console.log(`\n${describeGraph(graph)}\n`)
+      const charted = chartedValues(graph)
+      expect(charted).toEqual(['n'])
     },
     PER_QUESTION_MS,
   )

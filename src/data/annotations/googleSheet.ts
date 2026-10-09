@@ -134,8 +134,8 @@ export function parseSheetLocation(input: string): SheetLocation {
     if (ID_PATTERN.test(text)) return { documentId: text }
     return {
       error:
-        `"${text}" is not a Google Sheet link or id. Paste the address bar of the sheet — ` +
-        `https://docs.google.com/spreadsheets/d/…/edit — or just the id out of it.`,
+        `"${text}" is not a Google Sheet link or id. Paste the sheet's address from the address ` +
+        `bar (https://docs.google.com/spreadsheets/d/…/edit), or just the id from it.`,
     }
   }
 
@@ -146,13 +146,15 @@ export function parseSheetLocation(input: string): SheetLocation {
     return { error: `"${text}" is not a URL` }
   }
   if (!/(^|\.)google\.com$/i.test(url.hostname)) {
-    return { error: `${url.hostname} is not docs.google.com — this node reads Google Sheets` }
+    return {
+      error: `${url.hostname} is not docs.google.com. This node only reads Google Sheets.`,
+    }
   }
   if (/\/spreadsheets\/d\/e\//.test(url.pathname)) {
     return {
       error:
         'That is a "publish to web" link, which uses a different id that the export URL cannot ' +
-        'open. Use the ordinary Share link instead — Share ▸ Anyone with the link ▸ Viewer, ' +
+        'open. Use the ordinary Share link: Share ▸ Anyone with the link ▸ Viewer, ' +
         'then Copy link.',
     }
   }
@@ -310,9 +312,9 @@ function refusal(status: number, config: GoogleSheetConfig, url: string): Google
      * existence behind a 404 and sometimes does.
      */
     return new GoogleSheetError(
-      `No sheet with that id — Google answered 404. Check the link is the one from the ` +
-        `address bar, and that the sheet has not been deleted. (A sheet shared with named ` +
-        `people only can also answer 404 rather than admitting it exists.)`,
+      `No sheet with that id (Google answered 404). Check that the link is the one from the ` +
+        `address bar, and that the sheet has not been deleted. A sheet shared only with named ` +
+        `people can also answer 404.`,
       status,
     )
   }
@@ -368,7 +370,7 @@ async function explainFailure(url: string, signal?: AbortSignal): Promise<Google
     if (error instanceof DOMException && error.name === 'AbortError') throw error
   }
   return new GoogleSheetError(
-    `Could not reach docs.google.com. The sheet may be fine — check the connection, and that ` +
+    `Could not reach docs.google.com. The sheet may be fine. Check the connection, and that ` +
       `nothing on this network blocks Google: ${url}`,
   )
 }

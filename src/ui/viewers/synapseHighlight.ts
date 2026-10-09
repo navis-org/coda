@@ -59,14 +59,6 @@ export const HIGHLIGHT_COLUMN = 'codaHighlight'
 export const PARTNER_COLUMN = 'partnerType'
 export const PARTNER_ID_COLUMN = 'partnerId'
 
-/** Whether a cloud with this schema can name its partners at all, either way. */
-export function namesPartners(schema: TableValue['schema']): boolean {
-  return (
-    findColumn(schema, PARTNER_COLUMN) !== undefined ||
-    findColumn(schema, PARTNER_ID_COLUMN) !== undefined
-  )
-}
-
 /** Everything not lit. One key, so the whole remainder takes one muted colour. */
 export const HIGHLIGHT_OTHER = 'other'
 
@@ -163,21 +155,7 @@ export function partnerLabelColumn(
     return hasType && grouping !== 'neuron' ? getColumn(attributes, PARTNER_COLUMN) : undefined
   }
 
-  const typeById = new Map<string, CellValue>()
-  for (const table of tables) {
-    if (!table || !findColumn(table.schema, PARTNER_ID_COLUMN)) continue
-    const ids = getColumn(table, PARTNER_ID_COLUMN)
-    const types = findColumn(table.schema, PARTNER_COLUMN)
-      ? getColumn(table, PARTNER_COLUMN)
-      : undefined
-    for (let i = 0; i < table.length; i++) {
-      // `idText` on both sides of the join — invariant 8, and the two columns are declared `str`
-      // on CAVE and `i64` on the canonical schema, so this is the seam.
-      const id = idText(ids[i] ?? null)
-      if (id) typeById.set(id, types?.[i] ?? null)
-    }
-  }
-
+  const typeById = partnerTypesById(tables)
   const ids = getColumn(attributes, PARTNER_ID_COLUMN)
   const labels: ColumnData = new Array<CellValue>(attributes.length)
   for (let i = 0; i < attributes.length; i++) {
@@ -188,4 +166,49 @@ export function partnerLabelColumn(
       id !== null && typeById.has(id) ? partnerKey(grouping, typeById.get(id), id) : null
   }
   return labels
+}
+
+/**
+ * Every partner of a neuron, by id, with its type — `null` for a partner known to be untyped.
+ *
+ * Read off the connectivity tables, which carry a partner's type. One join for both readers: the
+ * label column above, and `partnerLabelsForIds` below. `idText` on both sides — invariant 8, and
+ * the two columns are declared `str` on CAVE and `i64` on the canonical schema, so this is the seam.
+ */
+export function partnerTypesById(
+  tables: ReadonlyArray<TableValue | undefined>,
+): Map<string, CellValue> {
+  const typeById = new Map<string, CellValue>()
+  for (const table of tables) {
+    if (!table || !findColumn(table.schema, PARTNER_ID_COLUMN)) continue
+    const ids = getColumn(table, PARTNER_ID_COLUMN)
+    const types = findColumn(table.schema, PARTNER_COLUMN)
+      ? getColumn(table, PARTNER_COLUMN)
+      : undefined
+    for (let i = 0; i < table.length; i++) {
+      const id = idText(ids[i] ?? null)
+      if (id) typeById.set(id, types?.[i] ?? null)
+    }
+  }
+  return typeById
+}
+
+/**
+ * A set of neuron ids as the partner list's labels under a grouping — what lighting "these
+ * neurons" means. An id that is not a partner of this neuron lights nothing: through `partnerKey`
+ * it would come back as the untyped bucket and light every untyped partner instead, which is what
+ * the Neuron Dendrogram's Partners port did on its first run in a browser.
+ */
+export function partnerLabelsForIds(
+  ids: readonly string[],
+  tables: ReadonlyArray<TableValue | undefined>,
+  grouping: PartnerGrouping,
+): string[] {
+  const typeById = partnerTypesById(tables)
+  const labels = new Set<string>()
+  for (const id of ids) {
+    if (!typeById.has(id)) continue
+    labels.add(markLabel(partnerKey(grouping, typeById.get(id), id)))
+  }
+  return [...labels]
 }

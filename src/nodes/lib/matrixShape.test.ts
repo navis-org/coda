@@ -395,7 +395,7 @@ describe('the whole thing on an adjacency', () => {
     const m = square()
     expect(orderAxis(m, 'rows', readOrderOptions({ sortBy: 'value' }))).toMatchObject({
       order: undefined,
-      problem: expect.stringContaining('needs its label'),
+      problem: expect.stringContaining('Type one under `Row or column`'),
     })
     expect(
       orderAxis(m, 'rows', readOrderOptions({ sortBy: 'value', sortKey: 'nope' })),

@@ -25,20 +25,15 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
-import type { HintSide, HintTone } from '../../core/graph'
-import {
-  DEFAULT_HINT_SIDE,
-  DEFAULT_HINT_TONE,
-  HINT_SIDES,
-  HINT_TONES,
-  sameHints,
-} from '../../core/graph'
+import type { HintSide } from '../../core/graph'
+import { DEFAULT_HINT_SIDE, DEFAULT_HINT_TONE, HINT_SIDES, sameHints } from '../../core/graph'
 import { nodeLabel } from '../../core/graph'
 import type { HintTarget } from '../../store/graphStore'
 import { useGraphStore } from '../../store/graphStore'
 import { cardElement } from '../cardSizes'
 import { restoreHints } from '../hints'
-import { TONE_TITLE } from '../markdown'
+import type { CalloutTone } from '../../core/markdown'
+import { CALLOUT_TONES, TONE_TITLE } from '../../core/markdown'
 import { ContextMenu } from '../menu/ContextMenu'
 import { layoutViewport } from '../menu/placement'
 import { HintBox } from '../nodes/NodeHints'
@@ -124,7 +119,7 @@ function HintEditorPanel({ target }: { target: HintTarget }) {
   const node = useGraphStore((s) => s.graph.nodes.find((n) => n.id === nodeId))
   const [{ at, cardWidth }] = useState(() => anchorFor(nodeId))
   const [text, setText] = useState(existing?.text ?? '')
-  const [tone, setTone] = useState<HintTone>(existing?.tone ?? DEFAULT_HINT_TONE)
+  const [tone, setTone] = useState<CalloutTone>(existing?.tone ?? DEFAULT_HINT_TONE)
   const [side, setSide] = useState<HintSide>(existing?.side ?? DEFAULT_HINT_SIDE)
 
   /*
@@ -207,7 +202,7 @@ function HintEditorPanel({ target }: { target: HintTarget }) {
       <div className="hint-editor__row">
         <Choices
           label="Tone"
-          options={HINT_TONES}
+          options={CALLOUT_TONES}
           titles={TONE_TITLE}
           value={tone}
           onChange={setTone}
@@ -230,8 +225,8 @@ function HintEditorPanel({ target }: { target: HintTarget }) {
         </div>
       )}
       <p className="hint-editor__note">
-        Saved with the workflow. Anyone opening it can hide a hint for themselves with ×; only
-        Delete removes it for everybody.
+        Hints are saved with the workflow. Anyone can hide a hint for themselves with ×, but
+        only Delete removes it for everyone.
       </p>
       <div className="hint-editor__actions">
         {existing && (

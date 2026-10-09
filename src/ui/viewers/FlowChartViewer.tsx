@@ -1,6 +1,6 @@
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react'
 
-import { canvasFont } from './canvas2d'
+import { textMeasurer } from './canvas2d'
 import type { NetworkValue } from '../../core/values'
 import type { FlowEdgeKind } from '../../nodes/lib/flowChartOps'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
@@ -19,11 +19,12 @@ import {
   foldFlowGraph,
   showsEdgeLabels,
 } from '../../nodes/lib/flowChartOps'
-import { CHART_INK, chartSurface, currentMode, inkOn } from '../colors'
-import type { ResolvedColor } from '../encoding'
-import { resolveColor } from '../encoding'
+import { CHART_INK, chartSurface, inkOn } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
+import type { ResolvedColor } from '../../style/encoding'
+import { resolveColor } from '../../style/encoding'
 import { exportBaseName as makeBaseName } from '../export'
-import { formatNumber, truncateLabel } from '../format'
+import { formatNumber, truncateLabel } from '../../style/format'
 import { ChartTooltip, TooltipRow } from './ChartTooltip'
 import { ColorKey } from './LegendKeys'
 import { tooltipPoint } from './tooltipPoint'
@@ -244,7 +245,8 @@ export function FlowChartViewer({
   const sizes = useMemo(() => {
     const out = new Map<string, BoxSize & { label: string }>()
     if (tooBig) return out
-    const measure = textMeasurer()
+    // `truncateLabel`'s own estimate where there is no canvas, so the two agree.
+    const measure = textMeasurer(FONT, (text) => text.length * 6)
     for (const node of folded.nodes) {
       const label = truncateLabel(node.label, MAX_LABEL, 1)
       out.set(node.id, {
@@ -267,7 +269,7 @@ export function FlowChartViewer({
    * Colour resolves against the network's **own** node table, by the row each box remembers —
    * never against the folded graph, which has boxes that are not rows. `resolveColor` owns the
    * palette, the eight slots, the cycling, the null grey and the overrides; re-deriving any of
-   * that here is what `ui/encoding.ts` exists to prevent.
+   * that here is what `style/encoding.ts` exists to prevent.
    */
   // `useStable`, because `readColorSpec` mints a fresh object on every `ValuePreview` render —
   // the hazard `networkRebuild.test.tsx` records, and without it this memo never bites.
@@ -616,39 +618,6 @@ function idsOf(box: FlowBox): string[] {
 /** A box's drawn label, for the arrow tooltip. Falls back to the id it could not find. */
 function boxLabel(boxes: readonly FlowBox[], id: string): string {
   return boxes.find((box) => box.id === id)?.label ?? id
-}
-
-/**
- * One shared canvas for text measurement.
- *
- * Module-level rather than per render: a `<canvas>` per measurement pass allocates a backing
- * store to answer a question about a string. Returns an estimate where there is no context at
- * all, which is what keeps this from being a hard dependency on the DOM.
- *
- * **The font string is read off `--font-ui` rather than written out** (`canvasFont`), because the box is sized
- * by this measurement and drawn by `.chart text`, which takes that variable — and two spellings
- * of one font is a box that fits its label on the author's machine and clips it elsewhere. The
- * two agree wherever `system-ui` resolves, which is why a literal here would survive every check
- * anybody would think to run: they part company exactly where `system-ui` is unavailable and
- * `-apple-system` or `Segoe UI` answers instead, leaving the canvas on generic sans-serif and
- * the drawing on neither.
- *
- * Read once, in `canvasFont`. A theme flip does not move it — `--font-ui` is declared outside
- * both palettes — and asking the DOM for a computed style per measurement pass would be paying for
- * a value that cannot change.
- */
-
-let measureContext: CanvasRenderingContext2D | null | undefined
-function textMeasurer(): (text: string) => number {
-  if (measureContext === undefined) {
-    measureContext =
-      typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d')
-    if (measureContext) measureContext.font = canvasFont(FONT)
-  }
-  const context = measureContext
-  // `truncateLabel`'s own estimate, so the two agree where there is no canvas to ask.
-  if (!context) return (text) => text.length * 6
-  return (text) => context.measureText(text).width
 }
 
 /**

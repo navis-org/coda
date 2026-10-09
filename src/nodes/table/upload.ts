@@ -47,9 +47,11 @@ registerNode({
   // tooltip, since it is what a colleague opening a shared graph sees.
   cardWidth: 300,
   description:
-    'Bring in a CSV of your own — annotations, cell types, an embedding. A chosen id column is renamed `neuronId` and a chosen type column `type`.',
+    'Load a CSV or TSV of your own, such as annotations, cell types or an embedding. A chosen id column is renamed `neuronId` and a chosen type column `type`.',
   guide:
-    'Your own CSV: annotations, cell types, embeddings. The only node with no inputs and no backend. Rows live in this browser, not in the graph — a .coda.json sent to a colleague arrives without them. The card shows which file is missing if you need to pick it again.',
+    'Brings in a CSV or TSV of your own, such as annotations, cell types or an embedding, ' +
+    'to join onto other tables. The rows are stored in this browser, not in the workflow, so a ' +
+    'colleague opening your workflow has to upload the same file again.',
   // No network and no parse: `evaluate` is one IndexedDB read of an already-parsed table.
   cost: 'cheap',
   inputs: [],
@@ -105,7 +107,7 @@ registerNode({
    */
   validate: (ctx) => {
     const dataId = String(ctx.params.dataId)
-    if (!dataId) return ['No file chosen — use the button on the node']
+    if (!dataId) return ['No file chosen. Use the button on the node to pick a CSV.']
     if (!uploadPeekSettled(dataId)) return []
     const schema = peekUploadSchema(dataId)
     if (!schema) return [uploadMissingBadge(String(ctx.params.fileName), 'table')]
@@ -129,7 +131,7 @@ registerNode({
     const idColumn = String(ctx.params.idColumn)
     if (idColumn && !findColumn(table.schema, idColumn)) {
       throw new Error(
-        `ID column "${idColumn}" is not in "${name}". Available: ${columnNames(table.schema).join(', ')}`,
+        `\`ID column\` is set to "${idColumn}", which is not in "${name}". Pick one of: ${columnNames(table.schema).join(', ')}`,
       )
     }
     return { out: uploadShapeTable(table, readImportShape(ctx)) }

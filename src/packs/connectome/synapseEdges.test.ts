@@ -152,7 +152,7 @@ describe('validate', () => {
 
   it('names the pair when a cloud carries no partner column', () => {
     const [message] = issues({}, T.points(PARTNERLESS))
-    expect(message).toMatch(/both read "neuronId"/)
+    expect(message).toMatch(/`Postsynaptic` both read "neuronId"/)
     expect(message).toMatch(/Synapses Between/)
   })
 
@@ -175,7 +175,7 @@ describe('evaluate', () => {
   })
 
   it('refuses anything that is not a point cloud', async () => {
-    await expect(run(ROWS)).rejects.toThrow(/point cloud|synapse cloud/)
+    await expect(run(ROWS)).rejects.toThrow(/Wire synapse points into `Points`/)
   })
 
   /* Said at both layers: `validate` marks the card, and a stored graph must not run and hand

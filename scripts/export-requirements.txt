@@ -40,3 +40,12 @@ sea-serpent
 # navis does not depend on it, so `coda_geom_nearest` imports it explicitly — which is the import
 # `--strict` has to resolve.
 rtree
+# The Custom Dataset half. pyarrow reads a Link Table's Parquet or Feather file by column and by
+# row group, fsspec (with its `http` extra, aiohttp) opens one at an https:// URL, and cloud-volume
+# reads a Neuroglancer Source's precomputed bucket. `probe-py-helpers.py` runs the table half
+# against files it writes; the bucket half is checked live by hand, needing a network.
+pyarrow
+fsspec[http]
+cloud-volume
+# Delta tables, which a Link Table can name (CAVE publishes its exports as them).
+deltalake

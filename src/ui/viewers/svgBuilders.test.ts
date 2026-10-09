@@ -15,15 +15,15 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CHART_INK, chartSurface } from '../colors'
+import { CHART_INK, chartSurface } from '../../style/colors'
 import { serializeSvg } from '../export'
 import { makeMatrix } from '../../core/values'
-import { rampColors } from '../encoding'
+import { rampColors } from '../../style/encoding'
 import { buildHeatmapSpec } from './heatmapPlot'
 import { heatmapToSvg } from './heatmapDraw'
 import { networkToSvg } from './networkDraw'
 import { scatterToSvg } from './scatterDraw'
-import { buildScatter } from './scatterPlot'
+import { buildMarks, buildScatter } from './scatterPlot'
 
 const INK = CHART_INK.dark
 const SURFACE = chartSurface('dark')
@@ -60,15 +60,18 @@ function heatmap(): SVGSVGElement {
 
 function scatter(): SVGSVGElement {
   const xs = Array.from({ length: 12 }, (_, i) => i)
-  const spec = buildScatter({
+  const marks = buildMarks({
     xValues: xs,
     yValues: xs.map((x) => x * 2),
     length: xs.length,
     xScale: 'linear',
     yScale: 'linear',
+    style: { colorAt: () => '#3987e5', radiusAt: () => 3, shapeAt: () => 'circle' },
+  })
+  const spec = buildScatter({
+    marks,
     plot: { x: 40, y: 10, width: 320, height: 240 },
     trendColor: '#ffffff',
-    style: { colorAt: () => '#3987e5', radiusAt: () => 3, shapeAt: () => 'circle' },
   })
   return scatterToSvg({
     spec,

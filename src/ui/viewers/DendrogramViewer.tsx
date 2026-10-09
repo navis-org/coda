@@ -3,11 +3,12 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from '
 import type { LinkageValue, TableValue } from '../../core/values'
 import { decodeIndices } from '../../nodes/lib/chartSelection'
 import { displayLabels } from '../../nodes/lib/displayLabels'
-import type { Mode } from '../colors'
-import { CHART_INK, MAX_SERIES, chartSurface, currentMode } from '../colors'
-import { clusterColor } from '../encoding'
+import type { Mode } from '../../style/colors'
+import { CHART_INK, MAX_SERIES, chartSurface } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
+import { clusterColor } from '../../style/encoding'
 import { exportBaseName as makeBaseName } from '../export'
-import { formatNumber, formatZoom, truncateLabel } from '../format'
+import { formatNumber, formatZoom, truncateLabel } from '../../style/format'
 import type {
   DendrogramLink,
   DendrogramOrientation,

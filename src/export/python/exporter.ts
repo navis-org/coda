@@ -9,9 +9,11 @@
 
 import './helpers'
 import './caveHelpers'
+import './customHelpers'
 import './emitters/analysis'
 import './emitters/cave'
 import './emitters/connectivity'
+import './emitters/custom'
 import './emitters/explore'
 import './emitters/googleSheet'
 import './emitters/influence'

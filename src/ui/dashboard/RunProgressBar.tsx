@@ -30,7 +30,7 @@
 import { useEffect, useState } from 'react'
 
 import { useGraphStore, useRunProgress } from '../../store/graphStore'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 
 /**
  * How long a run has to last before it is worth drawing a bar for.

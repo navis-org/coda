@@ -18,6 +18,7 @@
 
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
+import type { StoredSignIn } from '../signIns'
 
 /** The two deployments Coda ships a node for. Any other is reachable by typing its host. */
 export const SEATABLE_HOSTS = {
@@ -27,7 +28,13 @@ export const SEATABLE_HOSTS = {
 
 const KEY_PREFIX = 'coda.seatable.token.'
 
-const authFailure = channel<string>()
+/** A refusal and the deployment that refused, so the panel opens on that deployment's tab. */
+interface SeaTableAuthFailure {
+  host: string
+  message: string
+}
+
+const authFailure = channel<SeaTableAuthFailure>()
 
 /** Trailing slashes off and a scheme on, so one deployment is one string however it was typed. */
 export function normaliseHost(host: string): string {
@@ -62,8 +69,10 @@ export function setToken(host: string, raw: string | undefined): void {
   writeStorage(keyFor(host), cleaned)
 }
 
-/** Raised on 401/403 so the Connections panel can offer the fix. */
-export const reportAuthFailure = authFailure.notify
+/** Raised on 401/403 so the Connections panel can offer the fix, on the right tab. */
+export function reportAuthFailure(host: string, message: string): void {
+  authFailure.notify({ host: normaliseHost(host), message })
+}
 export const subscribeAuthFailure = authFailure.subscribe
 
 /** Test seam: clears both shipped hosts, plus anything else a test named. */
@@ -72,4 +81,12 @@ export function resetSeaTableCredentials(hosts: readonly string[] = []): void {
     writeStorage(keyFor(host), undefined)
   }
   tokens.clear()
+}
+
+/** The Storage tab's entry: one key per host, so a stem rather than a list. */
+export const SIGN_IN: StoredSignIn = {
+  service: 'SeaTable',
+  keys: [],
+  prefixes: [KEY_PREFIX],
+  stored: () => Object.values(SEATABLE_HOSTS).some((host) => getToken(host) !== undefined),
 }

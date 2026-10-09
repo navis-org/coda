@@ -222,6 +222,10 @@ function valueHeadline(value: Value): string {
       return `linkage over ${count(value.labels.length)} leaves`
     case 'layers':
       return `${count(value.items.length)} layers`
+    case 'tableFile':
+      return `a ${value.format} file of ${
+        value.rows === undefined ? 'unknown length' : `${count(value.rows)} rows`
+      }`
     default: {
       // A new `Value` kind fails to compile here rather than reaching the model as nothing.
       const unhandled: never = value

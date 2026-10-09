@@ -15,15 +15,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
-import { cacheSet, resetCache } from '../../data/cache'
+import { cacheGet, cacheSet, resetCache } from '../../data/cache'
 import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { resetDatastackRecords } from '../../data/cave/datastack'
 import { resetRootChecks } from '../../data/cave/rootIds'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams, findParam, resolveColumn } from '../../core/node'
-import type { ColumnParam } from '../../core/node'
+import { defaultParams, findParam, resolveColumn, visibleParams } from '../../core/node'
+import type { ColumnParam, EnumParam } from '../../core/node'
 import { T } from '../../core/types'
 import { requireNodeDef } from '../../core/registry'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
@@ -74,9 +74,10 @@ function installFetch(stale: string = OLD, fresh: string = NEW): Call[] {
       return json({ is_latest: list.map((id) => id !== stale) })
     }
     if (text.includes('roots_binary')) {
-      // Raw uint64 out, as `roots_binary` answers — one root per supervoxel sent.
+      // Raw uint64 out, as `roots_binary` answers — one root per supervoxel sent, and `0` for a
+      // supervoxel the graph does not know, which is how CAVE says so.
       const sent = new BigUint64Array(init?.body as ArrayBuffer)
-      const out = BigUint64Array.from(sent, () => BigInt(fresh))
+      const out = BigUint64Array.from(sent, (sv) => (sv === 0n ? 0n : BigInt(fresh)))
       return Promise.resolve({
         ok: true,
         status: 200,
@@ -92,6 +93,24 @@ function installFetch(stale: string = OLD, fresh: string = NEW): Call[] {
   return calls
 }
 
+/** The timestamp each of the two chunkedgraph calls was asked at, in call order. */
+function stampsOf(calls: Call[]): (string | null)[] {
+  return calls
+    .filter((c) => c.url.includes('is_latest_roots') || c.url.includes('roots_binary'))
+    .map((c) => new URL(c.url).searchParams.get('timestamp'))
+}
+
+/** Freeze `Date` at `now` for every test in the enclosing describe. */
+function clockAt(now: number): void {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(now)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+}
+
 function annotations(): TableValue {
   return makeTable(
     tableSchema(
@@ -104,12 +123,23 @@ function annotations(): TableValue {
   )
 }
 
-function run(table: TableValue, params: Record<string, unknown> = {}) {
+/** What a test listens for on the context; everything else is inert. */
+interface Listeners {
+  reportFetched?: (at: number) => void
+  warn?: (message: string) => void
+}
+
+function run(
+  table: TableValue,
+  params: Record<string, unknown> = {},
+  { reportFetched = () => undefined, warn = () => undefined }: Listeners = {},
+) {
   const def = requireNodeDef('cave.updateRootIds')
   return def.evaluate({
     params: {
       idColumn: 'neuronId',
       supervoxelColumn: 'supervoxel_id',
+      updateTo: 'materialization',
       version: '',
       ...params,
     },
@@ -133,8 +163,8 @@ function run(table: TableValue, params: Record<string, unknown> = {}) {
     },
     signal: new AbortController().signal,
     progress: () => undefined,
-    reportFetched: () => undefined,
-    warn: () => undefined,
+    reportFetched,
+    warn,
     publish: () => undefined,
   })
 }
@@ -248,6 +278,43 @@ describe('the repair', () => {
     expect(out.data.neuronId).toEqual([NEW, KEPT])
   })
 
+  /*
+   * A row that cannot be traced is kept as it was, which is right and was silent: the card went
+   * green on a run that repaired nine stale rows in ten, exactly as on one that repaired them all.
+   */
+  it('counts the stale rows it could not repair, by reason', async () => {
+    installFetch()
+    const said: string[] = []
+    const mixed = makeTable(
+      tableSchema(column('neuronId', 'str'), column('supervoxel_id', 'str')),
+      // Two stale rows with no supervoxel, one with a supervoxel CAVE answers 0 for, one repaired,
+      // and a current row with no supervoxel — which needs nothing and must not be counted.
+      { neuronId: [OLD, OLD, OLD, OLD, KEPT], supervoxel_id: [null, null, '0', SV, null] },
+      'neurons',
+    )
+    const out = (await run(mixed, {}, { warn: (m) => said.push(m) })).out as TableValue
+    expect(out.data.neuronId).toEqual([OLD, OLD, OLD, NEW, KEPT])
+    expect(said).toEqual([
+      '3 rows have an out-of-date ID that could not be updated: 2 without a supervoxel ID and ' +
+        '1 whose supervoxel CAVE does not know. They are left as they were.',
+    ])
+  })
+
+  it('says nothing when every stale row was repaired', async () => {
+    installFetch()
+    const said: string[] = []
+    await run(annotations(), {}, { warn: (m) => said.push(m) })
+    expect(said).toEqual([])
+  })
+
+  it('reads the materialization listing once per repair, not once per lookup', async () => {
+    // A frozen instant never changes, and the listing's memo holds only the request in flight —
+    // so each lookup awaiting it was a fresh `/metadata` round trip, two per repair.
+    const calls = installFetch()
+    await run(annotations())
+    expect(calls.filter((c) => c.url.includes('/metadata'))).toHaveLength(1)
+  })
+
   it('leaves a row with no supervoxel exactly as it was', async () => {
     // Nothing to recover from: the supervoxel is the only stable handle, so the honest answer is
     // to leave the stale id rather than to null it or drop the row.
@@ -260,6 +327,165 @@ describe('the repair', () => {
     const out = (await run(partial)).out as TableValue
     expect(out.data.neuronId).toEqual([OLD])
   })
+})
+
+/**
+ * Live — the newest root ids as of the last run, for interactive work.
+ *
+ * Three things a reasonable implementation gets wrong in silence. **Both calls are asked about one
+ * instant**, the run's own, or an edit between them leaves a row repointed at a root already
+ * retired. **Nothing is kept**: each live run is a new instant, so a permanent entry per run is a
+ * store that only grows. And **the instant is reported**, which is the whole of the manual
+ * update — it is what puts `cached 4m ago ⟳` on the card.
+ */
+describe('live', () => {
+  /** A moment well after the materialization, so the two cannot be confused. */
+  const NOW = Date.parse('2026-10-07T12:00:00Z')
+
+  clockAt(NOW)
+
+  it('asks both calls about the run’s own instant, never the materialization’s', async () => {
+    const calls = installFetch()
+    const out = (await run(annotations(), { updateTo: 'live' })).out as TableValue
+    expect(out.data.neuronId).toEqual([NEW, KEPT])
+
+    expect(stampsOf(calls)).toEqual([String(NOW / 1000), String(NOW / 1000)])
+  })
+
+  it('reports that instant, which is what puts the ⟳ on the card', async () => {
+    installFetch()
+    const reported: number[] = []
+    await run(annotations(), { updateTo: 'live' }, { reportFetched: (at) => reported.push(at) })
+    expect(reported).toEqual([NOW])
+  })
+
+  it('says nothing about an age when pinned to a materialization', async () => {
+    // A frozen instant is not "how old" anything is; the card's foot stays as it was.
+    installFetch()
+    const reported: number[] = []
+    await run(annotations(), {}, { reportFetched: (at) => reported.push(at) })
+    expect(reported).toEqual([])
+  })
+
+  it('keeps no answer about a live instant, and reads none', async () => {
+    installFetch()
+    // A warm entry at this very instant must not be served: live means asking.
+    await cacheSet(
+      `cave-sv-roots:https://cg.example|flywire_public|${NOW}`,
+      { sv: [SV], root: ['720575940699999999'] },
+      'v1',
+    )
+    const out = (await run(annotations(), { updateTo: 'live' })).out as TableValue
+    expect(out.data.neuronId).toEqual([NEW, KEPT])
+    expect(
+      await cacheGet(`cave-roots:https://cg.example|flywire_public|${NOW}`, {
+        fingerprint: 'v1',
+      }),
+    ).toBeUndefined()
+  })
+})
+
+/**
+ * The last full hour and the last half hour — live, snapped back to the schedule an annotation base
+ * refreshes its own ids on (FlyTable's is every thirty minutes).
+ *
+ * What a test must pin is the arithmetic, since a boundary off by one step lands on a state no
+ * other table's ids describe, and nothing fails: the same plausible repair, half an hour out. So a
+ * run time well inside a slot, and both calls checked against the boundary rather than the clock.
+ */
+describe('the last full hour and the last half hour', () => {
+  /** 12:47:13 UTC — inside both slots, so neither boundary can be the run time by accident. */
+  const NOW = Date.parse('2026-10-07T12:47:13Z')
+
+  clockAt(NOW)
+
+  it.each([
+    ['halfHour', '2026-10-07T12:30:00Z'],
+    ['hour', '2026-10-07T12:00:00Z'],
+  ])(
+    '%s asks both calls about the boundary before the run, and reports it',
+    async (mode, at) => {
+      const calls = installFetch()
+      const reported: number[] = []
+      const out = (
+        await run(annotations(), { updateTo: mode }, { reportFetched: (t) => reported.push(t) })
+      ).out as TableValue
+      expect(out.data.neuronId).toEqual([NEW, KEPT])
+      const boundary = Date.parse(at)
+      expect(stampsOf(calls)).toEqual([String(boundary / 1000), String(boundary / 1000)])
+      // The age the card shows is the age of the ids' state, not of the run.
+      expect(reported).toEqual([boundary])
+    },
+  )
+
+  it('treats a run exactly on a boundary as that boundary', async () => {
+    vi.setSystemTime(Date.parse('2026-10-07T12:30:00Z'))
+    const calls = installFetch()
+    await run(annotations(), { updateTo: 'halfHour' })
+    expect(stampsOf(calls)[0]).toBe(String(Date.parse('2026-10-07T12:30:00Z') / 1000))
+  })
+
+  /*
+   * The second run in one slot is the common case — an edit upstream, then Run — and it asks about
+   * the same boundary as the first. Held for the session, newest only, never in IndexedDB: a
+   * boundary is a new instant 48 times a day, and that store has no eviction.
+   */
+  it('answers a second run in the same slot without asking again, and keeps nothing', async () => {
+    const calls = installFetch()
+    await run(annotations(), { updateTo: 'halfHour' })
+    const first = stampsOf(calls).length
+    vi.setSystemTime(Date.parse('2026-10-07T12:59:59Z'))
+    const out = (await run(annotations(), { updateTo: 'halfHour' })).out as TableValue
+    expect(out.data.neuronId).toEqual([NEW, KEPT])
+    expect(stampsOf(calls)).toHaveLength(first)
+
+    const boundary = Date.parse('2026-10-07T12:30:00Z')
+    expect(
+      await cacheGet(`cave-roots:https://cg.example|flywire_public|${boundary}`, {
+        fingerprint: 'v1',
+      }),
+    ).toBeUndefined()
+  })
+
+  it('asks again once the next boundary has passed', async () => {
+    const calls = installFetch()
+    await run(annotations(), { updateTo: 'halfHour' })
+    vi.setSystemTime(Date.parse('2026-10-07T13:00:01Z'))
+    await run(annotations(), { updateTo: 'halfHour' })
+    expect(new Set(stampsOf(calls))).toEqual(
+      new Set([
+        String(Date.parse('2026-10-07T12:30:00Z') / 1000),
+        String(Date.parse('2026-10-07T13:00:00Z') / 1000),
+      ]),
+    )
+  })
+})
+
+/*
+ * Every mode but a materialization reads no version, so a version typed earlier is hidden — which
+ * is what takes it out of the provenance key (`normalizeParams` reads only visible params) — and
+ * `validate` says nothing about it. Read off the dropdown rather than listed, so a mode added later
+ * is covered without anybody remembering to add it here.
+ */
+it('ignores a materialization typed under any other mode, in the key and in validate', () => {
+  const def = requireNodeDef('cave.updateRootIds')
+  const modes = (findParam(def, 'updateTo') as EnumParam).options as readonly {
+    value: string
+  }[]
+  const others = modes.map((o) => o.value).filter((m) => m !== 'materialization')
+  expect(others.length).toBeGreaterThan(0)
+  for (const mode of others) {
+    const params = { ...defaultParams(def), updateTo: mode, version: 'nonsense' }
+    expect(visibleParams(def, params as never).map((p) => p.id)).not.toContain('version')
+    const g = addNode(emptyGraph('x'), {
+      id: 'upd',
+      type: 'cave.updateRootIds',
+      position: { x: 0, y: 0 },
+      params: params as GraphNode['params'],
+    })
+    const messages = (inferGraph(g).nodes.upd?.issues ?? []).map((i) => i.message).join(' ')
+    expect(messages).not.toContain('materialization number')
+  }
 })
 
 /**

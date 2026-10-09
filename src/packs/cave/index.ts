@@ -14,7 +14,8 @@ import { updateRootIdsNode } from '../../nodes/transform/updateRootIds'
 export const cave: PackDefinition = {
   id: 'cave',
   label: 'CAVE',
-  description: 'Datasets served by CAVE, such as FlyWire, BANC and MICrONS, with their tables.',
+  description:
+    'Datasets served by CAVE, such as FlyWire, BANC and MICrONS, and nodes to read their tables.',
   parent: 'connectome',
   keepsBuiltInIds: true,
   glyph: 'dataset.flywire',

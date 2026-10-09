@@ -29,15 +29,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
-import type { HintTone, NodeHint } from '../../core/graph'
-import { HINT_TONES } from '../../core/graph'
+import type { GraphNode, NodeHint } from '../../core/graph'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
-import { hintKey, resetHintsForTest } from '../hints'
-import type { CalloutTone } from '../markdown'
+import { hintKey, readerHints, resetHintsForTest } from '../hints'
 
 beforeAll(() => {
   installJsdomStubs({ width: 1000, height: 700 })
@@ -209,30 +207,6 @@ describe('dismissing one', () => {
   })
 })
 
-/**
- * The one thing about a hint that is stated in two files and checked in neither.
- *
- * `HINT_TONES` is in `src/core`, which is headless and cannot import `CalloutTone` from
- * `src/ui/markdown.ts`; the vocabulary is the same three words on purpose, because the help
- * documents already draw admonitions in exactly these and a second three-word list meaning the
- * same thing is how "tip" comes to be blue in one place and green in another. A type is not
- * enumerable at runtime, so the agreement is asserted where it lives: in the type system.
- */
-type Extends<_A extends B, B> = true
-
-describe('the tones', () => {
-  it('are the same three words the help documents use', () => {
-    // Mutual assignability, which for two unions is equality. Either list gaining a word the
-    // other lacks stops this compiling — the only place that mistake can be caught.
-    const bothWays: [Extends<HintTone, CalloutTone>, Extends<CalloutTone, HintTone>] = [
-      true,
-      true,
-    ]
-    expect(bothWays).toEqual([true, true])
-    expect([...HINT_TONES].sort()).toEqual(['note', 'tip', 'warning'])
-  })
-})
-
 describe('the key', () => {
   it('is the text, and nothing else on the hint', () => {
     // Re-toning a warning to a note does not make it something the reader has not read, and the
@@ -262,5 +236,89 @@ describe('editing one from the card', () => {
     })
     await waitFor(() => expect(boxes()[1]!.textContent).toContain('New words.'))
     expect(screen.queryByRole('dialog', { name: 'Edit hint' })).toBeNull()
+  })
+})
+
+/**
+ * A hint derived from the reader's browser (`NodeDefinition.readerHints`), never written to the document.
+ *
+ * jsdom has no `showOpenFilePicker`, so it stands in for Firefox and Safari here; the Chromium
+ * case stubs the picker onto `window`.
+ */
+describe('a hint derived from this browser', () => {
+  function addLinkTable(params: Record<string, string>): string {
+    let id = ''
+    act(() => {
+      const store = useGraphStore.getState()
+      id = store.addNode('core.linkTable', { x: 120, y: 120 })
+      for (const [key, value] of Object.entries(params)) store.setParam(id, key, value)
+    })
+    return id
+  }
+
+  const FORGETS = /cannot keep a local file across a reload/
+
+  it('says a local file must be chosen again after a reload, and is not in the document', async () => {
+    render(<App />)
+    addLinkTable({ fileId: 'file-abc', fileName: 'synapses.parquet' })
+
+    await waitFor(() => expect(boxes()).toHaveLength(1))
+    expect(boxes()[0]!.textContent).toMatch(FORGETS)
+    // Nothing in the document to edit, so no ✎ — only the ×.
+    expect(screen.queryByLabelText('Edit hint')).toBeNull()
+    expect(useGraphStore.getState().graph.nodes.flatMap((n) => n.hints ?? [])).toEqual([])
+  })
+
+  it('is absent for a URL, which survives a reload in every browser', async () => {
+    render(<App />)
+    addLinkTable({ url: 'https://example.org/synapses.parquet' })
+    // Give the card a render in which a box would have appeared.
+    await waitFor(() => expect(document.querySelector('.upload-body')).toBeTruthy())
+    expect(boxes()).toHaveLength(0)
+  })
+
+  it('reads a stored node with its defaults filled, as a file written elsewhere arrives', () => {
+    // No `fileId` key at all — read raw, it was the text "undefined" and so a local file.
+    const stored = {
+      id: 'n',
+      type: 'core.linkTable',
+      params: { url: 'https://x.org/a.parquet' },
+    }
+    expect(readerHints(stored as unknown as GraphNode)).toHaveLength(0)
+  })
+
+  it('is absent where the browser can remember the file', async () => {
+    const win = window as Window & { showOpenFilePicker?: unknown }
+    win.showOpenFilePicker = () => Promise.resolve([])
+    try {
+      render(<App />)
+      addLinkTable({ fileId: 'file-abc', fileName: 'synapses.parquet' })
+      await waitFor(() => expect(document.querySelector('.upload-body')).toBeTruthy())
+      expect(boxes()).toHaveLength(0)
+    } finally {
+      delete win.showOpenFilePicker
+    }
+  })
+
+  it('dismisses like any other, and the node menu offers it back', async () => {
+    render(<App />)
+    const id = addLinkTable({ fileId: 'file-abc', fileName: 'synapses.parquet' })
+    await waitFor(() => expect(boxes()).toHaveLength(1))
+    const before = useGraphStore.getState().graph
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Dismiss hint'))
+    })
+    await waitFor(() => expect(boxes()).toHaveLength(0))
+    expect(useGraphStore.getState().graph).toBe(before)
+
+    act(() => {
+      fireEvent.contextMenu(document.querySelector(`[data-id="${id}"]`)!)
+    })
+    await waitFor(() => expect(screen.queryByText('Show Hints')).toBeTruthy())
+    act(() => {
+      fireEvent.click(screen.getByText('Show Hints'))
+    })
+    await waitFor(() => expect(boxes()).toHaveLength(1))
   })
 })

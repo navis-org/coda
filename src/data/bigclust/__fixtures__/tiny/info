@@ -1,0 +1,37 @@
+{
+  "name": "tiny",
+  "description": "A five-neuron BigClust project for tests",
+  "dataset": "test",
+  "meta": {
+    "file": "meta.parquet"
+  },
+  "embeddings": [
+    {
+      "name": "morphology(nblast)",
+      "file": "embeddings_0.parquet",
+      "distances": {
+        "type": "nblast:knn",
+        "file": "distances_0.parquet"
+      }
+    },
+    {
+      "name": "connectivity(type)",
+      "file": "embeddings_1.parquet",
+      "features": {
+        "type": "connectivity",
+        "file": "features_1.parquet"
+      }
+    },
+    {
+      "name": "shuffled",
+      "file": "embeddings_2.parquet"
+    },
+    {
+      "name": "from meta",
+      "columns": [
+        "pre",
+        "pre"
+      ]
+    }
+  ]
+}

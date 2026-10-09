@@ -524,7 +524,9 @@ describe('loading a file whose handles the node no longer has', () => {
     raw.nodes[0]!.params.count = 2
     const { graph, warnings } = deserializeGraph(JSON.stringify(raw))
     expect(graph.edges).toEqual([])
-    expect(warnings).toEqual(['Dropped edge into test.ports.match (m): no input "dataset3"'])
+    expect(warnings).toEqual([
+      'Dropped edge into test.ports.match (m): the node has no input "dataset3".',
+    ])
   })
 
   /*
@@ -543,7 +545,7 @@ describe('loading a file whose handles the node no longer has', () => {
     const { graph, warnings } = deserializeGraph(JSON.stringify(raw))
     expect(graph.edges).toEqual([])
     expect(warnings).toEqual([
-      'Dropped edge from test.ports.match (m): the file records no output port, and it has 2',
+      'Dropped edge from test.ports.match (m): the file does not say which output the wire uses, and the node has 2.',
     ])
   })
 
@@ -715,5 +717,36 @@ describe('auto-wiring a repeated Dataset input', () => {
     g = addNode(g, node)
     const wired = autoWireDataset(g, node)
     expect(wired.edges.map((e) => e.targetHandle)).toEqual(['dataset1'])
+  })
+
+  /*
+   * A node publishing a Dataset is assembling one, so its Dataset inputs are its parts — and
+   * the single dataset on the canvas is a guess about those, not the workspace arriving.
+   */
+  it('leaves a node that publishes a Dataset unwired', () => {
+    registerNode({
+      type: 'test.ports.assemble',
+      label: 'Assemble (test)',
+      category: 'dataset',
+      cost: 'cheap',
+      inputs: [{ id: 'meshes', label: 'Meshes', type: T.dataset(), required: false }],
+      outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
+      evaluate: () => ({ dataset: tableFromRows(SCHEMA, []) }),
+    })
+    let g = emptyGraph('autowire')
+    g = addNode(g, {
+      id: 'ds',
+      type: 'test.ports.source',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    const node = {
+      id: 'a',
+      type: 'test.ports.assemble',
+      position: { x: 200, y: 0 },
+      params: {},
+    }
+    g = addNode(g, node)
+    expect(autoWireDataset(g, node).edges).toEqual([])
   })
 })

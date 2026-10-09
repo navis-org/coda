@@ -53,14 +53,9 @@ registerNode({
   label: 'Combine Columns',
   category: 'transform',
   description:
-    'Make one column out of several — the first with a value wins. The result takes the name in `Into` (`type` by default), backfilling that column in place when it is one of the picked ones and suffixing any other column of that name `_2`.',
+    'Merge several columns into one, taking the first non-empty value in the order picked. The result is named by `Into` (shown as Result, default `type`): naming one of the picked columns fills its gaps in place, and any other column already holding the name is suffixed `_2`.',
   guide:
-    'Make one column out of several. The columns are tried in the order you pick them and the ' +
-    'first one holding a value wins, so cell_type then hemibrain_type means "the hemibrain type ' +
-    'where there is no cell type". Null and blank count as the same absence. Naming the result ' +
-    'after one of the columns you picked backfills it in place; any other name adds a column. ' +
-    'The default name is type, which is what Coda reads a cell type from — so this is how an ' +
-    'annotation file whose types are spread over several columns becomes one a dataset can use.',
+    'Merges several columns into one, taking the first value that is not null or blank in the order you pick them, e.g. cell_type, then hemibrain_type. Naming the result after one of the picked columns fills its gaps in place. The default name is type, the column Coda reads cell types from.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -70,7 +65,7 @@ registerNode({
       kind: 'columns',
       label: 'Columns',
       from: 'in',
-      help: 'Tried in the order you pick them. The first with a value wins; null and blank are both absent.',
+      help: 'Tried in the order you pick them. The first value that is not null or blank wins.',
       default: [],
     },
     {
@@ -110,11 +105,16 @@ registerNode({
   validate: (ctx) => {
     const { columns, into } = readSpec(ctx)
     const issues: string[] = []
-    if (!into) issues.push('No result name — nothing will be added')
+    if (!into)
+      issues.push(
+        '`Result` is empty, so no column will be added. Enter a name for the combined column.',
+      )
     if (columns.length === 0)
-      issues.push('No columns picked — the table passes through unchanged')
+      issues.push('No columns are picked in `Columns`, so the table passes through unchanged.')
     if (into && columns.length === 1 && columns[0] === into) {
-      issues.push(`"${into}" is the only column picked, so nothing is filled in`)
+      issues.push(
+        `"${into}" is the only column picked, so there is nothing to fill it from. Pick more columns in \`Columns\`.`,
+      )
     }
     return issues
   },

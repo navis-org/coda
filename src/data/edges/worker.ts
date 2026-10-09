@@ -15,8 +15,10 @@
  * the page's catalogue describing a shelf it is not on.
  */
 
-import { errorMessage } from '../../core/errors'
+import type { JobRunOptions } from '../workerJob'
+import { serveJob } from '../workerJob'
 import type { EncodedEdges } from './encode'
+import type { ReadEdgesJob } from './tableFile'
 import type { EdgeFormat } from './formats'
 import type { EdgeColumnChoice, ReadEdgesOptions } from './read'
 import { readEdges } from './read'
@@ -31,31 +33,16 @@ export interface EdgeImportRequest {
   text?: Pick<ReadEdgesOptions, 'delimiter' | 'hasHeader'>
 }
 
-export type EdgeImportMessage =
-  | { type: 'progress'; fraction: number; note?: string }
-  | { type: 'done'; encoded: EncodedEdges }
-  | { type: 'error'; message: string }
-
-/** Every buffer in an encoded set, for `postMessage`'s transfer list. */
-export function edgeTransferables(encoded: EncodedEdges): Transferable[] {
-  return [encoded.out, encoded.in].flatMap((csr) => [
-    csr.offsets.buffer,
-    csr.targets.buffer,
-    csr.weights.buffer,
-  ]) as Transferable[]
-}
-
 /**
  * Read a request in whichever shape it is.
  *
- * Shared by the worker and the no-worker fallback, so the two cannot answer differently — and it
- * is where the **lazy import** lives: a delimited file must not pull `apache-arrow` and
- * `hyparquet` into the worker's chunk, which between them are 70 kB gzipped against a CSV path
- * that costs nothing.
+ * The import job's body, reached through `readEdgeJob` — and where the **lazy import** lives: a
+ * delimited file must not pull `apache-arrow` and `hyparquet` into the worker's chunk, which
+ * between them are 70 kB gzipped against a CSV path that costs nothing.
  */
-export async function readRequest(
+async function readRequest(
   request: EdgeImportRequest,
-  options: { onProgress?: (fraction: number, note?: string) => void; signal?: AbortSignal },
+  options: JobRunOptions,
 ): Promise<EncodedEdges> {
   if (request.format !== 'delimited') {
     const { readBinary } = await import('./binary')
@@ -80,8 +67,29 @@ export async function readRequest(
   })
 }
 
-/** Open whichever source the request named. Shared with the no-worker fallback. */
-export async function openEdgeStream(
+/**
+ * A table file's edge list, read whole (`tableFile.ts`) — the Custom Dataset's Edges socket. The
+ * second job this worker serves, since it returns what the first does: an encoded set, handed back
+ * transferred. Tagged rather than sniffed, being a different request altogether.
+ */
+export interface TableFileEdgesJob {
+  readonly tableFile: ReadEdgesJob
+}
+
+export type EdgeJob = EdgeImportRequest | TableFileEdgesJob
+
+/**
+ * The one body the worker serves and the no-worker fallback runs, so the two cannot answer
+ * differently.
+ */
+export async function readEdgeJob(job: EdgeJob, options: JobRunOptions): Promise<EncodedEdges> {
+  if (!('tableFile' in job)) return readRequest(job, options)
+  // Lazily, `readRequest`'s rule: the table-file readers are the heavy half.
+  return (await import('./tableFile')).readTableFileEdgesJob(job.tableFile, options)
+}
+
+/** Open whichever source the request named. */
+async function openEdgeStream(
   request: Pick<EdgeImportRequest, 'file' | 'url'>,
 ): Promise<{ stream: ReadableStream<Uint8Array>; totalBytes?: number }> {
   if (request.file) return { stream: request.file.stream(), totalBytes: request.file.size }
@@ -98,24 +106,14 @@ export async function openEdgeStream(
   }
 }
 
-// The module is imported by the main thread for its types and its two helpers, so the listener
-// has to be behind a check rather than at the top level — `self.onmessage` in a window context
-// would make every page a message target.
-if (
-  typeof self !== 'undefined' &&
-  typeof (self as unknown as Window).document === 'undefined'
-) {
-  self.onmessage = async (event: MessageEvent<EdgeImportRequest>) => {
-    const post = (message: EdgeImportMessage, transfer?: Transferable[]) =>
-      self.postMessage(message, { transfer: transfer ?? [] })
-    try {
-      const encoded = await readRequest(event.data, {
-        onProgress: (fraction, note) =>
-          post({ type: 'progress', fraction, ...(note ? { note } : {}) }),
-      })
-      post({ type: 'done', encoded }, edgeTransferables(encoded))
-    } catch (err) {
-      post({ type: 'error', message: errorMessage(err) })
-    }
-  }
+/** Every buffer in an encoded set, for `postMessage`'s transfer list. */
+function edgeTransferables(encoded: EncodedEdges): Transferable[] {
+  return [encoded.out, encoded.in].flatMap((csr) => [
+    csr.offsets.buffer,
+    csr.targets.buffer,
+    csr.weights.buffer,
+  ]) as Transferable[]
 }
+
+// The page imports this module for its types and its helpers; `serveJob` is a no-op there.
+serveJob(readEdgeJob, edgeTransferables)

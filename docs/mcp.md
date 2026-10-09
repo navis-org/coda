@@ -234,7 +234,10 @@ server to put one on. Six decisions:
 
 ## Numbers, measured on the first build
 
-- `coda.js`: **2.46 MB**, **625 kB gzipped**, one file (`inlineDynamicImports`)
+- `coda.js`: **2.46 MB**, **625 kB gzipped**, one file (`inlineDynamicImports`) — **2.90 MB,
+  752 kB gzipped** on 2026-09-29, with the table-file nodes, and **2.94 MB, 764 kB gzipped** on
+  2026-09-30 with Delta tables, and **3.06 MB, 790 kB gzipped** on 2026-10-04 with the Cell
+  typing/annotation pack; the budget and its history are in `vite.mcp.config.ts`
 - import in Node 26: **47 ms**
 - `guide('lean')`: 68,033 characters; `guide('full')`: 133,052
 - 109 listable node types

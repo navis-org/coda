@@ -20,7 +20,7 @@ import {
 } from '../../nodes/lib/datasetFamilies'
 import { findParam, withDefaults } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
-import { formatNumber } from '../format'
+import { formatNumber } from '../../style/format'
 import { useGraphStore } from '../../store/graphStore'
 import { edgeSetLabel, hasEdgeSet } from '../../nodes/lib/edgeParams'
 import { discoveredNeuronSchema, populationSummary } from '../../nodes/lib/populationParams'

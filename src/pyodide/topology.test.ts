@@ -5,7 +5,7 @@
  * The algorithm itself is checked by `pnpm probe:split`, which runs it against navis and needs a
  * Python with navis installed — vitest has neither Pyodide nor a worker, so a test here that
  * claimed to verify the split would be verifying a mock. What *is* checkable, and what would
- * otherwise fail silently, is the compartment vocabulary: `topology.py` and `topology.ts` each
+ * otherwise fail silently, is the compartment vocabulary: `topology.py` and `core/values.ts` each
  * name the four codes, and a renumbering on one side mislabels every axon on the card without
  * throwing anything anywhere.
  */
@@ -15,16 +15,8 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { CODE_AXON, CODE_DENDRITE, CODE_LINKER } from '../nodes/lib/topologyOps'
-import {
-  COMPARTMENT_AXON,
-  COMPARTMENT_DENDRITE,
-  COMPARTMENT_LINKER,
-  COMPARTMENT_UNASSIGNED,
-  SPLIT_MULTIPLE_ROOTS,
-  SPLIT_NO_SYNAPSES,
-  SPLIT_OK,
-} from './topology'
+import { CODE_AXON, CODE_DENDRITE, CODE_LINKER, CODE_UNASSIGNED } from '../core/values'
+import { SPLIT_MULTIPLE_ROOTS, SPLIT_NO_SYNAPSES, SPLIT_OK } from './topology'
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./topology.py', import.meta.url)), 'utf8')
 
@@ -37,11 +29,11 @@ function pythonConstant(name: string): number {
 
 describe('the compartment vocabulary', () => {
   it.each([
-    ['UNASSIGNED', COMPARTMENT_UNASSIGNED],
-    ['DENDRITE', COMPARTMENT_DENDRITE],
-    ['AXON', COMPARTMENT_AXON],
-    ['LINKER', COMPARTMENT_LINKER],
-  ])('%s means the same number on both sides', (name, ours) => {
+    ['UNASSIGNED', CODE_UNASSIGNED],
+    ['DENDRITE', CODE_DENDRITE],
+    ['AXON', CODE_AXON],
+    ['LINKER', CODE_LINKER],
+  ])('%s means the same number in Python as in core/values', (name, ours) => {
     expect(pythonConstant(name)).toBe(ours)
   })
 
@@ -53,27 +45,8 @@ describe('the compartment vocabulary', () => {
     expect(pythonConstant(name)).toBe(ours)
   })
 
-  it('agrees with the third spelling, in nodes/lib', () => {
-    /*
-     * `topologyOps.ts` restates these as `CODE_*` rather than importing them, because importing
-     * the value would pull `engine.ts` — and a `Worker`-shaped module — into the dependency graph
-     * of every table op. That is a fair trade only while something checks the two agree: without
-     * this, renumbering both Python and `pyodide/topology.ts` together leaves every test green
-     * while `compartmentStats` files axon cable under the dendrite column and the card's swatches
-     * invert. Nothing throws; the numbers are simply wrong.
-     */
-    expect(CODE_DENDRITE).toBe(COMPARTMENT_DENDRITE)
-    expect(CODE_AXON).toBe(COMPARTMENT_AXON)
-    expect(CODE_LINKER).toBe(COMPARTMENT_LINKER)
-  })
-
   it('keeps the four codes distinct', () => {
-    const codes = [
-      COMPARTMENT_UNASSIGNED,
-      COMPARTMENT_DENDRITE,
-      COMPARTMENT_AXON,
-      COMPARTMENT_LINKER,
-    ]
+    const codes = [CODE_UNASSIGNED, CODE_DENDRITE, CODE_AXON, CODE_LINKER]
     expect(new Set(codes).size).toBe(codes.length)
   })
 })

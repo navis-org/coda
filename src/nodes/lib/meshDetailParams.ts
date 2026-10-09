@@ -71,11 +71,10 @@ export function detailParam(): ParamDef {
     kind: 'enum',
     label: 'Detail',
     default: String(DEFAULT_TRIANGLE_BUDGET),
-    empty: 'Not available — this source has one level of detail',
+    empty: 'Not available: this source has one level of detail',
     help:
-      'Triangle budget for the whole set, spent among the levels of detail the source publishes: ' +
-      'the finest level that fits is the one fetched, so asking for more neurons gets you coarser ' +
-      'ones. A source that publishes one level has nothing to spend it on — use Downsample there.',
+      'Triangle budget for the whole set: the finest level of detail that fits is fetched, so ' +
+      'more neurons get coarser meshes. For sources with only one level, use `Downsample`.',
     /*
      * The vocabulary the catalogue cannot get from an options *function*, which prints
      * `(options depend on the input)` — see `skeletonRouteVocabulary`'s note, and measured there:
@@ -116,11 +115,9 @@ export function downsampleParam(): ParamDef {
     absentMeans: 0,
     advanced: true,
     help:
-      'How much geometry to keep. 1 is full resolution — what the source publishes. 0 is ' +
-      'automatic: each mesh reduced only as far as a 3D view can draw it, and not at all where it ' +
-      'already fits, which is worth setting for a large set on a source with one level of detail. ' +
-      'A number above 1 is a ratio — 4 keeps about a quarter of each mesh’s triangles. It ' +
-      're-fetches when changed, because the reduction happens at the source.',
+      'How much of each mesh to keep. 1 is full resolution; 0 reduces each mesh only as far as ' +
+      'a 3D view needs, useful for large sets; 4 keeps about a quarter of the triangles. ' +
+      'Changing it re-fetches the meshes.',
   }
 }
 

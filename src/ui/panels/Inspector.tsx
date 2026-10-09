@@ -10,7 +10,8 @@ import { useMemo } from 'react'
 import { IssueFixButton } from '../IssueFixButton'
 import { IssueText } from '../IssueText'
 
-import { makeInferContext, visibleParams } from '../../core/node'
+import { makeInferContext, shownWhenWired, visibleParams } from '../../core/node'
+import { useWiredInputs } from '../nodes/useWiredInputs'
 import { getNodeDef } from '../../core/registry'
 import type { Socket } from '../../core/sockets'
 import type { CodaType } from '../../core/types'
@@ -19,10 +20,10 @@ import { describeValue } from '../../core/values'
 import { hasHelp } from '../../help/registry'
 import { useGraphStore, useSelectedNode } from '../../store/graphStore'
 import { exportBaseName } from '../export'
-import { formatDuration } from '../format'
+import { formatDuration } from '../../style/format'
 import { nodeIssues } from '../nodes/nodeIssues'
 import { ParamField } from '../params/ParamField'
-import { familyColorVar, portStyle } from '../socketStyle'
+import { familyColorVar, portStyle } from '../../style/socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { firstOutputPort, inputPorts, outputPorts } from '../../core/ports'
 
@@ -59,6 +60,8 @@ export function Inspector() {
     () => (def && node ? makeInferContext(def, node.params, types?.inputs ?? {}) : undefined),
     [def, node, types],
   )
+  // The card's rule for a param drawn only while its socket is wired (`whenWired`).
+  const wired = useWiredInputs(node?.id ?? '', def)
 
   /*
    * Closed: render nothing at all rather than a zero-width panel. The grid column collapses,
@@ -95,7 +98,7 @@ export function Inspector() {
     )
   }
 
-  const params = visibleParams(def, node.params)
+  const params = visibleParams(def, node.params).filter((p) => shownWhenWired(p, wired))
   /*
    * Run state and edit-time issues in one list, ranked by `nodeIssues` — the same ranking the
    * card takes its single line from, so the top of this list and the card's line are always the

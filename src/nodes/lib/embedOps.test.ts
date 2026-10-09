@@ -183,6 +183,7 @@ describe('the k-NN graph a neighbour table becomes', () => {
     // A target with no row of its own cannot be placed; carried in it would index past the end.
     expect(graph.labels).toEqual(['a', 'b', 'c', 'd'])
     expect(losses.unknownTargets).toBe(1)
+    expect(losses.outsideOnly).toBe(0)
     for (const row of graph.indices) {
       for (const index of row) expect(index).toBeLessThan(4)
     }
@@ -256,7 +257,7 @@ describe('the guards', () => {
     // the default 15 would be a stack trace where the honest answer is "everybody".
     const warner = collecting()
     expect(clampNeighbours(warner, 15, 6)).toBe(5)
-    expect(warner.messages.join(' ')).toMatch(/Neighbours was 15/)
+    expect(warner.messages.join(' ')).toMatch(/`Neighbours` is 15, but there are only/)
     expect(clampNeighbours(NO_WARN, 3, 100)).toBe(3)
   })
 

@@ -114,13 +114,9 @@ registerNode({
   label: 'Qualify Ids',
   category: 'transform',
   description:
-    'Tag a neuron id with the dataset it came from, or take that tag off again. A tagged id reads `dataset:id` and its column becomes text, so filters, joins and lookups downstream have to match that form.',
+    'Prefix neuron ids with the dataset they came from, or strip that prefix again. A prefixed id reads `dataset:id` and its column becomes text, so filters, joins and lookups downstream have to match that form.',
   guide:
-    'Rewrites an id column to dataset:id, which is what lets two connectomes share one table ' +
-    'without neuron 12345 in one being mistaken for neuron 12345 in the other — the shape ' +
-    'co-clustering needs before Stack Tables. Strip it again on the way back out. The tagged ' +
-    'value is deliberately no longer a valid neuron id, so anything that would query it refuses ' +
-    'loudly instead of fetching the wrong neuron; only qualify where two datasets actually meet.',
+    'Rewrites an id column to dataset:id so that two connectomes can share one table without their ids colliding, e.g. before stacking them for co-clustering. Strip the prefix again on the way back out. A prefixed id is no longer a valid neuron id, so nodes that fetch neurons refuse it.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -147,7 +143,7 @@ registerNode({
       label: 'Dataset',
       default: '',
       visibleIf: (params) => params.direction !== 'remove',
-      help: 'What to tag these ids with — a short name for the dataset they came from, like flywire or hemibrain.',
+      help: 'A short name for the dataset these ids came from, e.g. flywire or hemibrain.',
     },
     {
       id: 'into',
@@ -155,7 +151,7 @@ registerNode({
       label: 'Dataset column',
       default: '',
       visibleIf: (params) => params.direction === 'remove',
-      help: 'Name a column to keep the stripped dataset in, so a filter or a group-by can still tell the two apart. Empty discards it.',
+      help: 'A column to keep the stripped dataset name in, so rows from different datasets can still be told apart. Leave empty to discard it.',
     },
   ],
 
@@ -177,16 +173,20 @@ registerNode({
     const spec = specOf(ctx)
     const issues: string[] = []
     if (spec.direction === 'add') {
-      if (!spec.prefix) issues.push('No dataset name — the ids pass through untagged.')
+      if (!spec.prefix)
+        issues.push(
+          'No dataset name is set, so the ids pass through unchanged. Enter one in `Dataset`.',
+        )
       if (spec.prefix.includes(QUALIFIED_SEPARATOR)) {
         issues.push(
           `"${spec.prefix}" contains the separator "${QUALIFIED_SEPARATOR}", so the ` +
-            `dataset will read back as "${spec.prefix.split(QUALIFIED_SEPARATOR)[0]}".`,
+            `dataset will read back as "${spec.prefix.split(QUALIFIED_SEPARATOR)[0]}". ` +
+            `Remove the "${QUALIFIED_SEPARATOR}" from \`Dataset\`.`,
         )
       }
       issues.push(
-        'A tagged id is not a valid neuron id, so anything downstream that queries the ' +
-          'dataset will refuse it. Strip it again before fetching geometry.',
+        'A prefixed id is not a valid neuron id, so nodes downstream that query the dataset ' +
+          'will reject it. Strip the prefix again before fetching geometry.',
       )
     }
     return issues
@@ -197,7 +197,10 @@ registerNode({
     if (!isTableValue(table)) throw new Error('Input is not a table')
     const spec = specOf(ctx)
     const layout = qualifyLayout(table.schema, spec)
-    if (!layout) throw new Error(`Column "${spec.column}" not found`)
+    if (!layout)
+      throw new Error(
+        `Column "${spec.column}" is not in the input table. Pick another in \`Id column\`.`,
+      )
 
     const source = getColumn(table, spec.column)
     const ids: CellValue[] = new Array(table.length)

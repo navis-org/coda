@@ -131,8 +131,24 @@ const FEEDBACK_NUDGE_KEY = 'coda.feedbackNudge.v1'
  * All of the above: `scripts/probe-autosave-budget.ts` for the graph sizes, and the quota probe
  * written up in [docs/persistence.md](../../docs/persistence.md).
  */
-const MAX_SLOTS = 6
-const MAX_SLOT_BYTES = 2_000_000
+export const MAX_SLOTS = 6
+export const MAX_SLOT_BYTES = 2_000_000
+/** The origin's whole `localStorage` allowance, in the code units described above. */
+export const LOCAL_STORAGE_BUDGET = 5 * 1024 * 1024
+
+/**
+ * Whether a `localStorage` key is one of Coda's — every key here is `coda.`-prefixed. Stated beside
+ * the stems, with `isAutosaveKey`, so the Storage tab files keys by the same spelling that writes
+ * them rather than by a copy of it.
+ */
+export function isCodaKey(key: string): boolean {
+  return key.startsWith('coda.')
+}
+
+/** Whether a `localStorage` key is the autosave's: the shared key, a tab's slot, or the slot index. */
+export function isAutosaveKey(key: string): boolean {
+  return key === AUTOSAVE_KEY || key.startsWith(`${AUTOSAVE_KEY}.`)
+}
 
 /**
  * `localStorage`, with every failure swallowed on the rule stated above — losing a *preference* is

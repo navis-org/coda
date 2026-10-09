@@ -62,6 +62,7 @@ export function valueCategory(value: Value): MemoryCategory {
     case 'table':
     case 'neurons':
     case 'dataset':
+    case 'tableFile':
       return 'tables'
     case 'matrix':
       return 'matrices'
@@ -236,6 +237,10 @@ export class ByteLedger {
         return this.claim(value) ? layoutBytes(value.positions) : 0
       case 'layers':
         return this.claim(value) ? jsonBytes(value.items) : 0
+      // The descriptor only: the rows are on disk or on a server, which is the point of the kind,
+      // and charging the file's size here would report gigabytes the tab is not holding.
+      case 'tableFile':
+        return this.claim(value) ? jsonBytes([value.schema, value.columns]) : 0
       case 'string':
         return stringBytes(String(value.value))
       default:

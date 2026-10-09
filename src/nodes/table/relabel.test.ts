@@ -153,7 +153,7 @@ describe('the node', () => {
         inputsOf(T.table(LABELS), T.table(ids)),
       ),
     )
-    expect(drift?.join(' ')).toMatch(/matched as text.*already a different id/)
+    expect(drift?.join(' ')).toMatch(/matched as text.*changed into a different id/)
   })
 
   it('warns before quietly suffixing a result name the table already carries', () => {

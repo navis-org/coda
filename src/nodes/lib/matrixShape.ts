@@ -563,7 +563,7 @@ function isIdentityOrder(order: Int32Array): boolean {
  * because the exporters print it at run time, where only the data can say the key is missing.
  */
 export function missingKeyProblem(axis: MatrixAxis, key: string): string {
-  return `No ${axis === 'rows' ? 'column' : 'row'} is called "${key}", so the ${axis} are left as they arrived.`
+  return `No ${axis === 'rows' ? 'column' : 'row'} is called "${key}", so the ${axis} keep their original order.`
 }
 
 /**
@@ -589,7 +589,7 @@ export function orderAxis(
       if (!options.key) {
         return {
           order: undefined,
-          problem: `Ordering ${axis} by one ${axis === 'rows' ? 'column' : 'row'} needs its label — type one under Order.`,
+          problem: `Ordering ${axis} by one ${axis === 'rows' ? 'column' : 'row'} needs that ${axis === 'rows' ? 'column' : 'row'}'s label. Type one under \`Row or column\`.`,
         }
       }
       const vector = axisVector(matrix, axis, options.key)

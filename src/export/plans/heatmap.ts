@@ -271,8 +271,8 @@ function orderSection(ctx: HeatmapContext): HeatmapOrderPlan | undefined {
       return {
         axis,
         note:
-          `The ${axis} are to be ordered by one ${axis === 'rows' ? 'column' : 'row'} but ` +
-          `none is named, so they are left as they arrived.`,
+          `The ${axis} are set to be ordered by one ${axis === 'rows' ? 'column' : 'row'}, but ` +
+          `none is named, so they are left in their original order.`,
       }
     }
     sorted.add(axis)
@@ -311,14 +311,12 @@ function colourPlan(ctx: HeatmapContext): HeatmapColourPlan {
     log: heatmapLogColor(ctx.params),
     showValues: ctx.params.showValues === true,
     limitsNote: limits.problem
-      ? `Coda is ignoring the colour limits because ${limits.problem}, so neither this nor ` +
-        `the card is using them.`
+      ? `The colour limits are ignored because ${limits.problem}. The card ignores them too.`
       : undefined,
     shapeNote:
       ctx.params.cellShape === 'circle'
-        ? `The card draws this with circles sized by value, which is a drawing rather than a ` +
-          `change to the matrix — the numbers below are the same either way. This draws it as ` +
-          `tiles.`
+        ? `The card draws circles sized by value. This draws tiles instead; the numbers are ` +
+          `the same either way.`
         : undefined,
   }
 }

@@ -113,9 +113,11 @@ registerNode({
   label: 'Attach Attributes',
   category: 'transform',
   description:
-    'Join a table’s columns onto skeletons, meshes or points. A carried column replaces a same-named one and keeps its place, rather than being suffixed.',
+    'Join a table’s columns onto skeletons, meshes or points, matched on an id column. A carried column replaces a same-named one and keeps its position; nothing is suffixed.',
   guide:
-    'Joins a table onto the attributes that skeletons, meshes or points carry, matched on a column you pick, so what a graph computes (a Cut Tree cluster, a Reduce Matrix statistic, an uploaded CSV) can colour or split a scene. With no columns picked it carries every column; an item the table does not mention keeps its geometry and carries nulls.',
+    'Joins the columns of a table onto skeletons, meshes or points, matched by neuron id. Use it ' +
+    'to colour or split a 3D scene by something computed elsewhere, e.g. a Cut Tree cluster or a ' +
+    'Reduce Matrix statistic. With no columns picked, every column is attached.',
   cost: 'cheap',
 
   /*
@@ -143,7 +145,7 @@ registerNode({
        * be a column of numbers and would match nothing while looking configured.
        */
       default: ID_COLUMN_NAME,
-      help: 'The table column holding neuron ids, matched against the ids the geometry carries. A Reduce Matrix, Cut Tree or Embedding keys on “label”.',
+      help: 'The table column holding neuron ids. Use `label` for tables from Reduce Matrix, Cut Tree or Embedding.',
     },
     {
       id: COLUMNS_PARAM,
@@ -157,7 +159,7 @@ registerNode({
       // unconfigured one — which is exactly what `optional` means here.
       optional: true,
       default: [],
-      help: 'Columns to attach. Empty attaches every column of the table except the matched one. A column replaces one of the same name on the geometry, keeping its position.',
+      help: 'Columns to attach. Leave empty to attach every column but the one matched on. A column with a name the geometry already has replaces it.',
     },
   ],
 
@@ -194,8 +196,8 @@ registerNode({
     const kind = ctx.inputs.in?.kind
     if (kind && !isGeometryKind(kind)) {
       return [
-        `Attach Attributes takes skeletons, meshes or points, not ${kind}. For a table, ` +
-          `use Join.`,
+        `Attach Attributes takes skeletons, meshes or points, but this input is ${kind}. ` +
+          `To add columns to a table, use Join.`,
       ]
     }
     /*

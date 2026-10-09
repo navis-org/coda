@@ -41,8 +41,8 @@
 
 import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, graphName, newId, serializeGraph } from '../core/graph'
-import type { RefusalWords } from '../data/idb'
-import { attempt, commit, database } from '../data/idb'
+import type { RefusalWords, StoredUsage } from '../data/idb'
+import { attempt, commit, database, usage } from '../data/idb'
 import { newestFirst } from './shelf'
 
 const DB_NAME = 'coda-library'
@@ -198,6 +198,15 @@ export async function deleteWorkflow(id: string): Promise<void> {
   await write((meta, graphs) => {
     meta.delete(id)
     graphs.delete(id)
+  })
+}
+
+/** What the shelf holds, for the Storage tab: one entry per saved workflow. */
+export function libraryUsage(): Promise<StoredUsage | undefined> {
+  // Each summary carries its graph's JSON length, so the graphs themselves are not read.
+  return usage(db, META_STORE, {
+    skip: [GRAPH_STORE],
+    bytes: (record) => (record as WorkflowSummary).size,
   })
 }
 

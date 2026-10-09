@@ -41,6 +41,7 @@ import { useSyncExternalStore } from 'react'
 import type { GraphNode, HintSide, NodeHint } from '../core/graph'
 import { DEFAULT_HINT_SIDE } from '../core/graph'
 import { hashString } from '../core/hash'
+import { filledParams, getNodeDef } from '../core/registry'
 import { channel } from '../data/channel'
 import { loadDismissedHints, saveDismissedHints } from '../store/persistence'
 
@@ -114,12 +115,25 @@ export function restoreHints(hints?: readonly NodeHint[]): void {
   publish(next)
 }
 
+const NO_HINTS: readonly NodeHint[] = []
+
+/**
+ * The hints a node's definition derives from this browser (`NodeDefinition.readerHints`) — never
+ * the document's, so they carry no ✎. Empty, and allocation-free, for almost every node.
+ */
+export function readerHints(node: GraphNode): readonly NodeHint[] {
+  // With the defaults filled, as every other reader of a node's params sees them (invariant 4):
+  // a stored node missing a key would otherwise be read as `"undefined"`.
+  return getNodeDef(node.type)?.readerHints?.(filledParams(node)) ?? NO_HINTS
+}
+
 /**
  * The hints on a node, split by whether this reader has read them.
  *
  * One function for every caller, so the card and the context menu cannot disagree about what is
  * left to show — the menu offers back exactly what the card is not drawing. `side` defaults to
- * `DEFAULT_HINT_SIDE` here exactly as `NodeHint` documents.
+ * `DEFAULT_HINT_SIDE` here exactly as `NodeHint` documents. The document's hints come first, then
+ * the ones the definition derives from this browser (`NodeDefinition.readerHints`).
  */
 export function splitHints(
   node: GraphNode,
@@ -127,7 +141,7 @@ export function splitHints(
 ): { unread: Record<HintSide, NodeHint[]>; dismissed: NodeHint[] } {
   const unread: Record<HintSide, NodeHint[]> = { top: [], bottom: [] }
   const put: NodeHint[] = []
-  for (const hint of node.hints ?? []) {
+  for (const hint of [...(node.hints ?? []), ...readerHints(node)]) {
     if (seen.has(hintKey(hint))) put.push(hint)
     else unread[hint.side ?? DEFAULT_HINT_SIDE].push(hint)
   }

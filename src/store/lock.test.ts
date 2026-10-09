@@ -16,6 +16,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { emptyPlan } from '../assistant/planShape'
+import { FIRST_TAB_ID, activeTab } from '../core/dashboard'
 import { addNode, emptyGraph } from '../core/graph'
 import { defaultParams } from '../core/node'
 import { requireNodeDef } from '../core/registry'
@@ -192,18 +193,37 @@ describe('a locked canvas', () => {
     store().addToDashboard(['view', 'src'])
     store().setDashboardColumns(3)
     store().setDashboardSpan('view', { w: 2 })
+    store().setDashboardRail('view', true)
     store().moveDashboardCell('view', 1)
     expect(store().dashboardOpen).toBe(true)
     // `open: true` rides along because the grid was the view while the cells were placed — see
     // `DashboardLayout.open`. That it lands in the *same* commit is what stops a save between
     // the two from capturing a dashboard that does not know it is being looked at.
     expect(graph().dashboard).toEqual({
-      columns: 3,
-      cells: [{ nodeId: 'src' }, { nodeId: 'view', w: 2 }],
+      tabs: [
+        {
+          id: FIRST_TAB_ID,
+          columns: 3,
+          cells: [{ nodeId: 'src' }, { nodeId: 'view', w: 2, rail: true }],
+        },
+      ],
       open: true,
     })
     store().removeFromDashboard(['src'])
-    expect(graph().dashboard?.cells).toEqual([{ nodeId: 'view', w: 2 }])
+    expect(activeTab(graph()).cells).toEqual([{ nodeId: 'view', w: 2, rail: true }])
+    // The tabs, too: a second page, named, switched away from and back, then taken off.
+    store().addDashboardTab(['src'])
+    store().renameDashboardTab('t2', 'Inputs')
+    store().setDashboardTab(FIRST_TAB_ID)
+    store().duplicateDashboardTab('t2')
+    store().moveDashboardTab('t3', 0)
+    expect(graph().dashboard?.tabs.map((t) => t.title ?? t.id)).toEqual([
+      'Inputs copy',
+      FIRST_TAB_ID,
+      'Inputs',
+    ])
+    store().removeDashboardTab('t3')
+    expect(graph().dashboard?.tabs).toHaveLength(2)
   })
 
   it('still selects, which is what the inspector and every viewer are reached through', () => {
@@ -365,10 +385,10 @@ describe('every store action is on one side of the lock', () => {
     'pinNode',
     'setDockFraction',
     /*
-     * The dashboard, on both counts. Opening it is a view switch like the overlay; the five
-     * that *edit* a layout do write to the document, which is the one place this list holds
-     * something structural on the live side — and deliberately, because a dashboard is not the
-     * canvas the lock is about. See the case above.
+     * The dashboard, on both counts. Opening it and switching its tab are view switches like
+     * the overlay; the ones that *edit* a layout or its tabs do write to the document, which is
+     * the one place this list holds something structural on the live side — and deliberately,
+     * because a dashboard is not the canvas the lock is about. See the case above.
      */
     'setDashboardOpen',
     'toggleDashboard',
@@ -376,7 +396,14 @@ describe('every store action is on one side of the lock', () => {
     'removeFromDashboard',
     'moveDashboardCell',
     'setDashboardSpan',
+    'setDashboardRail',
     'setDashboardColumns',
+    'setDashboardTab',
+    'addDashboardTab',
+    'renameDashboardTab',
+    'removeDashboardTab',
+    'moveDashboardTab',
+    'duplicateDashboardTab',
     'openHelp',
     'setGraph',
     'setGraphName',

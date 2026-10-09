@@ -14,13 +14,17 @@
  *    carries. Marking it presentational would let a stale downstream result survive a change
  *    to the very thing that identifies the rows.
  *
- * Note what is *not* on that list. `Max points` thins the drawing and nothing else: `out` is
- * the table unchanged and a lasso is tested against every row rather than against the sample
- * (see `rowsInPolygon`), so no output can tell whether a point was painted. That is the
- * difference from the Network viewer's Filter tab, which genuinely does subtract from what
- * the node returns and has to say so.
+ * Note what is *not* on that list. `Vector marks` changes only how an exported file carries
+ * the marks, so no output can tell; the Network viewer's Filter tab, by contrast, genuinely
+ * subtracts from what the node returns and has to say so.
+ *
+ * There used to be a `Max points`, a stride sample of 50,000 that was there because a path
+ * of circles rasterised at 3.4 µs a mark. Past `CIRCLES_MAX` visible marks the canvas now
+ * writes pixels and draws every row, so the cap and its `showing N of M` caption went; a
+ * stored value is an undeclared param and `normalizeParams` ignores it.
  */
 
+import type { ParamValues } from '../../core/node'
 import { registerNode } from '../../core/registry'
 import { NUMERIC_DTYPES, T, columnsOfType, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
@@ -29,13 +33,18 @@ import { decodeLabels } from '../lib/chartSelection'
 import { rowsWithKeys } from '../lib/rowIds'
 import { tapPorts } from '../lib/tapPorts'
 
+/** The point-label controls are shown while point labels are on. */
+const labelsOn = (params: ParamValues) => params.pointLabels === true
+
 registerNode({
   type: 'out.scatter',
   label: 'Scatter Plot',
   category: 'visualisation',
   description: 'Plot two numeric columns against each other, with colour, size and shape.',
   guide:
-    'Two numeric columns against each other with colour, size and shape as encoding channels — seaborn’s scatterplot, rendered to canvas for large datasets. Lasso to select points as output; log axes and linear trends available.',
+    'Plots two numeric columns against each other, with optional colour, size and shape ' +
+    'channels, log axes and a linear trend. Typically wired from Embedding or any table; points ' +
+    'you lasso come out of Selected.',
   cost: 'cheap',
   defaultSize: { width: 460, height: 380 },
   /*
@@ -87,7 +96,7 @@ registerNode({
       id: 'xLog',
       kind: 'boolean',
       label: 'Log X',
-      help: 'For data spanning orders of magnitude, where a linear axis piles most of it into one corner. Values at or below zero are dropped; the caption says how many.',
+      help: 'Use a log scale for data spanning orders of magnitude. Values at or below zero are dropped; the caption says how many.',
       default: false,
       presentational: true,
       advanced: true,
@@ -106,7 +115,7 @@ registerNode({
       id: 'aspect',
       kind: 'enum',
       label: 'Aspect',
-      help: '"Equal" gives both axes the same units per pixel, which is what a UMAP or t-SNE embedding needs. "Fit" fills the card.',
+      help: '"Equal" uses the same scale on both axes, as a UMAP or t-SNE embedding needs. "Fit" fills the card.',
       default: 'fit',
       options: [
         { value: 'fit', label: 'fit the card' },
@@ -164,7 +173,7 @@ registerNode({
       id: 'opacity',
       kind: 'number',
       label: 'Opacity',
-      help: 'Overplotting is the default state of a real scatter; this is what reads through it.',
+      help: 'Point opacity. Lower it to see through overlapping points.',
       default: 0.8,
       min: 0.05,
       max: 1,
@@ -177,7 +186,7 @@ registerNode({
       id: 'labelBy',
       kind: 'column',
       label: 'Label',
-      help: 'Named in the tooltip under the pointer. Defaults to the ID column.',
+      help: 'Shown in the tooltip, and beside points when `Labels on points` is ticked. Defaults to the `ID column`.',
       from: 'in',
       default: '',
       optional: true,
@@ -186,13 +195,71 @@ registerNode({
       group: 'points',
     },
     {
-      id: 'maxPoints',
-      kind: 'int',
-      label: 'Max points',
-      help: 'Above this, a stable stride through the rows is drawn and the caption says how many of how many. It thins the picture only — the table passes through whole.',
-      default: 50000,
-      min: 100,
-      step: 1000,
+      id: 'hoverColumns',
+      kind: 'columns',
+      label: 'Hover shows',
+      help: 'Extra columns to list in the tooltip, after the label, x, y and any colour or shape columns.',
+      from: 'in',
+      default: [],
+      presentational: true,
+      advanced: true,
+      group: 'points',
+    },
+    {
+      id: 'pointLabels',
+      kind: 'boolean',
+      label: 'Labels on points',
+      help: 'Write each point\u2019s label beside it once few enough are in view (see `Label up to`). Zoom in to see more.',
+      default: false,
+      presentational: true,
+      group: 'points',
+    },
+    {
+      id: 'labelLimit',
+      kind: 'number',
+      label: 'Label up to',
+      help: 'Draw labels only while at most this many points are in view.',
+      default: 400,
+      min: 1,
+      max: 5000,
+      step: 50,
+      presentational: true,
+      advanced: true,
+      group: 'points',
+      visibleIf: labelsOn,
+    },
+    {
+      id: 'labelLines',
+      kind: 'boolean',
+      label: 'Label lines',
+      help: 'Draw a thin line from each point to its label.',
+      default: true,
+      presentational: true,
+      advanced: true,
+      group: 'points',
+      visibleIf: labelsOn,
+    },
+    {
+      id: 'unplacedLabels',
+      kind: 'enum',
+      label: 'Labels that do not fit',
+      help: 'A label with no free space around its point: left out, or drawn faintly beside it, under the others.',
+      default: 'hide',
+      options: [
+        { value: 'hide', label: 'Leave out' },
+        { value: 'dim', label: 'Draw faintly' },
+      ],
+      presentational: true,
+      advanced: true,
+      group: 'points',
+      visibleIf: labelsOn,
+    },
+    {
+      id: 'vectorMarks',
+      kind: 'boolean',
+      label: 'Vector marks',
+      help: 'Export every point as a vector shape. Otherwise, SVGs with more than 10,000 points in view draw the points as one image.',
+      default: false,
       presentational: true,
       advanced: true,
       group: 'points',
@@ -208,7 +275,7 @@ registerNode({
         { value: 'none', label: 'none' },
         { value: 'linear', label: 'linear fit' },
       ],
-      help: 'Least squares in the space the axes are drawn in, so a log-log fit is a power law.',
+      help: 'A least-squares fit on the plotted axes, so on log-log axes it fits a power law.',
       presentational: true,
       advanced: true,
       group: 'trend',
@@ -229,7 +296,7 @@ registerNode({
       id: 'idColumn',
       kind: 'column',
       label: 'ID column',
-      help: 'What a selected point is called downstream. An id survives an upstream re-run where a row position does not; the row index is the fallback, and the caption says so.',
+      help: 'Identifies each point, so a selection survives an upstream re-run. Without one, points are identified by row number.',
       from: 'in',
       // `neuronId` when the table has one; `optional` is what makes the resolver answer
       // "nothing" rather than reaching for the first column when it does not.
@@ -284,8 +351,12 @@ registerNode({
     // naming different columns is the case that always holds.
     if (!x || !y || x !== y) return []
     return columnsOfType(schema, NUMERIC_DTYPES).length === 1
-      ? [`Only "${x}" is numeric — X and Y would be the same column`]
-      : [`X and Y are both "${x}", which draws a diagonal — pick a different Y`]
+      ? [
+          `Only "${x}" is numeric, so \`X\` and \`Y\` are the same column. Add a second numeric column upstream.`,
+        ]
+      : [
+          `\`X\` and \`Y\` are both "${x}", which draws a diagonal line. Pick a different column for \`Y\`.`,
+        ]
   },
 
   /**

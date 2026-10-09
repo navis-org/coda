@@ -254,15 +254,15 @@ interface SynapseEdges {
  * picker whose schema has not arrived answers its declared default (`resolveColumn`'s last
  * clause), so the two ends read `neuronId` and `partnerId` and differ.
  */
-const MISSING_ENDS = 'Pick the presynaptic and the postsynaptic id column.'
+const MISSING_ENDS = 'Pick an id column for both `Presynaptic` and `Postsynaptic`.'
 
 export function edgePlanRefusal(plan: EdgePlan): string | undefined {
   if (!plan.source || !plan.target) return MISSING_ENDS
   if (plan.source !== plan.target) return undefined
   return (
-    `Presynaptic and postsynaptic both read "${plan.source}", so every edge would be ` +
-    `a self-loop. A Synapses cloud carries no partner column; use Synapses Between, ` +
-    `which binds both ends at the server.`
+    `\`Presynaptic\` and \`Postsynaptic\` both read "${plan.source}", so every edge would be ` +
+    `a self-loop. A Synapses cloud has no partner column, so use Synapses Between instead, ` +
+    `which returns both ends of each synapse.`
   )
 }
 

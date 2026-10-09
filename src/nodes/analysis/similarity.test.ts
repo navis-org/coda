@@ -198,14 +198,14 @@ describe('the params, at edit time', () => {
     // the state the other message is for.
     expect(
       def.validate?.(makeInferContext(def, { layout: 'long' } as ParamValues, {})) ?? [],
-    ).toEqual(['Pick an Observations and a Features column'])
+    ).toEqual(['Pick an `Observations` and a `Features` column.'])
 
     // The wide pickers are what matters in the other layout, and the long ones are not asked for.
-    expect(issues({ layout: 'wide' })[0]).toMatch(/feature column/)
+    expect(issues({ layout: 'wide' })[0]).toMatch(/`Feature columns`/)
     expect(issues({ layout: 'wide', idColumn: 'a', wideFeatures: ['n'] })).toEqual([])
     expect(
       def.validate?.(makeInferContext(def, { layout: 'wide' } as ParamValues, {})) ?? [],
-    ).toEqual(['Pick the column naming each row'])
+    ).toEqual(['Pick an `Id column` naming each row.'])
   })
 
   it('is expensive, because it is quadratic and blocks the tab while it runs', () => {

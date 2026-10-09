@@ -27,6 +27,7 @@ import type { CaveRequestOptions } from './client'
 import { getToken } from './credentials'
 import { caveSourceId, deploymentKey, normaliseCaveServer } from './deployments'
 import { memoPromise } from '../memoPromise'
+import { PeekGates } from '../peekGate'
 import { reportSourceLearned } from '../source'
 import type { GrapheneSource } from './graphene'
 import { parseGrapheneSource } from './graphene'
@@ -63,9 +64,8 @@ export async function caveServerFor(
  * (invariant 2), so the first look at a datastack cannot answer. It starts the fetch and
  * `reportSourceLearned` re-infers when it lands.
  *
- * **Started once per datastack, never once per peek** — inference runs on every graph mutation,
- * so a retry from here would be a request per keystroke. The flag is not cleared on failure, for
- * the reason `runDiscovery`'s is not; recovery is an explicit listing from the Connections panel.
+ * **Started once per datastack and token, never without one** (`PeekGate`) — inference runs on
+ * every graph mutation, so a retry from here would be a request per keystroke.
  *
  * This exists because `CaveSource.listDatasets` deliberately lists only datastacks with a *spec*
  * in the static table, so a datastack somebody has just typed into a Custom CAVE node is not in
@@ -78,8 +78,8 @@ export function peekMaterializations(
 ): number[] | undefined {
   const key = deploymentKey(deployment, datastack)
   const known = materializations.get(key)
-  if (known || !datastack || asked.has(key)) return known
-  asked.add(key)
+  if (known || !datastack) return known
+  if (!asked.open(key, () => getToken(deployment))) return undefined
   /*
    * Swallowed *and* `quiet`. The swallow is `NeuPrintSource.peekDatasets`' trade — a peek has no
    * caller to report to. The quiet is the other half, and it was missing: this reaches
@@ -258,7 +258,8 @@ export function usableVersions(versions: readonly VersionInfo[]): VersionInfo[] 
 const materializations = new Map<string, number[]>()
 const loaded = new Map<string, LoadedDatastack>()
 const loading = new Map<string, Promise<number[]>>()
-const asked = new Set<string>()
+/** Which datastacks a peek may start a lookup for — see `peekMaterializations`. */
+const asked = new PeekGates()
 
 // ---------------------------------------------------------------------------
 // Which datastacks a token can see
@@ -372,11 +373,11 @@ export function resetDatastackRecords(): void {
 const l2Sources = new Map<string, GrapheneSource | null>()
 const l2Loading = new Map<string, Promise<GrapheneSource | undefined>>()
 /**
- * Datastacks a peek has started a lookup for. A failed lookup is not an answer and is not kept,
- * so without this the peek — asked on every graph mutation — would re-ask a failing server on
+ * Whether a peek may start a lookup — once per datastack and token (`PeekGate`). A failed lookup
+ * is not an answer and is not kept, so without this the peek would re-ask a failing server on
  * every edit. A fetch that needs the route asks again regardless.
  */
-const l2Peeked = new Set<string>()
+const l2Peeked = new PeekGates()
 
 /**
  * Whether skeletons can be built for this datastack — synchronously, if it is known.
@@ -389,8 +390,7 @@ const l2Peeked = new Set<string>()
 export function peekL2Cache(deployment: string, datastack: string): boolean | undefined {
   const key = deploymentKey(deployment, datastack)
   if (l2Sources.has(key)) return l2Sources.get(key) !== null
-  if (!datastack || l2Peeked.has(key)) return undefined
-  l2Peeked.add(key)
+  if (!datastack || !l2Peeked.open(key, () => getToken(deployment))) return undefined
   // Swallowed and `quiet`, for `peekMaterializations`' reason exactly: this asks the same
   // datastack record, from a card that renders on every graph mutation.
   void l2SourceFor(datastack, { deployment, quiet: true }).catch(() => undefined)

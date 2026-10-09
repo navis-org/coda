@@ -265,6 +265,11 @@ export interface DatasetRequest {
  */
 export interface EdgeAnswerableRequest extends DatasetRequest {
   edges?: DatasetEdges
+  /**
+   * Where an attached edge list says what it had to leave out — rows with a blank id or a weight
+   * that is not a number. Honoured by the funnel in `data/queries.ts`, never by a source.
+   */
+  onWarn?: (message: string) => void
 }
 
 export interface ConnectivityRequest extends EdgeAnswerableRequest {
@@ -706,6 +711,18 @@ export interface ViewerSceneRequest {
   signal?: AbortSignal
 }
 
+export interface PlaceSegmentsRequest extends ViewerSceneRequest {
+  segments: readonly string[]
+}
+
+/** Where a published scene puts one neuron, and the colour it publishes for it. */
+export interface SegmentPlacement {
+  /** The name of the scene's layer holding it; absent for the dataset's own segmentation layer. */
+  readonly layer?: string
+  /** `#rrggbb`. */
+  readonly color?: string
+}
+
 /**
  * How much geometry to spend on one body.
  *
@@ -787,6 +804,33 @@ export type CoarseGeometry =
 export interface CoarseRefusal {
   kind: 'refused'
   reason: 'too-large'
+}
+
+/**
+ * The schema of a source with nothing to say about a kind of table but its ids — a bucket of
+ * geometry, a scene. One spelling, for invariant 8's reason.
+ */
+export const ID_ONLY: TableSchema = tableSchema(column(ID_COLUMN_NAME, 'str'))
+
+/**
+ * Nothing at all, the base a source that answers a few questions spreads its own over — so a key
+ * `SourceCapabilities` gains later starts refused there rather than missing.
+ */
+export const NO_CAPABILITIES: SourceCapabilities = {
+  rawQuery: false,
+  skeletons: false,
+  meshes: false,
+  synapses: false,
+  neuronIndex: false,
+  paths: false,
+  viewerScene: false,
+  roiSummary: false,
+  roiCounts: false,
+  roiFilter: false,
+  connectivityRois: false,
+  edgeProperties: false,
+  synapseTotals: false,
+  roiMeshes: false,
 }
 
 export interface SourceSchemas {
@@ -1069,6 +1113,15 @@ export interface DataSource {
    * called from a `cheap` node that re-runs on every restyle.
    */
   fetchViewerScene?(req: ViewerSceneRequest): Promise<NgScene | undefined>
+
+  /**
+   * Which of the published scene's layers each of these neurons belongs in, and its colour — for a
+   * scene of **several** segmentations, where `segmentationLayerIndex`'s one target would put a
+   * neuron in a volume that does not have it (a BigClust project spanning two connectomes). A
+   * segment missing from the answer goes to the target layer, as it would without this method.
+   * The answer is read by lookup and may hold more segments than were asked about.
+   */
+  placeSegments?(req: PlaceSegmentsRequest): Promise<ReadonlyMap<string, SegmentPlacement>>
 
   /**
    * Where each neuron's soma is, in nanometres — for anything that places a cell by its body
@@ -1382,9 +1435,9 @@ export function edgePropertiesRefusal(label: string): string {
 export function edgeSetPropertiesRefusal(name?: string): string {
   return (
     `This dataset's connectivity comes from ` +
-    `${name ? `the edge set "${name}"` : 'an attached edge set'}, which records pre, ` +
-    `post and weight only. Use the plain weight here, or detach the edge set under ` +
-    `Edge data.`
+    `${name ? `the edge set "${name}"` : 'an attached edge set'}, which only records pre, ` +
+    `post and weight. Use the plain weight here, or detach the edge set under ` +
+    `\`Edge data\`.`
   )
 }
 
@@ -1471,7 +1524,7 @@ export interface RoiMeshRequest {
  * **The two fractions are null rather than zero where there is nothing to divide.** A region
  * with no synapses at all has *undefined* completeness, and `0` there would draw a confident
  * empty bar for a region nobody has looked at — the same reason `numeric()` exists in
- * `ui/encoding.ts`.
+ * `style/encoding.ts`.
  */
 export const ROI_COMPLETENESS_SCHEMA: TableSchema = tableSchema(
   column('roi', 'str'),
@@ -1789,9 +1842,9 @@ export function requireSkeletonRoute(
 ): void {
   if (!requested || served.some((route) => route.id === requested)) return
   throw new Error(
-    `${label} has no "${requested}" skeletons — it offers ` +
+    `${label} has no "${requested}" skeletons. It offers ` +
       `${served.map((route) => route.label).join(', ')}. Set the Skeletons node's ` +
-      `Source back to Automatic.`,
+      `\`Source\` back to "Automatic".`,
   )
 }
 
@@ -1906,8 +1959,8 @@ function canTotal(
  */
 export function groupTotalsRefusal(label: string): string {
   return (
-    `${label} publishes no synapse totals for Normalize to divide by. Turn Normalize ` +
-    `off, or use a dataset that does.`
+    `${label} publishes no synapse totals, which \`Normalize\` needs to divide by. Untick ` +
+    `\`Normalize\`, or use a dataset that has them.`
   )
 }
 

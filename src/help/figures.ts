@@ -40,8 +40,8 @@ import { getNodeDef } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import { socketAccepts, socketLabel } from '../core/sockets'
 import { backendForNodeType } from '../nodes/lib/datasetFamilies'
-import { portStyle } from '../ui/socketStyle'
-import type { SocketFamily, SocketShape } from '../ui/socketStyle'
+import { portStyle } from '../style/socketStyle'
+import type { SocketFamily, SocketShape } from '../style/socketStyle'
 import { paramIsPicker, paramValueLabel } from './paramText'
 
 // ---------------------------------------------------------------------------

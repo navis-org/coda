@@ -39,9 +39,10 @@ registerNode({
   // the auto-run warning that sets Download's width has no counterpart, since nothing about this
   // node fires on a run.
   cardWidth: 260,
-  description: 'Copy the incoming neuron ids to the clipboard, ready to paste elsewhere.',
+  description:
+    'Copy the incoming neuron ids to the clipboard, ready to paste elsewhere. The neurons pass through unchanged.',
   guide:
-    'Puts the ids of whatever neurons are wired to it on the clipboard, in the shape the thing you are pasting into wants — one per line for a list, comma-separated and quoted for a Python or R literal. It is a tap, so it passes the neurons on unchanged and can sit mid-chain; the button is the only trigger, because a browser refuses a clipboard write that no one clicked for.',
+    'Copies the ids of the wired neurons to the clipboard when you click the button: one per line, or comma-separated and quoted for pasting into Python or R. The neurons pass through unchanged, so the node can sit anywhere in a chain.',
   cost: 'cheap',
 
   inputs: [{ id: 'neurons', label: 'Neurons', type: T.neurons() }],
@@ -61,7 +62,7 @@ registerNode({
       id: 'separator',
       kind: 'enum',
       label: 'Separator',
-      help: 'What goes between two ids. New line pastes into a column or an ID field; comma into a list.',
+      help: 'What goes between two ids. "New line" pastes into a column or an ID field; "Comma" into a list.',
       default: DEFAULT_SEPARATOR,
       // Read from `lib/copyIds.ts`, which is also what joins them — a list written out here
       // would be a second table, and the way it fails is an option the copy does not honour.
@@ -80,7 +81,7 @@ registerNode({
       id: 'quoted',
       kind: 'boolean',
       label: 'Quote ids',
-      help: 'Wrap each id in double quotes, for a Python or R list — where an 18-digit id must be a string.',
+      help: 'Wrap each id in double quotes, e.g. for a Python or R list, where 18-digit ids must be strings.',
       default: false,
       presentational: true,
     },

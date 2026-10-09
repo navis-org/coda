@@ -20,14 +20,14 @@ import { inferGraph } from '../../core/inference'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import type { Scheduler } from '../../core/scheduler'
-import { column, tableSchema } from '../../core/types'
+import { T, column, tableSchema } from '../../core/types'
 import type { MatrixValue, PointsValue } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import type * as NblastBridge from '../../pyodide/nblast'
 import type { SynblastRequest } from '../../pyodide/nblast'
-import { NM_PER_UM } from '../../nodes/lib/nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import {
   UNIDENTIFIED,
   groupSynapses,
@@ -248,11 +248,15 @@ describe('neuron.synblast — types and params', () => {
 
   it('says so when there is no polarity column, since the measure is then a different one', () => {
     // Through `makeInferContext` rather than a hand-rolled literal: it runs the real
-    // `resolveColumn`, so the picker resolves the way it does in the editor — which for an
-    // optional picker against an unwired port is "not to anything", the case this asserts.
+    // `resolveColumn`, so the picker resolves the way it does in the editor. Against a point
+    // cloud whose columns are *known* to lack one — an unwired or unrun port keeps the stored
+    // column rather than calling it gone, so it says nothing there, which is the rule.
     const def = requireNodeDef('neuron.synblast')
-    const issues = def.validate?.(makeInferContext(def, defaultParams(def), {})) ?? []
+    const known = { query: T.points(tableSchema(column('neuronId', 'str'))) }
+    const issues = def.validate?.(makeInferContext(def, defaultParams(def), known)) ?? []
     expect(issues.join(' ')).toMatch(/polarity/)
+    const unknown = def.validate?.(makeInferContext(def, defaultParams(def), {})) ?? []
+    expect(unknown.join(' ')).not.toMatch(/polarity/)
   })
 })
 

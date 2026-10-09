@@ -22,7 +22,7 @@ import { signInWithPopup } from './popupSignIn'
 
 const CLOSED_MESSAGE =
   'The neuPrint sign-in window closed before a token arrived. If you cancelled on the consent ' +
-  'page, sign in again when you are ready; otherwise paste a token from your neuPrint account ' +
+  'page, sign in again when you are ready. Otherwise, paste a token from your neuPrint account ' +
   'page below.'
 
 const BLOCKED_MESSAGE =

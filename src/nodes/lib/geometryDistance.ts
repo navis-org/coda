@@ -75,8 +75,9 @@ import { boxesOf, cableLength, triangleArea } from '../../core/values'
 import type { KdTree } from './kdTree'
 import { anyPairWithin, closestPair, medianOfThree } from './kdTree'
 
-import { NM_PER_UM } from './nblastOps'
-import { checkGeometryUnits, frameClash, frameClashMessage } from './transformOps'
+import { NM_PER_UM } from '../../data/units'
+import { frameClash, frameClashMessage } from './transformOps'
+import { checkGeometryUnits } from '../../data/units'
 
 /**
  * Skeletons and meshes, and a **fifth** kind list rather than a reuse of `SPLIT_KINDS`, which
@@ -118,9 +119,9 @@ export function wrongDistanceKindReason(
 ): string {
   if (kind === 'points') {
     return (
-      `${side} is a point cloud. Distance puts one neuron on each axis of its matrix, and a ` +
-      'cloud is a single value carrying many points with no notion of which neuron each belongs ' +
-      'to — Points in Volumes is the node that asks a spatial question of one.'
+      `${side} is a point cloud. Distance needs one neuron per row and column of its matrix, ` +
+      'and a point cloud does not say which neuron each point belongs to. To ask a spatial ' +
+      'question of points, use Points in Volumes.'
     )
   }
   if (kind === 'table' || kind === 'neurons') {
@@ -130,8 +131,8 @@ export function wrongDistanceKindReason(
     )
   }
   return (
-    `Wire skeletons or meshes to ${side} — the Skeletons or Meshes node, or anything handing a ` +
-    `set of them on${kind ? `, not ${kind}` : ''}.`
+    `Wire skeletons or meshes to ${side}${kind ? ` (this is ${kind})` : ''}, for example from a ` +
+    'Skeletons or Meshes node.'
   )
 }
 
@@ -992,11 +993,10 @@ export function mixedQuantityRefusal(shape: DistanceShape): string | undefined {
   const q = quantityOf(query)
   const t = quantityOf(target)
   return (
-    `Query is ${query} and Target is ${target}, so the two directions of this ` +
-    `measurement are ${q.noun} in ${q.unit} and ${t.noun} in ${t.unit}. Combining them is not a ` +
-    `number of anything, and it would draw a perfectly ordinary heatmap. Set Symmetry to ` +
-    `“query against target only”, which measures the Query’s ${q.noun} and nothing else, or ` +
-    `wire the same kind of geometry to both ports.`
+    `\`Query\` is ${query} and \`Target\` is ${target}, so the two directions of this ` +
+    `measurement are ${q.noun} in ${q.unit} and ${t.noun} in ${t.unit}, which cannot be ` +
+    `combined into one number. Set \`Symmetry\` to "query against target only" to measure ` +
+    `only the Query's ${q.noun}, or wire the same kind of geometry to both ports.`
   )
 }
 
@@ -1325,11 +1325,11 @@ export function checkDistanceSize(
    */
   const lever = closestPairApplies(shape)
     ? ''
-    : ' A coarser Resample on Clean Skeletons moves that proportionally, and these statistics are' +
-      ' weighted by cable, so it does not change the answer.'
+    : ' Re-sampling with a coarser `Spacing` on Clean Skeletons makes this proportionally' +
+      ' faster without changing the answer, because these statistics are weighted by cable length.'
   ctx.warn(
-    `A ${rows.toLocaleString()} × ${cols.toLocaleString()} comparison is ` +
-      `${describeDuration(seconds)} of searching.${lever} Running anyway; cancel if ` +
+    `A ${rows.toLocaleString()} × ${cols.toLocaleString()} comparison will take ` +
+      `${describeDuration(seconds)}.${lever} Running anyway; cancel if ` +
       `that is not what you wanted.`,
   )
 }
@@ -1654,7 +1654,7 @@ function checkDistanceUnits(side: string, value: DistanceCollection): void {
     value,
     'geometry',
     'Skeletons or Meshes',
-    'every distance here would be labelled µm and be wrong by the size of a voxel.',
+    'every distance here would be labelled µm but be off by the size of a voxel.',
   )
 }
 
@@ -1678,10 +1678,10 @@ function checkDistanceFrame(
         clash,
         { left: 'The Query', right: 'the Target' },
         {
-          units: 'Every distance would be out by the ratio between them.',
+          units: 'Every distance would be off by the ratio between them.',
           space:
             'Every pair would come back hundreds of micrometres apart whatever their real ' +
-            'shapes, which draws a perfectly ordinary heatmap of nothing.',
+            'shapes, and the heatmap would look normal but mean nothing.',
         },
       )
     : undefined
@@ -1717,7 +1717,7 @@ export function distanceSidesFrom(
    */
   if (targetValue && targetValue.items.length === 0) {
     throw new Error(
-      'No neurons on the Target input — unwire it to compare the Query against itself.',
+      'No neurons on the Target input. To compare the Query against itself, unwire `Target`.',
     )
   }
 

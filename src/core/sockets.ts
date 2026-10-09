@@ -30,7 +30,7 @@
  */
 
 import type { CodaType, Kind } from './types'
-import { T, isAssignable, kindSetLabel, typeLabel } from './types'
+import { T, isAssignable, kindSetLabel, nominalType, typeLabel } from './types'
 
 /**
  * Anything with a socket's two declarations. `PortDef` satisfies it structurally, and so does
@@ -98,6 +98,9 @@ export function socketAccepts(from: Socket, to: Socket): boolean {
  * is what somebody dropping a wire meant.
  */
 export function socketTier(socket: Socket, other: Socket): number {
+  // A set standing for a concrete type ranks as that type: a table-or-file port is a table port.
+  const nominal = socket.type.kind === 'any' ? nominalType(socket.kinds) : undefined
+  if (nominal) return socketTier({ type: nominal }, other)
   if (socket.type.kind !== 'any') {
     const theirs = socketKinds(other)
     return theirs?.includes(socket.type.kind) ? 0 : 1
@@ -110,7 +113,7 @@ export function socketTier(socket: Socket, other: Socket): number {
  * set has a name of its own.
  *
  * The card's standing rule — *what it carries, falling back to what it accepts* — for the name,
- * where `ui/socketStyle.ts`' `portStyle` is the same rule for the drawing; both go through
+ * where `style/socketStyle.ts`' `portStyle` is the same rule for the drawing; both go through
  * `resolvedSocket`. A wired socket reads as the concrete kind flowing through it and only an
  * empty one names the family.
  *
@@ -144,7 +147,7 @@ export function socketLabel(socket: Socket | undefined, resolved?: CodaType): st
  * all, and `Any` is the honest answer to that.
  *
  * The name and the drawing are then each one question asked of the result: `socketLabel` here,
- * `portStyle` in `ui/socketStyle.ts`, where the boundary rule keeps it. **It hands back the
+ * `portStyle` in `style/socketStyle.ts`, where the boundary rule keeps it. **It hands back the
  * kinds, not the set's name** — a name is what one of them wants, the other wants the *family*,
  * and handing over a name made the second reach past this to `socket.kinds` and gate on the
  * first's answer.

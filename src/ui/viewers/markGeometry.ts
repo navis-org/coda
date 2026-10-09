@@ -18,7 +18,7 @@
  * `markGeometry.test.ts` can check the two agree.
  */
 
-import type { MarkerShape } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
 
 /**
  * Half-side of a square with the same area as a circle of radius 1.

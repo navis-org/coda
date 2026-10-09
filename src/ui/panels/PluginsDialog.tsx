@@ -19,7 +19,7 @@ import { packsNeeding } from '../../core/packs'
 import { getPack, registeredPacks } from '../../core/registry'
 import type { PackDefinition } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import { GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX } from '../glyphs'
 import { Modal, ModalHeader } from '../Modal'
 import {
@@ -59,8 +59,8 @@ function PluginsBody({ onClose }: { onClose: () => void }) {
         {packs.length === 0 && <li className="plugins__empty">This build has no plugins.</li>}
       </ul>
       <footer className="plugins__footer">
-        Extra tools for particular kinds of data. Switching one off hides its nodes when you add
-        something new; workflows that use it still open and run.
+        Plugins add nodes for particular kinds of data. Switching one off hides its nodes from
+        the menus you add nodes from. Workflows that use it still open and run.
       </footer>
     </Modal>
   )

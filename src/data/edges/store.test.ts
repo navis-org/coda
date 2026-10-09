@@ -29,6 +29,7 @@ import {
   loadEdgeSet,
   peekEdgeSets,
   renameEdgeSet,
+  provideEdgeSet,
   resetEdgeSets,
   saveEdgeSet,
 } from './store'
@@ -331,3 +332,49 @@ function rewriteMeta(id: string, meta: unknown): Promise<void> {
     }
   })
 }
+
+describe('a wired set', () => {
+  /** A loader that finishes when told, and remembers the signal it was handed. */
+  function deferredLoader() {
+    let finish: () => void = () => {}
+    const seen: { signal?: AbortSignal } = {}
+    const load = (signal?: AbortSignal) =>
+      new Promise<EncodedEdges>((resolve, reject) => {
+        seen.signal = signal
+        signal?.addEventListener('abort', () => reject(signal.reason))
+        finish = () => {
+          const b = new EdgeSetBuilder()
+          b.add('1', '2', 3)
+          resolve(b.finish())
+        }
+      })
+    return { load, seen, finish: () => finish() }
+  }
+
+  it('is built once for two callers, and one caller’s Cancel is not the other’s', async () => {
+    const loader = deferredLoader()
+    const id = provideEdgeSet(['one'], loader.load)
+    const cancelled = new AbortController()
+    const first = loadEdgeSet(id, cancelled.signal)
+    const second = loadEdgeSet(id, new AbortController().signal)
+    cancelled.abort()
+    await expect(first).rejects.toThrow()
+    // The read is still running for the caller that did not cancel.
+    expect(loader.seen.signal?.aborted).toBe(false)
+    loader.finish()
+    expect((await second)?.ids).toEqual(['1', '2'])
+  })
+
+  it('stops the read once every caller has cancelled', async () => {
+    const loader = deferredLoader()
+    const id = provideEdgeSet(['two'], loader.load)
+    const a = new AbortController()
+    const b = new AbortController()
+    const waits = [loadEdgeSet(id, a.signal), loadEdgeSet(id, b.signal)]
+    a.abort()
+    expect(loader.seen.signal?.aborted).toBe(false)
+    b.abort()
+    expect(loader.seen.signal?.aborted).toBe(true)
+    await Promise.allSettled(waits)
+  })
+})

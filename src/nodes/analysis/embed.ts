@@ -7,10 +7,11 @@
  * does not preserve is distance between things that were never near each other. Two clusters
  * far apart on the card are not more different than two that are close.
  *
- * **Three input ports, one wired, and they converge on one thing.** A score matrix, a table of
+ * **Three source ports, one wired, and they converge on one thing.** A score matrix, a table of
  * feature vectors and a table of nearest neighbours are three ways of writing down a k-NN
  * graph, which is all UMAP reads. `embedOps.ts` holds the three adapters and the reason the
- * middle one is a convenience rather than a scaling win.
+ * middle one is a convenience rather than a scaling win. A fourth, **Only these**, narrows
+ * whichever is wired to a set of neurons rather than being a source.
  *
  * **More than one wired is refused rather than ranked.** Nothing here makes "the matrix wins"
  * a defensible rule, and a silent precedence on an `expensive` node is a picture somebody
@@ -45,8 +46,13 @@ import {
   embedRoute,
   embedSchema,
   embedTable,
+  droppedNeighbours,
   knnFromMatrix,
   knnFromNeighbours,
+  checkOnlyMatched,
+  onlyLines,
+  onlyNames,
+  onlyRows,
 } from '../lib/embedOps'
 import { displayLabels } from '../lib/displayLabels'
 import {
@@ -69,12 +75,13 @@ registerNode({
   type: 'core.embed',
   label: 'Embedding',
   category: 'analysis',
-  description: 'Lay out a similarity matrix or feature table in 2D with UMAP.',
+  description:
+    'Lay out a similarity matrix, a feature table or a nearest-neighbour table in 2D with UMAP.',
   guide:
-    'UMAP in the browser: a score matrix, a table of feature vectors or a table of nearest ' +
-    'neighbours becomes two coordinates per neuron, ready for a Scatter Plot. It preserves who ' +
-    'is near whom, so distance between clusters means nothing, and it is stochastic — the Seed ' +
-    'is part of the picture. Wire Neighbours from NBLAST k-NN to skip the all-by-all matrix.',
+    'Lays out neurons in 2D with UMAP so that similar neurons end up close together. Takes a ' +
+    'similarity matrix, a feature table or a nearest-neighbour table; plot the result with a ' +
+    'Scatter Plot. Distances between clusters are meaningless, and a different Seed gives a ' +
+    'different layout.',
   cost: 'expensive',
 
   inputs: [
@@ -102,6 +109,13 @@ registerNode({
       exclusiveGroup: SOURCE_GROUP,
     },
     /*
+     * Lay out part of the population: a selection wired here restricts whichever route is wired
+     * to the neurons it lists — neighbour rows by their `from`, feature rows by their id, a matrix
+     * by its labels — so re-embedding a lasso is one wire rather than a Join keyed by hand. Not in
+     * the exclusive group: it narrows a source rather than being one.
+     */
+    { id: 'only', label: 'Only these', type: T.table(), required: false },
+    /*
      * Optional, and its two pickers are the only ones here that do not change where a point
      * lands. They are still data — `Scatter Plot` colours by a real column, so this has to be
      * one — which is the opposite of `out.dendrogram`'s answer for the same-looking port. There
@@ -120,9 +134,7 @@ registerNode({
       default: 15,
       min: 2,
       max: 200,
-      help:
-        'How local the structure is. Small values keep fine detail, large ones the overall ' +
-        'shape. Counts the neuron itself, so 15 means 14 neighbours.',
+      help: 'How local the structure is: small values keep fine detail, large ones the overall shape. Includes the neuron itself, so 15 means 14 neighbours.',
     },
     {
       id: 'minDist',
@@ -133,9 +145,7 @@ registerNode({
       max: 0.99,
       step: 0.05,
       slider: true,
-      help:
-        'How tightly points may pack. Near zero gives dense clumps, larger values spread them ' +
-        'out. Changes the drawing, not the neighbourhoods.',
+      help: 'How tightly points may pack. Near zero gives dense clumps. Only changes the drawing; which neurons are neighbours stays the same.',
     },
     {
       id: 'seed',
@@ -144,9 +154,7 @@ registerNode({
       default: 42,
       min: 0,
       max: 1_000_000,
-      help:
-        'UMAP is stochastic: the same seed gives the same arrangement. Change it to check ' +
-        'that a group you read off the plot is real.',
+      help: 'The same seed gives the same layout. Try another seed to check that a group you see is real.',
     },
     {
       id: 'spread',
@@ -157,7 +165,7 @@ registerNode({
       max: 10,
       step: 0.1,
       advanced: true,
-      help: 'The scale the whole embedding is drawn at. Read together with Min distance, which cannot exceed it.',
+      help: 'The overall scale of the embedding. `Min distance` cannot exceed it.',
     },
     {
       id: 'epochs',
@@ -167,9 +175,7 @@ registerNode({
       min: 0,
       max: 5000,
       advanced: true,
-      help:
-        'How long the layout is optimised for. 0 uses umap-learn’s default: 500 below ten ' +
-        'thousand points, 200 above.',
+      help: 'How many optimisation steps to run. 0 uses umap-learn’s default: 500 below 10,000 points, 200 above.',
     },
 
     // --- the Matrix route ------------------------------------------------
@@ -184,9 +190,7 @@ registerNode({
         { value: 'one_minus', label: '1 − value' },
         { value: 'none', label: 'the values are already distances' },
       ],
-      help:
-        'UMAP needs distances. "Auto" asks the matrix, inverting it if it carries ' +
-        'similarities. Same as the Linkage node’s.',
+      help: 'UMAP needs distances. "auto (from the matrix)" converts similarities to distances. Same as in Linkage.',
     },
 
     // --- the Features route ----------------------------------------------
@@ -197,7 +201,7 @@ registerNode({
       default: 'long',
       advanced: true,
       options: SIMILARITY_LAYOUT_OPTIONS,
-      help: '"Long" is a table of triplets, as Partner Vectors produces; "wide" is one row per neuron with a column per feature.',
+      help: 'How the table is laid out. "Long (one row per pair)" is what Partner Vectors produces.',
     },
     {
       id: 'observations',
@@ -207,7 +211,7 @@ registerNode({
       default: '',
       advanced: true,
       visibleIf: isLongLayout,
-      help: 'What each point in the plot will be — the neurons being compared.',
+      help: 'The column naming each point in the plot, usually neurons.',
     },
     {
       id: 'featureColumn',
@@ -217,7 +221,7 @@ registerNode({
       default: '',
       advanced: true,
       visibleIf: isLongLayout,
-      help: 'What they are being compared over. From Partner Vectors this is "feature".',
+      help: 'The column to compare over. From Partner Vectors this is `feature`.',
     },
     {
       id: 'value',
@@ -239,7 +243,7 @@ registerNode({
       default: '',
       advanced: true,
       visibleIf: (params) => !isLongLayout(params),
-      help: 'The column naming each row. Everything else picked below is a dimension.',
+      help: 'The column naming each row.',
     },
     {
       id: 'wideFeatures',
@@ -259,7 +263,7 @@ registerNode({
       default: 'cosine',
       advanced: true,
       options: SIMILARITY_METRIC_OPTIONS,
-      help: 'How two feature vectors are compared, before UMAP sees them. Same list as the Similarity Matrix node’s.',
+      help: 'How two feature vectors are compared. Same options as Similarity Matrix.',
     },
 
     // --- the Neighbours route --------------------------------------------
@@ -270,7 +274,7 @@ registerNode({
       from: 'neighbours',
       default: 'queryId',
       advanced: true,
-      help: 'The column naming the neuron a row is about. These are the points that get laid out.',
+      help: 'The column naming the neuron each row is about. These neurons become the points.',
     },
     {
       id: 'targetColumn',
@@ -302,7 +306,18 @@ registerNode({
         { value: 'similarity', label: 'similarities (bigger is more alike)' },
         { value: 'distance', label: 'distances (bigger is further apart)' },
       ],
-      help: 'NBLAST k-NN emits similarities, so that is the default.',
+      help: 'Whether a higher score means more alike or further apart. NBLAST k-NN gives similarities.',
+    },
+
+    {
+      id: 'onlyColumn',
+      kind: 'column',
+      label: 'Only these: column',
+      from: 'only',
+      default: ID_COLUMN_NAME,
+      whenWired: true,
+      advanced: true,
+      help: 'The column of the Only these table naming its neurons. Only those are laid out.',
     },
 
     // --- annotations ------------------------------------------------------
@@ -324,7 +339,7 @@ registerNode({
       default: 'type',
       optional: true,
       advanced: true,
-      help: 'What to write into the "annotation" column — cell type, hemilineage, a Cut Tree cluster. A Scatter Plot downstream colours by it.',
+      help: 'The column to copy into `annotation`, e.g. cell type or a Cut Tree cluster. A Scatter Plot can colour by it.',
     },
   ],
 
@@ -357,7 +372,9 @@ registerNode({
       if (query === target) return [EMBED_ISSUES.sameNeighbour]
     }
     if (ctx.inputs.annotations !== undefined && !ctx.column('labelBy')) {
-      return ['Annotations is wired but nothing is picked to label by']
+      return [
+        '`Annotations` is wired but `Label by` is empty. Pick the column to label points by.',
+      ]
     }
     /*
      * The two are one curve's parameters rather than two settings — `findABParams` fits the
@@ -366,7 +383,9 @@ registerNode({
      * that merely looks wrong. Said at edit time, where the number is still on screen.
      */
     if (Number(ctx.params.minDist) > Number(ctx.params.spread)) {
-      return ['Min distance cannot exceed Spread: it is how tightly points may pack within it.']
+      return [
+        '`Min distance` cannot be larger than `Spread`. Lower `Min distance` or raise `Spread`.',
+      ]
     }
     return []
   },
@@ -379,6 +398,7 @@ registerNode({
     const route = selected.route
 
     const requested = Number(ctx.params.neighbors)
+    const only = onlyFor(ctx)
     let graph
     if (route === 'neighbours') {
       const table = ctx.input('neighbours')
@@ -393,24 +413,19 @@ registerNode({
         { query, target, score: ctx.column('scoreColumn'), scoreIs },
         requested,
         ctx,
+        only,
       )
       checkNeighbourDistances(built.graph.distances, scoreIs)
-      if (built.losses.unknownTargets > 0) {
-        ctx.warn(
-          `${built.losses.unknownTargets.toLocaleString()} rows name a neighbour that is ` +
-            `not in "${query}" and were dropped. A large number means the NBLAST compared ` +
-            `two different populations.`,
-        )
-      }
+      for (const sentence of droppedNeighbours(built.losses)) ctx.warn(sentence)
       if (built.losses.isolated > 0) {
         ctx.warn(
           `${built.losses.isolated.toLocaleString()} neurons have no neighbours at all, so ` +
-            `UMAP left them where the initialisation put them - unplaced, not outliers.`,
+            `UMAP could not place them. Their positions are arbitrary, so do not read them as outliers.`,
         )
       }
       graph = built.graph
     } else {
-      const matrix = matrixFor(ctx, route)
+      const matrix = matrixFor(ctx, route, only)
       checkEmbedMatrix(ctx, matrix)
       const transform = transformFor(matrix.measure, String(ctx.params.distance))
       /*
@@ -446,7 +461,7 @@ registerNode({
         ctx.warn(
           `Nothing in the Annotations table matched: "` +
             `${ctx.column('matchOn') ?? 'neuronId'}" holds none of this embedding's ids, so ` +
-            `the annotation column is empty. Check the column.`,
+            `the annotation column is empty. Check that \`Match on\` names the right column.`,
         )
       } else if (matched < graph.labels.length) {
         ctx.progress(
@@ -460,6 +475,16 @@ registerNode({
   },
 })
 
+/** The neurons an Only these table lists, or undefined where none is wired. */
+function onlyFor(ctx: EvalContext): ReadonlySet<string> | undefined {
+  const table = ctx.input('only')
+  if (table === undefined) return undefined
+  if (!isTableValue(table)) throw new Error('Only these is not a table')
+  // An unresolved column names nobody, which `checkOnlyMatched` refuses in a sentence about it.
+  const column = ctx.column('onlyColumn')
+  return column ? onlyNames(table, column) : new Set()
+}
+
 /**
  * The matrix the two matrix-shaped routes both end on.
  *
@@ -468,29 +493,40 @@ registerNode({
  * is stated in `embedOps.ts`: this is `n²`, and folding the Similarity Matrix card in does not
  * change that.
  */
-function matrixFor(ctx: EvalContext, route: string): MatrixValue {
+function matrixFor(
+  ctx: EvalContext,
+  route: string,
+  only: ReadonlySet<string> | undefined,
+): MatrixValue {
   if (route === 'matrix') {
-    const matrix = ctx.input('matrix')
-    if (!isMatrixValue(matrix)) throw new Error('Matrix input is not a matrix')
+    const wired = ctx.input('matrix')
+    if (!isMatrixValue(wired)) throw new Error('Matrix input is not a matrix')
+    const matrix = only ? onlyLines(wired, only) : wired
+    checkOnlyMatched(ctx, matrix.rowLabels.length, only)
     return matrix
   }
-  const table = ctx.input('features')
-  if (!isTableValue(table)) throw new Error('Features is not a table')
+  const wired = ctx.input('features')
+  if (!isTableValue(wired)) throw new Error('Features is not a table')
+  // Restricted before the matrix is built, which is the point on this route: it is square in the
+  // number of observations, so a selection is also what makes it affordable.
+  const restrict = (column: string) => (only ? onlyRows(wired, column, only) : wired)
 
   let features
   if (isLongLayout(ctx.params)) {
     const observations = ctx.column('observations')
     const featureColumn = ctx.column('featureColumn')
     if (!observations || !featureColumn) throw new Error(EMBED_ISSUES.longColumns)
+    const table = restrict(observations)
     features = featuresFromLong(table, observations, featureColumn, ctx.column('value'))
   } else {
     const idColumn = ctx.column('idColumn')
     const picked = ctx.columns('wideFeatures')
     if (!idColumn) throw new Error(EMBED_ISSUES.wideId)
     if (picked.length === 0) throw new Error(EMBED_ISSUES.wideFeatures)
-    features = featuresFromWide(table, idColumn, picked)
+    features = featuresFromWide(restrict(idColumn), idColumn, picked)
   }
 
+  checkOnlyMatched(ctx, features.labels.length, only)
   checkEmbedCount(ctx, features.labels.length)
   ctx.progress(0.05, `${features.labels.length.toLocaleString()} observations`)
   // Asked as distances, so the `Distance` control resolves to `none` through the same

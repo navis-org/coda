@@ -11,7 +11,14 @@ import { nodeLabel } from '../../core/graph'
 import type { NodeDefinition, ResolvedPort } from '../../core/node'
 import type { Socket } from '../../core/sockets'
 import { dragReaches, socketTier } from '../../core/sockets'
-import { placeableIds } from '../../core/dashboard'
+import {
+  activeTab,
+  allOnTab,
+  dashboardOf,
+  isTabbed,
+  placeableIds,
+  tabLabel,
+} from '../../core/dashboard'
 import { groupsTouching } from '../../core/groups'
 import { isAnnotation } from '../../core/registry'
 import type { nodeDefsByCategory } from '../../core/registry'
@@ -24,7 +31,8 @@ import { peekExportWarnings } from '../exportWarnings'
 import { appElement, toggleFullscreen } from '../fullscreen'
 import { TOURS, startTour } from '../tour/tourState'
 import { LOCKED_HINT } from '../lockCopy'
-import { plural, recipeDetail } from '../format'
+import { plural } from '../../style/format'
+import { recipeDetail } from './recipeDetail'
 import { recipeTakesWire, selectionAttach } from '../../core/recipes'
 import { shortcutKeys } from '../shortcuts'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
@@ -296,8 +304,15 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
    * tick while the palette is open, including a `runVersion` bump per streaming mesh fragment.
    */
   const placeable = placeableIds(store.graph, selection)
-  const placedCells = new Set(store.graph.dashboard?.cells.map((c) => c.nodeId))
-  const allPlaced = placeable.length > 0 && placeable.every((id) => placedCells.has(id))
+  /*
+   * The add/remove pair acts on the tab on screen — the one the grid would show — and says which
+   * once the dashboard is in use as pages (`isTabbed`), since that is the one fact the canvas cannot show. Adding to
+   * another tab is the context menu's submenu; a row per tab here would multiply by the strip.
+   */
+  const layout = dashboardOf(store.graph)
+  const tab = activeTab(store.graph)
+  const onTab = isTabbed(layout) ? ` (${tabLabel(layout, tab)})` : ''
+  const allPlaced = allOnTab(tab, placeable)
 
   const items: PaletteItem[] = [
     {
@@ -637,7 +652,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
        * somebody who only wanted to look.
        */
       id: 'cmd:dashboard-add',
-      label: allPlaced ? 'Remove Selection from Dashboard' : 'Add Selection to Dashboard',
+      label: `${allPlaced ? 'Remove Selection from' : 'Add Selection to'} Dashboard${onTab}`,
       action: 'View',
       hint:
         placeable.length === 0
@@ -653,6 +668,21 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
         else store.addToDashboard(placeable)
       },
     },
+    /*
+     * One row per *other* tab, and only while the grid is up — the palette is the keyboard's way
+     * to the strip, and on the canvas there is no strip to switch.
+     */
+    ...(store.dashboardOpen
+      ? layout.tabs
+          .filter((t) => t.id !== tab.id)
+          .map((t): PaletteItem => ({
+            id: `cmd:dashboard-tab:${t.id}`,
+            label: `Switch to Dashboard Tab: ${tabLabel(layout, t)}`,
+            action: 'View',
+            hint: plural(t.cells.length, 'cell'),
+            perform: () => store.setDashboardTab(t.id),
+          }))
+      : []),
     {
       id: 'cmd:fit',
       label: 'Fit View',

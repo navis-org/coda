@@ -29,10 +29,11 @@ import { warnOverThreshold } from '../../core/limits'
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, MatrixValue, TableValue } from '../../core/values'
-import { getColumn, makeTable } from '../../core/values'
+import { getColumn, makeTable, selectRows } from '../../core/values'
 import type { KnnGraph } from '../../umap/run'
 import type { LinkageTransform } from '../../pyodide/linkage'
 import { checkSquarePopulation } from './linkageOps'
+import { takeMatrix } from './matrixShape'
 import { LABEL_COLUMN_NAME, labelOf } from './tableOps'
 
 // ---------------------------------------------------------------------------
@@ -151,16 +152,16 @@ export function embedRoute(isWired: (port: string) => boolean): EmbedRouteResult
     return {
       ok: false,
       refusal:
-        `Wire one of ${EMBED_ROUTES.map((r) => r.label).join(', ')}: a score matrix, a ` +
-        `table of feature vectors, or a table of nearest neighbours.`,
+        `Wire one of ${EMBED_ROUTES.map((r) => `\`${r.label}\``).join(', ')}: a score matrix, ` +
+        `a table of feature vectors, or a table of nearest neighbours.`,
     }
   }
   if (wired.length > 1) {
     return {
       ok: false,
       refusal:
-        `${wired.map((route) => route.label).join(' and ')} are wired at once and they ` +
-        `are alternatives — disconnect all but one.`,
+        `${wired.map((route) => `\`${route.label}\``).join(' and ')} are wired at once, but ` +
+        `only one can be used. Disconnect all but one.`,
     }
   }
   return { ok: true, route: wired[0]!.port }
@@ -168,15 +169,104 @@ export function embedRoute(isWired: (port: string) => boolean): EmbedRouteResult
 
 /** The messages both halves of the Features and Neighbours routes report. See invariant 5. */
 export const EMBED_ISSUES = {
-  longColumns: 'Pick an Observations and a Features column',
+  longColumns: 'Pick an `Observations` and a `Features` column.',
   sameFeature:
-    'Observations and Features point at the same column, so every point is identical',
-  wideId: 'Pick the column naming each row',
-  wideFeatures: 'Pick at least one feature column',
-  neighbourColumns: 'Pick the two columns naming each neighbour pair',
+    '`Observations` and `Features` are the same column, so every point is identical. Pick a different column for one of them.',
+  wideId: 'Pick an `Id column` naming each row.',
+  wideFeatures: 'Pick at least one column under `Feature columns`.',
+  neighbourColumns:
+    'Pick `Neighbour: from` and `Neighbour: to`, the two columns naming each neighbour pair.',
   sameNeighbour:
-    'From and To point at the same column, so every neuron is only its own neighbour',
+    '`Neighbour: from` and `Neighbour: to` are the same column, so every neuron is only its own neighbour. Pick a different column for one of them.',
 } as const
+
+// ---------------------------------------------------------------------------
+// Only these — laying out part of a population
+// ---------------------------------------------------------------------------
+
+/**
+ * The names an Only these table lists, read as every route reads a point's name (`labelOf`), so a
+ * selection's `neuronId` matches the neighbour, feature or matrix label it names.
+ */
+export function onlyNames(table: TableValue, column: string): ReadonlySet<string> {
+  const names = new Set<string>()
+  // A blank cell names nobody — skipped, as the Annotations port's `labelsByNeuron` skips it —
+  // rather than read as `labelOf`'s placeholder, which would match a point whose id is null.
+  for (const cell of getColumn(table, column)) {
+    if (cell !== null && cell !== undefined) names.add(labelOf(cell))
+  }
+  return names
+}
+
+/** The rows of a table whose `column` names one of `names`, in the table's own order. */
+export function onlyRows(
+  table: TableValue,
+  column: string,
+  names: ReadonlySet<string>,
+): TableValue {
+  const data = getColumn(table, column)
+  const rows: number[] = []
+  for (let row = 0; row < table.length; row++) if (names.has(labelOf(data[row]))) rows.push(row)
+  return selectRows(table, rows)
+}
+
+/** The matrix's lines whose label is one of `names`, on both axes — a sub-population, still square. */
+export function onlyLines(matrix: MatrixValue, names: ReadonlySet<string>): MatrixValue {
+  const keep = (labels: readonly string[]) =>
+    Int32Array.from(labels.flatMap((label, i) => (names.has(label) ? [i] : [])))
+  return takeMatrix(matrix, keep(matrix.rowLabels), keep(matrix.colLabels))
+}
+
+/**
+ * How many of Only these's neurons the input has, said before anything is laid out: none is a
+ * refusal naming the likely cause — a picker on the wrong column, which `resolveColumn` rule 3 can
+ * put there silently — where the count floor would only say there were too few points; some
+ * missing is a count. Select Neurons' rule for the same trap.
+ */
+export function checkOnlyMatched(
+  ctx: Warner,
+  found: number,
+  wanted: ReadonlySet<string> | undefined,
+): void {
+  if (!wanted) return
+  if (found === 0) {
+    throw new Error(
+      `None of the ${wanted.size.toLocaleString()} neurons in \`Only these\` are in the input ` +
+        `being laid out. Check \`Only these: column\`.`,
+    )
+  }
+  if (found < wanted.size) {
+    ctx.warn(
+      `${(wanted.size - found).toLocaleString()} of ${wanted.size.toLocaleString()} neurons in ` +
+        `\`Only these\` are not in the input and were not laid out.`,
+    )
+  }
+}
+
+/**
+ * The sentences for neighbours left out, told apart because they mean different things: one
+ * outside Only these is what laying out part of a graph does, where one that is never a point at
+ * all usually means the neighbours were found among a different population.
+ */
+export function droppedNeighbours(losses: NeighbourLosses): string[] {
+  return [
+    ...(losses.outsideOnly > 0
+      ? [
+          `${losses.outsideOnly.toLocaleString()} neighbours are outside \`Only these\` and were ` +
+            `left out. A neuron left with too few neighbours may be placed away from where it ` +
+            `belongs.`,
+        ]
+      : []),
+    ...(losses.unknownTargets > 0
+      ? [
+          `${losses.unknownTargets.toLocaleString()} rows name a neighbour that is not itself a ` +
+            `point (it never appears as "from"), so it was left out. A large number usually ` +
+            `means the neighbours came from a different population, for example an NBLAST ` +
+            `k-NN with \`Target\` wired.`,
+        ]
+      : []),
+  ]
+}
 
 // ---------------------------------------------------------------------------
 // Guard rails
@@ -209,7 +299,7 @@ export const EMBED_OBSERVATIONS_WARN = 20_000
  * needs two observations and a neighbourhood needs four.
  */
 export function checkEmbedMatrix(ctx: Warner, matrix: MatrixValue): void {
-  checkSquarePopulation(matrix, 'An embedding', 'single neighbourhood to lay out')
+  checkSquarePopulation(matrix, 'An embedding', 'layout')
   checkEmbedCount(ctx, matrix.rowLabels.length)
 }
 
@@ -218,7 +308,7 @@ export function checkEmbedCount(ctx: Warner, n: number): void {
   if (n < MIN_EMBED_OBSERVATIONS) {
     throw new Error(
       `An embedding needs at least ${MIN_EMBED_OBSERVATIONS} observations, got ${n}. ` +
-        `Fewer have no neighbourhood structure to preserve.`,
+        `Check that the right input is wired and that no filter upstream emptied the set.`,
     )
   }
   if (n > EMBED_OBSERVATIONS_WARN) {
@@ -226,10 +316,10 @@ export function checkEmbedCount(ctx: Warner, n: number): void {
       count: n,
       threshold: EMBED_OBSERVATIONS_WARN,
       unit: 'observations',
-      control: 'the size this stays interactive at',
+      control: 'the usual size for an interactive embedding',
       cost:
-        'UMAP runs single-threaded in slices, and the fuzzy-set construction allocates ' +
-        'per neighbour pair.',
+        'UMAP runs single-threaded, and its memory use grows with the number of neighbour ' +
+        'pairs.',
     })
   }
 }
@@ -246,8 +336,8 @@ export function clampNeighbours(ctx: Warner, requested: number, n: number): numb
   const capped = Math.max(2, Math.min(requested, n - 1))
   if (capped !== requested) {
     ctx.warn(
-      `Neighbours was ${requested}, more than ${n} observations can offer; used ` +
-        `${capped}. On a set this small the neighbourhood is nearly the whole of it.`,
+      `\`Neighbours\` is ${requested}, but there are only ${n} neurons, so ${capped} was ` +
+        `used. With this few neurons, each neighbourhood covers almost the whole set.`,
     )
   }
   return capped
@@ -388,6 +478,8 @@ export interface NeighbourColumns {
 export interface NeighbourLosses {
   /** Rows naming a target that is not itself a query, so has no row to be placed in. */
   unknownTargets: number
+  /** Rows naming a target that is a query but outside Only these — expected, and said apart. */
+  outsideOnly: number
   /** Observations left with no neighbour at all. */
   isolated: number
 }
@@ -410,6 +502,7 @@ export function knnFromNeighbours(
   columns: NeighbourColumns,
   requested: number,
   ctx: Warner,
+  only?: ReadonlySet<string>,
 ): { graph: KnnGraph; losses: NeighbourLosses } {
   const queries = getColumn(table, columns.query)
   const targets = getColumn(table, columns.target)
@@ -417,13 +510,22 @@ export function knnFromNeighbours(
 
   const labels: string[] = []
   const rowOf = new Map<string, number>()
+  /** Queries Only these left out, so a neighbour naming one is told from one never seen at all. */
+  const excluded = new Set<string>()
   for (let row = 0; row < table.length; row++) {
     const name = labelOf(queries[row])
     if (name === '') continue
     if (rowOf.has(name)) continue
+    // Only these restricts the graph here, by its points: a row about a neuron outside never
+    // makes one, and a row naming one as a neighbour is dropped below with the other unknowns.
+    if (only && !only.has(name)) {
+      excluded.add(name)
+      continue
+    }
     rowOf.set(name, labels.length)
     labels.push(name)
   }
+  checkOnlyMatched(ctx, labels.length, only)
 
   /*
    * How many points there are is not knowable until the query column has been walked, so the
@@ -435,13 +537,15 @@ export function knnFromNeighbours(
 
   const buckets: Array<Map<number, number>> = labels.map(() => new Map())
   let unknownTargets = 0
+  let outsideOnly = 0
   for (let row = 0; row < table.length; row++) {
     const from = rowOf.get(labelOf(queries[row]))
     if (from === undefined) continue
     const toName = labelOf(targets[row])
     const to = rowOf.get(toName)
     if (to === undefined) {
-      if (toName !== '') unknownTargets++
+      if (excluded.has(toName)) outsideOnly++
+      else if (toName !== '') unknownTargets++
       continue
     }
     // Self-matches are added back by `writeRow` at position 0. `NBLAST k-NN` with a Target wired
@@ -479,7 +583,10 @@ export function knnFromNeighbours(
     writeRow(indices[i]!, distances[i]!, i, foundIdx, foundDist, order.subarray(0, count))
   }
 
-  return { graph: { indices, distances, labels }, losses: { unknownTargets, isolated } }
+  return {
+    graph: { indices, distances, labels },
+    losses: { unknownTargets, outsideOnly, isolated },
+  }
 }
 
 /**
@@ -498,11 +605,11 @@ export function checkNeighbourDistances(rows: readonly number[][], scoreIs: stri
   throw new Error(
     scoreIs === 'similarity'
       ? `Read as similarities, these scores give distances as low as ${lowest.toFixed(3)}` +
-          `, and a distance cannot be negative. Scores above 1 mean Normalise is off at ` +
-          `the NBLAST node. If the column holds distances already, say so with "Scores ` +
-          `are".`
-      : `These scores go as low as ${lowest.toFixed(3)}, and a distance cannot be negative. Set ` +
-          `"Scores are" back to similarities if a bigger number means more alike.`,
+          `, and a distance cannot be negative. Scores above 1 mean \`Normalise\` is off on ` +
+          `the NBLAST node. If the column already holds distances, set \`Scores are\` to ` +
+          `"distances".`
+      : `These scores go as low as ${lowest.toFixed(3)}, and a distance cannot be negative. If ` +
+          `a bigger number means more alike, set \`Scores are\` to "similarities".`,
   )
 }
 

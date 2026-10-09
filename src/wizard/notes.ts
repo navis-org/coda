@@ -20,7 +20,7 @@ const NOTE_TYPE = 'note.text'
  * workflow is real and only the numbers are not.
  */
 export const SYNTHETIC_NOTE =
-  '*The dataset is synthetic, generated in your browser from a seed. The pipeline is the point; the numbers are not a finding.*'
+  '*This dataset is synthetic: it is generated in your browser from a seed. Use it to try out the workflow, but the numbers don’t mean anything biologically.*'
 
 /**
  * Strip the source indentation off a note written as an indented template literal.

@@ -151,7 +151,7 @@ describe('the guides dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Play video: Your first workflow/ }))
     const player = box.querySelector('iframe')
     expect(player?.getAttribute('src')).toBe(
-      'https://www.youtube-nocookie.com/embed/4s2zeBkXudo?autoplay=1&rel=0',
+      'https://www.youtube-nocookie.com/embed/4s2zeBkXudo?autoplay=1&rel=0&list=PLV8BfQPvTPmc',
     )
   })
 })

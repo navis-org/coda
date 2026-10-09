@@ -85,8 +85,8 @@ export function refuseIfCapped(
   if (total !== undefined) {
     if (rows >= total) return
     throw new CaveError(
-      `CAVE returned ${rows.toLocaleString()} of "${table}"'s ${total.toLocaleString()} rows — ` +
-        `its server caps a single query — so ${consequence}.`,
+      `CAVE returned ${rows.toLocaleString()} of "${table}"'s ${total.toLocaleString()} rows ` +
+        `because its server limits the size of one query, so ${consequence}.`,
     )
   }
   if (rows !== CAVE_MAX_ROWS) return
@@ -161,7 +161,7 @@ async function request<T>(
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new CaveError(
       `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down — a browser reports both the same way. (${errorMessage(error)})`,
+        `the host is down. The browser does not say which. (${errorMessage(error)})`,
     )
   }
 
@@ -221,9 +221,9 @@ function refuseNoToken(options: CaveRequestOptions): never {
    */
   const message =
     normaliseCaveServer(options.deployment) === DEFAULT_CAVE_SERVER
-      ? 'No CAVE token. Add one in Connections — the branch icon in the toolbar.'
+      ? 'No CAVE token. Add one in Connections (the branch icon in the toolbar).'
       : `No CAVE token for ${caveServerLabel(options.deployment)}. Each CAVE deployment has its ` +
-        `own sign-in — add one for it in Connections ▸ CAVE.`
+        `own sign-in. Add one for it in Connections ▸ CAVE.`
   return refuse(message, 401, options)
 }
 
@@ -257,7 +257,7 @@ function authRefusal(url: string, status: number, body: string): string {
   if (parsed.error === 'missing_tos') {
     const name = typeof data.tos_name === 'string' ? data.tos_name : 'its terms of service'
     const form =
-      typeof data.tos_form_url === 'string' ? ` — accept them at ${data.tos_form_url}` : ''
+      typeof data.tos_form_url === 'string' ? `. Accept them at ${data.tos_form_url}` : ''
     return (
       `CAVE will not serve ${dataset} until you have accepted ${name}${form}. Your token is ` +
       `fine; signing in again will not help.`
@@ -272,7 +272,7 @@ function authRefusal(url: string, status: number, body: string): string {
   }
   return (
     `CAVE rejected the token (${status}). It may have expired, or it may not ` +
-    `grant access to this datastack — check at ${new URL(url).origin}.`
+    `grant access to this datastack. Check it at ${new URL(url).origin}.`
   )
 }
 
@@ -303,7 +303,7 @@ function parsedBody(body: string): Record<string, unknown> {
 function explain(body: string): string {
   const parsed = parsedBody(body)
   if (typeof parsed.message === 'string') return parsed.message
-  if (parsed.schema_errors) return `invalid query — ${JSON.stringify(parsed.schema_errors)}`
+  if (parsed.schema_errors) return `invalid query: ${JSON.stringify(parsed.schema_errors)}`
   if (typeof parsed.error === 'string') return parsed.error
   // Not JSON: an HTML error page, or nothing at all.
   return bodyExcerpt(body)
@@ -388,7 +388,7 @@ export async function cavePostBinary(
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new CaveError(
       `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down — a browser reports both the same way. (${errorMessage(error)})`,
+        `the host is down. The browser does not say which. (${errorMessage(error)})`,
     )
   }
   if (response.status === 401 || response.status === 403)
@@ -432,7 +432,7 @@ export async function caveGetBytes(
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new CaveError(
       `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down — a browser reports both the same way. (${errorMessage(error)})`,
+        `the host is down. The browser does not say which. (${errorMessage(error)})`,
     )
   }
   if (response.status === 404) return undefined

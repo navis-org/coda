@@ -59,10 +59,10 @@
  */
 
 import type { MatrixValue } from '../../core/values'
-import { formatCompact, labelStep, truncateLabel } from '../format'
-import { inkOn } from '../colors'
-import type { ColorDomain } from '../encoding'
-import { RAMP_STEPS, normalize, rampDomain } from '../encoding'
+import { formatCompact, labelStep, truncateLabel } from '../../style/format'
+import { inkOn } from '../../style/colors'
+import type { ColorDomain } from '../../style/encoding'
+import { RAMP_STEPS, normalize, rampDomain } from '../../style/encoding'
 import type { ColorLimits } from '../../nodes/lib/heatmapParams'
 
 /**

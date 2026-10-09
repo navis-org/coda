@@ -16,7 +16,7 @@ import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import { pyList, pyStr } from '../py'
-import { CHART_INK } from '../../../ui/colors'
+import { CHART_INK } from '../../../style/colors'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
 import { codaNeurons, isCaveDataset, neuronIds, pySelection } from './common'
@@ -232,8 +232,8 @@ registerEmitter('out.histogram', (ctx) => {
     // difference that shows up as a differently shaped picture and gets blamed on the data.
     lines.push(
       ...ctx.note(
-        'Coda bins by Freedman–Diaconis capped at 80; seaborn\'s `bins="auto"` takes the ' +
-          'larger of Freedman–Diaconis and Sturges with no cap, so the bar count can ' +
+        'Coda bins by Freedman–Diaconis, capped at 80 bins. seaborn\'s `bins="auto"` takes ' +
+          'the larger of Freedman–Diaconis and Sturges with no cap, so the number of bars can ' +
           'differ.',
       ),
     )
@@ -372,8 +372,8 @@ registerEmitter('out.distribution', (ctx) => {
     lines.push(`sns.swarmplot(${[...shared, 'size=3'].join(', ')})`)
     lines.push(
       ...ctx.note(
-        'Coda thins a swarm to 300 marks per group; seaborn plots every observation, so a ' +
-          'large group is denser here than on the canvas.',
+        'Coda draws at most 300 points per group in a swarm. seaborn plots every ' +
+          'observation, so a large group is denser here than on the canvas.',
       ),
     )
   }
@@ -422,8 +422,8 @@ registerEmitter('out.heatmap', (ctx) => {
   if (substitute) {
     lines.push(
       ...ctx.note(
-        `Coda draws this in its own ${diverging ? 'blue–red' : 'blue'} ramp, which has no ` +
-          `matplotlib name; ${cmap} is the nearest published one.`,
+        `Coda draws this in its own ${diverging ? 'blue–red' : 'blue'} colour ramp, which ` +
+          `matplotlib does not have. ${cmap} is the closest match.`,
       ),
     )
   }
@@ -454,9 +454,9 @@ registerEmitter('out.heatmap', (ctx) => {
     drawn = '_plot'
     lines.push(
       ...ctx.note(
-        'The colour runs on a log scale and the values do not: Coda maps a cell through ' +
-          'log10(1 + value - low) and prints the raw value, so the annotations come from ' +
-          'the untransformed frame. Cells past either end are clipped, as on the card.',
+        'Only the colour uses a log scale. Coda colours a cell by ' +
+          'log10(1 + value - low) but prints the raw value, so the annotations come from ' +
+          'the untransformed table. Cells beyond either colour limit are clipped, as on the card.',
       ),
       `_plot = np.log10(1 + (${out}.clip(_lo, _hi) - _lo))`,
     )
@@ -711,9 +711,9 @@ function heatmapOrderLines(
         if (i === 0) {
           lines.push(
             ...ctx.note(
-              "The clustering is seaborn's clustermap: each row a vector across the columns. " +
-                'Coda reads an empty or infinite cell as 0 (hence nan_to_num) and puts a ' +
-                "constant vector at distance 1 from everything, rather than letting pdist's NaN " +
+              "The clustering is seaborn's clustermap, treating each row as a vector across " +
+                'the columns. Coda reads an empty or infinite cell as 0 (hence nan_to_num) and ' +
+                "puts a constant vector at distance 1 from everything, so pdist's NaN does not " +
                 'stop linkage.',
             ),
             // Every non-finite cell to 0, which is `coda_cluster_order`'s `nan_to_num` — `fillna`
@@ -908,8 +908,8 @@ registerEmitter('out.network', (ctx) => {
   lines.push(
     ``,
     ...ctx.note(
-      'Coda draws this with ForceAtlas2 in the browser. networkx has no equivalent, so the ' +
-        'graph is handed over and the layout is yours to pick — uncomment one.',
+      'Coda draws this with ForceAtlas2 in the browser. networkx has no equivalent, so ' +
+        'pick a layout yourself by uncommenting one of the lines below.',
     ),
     `# pos = nx.spring_layout(${out}, weight='weight')`,
     `# pos = nx.kamada_kawai_layout(${out}, weight='weight')`,
@@ -1166,9 +1166,9 @@ registerEmitter('out.flowChart', (ctx) => {
 
   const notes = [
     ...plan.divergences,
-    'networkx does no crossing minimisation, so the order of boxes within a layer is the ' +
-      "graph's node order rather than the arrangement on the card.",
-    'A marker here is a fixed size and every edge is a straight line, where Coda sizes each ' +
+    'networkx does not minimise edge crossings, so the boxes within a layer are in the ' +
+      "graph's node order and may be arranged differently from the card.",
+    'Markers here have a fixed size and every edge is a straight line. Coda sizes each ' +
       'box to its label and routes an arrow that skips a layer around the boxes in between.',
   ]
   return [...notes.flatMap((note) => ctx.note(note)), ...lines]
@@ -1283,8 +1283,8 @@ registerEmitter('out.copyIds', (ctx) => {
   const each = quoted ? `[f'"{i}"' for i in ${ids}]` : ids
   lines.push(
     ...ctx.note(
-      'In Coda this button puts the ids on the clipboard. A notebook has none, so ' +
-        'they are printed here — copy them from the output, or use the list directly.',
+      'In Coda this button copies the ids to the clipboard. Here they are printed instead: ' +
+        'copy them from the output, or use the list directly.',
     ),
     `print(${pyStr(separator)}.join(${each}))`,
   )
@@ -1319,8 +1319,8 @@ registerEmitter(
   (ctx) => {
     const cave = isCaveDataset(ctx)
     return ctx.note(
-      "This card shows the dataset's published description and citation, which is prose " +
-        'rather than a step. Read it with ' +
+      "This card shows the dataset's published description and citation, so there is no " +
+        'code to export. Read it with ' +
         (cave ? '`client.info.get_datastack_info()`' : '`fetch_meta(client=...)`') +
         ' if you need it here.',
     )
@@ -1370,14 +1370,14 @@ registerEmitter('out.datasetSummary', (ctx) => {
     ...(status
       ? []
       : ctx.note(
-          'No status filter, matching the card: the dataset index Coda counts is every ' +
-            ':Neuron the dataset publishes, not only the Traced ones.',
+          'No status filter, matching the card: Coda counts every :Neuron the dataset ' +
+            'publishes, including those that are not Traced.',
         )),
     `${neurons}, _ = fetch_neurons(${criteria}, client=${c})`,
     codaNeurons(ctx, neurons),
     ``,
     `# How many neurons carry each value of an attribute. dropna=False would count the`,
-    `# missing ones as a category; the card reports them apart instead.`,
+    `# missing ones as a category; the card reports them separately.`,
   ]
 
   const attributes = summaryChartList(chosen, ctx.params.chartsMode)
@@ -1396,8 +1396,8 @@ registerEmitter('out.datasetSummary', (ctx) => {
 
   lines.push(
     ``,
-    `# Region completeness: traced synapses against the total present. The published list`,
-    `# nests, so it is filtered to the primary set before anything is totalled.`,
+    `# Region completeness: traced synapses against the total present. Some regions are`,
+    `# nested inside others, so the table is filtered to primary regions before totalling.`,
     `${ctx.name}_regions = ${c}.fetch_roi_completeness()`,
     `${ctx.name}_regions = ${ctx.name}_regions[`,
     `    ${ctx.name}_regions['roi'].isin(${c}.primary_rois)`,
@@ -1442,14 +1442,14 @@ registerEmitter('out.rois', (ctx) => {
 
   return [
     ...ctx.note(
-      'Region meshes are OBJ bytes, one request each. neuPrint publishes them for ' +
-        'visualization only — decimated surfaces, so a volume measured off one is an ' +
+      'Region meshes arrive as OBJ bytes, one request each. neuPrint publishes these meshes ' +
+        'for display only: they are simplified surfaces, so a volume measured from one is an ' +
         'approximation.',
     ),
     ...(primaryOnly
       ? [
-          `# The published region list nests, so this walks the primary set that tiles the`,
-          `# volume — the same default the card carries.`,
+          `# Some published regions are nested inside others, so this uses the primary`,
+          `# regions, which do not overlap. The card does the same by default.`,
         ]
       : [`# Every published region, including the ones nested inside others.`]),
     `${meshes} = {}`,

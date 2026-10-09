@@ -47,11 +47,11 @@ registerNode({
   label: 'Group By',
   category: 'transform',
   description:
-    'Collapse rows into groups and aggregate one or more value columns. The result carries the ' +
-    'group columns, a row count named `n`, and one aggregate per value column renamed ' +
-    '`<agg>_<column>` — so summing `weight` gives `sum_weight`, not `weight`.',
+    'Collapse rows into groups and aggregate one or more value columns. The result carries the group columns, a row count named `n`, and one aggregate per value column named `<agg>_<column>`, so summing `weight` gives `sum_weight`, not `weight`. `agg: count` adds no aggregate column: its result is `n`, never `count` or `count_<column>`.',
   guide:
-    'Collapse rows into groups and aggregate — synapses per cell type, mean size per class. Pick several value columns and you get one aggregate each, sum_pre beside sum_post; the aggregation itself is one choice for all of them. The output schema is computed rather than copied, so switching sum to mean renames every aggregate and downstream pickers follow before anything re-runs. n rides along.',
+    'Collapses rows that share the same values in one or more columns and aggregates the rest, ' +
+    'e.g. total synapses per cell type. Each aggregate is named <agg>_<column> (summing weight ' +
+    'gives sum_weight), and a row count n is always added.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -76,7 +76,7 @@ registerNode({
        * a value column" while `validate` here still said "numeric".
        */
       dtypes: (params) => (params.agg === 'join' ? undefined : NUMERIC_DTYPES),
-      help: 'One aggregate per column, named "<agg>_<column>". "Join text" gives distinct values joined with "; " in first-appearance order; absences are skipped and repeats folded away.',
+      help: 'One aggregate per column, named "<agg>_<column>". "join text" lists the distinct values, separated by "; ".',
       default: [],
       visibleIf: (params) => params.agg !== 'count',
     },
@@ -91,11 +91,11 @@ registerNode({
 
   validate: (ctx) => {
     if (ctx.columns('by').length === 0 && ctx.inputs.in) {
-      return ['Pick at least one column to group by']
+      return ['No columns are picked in `Group by`. Pick at least one column to group by.']
     }
     const agg = String(ctx.params.agg) as AggFn
     if (agg !== 'count' && ctx.columns('value').length === 0) {
-      return [`"${agg}" needs at least one value column`]
+      return [`"${agg}" needs at least one value column. Pick one in \`Of columns\`.`]
     }
     return []
   },
@@ -105,7 +105,10 @@ registerNode({
     if (!isTableValue(table)) throw new Error('Input is not a table')
     const agg = String(ctx.params.agg) as AggFn
     const by = ctx.columns('by')
-    if (by.length === 0) throw new Error('No group-by columns selected')
+    if (by.length === 0)
+      throw new Error(
+        'No columns are picked in `Group by`. Pick at least one column to group by.',
+      )
     return { out: groupByTable(table, by, ctx.columns('value'), agg) }
   },
 })

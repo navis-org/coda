@@ -221,7 +221,10 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
     )
     const { outputs, error } = outputTypesFor(def, ctx)
     if (error) {
-      issues.push({ severity: 'warning', message: `Type inference failed: ${error}` })
+      issues.push({
+        severity: 'warning',
+        message: `Could not work out this node's output types: ${error}`,
+      })
     }
 
     // 3. Node-specific and generic param validation.
@@ -255,7 +258,12 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
     result[nodeId] = {
       inputs: {},
       outputs: {},
-      issues: [{ severity: 'error', message: 'Node is part of a cycle' }],
+      issues: [
+        {
+          severity: 'error',
+          message: 'This node is part of a cycle. Remove a wire to break the loop.',
+        },
+      ],
     }
   }
 

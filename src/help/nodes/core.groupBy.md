@@ -1,56 +1,54 @@
 ## What comes out
 
-The group columns, a row count called `n`, and **one aggregate per value column**, each named
-`<agg>_<column>`. Summing `weight` gives `sum_weight`, not `weight`, so a table that has been
-through two Group By nodes still reads.
-
-`n` rides along with every aggregation, including the ones that already count.
+Group By collapses all rows that share the same values in the `Group by` columns into a single row. For example, grouping a connectivity table by `postType` and summing `weight` gives you the total number of synapses onto each cell type.
 
 ```coda-params
-caption: Group by is the key; Of columns is what gets aggregated.
 core.groupBy: by, agg, value
 ```
 
-## One aggregation, several value columns
+Both column pickers start out empty, so you have to pick at least one group column and (unless you are counting rows) one value column.
 
-`Of columns` takes as many columns as you like and applies the *same* aggregation to each, in one
-pass — `sum_pre` beside `sum_post`. The columns are independent: a null in one has no effect on
-any other, and each keeps its own unit.
+The output contains:
 
-For a different aggregation per column, use two Group By nodes on the same input and
-[Join](#core.join) them on the group columns.
+- the group columns
+- `n`: the number of rows in each group (always added, even when the aggregation itself is a count)
+- one aggregate per value column, named `<agg>_<column>`
 
-The picker only offers columns the aggregation can take: numeric for everything except **join
-text**, which takes any column and produces text.
+Summing `weight` therefore produces a column called `sum_weight`, not `weight`.
 
-## The value list is ignored by `count`
+The column names update as soon as you change a setting: switch from sum to mean and every column picker downstream will offer `mean_weight` instead, without having to re-run.
 
-**count rows** answers with `n` alone, so the `Of columns` picker disappears when it is chosen and
-whatever it held is not read. Switching back brings the choice back with it.
+## Aggregating several columns
 
-## join text: distinct, in first-appearance order
+You can pick as many columns as you like under `Of columns`. The same aggregation is applied to each of them, so you get e.g. `sum_pre` next to `sum_post`.
 
-**join text** folds a group's values into one cell, joined with `; `:
+If you need different aggregations for different columns, use two Group By nodes on the same input and [Join](#core.join) the results on the group columns.
 
-- **Distinct** — a repeat is dropped.
-- **First appearance order**, not sorted. Sort upstream if a particular order matters.
-- **Absences are skipped**; a group with nothing to join comes out empty rather than as the text
-  `"null"`. Matching is exact: `DA1` and `da1` are different text.
+The picker only offers columns that the chosen aggregation can work with. That means numeric columns for everything except "join text", which takes any column.
 
-The unit does not survive a join — nanometres joined with semicolons are no longer nanometres.
+"count rows" ignores `Of columns` entirely (the picker is hidden when you select it) and returns only `n`. Your column selection is remembered if you switch back.
 
-> [!NOTE] Both pickers start empty
-> A picker that holds a list has no "first compatible column" to fall back on. A graph saved before
-> `Of columns` took a list opens with it empty and a warning on the card.
+## Missing values
 
-## Schema first, values later
+Missing values are skipped. If a group has no values at all in a column, `mean`, `min`, `max` and "join text" give an empty cell for that group, whereas `sum` gives 0.
 
-The output schema is *computed* rather than copied from the input, and computed at edit time.
-Change the aggregation from sum to mean and every column picker downstream updates to
-`mean_weight` immediately — before anything re-runs, and whether or not this node has ever run.
+## Joining text
+
+"join text" combines a group's values into a single cell, separated by `; `. A few things to keep in mind:
+
+- Duplicate values are only kept once.
+- Values are kept in the order they first appear, i.e. they are not sorted. Sort upstream if the order matters.
+- Matching is exact: `DA1` and `da1` count as two different values.
+- If the column had a unit (e.g. nanometres), the joined text no longer does.
+
+> [!NOTE] Older workflows
+> In workflows saved before `Of columns` accepted more than one column, the picker opens empty and
+> the node shows a warning. Pick the column(s) again to fix it.
+
+## A typical chain
 
 ```coda-graph
-caption: The usual chain: fold the rows, then order and draw them.
+caption: Group, sort, then plot.
 core.groupBy as g
 core.sort as s
 out.barChart as bar

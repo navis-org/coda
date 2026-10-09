@@ -54,7 +54,7 @@ const LEGEND: ReadonlyArray<[fam: string, shape: string, name: string, why: stri
   ['matrix', 'diamond', 'Matrix', 'labelled rows × columns'],
   ['matrix', 'hex', 'Network', 'nodes and links'],
   ['geometry', 'circle', 'Geometry', 'skeletons, meshes, synapse points'],
-  ['geometry', 'ring', 'Geometries', 'a socket taking any of those three'],
+  ['geometry', 'ring', 'Geometries', 'a socket that takes any of those three'],
 ]
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ const MAX_CARD_ROWS = 5
 function previewHTML(n: GuideNode): string {
   if (n.annotation) {
     return `<div class="note-card"><strong>Why this threshold</strong>
-      Below 10 synapses the partner list is mostly noise — see the tail of the weight
+      Below 10 synapses the partner list is mostly noise. See the tail of the weight
       histogram two nodes back.</div>`
   }
 
@@ -240,7 +240,7 @@ function portListHTML(n: GuideNode): string {
   const parts = [...n.inputs.map((p) => line(p, 'in')), ...n.outputs.map((p) => line(p, 'out'))]
   return parts.length
     ? parts.join('')
-    : '<p class="hint">No sockets — this node stands on its own.</p>'
+    : '<p class="hint">No sockets: this node isn’t connected to anything.</p>'
 }
 
 /**
@@ -308,8 +308,8 @@ function openHTML(n: GuideNode): string {
 
 function costLine(n: GuideNode): string {
   return n.cost === 'cheap'
-    ? 'Cheap — re-runs on its own as you edit, so a threshold moves the result live.'
-    : 'Expensive — reaches the network or chews CPU, so it goes stale and waits for Run.'
+    ? 'Cheap: re-runs automatically whenever you change something upstream or in its settings.'
+    : 'Expensive: fetches from a server or takes a while to compute, so it waits for you to press Run.'
 }
 
 let selected = 'neuron.connectivity'

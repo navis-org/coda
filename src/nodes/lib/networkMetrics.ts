@@ -36,7 +36,7 @@
  * summary reports `selfLoops` separately rather than hiding the discrepancy.
  */
 
-import type { TableSchema } from '../../core/types'
+import type { DType, TableSchema } from '../../core/types'
 import { column, isNumericDType, tableSchema } from '../../core/types'
 import type { ColumnData, NetworkValue, TableValue } from '../../core/values'
 import { getColumn, makeTable } from '../../core/values'
@@ -526,6 +526,35 @@ export function parseHistogramChoice(value: unknown): HistogramChoice {
   if (cut > 0 && column.length > 0 && SOURCES.includes(source)) return { source, column }
   return parseHistogramChoice(DEFAULT_HISTOGRAM_CHOICE)
 }
+
+// ---------------------------------------------------------------------------
+// What the card's scatter can encode
+// ---------------------------------------------------------------------------
+
+/**
+ * Columns a marker can be keyed on: text, booleans and whole numbers.
+ *
+ * A float has no categories — every value its own — so it is never offered. Whole numbers are,
+ * because the node table's labels are integers (`component`, Centrality's `community`).
+ */
+export const CATEGORICAL_DTYPES: DType[] = ['str', 'bool', 'i64']
+
+/** Whether an integer colour column is a quantity or a set of labels — `plotColorAs`. */
+export type ColorAs = 'value' | 'category'
+
+/** `plotColorAs`' options, read by the param and by the card's own switch. */
+export const COLOR_AS_OPTIONS: Array<{ value: ColorAs; label: string }> = [
+  { value: 'value', label: 'by value' },
+  { value: 'category', label: 'by category' },
+]
+
+/** A stored `plotColorAs` as one of its two values; anything else is the default. */
+export function readColorAs(value: unknown): ColorAs {
+  return value === 'category' ? 'category' : 'value'
+}
+
+/** The most bars the card's histogram will draw — the `bins` param's `max` and the card's input. */
+export const HISTOGRAM_MAX_BINS = 500
 
 // ---------------------------------------------------------------------------
 // Values — the half that runs on data

@@ -10,7 +10,7 @@ import { datasetNodesFor } from '../../nodes/dataset'
 export const catmaid: PackDefinition = {
   id: 'catmaid',
   label: 'CATMAID',
-  description: 'Manually traced datasets on CATMAID servers, such as FAFB and the L1 larva.',
+  description: 'Hand-traced datasets on CATMAID servers, such as FAFB and the L1 larva.',
   parent: 'connectome',
   keepsBuiltInIds: true,
   glyph: 'dataset.catmaid.fafb',

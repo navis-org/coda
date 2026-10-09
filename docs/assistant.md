@@ -128,6 +128,42 @@ annotation node to it. The worst offenders were `net.build` (renames your picked
 suffixed `_2`), `core.pivot` (column names are data, knowable only after a run), the annotation nodes
 (`cell_type` arrives as `type`) and `core.qualifyIds` (ids become the text `dataset:id`).
 
+**Stating the name was not enough for the one name that breaks the pattern.** Group By's count is
+`n`, the only aggregate outside `<agg>_<column>`, and the description already said *"a row count
+named `n`"*. Asked *"Find the CT1 neurons and chart their top downstream partner types"* beside a
+MaleCNS card, a model counting rows wired the chart to `count_postType` or `count_postId` — the
+pattern applied to the one name it does not cover. The column complaint that follows is exactly
+what the advisory round drops (`aboutColumns`, below), so nothing caught it.
+
+**The first fix was right about the name and wrong about the question**, and the second half is the
+one to keep in mind. Ten runs each, `gemma4:31b-cloud`, `lean`, the case above:
+
+| wording | charted | missing column |
+| --- | --- | --- |
+| stated only (`a row count named n`) | 6 `weight`, 2 `n`, 2 `count_*` | 2/10 |
+| + *"a chart of the count names `n`, never `count`…"* on Group By | 10 `n` | 0/10 |
+| + *"top partners … means the most synapses: sum `weight`"* on Group By | 3 `sum_weight`, 7 `n` | 0/10 |
+| + Bar Chart: *sums per category, so top partner types chart straight off Connectivity* | 10 `weight` | 0/10 |
+
+Every run of the second row counted rows: a sentence about how to chart a count reads as advice to
+chart one, and a partner ranking by **connection count** is not the one wanted — it is by synapses.
+Correcting that *on Group By* moved three runs in ten, because the model has decided to count
+("most frequent partner types", in its own summaries) before it reads Group By at all. The steer
+belongs **where the pipeline is chosen**, and the Bar Chart already sums its value per category, so
+`weight` straight off Connectivity *is* synapses per type.
+
+**Absolute wording over-steers, measurably.** Bar Chart's first version ended *"no Group By
+needed"*, and a second case — *"count the rows per partner type and chart that count"*, spelled out
+because *"how many connections"* is fairly read as synapses — charted `weight` 5 of 5, one card
+titled "Partner Type Counts". Conditioning it on *by synapses* and naming the count route beside it
+brought that to 4/5 `n`. Both cases are in `live.test.ts`. That wording then moved off Bar Chart
+entirely, because it named Connectivity's columns on a node every table reaches — see *What an
+output feeds*, below.
+
+Renaming `n` to fit the pattern was considered and not done: `n` rides along with *every*
+aggregation, and a rename would leave every saved downstream picker on `"n"` with nothing to
+migrate it — `formerId` is for params, not output columns.
+
 **A `carries:` line in the catalogue is rendered at the node's defaults**, which the same reader
 caught next: `core.reduceMatrix` advertises `label, mean`, and ticking a second statistic produces
 `label, mean, sd` with nothing saying so. That is worse than the silence above — a line that is
@@ -138,6 +174,14 @@ caught next: `core.reduceMatrix` advertises `label, mean`, and ticking a second 
 marking the line as "at the defaults", or probing each param the way `gateNote` already probes
 `visibleIf` — is not built: it would render for all 102 nodes, most of which have constant schemas,
 and probing a dataset node's params starts the listings `producedColumns` is careful not to.
+
+**Careful, as of 2026-09-28, and until then not.** `producedColumns` inferred a lone copy of every
+node type, and inferring a dataset node reads `peekDatasets` — so every question put a neuPrint, a
+CAVE and three CATMAID listings on the wire, and the neuPrint one reported a missing token straight
+into the Connections dialog. A node whose every output is a `Dataset` has no columns to print, so it
+is no longer probed; the prompt is byte-identical, and `assistant.test.ts` watches every source's
+peeks while rendering every entry. It renders entries rather than calling `buildSystemPrompt`, which
+is memoised and would leave the pin passing on whichever test built the prompt first.
 
 ### Live options on this node — `options:`
 
@@ -261,6 +305,30 @@ closes: `applyPlan` type-checks a plan and accepts two of those wired, and the a
 below is what then hands back the node's own `validate` line naming the port to disconnect. The
 same fact reaches the model twice, once before the plan and once after — which is not true of
 `producedBy`, whose absence produced a graph nothing complained about.
+
+### What an output feeds — `feeds`
+
+`producedBy`'s mirror, and it exists because the fix above landed on the wrong node. Bar Chart is
+general — any table reaches it — so a sentence naming `postType` and `weight` in its description was
+Connectivity's fact on somebody else's card. `PortDef.feeds` puts it on the port whose columns it
+names: a consumer, the clause it applies under, and the params a plan should set. `feedLines`
+renders each as a sentence in the `carries:` block, and a registry test checks that the consumer,
+its input, every param and every named column exist. Bar Chart keeps only what is true of Bar
+Chart (*it sums per category; a count of rows is a Group By's `n`*), and Group By only its names.
+
+Ten runs of the ranking case, five of the count case, `gemma4:31b-cloud`, `lean`:
+
+| what Connectivity's port declares | ranking → `weight` | count → `n` |
+| --- | --- | --- |
+| Bar Chart pairing only, as a recipe (*"add one, wire …, and set …"*) | 10/10 | **0/5** |
+| the same, conditioned (*"when asked to …; asked for anything else, follow the request"*) | — | **0/5** |
+| plus a Group By entry: *"when asked to count connections per partner type: … agg = count"* | **10/10** | **5/5** |
+
+**One stated recipe wins over the request**, conditioned or not: with only the ranking declared,
+all five count runs charted `weight` under a title saying "Counts". Declaring the alternative on the
+same port is what fixed it, so a port with a `feeds` entry for one reading of a request wants one for
+the other reading too. The *"follow the request"* clause stayed on every line; it was never measured
+on its own, having shown nothing where it was tried.
 
 ### A plan that is legal and still wrong — the advisory round
 

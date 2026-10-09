@@ -91,7 +91,7 @@ already knows roughly what they want and is scanning for the name.
 somebody deciding whether this is the node at all. Say what it is for, what it hands on, and the
 one thing that surprises people about it — the trade you made, the parameter that is not what it
 looks like, the failure it is easy to walk into. It is prose, not markdown: the guide renders it
-as a paragraph, and a subset parser there would be a second copy of `ui/markdown.ts` on a page
+as a paragraph, and a subset parser there would be a second copy of `core/markdown.ts` on a page
 that deliberately imports nothing.
 
 Collapsing the two would make one of them wrong: a palette row wrapping to four lines, or a guide
@@ -197,6 +197,13 @@ Two flags worth knowing:
 - `visibleIf: (params) => boolean` for conditional params. Hidden params are **excluded
   from the cache key**, so toggling an aggregation from `sum` to `count` doesn't leave a
   stale value column influencing freshness.
+- `whenWired: '<port>'` (or `true`, meaning a column picker's own `from`) draws the param only
+  while that input carries a wire — for a node with several optional sockets, each with settings
+  that mean nothing until it is wired (the Custom Dataset's). `visibleIf` cannot say this, seeing
+  params and never wiring. **Display only**: the param stays in the cache key, which costs
+  nothing since an unwired socket's settings reach no `evaluate`. Read by the card, its `… N more`
+  count and the inspector — **not by a node body**, which is handed no wiring, so
+  `paramFold.test.tsx` refuses the flag on a type with one.
 
 ### Always resolve column params through the context
 

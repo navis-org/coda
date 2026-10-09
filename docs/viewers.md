@@ -193,7 +193,7 @@ own `.download-button` positioning context, the menu being absolute against it.
 **`3M`** — a suffix meaning *million* beside a stored unit meaning *nano*, next to the figure every
 paper about a fly neuron quotes in millimetres.
 
-`formatMeasure(value, unit)` (`ui/format.ts`) walks nm → µm → mm → m, taking the coarsest rung the
+`formatMeasure(value, unit)` (`style/format.ts`) walks nm → µm → mm → m, taking the coarsest rung the
 value fills and **flooring at the finest** so a sub-nanometre length does not become `0 µm`:
 `2,980,158.182` reads `2.98 mm`, the giant fibre's `22,484,326` reads `22.48 mm`. Four rules:
 
@@ -248,7 +248,7 @@ has always been `String(cell)`, so before this the hover and the cell under it d
 
 **The rule is the name, because nothing in a `DType` can say it** — the gap `BuildNetwork`'s merge
 rule documents ("summing added `preId` up to 24093454514") and the one the upload node's
-`Text columns` exists for. `isIdentifierColumn` (`ui/format.ts`) reads the name's **last word**,
+`Text columns` exists for. `isIdentifierColumn` (`core/ids.ts`) reads the name's **last word**,
 split on separators and camelCase, covering `neuronId`, `preId`/`postId`, `partnerId`,
 `sourceId`/`targetId` and the `root_id` / `pt_root_id` spellings an uploaded CSV arrives under with
 no list to keep in step. A plain `endsWith('id')` is a different rule and a wrong one: `centroid` and
@@ -540,7 +540,7 @@ had to mean "all" for those files to gain anything.
 The viewer was never the culprit: `out.network` passes the network through and `filterNetwork`
 uses `selectRows`, which preserves the schema whole.
 
-**Encodings** live in `ui/encoding.ts` (resolution) and `nodes/lib/encodingParams.ts` (param
+**Encodings** live in `style/encoding.ts` (resolution) and `nodes/lib/encodingParams.ts` (param
 factories, headless). Never re-implement colour mapping in a viewer — the 8-slot cap, the
 achromatic Other fold, area-scaled sizes and null-as-grey are enforced in one place.
 `numeric()` exists because `Number(null)` is `0`, which silently painted missing data as the
@@ -687,7 +687,7 @@ saying why is the failure that note already exists to avoid.
 ### Shape, the channel that survives without colour
 
 **Six marks, and the sixth is the last one.** `resolveShape` sits beside `resolveColor` in
-`src/ui/encoding.ts` and mirrors it exactly — same frequency ranking so the commonest value gets
+`src/style/encoding.ts` and mirrors it exactly — same frequency ranking so the commonest value gets
 the most distinguishable mark, same `—` key for a null, same `Other` label, same override-wins
 rule — with one deliberate departure: **it folds where colour cycles.** Cycling a hue is
 survivable because there are twenty of them, the eye reads position too, and the caption admits
@@ -2078,7 +2078,7 @@ On for all four 3D sockets, Scatter's point colour and Network's **node** colour
 whose `by value` was withheld for the hairline measurement recorded above.
 
 **One arithmetic, lifted rather than copied.** `ColorDomain`, `normalize`, `rampDomain`,
-`RAMP_STEPS`, `bucketOf` and `rampColors` live in `ui/encoding.ts`, and the Heatmap and
+`RAMP_STEPS`, `bucketOf` and `rampColors` live in `style/encoding.ts`, and the Heatmap and
 `resolveColor` both read them; the typed ends go through `parseColorLimits`, which
 `readColorLimits` is now a caller of. So a palette name, an inverted pair being ignored, the
 symmetric centred ramp and the log's `log1p(v − lo) / log1p(span)` each mean one thing app-wide.
@@ -2184,18 +2184,90 @@ column and what a tooltip prints; _transformed space_ is that under the axis sca
 transformed, because that is the space the picture is linear in. `forward`/`inverse` are the
 only crossings and everything named `*T` is transformed.
 
-**`Max points` thins the drawing and nothing else — so it is presentational, and the Network Viewer
-viewer's filters are not.** That contrast is the whole of it. `out` is the input table
-unchanged, and a lasso is tested against **every usable row rather than the drawn sample**, so
-no output can tell whether a point was painted. `out.network`'s `minLinkWeight`/`topNodes`
-genuinely subtract from what it returns, which is why they stale everything downstream and
-carry an `affectsData` tab. Getting this backwards would have a graph go stale every time
-somebody raised a drawing cap, which reads as a scheduler bug.
+**Every row is drawn, and past `CIRCLES_MAX` (10,000) visible marks they are drawn on the GPU.**
+There was a `Max points`, a deterministic stride of 50,000, and it existed because a path of
+antialiased circles is Skia's raster at ~3.4 µs a mark. Measured by `pnpm probe:scatter-scale` on
+fish2's 129,325-neuron NBLAST embedding (M3 Max, devicePixelRatio 2, median frame while panning):
+10,000 circles 16.7 ms, 50,000 117 ms — so the old default was not smooth either — and 129,325
+420 ms. Issuing the path took 21 ms of that and the spec 3.4 ms; the rest was raster, worse on a card
+where marks overlap more. Nothing was culled, so a tenfold zoom with 4,261 marks in view still took
+50 ms. Now `buildScatter` culls to `spec.visible`, which the canvas pass, the hit index and the
+export all walk, and the count of it picks the pass: paths up to `CIRCLES_MAX`, pixels above.
 
-The sample is a **deterministic stride**, not a random draw: a random one reshuffles per
-render, so points would flicker in and out during a pan and the picture would never be the
-same twice. The caption says `showing 50,000 of 165,122`, in the same idiom as
-`labels thinned`.
+**The pixel pass is one WebGL2 context for the whole app (`scatterGl.ts`), with a CPU raster
+(`scatterRaster.ts`) as its fallback and as the export path — and the CPU raster was the first
+answer and was wrong.** A prototype stamping pixels into an `ImageData` measured 60 Hz at 129,325
+and was recommended on that number; it had stamped marks of ~2 device pixels where a real one is 6,
+five times less work. Built properly it took 103 ms a frame. Blending onto an *opaque* buffer — the
+plot background and grid written in first, so source-over needs no division and red and blue share
+one integer multiply — brought it to 67 ms at 2× and 18 ms at 1×, and that is the floor: the cost is
+the overdraw itself, 129,325 marks of ~113 device pixels over a 3.5M-pixel plot. `gl.POINTS` drew
+the same frame in 6.7 ms of main thread. **One context, not one per scatter**: the module owns an
+offscreen canvas, draws whichever scatter is repainting, and that scatter copies the frame into its
+own 2D canvas with `drawImage` *in the same task*, which is why `preserveDrawingBuffer` is off. The
+2D canvas keeps the background, grid, axes, trend and hover; only the marks and the selection rings
+go through the GPU. Every other WebGL user here is a viewer owning its own context, which the store
+and the dashboard ration carefully, so a scatter on every card would have been one more each.
+
+**A pan builds a frame of the marks, never the marks.** `ScatterMarks` (`buildMarks`) is
+everything a pan cannot change — the usable rows, each mark's coordinates *in transformed space*,
+its radius, colour and shape, the colour/shape buckets, the trend fits — and `ScatterSpec`
+(`buildScatter`) is one frame of it: the view, the ticks, `px`/`py` and `visible`. The viewer
+memoises them separately, so a pointer move during a pan projects stored numbers and does nothing
+else per mark. Before the split every frame re-read every cell through `cellNumber`, re-resolved
+every encoding, allocated two `Array(n)` of colours and shapes, rebuilt the hit grid, rebuilt a
+string key per row to find the selection, and re-uploaded ~2.5 MB to the GPU. Measured at
+129,325 marks on the GPU path (median per frame): building the frame 3.6 → 0.4 ms, the hit index
+1.1 → 0 ms, issuing the draw 2.9 → 0.1 ms; the marks cost 3–10 ms once. Four things follow:
+
+- **The GPU keeps the marks uploaded and moves a uniform.** Positions go up once as transformed
+  coordinates *less the data's centre*, and the vertex shader applies `viewAffine`'s scale and
+  offset — the one definition of the projection, which `projectX`/`projectY` and every frame also
+  read, so the shader holds no projection of its own to drift. Opacity is a uniform too, so neither
+  a pan nor an opacity drag uploads anything, and the trend's ink is the frame's, so a theme change
+  does not rebuild the marks either. The centring is not optional: float32 absolute positions would lose the low
+  digits of large values under a narrow view, and the probe draws the parity mark again with every
+  coordinate offset by 10,000,000 and gets the identical footprint. Uploads are kept per marks
+  object, eight at most (`MARKS_KEPT`), least recently drawn deleted — a dashboard repaints
+  several scatters in turn, and a `WebGLBuffer` is only freed when somebody says so. The lookup is
+  a `WeakMap`, so the eight uploads do not pin eight sets of ~6 MB of arrays after their viewers
+  let go; `LruMap` holds keys strongly and has no eviction hook, which is why it is not used. The GPU draws
+  the whole set and clips; culling to `visible` is a CPU concern, where `CIRCLES_MAX` is counted.
+- **Selection indices are positions in the marks**, so the `selectedIndices` memo keys on the marks
+  and the selection, and survives every pan.
+- **The hit index is built on its first query.** A pan makes a spec per pointer move and hovers
+  none of them, so an eager grid was a hundred thousand entries built and discarded per frame.
+- **Stacking order is the marks'**: `markBuckets` runs once over every mark, recording each mark's
+  bucket, and `visibleBuckets` sorts a frame's visible marks into those buckets in one pass over
+  `visible` — so it costs what is on screen, and keeps the order — so the GPU pass (all marks) and the circle path
+  and CPU raster (visible marks) stack categories identically.
+
+`scatterRebuild.test.tsx` drives a real pointer pan and asserts frames are rebuilt and the marks are
+not; the rest is `pnpm probe:scatter-scale`.
+
+**Crossing the threshold must not change the picture**, so three things are shared rather than
+matched. *Stacking*: `markBuckets` is the one batching, its order the draw order in all three
+painters — the path pass used to bucket by a `colour|shape` string per mark per frame, and a second
+batching would stack categories differently either side of 10,000. *Composite*: premultiplied
+source-over at the node's `Opacity`, which is what `globalAlpha` does to a path; last-write-wins was
+faster and discarded `Opacity`. *Shape*: `markStamp`'s coverage (a 4×4 supersample per shape and
+size) is what the CPU raster stamps and what the GPU's texture array is built from, so an outline
+has one definition. The probe draws one isolated mark with its selection ring either side of the
+threshold and compares: same centre colour, footprint 100.3% of the path's. The selection ring on
+the GPU is analytic, its radius depending on the mark's.
+
+**The export carries the plot area as one PNG past the same threshold**, axes, ticks, labels and
+legend staying vector — matplotlib's `rasterized=True`. Measured at 129,325: 2.8 MB in 359 ms, against
+5.7 MB of vector marks. `Vector marks` opts back in. The image is the CPU raster at 4×, opaque, so it
+carries the grid drawn into it over the vector grid beneath; where the browser cannot encode a PNG,
+the export falls back to vector marks rather than to none. `Vector marks` is presentational for the
+reason everything on the tabbed panel is: no output can tell.
+
+Two smaller findings from the same work. The hit index used to bucket every mark, and `cellOf`
+clamps off-plot positions to the border cells, so a zoom into one cluster piled the rest of a
+whole-dataset embedding along the edges and a hover there walked it — it indexes `visible` now. And
+a stored `maxPoints` is simply an undeclared param, which `normalizeParams` ignores; it was
+presentational, so no provenance key moved.
 
 **Selection is by id, with the row index as an admitted fallback.** `nodes/lib/rowIds.ts` owns
 it and _both_ the viewer and the node import it — what a selected point is called has to mean
@@ -2303,6 +2375,62 @@ state distinguishes _not known yet_ from _nothing to pick_. See invariant 5's co
 **No visual verification exists.** jsdom has no canvas beyond the accept-everything stub, so
 the marks have not been looked at by anyone; what is checked is the geometry, the exported SVG
 and the caption. Same standing as the WebGL viewers.
+
+### Labels beside the points, and the tooltip's extra columns
+
+From BigClust: once at most `Label up to` (400) points are in view, each is named beside its dot
+by the `Label` column. `scatterLabels.ts`' `placePointLabels` is BigClust's placement (`label_placement.py`) and its
+choices, measured against the source rather than recalled: **greedy in priority order, first
+free slot wins** — eight boxes per point, right first, then the diagonals, left, above, below;
+every mark in view an obstacle whether labelled or not, so a name never covers a neighbour's dot;
+a uniform grid for the collision test; **the previous slot tried first**, so a pan does not flip
+a label to the other side of its point; **selected marks' labels placed first**. Unplaced labels
+are left out or drawn faintly, under the rest, and the caption counts what was left out or says to
+zoom in while more than the cap are in view. Pure over positions and measured text, so jsdom
+tests it.
+
+One departure, chosen: **screen-pixel text** (`LABEL_FONT_PX`, in `canvasFont`'s `--font-ui` face
+and measured by the shared `textMeasurer`, so the SVG's `text` is the face the box was sized in), where BigClust sizes in data units
+so its labels grow with the zoom. Coda's charts keep text one readable size, so a zoom re-solves
+— `pnpm probe:scatter-labels` measured 0.4–0.9 ms for 265–664 points in view on fish2, and the
+measured box (`measureLabel`, in the painter's own font) never short of the drawn text. A label
+is haloed in the background (`textNode`'s outline in the export), and the SVG carries labels and
+leader lines as on screen. **Group labels** — one per value at each spatial cluster's centre —
+are deferred; BigClust's island split is quadratic and only safe under its cap.
+
+`Hover shows` lists columns **after** the tooltip's own rows (label, x, y, the colour and shape
+columns), leaving out any already shown: adding to the defaults rather than replacing them, so
+picking one extra column cannot make the tooltip stop naming what the colours mean. All five
+controls are presentational — none changes `Selected`.
+
+### Search, in the strip
+
+BigClust's search, on the expanded card: `⌕` opens a second bar under the strip — a box, a count,
+`‹ ›`, `◎` to select every hit (Shift adds, the lasso's own modifier rule), and `⋯` for the column
+searched (label and id by default, as the Network Viewer's Find), whole value, case and regex.
+`pointSearch.ts` is the matching and reuses Coda's grammar rather than adding a third: a leading
+`/` is a pattern (`bareRegex`), an uncompilable one is said (`regexError`), and Exact anchors as
+`anchoredPattern` does. **Stepping pans and never zooms** — finding a point is not a reason to
+change a scale somebody chose — and rings the hit with the hover ring while its tooltip opens at
+the mark; every hit is a **dashed** ring, so a search reads apart from a selection's solid ones, and
+it is drawn over the pixel pass too, a zoomed-out embedding being where finding a point is hardest.
+The search is view state: nothing reaches the document until `◎` writes a selection.
+
+**The strips are siblings of the plot box, not children of it**, as the Network Viewer's and the
+Heatmap's already were. Shipped inside it, the ⌕ did nothing to a mouse: the press bubbled to the
+plot, which starts a pan by taking pointer capture, and the browser then delivers the release — and
+so the click — to the capturing plot rather than the button. A scripted `.click()` and jsdom's
+`fireEvent` both skip that path, so the first build passed every test and opened in a probe that
+clicked from script; only `Input.dispatchMouseEvent` (a real press) reproduces it, and the fix was
+checked that way in both directions. The test pins the cause — no capture taken for a press on the
+strip — rather than the click. (The first fix stopped the events on the strip instead; moving it
+out removes the thing to stop.) The viewers built on `usePanGesture` keep their strips inside but
+capture only past the drag slop, so a click still lands. Also from that pass: the label texts are
+built once per search rather than per keystroke (formatting a numeric column of 129,325 rows was
+1.5 s a keystroke), the hit cursor is kept *with the list it indexes* so opening the menu does not
+start it over, hit rings go plain past 2,000, the menu closes on an outside press or Escape, and the
+Network Viewer's Find matches through the same `pointSearch.ts`, so `/pattern` means one thing in
+both boxes.
 
 ## Histogram, pie and box plot
 
@@ -3129,7 +3257,7 @@ Width is already the quantity, and on a diagram of thirty labels a categorical p
 stops meaning anything. Pointing `Band colour` at the from or to column is one click for somebody
 tracing a stream, and then it earns its place. The bands take their colour from the row they came
 from, through `resolveColor` on the input table — so the palette, the frequency ranking, the
-cycling and the legend are all `ui/encoding.ts`' and none of it is re-derived here.
+cycling and the legend are all `style/encoding.ts`' and none of it is re-derived here.
 
 ### What was checked in a real browser
 
@@ -4182,6 +4310,26 @@ Same-origin only, since it reuses the same read `spliceSegments` needs, and it d
 way: no proxy, no memory, and the embed behaves as it did. The frame in `Neuron Profile` passes no
 `viewerId` and so remembers nothing — it is a tile showing one neuron at the published framing,
 with no identity of its own to hand anything to.
+
+### No bounding boxes, written as `bounds: false` on every volume source
+
+Asked for: no scene Coda shows draws the volume's bounding box, a wireframe round the whole
+dataset that on a card is mostly box. Removing `"bounds": true` where a state said it was not
+enough, and the reason is measured: a **bare URL source gets neuroglancer's default subsources, and
+`bounds` is one** — hemibrain's segmentation as a bare URL draws the box, and as
+`{ url, subsources: { bounds: false } }` it does not while its meshes still load (screenshotted
+through the dev server's `/ng` proxy). The published neuPrint states list their subsources without
+`bounds`; the scenes Coda builds itself (a BigClust Scene, a Neuroglancer Source's layers) are bare
+URLs, which is where the box came from.
+
+So `sceneForViewer` writes `bounds: false` on every source of an **image or segmentation** layer
+(annotation layers have no such subsource), turning a bare URL into `{ url, subsources }` and
+keeping every other key. Two orderings matter. It runs **after** the graphene rewrite — and that
+rewrite now reads a source through `sourceUrl`, whichever spelling it is in, because a scene re-sent
+from a link already carries the object form; reading only strings, a FlyWire scene re-targeted to
+the Seung-lab fork kept a `middleauth+` that fork refuses (the viewer suite caught it). And **not
+for the Seung-lab fork**, whose older format is not known to take the object spelling — it gets the
+bare URL back.
 
 ### The Neuroglancer frame is handed between surfaces, not reloaded
 

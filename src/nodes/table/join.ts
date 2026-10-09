@@ -39,9 +39,11 @@ registerNode({
   label: 'Join',
   category: 'transform',
   description:
-    'Annotate the left table with matching rows from the right table. A right-hand column colliding with a left-hand name is suffixed, `_r` by default.',
+    'Add columns from the right table to the left table, matching rows on a key column in each. A right-hand column whose name is already on the left is suffixed, `_r` by default.',
   guide:
-    'Annotate the left table with matching rows from the right. Join type decides which rows survive: left keeps every left row, inner only matches, outer all rows, right every right row. Right-hand columns that collide get a suffix rather than being dropped. Chain for more tables.',
+    'Adds columns from the right table to the left table, matching rows on a key column in ' +
+    'each. Type decides which rows are kept (left, inner, outer or right). Typically used to ' +
+    'attach annotations to a neuron table; chain several Joins to combine more tables.',
   cost: 'cheap',
   inputs: [
     { id: 'left', label: 'Left', type: T.table() },
@@ -89,9 +91,9 @@ registerNode({
         // dtype under every picker downstream is not something to discover after a run.
         const key = joinKeyDType(left, right, spec)
         issues.push(
-          `Key dtypes differ (${spec.leftKey}: ${l.dtype}, ${spec.rightKey}: ${r.dtype}) — ` +
-            `matched as text.` +
-            (key ? `, and "${spec.leftKey}" comes out as ${key}` : ''),
+          `The two keys have different types (${spec.leftKey}: ${l.dtype}, ${spec.rightKey}: ${r.dtype}), ` +
+            `so they are matched as text` +
+            (key ? ` and "${spec.leftKey}" comes out as ${key}.` : '.'),
         )
       }
     }
@@ -104,7 +106,8 @@ registerNode({
     if (!isTableValue(left)) throw new Error('Left input is not a table')
     if (!isTableValue(right)) throw new Error('Right input is not a table')
     const spec = specOf(ctx)
-    if (!spec.leftKey || !spec.rightKey) throw new Error('Both join keys must be selected')
+    if (!spec.leftKey || !spec.rightKey)
+      throw new Error('Pick both `Left key` and `Right key`.')
     return { out: joinTables(left, right, spec) }
   },
 })

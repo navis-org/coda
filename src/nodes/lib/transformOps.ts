@@ -406,8 +406,8 @@ export function checkWarpSize(ctx: Warner, points: number, landmarks: number): v
   ctx.warn(
     `Warping ${points.toLocaleString()} points through ${landmarks.toLocaleString()} ` +
       `landmarks is ${describeDuration(product / WARP_PRODUCTS_PER_SECOND)}, ` +
-      `single-threaded. Warping anyway — cancel and fetch fewer neurons, take a ` +
-      `coarser Detail, or turn Warp off for a plain flip.`,
+      `single-threaded. Warping anyway. To make it faster, cancel and fetch fewer neurons, ` +
+      `choose a coarser \`Detail\`, or turn \`Warp\` off for a plain flip.`,
   )
 }
 
@@ -443,8 +443,8 @@ export function kindClashMessage(
 ): string {
   return (
     `${first.name} is ${first.noun} and ${other.name} is ${other.noun}. These are different ` +
-    'kinds of geometry and cannot share one collection — wire them to separate ports on the 3D ' +
-    'View instead.'
+    'kinds of geometry and cannot be stacked into one collection. Wire them to separate ports ' +
+    'on the 3D View instead.'
   )
 }
 
@@ -482,48 +482,6 @@ export function frameClash(
     return { axis: 'space', left: left.space, right: right.space }
   }
   return undefined
-}
-
-/**
- * Refuse coordinates that are not nanometres, naming the side.
- *
- * A refusal rather than a warning, and that is forced rather than chosen: there is no run-time
- * warning channel that survives a result being restored from cache instead of recomputed. Given
- * the choice between silence and a stop, a comparison whose every number would be wrong should
- * stop.
- *
- * **Absent units are allowed through.** Absent means unknown, and no source produces it today —
- * every geometry value from either source says `nm` or `voxels`. Refusing on it would refuse on a
- * fact nobody stated, which is the same distinction `columnSchemaFor` draws between a schema that
- * is missing and one that is empty.
- *
- * Here rather than in `nblastOps.ts`, where it began, for `frameClashMessage`'s reason one line
- * down: three nodes refuse on this and nothing about the diagnosis is NBLAST's. What each of them
- * supplies is `consequence` — the one clause that genuinely differs, which for NBLAST is a
- * mis-scaled score and for `Distance between` is a number labelled µm that is out by a voxel.
- *
- * Every parameter is **required**, which is the one thing about this signature worth arguing
- * about. The type is structural — any geometry value satisfies it — so a defaulted noun means a
- * caller that forgets these strings gets a grammatically perfect error about *skeletons* when it
- * holds a set of meshes: silently wrong prose, in the one guard rail whose entire job is to name
- * the cause. Required, that caller fails to compile instead.
- */
-export function checkGeometryUnits(
-  side: string,
-  geometry: { units?: string },
-  /** What to call the geometry, and which node's footer to point at. */
-  noun: string,
-  sourceNode: string,
-  /** What goes wrong here, as a whole sentence. */
-  consequence: string,
-): void {
-  if (geometry.units === undefined || geometry.units === 'nm') return
-  throw new Error(
-    `${side} ${noun} are in ${geometry.units}, not nanometres, so ${consequence} This happens ` +
-      `when the dataset's Meta publishes no voxelSize or no unit this build recognises, so the ` +
-      `fetch had nothing to convert with — the ${sourceNode} node's footer says which units it ` +
-      `got.`,
-  )
 }
 
 /**
@@ -567,16 +525,15 @@ export function frameClashMessage(
  * that one.
  *
  * So the remedy is here rather than in each caller's sentence, which is the same move
- * `checkGeometryUnits` made one function up: what genuinely differs per card is the
+ * `checkGeometryUnits` (`data/units.ts`) made one function up: what genuinely differs per card is the
  * *consequence*, and what does not is what to do about it.
  */
 export function spaceRemedy(clash: FrameClash): string {
   return toCommonFor(clash.left as TemplateSpaceId) &&
     toCommonFor(clash.right as TemplateSpaceId)
     ? 'Put them through Transform Neurons first.'
-    : 'Coda ships no route from one of these into a shared frame — where the two spaces are ' +
-        'different animals there is no such registration to ship — so there is no step that ' +
-        'would make this comparison mean anything.'
+    : 'Coda has no transform between these two spaces (they may be different animals), so ' +
+        'they cannot be compared.'
 }
 
 function lowerFirst(text: string): string {
@@ -659,8 +616,8 @@ export function checkStackable(inputs: readonly GeometryValue[]): StackedFrame {
           { left: stackInputName(stated.input), right: where },
           {
             units:
-              'Stacked, part of the collection would be drawn at the wrong scale with nothing ' +
-              'to say so.',
+              'Stacked, part of the collection would be drawn at the wrong scale without any ' +
+              'warning.',
             space: 'This would draw two clouds in opposite corners of an empty scene.',
           },
         ),
@@ -829,9 +786,9 @@ export function landmarkTriple(
        */
       if (typeof cell !== 'number' || !Number.isFinite(cell)) {
         throw new Error(
-          `Row ${row + 1} of "${name}" is not a finite number. A spline interpolates its ` +
-            `landmarks exactly, so one missing coordinate drags every neuron near it to the ` +
-            `origin.`,
+          `Row ${row + 1} of "${name}" is not a finite number. A spline passes exactly through ` +
+            `its landmarks, so one missing coordinate would drag every neuron near it to the ` +
+            `origin. Fix or remove that row.`,
         )
       }
       out[row * 3 + axis] = cell * scale

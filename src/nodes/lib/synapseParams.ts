@@ -74,8 +74,8 @@ export function minConfidenceParam(lead: string): ParamDef {
     step: 0.05,
     advanced: true,
     help:
-      `${lead} The scale belongs to the data source — 0–1 on neuPrint, a tracer’s 1–5 on ` +
-      'CATMAID, cleft_score on FlyWire. Sources without one say so and return everything.',
+      `${lead} The scale depends on the source: 0–1 on neuPrint, 1–5 on CATMAID, cleft_score ` +
+      'on FlyWire. Sources without a score say so and return everything.',
   }
 }
 
@@ -147,7 +147,7 @@ export function synapseUnitParam(): ParamDef {
     id: SYNAPSE_UNIT_PARAM,
     kind: 'enum',
     label: 'Rows',
-    help: 'What one point counts. A presynaptic site drives several partners, so "one row per connection" repeats it once each while "one row per site" returns it once. "Automatic" takes what this source has.',
+    help: 'What each row counts. A presynaptic site with several partners appears once per partner with "one row per connection" and once with "one row per site". "Automatic" uses what the source has.',
     default: '',
     catalogueNote: synapseUnitVocabulary(),
     optionsWithoutPeek: true,

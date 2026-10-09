@@ -175,7 +175,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
     const unknown = unknownTypeOf(node, def)
     if (!def || unknown !== undefined) {
       const type = unknown ?? node.type
-      warnings.push(`Unknown node type "${type}" — emitted as a comment.`)
+      warnings.push(`Unknown node type "${type}". It was written as a comment.`)
       // It binds nothing, so everything downstream is blocked — which is exactly what a TODO
       // step is, and a surface warning about them would otherwise miss the worst case there is.
       todos.push({ nodeId, label: node.title || type })
@@ -194,9 +194,9 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
         source: [
           header,
           ...pyComment(
-            'Muted on the canvas, so it produced nothing and nothing downstream of it ' +
-              'ran. Left here rather than dropped, because a node missing from the ' +
-              'notebook and a node deliberately switched off look identical otherwise.',
+            'This node is muted on the canvas, so it produced nothing and nothing downstream of it ' +
+              'ran. It is kept here so a muted node is not mistaken for one missing from ' +
+              'the notebook.',
           ),
         ],
       })
@@ -310,7 +310,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
     } else if (blockedBy.length > 0) {
       blockedHere = true
       body = ctx.todo(
-        `nothing upstream produced a value — ${quoted([...new Set(blockedBy)])} ` +
+        `nothing upstream produced a value, because ${quoted([...new Set(blockedBy)])} ` +
           `${blockedBy.length === 1 ? 'was' : 'were'} not translated.`,
       )
     } else if (!emitter) {
@@ -328,9 +328,10 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
        */
       const named = backendName(foreign)
       warnings.push(`${def.label} has no ${named} equivalent yet.`)
+      const written = listed(emitterBackends(def.type).map(backendName))
       body = ctx.todo(
         `"${def.label}" is wired to a ${named} dataset, but its notebook cell has only ` +
-          `been written for neuPrint. The dataset itself is a real client, so fill this ` +
+          `been written for ${written}. The dataset is bound above, so fill this ` +
           `step in by hand.`,
       )
     } else {
@@ -404,7 +405,11 @@ function setupCell(modules: Map<PyModule, Set<string>>): Cell {
 
   const pip = entries.map(([m]) => MODULES[m].pip).filter((p): p is string => !!p)
   const lines: string[] = []
-  if (pip.length > 0) lines.push(`# pip install ${[...new Set(pip)].sort().join(' ')}`, '')
+  // A spec with extras is quoted, or zsh reads its brackets as a glob and refuses the paste.
+  const shellQuoted = (name: string) => (/[[\]]/.test(name) ? `'${name}'` : name)
+  if (pip.length > 0) {
+    lines.push(`# pip install ${[...new Set(pip)].sort().map(shellQuoted).join(' ')}`, '')
+  }
 
   for (const [module, names] of entries) {
     const spec = MODULES[module]

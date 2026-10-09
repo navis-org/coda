@@ -21,6 +21,7 @@
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
 import { PROVIDERS, providerFor } from './providers'
+import type { StoredSignIn } from '../signIns'
 
 /**
  * The per-provider values, as one table.
@@ -284,4 +285,12 @@ export function resetCredentials(): void {
     if (legacy) writeStorage(legacy, undefined)
     for (const entry of PROVIDERS) writeStorage(FIELDS[field].prefix + entry.id, undefined)
   }
+}
+
+/** The Storage tab's entry: a key per provider, and the one from when Anthropic was the only one. */
+export const SIGN_IN: StoredSignIn = {
+  service: 'AI assistant',
+  keys: LEGACY.key ? [LEGACY.key] : [],
+  prefixes: [FIELDS.key.prefix],
+  stored: () => PROVIDERS.some((entry) => getKey(entry.id) !== undefined),
 }

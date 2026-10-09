@@ -70,22 +70,25 @@ import {
   parseSceneUrl,
   proxiedViewer,
   sceneIdentity,
+  patchUrl,
   scenePatchUrl,
   viewerKind,
   sceneUrl,
   ownedLayerNames,
   spliceSegments,
   splitSceneUrl,
+  layerPanelPatch,
+  withLayerPanel,
 } from '../../data/neuroglancer/scene'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { errorMessage } from '../../core/errors'
-import { describeLegend, resolveColor } from '../encoding'
+import { describeLegend, resolveColor } from '../../style/encoding'
 import { copyText } from '../export'
 import { RootRegistry } from './persistentRoots'
 import type { RootLease } from './persistentRoots'
 import { forgetScene, recallScene, rememberScene } from './sceneMemo'
 import { ViewerActions } from './ViewerActions'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import { ViewerEmpty } from './ViewerEmpty'
 
 export interface NeuroglancerViewerProps {
@@ -138,6 +141,10 @@ export interface NeuroglancerViewerProps {
    * neuron that is plainly drawn — which the profile's 3D tile did until this existed.
    */
   summary?: string | undefined
+  /**
+   * A small surface: button labels go, and so does neuroglancer's layer bar — in the frame only,
+   * never in the link ↗ and ⧉ hand out. See `withLayerPanel`.
+   */
   compact?: boolean
   baseName?: string
   onExpand?: () => void
@@ -186,7 +193,14 @@ interface HeldFrame {
   frame: HTMLIFrameElement
   /** What the frame was last pointed at, so the next change knows how to apply itself. */
   applied:
-    | { url: string; base: string; identity: string; viewerType?: ViewerKind | undefined }
+    | {
+        url: string
+        base: string
+        identity: string
+        viewerType?: ViewerKind | undefined
+        /** Whether the layer bar was last sent shown — see `withLayerPanel`. */
+        layerPanel: boolean
+      }
     | undefined
   /** Whether a document has finished loading in the frame, i.e. whether there is state to merge into. */
   loaded: boolean
@@ -372,7 +386,24 @@ export function NeuroglancerViewer({
     // normalises — so flipping the control alone leaves this guard true and the frame showing
     // the scene built for the other one. The prop rather than the resolved kind, since
     // `viewerKind` is a pure function of the URL that is already being compared.
-    if (kept.applied?.url === url && kept.applied.viewerType === viewerType) return
+    const shownBar = !compact
+    const was = kept.applied
+    const sameScene = was?.url === url && was.viewerType === viewerType
+    if (sameScene && was.layerPanel === shownBar) return
+
+    /*
+     * Only the surface changed — a kept frame moving between card and overlay. The bar goes on its
+     * own, so no layer is rebuilt and no pointer hold applies. Only into a *loaded* document: a
+     * patch as the opening navigation would leave a scene of nothing but the bar.
+     */
+    if (sameScene && kept.loaded) {
+      kept.frame.src = patchUrl(
+        sameOriginViewer(was.base) ?? was.base,
+        layerPanelPatch(shownBar),
+      )
+      kept.applied = { ...was, layerPanel: shownBar }
+      return
+    }
 
     /*
      * Nothing is written into a document somebody has the pointer in — see `pointerInside`.
@@ -461,10 +492,17 @@ export function NeuroglancerViewer({
             )
           : undefined
       const scene = spliced ?? split.scene
+      // A merge carries the bar only when it changed, so one toggled inside the viewer survives a
+      // selection; a full navigation always takes this surface's, a resumed state being the card's.
       kept.frame.src = canMerge
-        ? scenePatchUrl(frameBase, scene, kind)
-        : sceneUrl(frameBase, scene, kind)
-      kept.applied = { url, base: split.base, identity, viewerType }
+        ? scenePatchUrl(
+            frameBase,
+            scene,
+            kind,
+            applied?.layerPanel === shownBar ? undefined : layerPanelPatch(shownBar),
+          )
+        : sceneUrl(frameBase, withLayerPanel(scene, shownBar), kind)
+      kept.applied = { url, base: split.base, identity, viewerType, layerPanel: shownBar }
     }
 
     /*
@@ -482,7 +520,7 @@ export function NeuroglancerViewer({
     return () => clearTimeout(timer)
     // `reloadCount` belongs here: the lease it swaps holds a frame that has applied nothing, and
     // this effect is what points it somewhere.
-  }, [url, reloadCount, viewerType, datasetId, extraLayers, viewerId, pointerInside])
+  }, [url, reloadCount, viewerType, datasetId, extraLayers, viewerId, pointerInside, compact])
 
   /*
    * Recomputed rather than carried on the value: same table, same spec, same palette, so it

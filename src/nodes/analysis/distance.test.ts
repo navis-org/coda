@@ -189,7 +189,9 @@ describe('the node', () => {
 
   it('refuses geometry that is not in nanometres rather than labelling voxels µm', async () => {
     const voxels = { ...skeletons(2000), units: 'voxels' as const }
-    await expect(run({}, { query: voxels })).rejects.toThrow(/not nanometres/)
+    await expect(run({}, { query: voxels })).rejects.toThrow(
+      /are in voxels. They must be in nanometres/,
+    )
   })
 
   it('refuses two template spaces, which would be plausible and meaningless', async () => {

@@ -97,7 +97,7 @@ describe('buildCommandItems', () => {
     const item = byId(commands(), 'cmd:export-notebook')
     expect(item.disabled).toBe(true)
     expect(item.hint).toContain('Demo Data')
-    expect(item.hint).toContain('swap in a real dataset')
+    expect(item.hint).toContain('replace it with a real dataset')
   })
 
   it('enables Export as Jupyter Notebook once the dataset is a real one', () => {
@@ -357,10 +357,13 @@ describe('buildNodeItems', () => {
   it('filters to nodes that can feed a dragged input type', () => {
     const items = nodeItems({ type: T.dataset(), from: 'target' })
     const types = items.map((i) => i.nodeType)
-    // Every dataset node outputs a Dataset, and nothing else does.
+    // Every dataset node outputs a Dataset, and nothing else does but BigClust Project, whose
+    // Scene is a datasource for the Neuroglancer node. Asked of the category rather than the id:
+    // a pack's dataset node is `pack:name` (`connectome:customDataset`).
     expect(types).toContain('dataset.malecns')
     expect(types).toContain('dataset.neuprint')
-    expect(types.every((t) => t?.startsWith('dataset.'))).toBe(true)
+    const others = types.filter((t) => getNodeDef(t ?? '')?.category !== 'dataset')
+    expect(others).toEqual(['annotation:bigclust'])
     expect(byId(items, 'node:dataset.malecns').portId).toBe('dataset')
   })
 
@@ -746,7 +749,7 @@ describe('breadcrumbs on the real item list', () => {
   it('uses the middle segment where it earns its place', () => {
     expect(rowFor('Dark')).toBe('View ▶ Theme ▶ Dark')
     expect(rowFor('Find Neurons')).toBe(
-      'Add ▶ Query ▶ Find Neurons ▶ Search a dataset for neurons, by any field the dataset publishes.',
+      'Add ▶ Query ▶ Find Neurons ▶ Searches a dataset for neurons by any field the dataset publishes.',
     )
   })
 })

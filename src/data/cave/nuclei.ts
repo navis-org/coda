@@ -92,7 +92,7 @@ async function ask(
       columns: ['id', 'pt_root_id', 'pt_position'],
       resolution: [1, 1, 1],
     },
-    { consequence: 'Some neurons would be missing their soma.' },
+    { consequence: 'some neurons would be missing their soma' },
     options,
   )
   const found = new Map<NeuronId, Position | null>()

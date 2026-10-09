@@ -35,7 +35,7 @@ import {
   cornerClip,
 } from '../../data/neuronbridge/views'
 import { isTypingTarget } from '../appShortcuts'
-import { formatNumber } from '../format'
+import { formatNumber } from '../../style/format'
 import { Modal } from '../Modal'
 import { Pager } from './Pager'
 

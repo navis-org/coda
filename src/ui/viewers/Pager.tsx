@@ -7,7 +7,7 @@
  * collections have filtered out). A fragment, so it sits in whichever row holds it.
  */
 
-import { formatNumber } from '../format'
+import { formatNumber } from '../../style/format'
 
 export interface PagerProps {
   /** The current position, 0-based; -1 for none. */

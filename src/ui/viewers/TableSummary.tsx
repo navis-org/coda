@@ -17,7 +17,7 @@
  */
 
 import type { TableValue } from '../../core/values'
-import { formatCell } from '../format'
+import { formatCell } from '../../style/format'
 
 /**
  * How much of a value is shown.

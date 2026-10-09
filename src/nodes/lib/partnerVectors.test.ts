@@ -147,7 +147,7 @@ describe('which end was the query', () => {
         { partnerBy: 'id', untyped: 'id', weightColumn: 'weight', weighting: 'raw' },
         SILENT,
       ),
-    ).toThrow(/which end of an edge was the query/)
+    ).toThrow(/which end of each edge is the query neuron/)
   })
 })
 
@@ -268,7 +268,9 @@ describe('what it says about an input it cannot use', () => {
       column('postId', 'i64'),
       column('weight', 'i64'),
     )
-    expect(partnerVectorIssues(noDirection, 'id', false)[0]).toMatch(/Neurons input/)
+    expect(partnerVectorIssues(noDirection, 'id', false)[0]).toMatch(
+      /wire the query neurons into `Neurons`/i,
+    )
     expect(partnerVectorIssues(noDirection, 'id', true)).toEqual([])
   })
 })
@@ -324,7 +326,7 @@ describe('a shared label space', () => {
   it('says how many connections it dropped for want of a label', () => {
     const messages: string[] = []
     vectors({ labels: LABELS }, { warn: (m) => messages.push(m) })
-    expect(messages.join(' ')).toMatch(/mapping does not cover/)
+    expect(messages.join(' ')).toMatch(/partner has no match in the other dataset/)
   })
 
   it('leaves the two existing rules exactly as they were when nothing is wired', () => {

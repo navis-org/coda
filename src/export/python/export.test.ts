@@ -13,19 +13,22 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-import { addNode, emptyGraph } from '../../core/graph'
+import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { ParamValues } from '../../core/node'
 import { allNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import { exportNotebook } from './exporter'
-import { caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
+import { caveGraph, customGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
 import { getEmitter } from './registry'
 import { serializeNotebook } from './notebook'
 import { inputPorts, outputPorts } from '../../core/ports'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
+import { holdLocalFile, readTableFileSummary } from '../../data/files/registry'
 
 const GOLDEN = new URL('./__fixtures__/everything.ipynb', import.meta.url).pathname
 const CAVE_GOLDEN = new URL('./__fixtures__/cave.ipynb', import.meta.url).pathname
+const CUSTOM_GOLDEN = new URL('./__fixtures__/custom.ipynb', import.meta.url).pathname
 
 /** Fixed, so the golden file does not change every time it is written. */
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
@@ -45,8 +48,8 @@ function exportFixture(graph = everythingGraph()): string {
   return serializeNotebook(result.notebook)
 }
 
-/** Both fixture graphs, since the CAVE half is its own for the reason `fixture.ts` records. */
-const FIXTURES = [everythingGraph, caveGraph]
+/** Every fixture graph: the CAVE and Custom halves are their own for the reason `fixture.ts` records. */
+const FIXTURES = [everythingGraph, caveGraph, customGraph]
 
 describe('the fixture itself', () => {
   /*
@@ -105,6 +108,66 @@ describe('notebook export', () => {
     expect(actual).toEqual(readFileSync(CAVE_GOLDEN, 'utf-8'))
   })
 
+  it('matches the golden Custom Dataset notebook', () => {
+    const actual = exportFixture(customGraph())
+    if (process.env.UPDATE_GOLDEN) {
+      writeFileSync(CUSTOM_GOLDEN, actual)
+      return
+    }
+    expect(actual).toEqual(readFileSync(CUSTOM_GOLDEN, 'utf-8'))
+  })
+
+  it('answers every query below a Custom Dataset from its helper, never neuprint-python', () => {
+    const source = notebookText(customGraph())
+    expect(source).not.toContain('TODO')
+    expect(source).not.toContain('NeuronCriteria')
+    expect(source).toContain('CodaCustomDataset(')
+  })
+
+  it('routes a lender\u2019s geometry at export: navis for neuPrint, a note for CAVE', () => {
+    let g = emptyGraph('lenders')
+    g = addNode(g, node('hemi', 'dataset.hemibrain', { version: 'v1.2.1' }))
+    g = addNode(g, node('fly', 'dataset.flywire', { version: '783' }))
+    g = addNode(g, node('custom', 'connectome:customDataset'))
+    g = addEdge(g, {
+      source: 'hemi',
+      sourceHandle: 'dataset',
+      target: 'custom',
+      targetHandle: 'meshes',
+    })
+    g = addEdge(g, {
+      source: 'fly',
+      sourceHandle: 'dataset',
+      target: 'custom',
+      targetHandle: 'skeletons',
+    })
+    const source = notebookText(g)
+    expect(source).toContain('meshes=lambda ids: neu.fetch_mesh_neuron(ids, lod=1, client=')
+    expect(source).not.toMatch(/^\s+skeletons=/m)
+    expect(source).toMatch(
+      /no[\s#]+way[\s#]+to[\s#]+fetch[\s#]+skeletons[\s#]+from[\s#]+the[\s#]+CAVE[\s#]+dataset[\s#]+wired[\s#]+into[\s#]+`Skeletons`/,
+    )
+    expect(source).not.toContain('TODO')
+  })
+
+  it('casts the id columns a read footer says are text', async () => {
+    const file = new File(
+      [readFileSync('src/data/files/__fixtures__/synapses.parquet')],
+      's.parquet',
+    )
+    const fileId = holdLocalFile(file)
+    await readTableFileSummary({ kind: 'local', id: fileId, name: 's.parquet' })
+    const g = addNode(
+      emptyGraph('file'),
+      node('f', 'core.linkTable', { fileId, fileName: 's.parquet' }),
+    )
+    const source = notebookText(g)
+    expect(source).toContain(
+      `text_columns=['pre_pt_root_id', 'post_pt_root_id', 'region', 'hash']`,
+    )
+    expect(source).toContain(`format='parquet'`)
+  })
+
   /*
    * The third way a node fails to translate, and the one the backend declaration exists for: a
    * graph that is perfectly well wired, on a backend nobody has written *that node's* cell for.
@@ -137,7 +200,7 @@ describe('notebook export', () => {
   it('says a muted node was muted rather than omitting it', () => {
     const source = exportFixture()
     expect(source).toContain('Muted step')
-    expect(source).toContain('Muted on the canvas')
+    expect(source).toContain('This node is muted on the canvas')
   })
 
   /*
@@ -403,7 +466,7 @@ describe('the region and normalisation options', () => {
     expect(text).toContain("groupby(['bodyId_pre', 'bodyId_post'], as_index=False)['weight']")
     // And the one place the two genuinely disagree is said in the cell rather than left to be
     // discovered from a row count.
-    expect(text).toContain('min_total_weight across every ROI')
+    expect(text).toContain('min_total_weight to the total across every ROI')
   })
 
   it('refuses normalisation rather than emitting the reachable half of it', () => {
@@ -415,7 +478,7 @@ describe('the region and normalisation options', () => {
       normalizeBasis: 'connected',
     })
     expect(text).toContain('TODO')
-    expect(text).toMatch(/no neuprint-python equivalent/)
+    expect(text).toMatch(/neuprint-python has no equivalent/)
     // The refusal has to say what to write instead, or it reads as the feature being broken.
     expect(text).toContain('upstream/downstream')
   })

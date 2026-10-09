@@ -10,8 +10,21 @@
 import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from './types'
-import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from './values'
-import { describeValue, emptyTable, makeTable, spaceLabel, unitsLabel } from './values'
+import type {
+  Bounds3,
+  MeshesValue,
+  PointsValue,
+  SkeletonGeometry,
+  SkeletonsValue,
+} from './values'
+import {
+  describeValue,
+  emptyTable,
+  makeTable,
+  perGeometry,
+  spaceLabel,
+  unitsLabel,
+} from './values'
 
 const SCHEMA = tableSchema(column('neuronId', 'i64'))
 const attributes = makeTable(SCHEMA, { neuronId: [7] })
@@ -130,5 +143,22 @@ describe('describeValue — geometry', () => {
         attributes: emptyTable(SCHEMA),
       }),
     ).toBe('0 skeletons · 0 pts · FLYWIRE · nm')
+  })
+})
+
+describe('perGeometry', () => {
+  it('gives one slot per geometry, shared by a relabelled copy, fresh after a heal or a mirror', () => {
+    const slot = perGeometry(() => ({}))
+    const skeleton: SkeletonGeometry = {
+      id: '1',
+      positions: new Float32Array(6),
+      radii: new Float32Array(2),
+      parents: Int32Array.from([-1, 0]),
+    }
+    // What `withSplit` hands back: a new item around the same arrays.
+    expect(slot({ ...skeleton, split: new Uint8Array(2) })).toBe(slot(skeleton))
+    // A heal replaces the parents; a mirror, the positions. Either is a different tree.
+    expect(slot({ ...skeleton, parents: Int32Array.from([1, -1]) })).not.toBe(slot(skeleton))
+    expect(slot({ ...skeleton, positions: new Float32Array(6) })).not.toBe(slot(skeleton))
   })
 })

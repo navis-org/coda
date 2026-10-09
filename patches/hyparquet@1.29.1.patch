@@ -1,0 +1,144 @@
+diff --git a/src/column.js b/src/column.js
+index 4af7fa575ab4e8327fba6cad96810ee7c62ec266..0717f1fafbf68d3386c6d7293c021706e249884d 100644
+--- a/src/column.js
++++ b/src/column.js
+@@ -108,6 +108,12 @@ export function readPage(reader, header, columnDecoder, dictionary, previousChun
+ 
+     // convert types, dereference dictionary, and assemble lists
+     const values = convertWithDictionary(dataPage, dictionary, daph.encoding, columnDecoder)
++    // A flat column whose page holds no nulls needs no assembly: its values are the page, as
++    // the typed array they were decoded into. (Coda patch: assembleLists otherwise pushes every
++    // value of an optional column into a plain array, one BigInt at a time for int64.)
++    if (!definitionLevels.length && !repetitionLevels.length && isFlatColumn(schemaPath)) {
++      return { skipped: 0, data: values }
++    }
+     const output = Array.isArray(previousChunk) ? previousChunk : []
+     const assembled = assembleLists(output, definitionLevels, repetitionLevels, values, schemaPath)
+     return { skipped: 0, data: assembled }
+@@ -125,6 +131,12 @@ export function readPage(reader, header, columnDecoder, dictionary, previousChun
+ 
+     // convert types, dereference dictionary, and assemble lists
+     const values = convertWithDictionary(dataPage, dictionary, daph2.encoding, columnDecoder)
++    // A flat column whose page holds no nulls needs no assembly: its values are the page, as
++    // the typed array they were decoded into. (Coda patch: assembleLists otherwise pushes every
++    // value of an optional column into a plain array, one BigInt at a time for int64.)
++    if (!definitionLevels.length && !repetitionLevels.length && isFlatColumn(schemaPath)) {
++      return { skipped: 0, data: values }
++    }
+     const output = Array.isArray(previousChunk) ? previousChunk : []
+     const assembled = assembleLists(output, definitionLevels, repetitionLevels, values, schemaPath)
+     return { skipped: 0, data: assembled }
+diff --git a/src/convert.js b/src/convert.js
+index f3a524d2d4a5504e38b270f635f87feeafbffef4..324dfe8aa959edbeffcd133f5bbc4158e3b32fa7 100644
+--- a/src/convert.js
++++ b/src/convert.js
+@@ -54,19 +54,58 @@ export const DEFAULT_PARSERS = {
+ export function convertWithDictionary(data, dictionary, encoding, columnDecoder) {
+   if (dictionary && encoding.endsWith('_DICTIONARY')) {
+     let output = data
+-    if (data instanceof Uint8Array && !(dictionary instanceof Uint8Array)) {
++    // Coda patch: also upgrade when the dictionary is a typed array and the indices are not of its
++    // type. The indices arrive as a plain array, and writing a BigInt64Array's values back into it
++    // made a plain array holding a BigInt per row — for every dictionary-encoded int64 column.
++    if (
++      !(data instanceof dictionary.constructor) &&
++      (data instanceof Uint8Array || ArrayBuffer.isView(dictionary))
++    ) {
+       // @ts-expect-error upgrade data to match dictionary type with fancy constructor
+       output = new dictionary.constructor(data.length)
+     }
+-    for (let i = 0; i < data.length; i++) {
+-      output[i] = dictionary[data[i]]
+-    }
+-    return output
++    // Coda patch: typed and untyped dictionaries dereferenced in loops of their own. One loop
++    // serving strings, BigInts and numbers goes megamorphic once a file of strings has passed
++    // through it, and every later column pays a generic element access per cell: 59 s of a 79 s
++    // read of 19,826 dictionary-encoded int columns that took 21 s on a fresh thread.
++    return ArrayBuffer.isView(output)
++      ? derefTyped(output, dictionary, data)
++      : derefPlain(output, dictionary, data)
+   } else {
+     return convert(data, columnDecoder)
+   }
+ }
+ 
++/**
++ * Coda patch: `derefTyped` and `derefPlain` are the same loop on purpose — **do not merge them**.
++ * Two functions are two sets of V8 type feedback; one shared loop is the megamorphic one this
++ * patch exists to undo (see `convertWithDictionary`).
++ *
++ * @param {any} output
++ * @param {any} dictionary
++ * @param {any} data
++ * @returns {DecodedArray}
++ */
++function derefTyped(output, dictionary, data) {
++  for (let i = 0; i < data.length; i++) {
++    output[i] = dictionary[data[i]]
++  }
++  return output
++}
++
++/**
++ * @param {any} output
++ * @param {any} dictionary
++ * @param {any} data
++ * @returns {DecodedArray}
++ */
++function derefPlain(output, dictionary, data) {
++  for (let i = 0; i < data.length; i++) {
++    output[i] = dictionary[data[i]]
++  }
++  return output
++}
++
+ /**
+  * Convert known types from primitive to rich.
+  *
+diff --git a/src/schema.js b/src/schema.js
+index 1dd9ae87307f5b04d89248d8ab84dc078d24bf29..38602af5563b0989d16c7847e5207681f2836742 100644
+--- a/src/schema.js
++++ b/src/schema.js
+@@ -24,6 +24,11 @@ function schemaTree(schema, rootIndex, path) {
+   return { count, element, children, path }
+ }
+ 
++/** @type {WeakMap<SchemaElement[], SchemaTree>} */
++const schemaTrees = new WeakMap()
++/** @type {WeakMap<SchemaTree, Map<string, SchemaTree>>} */
++const childrenByName = new WeakMap()
++
+ /**
+  * Get schema elements from the root to the given element name.
+  *
+@@ -32,10 +37,27 @@ function schemaTree(schema, rootIndex, path) {
+  * @returns {SchemaTree[]} list of schema elements
+  */
+ export function getSchemaPath(schema, name) {
+-  let tree = schemaTree(schema, 0, [])
++  // Coda patch: the tree is built once per schema rather than once per call. Every column read
++  // asks for its path, so a file of 19,826 columns walked 19,826 elements per column — quadratic,
++  // most of a 55 s read and its garbage. The tree is never mutated, so sharing it is safe.
++  let tree = schemaTrees.get(schema)
++  if (!tree) {
++    tree = schemaTree(schema, 0, [])
++    schemaTrees.set(schema, tree)
++  }
+   const path = [tree]
+   for (const part of name) {
+-    const child = tree.children.find(child => child.element.name === part)
++    // Coda patch: by name through a map built once per node, not a scan of the children — the
++    // root's are every column, so a scan per column was the same quadratic again (~0.5 s at 19,826).
++    let byName = childrenByName.get(tree)
++    if (!byName) {
++      byName = new Map()
++      for (const child of tree.children) {
++        if (!byName.has(child.element.name)) byName.set(child.element.name, child)
++      }
++      childrenByName.set(tree, byName)
++    }
++    const child = byName.get(part)
+     if (!child) throw new Error(`parquet schema element not found: ${name}`)
+     path.push(child)
+     tree = child

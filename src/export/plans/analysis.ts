@@ -185,6 +185,15 @@ export function embedPlan(ctx: AnalysisContext): EmbedPlan {
   const selected = embedRoute((port) => ctx.input(port) !== undefined)
   if (!selected.ok)
     return { refusal: `This Embedding cannot be translated: ${selected.refusal}` }
+  // Refused rather than written: restricting by id across pandas and R is where `101` meets
+  // `'101.0'`, and a cell that silently keeps the wrong neurons lays out a different population.
+  if (ctx.input('only') !== undefined) {
+    return {
+      refusal:
+        'This Embedding uses `Only these`, which the export cannot write yet. Filter its ' +
+        'input to those neurons first.',
+    }
+  }
 
   const epochs = Number(ctx.params.epochs)
   const settings: EmbedSettings = {
@@ -369,8 +378,8 @@ export function cutPlan(params: ParamValues): CutPlan {
   if (mode === 'mixed') {
     return {
       refusal:
-        'This Cut Tree groups by which datasets each cluster draws from, which has no ' +
-        'single-call equivalent here.',
+        'This Cut Tree groups clusters by which datasets they draw from, and there is no ' +
+        'single call that does this here.',
     }
   }
   return mode === 'height'
@@ -378,8 +387,8 @@ export function cutPlan(params: ParamValues): CutPlan {
         by: 'height',
         at: Number(params.height),
         note:
-          'Cutting at a height gives however many groups fall out below it, which may be one ' +
-          'if the height is above the top of the tree.',
+          'Cutting at a height gives as many groups as fall below it. If the height is above ' +
+          'the top of the tree, that is a single group.',
       }
     : { by: 'count', at: Number(params.count) }
 }
@@ -438,7 +447,7 @@ export function landmarkPlan(ctx: Pick<NeutralContext, 'column'>): LandmarkPlan 
   const from = columns('source')
   const to = columns('target')
   if ([...from, ...to].some((name) => !name)) {
-    return { refusal: 'Landmark Transform has unset coordinate columns — pick all six.' }
+    return { refusal: 'Landmark Transform has unset coordinate columns. Pick all six.' }
   }
   return { from, to }
 }

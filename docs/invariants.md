@@ -5,10 +5,20 @@ verbatim. Read the entry before arguing with the rule.
 
 ## Invariants — don't break these silently
 
-1. **`src/core` and `src/data` are headless.** No React, no zustand, no store, no UI
-   imports. Enforced by a lint rule in `eslint.config.js`. The reason is a future non-React
-   consumer (CLI runner, Python-side executor over the same graph JSON), plus DOM-free unit
-   tests.
+1. **The headless areas — `src/core`, `src/data`, `src/nodes`, `src/style` and the rest listed in
+   `eslint.config.js` — import no React, zustand, store or UI.** Enforced per file by that lint
+   rule, and transitively by `src/test/importGraph.test.ts`, which also holds every Web Worker off
+   the UI and, outside `src/pyodide`, off Python. The reason is non-React consumers — the MCP
+   server's Node build today; a CLI runner or a Python-side executor over the same graph JSON
+   later — plus DOM-free unit tests.
+
+   The walk found the MCP build reaching React through three nodes taking a colour from
+   `ui/encoding` (whose palette asked the browser for the theme) and the help pages parsing
+   through `ui/markdown`, which `src/nodes` and `src/help` not being linted had let through. The
+   palette, encodings and formatting moved to `src/style`, the parser to `src/core`, and only
+   `currentMode` stayed in `src/ui`. `src/style` reads `nodes/lib`'s param vocabulary
+   (`encodingParams`, `heatmapParams`), so **`nodes/lib` never imports `src/style`** — the same
+   test holds that edge one way; anything else in `src/nodes` may use the palette.
 
 2. **`inferOutputs` must never throw and must not fetch.** It runs on every graph
    mutation. Failures degrade to "unknown type", which silently kills column pickers.
@@ -85,6 +95,24 @@ verbatim. Read the entry before arguing with the rule.
    neuron table, meaning row positions elsewhere — without a badge either way. A column
    somebody _chose_ is still reported, optional or not: `out.network`'s link label drawing
    nothing is exactly the silent failure the check exists for.
+
+   **Off needs a schema to be off against.** `resolveColumn` asked the optional rule before the
+   unknown-schema one, so an optional picker *holding* a column resolved to nothing until its
+   upstream had run. Read Rows below a table file then ran its first Run without its match
+   column — reading the whole file — and its second with it, re-keyed in between: the "runs
+   twice, answers differently" signature. The notebook exporter, which has only types, had the
+   same gap on Embedding's `score`, so an exported notebook built its neighbourhoods unweighted
+   where the canvas weighted them. Unknown is now asked first for every picker; empty on an
+   optional one still means off.
+
+   Decided rather than drifted into, with its costs known: about fifteen optional pickers outside
+   the table-file nodes resolve differently before their schema lands (the Heatmap's and the
+   Dendrogram's match and label, Embedding's `matchOn`/`labelBy`/`scoreColumn`, Filter Network's
+   seed column, Match Cell Types, Input IDs, ZapBench's neurons), so a saved graph re-keys them
+   once and an `expensive` Embedding runs once more. And a notebook exported before a run now
+   names a picker's *default* where it used to name nothing — `score='score'` on a neighbour
+   table that may have no such column — so `coda_umap_knn` counts every neighbour as one when the
+   column it is handed is absent, which is what the canvas does, and says so.
 
 6. **`cheap` vs `expensive` on a node is a real decision.** `cheap` re-runs automatically
    on every edit. A backend call marked `cheap` fires a request per keystroke.

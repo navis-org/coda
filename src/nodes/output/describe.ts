@@ -38,14 +38,9 @@ registerNode({
   label: 'Describe Table',
   category: 'visualisation',
   description:
-    'Per-column summary of a table: how much is filled in, and the numeric spread. Its columns are `column`, `dtype`, `non_nulls`, `nulls`, `non_zero`, `unique`, `min`, `q1`, `median`, `q3`, `max` and `mean` — snake_case, unlike the rest of Coda.',
+    "Per-column summary of a table: how much is filled in, and the numeric spread. The summary's columns are `column`, `dtype`, `non_nulls`, `nulls`, `non_zero`, `unique`, `min`, `q1`, `median`, `q3`, `max` and `mean` (snake_case, unlike the rest of Coda).",
   guide:
-    'Summarises a table one row per column — the dtype, how many values are present, how many ' +
-    'are missing, how many are distinct, and for numeric columns the non-zero count, the ' +
-    'five-number spread and the mean. The table itself passes straight through, and the summary ' +
-    'leaves by a second port as ordinary data you can sort, filter or export. Text and boolean ' +
-    'columns get the counts and nothing else, and so does the neuronId column: a mean neuron id ' +
-    'identifies no neuron, and on an 18-digit id it would not even be arithmetic over the ids.',
+    'Summarises a table with one row per column: dtype, present, missing and distinct counts, and for numeric columns the non-zero count, quartiles and mean. The table passes through and the summary comes out of a second port. Text, boolean and neuron id columns get the counts only.',
   cost: 'cheap',
   /*
    * Wider than the chart viewers and shorter than Profile: twelve narrow numeric columns, and
@@ -89,7 +84,7 @@ registerNode({
         count: cells,
         threshold: DESCRIBE_CELLS_WARN,
         unit: 'cells',
-        control: 'the size a summary is usually taken over',
+        control: 'what a summary is usually computed over',
         cost: 'Every cell is read once and every numeric column is sorted for its quartiles.',
       })
     }

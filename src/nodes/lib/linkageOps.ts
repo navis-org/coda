@@ -128,9 +128,9 @@ export function checkSquarePopulation(
   const n = matrix.rowLabels.length
   if (n !== matrix.colLabels.length) {
     throw new Error(
-      `${subject} needs a square matrix; this one is ${n} × ${matrix.colLabels.length}` +
-        `. An NBLAST with a Target wired compares two different sets, which has no ` +
-        `${lacks}.`,
+      `${subject} needs a square matrix, and this one is ${n} × ${matrix.colLabels.length}` +
+        `. It compares two different sets, so there is no single ${lacks}. An NBLAST with ` +
+        `\`Target\` wired does this; unwire \`Target\` to compare one set with itself.`,
     )
   }
   if (!labelsAgree(matrix)) {
@@ -168,7 +168,7 @@ export function checkLinkageInput(ctx: Warner, matrix: MatrixValue): void {
       count: n,
       threshold: LINKAGE_OBSERVATIONS_WARN,
       unit: 'observations',
-      control: "this node's warn-above",
+      control: 'the usual size for clustering',
       cost: 'Linkage is single-threaded and grows with the square of that number.',
     })
   }
@@ -262,10 +262,11 @@ export function checkLinkageDistances(
     transform === 'one_minus'
       ? `These cells run ${range}, so read as similarities they give distances as low as ` +
           `${formatCell(lowest)}, and a distance cannot be negative. Synapse counts need a ` +
-          `Normalize in front; un-normalised NBLAST scores need Normalise back on. If the ` +
-          `cells are already distances, say so with the Distance setting.`
-      : `These cells run ${range}, and a distance cannot be negative. Set Distance back to ` +
-          `auto if they are similarities rather than distances.`,
+          `Normalize node in front, and NBLAST scores need \`Normalise\` turned back on. If ` +
+          `the cells are already distances, set \`Distance\` to "the values are already ` +
+          `distances".`
+      : `These cells run ${range}, and a distance cannot be negative. If they are ` +
+          `similarities, set \`Distance\` back to "auto (from the matrix)".`,
   )
 }
 
@@ -638,10 +639,8 @@ export function checkClusterInput(ctx: Warner, matrix: MatrixValue, axis: Matrix
       count: n,
       threshold: LINKAGE_OBSERVATIONS_WARN,
       unit: axis,
-      control: 'the clustering warn-above',
-      cost:
-        'Clustering is single-threaded and grows with the square of that number, and the ' +
-        'distances between vectors are computed first.',
+      control: 'the usual size for clustering',
+      cost: 'Clustering is single-threaded, and its time grows with the square of that number.',
     })
   }
 }
@@ -664,6 +663,6 @@ export function warnUnrecordedCells(
   if (unrecorded === 0) return
   ctx.warn(
     `${unrecorded.toLocaleString()} cells are empty or not a number and were read as ` +
-      `0 for the clustering. The cells themselves are unchanged.`,
+      `0 for the clustering. The matrix itself is unchanged.`,
   )
 }

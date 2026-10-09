@@ -67,8 +67,8 @@ describe('heatmapExportPlan', () => {
       {
         axis: 'rows',
         note:
-          'The rows are to be ordered by one column but none is named, so they are left as ' +
-          'they arrived.',
+          'The rows are set to be ordered by one column, but none is named, so they are left ' +
+          'in their original order.',
       },
     ])
     expect(order.follower).toBeUndefined()
@@ -143,8 +143,8 @@ describe('heatmapExportPlan', () => {
 
   it('says why typed limits are ignored, and treats one typed end as manual', () => {
     expect(planFor({ colorMin: '10', colorMax: '1' }).colour.limitsNote).toBe(
-      'Coda is ignoring the colour limits because the minimum (10) is not below the maximum ' +
-        '(1), so neither this nor the card is using them.',
+      'The colour limits are ignored because the minimum (10) is not below the maximum ' +
+        '(1). The card ignores them too.',
     )
     expect(planFor({ colorMax: '5' }).colour).toMatchObject({
       manual: true,

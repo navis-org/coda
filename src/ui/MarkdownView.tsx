@@ -32,8 +32,8 @@ import type {
   MarkdownInline,
   MarkdownList,
   MarkdownTable,
-} from './markdown'
-import { parseInline, parseMarkdown } from './markdown'
+} from '../core/markdown'
+import { parseInline, parseMarkdown } from '../core/markdown'
 
 export interface MarkdownRenderOptions {
   /** Draw a fenced block. Without this a fence renders as preformatted text. */

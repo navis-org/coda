@@ -39,7 +39,7 @@ contain `coda_dotprops`, and `main-*.js` should not match `jsdelivr` at all.
 **Coda's skeletons are nanometres; NBLAST's scoring matrix is micrometres.** The FCWB matrix
 fastcore embeds runs out at a 40 um distance bin and past it every cell is about -10 — so a set
 handed over in nm scores every pair as if no two neurons had ever been near each other,
-uniformly, with nothing anywhere to say why. `NM_PER_UM` in `nodes/lib/nblastOps.ts` is the
+uniformly, with nothing anywhere to say why. `NM_PER_UM` in `data/units.ts` is the
 whole of the fix and `nblast.test.ts` pins it. The related limit *was* that NBLAST **across**
 datasets means nothing without a template-space registration. There is a route now — geometry
 carries the template space it is in, beside its units, and `checkNblastSpaces` refuses a

@@ -83,7 +83,7 @@ function wholeShapeIssue(window: TraceWindow, scale: RecordingScale): string | u
   return crashFloorIssue(
     `A ${rows.toLocaleString()} × ${steps.toLocaleString()} matrix of every cell`,
     rows * steps * 8,
-    'Narrow Condition or reduce Scale.',
+    'Pick a narrower `Condition` or a coarser `Scale`.',
   )
 }
 
@@ -93,7 +93,7 @@ function listShapeIssue(cells: number, window: TraceWindow): string | undefined 
   return crashFloorIssue(
     `A ${cells.toLocaleString()} × ${steps.toLocaleString()} matrix of listed cells`,
     cells * steps * 8,
-    'List fewer cells or narrow Condition.',
+    'List fewer cells or pick a narrower `Condition`.',
   )
 }
 
@@ -105,9 +105,11 @@ export const tracesNode = packNode({
   category: 'query',
   cardWidth: 300,
   description:
-    'Activity for every ZapBench cell, or for cells you list — the overview to select cells from.',
+    'Activity of every ZapBench cell at a reduced scale, or of listed cells at full ' +
+    'resolution, as a matrix to select cells from.',
   guide:
-    'Reads the ZapBench recording starting from its cells: every cell at a reduced Scale, or listed cell ids at full resolution, as a matrix for the Heatmap. Shift-drag rows on the expanded Heatmap and wire Selected Rows into ZapBench to Neurons. Rows are in activity order, and a row’s label lists the cells it averages. Quarter scale over the whole recording reads about 144 MB.',
+    'Reads the ZapBench recording starting from its cells: every cell at a reduced scale, or listed cells at full resolution, as a matrix for a Heatmap. ' +
+    'Shift-drag rows on the expanded Heatmap and wire Selected Rows into ZapBench to Neurons to get the matching fish2 neurons.',
   cost: 'expensive',
 
   inputs: [],
@@ -123,7 +125,7 @@ export const tracesNode = packNode({
         { value: 'all', label: 'Every cell' },
         { value: 'list', label: 'Cells I list' },
       ],
-      help: 'Every cell reads the whole population, in activity order. Cells I list reads the ids you type, in that order, at full resolution.',
+      help: '"Every cell" reads the whole population, in activity order. "Cells I list" reads the ids you type, in that order, at full resolution.',
     },
     { ...CELL_IDS_PARAM, visibleIf: (params) => params.cells === 'list' },
     {
@@ -133,7 +135,7 @@ export const tracesNode = packNode({
       default: String(DEFAULT_SCALE),
       options: SCALE_OPTIONS,
       visibleIf: (params) => params.cells !== 'list',
-      help: 'Averages neighbouring cells and timesteps into one value, using the release’s own downsampled copies. Each row label lists the cells it averages. Full scale over the whole recording is too large for a browser tab; pick a condition for it.',
+      help: 'Averages neighbouring cells and timesteps into one value; each row label lists the cells it averages. "Full" over the whole recording is too large for a browser tab, so pick a `Condition` with it.',
     },
     {
       id: 'condition',
@@ -141,7 +143,7 @@ export const tracesNode = packNode({
       label: 'Condition',
       default: WHOLE_RECORDING_ID,
       options: CONDITION_OPTIONS,
-      help: 'Which stimulus block to read, trimmed one timestep at each end as zapbench’s get_condition_bounds trims it. Beside Scale, the only thing that makes a read smaller.',
+      help: 'Which stimulus block to read, trimmed by one timestep at each end as zapbench’s get_condition_bounds does. With `Scale`, the only way to make a read smaller.',
     },
     {
       id: 'product',
@@ -189,7 +191,7 @@ export const tracesNode = packNode({
       if (issues.length > 0) throw new Error(issues.join(' '))
       if (cells.length < ids.length) {
         ctx.warn(
-          `${(ids.length - cells.length).toLocaleString()} repeated cell ids are read once.`,
+          `${(ids.length - cells.length).toLocaleString()} cell ids were listed more than once and are read once.`,
         )
       }
       const colLabels = stepLabels(window)
@@ -242,8 +244,8 @@ export const tracesNode = packNode({
     })
     if (result.order === 'cell') {
       ctx.warn(
-        'The activity sorting could not be checked against this release, so rows are in ' +
-          'cell-id order rather than activity order. Every label is still its own cell.',
+        'The activity sorting could not be checked against this release, so rows are sorted ' +
+          'by cell id instead of by activity. Each row label still names the right cell.',
       )
     }
 

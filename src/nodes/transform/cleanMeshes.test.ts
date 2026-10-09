@@ -249,8 +249,8 @@ describe('cleanOps — the drop-internals ceiling', () => {
     const said: string[] = []
     checkDropInternalsSize({ warn: (m) => said.push(m) }, many, { ...OFF, dropInternals: true })
     expect(said.join(' ')).toMatch(/ray casts/)
-    expect(said.join(' ')).toMatch(/Rays or/)
-    expect(said.join(' ')).toMatch(/Detail on the Meshes node/)
+    expect(said.join(' ')).toMatch(/`Rays per face` or `Passes`/)
+    expect(said.join(' ')).toMatch(/`Detail` on the Meshes node/)
   })
 
   it('never refuses, because the cost is a wait', () => {
@@ -328,7 +328,7 @@ describe('neuron.cleanMeshes — types and params', () => {
   }
 
   it('says so when nothing is switched on', () => {
-    expect(validate({ ratio: 1 })).toMatch(/passes the meshes through/)
+    expect(validate({ ratio: 1 })).toMatch(/meshes pass through unchanged/)
   })
 
   it('says so when Laplacian would shrink the mesh unchecked', () => {

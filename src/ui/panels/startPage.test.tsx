@@ -143,7 +143,7 @@ describe('Start page', () => {
       render(<StartPage />)
       fireEvent.click(card(VIDEO_CARD.title))
       expect(open).toHaveBeenCalledWith(
-        'https://youtu.be/4s2zeBkXudo',
+        'https://www.youtube.com/watch?v=4s2zeBkXudo&list=PLV8BfQPvTPmc',
         '_blank',
         'noopener,noreferrer',
       )
@@ -628,7 +628,9 @@ describe('Start page', () => {
       // The menu is still open, so the sibling submenu is one press away; `openHelp` would close it.
       fireEvent.click(screen.getByRole('button', { name: /Documentation/ }))
       const video = screen.getByRole('link', { name: /Video: Your first workflow/ })
-      expect(video.getAttribute('href')).toBe('https://youtu.be/4s2zeBkXudo')
+      expect(video.getAttribute('href')).toBe(
+        'https://www.youtube.com/watch?v=4s2zeBkXudo&list=PLV8BfQPvTPmc',
+      )
       expect(video.getAttribute('target')).toBe('_blank')
     })
 

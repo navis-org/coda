@@ -571,7 +571,7 @@ broken form, so the fix is measured rather than asserted.
 
 ### The palettes
 
-Names in `nodes/lib/heatmapParams.ts`, hex in `ui/colors.ts`, which is `encodingParams.ts`'s
+Names in `nodes/lib/heatmapParams.ts`, hex in `style/colors.ts`, which is `encodingParams.ts`'s
 arrangement for the categorical sets. Two lists because they are two kinds of thing — a diverging
 ramp has a middle — and two params so a choice survives toggling the scale and back;
 `heatmapPaletteOf` is the one reader, so a name from the wrong list degrades to Coda's ramp
@@ -740,6 +740,28 @@ with `X = NULL`. The two `coda_umap_knn` helpers differ in exactly one thing, an
 worth knowing: **uwot's `idx` is 1-based with no `-1` sentinel**, so a short row there pads with
 its *own* index — which every implementation of this algorithm scores as a zero-weight self edge,
 so it means what the sentinel means.
+
+### Only these: laying out part of a population
+
+Added for BigClust, where the gesture is a lasso on a 129,325-neuron embedding and then a fresh
+embedding of the lasso. It was already possible — an inner `Join` of the Neighbours table against
+the selection on `queryId` — and measured that way on fish2 first: 3,950 neurons in a few seconds,
+65,049 in ~36 s, all of them in ~90 s, sliced so Cancel works. What the Join needed was a key
+typed by hand on the right column of the right side, so **Only these** is a fourth input, outside
+the exclusive group because it narrows a source rather than being one, and it applies to **every
+route** — an input that did nothing on two of three would be a control that lies. Neighbour rows
+are restricted by their `from` only, inside `knnFromNeighbours` — which already drops a neighbour
+that is not itself a point, so restricting one column restricts the graph, and fish2's 2.4M-row
+table is never copied to do it. A selection matching nothing is refused naming the likely cause (a
+picker `resolveColumn` rule 3 put on the wrong column); one matching in part is counted. Features are restricted **before**
+the matrix is built, which on that route is also what makes a large population affordable; a
+matrix by `takeMatrix` on both axes.
+
+The dropped-neighbour warning had blamed every drop on "the NBLAST compared two different
+populations" — read off a selection, where dropping the outside is the point, it accused the
+wrong thing. `droppedNeighbours` now says which case it is. Both exporters **refuse** while Only
+these is wired: restricting by id across pandas and R is where `101` meets `'101.0'`, and a cell
+keeping the wrong neurons lays out a different population with nothing to say so.
 
 ## Group By: one aggregation, several value columns
 

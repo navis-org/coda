@@ -119,10 +119,10 @@ export function parseMeshFile(name: string, bytes: Uint8Array): ParsedMesh {
 export function meshFileProblem(mesh: ParsedMesh, name: string): string | undefined {
   if (mesh.positions.length > 0 && mesh.indices.length > 0) return undefined
   if (mesh.positions.length === 0) {
-    return `"${name}" has no vertices in it — Coda reads OBJ, STL and PLY.`
+    return `"${name}" has no vertices in it. Coda reads OBJ, STL and PLY files.`
   }
   return (
     `"${name}" has ${mesh.positions.length / 3} vertices and no faces, so it is a point cloud ` +
-    `rather than a surface.`
+    `and cannot be drawn as a mesh.`
   )
 }

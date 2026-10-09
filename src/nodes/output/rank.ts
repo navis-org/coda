@@ -55,13 +55,9 @@ registerNode({
    * assistant's only prose about the node.
    */
   description:
-    'Plot a numeric column against its rank on log axes, with the cumulative share of the total beside it — a Pareto or rank-abundance chart.',
+    'Plot a numeric column against its rank on log axes, with the cumulative share of the total underneath: a Pareto or rank-abundance chart.',
   guide:
-    'A heavy-tailed column read as an ordering: value against rank on log axes, with the ' +
-    'running share of the total underneath. Made for influence scores, degree and centrality, ' +
-    'where a bar chart draws a thousandfold difference as a barely visible one. The share is ' +
-    'of the values rather than of the rows, so it answers "the top twenty carry 60%" — and it ' +
-    'is withheld, with a reason, on a column that can go negative.',
+    'Plots a heavy-tailed column, such as influence scores, degree or centrality, as value against rank on log axes. A second panel shows the running share of the total, e.g. that the top twenty neurons carry 60%. The share is left out for columns with negative values.',
   cost: 'cheap',
   /*
    * Taller than the other charts, and the reason is the second panel rather than taste: the
@@ -93,7 +89,7 @@ registerNode({
       default: '',
       presentational: true,
       group: 'axes',
-      help: 'The measure being ranked. On an Influence result this is influence — not influenceLog, which is already a transform and would be logged twice.',
+      help: 'The measure to rank. On an Influence result, use `influence`: `influenceLog` is already logged.',
     },
     {
       id: 'descending',
@@ -102,7 +98,7 @@ registerNode({
       default: true,
       presentational: true,
       group: 'axes',
-      help: 'Off ranks smallest first, which is what a cost or a distance wants.',
+      help: 'Rank the largest values first. Turn off for costs or distances.',
     },
     {
       id: 'valueLog',
@@ -116,7 +112,7 @@ registerNode({
        * is pointed at any two columns; this one exists for measures that span decades, and a
        * linear default would draw the picture it was built to replace.
        */
-      help: 'On by default: the measures this chart is for span several orders of magnitude. Values at or below zero have no logarithm and are dropped, and the caption counts them.',
+      help: 'Use a log scale for the values. Values at or below zero are dropped; the caption counts them.',
     },
     {
       id: 'rankLog',
@@ -125,7 +121,7 @@ registerNode({
       default: true,
       presentational: true,
       group: 'axes',
-      help: 'Log rank makes a power law a straight line and keeps the head of the ranking readable on a table of thousands. Off spaces the ranks evenly, which is right for a few dozen rows.',
+      help: 'Use a log scale for the rank axis, which keeps the top of a long ranking readable. Turn off for a few dozen rows.',
     },
     {
       id: 'showShare',
@@ -134,7 +130,7 @@ registerNode({
       default: true,
       presentational: true,
       group: 'axes',
-      help: 'The second panel: the share of the total accumulated down the ranking. Of the values, not of the rows — it answers "the top twenty carry 60%".',
+      help: 'Add a panel with the running share of the total down the ranking, e.g. "the top twenty carry 60%".',
     },
 
     // ---- Points ----------------------------------------------------------
@@ -147,7 +143,7 @@ registerNode({
       optional: true,
       presentational: true,
       group: 'points',
-      help: 'What the labelled points and the tooltip say. Empty uses the id column, which on a neuron table is an 18-digit root id — point this at type or instance for something readable.',
+      help: 'What labelled points and the tooltip show. Empty uses the id column; pick e.g. `type` or `instance` for something readable.',
     },
     {
       id: 'labelTop',
@@ -159,7 +155,7 @@ registerNode({
       step: 1,
       presentational: true,
       group: 'points',
-      help: 'How many of the leading points get a label drawn beside them. 0 draws none; every point still names itself on hover.',
+      help: 'How many of the top points get a label. 0 labels none; every point still shows its name on hover.',
     },
     {
       id: 'flagColumn',
@@ -187,7 +183,7 @@ registerNode({
       optional: true,
       presentational: true,
       group: 'points',
-      help: 'Which rows to ring and keep out of the share — on an Influence result, isSeed. A true/false or 0/1 column. A seed is kept in the table on purpose, and left in the share it carries most of it and the curve says nothing.',
+      help: 'A true/false or 0/1 column marking rows to ring and leave out of the share, e.g. `isSeed` on an Influence result.',
     },
     ...colorParams({
       prefix: 'point',
@@ -212,7 +208,7 @@ registerNode({
       id: 'idColumn',
       kind: 'column',
       label: 'ID column',
-      help: 'What a selected point is called downstream. An id survives an upstream re-run where a row position does not; the row index is the fallback, and the caption says so.',
+      help: 'Identifies each point, so a selection survives an upstream re-run. Without one, points are identified by row number.',
       from: 'in',
       // `out.scatter`'s exact declaration: a named default rather than an empty one, because
       // empty means "the first compatible column" and `optional` is what makes the resolver
@@ -251,8 +247,8 @@ registerNode({
     if (!value || ctx.params.valueLog === false) return []
     return /log$/i.test(value)
       ? [
-          `"${value}" is already a logarithm and Log value would take it again. Point ` +
-            `Value at the raw measure, or turn Log value off.`,
+          `"${value}" is already a logarithm, and \`Log value\` would take the log again. ` +
+            `Set \`Value\` to the raw measure, or turn off \`Log value\`.`,
         ]
       : []
   },

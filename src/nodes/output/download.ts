@@ -45,9 +45,12 @@ registerNode({
   // Wide enough for a filename field and for the auto-run warning to read as a sentence — that
   // line is the whole reason somebody does not end up with four hundred files.
   cardWidth: 300,
-  description: 'Write the incoming value to a file, on every run or on demand.',
+  description:
+    'Write the incoming value to a file (CSV, SWC, OBJ, or SVG/PNG of a chart), on every run or on demand.',
   guide:
-    'Save whatever is connected to a file — CSV for tables, SWC for skeletons, OBJ for meshes, SVG or PNG for an upstream chart.',
+    'Saves whatever is wired into it to a file: CSV for tables, SWC for skeletons, OBJ for ' +
+    'meshes, SVG or PNG for the chart of the node feeding it. Passes its input on unchanged, so ' +
+    'it can sit mid-chain; writes on every run unless you untick On run.',
   cost: 'expensive',
   /*
    * `T.any()`: a Download node refusing what it was wired to would be the one node in the tree

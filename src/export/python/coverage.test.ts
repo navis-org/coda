@@ -25,6 +25,17 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
+  'annotation:editor':
+    'Annotate is a card that writes a backend on an edit — there is nothing for a notebook to ' +
+    'recompute, and a cell that replayed the writes would push them again. The node itself passes ' +
+    'its neurons through unchanged.',
+  'annotation:bigclust':
+    'A BigClust project. The cell is short — `pandas.read_json` of `info`, `read_parquet` of ' +
+    'meta and each embedding, and the k-NN and features made long — but every line of it is an ' +
+    'alignment *by row*, which is the one thing a notebook gets silently wrong: a misread ' +
+    'embedding still draws a plausible cloud under the wrong neurons. So it waits for a probe ' +
+    'that runs the emitted cell against a real project and compares it with the node, as ' +
+    '`out.topology` argues an emitter must be checked.',
   'cortex:depth':
     'Depth, layer and lateral position through a cortical frame (`packs/cortex/frames.ts`), the ' +
     'gallery\u2019s own reason: no notebook library carries the frame. The arithmetic is a ' +
@@ -56,6 +67,10 @@ const NO_EMITTER: Record<string, string> = {
     '*running* it against the node, `out.topology`\u2019s rule.',
   'out.sankey':
     'A flow diagram, and this is a dependency refusal rather than a gap. Neither library draws one: matplotlib has `matplotlib.sankey`, which is built for a different figure entirely \u2014 a single balance of inflows and outflows, not a layered flow \u2014 and the routes that would work are plotly or holoviews, each a fourth package in an exporter that is neuprint-python, pandas and navis. The R side is the same story with ggalluvial. The arithmetic is not the obstacle and would be about fifteen lines; what stops this is the same rule `out.topology` and `zapbench:traces` record \u2014 an emitter has to be checked by *running* it, and a flow diagram whose widths silently stopped conserving would look entirely plausible. The table itself exports perfectly well: the Transfers port is four ordinary columns, so a reader has everything they need to draw this in whichever package they already have.',
+  'out.neuronDendrogram':
+    'Mostly a card: two ports are the incoming table passed through and the pinned row, and the drawing \u2014 the layout, the distances, the colouring \u2014 is presentational. The Points port (the synapses beyond a clicked point) is data, but it is defined by a point clicked on the card, which no notebook can reproduce without the card. navis has the nearest figure, `navis.plot_flat`, but only for the subway layout, without electrotonic distance, and with a known shortening of every branch by its first edge that this card fixes; emitting it would hand a reader a different picture under the same name. The neuron table exports as it is.',
+  'neuron.splitCompartments':
+    'Split Axon/Dendrite \u2014 Neuron Topology\u2019s split as data, and held back for that note\u2019s reason. `navis.split_axon_dendrite(label_only=True)` is the obvious cell, but this node\u2019s answer is navis\u2019s with three departures (a fragmented neuron is reported rather than raised, healing is opt-in, synapses are snapped on this side), and an emitter has to be checked against the node by running it before it can claim the same split.',
   'out.topology':
     'Neuron Topology, and this is a prototype rather than an absence nobody noticed. Every number on the card has a navis counterpart \u2014 `navis.strahler_index`, `navis.split_axon_dendrite`, `cable_length` \u2014 so the emitter is writable and worth writing. What stops it being written *now* is that the split is the one thing here somebody will compare against a paper, and both exporters have silently disagreed with the canvas before (Connectivity\u2019s far-end match, Paths\u2019 missing floor). An emitter for this has to be checked by running it against the node, the way `pnpm probe:split` already checks the node against navis \u2014 and until it is, no emitter is a better answer than one that looks right.',
   'compare.matchTypes':
@@ -85,12 +100,6 @@ const NO_EMITTER: Record<string, string> = {
     'A CATMAID instance named by hand \u2014 the same reason as `dataset.catmaid.fafb`, and no ' +
     'different for being a server this build ships no node for. pymaid would emit it; nobody ' +
     'has written that emitter.',
-  'dataset.ngsource':
-    'A neuroglancer datasource \u2014 a bucket URL, not a server. `cloudvolume` is the faithful ' +
-    'route and navis wraps it (`navis.read_precomputed`), but nothing downstream would use the ' +
-    'result yet: the morphology emitters are written against neuprint-python, so a cell binding ' +
-    'a CloudVolume would sit above a Meshes cell that is itself a TODO for this backend. One ' +
-    'emitter is worth writing when the pair is.',
   'zapbench:neuronTraces':
     'ZapBench traces. The faithful route is short and obvious \u2014 `tensorstore.open` against ' +
     'the same `gs://zapbench-release/\u2026/traces/` zarr3 kvstore zapbench\u2019s own ' +
@@ -138,6 +147,10 @@ describe('emitter coverage', () => {
   it('every registered node type is either emitted or explicitly excused', () => {
     const missing = types.filter((t) => !getEmitter(t) && !(t in NO_EMITTER))
     expect(missing).toEqual([])
+  })
+
+  it('no excused type has an emitter, so an excuse leaves with the gap it explained', () => {
+    expect(Object.keys(NO_EMITTER).filter((t) => getEmitter(t))).toEqual([])
   })
 
   it('every excused type is still registered, so the list cannot rot', () => {

@@ -33,7 +33,8 @@ import type { PointsValue, TableValue } from '../../core/values'
 import { getColumn, isPointsValue } from '../../core/values'
 import type { Value } from '../../core/values'
 import type { SynapseSet } from '../../pyodide/nblast'
-import { NM_PER_UM, checkNblastSize, checkNblastSpaces, checkNblastUnits } from './nblastOps'
+import { checkNblastSize, checkNblastSpaces, checkNblastUnits } from './nblastOps'
+import { NM_PER_UM } from '../../data/units'
 
 /** What a point with no `neuronId` is grouped under, and called. */
 export const UNIDENTIFIED = '(no id)'
@@ -162,9 +163,9 @@ export function checkSynblastSize(ctx: Warner, query: number, target: number): v
   if (total <= SYNAPSE_WARN) return
   ctx.warn(
     `Comparing ${query.toLocaleString()} synapses against ${target.toLocaleString()} ` +
-      `is a nearest-neighbour search per connector, single-threaded. Scoring anyway — ` +
-      `cancel and filter the synapses down (polarity, weight, region) if that is not ` +
-      `what you wanted.`,
+      `means a single-threaded nearest-neighbour search for every synapse. Scoring anyway. ` +
+      `If that is not what you wanted, cancel and filter the synapses down (by polarity, ` +
+      `weight or region).`,
   )
 }
 
@@ -191,10 +192,10 @@ export function synblastSidesFrom(
   targetGroups?: SynapseGroup[]
 } {
   if (!isPointsValue(queryValue)) {
-    throw new Error('Query input is not a set of points — wire a Synapses node into it.')
+    throw new Error('The Query input is not a set of points. Wire a Synapses node into it.')
   }
   if (targetValue !== undefined && !isPointsValue(targetValue)) {
-    throw new Error('Target input is not a set of points — wire a Synapses node into it.')
+    throw new Error('The Target input is not a set of points. Wire a Synapses node into it.')
   }
 
   const queryGroups = groupSynapses(queryValue)

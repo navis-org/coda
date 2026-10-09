@@ -46,6 +46,10 @@ export interface DatabaseSpec {
 
 /** A database's connection, opened on first use. */
 export interface Database {
+  /** The database's name, which is what `usage` asks the browser whether it exists by. */
+  name: string
+  /** Its object stores, as declared — every one of them is walked by `usage`. */
+  stores: readonly string[]
   /**
    * The open connection, memoised on success only. Rejects when there is none to be had — no
    * IndexedDB, a refusal (private-mode Firefox, storage switched off), or an open blocked by a
@@ -100,6 +104,8 @@ export function database(spec: DatabaseSpec): Database {
       }
     })
   return {
+    name: spec.name,
+    stores: spec.stores,
     open: () => memoPromise(held, 'connection', connect, { keep: 'resolved' }),
     reset: () => held.clear(),
   }
@@ -226,4 +232,140 @@ export function readKey<T, F = T>(
     (tx) => tx.objectStore(store).get(key) as IDBRequest<T>,
     fallback,
   )
+}
+
+/** What one database holds, as the Memory dialog's Storage tab reports it. */
+export interface StoredUsage {
+  /** Records in the one store that holds a record per thing a reader would count. */
+  entries: number
+  /** `storedBytes` summed over every store, keys included — an estimate, not a measurement. */
+  bytes: number
+}
+
+/**
+ * How a database's payload is sized without reading it: the stores to leave unread, and the size
+ * each counted record already declares for what they hold.
+ *
+ * For the shelves that record a size at write time — a saved workflow's JSON length, an edge set's
+ * encoded bytes, an upload's file size. Reading the payload instead pulls every graph, every 8 MB
+ * edge chunk and every uploaded table through a structured clone on the main thread to learn a
+ * number already stored beside it.
+ */
+export interface SizedBy {
+  skip: readonly string[]
+  bytes: (record: unknown) => number
+}
+
+/**
+ * Walk a database's stores and add up what they hold.
+ *
+ * **No browser says how big one database is** — `navigator.storage.estimate()` answers for the
+ * whole origin — so this reads records and estimates each one, or takes the size a record already
+ * declares (`SizedBy`). Whatever is read is deserialised, one record at a time, so this runs only
+ * when somebody asks (the Storage tab opening), never on a clock.
+ *
+ * **Asks before opening.** Opening a database that does not exist creates it, so measuring would
+ * otherwise leave an empty database behind for every feature somebody has never used. Where
+ * `indexedDB.databases()` is missing (Firefox before 126) the open goes ahead, and creates an empty
+ * database at the module's own version with its own stores — wasteful, never wrong.
+ *
+ * Resolves undefined when there is no IndexedDB or the database will not open: unknown, which the
+ * dialog must not draw as a zero.
+ */
+export async function usage(
+  db: Database,
+  counted: string,
+  sizedBy?: SizedBy,
+): Promise<StoredUsage | undefined> {
+  try {
+    const listed = await indexedDB.databases?.()
+    if (listed && !listed.some((entry) => entry.name === db.name))
+      return { entries: 0, bytes: 0 }
+  } catch {
+    // Unlisted is not absent — and with no IndexedDB at all, the open below says so.
+  }
+  let connection: IDBDatabase
+  try {
+    connection = await db.open()
+  } catch {
+    return undefined
+  }
+  const read = db.stores.filter((name) => !sizedBy?.skip.includes(name))
+  let entries = 0
+  let bytes = 0
+  try {
+    await settle(connection, read, 'readonly', (tx) => {
+      for (const name of read) {
+        const request = tx.objectStore(name).openCursor()
+        request.onsuccess = () => {
+          const cursor = request.result
+          if (!cursor) return
+          bytes += storedBytes(cursor.primaryKey) + storedBytes(cursor.value)
+          if (name === counted) {
+            entries += 1
+            if (sizedBy) bytes += sizedBy.bytes(cursor.value)
+          }
+          cursor.continue()
+        }
+      }
+    })
+  } catch {
+    return undefined
+  }
+  return { entries, bytes }
+}
+
+/** Any character outside Latin-1, which is what makes a string two bytes a character. */
+const TWO_BYTE = /[Ā-￿]/
+
+/**
+ * Roughly what a value takes up once structured-cloned, in bytes.
+ *
+ * The payload only, with no allowance for the browser's own framing or for compression (Chrome
+ * compresses large values), which is why the dialog marks every figure from this with `≈`. Strings
+ * are a byte a character where every character is Latin-1 and two otherwise, which is how V8
+ * stores them. A buffer is charged once however many views share it, because a clone writes it
+ * once — the same rule as `ByteLedger`, for the same reason.
+ */
+export function storedBytes(value: unknown): number {
+  const seen = new Set<object>()
+  const walk = (item: unknown): number => {
+    switch (typeof item) {
+      case 'string':
+        return item.length * (TWO_BYTE.test(item) ? 2 : 1)
+      case 'number':
+      case 'bigint':
+        return 8
+      case 'boolean':
+      case 'undefined':
+        return 1
+      case 'object':
+        break
+      default:
+        return 0
+    }
+    if (item === null) return 1
+    if (seen.has(item)) return 0
+    seen.add(item)
+    if (item instanceof ArrayBuffer) return item.byteLength
+    if (ArrayBuffer.isView(item)) {
+      if (seen.has(item.buffer)) return 0
+      seen.add(item.buffer)
+      return item.buffer.byteLength
+    }
+    if (typeof Blob !== 'undefined' && item instanceof Blob) return item.size
+    if (item instanceof Date) return 8
+    let total = 0
+    if (item instanceof Map) {
+      for (const [key, entry] of item) total += walk(key) + walk(entry)
+      return total
+    }
+    if (item instanceof Set || Array.isArray(item)) {
+      for (const entry of item) total += walk(entry)
+      return total
+    }
+    for (const [key, entry] of Object.entries(item)) total += key.length + walk(entry)
+    return total
+  }
+  return walk(value)
 }

@@ -659,6 +659,27 @@ describe('the datastacks a token can see', () => {
     stop()
   })
 
+  // The source's own listing peek, which is the one inference reaches (docs/backends.md).
+  it('keeps the source’s listing peek silent too when there is no token', async () => {
+    const captured = installFetch()
+    setToken(DEFAULT_CAVE_SERVER, undefined)
+    const { raised, stop } = failures()
+    const source = new CaveSource()
+
+    expect(source.peekDatasets()).toBeUndefined()
+    await Promise.resolve()
+    expect(captured).toHaveLength(0)
+    expect(raised).toEqual([])
+
+    // Signing in is what arms it: nothing was spent while there was no token.
+    setToken(DEFAULT_CAVE_SERVER, 'a-token')
+    source.peekDatasets()
+    await vi.waitFor(() =>
+      expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(1),
+    )
+    stop()
+  })
+
   it('re-asks when the token changes, and does not keep the other account’s list', async () => {
     const captured = installFetch()
     await vi.waitFor(() => expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeDefined())
@@ -711,6 +732,26 @@ describe('the neuron schema', () => {
     // waits until something actually asks for neurons.
     expect(captured.some((c) => c.url.includes('/unique_string_values'))).toBe(true)
     expect(captured.some((c) => c.url.includes('/query'))).toBe(false)
+  })
+
+  it('keeps a refused discovery from inference off the auth channel, and a Run on it', async () => {
+    /*
+     * A token that this datastack refuses is the ordinary state of a new account (see
+     * `quiet`): a peek has no caller waiting on it, so the refusal is not a reason to open the
+     * Connections dialog. A Run is somebody waiting — that one still reports.
+     */
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(new Response('{"error":"forbidden"}', { status: 403 })),
+    )
+    const { raised, stop } = failures()
+    const source = new CaveSource()
+    source.schemasFor(DATASET)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(raised).toEqual([])
+
+    await expect(source.neuronIndex({ datasetId: DATASET })).rejects.toThrow()
+    expect(raised.length).toBeGreaterThan(0)
+    stop()
   })
 })
 
@@ -1510,12 +1551,12 @@ describe('meshes', () => {
      * which serves no mesh fragments; that it got that far is the point.
      */
     const said = (await warningsFor(ids)).join(' ')
-    expect(said).toMatch(
-      /no level of detail, so each one is dozens to hundreds of separate requests/,
-    )
+    expect(said).toMatch(/Each graphene mesh takes dozens to hundreds of separate requests/)
     // And it names the alternative, which for this datastack is not hypothetical: FlyWire's own
     // materializations were flattened, and only a stub with no bucket sends it down this route.
-    expect(said).toMatch(/flat segmentation beside it does the same set in two requests/)
+    expect(said).toMatch(
+      /published \(flat\) segmentation fetches the same meshes in two requests/,
+    )
     expect(said).toMatch(/Fetching anyway/)
   })
 

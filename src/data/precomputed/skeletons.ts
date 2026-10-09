@@ -52,7 +52,7 @@ import { spanningForest } from '../skeletonTree'
 import type { ShardingSpec } from './sharded'
 import { readShardedObject } from './sharded'
 import type { FetchOptions } from './transport'
-import { PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
+import { fetchBytes, fetchInfo, isNotFound } from './transport'
 
 /** One entry of `info.vertex_attributes`. */
 interface VertexAttribute {
@@ -110,7 +110,7 @@ export async function openSkeletonSource(
   const source = skeletonSourceFromInfo(base, info)
   if (!source) {
     throw new Error(
-      `${base} is ${info['@type'] ?? 'an info with no @type'}, not a skeleton source`,
+      `${base} is not a skeleton source (its info says ${info['@type'] ?? 'no @type'})`,
     )
   }
   return source
@@ -258,7 +258,7 @@ export async function readSkeleton(
       : await fetchBytes(`${source.base}/${segmentId}`, options)
     return bytes ? parseSkeleton(bytes, source) : undefined
   } catch (error) {
-    if (error instanceof PrecomputedFetchError && error.status === 404) return undefined
+    if (isNotFound(error)) return undefined
     throw error
   }
 }

@@ -1,9 +1,11 @@
-## What a linkage is
+## What Linkage does
 
-Clustering here is **agglomerative**: every neuron starts as its own group, the two closest groups merge, and that repeats until one group is left. The output — a *linkage* — is the record of that process: every merge, in order, with the distance it happened at.
+Linkage runs agglomerative clustering: every neuron starts out as its own group, the two closest groups are merged, and this repeats until only one group is left. The output (the *linkage*) records each merge and the distance at which it happened.
+
+The typical use is clustering neurons by their [NBLAST](#neuron.nblast) scores:
 
 ```coda-graph
-caption: The tree records the merges; Cut Tree turns them into groups.
+caption: Cluster NBLAST scores, then look at the tree, the reordered matrix and the groups.
 neuron.nblast as nb
 cluster.linkage as link
 out.dendrogram as dend
@@ -15,41 +17,43 @@ link:ordered -> hm
 link:tree -> cut
 ```
 
-The `Ordered` output is the input matrix with its rows and columns permuted into the tree's leaf order. That is the one to send to a Heatmap: an unordered [NBLAST](#neuron.nblast) matrix is visual noise, and the same numbers in leaf order show their clusters as blocks down the diagonal.
+There are two outputs:
 
-## Scores are not distances, and you do not have to worry about that
+- `Tree` is the linkage itself. Feed it into a [Dendrogram](#out.dendrogram) to look at it, or into [Cut Tree](#cluster.cut) to turn it into groups.
+- `Ordered` is the input matrix with rows and columns sorted into the order of the tree's leaves. Send this one to a [Heatmap](#out.heatmap): in leaf order, clusters show up as blocks along the diagonal.
 
-Clustering needs a distance — 0 for identical — and NBLAST produces a similarity, where 1 is identical. The conversion happens automatically, because a matrix carries what it measures.
+## Input
+
+Linkage needs a square matrix over a single population, e.g. an all-by-all NBLAST. A query-vs-target NBLAST is not square and will fail.
+
+The matrix also has to be symmetric. NBLAST scores are not (A→B is never exactly B→A), so `Symmetry` combines the two directions first. The default uses the mean, which is also what we would recommend for NBLAST.
 
 ```coda-params
-caption: `Distance` is the setting that decides, and it is right by default.
+cluster.linkage: symmetry
+```
+
+## Similarities vs. distances
+
+Clustering works on distances, where 0 means identical. NBLAST gives you similarities, where 1 means identical. You don't have to do anything about this: by default, `Distance` checks what the matrix contains and inverts similarities for you.
+
+```coda-params
 cluster.linkage: distance
 ```
 
-> [!WARNING] A matrix that says nothing about itself is assumed to be similarities
-> A Pivot cannot know what its own numbers mean, so a pivoted matrix falls through to the
-> similarity branch. If you pivoted something that is genuinely a distance, say so with `Distance`
-> rather than letting `auto` invert it — the clustering succeeds either way, and the tree it draws
-> is inside out.
+> [!WARNING] Pivoted matrices are assumed to contain similarities
+> A matrix coming out of a [Pivot](#core.pivot) does not know what its numbers mean, so `auto`
+> treats them as similarities. If they are in fact distances, set `Distance` to "the values are
+> already distances". Otherwise the clustering still runs but the tree comes out inside out.
 
 ## Choosing a method
 
-`Method` is how the distance between two *groups* is measured once they hold more than one neuron, and it changes the shape of the tree more than any other setting.
+`Method` determines how the distance between two groups is calculated once they contain more than one neuron. Of all the settings, this one has the biggest effect on the shape of the tree:
 
-| Method     | Behaviour                                                        |
-| ---------- | ---------------------------------------------------------------- |
-| `ward`     | keeps groups compact; what the NBLAST paper uses, and the default |
-| `average`  | the other common choice; less eager to split off outliers         |
-| `complete` | conservative — a group is only as close as its furthest member    |
-| `single`   | chains: two clusters join through one intermediate neuron         |
+| Method     | Behaviour                                                              |
+| ---------- | ---------------------------------------------------------------------- |
+| `ward`     | keeps groups compact; used in the NBLAST paper and the default here     |
+| `average`  | the other common choice; less eager to split off outliers               |
+| `complete` | conservative: a group is only as close as its furthest member           |
+| `single`   | tends to chain groups together through single intermediate neurons      |
 
-`single` will merge two obviously distinct groups because one neuron sits between them, and the result reads as a single cluster.
-
-## The matrix must be square, and symmetric
-
-Linkage fails on a non-square matrix — a query-vs-target NBLAST, say. It also requires A→B to equal B→A, and **enforces that** through `Symmetry`; the default takes the mean of both directions.
-
-```coda-params
-caption: `Symmetry` decides how a matrix is made symmetric
-cluster.linkage: symmetry
-```
+If in doubt, stick with `ward`. Be careful with `single`: two clearly distinct groups will be merged as soon as a single neuron sits between them.

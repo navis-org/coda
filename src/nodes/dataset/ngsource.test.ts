@@ -179,7 +179,7 @@ describe('inference', () => {
     expect(empty.typed).toBeDefined()
     // Empty cannot mean a default set when nothing lists the regions.
     expect(empty.issues).toEqual([
-      'This source publishes its region meshes without names — type their segment ids into Regions',
+      'This source publishes its region meshes without names. Type their segment ids into `Regions`.',
     ])
     // A name left over from a source that had them is not an id, and says so before a Run.
     expect(roiMeshesOn({ rois: ['7', 'EB'] }).issues).toEqual([

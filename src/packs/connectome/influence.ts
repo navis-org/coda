@@ -103,7 +103,9 @@ export const influenceNode = packNode({
   label: 'Influence',
   category: 'query',
   description:
-    'Score every neuron by how strongly it drives, or is driven by, a set of neurons. Columns are `influence`, `influenceLog`, `hops` and `isSeed`; scoring per query adds `queryId` and `queryType`.',
+    'Score every neuron by how strongly it drives, or is driven by, a set of query neurons. ' +
+    'Columns are `influence`, `influenceLog`, `hops` and `isSeed`; scoring per query adds ' +
+    '`queryId` and `queryType`.',
   /*
    * Under 400 characters, which `help.test.ts` enforces for a node that has a document: the
    * overlay prints this above the document under a `TL;DR` label, and a nine-sentence paragraph
@@ -111,10 +113,10 @@ export const influenceNode = packNode({
    * about what a lower bound means lives in `src/help/nodes/neuron.influence.md`.
    */
   guide:
-    'How strongly one neuron drives another through every path at once rather than along one ' +
-    'route \u2014 the influence score of Bates et al. Seed the neurons you care about, walk ' +
-    'upstream, and everything that reaches them comes back ranked. Bounded by hops rather than ' +
-    'solved over the whole connectome, so every score is a lower bound the node puts a number on.',
+    'Scores neurons by how strongly they drive (or are driven by) a set of query neurons, ' +
+    'summed over all paths up to Max hops, following Bates et al. Wire neurons in from Find ' +
+    'Neurons and get every neuron reached back, ranked. Scores are lower bounds on the exact ' +
+    'ones, and the node reports how much was left out.',
   cost: 'expensive',
 
   inputs: [
@@ -176,7 +178,7 @@ export const influenceNode = packNode({
       id: 'direction',
       kind: 'enum',
       label: 'Direction',
-      help: '"Upstream" asks what influences your neurons, "downstream" what they influence. Downstream needs published synapse totals, which not every backend has.',
+      help: 'Whether to score what influences your neurons or what they influence. Downstream needs published synapse totals, which not every backend has.',
       default: 'inputs',
       options: [
         { value: 'inputs', label: 'upstream (what influences them)' },
@@ -187,7 +189,7 @@ export const influenceNode = packNode({
       id: 'maxHops',
       kind: 'int',
       label: 'Max hops',
-      help: 'How many synapses of indirect effect to include. More hops can only raise a score, and the node reports a ceiling on what the hops it skipped could have added.',
+      help: 'How many synaptic steps of indirect effect to include. More hops can only raise scores; the node reports how much the skipped hops could have added.',
       default: 4,
       min: 1,
       max: 12,
@@ -204,7 +206,7 @@ export const influenceNode = packNode({
        * raising it does not merely drop rows — it redistributes the shares of the ones that
        * remain.
        */
-      help: 'Ignore connections below this many synapses. Under the default denominator it is applied before each connection’s share is worked out, so raising it also raises the surviving shares.',
+      help: 'Ignore connections below this many synapses. With the default `Denominator`, raising it also raises the shares of the connections that remain.',
       default: 5,
       min: 1,
       step: 1,
@@ -229,7 +231,7 @@ export const influenceNode = packNode({
        * measures the consequence against the exact solve on 300 neurons: at 0.5 and four hops,
        * 97% of the score and 19 of the exact top 20; at 0.99 and four hops, 6.5% and 6 of 20.
        */
-      help: 'How much of a signal survives each further synapse; 0.5 means half. This is the published lambda_max. At 0.5 four hops cover 97% of the score, against 6% at its 0.99 default.',
+      help: 'How much of the signal survives each synapse; 0.5 means half (the published lambda_max). At 0.5 four hops cover 97% of the score; at 0.99, only 6%.',
       default: 0.5,
       min: 0.01,
       max: 0.99,
@@ -253,7 +255,7 @@ export const influenceNode = packNode({
        * the moment a CAVE user created it. The cost of that choice is that the two things it
        * cannot do have to say so, which `validate` does, naming the fix.
        */
-      help: 'How each connection’s share of a neuron’s input is worked out. "Summed within the traversal" reuses what the walk fetched but rules out downstream. "Published totals" costs a query per hop and allows both — or, on a dataset answering from an attached edge set, sums that file’s own weights, which it cannot split by partner.',
+      help: 'How each connection’s share of a neuron’s input is computed. "summed within the traversal" needs no extra queries but cannot go downstream. The published totals cost a query per hop; with an attached edge set, both sum that file’s weights.',
       default: 'traversal',
       optionsWithoutPeek: true,
       /*
@@ -284,14 +286,14 @@ export const influenceNode = packNode({
        * of the key means something other than the default. See `ParamBase.absentMeans` for the
        * case where there is.
        */
-      help: 'Off, only proofread neurons carry the signal onwards — what counts as proofread is set on the Dataset node. Drive reaching a fragment is reported as lost rather than shared out.',
+      help: 'Let partners that are not proofread neurons pass the signal on (what counts is set on the Dataset node). Off, signal reaching a fragment is reported as lost.',
       default: false,
     },
     {
       id: 'frontierLimit',
       kind: 'int',
       label: 'Frontier limit',
-      help: 'Carry at most this many neurons into the next hop, strongest first; 0 is no limit. What it discards is reported as a share of the signal.',
+      help: 'Carry at most this many neurons into the next hop, strongest first; 0 means no limit. The share of signal dropped is reported.',
       default: 2000,
       min: 0,
       step: 500,
@@ -306,14 +308,14 @@ export const influenceNode = packNode({
        * end. Which is also why the two cannot both be on: the channels index one set, and asking
        * for both would be an outer product per reached neuron rather than a vector.
        */
-      help: 'Emit one row per query neuron per influencer, before the scores are summed — which is what a Pivot needs for a queries × influencers Heatmap. The result is no longer a neuron set.',
+      help: 'One row per query neuron per influencer, instead of summed scores. Use with a Pivot for a queries × influencers Heatmap. The output is then no longer a neuron set.',
       default: false,
     },
     {
       id: 'seedWeighting',
       kind: 'enum',
       label: 'Seed weighting',
-      help: 'Whether a score is the sum or the mean across the neurons you wired in. "One each" makes a bigger seed set score higher; "share of one" divides one unit between them, so different-sized runs compare.',
+      help: 'Whether scores sum or average over your input neurons. "one each" sums, so more neurons score higher; "share of one" averages, so runs of different sizes compare.',
       default: 'each',
       options: [
         { value: 'each', label: 'one each' },
@@ -325,7 +327,7 @@ export const influenceNode = packNode({
       id: 'flowFloor',
       kind: 'number',
       label: 'Transfer floor',
-      help: 'Leave a connection out of the Transfers table when it carried less than this share of the drive. 0 keeps every one, which on a wide ball is a diagram of a few thousand bands.',
+      help: 'Leave connections carrying less than this share of the signal out of the Transfers table. 0 keeps all, which can mean thousands of bands.',
       default: 0.002,
       min: 0,
       max: 0.1,
@@ -387,22 +389,24 @@ export const influenceNode = packNode({
      */
     if (needsPublishedTotals(settings)) {
       issues.push(
-        "Downstream needs the far end's denominator, which an outputs query cannot sum. " +
-          'Set Denominator to published totals, or use Upstream.',
+        'Downstream influence needs the total input of each receiving neuron, which ' +
+          '"summed within the traversal" cannot provide. Set `Denominator` to one of the published totals options, ' +
+          'or set `Direction` to "upstream".',
       )
     }
     if (settings.perQuery && hasCandidates) {
       issues.push(
-        'Per query neuron spends the channels on the query neurons, so none are left to ' +
-          'index the candidates and this cannot meet in the middle. Candidates still ' +
-          'restrict the rows: same scores, full-depth walk.',
+        'With `Per query neuron` on, this cannot search from both ends at once, ' +
+          'so it runs one full-depth search and keeps only the `Candidates` ' +
+          'rows. You get the same scores; the run just fetches more.',
       )
     }
     if (hasCandidates && !published && !downstream && !settings.perQuery) {
       issues.push(
-        'Meeting in the middle needs published totals, so this runs as one full-depth ' +
-          'walk and filters the result — same scores, more queries. Set Denominator to ' +
-          'published totals to halve the depth.',
+        'With `Candidates` wired, this runs one full-depth search and keeps only the ' +
+          'candidate rows. You get the same scores, but it costs more queries. Set ' +
+          '`Denominator` to one of the published totals options to search from both ends ' +
+          'at half the depth.',
       )
     }
     // The capability, asked only when the control is actually used. `sourceSupports` folds in
@@ -410,16 +414,16 @@ export const influenceNode = packNode({
     // imported file totals that file's own weights. See `canTotalSynapses`.
     if (published && !sourceSupports(ctx.inputs.dataset, 'synapseTotals')) {
       issues.push(
-        `${label} publishes no per-neuron synapse totals. Use "summed within the ` +
-          `traversal", which needs no second query.`,
+        `${label} does not publish per-neuron synapse totals. Set \`Denominator\` to ` +
+          `"summed within the traversal".`,
       )
     }
 
     const { maxHops: hops, minWeight, gain } = settings
     if (hops >= NOISY_HOPS && minWeight <= 1) {
       issues.push(
-        `${hops} hops at Min synapses ${minWeight} expands almost every partner of every ` +
-          `partner. Raise Min synapses, or lower the Frontier limit.`,
+        `${hops} hops with \`Min synapses\` at ${minWeight} will reach almost every ` +
+          `partner of every partner. Raise \`Min synapses\` or lower \`Frontier limit\`.`,
       )
     }
 
@@ -432,8 +436,8 @@ export const influenceNode = packNode({
       const covered = 1 - Math.pow(gain, hops + 1)
       if (covered < 0.5) {
         issues.push(
-          `At gain ${gain}, ${hops} hops covers ${percent(covered)} of the score; the rest ` +
-            `is in longer paths. Lower the gain or raise Max hops.`,
+          `With \`Gain\` at ${gain}, ${hops} hops cover only ${percent(covered)} of the ` +
+            `score, and the rest comes from longer paths. Lower \`Gain\` or raise \`Max hops\`.`,
         )
       }
     }
@@ -478,9 +482,9 @@ export const influenceNode = packNode({
       seedColumn.length - seeds.length + (candidateColumn.length - candidates.length)
     if (repeated > 0) {
       ctx.warn(
-        `${repeated.toLocaleString()} repeated ${repeated === 1 ? 'id was' : 'ids were'} ` +
-          `folded away — an influence score is per neuron. Check the Neurons wire if you ` +
-          `expected them to be distinct.`,
+        `${repeated.toLocaleString()} neuron ${repeated === 1 ? 'id appeared' : 'ids appeared'} ` +
+          `more than once and ${repeated === 1 ? 'was' : 'were'} merged. If you expected them ` +
+          `to be distinct, check the table wired into \`Neurons\`.`,
       )
     }
 
@@ -493,9 +497,9 @@ export const influenceNode = packNode({
 
     if (needsPublishedTotals(settings)) {
       throw new Error(
-        "Downstream influence divides by the receiving neuron's total input, which an " +
-          'outputs query never returns. Set Denominator to published totals, or Direction ' +
-          'to Upstream.',
+        "Downstream influence needs each receiving neuron's total input, which " +
+          '"summed within the traversal" cannot provide. Set `Denominator` to one of the published totals ' +
+          'options, or set `Direction` to "upstream".',
       )
     }
     /*
@@ -513,9 +517,8 @@ export const influenceNode = packNode({
       !canTotalSynapses(source, dataset.datasetId, dataset.edges !== undefined)
     ) {
       throw new Error(
-        `${source.label} publishes no per-neuron synapse totals. Set Denominator to ` +
-          `"summed within the traversal", which divides by the input list the walk already ` +
-          `has.`,
+        `${source.label} does not publish per-neuron synapse totals. Set \`Denominator\` ` +
+          `to "summed within the traversal".`,
       )
     }
 
@@ -530,6 +533,7 @@ export const influenceNode = packNode({
           direction: hopDirection,
           minWeight,
           signal: ctx.signal,
+          onWarn: ctx.warn,
         }),
       FRONTIER_BATCH,
     )
@@ -674,9 +678,10 @@ export const influenceNode = packNode({
         }
         if (denominators === undefined) {
           ctx.warn(
-            `Candidates are wired, but with the denominator summed within the traversal this ` +
-              `walked the full ${hops} hops and filtered the result. Same scores — published ` +
-              `totals would fetch far fewer neurons.`,
+            `With \`Candidates\` wired and \`Denominator\` set to "summed within the ` +
+              `traversal", this searched the full ${hops} hops and kept only the candidate ` +
+              `rows. The scores are the same, but a published totals option would fetch far ` +
+              `fewer neurons.`,
           )
         }
       }
@@ -755,9 +760,9 @@ export const influenceNode = packNode({
         const bound = truncation(half)
         if (bound !== null && bound / seedTotal > LOSS_WARN) {
           ctx.warn(
-            `These scores are a lower bound: paths longer than the hop budget could add up ` +
-              `to ${percent(bound / seedTotal)} more. Raise Max hops or lower Gain to close ` +
-              `the gap.`,
+            `These scores are a lower bound: paths longer than \`Max hops\` could add up ` +
+              `to ${percent(bound / seedTotal)} more. Raise \`Max hops\` or lower \`Gain\` ` +
+              `to close the gap.`,
           )
         }
       }
@@ -765,24 +770,24 @@ export const influenceNode = packNode({
       const droppedTotal = half.droppedMass.reduce((sum, value) => sum + value, 0)
       if (droppedTotal / seedTotal > LOSS_WARN) {
         ctx.warn(
-          `The frontier limit discarded ${percent(droppedTotal / seedTotal)} of the ` +
-            `signal, so weakly-connected neurons are missing or under-scored. Raise Frontier ` +
-            `limit, or raise Min synapses.`,
+          `\`Frontier limit\` discarded ${percent(droppedTotal / seedTotal)} of the ` +
+            `signal, so weakly connected neurons are missing or scored too low. Raise ` +
+            `\`Frontier limit\` or raise \`Min synapses\`.`,
         )
       }
       const fragmentTotal = half.fragmentMass.reduce((sum, value) => sum + value, 0)
       if (fragmentTotal / seedTotal > LOSS_WARN) {
         ctx.warn(
-          `${percent(fragmentTotal / seedTotal)} of the signal went to bodies the dataset ` +
-            `does not publish as neurons and stopped there. Tick "Include fragments" to ` +
-            `follow it.`,
+          `${percent(fragmentTotal / seedTotal)} of the signal went to fragments (bodies ` +
+            `the dataset does not publish as neurons) and stopped there. Tick ` +
+            `\`Include fragments\` to follow it.`,
         )
       }
       if (half.missingDenominator.size > 0) {
         ctx.warn(
           `${half.missingDenominator.size.toLocaleString()} neurons have no published ` +
-            `input total, so nothing propagated through them — a break in the paths running ` +
-            `through them, not missing rows.`,
+            `input total, so no signal passed through them. Paths through these neurons are ` +
+            `cut off at that point.`,
         )
       }
     }
@@ -831,9 +836,10 @@ export const influenceNode = packNode({
      */
     if (flow.floored > LOSS_WARN) {
       ctx.warn(
-        `Transfer floor left ${percent(flow.floored)} of the drive out of the Transfers ` +
-          `table, so a flow diagram will show that much stopping short. Lower it to draw ` +
-          `the weak connections — it changes the picture, not the scores.`,
+        `${percent(flow.floored)} of the signal fell below \`Transfer floor\` and is ` +
+          `missing from the Transfers table, so a Sankey will show flow stopping short. ` +
+          `Lower \`Transfer floor\` to include weaker connections. This does not affect ` +
+          `the influence scores.`,
       )
     }
     /*
@@ -845,9 +851,9 @@ export const influenceNode = packNode({
      */
     if (!single) {
       ctx.warn(
-        'Transfers is empty because this run met in the middle: its two halves count ' +
-          'hops from opposite ends, so they cannot share a diagram. Unwire Candidates, or ' +
-          'set Denominator to "summed within the traversal".',
+        'Transfers is empty because this run searched from both ends, and the two ' +
+          'halves count hops from opposite ends. Unwire `Candidates`, or set ' +
+          '`Denominator` to "summed within the traversal".',
       )
     }
 
@@ -880,8 +886,8 @@ export const influenceNode = packNode({
           count: pairs.length,
           threshold: PAIR_ROWS_WARN,
           unit: 'query-influencer pairs',
-          control: 'the width a Pivot is usually meant to have',
-          cost: 'Group By on the influencer collapses it to one row per neuron.',
+          control: 'the size a Pivot usually handles',
+          cost: 'A Group By on the influencer column gives one row per neuron.',
         })
       }
       ctx.progress(

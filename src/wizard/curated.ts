@@ -86,6 +86,42 @@ export const isSynthetic = (spec: ExampleSpec): boolean => spec.published === un
 
 const EXAMPLES: readonly ExampleSpec[] = [
   {
+    types: ['connectome:customDataset'],
+    focus: 'custom',
+    title: 'Custom Dataset',
+    about:
+      '**Custom Dataset** assembles a dataset from parts. Here every part comes from the synthetic connectome — the T4 neurons as the neuron table, their outgoing connections as the edge list, its skeletons as geometry — and the cards below it query the result like any other dataset.\n\n' +
+      'Swap a part for your own: a sheet of cell types into **Neurons**, a Link Table file of connections or synapses into **Edges** or **Synapses**.',
+    cards: [
+      DS,
+      find('find', typeStarts('T4')),
+      {
+        id: 'conn',
+        type: 'neuron.connectivity',
+        params: { direction: 'outputs', minWeight: 3 },
+      },
+      {
+        id: 'custom',
+        type: 'connectome:customDataset',
+        params: { name: 'T4 and its targets', pre: 'preId', post: 'postId', weight: 'weight' },
+      },
+      find('again', typeStarts('T4'), UNDER_TALL),
+      { id: 'skel', type: 'neuron.skeletons' },
+      { id: 'view', type: 'out.viewer3d', params: BY_TYPE },
+    ],
+    wires: [
+      ['find', 'neurons', 'conn', 'neurons'],
+      ['find', 'neurons', 'custom', 'neurons'],
+      ['conn', 'connections', 'custom', 'edges'],
+      [DS.id, 'dataset', 'custom', 'skeletons'],
+      ['custom', 'dataset', 'again', 'dataset'],
+      ['custom', 'dataset', 'skel', 'dataset'],
+      ['again', 'neurons', 'skel', 'neurons'],
+      ['skel', 'skeletons', 'view', 'skeletons'],
+    ],
+  },
+
+  {
     types: ['neuron.selectNeurons'],
     focus: 'select',
     title: 'Select Neurons',
@@ -410,15 +446,17 @@ export function curatedGraph(type: string): CodaGraph | undefined {
 const NOTE = { width: 720, height: 210, gap: 30 }
 
 /**
- * The example as a graph: the dataset wired into every card with a `dataset` socket, the cards
- * placed in columns by dataflow, the note above them.
+ * The example as a graph: the dataset wired into every card with a `dataset` socket the example
+ * does not wire itself — a card below a Custom Dataset reads *that* — the cards placed in columns
+ * by dataflow, the note above them.
  */
 export function exampleGraph(spec: ExampleSpec): CodaGraph {
   const fromDataset: Wire[] = spec.cards
     .filter(
       (c) =>
         c.id !== DS.id &&
-        inputPorts(requireNodeDef(c.type), {}).some((p) => p.id === 'dataset'),
+        inputPorts(requireNodeDef(c.type), {}).some((p) => p.id === 'dataset') &&
+        !spec.wires.some(([, , target, port]) => target === c.id && port === 'dataset'),
     )
     .map((c) => [DS.id, 'dataset', c.id, 'dataset'])
   const wires = [...fromDataset, ...spec.wires]

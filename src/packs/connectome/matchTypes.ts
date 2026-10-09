@@ -103,7 +103,7 @@ const datasetCountParam = {
   id: 'datasetCount',
   kind: 'int',
   label: 'Datasets',
-  help: 'How many connectomes to map between. Two subtypes can stay distinct across two datasets and collapse when a third knows only the coarse label.',
+  help: 'How many connectomes to match. Adding a dataset that only has a coarse type can merge subtypes that were distinct before.',
   default: 2,
   min: 2,
   max: MAX_DATASETS,
@@ -130,7 +130,7 @@ const typeColumnParams = repeatParams({
       // module for why the pair cannot be left to two hand-written strings.
       fromPort: 'dataset',
       schemaOf: (type) => schemasFromType(type).neurons,
-      help: 'Every column naming a cell type, including the ones written in another dataset’s namespace — those cross-references are what the match is made of.',
+      help: 'Every column naming a cell type, including ones holding another dataset’s type names. Those cross-references are what the match uses.',
       default: [] as string[],
       // Empty is refused by `validate` rather than by the picker, so the message can name which
       // dataset is missing its columns instead of four identical "required" marks.
@@ -143,9 +143,13 @@ export const matchTypesNode = packNode({
   type: 'compare.matchTypes',
   label: 'Match Cell Types',
   category: 'analysis',
-  description: 'Work out which cell types correspond between two or more connectomes.',
+  description:
+    'Work out which cell types correspond between two or more connectomes, as a label table ' +
+    'per dataset plus a report on each match.',
   guide:
-    'Builds the type-to-type correspondence needed for cross-brain comparison: which cell types in one connectome are the same cells as which in another.',
+    'Works out which cell types in one connectome correspond to which in another, using every ' +
+    'type column the neurons carry. Wire each dataset in; the Labels outputs feed Compare ' +
+    'Connectivity or Partner Vectors, and the Report shows how well each label matched.',
   cost: 'expensive',
   dataCache: true,
 
@@ -189,7 +193,7 @@ export const matchTypesNode = packNode({
       id: 'badLabels',
       kind: 'string',
       label: 'Ignore labels',
-      help: 'Labels that are not cell types — "unknown", "na", a placeholder. Left in, they correspond like any other label and assert that two neurons are the same cells. Commas or new lines.',
+      help: 'Labels that are not cell types, e.g. "unknown" or "na", separated by commas or new lines. Left in, they match neurons that share them like any type.',
       default: '',
     },
     {
@@ -197,7 +201,7 @@ export const matchTypesNode = packNode({
       kind: 'column',
       label: 'Pass-through labels',
       from: 'keep',
-      help: 'On the Pass Through table: the column holding type names to let through, one per row.',
+      help: 'The Pass Through table’s column of type names to let through, one per row.',
       default: 'label',
       /*
        * Optional, so that an empty picker means "nothing passes through" and keeps meaning it.
@@ -216,7 +220,7 @@ export const matchTypesNode = packNode({
       id: 'compoundSeparator',
       kind: 'string',
       label: 'Compound separator',
-      help: 'What joins two type names written in one field — "PS008,PS009" — so a dataset that kept them apart can match one that did not.',
+      help: 'The character joining two type names in one field, e.g. the comma in "PS008,PS009". Lets them match a dataset that lists the types separately.',
       default: ',',
       advanced: true,
     },
@@ -224,7 +228,7 @@ export const matchTypesNode = packNode({
       id: 'noSplitPrefixes',
       kind: 'string',
       label: 'Never split starting with',
-      help: 'Prefixes marking a label whose separator is part of its name: "(M_adPNm4,M_adPNm5)b" is one type. Commas or new lines, so a prefix cannot contain one.',
+      help: 'Prefixes of labels whose separator is part of the name, e.g. "(M_adPNm4,M_adPNm5)b" is one type. Separate with commas or new lines, so a prefix cannot contain a comma.',
       default: DEFAULT_NO_SPLIT_PREFIXES.join(', '),
       advanced: true,
     },
@@ -232,7 +236,7 @@ export const matchTypesNode = packNode({
       id: 'allowIndirect',
       kind: 'boolean',
       label: 'Allow indirect matches',
-      help: 'Let a correspondence run through another neuron — A shares a group label with B, and B has the type that matches. Off, since that is a claim about A made from B.',
+      help: 'Let a match go through another neuron: A shares a group label with B, and B’s type matches. Use with care, since it infers A’s type from B.',
       default: false,
       advanced: true,
     },
@@ -266,12 +270,14 @@ export const matchTypesNode = packNode({
        */
       if (!sourceSupports(type, 'neuronIndex')) {
         issues.push(
-          `Dataset ${index}: ${sourceLabel(type) ?? 'this source'} cannot list a whole ` +
-            `dataset, which matching types needs.`,
+          `Dataset ${index}: ${sourceLabel(type) ?? 'this source'} cannot list every neuron ` +
+            `in a dataset, which matching cell types needs. Wire a dataset from another source.`,
         )
       }
       if (ctx.columns(repeatParamId('types', index)).length === 0) {
-        issues.push(`Dataset ${index}: pick at least one column holding cell types.`)
+        issues.push(
+          `Dataset ${index}: pick at least one column holding cell types in \`Type columns ${index}\`.`,
+        )
       }
     }
 
@@ -282,7 +288,10 @@ export const matchTypesNode = packNode({
      * "empty" nobody intends.
      */
     if (ctx.inputs.keep && !ctx.column('keepColumn')) {
-      issues.push('Pass Through: pick the column holding the type names to let through.')
+      issues.push(
+        'A table is wired into `Pass Through`: pick the column holding the type names to let ' +
+          'through in `Pass-through labels`.',
+      )
     }
     return issues
   },
@@ -300,9 +309,9 @@ export const matchTypesNode = packNode({
       const source = ctx.resolveSource(dataset.sourceId)
       if (!source.neuronIndex) {
         throw new Error(
-          `${source.label} publishes no neuron index, so ${dataset.datasetId} cannot be ` +
-            `matched on cell types — matching reads every neuron's types, not only the ones ` +
-            `wired in.`,
+          `${source.label} does not publish a list of every neuron, so ${dataset.datasetId} ` +
+            `cannot be matched on cell types. Matching needs the types of every neuron in the ` +
+            `dataset.`,
         )
       }
       return {
@@ -361,8 +370,8 @@ export const matchTypesNode = packNode({
       if (!total || count / total < UNMATCHED_WARN_FRACTION) return
       ctx.warn(
         `${names[i]}: ${count.toLocaleString()} of ${total.toLocaleString()} neurons ` +
-          `matched nothing in the other datasets. Anything built on this mapping covers ` +
-          `only the rest.`,
+          `matched nothing in the other datasets, so anything built on this mapping leaves ` +
+          `them out.`,
       )
     })
 

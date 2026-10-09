@@ -6,9 +6,10 @@
  * the mark is `public/logo.svg` itself and the name is set in `--font-ui` (`system-ui`), which is
  * what the toolbar draws. A font file handed to ffmpeg would be a second spelling of both.
  *
- * - `intro.png`: the mark and "Coda", centred, straight over the canvas. There was a radial scrim
- *   behind them; it banded into visible rings after the encode, and the opening canvas is empty
- *   and dark anyway, so there was nothing for it to hold back.
+ * - `intro.png`: the mark and "Coda" (and a topic line, if the tutorial names one), centred over a
+ *   **flat** veil of the canvas colour. Flat because a radial scrim banded into visible rings after
+ *   the encode; a veil at all because a short tutorial opens on a canvas already full of cards, and
+ *   the name set straight over a dataset card's text was hard to read.
  * - `outro.png`: the mark alone with the site's address under it, on nothing. The render fades
  *   the last frame to the canvas colour (`CANVAS`) first, so it reads as the app emptying out.
  */
@@ -33,9 +34,12 @@ function mark() {
 const PAGE = (body) => `<!doctype html><html><head><meta charset="utf-8"><style>
   html, body { margin: 0; width: 100%; height: 100%; background: transparent; }
   body { display: grid; place-items: center; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  .veil { position: fixed; inset: 0; background: rgb(18 18 17 / 0.84); }
   .lockup { position: relative; display: flex; align-items: center; gap: 30px; }
   .lockup svg { width: 132px; height: 132px; }
   .lockup span { font-size: 124px; font-weight: 700; letter-spacing: -0.02em; color: #f3f2ef; line-height: 1; }
+  .intro { position: relative; display: flex; flex-direction: column; align-items: center; gap: 28px; }
+  .topic { font-size: 46px; font-weight: 500; letter-spacing: 0.01em; color: #a3a19b; }
   .end { display: flex; flex-direction: column; align-items: center; gap: 34px; }
   .end svg { width: 150px; height: 150px; }
   .end span { font-size: 34px; font-weight: 500; letter-spacing: 0.04em; color: #a3a19b; }
@@ -46,10 +50,19 @@ const PAGE = (body) => `<!doctype html><html><head><meta charset="utf-8"><style>
  *
  * @param {string} out  a directory, with a trailing slash
  * @param {{ width: number, height: number, dpr: number }} view
+ * @param {{ topic?: string }} [options]  a line under the name, for a video about one thing
  */
-export async function renderCards(out, view) {
+function escapeHtml(text) {
+  return text.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+}
+
+export async function renderCards(out, view, { topic } = {}) {
+  const lockup = `<div class="lockup">${mark()}<span>Coda</span></div>`
   const pages = {
-    intro: PAGE(`<div class="lockup">${mark()}<span>Coda</span></div>`),
+    intro: PAGE(
+      '<div class="veil"></div>' +
+        (topic ? `<div class="intro">${lockup}<span class="topic">${escapeHtml(topic)}</span></div>` : lockup),
+    ),
     outro: PAGE(`<div class="end">${mark()}<span>${SITE}</span></div>`),
   }
   const profile = '/tmp/coda-tutorial-cards'

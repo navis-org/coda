@@ -273,7 +273,7 @@ describe('what it says on the card', () => {
       { column: 'kind', op: 'eq', value: 'label' },
       { in: network, seed: T.table(tableSchema(column('node', 'str'))) },
     )
-    expect(found.join(' ')).toMatch(/Seed: pick the column/)
+    expect(found.join(' ')).toMatch(/`Seed ids` is empty. Pick the column/)
   })
 
   it('refuses an operator somebody chose that the column type does not offer', () => {
@@ -297,7 +297,7 @@ describe('what it says on the card', () => {
   })
 
   /*
-   * `Filter Table`'s second check, which this node was missing. Not decoration: `makePredicate`
+   * `Filter Table`'s second check, which this node was missing. Not decoration: `rowPredicate`
    * *throws* on a non-numeric value against a numeric column, so without it the node goes red at
    * Run with a raw error where its sibling says the same thing on the card while there is still
    * something to change.

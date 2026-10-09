@@ -47,6 +47,7 @@ export type Cell = MarkdownCell | CodeCell
 export type PyModule =
   | 'os'
   | 're'
+  | 'copy'
   | 'pandas'
   | 'numpy'
   | 'neuprint'
@@ -65,6 +66,13 @@ export type PyModule =
   | 'scipySpatial'
   | 'scipySparse'
   | 'umap'
+  | 'pyarrow'
+  | 'pyarrowParquet'
+  | 'pyarrowFeather'
+  | 'pyarrowCompute'
+  | 'fsspec'
+  | 'deltalake'
+  | 'cloudvolume'
 
 export interface ModuleSpec {
   /** Emitted verbatim when the module is imported whole. */
@@ -79,6 +87,7 @@ export interface ModuleSpec {
 export const MODULES: Record<PyModule, ModuleSpec> = {
   os: { statement: 'import os' },
   re: { statement: 'import re' },
+  copy: { statement: 'import copy' },
   pandas: { statement: 'import pandas as pd', pip: 'pandas' },
   numpy: { statement: 'import numpy as np', pip: 'numpy' },
   networkx: { statement: 'import networkx as nx', pip: 'networkx' },
@@ -189,6 +198,32 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * and the package's own README write it, and a notebook is read as much as it is run.
    */
   umap: { statement: 'import umap', pip: 'umap-learn' },
+  /*
+   * A table file — Link Table's Parquet or Feather — read the way Coda reads it: only the columns
+   * asked for, and a Parquet file only in the row groups whose statistics can hold an id asked
+   * about (`pq.read_table(..., filters=)`). pandas' `read_parquet` would do the first and not the
+   * second, which on a connectome's synapse table is the difference between a lookup and a read of
+   * the whole file. Four keys for one distribution, `scipy`'s arrangement above.
+   */
+  pyarrow: { statement: 'import pyarrow as pa', pip: 'pyarrow' },
+  pyarrowParquet: { statement: 'import pyarrow.parquet as pq', pip: 'pyarrow' },
+  pyarrowFeather: { statement: 'import pyarrow.feather as feather', pip: 'pyarrow' },
+  pyarrowCompute: { statement: 'import pyarrow.compute as pc', pip: 'pyarrow' },
+  // A file at an `https://` URL, opened as a file object pyarrow can read by range — pyarrow's own
+  // filesystems speak `gs://` and `s3://` but not plain HTTP. The `http` extra is aiohttp, without
+  // which fsspec refuses an `https://` URL at the first read.
+  fsspec: { statement: 'import fsspec', pip: 'fsspec[http]' },
+  /*
+   * A precomputed bucket — a Neuroglancer Source, or a Custom Dataset's geometry borrowed from
+   * one. `cloud-volume` is the distribution and `cloudvolume` the module, the mismatch the list
+   * above keeps meeting. Its meshes and skeletons come back in nanometres, read off the bucket's
+   * own `info`, which is the frame Coda holds geometry in.
+   */
+  cloudvolume: { from: 'cloudvolume', pip: 'cloud-volume' },
+  // A Delta table read the way delta-rs reads it: `QueryBuilder` is its SQL engine, the one route
+  // that applies deletion vectors and column mapping — `to_pyarrow_dataset` refuses the first and
+  // reads the second's columns as nulls. Required only by a notebook that links one.
+  deltalake: { from: 'deltalake', pip: 'deltalake' },
 }
 
 // ---------------------------------------------------------------------------

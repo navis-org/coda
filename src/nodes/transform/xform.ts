@@ -114,10 +114,9 @@ registerNode({
    * are all in that document.
    */
   guide:
-    'Put neurons from different brains into one coordinate system, so they can be drawn ' +
-    'together or compared by NBLAST — neither of which works while two reconstructions sit in ' +
-    'unrelated spaces. One landmark transform per dataset, straight into JRC2018U. Mirror ' +
-    'before transforming, not after.',
+    'Moves skeletons, meshes or points into the shared JRC2018U template space (or another ' +
+    'dataset’s space), so neurons from different datasets can be shown together or compared ' +
+    'with NBLAST. The source space is read from the neurons. If you also mirror, do that first.',
   /*
    * `expensive` for the reason the Mirror node is: this fetches a landmark file and runs a
    * spline in a Python runtime that is a ten megabyte download on first use. There is no cheap
@@ -147,7 +146,7 @@ registerNode({
         { value: COMMON_SPACE.id, label: `${COMMON_SPACE.label} (shared)` },
         ...bridgeableSpaces().map((s) => ({ value: s.id, label: s.label })),
       ],
-      help: 'Where to transform into. The shared template is one hop; another dataset’s space goes out through it and back. A target that does not cover the neuron costs accuracy — the hemibrain is one hemisphere.',
+      help: 'The space to transform into. Another dataset’s space is reached via the shared template. Accuracy suffers where the target does not cover the neuron, e.g. the hemibrain covers one hemisphere.',
     },
     {
       id: 'space',
@@ -155,7 +154,7 @@ registerNode({
       label: 'Space',
       default: '',
       options: [FROM_DATA, ...bridgeableSpaces().map((s) => ({ value: s.id, label: s.label }))],
-      help: 'Which space the geometry is coming from. Leave on "From the data" unless it arrived without one, since naming it here is a claim about coordinates nobody else can identify.',
+      help: 'The space the geometry is in. Leave on "From the data" unless it arrived without one.',
     },
   ],
 
@@ -171,7 +170,9 @@ registerNode({
   validate: (ctx) => {
     const input = ctx.inputs.in
     if (!isGeometryKind(input?.kind)) {
-      return ['Transform takes skeletons, meshes or points — not a table.']
+      return [
+        'Transform Neurons takes skeletons, meshes or points. Wire one of those into `Neurons`.',
+      ]
     }
 
     /*
@@ -181,7 +182,7 @@ registerNode({
      * is plugged in is exactly the thing somebody needs told.
      */
     if (ctx.inputs.transform) {
-      return ['Using the wired Transform; Target and Space are ignored.']
+      return ['Using the wired `Transform`, so `Target` and `Space` are ignored.']
     }
 
     /*
@@ -199,10 +200,10 @@ registerNode({
     const override = String(ctx.params.space)
     if (!override) return []
     if (!toCommonFor(override)) {
-      return [`Coda ships no route from “${override}” into ${COMMON_SPACE.id}.`]
+      return [`Coda has no route from “${override}” into ${COMMON_SPACE.id}.`]
     }
     if (override === target) {
-      return [`Source and Target are both ${override} — there is nothing to do.`]
+      return [`\`Space\` and \`Target\` are both ${override}, so there is nothing to do.`]
     }
 
     /*
@@ -217,9 +218,9 @@ registerNode({
       const shared = [...from].filter((region) => to.has(region))
       if (from.size > 0 && to.size > 0 && shared.length === 0) {
         return [
-          `${spaceName(override)} covers ${[...from].join(' and ')} where ` +
-            `${spaceName(target)} covers ${[...to].join(' and ')}. With no shared territory ` +
-            `every point would be extrapolated rather than transformed.`,
+          `${spaceName(override)} covers ${[...from].join(' and ')}, but ` +
+            `${spaceName(target)} covers ${[...to].join(' and ')}. With no shared territory, ` +
+            `every point would be extrapolated instead of transformed.`,
         ]
       }
       // Beyond that there is nothing to say in advance: the placement below is a fact about
@@ -237,15 +238,15 @@ registerNode({
     if (vnc.wholly) {
       return [
         `${COMMON_SPACE.id} is a brain template. A nerve cord is registered to JRCVNC2018U and ` +
-          'then placed beside the brain by a fixed affine — good for drawing, not a claim ' +
-          'about anatomy.',
+          'then placed beside the brain by a fixed affine transform. This is fine for drawing ' +
+          'but is not anatomically accurate.',
       ]
     }
     if (vnc.any) {
       return [
-        `${COMMON_SPACE.id} is a brain template, so the nerve cord half is placed rather ` +
-          `than registered. The two halves reach the frame by different routes and ` +
-          `disagree slightly around the neck.`,
+        `${COMMON_SPACE.id} is a brain template, so the nerve cord part is only placed ` +
+          `beside the brain without being registered. The brain and nerve cord are ` +
+          `transformed by different routes and disagree slightly around the neck.`,
       ]
     }
     return []
@@ -282,16 +283,15 @@ registerNode({
     if (conflict) {
       const [carried, override] = conflict
       throw new Error(
-        `These coordinates are in ${spaceName(carried)} (${carried}) but Space is set to ` +
+        `These coordinates are in ${spaceName(carried)} (${carried}), but \`Space\` is set to ` +
           `${spaceName(override)} (${override}). Transforming from the wrong space puts ` +
-          `neurons somewhere plausible and wrong. Set Space back to "From the data".`,
+          `neurons in the wrong place. Set \`Space\` back to "From the data".`,
       )
     }
     if (!spaceId) {
       throw new Error(
-        'These coordinates name no template space, so there is nothing to transform them ' +
-          'from. Fetch them from a dataset Coda has a registration for, or name the space ' +
-          'here.',
+        'These coordinates have no template space, so there is nothing to transform them ' +
+          'from. Fetch them from a dataset Coda has a registration for, or set `Space`.',
       )
     }
 
@@ -320,8 +320,8 @@ registerNode({
        * looking for a workaround there is none of.
        */
       throw new Error(
-        `Coda ships no route from ${spaceName(spaceId)} (${spaceId}) into ` +
-          `${COMMON_SPACE.id} — either none exists, or building one needs native libraries ` +
+        `Coda has no route from ${spaceName(spaceId)} (${spaceId}) into ` +
+          `${COMMON_SPACE.id}. Either none exists, or building one needs native libraries ` +
           `that cannot run in a browser.`,
       )
     }
@@ -334,7 +334,7 @@ registerNode({
     const inbound = target === COMMON_SPACE.id ? undefined : toCommonFor(target)
     if (target !== COMMON_SPACE.id && !inbound) {
       throw new Error(
-        `Coda ships no route from ${COMMON_SPACE.id} into ${spaceName(target)} (${target}).`,
+        `Coda has no route from ${COMMON_SPACE.id} into ${spaceName(target)} (${target}).`,
       )
     }
 

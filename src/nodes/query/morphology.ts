@@ -26,9 +26,11 @@ registerNode({
   type: 'neuron.skeletons',
   label: 'Skeletons',
   category: 'query',
-  description: 'Fetch centerline tracings for the incoming neurons.',
+  description: 'Fetches skeletons (centreline tracings) for the incoming neurons.',
   guide:
-    'Centerline tracings for the incoming neurons — encode both the 3D shape and topology of the cell. Coordinates come out in nanometres, so a skeleton and a mesh of the same neuron sit in the same space. Some datasets have more than one place to get a skeleton. A collection carries only the fetch’s own attributes, so use Carry fields for anything else you want to filter or colour by.',
+    'Fetches skeletons (centreline tracings) for the incoming neurons, in nanometres. Wire a ' +
+    'Dataset and a table of neurons, and send the output to a 3D View, NBLAST or Distance ' +
+    'between. Use Carry fields to bring along extra columns from the neuron table, e.g. to colour by.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -100,7 +102,7 @@ registerNode({
       ctx,
       ctx.input('neurons'),
       Number(ctx.params.limit),
-      'Each skeleton is a separate request, and a few thousand of them is minutes rather than seconds.',
+      'Each skeleton is a separate request, so a few thousand of them can take minutes.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
     // Bound once rather than per publish — see `carrying`.
@@ -141,9 +143,12 @@ registerNode({
   type: 'neuron.meshes',
   label: 'Meshes',
   category: 'query',
-  description: 'Fetch surface meshes for the incoming neurons.',
+  description: 'Fetches surface meshes for the incoming neurons.',
   guide:
-    'Neuron surface meshes; where they come from varies by source. **Detail** spends a triangle budget among the levels a source publishes, and does nothing where there is only one — **Downsample** reduces the geometry itself, anywhere. A collection carries only the fetch’s own attributes, so use Carry fields for anything else.',
+    'Fetches surface meshes for the incoming neurons, usually for a 3D View. Detail sets a ' +
+    'triangle budget for the whole set where the source has several levels of detail; ' +
+    'Downsample reduces the meshes on any source. Use Carry fields to bring along extra columns ' +
+    'from the neuron table.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -189,7 +194,7 @@ registerNode({
       ctx,
       ctx.input('neurons'),
       Number(ctx.params.limit),
-      'Each mesh is a separate fetch, and a source without levels of detail sends full resolution unless Downsample is set.',
+      'Each mesh is a separate fetch, and a source without levels of detail sends meshes at full resolution unless `Downsample` is set.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
     const carry = carrying(ctx)

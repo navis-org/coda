@@ -1,21 +1,31 @@
-Rescale a matrix cell by dividing it against a reference value.
+## What Normalize does
 
-| Mode | Rescales each cell by |
-|------|---|
-| **Raw values** | No change; keeps the input as-is. |
-| **Fraction of row** | Sum of its row. Each row becomes fractions that sum to 1. |
-| **Fraction of column** | Sum of its column. Each column becomes fractions that sum to 1. |
-| **Fraction of global max** | Largest cell in the entire matrix. All cells fall into 0–1. |
-| **Log** | log₁₀(1 + x) — a logarithmic transform without normalisation. |
+Normalize rescales the values in a matrix, typically a connectivity matrix coming out of a [Pivot](#core.pivot). `Mode` picks the rescaling:
 
-A connectivity matrix of raw synapse counts is usually dominated by whichever cell type happens to be numerous, so `Fraction of row` is the mode reached for most often — each row then reads as "where does this type send its output".
-
-> [!WARNING] Clustering a raw count matrix fails silently
-> Feeding one into [Hierarchical Clustering](#cluster.linkage) with `Distance` on `auto` reads the
-> counts as similarities and produces negative distances. The clustering proceeds with no error
-> and the resulting tree renders offscreen. Normalise first — any mode but `raw values` or `log`.
+| Mode | Each cell is |
+| --- | --- |
+| "raw values" | left as it is |
+| "fraction of row total" | divided by the sum of its row, so each row sums to 1 |
+| "fraction of column total" | divided by the sum of its column, so each column sums to 1 |
+| "fraction of global max" | divided by the largest value in the matrix, so all cells fall between 0 and 1 |
+| "log10(1 + x)" | log-transformed, without any normalisation |
 
 ```coda-params
-caption: Example: normalising a connectivity matrix
 core.normalize: mode
 ```
+
+In a matrix of raw synapse counts, whichever cell types have the most neurons tend to dominate the picture. "fraction of row total" is therefore the mode you will want most often: if rows are presynaptic types, each row then tells you what fraction of that type's output goes to each target.
+
+> [!TIP] Normalise counts before clustering
+> [Linkage](#cluster.linkage) reads a matrix it knows nothing about as similarities, which raw
+> synapse counts are not, and refuses to run on them. Put a Normalize with one of the fraction
+> modes in front of it.
+
+## Negative values and empty rows
+
+Most of the time you will be normalising counts, but signed matrices (e.g. [NBLAST](#neuron.nblast) scores, or cosine and Pearson similarities from a [Similarity Matrix](#core.similarity)) work too:
+
+- A row or column that is all zeros stays all zeros.
+- A row or column that contains values but sums to zero or less has no meaningful fraction. Its cells are left empty (a [Heatmap](#out.heatmap) draws them as unrecorded) and the node tells you how many there were.
+- "fraction of global max" divides by the largest absolute value, so negative values keep their sign and everything ends up between -1 and 1.
+- With "log10(1 + x)", cells at or below -1 have no logarithm. They are left empty, again with a warning.

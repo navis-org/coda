@@ -17,11 +17,10 @@ import type { CodaGraph } from '../core/graph'
 import { canExportNotebook } from '../export/canExport'
 import type { ExportRefusal } from '../export/canExport'
 import { serializeGraph } from '../core/graph'
+import { SVG_NS, XLINK_NS } from './viewers/svgElement'
 
-const SVG_NS = 'http://www.w3.org/2000/svg'
 /** The namespace a namespace *declaration* lives in — see `serializeSvg`. */
 const XMLNS_NS = 'http://www.w3.org/2000/xmlns/'
-const XLINK_NS = 'http://www.w3.org/1999/xlink'
 const CSV_CHUNK_ROWS = 2000
 
 /** RFC 4180: quote when the value contains a delimiter, quote or newline. */

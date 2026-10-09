@@ -97,6 +97,28 @@ describe('ByteLedger', () => {
     expect(ledger.buffers).toBe(200)
   })
 
+  it('charges every per-node array a skeleton can carry, the computed ones included', () => {
+    // `skeletonBuffers` is the one list; a field added to the geometry and not to it is an array
+    // the memory readout and the cache budget both quietly leave out.
+    const skeletons: SkeletonsValue = {
+      kind: 'skeletons',
+      items: [
+        {
+          id: '1',
+          positions: new Float32Array(30),
+          radii: new Float32Array(10),
+          parents: new Int32Array(10),
+          compartments: new Uint8Array(10),
+          split: new Uint8Array(10),
+          nodeValues: { flow: new Float32Array(10) },
+        },
+      ],
+      attributes: table({ neuronId: ['1'] }),
+      bounds: EMPTY_BOUNDS,
+    }
+    expect(new ByteLedger().add(skeletons)).toBe(120 + 40 + 40 + 10 + 10 + 40 + 4 + (4 + 16))
+  })
+
   it('charges something holding no buffers what the cache recorded, once', () => {
     const manifest = { lods: [0, 1], fragments: ['a', 'b'] }
     const ledger = new ByteLedger()

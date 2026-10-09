@@ -26,11 +26,28 @@ import { bodyExcerpt, looksLikeHtml } from '../errorBody'
 
 export class NeuPrintError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  /**
+   * The request never reached neuPrint — a same-origin path nothing proxies answers 404 too,
+   * which is the one status `isNotFound` must not read as neuPrint's answer.
+   */
+  readonly unreached: boolean
+  constructor(message: string, status: number, options: { unreached?: boolean } = {}) {
     super(message)
     this.name = 'NeuPrintError'
     this.status = status
+    this.unreached = options.unreached ?? false
   }
+}
+
+/**
+ * Whether neuPrint itself said this does not exist — the one failure that is an *answer*.
+ *
+ * Anything else (no token, a 401, a 5xx, a cancel, a proxy that is not there) says nothing about
+ * the dataset, and a lookup that caches it as "none" keeps that for the session: CLAUDE.md's
+ * *a lookup that failed has not answered "none"*, learned on CAVE first.
+ */
+export function isNotFound(error: unknown): boolean {
+  return error instanceof NeuPrintError && error.status === 404 && !error.unreached
 }
 
 /** Everything a query needs to reach the server, resolved at call time. */
@@ -108,7 +125,7 @@ async function request<T>(
   const token = options.token ?? getToken()
   if (!token) {
     const message =
-      'No neuPrint token. Sign in, or paste one, in Connections — the branch icon in the toolbar.'
+      'No neuPrint token. Sign in, or paste one, in Connections (the branch icon in the toolbar).'
     reportAuthFailure(message)
     throw new NeuPrintError(message, 401)
   }
@@ -157,8 +174,8 @@ async function request<T>(
    */
   const fallback = routes.find((route) => route.kind === 'proxy')
   throw new NeuPrintError(
-    `Could not reach neuPrint at ${server}. It could not be read cross-origin — the deployment ` +
-      `may send no CORS headers, or may simply be down; a browser reports both the same way` +
+    `Could not reach neuPrint at ${server}. Either the server sends no CORS headers or it ` +
+      `is down. The browser does not say which` +
       (fallback && fallback.base !== server
         ? `. ${fallback.base} did not answer either: in development that path comes from ` +
           `vite.config.ts, so it needs \`pnpm dev\` or \`pnpm preview\`, and a static deploy ` +
@@ -198,11 +215,12 @@ async function readResponse<T>(
       (!body || looksLikeHtml(body))
     ) {
       throw new NeuPrintError(
-        `Nothing is serving ${route.base} — the request never reached neuPrint. That path has ` +
-          `to be proxied: \`pnpm dev\` and \`pnpm preview\` proxy it via vite.config.ts, and a ` +
-          `static deploy does not. Where the deployment sends CORS headers no proxy is needed ` +
-          `at all; where it does not, put one in front and name it in Connections → Base URL.`,
+        `Nothing is serving ${route.base}, so the request never reached neuPrint. That path ` +
+          `needs a proxy: \`pnpm dev\` and \`pnpm preview\` provide one via vite.config.ts, but ` +
+          `a static deploy does not. If the server sends CORS headers, no proxy is needed. ` +
+          `Otherwise, put a proxy in front of it and enter it in Connections → Base URL.`,
         404,
+        { unreached: true },
       )
     }
     throw new NeuPrintError(
@@ -242,7 +260,7 @@ function authRefusal(
   }
   return {
     message:
-      `neuPrint rejected the token (${status}). It may have expired — a sign-in lasts about a ` +
+      `neuPrint rejected the token (${status}). It may have expired; a sign-in lasts about a ` +
       `week. Sign in again in Connections, or paste a new token from neuprint.janelia.org/account.`,
     credential: true,
   }

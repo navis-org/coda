@@ -82,9 +82,11 @@ registerNode({
   label: 'ROI Viewer',
   category: 'visualisation',
   description:
-    "The dataset's neuropils drawn together in a named anatomical plane, coloured by how completely each is traced.",
+    "The dataset's neuropils drawn in 2D in a chosen anatomical plane, coloured by how completely each is traced.",
   guide:
-    'Neuropils drawn together on a fixed anatomical plane — frontal, dorsal or lateral — that can be exploded to separate overlapping regions. Various coloring options including reconstruction completeness.',
+    'Draws a dataset’s brain regions in 2D from the front, top or side, coloured by how ' +
+    'completely each region is reconstructed. Wire a neuPrint dataset straight into it; Explode ' +
+    'pushes overlapping regions apart.',
   cost: 'cheap',
   // Landscape, unlike Profile's and Dataset Summary's portrait boxes: a fly brain is wider than
   // it is tall in every one of the three planes, so a portrait card wastes the axis the picture
@@ -139,7 +141,7 @@ registerNode({
       id: 'colorBy',
       kind: 'enum',
       label: 'Colour',
-      help: 'What the fill says. Completeness is traced synapses over the synapses present.',
+      help: 'What the fill shows. Completeness is traced synapses over all synapses present.',
       default: 'postCompleteness',
       options: COLOR_MODES.map((m) => ({ value: m.value, label: m.label })),
       presentational: true,
@@ -149,7 +151,7 @@ registerNode({
       id: 'labels',
       kind: 'enum',
       label: 'Labels',
-      help: 'Auto names as many regions as fit and says when it has thinned them.',
+      help: '"Auto" names as many regions as fit and says when some were left out.',
       default: 'auto',
       options: [
         { value: 'auto', label: 'Auto' },
@@ -169,7 +171,7 @@ registerNode({
       id: 'primaryOnly',
       kind: 'boolean',
       label: 'Primary regions only',
-      help: 'Keep only the regions that tile the volume. The published list nests, so the rest are drawn inside their parents; unticking this downloads them.',
+      help: 'Draw only the top-level regions that tile the volume. Unticking also downloads the nested subregions.',
       default: true,
       presentational: true,
       advanced: true,
@@ -223,7 +225,7 @@ registerNode({
       id: 'refresh',
       kind: 'int',
       label: 'Refresh',
-      help: "Bumped by the card's reload button. Re-downloads the region meshes instead of reading the cached copy.",
+      help: "Set by the card's reload button. Re-downloads the region meshes instead of using the cached copy.",
       default: 0,
       min: 0,
       presentational: true,

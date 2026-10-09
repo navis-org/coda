@@ -52,10 +52,12 @@ import type {
   TableValue,
 } from '../../core/values'
 import { boundsOf, cableLength, emptyTable, makeTable, selectRows } from '../../core/values'
-import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type {
   AdjacencyRequest,
+  CoarseGeometry,
+  CoarseGeometryRequest,
+  CoarseRefusal,
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
@@ -66,7 +68,7 @@ import type {
   SourceCapabilities,
   SourceSchemas,
 } from '../source'
-import { ROI_MESH_SCHEMA, requireSkeletonRoute } from '../source'
+import { ID_ONLY, ROI_MESH_SCHEMA, requireSkeletonRoute } from '../source'
 import {
   compileLabelMatch,
   matchIndexRows,
@@ -78,6 +80,7 @@ import type { NgSourceRef } from '../neuroglancer/sourceUrl'
 import type { MeshResult, MeshSource } from './index'
 import {
   DEFAULT_TRIANGLE_BUDGET,
+  fetchCoarseMesh,
   fetchMeshes,
   meshFormatHasLevels,
   meshProgress,
@@ -120,7 +123,6 @@ const LEGACY_WARN = 25
  * copied from `CANONICAL_SCHEMAS`, so nothing downstream can advertise a `weight` column that no
  * call here will ever fill.
  */
-const ID_ONLY: TableSchema = tableSchema(column('neuronId', 'str'))
 
 const PRECOMPUTED_SCHEMAS: SourceSchemas = {
   neurons: ID_ONLY,
@@ -615,9 +617,9 @@ export class PrecomputedSource implements DataSource {
   private idsAsRegions(req: RoiMeshRequest, summary: string): { id: string; label: string }[] {
     if (!req.rois?.length) {
       throw new Error(
-        `${this.ref.canonical} publishes no segment properties — it is ${summary} — so ` +
-          `nothing can list its regions. Type the segment ids of the ones you want into ` +
-          `Regions, separated by commas.`,
+        `${this.ref.canonical} publishes no segment properties (it is ${summary}), so its ` +
+          `regions cannot be listed. Type the segment ids of the regions you want into ` +
+          `\`Regions\`, separated by commas.`,
       )
     }
     return req.rois.map((id) => ({ id, label: id }))
@@ -628,9 +630,9 @@ export class PrecomputedSource implements DataSource {
     const source = await this.describe(signal ? { signal } : {})
     if (!source.segmentPropertiesUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no segment properties — it is ${source.summary} ` +
-          `— so its segments have no names and nothing can list them. Supply the ids with ` +
-          `an Input IDs node.`,
+        `${this.ref.canonical} publishes no segment properties (it is ${source.summary}), so ` +
+          `its segments have no names and cannot be listed. Supply the ids with an Input IDs ` +
+          `node.`,
       )
     }
     return source.segmentPropertiesUrl
@@ -648,7 +650,7 @@ export class PrecomputedSource implements DataSource {
   private noConnectivity<T>(): Promise<T> {
     return Promise.reject(
       new Error(
-        `${this.label} publishes geometry, not connectivity. Wire a Dataset node for that.`,
+        `${this.label} only publishes geometry and has no connectivity. Wire a Dataset node for that.`,
       ),
     )
   }
@@ -670,8 +672,7 @@ export class PrecomputedSource implements DataSource {
     if (source.format === 'legacy' && req.neuronIds.length > LEGACY_WARN) {
       req.onWarn?.(
         `${this.label} publishes single-resolution meshes, so all ${req.neuronIds.length} arrive ` +
-          `at full detail — a few megabytes each — whatever Detail is set to. The fetch goes ` +
-          `ahead either way.`,
+          `at full detail (a few megabytes each), whatever \`Detail\` is set to. Fetching anyway.`,
       )
     }
 
@@ -724,6 +725,42 @@ export class PrecomputedSource implements DataSource {
       ...(detail ? { detail } : {}),
       ...this.frame(),
     }
+  }
+
+  /**
+   * The cheapest drawing of one segment, for a list row — Explore's tiles, where this source is the
+   * Meshes or Skeletons part of a Custom Dataset. A Neuroglancer Source never needed one on its
+   * own, having no neuron list for Explore to browse, and a Custom Dataset asks its parts in turn
+   * and got nothing from here: every tile blank over a bucket full of geometry.
+   *
+   * The mesh first, at its coarsest level: `fetchCoarseMesh`, the call neuPrint makes of the very
+   * same kind of bucket, which refuses a directory with no pyramid rather than downloading a whole
+   * neuron per row, and turns a pathological body down without fetching it. The skeleton where the
+   * mesh cannot answer — no mesh directory, a legacy one, a segment the mesh store lacks — since a
+   * skeleton is one small read whatever the format.
+   */
+  async fetchCoarseGeometry(
+    req: CoarseGeometryRequest,
+  ): Promise<CoarseGeometry | CoarseRefusal | undefined> {
+    const signal = req.signal ? { signal: req.signal } : {}
+    const source = await this.describe(signal)
+    if (source.meshUrl) {
+      const mesh = await fetchCoarseMesh(
+        await this.meshDir(req.signal),
+        req.neuronId,
+        signal,
+        req.detail,
+      )
+      if (mesh) return mesh
+    }
+    if (!source.skeletonUrl) return undefined
+    const { skeletons } = await fetchSkeletons(
+      await this.skeletonDir(req.signal),
+      [req.neuronId],
+      signal,
+    )
+    const skeleton = skeletons[0]
+    return skeleton && { kind: 'skeleton', ...skeleton }
   }
 
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
@@ -791,9 +828,8 @@ export class PrecomputedSource implements DataSource {
     const source = await this.describe(signal ? { signal } : {})
     if (!source.skeletonUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no skeletons — it is ${source.summary}. A segmentation ` +
-          `names its skeleton directory in the same info that names its meshes, and most name ` +
-          `neither.`,
+        `${this.ref.canonical} publishes no skeletons; it is ${source.summary}. Point this at a ` +
+          `segmentation whose info names a skeleton directory.`,
       )
     }
     // Keyed on the URL rather than the opened copy — see `meshDir` for why they are not the
@@ -818,7 +854,7 @@ export class PrecomputedSource implements DataSource {
     const source = await this.describe(signal ? { signal } : {})
     if (!source.meshUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no meshes — it is ${source.summary}. Point this ` +
+        `${this.ref.canonical} publishes no meshes; it is ${source.summary}. Point this ` +
           `at a segmentation that names a mesh directory, or at the mesh directory itself.`,
       )
     }

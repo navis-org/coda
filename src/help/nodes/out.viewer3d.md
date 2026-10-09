@@ -1,11 +1,20 @@
-## Four sockets, one space
+## Inputs
 
-Skeletons, meshes and synapse points are three views of the same cell; volumes are the room they sit in. Only one socket has to be filled.
+The 3D View draws neurons and brain regions in one scene. It has four input sockets, and you only need to fill one of them:
 
-They line up because everything upstream converts to **nanometres** at its own edge: a skeleton from one query and a mesh from another are the same neuron in the same place.
+| Socket      | What it draws                                                | Typically comes from                |
+| ----------- | ------------------------------------------------------------ | ----------------------------------- |
+| `Skeletons` | the neuron's branching wire frame                            | `Skeletons`                         |
+| `Meshes`    | the neuron's surface                                         | `Meshes`                            |
+| `Points`    | one dot per synapse, soma, or anything else with a position | `Synapses`                          |
+| `Volumes`   | neuropil shells, i.e. the brain regions around the neurons   | [`ROI Meshes`](#neuron.roiMeshes)   |
+
+`Volumes` takes meshes just like `Meshes` does. It is a separate socket so that regions and neurons can have their own opacity and colours.
+
+All geometry is converted to nanometres before it reaches the viewer, so a skeleton from one query and a mesh from another line up in the same place.
 
 ```coda-graph
-caption: One neuron search feeds both morphology queries, so the wire frame and the synapses are about the same cells. The regions come from the dataset alone.
+caption: One neuron search feeds both morphology queries, so the skeletons and the synapses belong to the same cells. The regions come from the dataset alone.
 dataset.hemibrain as ds
 neuron.findNeurons as find
 neuron.skeletons as skel
@@ -23,122 +32,117 @@ syn:points -> view:points
 rois:meshes -> view:volumes
 ```
 
-| Socket | What it draws | Comes from |
-| --- | --- | --- |
-| `Skeletons` | the branching wire frame, one line per parent link | `Skeletons` |
-| `Meshes` | the filled surface — the shape a neurite actually has | `Meshes` |
-| `Points` | one dot per synapse, or per soma, or per anything else with a position | `Synapses` |
-| `Volumes` | neuropil shells — the room the cells are in | [`ROI Meshes`](#neuron.roiMeshes) |
+## Settings
 
-`Volumes` is a second meshes socket rather than the same one so that a shell and a neuron can carry their own opacity and their own colour encoding.
-
-## Colour is a column picker, three times over
-
-Every input arrives with an **attribute table** beside its geometry — one row per skeleton, per mesh, per point, in the same order. So "colour these by cell type" is the ordinary column picker, not a special case built into the viewer.
-
-The three encodings are independent: neurons by cell type while their synapses go by polarity. Each one that resolves to a category gets its own key in the legend strip under the canvas.
-
-**Skeletons and meshes start on `a colour each`, hashed from `neuronId`** — **neuroglancer's own hash**, so a cell that is teal in a FlyWire view is teal here.
-
-| Mode | Use it when |
-| --- | --- |
-| `a colour each` | the colour stands for *which neuron this is*. No cap: forty neurons, forty colours |
-| `by category` | the colour stands for a *group* — `type`, `side`, a cluster number |
-| `by value` | the column is a number and the order matters — cable length, synapse count |
-| `single colour` | the colour is not carrying anything, and something else in the scene is |
-| `colours in a column` | something upstream already decided, and you want it honoured |
-
-`by category` ranks values by frequency and hands them the palette's eight colours in that order, coming round to the first after the eighth; the caption says when it has repeated. `a colour each` derives a colour per value, so it never runs out — but the hues cover the whole circle with no colourblind check.
-
-**`by value` has controls of its own**, in the same colour row, and while it is the mode the column picker offers only numeric columns:
-
-| Control | What it does |
-| --- | --- |
-| `ramp` | Coda blue, or one of matplotlib's — viridis, magma, cividis and the rest. The ones marked `centred` are diverging, with their middle colour on `centre` |
-| `min` / `max` | the values at the two ends; empty lets the data decide. Anything outside takes the end colour, and the legend says `values clipped` |
-| `centre` | centred ramps only, and empty means 0. Both arms stay the same length, so there is no `min` and `max` is the distance from the centre to either end |
-| `log` | spreads the colour over a log scale; the numbers on the colour bar stay the values. Not offered on a centred ramp |
-
-Ends that make no ramp — a minimum above the maximum — are ignored, and the legend says `limits ignored`. The same controls are on `Scatter Plot` and on the node colour of `Network Viewer`.
-
-> [!NOTE] The legend lists twelve
-> A hash key is one row per neuron, so the strip shows the first twelve and says `+28 more`. The rest are still drawn in colours of their own; they just have no key to click.
-
-## The legend is a control panel
-
-| Part of the key | What it does |
-| --- | --- |
-| the swatch | opens a colour picker — that key's colour, overriding the palette slot |
-| the label | selects every item under it; click again to let it go |
-| the dot after it | hides that key from the scene; `Alt`-click (`Option` on a Mac) shows **only** it |
-
-A hidden neuron is not drawn at all rather than drawn faintly, so it also stops being clickable. The caption says how many are hidden, since a scene showing 12 of 21 neurons otherwise looks like a scene that only fetched 12.
-
-**Selecting from the legend is the same selection as clicking in the scene**, and feeds the `Selected` output. Synapse keys can be hidden and recoloured but not selected: their rows are synapses, and the selection this node carries is of neurons.
-
-Hidden keys and colour overrides are saved with the workflow and both presentational. `show all` and `reset colours` appear at the end of the strip when there is something to undo.
-
-**Where more than one socket has something on it, each group's name is itself a switch** — `● skeletons`, `● volumes` — taking that socket out of the picture. This reaches somewhere the per-key dots cannot: a key only exists where the colour is a category, so a socket on a single colour has none, which is what neuropil shells arrive as.
-
-## Getting around
-
-The camera is a **trackball**, like neuroglancer's: drag to turn, with no up axis holding you level. The compass in the corner tracks the current orientation, and **clicking an axis head flies to that view**. Scroll zooms.
-
-**The camera is framed once and then left alone.** It centres itself the first time the scene has anything in it; after that nothing moves it — not an upstream node re-running, not expanding the card and closing it again. **Reset view** (`⟲` in the caption) frames the whole scene again, and is the only thing that does.
-
-## Picking neurons, and the pick is an output
-
-Selected neurons keep their colour while everything else dims to **a grey of its own**: lighter colours to lighter greys, all of them pulled back towards the background, so the neurons you did not pick can still be told apart without competing with the ones you did. Colours of similar lightness — the eight of `by category` among them — dim to much the same grey. The selection leaves through `Selected` as an ordinary neuron table.
-
-**Clicking in the scene is off until you switch it on**, with `Select by clicking` on the **Scene** tab. After that a click on a skeleton or a mesh selects that neuron and a second click lets it go. Synapse points and volumes are not clickable, so a click passes through a neuropil shell to the neuron inside it.
-
-> [!NOTE] Why that is off by default
-> The selection takes part in the provenance key, so changing it marks everything downstream stale and re-runs it. A click that lands on a neurite while you are turning the scene would do that silently.
-
-**Legend labels select either way**, whatever the toggle says. `3 selected ⨯` in the caption clears the whole selection, and is only there when there is one to clear.
-
-## Where the settings are
-
-The card shows no settings at all — ports, the picture and the legend. Expand it (`⤢`) and everything is in the **Style** panel down the right-hand side, with **a tab per socket** plus one for the scene. The **Style** button in the header puts the panel away.
+The card itself only shows the ports, the picture and the legend. To change settings, expand the card (`⤢`): all settings are in the **Style** panel on the right, with one tab per socket plus a `Scene` tab. The **Style** button in the header hides the panel again.
 
 ```coda-params
-caption: The three settings most worth changing, all of them presentational — they change the picture and nothing downstream.
+caption: The settings you are most likely to change. None of them affect anything downstream.
 out.viewer3d: meshOpacity, pointSize, background
 ```
 
-**Meshes are opaque; volumes are not.** Both are a slider in their own colour's row. `Mesh opacity` starts at 1, `Volume opacity` at 0.12; either can be moved to the other's setting.
+- **Opacity**: meshes start fully opaque (1) and volumes mostly transparent (0.12). Each has a slider in its colour row.
+- **Point size** is in nanometres, not pixels, so synapses stay the same size relative to the neuron as you zoom. The default of 800 nm is larger than a real synapse so that the dots are visible next to a mesh. Zoomed out on a whole brain they shrink to specks.
+- **Light intensity** scales the scene's lighting; 1 is the default. Above about 1.4 the brightest surfaces start to turn white, and at the top of the slider about a quarter of the visible surface has lost its colour.
+- **Ambient occlusion** darkens creases, cavities and places where surfaces meet. 0 turns it off; at 100% a fully occluded pixel goes black, and above that the effect spreads wider instead of getting darker. Only opaque meshes and volumes cast it, so a scene with only skeletons is unaffected.
+- **Background** fixes the canvas colour regardless of the app's theme. "black" is not the same as "dark", which is a very dark grey.
 
-**Volume colour is a single grey by default**, where skeletons and meshes start on a colour each: 63 neuropils over an eight-colour palette repeats a hue every eighth region. Switch it to `by category` on `roi` when the regions are the subject rather than the room.
+## Colours
 
-**Point size is in nanometres**, not pixels, so synapses keep their size relative to the neuron as you zoom. The default, 800 nm, is larger than a real synapse, so the dots show beside a mesh. Zoomed right out on a whole brain they shrink to specks.
+Each input comes with an attribute table: one row per skeleton, mesh or point, in the same order as the geometry. Colouring works by picking a column from that table, e.g. `type` to colour neurons by cell type. Skeletons, meshes, points and volumes each have their own colour setting, so you can colour neurons by cell type and their synapses by polarity at the same time.
 
-**`Light intensity`** scales the scene's lighting; 1 is the default the palette was checked against. Past about 1.4 the brightest surfaces **clip** — there is no highlight roll-off — and at the top of the slider roughly a quarter of the visible surface is white rather than its own colour.
+Skeletons and meshes start out on "a colour each", based on `neuronId`. This uses the same colour hashing as neuroglancer, so a neuron that is teal in a FlyWire neuroglancer scene is teal here too. Volumes start out in a single grey: with dozens of neuropils and eight palette colours, colours would repeat every eighth region. If the regions are what you want to look at, switch to "by category" on `roi`.
 
-**Ambient occlusion** darkens creases, cavities and the places where surfaces meet. **0 turns it off**; at 100% a fully occluded pixel goes black, and above that the effect widens rather than deepens. Only opaque meshes and volumes can cast it, so a scene of skeletons alone is unaffected.
+| Mode                  | Use it when                                                                    |
+| --------------------- | ------------------------------------------------------------------------------ |
+| "a colour each"       | the colour identifies individual neurons. There is no limit on the number of colours |
+| "by category"         | the colour stands for a group, e.g. `type`, `side` or a cluster number         |
+| "by value"            | the column is numeric and the order matters, e.g. cable length or synapse count |
+| "single colour"       | the colour does not need to carry any information                             |
+| "colours in a column" | a column upstream already contains the colours you want                        |
 
-**Background** pins the canvas regardless of the app's theme. `black` is its own option and not the same as `dark`, whose surface is a very dark grey.
+"by category" assigns the palette's eight colours to the most common values first and starts over after the eighth; the caption tells you when colours repeat. "a colour each" generates a colour per value and never runs out, but the colours are not checked for colourblind safety.
+
+### Colouring by value
+
+When the mode is "by value", the column picker only offers numeric columns, and a few extra controls appear in the same row:
+
+| Control       | What it does                                                                                                         |
+| ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `ramp`        | Coda blue or one of matplotlib's (viridis, magma, cividis, ...). Ramps marked `centred` are diverging, with their middle colour at `centre` |
+| `min` / `max` | the values at the two ends of the ramp; leave empty to use the data's range. Values outside get the end colour, and the legend says `values clipped` |
+| `centre`      | centred ramps only; empty means 0. Both arms are the same length, so there is no `min`, and `max` is the distance from the centre to either end |
+| `log`         | uses a log scale for the colours; the colour bar still shows the actual values. Not available on centred ramps |
+
+If `min` is larger than `max`, the limits are ignored and the legend says `limits ignored`. The same controls exist on the [Scatter Plot](#out.scatter) and for node colours in the [Network Viewer](#out.network).
+
+## The legend
+
+The legend under the canvas has one entry per category for every colour setting that uses categories. You can use it to change the scene:
+
+| Part of the entry  | What it does                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| the swatch         | opens a colour picker to change that entry's colour                                 |
+| the label          | selects all neurons under it; click again to deselect                               |
+| the dot after it   | hides that entry from the scene; `Alt`-click (`Option` on a Mac) shows only that entry |
+
+Hidden neurons are not drawn at all, so you can't click them either. The caption says how many are hidden.
+
+Synapse entries can be hidden and recoloured, but not selected, because the node's selection is a selection of neurons.
+
+Hidden entries and custom colours are saved with the workflow. `show all` and `reset colours` appear at the end of the legend when there is something to undo.
+
+When more than one socket is connected, the name of each group in the legend (e.g. `● skeletons`, `● volumes`) toggles that whole socket on and off. This is useful for sockets in a single colour, such as neuropil shells, which have no individual entries to hide.
+
+> [!NOTE] The legend shows at most twelve entries
+> With "a colour each" there is one entry per neuron, so the legend shows the first twelve and
+> then e.g. `+28 more`. The other neurons are still drawn in their own colours; they just don't
+> have an entry you can click.
+
+## Moving around
+
+The camera works like a trackball (the same as neuroglancer's): drag to rotate, scroll to zoom. There is no fixed "up" direction. The compass in the corner shows the current orientation, and clicking one of its axes flies to that view.
+
+The camera centres on the scene the first time there is something to show and then stays put, even when upstream nodes re-run or you expand and collapse the card. Press **Reset view** (`⟲` in the caption) to frame the whole scene again. If you would rather have the camera re-frame every time the scene changes (e.g. when a [For Each](#flow.forEach) loop sends one neuron at a time through the viewer and the neurons are far apart), switch on `Frame each` on the `Scene` tab. Leave it off if you want a series of images at the same scale.
+
+## Selecting neurons
+
+Selected neurons keep their colour while everything else is dimmed to grey. Lighter colours become lighter greys, so unselected neurons can still be told apart. Colours of similar lightness (such as the eight "by category" colours) end up as similar greys. The selected neurons are sent out through the `Selected` output as a normal neuron table.
+
+There are two ways to select:
+
+- **Legend labels**: click a label in the legend (see above). This always works.
+- **Clicking in the scene**: off by default. Switch on `Select by clicking` on the `Scene` tab, then click a skeleton or mesh to select that neuron, and click again to deselect it. Synapse points and volumes are not clickable, so a click goes through a neuropil shell to the neuron inside.
+
+Clicking in the scene is off by default because changing the selection marks everything downstream as stale and re-runs it. With it on, a click that lands on a neurite while you are rotating the scene would do that.
+
+`3 selected ⨯` in the caption clears the selection.
 
 ## Line width
 
-**Three modes, and a new card opens on `by radius`.** `one width` draws every neurite the same. `by radius` and `to scale` both draw each one at its recorded calibre — CATMAID's annotated radii, CAVE's level-2 chunk sizes, neuPrint's SWC column.
+`Line width` controls how skeletons are drawn and has three modes. New cards start on "by radius".
 
-Under `by radius` the number is the width of the **thickest** neurites, in pixels; everything thinner is drawn in proportion, down to a one-pixel floor. `to scale` is the same radii in the scene's own units, so the number is a **multiplier**: at 1 a 200 nm neurite is drawn 200 nm across and thickens as you zoom into it. Nodes with no recorded radius stay a hairline, and a source that publishes none falls back to one width.
+- "one width" draws every neurite with the same width.
+- "by radius" uses each neurite's recorded radius (e.g. CATMAID's annotated radii, CAVE's level-2 chunk sizes, or the radius column of neuPrint's SWC files). The number is the width in pixels of the thickest neurites; everything thinner is scaled down in proportion, to a minimum of one pixel. The arbour looks the same at every zoom level, which suits figures about branching patterns.
+- "to scale" uses the same radii, but in the scene's own units, so the number is a multiplier: at 1, a 200 nm neurite is drawn 200 nm across and gets thicker as you zoom in. Use this if the calibre itself matters. Zoomed far out, thin neurites all end up at the one-pixel minimum.
 
-`by radius` keeps the arbour looking the same at every zoom, which suits a figure about branching pattern. `to scale` is the honest one for calibre, but zoom out far enough and thin neurites all reach the hairline floor together.
+Nodes without a recorded radius are drawn as hairlines, and sources that don't publish radii fall back to "one width". Widths above 1 take more effort to draw: each segment then needs about four times as much data.
 
-Anything above 1 costs more to draw: at 1 the skeletons are hairlines, the only width WebGL draws, and above it each segment becomes a camera-facing quad at about four times the vertex data.
+## Exporting a picture
 
-## Getting a picture out
+The download button offers:
 
-The download button offers **PNG** — the scene as it stands, at twice screen resolution, with the compass left out. It is a read-back of the live frame rather than a re-drawing. **`PNG, no background`** is the same frame for dropping onto a figure. `CSV` writes the attribute table behind the geometry, not the picture.
+- **PNG**: the scene as it is, at twice screen resolution, without the compass.
+- **PNG, no background**: the same with a transparent background, for figures.
+- **CSV**: the attribute table behind the geometry (not the picture).
 
-> [!NOTE] A cut-out of hairlines is faint
-> On a transparent background a one-pixel line is mostly *coverage* rather than colour, so it arrives pale. Raise `Line width` before exporting a cut-out.
+> [!TIP] Thicken lines for transparent exports
+> On a transparent background, one-pixel lines come out pale. Increase `Line width` before exporting.
 
-A `Download` node wired to this one can write the same PNG as part of a run, as long as this card is on screen while it runs — a picture only exists where it is being drawn.
+A `Download` node wired to this one can save the same PNG during a run, but only if this card is on screen while the run happens.
 
-## What it is not
+## Limitations
 
-- **It is not a segmentation browser.** For EM sections, published scenes and neuron meshes served straight from a bucket, use `Neuroglancer`, which fetches its own geometry rather than taking it on a wire.
-- **It is not the ROI map.** `ROI Viewer` answers "where in the brain is this region, and how well is it traced" with its own fetch and its own 2D projection, and nothing it downloads can leave it. Use [`ROI Meshes`](#neuron.roiMeshes) to put the same shells on a wire and draw them in here.
-- **Everything it draws was fetched first.** The morphology nodes are `expensive` and capped, so this is a viewer for tens of neurons, not thousands.
+- The 3D View is not a segmentation browser. For EM image data, published scenes, or meshes loaded straight from a bucket, use `Neuroglancer`, which fetches its own data instead of taking it from a wire.
+- The `ROI Viewer` (which shows where a brain region is and how well it is traced) is a separate tool, and its geometry can't be passed on. To draw the same region shells here, use [`ROI Meshes`](#neuron.roiMeshes).
+- Everything the viewer draws has to be fetched first. The morphology nodes are `expensive` and capped, so the 3D View is meant for tens of neurons, not thousands.

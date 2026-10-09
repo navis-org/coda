@@ -81,7 +81,7 @@ const perDatasetParams = repeatParams({
       id: slot.id('name'),
       kind: 'string',
       label: `Name ${slot.index}`,
-      help: 'What this dataset is called in the output’s column names — weight_A, present_A. Keep it short.',
+      help: 'This dataset’s name in the output column names, e.g. weight_A. Keep it short.',
       default: compareDatasetName(slot.index),
     },
     {
@@ -105,7 +105,7 @@ const perDatasetParams = repeatParams({
       kind: 'column',
       label: `Weight ${slot.index}`,
       fromPort: 'edges',
-      help: 'Synapse count. Leave empty to count each row as one, which is what an unweighted edge list means.',
+      help: 'Synapse count. Leave empty to count each row as one.',
       default: 'weight',
       optional: true,
     },
@@ -149,9 +149,10 @@ function labelsShapeIssue(ctx: InferContext, portId: string, index: number): str
     .filter((name) => !findColumn(schema, name))
   if (missing.length === 0) return []
   return [
-    `Dataset ${index}: the Labels table has no ${missing.map((n) => `"${n}"`).join(' or ')} ` +
-      `column, so it is not a Match Cell Types labels table — the comparison would be made ` +
-      `against whichever columns happen to come first.`,
+    `Dataset ${index}: the table wired into \`Labels ${index}\` has no ` +
+      `${missing.map((n) => `"${n}"`).join(' or ')} column, so it is not a labels table from ` +
+      `Match Cell Types. Wire the Labels output of Match Cell Types, or pick the columns in ` +
+      `\`Labels: neuron id\` and \`Labels: label\`.`,
   ]
 }
 
@@ -175,7 +176,7 @@ const LABEL_PICKERS: ParamDef[] = [
     kind: 'column',
     label: 'Labels: neuron id',
     from: 'labels1',
-    help: 'On the Labels tables: the neuron id column. Match Cell Types publishes neuronId.',
+    help: 'The neuron id column in the Labels tables. Match Cell Types writes neuronId.',
     default: ID_COLUMN_NAME,
     advanced: true,
   },
@@ -184,7 +185,7 @@ const LABEL_PICKERS: ParamDef[] = [
     kind: 'column',
     label: 'Labels: label',
     from: 'labels1',
-    help: 'On the Labels tables: the shared label column.',
+    help: 'The shared label column in the Labels tables.',
     default: 'label',
     advanced: true,
   },
@@ -195,9 +196,14 @@ export const compareConnectivityNode = packNode({
   label: 'Compare Connectivity',
   category: 'analysis',
   description:
-    'Put the same type-to-type connection side by side across two or more connectomes. Columns are `preLabel`, `postLabel`, then `weight_<name>` and `present_<name>` for each dataset, named by its `Name` param.',
+    'Put the same type-to-type connections side by side across two or more connectomes. ' +
+    'Columns are `preLabel`, `postLabel`, then `weight_<name>` and `present_<name>` for ' +
+    'each dataset, named by its `Name` param.',
   guide:
-    'Takes each dataset’s edge list plus its labels from Match Cell Types, rewrites both ends into the shared label space and sums per type pair, so one row reads “LC4 to DNp01 is 30 synapses here and 6 there”. Read the present columns before the weights: 0 is a real absence, empty means the type is missing there.',
+    'Puts type-to-type connections side by side across connectomes. Wire in each dataset’s ' +
+    'edge list plus its labels from Match Cell Types; each row then reads e.g. “LC4 to DNp01 is ' +
+    '30 synapses here and 6 there”. A weight of 0 means not connected, an empty one means the ' +
+    'type is missing from that dataset.',
   cost: 'cheap',
 
   inputs: [
@@ -254,7 +260,7 @@ export const compareConnectivityNode = packNode({
       group: 'shared',
       kind: 'int',
       label: 'Min weight',
-      help: 'Drop a type pair no dataset reaches. Applied per row rather than per dataset, so a pair that is 1 here and 40 there survives.',
+      help: 'Drop type pairs below this weight in every dataset. A pair that passes in one dataset is kept for all.',
       default: 0,
       min: 0,
     },
@@ -283,8 +289,8 @@ export const compareConnectivityNode = packNode({
       const typed = String(ctx.params[repeatParamId('name', index)] ?? '').trim()
       if (typed && typed !== name) {
         issues.push(
-          `Dataset ${index}: another dataset is already called "${typed}", so its columns ` +
-            `are named after "${name}".`,
+          `Dataset ${index}: another dataset is already called "${typed}", so this one's ` +
+            `columns are named "${name}" instead. Change \`Name ${index}\` to pick another name.`,
         )
       }
     })
@@ -302,12 +308,16 @@ export const compareConnectivityNode = packNode({
        */
       for (const role of ['pre', 'post'] as const) {
         if (!ctx.column(repeatParamId(role, index))) {
-          issues.push(`Dataset ${index}: pick the ${role}synaptic id column.`)
+          issues.push(
+            `Dataset ${index}: pick the ${role}synaptic id column in \`${role === 'pre' ? 'Pre' : 'Post'} ${index}\`.`,
+          )
         }
       }
       const labelsPort = portIdAt('labels', index)
       if (!ctx.inputs[labelsPort]) {
-        issues.push(`Dataset ${index}: wire the matching Labels table from Match Cell Types.`)
+        issues.push(
+          `Dataset ${index}: wire the matching Labels table from Match Cell Types into \`Labels ${index}\`.`,
+        )
       } else {
         issues.push(...labelsShapeIssue(ctx, labelsPort, index))
       }
@@ -327,7 +337,9 @@ export const compareConnectivityNode = packNode({
       if (!isTableValue(labels)) throw new Error(`Labels ${index} is not a table`)
       const columns = spec.columns[i]!
       if (!columns.pre || !columns.post) {
-        throw new Error(`Dataset ${index}: both the pre and post id columns must be selected`)
+        throw new Error(
+          `Dataset ${index}: pick both the presynaptic and postsynaptic id columns (\`Pre ${index}\` and \`Post ${index}\`).`,
+        )
       }
       return {
         name,

@@ -65,9 +65,11 @@ export const galleryNode = packNode({
   // A wall of neurons wants the room on the canvas, not only once somebody opens it full size.
   cardWidth: 640,
   description:
-    'Neurons side by side against cortical depth, with the layers behind them and axon and dendrite apart.',
+    'Neurons side by side at their cortical depth, with the layers behind them and axon and ' +
+    'dendrite in two colours.',
   guide:
-    'Browse a cortical dataset as a wall of reconstructions, each drawn at its depth below the pia with the layers behind it and its axon and dendrite in two colours. Filter by type and proofreading, draw a sample of each type, and select cells to pass on — as a table with each soma’s depth and layer, and as skeletons.',
+    'Draws a wall of reconstructed cells, each at its depth below the pia, with the layers behind them and axon and dendrite in two colours. ' +
+    'Browse by cell type and proofreading status, then select cells to pass them on as a table (with soma depth and layer) and as skeletons.',
   cost: 'expensive',
   inputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   outputs: [
@@ -86,7 +88,7 @@ export const galleryNode = packNode({
       default: [],
     },
     cellTypeSourceParam(
-      'The table cell types are read from. The default combines the published typings; the others are single typings, including m-types. None reads only what the Dataset carries, such as a table wired into it. Proofreading is read either way.',
+      'The table to read cell types from. The first option combines the published typings; the others are single typings, including m-types. "None" uses only what the Dataset carries, e.g. a table wired into it.',
     ),
     {
       // A column rather than the literal `type`, so a dataset naming its typing otherwise — or a
@@ -106,7 +108,7 @@ export const galleryNode = packNode({
       id: 'mode',
       kind: 'enum',
       label: 'Mode',
-      help: 'Line-up runs every group on one after the other; rows gives each group rows of its own; compare sets two groups side by side on one depth scale.',
+      help: '"Line-up" runs all groups one after another; "Rows" gives each group its own rows; "Compare" sets two groups side by side on one depth scale.',
       options: [
         { value: 'lineup', label: 'Line-up' },
         { value: 'rows', label: 'Rows' },
@@ -140,7 +142,7 @@ export const galleryNode = packNode({
       label: 'Second stripe',
       from: 'dataset',
       schemaFrom: (inputs, params) => galleryNeurons(inputs.dataset, params),
-      help: 'A second coloured band over each cell, from another column. Empty draws one.',
+      help: 'A second coloured band over each cell, from another column. Leave empty for one band.',
       default: '',
       optional: true,
       // A colour per neuron id is a colour per cell, which a band cannot say anything with.
@@ -162,7 +164,7 @@ export const galleryNode = packNode({
       id: 'columnMode',
       kind: 'enum',
       label: 'Column width',
-      help: 'Fit gives each cell a column as wide as its own arbour, never clipped, so columns vary. Even gives every cell the same width, the arbour clipped at its edges, so columns line up. The same on the card and full size.',
+      help: '"Fit each neuron" makes each column as wide as its cell, so widths vary. "Even" gives every cell the same width, clipping wider ones, so columns line up.',
       options: [
         { value: 'fit', label: 'Fit each neuron' },
         { value: 'even', label: 'Even' },
@@ -208,7 +210,7 @@ export const galleryNode = packNode({
       id: 'proofread',
       kind: 'enum',
       label: 'Proofread',
-      help: 'How much of a cell must have been proofread. The axon and dendrite are told apart automatically, which is only trustworthy where somebody cleaned them.',
+      help: 'How much of a cell must be proofread. Axon and dendrite are labelled automatically, which is only reliable on proofread cells.',
       options: PROOFREAD_OPTIONS,
       default: 'both',
       presentational: true,
@@ -266,7 +268,9 @@ export const galleryNode = packNode({
     const frame = frameOf(dataset)
     if (!frame) throw new Error(frameIssue(dataset))
     if (!source.neuronIndex || !source.somaPositions) {
-      throw new Error(`${source.label} cannot list this dataset's cells with their somata.`)
+      throw new Error(
+        `${source.label} cannot list this dataset's cells with their soma positions, so the gallery cannot draw them.`,
+      )
     }
 
     ctx.progress(0.02, 'cell types')

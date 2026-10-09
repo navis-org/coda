@@ -393,7 +393,7 @@ export function resolveRows(
     if (!column) {
       problems.push({
         field: row.field,
-        message: `This dataset has no "${row.field}" — remove the filter or pick another field`,
+        message: `This dataset has no "${row.field}". Remove the filter or pick another field`,
       })
       continue
     }

@@ -214,7 +214,7 @@ describe('For Each, group by group', () => {
   })
 
   it('refuses to evaluate without a column rather than guessing one', () => {
-    expect(() => def.evaluate(ctx(NEURONS, { mode: 'group' }) as never)).toThrow(/group by/)
+    expect(() => def.evaluate(ctx(NEURONS, { mode: 'group' }) as never)).toThrow(/`Group by`/)
   })
 })
 

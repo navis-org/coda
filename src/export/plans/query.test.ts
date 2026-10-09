@@ -71,7 +71,7 @@ describe('inputIdsPlan', () => {
     inputIdsPlan(fakeNeutralContext({ type: 'neuron.inputIds', params, wires }))
 
   const IDS_ALONE = {
-    note: 'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
+    note: 'No Dataset is wired, so this is just the ids, the same as the node outputs.',
   }
 
   it('refuses a list that does not parse only when no id table is wired', () => {

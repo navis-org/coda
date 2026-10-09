@@ -1,12 +1,11 @@
-## Two nodes for one job
+## What the Network Viewer does
 
-1. **`Build Network`** turns an edge table into nodes and links, deriving the roll-ups a node-link drawing needs — in/out degree, in/out weight.
-2. **`Network Viewer`** draws the result. Both halves are ordinary Coda attribute tables, one row per node or per link, so colouring nodes by cell type is the same column picker as anywhere else.
+The Network Viewer draws a network as an interactive node-link diagram: neurons (or cell types) as discs, connections as links. Colour, size, shape and labels can all be driven by columns, and whatever you click in the viewer comes out of the `Selected` port.
 
-They are two nodes so that the viewer can be restyled without invalidating the network everything else reads.
+The network itself is usually made by [Build Network](#net.build), which turns an edge table into nodes and links. It sums the weights of rows that connect the same pair, adds in/out degree and in/out weight to each node, and can join extra columns onto the nodes from a second `Node attrs` table. The edge table can be a [Connectivity](#neuron.connectivity) result or any table with a source and a target column:
 
 ```coda-graph
-caption: Connectivity's own guide names this pipeline — an edge list in, a network out.
+caption: An edge list from Connectivity, turned into a network and drawn.
 neuron.connectivity as conn
 net.build as build { source: preId, target: postId, weight: weight }
 out.network as net
@@ -14,144 +13,166 @@ conn -> build
 build -> net
 ```
 
-**Connectivity** — or any table with a source and a target column — is the edge list. **Build Network** groups it into links, summing weight where several rows join the same pair; a second `Node attrs` table can join extra columns onto the nodes by id. **Network Viewer** lays the result out and draws it; its `Network` output passes the graph through unchanged, and `Selected` carries back whatever you clicked.
+Both the nodes and the links are ordinary attribute tables, one row per node or link, so colouring nodes by cell type works with the same column picker as anywhere else. Keeping the build and the drawing in two nodes means you can restyle the picture without re-running anything that reads the network.
 
-## The filters change what leaves the node
+The `Network` output passes the graph through (apart from the filters below), and `Selected` carries whatever you clicked.
 
-> [!WARNING] `Min link weight`, `Top nodes` and `Hide isolated` are not presentational
-> Everywhere else on this card a setting only changes the picture. These three change what
-> `evaluate` returns, so they join the provenance key and everything wired after this node goes
-> stale.
+## Filters
+
+Most settings on this node only change the picture. The three on the `Filter` tab are different: they change the network that leaves the node, so everything wired downstream has to re-run when you change them.
 
 ```coda-params
-caption: Order matters — a node kept by `Top nodes` is ranked over the links `Min link weight` left standing.
 out.network: minLinkWeight, topNodes, hideIsolated
 ```
 
-They apply in that fixed order: the weight cut, then the top-N ranking over whatever links survived it, then isolated nodes — including ones the first two stranded. Filtering also recomputes `degreeIn`, `degreeOut`, `weightIn` and `weightOut` on the nodes that remain, so a size encoding cannot contradict the picture beside it.
+They are applied in this order:
+
+1. `Min link weight` drops links below the threshold.
+2. `Top nodes` keeps the N nodes with the most attached weight, counted over the links that survived step 1.
+3. `Hide isolated` drops nodes that are left without links, including those stranded by the first two steps.
+
+Afterwards `degreeIn`, `degreeOut`, `weightIn` and `weightOut` are recomputed for the remaining nodes, so if you size nodes by degree the sizes match what you see.
 
 ## Choosing a layout
 
-| Layout                   | Behaviour                                                                    |
-| ------------------------- | ----------------------------------------------------------------------------- |
-| `force-directed (prefuse)` | lays out each disconnected piece separately and packs the results — **the default** |
-| `force-directed`          | settles by simulated repulsion and attraction, live, in a worker |
-| `circular`                 | one ring, deterministic                                                       |
-| `layered (feed-forward)`   | layers by longest path, or by a column you choose; left to right or top to bottom |
-| `spectral`                 | eigenvectors of the graph Laplacian, so structurally similar nodes land near each other |
-| `grouped by column`       | rings each group by size, and rings its members inside it — deterministic, no relaxation |
-| `from columns`             | reads each node's position straight from two columns you pick                 |
+| Layout                     | Behaviour                                                                              |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `force-directed (prefuse)` | lays out each disconnected piece separately and packs the results; the default          |
+| `force-directed`           | simulated repulsion and attraction, settling live in a background worker               |
+| `circular`                 | a single ring; always gives the same result                                            |
+| `layered (feed-forward)`   | layers by longest path or by a column you choose; left to right or top to bottom       |
+| `spectral`                 | uses eigenvectors of the graph Laplacian, so structurally similar nodes end up close   |
+| `grouped by column`        | one ring per group, members arranged inside it; always gives the same result           |
+| `from columns`             | reads each node's position from two columns you pick                                   |
 
 ```coda-params
 out.network: layout
 ```
 
-`force-directed` is the one layout that keeps moving after it lands, settling live in a worker where the others arrive finished. `Weight pull` decides how much a link's weight pulls its endpoints together; at 0 a node's mass is still its weighted degree, so weight tells in the spacing either way. `Spectral` is deliberately unweighted — synaptic weights span orders of magnitude and a few strong links would dominate the embedding — and declines to embed fewer than three nodes or a graph with no edges.
+A few details:
 
-A layout is presentational: positions are never saved, and changing it invalidates nothing downstream.
+- `force-directed` is the only layout that keeps moving after it first appears. The others arrive finished.
+- `Weight pull` sets how strongly a link's weight pulls its two ends together. Even at 0, weight still affects the spacing because a node's mass is its weighted degree.
+- `spectral` ignores weights (synapse counts span orders of magnitude, and a few strong links would dominate). It also won't lay out fewer than three nodes or a graph without links.
+- If something is wired into the `Layout` input (e.g. positions from [Paths](#neuron.paths)), those positions are used instead of the `Layout` setting, and the caption says so.
 
-### When the graph is in many pieces
+Layouts only affect the drawing: positions are not saved, and changing the layout doesn't invalidate anything downstream.
 
-If your network is a lot of small disconnected clusters — a cell-type correspondence graph, a thresholded connectome — `force-directed` draws a uniform blob, and **letting it run longer makes it worse**. Two pieces with no link between them have nothing holding them apart, so the simulation's gravity pulls them into the same place and that pile *is* where it settles.
+### Networks with many disconnected pieces
 
-`force-directed (prefuse)` lays each connected piece out on its own and packs the results side by side. It is the same layout Cytoscape calls "Prefuse Force Directed", and the packing rather than the physics is what makes the difference: on a 36,000-node correspondence graph in 12,000 pieces it produced a readable picture in half a second where the ordinary force layout could not produce one at all.
+If your network consists of many small, disconnected clusters (e.g. a cell-type correspondence graph or a thresholded connectome), `force-directed` will draw a uniform blob. Letting it run longer makes this worse: nothing holds two unconnected pieces apart, so the simulation's gravity pulls them all into the same spot.
 
-`Components` switches the packing off. `Link length` sets the scale everything else follows, and `Iterations` has little effect past about 25 — this layout cools itself down rather than improving indefinitely.
+`force-directed (prefuse)` gets around this by laying out each connected piece on its own and then packing the results side by side. It is the same layout Cytoscape calls "Prefuse Force Directed". On a 36,000-node correspondence graph in 12,000 pieces it gave a readable picture in half a second, where the ordinary force layout never produced a usable one.
 
-## Shape, so the picture survives without colour
+Some related settings:
 
-`Shape` works like `Colour`: pick `by category` and a column, and each value gets its own mark. **Point it at the same column as `Colour`** for two channels saying one thing, which is what survives being printed in black and white.
+- `Components` set to "all at once" switches the packing off.
+- `Link length` sets the scale for everything else in the layout.
+- `Iterations` makes little difference past about 25, because this layout cools down on its own.
+
+## Shapes
+
+`Shape` works like `Colour`: pick "by category" and a column, and each value gets its own mark. If you point `Shape` and `Colour` at the same column, the figure stays readable in black and white and for colour-blind readers.
 
 ```coda-params
 out.network: nodeShapeMode
 ```
 
-There are **six marks and no more**: circle, square, triangle, diamond, cross, plus. Everything past the sixth commonest value becomes a dash. That is deliberately unlike colour, which cycles: a seventh category drawn as a second circle would say two categories are the same thing. With more categories than that, colour is the channel with the capacity.
+There are six marks: circle, square, triangle, diamond, cross and plus. Values beyond the six most common are all drawn as a dash. Unlike colours, shapes are not reused, since a second set of circles would suggest that two categories are the same. If you have more than six categories, colour is the better channel.
 
-To pin one, use the **menu on its legend mark**. A pinned mark wins over the ranking, and two keys may share one.
+To assign a particular mark to a value, use the menu on its legend entry. A mark assigned this way takes precedence over the ranking, and two values can share a mark.
 
-## Arranging nodes by hand
+## Colours and palettes
 
-Drag a node in the expanded view and it stays where you put it. Grab a node that is **selected** and the whole selection moves with it, keeping its spacing. Grabbing an unselected node moves that one and leaves the selection alone, and a drag never counts as a click.
+When colouring by category, colours are reused once the palette runs out: the twelfth cell type gets a colour again rather than a grey catch-all. Two categories a palette-length apart then share a colour, and the caption shows `colours repeat` when that happens.
 
-- **⤢ still frames everything**, dragged outliers included.
-- **↻ throws hand placement away** — the layout runs from scratch.
-
-> [!NOTE] Hand-placed positions last for the session, not for the file
-> An arrangement survives closing and reopening the viewer, and the card, the inspector and the
-> expanded view share it. It is **not** saved into the document or a share link, so reopening a
-> saved file lays the graph out afresh. The caption says `moved by hand` while any of it is.
-
-The `force-directed` layout keeps moving what you drop while it is still settling — freeze it with ❙❙, or wait for it to stop, before arranging.
-
-## Colours cycle, and you pick the palette
-
-A category encoding never runs out: past the end of the palette it comes round to the first colour again, so the twelfth cell type is drawn in a colour rather than in a grey lump. Two categories a palette apart then share a hue, and the caption says `colours repeat` when that happens.
+Nodes and links each have their own palette, on their own tabs:
 
 ```coda-params
-caption: Nodes and links have their own palette, on their own tabs.
 out.network: nodePalette, edgePalette
 ```
 
-| Palette | Colours | When |
-| --- | --- | --- |
-| `Coda` | 8 | the default, and the only one tuned for both the light and the dark background |
-| `Okabe–Ito` | 8 | when the figure has to survive colour-blindness — the colour-universal-design set |
-| `Tableau` | 10 | matplotlib's `tab10`, familiar from most plotting stacks |
-| `Paired` | 12 | ColorBrewer's, saturated half first |
-| `tab20` | 20 | most categories before anything repeats; its first ten *are* `Tableau` |
+| Palette     | Colours | When to use                                                                 |
+| ----------- | ------- | --------------------------------------------------------------------------- |
+| `Coda`      | 8       | the default, and the only one tuned for both light and dark backgrounds     |
+| `Okabe–Ito` | 8       | figures that need to work for colour-blind readers                           |
+| `Tableau`   | 10      | matplotlib's `tab10`, familiar from most plotting libraries                  |
+| `Paired`    | 12      | ColorBrewer's `Paired`, saturated half first                                  |
+| `tab20`     | 20      | the most categories before colours repeat; its first ten are `Tableau`       |
 
-The other four are published sets used exactly as published, so the pale members of `Paired` and `tab20` are weak on a light background — the price of having twenty colours.
+The last four are published palettes used as-is, so the pale colours in `Paired` and `tab20` are hard to see on a light background.
 
-The legend lists twelve keys and then says `+N more`. Everything past the twelfth is still drawn; the cap is on the strip, not on the picture.
+The legend lists up to twelve entries and then shows `+N more`. Everything beyond that is still drawn.
 
-## Colouring nodes by a number
+### Colouring nodes by a number
 
-**Nodes ▸ Colour ▸ `by value`** maps a numeric column onto a ramp, and the row then carries four more controls: the `ramp` (Coda blue or one of matplotlib's; the ones marked `centred` are diverging), the values at its `min` and `max` ends, a `centre` for a centred ramp, and `log`. Empty ends follow the data. A centred ramp keeps both arms the same length, so `max` there is the distance from the centre to either end. The legend says `values clipped` when nodes fall outside the ends, and `log colour` when the ramp is on a log scale.
+Under **Nodes ▸ Colour**, "by value" maps a numeric column onto a colour ramp. You then get four more controls:
 
-Links have no `by value`: a one-pixel line cannot show a ramp's pale end against the background.
+- `ramp`: Coda blue or one of matplotlib's ramps. The ones marked `centred` are diverging.
+- `min` and `max`: the values at either end. Leave them empty to follow the data. For a centred ramp both arms are the same length, so `max` is the distance from the centre to either end.
+- `centre`: the midpoint of a centred ramp.
+- `log`: put the ramp on a log scale.
 
-## Two colour modes a column cannot express
+The legend shows `values clipped` if some nodes fall outside the ends, and `log colour` when the log scale is on.
 
-- **Nodes ▸ Colour ▸ `by connected component`** gives every connected component its own colour, which a drawing answers badly: a force layout can pack two components into one blob and spread one across the canvas. Components are numbered by size, so `1` is the biggest, and they ignore link direction — a component that followed arrows would be a *reachable set*. It is the same partition `Select connected component` uses.
-- **Links ▸ Colour ▸ `by upstream node` / `by downstream node`** gives each link the colour of the node at one of its ends. With nodes coloured by type, colouring links by their upstream node shows where each type's output goes without reading a label.
+Links can't be coloured by value, because the pale end of a ramp is invisible on a thin line.
+
+### Colouring by component or by endpoint
+
+Two colour modes don't come from a column:
+
+- **Nodes ▸ Colour ▸ "by connected component"** gives each connected component its own colour. This is useful because a force layout may squash two components into one blob or spread one across the canvas. Components are numbered by size (`1` is the largest) and ignore link direction. This is the same grouping that `Select connected component` uses.
+- **Links ▸ Colour ▸ "by upstream node" / "by downstream node"** gives each link the colour of the node at one of its ends. With nodes coloured by cell type, colouring links by their upstream node shows where each type's output goes.
 
 ```coda-params
-caption: Both live in the styling panel — node colour on the Node tab, link colour on the Link tab.
 out.network: nodeColorMode, edgeColorMode
 ```
 
-The link modes draw no legend of their own: they take the *node* colours, and the node key already names every colour on screen.
+The link modes don't add a legend of their own, since they reuse the node colours.
 
-> [!NOTE] `by upstream node` is not picking `source` in the category picker
-> That works too and answers a different question: it ranks the palette by how many links each
-> source has, so it lands on colours that disagree with the nodes an inch away. The point of the
-> mode is that they agree.
+> [!NOTE] Not the same as colouring by `source`
+> You could instead colour links "by category" using the `source` column. That ranks the palette
+> by how many links each source has, so the link colours won't match the node colours. Use "by
+> upstream node" if you want them to match.
 
-## Right-click to select
+## Arranging nodes by hand
 
-Right-clicking in the expanded view opens a menu instead of the browser's. What it acts on follows the same rule as dragging: a right-click **inside the selection** acts on the whole selection, one outside it acts on that node alone — and never selects it. Right-clicking a **link** acts on both of its ends.
+In the expanded view you can drag nodes around and they stay where you drop them. Dragging a selected node moves the whole selection along with it. Dragging an unselected node moves only that node, and a drag never counts as a click.
 
-| Command | What you get |
-| --- | --- |
-| `Select connected` | the anchors plus everything one link away, either direction |
-| `Select downstream` | the anchors plus their targets — directed networks only |
-| `Select upstream` | the anchors plus their sources — directed networks only |
-| `Select connected component` | everything reachable along links, ignoring direction |
-| `Copy id` | the ids themselves, one per line, on the clipboard |
+- **⤢** zooms to fit everything, including nodes you dragged away.
+- **↻** discards your manual placement and runs the layout again from scratch.
 
-Each **replaces** the selection with one that still contains what it started from, so running `Select connected` again reaches one hop further out — which is why there is no "within N hops" box.
+> [!NOTE] Manual positions are not saved
+> Your arrangement survives closing and reopening the viewer during a session, and the card, the
+> inspector and the expanded view share it. It is not saved into the file or a share link, so a
+> saved workflow is laid out afresh when you open it again. The caption shows `moved by hand`
+> while any nodes have been placed manually.
 
-`Select downstream` and `Select upstream` are absent on an **undirected** network, where `source` and `target` are an arbitrary order: walking them would follow half of each pair by construction order rather than by the direction of anything.
+With `force-directed`, nodes you drop keep moving while the layout is still settling. Pause it with ❙❙ (or wait for it to finish) before arranging things by hand.
 
-Right-clicking empty canvas offers the whole-graph verbs instead — `Select all`, `Clear selection`, `Copy all ids` and `Fit to view`.
+## Selecting nodes
 
-## Selection is data, not decoration
+Clicking nodes selects them. The selection is stored in the `Selected` setting, so it is saved with the workflow and can be undone, and it feeds the `Selected` output as a table of neurons.
 
-Clicking nodes writes into `Selected` (a `Neurons` table) and into the `selection` param that drives it — the one setting on this card that is not presentational, because it lives in the saved file and is undoable. Everything in the right-click menu writes it too.
+### The right-click menu
 
-> [!WARNING] A type-level selection reaches `Selected` as `null`, not as a made-up neuron
-> A network node's own id is text — a neuron id at neuron level, a type name once nodes are
-> grouped by type. `Selected`'s `neuronId` column is filled by parsing that text, so selecting a
-> type gives rows with `neuronId: null` rather than a number that only looks like a neuron.
-> Downstream fails loudly at the next query instead of silently pretending a type is a neuron.
+Right-clicking in the expanded view opens a menu. If you right-click a node inside the current selection, the command acts on the whole selection; a node outside it, and the command acts on that node alone (without selecting it). Right-clicking a link acts on both of its ends.
+
+| Command                      | What you get                                                    |
+| ---------------------------- | --------------------------------------------------------------- |
+| `Select connected`           | the starting nodes plus everything one link away, in either direction |
+| `Select downstream`          | the starting nodes plus their targets (directed networks only)  |
+| `Select upstream`            | the starting nodes plus their sources (directed networks only)  |
+| `Select connected component` | everything reachable along links, ignoring direction            |
+| `Copy id`                    | the ids, one per line, copied to the clipboard                  |
+
+Each command replaces the selection with a larger one that still contains the starting nodes. Running `Select connected` again therefore reaches one hop further out.
+
+`Select downstream` and `Select upstream` aren't offered for undirected networks, where source and target are in arbitrary order.
+
+Right-clicking empty canvas gives you `Select all`, `Clear selection`, `Copy all ids` and `Fit to view`.
+
+> [!WARNING] Selecting cell types gives empty neuron ids
+> A network node's id is a neuron id in a neuron-level network but a type name once nodes are
+> grouped by type. `Selected` fills its `neuronId` column from that id, so selecting types gives
+> rows with an empty `neuronId`. Nodes downstream that need neuron ids will then report an error.

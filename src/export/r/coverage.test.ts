@@ -14,6 +14,28 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'annotation:editor':
+    'Annotate is a card that writes a backend on an edit — there is nothing for a notebook to ' +
+    'recompute, and a cell that replayed the writes would push them again. The node itself passes ' +
+    'its neurons through unchanged.',
+  'annotation:bigclust':
+    'A BigClust project. The cell is short — `pandas.read_json` of `info`, `read_parquet` of ' +
+    'meta and each embedding, and the k-NN and features made long — but every line of it is an ' +
+    'alignment *by row*, which is the one thing a notebook gets silently wrong: a misread ' +
+    'embedding still draws a plausible cloud under the wrong neurons. So it waits for a probe ' +
+    'that runs the emitted cell against a real project and compares it with the node, as ' +
+    '`out.topology` argues an emitter must be checked.',
+  'core.linkTable':
+    '`arrow::open_dataset` in R. The Python exporter emits it as a `CodaTableFile` beside Read ' +
+    'Rows and the Custom Dataset; R waits on a port of that helper, so the three agree about ' +
+    'which columns are read as text.',
+  'core.readRows':
+    'A `dplyr::filter` over `arrow::open_dataset`, emitted with Link Table, whose path and ' +
+    'text columns it needs.',
+  'connectome:customDataset':
+    'Assembled from parts, with an object standing in for `CompositeSource` so downstream ' +
+    'chunks have something to call. The Python exporter has one (`CodaCustomDataset`); an R ' +
+    'port, and the Custom branches of the query emitters beside it, is the next step.',
   'cortex:depth':
     'Depth, layer and lateral position through a cortical frame (`packs/cortex/frames.ts`), the ' +
     'gallery\u2019s own reason: no notebook library carries the frame. The arithmetic is a ' +
@@ -61,6 +83,10 @@ const NO_EMITTER: Record<string, string> = {
     'conserving would look entirely plausible, which is the one failure this viewer measures its ' +
     'own caption against. The Transfers table itself exports perfectly well: four ordinary ' +
     'columns, so a reader has everything they need to draw this in whichever package they have.',
+  'out.neuronDendrogram':
+    'Neuron Dendrogram \u2014 see the Python note. The natverse has no flat dendrogram of a neuron at all, so there is nothing to emit that would draw the same picture.',
+  'neuron.splitCompartments':
+    'Split Axon/Dendrite \u2014 see `out.topology`\u2019s note: the natverse has no synapse flow centrality split that agrees with navis node for node, and this node is that split.',
   'out.topology':
     'Neuron Topology \u2014 see the Python note. The natverse has the pieces (`nat::strahler_order`, `nat::seglengths`), but the axon/dendrite split is navis\u2019s synapse flow centrality with a branch-point correction and a fragment-stitching pass, and R has no counterpart that agrees with it node for node. Emitting an R split that quietly differs from the card is the failure this entry exists to avoid.',
   'compare.matchTypes':
@@ -94,9 +120,8 @@ const NO_EMITTER: Record<string, string> = {
     'the same absent client.',
   'dataset.ngsource':
     'A neuroglancer datasource. `fafbseg::read_cloudvolume_meshes` is the R counterpart of the ' +
-    'cloudvolume route named in the Python note, and it is blocked on the same thing rather ' +
-    'than on the language: this document is built on neuprintr, so the Meshes node downstream ' +
-    'has nothing to emit against a bucket either.',
+    'Python exporter\u2019s `CodaPrecomputed`, and it waits on the same thing: this document is ' +
+    'built on neuprintr, so the Meshes node downstream has no bucket branch to emit.',
   'neuron.skeletonPoints':
     'Skeleton to Points. `nat::resample` and the resampled neuron\u2019s point table are the nearest thing, and a ' +
     'different placement: nodes laid every Spacing from the root, with no `cable` weight, so ' +

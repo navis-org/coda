@@ -2022,6 +2022,119 @@ export function caveGraph(): CodaGraph {
 }
 
 /**
+ * The Custom Dataset half: the dataset assembled from a neuron table, an edge list and a synapse
+ * table on disk, and a precomputed bucket's geometry, with the query nodes that branch on it.
+ *
+ * Its own graph for `caveGraph`'s reason — R emits none of these, and a Custom Dataset in
+ * `everythingGraph` would put a column of TODOs into the R golden. The two files are local and
+ * never held, so the footers are unread and every picker resolves to its declared default, which
+ * is what a notebook exported from a cold session writes; `export.test.ts` covers a read footer.
+ */
+export function customGraph(): CodaGraph {
+  let g = emptyGraph('Custom dataset')
+  g.meta = { ...g.meta, description: 'A dataset assembled from parts, and what asks it.' }
+
+  const nodes: Spec[] = [
+    {
+      id: 'types',
+      type: 'core.tableFromUrl',
+      col: 0,
+      params: { url: 'https://example.org/cell_types.csv' },
+    },
+    // A Delta table's folder, as CAVE publishes an edge list: the notebook reads it with deltalake.
+    {
+      id: 'edgeFile',
+      type: 'core.linkTable',
+      col: 0,
+      row: 1,
+      params: { url: 'gs://example-bucket/connectome/edges' },
+    },
+    {
+      id: 'synFile',
+      type: 'core.linkTable',
+      col: 0,
+      row: 2,
+      params: { fileId: 'file-synapses', fileName: 'synapses.parquet' },
+    },
+    // A confidence threshold on the file, read nowhere: it rides on the file to the lookups.
+    {
+      id: 'synFilter',
+      type: 'core.filterTable',
+      col: 1,
+      row: 2,
+      params: { column: 'score', op: 'ge', value: '0.5' },
+    },
+    {
+      id: 'bucket',
+      type: 'dataset.ngsource',
+      col: 0,
+      row: 3,
+      params: { url: 'precomputed://gs://flywire_v141_m783' },
+    },
+    { id: 'custom', type: 'connectome:customDataset', col: 1, params: { name: 'My fly' } },
+    {
+      id: 'find',
+      type: 'neuron.findNeurons',
+      col: 2,
+      params: { filters: encodeRows([{ field: 'type', op: 'matches', values: ['LC.*'] }]) },
+    },
+    { id: 'explore', type: 'neuron.explore', col: 2, row: 1, params: { query: 'LC4' } },
+    { id: 'ids', type: 'neuron.inputIds', col: 2, row: 2, params: { ids: '1 2 3' } },
+    // Both walks: one hop with the neuron table's rows for the set, and the multi-hop one.
+    { id: 'conn', type: 'neuron.connectivity', col: 3, params: { neuronRows: 'full' } },
+    {
+      id: 'walk',
+      type: 'neuron.connectivity',
+      col: 3,
+      row: 1,
+      params: { hops: 2, direction: 'both', includeFragments: true },
+    },
+    { id: 'syn', type: 'neuron.synapses', col: 3, row: 2, params: { polarity: 'pre' } },
+    { id: 'between', type: 'neuron.synapsesBetween', col: 3, row: 3 },
+    { id: 'skel', type: 'neuron.skeletons', col: 4 },
+    // Straight off the bucket rather than through the dataset: the precomputed branch.
+    { id: 'mesh', type: 'neuron.meshes', col: 4, row: 1 },
+    {
+      id: 'rows',
+      type: 'core.readRows',
+      col: 4,
+      row: 2,
+      params: { columns: ['pre_pt_root_id', 'x', 'y', 'z'], matchColumn: 'pre_pt_root_id' },
+    },
+  ]
+  for (const spec of nodes) g = place(g, spec)
+
+  const edges: Array<[string, string, string, string]> = [
+    ['types', 'out', 'custom', 'neurons'],
+    ['edgeFile', 'file', 'custom', 'edges'],
+    ['synFile', 'file', 'synFilter', 'in'],
+    ['synFilter', 'out', 'custom', 'synapses'],
+    ['bucket', 'dataset', 'custom', 'meshes'],
+    ['bucket', 'dataset', 'custom', 'skeletons'],
+    ['custom', 'dataset', 'find', 'dataset'],
+    ['custom', 'dataset', 'explore', 'dataset'],
+    ['custom', 'dataset', 'ids', 'dataset'],
+    ['custom', 'dataset', 'conn', 'dataset'],
+    ['find', 'neurons', 'conn', 'neurons'],
+    ['custom', 'dataset', 'walk', 'dataset'],
+    ['find', 'neurons', 'walk', 'neurons'],
+    ['custom', 'dataset', 'syn', 'dataset'],
+    ['find', 'neurons', 'syn', 'neurons'],
+    ['custom', 'dataset', 'between', 'dataset'],
+    ['find', 'neurons', 'between', 'sources'],
+    ['ids', 'neurons', 'between', 'targets'],
+    ['custom', 'dataset', 'skel', 'dataset'],
+    ['find', 'neurons', 'skel', 'neurons'],
+    ['bucket', 'dataset', 'mesh', 'dataset'],
+    ['find', 'neurons', 'mesh', 'neurons'],
+    ['synFile', 'file', 'rows', 'file'],
+    ['find', 'neurons', 'rows', 'ids'],
+  ]
+  for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
+  return g
+}
+
+/**
  * A dataset node wired to one query node, both built over their declared defaults.
  *
  * The counterpart of `everythingGraph` for a setting that lives on the **dataset** and shows up

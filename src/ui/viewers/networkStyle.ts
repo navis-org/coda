@@ -12,9 +12,9 @@ import type { NodeHoverDrawingFunction, NodeLabelDrawingFunction } from 'sigma/r
 
 import type { TableSchema } from '../../core/types'
 import type { NetworkValue, TableValue } from '../../core/values'
-import type { Mode } from '../colors'
-import { CHART_INK, chartSurface, mixHex } from '../colors'
-import { formatCell } from '../format'
+import type { Mode } from '../../style/colors'
+import { CHART_INK, chartSurface, mixHex } from '../../style/colors'
+import { formatCell } from '../../style/format'
 
 // ---------------------------------------------------------------------------
 // Focus

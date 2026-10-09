@@ -260,7 +260,7 @@ export function buildEntry(input: BuildEntryInput): {
   if (missing.length) {
     problems.push({
       level: 'error',
-      message: `meta.json "requires" is missing ${missing.join(', ')} — the graph has dataset nodes for ${actual.join(', ') || 'nothing'}`,
+      message: `meta.json "requires" is missing ${missing.join(', ')}. The graph has dataset nodes for ${actual.join(', ') || 'nothing'}`,
     })
   }
   if (extra.length) {

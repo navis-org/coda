@@ -19,6 +19,7 @@ import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
 import type { SignInSession } from '../signIn'
 import { cleanToken, parseStoredSession } from '../signIn'
+import type { StoredSignIn } from '../signIns'
 
 const TOKEN_KEY = 'coda.neuprint.token'
 const SERVER_KEY = 'coda.neuprint.server'
@@ -110,4 +111,11 @@ export function resetCredentials(): void {
   writeStorage(TOKEN_KEY, undefined)
   writeStorage(SESSION_KEY, undefined)
   writeStorage(SERVER_KEY, undefined)
+}
+
+/** The Storage tab's entry. The server override is a preference, not part of the sign-in. */
+export const SIGN_IN: StoredSignIn = {
+  service: 'neuPrint',
+  keys: [TOKEN_KEY, SESSION_KEY],
+  stored: () => getToken() !== undefined,
 }

@@ -33,18 +33,10 @@ import {
 } from '../../core/values'
 import type { Value } from '../../core/values'
 import { warnSideCount } from './limitParams'
-import { checkGeometryUnits, spaceRemedy } from './transformOps'
+import { NM_PER_UM } from '../../data/units'
+import { spaceRemedy } from './transformOps'
+import { checkGeometryUnits } from '../../data/units'
 import type { NblastKnnResult, NblastResult, PointSet } from '../../pyodide/nblast'
-
-/**
- * Coda's skeletons are nanometres; NBLAST's scoring matrix is micrometres.
- *
- * This is the one number in the feature that produces a confident wrong answer rather than an
- * error. The FCWB matrix fastcore embeds runs out at a 40 um distance bin, and past it every
- * cell is about -10 — so a set of neurons handed over in nanometres scores as if no two of them
- * had ever been near each other, uniformly, with nothing anywhere to say why. See `nblast.py`.
- */
-export const NM_PER_UM = 1000
 
 /**
  * Pairs a second, measured on this wheel: single-threaded in wasm at a thousand points a
@@ -139,7 +131,7 @@ export function checkNblastUnits(
     geometry,
     noun,
     sourceNode,
-    'NBLAST would compare them at the wrong scale and say nothing about it.',
+    'NBLAST would compare them at the wrong scale without any warning.',
   )
 }
 
@@ -179,7 +171,7 @@ export function checkNblastSpaces(
   if (!query.space || !target.space || query.space === target.space) return
   throw new Error(
     `Query ${noun} are in ${query.space} and Target ${noun} are in ${target.space}. ` +
-      `Across two coordinate systems NBLAST would score every pair as a stranger.` +
+      `Across two coordinate systems NBLAST would score every pair as unrelated. ` +
       // The remedy and its bridge check are `transformOps.ts`' — this function is where they were
       // learned, and keeping a copy is how the two came to say "both sides" and "them".
       spaceRemedy({ axis: 'space', left: query.space, right: target.space }),
@@ -201,7 +193,7 @@ export function checkNblastSize(ctx: Warner, rows: number, cols: number): void {
     count: pairs,
     threshold: NBLAST_PAIRS_WARN,
     unit: `pairs (${rows.toLocaleString()} x ${cols.toLocaleString()})`,
-    control: 'what this node scores without comment',
+    control: 'the usual size for NBLAST',
     cost:
       `${describeDuration(pairs / NBLAST_PAIRS_PER_SECOND)} of scoring, ` +
       `single-threaded at about ${NBLAST_PAIRS_PER_SECOND.toLocaleString()} pairs a ` +
@@ -258,7 +250,10 @@ export function nblastSidesFrom(
  */
 export function nblastIssues(resample: number): string[] {
   return resample === 0
-    ? ['Resample is 0, so scores follow how finely each neuron was traced as much as its shape']
+    ? [
+        '`Resample (µm)` is 0, so scores depend on how finely each neuron was traced as well as ' +
+          'on its shape. Set a resample distance to compare shapes only.',
+      ]
     : []
 }
 

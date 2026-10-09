@@ -16,6 +16,7 @@
  */
 
 export const SVG_NS = 'http://www.w3.org/2000/svg'
+export const XLINK_NS = 'http://www.w3.org/1999/xlink'
 
 /** Two decimal places: enough for a hairline, and it keeps a 900,000-cell path readable. */
 export const round = (value: number): number => Math.round(value * 100) / 100

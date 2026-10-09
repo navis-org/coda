@@ -56,8 +56,9 @@ import {
   startOptions,
   visualisationOptions,
 } from '../../wizard/options'
+import { activeTab } from '../../core/dashboard'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../../core/registry'
-import { plural } from '../format'
+import { plural } from '../../style/format'
 import type { CodaGraph } from '../../core/graph'
 import { Modal, ModalHeader } from '../Modal'
 import { useOfferedForNewWork } from '../packSwitches'
@@ -443,7 +444,7 @@ function Dialog() {
         {at === 'datasets' && (
           <Question
             title="Which datasets?"
-            hint={`Tick two or more connectomes to compare — up to ${maxDatasets}. The order is the order they appear in the workflow.`}
+            hint={`Tick two or more datasets to compare (up to ${maxDatasets}). They appear in the workflow in the order you tick them.`}
           >
             {multiFamilies.map((family) => (
               <Option
@@ -467,7 +468,7 @@ function Dialog() {
         {at === 'start' && (
           <Question
             title="Which neurons?"
-            hint="How you want to define the set of neurons you want to work on."
+            hint="How do you want to choose the neurons to work with?"
           >
             {starts.map((option) => (
               <Option
@@ -485,7 +486,7 @@ function Dialog() {
         {at === 'analysis' && (
           <Question
             title="What do you want to know or do?"
-            hint="The question the workflow is supposed to answer."
+            hint="The question the workflow should answer."
           >
             {analyses.map((option) => (
               <Option
@@ -503,7 +504,7 @@ function Dialog() {
         {at === 'views' && (
           <Question
             title="How should it look?"
-            hint="What ends the chain — tick as many as you want. Viewers pass their input through, so you can add more after them."
+            hint="Tick as many as you like. These go at the end of the workflow, and since viewers pass their input through, you can add more nodes after them."
           >
             {views.map((option) => (
               <Option
@@ -737,18 +738,18 @@ function Summary({
    * that — wrong on the day it changes, in the one place the reader is deciding whether to press
    * the button.
    */
-  const cells = graph.dashboard?.cells.length ?? 0
-  const controls = graph.dashboard?.cells[0]
-    ? requireNodeDef(graph.nodes.find((n) => n.id === graph.dashboard!.cells[0]!.nodeId)!.type)
-        .label
+  const placed = activeTab(graph).cells
+  const cells = placed.length
+  const controls = placed[0]
+    ? requireNodeDef(graph.nodes.find((n) => n.id === placed[0]!.nodeId)!.type).label
     : ''
 
   return (
     <section className="wizard__question">
       <h3>Ready to build</h3>
       <p className="wizard__hint">
-        Every node is an ordinary one — change anything, add anything, delete what you do not
-        need.
+        These are ordinary nodes: once the workflow is built, you can change, add or delete
+        anything.
       </p>
 
       <ol className="wizard__chain">
@@ -786,8 +787,8 @@ function Summary({
           Arrange the nodes on the canvas
           <em>
             {dashboard
-              ? 'Only when it opens on the canvas — a dashboard has no card positions to tidy.'
-              : 'Tidies the generated row into a layout. Remembered for next time.'}
+              ? 'Only applies when the workflow opens on the canvas, not as a dashboard.'
+              : 'Lays the nodes out neatly instead of in one long row. Remembered for next time.'}
           </em>
         </span>
       </label>
@@ -802,7 +803,7 @@ function Summary({
           Open as a dashboard
           <em>
             {cells > 1
-              ? `A grid of ${cells} cells — the ${controls} and the ${plural(cells - 1, 'view')}. The canvas is a click away.`
+              ? `A grid of ${cells} cells: the ${controls} and the ${plural(cells - 1, 'view')}. The canvas is a click away.`
               : 'Shows the result on its own grid. The canvas is a click away.'}
           </em>
         </span>

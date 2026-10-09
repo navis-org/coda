@@ -65,6 +65,7 @@ import type { DType } from '../../core/types'
 import { caveDType } from './json'
 import { caveSourceId, deploymentKey } from './deployments'
 import { getToken } from './credentials'
+import { PeekGates } from '../peekGate'
 import { caveServerFor, datastackRecord, resetDatastackRecords } from './datastack'
 import { resetFlatSources } from './flat'
 import { resetSkeletonServices } from './skeletonService'
@@ -167,11 +168,11 @@ function keyFor(deployment: string, datastack: string, version: number): string 
 const tableNames = new Map<string, Promise<string[]>>()
 const viewInfos = new Map<string, Promise<Record<string, ViewInfo>>>()
 const listed = new Map<string, CaveTableEntry[]>()
-const listingAsked = new Set<string>()
+const listingAsked = new PeekGates()
 
 const factsLoading = new Map<string, Promise<CaveTableFacts>>()
 const factsKnown = new Map<string, CaveTableFacts>()
-const factsAsked = new Set<string>()
+const factsAsked = new PeekGates()
 
 const columnsLoading = new Map<string, Promise<CaveColumnSample[]>>()
 const referencesLoading = new Map<string, Promise<string | undefined>>()
@@ -321,8 +322,8 @@ export function tableListFor(
  *
  * `peekMaterializations`' contract exactly: **`undefined` means "not yet", not "none"**, because
  * this is read from a card that renders on every graph mutation and may not await. Started once
- * per datastack, never once per peek — the `asked` set is what stops a request per keystroke, and
- * it is deliberately not cleared on failure, for the reason `runDiscovery`'s is not.
+ * per datastack and token, never once per peek and never without one (`PeekGate`) — a request per
+ * keystroke otherwise, and a failure is asked again only under the next token.
  *
  * Always the full listing including views, whatever the asking node's own toggle says: this feeds
  * `validate`, and a table name being refused because a *checkbox* is off would be a message about
@@ -335,15 +336,10 @@ export function peekTableList(
 ): CaveTableEntry[] | undefined {
   const key = `${keyFor(deployment, datastack, version)}|v`
   const known = listed.get(key)
-  if (known || !datastack || listingAsked.has(key)) return known
-  /*
-   * Gated on a credential, and not marked asked without one, so a token pasted later re-arms it.
-   * The `Table` field on `CAVE table` peeks this on every render, so ungated it put an auth
-   * failure in front of somebody who had only dropped the card on the canvas (`peekDatastacks`'
-   * rule).
-   */
-  if (!getToken(deployment)) return undefined
-  listingAsked.add(key)
+  if (known || !datastack) return known
+  // The `Table` field on `CAVE table` peeks this on every render, so ungated it put an auth
+  // failure in front of somebody who had only dropped the card on the canvas.
+  if (!listingAsked.open(key, () => getToken(deployment))) return undefined
   // Swallowed and `quiet`, `peekMaterializations`' trade: a peek has no caller to report to, and
   // a refusal raised from a render opens the Connections panel at somebody who asked nothing. A
   // rejection is not memoised, so a later Run asks again and refuses loudly.
@@ -510,10 +506,13 @@ export function peekTableFacts(
   if (!datastack || !name) return undefined
   const key = `${keyFor(deployment, datastack, version)}|${name}`
   const known = factsKnown.get(key)
-  if (known || factsAsked.has(key)) return known
+  if (known) return known
   if (!kindOf(peekTableList(deployment, datastack, version), name)) return undefined
-  factsAsked.add(key)
-  void tableFactsFor(datastack, version, name, { deployment }).catch(() => undefined)
+  // `PeekGate`, and `quiet` as its two neighbours are: a peek has no caller waiting.
+  if (!factsAsked.open(key, () => getToken(deployment))) return undefined
+  void tableFactsFor(datastack, version, name, { deployment, quiet: true }).catch(
+    () => undefined,
+  )
   return undefined
 }
 
@@ -630,7 +629,9 @@ async function loadColumns(
  */
 function peekMemo<T>() {
   const known = new Map<string, T>()
-  const asked = new Set<string>()
+  // Once per token, never without one (`PeekGate`): a sample refused under one token is asked
+  // again under the next, where a flag would have kept it unknown after signing in.
+  const asked = new PeekGates()
   return {
     peek(
       where: { deployment: string; datastack: string; version: number; name: string },
@@ -640,10 +641,9 @@ function peekMemo<T>() {
       if (!datastack || !name) return undefined
       const key = `${keyFor(deployment, datastack, version)}|${name}`
       if (known.has(key)) return known.get(key)
-      if (asked.has(key)) return undefined
       if (kindOf(peekTableList(deployment, datastack, version), name) !== 'table')
         return undefined
-      asked.add(key)
+      if (!asked.open(key, () => getToken(deployment))) return undefined
       void start({ deployment, quiet: true })
         .then((value) => {
           known.set(key, value)

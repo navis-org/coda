@@ -16,7 +16,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import type { NgScene } from '../../data/neuroglancer/scene'
-import { parseSceneUrl, sceneUrl } from '../../data/neuroglancer/scene'
+import { parseSceneUrl, sceneUrl, layerSourceUrl } from '../../data/neuroglancer/scene'
 import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { RELEASE_AFTER_MS } from './persistentRoots'
@@ -147,7 +147,11 @@ describe('mounting', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} compact />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    // The scene the node built, less the layer bar a card has no room for.
+    expect(frameScene(container)).toEqual({
+      ...parseSceneUrl(URL_A),
+      uiControlVisibility: { showLayerPanel: false },
+    })
   })
 
   it('mounts it full size, pointed at the URL the node built', () => {
@@ -267,7 +271,9 @@ describe('mounting', () => {
     const { container, rerender } = render(
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
     )
-    rerender(<NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} compact />)
+    rerender(
+      <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} summary="x" />,
+    )
     expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
   })
 
@@ -571,6 +577,34 @@ describe('handing the live frame to the next surface', () => {
     expect(frameSrc(container)).toContain('#!+')
   })
 
+  it('flips the layer bar on the frame it adopted, and sends nothing else', () => {
+    // The card hides the bar and the overlay shows it, and they share this one frame. A patch
+    // naming `layers` would rebuild every layer for a change that touches none.
+    const card = render(
+      <NeuroglancerViewer
+        url={URL_A}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId="kept-bar"
+        compact
+      />,
+    )
+    frameLoaded(card.container)
+    expect(frameScene(card.container)!['uiControlVisibility']).toEqual({
+      showLayerPanel: false,
+    })
+    card.unmount()
+
+    const props = { url: URL_A, color: CATEGORICAL, datasetId: OWNED, viewerId: 'kept-bar' }
+    const { container, rerender } = render(<NeuroglancerViewer {...props} />)
+    expect(frameSrc(container)).toContain('#!+')
+    expect(frameScene(container)).toEqual({ uiControlVisibility: { showLayerPanel: true } })
+
+    // And back, on the way to the card.
+    rerender(<NeuroglancerViewer {...props} compact />)
+    expect(frameScene(container)).toEqual({ uiControlVisibility: { showLayerPanel: false } })
+  })
+
   it('builds a new frame on Reload, which is how somebody leaves one that has gone wrong', () => {
     const { element } = handOff('kept-c')
     const { container } = render(
@@ -675,6 +709,28 @@ describe('resuming across a remount', () => {
     expect(layers[0]!['visible']).toBe(false)
     // And the selection the node is emitting *now*, spliced into it.
     expect(layers[1]!['segments']).toEqual(['1', '2'])
+  })
+
+  it('shows the bar the card hid, when the state it resumes came from the card', () => {
+    const first = render(
+      <NeuroglancerViewer
+        url={URL_A}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId="bar"
+        compact
+      />,
+    )
+    frameLoaded(first.container)
+    frameShowing(first.container, { ...live, uiControlVisibility: { showLayerPanel: false } })
+    first.unmount()
+
+    const { container } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="bar" />,
+    )
+    const scene = frameScene(container)!
+    expect(scene['position']).toEqual([900, 900, 900])
+    expect(scene['uiControlVisibility']).toBeUndefined()
   })
 
   it('sends the resumed state as a full navigation, not as a merge', () => {
@@ -869,6 +925,49 @@ describe('the caption', () => {
   })
 })
 
+describe('hiding the layer bar', () => {
+  it('hides it in the frame and leaves it on in the link', () => {
+    // The profile tile is too short to spare the strip; a tab of its own is not, so ↗ and ⧉
+    // hand out the scene exactly as built.
+    const { container } = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} compact />)
+    expect(frameScene(container)!['uiControlVisibility']).toEqual({ showLayerPanel: false })
+    expect(screen.getByLabelText('Open in a new tab').getAttribute('href')).toBe(URL_A)
+  })
+
+  it('leaves the scene untouched when nobody asked', () => {
+    const { container } = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} />)
+    expect(frameScene(container)!['uiControlVisibility']).toBeUndefined()
+  })
+
+  it('sends a change of surface along with a selection that changed in the same pass', () => {
+    const { container, rerender } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} compact />,
+    )
+    frameLoaded(container)
+    rerender(<NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} />)
+    flushMerge()
+    const patch = frameScene(container)!
+    expect(frameSrc(container)).toContain('#!+')
+    expect(patch['uiControlVisibility']).toEqual({ showLayerPanel: true })
+    expect(layersOf(patch)[1]!['segments']).toEqual(['1', '2'])
+  })
+
+  it('does not hide it again in a merge, once somebody has brought it back', () => {
+    const { container, rerender } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} compact />,
+    )
+    frameLoaded(container)
+    // The reader switched the bar back on inside the viewer.
+    frameShowing(container, { ...sceneWith(['1']), uiControlVisibility: {} })
+
+    rerender(<NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} compact />)
+    flushMerge()
+
+    expect(frameSrc(container)).toContain('#!+')
+    expect(frameScene(container)!['uiControlVisibility']).toBeUndefined()
+  })
+})
+
 /**
  * Reloading, which is the only way to clear a warning the viewer has already put up.
  *
@@ -972,8 +1071,8 @@ describe('an explicit viewer type', () => {
     ],
   }
   const sourceIn = (container: HTMLElement): string => {
-    const scene = frameScene(container) as { layers: Array<{ source?: string }> } | undefined
-    return String(scene?.layers[0]?.source)
+    const scene = frameScene(container) as { layers: Array<{ source?: unknown }> } | undefined
+    return String(layerSourceUrl(scene?.layers[0]?.source))
   }
 
   it('is honoured rather than re-derived from the host', () => {

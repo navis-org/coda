@@ -87,7 +87,8 @@ registerNode({
    * tooltip is the fix and the extra 40px only makes the common case fit.
    */
   cardWidth: 440,
-  description: 'Overwrite values in the rows a rule matches.',
+  description:
+    'Overwrite values in the rows a rule matches. Naming a column the table lacks creates it.',
   /*
    * Short, because this node has a document: the overlay prints the guide above it under a
    * `TL;DR` label, and `help.test.ts` holds the ceiling at 400 characters. The grammar, the
@@ -95,10 +96,9 @@ registerNode({
    * `src/help/nodes/core.editTable.md`.
    */
   guide:
-    'Override values in a table. Each rule names the rows to change — an Explore query like ' +
-    'type==LC4 status==Traced, or blank for all of them — then the column to write and what to ' +
-    'put in it; naming a column the table does not have creates it. A filter it cannot resolve ' +
-    'switches its own rule off rather than editing more rows than you meant.',
+    'Overwrites values in a table using rules: which rows (a filter like type==LC4 ' +
+    'status==Traced, or blank for all), which column, and what value. Use it to correct a few ' +
+    'annotations or add a grouping of your own; naming a new column creates it.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -111,7 +111,7 @@ registerNode({
       id: 'edits',
       kind: 'ids',
       label: 'Edits',
-      help: 'One rule per row, set on the card: which rows, which column, what to write. The filter is Explore terms ANDed — type==LC4, pre>100 — and blank means every row. Bare terms are refused.',
+      help: 'One edit per row, set on the card: which rows, which column, what to write. Each filter term must name a column, e.g. type==LC4, pre>100; all terms must match, and a blank filter means every row.',
       noun: 'edits',
       default: [],
     },

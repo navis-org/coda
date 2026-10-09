@@ -220,8 +220,8 @@ function overflowed(model: string): never {
     `The prompt did not fit ${model}'s context window. Ollama truncated it from the front until ` +
       `the question itself was gone, then refused what was left. Coda asks for ` +
       `${NUM_CTX / 1024}k tokens and sends ~10k of prompt before your canvas is described, but ` +
-      `a model clamps to the window it ` +
-      `was trained with — check that with \`ollama show ${model}\`, and pick one offering at ` +
+      `a model is limited to the window it ` +
+      `was trained with. Check it with \`ollama show ${model}\`, and pick a model with at ` +
       `least ${NUM_CTX / 1024}k.`,
     500,
   )
@@ -250,7 +250,7 @@ function sizeLabel(bytes: number | undefined): string {
  */
 function contextNote(context: number): string {
   if (!context || context >= NUM_CTX) return ''
-  return `${Math.round(context / 1024)}k window — too small for Coda's prompt`
+  return `${Math.round(context / 1024)}k window, too small for Coda's prompt`
 }
 
 /**
@@ -413,7 +413,7 @@ export const ollama: AiProvider = {
       if (!who) {
         throw new AiError(
           `${id} runs on ollama.com, and this machine is not signed in. Run \`ollama signin\` ` +
-            `in a terminal — it is free and takes one browser round trip — then press Test again.`,
+            `in a terminal (it is free and takes one browser sign-in), then press Test again.`,
           401,
         )
       }
@@ -471,9 +471,8 @@ export const ollama: AiProvider = {
     // say so, where nothing has made up for it and the caveat is still true.
     if (chosen && !chosen.structured && !ignoresSchemaField(id)) {
       warnings.push(
-        `${id} is not a GGUF build, so its engine accepts the JSON schema and ignores it ` +
-          `— plans may come back in the wrong shape. A GGUF build of the same model ` +
-          `honours it.`,
+        `${id} is not a GGUF build, so its engine ignores the JSON schema and plans may come ` +
+          `back in the wrong shape. A GGUF build of the same model follows the schema.`,
       )
     }
     /*
@@ -582,9 +581,9 @@ export const ollama: AiProvider = {
       if (status === 404) {
         throw new AiError(
           isCloudModel(model)
-            ? `${message} — cloud models are served by name and this one is not among them, ` +
-                `whatever ollama.com may list. Pick another from the dropdown.`
-            : `${message} — is the model pulled? Try \`ollama pull ${model}\`.`,
+            ? `${message}. Ollama's cloud does not serve this model, even if ollama.com lists ` +
+                `it. Pick another from the dropdown.`
+            : `${message}. The model may not be pulled; try \`ollama pull ${model}\`.`,
           404,
         )
       }

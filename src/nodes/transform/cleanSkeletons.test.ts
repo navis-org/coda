@@ -37,7 +37,7 @@ import {
   skeletonsFromResult,
   usesDistance,
 } from '../lib/cleanOps'
-import { NM_PER_UM } from '../lib/nblastOps'
+import { NM_PER_UM } from '../../data/units'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
 import { node } from '../../test/graph'
@@ -127,7 +127,9 @@ describe('cleanOps — units, and when they matter', () => {
     expect(usesDistance({ ...OFF, smooth: 2 })).toBe(true)
     expect(usesDistance({ ...OFF, heal: true, healMaxDist: 5 })).toBe(true)
     expect(usesDistance({ ...OFF, method: 'resample', spacing: 1 })).toBe(true)
-    expect(() => checkCleanUnits({ units: 'voxels' }, true)).toThrow(/not nanometres/)
+    expect(() => checkCleanUnits({ units: 'voxels' }, true)).toThrow(
+      /are in voxels, so a distance in micrometres cannot be applied/,
+    )
   })
 
   it('does not count healing with no limit as a distance', () => {
@@ -263,7 +265,7 @@ describe('cleanOps — the resample ceiling', () => {
     const said: string[] = []
     checkResampleSize({ warn: (m) => said.push(m) }, cable(), 0.1 * NM_PER_UM)
     expect(said.join(' ')).toMatch(/nodes after resampling/)
-    expect(said.join(' ')).toMatch(/0.1 µm Spacing/)
+    expect(said.join(' ')).toMatch(/0.1 µm `Spacing`/)
   })
 
   it('still refuses the one spacing that has no geometry on the other side of it', () => {
@@ -353,12 +355,67 @@ describe('neuron.cleanSkeletons — types and params', () => {
   }
 
   it('says so when nothing is switched on', () => {
-    expect(validate({ method: 'none' })).toMatch(/passes the skeletons through/)
+    expect(validate({ method: 'none' })).toMatch(/skeletons pass through unchanged/)
   })
 
   it('catches a spacing that was typed in nanometres', () => {
-    expect(validate({ method: 'resample', spacing: 500 })).not.toMatch(/micrometres, not/)
-    expect(validate({ method: 'resample', spacing: 0.001 })).toMatch(/micrometres, not/)
+    expect(validate({ method: 'resample', spacing: 500 })).not.toMatch(
+      /check you did not enter nanometres/,
+    )
+    expect(validate({ method: 'resample', spacing: 0.001 })).toMatch(
+      /check you did not enter nanometres/,
+    )
+  })
+})
+
+describe('neuron.cleanSkeletons — a computed split', () => {
+  /** The node's own `evaluate`, with a warn spy: no scheduler, so the input can carry a split. */
+  async function clean(value: SkeletonsValue, params: Partial<SkeletonCleanParams>) {
+    const def = requireNodeDef('neuron.cleanSkeletons')
+    const warnings: string[] = []
+    const outputs = await def.evaluate({
+      params: { ...defaultParams(def), ...params } as ParamValues,
+      refresh: false,
+      reportFetched: () => undefined,
+      warn: (message: string) => warnings.push(message),
+      publish: () => undefined,
+      input: () => value,
+      inputKey: () => 'in-key',
+      column: () => undefined,
+      columns: () => [],
+      inputPorts: () => [],
+      outputPorts: () => [],
+      resolveSource: () => new MockSource(),
+      signal: new AbortController().signal,
+      progress: () => {},
+    })
+    return { out: outputs['out'] as SkeletonsValue, warnings }
+  }
+
+  function withSplit(): SkeletonsValue {
+    const value = skeletonsFixture()
+    return {
+      ...value,
+      items: value.items.map((item, i) =>
+        i === 0 ? { ...item, split: new Uint8Array([1, 3, 2]) } : item,
+      ),
+    }
+  }
+
+  it('drops it, since cleaning renumbers the nodes it labels, and says so', async () => {
+    mockedRun.mockImplementation((request: CleanSkeletonsRequest) =>
+      Promise.resolve(passThrough(request)),
+    )
+    const { out, warnings } = await clean(withSplit(), { smooth: 1 })
+    expect(out.items.every((item) => item.split === undefined)).toBe(true)
+    expect(warnings.join(' ')).toMatch(/1 of 3 neurons carried an axon\/dendrite split/)
+  })
+
+  it('keeps it on a pass-through, where no node moved', async () => {
+    const value = withSplit()
+    const { out, warnings } = await clean(value, {})
+    expect(out).toBe(value)
+    expect(warnings).toEqual([])
   })
 })
 

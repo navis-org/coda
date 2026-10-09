@@ -9,11 +9,22 @@
  */
 
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from 'vitest'
 
 import { App } from '../../App'
 import { deserializeGraph } from '../../core/graph'
+import { stubFetch } from '../../data/ai/fixture'
 import { MockSource } from '../../data/mock/MockSource'
+import { resetCredentials, setToken } from '../../data/neuprint/credentials'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { ATTACH_CHAIN_LABEL } from '../../nodes/lib/datasetFamilies'
@@ -232,6 +243,19 @@ describe('the population summary', () => {
    * does not return. The node's own warning is that box's honest channel.
    */
   it('omits a ticked filter the dataset cannot answer', async () => {
+    /*
+     * A token and a server that answers, because discovery is gated on the first and needs the
+     * second to *land*. This used to pass with neither: every discovery query was refused for the
+     * missing token, `runDiscovery` swallowed each refusal and stored a schema discovered from
+     * nothing — which is the "no superclass" this reads, and which stayed cached after signing
+     * in. An empty Cypher result is hemibrain's answer to the question that matters here.
+     */
+    setToken('test-token')
+    stubFetch((name, value) => vi.stubGlobal(name, value), { columns: [], data: [] })
+    onTestFinished(() => {
+      vi.unstubAllGlobals()
+      resetCredentials()
+    })
     await open({ superclassOnly: true })
     // Reported until discovery says otherwise — a schema that has not arrived is not a schema
     // without `superclass` in it — and dropped once it lands.

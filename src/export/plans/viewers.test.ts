@@ -207,6 +207,6 @@ describe('the other viewers', () => {
     expect(plan.terms).toEqual([])
     // The card's own sentence, from `resolveFilters`, with the document's suffix.
     const [problem] = resolveFilters(schema, clauses).problems
-    expect(plan.ignored).toEqual([`${problem!.message} — not applied.`])
+    expect(plan.ignored).toEqual([`${problem!.message}, so this filter is not applied.`])
   })
 })

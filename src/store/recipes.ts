@@ -22,8 +22,8 @@ import type { Recipe } from '../core/recipes'
 import { readRecipe, recipeSockets, recipeText, renamedRecipeText } from '../core/recipes'
 import type { Socket } from '../core/sockets'
 import { newId } from '../core/graph'
-import type { RefusalWords } from '../data/idb'
-import { attempt, commit, database, readKey } from '../data/idb'
+import type { RefusalWords, StoredUsage } from '../data/idb'
+import { attempt, commit, database, readKey, usage } from '../data/idb'
 import { newestFirst } from './shelf'
 
 const DB_NAME = 'coda-recipes'
@@ -170,6 +170,11 @@ export async function deleteRecipe(id: string): Promise<void> {
     meta.delete(id)
     texts.delete(id)
   })
+}
+
+/** What the shelf holds, for the Storage tab: one entry per recipe. */
+export function recipesUsage(): Promise<StoredUsage | undefined> {
+  return usage(db, META_STORE)
 }
 
 /** Test seam: forget the open database so a fresh `indexedDB` is picked up. */

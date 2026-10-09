@@ -61,7 +61,7 @@ would be unselectable except by accident; and the frame comes back while the tex
 because an edit needs a visible target. Absent means on, so a note saved before the param existed
 keeps the frame it was drawn with.
 
-**The text goes through `ui/markdown.ts`**, the same subset the Description card renders, rather
+**The text goes through `core/markdown.ts`**, the same subset the Description card renders, rather
 than a second parser. That module exists because a blurb from a foreign deployment must not be
 able to become markup, and text pasted into a graph that is then shared has exactly the same
 property — raw HTML stays text by construction.
@@ -316,6 +316,296 @@ The door is `urlOf`, and the reason it is one function rather than four call sit
 map: keyed by the pasted text instead of the fetched address, a node pointed at the page link and
 one pointed at the raw address would learn the same table's shape separately, and the second would
 look unfetched.
+
+## Link Table and Read Rows: a file too large to copy
+
+`core.linkTable` and `core.readRows` (`src/nodes/table/`, readers in `src/data/files/`). Upload
+Table copies a file into IndexedDB and reads all of it on every run, which is right up to tens of
+megabytes and wrong for a connectome's synapse table. Link Table holds a **reference** and reads
+only the footer; Read Rows reads the blocks a lookup needs. The help pages say what that means to a
+reader; this is why it is built the way it is.
+
+**A table file is its own kind, `tableFile`, and is not assignable to `table`.** A node taking a
+table would otherwise be handed a reference and read all of it, which is the one thing the kind
+exists to prevent. Only a reader — Read Rows, the Custom Dataset's sockets — takes one.
+
+**One exception, and it reads nothing: Filter Table carries its condition on the file.** Wired
+below a Link Table it hands on the same value with `{column, op, value}` appended to
+`TableFileValue.filters`, and every reader applies the conditions to the rows *it* fetched
+(`data/files/filters.ts`): Read Rows, the synapse lookup, the edge-list build. Rows are read through
+`readFileRows`, which takes the conditions — with the location, fingerprint and block count — off
+the value itself: a caller handing them over could forget them and still compile, returning rows
+the Filter Table dropped with nothing to say so. The case it was
+built for is a confidence threshold between a synapse file and a Custom Dataset — a lookup of six
+neurons stays a lookup of six neurons, and the threshold sees only their synapses. Four rules:
+
+- **Only a row-local operation may be deferred this way.** Whether a row is kept depends on that
+  row alone, so "look up by id, then filter" keeps exactly what "filter, then look up" would. A
+  dedupe, a sort, a join or a group-by answers per row from the other rows, and deferring one
+  would be a different answer; those stay refused, and Read Rows is the way through.
+- **One predicate, on the cell as the node reads it.** `rowPredicate` moved to
+  `core/rowPredicate.ts` so the workers can run it, and each condition's cell is decoded by
+  `decoderFor` to the file's own schema dtype before it is tested — so a threshold means the same
+  on the file and on the rows once Read Rows has made them a table. `filterFile.test.ts` holds the
+  two to agreement over every operator family, both formats and a keyed read; a condition column
+  is read whether or not it is an output.
+- **The cap counts rows kept**, in both halves: Read Rows' `limit` and the notebook's `_head`,
+  which reads batch by batch until enough rows have passed.
+- **The condition is in the key through the Filter Table's provenance**, so a new threshold is a
+  new edge set and a new synapse table id, and nothing stale answers. The file's fingerprint and
+  its saved block indexes are unchanged — they are facts about the file, not the condition.
+
+The port is `T.any()` with `TABLE_OR_FILE_KINDS`, which `nominalType` names and ranks as the Table
+port it is (`core/types.ts`, `core/sockets.ts`): unnamed, the most-used filter in the palette read
+"Any → Any" and sorted below nodes that merely have an optional table socket. The notebook's
+`CodaTableFile.where(columns, keep)` is the same mask the table emitter writes, applied after the
+canvas' text cast; exported before the footer was read, the column's dtype is unknown and the mask
+asks the column at run time rather than guessing numeric or text.
+
+**The footer is the whole open.** A tail read of 64 kB (`TAIL_READ`, held by `withTail`) answers
+the format's magic (`PAR1`, `ARROW1`), the footer walk and the fingerprint in one request. A CSV is
+refused with the conversion, since it has no footer to find a row by. From a URL every read is a
+Range request capped by `maxBytes`, so a server that ignores Range is refused rather than
+downloaded — except below 64 kB, where the whole file is one read anyway.
+
+**Reading rows is key-first.** A block ruled out by its statistics is never read; a surviving
+block has only its key column read first, and the other columns only where a key matched. Ids are
+probed as `bigint` by value, never spelled as text in the hot loop. What is kept is asked of the
+crash floor as it grows, and the read runs in a worker.
+
+**A 64-bit column is text when it reads as an id** — by name (`isIdentifierColumn`) or because
+Parquet's statistics pass 2^53 — and `Detect id columns` / `Read as text` override it. A value too
+large for a number column is refused naming the setting, never rounded (invariant 8).
+
+**A local file is a handle, and only Chromium can keep one.** The `FileSystemFileHandle` goes into
+IndexedDB and a reload restores it, possibly behind an "Allow access" click. Elsewhere a file lasts
+the tab, and the card says so through a hint **derived from the browser** rather than written into
+the node (`NodeDefinition.readerHints`), since the same file opened in Chrome must not say it.
+
+**A block index is built by the first lookup that could use one**, on an `Index columns` column
+(Read Rows) or the Custom Dataset's lookup columns (always): each block's range recorded as the key
+column is read, saved by fingerprint and column only when **every** block's range was seen, and
+consulted through `mayHold` thereafter (`withBlockIndex`). It pays on the column the file is
+clustered by and on nothing else.
+
+**A lookup in a file its key does not sort is a scan, and the scan was the whole cost — measured,
+44 s to 2.6 s.** A Synapses question on six FlyWire neurons against a 192M-row, 184-row-group
+Parquet synapse table (`fw_mat783_synapses_v3_neuropil`) took 44 s where polars' lazy
+`is_in(pre) | is_in(post)` took 0.4 s. The file is not sorted by either id — every row group's
+statistics span the whole range, so polars scans it too; the difference was decoding. Four
+findings, each measured on that file (`vite-node` against our reader, then Chrome), in the order
+they were found:
+
+1. **hyparquet assembled every *optional* column value by value** — a flat column with no nulls
+   still went through `assembleLists`, a plain array filled one BigInt at a time. Half the time.
+   `patches/hyparquet@1.29.1.patch` hands such a page back as its typed array, and makes the
+   dictionary dereference write into an array of the dictionary's type (a dictionary-encoded int64
+   column otherwise came back as a plain array of BigInts too). Neither is fixed in 1.31.2; re-check
+   before upgrading, and drop the patch when upstream has it. **Two more hunks came from a wide
+   file** — a BigClust feature matrix, 115,982 rows × 19,826 dictionary-encoded int columns, which
+   took 115 s where pyarrow took 0.8 s. `getSchemaPath` rebuilt the whole schema tree for every
+   column it was asked about, quadratic in the column count and invisible at fish2's 1,063 (55 s →
+   21 s, now built once per schema, in a `WeakMap`, its children found through a name map rather than
+   a scan — the root's children are every column, so the scan was the same quadratic again). And the dictionary dereference was one loop
+   for strings, BigInts and numbers, which goes **megamorphic** once a file of strings has passed
+   through the same worker — meta does, first — and every later column then pays a generic
+   element access per cell: 59 s of a 79 s read that took 21 s on a fresh thread. Typed and plain
+   dictionaries now have a loop each, identical on purpose and commented so (two functions are two
+   sets of type feedback). Both hunks belong upstream. The second only reproduces with something else decoded first
+   in the same thread, so measure a wide read *after* a string column, not alone. The project now
+   reads in 27 s; what is left is decoding 2.3 billion cells, one worker at a time.
+2. **Matching made a BigInt per row.** `matchingRows` reads a `BigInt64Array` run's two 32-bit
+   words against the probe's (`IdProbe.words`, behind a 64K bitmap of low bits that turns most
+   rows away in one read); the block-index build and the edge-list build do the same. One set of
+   helpers in `reader.ts` — `int64Words`, `joinWords`, `splitWords` — so the signed high word,
+   the part that fails silently, is read one way. Blocks expose their decoded arrays as
+   `RawBlock.runs` for this, and the per-row getter is built over the same runs (`runGetter`).
+3. **One worker is one core.** A keyed read of a many-block file is split into consecutive block
+   ranges over every core but the page's (`split.ts`, at most 16 and at least 4 blocks a part) and
+   merged in block order — the row cap applied to the whole. **The block indexes are the page's**
+   on every route: `client.ts` loads each key column's stored index once and hands it to the
+   workers, and saves a build only once it covers every block, which on a split read means joining
+   the parts' (`mergeParts`); a worker never opens the store. An unkeyed read is never split: it
+   stops at its cap after the first blocks. 17.6 s → 2.8 s.
+4. **Both ends in one pass.** `key.names` keeps a row where any named column holds an id, so a
+   Synapses question is one read of the table where it was two — each of which decoded every
+   column, the other end being an output. The lookup splits the kept rows by side itself, off
+   their id columns (`keptWhere`), rather than the reader reporting which column matched. 4.8 s →
+   3.4 s at the same worker count; 2.1 s with every core and the tidying after it.
+
+**Then the library was taken out of the common case — 2.1 s → 1.25 s in Chrome, 12.5 s → 3.8 s
+on one thread.** Three independent investigations measured where the rest went: not I/O plumbing
+(worker start, footer, merge and transfer are 3%; pools, queues, merged reads and prefetch bought
+nothing), and not the key scan, but decoding the *output* columns whole to keep 376 rows of each
+million, with Snappy the largest single cost. What the file is matters, and was measured by walking
+every page header: most of each id column is **not** dictionary-encoded (the writer's 1 MB
+dictionary fills at ~131K ids and the chunk falls back to PLAIN — 62% of `pre`, 84% of `post`), the
+coordinate columns do not compress at all, and every page's statistics say `null_count = 0`.
+
+`pages.ts` is the result: for a flat column of plain integers, floats or text on v1 pages, it
+matches a key on the page as it lies (a PLAIN id by its two words, a dictionary page by
+testing the dictionary once and scanning only its indices, never decompressing a page whose
+dictionary holds no id), and **gathers** every other column — a page with no matched row is never
+decompressed, and on one with matches only those values are read, a dictionary index by its bit
+position in its run. Snappy is `hysnappy`'s WASM, for the library's reads too. Three rules:
+
+- **It refuses rather than guesses.** A v2 page, a null in a key column's page (an output
+  column's are read, below), a date, a decimal, an unsigned integer, a codec `pageLibraries` does
+  not hold or a nested file throws `Unsupported`, and that block goes to hyparquet — so the
+  failure mode is *slower*, never *different*. `pages.test.ts` holds both routes cell for cell,
+  and also counts the blocks the fast path answered, since one that silently fell back everywhere
+  passes every equality test there is.
+- **Values come out as the library's** — `bigint` for INT64, text for BYTE_ARRAY — so `decoderFor`
+  reads either route alike.
+- **A block it answers records no key range**, so `withBlockIndex` drops that column's build. It
+  costs a Parquet file nothing, its footer's statistics being the index already.
+
+**The split is sized on the blocks a read can still find anything in**, not on the file's count:
+the page reads the footer (`splitRanges`, `client.ts`) and shares out what the statistics and the
+stored indexes leave. On a copy sorted by the id, a lookup survives in a handful of 420 blocks and
+now runs in one worker, 55 ms, where thirteen each opening the file to skip theirs measured twice
+as slow as one.
+
+**Sorting is still the only lever on this scale.** Two copies, one sorted by each id, with
+100k-row groups and a page index, answer the same question in about 0.2 s — faster than polars'
+0.4 s — at twice the disk. What is left on the unsorted file is Snappy and reading the bytes:
+Chrome serves a `File`'s reads one at a time, about 0.7 s of this query whatever the decoder does.
+parquet-wasm measured 1.3–1.4 s in Chrome with workers and was not adopted: 1.7 MB more download
+and about 150 MB of WASM memory per worker that never shrinks.
+
+**Feather takes findings 2–4 and not the first**, which is Parquet's library. `apache-arrow`
+already decodes into typed arrays; what Feather lacked was handing them over, so `runsOf`
+(`feather.ts`) passes a chunk's `values` as a run where the chunk is plain integers or floats with
+no nulls — not a dictionary (its values are indices), not a half float (raw bits). Measured on the
+same six neurons, both ends in one pass, in Chrome, and matching polars' rows exactly:
+
+| File | One worker | Split | polars |
+| --- | --- | --- | --- |
+| 10.7 GB synapse table, 1,985 batches, 20 columns | 25.3 s | 4.5 s | 0.9–1.4 s |
+| 98 MB edge list, 15M rows | 0.8 s | 0.18 s | — |
+
+Single-threaded the runs took the synapse table from 26 s to 18 s. **What is left is half LZ4**,
+and of columns nobody asked for: `apache-arrow` decompresses every buffer of a record batch before
+building any column (`_decompressBuffers`), so a lookup wanting five of twenty columns pays for
+twenty. Not reachable without patching it; Parquet sorted by the id column is the fix a user has.
+
+**The same edge list read whole, into a Custom Dataset's Edges, took 6.3 s and now 3.5 s.** The
+cost was the builder, not the file: a `bigint`, its string and a string-keyed Map lookup per id per
+row. `EdgeSetBuilder.addWords` interns a 64-bit id by its two 32-bit words and makes its text once
+per neuron, through `idIndex`, so an id met as text and as words is one neuron; `tableFile.ts`
+takes that route where both ends arrive as integer runs.
+
+**An optional picker keeps a column while its schema has not arrived** — `resolveColumn` asks
+about an unknown schema before the optional rule. Read Rows' match column used to resolve to
+nothing on a first run, which read the whole file.
+
+### Delta tables: a log replayed, never a folder listed
+
+CAVE publishes its exports as Delta tables (`gs://mat_dbs/public/deltalake_exports/…`), so a Link
+Table takes a table's folder as well as a file. **The name is a hint and the bytes are the
+answer** (`registry.ts`' `formatByName`): a URL with no table file's extension is asked for as a
+Delta table first, and where that fails the address itself is asked: a table file ends in its
+magic (`PAR1`, `ARROW1`), a repository's download endpoint names a Parquet file with no extension
+at all, and `openTableFile` has always decided by magic bytes. Only where it is neither is it
+refused, by the table's own error. Three rounds to get here. The first decided on the extension
+alone and refused such a URL. The second fell back only where the log was *cleanly* absent, which
+is a 404 on every probe — and a bucket without list permission answers a missing key 403, a server
+sending no CORS header on its errors answers nothing a page can read, and one serving a page for
+every path answers 200, so the case the fallback existed for failed on ordinary servers. And a URL
+with a **query string is a file whatever its path**: a folder has objects under it, and
+`…/123?format=original/_delta_log/…` is the same file asked for again, whole — which is also why
+`_last_checkpoint` is read under a byte cap.
+The code is `src/data/files/delta/`: `log.ts` reads the log into a `DeltaSnapshot`, `reader.ts`
+turns that into a `TableFileReader`, `deletionVectors.ts` decodes the one binary format involved,
+`store.ts` reads over HTTP. The first real table — `valid_connection_v2`, 596 versions — replays
+to 33 live files, 4.6 GB, 76.5M rows; a lookup of one neuron reads one file and returns polars'
+174 rows.
+
+**The live files are replayed, never listed.** A delete or a compaction leaves the old files on
+disk until somebody vacuums, so a listing counts rows the table no longer holds. The newest
+checkpoint (a Parquet file of the live actions; hyparquet reads its nested columns as plain
+objects) and every JSON commit after it are applied in order, a file keyed by its path *and* its
+deletion vector, since an update to a vector is a remove and an add of the same path. Read one
+commit at a time that was 23 s; read sixteen at once it is 4 s. On GCS the commits and the newest
+checkpoint are found by one listing through the JSON API; elsewhere they are asked for a batch at
+a time from `_last_checkpoint`, since a web server cannot say what is in a folder — and asking is
+reading, so the bytes that answered are what the replay uses rather than a second fetch.
+
+**A snapshot is built once, on the page, and travels to every worker as data**, a few kB per file:
+re-reading the log per worker would be a hundred requests each. It is kept by root until ⟳, which
+is also what **pins the version** — a commit landing between two runs of a workflow changes
+nothing until somebody asks for it. The fingerprint is the root, the version and the live files,
+so a stale value is refused by the same `requireFingerprint` a rewritten file is.
+
+**A block is a file, and a file's row groups are skipped inside it.** Each `add` carries its
+file's min/max in the log, so a lookup rules out whole files with no request; only a surviving
+file's footer is opened, and its own statistics rule out the rest. Opening every footer up front
+would be a request per file per worker before a row is read. Everything above `TableFileReader` —
+the worker split, block indexes, a Filter Table's conditions — is unchanged, because this is one.
+Three things follow from a block being *several* reads, each of which the first version got wrong.
+A **capped read with no key** stops once it has its rows (`readBlock`'s `head`, which the caller
+sets one past the cap so it can still say the read was cut short), where a file was otherwise read
+whole to keep its first thousand. The Parquet reader is what honours it — `rowEnd`, and hyparquet's
+`useOffsetIndex` so only a group's leading pages are fetched where the file has a page index — so a
+plain Parquet file of million-row groups gains the same (the first thousand rows of CAVE's table:
+7.3 MB in 1.5 s, measured, of a file over a hundred megabytes); the Delta reader passes on what is
+left of the cap, and only a file with a deletion vector stops at a whole group instead. The block-index
+wrapper deliberately never forwards `head`: it takes a block's range from what it reads. A row
+group the page path declines is read **keys first**, the other columns only where a key matched —
+`matchesByColumns` in `reader.ts`, one function for `readRows` and the Delta reader, which were
+two copies for a round. And
+**one file is held open at a time**: every reader walks blocks in ascending order, and a footer
+and its kept tail per file ever opened is what a whole-table read would hold to its end. A
+deletion vector is fetched only for a file a lookup matched in.
+
+**The stats are parsed without rounding.** They are a JSON string, and CAVE's ids are eighteen
+digits: `JSON.parse` turns `720575940638257498` into another number, and file skipping built on
+it would skip the file holding the id. `parseStats` quotes every integer a double cannot hold
+before parsing, through `quoteWideIntegers` — CAVE's own JSON has the same problem, and that scan
+is string-aware for the reason that applies here too: a text column's min or max is free text, and
+a one-line pattern (which this was, first) splices quotes into a string holding `,<digits>,`.
+
+**What a reader must understand is read exactly or refused.** `deletionVectors` (rows a writer
+marked deleted without rewriting the file — Z85 in the log, a RoaringBitmapArray in a file beside
+the table, checked against the cardinality the log states), `columnMapping` (names in the files,
+the stats and the partition values are *physical*; the table's are in the schema),
+`timestampNtz` and `vacuumProtocolCheck` are read. Anything else is refused by name — a table read
+as plain when it is not returns wrong rows without a word. Partition columns are not in the files
+at all: one value per file, from the log, typed as the column is. The tests read four tables
+against delta-rs' own answers (`expected.json`): a synthetic edge list reaching every log path,
+and three of delta-rs' Spark-written test tables for what delta-rs cannot write.
+
+**The bucket allows no cross-origin reads at its direct address**, which is ordinary for a data
+bucket. Reads were already falling back to the JSON API (`transport.ts`), which every public
+object answers; the size check (`urlHead`) had no fallback and now asks the JSON API for size and
+`Last-Modified`, and the listing goes through it too. A key with a percent-escape in it is decoded
+once before the JSON API encodes it, or a space in a partition folder is asked for as `%2520`.
+
+**A compacted table's files are ZSTD**, which is also polars' Parquet default, so `fzstd` (the
+decoder hyparquet's own compressor package uses) joined Snappy in `pageLibraries().codecs`, read
+by the fast path and the library alike, and in apache-arrow's registry for Feather. A decode-only
+codec registers there: the registry validates an encoder only where one is given.
+
+**The fast path reads pages, not chunks, where a file has a page index.** The first lookup read
+77 MB in 9.9 s for 174 rows: each output column's whole chunk, and then — because the page it
+needed held a null — the library's read of the whole row group again. Two changes: `pagesHolding`
+reads a column's offset index (a row group's are written side by side, so the output columns'
+are one read) and fetches the dictionary page and only the data pages holding the matched rows,
+neighbours merged into one request, the whole chunk where that would be most of it;
+and a page with nulls is read rather than refused, each row given its place among the page's
+stored values (`valueSlots`). The same lookup is 14 MB in 1.8–2.4 s, nearly all of it dictionary
+pages, which a dictionary-encoded page cannot be read without. A key column with nulls is still
+refused — its scan reads one value per row. **What the footer can refuse is refused before a byte
+is read** (a key that is not an integer, an output this path does not read, a codec, a key chunk
+whose statistics count a null): found after the key chunks were fetched, a refusal has the library
+fetch them again, and on a Delta table that is once per file.
+
+**The notebook reads through delta-rs' SQL engine** (`QueryBuilder`), at the pinned version.
+`DeltaTable.to_pyarrow_dataset()` is the obvious route and is wrong twice: it refuses deletion
+vectors, and on a column-mapped table it reads every column as null. polars' `scan_delta` gives
+the same nulls. The lookup is an SQL `IN`, so delta-rs skips files on the same stats — measured
+rather than assumed, DataFusion being said to stop pruning on a long list: thirty ids took the
+1.8 s one id took, against the same table (deltalake 1.6.6).
 
 ## Upload Mesh: somebody else's regions
 

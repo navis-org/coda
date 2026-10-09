@@ -1,7 +1,8 @@
 import { registerNode } from '../../core/registry'
-import { T, findColumn, isTabular, schemaOf } from '../../core/types'
-import { isTableValue } from '../../core/values'
-import type { FilterOp } from '../lib/tableOps'
+import { T, TABLE_OR_FILE_KINDS, findColumn, isTabular, schemaOf } from '../../core/types'
+import { isTableFileValue, isTableValue } from '../../core/values'
+import { rowPredicate } from '../../core/rowPredicate'
+import type { FilterOp } from '../../core/rowPredicate'
 import {
   FILTER_TABLE_DEFAULT_OP,
   filterConditionIssues,
@@ -31,10 +32,13 @@ registerNode({
   category: 'transform',
   description: 'Keep rows matching a condition on one column.',
   guide:
-    'Keep the rows matching one condition. The operator list follows the column’s type — pick a number and you get ≥, ≤, between; pick text and you get contains and matches — which is schema propagation doing something visible. It is cheap, so the result re-computes as you type a threshold, with nothing waiting for Run.',
+    'Keeps the rows that match one condition on one column, e.g. pre ≥ 100 or type starts with ' +
+    'LC. The operators on offer depend on the column type. Chain several for AND; below a Link ' +
+    'Table, the condition is applied to whatever rows are later read from the file.',
   cost: 'cheap',
-  inputs: [{ id: 'in', label: 'Table', type: T.table() }],
-  outputs: [{ id: 'out', label: 'Table', type: T.table() }],
+  // A table, or a Link Table file, whose condition rides on to its readers (`data/files/filters.ts`).
+  inputs: [{ id: 'in', label: 'Table', type: T.any(), kinds: TABLE_OR_FILE_KINDS }],
+  outputs: [{ id: 'out', label: 'Table', type: T.any(), kinds: TABLE_OR_FILE_KINDS }],
   params: [
     { id: 'column', kind: 'column', label: 'Column', from: 'in', default: '' },
     {
@@ -60,9 +64,10 @@ registerNode({
     },
   ],
 
-  // Filtering preserves the schema exactly — including neurons-ness.
+  // Filtering preserves the schema exactly — including neurons-ness, and a file's being a file.
   inferOutputs: (ctx) => {
     const input = ctx.inputs.in
+    if (input?.kind === 'tableFile') return { out: input }
     if (!isTabular(input)) return { out: T.table() }
     return {
       out: input.kind === 'neurons' ? T.neurons(schemaOf(input)) : T.table(schemaOf(input)),
@@ -79,20 +84,25 @@ registerNode({
   },
 
   evaluate: (ctx) => {
-    const table = ctx.input('in')
-    if (!isTableValue(table)) throw new Error('Input is not a table')
+    const input = ctx.input('in')
+    if (!isTableFileValue(input) && !isTableValue(input))
+      throw new Error('Input is not a table')
     const columnName = ctx.column('column')
-    if (!columnName) throw new Error('No column selected')
-    const out = filterTable(
-      table,
-      columnName,
-      resolveFilterOp(
-        ctx.params.op,
-        findColumn(schemaOf(table), columnName)?.dtype,
-        FILTER_TABLE_DEFAULT_OP,
-      ),
-      String(ctx.params.value),
-    )
-    return { out }
+    if (!columnName) throw new Error('No column is selected. Pick one in `Column`.')
+    // Both kinds carry their schema, so the column and the operator are resolved once.
+    const dtype = findColumn(input.schema, columnName)?.dtype
+    if (!dtype)
+      throw new Error(
+        `Column "${columnName}" is not in the input table. Pick another in \`Column\`.`,
+      )
+    const op = resolveFilterOp(ctx.params.op, dtype, FILTER_TABLE_DEFAULT_OP)
+    const value = String(ctx.params.value)
+    if (isTableValue(input)) return { out: filterTable(input, columnName, op, value) }
+    // A file is not read here (`data/files/filters.ts`). Tested once now, so a value the operator
+    // cannot use is refused on this card rather than inside somebody's lookup.
+    rowPredicate(dtype, op, value)
+    return {
+      out: { ...input, filters: [...(input.filters ?? []), { column: columnName, op, value }] },
+    }
   },
 })

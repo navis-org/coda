@@ -89,7 +89,7 @@ export const CARRY_PARAM_ID = 'carry'
  * What the node calls one of the things it fetches, singular and plural.
  *
  * A table rather than `${noun}s`, which is how the first draft said "meshs" — the same reason
- * `plural` takes an explicit plural for the irregular cases (`ui/format.ts`), stated here because
+ * `plural` takes an explicit plural for the irregular cases (`style/format.ts`), stated here because
  * this file cannot import the UI.
  */
 type CarryNoun = 'skeleton' | 'mesh'
@@ -134,7 +134,7 @@ export function carryParam(noun: CarryNoun): ColumnsParam {
     default: [],
     help:
       `Columns of the incoming neuron table to carry onto the ${PLURAL[noun]}, matched by ` +
-      'neuronId — a cell type or an annotation for Split Neurons, the 3D View and Download. ' +
+      'neuronId, e.g. a cell type for Split Neurons, the 3D View or Download. ' +
       'A carried column replaces one of the same name.',
   }
 }

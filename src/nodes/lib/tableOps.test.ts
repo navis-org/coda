@@ -938,7 +938,7 @@ describe('pivot ceilings', () => {
     const matrix = pivotTable(table, 'side', 'type', 'v', 'sum', { warn: (m) => said.push(m) })
     expect(matrix.colLabels.length).toBe(PIVOT_COLUMNS_WARN + 1)
     expect(said.join(' ')).toContain('"type"')
-    expect(said.join(' ')).toContain('Columns is the small axis')
+    expect(said.join(' ')).toContain('`Columns` is usually a column with few values')
   })
 
   it('says nothing to a SILENT warner, and still applies the floors below', () => {
@@ -1196,7 +1196,7 @@ describe('unpivot', () => {
     const out = unpivotTable(wide(), spec({ keep: ['type', 'DNp02'] }), SILENT)
     expect(columnNames(out.schema)).toEqual(['type', 'name', 'value'])
     expect(unpivotIssues(WIDE, spec({ keep: ['type', 'DNp02'] }))).toEqual([
-      'DNp02 is both folded and kept — it will only appear as a value',
+      'DNp02 is in both `Fold columns` and `Keep`, so it will only appear as a value.',
     ])
   })
 
@@ -1291,12 +1291,14 @@ describe('unpivot', () => {
 
   it('says what is unset without ever refusing', () => {
     expect(unpivotIssues(WIDE, spec({ columns: [] }))).toEqual([
-      'No columns to fold — the table passes through unchanged',
+      'No columns to fold, so the table passes through unchanged. Pick some under `Fold columns`.',
     ])
-    expect(unpivotIssues(WIDE, spec({ nameInto: '' }))[0]).toContain('need a name')
+    expect(unpivotIssues(WIDE, spec({ nameInto: '' }))[0]).toContain('both need a name')
     expect(
       unpivotIssues(WIDE, spec({ columns: ['neuronId', 'type', 'DNp02', 'PLP003'] })),
-    ).toEqual(['Nothing is kept, so the values cannot be traced back to their rows'])
+    ).toEqual([
+      'Nothing is in `Keep`, so the values cannot be traced back to their rows. Pick an id column to keep.',
+    ])
     // A schema that has not arrived is not a schema without these columns: nothing to say.
     expect(unpivotIssues(undefined, spec())).toEqual([])
   })

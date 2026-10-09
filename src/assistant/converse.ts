@@ -18,7 +18,7 @@ import type { CompletionResult, Usage } from '../data/ai/types'
 import { complete } from '../data/ai/registry'
 import { errorMessage } from '../core/errors'
 import type { CatalogueDetail } from './catalogue'
-import { buildSystemPrompt, carriesLines, optionLines } from './catalogue'
+import { buildSystemPrompt, carriesLines, optionLines, paramValueText } from './catalogue'
 import type { ResultReader } from './digest'
 import { digestState, resultLines } from './digest'
 import type { AssistantPlan } from './planShape'
@@ -130,7 +130,7 @@ export function describeGraph(graph: CodaGraph, ctx: GraphContext = {}): string 
       const changed = changedParams(configurableParams(def, node.params), node.params).map(
         (p) => {
           const value = node.params[p.id]
-          return `${p.id}=${Array.isArray(value) ? `[${value.join(',')}]` : String(value)}`
+          return `${p.id}=${paramValueText(value!)}`
         },
       )
       if (changed.length) bits.push(`    set: ${changed.join('  ')}`)

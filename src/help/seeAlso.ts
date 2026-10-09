@@ -1,70 +1,39 @@
 /**
- * "See also": which other documented nodes a reader should look at next.
+ * "See also": which other nodes a reader should look at next, listed at the foot of a help
+ * document. The same job as a docstring's See Also section.
  *
- * A Python docstring's See Also section, and the same job. The overlay is a reading surface, and
- * the question a reader has at the foot of a document is usually *what is the other one of
- * these* — Explore Dataset and Find Neurons are two answers to one question, and neither
- * document said so.
+ * It is a hand-written table rather than derived from the links in the documents, because those
+ * are mostly one-way: a document explains its own node, so the nodes everybody links *to* had no
+ * way onward, and siblings (Mirror and Transform, the two CATMAID datasets) never mention each
+ * other. Deriving it from category or socket type would relate every viewer to every other.
+ * See docs/help.md for the measurement.
  *
- * ## Why it is a table and not the cross-references the documents already have
- *
- * The obvious source is the prose: a document links another with `[Linkage](#cluster.linkage)`,
- * `help.test.ts` already refuses one whose target has no document, and mirroring those links
- * would need no list at all. Measured across the 64 documents before this existed: **105 links,
- * 74 distinct pairs, of which 12 mutual and 62 one-way** — and 13 documents in no pair at all.
- *
- * Both halves of that measurement argue against using it. The one-way links are one-way because
- * a document explains its own node: Find Neurons' document links nothing, and four documents link
- * *to* it, so the hub nodes — the ones most worth arriving at — were exactly the ones with no way
- * onward. And the pairs prose never states are the ones a reader most wants: Mirror and Transform,
- * the two CATMAID datasets, the three ways of choosing neurons. Nothing in the corpus relates
- * them because no document has a reason to mention its own sibling.
- *
- * So the relation is written down, once, here. It is **editorial** — the same line `guide` and
- * `coda-params` draw, where the registry knows what a node *is* and a person knows which other
- * one you actually wanted. A See Also derived from sharing a category or a socket type would
- * relate every viewer to every other, since they all take a table and almost none of them are
- * alternatives.
- *
- * The prose links stay what they were: a link inside a sentence, where the sentence explains why.
- * This is what to read next when the sentences have run out.
- *
- * ## Groups, not pairs, and not a field on the node
- *
- * A group means every member is worth reading next to every other, so a set of four is one line
- * rather than six pairs — five of which somebody would forget. The relation is symmetric by
- * construction rather than by anybody checking, which is the whole reason the user's example was
- * missing in the first place.
- *
- * **Not `NodeDefinition.seeAlso`.** The `?` exists because a file exists; a relation between two
- * documents is a fact about the documents, and a list on the definition would be free to name
- * nodes with nothing to open.
+ * Any registered node may be listed, documented or not. The overlay links the ones that have a
+ * document and names the rest.
  */
 
-import { helpTypes } from './registry'
-
 /**
- * Every group of documented nodes worth reading next to one another.
+ * Every group of nodes worth reading next to one another.
  *
- * A node may appear in several — that is the point of groups over a single partition. Skeletons
- * is a thing you fetch, a thing NBLAST compares, and a thing the 3D view draws, and a reader
- * arriving at it from any of those wants the other two.
+ * A group is a clique: every member is listed under every other. So a group must only hold nodes
+ * where *each pair* is worth reading together. If one node relates to several others that do not
+ * relate to each other (a star), write it as several small groups instead. "3D View, Neuroglancer,
+ * Skeletons" as one group listed Skeletons under Neuroglancer, which nobody wanted.
  *
- * A type with no document is dropped rather than being an error, so a group may name the node
- * whose document arrives next month; `seeAlso.test.ts` asserts the whole list is either
- * documented or deliberately ahead of one, and that every documented node ends up in at least
- * one group — which is the coverage claim that makes this worth having at all.
+ * A node may appear in several groups. A member does not need a help document: the overlay lists
+ * an undocumented node by name and description, without a link.
  */
 const RELATED: readonly (readonly string[])[] = [
   // --- getting neurons in ---------------------------------------------------
-  // The first question every workflow answers, and its answers. The wizard asks it as a single
-  // question (`StartId`), which is the plainest statement that these are alternatives.
+  // The ways of choosing which neurons to work with.
   ['neuron.explore', 'neuron.findNeurons', 'neuron.inputIds', 'neuron.idsFromLabel'],
-  // The escape hatch, beside the two nodes it replaces when they cannot express the question.
+  // Raw Cypher, for when Find Neurons or Connectivity cannot express the question.
   ['neuron.rawCypher', 'neuron.findNeurons', 'neuron.connectivity'],
-  // A table from somewhere that is not a connectome, and the way back out.
+  // Tables from outside a connectome, and the way back out.
   ['core.uploadTable', 'core.tableFromUrl', 'out.download'],
-  // The four annotation sources are alternatives in the plainest sense: same socket, same job.
+  ['core.linkTable', 'core.readRows'],
+  ['connectome:customDataset', 'core.linkTable', 'core.uploadTable', 'core.tableFromUrl'],
+  // Annotation sources: same socket, same job.
   [
     'annotation.seaTable',
     'annotation.flyTable',
@@ -73,60 +42,82 @@ const RELATED: readonly (readonly string[])[] = [
   ],
 
   // --- datasets -------------------------------------------------------------
-  // Whichever connectome somebody opened, the others answer "what else can I ask this of".
+  // By backend: the published datasets and the custom node for any other server.
   [
     'dataset.hemibrain',
-    'dataset.flywire',
-    'dataset.cave',
-    'dataset.catmaid.fafb',
-    'dataset.catmaid.l1',
+    'dataset.malecns',
+    'dataset.manc',
+    'dataset.opticlobe',
+    'dataset.neuprint',
   ],
-  // Both CATMAID, and the pair somebody comparing larva to adult wants.
-  ['dataset.catmaid.fafb', 'dataset.catmaid.l1'],
-  // A datastack, the tables it publishes, and the node that repairs ids proofreaders have moved.
-  ['dataset.cave', 'annotation.caveTable', 'cave.updateRootIds'],
+  ['dataset.flywire', 'dataset.banc', 'dataset.minnie65', 'dataset.cave'],
+  ['dataset.catmaid.fafb', 'dataset.catmaid.l1', 'dataset.catmaid'],
+  // One flagship per backend, for "what else is there".
+  ['dataset.hemibrain', 'dataset.flywire', 'dataset.catmaid.fafb'],
+  // A datastack and the node that repairs outdated root ids.
+  ['dataset.cave', 'dataset.flywire', 'cave.updateRootIds'],
+  // Finding and reading a datastack's tables.
+  ['annotation.caveTable', 'cave.tables', 'cave.tableInfo'],
   // What a connectome holds before you have asked it anything.
   ['out.datasetSummary', 'out.rois', 'neuron.explore'],
+  // A neuroglancer source: geometry in, and the viewer it comes from.
+  ['dataset.ngsource', 'out.neuroglancer'],
+  ['dataset.ngsource', 'neuron.meshes', 'neuron.skeletons'],
 
   // --- reshaping a table ----------------------------------------------------
-  // Rows in, fewer rows out. Filter is what people reach for first; the other two are what they
-  // wanted about half the time.
+  // Fewer rows out.
   ['core.filterTable', 'core.sample', 'core.dedupe'],
-  // The same verb on the two materials: rows out of a table, neurons out of a collection. A pair
-  // rather than a group, because Split Neurons' other neighbours are geometry and Filter Table's
-  // are table ops — relating those to each other is what makes a See Also list stop being read.
+  // Top N is a sort followed by a sample.
+  ['core.sort', 'core.sample'],
+  // The same verb on a table and on a collection of neurons.
   ['neuron.splitNeurons', 'core.filterTable'],
-  // Same rows, different shape.
-  ['core.groupBy', 'core.pivot', 'core.join', 'core.stack'],
-  // A matrix to a table: Pivot run backwards, and Group By over lines instead of keys.
-  ['core.reduceMatrix', 'core.pivot', 'core.groupBy'],
-  // Choosing by hand rather than by predicate, and where you look at the result.
+  // Working on columns.
+  ['core.select', 'core.rename', 'core.combineColumns'],
+  // Renaming a column vs. rewriting its values.
+  ['core.rename', 'core.relabel'],
+  // Grouping and reshaping.
+  ['core.groupBy', 'core.pivot', 'core.reduceMatrix'],
+  ['core.pivot', 'core.unpivot'],
+  // Putting two tables together: side by side, or end to end.
+  ['core.join', 'core.stack'],
+  ['core.stack', 'neuron.stack'],
+  // Choosing rows by hand, and where you look at them.
   ['core.editTable', 'core.selectOne', 'out.table'],
+  ['out.table', 'out.describe'],
 
   // --- connectivity ---------------------------------------------------------
   // One hop, many hops, and the whole-network answer to the same question.
-  ['neuron.connectivity', 'neuron.paths', 'neuron.influence', 'neuron.partnerVectors'],
-  // An edge list, the graph it becomes, and the two things worth asking that graph.
-  ['net.build', 'net.centrality', 'net.metrics', 'out.network'],
-  // A local motif query needs the built graph and the membership table beside its picture.
+  ['neuron.connectivity', 'neuron.paths', 'neuron.influence'],
+  // Partners as a list, as a matrix within a set, and as a vector per neuron.
+  ['neuron.connectivity', 'neuron.adjacency', 'neuron.partnerVectors'],
+  // An edge list, the graph it becomes, and what to ask of it.
+  ['net.build', 'net.filter', 'net.centrality', 'net.metrics', 'out.network'],
+  // A local motif query, its graph, and its results as a network or table.
   ['net.dotmotif', 'net.build', 'out.network', 'out.table'],
-  // The two ways to draw a network, and the two nodes whose result is small enough for the
-  // second one. The pair a reader most needs is the first: they draw the same material and the
-  // choice between them is about how many nodes there are, which is exactly the fact no
-  // category or socket type could relate them by.
-  ['out.flowChart', 'out.network', 'neuron.paths'],
-  // A ball and the mark that draws one. `Influence` emits layered flow rather than a network,
-  // which is what puts it here and not in the group above — a node-link diagram of a ball
-  // invites tracing a route through paths that are not on the page, and a Sankey's widths
-  // account for all of them.
-  ['out.sankey', 'neuron.influence', 'out.flowChart'],
-  // A matrix and the two ways to make one comparable before drawing it.
-  ['core.pivot', 'core.normalize', 'out.heatmap', 'core.similarity'],
+  // The two ways to draw a network: boxes and arrows for a few dozen nodes, WebGL for thousands.
+  ['out.flowChart', 'out.network'],
+  ['out.flowChart', 'neuron.paths'],
+  // Influence's Transfers output is drawn as a Sankey.
+  ['out.sankey', 'neuron.influence'],
+  // Matrices, made comparable and drawn.
+  ['core.pivot', 'core.normalize', 'out.heatmap'],
+  ['neuron.adjacency', 'out.heatmap'],
+
+  // --- synapses -------------------------------------------------------------
+  // Synapse points, and turning them into connectivity.
+  ['neuron.synapses', 'neuron.synapsesBetween', 'neuron.synapseEdges'],
+  ['neuron.synapseEdges', 'neuron.connectivity'],
+  // Which region a synapse sits in.
+  ['neuron.synapses', 'neuron.pointsInVolumes', 'neuron.roiMeshes'],
 
   // --- clustering -----------------------------------------------------------
-  // How alike, from wiring or from shape, and the tree that follows.
-  ['core.similarity', 'neuron.partnerVectors', 'cluster.linkage', 'neuron.nblast'],
-  // A tree, the cut through it, and the two ways of getting neurons back out.
+  // Similarity matrices, from wiring or from shape, and the clustering that follows.
+  ['core.similarity', 'neuron.partnerVectors', 'cluster.linkage'],
+  ['neuron.nblast', 'cluster.linkage'],
+  // The NBLAST family.
+  ['neuron.nblast', 'neuron.nblastKnn', 'neuron.nblastMatches', 'neuron.synblast'],
+  ['neuron.nblast', 'neuron.skeletons'],
+  // A tree, cutting it, and getting neurons back out.
   [
     'cluster.linkage',
     'cluster.cut',
@@ -134,96 +125,74 @@ const RELATED: readonly (readonly string[])[] = [
     'cluster.clustersToNeurons',
     'cluster.selectedToNeurons',
   ],
-  // All-by-all, and the same measure asked for one neuron's nearest matches.
-  ['neuron.nblast', 'neuron.nblastKnn', 'neuron.skeletons'],
-  // Two sockets and a matrix, twice over: how alike two neurons are in shape, and how far apart
-  // they are. The pair people reach for one of while meaning the other.
-  ['neuron.distance', 'neuron.nblast', 'neuron.meshes', 'neuron.skeletons'],
-  // The Heatmap is where a distance matrix is first read, and Points in Volumes is the other
-  // spatial question asked of geometry — where something is, rather than how far from what.
-  ['neuron.distance', 'out.heatmap', 'neuron.pointsInVolumes'],
-  // A square matrix's structure as a tree, and the same structure as somewhere to put a point.
+  // Linkage's Ordered output goes to a Heatmap.
+  ['cluster.linkage', 'out.heatmap'],
+  // Groups as a tree vs. neighbourhoods as a picture.
   ['cluster.linkage', 'core.embed', 'out.scatter'],
-  // The three things an Embedding will take, one at a time.
-  ['core.embed', 'neuron.nblastKnn', 'neuron.partnerVectors'],
-  // Putting two connectomes in one table.
-  ['compare.matchTypes', 'compare.connectivity', 'core.similarity'],
+  // What an Embedding takes.
+  ['core.embed', 'neuron.nblastKnn'],
+  ['core.embed', 'neuron.partnerVectors'],
+  // Two connectomes in one table.
+  ['compare.matchTypes', 'compare.connectivity', 'core.qualifyIds'],
+  ['compare.matchTypes', 'core.relabel'],
 
   // --- geometry -------------------------------------------------------------
-  // The three things a dataset will hand you in space, and taking a collection of them apart.
-  ['neuron.skeletons', 'neuron.meshes', 'neuron.roiMeshes', 'neuron.splitNeurons'],
-  // Columns onto geometry after the fetch, and the two things that read them.
-  [
-    'neuron.attachAttributes',
-    'neuron.skeletons',
-    'neuron.splitNeurons',
-    'neuron.selectNeurons',
-  ],
-  // The three ways to end up with fewer neurons than were fetched: a question asked of the
-  // attributes, a list of ids from somewhere else, and one element at a time. Attach Attributes
-  // is not a fourth — it changes no counts — and is related on the line above instead, since a
-  // group claims every member is worth reading beside every other.
+  // What a dataset hands you in space, and where it is drawn.
+  ['neuron.skeletons', 'neuron.meshes', 'out.viewer3d'],
+  ['neuron.skeletons', 'neuron.cleanSkeletons', 'neuron.skeletonPoints'],
+  // Splitting a neuron, what to split it from, and where the split is drawn.
+  ['neuron.splitCompartments', 'neuron.synapses', 'out.viewer3d'],
+  ['neuron.splitCompartments', 'out.topology'],
+  ['neuron.splitCompartments', 'neuron.cleanSkeletons'],
+  ['neuron.meshes', 'neuron.cleanMeshes'],
+  // How alike two neurons are in shape vs. how far apart they are.
+  ['neuron.distance', 'neuron.nblast'],
+  ['neuron.distance', 'neuron.skeletons', 'neuron.meshes'],
+  // Columns onto geometry, and the two nodes that read them.
+  ['neuron.attachAttributes', 'neuron.splitNeurons', 'neuron.selectNeurons'],
+  // Fewer neurons than were fetched.
   ['neuron.selectNeurons', 'neuron.splitNeurons', 'core.selectOne'],
-  // Both move geometry through a registration; Mirror is Transform with the sides swapped.
-  ['neuron.mirror', 'neuron.xform'],
-  // The two ways to look at neurons in space: Coda's own scene, and the viewer the field uses.
-  ['out.viewer3d', 'out.neuroglancer', 'neuron.skeletons'],
-
-  // Two lines rather than one four-member group, because a group claims every member is worth
-  // reading beside every other and this relation is a star: Upload Table has nothing to do with
-  // ROI Meshes or the 3D View. Bringing your own shells belongs with the node that fetches the
-  // published ones and the viewer that draws them; bringing your own *file* is the other relation.
+  // Combining collections.
+  ['neuron.stack', 'neuron.splitNeurons'],
+  // Moving geometry through a registration.
+  ['neuron.mirror', 'neuron.xform', 'core.landmarkTransform'],
+  // The two 3D viewers: Coda's own, and neuroglancer.
+  ['out.viewer3d', 'out.neuroglancer'],
+  // Region shells: published, or your own.
   ['core.uploadMesh', 'neuron.roiMeshes', 'out.viewer3d'],
   ['core.uploadMesh', 'core.uploadTable'],
 
   // --- regions --------------------------------------------------------------
-  // Counts and completeness are per neuron, connectivity is region to region, and the viewer is
-  // where you find out which regions there are.
   ['neuron.roiCounts', 'neuron.roiCompleteness', 'neuron.roiConnectivity', 'out.rois'],
-  // A neuron's own summary, and the two queries it folds up.
+
+  // --- single neurons -------------------------------------------------------
   ['out.profile', 'neuron.connectivity', 'neuron.roiCounts'],
-  // The per-neuron pagers: what the dataset says about a cell, what its arbour measures, and which
-  // driver lines label it.
   ['out.profile', 'out.topology', 'out.neuronbridge'],
+  // One neuron's arbour: its skeleton, measured, drawn flat, or drawn in 3D.
+  ['out.neuronDendrogram', 'out.topology', 'neuron.skeletons', 'out.viewer3d'],
 
-  // Where the synapses are, and the connectivity you get by counting them somewhere. Three of
-  // the four have no document yet, so this group relates nothing today — which is what the
-  // "may name the node whose document arrives next month" rule is for: the relation is the
-  // thing worth writing down, and it is exactly the one nobody would reconstruct later.
-  [
-    'neuron.synapsesBetween',
-    'neuron.pointsInVolumes',
-    'neuron.synapseEdges',
-    'neuron.connectivity',
-  ],
-
-  // --- looking at it --------------------------------------------------------
-  // A table, a chart of two of its columns, and a picture of the whole of it.
-  ['out.table', 'out.scatter', 'out.heatmap'],
+  // --- charts ---------------------------------------------------------------
+  ['out.barChart', 'out.pie', 'out.histogram', 'out.distribution', 'out.rank'],
+  ['out.histogram', 'out.describe'],
 
   // --- running it several times ---------------------------------------------
-  // The pair: nothing else uses either.
   ['flow.forEach', 'flow.collect'],
 ]
 
 /**
- * The relation, built once: every documented type to the documented types worth reading next.
- *
- * Mirrored as it goes in, so the map is symmetric by construction. Nothing is ordered here —
- * `seeAlsoFor` sorts, because the order a reader wants is by label and this module deliberately
- * has no registry to ask.
+ * The relation, built once: every type named in a group to the other types it shares a group with.
+ * Mirrored as it goes in, so it is symmetric by construction. `seeAlsoFor` does the sorting.
  */
 let relation: ReadonlyMap<string, ReadonlySet<string>> | undefined
 
 function related(): ReadonlyMap<string, ReadonlySet<string>> {
   if (relation) return relation
-  const documented = new Set(helpTypes())
-  const built = new Map<string, Set<string>>([...documented].map((type) => [type, new Set()]))
+  const built = new Map<string, Set<string>>()
   for (const group of SEE_ALSO_GROUPS) {
     for (const a of group) {
-      for (const b of group) {
-        if (a !== b && documented.has(a) && documented.has(b)) built.get(a)?.add(b)
-      }
+      const set = built.get(a) ?? new Set<string>()
+      for (const b of group) if (a !== b) set.add(b)
+      built.set(a, set)
     }
   }
   relation = built

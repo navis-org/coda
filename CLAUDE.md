@@ -32,9 +32,11 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 [docs/invariants.md](docs/invariants.md) has the incident behind each in full.
 **Read it before deciding a rule does not apply to your case.**
 
-1. **`src/core` and `src/data` are headless.** No React, no zustand, no store, no UI
-   imports. Enforced by a lint rule in `eslint.config.js`. The reason is a future
-   non-React consumer, plus DOM-free unit tests.
+1. **The headless areas — `src/core`, `src/data`, `src/nodes`, `src/style` and the rest listed in
+   `eslint.config.js` — import no React, zustand, store or UI**, nor does `nodes/lib` import
+   `src/style`. Enforced per file by lint and, transitively and for every Web Worker, by
+   `src/test/importGraph.test.ts`. The reason is non-React consumers (the MCP server today) plus
+   DOM-free tests.
 
 2. **`inferOutputs` must never throw and must not fetch.** It runs on every graph
    mutation; failures degrade to "unknown type", which silently kills column pickers.
@@ -99,7 +101,9 @@ rule belongs to one area, its record is in that area's doc.
   decision and stays one. **A multi-column picker keeps an unseen list untouched.**
 - **Both peeks start the fetch they cannot answer** (`peekDatasets`, `schemasFor`), once per
   instance, or the first Run of a session behaves differently from the second. **A peek whose
-  fetch needs a credential is gated on having one**, and re-armed by the credential *changing* —
+  fetch needs a credential is gated on having one** (`PeekGate`, `src/data/peekGate.ts`), and
+  re-armed by the credential *changing* — `src/data/peeks.test.ts` sweeps every one, and a new
+  one goes in its list —
   an ungated peek puts an auth failure in the status bar at somebody who has only dragged a node
   onto the canvas. A per-account listing is not reusable across accounts.
   See [docs/backends.md](docs/backends.md).
@@ -131,8 +135,8 @@ rule belongs to one area, its record is in that area's doc.
   itself.** Dropping it, the old behaviour, lost the card and its wires on the next save. It holds
   everything in `params` (the original params as JSON text, its ports read off the file's edges);
   `getNodeDef` answers for it and `allNodeDefs` never lists it; its error comes from *inference*,
-  a `validate` line blocking nothing. **A new writer of graph JSON goes through `serializeGraph` or
-  `fragmentBody`**, which spell it back via `documentNode`. Alongside: a registered definition is
+  a `validate` line blocking nothing. **A new writer of graph JSON goes through `graphText`**
+  (`serializeGraph`, a fragment and a recipe all do), which spells it back via `documentNode`. Alongside: a registered definition is
   **frozen**, and a type id follows `core/nodeType.ts` — `pack:name` for a pack's node.
   See [docs/persistence.md](docs/persistence.md).
 - **A pack switched off hides, never unregisters, and only what reads the offered hooks hides.** A
@@ -196,6 +200,25 @@ rule belongs to one area, its record is in that area's doc.
   of one scope drift into a guard that passes while `pnpm format` still rewrites the tree. One
   documented exception goes the other way: a `<!-- prettier-ignore -->` pinning each
   `<meta name="description">` onto one line, a wrapped tag being one `grep` reports missing.
+- **A table file is a reference, and only a reader may take one.** `tableFile` is its own kind and
+  deliberately not assignable to `table`, or a node taking a table would read a multi-gigabyte file
+  whole. Link Table reads the footer; Read Rows and the Custom Dataset read blocks. **Filter Table
+  is the one exception and reads nothing**: its condition rides on the file and every reader
+  applies it to the rows it fetched (`readFileRows` takes it off the value) — sound only because a
+  row filter is row-local, so nothing else may be deferred this way. **A Delta table is a
+  folder read through its log, never listed** (`files/delta/`): its live files are the blocks, the
+  log's per-file stats are parsed without rounding eighteen-digit ids, the version is pinned until
+  ⟳, and a reader feature it does not know is refused by name. A block index is saved only
+  when every block's range was seen. **hyparquet is patched** (`patches/`, keyed to its version,
+  so an upgrade drops it silently) — without it an optional int64 column decodes a BigInt per
+  row, half of a scan's time; a keyed read is split over workers and both synapse ends are one
+  pass. **A keyed Parquet read bypasses the library where it can** (`pages.ts`) and must refuse
+  (`Unsupported`) anything it does not read exactly — slower, never different. See
+  [docs/nodes-io.md](docs/nodes-io.md).
+- **A long-lived closure keeps its whole creating scope alive.** V8 gives every closure made in one
+  scope the same context, so anything kept past its build — a loader, a tree — is made in a
+  function holding only what it reads. It pinned whole tables once and a build's arrays once; see
+  the distances rule below and [docs/datasets.md](docs/datasets.md).
 
 ### Canvas, cards and layout — [docs/canvas.md](docs/canvas.md)
 
@@ -278,7 +301,8 @@ rule belongs to one area, its record is in that area's doc.
   hint's text** — in the document it would be an undo step, a dirty file, and a share link arriving
   pre-dismissed for the person being shown the workflow. Cost: reworded copy comes back for
   everybody, hence **Show Hints** and **Show Hints Again**. *Writing* one is an edit, live under
-  the lock like a rename. See also [docs/wizard.md](docs/wizard.md).
+  the lock like a rename. A sentence true of the **reader's browser** rather than the workflow is
+  **derived** (`NodeDefinition.readerHints`), never written. See also [docs/wizard.md](docs/wizard.md).
 - **A group frame is not a React Flow node — and a *folded* one is, the same argument reaching the
   opposite answer.** Expanded: `ViewportPortal` at `z-index: -1`, `pointer-events: stroke` on the
   rect alone, `nopan` because panning is d3-zoom's *native* listener; membership is node ids and the
@@ -317,6 +341,13 @@ rule belongs to one area, its record is in that area's doc.
   own input check, which stays `isAssignable`. **Absence means unaudited**, so a port that really
   is `any` says `anyKind: true` and a registry sweep refuses anything saying neither. See also
   [docs/canvas.md](docs/canvas.md).
+- **Advice about one producer's columns lives on that producer's port, never on a general
+  consumer.** Steering the assistant from Connectivity to a Bar Chart by naming `postType` and
+  `weight` in Bar Chart's description put one node's columns on a card every table reaches.
+  `PortDef.feeds` is the declaration — consumer, clause, params — rendered by `feedLines` and
+  checked against the registry. **A port declaring one reading of a request must declare the
+  other**: with only the ranking stated, an explicit count request charted `weight` 5 of 5.
+  See [docs/assistant.md](docs/assistant.md).
 - **Optional input ports normally compose, and an exclusive set does not.** Every automatic wiring
   pass fills each port with a compatible source, which is right for Connectivity's `neurons` and
   `labels` and wrong for three ports that are three ways of writing one input down.
@@ -334,6 +365,10 @@ rule belongs to one area, its record is in that area's doc.
   The empty table carries the **dataset's own** neuron schema, or every column picker downstream
   empties on Run and reads as a broken dataset. The *order* of a deletion and a rename is
   load-bearing: delete the params first and an old file becomes a silent whole-connectome query.
+- **`whenWired` hides a param while its socket is unwired — on the card and in the inspector, never
+  in a node body**, which is handed no wiring (`paramFold.test.tsx` refuses the flag there). Display
+  only, so it stays in the provenance key; `true` means a column picker's own `from`. See
+  [docs/adding-a-node.md](docs/adding-a-node.md).
 - **A dataset-level filter is not a filter row, the row wins, and the filters OR.** The population
   checkboxes on a neuPrint dataset node are **OR-ed** — a second ticked box lets *more* rows
   through. `typed` matches column names **ending** in `type`. `findNeuronsCypher` drops the
@@ -757,7 +792,7 @@ rule belongs to one area, its record is in that area's doc.
   **monotonic**. seaborn's **`annot` takes a frame of its own** and ggplot gets a `fill_` column
   beside the untouched `value`: that is how the numbers stay raw under a transformed fill.
 - **`by value` on the 3D, Scatter and Network viewers is the Heatmap's colour domain, not a copy.**
-  `colorParams({ valueScale })` adds a ramp, both ends, a centre and a log, and `ui/encoding.ts`
+  `colorParams({ valueScale })` adds a ramp, both ends, a centre and a log, and `style/encoding.ts`
   holds them for both. Three rules: an automatic bottom is the **data's minimum** (the Heatmap's is
   zero), so a node on the defaults draws what it always drew; a centred ramp is **symmetric** about
   its centre, so it has no `Min` and no log; and "numeric columns only" is `ColorBy`'s `dtypes` as a
@@ -932,7 +967,8 @@ rule belongs to one area, its record is in that area's doc.
   Three CAVE lookups read a cancel, a 5xx or a `429` as "no level-2 cache", "no service" or "not
   cached" and kept it for the session — so a gallery that cancels as its wall moves drew half its
   cells from the level-2 route, unlabelled, on a datastack whose service held every one. Only a
-  404 is a verdict. The skeleton service's `exists` is rate-limited (100/minute), so a caller
+  404 is a verdict — neuPrint's `ngState` had the same bug (`isNotFound`, and a proxy's 404 is not
+  neuPrint's). The skeleton service's `exists` is rate-limited (100/minute), so a caller
   fetching neuron by neuron names the set first (`DataSource.planSkeletons`). See
   [docs/backends.md](docs/backends.md).
 - **CAVE's row cap is a per-deployment number, and a reference table has no root id.**
@@ -1136,8 +1172,11 @@ rule belongs to one area, its record is in that area's doc.
 - **A dashboard cell is a reference to a node id, and the grid replaces the canvas rather than
   covering it.** `D` swaps `Editor` for `DashboardView` in the same grid area, so React Flow
   unmounts and every card's preview goes with it — the swap trades WebGL contexts rather than
-  adding them. Hence **at most one cell per node, and only nodes that can be drawn**, enforced in
-  `addCells` *and* `validDashboard`, a hand-edited file being the other way each arrives. The dock
+  adding them. Hence **at most one cell per node per tab, and only nodes that can be drawn**, enforced
+  in `addCells` *and* `validDashboard`, a hand-edited file being the other way each arrives. **Tabs
+  are pages of one layout**: only the active one is mounted, a lone untitled tab is written in the
+  **pre-tabs form** so it round trips byte-identically (`storedDashboard`), and the active tab lives
+  **only in the document**, so an undo lands on the tab its edit was made on. The dock
   does not render while the grid is up. **Order is position** — no `x`/`y`, flow is not `dense`, so
   a gap is visible rather than CSS reordering the list somebody just dragged. The **layout is in the
   document**, inverting the dock's rule on purpose: these ids belong to *this* graph — kept
@@ -1168,6 +1207,12 @@ rule belongs to one area, its record is in that area's doc.
 
 ### The scheduler and loops — [docs/core.md](docs/core.md), [docs/loops.md](docs/loops.md)
 
+- **A new run supersedes the walk, never the work.** A top-level evaluation is owned by its
+  provenance key: a newer walk **adopts** it, an edit that moves the key **retires** it at the edit
+  (`retireMoved`), and only Cancel stops everything. `refreshStates` must leave a live evaluation's
+  `running` badge alone — overwriting it is what made a drag look like it had stopped an NBLAST.
+  A cheap pass during a Run finishes the Run's work (`requestedFull`), so it goes through
+  `runFull`. Loops are excluded on purpose.
 - **A `reference` port that resolved to nothing is refused by the scheduler, and the two states it
   tells apart are invisible to the node.** `datasetIdentity` hands `evaluate` the same `undefined`
   for "nothing wired" and "a wire whose dataset node cannot yet say which dataset it is", so a
@@ -1280,7 +1325,7 @@ rule belongs to one area, its record is in that area's doc.
 
 ## Chart colours
 
-Do not pick chart colours by eye. The palette in `src/ui/colors.ts` was validated with the
+Do not pick chart colours by eye. The palette in `src/style/colors.ts` was validated with the
 `dataviz` skill's validator; the header comment records what passed and what didn't. If you
 change the palette, re-run the validator; don't reason about ΔE.
 

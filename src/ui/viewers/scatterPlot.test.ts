@@ -10,10 +10,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ColumnData } from '../../core/values'
+import type { MarksOptions, Viewport } from './scatterPlot'
 import {
-  DEFAULT_MAX_POINTS,
   axisTicks,
   buildHitIndex,
+  buildMarks,
   buildScatter,
   cellNumber,
   equaliseAspect,
@@ -25,7 +26,6 @@ import {
   pointInPolygon,
   rectPolygon,
   rowsInPolygon,
-  sampleRows,
   usableRows,
 } from './scatterPlot'
 
@@ -38,17 +38,28 @@ const FLAT = {
   shapeAt: () => 'circle' as const,
 }
 
-function build(xs: ColumnData, ys: ColumnData, extra: Record<string, unknown> = {}) {
-  return buildScatter({
+/** Marks and one frame of them; `view` and `aspect` go to the frame, the rest to the marks. */
+function build(
+  xs: ColumnData,
+  ys: ColumnData,
+  extra: Partial<MarksOptions> & { view?: Viewport; aspect?: 'fit' | 'equal' } = {},
+) {
+  const { view, aspect, ...rest } = extra
+  const marks = buildMarks({
     xValues: xs,
     yValues: ys,
     length: xs.length,
     xScale: 'linear',
     yScale: 'linear',
-    plot: PLOT,
     style: FLAT,
+    ...rest,
+  })
+  return buildScatter({
+    marks,
+    plot: PLOT,
     trendColor: '#000000',
-    ...extra,
+    ...(view ? { view } : {}),
+    ...(aspect ? { aspect } : {}),
   })
 }
 
@@ -94,26 +105,58 @@ describe('usable rows', () => {
   })
 })
 
-describe('the point budget', () => {
-  it('leaves a set under the cap exactly as it is, same array', () => {
-    const rows = Int32Array.from([0, 1, 2])
-    expect(sampleRows(rows, 10)).toBe(rows)
+describe('culling', () => {
+  it('draws every usable row — there is no sample any more', () => {
+    const xs = Array.from({ length: 100 }, (_, i) => i)
+    const spec = build(xs, xs)
+    expect(spec.marks.rows).toHaveLength(100)
+    expect(spec.px).toHaveLength(100)
   })
 
-  it('strides rather than clipping, and is the same answer every time', () => {
-    const rows = Int32Array.from({ length: 100 }, (_, i) => i)
-    const first = sampleRows(rows, 10)
-    expect(first.length).toBe(10)
-    // A random sample would reshuffle on every re-render, so points would flicker in and out
-    // during a pan and the picture would never be the same twice.
-    expect([...sampleRows(rows, 10)]).toEqual([...first])
-    // Strided across the whole set, not the first ten.
-    expect(first[0]).toBe(0)
-    expect(first[9]).toBe(90)
+  it('counts as visible only the marks that reach the plot, radius included', () => {
+    // A zoom into one cluster has to cost what that cluster costs, and `CIRCLES_MAX` is
+    // counted against this — so a whole-dataset embedding zoomed in hands back real circles.
+    const xs = [0, 1, 2, 10, 20]
+    const view = { x: { min: -0.5, max: 2.5 }, y: { min: -0.5, max: 2.5 } }
+    const spec = build(xs, xs, { view })
+    expect([...spec.visible]).toEqual([0, 1, 2])
+    // A mark whose centre is just outside but whose disc pokes in is still drawn.
+    const edge = build([0, 2.51], [1, 1], { view, style: { ...FLAT, radiusAt: () => 6 } })
+    expect([...edge.visible]).toEqual([0, 1])
   })
 
-  it('defaults to a cap that draws a whole connectome-scale embedding', () => {
-    expect(DEFAULT_MAX_POINTS).toBeGreaterThanOrEqual(50_000)
+  it('indexes only visible marks for the hover', () => {
+    // Off-screen marks used to clamp into the border cells, and a hover along the edge then
+    // walked a zoomed-out remainder of the whole cloud. They cannot be under the pointer.
+    const xs = [0, 1, 50]
+    const view = { x: { min: -1, max: 2 }, y: { min: -1, max: 2 } }
+    const spec = build(xs, xs, { view })
+    const index = buildHitIndex(spec)
+    const edgeX = PLOT.x + PLOT.width - 1
+    expect(index.nearest(edgeX, PLOT.y + 1, 12)).toBe(-1)
+  })
+})
+
+describe('batching', () => {
+  it('buckets by colour and shape in order of first appearance', () => {
+    // The order is the stacking order, and every painter shares it — the circle path and the
+    // pixel pass included, or the cloud restacks as a zoom crosses `CIRCLES_MAX`.
+    const colours = ['#bbbbbb', '#aaaaaa', '#bbbbbb', '#aaaaaa']
+    const shapes = ['circle', 'circle', 'square', 'circle'] as const
+    const spec = build([0, 1, 2, 3], [0, 1, 2, 3], {
+      style: {
+        colorAt: (row: number) => colours[row]!,
+        radiusAt: () => 3,
+        shapeAt: (row: number) => shapes[row]!,
+      },
+    })
+    const { buckets, bucketOf } = spec.marks
+    expect([...bucketOf]).toEqual([0, 1, 2, 1])
+    expect(buckets.map((b) => [b.color, b.shape, b.indices])).toEqual([
+      ['#bbbbbb', 'circle', [0]],
+      ['#aaaaaa', 'circle', [1, 3]],
+      ['#bbbbbb', 'square', [2]],
+    ])
   })
 })
 
@@ -125,8 +168,9 @@ describe('domains', () => {
   })
 
   it('reads the extent in transformed space, so a log axis frames decades', () => {
-    const extent = extentOf([1, 10, 1000], Int32Array.from([0, 1, 2]), 'log')
-    expect(extent).toEqual({ min: 0, max: 3 })
+    const marks = build([1, 10, 1000], [1, 1, 1], { xScale: 'log' }).marks
+    expect(marks.extent?.x).toEqual({ min: 0, max: 3 })
+    expect(extentOf(Float64Array.from([2, -1, 5]))).toEqual({ min: -1, max: 5 })
   })
 
   it('equal aspect widens the tighter axis and never narrows either', () => {
@@ -172,17 +216,6 @@ describe('projection', () => {
     expect(spec.px[1]).toBeLessThan(PLOT.x + PLOT.width)
     // y is flipped: the larger value sits higher, i.e. at a smaller pixel.
     expect(spec.py[1]!).toBeLessThan(spec.py[0]!)
-  })
-
-  it('frames over every usable row, not over the sample', () => {
-    // An axis range that moved when Max points changed would make a drawing cap look like a
-    // filter on the data.
-    const xs = Array.from({ length: 100 }, (_, i) => i)
-    const full = build(xs, xs)
-    const capped = build(xs, xs, { maxPoints: 5 })
-    expect(capped.drawn).toBe(5)
-    expect(capped.usableRows.length).toBe(100)
-    expect(capped.view.x).toEqual(full.view.x)
   })
 })
 
@@ -244,41 +277,20 @@ describe('the lasso', () => {
     expect(pointInPolygon(15, 5, square)).toBe(false)
   })
 
-  it('catches rows the point budget never drew', () => {
-    // The load-bearing half. Above the cap a lasso still means the region it enclosed, so
-    // `Selected` describes the area rather than the sample that survived the stride — the
-    // caption is what stops the difference from being a surprise.
-    const xs = Array.from({ length: 100 }, (_, i) => i)
-    const spec = build(xs, xs, { maxPoints: 10 })
-    expect(spec.drawn).toBe(10)
-
-    const everything = rectPolygon(-1000, -1000, 1000, 1000)
-    const hits = rowsInPolygon({
-      xValues: xs,
-      yValues: xs,
-      rows: spec.usableRows,
-      xScale: 'linear',
-      yScale: 'linear',
-      view: spec.view,
-      plot: spec.plot,
-      polygon: everything,
-    })
+  it('catches every mark inside it, on screen or not, and names their source rows', () => {
+    // Tested at the frame's projection rather than against what was painted, so the answer
+    // cannot depend on whether the marks were traced as paths or written as pixels — and a
+    // zoom does not shrink what a lasso round the whole plane catches.
+    const xs = [null, ...Array.from({ length: 100 }, (_, i) => i)]
+    const spec = build(xs, xs, { view: { x: { min: 0, max: 10 }, y: { min: 0, max: 10 } } })
+    const hits = rowsInPolygon(spec, rectPolygon(-1e6, -1e6, 1e6, 1e6))
     expect(hits).toHaveLength(100)
+    // Source rows, not mark positions: row 0 had no coordinate and is not a mark.
+    expect(hits[0]).toBe(1)
   })
 
   it('answers nothing for a polygon with no area', () => {
-    expect(
-      rowsInPolygon({
-        xValues: [1],
-        yValues: [1],
-        rows: Int32Array.from([0]),
-        xScale: 'linear',
-        yScale: 'linear',
-        view: { x: { min: 0, max: 2 }, y: { min: 0, max: 2 } },
-        plot: PLOT,
-        polygon: [0, 0, 1, 1],
-      }),
-    ).toEqual([])
+    expect(rowsInPolygon(build([1], [1]), [0, 0, 1, 1])).toEqual([])
   })
 })
 

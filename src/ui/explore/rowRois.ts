@@ -25,7 +25,7 @@ import type { TableValue } from '../../core/values'
 import type { RegionRow } from '../../nodes/lib/profileStats'
 import { partitionByMember, regionRows } from '../../nodes/lib/profileStats'
 import { idColumn } from '../../nodes/lib/tableOps'
-import { OTHER_LABEL, foldByRank } from '../colors'
+import { OTHER_LABEL, foldByRank } from '../../style/colors'
 
 /** One segment of a row's bar. */
 export interface RegionShare {
@@ -53,7 +53,7 @@ export interface RegionShare {
  * Small, because the bar is 54 pixels wide: past five the segments are under ten pixels and stop
  * being separable. The tail is folded rather than dropped — a bar whose segments did not sum to
  * the neuron's synapses would be a proportion of nothing in particular. **Fold where the mark
- * folds**, which is `src/ui/colors.ts`' rule for exactly this shape.
+ * folds**, which is `src/style/colors.ts`' rule for exactly this shape.
  */
 export const MAX_REGIONS = 5
 

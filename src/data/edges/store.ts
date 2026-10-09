@@ -39,10 +39,12 @@
  * earns its place at the writing end.
  */
 
-import type { RefusalWords } from '../idb'
-import { attempt, commit, database, readKey } from '../idb'
-import { memoPromise } from '../memoPromise'
-import { hashBytes } from '../../core/hash'
+import type { RefusalWords, StoredUsage } from '../idb'
+import { attempt, commit, database, readKey, usage } from '../idb'
+import { memoPromise, untilAborted } from '../memoPromise'
+import { LruMap, PinnedLru } from '../../core/lruMap'
+import type { DatasetEdges } from '../../core/values'
+import { hashBytes, hashValue } from '../../core/hash'
 import { channel } from '../channel'
 import type { EdgeCsr, EdgeReport, EncodedEdges, IdArray, WeightArray } from './encode'
 import { EDGE_FORMAT, edgeSetBytes } from './encode'
@@ -101,15 +103,37 @@ export interface EdgeSetMeta {
   idChunks: number
 }
 
-/** An edge set in memory, ready to answer. */
+/**
+ * An edge set in memory, ready to answer — from the shelf or from a wire (`provideEdgeSet`).
+ * Carries no catalogue entry: the query layer never reads one, and a wired set has none.
+ */
 export interface LoadedEdgeSet {
-  meta: EdgeSetMeta
   /** Dictionary, in index order. */
   ids: string[]
   /** The inverse, built on load: id text to dictionary index. */
   index: Map<string, number>
   out: EdgeCsr
   in: EdgeCsr
+  /**
+   * Rows a wired list's build dropped — a blank id or a weight that is not a number — which a
+   * question below it has to say, the node having read nothing. Absent on a shelf set, whose
+   * import reported it on the spot.
+   */
+  dropped?: number
+}
+
+/** An encoded set made ready to answer: the dictionary's inverse, built once. */
+export function residentEdgeSet(
+  encoded: Pick<EncodedEdges, 'ids' | 'out' | 'in'>,
+): LoadedEdgeSet {
+  const index = new Map<string, number>()
+  for (let at = 0; at < encoded.ids.length; at++) index.set(encoded.ids[at]!, at)
+  return {
+    ids: encoded.ids,
+    index,
+    out: encoded.out,
+    in: encoded.in,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +147,7 @@ const REFUSAL: RefusalWords = {
   rolledBack: 'The edge set was rolled back',
   failed: 'The edge set could not be saved',
   quota:
-    'No room left in browser storage. Delete an edge set and try again — an edge set is ' +
+    'No room left in browser storage. Delete an edge set and try again; edge sets are ' +
     'far larger than anything else Coda keeps.',
 }
 
@@ -468,14 +492,145 @@ export function releaseEdgeSet(id: string): void {
   loaded.delete(id)
 }
 
+// ---------------------------------------------------------------------------
+// Wired sets — built in this tab from a node's input, never stored
+// ---------------------------------------------------------------------------
+
+/**
+ * A wired set's id prefix. A shelf id is a bare content hash, so the two can never collide, and
+ * the refusal for a missing set can say which remedy applies.
+ */
+const WIRED_PREFIX = 'wired-'
+
+/** Builds an encoded set, when a question first needs it. */
+export type EdgeSetLoader = (signal?: AbortSignal) => Promise<EncodedEdges>
+
+/**
+ * How many wired sets are remembered, and how many are held built.
+ *
+ * Two bounds because the two things cost differently. A loader is a closure over its input — a
+ * table the scheduler already caches, or a file handle — so remembering sixteen is cheap and is
+ * what keeps a dataset value a downstream node still holds answerable. A **built** set is the
+ * hundred megabytes, so only two stay resident: switching back to an older edge list re-reads it
+ * rather than holding every version somebody tried. `makeRoom` runs once a build's arrays exist and
+ * before they are indexed, so a failed build displaces nothing.
+ */
+const MAX_WIRED = 16
+const MAX_WIRED_RESIDENT = 2
+
+const wired = new PinnedLru<EdgeSetLoader>(MAX_WIRED)
+const wiredResident = new LruMap<string, LoadedEdgeSet>(MAX_WIRED_RESIDENT)
+
+/**
+ * Register how to build a wired set, and return the id it goes by — minted here from whatever
+ * identifies its content, so the prefix that routes a load to this tier is written in one place.
+ * Nothing is read until a question asks: the node that wires one stays `cheap`, and the first
+ * Connectivity, Adjacency or Paths run pays for the read.
+ */
+export function provideEdgeSet(content: unknown, load: EdgeSetLoader): string {
+  const id = `${WIRED_PREFIX}${hashValue(content)}`
+  wired.set(id, load)
+  return id
+}
+
+/** Keep a wired set's loader for as long as `owner` — the dataset value naming it — lives. */
+export function pinEdgeSet(owner: object, id: string): void {
+  wired.pin(owner, id)
+}
+
+function isWiredEdgeSet(id: string): boolean {
+  return id.startsWith(WIRED_PREFIX)
+}
+
+/**
+ * A wired set being built, and who is waiting for it.
+ *
+ * **Shared, so asked with nobody's signal** — the rule every shared request here keeps (see
+ * `untilAborted`): the first caller's Cancel must not become every caller's. What a
+ * whole-file read adds is that it is seconds of work in a worker, so it is not simply left to run
+ * either: each caller's Cancel stops *its* wait, and the read is aborted only when nobody is left
+ * waiting. A caller with no signal can never cancel, so it keeps the build alive to the end.
+ */
+interface WiredBuild {
+  readonly promise: Promise<LoadedEdgeSet>
+  readonly controller: AbortController
+  waiting: number
+}
+
+const building = new Map<string, WiredBuild>()
+
+function loadWired(id: string, signal?: AbortSignal): Promise<LoadedEdgeSet | undefined> {
+  const held = wiredResident.get(id)
+  if (held) {
+    // A question is a use: re-set, so the set in use is the last evicted (`LruMap` counts writes).
+    wiredResident.set(id, held)
+    return Promise.resolve(held)
+  }
+  const load = wired.get(id)
+  if (!load) return Promise.resolve(undefined)
+  // Cancelled already: no build is started for a question nobody is waiting on.
+  if (signal?.aborted) return Promise.reject(signal.reason)
+  let build = building.get(id)
+  // A build everybody walked away from is still settling; a new question is not its answer.
+  if (!build || build.controller.signal.aborted) build = startBuild(id, load)
+  return waitFor(build, signal)
+}
+
+function startBuild(id: string, load: EdgeSetLoader): WiredBuild {
+  const controller = new AbortController()
+  const promise = (async () => {
+    const encoded = await load(controller.signal)
+    // Room is made once the set exists: a cancelled or failed build evicts nothing. The price is
+    // that the build runs beside both resident sets — a slot of headroom, spent only while full.
+    wiredResident.makeRoom()
+    const { droppedId, droppedWeight } = encoded.report
+    const set: LoadedEdgeSet = {
+      ...residentEdgeSet(encoded),
+      dropped: droppedId + droppedWeight,
+    }
+    wiredResident.set(id, set)
+    return set
+  })()
+  const build: WiredBuild = { promise, controller, waiting: 0 }
+  building.set(id, build)
+  // Settled either way, it is no longer in flight: a failed read is not kept, and the next
+  // question starts it again.
+  const settled = () => {
+    if (building.get(id) === build) building.delete(id)
+  }
+  promise.then(settled, settled)
+  return build
+}
+
+function waitFor(build: WiredBuild, signal: AbortSignal | undefined): Promise<LoadedEdgeSet> {
+  build.waiting++
+  const leave = () => {
+    if (--build.waiting === 0) build.controller.abort()
+  }
+  if (signal) {
+    signal.addEventListener('abort', leave, { once: true })
+    // A Cancel after the build settled leaves nothing to abort.
+    const off = () => signal.removeEventListener('abort', leave)
+    build.promise.then(off, off)
+  }
+  return untilAborted(build.promise, signal)
+}
+
 /**
  * Load a set, or resolve `undefined` when this browser does not have it.
  *
  * `undefined` is the case a caller must act on and must **not** paper over: a graph naming an
  * edge set that is not here has to refuse, because the alternative is querying the backend and
  * answering a different question under a green node.
+ *
+ * `signal` is this caller's alone: it stops this wait, and a wired set's read only once no caller
+ * is left waiting (`WiredBuild`). A shelf read is IndexedDB and runs to the end.
  */
-export function loadEdgeSet(id: string): Promise<LoadedEdgeSet | undefined> {
+export function loadEdgeSet(
+  id: string,
+  signal?: AbortSignal,
+): Promise<LoadedEdgeSet | undefined> {
+  if (isWiredEdgeSet(id)) return loadWired(id, signal)
   const held = loaded.get(id)
   if (held) return Promise.resolve(held)
   return memoPromise(
@@ -526,10 +681,8 @@ export function loadEdgeSet(id: string): Promise<LoadedEdgeSet | undefined> {
         columns[name] = array
       }
 
-      const set: LoadedEdgeSet = {
-        meta,
+      const set = residentEdgeSet({
         ids,
-        index: new Map(ids.map((text, at) => [text, at])),
         out: {
           offsets: columns['out.offsets'] as Uint32Array,
           targets: columns['out.targets'] as IdArray,
@@ -540,12 +693,58 @@ export function loadEdgeSet(id: string): Promise<LoadedEdgeSet | undefined> {
           targets: columns['in.targets'] as IdArray,
           weights: columns['in.weights'] as WeightArray,
         },
-      }
+      })
       loaded.set(id, set)
       return set
     },
     { keep: 'inflight' },
   )
+}
+
+/**
+ * A dataset's edge set, or a refusal naming it — what every reader of a dataset's `edges` calls.
+ *
+ * Total rather than partial: given an identity it either answers or throws, so a caller has one
+ * branch — is anything attached — rather than two that lead to the same place. The refusal is
+ * the store's because only the store knows which tier the id names, and the two differ in their
+ * remedy: a shelf set is re-imported, a wired one is rebuilt by running the node it is wired into
+ * — its loader outlived by a dataset value somebody still holds.
+ */
+export async function requireEdgeSet(
+  edges: DatasetEdges,
+  signal?: AbortSignal,
+  onWarn?: (message: string) => void,
+): Promise<LoadedEdgeSet> {
+  const set = await loadEdgeSet(edges.id, signal)
+  if (set?.dropped) {
+    // A tolerated partial answer is counted, or a connection with a blank weight simply is not
+    // there, under a green card.
+    onWarn?.(
+      `${set.dropped.toLocaleString()} rows of the edge list (${edges.name}) have a blank id or ` +
+        `a weight that is not a number, and were left out.`,
+    )
+  }
+  if (set) return set
+  if (isWiredEdgeSet(edges.id)) {
+    throw new Error(
+      `This dataset's edge list (${edges.name}) is no longer held in this tab. Select the ` +
+        `dataset node it is wired into, press Invalidate in the inspector, and run again.`,
+    )
+  }
+  throw new Error(
+    `This dataset's connectivity comes from the edge set "${edges.name}", which is ` +
+      `not in this browser. Import the same file under \`Edge data\` on the dataset node; ` +
+      `a set is identified by its contents, so the same file will match.`,
+  )
+}
+
+/** What the shelf holds, for the Storage tab: one entry per edge set. */
+export function edgeSetsUsage(): Promise<StoredUsage | undefined> {
+  // Each catalogue entry carries its encoded size, so the chunks themselves are not read.
+  return usage(db, SET_STORE, {
+    skip: [PART_STORE],
+    bytes: (record) => (record as EdgeSetMeta).bytes,
+  })
 }
 
 /** Test seam: forget the opened database, the catalogue and everything resident. */
@@ -555,5 +754,8 @@ export function resetEdgeSets(): void {
   listings.clear()
   loaded.clear()
   loading.clear()
+  wired.clear()
+  wiredResident.clear()
+  building.clear()
   revision = 0
 }

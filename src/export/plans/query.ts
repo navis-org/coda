@@ -113,7 +113,7 @@ export function inputIdsPlan(
     dataset: connection
       ? { connection }
       : {
-          note: 'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
+          note: 'No Dataset is wired, so this is just the ids, the same as the node outputs.',
         },
   }
 }

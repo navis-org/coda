@@ -10,8 +10,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { makeMatrix } from '../../core/values'
-import { heatmapPaletteStops, sequentialColor } from '../colors'
-import { RAMP_STEPS, bucketOf, normalize, rampColors } from '../encoding'
+import { heatmapPaletteStops, sequentialColor } from '../../style/colors'
+import { RAMP_STEPS, bucketOf, normalize, rampColors } from '../../style/encoding'
 import {
   DIVERGING_PALETTE_OPTIONS,
   SEQUENTIAL_PALETTE_OPTIONS,

@@ -178,6 +178,12 @@ interface Branch {
 const ARBOR_PULL = 0.4
 
 /**
+ * Nodes on the primary neurite after the soma. Named because `arboursOf` reads the same number:
+ * the distal arbour is everything grown from the last of them.
+ */
+const PRIMARY_SEGMENTS = 12
+
+/**
  * Grow one neuron.
  *
  * Structure: soma at the first ROI centre, a primary neurite toward the second (or a jitter
@@ -220,7 +226,7 @@ export function generateSkeleton(
   const root = push(soma[0], soma[1], soma[2], somaRadius, -1)
 
   // Primary neurite: a slightly wandering cable from soma toward the arbor territory.
-  const segments = 12
+  const segments = PRIMARY_SEGMENTS
   let current = root
   for (let i = 1; i <= segments; i++) {
     const t = i / segments
@@ -412,24 +418,91 @@ function cross(
 // ---------------------------------------------------------------------------
 
 /**
+ * The share of a neuron's synapses placed on the arbour their polarity belongs to; the rest land on
+ * the other one. Below 1 on purpose: a real neuron receives some input on its axon and makes some
+ * output from its dendrite, so a split of the demo data comes out polarised rather than perfect,
+ * and every kind of connection (axo-axonic, dendro-dendritic, …) occurs somewhere in it.
+ */
+const OWN_ARBOUR_SHARE = 0.9
+
+/** A generated skeleton's two arbours, as node lists. */
+interface Arbours {
+  /** Grown from the end of the primary neurite — the axon-like one, carrying the outputs. */
+  readonly distal: readonly number[]
+  /** Grown from the primary neurite near the soma — the dendrite-like one, taking the inputs. */
+  readonly proximal: readonly number[]
+}
+
+const arbourMemo = new WeakMap<SkeletonGeometry, Arbours>()
+
+/**
+ * Which arbour each node of a `generateSkeleton` neuron is on, read back from the tree.
+ *
+ * Derived rather than recorded during growth because the geometry is the only thing that crosses
+ * from the generator to the source — the skeleton is regenerated wherever synapses are placed —
+ * and adding a field to `SkeletonGeometry` for the mock's sake would put it on every neuron. One
+ * forward pass suffices: the generator always pushes a parent before its children.
+ */
+function arboursOf(skeleton: SkeletonGeometry): Arbours {
+  const hit = arbourMemo.get(skeleton)
+  if (hit) return hit
+  const { parents } = skeleton
+  const onDistal = new Uint8Array(parents.length)
+  const distal: number[] = []
+  const proximal: number[] = []
+  for (let i = PRIMARY_SEGMENTS + 1; i < parents.length; i++) {
+    const parent = parents[i]!
+    if (parent === PRIMARY_SEGMENTS || (parent > PRIMARY_SEGMENTS && onDistal[parent])) {
+      onDistal[i] = 1
+      distal.push(i)
+    } else {
+      proximal.push(i)
+    }
+  }
+  const arbours = { distal, proximal }
+  arbourMemo.set(skeleton, arbours)
+  return arbours
+}
+
+/**
  * Place a synapse on a skeleton, deterministically for a given (id, index) pair so the
  * same connection always lands in the same place.
+ *
+ * With a `polarity`, the site is **segregated**: outputs mostly on the distal arbour and inputs
+ * mostly on the proximal one (`OWN_ARBOUR_SHARE`), which is the shape an axon/dendrite split looks
+ * for. Without it, anywhere on the arbour past the first fifth of the nodes, as before — which
+ * spread pre and post evenly over both arbours and gave the split nothing to find.
  */
 export function synapsePosition(
   skeleton: SkeletonGeometry,
   index: number,
+  polarity?: 'pre' | 'post',
 ): [number, number, number] {
   const count = skeleton.parents.length
   if (count === 0) return [0, 0, 0]
   // The mock mints its own ids as small integers, so this is exact — it is the same edge
   // `numericIds` converts at, for the same reason.
   const rand = mulberry32(((numericId(skeleton.id) ?? 0) ^ (index * 2654435761)) >>> 0)
+  const at = polarity ? segregatedNode(skeleton, polarity, rand) : undefined
   // Bias away from the soma: synapses sit on the arbor, not on the cell body.
-  const at = Math.min(count - 1, Math.floor(count * (0.2 + rand() * 0.8)))
+  const node = at ?? Math.min(count - 1, Math.floor(count * (0.2 + rand() * 0.8)))
   const jitter = () => (rand() - 0.5) * 90
   return [
-    skeleton.positions[at * 3]! + jitter(),
-    skeleton.positions[at * 3 + 1]! + jitter(),
-    skeleton.positions[at * 3 + 2]! + jitter(),
+    skeleton.positions[node * 3]! + jitter(),
+    skeleton.positions[node * 3 + 1]! + jitter(),
+    skeleton.positions[node * 3 + 2]! + jitter(),
   ]
+}
+
+/** A node on the arbour `polarity` belongs to, most of the time; undefined if either is empty. */
+function segregatedNode(
+  skeleton: SkeletonGeometry,
+  polarity: 'pre' | 'post',
+  rand: () => number,
+): number | undefined {
+  const { distal, proximal } = arboursOf(skeleton)
+  if (distal.length === 0 || proximal.length === 0) return undefined
+  const [own, other] = polarity === 'pre' ? [distal, proximal] : [proximal, distal]
+  const pool = rand() < OWN_ARBOUR_SHARE ? own : other
+  return pool[Math.floor(rand() * pool.length)]!
 }

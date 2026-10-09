@@ -166,9 +166,9 @@ export function checkSkipSelf(matrix: MatrixValue, skipSelf: boolean): void {
   if (!skipSelf) return
   if (matrix.rowLabels.length === matrix.colLabels.length) return
   throw new Error(
-    `"Skip self-matches" means the diagonal, and a ${matrix.rowLabels.length} × ` +
+    `\`Skip self-matches\` skips the diagonal, and a ${matrix.rowLabels.length} × ` +
       `${matrix.colLabels.length} matrix has none. Turn it off, or wire in an ` +
-      `all-by-all.`,
+      `all-by-all matrix.`,
   )
 }
 
@@ -353,9 +353,9 @@ export function checkMatchSize(ctx: Warner, matrix: MatrixValue, params: MatchPa
   refuseIfOverCrashFloor(`${groups.toLocaleString()} × ${n} matches`, groups * n * 4 * 8)
   if (n < params.n) {
     ctx.warn(
-      `Asked for the top ${params.n}, but this matrix offers ` +
+      `\`Matches per neuron\` is ${params.n}, but this matrix offers only ` +
         `${candidates.toLocaleString()} per group` +
-        `${params.skipSelf ? ' before the self-match is skipped' : ''}; returned ${n}.`,
+        `${params.skipSelf ? ' before the self-match is skipped' : ''}, so ${n} were returned.`,
     )
   }
 }
@@ -364,6 +364,9 @@ export function checkMatchSize(ctx: Warner, matrix: MatrixValue, params: MatchPa
 export function matchIssues(params: MatchParams): string[] {
   const banded = params.mode !== 'top' && params.cutoff === 'percentage'
   return banded && (params.percentage < 0 || params.percentage > 1)
-    ? ['Percentage is a fraction in 0–1, not a percent — 0.05 keeps within 5% of each best']
+    ? [
+        '`Within (fraction)` must be between 0 and 1. For example, 0.05 keeps matches within 5% ' +
+          'of each best score.',
+      ]
     : []
 }

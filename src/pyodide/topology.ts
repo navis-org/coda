@@ -12,20 +12,7 @@
 
 import { callPython } from './engine'
 import type { CallOptions } from './engine'
-import { int32From } from './types'
-
-/**
- * What a node was labelled, mirroring `topology.py`'s own constants.
- *
- * Two languages, so this is a second spelling of the same numbers and there is no way to share
- * them — which is exactly the arrangement `markGeometry.ts` refused, and the reason `topology.py`
- * names them rather than inlining. `topology.test.ts` asserts the two agree by reading the Python
- * source, so a renumbering on either side fails a test rather than mislabelling every axon.
- */
-export const COMPARTMENT_UNASSIGNED = 0
-export const COMPARTMENT_DENDRITE = 1
-export const COMPARTMENT_AXON = 2
-export const COMPARTMENT_LINKER = 3
+import { float32From, int32From } from './types'
 
 /** Why a neuron has no split, per neuron. `0` is a split that worked. */
 export const SPLIT_OK = 0
@@ -81,13 +68,20 @@ export type SplitCompartmentsRequest = {
    * is the one step that needs to know where a node *is* — and sent empty otherwise.
    */
   points: Float32Array
+  /**
+   * Send back the synapse flow per node — the number the linker threshold is applied to. Off for
+   * every caller that only wants the labels: a float per node is the largest thing this returns.
+   */
+  flow?: boolean
 }
 
 export interface SplitCompartmentsResult {
-  /** One `CompartmentCode` per node, in the order they were sent. */
+  /** One `CODE_*` per node, in the order they were sent. */
   compartment: Int32Array
   /** One `SPLIT_*` code per neuron. */
   status: Int32Array
+  /** Per node, navis's flow as the split used it; only when the request asked for it. */
+  flow?: Float32Array
 }
 
 /** Split a whole set of skeletons into axon, dendrite and linker in one call. */
@@ -129,5 +123,12 @@ export async function runSplitCompartments(
     )
   }
 
-  return { compartment, status }
+  const flow = request.flow ? float32From(result, 'flow') : undefined
+  if (flow && flow.length !== nodeCount) {
+    throw new Error(
+      `Compartment split returned ${flow.length} flow values for ${nodeCount} nodes`,
+    )
+  }
+
+  return { compartment, status, ...(flow ? { flow } : {}) }
 }

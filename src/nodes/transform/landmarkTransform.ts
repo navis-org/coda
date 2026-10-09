@@ -96,10 +96,10 @@ registerNode({
   category: 'transform',
   description: 'Build a spatial transform from a table of matched landmark coordinates.',
   guide:
-    'Turns a six-column table — three coordinates before, three after — into a transform that ' +
-    'Transform Neurons and Mirror Neurons can use in place of the registrations Coda ships. ' +
-    'Pair it with Upload Table or Table from URL to bring in your own registration, or one ' +
-    'from navis-flybrains that this build predates.',
+    'Turns a six-column table of landmarks (three coordinates before, three after) into a ' +
+    'transform that Transform Neurons and Mirror Neurons can use instead of a built-in ' +
+    'registration. Load the table with Upload Table or Table from URL, e.g. to use your own ' +
+    'registration or a navis-flybrains one this build does not include.',
   // Reading six columns out of a table already in hand. The fitting happens where the transform
   // is *used*, which is what keeps this off the expensive path.
   cost: 'cheap',
@@ -130,7 +130,7 @@ registerNode({
       default: 'nm',
       options: UNIT_OPTIONS,
       advanced: true,
-      help: 'What the first three columns are in. Everything in Coda is nanometres, so anything else is converted on the way in.',
+      help: 'Units of the `From` columns. Converted to nanometres on the way in.',
     },
     {
       id: 'targetUnits',
@@ -139,7 +139,7 @@ registerNode({
       default: 'nm',
       options: UNIT_OPTIONS,
       advanced: true,
-      help: 'What the last three columns are in. Often different from the first three — a template published in micrometres registered against a volume in nanometres.',
+      help: 'Units of the `To` columns. Often differs from `From units`, e.g. a template in micrometres registered to a volume in nanometres.',
     },
     {
       id: 'targetSpace',
@@ -151,7 +151,7 @@ registerNode({
         { value: COMMON_SPACE.id, label: COMMON_SPACE.label },
         ...allSpaces().map((space) => ({ value: space.id, label: space.label })),
       ],
-      help: 'Which template space the second three columns are in, if it is one Coda knows. Geometry transformed through this is stamped with it, which lets a later Mirror or NBLAST check that two sets are comparable.',
+      help: 'The template space the `To` columns are in, if Coda knows it. Lets a later Mirror or NBLAST check that two sets are comparable.',
     },
   ],
 
@@ -169,7 +169,9 @@ registerNode({
       LANDMARK_AXES.map((axis) => ctx.column(landmarkParamId(side, axis))),
     )
     if (chosen.some((name) => !name)) {
-      return ['Pick all six coordinate columns — three before the transform, three after.']
+      return [
+        'Pick all six coordinate columns: `From x`, `From y` and `From z` for where each landmark starts, `To x`, `To y` and `To z` for where it lands.',
+      ]
     }
 
     /*
@@ -183,8 +185,8 @@ registerNode({
      */
     if (new Set(chosen).size !== chosen.length) {
       return [
-        'All six columns must be different: a repeat collapses an axis, and six ' +
-          'identical ones mean the pickers are unset.',
+        'The six coordinate columns must all be different. Using a column twice collapses an ' +
+          'axis, and if all six are the same, the pickers have not been set yet.',
       ]
     }
     return []

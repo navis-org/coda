@@ -46,17 +46,13 @@ registerNode({
   type: 'dataset.ngsource',
   label: 'Neuroglancer Source',
   category: 'dataset',
-  description: 'Read meshes, skeletons or region shells from a neuroglancer precomputed URL.',
+  description:
+    'Reads meshes, skeletons or region shells from a neuroglancer precomputed URL, and makes it a layer for the Neuroglancer node.',
   guide:
-    'A single neuroglancer source — the string in a layer’s Source box — with two uses. Its ' +
-    'Datasource output is something the Meshes, Skeletons and ROI Meshes nodes can fetch from, so ' +
-    'a bucket no connectome server knows about is still usable. A source that publishes segment ' +
-    'properties can also be browsed and queried by name; one that does not takes its ids from an ' +
-    'Input IDs node, or for ROI Meshes typed into its Regions field. Its ' +
-    'Layers output plugs into the Neuroglancer node’s Extra layers socket, which is how a brain ' +
-    'shell, a second segmentation or somebody’s own annotations get into that scene — chain ' +
-    'these nodes to add more than one. Paste any of the three spellings and the card says what ' +
-    'it found at the other end.',
+    'Reads one neuroglancer source (the URL in a layer’s Source box). The Datasource output feeds ' +
+    'Meshes, Skeletons and ROI Meshes; without segment properties, take the ids from Input IDs. ' +
+    'The Layers output goes into the Neuroglancer node’s Extra layers socket; chain several ' +
+    'of these nodes to add more than one layer.',
   cost: 'cheap',
   /*
    * The pairing `NodeDefinition.dataCache` documents: the Clear Cache button appears *and*
@@ -87,7 +83,7 @@ registerNode({
       label: 'Source',
       default: '',
       placeholder: EXAMPLE,
-      help: 'A neuroglancer source URL. "gs://bucket/path", "precomputed://gs://bucket/path" and "gs://bucket/path|neuroglancer-precomputed:" all name the same directory. Point it at a segmentation or at the mesh directory itself. Options after a # (such as #type=mesh) are passed on to neuroglancer and ignored by Coda.',
+      help: 'A neuroglancer source URL, e.g. "gs://bucket/path" or "precomputed://gs://bucket/path", pointing at a segmentation or a mesh directory. Options after a # (such as #type=mesh) are passed on to neuroglancer.',
     },
     /*
      * Everything below is for the Layers output only, and all of it is `advanced` — the card's
@@ -103,7 +99,7 @@ registerNode({
       default: '',
       advanced: true,
       placeholder: '(from the URL)',
-      help: 'What the layer is called in neuroglancer. Empty names it after the last path segment. A name already in the scene is suffixed rather than replacing it.',
+      help: 'The layer’s name in neuroglancer. Empty uses the last path segment; a name already in the scene gets a suffix.',
     },
     {
       id: 'layerType',
@@ -117,7 +113,7 @@ registerNode({
         { value: 'image', label: 'Image' },
         { value: 'annotation', label: 'Annotation' },
       ],
-      help: '"Automatic" reads it off the source: an image volume becomes an image layer, meshes and skeletons a segmentation. Override it where the source’s "info" says something unfamiliar.',
+      help: '"Automatic" reads the type from the source. Override it if the source is not recognised correctly.',
     },
     {
       id: 'segments',
@@ -126,7 +122,7 @@ registerNode({
       default: '',
       advanced: true,
       placeholder: '720575940628857210, 720575940624... ',
-      help: 'Segment ids to show in this layer, comma- or whitespace-separated. Empty shows the layer with nothing selected, which is the right thing for a brain shell or an EM volume.',
+      help: 'Segment ids to show, separated by commas or spaces. Leave empty for a brain shell or an EM volume.',
     },
     {
       id: 'settings',
@@ -136,7 +132,7 @@ registerNode({
       multiline: true,
       advanced: true,
       placeholder: '{ "objectAlpha": 0.3, "segmentDefaultColor": "#88aacc" }',
-      help: 'JSON merged over the generated layer, so anything neuroglancer accepts is reachable — opacity, colours, a shader. Your keys win over the generated ones.',
+      help: 'JSON merged over the generated layer, e.g. opacity, colours or a shader. Your keys win over the generated ones.',
     },
   ],
 
@@ -187,15 +183,15 @@ registerNode({
        */
       return [
         ref.scheme === 'graphene'
-          ? 'That is a graphene:// segmentation — a CAVE datastack. Use a CAVE dataset node; ' +
-            'this node reads precomputed sources.'
-          : `Coda reads precomputed sources; this one is ${ref.scheme}.`,
+          ? 'That is a graphene:// segmentation, which is a CAVE datastack. Use a CAVE dataset ' +
+            'node instead; this node reads precomputed sources.'
+          : `This node reads precomputed sources only, and this one is ${ref.scheme}.`,
       ]
     }
     if (!ref.url) {
       return [
-        `${ref.location} is not a location Coda can fetch from. Object stores (gs://, s3://) ` +
-          `and plain https:// directories work.`,
+        `${ref.location} is not a location Coda can fetch from. Use an object store (gs://, ` +
+          `s3://) or a plain https:// directory.`,
       ]
     }
 
@@ -215,8 +211,8 @@ registerNode({
        * **layer**, which is the other thing this node emits.
        */
       return [
-        `${ref.location} is ${probe.source.summary}: no geometry for a Meshes node, ` +
-          `though it still works as a Neuroglancer layer.`,
+        `${ref.location} is ${probe.source.summary}, so it has no geometry for a Meshes node. ` +
+          `It still works as a Neuroglancer layer.`,
       ]
     }
     return []
@@ -313,10 +309,10 @@ function readSettings(raw: unknown): Record<string, unknown> | string {
   try {
     parsed = JSON.parse(text)
   } catch (error) {
-    return `Layer settings is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+    return `\`Layer settings\` is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return 'Layer settings must be a JSON object, e.g. { "objectAlpha": 0.3 }'
+    return '`Layer settings` must be a JSON object, e.g. { "objectAlpha": 0.3 }'
   }
   return parsed as Record<string, unknown>
 }

@@ -165,12 +165,12 @@ export function unselectableKindReason(kind: CodaType['kind'] | undefined): stri
   }
   if (kind === 'points') {
     return (
-      'Select Neurons takes skeletons or meshes. A synapse cloud carries no id of its own — a ' +
-      'row is a connector with a neuron at each end — so there is no one column to match on. ' +
-      'Filter the neuron table above the node that fetched the synapses.'
+      'Select Neurons takes skeletons or meshes. A synapse cloud carries no id of its own (each ' +
+      'row is a connection with a neuron at each end), so there is no single column to match ' +
+      'on. Filter the neuron table above the node that fetched the synapses instead.'
     )
   }
-  return `Select Neurons takes skeletons or meshes, not ${kind ?? 'this'}.`
+  return `Select Neurons takes skeletons or meshes${kind ? `, and this input is ${kind}` : ''}.`
 }
 
 /**
@@ -195,7 +195,7 @@ export function nothingSelectedReason(column: string, wanted: readonly string[])
   const sample = wanted.length > 0 ? ` It holds ${namedFew(wanted)}.` : ' It holds no ids.'
   return (
     `None of the ids in "${column}" name a neuron in this collection, so the result is ` +
-    `empty.${sample} Check that the picker names the table's neuron id column.`
+    `empty.${sample} Check that \`ID column\` is set to the table's neuron id column.`
   )
 }
 

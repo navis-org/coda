@@ -308,6 +308,18 @@ describe('portPreview', () => {
         count: 1,
       },
       { kind: 'layers', items: [{ type: 'segmentation' }] },
+      {
+        kind: 'tableFile',
+        ref: { kind: 'url', url: 'https://example.org/synapses.parquet' },
+        format: 'parquet',
+        schema: NEURONS.schema,
+        columns: [{ name: 'neuronId', dtype: 'str' }],
+        indexColumns: [],
+        rows: 12,
+        blocks: 3,
+        bytes: 4405,
+        fingerprint: 'f',
+      },
     ]
     /*
      * The kinds whose headline is the whole answer, listed rather than derived — a kind that

@@ -27,9 +27,12 @@ registerNode({
   type: 'core.dedupe',
   label: 'Deduplicate',
   category: 'transform',
-  description: 'Drop repeated rows, comparing on the chosen columns.',
+  description:
+    'Drop repeated rows, comparing on the chosen columns, or on whole rows if none are chosen.',
   guide:
-    'Drop rows that repeat. Name the columns to compare on, or leave empty to compare whole rows for exact duplicates. Keep decides which row survives: first, last, or none at all—only rows nobody disagrees about. Keeps whole rows unchanged; unlike Group By, nothing is aggregated.',
+    'Drops rows that repeat, comparing on the columns you pick (or on whole rows if you pick ' +
+    'none). Keep decides whether the first or last row of each repeated set survives, or none of ' +
+    'them. Typically used to get one row per neuron out of an annotation table.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Table', type: T.table() }],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
@@ -46,7 +49,7 @@ registerNode({
       id: 'keep',
       kind: 'enum',
       label: 'Keep',
-      help: 'Which row of a repeated set survives. "none" drops every row of it, leaving only rows that were already unique.',
+      help: 'Which row of each duplicate set to keep. "none (drop them all)" keeps only rows that were already unique.',
       default: 'first',
       options: KEEP_OPTIONS,
     },

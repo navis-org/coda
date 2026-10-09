@@ -36,12 +36,20 @@ import {
   updateNode,
 } from '../core/graph'
 import {
+  activeTab,
   addCells,
+  addTab,
+  duplicateTab,
   moveCell,
+  moveTab,
   removeCells,
+  removeTab,
+  renameTab,
+  setActiveTab,
   setViewOpen,
   setColumns as setDashboardTracks,
   setSpan as setCellSpan,
+  setRail as setCellRail,
 } from '../core/dashboard'
 import {
   createGroup,
@@ -874,13 +882,36 @@ export interface GraphState {
    * as a dashboard is the want this replaces, so a locked canvas is exactly when somebody is
    * assembling one.
    */
-  addToDashboard(nodeIds: string[]): void
-  removeFromDashboard(nodeIds: string[]): void
-  /** Reorder: put this cell at `toIndex`, counted after it has been lifted out. */
+  addToDashboard(nodeIds: string[], tabId?: string): void
+  removeFromDashboard(nodeIds: string[], tabId?: string): void
+  /** Reorder: put this cell at `toIndex`, counted after it has been lifted out. Active tab. */
   moveDashboardCell(nodeId: string, toIndex: number): void
-  /** Resize one cell. Spans are clamped to the grid, never refused — see `clampSpan`. */
+  /** Resize one cell on the active tab. Spans are clamped, never refused — see `clampSpan`. */
   setDashboardSpan(nodeId: string, span: { w?: number; h?: number }): void
+  /**
+   * Open or close a cell's control rail on the active tab. Held in the document, so it survives
+   * leaving the grid; **not an undo step**, for `setDashboardTab`'s reason — undo would otherwise
+   * spend its steps opening and closing panels between the edits somebody wants back.
+   */
+  setDashboardRail(nodeId: string, open: boolean): void
   setDashboardColumns(columns: number): void
+  /**
+   * Put a tab on screen. Not an undo step, for `setDashboardOpen`'s reason, and held only in the
+   * document (`DashboardLayout.active`) — no live copy here, so an undo lands on the tab where
+   * the undone edit was made.
+   */
+  setDashboardTab(tabId: string): void
+  /**
+   * Append a tab and put it on screen, optionally with these nodes already on it — the canvas's
+   * "New tab" row, which is one decision and so one undo step.
+   */
+  addDashboardTab(nodeIds?: string[]): void
+  /** Name a tab; blank removes the name. Coalesced per tab, so typing a name is one undo step. */
+  renameDashboardTab(tabId: string, title: string): void
+  /** Take a tab off — its cells, never its nodes. The only tab cannot be removed. */
+  removeDashboardTab(tabId: string): void
+  moveDashboardTab(tabId: string, toIndex: number): void
+  duplicateDashboardTab(tabId: string): void
   /**
    * Node **type** whose help document is open, if any.
    *
@@ -1519,9 +1550,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     if (options.autoRun !== false) {
       if (autoRunTimer) clearTimeout(autoRunTimer)
       /*
-       * One timer, not two. Scheduling the cheap pass *as well* would have it supersede an
-       * in-flight full run — `scheduler.run` aborts whatever is running — so a slow query would
-       * be cancelled and restarted by the very keystroke that was meant to refine it.
+       * One timer, not two. Scheduling the cheap pass *as well* would supersede the full run
+       * twice per edit for nothing.
        */
       const full = get().autoRun
       autoRunTimer = setTimeout(
@@ -1530,8 +1560,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
            * `automatic`, so a `For Each` still defers. Auto-run means "re-run the full pass for
            * me", which is right for an ordinary expensive node and wrong for a loop: four
            * hundred queries and four hundred files, 700ms after a keystroke. See `RunOptions`.
+           *
+           * A cheap pass arriving during a Run finishes that Run's work as well as its own (the
+           * scheduler's `requestedFull`), so it has to own what the Run owned: `busy`, or the
+           * Cancel button vanishes over a ten-minute NBLAST, and `lastRun`, or a Download the
+           * Run was about to reach never writes its file.
            */
           if (get().autoRun) void runFull(undefined, { automatic: true })
+          else if (sched().owesFullRun) void runFull(undefined, { mode: 'auto' })
           else void sched().run(get().graph, { mode: 'auto' })
         },
         full ? AUTO_FULL_RUN_DELAY_MS : AUTO_RUN_DELAY_MS,
@@ -1552,14 +1588,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
    */
   async function runFull(
     targets?: string[],
-    options: { automatic?: boolean } = {},
+    options: { automatic?: boolean; mode?: 'auto' | 'full' } = {},
   ): Promise<RunSummary> {
     if (autoRunTimer) clearTimeout(autoRunTimer)
     const token = ++runToken
     set({ busy: true })
     try {
       const summary = await sched().run(get().graph, {
-        mode: 'full',
+        mode: options.mode ?? 'full',
         ...(targets ? { targets } : {}),
         ...(options.automatic ? { automatic: true } : {}),
       })
@@ -1703,7 +1739,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
   /**
    * Change a layout, and stamp the current view on it in the same commit.
    *
-   * The composition is here rather than at each of the five call sites, which each had to
+   * The composition is here rather than at each call site, which each had to
    * remember it: a sixth mutator that forgot would still commit the layout and leave the flag
    * stale until a save captured it — silent, and only visible as a graph opening in the wrong
    * view days later.
@@ -2451,26 +2487,53 @@ export const useGraphStore = create<GraphState>((set, get) => {
     setDashboardOpen: setDashboard,
     toggleDashboard: () => setDashboard(!get().dashboardOpen),
 
-    addToDashboard: (nodeIds) => {
+    addToDashboard: (nodeIds, tabId) => {
       if (nodeIds.length === 0) return
-      commitLayout((g) => addCells(g, nodeIds))
+      commitLayout((g) => addCells(g, nodeIds, tabId))
     },
 
-    removeFromDashboard: (nodeIds) => {
+    removeFromDashboard: (nodeIds, tabId) => {
       if (nodeIds.length === 0) return
-      commitLayout((g) => removeCells(g, nodeIds))
+      commitLayout((g) => removeCells(g, nodeIds, tabId))
     },
 
     moveDashboardCell: (nodeId, toIndex) => commitLayout((g) => moveCell(g, nodeId, toIndex)),
 
     // Tagged, so a drag that crosses three track boundaries is one undo step rather than three —
     // the coalescing `renameNode` and `renameGroup` already use. The columns slider takes one for
-    // the same reason: five steps of a drag are one decision.
-    setDashboardSpan: (nodeId, span) =>
-      commitLayout((g) => setCellSpan(g, nodeId, span), `cell-span:${nodeId}`),
+    // the same reason: five steps of a drag are one decision. Both tags name the tab, so the same
+    // gesture on two tabs in a row is two decisions and not one.
+    // The tab is resolved once and handed to the mutator, so the tag and the edit cannot name
+    // two different pages.
+    setDashboardSpan: (nodeId, span) => {
+      const tab = activeTab(get().graph).id
+      commitLayout((g) => setCellSpan(g, nodeId, span, tab), `cell-span:${tab}:${nodeId}`)
+    },
 
-    setDashboardColumns: (columns) =>
-      commitLayout((g) => setDashboardTracks(g, columns), 'dash-columns'),
+    setDashboardRail: (nodeId, open) => {
+      const tab = activeTab(get().graph).id
+      commit((g) => setCellRail(g, nodeId, open, tab), { history: false, autoRun: false })
+    },
+
+    setDashboardColumns: (columns) => {
+      const tab = activeTab(get().graph).id
+      commitLayout((g) => setDashboardTracks(g, columns, tab), `dash-columns:${tab}`)
+    },
+
+    setDashboardTab: (tabId) =>
+      commit((g) => setActiveTab(g, tabId), { history: false, autoRun: false }),
+
+    // `addTab` puts the new page on screen, so the cells land on it by the active-tab default.
+    addDashboardTab: (nodeIds = []) => commitLayout((g) => addCells(addTab(g), nodeIds)),
+
+    renameDashboardTab: (tabId, title) =>
+      commitLayout((g) => renameTab(g, tabId, title), `tab-title:${tabId}`),
+
+    removeDashboardTab: (tabId) => commitLayout((g) => removeTab(g, tabId)),
+
+    moveDashboardTab: (tabId, toIndex) => commitLayout((g) => moveTab(g, tabId, toIndex)),
+
+    duplicateDashboardTab: (tabId) => commitLayout((g) => duplicateTab(g, tabId)),
     dockFraction: loadDockFraction(),
     setDockFraction: (fraction, totalPx) => {
       const next = clampDockFraction(fraction, totalPx)

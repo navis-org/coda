@@ -299,3 +299,15 @@ describe('which cards the affordance reaches', () => {
     }
   })
 })
+
+describe('whenWired', () => {
+  it('is declared only on types the generic band draws, a body being handed no wiring', () => {
+    // A body draws its params through `cardParams`, which cannot see wires: a `whenWired` param
+    // there would draw unwired with nothing saying so. When a body wants one, it takes the set.
+    const bodied = allNodeDefs()
+      .filter((def) => nodeBody(def.type))
+      .filter((def) => (def.params ?? []).some((p) => p.whenWired !== undefined))
+      .map((def) => def.type)
+    expect(bodied).toEqual([])
+  })
+})

@@ -70,9 +70,14 @@ export const connectivityNode = packNode({
   // here that draws ordinary param rows rather than a body of its own.
   cardWidth: 280,
   description:
-    'Fetch synaptic partners for the incoming neurons, one or more hops out. Rows are `preId`, `preType`, `postId`, `postType`, `weight`, `hop` and `direction`; a region split adds `roi`, and `Normalize` adds `weightNorm` and `weightTotal`.',
+    'Fetch the synaptic partners of the incoming neurons, one or more hops out. Rows are ' +
+    '`preId`, `preType`, `postId`, `postType`, `weight`, `hop` and `direction`; a region ' +
+    'split adds `roi`, and `Normalize` adds `weightNorm` and `weightTotal`.',
   guide:
-    'Synaptic partners, one or more hops out. Connections is an edge list: every row is preId → postId oriented the way the synapse points, so Build Network works with nothing to think about. Neuron Set is the same result as neurons — seeds plus every partner reached — which is what Adjacency takes. Partners decides whether a fragment counts as one.',
+    'Fetches the synaptic partners of a set of neurons, one or more hops up- or downstream. ' +
+    'Connections is an edge list (preId → postId) that goes straight into Build Network; ' +
+    'Neuron Set lists the queried neurons plus every partner found, e.g. for Adjacency. ' +
+    'Fragments are left out unless you tick Include fragments.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -99,7 +104,41 @@ export const connectivityNode = packNode({
    * exporter would bind it as `connectivity_neurons`.
    */
   outputs: [
-    { id: 'connections', label: 'Connections', type: T.table() },
+    {
+      id: 'connections',
+      label: 'Connections',
+      type: T.table(),
+      /*
+       * A partner ranking is by synapses, and a Bar Chart sums its value per category, so
+       * `weight` goes straight in; the count is declared beside it, or it loses to the ranking
+       * on a request for one. Per direction because the partner's column is the other end's.
+       * See `PortDef.feeds`.
+       */
+      feeds: [
+        {
+          type: 'out.barChart',
+          when: 'to rank downstream partner types by synapses',
+          params: { category: 'postType', value: 'weight' },
+        },
+        {
+          type: 'out.barChart',
+          when: 'to rank upstream partner types by synapses',
+          ifParams: { direction: 'inputs' },
+          params: { category: 'preType', value: 'weight' },
+        },
+        {
+          type: 'core.groupBy',
+          when: 'to count connections per downstream partner type',
+          params: { by: ['postType'], agg: 'count' },
+        },
+        {
+          type: 'core.groupBy',
+          when: 'to count connections per upstream partner type',
+          ifParams: { direction: 'inputs' },
+          params: { by: ['preType'], agg: 'count' },
+        },
+      ],
+    },
     { id: 'neuronSet', label: 'Neuron Set', type: T.neurons() },
   ],
   params: [
@@ -118,7 +157,7 @@ export const connectivityNode = packNode({
       id: 'hops',
       kind: 'int',
       label: 'Hops',
-      help: 'How many synapses out to travel. 1 is direct partners. Every neuron reached by one hop is expanded by the next, so Min weight is what keeps this bounded.',
+      help: 'How many synaptic steps to travel. 1 returns direct partners. Each hop expands every neuron the previous one found, so use `Min weight` to keep the result small.',
       default: 1,
       min: 1,
       step: 1,
@@ -127,7 +166,7 @@ export const connectivityNode = packNode({
       id: 'minWeight',
       kind: 'int',
       label: 'Min weight',
-      help: 'Discard connections below this synapse count. Applied to the connection before any region split, so splitting never changes which partners are found.',
+      help: 'Drop connections below this synapse count. Splitting by region does not change which partners pass.',
       default: 1,
       min: 1,
       step: 1,
@@ -153,7 +192,7 @@ export const connectivityNode = packNode({
       label: 'Edge properties',
       noun: 'property',
       emptyLabel: 'weight only',
-      help: 'Properties of each connection to add as columns beside weight, from what the dataset publishes — on fish2, the synapse count split by compartment (weightAxonDendrite, …). With the region options on, each region’s row carries that region’s share; a property marked “not by region” is empty there.',
+      help: 'Extra connection properties the dataset publishes, added as columns, e.g. synapse counts by compartment on fish2. When split by region, each row gets that region’s share; a property marked “not by region” is left empty.',
       default: [],
       optionsWithoutPeek: true,
       options: (ctx) =>
@@ -175,7 +214,7 @@ export const connectivityNode = packNode({
       id: 'splitByRoi',
       kind: 'boolean',
       label: 'Split by region',
-      help: 'One row per connection per region, with a roi column naming it. The parts sum back to the connection’s weight, give or take synapses in no primary region.',
+      help: 'One row per connection per region, with a roi column naming it. The rows sum to the connection’s weight, minus synapses outside any primary region.',
       default: false,
     },
     {
@@ -212,7 +251,7 @@ export const connectivityNode = packNode({
        * substituting. A region picked while this was off and left in place when it went back on
        * is still honoured, and the warning below is what says so.
        */
-      help: 'Regions nest — a synapse in LAL(L) is also counted in LX(L). On, only the set that tiles the volume is offered. Off, rows can sum to several times what the connection has.',
+      help: 'Only offer regions that do not overlap. Turn off to pick nested regions, but then a synapse can be counted in several rows.',
       default: true,
       visibleIf: usesRegions,
     },
@@ -220,14 +259,14 @@ export const connectivityNode = packNode({
       id: 'normalize',
       kind: 'boolean',
       label: 'Normalize',
-      help: 'Add weightNorm, the connection as a fraction of one neuron\u2019s total synapses, and weightTotal, the denominator it was divided by.',
+      help: 'Add weightNorm (the connection as a fraction of one neuron\u2019s total synapses) and weightTotal (that total).',
       default: false,
     },
     {
       id: 'normalizeBy',
       kind: 'enum',
       label: 'Normalize by',
-      help: 'Which end of the connection the denominator belongs to. These are different questions, not two views of one number.',
+      help: 'Which neuron\u2019s total the weight is divided by.',
       default: 'postsynaptic',
       options: [
         { value: 'postsynaptic', label: 'the target\u2019s total input' },
@@ -245,7 +284,7 @@ export const connectivityNode = packNode({
        * neuron's outgoing synapses — the difference is the 14,091 that land on fragments the
        * segmentation never promoted to a neuron.
        */
-      help: '"All synapses" counts everything the neuron makes, matching the dataset’s published total. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing across connectomes. A dataset answering from an attached edge set sums that file’s own weights instead, and cannot tell the two apart.',
+      help: '"all synapses" matches the dataset’s published total. "reconstructed partners only" counts only synapses with named neurons; use it to compare across connectomes. With an attached edge set, both sum that file’s weights.',
       default: 'all',
       optionsWithoutPeek: true,
       options: (ctx) =>
@@ -291,7 +330,7 @@ export const connectivityNode = packNode({
       id: 'includeFragments',
       kind: 'boolean',
       label: 'Include fragments',
-      help: 'Off, only proofread neurons come back — set what counts on the Dataset node. On, fragments do too; they are most of what a query returns, and none has a row for the Neuron Set port.',
+      help: 'Also return partners that are not proofread neurons (what counts is set on the Dataset node). Fragments are often most of the result and get no row in the Neuron Set output.',
       default: false,
       absentMeans: true,
     },
@@ -316,7 +355,7 @@ export const connectivityNode = packNode({
       id: 'neuronRows',
       kind: 'enum',
       label: 'Neuron Set',
-      help: '"Minimal" reads ids and types off the edges and costs nothing. "Full metadata" looks every neuron up for status, size and instance — a second query, run whether or not the port is wired.',
+      help: '"minimal (IDs + types)" reads ids and types off the edges. "full meta data" looks up status, size and instance with a second query, which runs even if the port is unwired.',
       default: 'derived',
       options: [
         { value: 'derived', label: 'minimal (IDs + types)' },
@@ -368,13 +407,13 @@ export const connectivityNode = packNode({
      */
     if (hops >= NOISY_HOPS && minWeight <= 1) {
       issues.push(
-        `${hops} hops at Min weight ${minWeight} expands every partner of every partner ` +
-          `and can reach much of the dataset. Raise Min weight.`,
+        `${hops} hops with \`Min weight\` at ${minWeight} will reach every partner of every ` +
+          `partner, which can be much of the dataset. Raise \`Min weight\`.`,
       )
     }
     if (hops >= NOISY_HOPS && ctx.params.direction === 'both') {
       issues.push(
-        `Direction "both" expands upstream and downstream at every hop, so ${hops} hops covers the undirected neighbourhood.`,
+        `\`Direction\` "both (in + out)" follows inputs and outputs at every hop, so ${hops} hops reach everything within ${hops} steps in either direction.`,
       )
     }
 
@@ -391,7 +430,7 @@ export const connectivityNode = packNode({
     }
     if (ctx.params.normalize === true && !sourceSupports(ctx.inputs.dataset, 'synapseTotals')) {
       issues.push(
-        `${label} does not publish the per-neuron synapse totals Normalize divides by`,
+        `${label} does not publish per-neuron synapse totals, which \`Normalize\` needs. Untick \`Normalize\`.`,
       )
     }
 
@@ -403,8 +442,8 @@ export const connectivityNode = packNode({
      */
     if (regionOptions(ctx.params).mayNest) {
       issues.push(
-        'Regions nest, so a split over the whole published list counts a synapse once ' +
-          'per containing region — the rows will sum to more than the connection weight.',
+        'Some regions are nested inside others, so a synapse is counted once for every ' +
+          "region that contains it, and the rows add up to more than the connection's weight.",
       )
     }
     /*
@@ -423,7 +462,7 @@ export const connectivityNode = packNode({
       )
       if (whole.length) {
         issues.push(
-          `${whole.join(', ')} ${whole.length === 1 ? 'is' : 'are'} not broken down by region in this dataset, so with the region options on ${whole.length === 1 ? 'its column is' : 'their columns are'} empty.`,
+          `${whole.join(', ')} ${whole.length === 1 ? 'is' : 'are'} not broken down by region in this dataset, so with \`Split by region\` or \`Regions\` set, ${whole.length === 1 ? 'its column is' : 'their columns are'} empty.`,
         )
       }
     }
@@ -458,10 +497,9 @@ export const connectivityNode = packNode({
     if (splitByRoi && !chosen.length) {
       if (!primaryOnly) {
         ctx.warn(
-          'Split by region covers every region a connection mentions, and region can nest ' +
-            '— a synapse in LAL(L) is counted again in CentralBrain so the rows sum to ' +
-            'several times the connection weight. Turn on "Primary regions only" to avoid ' +
-            'this.',
+          'Some regions are nested inside others, so a synapse in LAL(L) is also counted ' +
+            "under CentralBrain, and the rows add up to more than the connection's weight. " +
+            'Tick "Primary regions only" to count each synapse once.',
         )
       } else {
         // `listDatasets` is cached and deduplicated, so this is a lookup rather than a fetch on
@@ -477,9 +515,10 @@ export const connectivityNode = packNode({
            * a reader would otherwise take from it is a total that is too large.
            */
           ctx.warn(
-            `${source.label} has not published which regions tile this dataset, so the split ` +
-              `covers every region a connection mentions. Regions nest, so the rows can sum to ` +
-              `more than the connection weight.`,
+            `${source.label} does not publish a list of primary regions for this dataset, so ` +
+              `the split covers every region a connection passes through. Some regions are ` +
+              `nested inside others, so the rows can add up to more than the connection's ` +
+              `weight.`,
           )
         }
       }
@@ -543,6 +582,7 @@ export const connectivityNode = packNode({
           // `collect` copies it with the rest of the row.
           ...(properties.length ? { edgeProperties: properties } : {}),
           signal: ctx.signal,
+          onWarn: ctx.warn,
         }),
     })
 
@@ -593,8 +633,8 @@ export const connectivityNode = packNode({
           `${normalized.missingRows.toLocaleString()} of ` +
             `${traversed.length.toLocaleString()} rows have no denominator (` +
             `${normalized.missingNeurons.toLocaleString()} neurons with no published ` +
-            `${by === 'postsynaptic' ? 'input' : 'output'} total), so weightNorm is empty ` +
-            `for them.`,
+            `${by === 'postsynaptic' ? 'input' : 'output'} total), so their \`weightNorm\` ` +
+            `is empty.`,
         )
       }
 
@@ -642,9 +682,9 @@ export const connectivityNode = packNode({
     if (missing > 0) {
       ctx.warn(
         `${missing.toLocaleString()} of ${derived.length.toLocaleString()} neurons have ` +
-          `no row in ${source.label}'s neuron table, so their columns are empty — a ` +
-          `partner can be a fragment the dataset does not publish as a neuron. Their ids ` +
-          `and types are kept; untick "Include fragments" to drop them.`,
+          `no row in ${source.label}'s neuron table, usually because they are fragments ` +
+          `the dataset does not publish as neurons. Their ids and types are kept and the ` +
+          `other columns are empty. Untick \`Include fragments\` to drop them.`,
       )
     }
     ctx.progress(1)

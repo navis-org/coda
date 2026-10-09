@@ -67,13 +67,12 @@ registerNode({
   type: 'flow.collect',
   label: 'Collect',
   category: 'utility',
-  description: 'Stack what each pass of a For Each produced into one value.',
+  description:
+    'Combine the results of every pass of a For Each into one table or geometry collection.',
   guide:
-    'The exit of a For Each loop: it folds each pass’s result onto the last, so a loop that ' +
-    'fetches one neuron at a time hands on the whole collection. Everything wired after it runs ' +
-    'once, on the finished total, which is what makes it the boundary of the loop. Tables stack ' +
-    'like Stack Tables and geometry like Stack Neurons, so passes that carry different columns ' +
-    'fill with null rather than losing them.',
+    'Ends a For Each loop by combining the result of every pass into a single table or ' +
+    'geometry collection. Nodes wired after it run once, on the combined result, e.g. a 3D ' +
+    'View showing every skeleton the loop fetched.',
   // Concatenating a value already in hand onto a running total, once per pass. The cost of a
   // loop is in the region above this, never here.
   cost: 'cheap',

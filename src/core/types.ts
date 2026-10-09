@@ -142,6 +142,18 @@ export type CodaType =
    * Carries no schema, because a layer is opaque JSON — see `LayersValue`.
    */
   | { kind: 'layers' }
+  /**
+   * A table held in a file rather than in memory — a Parquet or Feather file too large to load,
+   * read a block at a time by the nodes that know how.
+   *
+   * **Deliberately not assignable to `table`**, and that is the whole point of the kind. Every
+   * table op materialises its input, so a Filter handed a five-gigabyte synapse table would load
+   * all of it to keep a hundred rows; typed apart, the only nodes that accept one are the ones
+   * that read it lazily (Read Rows and the Custom Dataset), and pulling rows into an ordinary table
+   * is a step somebody takes on purpose. The schema is carried so their column pickers work
+   * before anything is read.
+   */
+  | { kind: 'tableFile'; schema?: TableSchema }
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -195,6 +207,8 @@ export const T = {
   linkage: (): CodaType => ({ kind: 'linkage' }),
   transform: (): CodaType => ({ kind: 'transform' }),
   layers: (): CodaType => ({ kind: 'layers' }),
+  tableFile: (schema?: TableSchema): CodaType =>
+    schema ? { kind: 'tableFile', schema } : { kind: 'tableFile' },
 } as const
 
 /** Types whose values are tabular, i.e. carry a `TableSchema`. */
@@ -231,6 +245,29 @@ export const GEOMETRY_KINDS = [
 ] as const satisfies readonly Kind[]
 
 /**
+ * A table port that also takes a table's on-disk form: Filter Table, and the Custom Dataset's
+ * Edges and Synapses. Named as it arrives (`PortDef.kinds`), so `neurons` beside `table`.
+ */
+export const TABLE_OR_FILE_KINDS = [
+  'table',
+  'neurons',
+  'tableFile',
+] as const satisfies readonly Kind[]
+
+/**
+ * The concrete type a declared set stands for, where it stands for one — a Table, for a table
+ * port that also takes a Link Table file. Not a union in `CodaType` (`kindSetLabel` says why);
+ * what it buys is that such a port is *named* and *ranked* as the Table port it is (`sockets.ts`),
+ * rather than as an `any` — "Any → Any" on the most-used filter in the palette, and sorted below
+ * nodes that merely have an optional socket for a table.
+ */
+export function nominalType(kinds: readonly Kind[] | undefined): CodaType | undefined {
+  if (!kinds?.length || !kinds.includes('table')) return undefined
+  const tabular: readonly string[] = TABLE_OR_FILE_KINDS
+  return kinds.every((kind) => tabular.includes(kind)) ? T.table() : undefined
+}
+
+/**
  * The name a set of kinds goes by on screen, or undefined for a set with no name.
  *
  * **A subset counts, and that is the whole design.** `Split Neurons` takes skeletons and meshes
@@ -241,12 +278,15 @@ export const GEOMETRY_KINDS = [
  * would have to admit points on that port and refuse them at `validate`, which is a *looser*
  * filter than today's, on top of a new case in `isAssignable`, inference and every cache key.
  *
- * One named set today. A second — the four `ITERABLE_KINDS` a `For Each` steps through — was
+ * Two named sets: Geometries, and a table-or-file set, which is named for the type it stands for
+ * (`nominalType`). A third — the four `ITERABLE_KINDS` a `For Each` steps through — was
  * considered and left unnamed, because "Collections" is not a word this app uses anywhere else
  * and an invented one is worse than the honest grey.
  */
 export function kindSetLabel(kinds: readonly Kind[] | undefined): string | undefined {
   if (!kinds?.length) return undefined
+  // Named as the type is, without the `{?}` an unknown schema prints: a declaration has none.
+  if (nominalType(kinds)) return 'Table'
   // A plain `includes`, not `kindIn`: this set has been declared and settled, where `kindIn`'s
   // job is to let an *unresolved* socket through. `['skeletons', 'any']` is not Geometries.
   const geometry: readonly string[] = GEOMETRY_KINDS
@@ -290,9 +330,10 @@ export function typeLabel(t: CodaType | undefined): string {
   if (!t) return 'unknown'
   switch (t.kind) {
     case 'table':
-    case 'neurons': {
+    case 'neurons':
+    case 'tableFile': {
       const cols = t.schema?.columns
-      const head = t.kind === 'neurons' ? 'Neurons' : 'Table'
+      const head = { table: 'Table', neurons: 'Neurons', tableFile: 'TableFile' }[t.kind]
       if (!cols) return `${head}{?}`
       if (cols.length <= 4) return `${head}{${cols.map((c) => c.name).join(', ')}}`
       return `${head}{${cols
@@ -342,6 +383,10 @@ export function attributeSchema(
     case 'skeletons':
     case 'meshes':
     case 'points':
+      return t.schema
+    // Its pickers read the file's columns before anything is read — `tableFile`'s whole reason
+    // for carrying a schema — without making it tabular to `schemaOf`, which table ops read.
+    case 'tableFile':
       return t.schema
     default:
       return undefined
@@ -404,9 +449,14 @@ export function columnNames(schema: TableSchema | undefined): string[] {
  * produced by the very function that exists to prevent one. Probing for the first *free* name
  * cannot do that.
  */
-export function uniqueName(taken: Set<string>, name: string): string {
+export function uniqueName(
+  taken: Set<string>,
+  name: string,
+  /** How the `n`th repeat is told apart: `_2` for a column, ` (2)` for something read aloud. */
+  suffix: (n: number) => string = (n) => `_${n}`,
+): string {
   let out = name
-  for (let n = 2; taken.has(out); n++) out = `${name}_${n}`
+  for (let n = 2; taken.has(out); n++) out = `${name}${suffix(n)}`
   taken.add(out)
   return out
 }

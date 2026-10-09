@@ -15,7 +15,7 @@
  * touching the memo.
  */
 
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
@@ -28,6 +28,7 @@ import type { ScatterViewerProps } from './ScatterViewer'
 import { ScatterViewer } from './ScatterViewer'
 
 const buildScatter = vi.hoisted(() => vi.fn())
+const buildMarks = vi.hoisted(() => vi.fn())
 
 vi.mock('./scatterPlot', async (importOriginal) => {
   const actual = await importOriginal<typeof PlotModule>()
@@ -36,7 +37,10 @@ vi.mock('./scatterPlot', async (importOriginal) => {
   buildScatter.mockImplementation((options: PlotModule.BuildOptions) =>
     actual.buildScatter(options),
   )
-  return { ...actual, buildScatter }
+  buildMarks.mockImplementation((options: PlotModule.MarksOptions) =>
+    actual.buildMarks(options),
+  )
+  return { ...actual, buildScatter, buildMarks }
 })
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 400 }))
@@ -49,6 +53,7 @@ beforeAll(() => installJsdomStubs({ width: 800, height: 400 }))
  */
 beforeEach(() => {
   buildScatter.mockClear()
+  buildMarks.mockClear()
 })
 afterEach(cleanup)
 
@@ -84,7 +89,6 @@ function props(): ScatterViewerProps {
     shape: { mode: 'constant' as const, column: undefined, constant: 'circle' },
     idColumn: 'neuronId',
     opacity: 0.8,
-    maxPoints: 50000,
     trend: 'none',
     trendPerGroup: true,
     selection: ['1001'],
@@ -125,5 +129,24 @@ describe('rebuilding the plot', () => {
     // Not through `buildScatter` necessarily, but the paint must not be memoised away —
     // asserted here as "the render did not throw away the change", which the caption shows.
     expect(buildScatter.mock.calls.length).toBeGreaterThanOrEqual(before)
+  })
+
+  it('a pan re-projects the frame and never rebuilds the marks', () => {
+    // The split that makes a whole-dataset embedding pan: reading the cells, resolving the
+    // encodings and uploading to the GPU happen per *marks*, and a pan is a new view of the
+    // same marks. Rebuilding them per pointer move is the regression this pins.
+    const { container } = render(<ScatterViewer {...props()} />)
+    const marksBefore = buildMarks.mock.calls.length
+    const framesBefore = buildScatter.mock.calls.length
+    expect(marksBefore).toBeGreaterThan(0)
+
+    const surface = container.querySelector('.scatter-canvas')!
+    fireEvent.pointerDown(surface, { button: 0, clientX: 200, clientY: 200, pointerId: 1 })
+    fireEvent.pointerMove(surface, { clientX: 240, clientY: 220, pointerId: 1 })
+    fireEvent.pointerMove(surface, { clientX: 280, clientY: 240, pointerId: 1 })
+    fireEvent.pointerUp(surface, { clientX: 280, clientY: 240, pointerId: 1 })
+
+    expect(buildScatter.mock.calls.length).toBeGreaterThan(framesBefore)
+    expect(buildMarks.mock.calls.length).toBe(marksBefore)
   })
 })

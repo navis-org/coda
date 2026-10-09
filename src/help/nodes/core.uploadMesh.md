@@ -1,16 +1,11 @@
-## Your own regions, as Volumes
+## What Upload Mesh does
 
-A dataset's neuropils are the ones its curators named. Anything else — a glomerulus you
-segmented, a shell from another lab's template, one hemisphere of a structure the connectome
-lists whole — has no route onto a wire at all, because `ROI Meshes` can only ask a server for
-what the server publishes.
+Upload Mesh loads meshes from files on your computer and outputs them as `Volumes`, the same kind of value [ROI Meshes](#neuron.roiMeshes) produces. Use it for regions that the dataset doesn't publish: a glomerulus you segmented yourself, a neuropil from another lab's template brain, or one half of a structure the connectome only lists as a whole.
 
-This reads them off disk instead, and the output is the same `Volumes` value: the 3D View's
-`Volumes` socket, `Points in Volumes`, `Download` and the rest take it without knowing where it
-came from.
+The output can go anywhere ROI Meshes can, e.g. the `Volumes` socket of the [3D View](#out.viewer3d) or Points in Volumes:
 
 ```coda-graph
-caption: The shells are local and the neurons are not. They meet at the viewer, so both have to be in nanometres.
+caption: Draw your own meshes next to neurons from a dataset. Both have to be in nanometres.
 dataset.hemibrain as ds
 neuron.findNeurons as find
 neuron.skeletons as skel
@@ -23,49 +18,46 @@ skel -> view:skeletons
 up:meshes -> view:volumes
 ```
 
-## OBJ, STL or PLY, one mesh per file
+## Files
 
-Pick several at once. Each file becomes one region named after itself — `LO_R.obj` arrives as
-`LO_R` — so a directory of shells imports in one gesture. A file holding several objects merges
-into one mesh; if you want them apart, they are apart on disk already.
+Press "Choose meshes…" and pick one or more OBJ, STL or PLY files. Each file becomes one mesh, named after the file: `LO_R.obj` becomes a region called `LO_R`. That way you can import a whole folder of meshes in one go. If a file contains several objects, they are merged into one mesh; to keep them apart, save them as separate files.
 
-Picking again **replaces** the set rather than adding to it.
+Picking files again replaces the current set; it does not add to it.
 
-> [!NOTE] An STL says nothing about which corners are shared
-> The format writes every triangle's three corners separately, so the same shape is six times the
-> vertices of an OBJ. Coda merges corners at identical coordinates on read, exactly — without
-> that, `computeVertexNormals` shades each face flat and an uploaded shell looks faceted beside a
-> fetched one. Exact, not within a tolerance: a tolerance is a decimation, and this is your data.
+STL files store every triangle's corners separately. Coda merges corners with identical coordinates when reading the file, so STL meshes are shaded as smoothly as OBJ or PLY ones. Corners are only merged if their coordinates match exactly, so the mesh itself is not changed.
 
-## Units are the one thing to get right
+## Units
+
+Everything in Coda is in nanometres, so you have to tell the node what units your files are in:
 
 ```coda-params
-caption: Everything in Coda is nanometres. A micron file drawn as nanometres is a thousand times too small — internally consistent, so nothing fails and nothing looks broken except the picture.
 core.uploadMesh: units
 ```
 
-A connectome exports nanometres, a template-space or light-level surface is usually microns, and
-a surface out of an MRI pipeline is millimetres. The scaling happens when the node runs, not when
-the file is read, so a wrong setting costs a re-run rather than another trip to the file picker.
+Meshes exported from a connectome are usually in nanometres, template-brain or light-level meshes usually in microns, and meshes from MRI pipelines often in millimetres.
 
-## What arrives
+> [!WARNING] Getting the units wrong fails silently
+> A mesh in microns that is read as nanometres comes out a thousand times too small. Nothing
+> breaks and there is no error; the mesh just won't show up where your neurons are. If an
+> uploaded mesh seems to be missing in the 3D View, check `Units` first.
 
-One mesh per file, with an attribute row each:
+The units are applied when the node runs, not when the file is read, so fixing them doesn't require picking the files again.
 
-| Column | What it is |
+## Output columns
+
+Each mesh comes with one row of attributes:
+
+| Column | Contains |
 | --- | --- |
-| `roi` | the region's name — the file's own, without its extension |
-| `primary` | always true here |
-| `file` | the file it came from |
+| `roi` | the region's name: the file name without its extension |
+| `primary` | always true |
+| `file` | the file the mesh came from |
 
-The first two are `ROI Meshes`' columns under `ROI Meshes`' names, which is what makes the two
-interchangeable downstream. `primary` is the licence to sum, and nothing in a pile of files says
-which shells sit inside which — so it is true throughout rather than guessed at.
+`roi` and `primary` match the columns of [ROI Meshes](#neuron.roiMeshes), so downstream nodes treat both the same way. `primary` is set to true for every mesh because Coda has no way of knowing whether one of your meshes sits inside another. Keep that in mind if you add up counts across regions that overlap.
 
-`file` is the column a fetched set has no counterpart for. Two directories can each hold an
-`LO.obj`, and then two regions are both called `LO`.
+Two folders can each contain an `LO.obj`, which would give you two regions called `LO`. The `file` column tells them apart.
 
 > [!WARNING] Sharing a workflow does not share the meshes
-> The `.coda.json` carries a content-addressed reference and nothing else. A colleague opening it
-> sees the card naming your files and everything downstream blocked until they pick their own
-> copies. Send the files alongside the link.
+> A `.coda.json` file or share link only contains a reference to the meshes. A colleague opening
+> it sees the card naming your files, and everything downstream stays blocked until they pick
+> their own copies. Send the files along with the workflow.

@@ -1505,8 +1505,18 @@
 .param--wide {
   grid-template-columns: minmax(0, 1fr);
 }
+/* A checkbox draws its own label, so the row's would say it twice. */
 .param--wide .param__label {
   display: none;
+}
+/*
+ * A chips picker takes the card's full width too, but draws no label of its own — so its row keeps
+ * the label, above the chips rather than beside them. It used to share `.param--wide`, and every
+ * multi-column picker on a card was a row of chips with nothing saying what they were for.
+ */
+.param--stacked {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
 }
 
 .field {
@@ -4548,6 +4558,14 @@ input.field--combo {
   font-size: 11px;
   color: var(--text-secondary);
 }
+/*
+ * A rail item that changes the data: the `.style-warning` mark, on the item rather than a tab.
+ * The same token the node badge uses for the state an edit here puts downstream nodes in.
+ */
+.overlay__rail-item--data {
+  padding-left: 6px;
+  border-left: 2px solid var(--status-stale);
+}
 /* Fields in the rail need a usable width without stretching across the panel. */
 .overlay__rail-item .field {
   width: auto;
@@ -5772,6 +5790,33 @@ a.viewer-actions__btn {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   padding-right: 2px;
+}
+
+/* A second bar under the first: the scatter's search, opened by its ⌕. */
+.network-strip--below {
+  top: 38px;
+}
+.network-strip__find[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.network-strip__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.network-strip__menu select {
+  font-size: 11px;
+  max-width: 160px;
 }
 
 .viewer__overlay-note {
@@ -10196,16 +10241,8 @@ details[open] > summary.tile__label {
   color: var(--text-muted);
 }
 
-/* --- the metrics card's scatter --- */
+/* --- the Network Metrics card --- */
 
-/*
- * A fixed height rather than an aspect ratio, with `preserveAspectRatio="none"` on the element.
- *
- * The two axes are unrelated quantities — degree against clustering, betweenness against
- * strength — so there is no square to preserve, and forcing one would leave most of a full-width
- * tile as margin. Height in px because this tile sits in a grid whose rows are content-sized:
- * a percentage would resolve against a track the SVG is itself defining.
- */
 /*
  * `Columns` as a histogram rather than as a completeness chart.
  *
@@ -10238,13 +10275,107 @@ details[open] > summary.tile__label {
 }
 .metrics__columns .tile__column-key {
   height: 44px;
+  /*
+   * Sideways into the neighbours, never down into the caption. Past a few dozen bins a cell is
+   * narrower than a line of text, and `thinColumns` has blanked the neighbours so the one key in
+   * every few has their room; clipped to its own cell it drew as a 1px sliver. `clip` rather than
+   * `hidden` on the other axis, the one pairing with `visible` a browser does not turn into a
+   * scroller.
+   */
+  overflow-x: visible;
+  overflow-y: clip;
+}
+/*
+ * Hundreds of bins: no gap at all. At 500 bins in a 600px card a 1px gap is 499px of the width,
+ * and the bars between them round to nothing. `thinColumns` sets the attribute.
+ */
+.metrics__columns[data-dense] .tile__columns-row,
+.metrics__columns[data-dense] .tile__columns-band {
+  gap: 0;
 }
 
+/*
+ * The Network Metrics card: the fact tiles as a grid, the two plots stacked beneath it.
+ *
+ * The scroll container moves up from `.tiles` to here, and takes over its 1px-of-border seams so
+ * the join between the grid and the plots looks like every other seam on the card. A flex column
+ * because that is what lets one child have the spare height: the scatter tile grows, and its
+ * automatic minimum (its content, the 120px plot included) is what makes a short card scroll
+ * rather than squash it.
+ */
+.metrics__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border);
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.metrics__body > .tiles {
+  flex: none;
+  overflow: visible;
+}
+/*
+ * The scatter tile takes the spare height. A wrapper class rather than a prop on `Tile`, for
+ * `.metrics__columns`' reason: the shared component does not learn a caller by name. `contents`,
+ * so the wrapper adds no box and the tile itself is the column's flex item.
+ */
+.metrics__grow {
+  display: contents;
+}
+.metrics__grow > .tile {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * The plot box, measured: the marks are placed in its pixels, so a triangle is the same triangle
+ * on every card rather than one stretched by a `preserveAspectRatio="none"` unit box.
+ *
+ * It is what takes the tile's spare height, never the axis readout under it — a basis of 0 and
+ * a 120px floor. The SVG is absolute inside it because an SVG's own
+ * automatic height is its aspect ratio (870px in an expanded panel), which would make the box
+ * size itself to the drawing it is supposed to be sizing.
+ */
+.metrics__plot {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 120px;
+  margin: 2px 0 6px;
+}
 .metrics__scatter {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
-  height: 120px;
-  margin: 2px 0 6px;
+  height: 100%;
+}
+
+/* Colour, size and marker: one row of named pickers between the heading and the plot. */
+.metrics__encodings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0 0 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.metrics__encodings label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/*
+ * `.legend` is a viewer's foot strip, ruled off from the canvas above it; inside a tile it sits
+ * between the plot and its readout, which the tile's own spacing already separates.
+ */
+.metrics__legend {
+  border-top: none;
+  padding: 0 0 4px;
 }
 
 /* --- split meter --- */
@@ -10445,6 +10576,211 @@ details[open] > summary.tile__label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------------------
+ * Annotate card
+ *
+ * `.list-body` for the settings and the foot, with a table between them. The table scrolls inside
+ * the card rather than growing it: a selection can be thousands of rows, and a card taller than
+ * the window is one nobody can reach the foot of.
+ * ------------------------------------------------------------------------- */
+
+/* A tab per target, in a row that wraps rather than widening the card. */
+/* The card's own tab strip (`coda-node__tab`), with room for the not-set-up dot. */
+.annotate__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* A tab not set up yet: a dot as well as the title, colour not being the only channel. */
+.annotate__tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-stale);
+}
+.annotate__remove {
+  justify-self: start;
+  font-size: 10px;
+}
+/* The tick column: narrow, and not part of the id's sticky header. */
+.annotate__pick {
+  width: 18px;
+  padding: 0 2px;
+}
+.annotate__row--picked {
+  background: var(--accent-soft);
+}
+.annotate__fill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+.annotate__fill .annotate__input {
+  width: auto;
+  min-width: 8em;
+  border-color: var(--border);
+}
+
+.annotate__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+}
+.annotate__target {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  /* A disclosure, not a button to press: it reads as the target's name with a caret. */
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.annotate__target:hover {
+  color: var(--text-primary);
+}
+.annotate__note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.annotate__note--error {
+  color: var(--status-error);
+}
+/*
+ * Neurons the selection holds and the tab will not show. Bold and in the refusal red — the text red,
+ * `--status-error` being under the 4.5:1 floor for small text on the dark panel.
+ */
+.annotate__file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.annotate__loss {
+  color: var(--status-refused);
+  font-weight: 600;
+}
+.annotate__chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+.annotate__chooser ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  font-size: 11px;
+}
+.annotate__chooser label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.annotate__readonly {
+  color: var(--text-muted);
+}
+.annotate__scroll {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+/* The overlay has the room the card does not. */
+.annotate--full .annotate__scroll {
+  max-height: none;
+}
+.annotate__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.annotate__table th,
+.annotate__table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.annotate__table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--canvas);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.annotate__table tbody th {
+  font-family: var(--font-mono);
+  font-weight: normal;
+  color: var(--text-secondary);
+}
+.annotate__input {
+  width: 100%;
+  min-width: 6em;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 1px 3px;
+}
+select.annotate__input {
+  min-width: 5em;
+}
+.annotate__input option {
+  background: var(--canvas);
+  color: var(--text-primary);
+}
+.annotate__input:hover,
+.annotate__input:focus {
+  border-color: var(--border-strong);
+}
+/* Marked by outline and colour together — colour alone would say nothing to a reader without it. */
+.annotate__cell--saving {
+  opacity: 0.6;
+}
+.annotate__cell--held {
+  outline: 1px dashed var(--status-stale);
+  outline-offset: -1px;
+}
+.annotate__cell--failed {
+  outline: 1px solid var(--status-error);
+  outline-offset: -1px;
+}
+/*
+ * Changed in this session: a bar and a slant, not a colour alone — and not an outline, which is
+ * how a held or failed write is drawn, so the two can show on one cell at once.
+ */
+.annotate__cell--edited {
+  box-shadow: inset 2px 0 0 var(--accent);
+  font-style: italic;
+}
+.annotate__foot {
+  align-items: center;
+}
+/* Undo with nothing to undo, a log with nothing in it: visibly off, not merely unresponsive. */
+.annotate__foot button:disabled {
+  opacity: 0.45;
+}
+.annotate__spacer {
+  flex: 1;
 }
 
 /* ---------------------------------------------------------------------------
@@ -10692,6 +11028,9 @@ details[open] > summary.tile__label {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* The card's own inset, as `.dataset-body` has — without it the buttons and the status line
+     sat flush against the card's left border. */
+  padding: 6px;
   min-width: 0;
 }
 .upload-body__actions {
@@ -11485,6 +11824,10 @@ details[open] > summary.tile__label {
 }
 .help-see__item:hover {
   text-decoration: underline;
+}
+/* A related node with no document: named, not linked. */
+.help-see__name {
+  color: var(--text-primary);
 }
 .help-see__desc {
   color: var(--text-secondary);
@@ -12495,10 +12838,88 @@ details[open] > summary.tile__label {
     animation: coda-pulse 1.6s ease-in-out infinite;
   }
 }
-.dashboard__title {
+/*
+ * The tab strip, where the title was. A single tab reads "Dashboard" in the title's own weight,
+ * so a dashboard that never grows a second page looks as it did.
+ *
+ * **It scrolls sideways inside itself and never widens the bar.** `min-width: 0` on a flex child
+ * is what lets it shrink below its content; without it a dozen tabs make the *document* wider
+ * than the viewport, which on a phone is the whole page zooming out (`pnpm probe:mobile`).
+ */
+.dash-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* On the strip rather than on each tab, so the rename field inherits it through the shared
+     rename rule's `font: inherit`. */
   font-size: 13px;
 }
+/*
+ * On a phone the bar wraps and the strip takes a row of its own. Without it the strip's
+ * `min-width: 0` lets the other controls squeeze it to nothing — measured at 412px: the tabs at
+ * zero width and the document 419 wide. `NARROW_QUERY`'s width, as a plain media query because
+ * no React branch is paired with it.
+ */
+@media (max-width: 720px) {
+  .dashboard__bar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .dash-tabs {
+    flex-basis: 100%;
+  }
+}
+/* The scroller is the list alone — `+` sits after it, so it is always in reach. */
+.dash-tabs__list {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dash-tabs__tab {
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 9px;
+  font: inherit;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.dash-tabs__tab:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+.dash-tabs__tab[aria-selected='true'] {
+  color: var(--text-primary);
+  font-weight: 600;
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+/* `.btn--icon`, a little smaller and with a larger glyph, to sit level with the tabs. */
+.dash-tabs__add {
+  flex: none;
+  width: 24px;
+  font-size: 15px;
+  line-height: 1;
+}
+/* Sized to a tab, so the strip does not jump when it opens; the look is `.wf-tabs__rename`'s. */
+.dash-tabs__rename {
+  flex: none;
+  width: 160px;
+  padding: 3px 8px;
+}
 .dashboard__count {
+  flex: none;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -12560,8 +12981,11 @@ details[open] > summary.tile__label {
   grid-template-columns: repeat(var(--dash-cols, 2), minmax(0, 1fr));
   /* The fallback is only ever painted for the frame before the observer fires. */
   grid-auto-rows: var(--dash-row, 120px);
-  gap: 10px;
-  padding: 10px;
+  /* One number for the space between cells, which the drop bar below centres itself in and the
+     row-height measurement reads back (`getComputedStyle(grid).rowGap`). */
+  --dash-gap: 5px;
+  gap: var(--dash-gap);
+  padding: var(--dash-gap);
   align-content: start;
 }
 
@@ -12590,10 +13014,10 @@ details[open] > summary.tile__label {
   pointer-events: none;
 }
 .dash-cell[data-drop='before']::after {
-  left: -6px;
+  left: calc(var(--dash-gap) / -2 - 1.5px);
 }
 .dash-cell[data-drop='after']::after {
-  right: -6px;
+  right: calc(var(--dash-gap) / -2 - 1.5px);
 }
 
 .dash-cell__panel {
@@ -12835,18 +13259,22 @@ details[open] > summary.tile__label {
   color: var(--text-primary);
 }
 
-/* Takes the name button's slot and metrics, so the row does not jump when the field opens. */
-.wf-tabs__rename {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 1px 4px 1px 3px;
-  padding: 2px 4px;
+/* The in-place rename field's look, shared with the dashboard's tab strip. */
+.wf-tabs__rename,
+.dash-tabs__rename {
   font: inherit;
   color: var(--text-primary);
   background: var(--surface-0, var(--surface-1));
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
   outline: none;
+}
+/* Takes the name button's slot and metrics, so the row does not jump when the field opens. */
+.wf-tabs__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 1px 4px 1px 3px;
+  padding: 2px 4px;
 }
 
 /*
@@ -13471,6 +13899,173 @@ details[open] > summary.tile__label {
 .topo__color::-webkit-color-swatch {
   border: none;
   border-radius: 2px;
+}
+
+/* --------------------------------------------------------------------------
+ * Neuron Dendrogram: Topology's card with a flat stage
+ *
+ * The bar, the tools and the rail are `.topo`'s. What is here is the plot, which stops at the
+ * rail rather than running under it — a 3D scene can be orbited out from behind the rail, a flat
+ * drawing cannot — and the two things only this card has, the distal table and the settings rows.
+ * -------------------------------------------------------------------------- */
+
+.arbor .topo__stage {
+  display: flex;
+  flex-direction: column;
+}
+/*
+ * The tools in flow above the plot rather than floating over it, as they do on Topology's 3D
+ * stage: a flat drawing cannot be orbited out from under them, and a fixed inset guessed at one
+ * row's height is covered again the moment a narrow card wraps them onto two.
+ */
+.arbor .topo__tools {
+  position: static;
+  padding: 8px 8px 4px;
+  margin-right: var(--topo-rail-space);
+}
+/*
+ * The ⤓ sits in the tools row at the top of this card, where every other viewer has it in its
+ * foot. Its menu opens upwards from its right edge for the foot; here that put half of it under
+ * the card's header, so it opens downwards from its left edge instead.
+ */
+.arbor .viewer-actions__menu {
+  top: calc(100% + 4px);
+  bottom: auto;
+  left: 0;
+  right: auto;
+}
+.arbor__plot {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-right: var(--topo-rail-space);
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+}
+.arbor__plot[data-zoomed] {
+  cursor: grab;
+}
+.arbor__plot[data-panning] {
+  cursor: grabbing;
+  user-select: none;
+}
+.arbor__canvas {
+  position: absolute;
+  inset: 0;
+}
+.arbor__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/*
+ * Split Axon/Dendrite's expanded view: a pager over a dendrogram, the corrections beside it. The
+ * plot is `.arbor__plot` — the Neuron Dendrogram's stage, cursors and all — so the two read alike.
+ */
+.split-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.split-editor__keys {
+  display: inline-flex;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+.split-editor__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.split-editor__list {
+  flex: 0 0 220px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-left: 1px solid var(--border);
+  font-size: 12px;
+}
+.split-editor__list h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.split-editor__list ol {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.split-editor__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+.split-editor__hint {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.arbor__overlay line {
+  stroke: var(--text-secondary);
+  stroke-width: 1.5;
+}
+.arbor__overlay text {
+  fill: var(--text-secondary);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.arbor__table {
+  width: calc(100% - 24px);
+  margin-left: 12px;
+  margin-right: 12px;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 8px;
+}
+.arbor__table caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 2px;
+}
+.arbor__table th,
+.arbor__table td {
+  padding: 1px 4px;
+  text-align: right;
+  white-space: nowrap;
+}
+.arbor__table th[scope='row'] {
+  text-align: left;
+  font-weight: 400;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arbor__table thead th {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+/* Inset to the same 9–12px the Partners tab's rows sit at; flush, the labels touched the rail. */
+.arbor__settings {
+  padding: 8px 12px 4px;
+}
+.arbor__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  padding: 4px 0;
+}
+.arbor__field input,
+.arbor__field select {
+  width: 120px;
+  font-size: 11px;
 }
 
 /* --------------------------------------------------------------------------

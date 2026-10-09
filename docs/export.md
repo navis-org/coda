@@ -776,6 +776,66 @@ name resolution (`check-export.py`), and the pandas (`probe-py-helpers.py` again
 wire format is `src/data/cave`'s business and is covered by `live.test.ts` there. The SeaTable
 half *has* been run live, as above.
 
+### The Custom Dataset half of the notebook exporter
+
+`src/export/python/emitters/custom.ts` and `customHelpers.ts`, Python only — R still lists all
+four types in `NO_EMITTER`. Four nodes emit: **Link Table** binds a `CodaTableFile`, **Read Rows**
+calls its `read`, **Neuroglancer Source** binds a `CodaPrecomputed` (cloudvolume), and **Custom
+Dataset** binds a `CodaCustomDataset` holding the other three plus a neuron table. That class is
+`CompositeSource` in a notebook: every query node that takes a Dataset branches on
+`isCustomDataset` and calls a method (`labels`, `connectivity`, `synapses`, `synapses_between`,
+`meshes`, `skeletons`), so the cells below it read like the neuPrint cells they replace.
+
+Five decisions, each checked by running rather than by reading:
+
+- **A table file is read the way the canvas reads it, never whole.** `read(columns, where)` hands
+  Parquet to `pq.read_table(filters=[(column, 'in', ids), …])`, which skips row groups by their
+  statistics — pandas' `read_parquet` would narrow the columns and not the rows, and on a synapse
+  table that is the difference between a lookup and the whole file. `where` ANDs, so Synapses
+  Between with both ends bound is one filtered read. Feather has no statistics, so it is read
+  memory-mapped and then filtered, and the Link Table cell says so. An empty id list reads
+  nothing, Read Rows' rule. The footer is read once. A wired *table* goes through
+  `CodaFrameTable`, the same surface over a frame, so no method asks which it was handed. An `https://` file goes through fsspec — pyarrow's own filesystems speak `gs://`/`s3://`
+  and not HTTP — which needs its `http` extra (aiohttp), hence `fsspec[http]` on the install line.
+  A Delta table (`format='delta'`, at the `version` the canvas read) goes through delta-rs'
+  `QueryBuilder`, the lookup an SQL `IN`: `to_pyarrow_dataset` refuses deletion vectors and reads
+  a column-mapped table as nulls, and `deltalake` is on the install line only where one is linked
+  (`docs/nodes-io.md`, Delta tables).
+- **Text columns come from the footer the canvas read** (`peekEntry`, already asked by inference on
+  this export), so an id column Coda reads as `str` is cast by Arrow, digit for digit. A cold
+  export has no footer, casts nothing, and says so. Every other id goes through `coda_id_column` —
+  `idText` over a column, **built on `coda_ids`** so the notebook has one cast, adding only its
+  refusals: a blank, a fractional float and a float past 2^53 are *no id* rather than a different
+  one. `edge_list` groups by the raw columns first, so it converts once per edge, not per row.
+- **One statement of the node's column rules.** The Custom Dataset cell reads its columns through
+  `edgeColumnsOf`/`synapseColumnsOf`, exported from the node rather than restated, so a card that
+  would refuse becomes a TODO with the card's sentence. The one rule the helper has to apply at
+  run time is the untouched `weight` default: absent from the file, rows are counted, as on the
+  canvas — the emitter cannot know when the footer was not read.
+- **A lender's geometry is routed at export, per socket.** `geometryCall` (`emitters/query.ts`) is
+  the one answer to "what fetches this kind from this dataset": a bucket's or another Custom
+  Dataset's own method, navis for neuPrint, or nothing. The Meshes and Skeletons cells emit it, and
+  a Custom Dataset wraps it in a `lambda ids:` per socket, so every lender reaches the helper as a
+  function and a lender with no route gets a note on that socket. The emitter declares every backend so the guard does not
+  block the whole dataset over one socket, and the decision it would have made is made per socket
+  instead — never left to the notebook to discover at run time. Meshes are `navis.Mesh`;
+  `navis.MeshNeuron` warns now. A bucket's batch that fails is halved until the missing segments
+  are found, rather than fetched one id at a time.
+- **One walk.** `coda_walk` holds the traversal's three rules and takes a hop as a function;
+  `coda_traverse_connectivity` hands it `fetch_adjacencies` and `CodaCustomDataset.connectivity` a
+  filter of its edge list. Two copies had begun to drift within the phase that wrote the second.
+- **What is refused.** Connectivity's `Normalize` (the denominators are totals over the whole edge
+  list, not computed here), and the region options and edge properties, which a Custom Dataset's
+  card does not offer. `Min confidence` is ignored with the canvas' sentence.
+
+`fixture.ts` gained a **third graph**, `customGraph`, and a third golden, for `caveGraph`'s reason.
+`probe-py-helpers.py` checks `coda_walk` over a stub `fetch_adjacencies` and runs that golden **whole** — every cell after the helpers, against a
+Feather edge list and a row-grouped Parquet synapse table it writes, geometry through a stub
+bucket — and checks the answers: summed repeated pairs, types from the neuron table, the two-hop
+walk's edge back into a seed, the row-group-filtered read, an 18-digit id round trip. The bucket
+half was run live by hand against `gs://flywire_v141_m783`: one mesh (1,181,103 vertices) and a
+missing segment counted, and a 191,525-node skeleton in nanometres.
+
 ### The R Markdown exporter
 
 `Save ▸ Export as R Markdown` writes the same graph as an `.Rmd` on **neuprintr, dplyr, nat,

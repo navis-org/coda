@@ -125,8 +125,8 @@ describe('what the two differ about', () => {
         column: () => 'label',
         columns: () => [],
       } as never).join(' ')
-    expect(ask('cluster.clustersToNeurons')).toMatch(/No "cluster" column/)
-    expect(ask('cluster.selectedToNeurons')).not.toMatch(/No "cluster" column/)
+    expect(ask('cluster.clustersToNeurons')).toMatch(/has no "cluster" column/)
+    expect(ask('cluster.selectedToNeurons')).not.toMatch(/has no "cluster" column/)
   })
 })
 

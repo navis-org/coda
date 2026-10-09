@@ -63,15 +63,12 @@ export const caveTablesNode = packNode({
   type: 'cave.tables',
   label: 'List CAVE tables',
   category: 'dataset',
-  description: 'Every annotation table and view a CAVE datastack publishes.',
+  description:
+    'Lists every annotation table and view a CAVE datastack publishes, as a table with `table` and `kind` columns.',
   guide:
-    'Lists what is actually in a CAVE datastack, which is otherwise something you have to know ' +
-    'before you can ask: nothing in a datastack marks one table as the neurons or another as the ' +
-    'cell types, so this is where the names for CAVE table and CAVE table info come from. Tables ' +
-    'and views are separate things on separate endpoints and the Kind column says which — worth ' +
-    'knowing, because the view is often the useful one (FlyWire aggregates its connectivity into ' +
-    'valid_connection_v2, and no table holds that). Names only, by design: a description per ' +
-    'table would be a request per table, and CAVE table info is that request.',
+    'Lists the tables and views of a CAVE datastack by name, with a kind column saying which is ' +
+    'which. Use it to find the names to give CAVE table or CAVE table info. Views are often the ' +
+    'useful ones: FlyWire’s connectivity, for example, is only in the valid_connection_v2 view.',
   cost: 'expensive',
 
   inputs: [CAVE_DATASET_INPUT],
@@ -84,7 +81,7 @@ export const caveTablesNode = packNode({
       id: 'includeViews',
       kind: 'boolean',
       label: 'Include views',
-      help: 'Views are a separate endpoint from tables — a server-side query somebody saved, usually a join or a roll-up. Off lists only the annotation tables.',
+      help: 'Also list views: saved server-side queries, usually joins or roll-ups. Off lists only the annotation tables.',
       default: true,
     },
   ],
@@ -95,7 +92,10 @@ export const caveTablesNode = packNode({
 
   evaluate: async (ctx) => {
     const where = caveTargetOfValue(ctx.input('dataset'), ctx.params)
-    if (!where) throw new Error('Name a datastack as `name:number`, or wire a CAVE Dataset')
+    if (!where)
+      throw new Error(
+        'Name a datastack, e.g. flywire_fafb_public:783, or wire a CAVE Dataset into `Dataset`.',
+      )
     const entries = await tableListFor(
       where.datastack,
       where.version,
@@ -143,16 +143,13 @@ export const caveTableInfoNode = packNode({
   // Wide enough for the two counts and their labels to share one line, since the whole point of
   // showing both is that they can be compared at a glance.
   cardWidth: 300,
-  description: 'What one CAVE table is: its description, its row counts and its columns.',
+  description:
+    'Describes one CAVE table or view: its description, its row counts, and its columns as a table with `column`, `type` and `example`.',
   guide:
-    'Four reads about one table of a CAVE datastack, gathered onto one card: its registered ' +
-    'schema and the description its publisher wrote, how many rows it holds, and the columns a ' +
-    'query actually returns — sampled from one real row, so `pt` shows up as the ' +
-    'pt_position_x/y/z, pt_supervoxel_id and pt_root_id a query gives you rather than as the ' +
-    'bound point the schema declares. The two row counts on the card are both true and disagree ' +
-    'by up to a third; the card says which is which. It also accepts a view, but a view that ' +
-    'aggregates cannot be sampled quickly — CAVE builds the whole result before taking one row ' +
-    'off it — so the node warns before it waits.',
+    'Shows what one table of a CAVE datastack holds: its schema, the description its publisher ' +
+    'wrote, two row counts (the card explains the difference) and the columns a query returns, ' +
+    'sampled from one row, so pt arrives as pt_position_x/y/z, pt_supervoxel_id and pt_root_id. ' +
+    'Views work too, but an aggregating view is slow to sample and the node warns first.',
   cost: 'expensive',
 
   inputs: [CAVE_DATASET_INPUT],
@@ -166,7 +163,7 @@ export const caveTableInfoNode = packNode({
       kind: 'string',
       label: 'Table',
       placeholder: 'nuclei_v1',
-      help: 'A table or a view in this datastack. The list is the datastack’s tables and views (marked t and v), once it has been read, which needs a CAVE token; any name can still be typed.',
+      help: 'A table or view in this datastack. With a CAVE token, the list shows its tables and views (marked t and v); any name can be typed.',
       default: '',
       // This node samples either kind, and warns before a view.
       suggestions: caveTableSuggestions,
@@ -179,7 +176,7 @@ export const caveTableInfoNode = packNode({
     const issues = caveDatastackIssues(ctx.inputs.dataset, ctx.params)
     if (issues.length > 0) return issues
     const name = String(ctx.params.table).trim()
-    if (!name) return ['Name a table or a view']
+    if (!name) return ['Set `Table` to the name of a table or view.']
     /*
      * Checked against the listing only once it has landed. `peekTableList` answers `undefined`
      * for "not yet" and that is not a problem to report — a card that said "no such table" for
@@ -201,9 +198,12 @@ export const caveTableInfoNode = packNode({
 
   evaluate: async (ctx) => {
     const where = caveTargetOfValue(ctx.input('dataset'), ctx.params)
-    if (!where) throw new Error('Name a datastack as `name:number`, or wire a CAVE Dataset')
+    if (!where)
+      throw new Error(
+        'Name a datastack, e.g. flywire_fafb_public:783, or wire a CAVE Dataset into `Dataset`.',
+      )
     const name = String(ctx.params.table).trim()
-    if (!name) throw new Error('Name a table or a view')
+    if (!name) throw new Error('Set `Table` to the name of a table or view.')
     const options = { deployment: where.deployment, signal: ctx.signal }
 
     /*
@@ -232,8 +232,8 @@ export const caveTableInfoNode = packNode({
      */
     if (kind === 'view') {
       ctx.warn(
-        `${name} is a view which build their whole result first before applying row ` +
-          `limits. This can make for a very slow response.`,
+        `${name} is a view. CAVE builds a view's whole result before applying row ` +
+          `limits, so this can be very slow.`,
       )
     }
 
@@ -248,8 +248,8 @@ export const caveTableInfoNode = packNode({
     ])
     if (columns.length === 0) {
       ctx.warn(
-        `${name} answered no rows, so there are no columns to read. CAVE publishes a ` +
-          `column set only in a result.`,
+        `${name} returned no rows, so there are no columns to read. CAVE only reports a ` +
+          `table's columns alongside its rows.`,
       )
     }
     return { columns: columnsTable(columns) }

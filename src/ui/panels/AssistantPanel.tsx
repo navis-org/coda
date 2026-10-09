@@ -332,7 +332,7 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
    */
   const locked = useGraphStore((s) => s.locked)
   const placeholder = locked
-    ? 'The canvas is locked — unlock it to ask for a change'
+    ? 'The canvas is locked. Unlock it to ask for a change'
     : !ready
       ? 'Pick a provider under Connections first'
       : awaiting
@@ -370,10 +370,10 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
             <Toggle
               label="Full node help"
               hint={
-                'Send what every setting means, not just its name, kind and bounds — roughly ' +
-                'twice the prompt. Measured as good as the lean one on every model tried, so ' +
-                'this is for a request that came back wrong. The next question re-sends the ' +
-                'whole prompt either way.'
+                'Also send what every setting means, not just its name, type and limits. This ' +
+                'roughly doubles the prompt. In our tests it did no better than the short ' +
+                'version on any model, so turn it on only if a request comes back wrong. Either ' +
+                'way, the whole prompt is sent again with the next question.'
               }
               checked={full}
               onChange={(next) => setFullCatalogue(getProviderId(), next)}
@@ -381,11 +381,12 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
             <Toggle
               label="Send run values"
               hint={
-                'Tell the model what your graph last produced — row counts, ranges, and the ' +
-                'commonest values of a column — so it can pick a real filter value or a ' +
-                'sensible threshold instead of guessing. Aggregates only: no rows are sent and ' +
-                'neuron ids are never listed, and a node you have edited since running says ' +
-                'nothing. This is the only setting here that sends data rather than structure.'
+                'Tell the model what your graph last produced (row counts, value ranges and the ' +
+                'most common values in a column), so it can pick a real filter value or a ' +
+                'sensible threshold instead of guessing. Only these summaries are sent: no rows ' +
+                'and no neuron ids, and nothing for a node you have edited since it last ran. ' +
+                'This is the only setting here that sends your data, not just the layout of ' +
+                'your graph.'
               }
               checked={values}
               onChange={(next) => setSendRunValues(getProviderId(), next)}
@@ -408,7 +409,7 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
             type="button"
             className="btn btn--ghost"
             onClick={clearChat}
-            title="Clear the conversation. The graph is untouched."
+            title="Clear the conversation. Your graph stays as it is."
           >
             Clear
           </button>
@@ -428,14 +429,16 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
           <p className="assistant__empty">
             {ready ? (
               <>
-                Ask for a pipeline — “find LC4 neurons and chart their strongest partners” — or
-                a change to what is already here. Every edit is one undo.
+                Ask for a pipeline, such as “find LC4 neurons and chart their strongest
+                partners”, or for a change to the graph you have. You can undo each edit in one
+                step.
               </>
             ) : (
               <>
-                Pick a provider under <strong>Connections</strong> — the branch icon in the
-                toolbar — Anthropic, OpenAI, Gemini, or Ollama, which runs a model on your own
-                machine or fronts a free one in its cloud. Nothing else in Coda needs one.
+                To use the assistant, pick a provider under <strong>Connections</strong> (the
+                branch icon in the toolbar): Anthropic, OpenAI, Gemini, or Ollama, which runs a
+                model on your own computer or a free one in its cloud. Nothing else in Coda
+                needs one.
               </>
             )}
           </p>
@@ -472,8 +475,8 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
         )}
         {busy && elapsed >= SLOW_AFTER_MS && (
           <p className="assistant__note">
-            Still going. A model running locally can take several minutes on a prompt this size
-            — the whole node catalogue goes with every question.
+            Still working. A model running on your own computer can take several minutes,
+            because the whole node catalogue is sent with every question.
           </p>
         )}
       </div>

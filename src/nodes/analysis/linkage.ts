@@ -47,9 +47,9 @@ registerNode({
    * why each matters. `help.test.ts` holds the ceiling.
    */
   guide:
-    'Perform hierarchical/agglomerative clustering on a distance or similarty matrix. ' +
-    'This is the usual next step after NBLAST, and works on any square matrix over one population. ' +
-    'Can be wired into a Dendrogram, Cut Tree, or Heatmap node to see the groups and their scores.',
+    'Hierarchical (agglomerative) clustering of a square similarity or distance matrix, ' +
+    'typically an all-by-all NBLAST. Wire the tree into a Dendrogram to look at it or into Cut ' +
+    'Tree to get groups, and the reordered matrix into a Heatmap.',
   cost: 'expensive',
   inputs: [{ id: 'in', label: 'Matrix', type: T.matrix() }],
   outputs: [
@@ -63,7 +63,7 @@ registerNode({
       label: 'Method',
       default: 'ward',
       options: LINKAGE_METHODS,
-      help: 'How the distance between two groups is measured. "Ward" keeps groups compact and is what the NBLAST paper uses; "average" is less eager to split off outliers; "single" chains through one intermediate neuron.',
+      help: 'How the distance between two groups is measured. "ward (minimum variance)" keeps groups compact and is what the NBLAST paper uses; "single (nearest neighbour)" tends to chain groups together.',
     },
     {
       id: 'symmetry',
@@ -71,7 +71,7 @@ registerNode({
       label: 'Symmetry',
       default: 'mean',
       options: LINKAGE_SYMMETRY_OPTIONS,
-      help: 'A distance has to be symmetric and an NBLAST score is not, so the two directions of each pair are combined first. "Use the matrix as it is" reads only the upper triangle.',
+      help: 'Clustering needs a symmetric matrix, so the two scores of each pair are combined first. "use the matrix as it is" reads only the upper triangle.',
     },
     {
       id: 'distance',
@@ -84,7 +84,7 @@ registerNode({
         { value: 'one_minus', label: '1 − value' },
         { value: 'none', label: 'the values are already distances' },
       ],
-      help: 'Clustering needs distances. "Auto" asks the matrix, inverting it if it carries similarities; a matrix that says nothing — a Pivot cannot know — is treated as similarities.',
+      help: 'Clustering needs distances. "auto (from the matrix)" converts similarities to distances; a matrix that does not say what it holds, such as a Pivot’s, is treated as similarities.',
     },
   ],
 

@@ -53,7 +53,8 @@ import {
 } from '../../nodes/lib/neuronbridgePins'
 import { idColumn } from '../../nodes/lib/tableOps'
 import { tableToCsvParts } from '../export'
-import { formatNumber, plural } from '../format'
+import { formatNumber, plural } from '../../style/format'
+import { revealIn } from '../reveal'
 import { useLatest } from '../useLatest'
 import type { NbView, SetView } from './NeuronBridgeCompare'
 import {
@@ -793,15 +794,6 @@ function Tile({
       </div>
     </div>
   )
-}
-
-/** Scroll `container` just enough to show `el`, with a little air, and nothing else. */
-function revealIn(container: HTMLElement, el: HTMLElement): void {
-  const box = container.getBoundingClientRect()
-  const r = el.getBoundingClientRect()
-  const air = 6
-  if (r.top < box.top) container.scrollTop -= box.top - r.top + air
-  else if (r.bottom > box.bottom) container.scrollTop += r.bottom - box.bottom + air
 }
 
 /** The lines on screen as a table, for the card's CSV export. */

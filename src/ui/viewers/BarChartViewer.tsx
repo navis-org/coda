@@ -9,9 +9,15 @@ import {
   SURFACE_GAP,
   foldByRank,
   seriesColor,
-} from '../colors'
+} from '../../style/colors'
 import { exportBaseName as makeBaseName } from '../export'
-import { formatCompact, formatNumber, labelGutter, niceTicks, truncateLabel } from '../format'
+import {
+  formatCompact,
+  formatNumber,
+  labelGutter,
+  niceTicks,
+  truncateLabel,
+} from '../../style/format'
 import { ViewerActions } from './ViewerActions'
 import { tooltipPoint } from './tooltipPoint'
 import { ChartTooltip, TooltipRow } from './ChartTooltip'

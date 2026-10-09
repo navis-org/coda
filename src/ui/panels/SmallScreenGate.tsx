@@ -66,22 +66,19 @@ function Notice() {
     >
       <h2 id="small-screen-title">Coda wants a bigger screen</h2>
       <p>
-        Coda is a node-graph editor built for a desktop or a tablet — a canvas you place cards
-        on, wire together and read charts from. On a phone the layout will not hold together.
+        Coda is a node-graph editor made for a desktop or tablet: you place nodes on a canvas,
+        wire them together and look at the results. On a phone the layout does not work well.
       </p>
-      <p className="small-screen__quiet">
-        These pages do read here, and are where the writing is:
-      </p>
+      <p className="small-screen__quiet">These pages work fine on a phone:</p>
       <ul className="small-screen__links">
         <li>
-          <a href={OVERVIEW_URL}>Overview</a> — what Coda is, in one scroll.
+          <a href={OVERVIEW_URL}>Overview</a>: what Coda is and what it can do.
         </li>
         <li>
-          <a href={TUTORIAL_URL}>Field guide</a> — an introduction that builds a real pipeline.
+          <a href={TUTORIAL_URL}>Field guide</a>: an introduction that builds a real pipeline.
         </li>
         <li>
-          <a href={NODE_GUIDE_URL}>Node guide</a> — every node, what it takes and what it hands
-          on.
+          <a href={NODE_GUIDE_URL}>Node guide</a>: every node, with its inputs and outputs.
         </li>
       </ul>
       <div className="small-screen__actions">

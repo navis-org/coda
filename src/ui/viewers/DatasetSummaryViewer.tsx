@@ -36,9 +36,10 @@ import {
 } from '../../nodes/lib/datasetStats'
 import type { AttributeCounts, SummaryChartsMode } from '../../nodes/lib/datasetStats'
 import { getSource } from '../../data/source'
-import { MAX_SERIES, currentMode, seriesColor } from '../colors'
-import type { Mode } from '../colors'
-import { formatCompact, formatNumber, formatShare } from '../format'
+import { MAX_SERIES, seriesColor } from '../../style/colors'
+import { currentMode } from '../useThemeMode'
+import type { Mode } from '../../style/colors'
+import { formatCompact, formatNumber, formatShare } from '../../style/format'
 import { useNeuronIndex } from '../useNeuronIndex'
 import { Bars, Columns, Donut, Loadable, Pager, Tile } from './Tiles'
 import type { ColumnBar } from './Tiles'
@@ -694,7 +695,7 @@ function completenessColumns(
      *
      * `Number(null)` is 0 and `Number.isFinite(0)` is true, so testing the converted value lets
      * a region with nothing recorded through as a confident 0% column — a measurement drawn for
-     * something nobody measured. Same trap `numeric()` in `ui/encoding.ts` exists for, and the
+     * something nobody measured. Same trap `numeric()` in `style/encoding.ts` exists for, and the
      * same answer.
      */
     const cell = fraction[row]

@@ -59,9 +59,9 @@ describe('familyChainHint', () => {
     const warning = familyChainHint(flywire, undefined)
     // Pinned whole: this is the wording that was asked for, assembled from three declarations.
     expect(warning?.message).toBe(
-      'Cell types come from the hierarchical_neuron_annotations CAVE table, an outdated cut of ' +
-        'the FlyWire annotations: later typing and corrections are missing, and it has no ' +
-        'community tags. Click button below to wire in the recommended FlyWire annotations.',
+      'Cell types come from the hierarchical_neuron_annotations CAVE table, an outdated version ' +
+        'of the FlyWire annotations. It is missing later typing and corrections, and it has no ' +
+        'community tags. Click the button below to wire in the recommended FlyWire annotations.',
     )
     expect(warning?.fix).toEqual(
       expect.objectContaining({ label: ATTACH_CHAIN_LABEL, action: 'attachAnnotationChain' }),
@@ -73,23 +73,30 @@ describe('familyChainHint', () => {
   })
 
   it('offers the chain where a dataset has no labels of its own and its chain opts in', () => {
-    const minnie = datasetFamily('minnie65')
-    const hint = familyChainHint(minnie, undefined)
-    expect(hint?.message).toBe(
-      'No cell types without annotations: MICrONS types its cells in CAVE tables rather than on ' +
-        'the neuron. Click button below to wire in the recommended MICrONS cell types.',
-    )
-    expect(hint?.fix).toEqual(
-      expect.objectContaining({ label: ADD_CHAIN_LABEL, action: 'attachAnnotationChain' }),
-    )
-    expect(familyChainHint(minnie, T.table())).toBeUndefined()
+    for (const [key, message] of [
+      [
+        'minnie65',
+        'No cell types without annotations: MICrONS keeps its cell types in separate CAVE ' +
+          'tables. Click the button below to wire in the recommended MICrONS cell types.',
+      ],
+      [
+        'banc',
+        'No cell types without annotations: BANC keeps its cell types in a separate CAVE table. ' +
+          'Click the button below to wire in the recommended BANC annotations.',
+      ],
+    ] as const) {
+      const family = datasetFamily(key)
+      const hint = familyChainHint(family, undefined)
+      expect(hint?.message, key).toBe(message)
+      expect(hint?.fix, key).toEqual(
+        expect.objectContaining({ label: ADD_CHAIN_LABEL, action: 'attachAnnotationChain' }),
+      )
+      expect(familyChainHint(family, T.table()), key).toBeUndefined()
+    }
   })
 
-  it('is silent where a chain declares neither reason, or there is no chain', () => {
-    // BANC is Minnie's case and has not opted in (`AnnotationChain.unlabelled`).
-    for (const key of ['banc', 'hemibrain']) {
-      expect(familyChainHint(datasetFamily(key), undefined), key).toBeUndefined()
-    }
+  it('is silent where there is no chain', () => {
+    expect(familyChainHint(datasetFamily('hemibrain'), undefined)).toBeUndefined()
   })
 
   it('is silent on the graph the wizard builds', () => {

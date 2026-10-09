@@ -597,6 +597,63 @@ keystroke (`asked`'s rule, reached by comparing the credential instead of by a s
 signing in is what fills a field that was drawn bare — with no listing button anywhere, because
 there is nowhere sensible to put one on a card.
 
+**The source's own listing peek is gated the same way**, and was not until the assistant found
+it. `CaveSource.peekDatasets` started `runListing`, whose first request is this one, with no token
+check, so any code that merely *inferred* a CAVE dataset node raised "No CAVE token". The
+assistant's system prompt infers a one-card graph for every node type it describes, CAVE datasets
+included, so every first question put the Connections dialog over an answer about a neuPrint
+dataset — for anybody without a CAVE token, which is most people. `peekDatasets` now returns before
+`listing.peek` without one, so nothing is spent and the first peek after signing in still starts
+it; `cave.test.ts` pins both halves.
+
+neuPrint had the same hole, and **the gate now lives in `DatasetListing` as `credential`** (its
+rule 4) rather than in each source: a listing given one does not peek without it, and one that
+failed under a token is asked again under the next — rule 2's once-per-instance becoming once per
+credential. neuPrint's second peek, `schemasFor`, starts discovery and is gated the same way, since
+its queries are refused by the client for the same missing token: five reports to the Connections
+channel per inferred node. **The old neuPrint test had watched `fetch` and passed throughout** — the
+client refuses a tokenless request *before* fetching, so the report went out with no request to
+count. It watches the auth channel now. **The discovery gate fixes a second bug it had been hiding**:
+`runDiscovery` catches each of its three queries, so with every one refused it still stored a
+schema "discovered" from nothing and never asked again — a tokenless session's hemibrain claimed no
+`superclass` until a reload, sign-in or not. `datasetBody.test.tsx` had been reading exactly that
+as a real discovery; it now sets a token and stubs a server that answers.
+
+**The two geometry peeks were the same hole with a longer memory.** `skeletonSourcesFor` and
+`meshLevelsFor` read the published neuroglancer state through the same client, ungated, so
+inferring a Skeletons or Meshes card without a token opened the Connections dialog. And `ngState`
+caught *every* failure as `scene: null` — no token, a 401, a 5xx, a cancel — which
+`publishedSkeletonsFor` and `meshSourceFor` then cached as "publishes none" on top: after one blip,
+or after signing in, the Skeletons card offered one route and the Meshes card no levels for the rest
+of the session. The CAVE rule, arrived at independently: **only neuPrint's own 404 is a verdict**
+(`isNotFound`), and a same-origin 404 from a host with no proxy rule is marked `unreached` so it
+cannot pass for one. `ngState` now *rejects* on anything else, `caveGetOr404`'s shape, so no reader
+can cache a failure by accident, and replays a failure for `RETRY_AFTER_MS` per token rather than
+asking once per thumbnail and per restyle. Both peeks are gated on a token and keyed on it through
+`PeekGate` (`src/data/peekGate.ts`), which `DatasetListing` shares — three hand-written copies had
+already diverged on whether they remembered a flag or a token. CAVE's `schemasFor` discovery had the
+same hole — a one-shot flag and no token check, so dragging a FlyWire card onto the canvas without a
+CAVE token reported "No CAVE token" — and now takes the gate too, with `quiet` on the discovery it
+starts, since a refusal of something nobody asked for is not a reason to open the dialog; a Run still
+reports.
+
+**Then every credentialed peek was swept, and five more had it.** `src/data/peeks.test.ts` calls each
+with no token and asserts no request *and* no report, then signs in and asserts a request — both
+halves, since each hides the other. Three reported into the dialog from a render: CAVE's skeleton
+service peek, the CAVE-table annotations' kinds and SeaTable's base metadata. Two were already
+`quiet` but spent their one ask on the tokenless refusal, so the answer stayed unknown after signing
+in until something awaited it: `peekMaterializations` (a Custom CAVE node's versions) and
+`peekL2Cache`. All five are on `PeekGate` now — `PeekGates` for the module-level ones, which also
+took `peekTableList` and the table-sample peeks off their own flags — keyed on their own credential,
+CAVE's per deployment and SeaTable's per host, and the CAVE ones are `quiet`. The flat-bucket and
+NeuronBridge peeks read public buckets and keep a plain once-flag, correctly. The sweep's last test
+reads every exported `peek*` function in `src/data` and fails on one that is neither swept nor listed
+in `NO_CREDENTIAL` with a reason, so the next peek cannot be missed the way these five were. The
+test that pins the gate has to watch the auth channel *and* let the first read settle: a pending
+read is joined rather than repeated, and a tokenless one is refused before `fetch`, so a URL count
+stayed green against the ungated version twice before it was written that way. And the assistant's prompt no longer infers dataset nodes at
+all (`producedColumns`, `docs/assistant.md`), which is what had been reaching these peeks.
+
 **One memo, two readers.** `CaveSource.runListing` narrows the very same list to the datastacks
 with a spec, so `datastacksFor` in `datastack.ts` is what both go through — one fact, one request,
 one invalidation rule. Written as a second call it was two round trips per session cached two ways
@@ -2604,6 +2661,16 @@ inside it. That last pair is pre-existing and every backend's mesh open paid it.
 held (they are usually transient, the same reason `remember` refuses to persist `unreachable`),
 and in-flight requests are not deduplicated, because sharing one promise would let one caller's
 `AbortSignal` reject for every other.
+
+**A host that has answered direct reads is retried, not routed, when a read comes back with
+nothing** (`retryDirect` in `fetchBytes`). A browser reports a dropped connection exactly as it
+reports a CORS refusal — an opaque `TypeError` — so the fallback chain read a reset as a refusal and
+the error said the host "refuses cross-origin reads". Found on BigClust's public example: its
+60 MB `features_0.parquet` is read in about 8,400 ranged requests, and one in a few thousand came
+back `206` and was then reset mid-body (`net::ERR_CONNECTION_RESET`, seen through the DevTools
+protocol) — one reset failing the whole project. Twice more, after 250 ms and 1 s, and an answer of
+any kind settles it as before; a host that has never answered still takes the routes. A run that
+keeps dropping says the connection dropped, naming no CORS.
 
 Checked against the live buckets (`live.test.ts`, `PRECOMPUTED_LIVE=1`):
 

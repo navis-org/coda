@@ -7,7 +7,8 @@
  * Nodes must treat columns as immutable — always build new arrays.
  */
 
-import type { CodaType, PopulationFilter, TableSchema } from './types'
+import type { FilterOp } from './rowPredicate'
+import type { CodaType, DType, PopulationFilter, TableSchema } from './types'
 import { datasetRef } from './types'
 
 export type CellValue = number | string | boolean | null
@@ -263,21 +264,133 @@ export interface SkeletonGeometry {
    * one the source measured. Where present it is exactly as long as `radii`.
    */
   readonly compartments?: Uint8Array
+  /**
+   * A *computed* axon/dendrite split, one code per point — 0 unassigned, 1 dendrite, 2 axon,
+   * 3 linker, `pyodide/topology.py`'s numbers (pinned there by `topology.test.ts`).
+   *
+   * A field of its own rather than codes written into `compartments`, which is the rule above
+   * kept rather than bent: a source's labels and a result computed from synapses stay apart, so a
+   * reader can always say which it drew. MICrONS' skeleton service already ships an automatic
+   * split in `compartments`, and with one field the two would be indistinguishable. SWC also has
+   * no code for the linker.
+   *
+   * **Absent means nobody split this skeleton.** No source sets it. It is a property of *this*
+   * tree's nodes, so anything that renumbers them (Clean Skeletons) drops it; anything that only
+   * moves them (mirror, warp, heal) keeps it. Where present it is exactly as long as `radii`.
+   */
+  readonly split?: Uint8Array
+  /**
+   * Computed numbers per point, by name — `flow` being the first (`NODE_VALUES`). Each array is
+   * exactly as long as `radii`.
+   *
+   * One map rather than a field per measure, so the next per-node number (Strahler order, distance
+   * from the soma) needs no new field, no new viewer mode and no new entry in `skeletonBuffers`.
+   * Like `split` these are results computed for *this* tree's nodes: never set by a source, kept by
+   * a transform that only moves the nodes, dropped by one that renumbers them.
+   */
+  readonly nodeValues?: Readonly<Record<string, Float32Array>>
 }
+
+/**
+ * A memo slot per skeleton geometry, for a cache that has to outlive the item object.
+ *
+ * Keyed on `parents` and `positions` by reference rather than on the item, because a node that
+ * re-labels a set (`withSplit`) mints a new item per run around the same two arrays — and on both,
+ * because a heal replaces `parents` and keeps `positions` while a mirror does the opposite, and a
+ * cache keyed on either alone would hand the changed tree the old one's answer. Weak at both
+ * levels, so a slot lives exactly as long as its geometry. Each caller keeps its own inner key in
+ * the slot `make` builds — a root number in a `Map`, a synapse list in a `WeakMap`.
+ */
+export function perGeometry<V>(make: () => V): (skeleton: SkeletonGeometry) => V {
+  const byParents = new WeakMap<Int32Array, WeakMap<Float32Array, V>>()
+  return (skeleton) => {
+    let byPositions = byParents.get(skeleton.parents)
+    if (!byPositions) byParents.set(skeleton.parents, (byPositions = new WeakMap()))
+    let slot = byPositions.get(skeleton.positions)
+    if (slot === undefined) byPositions.set(skeleton.positions, (slot = make()))
+    return slot
+  }
+}
+
+/**
+ * The per-node values Coda computes, and what each is called where somebody picks one. A fixed list
+ * rather than discovery, because the 3D View's picker is drawn at edit time and a type carries no
+ * geometry to discover them from.
+ */
+export const NODE_VALUES = [
+  {
+    value: 'flow',
+    label: 'synapse flow (fraction of peak)',
+    /** Where the value comes from — so a picker can say it without naming nodes itself. */
+    source: 'Split Axon/Dendrite, with Write synapse flow on',
+  },
+] as const satisfies readonly { value: string; label: string; source: string }[]
+
+/** SWC's structure codes — `SkeletonGeometry.compartments`' vocabulary, named once. */
+export const SWC_SOMA = 1
+export const SWC_AXON = 2
+export const SWC_BASAL = 3
+export const SWC_APICAL = 4
 
 /**
  * `SkeletonGeometry.compartments`' codes as words, for a column a Split by or a Filter reads. 0 is
  * unlabelled and reads null; a code past SWC's standard four keeps its number rather than being
  * guessed at. A table so those `swc N` fallbacks are built once rather than once per point.
  */
+const SWC_WORDS: Readonly<Record<number, string>> = {
+  [SWC_SOMA]: 'soma',
+  [SWC_AXON]: 'axon',
+  [SWC_BASAL]: 'basal dendrite',
+  [SWC_APICAL]: 'apical dendrite',
+}
 const SWC_NAMES: readonly (string | null)[] = Array.from({ length: 256 }, (_, code) =>
-  code === 0
-    ? null
-    : (['soma', 'axon', 'basal dendrite', 'apical dendrite'][code - 1] ?? `swc ${code}`),
+  code === 0 ? null : (SWC_WORDS[code] ?? `swc ${code}`),
 )
 
 export function compartmentName(code: number): string | null {
   return SWC_NAMES[code] ?? null
+}
+
+/*
+ * `SkeletonGeometry.split`'s codes — the one TypeScript spelling, here because this file declares
+ * the field they label, beside the SWC codes `compartments` speaks.
+ *
+ * The split itself is `pyodide/topology.py`, which names the same numbers in Python. Two languages
+ * cannot share a constant, so `pyodide/topology.test.ts` reads the Python source and holds it to
+ * these: a renumbering on either side fails a test rather than filing axon cable under the
+ * dendrite column with nothing thrown anywhere.
+ */
+export const CODE_UNASSIGNED = 0
+export const CODE_DENDRITE = 1
+export const CODE_AXON = 2
+export const CODE_LINKER = 3
+
+/**
+ * A split code as a word, for a column a Group By, a Filter or a colour reads. Unassigned — and any
+ * code this vocabulary does not have — is null rather than a guess.
+ */
+export function splitName(code: number): 'dendrite' | 'axon' | 'linker' | null {
+  if (code === CODE_DENDRITE) return 'dendrite'
+  if (code === CODE_AXON) return 'axon'
+  if (code === CODE_LINKER) return 'linker'
+  return null
+}
+
+/** What a compartment label can mean, in either vocabulary a skeleton carries. */
+export type CompartmentKey = 'axon' | 'dendrite' | 'linker' | 'soma'
+
+/**
+ * A node's label as a compartment, read in the vocabulary it is in: a computed split
+ * (`SkeletonGeometry.split`, `CODE_*`) or the source's SWC codes (`compartments`), where basal and
+ * apical are both dendrite. The one mapping every surface that draws compartments reads, so the 3D
+ * View, Topology's card and the Cortex wall cannot disagree about what a code is.
+ */
+export function compartmentKey(code: number, computed: boolean): CompartmentKey | undefined {
+  if (computed) return splitName(code) ?? undefined
+  if (code === SWC_AXON) return 'axon'
+  if (code === SWC_BASAL || code === SWC_APICAL) return 'dendrite'
+  if (code === SWC_SOMA) return 'soma'
+  return undefined
 }
 
 /**
@@ -286,9 +399,11 @@ export function compartmentName(code: number): string | null {
  * somebody remembered to edit.
  */
 export function skeletonBuffers(s: Omit<SkeletonGeometry, 'id'>): ArrayBufferView[] {
-  return s.compartments
-    ? [s.positions, s.radii, s.parents, s.compartments]
-    : [s.positions, s.radii, s.parents]
+  const buffers: ArrayBufferView[] = [s.positions, s.radii, s.parents]
+  if (s.compartments) buffers.push(s.compartments)
+  if (s.split) buffers.push(s.split)
+  if (s.nodeValues) buffers.push(...Object.values(s.nodeValues))
+  return buffers
 }
 
 /**
@@ -536,6 +651,78 @@ export interface LayersValue {
   readonly items: ReadonlyArray<Readonly<Record<string, unknown>>>
 }
 
+/**
+ * A table held in a file rather than in memory — what `tableFile` sockets carry.
+ *
+ * **Plain data, deliberately**: where the bytes are, what they hold, and a fingerprint of them,
+ * with no open reader, handle or promise on it. A value is hashed, exported as JSON, previewed and
+ * measured by code that knows nothing about files, and a reader object riding on one would leak
+ * into all of those. Whoever reads rows opens the file from `ref` (`data/files/`) and refuses one
+ * whose fingerprint no longer matches, which is how a file edited on disk since it was opened is
+ * caught rather than read as if nothing had changed.
+ */
+export interface TableFileValue {
+  readonly kind: 'tableFile'
+  readonly ref: TableFileRef
+  readonly format: 'parquet' | 'feather' | 'delta'
+  /** A Delta table's version: what this value and every read below it are pinned to. */
+  readonly version?: number
+  /** The columns rows come out in, as this file's node types them. */
+  readonly schema: TableSchema
+  /**
+   * How each column is *stored* — what a reader needs to decode it, where `schema` says only what
+   * it is read as. On the value rather than looked up by `ref`, so whoever reads rows has the
+   * facts from the wire, the way it has everything else.
+   */
+  readonly columns: readonly TableFileColumn[]
+  /**
+   * The columns whose block index a lookup should use, building it the first time. On the value,
+   * and so in the key, because it is how a reader learns it — ticking one re-runs the lookups
+   * below once, which is when the index gets built. It changes how fast, never what.
+   */
+  readonly indexColumns: readonly string[]
+  /** Undefined where the file does not say without reading every block (Feather). */
+  readonly rows: number | undefined
+  /** Row groups (Parquet) or record batches (Feather): the unit a read skips or takes. */
+  readonly blocks: number
+  readonly bytes: number
+  readonly fingerprint: string
+  /**
+   * Row conditions a Filter Table left on the file for its readers, ANDed, in the order added —
+   * applied to the rows a reader fetched rather than by reading the file for them, so a lookup
+   * by id stays a lookup by id (`data/files/filters.ts`). Absent is no condition.
+   */
+  readonly filters?: readonly TableFileFilter[]
+}
+
+/** One `Filter Table` condition, carried on a file for its readers: plain data, so it crosses to a worker. */
+export interface TableFileFilter {
+  readonly column: string
+  readonly op: FilterOp
+  readonly value: string
+}
+
+/** One column of a table file, as its footer declares it — plain data, so a value can carry it. */
+export interface TableFileColumn {
+  readonly name: string
+  /** The type it is read as when nothing overrides it. A 64-bit integer column says `i64` here. */
+  readonly dtype: DType
+  /** A 64-bit integer — the one kind whose dtype the file's node decides. */
+  readonly int64?: true
+  /** Parquet statistics show a value past 2^53, so it cannot be a number column. */
+  readonly overflow?: true
+  /** A timestamp or date, read as ISO text. */
+  readonly time?: true
+}
+
+/**
+ * Where a table file's bytes are. `local` names a file on this machine by the id the registry
+ * holds it under — never the file itself, which cannot be hashed or saved.
+ */
+export type TableFileRef =
+  | { readonly kind: 'local'; readonly id: string; readonly name: string }
+  | { readonly kind: 'url'; readonly url: string }
+
 export type Value =
   | TableValue
   | MatrixValue
@@ -549,6 +736,7 @@ export type Value =
   | LinkageValue
   | TransformValue
   | LayersValue
+  | TableFileValue
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -894,7 +1082,7 @@ export function isPointsValue(v: Value | undefined): v is PointsValue {
 }
 
 /** Total point count across a skeleton collection, for summaries and guard rails. */
-export function skeletonPointCount(v: SkeletonsValue): number {
+export function skeletonPointCount(v: Pick<SkeletonsValue, 'items'>): number {
   return v.items.reduce((sum, item) => sum + item.parents.length, 0)
 }
 
@@ -924,6 +1112,10 @@ export function isLayoutValue(v: Value | undefined): v is LayoutValue {
 
 export function isLinkageValue(v: Value | undefined): v is LinkageValue {
   return !!v && v.kind === 'linkage'
+}
+
+export function isTableFileValue(v: Value | undefined): v is TableFileValue {
+  return !!v && v.kind === 'tableFile'
 }
 
 /** How many merges. `merges` is four numbers each, so this is not its length. */
@@ -1053,6 +1245,11 @@ export function describeValue(v: Value | undefined): string {
       return `${v.count.toLocaleString()} landmarks${v.targetSpace ? ` → ${v.targetSpace}` : ''}`
     case 'layers':
       return `${v.items.length} layer${v.items.length === 1 ? '' : 's'}`
+    case 'tableFile': {
+      // The file's own row count is before any condition: said so, rather than read as the answer.
+      const on = [...new Set(v.filters?.map((f) => f.column))].join(', ')
+      return on ? `${describeTableFile(v)} · filtered on ${on}` : describeTableFile(v)
+    }
     case 'linkage': {
       const cut = v.clusters ? ` · ${new Set(v.clusters).size} clusters` : ''
       return `${v.labels.length} leaves${v.method ? ` · ${v.method}` : ''}${cut}`
@@ -1066,6 +1263,36 @@ export function describeValue(v: Value | undefined): string {
     default:
       return String(v.value)
   }
+}
+
+/** What a table file is called wherever it is named: the file's name, or its URL. */
+export function tableFileName(ref: TableFileRef): string {
+  return ref.kind === 'local' ? ref.name : ref.url
+}
+
+const BLOCK_NOUNS = {
+  parquet: ['row group', 'row groups'],
+  feather: ['batch', 'batches'],
+  delta: ['file', 'files'],
+} as const
+
+/** What a format's blocks are called — the unit a read skips or reads whole — for `count` of them. */
+export function tableFileBlocks(format: TableFileValue['format'], count: number): string {
+  return BLOCK_NOUNS[format][count === 1 ? 0 : 1]
+}
+
+/**
+ * `Parquet · 1,234 rows · 3 row groups`, `Feather · 3 batches` where rows are not known, or
+ * `Delta · version 596 · 76,460,814 rows · 33 files`.
+ */
+export function describeTableFile(
+  v: Pick<TableFileValue, 'format' | 'rows' | 'blocks' | 'version'>,
+): string {
+  const blocks = `${v.blocks.toLocaleString()} ${tableFileBlocks(v.format, v.blocks)}`
+  const rows = v.rows === undefined ? '' : ` · ${v.rows.toLocaleString()} rows`
+  const name = { parquet: 'Parquet', feather: 'Feather', delta: 'Delta' }[v.format]
+  const version = v.version === undefined ? '' : ` · version ${v.version}`
+  return `${name}${version}${rows} · ${blocks}`
 }
 
 /**

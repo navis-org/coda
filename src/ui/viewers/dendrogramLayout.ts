@@ -12,7 +12,7 @@
  */
 
 import type { LinkageValue } from '../../core/values'
-import { labelStep } from '../format'
+import { labelStep } from '../../style/format'
 
 export type DendrogramOrientation = 'right' | 'down'
 

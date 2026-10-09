@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { labelStep } from '../format'
+import { labelStep } from '../../style/format'
 
 import type { LinkageValue } from '../../core/values'
 import { makeLinkage } from '../../core/values'

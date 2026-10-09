@@ -62,7 +62,7 @@ export function anchor(key: string): string {
 /**
  * The inline markdown `DatasetGuideEntry.about` is allowed to use.
  *
- * Four constructs — link, bold, italic, code — and deliberately not `ui/markdown.ts`, which
+ * Four constructs — link, bold, italic, code — and deliberately not `core/markdown.ts`, which
  * parses to blocks a React component renders and would have to be paired with a second renderer
  * here. What it does share is the rule that matters: **an href is either `http`/`https` or a
  * `./` path on this site, and nothing else is linked at all** — so a URL typed wrong renders as
@@ -334,7 +334,7 @@ function cardHTML(d: DatasetGuideEntry): string {
       </div>`
     : `<div class="ds__block ds__block--cite">
         <h3>How to cite it</h3>
-        <p class="ds__none">Nothing to cite &mdash; it is generated, not measured.</p>
+        <p class="ds__none">Nothing to cite: this dataset is synthetic.</p>
       </div>`
 
   const rather = d.ratherThan ? `<p class="ds__rather">${inline(d.ratherThan)}</p>` : ''
@@ -430,9 +430,9 @@ ${TIERS.map((t) => tierHTML(t.id)).join('\n')}
   <header class="tier__head">
     <h2 id="elsewhere-h">What else is out there</h2>
     <p>
-      Connectomes with no node of their own here. Most are still reachable &mdash; the three
-      custom dataset nodes take a deployment and a name, and the Neuroglancer Source node takes a
-      precomputed bucket.
+      These connectomes have no dedicated node in Coda, but you can still open most of them: the
+      Custom CAVE, Custom neuPrint and Custom CATMAID nodes take a server and a dataset name, and
+      the Neuroglancer Source node takes a precomputed bucket.
     </p>
   </header>
   <ul class="elses">${ELSEWHERE.map(elsewhereHTML).join('\n')}</ul>

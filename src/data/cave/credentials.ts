@@ -30,6 +30,7 @@ import { readStorage, writeStorage } from '../localStore'
 import type { SignInSession } from '../signIn'
 import { cleanToken, readSession } from '../signIn'
 import { normaliseCaveServer } from './deployments'
+import type { StoredSignIn } from '../signIns'
 
 const CREDENTIALS_KEY = 'coda.cave.credentials.v1'
 
@@ -190,4 +191,11 @@ export function resetCredentials(): void {
   rows = undefined
   writeStorage(CREDENTIALS_KEY, undefined)
   removeLegacy()
+}
+
+/** The Storage tab's entry: the current key and the legacy ones a migration may not have reached. */
+export const SIGN_IN: StoredSignIn = {
+  service: 'CAVE',
+  keys: [CREDENTIALS_KEY, ...LEGACY_KEYS],
+  stored: () => listCredentials().length > 0,
 }

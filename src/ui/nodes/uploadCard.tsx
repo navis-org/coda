@@ -4,8 +4,8 @@
  *
  * Cohesive by *audience* rather than by technology — every export here has exactly the same two
  * consumers and is always imported with the others. `checkUploadSize` looks pure enough to live a
- * layer down, and cannot: it takes DOM `File`s and builds copy through `ui/format`, both of which
- * invariant 1 closes `src/data` and `src/nodes` to.
+ * layer down, and cannot: it takes DOM `File`s, which invariant 1 closes `src/data` and `src/nodes`
+ * to.
  *
  * Shared by `UploadBody` and `UploadMeshBody`, which are otherwise different cards — one picks a
  * CSV and asks what its columns mean, the other picks mesh files and asks what units they are in.
@@ -32,6 +32,8 @@
 import { useSyncExternalStore } from 'react'
 
 import { getNodeDef } from '../../core/registry'
+import type { TableSchema } from '../../core/types'
+import type { RememberedState } from '../../data/files/remembered'
 import { ParamField } from '../params/ParamField'
 import { cardParams } from '../params/paramGroups'
 import type { NodeBodyProps } from './nodeBodies'
@@ -46,7 +48,7 @@ import {
   uploadPeekSettled,
   uploadRevision,
 } from '../../data/uploads'
-import { formatBytes, plural } from '../format'
+import { formatBytes, plural } from '../../style/format'
 
 type UploadState = 'empty' | 'loading' | 'ready' | 'absent'
 
@@ -170,4 +172,60 @@ export function UploadAbsent({
   return (
     <span className="upload-body__absent">⚠ {uploadMissingReason(fileName, kind, 'card')}</span>
   )
+}
+
+/**
+ * A file's columns and their types, which is what somebody checks after bringing one in — drawn
+ * the same way on every card that brings a file in, so a third card does not grow a third copy.
+ */
+export function SchemaListing({ schema }: { schema: TableSchema }) {
+  return (
+    <table className="upload-body__schema">
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        {schema.columns.map((c) => (
+          <tr key={c.name}>
+            <td>{c.name}</td>
+            <td>{c.dtype}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/**
+ * A local file's or folder's card line where it is not in hand: still being looked for, waiting
+ * for the click only a user gesture may give, or not in this browser — the states
+ * `data/files/remembered.ts` keeps, drawn once for Link Table's card and BigClust's. Undefined
+ * while it is held, when the card says what is in it instead. An absent one shows its name alone:
+ * the card's warning line says what happened and what to do, once.
+ */
+export function localSourceLine(
+  state: RememberedState,
+  name: string,
+  allow: () => void,
+): { state: string; line: React.ReactNode } | undefined {
+  switch (state) {
+    case 'restoring':
+      return { state: 'reading', line: `Looking for ${name}…` }
+    case 'permission':
+      return {
+        state: 'missing',
+        line: (
+          <button type="button" onClick={allow}>
+            Allow access to {name}
+          </button>
+        ),
+      }
+    case 'absent':
+      return { state: 'missing', line: <span className="upload-body__absent">{name}</span> }
+    default:
+      return undefined
+  }
 }

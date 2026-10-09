@@ -539,7 +539,7 @@ describe('Custom CAVE', () => {
       requireNodeDef('dataset.cave').validate?.(
         ctxFor('dataset.cave', { datastack: DATASTACK_SPECS[0]?.datastack ?? '' }),
       ) ?? []
-    expect(issues.join(' ')).toContain('ships a node')
+    expect(issues.join(' ')).toContain('already has a node')
   })
 })
 

@@ -23,13 +23,11 @@ registerNode({
   type: 'out.network',
   label: 'Network Viewer',
   category: 'visualisation',
-  description: 'Node-link view of a network, with data-driven colour and size.',
+  description: 'Node-link view of a network, with colour, size and shape driven by columns.',
   guide:
-    'Draw an interactive network diagram: neurons or types as discs, connections as links, laid ' +
-    'out by force, layers, a circle or a grouped ring. Colour and size are data-driven through ' +
-    'the styling panel, and what you click leaves by the Selected port. Note that its three ' +
-    'filters — minimum link weight, top N nodes, hide isolated — change what the node returns ' +
-    'rather than only what it draws.',
+    'Interactive node-link diagram of a network, usually wired from Build Network. Colour, size ' +
+    'and shape can follow columns, and nodes you click come out of Selected. The three filters ' +
+    '(Min link weight, Top nodes, Hide isolated) also change the network passed downstream.',
   cost: 'cheap',
   /*
    * Tabs for the overlay's styling panel, Cytoscape's Style tab being the reference: the
@@ -146,9 +144,7 @@ registerNode({
         { value: 'on', label: 'always' },
         { value: 'off', label: 'never' },
       ],
-      help:
-        'Barnes-Hut approximation of the repulsion — about 3× faster at 3,000 nodes. On ' +
-        'automatically above 2,000.',
+      help: 'Barnes-Hut approximation of the repulsion, about 3× faster at 3,000 nodes.',
       presentational: true,
       advanced: true,
       group: 'layout',
@@ -164,8 +160,8 @@ registerNode({
       max: 1,
       step: 0.1,
       help:
-        'How much a link’s weight pulls its endpoints together. Lower it if strongly ' +
-        'connected pairs collapse onto each other; 0 leaves weight in the node spacing.',
+        'How strongly a link’s weight pulls its endpoints together. Lower it if strongly ' +
+        'connected pairs collapse onto each other.',
       presentational: true,
       advanced: true,
       group: 'layout',
@@ -209,7 +205,7 @@ registerNode({
       from: 'in',
       part: 'nodes',
       default: '',
-      help: 'Cluster nodes sharing a value — a class, a side, an ROI.',
+      help: 'Cluster nodes that share a value, e.g. a class, side or ROI.',
       presentational: true,
       advanced: true,
       group: 'layout',
@@ -234,9 +230,7 @@ registerNode({
         { value: 'separate', label: 'laid out separately' },
         { value: 'together', label: 'all at once' },
       ],
-      help:
-        'Lay each disconnected piece out on its own and pack the results, instead of piling ' +
-        'them together.',
+      help: 'Lay out each disconnected piece separately and pack them side by side.',
       presentational: true,
       // Inspector and styling panel, not the card — see the note above. It was briefly not
       // `advanced`, on the grounds that partitioning is the whole point of this layout; making
@@ -422,7 +416,7 @@ registerNode({
       id: 'edgeOpacity',
       kind: 'number',
       label: 'Link opacity',
-      help: 'Fade every link. The cheapest way to read a dense graph without dropping links.',
+      help: 'Fade every link. Helps read a dense graph without dropping links.',
       default: 1,
       min: 0.1,
       max: 1,

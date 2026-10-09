@@ -75,11 +75,9 @@ registerNode({
   cardWidth: 320,
   description: 'Run everything downstream once per element, or once per group.',
   guide:
-    'Runs everything wired after it once per element — a row, a skeleton, a mesh, or every ' +
-    'element sharing a value of a column. Pair it with Download to write a file per neuron, or ' +
-    'with Collect to stack the results into one value. Only one element is ever in memory, ' +
-    'which is what makes a set too large to load still possible to save. Start it with the ' +
-    'card’s Run loop button, not Run.',
+    'Runs everything wired after it once per element (a row, a skeleton or a mesh) or once per ' +
+    'group. Follow it with Download to write one file per neuron, or with Collect to combine ' +
+    'the results. Start it with the card’s Run loop button.',
   /*
    * Not about cost — see the header. `cheap` would run the whole loop on the 180ms pass after
    * every keystroke, which for a loop that writes files is unusable.
@@ -133,7 +131,7 @@ registerNode({
       id: 'batch',
       kind: 'int',
       label: 'Batch size',
-      help: 'Elements per pass. Raising it lets the backend fetch several at once — much faster for downloads — at the cost of holding that many. Leave at 1 when each pass renders a picture.',
+      help: 'Elements per pass. Higher is much faster for downloads but holds more in memory. Leave at 1 when each pass renders a picture.',
       default: 1,
       min: 1,
       advanced: true,
@@ -150,7 +148,7 @@ registerNode({
       id: 'limit',
       kind: 'int',
       label: 'First N',
-      help: 'Stop after this many elements — not passes, so it means the same neurons whatever the batch size. 0 runs the whole collection.',
+      help: 'Stop after this many elements, whatever the batch size. 0 runs the whole collection.',
       default: 0,
       min: 0,
       advanced: true,
@@ -176,7 +174,7 @@ registerNode({
       )
     }
     if (isGroupMode(ctx.params) && !ctx.column('groupBy')) {
-      issues.push('Pick a column to group by, or switch back to iterating elements.')
+      issues.push('Pick a column for `Group by`, or set `For each` back to "element".')
     }
     return issues
   },
@@ -206,13 +204,14 @@ registerNode({
     const value = ctx.input('in')
     if (!isIterableValue(value)) {
       throw new Error(
-        'For Each iterates a Table, Skeletons or Meshes — this input carries something else.',
+        'For Each iterates a Table, Skeletons or Meshes, and this input is something else. ' +
+          'Wire one of those into `Items`.',
       )
     }
     if (isGroupMode(ctx.params) && !ctx.column('groupBy')) {
       throw new Error(
-        `No column to group by. Pick one, or set "For each" back to ${elementNoun(value)}` +
-          `.`,
+        `No column is set for \`Group by\`. Pick one, or set \`For each\` back to "element" ` +
+          `to loop over each ${elementNoun(value)}.`,
       )
     }
 

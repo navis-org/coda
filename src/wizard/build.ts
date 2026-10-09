@@ -1591,7 +1591,7 @@ function overviewNote(answers: WizardAnswers): GraphNode {
 
     Built by the Workflow Wizard from four answers: **${dataset}**, neurons chosen by **${start}**, showing **${analysis}** as **${view}**.
 
-    Read it left to right — each node takes what is on its left and hands something new to its right. Press Run, or ⇧R, to evaluate the chain. Every node here is an ordinary one: change anything, add anything, delete what you do not need.${synthetic}`,
+    Read it from left to right: each node takes the output of the node on its left and passes its own result on to the right. Press Run, or ⇧R, to run the workflow. These are ordinary nodes, so you can change, add or delete anything.${synthetic}`,
   })
 }
 

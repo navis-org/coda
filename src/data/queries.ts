@@ -18,8 +18,7 @@
  *
  * A dataset naming an edge set this browser does not have is a graph that cannot be run. Asking
  * the backend instead would produce a green node, a plausible table, and a different answer from
- * the one the author saw. The message names the set and says that importing the same file
- * resolves it — which is true, because the id is the content.
+ * the one the author saw. The refusal is `requireEdgeSet`'s, which names the set and its remedy.
  *
  * ## Types are the dataset's
  *
@@ -40,8 +39,7 @@ import {
   pathStepFrom,
   synapseTotalsFrom,
 } from './edges/query'
-import type { LoadedEdgeSet } from './edges/store'
-import { loadEdgeSet } from './edges/store'
+import { requireEdgeSet } from './edges/store'
 import type {
   AdjacencyRequest,
   ConnectivityRequest,
@@ -63,22 +61,6 @@ import {
   capabilityOf,
   groupTotalsRefusal,
 } from './source'
-
-/**
- * The attached set, or a refusal naming it.
- *
- * Total rather than partial: given an identity it either answers or throws, so a caller has one
- * branch — is anything attached — rather than two that lead to the same place.
- */
-async function attached(edges: DatasetEdges): Promise<LoadedEdgeSet> {
-  const set = await loadEdgeSet(edges.id)
-  if (set) return set
-  throw new Error(
-    `This dataset's connectivity comes from the edge set "${edges.name}", which is ` +
-      `not in this browser. Import the same file under Edge data on the dataset node; ` +
-      `a set is identified by its contents, so the same file will match.`,
-  )
-}
 
 function schemasOf(source: DataSource, datasetId: string): SourceSchemas {
   return source.schemasFor?.(datasetId) ?? source.schemas
@@ -143,8 +125,8 @@ export async function connectivityFor(
     if (req.edges) {
       throw new Error(
         `This dataset's connectivity comes from the edge set "${req.edges.name}", which ` +
-          `records pre, post and weight only. Turn the region options off, or detach the ` +
-          `edge set under Edge data.`,
+          `only records pre, post and weight. Turn the region options off, or detach the ` +
+          `edge set under \`Edge data\`.`,
       )
     }
     if (!canSplitConnectivityByRoi(source, req.datasetId, false)) {
@@ -164,7 +146,7 @@ export async function connectivityFor(
    * series that is a + b for the first query of a session; here it is the larger of the two.
    */
   const [set, types] = await Promise.all([
-    attached(req.edges),
+    requireEdgeSet(req.edges, req.signal, req.onWarn),
     typeLookup(source, req.datasetId, req),
   ])
 
@@ -208,7 +190,8 @@ export async function synapseTotalsFor(
   source: DataSource,
   req: SynapseTotalsRequest,
 ): Promise<TableValue> {
-  if (req.edges) return synapseTotalsFrom(await attached(req.edges), req)
+  if (req.edges)
+    return synapseTotalsFrom(await requireEdgeSet(req.edges, req.signal, req.onWarn), req)
   // The same predicate the node asks, rather than a third spelling — `pathStepFor`'s rule, and
   // it is that function's recorded incident: a funnel checking only that a method existed
   // accepted a source the node had already refused.
@@ -235,7 +218,7 @@ export async function groupTotalsFor(
 ): Promise<TableValue> {
   if (req.edges) {
     const [set, types] = await Promise.all([
-      attached(req.edges),
+      requireEdgeSet(req.edges, req.signal, req.onWarn),
       typeLookup(source, req.datasetId, req),
     ])
     return groupTotalsFrom(set, req, types)
@@ -270,7 +253,7 @@ export async function adjacencyFor(
   if (edgePropertyWeight(req.weight)) requireEdgeProperties(source, req)
   if (!req.edges) return source.fetchAdjacency(req)
   const [set, types] = await Promise.all([
-    attached(req.edges),
+    requireEdgeSet(req.edges, req.signal, req.onWarn),
     req.groupByType ? typeLookup(source, req.datasetId, req) : undefined,
   ])
   const edges = edgesBetween(set, req.sourceIds, req.targetIds)
@@ -293,7 +276,7 @@ export async function pathStepFor(
   // Types always, not only when collapsing: a neuron-level step still reports each end's type,
   // and a step that dropped them would leave every node in the traversal unnamed.
   const [set, types] = await Promise.all([
-    attached(req.edges),
+    requireEdgeSet(req.edges, req.signal, req.onWarn),
     typeLookup(source, req.datasetId, req),
   ])
   return pathStepFrom(set, req, types)

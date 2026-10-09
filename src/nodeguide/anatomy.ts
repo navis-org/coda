@@ -123,7 +123,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'state',
     label: 'Run state',
-    note: 'Whether the card’s result is current. A glyph as well as a colour, so it reads without telling the hues apart; the stripe down the left edge repeats it.',
+    note: 'Tells you whether the card’s result is up to date. Each state has its own symbol as well as a colour, so you don’t have to tell the colours apart. The stripe down the left edge shows the same state.',
     extra: stateTable(),
     x: 0,
     y: 184,
@@ -134,7 +134,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'title',
     label: 'The node’s name',
-    note: 'Double-click to rename. The name is saved with the workflow; the node’s type underneath it does not change.',
+    note: 'Double-click to rename the node. The new name is saved with the workflow but the node’s type stays the same.',
     x: 8,
     y: 120,
     w: 130,
@@ -144,7 +144,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'fold',
     label: 'Hide settings and ports',
-    note: 'Folds the settings and socket rows away, giving the space to what the card draws. Wires stay connected — the sockets move onto the header.',
+    note: 'Hides the settings and socket rows to make room for whatever the card draws. Wires stay connected: the sockets move up into the header.',
     x: 150,
     y: 136,
     w: 130,
@@ -154,7 +154,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'collapse',
     label: 'Collapse',
-    note: 'Folds the whole card down to its header. Unlike ☰, nothing below the header is kept.',
+    note: 'Collapses the whole card down to its header. Unlike ☰, this also hides the drawing and everything else below the header.',
     x: 236,
     y: 90,
     w: 110,
@@ -164,7 +164,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'tint',
     label: 'Category and state colour',
-    note: 'The header is the node’s category — green dataset, blue query. The stripe down the left edge is the run state, readable at a zoom where the badge is not.',
+    note: 'The header colour shows the node’s category, e.g. green for datasets and blue for queries. The stripe down the left edge shows the run state, which you can still see when zoomed too far out to read the badge.',
     x: 0,
     y: 280,
     w: 104,
@@ -176,7 +176,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'edges',
     label: 'Bring your own edges',
-    note: 'Attaches a user-supplied edge list of pre, post, weight. Connectivity below this card is then answered from the file rather than the server.',
+    note: 'Attach your own edge list with pre, post and weight columns. Connectivity queries downstream of this card will then use your file instead of the server.',
     x: 44,
     y: 508,
     w: 152,
@@ -186,7 +186,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'cache',
     label: 'How old the data is',
-    note: 'The age of this dataset’s downloaded neuron table, which is kept for a month. Click to drop it and fetch again.',
+    note: 'How long ago this dataset’s neuron table was downloaded. We keep it for a month. Click to throw it away and fetch it again.',
     x: 226,
     y: 508,
     w: 144,
@@ -196,7 +196,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'issue',
     label: 'Warnings and errors',
-    note: 'What the node reports about itself. Amber warns and the result stands; red means there is no result. The inspector lists the rest.',
+    note: 'Messages from the node. Amber is a warning and the result is still usable; red is an error and there is no result. The inspector lists all of them.',
     x: 366,
     y: 446,
     w: 104,
@@ -208,7 +208,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'wire',
     label: 'The wire',
-    note: 'Colour, shape and the socket label all give the type — here, a Dataset. A wire only connects sockets whose types match; dragging one dims the rest.',
+    note: 'Colour, shape and socket label all tell you the type, here a Dataset. You can only connect sockets whose types match: while you drag a wire, the sockets it can’t connect to are dimmed.',
     x: 380,
     y: 262,
     w: 92,
@@ -221,7 +221,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'run',
     label: 'Run this node',
-    note: 'Runs this node and any stale nodes above it, not the whole graph. Disabled when the result is current, and ■ while a run is going.',
+    note: 'Runs this node plus any outdated nodes it depends on, but not the rest of the graph. The button is disabled when the result is up to date and turns into ■ while the node is running.',
     x: 486,
     y: 26,
     w: 112,
@@ -231,7 +231,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'expand',
     label: 'Open full size',
-    note: 'Opens the result full size over the canvas. Double-clicking the drawing on the card does the same.',
+    note: 'Opens the result full size on top of the canvas. You can also double-click the drawing on the card.',
     x: 606,
     y: 26,
     w: 106,
@@ -241,7 +241,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'pin',
     label: 'Pin beside the canvas',
-    note: 'Docks the result beside the canvas, where it stays while you work on other cards. One node at a time.',
+    note: 'Docks the result next to the canvas so you can keep looking at it while you work on other cards. Only one node can be pinned at a time.',
     x: 714,
     y: 26,
     w: 118,
@@ -251,7 +251,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'help',
     label: 'Show help',
-    note: 'Opens this node’s help document. Present only on node types that have one written.',
+    note: 'Opens the help page for this node. Only shown for node types that have one.',
     x: 836,
     y: 26,
     w: 76,
@@ -263,7 +263,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'in',
     label: 'Input socket',
-    note: 'Typed for the value it accepts. A required input left unwired is why a card reports that it has nothing to work on.',
+    note: 'Where data comes in. Each socket accepts one type of value. If a required input isn’t connected, the card will tell you it has nothing to work on.',
     x: 328,
     y: 148,
     w: 116,
@@ -273,7 +273,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'out',
     label: 'Output sockets',
-    note: 'Which one the wire leaves from decides what the rest of the graph sees. Hover a socket to preview the value on it.',
+    note: 'Where results go out. A node can have several outputs, so pick the one you want downstream. Hover over a socket to preview its value.',
     x: 800,
     y: 152,
     w: 140,
@@ -283,7 +283,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'more',
     label: 'Additional hidden settings',
-    note: 'Settings that live in the inspector rather than on the card. Click to select the node and open it; any that have been changed are counted.',
+    note: 'Settings that are only shown in the inspector, not on the card. Click to select the node and open the inspector. If you have changed any of them, the line also says how many.',
     x: 800,
     y: 240,
     w: 140,
@@ -293,7 +293,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'selection',
     label: 'Picking neurons',
-    note: '+ page selects this page and + all every match; the count clears the selection. It leaves by the Selected port and is saved with the workflow.',
+    note: '+ page selects the neurons on this page and + all selects every match. Click the count to clear the selection. Selected neurons come out of the Selected port and are saved with the workflow.',
     x: 800,
     y: 386,
     w: 140,
@@ -303,7 +303,7 @@ const CALLOUTS: readonly Callout[] = [
   {
     id: 'footer',
     label: 'The last result',
-    note: 'The value this node produced, in the shape the rest of the graph sees it, plus the duration of the run that made it.',
+    note: 'A summary of what this node produced (here: rows and columns of a table) and how long the run took.',
     x: 800,
     y: 454,
     w: 140,
@@ -385,7 +385,7 @@ function datasetCard(): string {
       </div>
     </div>
     <div class="node__issue" data-severity="warning" data-anat="issue">
-      male-cns:v0.9 publishes no column for &ldquo;Superclass&rdquo;, so only the other filters
+      male-cns:v0.9 publishes no column for \`Superclass only\`, so only the other filters
       apply here.
     </div>
     <div class="node__foot">

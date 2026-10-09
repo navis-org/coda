@@ -128,7 +128,7 @@ describe('looking cells up', () => {
 describe('a column that is not cells', () => {
   it('refuses neuron ids and says what reads them', async () => {
     await expect(run({}, selection(['720575940612345678']))).rejects.toThrow(
-      /look like neuron ids — Selected to Neurons/,
+      /look like neuron ids\. To read a selection of neurons, use Selected to Neurons/,
     )
   })
 
@@ -141,7 +141,7 @@ describe('a column that is not cells', () => {
   it('refuses a dataset whose neurons carry no zapbenchId', async () => {
     const bare = tableSchema(column('neuronId', 'str'), column('type', 'str'))
     await expect(run({}, selection(['3']), fakeSource(bare).source)).rejects.toThrow(
-      /fish2 publishes no zapbenchId/,
+      /fish2 has no zapbenchId column/,
     )
   })
 

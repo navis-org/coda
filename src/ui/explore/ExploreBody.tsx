@@ -31,7 +31,7 @@ import {
 } from '../../nodes/lib/neuronSearch'
 import type { NodeBodyProps } from '../nodes/nodeBodies'
 import { useDatasetInput } from '../useDatasetInput'
-import { formatCell, formatNumber } from '../format'
+import { formatCell, formatNumber } from '../../style/format'
 import { copyText } from '../export'
 import { errorMessage } from '../../core/errors'
 import { joinIds } from '../../nodes/lib/copyIds'

@@ -45,9 +45,11 @@ registerNode({
   // IDs from Label's width, for its reason: the IDs field is a paste target, and a list of
   // neuron ids wrapped into a 232px box is unreadable.
   cardWidth: 300,
-  description: 'A list of neuron IDs, typed or pasted, as a table.',
+  description: 'Turns a typed or pasted list of neuron IDs into a neuron table.',
   guide:
-    'A list of neuron IDs you already have — from a paper, a spreadsheet, a colleague. Paste them in any form; brackets and newlines are separators. Wire a Dataset to get full rows and a count of IDs it never heard of; unwired it just emits the IDs as a one-column table.',
+    'Turns a list of neuron IDs you already have (from a paper, a spreadsheet or Neuroglancer) ' +
+    'into a neuron table. Paste them in almost any format. Wire a Dataset to fetch the full ' +
+    'neuron rows and find IDs that do not exist; without one, you get a one-column table.',
   cost: 'expensive',
   inputs: [
     // Optional on both: a typed list alone is a complete question, and a node unusable until
@@ -102,7 +104,8 @@ registerNode({
     if (parsed.error) return [parsed.error]
     // Nothing typed and nothing wired is an *unconfigured* node, not a broken one: it returns an
     // empty table of the right schema, and this line says which of the two it is.
-    if (parsed.ids.length === 0 && !ctx.inputs.ids) return ['No IDs yet — type or paste some']
+    if (parsed.ids.length === 0 && !ctx.inputs.ids)
+      return ['No IDs yet. Type or paste some, or wire a table into `IDs`.']
     /*
      * There was a width warning here, and it is worth recording what removed it rather than
      * leaving a gap. With no Dataset the ids *are* the output, and that output's `neuronId` used

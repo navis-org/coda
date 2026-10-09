@@ -56,7 +56,8 @@
  */
 
 import type { RefusalWords } from './idb'
-import { commit, database, readKey } from './idb'
+import type { StoredUsage } from './idb'
+import { commit, database, readKey, usage } from './idb'
 import { hashBytes, hashString } from '../core/hash'
 import type { TableSchema } from '../core/types'
 import type { TableValue } from '../core/values'
@@ -130,7 +131,7 @@ const UPLOAD_NOUNS: Record<UploadMeta['kind'], UploadNoun> = {
 /** The badge a `validate` returns: a clause, because the card draws it under the node's name. */
 export function uploadMissingBadge(fileName: string, kind: UploadMeta['kind']): string {
   const noun = UPLOAD_NOUNS[kind]
-  return `${fileName || noun.unnamed} is not stored in this browser — pick ${noun.file} again`
+  return `${fileName || noun.unnamed} is not stored in this browser. Pick ${noun.file} again`
 }
 
 /**
@@ -152,7 +153,7 @@ export function uploadMissingReason(
       : `pick ${noun.file} again on this node to restore ${noun.them}`
   return (
     `“${fileName || noun.unnamed}” is not stored in this browser. Uploaded ` +
-    `${noun.held} stay on the machine that uploaded them — ${remedy}.`
+    `${noun.held} stay on the machine that uploaded them, so ${remedy}.`
   )
 }
 
@@ -267,8 +268,10 @@ const learnedListeners = new Set<() => void>()
  *
  * Not a data-changed event: nothing here invalidates a cached result. It says only that
  * inference ran against "I do not know yet" and can now do better. Fired once per id when an
- * upload's meta lands, and by `core.tableFromUrl` when a fetch fills its own schema mirror —
- * exported for that second caller, which holds the same kind of fact in a different place.
+ * upload's meta lands, by `core.tableFromUrl` when a fetch fills its own schema mirror, and by
+ * the table-file registry (`data/files/registry.ts`) when a footer is read — exported for those
+ * callers, which hold the same kind of fact in a different place. A shared channel, then, rather
+ * than an upload one.
  */
 export function reportUploadLearned(): void {
   revision++
@@ -540,6 +543,15 @@ function uploadId(table: TableValue): string {
     for (const cell of data) parts.push(cell === null ? ' ' : String(cell))
   }
   return `u_${hashString(parts.join(SEP))}`
+}
+
+/** What the uploads hold, for the Storage tab: one entry per upload. */
+export function uploadsUsage(): Promise<StoredUsage | undefined> {
+  // The source file's size stands in for the parsed copy, which is not read: close, not exact.
+  return usage(db, META_STORE, {
+    skip: [TABLE_STORE, MESH_STORE],
+    bytes: (record) => (record as UploadMeta).bytes,
+  })
 }
 
 /** Test seam: forget the session's mirror and the memoised connection. */

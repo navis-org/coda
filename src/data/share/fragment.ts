@@ -174,7 +174,7 @@ export function parseShareFragment(hash: string): ShareRef {
       return parseDemoRef(rest)
     case undefined:
       throw new ShareLinkError(
-        'This workflow link is in a format this build does not recognise — it may have been made by a newer version of Coda, or truncated on the way here.',
+        'This workflow link is in a format this version of Coda does not recognise. It may have been made by a newer version, or cut short on the way here.',
       )
     default:
       // http, file, javascript, data — anything that is a scheme but not one of ours. Named,
@@ -294,7 +294,7 @@ export async function decodePacked(blob: string): Promise<string> {
     bytes = fromBase64Url(blob)
   } catch {
     throw new ShareLinkError(
-      'This workflow link is damaged — some characters are missing or were changed on the way here. Ask for it again, unwrapped.',
+      'This workflow link is damaged: some characters are missing or were changed on the way here. Ask for it again, unwrapped.',
     )
   }
   try {
@@ -302,7 +302,7 @@ export async function decodePacked(blob: string): Promise<string> {
     return new TextDecoder().decode(out)
   } catch {
     throw new ShareLinkError(
-      'This workflow link could not be unpacked. It was most likely truncated — links are often cut short by chat and mail clients.',
+      'This workflow link could not be unpacked. It was most likely cut short; chat and mail clients often do this to long links.',
     )
   }
 }

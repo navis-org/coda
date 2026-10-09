@@ -98,13 +98,14 @@ export const pathsNode = packNode({
   // `.paths-body` in the stylesheet, which widens the shared label column for it.
   cardWidth: 260,
   description:
-    'Find the strongest routes from one set of neurons to another. The Paths table is `rank`, `source`, `target`, `hops`, `bottleneck` and `path`, plus `bottleneckNorm` when normalizing.',
+    'Find the strongest routes from one set of neurons to another. The Paths table has ' +
+    '`rank`, `source`, `target`, `hops`, `bottleneck` and `path`, plus `bottleneckNorm` ' +
+    'when normalizing.',
   guide:
-    'Not “what is wired to this?” but “how does this reach that?” — the strongest feed-forward ' +
-    'routes from sources to targets, ranked by their weakest link rather than by a sum, since a ' +
-    'chain is only as strong as its narrowest step. Collapse types traverses the type-level ' +
-    'graph, which is usually the circuit somebody means. Three outputs: the pruned network, a ' +
-    'layout for it, and one row per route.',
+    'Finds the strongest routes from a set of source neurons to a set of target neurons, ' +
+    'ranked by their weakest link. By default it searches between cell types rather than ' +
+    'individual neurons. Wire Network and Layout into a Network Viewer, or use the Paths table ' +
+    'for one row per route.',
   cost: 'expensive',
   /*
    * No `defaultSize`, deliberately. It sizes React Flow's *wrapper*, and only a resizable card
@@ -128,7 +129,7 @@ export const pathsNode = packNode({
       id: 'maxHops',
       kind: 'int',
       label: 'Max hops',
-      help: 'Longest route to look for, in synapses. The search runs from both ends at once, so it costs about half what the number suggests. Each hop still multiplies the frontier.',
+      help: 'Longest route to look for, in synapses. Each extra hop multiplies the search.',
       default: 3,
       min: 1,
       max: 8,
@@ -138,7 +139,7 @@ export const pathsNode = packNode({
       id: 'minWeight',
       kind: 'int',
       label: 'Min synapses',
-      help: 'Discard connections below this many synapses. Applied after the grouping, so with Collapse types on it is a threshold on the total traffic between two cell types.',
+      help: 'Drop connections below this many synapses. With `Collapse types` on, this applies to the total between two cell types.',
       default: 10,
       min: 1,
       step: 1,
@@ -147,7 +148,7 @@ export const pathsNode = packNode({
       id: 'topN',
       kind: 'int',
       label: 'N strongest',
-      help: 'Keep this many routes, ranked by their weakest link. The network is what those routes span. 0 keeps every route found.',
+      help: 'Keep this many routes, ranked by their weakest link; 0 keeps all. The network output contains only these routes.',
       default: 25,
       min: 0,
       step: 5,
@@ -156,7 +157,7 @@ export const pathsNode = packNode({
       id: 'collapseTypes',
       kind: 'boolean',
       label: 'Collapse types',
-      help: 'Trace the circuit between cell types rather than individual neurons. This changes what is searched: a pathway through a population is found even when no single neuron carries the whole route.',
+      help: 'Trace routes between cell types instead of individual neurons. This finds pathways through a population even when no single chain of neurons carries the whole route.',
       default: true,
     },
     {
@@ -169,14 +170,14 @@ export const pathsNode = packNode({
        * every PLP1 neuron receives, which is what `GroupTotalsRequest` exists to answer: the
        * frontier carries a type name and a per-neuron total cannot be asked about one.
        */
-      help: 'Add weightNorm, each connection as a fraction of one group’s total synapses, and weightTotal, the denominator. With Collapse types on that denominator is the whole population’s.',
+      help: 'Add weightNorm (each connection as a fraction of one group’s total synapses) and weightTotal (that total). With `Collapse types` on, the total is the whole cell type’s.',
       default: false,
     },
     {
       id: 'normalizeBy',
       kind: 'enum',
       label: 'Normalize by',
-      help: 'Which end of the connection the denominator belongs to. These are different questions, not two views of one number.',
+      help: 'Which end’s total the weight is divided by.',
       default: 'postsynaptic',
       options: [
         { value: 'postsynaptic', label: 'the target\u2019s total input' },
@@ -188,7 +189,7 @@ export const pathsNode = packNode({
       id: 'normalizeBasis',
       kind: 'enum',
       label: 'Denominator',
-      help: '"All synapses" counts everything the group makes, fragments included. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing routes across connectomes. A dataset answering from an attached edge set sums that file’s own weights instead, and cannot tell the two apart.',
+      help: '"all synapses" counts every synapse, fragments included. "reconstructed partners only" counts only synapses with named neurons; use it to compare routes across connectomes. With an attached edge set, both sum that file’s weights.',
       default: 'all',
       optionsWithoutPeek: true,
       options: (ctx) =>
@@ -209,7 +210,7 @@ export const pathsNode = packNode({
        * ranking by synapses prefers the route through the biggest population, which is the
        * failure normalising is usually reached for in the first place.
        */
-      help: 'Which weakest link decides the ranking, and so which routes N strongest keeps. "Synapses" prefers a route through a large population; "fraction" prefers one that is a large share of what the next population receives.',
+      help: 'How routes are ranked for `N strongest`. "synapses (weakest link)" favours routes through large populations; "fraction of the total" favours routes that are a large share of what the next population receives.',
       default: 'synapses',
       options: [
         { value: 'synapses', label: 'synapses (weakest link)' },
@@ -232,7 +233,7 @@ export const pathsNode = packNode({
        * No `max`: `connected` denominators can produce a fraction above 1, legitimately, for
        * `normalizeConnectivity`'s recorded reason.
        */
-      help: 'Discard connections carrying less than this share of the denominator, and do not follow them. Applied per hop, so it bounds the frontier as Min synapses does. 0 is off.',
+      help: 'Drop connections below this share of the total and stop following them. 0 is off.',
       default: 0,
       min: 0,
       step: 0.01,
@@ -273,13 +274,13 @@ export const pathsNode = packNode({
      */
     if (hops >= NOISY_HOPS && minWeight <= 1) {
       issues.push(
-        `${hops} hops at Min synapses ${minWeight} expands almost every partner of every ` +
-          `partner and can reach much of the dataset. Raise Min synapses.`,
+        `${hops} hops with \`Min synapses\` at ${minWeight} will reach almost every ` +
+          `partner of every partner, which can be much of the dataset. Raise \`Min synapses\`.`,
       )
     }
     if (hops >= NOISY_HOPS && ctx.params.collapseTypes === false) {
       issues.push(
-        `At neuron level, ${hops} hops is a very large expansion — the frontier is inlined into each query. Collapse types keeps it to a few hundred nodes per hop.`,
+        `With \`Collapse types\` off, ${hops} hops between individual neurons makes very large queries. Tick \`Collapse types\` to keep each hop to a few hundred nodes.`,
       )
     }
     /*
@@ -360,6 +361,7 @@ export const pathsNode = packNode({
           collapseTypes,
           minWeight,
           signal: ctx.signal,
+          onWarn: ctx.warn,
         }),
       /*
        * A second query per hop, asked about the keys that hop returned. Not one query at the
@@ -430,10 +432,10 @@ export const pathsNode = packNode({
         ctx.warn(
           `${unmeasured.size.toLocaleString()} ${collapseTypes ? 'groups' : 'neurons'} on ` +
             `the ${by === 'postsynaptic' ? 'receiving' : 'sending'} end have no published ` +
-            `total, so weightNorm is empty there.` +
+            `total, so their \`weightNorm\` is empty.` +
             (rankBy === 'norm'
-              ? ' — and any route through one of them ranks below every route that could be scored.'
-              : '.'),
+              ? ' Any route through one of them ranks below every route that could be scored.'
+              : ''),
         )
       }
     }
@@ -446,9 +448,9 @@ export const pathsNode = packNode({
      */
     if (ranked.truncated) {
       ctx.warn(
-        `The route search hit its step budget (${MAX_PATH_STEPS.toLocaleString()} ` +
-          `steps), so these are the strongest routes found rather than the strongest ` +
-          `routes. Raise Min synapses or lower Max hops to thin the graph.`,
+        `The route search stopped after ${MAX_PATH_STEPS.toLocaleString()} steps, so ` +
+          `stronger routes may exist that weren't found. Raise \`Min synapses\` or lower ` +
+          `\`Max hops\` to make the search smaller.`,
       )
     }
 

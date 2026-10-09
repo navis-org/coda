@@ -118,7 +118,7 @@ export function shareAdvisories(
             `separately; whoever opens the link can pick it up on the card that names it.`
           : // "the Upload Table cards" until an Upload Mesh node could be among them, at which
             // point it names a card half the set is not on. The cards name their own files.
-            `${files.join(', ')} are stored in this browser, not in the workflow — send the files separately, and whoever opens the link can pick them up again on the cards that name them.`,
+            `${files.join(', ')} are stored in this browser, not in the workflow. Send the files separately; whoever opens the link can pick them up on the cards that name them.`,
     })
   }
 
@@ -128,7 +128,7 @@ export function shareAdvisories(
     const credential = backend.label ? `a ${backend.label} token` : 'a token'
     out.push({
       id: `token-${backend.id}`,
-      text: `Running this needs ${credential} of their own — ${labels.join(', ')} ${labels.length === 1 ? 'is a real connectome' : 'are real connectomes'}. The workflow opens without one; only Run needs it.`,
+      text: `To run this, the recipient needs ${credential} of their own, because ${labels.join(', ')} ${labels.length === 1 ? 'is a real connectome' : 'are real connectomes'}. The workflow opens without one; only Run needs it.`,
     })
   }
 
@@ -136,8 +136,8 @@ export function shareAdvisories(
     out.push({
       id: 'long',
       text:
-        `This link is ${Math.round(linkChars / 1000)} kB, which mail and chat clients ` +
-        `often cut short. A gist keeps it to about forty characters at any size.`,
+        `This link is ${Math.round(linkChars / 1000)} kB long, and mail and chat clients ` +
+        `often cut links that long short. A gist link is about forty characters at any size.`,
     })
   }
 

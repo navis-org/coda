@@ -10,25 +10,14 @@ import { describe, expect, it } from 'vitest'
 
 import type { NeuronId } from '../../core/ids'
 import { EdgeSetBuilder } from './encode'
-import type { EncodedEdges } from './encode'
-import type { EdgeSetMeta, LoadedEdgeSet } from './store'
+import type { LoadedEdgeSet } from './store'
+import { residentEdgeSet } from './store'
 import { edgesBetween, edgesFrom, pathStepFrom } from './query'
-
-/** A resident set, without going anywhere near IndexedDB — the query layer never reads `meta`. */
-function resident(encoded: EncodedEdges): LoadedEdgeSet {
-  return {
-    meta: { id: 'test', name: 'test', edges: encoded.edges } as EdgeSetMeta,
-    ids: encoded.ids,
-    index: new Map(encoded.ids.map((id, at) => [id, at])),
-    out: encoded.out,
-    in: encoded.in,
-  }
-}
 
 function build(rows: [string, string, number][]): LoadedEdgeSet {
   const b = new EdgeSetBuilder()
   for (const [pre, post, w] of rows) b.add(pre, post, w)
-  return resident(b.finish())
+  return residentEdgeSet(b.finish())
 }
 
 //   1 -> 2 (10)      1, 4 are LC4

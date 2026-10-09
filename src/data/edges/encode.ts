@@ -24,7 +24,43 @@
  * this half is testable at ten million edges in node with no browser at all.
  */
 
-import { isNeuronId } from '../../core/ids'
+import { idText, isNeuronId } from '../../core/ids'
+import type { CellValue } from '../../core/values'
+import { joinWords } from '../files/reader'
+
+/**
+ * Which columns of an edge list hold the two ends and, optionally, the weight — by name, for every
+ * reader that is handed names (a table, a table file). The importer's panel chooses by position
+ * (`EdgeColumnChoice`) because a headerless text file has no names to give.
+ */
+export interface EdgeColumns {
+  readonly pre: string
+  readonly post: string
+  /** Absent: every row weighs 1, so a list with a row per synapse counts synapses. */
+  readonly weight?: string
+}
+
+/**
+ * One id cell, from any reader, as exact text — blank for anything that is not one, which the
+ * builder drops and counts. The one rule for every edge list, however it arrived: `idText`'s
+ * (trimmed, a number only while it is exact), widened to the `bigint` that Arrow and hyparquet
+ * hand back for an `INT64` column, which is exact at any width.
+ */
+export function edgeIdCell(cell: unknown): string {
+  if (typeof cell === 'bigint') return cell.toString()
+  return idText(cell as CellValue) ?? ''
+}
+
+/**
+ * One weight cell as a number — `NaN`, dropped and counted by the builder, for a missing one.
+ * Blank — or only whitespace — is missing data rather than `Number('')`'s 0, which would be a
+ * connection nobody recorded; `Number` takes a bigint or a numeric string on its own.
+ */
+export function edgeWeightCell(value: unknown): number {
+  if (value === null || value === undefined) return Number.NaN
+  if (typeof value === 'string' && value.trim() === '') return Number.NaN
+  return Number(value)
+}
 
 /** Bumped when the layout changes, so a stored set cannot outlive the code that reads it. */
 export const EDGE_FORMAT = 1
@@ -211,6 +247,13 @@ const doubles = (): Growable<Float64Array> => new Growable((n) => new Float64Arr
  */
 export class EdgeSetBuilder {
   private index = new Map<string, number>()
+  /**
+   * 64-bit ids by their high then low 32-bit word, read unsigned — `addWords`' intern, a string per
+   * neuron. The two readings agree below 2^63; a signed pair past it is a negative number, which
+   * is never an id and is interned by its text instead, so an int64 end meeting a uint64 one
+   * cannot find the other's id under the same words.
+   */
+  private words = new Map<number, Map<number, number>>()
   private ids: string[] = []
   private pre = ints()
   private post = ints()
@@ -255,10 +298,51 @@ export class EdgeSetBuilder {
     }
     const from = this.idIndex(a)
     const to = this.idIndex(b)
+    this.push(from, to, weight)
+  }
+
+  /**
+   * `add` for a row whose ids are 64-bit integers, given as their unsigned 32-bit words — no string
+   * and no `bigint` per row, the text of an id being made once, the first time it is seen, and
+   * interned through `idIndex` so the two routes agree. `preSigned` / `postSigned`: that end's high
+   * word is two's complement (an `int64` column) rather than unsigned. On the 15M-edge FlyWire list, the
+   * string per row and its lookup were most of the build.
+   */
+  addWords(
+    preHigh: number,
+    preLow: number,
+    postHigh: number,
+    postLow: number,
+    weight: number,
+    preSigned: boolean,
+    postSigned: boolean,
+  ): void {
+    this.report.rowsRead++
+    if (!Number.isFinite(weight)) {
+      this.report.droppedWeight++
+      return
+    }
+    const from = this.wordIndex(preHigh, preLow, preSigned)
+    const to = this.wordIndex(postHigh, postLow, postSigned)
+    this.push(from, to, weight)
+  }
+
+  private push(from: number, to: number, weight: number): void {
     if (from === to) this.report.selfEdges++
     this.pre.push(from)
     this.post.push(to)
     this.weight.push(weight)
+  }
+
+  private wordIndex(high: number, low: number, signed: boolean): number {
+    if (signed && high >= 0x80000000) return this.idIndex(joinWords(high, low, true).toString())
+    let byLow = this.words.get(high)
+    if (!byLow) this.words.set(high, (byLow = new Map()))
+    const held = byLow.get(low)
+    if (held !== undefined) return held
+    const at = this.idIndex(joinWords(high, low, false).toString())
+    byLow.set(low, at)
+    return at
   }
 
   /** How much has been accepted so far, for a progress readout during a long import. */

@@ -126,7 +126,7 @@ export function edgeSetIssues(params: Record<string, unknown>): string[] {
   const name = edgeSetLabel(params)
   return [
     `The edge set ${name === id ? id : `"${name}"`} is not in this browser, so this dataset cannot ` +
-      `answer connectivity. Import the same file under Edge data — a set is identified by its ` +
-      `contents, so the same file will match.`,
+      `answer connectivity queries. Import the same file again under Edge data and it will ` +
+      `match.`,
   ]
 }

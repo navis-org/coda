@@ -45,6 +45,7 @@ import type { Value } from './values'
 import { datasetIdentity } from './values'
 import type { DataSource } from '../data/source'
 import { errorMessage } from './errors'
+import { untilAborted } from '../data/memoPromise'
 
 export type NodeRunState =
   /** Never evaluated, and nothing is asking it to be. */
@@ -205,6 +206,49 @@ interface RunPass {
    */
   accumulations: Map<string, Readonly<Record<string, Value>>>
 }
+
+/** How an evaluation came out, before any walk has recorded it. */
+type Outcome = 'ran' | 'failed' | 'aborted' | 'retired'
+
+/**
+ * One top-level evaluation in flight, which **belongs to its key rather than to a run**.
+ *
+ * Its key is the whole of what the work answers (invariant 4), so the work is still worth having
+ * for exactly as long as the graph still asks for that key — however many runs supersede the one
+ * that started it, a ten-minute NBLAST included. A newer walk
+ * reaching the node *adopts* the evaluation and awaits it; an edit that moves the key *retires*
+ * it, which is the only thing besides `cancel` that aborts one.
+ *
+ * Top-level only. A loop's region re-keys on every pass, so its evaluations still take the run's
+ * own signal and a newer run still stops a loop — see `docs/core.md`.
+ */
+interface Evaluation {
+  key: string
+  /** Aborted with `RETIRED` as the reason when the graph stopped asking for `key`. */
+  controller: AbortController
+  done: Promise<Outcome>
+  /**
+   * The walk currently awaiting this, whose progress bar its `ctx.progress` feeds.
+   *
+   * Three fields copied out rather than the pass itself: an evaluation outlives the walk that
+   * started it, and holding the `RunPass` would hold that walk's graph, inference and key map for
+   * as long as the node runs — ten minutes, for the NBLAST this exists for.
+   */
+  walk: Walk
+}
+
+/** What an evaluation may read of a walk — see `Evaluation.walk`. */
+type Walk = Pick<RunPass, 'steps' | 'generation' | 'controller'>
+
+function walkOf(pass: RunPass): Walk {
+  return { steps: pass.steps, generation: pass.generation, controller: pass.controller }
+}
+
+/** Who an evaluation answers to: whose signal stops it, and whose bar its progress moves. */
+type Owner = Pick<Evaluation, 'controller' | 'walk'>
+
+/** The abort reason that tells a retired evaluation from a cancelled one. */
+const RETIRED = Symbol('retired')
 
 /**
  * One loop pass, as the host is told about it.
@@ -403,7 +447,18 @@ export class Scheduler {
    */
   private progress: RunProgress | undefined
   private abort: AbortController | undefined
-  /** Bumped on every run; results from a superseded run are discarded. */
+  /** Top-level evaluations in flight, by node — see `Evaluation`. */
+  private evaluations = new Map<string, Evaluation>()
+  /**
+   * Nodes a full run was asked for and no walk has finished with yet.
+   *
+   * Every walk takes this set into its scope and runs its expensive members, so a cheap pass that
+   * supersedes a Run finishes the Run's work rather than deferring the rest of it back to
+   * `stale`. Spent per node as a walk settles it, `forceRefresh`'s pattern; a retired node leaves
+   * it too, so an accidental edit does not restart a long evaluation. See `docs/core.md`.
+   */
+  private requestedFull = new Set<string>()
+  /** Bumped on every run; a superseded run's progress is not published. */
   private generation = 0
   private inFlight: Promise<RunSummary> | undefined
   private host: SchedulerHost
@@ -446,8 +501,16 @@ export class Scheduler {
    * Clearing `loop` here is what makes the hand-over monotonic: the share a loop was publishing
    * is at most `region × (count - 1) / count`, and it is replaced by the whole `region` in the
    * same step.
+   *
+   * Spends each node's `requestedFull` here too, so no place can count a node as behind the run
+   * and leave its full-run request standing — `owesFullRun` would then never come back false.
    */
-  private countSettled(pass: RunPass, nodes: number): void {
+  private countSettled(pass: RunPass, ids: Iterable<string>): void {
+    let nodes = 0
+    for (const id of ids) {
+      this.requestedFull.delete(id)
+      nodes += 1
+    }
     const steps = pass.steps
     if (!steps) return
     steps.settled += nodes
@@ -503,7 +566,7 @@ export class Scheduler {
    * Publishes without announcing: `ctx.progress` calls the host itself a statement later, and
    * that notification carries this with it.
    */
-  private countRunning(pass: RunPass, fraction: number): void {
+  private countRunning(pass: Walk, fraction: number): void {
     const steps = pass.steps
     if (!steps) return
     steps.running = Math.max(steps.running, Math.min(1, Math.max(0, fraction)))
@@ -527,7 +590,7 @@ export class Scheduler {
    * 120 whole-graph walks per auto pass, i.e. per keystroke pause, for a bar that auto passes
    * never even show. A step reveals no schema that the run's own final notification will not.
    */
-  private publishProgress(pass: RunPass, announce: boolean): void {
+  private publishProgress(pass: Walk, announce: boolean): void {
     const steps = pass.steps
     if (!steps || pass.generation !== this.generation) return
     const done = Math.min(steps.total, steps.settled + steps.loop + steps.running)
@@ -563,6 +626,11 @@ export class Scheduler {
     return this.inFlight !== undefined
   }
 
+  /** Whether a full run's work is still owed — which a cheap pass arriving now will finish. */
+  get owesFullRun(): boolean {
+    return this.requestedFull.size > 0
+  }
+
   /**
    * Recompute state labels from the graph without executing anything. Call after every
    * graph mutation so badges update immediately: fresh nodes stay 'ok', everything whose
@@ -588,10 +656,17 @@ export class Scheduler {
      * loop path already does this.
      */
     const keys =
-      this.cache.size === 0
+      this.cache.size === 0 && this.evaluations.size === 0
         ? new Map<string, string>()
         : this.desiredKeys(graph, inf, order, { nodes, inbound })
+    this.retireMoved(keys, nodes, inf)
     const fresh = new Set<string>()
+    /*
+     * Still being computed, for the key the graph still asks for. Its `running` badge is left
+     * alone — overwriting it with `stale` is what made dragging a card look like it had stopped
+     * the run — and what reads it counts as about to be supplied rather than missing.
+     */
+    const coming = new Set<string>()
 
     for (const nodeId of order) {
       const node = nodes.get(nodeId)!
@@ -611,6 +686,10 @@ export class Scheduler {
         this.setState(nodeId, { state: 'error', error: first?.message ?? 'Invalid node' })
         continue
       }
+      if (this.live(nodeId)) {
+        coming.add(nodeId)
+        continue
+      }
       const cached = this.cache.get(nodeId)
       const isFresh = cached !== undefined && cached.key === keys.get(nodeId)
       if (isFresh) {
@@ -627,13 +706,16 @@ export class Scheduler {
       const upstreamReady = (def ? inputPorts(def, node.params) : []).every((port) => {
         if (port.required === false) return true
         const edge = inbound.get(portKey(nodeId, port.id))
-        return edge ? fresh.has(edge.source) : false
+        return edge ? fresh.has(edge.source) || coming.has(edge.source) : false
       })
       this.setState(nodeId, { state: upstreamReady ? 'stale' : 'blocked' })
     }
 
     for (const nodeId of cyclic) {
-      this.setState(nodeId, { state: 'error', error: 'Node is part of a cycle' })
+      this.setState(nodeId, {
+        state: 'error',
+        error: 'This node is part of a cycle. Remove a wire to break the loop.',
+      })
     }
 
     this.pruneCache(graph)
@@ -642,6 +724,9 @@ export class Scheduler {
 
   /** Drop cached results, e.g. after switching datasets or on user request. */
   invalidateAll(): void {
+    // An evaluation still in flight would put its result straight back under a key that, after a
+    // dataset switch, nothing may trust any more.
+    for (const [nodeId, evaluation] of this.evaluations) this.retire(nodeId, evaluation)
     this.cache.clear()
     this.states.clear()
     this.forceRefresh.clear()
@@ -696,8 +781,11 @@ export class Scheduler {
     this.invalidateNode(graph, nodeId)
   }
 
+  /** Stop the walk *and* everything it set evaluating — the one gesture that means "all of it". */
   cancel(): void {
+    this.requestedFull.clear()
     this.abort?.abort()
+    for (const evaluation of this.evaluations.values()) evaluation.controller.abort()
   }
 
   /**
@@ -734,7 +822,11 @@ export class Scheduler {
    * before starting, so node states never interleave between two passes.
    */
   async run(graph: CodaGraph, options: RunOptions): Promise<RunSummary> {
-    if (this.inFlight) {
+    // A loop, not an `if`: two runs asked for while a third unwinds would otherwise both await
+    // it and then walk side by side.
+    while (this.inFlight) {
+      // The walk only. Its evaluations keep going for as long as their keys hold — see
+      // `Evaluation` — and the run below adopts them.
       this.abort?.abort()
       try {
         await this.inFlight
@@ -816,7 +908,15 @@ export class Scheduler {
     const { order } = topoSort(graph)
     const nodes = nodesById(graph)
     const inbound = inboundIndex(graph)
-    const scope = this.resolveScope(graph, order, options.targets)
+    const scope = this.resolveScope(
+      graph,
+      order,
+      options.targets && [
+        ...options.targets,
+        ...[...this.requestedFull].filter((id) => nodes.has(id)),
+      ],
+    )
+    if (options.mode === 'full') for (const id of scope) this.requestedFull.add(id)
     let inference = inferGraph(graph)
     if (
       options.mode === 'full' &&
@@ -861,6 +961,9 @@ export class Scheduler {
     }
     this.progress = pass.steps ? { done: 0, total: pass.steps.total } : undefined
     this.markAvailable(pass, order)
+    // Before the walk, so it can neither adopt work the graph has since moved past nor hand a
+    // still-current evaluation's node a fresh start.
+    this.retireMoved(pass.keys, nodes, inference)
 
     for (const id of loops.flatMap((l) => [...l.region])) {
       if (scope.has(id) && !summary.loopNodes.includes(id)) summary.loopNodes.push(id)
@@ -873,7 +976,8 @@ export class Scheduler {
     for (const nodeId of scope) {
       if (pass.available.has(nodeId)) continue
       const state = this.info(nodeId).state
-      if (state === 'running') this.setState(nodeId, { state: 'stale' })
+      // Unless it is still evaluating — then its badge is true, and the next run adopts it.
+      if (state === 'running' && !this.live(nodeId)) this.setState(nodeId, { state: 'stale' })
     }
 
     summary.durationMs = performance.now() - started
@@ -951,7 +1055,7 @@ export class Scheduler {
         if (verdict === 'aborted') return 'aborted'
         if (verdict === 'failed') failed = true
         // The whole region, in one step: its passes were reported as a fraction of this.
-        if (!iteration) this.countSettled(pass, trigger.region.size)
+        if (!iteration) this.countSettled(pass, trigger.region)
         continue
       }
       // Claimed by a loop whose turn has not come yet — it runs inside that loop's passes.
@@ -966,7 +1070,7 @@ export class Scheduler {
        * you as one that succeeded; counting only successes would leave the bar short of its own
        * end on exactly the runs somebody is watching most closely.
        */
-      if (!iteration) this.countSettled(pass, 1)
+      if (!iteration) this.countSettled(pass, [nodeId])
     }
     return failed ? 'failed' : 'ran'
   }
@@ -1333,8 +1437,8 @@ export class Scheduler {
     const name = `Input "${port.label ?? port.id}"`
     return why
       ? `${name} is wired to ${label}, which has not resolved a dataset: ${why}`
-      : `${name} is wired to ${label}, which has not resolved a dataset yet — its version list ` +
-          `has not arrived. Run again once it has.`
+      : `${name} is wired to ${label}, which has not resolved a dataset yet because its ` +
+          `version list has not loaded. Run again once it has.`
   }
 
   /**
@@ -1381,13 +1485,24 @@ export class Scheduler {
       return 'skipped'
     }
 
+    /*
+     * Already being computed for this very key — started by a run this one superseded. Waiting
+     * for it is the whole point of `Evaluation`; starting it again is what an edit three wires
+     * downstream used to cost. Ahead of the deferral below, so a cheap pass adopts an expensive
+     * node already in flight rather than stopping above it. One under another key was retired
+     * by `retireMoved` before the walk began.
+     */
+    const live = iteration === undefined ? this.live(nodeId, pass.keys.get(nodeId)) : undefined
+    if (live) return this.adopt(pass, nodeId, live)
+
     const gathered = this.gatherInputs(pass, nodeId, def)
     if (gathered.blocked) {
       this.setState(nodeId, { state: 'blocked' })
       return 'blocked'
     }
-    // The hybrid rule: defer expensive work unless this is a full run.
-    if (pass.mode === 'auto' && def.cost === 'expensive') {
+    // The hybrid rule: defer expensive work unless this is a full run — or the part of one still
+    // unfinished (`requestedFull`).
+    if (pass.mode === 'auto' && def.cost === 'expensive' && !this.requestedFull.has(nodeId)) {
       this.setState(nodeId, { state: 'stale' })
       pass.summary.deferred.push(nodeId)
       return 'skipped'
@@ -1403,63 +1518,217 @@ export class Scheduler {
      */
     if (gathered.refusal) {
       this.setState(nodeId, { state: 'error', error: gathered.refusal })
-      if (!pass.summary.failed.includes(nodeId)) pass.summary.failed.push(nodeId)
-      return 'failed'
+      return this.record(pass, nodeId, 'failed')
     }
 
     this.setState(nodeId, { state: 'running', progress: 0 })
-    const nodeStarted = performance.now()
-    try {
-      // Spent here rather than at the top of the run: a node that was deferred by the cheap
-      // pass has not had its chance to honour the request yet. Inside a loop that means the
-      // first pass, which is the one that would reach the network anyway.
-      const refresh = this.forceRefresh.delete(nodeId)
-      // Collected per execution rather than on the context object, so a node cannot read back
-      // what it reported and nothing survives into the next run.
-      let fetchedAt: number | undefined
-      /*
-       * The exception to that: warnings are visible while the node runs, which is the whole
-       * point of raising them before the expensive part, so they live in a map the UI reads.
-       *
-       * Cleared here as well as in the `finally`, which is not redundant: `warn` is handed to
-       * fetches that keep unwinding after a run is superseded, so a late call can repopulate
-       * the map *after* the finally has run. Without this, that stray would shadow the cache
-       * entry — the newer, real answer — for as long as the node existed.
-       */
-      this.liveWarnings.delete(nodeId)
-      const ctx = this.makeEvalContext({
+    if (iteration) {
+      return this.record(
         pass,
         nodeId,
-        def,
-        gathered,
-        refresh,
-        iteration,
-        // No `def.loop === 'end'` guard: the only writer of this map already gates on it, so a
-        // second test here would imply the map can hold a node that it never does.
-        accumulated: pass.accumulations.get(nodeId),
-        onFetched: (at) => {
-          // Oldest wins: a node making several fetches is only as fresh as its stalest one.
-          fetchedAt = fetchedAt === undefined ? at : Math.min(fetchedAt, at)
-        },
-      })
-      const outputs = await def.evaluate(ctx)
+        await this.evaluate(pass, nodeId, def, gathered, iteration),
+      )
+    }
+    return this.adopt(pass, nodeId, this.start(pass, nodeId, def, gathered))
+  }
 
-      if (pass.generation !== this.generation) {
-        // A newer run took over while we awaited; drop the result silently.
+  /**
+   * Wait for an evaluation that may outlive this walk, and record how it came out.
+   *
+   * Raced against the walk's own signal: a superseded walk has to unwind *now*, so the run that
+   * replaced it can start and adopt the same evaluation, rather than holding everything behind
+   * the very node the edit was meant not to disturb.
+   */
+  private async adopt(
+    pass: RunPass,
+    nodeId: string,
+    evaluation: Evaluation,
+  ): Promise<NodeVerdict> {
+    evaluation.walk = walkOf(pass)
+    let outcome: Outcome
+    try {
+      outcome = await untilAborted(evaluation.done, pass.controller.signal)
+    } catch {
+      outcome = 'aborted'
+    }
+    return this.record(pass, nodeId, outcome)
+  }
+
+  /** One spelling of what an outcome means to the walk, for the inline and the detached path. */
+  private record(pass: RunPass, nodeId: string, outcome: Outcome): NodeVerdict {
+    switch (outcome) {
+      case 'ran':
+        pass.available.add(nodeId)
+        if (!pass.summary.executed.includes(nodeId)) pass.summary.executed.push(nodeId)
+        return 'ran'
+      case 'failed':
+        if (!pass.summary.failed.includes(nodeId)) pass.summary.failed.push(nodeId)
+        return 'failed'
+      case 'aborted':
         pass.summary.cancelled = true
         return 'aborted'
-      }
-      if (pass.controller.signal.aborted) {
-        pass.summary.cancelled = true
-        this.setState(nodeId, { state: 'stale' })
-        return 'aborted'
-      }
+      case 'retired':
+        // The graph moved past this key while the walk waited. Not available, so everything
+        // reading it is blocked — the same as any node the walk has not got to yet.
+        return 'skipped'
+    }
+  }
+
+  /**
+   * The evaluation in flight for this node, unless it has been stopped and is only unwinding.
+   *
+   * A stopped one stays registered until it returns, and must not be adopted: an undo straight
+   * after the edit that retired it brings the same key back, and adopting would wait on work that
+   * is going to answer `retired`.
+   */
+  private live(nodeId: string, key?: string): Evaluation | undefined {
+    const evaluation = this.evaluations.get(nodeId)
+    if (!evaluation || evaluation.controller.signal.aborted) return undefined
+    return key === undefined || evaluation.key === key ? evaluation : undefined
+  }
+
+  /** Abort an evaluation because the graph no longer asks for its key. */
+  private retire(nodeId: string, evaluation: Evaluation): void {
+    this.requestedFull.delete(nodeId)
+    evaluation.controller.abort(RETIRED)
+  }
+
+  /**
+   * Retire every evaluation whose node is gone, muted, now invalid, or keyed differently.
+   *
+   * Asked by `refreshStates` — every edit's hook, so a parameter change on the node being
+   * computed stops it at once rather than at the next run — and at the top of every run.
+   */
+  private retireMoved(
+    keys: Map<string, string>,
+    nodes: Map<string, GraphNode>,
+    inference: InferenceResult,
+  ): void {
+    for (const [nodeId, evaluation] of this.evaluations) {
+      if (evaluation.controller.signal.aborted) continue
+      const node = nodes.get(nodeId)
+      if (
+        !node ||
+        node.disabled ||
+        keys.get(nodeId) !== evaluation.key ||
+        hasErrors(inference, nodeId)
+      )
+        this.retire(nodeId, evaluation)
+    }
+  }
+
+  /**
+   * Start a top-level evaluation as an `Evaluation` — its own controller, registered by node,
+   * writing its own cache entry whoever is waiting for it — for the caller to `adopt`.
+   */
+  private start(
+    pass: RunPass,
+    nodeId: string,
+    def: NodeDefinition,
+    gathered: GatheredInputs,
+  ): Evaluation {
+    const owner: Owner = { controller: new AbortController(), walk: walkOf(pass) }
+    const done: Promise<Outcome> = this.evaluate(
+      pass,
+      nodeId,
+      def,
+      gathered,
+      undefined,
+      owner,
+    ).finally(() => {
+      if (this.evaluations.get(nodeId)?.done === done) this.evaluations.delete(nodeId)
+      // Nothing is walking towards this node any more — a cancel, or a retirement after its
+      // walk unwound — so no step of a run will announce how it ended.
+      if (owner.walk.controller.signal.aborted) this.host.onStateChange?.()
+    })
+    const evaluation: Evaluation = Object.assign(owner, { key: pass.keys.get(nodeId)!, done })
+    this.evaluations.set(nodeId, evaluation)
+    return evaluation
+  }
+
+  /**
+   * Call `evaluate` and keep what it returns under the key it was asked for.
+   *
+   * Inside a loop's pass the owner is the run itself, as it was for every evaluation once; at the
+   * top level it is an `Evaluation` (see `start`).
+   *
+   * **Two halves, and `pass` never reaches the second.** A suspended async frame keeps every one
+   * of its parameters whether or not they are read again — measured, reading them before the
+   * await frees nothing — and a top-level evaluation can wait minutes after the walk that started
+   * it was superseded. So this half reads what it needs from the pass and `finish` awaits.
+   */
+  private evaluate(
+    pass: RunPass,
+    nodeId: string,
+    def: NodeDefinition,
+    gathered: GatheredInputs,
+    iteration: LoopIteration | undefined,
+    owner?: Owner,
+  ): Promise<Outcome> {
+    // Spent here rather than at the top of the run: a node that was deferred by the cheap
+    // pass has not had its chance to honour the request yet. Inside a loop that means the
+    // first pass, which is the one that would reach the network anyway.
+    const refresh = this.forceRefresh.delete(nodeId)
+    // Collected per execution rather than on the context object, so a node cannot read back
+    // what it reported and nothing survives into the next run.
+    const fetched: { at?: number } = {}
+    /*
+     * The exception to that: warnings are visible while the node runs, which is the whole
+     * point of raising them before the expensive part, so they live in a map the UI reads.
+     *
+     * Cleared here as well as in the `finally`, which is not redundant: `warn` is handed to
+     * fetches that keep unwinding after a run is superseded, so a late call can repopulate
+     * the map *after* the finally has run. Without this, that stray would shadow the cache
+     * entry — the newer, real answer — for as long as the node existed.
+     */
+    this.liveWarnings.delete(nodeId)
+    const ctx = this.makeEvalContext({
+      pass,
+      nodeId,
+      def,
+      gathered,
+      refresh,
+      iteration,
+      owner,
+      // No `def.loop === 'end'` guard: the only writer of this map already gates on it, so a
+      // second test here would imply the map can hold a node that it never does.
+      accumulated: pass.accumulations.get(nodeId),
+      onFetched: (at) => {
+        // Oldest wins: a node making several fetches is only as fresh as its stalest one.
+        fetched.at = fetched.at === undefined ? at : Math.min(fetched.at, at)
+      },
+    })
+    return this.finish(nodeId, def, ctx, {
+      key: pass.keys.get(nodeId)!,
+      // A loop exit folds into what its last pass returned — see `RunPass.accumulations`.
+      accumulations: def.loop === 'end' && iteration ? pass.accumulations : undefined,
+      fetched,
+    })
+  }
+
+  /** `evaluate`'s awaiting half, handed only what it keeps — see there for why. */
+  private async finish(
+    nodeId: string,
+    def: NodeDefinition,
+    ctx: EvalContext,
+    run: {
+      key: string
+      accumulations: Map<string, Readonly<Record<string, Value>>> | undefined
+      fetched: { at?: number }
+    },
+  ): Promise<Outcome> {
+    const { key, fetched } = run
+    const signal = ctx.signal
+    const nodeStarted = performance.now()
+    try {
+      const outputs = await def.evaluate(ctx)
+      signal.throwIfAborted()
 
       const warnings = this.liveWarnings.get(nodeId)
       this.cache.set(nodeId, {
-        key: pass.keys.get(nodeId)!,
+        key,
         outputs,
-        ...(fetchedAt === undefined ? {} : { fetchedAt }),
+        ...(fetched.at === undefined ? {} : { fetchedAt: fetched.at }),
         ...(warnings && warnings.length > 0 ? { warnings } : {}),
       })
       /*
@@ -1468,22 +1737,21 @@ export class Scheduler {
        * a half-finished total, and storing one under a provenance key is the mistake
        * `previews` exists to avoid.
        */
-      if (def.loop === 'end' && iteration) pass.accumulations.set(nodeId, outputs)
-      pass.available.add(nodeId)
-      if (!pass.summary.executed.includes(nodeId)) pass.summary.executed.push(nodeId)
+      run.accumulations?.set(nodeId, outputs)
       this.setState(nodeId, {
         state: 'ok',
         durationMs: performance.now() - nodeStarted,
       })
       return 'ran'
     } catch (err) {
-      if (pass.controller.signal.aborted) {
-        pass.summary.cancelled = true
+      if (signal.aborted) {
+        // A retired node's badge was already set by whatever retired it, from the graph it
+        // retired it against; this one knows only the graph it started from.
+        if (signal.reason === RETIRED) return 'retired'
         this.setState(nodeId, { state: 'stale' })
         return 'aborted'
       }
       this.cache.delete(nodeId)
-      if (!pass.summary.failed.includes(nodeId)) pass.summary.failed.push(nodeId)
       this.setState(nodeId, {
         state: 'error',
         error: errorMessage(err),
@@ -1634,16 +1902,25 @@ export class Scheduler {
     iteration?: LoopIteration | undefined
     accumulated?: Readonly<Record<string, Value>> | undefined
     onFetched?: (at: number) => void
+    /** Whose signal it carries and whose bar its progress moves; the run's own when absent. */
+    owner?: Owner
   }): EvalContext {
-    const { pass, nodeId, def, gathered, refresh } = opts
-    const params = withDefaults(def, this.nodeOf(pass, nodeId).params)
-    const types = (pass.inference.nodes[nodeId]?.inputs ?? {}) as Record<string, never>
+    /*
+     * No closure below names `opts` or `pass`. They outlive the walk that built them whenever an
+     * `Evaluation` is adopted, and V8 gives every closure made in one scope the same context — so
+     * one mention would keep the superseded walk's whole graph alive until the node returned.
+     */
+    const { nodeId, def, gathered, refresh, iteration, accumulated, onFetched } = opts
+    const params = withDefaults(def, this.nodeOf(opts.pass, nodeId).params)
+    const types = (opts.pass.inference.nodes[nodeId]?.inputs ?? {}) as Record<string, never>
+    const owner = opts.owner ?? { controller: opts.pass.controller, walk: walkOf(opts.pass) }
+    const signal = owner.controller.signal
     return {
       params,
       refresh,
-      iteration: opts.iteration,
-      accumulated: opts.accumulated,
-      reportFetched: (at) => opts.onFetched?.(at),
+      iteration,
+      accumulated,
+      reportFetched: (at) => onFetched?.(at),
       warn: (message) => {
         const said = this.liveWarnings.get(nodeId) ?? []
         // Deduped, so a warning raised inside a per-item loop says its piece once.
@@ -1655,11 +1932,12 @@ export class Scheduler {
       publish: (partial) => {
         /*
          * Checked here rather than left to the caller: `publish` is handed to a fetch that
-         * is already unwinding when a run is superseded, and the last few bodies in flight
-         * land after that. Dropping them silently is the whole point — the newer run owns
-         * the screen from the moment it starts.
+         * is still unwinding after the evaluation was cancelled or retired, and the last few
+         * bodies in flight land after that. Dropping them silently is the whole point — a
+         * partial for work nobody is waiting on is a picture of nothing. (A run that merely
+         * supersedes this one adopts it, so its previews keep landing.)
          */
-        if (pass.generation !== this.generation || pass.controller.signal.aborted) return
+        if (signal.aborted) return
         this.previews.set(nodeId, partial)
         this.host.onPreview?.()
       },
@@ -1676,8 +1954,10 @@ export class Scheduler {
         return p && p.kind === 'columns' ? resolveColumns(p, params, types) : []
       },
       resolveSource: (sourceId) => this.host.resolveSource(sourceId),
-      signal: pass.controller.signal,
+      signal,
       progress: (fraction, note) => {
+        // A late report from an evaluation already stopped would put back a `running` badge.
+        if (signal.aborted) return
         this.setState(nodeId, {
           state: 'running',
           progress: Math.max(0, Math.min(1, fraction)),
@@ -1685,11 +1965,11 @@ export class Scheduler {
         })
         /*
          * The same number, weighed against the whole run — see `countRunning`. Gated on
-         * `opts.iteration` being absent, which is precisely "this node is the top-level walk's
+         * `iteration` being absent, which is precisely "this node is the top-level walk's
          * current one": inside a pass its region's share already counts it, and the begin node's
          * own `progress` *is* that share. Ahead of the notification below, which carries it.
          */
-        if (!opts.iteration) this.countRunning(pass, fraction)
+        if (!iteration) this.countRunning(owner.walk, fraction)
         this.host.onStateChange?.()
       },
     }
@@ -1706,6 +1986,7 @@ export class Scheduler {
     }
     // A deleted node's pending request would otherwise be spent by whatever reused its id.
     for (const id of [...this.forceRefresh]) if (!alive.has(id)) this.forceRefresh.delete(id)
+    for (const id of [...this.requestedFull]) if (!alive.has(id)) this.requestedFull.delete(id)
     // Same reason, and it matters more: a stranded index would still be folded into whatever
     // node took the id, keying it off a loop that no longer exists.
     for (const id of [...this.loopIndex.keys()]) if (!alive.has(id)) this.loopIndex.delete(id)
@@ -1788,8 +2069,8 @@ function descendantsOf(graph: CodaGraph, nodeId: string): Set<string> {
 /**
  * A count, grouped, for a progress line and a warning that both read as prose.
  *
- * Local rather than `ui/format.ts`'s `formatNumber`: `src/core` is headless and must not reach
- * into the UI layer, and what is wanted here is the one rule (group thousands) rather than that
+ * Local rather than `style/format.ts`'s `formatNumber`: `src/style` reads `nodes/lib`, which
+ * `src/core` sits beneath, and what is wanted here is the one rule (group thousands) rather than that
  * module's whole ladder of unit- and dtype-aware cases.
  */
 function formatCount(n: number): string {

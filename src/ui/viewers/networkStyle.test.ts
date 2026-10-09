@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
-import { CHART_INK, chartSurface, mixHex, withAlpha } from '../colors'
+import { CHART_INK, chartSurface, mixHex, withAlpha } from '../../style/colors'
 import {
   DIM_EDGE,
   DIM_NODE,

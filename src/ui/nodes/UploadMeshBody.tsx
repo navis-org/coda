@@ -34,7 +34,7 @@ import {
 } from '../../data/meshFile'
 import { putMeshUpload } from '../../data/uploads'
 import type { StoredMesh } from '../../data/uploads'
-import { formatBytes, formatNumber, plural } from '../format'
+import { formatBytes, formatNumber, plural } from '../../style/format'
 import type { NodeBodyProps } from './nodeBodies'
 import { UploadAbsent, UploadFields, checkUploadSize, useUploadState } from './uploadCard'
 

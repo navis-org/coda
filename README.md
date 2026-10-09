@@ -2,10 +2,10 @@
 
 # Coda
 
-`Co`nnectome `d`ata `a`nalysis — Browser-based, node editor for querying and analyzing connectomic data.
+`Co`nnectome `d`ata `a`nalysis: a browser-based node editor for querying and analyzing connectomic data.
 
 > [!TIP]
-> **Beta.** The core functionality is there, including support for (almost) all major connectome datasets. We're still adding features, improving the UI, and fixing bugs — but from here on we aim to keep saved workflows opening in later builds. Bug reports and feature requests are very welcome!
+> **Beta.** The core functionality is there, including support for (almost) all major connectome datasets. We're still adding features, improving the UI and fixing bugs, but from here on we aim to keep saved workflows opening in later builds. Bug reports and feature requests are very welcome!
 
 **Highlights**
 - node-based editor for building analysis/exploration pipelines
@@ -20,19 +20,19 @@
 
 Just go to https://coda.science/.
 
-New to Coda? Watch the two-minute video [Your first Coda workflow](https://youtu.be/4s2zeBkXudo),
-and find more on the [YouTube channel](https://www.youtube.com/@coda-science).
+New to Coda? Watch the two-minute video [Your first Coda workflow](https://www.youtube.com/watch?v=4s2zeBkXudo&list=PLV8BfQPvTPmc), which carries on
+into the rest of the [tutorial playlist](https://www.youtube.com/playlist?list=PLV8BfQPvTPmc).
 
 Other useful links:
 - ["Feature Overview"](https://coda.science/overview.html)
 - ["Field Guide"](https://coda.science/tutorial.html)
 - ["Node Guide"](https://coda.science/nodes.html)
-- ["MCP Server"](https://coda.science/mcp.html) — drive Coda from your own AI client
+- ["MCP Server"](https://coda.science/mcp.html): drive Coda from your own AI client
 
-Check out `?` ▶ `Guides` for in-app tutorials and `Examples` for pre-built workflows.
+Check out `?` ▶ `Guides` for in-app tutorials, and the Coda Zoo for workflows shared by other users.
 
 - add credentials to access neuPrint/CAVE/CATMAID datasets via `Connections` icon in the top toolbar
-- `New` to create a new graph, either from scratch or using the Workflow Wizard/Examples/Preconfigured datastacks
+- `New` to create a new graph: from scratch, with the Workflow Wizard, from the Coda Zoo or from a preconfigured dataset
 - click and drag to pan, scroll to zoom
 - **+** button (lower right) to add nodes or `Tab` to search for nodes
 - `Space` for the command palette
@@ -41,9 +41,9 @@ Check out `?` ▶ `Guides` for in-app tutorials and `Examples` for pre-built wor
 
 ## Why not just use neuPrint, Codex or CATMAID directly?
 
-Codex and neuPrint are great for initial exploration of the datasets but if you want to do more than just look at a few neurons, you quickly hit a wall and have to start writing code. CATMAID (the oldest of these tools) has actually a lot of analysis tools, but hasn't made the transition to modern (segmentation + meshes) connectomics.
+Codex and neuPrint are great for initial exploration of the datasets but if you want to do more than just look at a few neurons, you quickly hit a wall and have to start writing code. CATMAID (the oldest of these tools) actually has a lot of analysis tools, but hasn't made the transition to modern (segmentation + meshes) connectomics.
 
-Coda is designed to fill the gap between exploration-only and full-on coding. Also: because we don't play favourites, you can combine data from multiple sources in one workflow! And if you do want to write code, Coda can help you get started by generate Python or R code from your workflow.
+Coda is designed to fill the gap between exploration-only and full-on coding. Also: because we don't play favourites, you can combine data from multiple sources in one workflow! And if you do want to write code, Coda can help you get started by generating Python or R code from your workflow.
 
 ## Why "Coda"?
 
@@ -57,7 +57,7 @@ pnpm dev          # http://localhost:5173
 ```
 
 ```bash
-pnpm test         # 1143 tests
+pnpm test         # vitest
 pnpm typecheck
 pnpm lint
 pnpm build        # static bundle in dist/
@@ -76,15 +76,18 @@ src/
 │  ├─ graph.ts        document model, topo sort, serialisation
 │  ├─ inference.ts    edit-time type/schema propagation + link validation
 │  └─ scheduler.ts    DAG executor, provenance-keyed cache, hybrid eval
-├─ data/          DataSource interface + the mock connectome
-├─ nodes/         node pack (query / table / output)
+├─ data/          DataSource interface, one folder per backend, the mock connectome
+├─ nodes/         built-in nodes (query / table / analysis / output …)
+├─ packs/         node packs (Connectome, Cortex, ZapBench, …), switched on under Plugins
+├─ help/          the in-app help documents (a pack keeps its own under packs/<id>/help)
+├─ export/        Python notebook and R Markdown export
 ├─ store/         zustand document state, undo, persistence
 ├─ ui/            React Flow editor, param widgets, viewers
 │  └─ panels/     command palette (+ fuzzy matcher), inspector, toolbar
 └─ wizard/        the Workflow Wizard: graphs built from four answers, the starters, the demos
 ```
 
-`src/core` and `src/data` must stay headless — a lint rule blocks imports of React,
+`src/core` and `src/data` must stay headless: a lint rule blocks imports of React,
 zustand, the store and the UI from those directories. The point is that the engine stays
 unit-testable without a DOM, and reusable later by a non-React consumer (a CLI runner, or a Python-side executor consuming the same graph JSON).
 

@@ -14,9 +14,10 @@
  * `edgeMenu.test.tsx`'s reason.
  */
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import type { CodaGraph } from '../../core/graph'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -34,6 +35,13 @@ beforeEach(() => {
 })
 
 afterEach(cleanup)
+
+/** The ids of every tab holding a cell for this node, in strip order. */
+function tabsHolding(graph: CodaGraph, nodeId: string): string[] {
+  return (graph.dashboard?.tabs ?? [])
+    .filter((t) => t.cells.some((c) => c.nodeId === nodeId))
+    .map((t) => t.id)
+}
 
 function menuOn(type: string): void {
   const id = useGraphStore.getState().addNode(type, { x: 0, y: 0 })
@@ -63,5 +71,38 @@ describe('the node menu’s two caches', () => {
      */
     menuOn('core.filterTable')
     expect(screen.queryByText('Clear Cache')).toBeNull()
+  })
+})
+
+/**
+ * The dashboard row once there are several tabs: one row per page, ticked where the node is, and
+ * a new page at the foot. Until the dashboard is in use as pages it stays the single toggle.
+ */
+describe('the dashboard row', () => {
+  it('is the plain toggle until the dashboard is in use as pages', () => {
+    menuOn('out.table')
+    expect(screen.getByRole('button', { name: 'Add to Dashboard' })).toBeTruthy()
+  })
+
+  it('lists every tab, ticked where the node already is, and toggles one without closing', () => {
+    const store = useGraphStore.getState()
+    const id = store.addNode('out.table', { x: 0, y: 0 })
+    store.addToDashboard([id])
+    store.addDashboardTab()
+    let closed = 0
+    render(
+      <NodeContextMenu nodeId={id} screenPosition={{ x: 0, y: 0 }} onClose={() => closed++} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /^Dashboard/ }))
+    expect(screen.getByRole('button', { name: '✓ Tab 1' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Tab 2' }))
+    expect(tabsHolding(useGraphStore.getState().graph, id)).toEqual(['main', 't2'])
+    expect(closed).toBe(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '+ New Tab' }))
+    expect(tabsHolding(useGraphStore.getState().graph, id)).toEqual(['main', 't2', 't3'])
+    expect(closed).toBe(1)
   })
 })

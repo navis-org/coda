@@ -53,13 +53,13 @@ export function SharedLinkGate() {
            * link is exactly the act of hiding where it goes.
            */}
           <p>
-            This link does not carry the workflow itself — it points at{' '}
-            <code>{load.target.host ?? 'another site'}</code>, which Coda will have to fetch
-            from.
+            This link does not contain the workflow itself. It points to{' '}
+            <code>{load.target.host ?? 'another site'}</code>, and Coda has to fetch the
+            workflow from there.
           </p>
           <p className="share-gate__quiet">
-            A workflow is a document, not a program: nothing in it runs until you press Run, and
-            it cannot reach your neuPrint token or any other credential.
+            Opening a workflow runs nothing: nothing in it runs until you press Run, and it
+            cannot reach your neuPrint token or any other credential.
           </p>
           <div className="share-gate__actions">
             <button type="button" className="btn btn--primary" onClick={accept}>

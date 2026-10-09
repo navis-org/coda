@@ -80,7 +80,7 @@ export function importShapeParams({ read, textAdvanced }: ImportShapeOptions): P
       id: 'textColumns',
       kind: 'columns',
       label: 'Text columns',
-      help: 'Read these as text rather than numbers — a cluster id is a label, not a quantity.',
+      help: 'Read these columns as text, e.g. cluster ids that should not be treated as numbers.',
       // No port to read: the schema is the node's own, so the picker is handed the lookup.
       from: '',
       schemaFrom,
@@ -132,7 +132,9 @@ export function importShapeIssues(
   // Reachable from a saved graph rather than from the picker, which never offers the id. The
   // rename would silently do nothing, since the id claims the column first.
   if (typeColumn && typeColumn === idColumn) {
-    return [`"${idColumn}" cannot be both the ID column and the Type column`]
+    return [
+      `"${idColumn}" cannot be both the \`ID column\` and the \`Type column\`. Pick a different \`Type column\`.`,
+    ]
   }
   return []
 }

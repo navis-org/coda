@@ -23,6 +23,7 @@
  */
 
 import { DatasetListing } from '../datasetListing'
+import { PeekGate } from '../peekGate'
 import { errorMessage } from '../../core/errors'
 import { describeDuration } from '../../core/limits'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
@@ -101,7 +102,6 @@ import {
 } from './meshes'
 import { achievedDownsample, reductionFor, reductionKey } from '../meshDecimate'
 import type { MeshResult, MeshSource } from '../precomputed'
-import { OVERSIZE } from '../precomputed/transport'
 import {
   DEFAULT_TRIANGLE_BUDGET,
   fetchCoarseMesh,
@@ -131,7 +131,7 @@ import type { DatastackInfo, VersionInfo } from './api'
 import { CaveError } from './client'
 import { queryTableChecked, queryView, queryViewChecked, uniqueStringValues } from './api'
 import type { CaveQuery } from './api'
-import { reportAuthFailure } from './credentials'
+import { getToken, reportAuthFailure } from './credentials'
 import {
   DEFAULT_CAVE_SERVER,
   caveServerLabel,
@@ -150,6 +150,7 @@ import {
 } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
+import { annotationIndex, morphologyAttributes } from '../annotations/labels'
 import { L2_SKELETON_WARN, readL2Skeletons } from './l2'
 import { byteLengthOf, skeletonBytes, cachedGeometry } from '../geometryCache'
 import { caveScene } from './scene'
@@ -275,18 +276,15 @@ interface DatastackState {
   systems?: string[]
   discovering?: Promise<void>
   /**
-   * Whether inference has already asked for discovery. Never cleared on failure.
-   *
-   * The same rule, and the same reason, as `DatasetListing.peek`: inference runs on every graph
-   * mutation, so a discovery that failed and was retried from there is a request per keystroke —
-   * or, with no token, an auth-failure popup per keystroke. `runDiscovery` sets `schemas` only
-   * on the success path, so without this flag every failure is retried forever.
+   * Whether inference may ask for discovery — once per token, never without one (`PeekGate`).
+   * `runDiscovery` sets `schemas` only on the success path, so a failure is asked again under the
+   * next token.
    *
    * The *Run* path (`neuronSchema`) deliberately calls `discover` regardless, so pressing Run is
-   * still what retries. That is the same shape as the Sources panel being the recovery for a
-   * failed listing.
+   * still what retries under the same one. That is the same shape as the Sources panel being the
+   * recovery for a failed listing.
    */
-  discoveryRequested?: boolean
+  discoveryPeek?: PeekGate
 }
 
 /**
@@ -423,8 +421,8 @@ function noRoute(
       ? `${spec.label} publishes no flat skeleton bucket for materialization ${version}`
       : `${spec.label} declares no skeleton service`
   return new CaveError(
-    `${missing}, so the Skeletons node cannot take that route here. Set its Source back to ` +
-      `Automatic, which picks whichever route this dataset does have.`,
+    `${missing}, so the Skeletons node cannot use that route here. Set its \`Source\` back to ` +
+      `"Automatic" to use whichever route this dataset has.`,
   )
 }
 
@@ -510,6 +508,7 @@ export class CaveSource implements DataSource {
         `deployment; every dataset is pinned to a materialization.`
     this.listing = new DatasetListing(this.id, (signal) => this.runListing(signal), {
       keep: 'inflight',
+      credential: () => getToken(this.deployment),
     })
   }
 
@@ -526,7 +525,11 @@ export class CaveSource implements DataSource {
     return this.listing.get(signal)
   }
 
-  /** `DatasetListing.peek`: starts the listing once per instance, and answers what has landed. */
+  /**
+   * `DatasetListing.peek`: starts the listing once per token, and answers what has landed. Gated
+   * on this deployment's token through the listing's `credential`, `peekDatastacks`' rule and for
+   * its reason — see docs/backends.md.
+   */
   peekDatasets(): DatasetInfo[] | undefined {
     return this.listing.peek()
   }
@@ -738,11 +741,10 @@ export class CaveSource implements DataSource {
     if (!spec) return this.schemas
     const state = this.state(spec.datastack)
     if (state.schemas) return state.schemas
-    if (!state.discoveryRequested) {
-      state.discoveryRequested = true
-      // Swallowed: inference has no caller to report to, and a 401 already travels on its own
-      // channel to the Connections panel.
-      void this.discover(spec).catch(() => undefined)
+    if ((state.discoveryPeek ??= new PeekGate(() => getToken(this.deployment))).open()) {
+      // Swallowed and `quiet`: a peek has no caller waiting, so a refusal is no reason to open
+      // Connections. A Run discovers loudly.
+      void this.discover(spec, true).catch(() => undefined)
     }
     return this.schemas
   }
@@ -754,24 +756,34 @@ export class CaveSource implements DataSource {
    * which is what lets this run from inference while the index waits until something actually
    * asks for neurons.
    */
-  private discover(spec: DatastackSpec): Promise<void> {
+  private discover(spec: DatastackSpec, quiet = false): Promise<void> {
     const state = this.state(spec.datastack)
     if (state.schemas) return Promise.resolve()
-    state.discovering ??= this.runDiscovery(spec, state).finally(() => {
+    /*
+     * A loud caller arriving while a quiet discovery is in flight inherits the silence —
+     * `CaveRequestOptions.quiet`'s memo nuance, self-healing for the same reason: a failed
+     * discovery sets nothing, so the next Run asks again and reports.
+     */
+    state.discovering ??= this.runDiscovery(spec, state, quiet).finally(() => {
       state.discovering = undefined
     })
     return state.discovering
   }
 
-  private async runDiscovery(spec: DatastackSpec, state: DatastackState): Promise<void> {
-    const server = await this.serverFor(spec)
+  private async runDiscovery(
+    spec: DatastackSpec,
+    state: DatastackState,
+    quiet: boolean,
+  ): Promise<void> {
+    const options = { ...this.options(), quiet }
+    const server = await this.serverFor(spec, options)
     let systems: string[] = []
     if (spec.annotations) {
       const values = await uniqueStringValues(
         server,
         spec.datastack,
         spec.annotations.table,
-        this.options(),
+        options,
       )
       systems = [...(values[spec.annotations.systemColumn] ?? [])].sort()
     }
@@ -1304,8 +1316,8 @@ export class CaveSource implements DataSource {
       req.onWarn?.(
         `${result.missing.length.toLocaleString()} of ${req.neuronIds.length.toLocaleString()} ` +
           `neurons have no mesh in ${spec.label}'s published segmentation for this version, so ` +
-          `they are not in this result. A flat segmentation holds the root ids that were current ` +
-          `when it was written; an id from another materialization will not be in it.`,
+          `they are not in this result. The published segmentation only holds the root ids that ` +
+          `were current at this materialization, so an id from another version will not be in it.`,
       )
     }
 
@@ -1375,11 +1387,10 @@ export class CaveSource implements DataSource {
         `${count.toLocaleString()} graphene meshes from ${spec.label} is ` +
           `${describeDuration(count * SECONDS_PER_NEURON)} and ` +
           `${Math.round(count * MB_PER_NEURON.low)}–${Math.round(count * MB_PER_NEURON.high)} MB. ` +
-          `A graphene mesh has no level of detail, so each one is dozens to hundreds of separate ` +
-          `requests, and how many varies by more than a hundredfold between neurons — this is ` +
-          `the slow route, and a materialization with a flat segmentation beside it does the ` +
-          `same set in two requests a neuron. Fetching anyway; cancel if that is not what you ` +
-          `meant.`,
+          `Each graphene mesh takes dozens to hundreds of separate requests, and the number varies ` +
+          `a hundredfold between neurons. A materialization with a published (flat) segmentation ` +
+          `fetches the same meshes in two requests per neuron. Fetching anyway; cancel if you ` +
+          `did not mean to.`,
       )
     }
 
@@ -1482,11 +1493,11 @@ export class CaveSource implements DataSource {
       req.onWarn?.(
         `${shortMeshes.toLocaleString()} of the meshes from ${spec.label} are incomplete: ` +
           `${fragments.missing.toLocaleString()} of ${fragments.named.toLocaleString()} ` +
-          `fragments are not in the result, so what is drawn is less than the neuron. ` +
+          `fragments are missing, so part of each neuron is not drawn. ` +
           // Two remedies, and only one of them is a retry — see `FragmentTally.unaddressable`.
           (fragments.unaddressable === fragments.missing
-            ? `Their names are in a form this build cannot address, which is a bug in Coda ` +
-              `rather than something a retry will fix.`
+            ? `Coda could not read their names. This is a bug in Coda, and running again will ` +
+              `not fix it.`
             : `Clear Cache on this node and Run to try the missing ones again.`),
       )
     }
@@ -1623,7 +1634,7 @@ export class CaveSource implements DataSource {
           throw new CaveError(
             `Could not ask ${spec.label}'s skeleton service which neurons it holds ` +
               `(${errorMessage(error)}), so no route was chosen. Run again, or set the Skeletons ` +
-              'Source to the level-2 chunk graph.',
+              'node\'s `Source` to "level-2 chunk graph".',
           )
         },
       )
@@ -1738,9 +1749,9 @@ export class CaveSource implements DataSource {
       req.onWarn?.(
         `${req.neuronIds.length.toLocaleString()} skeletons from ${spec.label} is around ` +
           `${megabytes.toLocaleString()} MB and ${describeDuration(req.neuronIds.length * 0.2)}. ` +
-          `These are skeletonised at mip 1 — tens of thousands of nodes each, not the few ` +
-          `hundred a chunk-graph skeleton has — so the cost here is memory rather than the ` +
-          `wait. Fetching anyway; cancel if that is not what you meant.`,
+          `These skeletons have tens of thousands of nodes each (a level-2 chunk-graph skeleton ` +
+          `has a few hundred), so they take a lot of memory. Fetching anyway; cancel if you did ` +
+          `not mean to.`,
       )
     }
 
@@ -1796,10 +1807,10 @@ export class CaveSource implements DataSource {
       const missing = req.neuronIds.length - available.length
       req.onWarn?.(
         `${missing.toLocaleString()} of ${req.neuronIds.length.toLocaleString()} neurons have no ` +
-          `skeleton in ${spec.label}'s skeleton cache, so they are not in this result. That ` +
-          `service builds a skeleton the first time somebody asks for one and Coda does not ` +
-          `queue that — a cold build is tens of seconds per neuron. Leave Source on Automatic ` +
-          `for a route that can answer for every neuron.`,
+          `skeleton in ${spec.label}'s skeleton cache, so they are not in this result. The ` +
+          `service only builds a skeleton the first time it is asked for one, which takes tens ` +
+          `of seconds per neuron, and Coda does not ask it to. Set \`Source\` to "Automatic" to ` +
+          `use a route that has every neuron.`,
       )
     }
 
@@ -1867,9 +1878,8 @@ export class CaveSource implements DataSource {
       // Two chunkedgraph reads apiece, sixteen at a time: ~0.3 s a neuron once warm.
       req.onWarn?.(
         `${req.neuronIds.length.toLocaleString()} skeletons from ${spec.label} is ` +
-          `${describeDuration(req.neuronIds.length * 0.3)}. Each one is built from the ` +
-          `level-2 cache rather than read ready-made, so this datastack is the slow way to get ` +
-          `a skeleton. Building anyway.`,
+          `${describeDuration(req.neuronIds.length * 0.3)}, because each one is built from the ` +
+          `level-2 cache on request. Building anyway.`,
       )
     }
 
@@ -1879,8 +1889,8 @@ export class CaveSource implements DataSource {
     if (!source) {
       throw new CaveError(
         `${spec.label} has no level-2 cache to build skeletons from, and no published skeletons ` +
-          `for this materialization either. That is a fact about the datastack rather than ` +
-          `about this graph — meshes and synapses are unaffected.`,
+          `for this materialization either, so no skeletons can be fetched from it. Meshes and ` +
+          `synapses are unaffected.`,
       )
     }
 
@@ -2163,9 +2173,7 @@ export class CaveSource implements DataSource {
 
     const pyramid = await this.flatMeshDir(spec, parsed.version, req.signal)
     if (pyramid) {
-      const mesh = await fetchCoarseMesh(pyramid, req.neuronId, options, req.detail)
-      if (mesh === OVERSIZE) return { kind: 'refused', reason: 'too-large' }
-      return mesh && { kind: 'mesh', ...mesh }
+      return fetchCoarseMesh(pyramid, req.neuronId, options, req.detail)
     }
 
     const cached = await this.serviceThumbnail(spec.datastack, req.neuronId, options)
@@ -2352,25 +2360,19 @@ export class CaveSource implements DataSource {
   }
 
   /**
-   * The table itself, synchronous, so a partial answer can be assembled inside a callback.
-   *
-   * Only the id and the point count are read, which both geometry kinds carry — so meshes and
-   * skeletons share this rather than each building an attribute table that could disagree about
-   * which columns a morphology row has.
+   * The table itself, synchronous, so a partial answer can be assembled inside a callback — the
+   * shared row (`morphologyAttributes`), with this datastack's `type` where no chain supplies one.
    */
   private morphologyTable(
     req: GeometryRequest,
     items: ReadonlyArray<{ id: string; positions: Float32Array }>,
     types: Map<string, string> | undefined,
   ): TableValue {
-    return tableFromRows(
-      withAnnotations(this.schemasFor(req.datasetId), req.annotations?.table.schema).morphology,
-      items.map((item) => ({
-        [ID_COLUMN_NAME]: item.id,
-        ...labelsFor(req.annotations, item.id),
-        ...(types ? { type: types.get(item.id) ?? null } : {}),
-        points: item.positions.length / 3,
-      })),
+    return morphologyAttributes(
+      this.schemasFor(req.datasetId),
+      req.annotations,
+      items,
+      types ? (id) => ({ type: types.get(id) ?? null }) : undefined,
     )
   }
 
@@ -2428,7 +2430,7 @@ export class CaveSource implements DataSource {
       throw new CaveError(
         `Coda has no wiring for the CAVE datastack "${parsed.datastack}" on ` +
           `${caveServerLabel(this.deployment)}. A datastack has to ` +
-          `say which of its tables are neurons and which are connections — see ` +
+          `say which of its tables are neurons and which are connections; see ` +
           `src/data/cave/spec.ts.`,
       )
     }
@@ -2442,8 +2444,8 @@ export class CaveSource implements DataSource {
   }
 
   /** The server a datastack is served from. */
-  private serverFor(spec: DatastackSpec): Promise<string> {
-    return caveServerFor(spec.datastack, this.options())
+  private serverFor(spec: DatastackSpec, options = this.options()): Promise<string> {
+    return caveServerFor(spec.datastack, options)
   }
 }
 
@@ -2533,45 +2535,6 @@ function joinIndex(
     }
   }
   return makeTable(schema, data, 'neurons')
-}
-
-/** One neuron's labels out of a chain, by id. */
-function labelsFor(
-  annotations: DatasetAnnotations | undefined,
-  id: string,
-): Record<string, CellValue> {
-  if (!annotations) return {}
-  const index = annotationIndex(annotations.table)
-  const row = index.get(id)
-  if (row === undefined) return {}
-  const labels: Record<string, CellValue> = {}
-  for (const col of annotations.table.schema.columns) {
-    if (col.name === ID_COLUMN_NAME) continue
-    labels[col.name] = annotations.table.data[col.name]?.[row] ?? null
-  }
-  return labels
-}
-
-/**
- * Row index of an annotation table, built once per table.
- *
- * A `WeakMap` on the table itself, `typesOf`'s idiom: `labelsFor` is called per item, and
- * rebuilding a 58,000-entry map twenty times over to place twenty meshes is the case that memo
- * exists for.
- */
-const annotationRows = new WeakMap<TableValue, Map<string, number>>()
-
-function annotationIndex(table: TableValue): Map<string, number> {
-  const cached = annotationRows.get(table)
-  if (cached) return cached
-  const index = new Map<string, number>()
-  const ids = table.data[ID_COLUMN_NAME] ?? []
-  for (let i = 0; i < table.length; i++) {
-    const id = String(ids[i] ?? '')
-    if (id && !index.has(id)) index.set(id, i)
-  }
-  annotationRows.set(table, index)
-  return index
 }
 
 /**

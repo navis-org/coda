@@ -49,7 +49,9 @@ registerNode({
   description:
     'Compare every observation with every other over its features, as a similarity or distance matrix.',
   guide:
-    'Turns a table of features, calculates similarities or distances between them and returns it as a square similarity matrix for e.g. Linkage or Heatmap takes.',
+    'Compares every neuron (or other observation) with every other one over a table of ' +
+    'features, e.g. connectivity from Partner Vectors, using cosine, Jaccard, Pearson or ' +
+    'Euclidean. The square matrix it returns goes into Linkage for clustering or into a Heatmap.',
   cost: 'expensive',
 
   inputs: [{ id: 'in', label: 'Features', type: T.table() }],
@@ -62,7 +64,7 @@ registerNode({
       label: 'Layout',
       default: 'long',
       options: SIMILARITY_LAYOUT_OPTIONS,
-      help: '"Long" is a table of triplets — observation, feature, value — as Partner Vectors and Group By produce, and the only form that scales. "Wide" is one row per observation, a column per feature.',
+      help: 'How the table is laid out. "Long (one row per pair)" is what Partner Vectors and Group By produce, and scales best.',
     },
     {
       id: 'observations',
@@ -71,7 +73,7 @@ registerNode({
       from: 'in',
       default: '',
       visibleIf: isLongLayout,
-      help: 'What the rows and columns of the result will be — the neurons being compared.',
+      help: 'The column naming what is compared, usually neurons. These become the rows and columns of the matrix.',
     },
     {
       id: 'features',
@@ -80,7 +82,7 @@ registerNode({
       from: 'in',
       default: '',
       visibleIf: isLongLayout,
-      help: 'What they are being compared over. From Partner Vectors this is "feature", which already keeps upstream and downstream apart.',
+      help: 'The column to compare over. From Partner Vectors this is `feature`.',
     },
     {
       id: 'value',
@@ -91,7 +93,7 @@ registerNode({
       default: '',
       optional: true,
       visibleIf: isLongLayout,
-      help: 'How strong each pair is. Left empty the vector is 1 wherever a pair is listed, which asks whether two observations touch the same features rather than how hard.',
+      help: 'How strong each pair is. Leave empty to compare only which features each observation has.',
     },
     {
       id: 'idColumn',
@@ -100,7 +102,7 @@ registerNode({
       from: 'in',
       default: '',
       visibleIf: (params) => !isLongLayout(params),
-      help: 'The column naming each row. Everything else picked below is a dimension.',
+      help: 'The column naming each row.',
     },
     {
       id: 'wideFeatures',
@@ -110,7 +112,7 @@ registerNode({
       dtypes: NUMERIC_DTYPES,
       default: [],
       visibleIf: (params) => !isLongLayout(params),
-      help: 'The numeric columns to compare over. A zero counts as absent, which matters only to Jaccard (presence).',
+      help: 'The numeric columns to compare over. For "Jaccard (presence)", a zero counts as absent.',
     },
     {
       id: 'metric',
@@ -118,7 +120,7 @@ registerNode({
       label: 'Metric',
       default: 'cosine',
       options: SIMILARITY_METRIC_OPTIONS,
-      help: 'Cosine ignores overall magnitude, so a strongly and a weakly connected neuron with the same partners come out alike. Jaccard (presence) ignores the weights; the rest keep them, and Euclidean keeps the magnitude too.',
+      help: '"Cosine" ignores overall magnitude, so a strongly and a weakly connected neuron with the same partners match. "Jaccard (presence)" ignores weights; "Euclidean" also compares magnitude.',
     },
     {
       /*
@@ -134,7 +136,7 @@ registerNode({
       default: 'similarity',
       options: SIMILARITY_OUTPUT_OPTIONS,
       visibleIf: (params) => hasSimilarityForm(String(params.metric) as SimilarityMetric),
-      help: 'Distance is 1 − the similarity. Either works into Linkage; a Heatmap is usually easier to read as similarities.',
+      help: '"Distance" is 1 − similarity. Either works with Linkage; heatmaps are easier to read as similarities.',
     },
   ],
 
@@ -144,17 +146,18 @@ registerNode({
     if (isLongLayout(ctx.params)) {
       const observations = ctx.column('observations')
       const features = ctx.column('features')
-      if (!observations || !features) return ['Pick an Observations and a Features column']
+      if (!observations || !features) return ['Pick an `Observations` and a `Features` column.']
       if (observations === features) {
         return [
-          'Observations and Features are the same column, so every observation is compared ' +
-            'only with itself.',
+          '`Observations` and `Features` are the same column, so every observation is compared ' +
+            'only with itself. Pick a different column for one of them.',
         ]
       }
       return []
     }
-    if (!ctx.column('idColumn')) return ['Pick the column naming each row']
-    if (ctx.columns('wideFeatures').length === 0) return ['Pick at least one feature column']
+    if (!ctx.column('idColumn')) return ['Pick an `Id column` naming each row.']
+    if (ctx.columns('wideFeatures').length === 0)
+      return ['Pick at least one of the `Feature columns`.']
     return []
   },
 
@@ -171,22 +174,21 @@ registerNode({
       const observations = ctx.column('observations')
       const featureColumn = ctx.column('features')
       if (!observations || !featureColumn) {
-        throw new Error('Pick an Observations and a Features column')
+        throw new Error('Pick an `Observations` and a `Features` column.')
       }
       features = featuresFromLong(table, observations, featureColumn, ctx.column('value'))
     } else {
       const idColumn = ctx.column('idColumn')
       const picked = ctx.columns('wideFeatures')
-      if (!idColumn) throw new Error('Pick the column naming each row')
-      if (picked.length === 0) throw new Error('Pick at least one feature column')
+      if (!idColumn) throw new Error('Pick an `Id column` naming each row.')
+      if (picked.length === 0) throw new Error('Pick at least one of the `Feature columns`.')
       features = featuresFromWide(table, idColumn, picked)
     }
 
     if (features.labels.length < 2) {
       throw new Error(
         `A similarity matrix needs at least 2 observations; this has ` +
-          `${features.labels.length}. Check Observations names the neurons rather than the ` +
-          `features.`,
+          `${features.labels.length}. Check that \`Observations\` is the column naming the neurons.`,
       )
     }
     return { matrix: similarityMatrix(features, metric, output, ctx) }

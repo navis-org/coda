@@ -158,7 +158,7 @@ describe('neuron.xform', () => {
      * state a Custom dataset node produces, and the override is the only way through.
      */
     const error = (await run(pipeline())).info('xf').error ?? ''
-    expect(error).toMatch(/name no template space/)
+    expect(error).toMatch(/have no template space/)
     expect(mockedWarp).not.toHaveBeenCalled()
   })
 
@@ -384,6 +384,6 @@ describe('neuron.xform — a registration Coda does not ship', () => {
     // needs told, rather than left to discover.
     const graph = withCustom({ target: 'FLYWIRE', space: 'MANC' })
     const issues = (inferGraph(graph).nodes['xf']?.issues ?? []).map((i) => i.message)
-    expect(issues.join(' ')).toMatch(/Target and Space are ignored/)
+    expect(issues.join(' ')).toMatch(/`Target` and `Space` are ignored/)
   })
 })

@@ -7,20 +7,104 @@
  * the screen is raster because fifty thousand DOM nodes is not a chart, and the export is
  * vector because an exported file outlives the browser that made it.
  *
+ * Past `CIRCLES_MAX` visible marks both change hands: the canvas writes pixels
+ * (`scatterRaster.ts`) rather than tracing paths, and the export carries the plot area as one
+ * embedded image while axes, ticks, labels and legend stay vector — matplotlib's `rasterized=True`,
+ * because a file of a hundred thousand vector marks opens in almost nothing. `vectorMarks`
+ * opts back into every mark as a shape.
+ *
  * Marker outlines are shared between the two through `markPath`, which emits an SVG path
  * `d`. Canvas takes the same string via `Path2D` only for the export preview; the hot path
  * traces directly, because a `Path2D` per point is fifty thousand allocations per frame.
  */
 
-import type { MarkerShape } from '../encoding'
+import type { MarkerShape } from '../../nodes/lib/encodingParams'
 import { markVertices } from './markGeometry'
-import { SVG_NS, element, round, svgRoot, textNode } from './svgElement'
+import { SVG_NS, XLINK_NS, element, round, svgRoot, textNode } from './svgElement'
 import type { ScatterSpec } from './scatterPlot'
-import { inverse } from './scatterPlot'
-import { formatCompact } from '../format'
+import type { PlacedLabel } from './scatterLabels'
+import {
+  drawsPixels,
+  inverse,
+  markAlpha,
+  projectX,
+  projectY,
+  reachesPlot,
+  visibleBuckets,
+} from './scatterPlot'
+import { RING_GAP, RING_WIDTH, rasterBox, rasterizeMarks } from './scatterRaster'
+import { drawMarksGl } from './scatterGl'
+import { formatCompact } from '../../style/format'
+import { LruMap } from '../../core/lruMap'
+import { canvasFont, textMeasurer } from './canvas2d'
+import { LABEL_HALO_WIDTH } from './networkStyle'
 
 /** Height of the legend strip appended below an exported plot. */
 const LEGEND_HEIGHT = 26
+
+/** Gap between a hovered mark and its ring, wider than the selection's so both can show. */
+const HOVER_GAP = 3.5
+
+/** The point labels' size, a size up from the ticks; the face is `canvasFont`'s (see `textMeasurer`). */
+export const LABEL_FONT_PX = 10.5
+/** Past this many search hits their rings are drawn plain rather than dashed. */
+const DASHED_HITS_MAX = 2_000
+/** What a dimmed label — one that fit nowhere — is drawn at. */
+const DIM_ALPHA = 0.3
+const LABEL_HEIGHT = Math.ceil(LABEL_FONT_PX * 1.25)
+
+const measured = new LruMap<string, number>(20_000)
+let measureText: ((text: string) => number) | undefined
+
+/** A label's box, measured once per text in the label font. */
+export function measureLabel(text: string): { width: number; height: number } {
+  let width = measured.get(text)
+  if (width === undefined) {
+    // Made on first use: there is no document to measure with when this module is imported.
+    measureText ??= textMeasurer(LABEL_FONT_PX, (t) => t.length * LABEL_FONT_PX * 0.6)
+    width = measureText(text)
+    measured.set(text, width)
+  }
+  return { width: Math.ceil(width), height: LABEL_HEIGHT }
+}
+
+/**
+ * Labels with a halo of the background behind each glyph, so a name over a grid line or a stray
+ * mark still reads; leader lines first, under every label.
+ */
+function paintLabels(
+  context: CanvasRenderingContext2D,
+  labels: readonly PlacedLabel[],
+  ink: PlotInk,
+  background: string,
+): void {
+  context.save()
+  context.lineWidth = 1
+  context.strokeStyle = ink.muted
+  context.globalAlpha = 0.7
+  context.beginPath()
+  for (const label of labels) {
+    if (!label.line) continue
+    const [x0, y0, x1, y1] = label.line
+    context.moveTo(x0, y0)
+    context.lineTo(x1, y1)
+  }
+  context.stroke()
+  context.font = canvasFont(LABEL_FONT_PX)
+  context.textAlign = 'left'
+  context.textBaseline = 'middle'
+  context.lineJoin = 'round'
+  context.lineWidth = LABEL_HALO_WIDTH
+  context.strokeStyle = background
+  context.fillStyle = ink.primary
+  for (const label of labels) {
+    context.globalAlpha = label.dim ? DIM_ALPHA : 1
+    const y = label.y + label.height / 2
+    context.strokeText(label.text, label.x, y)
+    context.fillText(label.text, label.x, y)
+  }
+  context.restore()
+}
 
 /** SVG path data for one mark. */
 export function markPath(shape: MarkerShape, x: number, y: number, r: number): string {
@@ -82,12 +166,17 @@ export interface CanvasDrawOptions {
   height: number
   xLabel: string
   yLabel: string
-  /** Indices into the spec's arrays that carry a selection ring. */
+  /** Positions in `spec.marks` that carry a selection ring. */
   selected?: Set<number>
   /** Index of the hovered mark, drawn on top with a ring. */
   hovered?: number
+  /** Positions in `spec.marks` a search found, each outlined with a dashed ring. */
+  hits?: readonly number[]
+  /** The hit the search is on, ringed as a hovered mark is. */
+  current?: number
+  /** Labels beside the points, already placed (`scatterLabels.ts`). */
+  labels?: readonly PlacedLabel[]
   compact?: boolean
-  /** Device pixel ratio the context has already been scaled by. */
   showAxisTitles?: boolean
 }
 
@@ -112,29 +201,19 @@ export function drawScatter(
   context.fillStyle = background
   context.fillRect(0, 0, width, height)
 
-  // --- grid + axes -------------------------------------------------------
+  // --- grid ---------------------------------------------------------------
+  const grid = gridLines(spec)
   context.lineWidth = 1
   context.strokeStyle = ink.grid
   context.beginPath()
-  for (const tick of spec.xTicks) {
-    const x = Math.round(projectTickX(spec, tick)) + 0.5
-    if (x < plot.x || x > plot.x + plot.width) continue
-    context.moveTo(x, plot.y)
-    context.lineTo(x, plot.y + plot.height)
+  for (const x of grid.xs) {
+    context.moveTo(x + 0.5, plot.y)
+    context.lineTo(x + 0.5, plot.y + plot.height)
   }
-  for (const tick of spec.yTicks) {
-    const y = Math.round(projectTickY(spec, tick)) + 0.5
-    if (y < plot.y || y > plot.y + plot.height) continue
-    context.moveTo(plot.x, y)
-    context.lineTo(plot.x + plot.width, y)
+  for (const y of grid.ys) {
+    context.moveTo(plot.x, y + 0.5)
+    context.lineTo(plot.x + plot.width, y + 0.5)
   }
-  context.stroke()
-
-  context.strokeStyle = ink.axis
-  context.beginPath()
-  context.moveTo(Math.round(plot.x) + 0.5, plot.y)
-  context.lineTo(Math.round(plot.x) + 0.5, Math.round(plot.y + plot.height) + 0.5)
-  context.lineTo(plot.x + plot.width, Math.round(plot.y + plot.height) + 0.5)
   context.stroke()
 
   // --- marks -------------------------------------------------------------
@@ -142,22 +221,21 @@ export function drawScatter(
   context.beginPath()
   context.rect(plot.x, plot.y, plot.width, plot.height)
   context.clip()
-  context.globalAlpha = Math.max(0.02, Math.min(1, opacity))
 
-  const buckets = new Map<string, number[]>()
-  for (let i = 0; i < spec.drawn; i++) {
-    const key = `${spec.colors[i]}|${spec.shapes[i]}`
-    const bucket = buckets.get(key)
-    if (bucket) bucket.push(i)
-    else buckets.set(key, [i])
-  }
-  for (const [key, indices] of buckets) {
-    context.fillStyle = key.slice(0, key.lastIndexOf('|'))
-    const shape = key.slice(key.lastIndexOf('|') + 1) as MarkerShape
-    context.beginPath()
-    for (const i of indices)
-      traceMark(context, shape, spec.px[i]!, spec.py[i]!, spec.radius[i]!)
-    context.fill()
+  const pixels = drawsPixels(spec)
+  const rings = ringed(spec, options.selected)
+  if (pixels) {
+    drawPixels(context, spec, rings, options)
+  } else {
+    images.delete(context)
+    context.globalAlpha = markAlpha(opacity)
+    for (const bucket of visibleBuckets(spec)) {
+      context.fillStyle = bucket.color
+      context.beginPath()
+      for (const i of bucket.indices)
+        traceMark(context, bucket.shape, spec.px[i]!, spec.py[i]!, spec.marks.radius[i]!)
+      context.fill()
+    }
   }
 
   // --- trend -------------------------------------------------------------
@@ -174,41 +252,62 @@ export function drawScatter(
   // --- selection and hover ------------------------------------------------
   // Achromatic, and a ring rather than a recolour: `--accent` is byte-identical to
   // categorical slot 0, so an accent ring would be invisible on exactly the points it marks.
-  // Same finding as the network viewer's selection ring.
-  context.lineWidth = 1.5
+  // Same finding as the network viewer's selection ring. In the pixel pass the rings are
+  // stamped with the marks, a selection there being as large as the cloud.
+  context.lineWidth = RING_WIDTH
   context.strokeStyle = ink.primary
-  if (options.selected && options.selected.size > 0) {
+  if (!pixels && rings.length > 0) {
     context.beginPath()
-    for (const i of options.selected) {
-      if (i < 0 || i >= spec.drawn) continue
-      const r = spec.radius[i]! + 2.5
+    for (const i of rings) {
+      const r = spec.marks.radius[i]! + RING_GAP
       context.moveTo(spec.px[i]! + r, spec.py[i]!)
       context.arc(spec.px[i]!, spec.py[i]!, r, 0, Math.PI * 2)
     }
     context.stroke()
   }
-  if (options.hovered !== undefined && options.hovered >= 0 && options.hovered < spec.drawn) {
-    const i = options.hovered
-    const r = spec.radius[i]! + 3.5
+  // Search hits: dashed, so they read apart from a selection's solid rings, and drawn over the
+  // pixel pass too — a search on a zoomed-out embedding is where finding a point is hardest.
+  if (options.hits?.length) {
+    context.save()
+    // Dashed while there are few enough to read one at a time; past that, plain — dashing tens of
+    // thousands of arcs every frame buys a pattern nobody can see at that density.
+    if (options.hits.length <= DASHED_HITS_MAX) context.setLineDash([2, 2])
+    context.beginPath()
+    for (const i of options.hits) {
+      const r = spec.marks.radius[i]! + RING_GAP
+      if (!reachesPlot(plot, spec.px[i]!, spec.py[i]!, r)) continue
+      context.moveTo(spec.px[i]! + r, spec.py[i]!)
+      context.arc(spec.px[i]!, spec.py[i]!, r, 0, Math.PI * 2)
+    }
+    context.stroke()
+    context.restore()
+  }
+  for (const i of [options.hovered, options.current]) {
+    if (i === undefined || i < 0 || i >= spec.marks.rows.length) continue
+    const r = spec.marks.radius[i]! + HOVER_GAP
     context.beginPath()
     context.moveTo(spec.px[i]! + r, spec.py[i]!)
     context.arc(spec.px[i]!, spec.py[i]!, r, 0, Math.PI * 2)
     context.stroke()
   }
+  if (options.labels?.length) paintLabels(context, options.labels, ink, background)
   context.restore()
+
+  // Over the marks, so a pass that replaces the plot's pixels cannot cover the axis line.
+  strokeAxes(context, spec, ink)
 
   // --- tick labels --------------------------------------------------------
   // Drawn in `compact` too — see `MARGIN_COMPACT`. An axis line with no numbers against it is
   // decoration, and the card is where the scale is least obvious.
   context.fillStyle = ink.muted
-  context.font = `${options.compact ? 9 : 9.5}px system-ui, sans-serif`
+  context.font = canvasFont(options.compact ? 9 : 9.5)
   context.textAlign = 'center'
   context.textBaseline = 'top'
   for (const tick of spec.xTicks) {
     const x = projectTickX(spec, tick)
     if (x < plot.x - 1 || x > plot.x + plot.width + 1) continue
     context.fillText(
-      formatCompact(inverse(spec.xScale, tick)),
+      formatCompact(inverse(spec.marks.xScale, tick)),
       x,
       plot.y + plot.height + (options.compact ? 3 : 5),
     )
@@ -219,7 +318,7 @@ export function drawScatter(
     const y = projectTickY(spec, tick)
     if (y < plot.y - 1 || y > plot.y + plot.height + 1) continue
     context.fillText(
-      formatCompact(inverse(spec.yScale, tick)),
+      formatCompact(inverse(spec.marks.yScale, tick)),
       plot.x - (options.compact ? 3 : 5),
       y,
     )
@@ -229,7 +328,7 @@ export function drawScatter(
   // columns already.
   if (!options.compact && options.showAxisTitles !== false) {
     context.fillStyle = ink.secondary
-    context.font = '10px system-ui, sans-serif'
+    context.font = canvasFont(10)
     context.textAlign = 'center'
     context.textBaseline = 'bottom'
     context.fillText(options.xLabel, plot.x + plot.width / 2, plot.y + plot.height + 32)
@@ -242,14 +341,158 @@ export function drawScatter(
   }
 }
 
+/**
+ * The selected marks whose ring reaches the plot — worked out once, for whichever painter draws
+ * them. Zoomed in on a whole-cloud selection, everything else is off screen and would be work.
+ */
+function ringed(spec: ScatterSpec, selected: Set<number> | undefined): number[] {
+  const out: number[] = []
+  if (!selected) return out
+  for (const i of selected) {
+    if (i < 0 || i >= spec.marks.rows.length) continue
+    if (reachesPlot(spec.plot, spec.px[i]!, spec.py[i]!, spec.marks.radius[i]!, RING_GAP))
+      out.push(i)
+  }
+  return out
+}
+
+/** Grid line positions inside the plot, in whole CSS pixels — one list for both passes. */
+function gridLines(spec: ScatterSpec): { xs: number[]; ys: number[] } {
+  const { plot } = spec
+  const xs: number[] = []
+  const ys: number[] = []
+  for (const tick of spec.xTicks) {
+    const x = Math.round(projectTickX(spec, tick))
+    if (x + 0.5 >= plot.x && x + 0.5 <= plot.x + plot.width) xs.push(x)
+  }
+  for (const tick of spec.yTicks) {
+    const y = Math.round(projectTickY(spec, tick))
+    if (y + 0.5 >= plot.y && y + 0.5 <= plot.y + plot.height) ys.push(y)
+  }
+  return { xs, ys }
+}
+
+function strokeAxes(context: CanvasRenderingContext2D, spec: ScatterSpec, ink: PlotInk): void {
+  const { plot } = spec
+  context.lineWidth = 1
+  context.strokeStyle = ink.axis
+  context.beginPath()
+  context.moveTo(Math.round(plot.x) + 0.5, plot.y)
+  context.lineTo(Math.round(plot.x) + 0.5, Math.round(plot.y + plot.height) + 0.5)
+  context.lineTo(plot.x + plot.width, Math.round(plot.y + plot.height) + 0.5)
+  context.stroke()
+}
+
+/**
+ * The `ImageData` each canvas's CPU pixel pass writes, kept between frames: a full viewer at 2×
+ * is ~15 MB, and allocating it per pan step was garbage the collector then paused for. Dropped
+ * when a frame goes back to paths.
+ */
+const images = new WeakMap<CanvasRenderingContext2D, ImageData>()
+
+/** Run the CPU raster over the plot box into `image` — the one spelling for screen and export. */
+function rasterInto(
+  image: ImageData,
+  box: ReturnType<typeof rasterBox>,
+  ratio: number,
+  spec: ScatterSpec,
+  options: { opacity: number; background: string; ink: PlotInk },
+  ring?: { indices: number[]; color: string },
+): void {
+  rasterizeMarks(
+    { pixels: new Uint32Array(image.data.buffer), ...box },
+    {
+      spec,
+      ratio,
+      opacity: options.opacity,
+      background: options.background,
+      grid: { color: options.ink.grid, ...gridLines(spec) },
+      ...(ring ? { ring } : {}),
+    },
+  )
+}
+
+/**
+ * The pass past `CIRCLES_MAX`: the shared WebGL context where there is one (`scatterGl.ts`),
+ * composited over the grid this canvas already drew; otherwise the CPU raster, which writes the
+ * plot box whole — background, grid and marks — in one `putImageData`, a call that replaces
+ * rather than composites and so has to carry the grid itself.
+ */
+function drawPixels(
+  context: CanvasRenderingContext2D,
+  spec: ScatterSpec,
+  rings: number[],
+  options: CanvasDrawOptions,
+): void {
+  // The transform `prepareCanvas` set is device ratio times any card zoom: the ratio this
+  // buffer has to match to land one to one on the backing store.
+  const ratio = typeof context.getTransform === 'function' ? context.getTransform().a || 1 : 1
+  const box = rasterBox(spec.plot, ratio)
+  const ring = rings.length > 0 ? { indices: rings, color: options.ink.primary } : undefined
+  if (
+    drawMarksGl(context, {
+      spec,
+      ratio,
+      box,
+      opacity: options.opacity,
+      ...(ring ? { ring } : {}),
+    })
+  )
+    return
+
+  let image = images.get(context)
+  if (!image || image.width !== box.width || image.height !== box.height) {
+    image = context.createImageData(box.width, box.height)
+    images.set(context, image)
+  }
+  rasterInto(image, box, ratio, spec, options, ring)
+  // Device pixels, transform and clip both ignored.
+  context.putImageData(image, box.originX, box.originY)
+}
+
+/** How much finer than the screen an exported image of the marks is drawn. */
+const EXPORT_RASTER_SCALE = 4
+
+/**
+ * The plot box as one PNG, for an export past `CIRCLES_MAX` — background and grid included, the
+ * pixel pass being opaque. Undefined where the browser cannot encode one, jsdom among them, and
+ * the export then falls back to vector marks rather than to none.
+ */
+function marksImage(
+  spec: ScatterSpec,
+  options: ScatterSvgSpec,
+): { href: string; x: number; y: number; width: number; height: number } | undefined {
+  try {
+    const box = rasterBox(spec.plot, EXPORT_RASTER_SCALE)
+    const canvas = document.createElement('canvas')
+    canvas.width = box.width
+    canvas.height = box.height
+    const context = canvas.getContext('2d')
+    if (!context) return undefined
+    const image = context.createImageData(box.width, box.height)
+    rasterInto(image, box, EXPORT_RASTER_SCALE, spec, options)
+    context.putImageData(image, 0, 0)
+    const href = canvas.toDataURL('image/png')
+    if (typeof href !== 'string' || !href.startsWith('data:image/png')) return undefined
+    return {
+      href,
+      x: box.originX / EXPORT_RASTER_SCALE,
+      y: box.originY / EXPORT_RASTER_SCALE,
+      width: box.width / EXPORT_RASTER_SCALE,
+      height: box.height / EXPORT_RASTER_SCALE,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/** A tick or trend end in transformed space → pixels, through the one projection. */
 function projectTickX(spec: ScatterSpec, t: number): number {
-  const span = spec.view.x.max - spec.view.x.min || 1
-  return spec.plot.x + ((t - spec.view.x.min) / span) * spec.plot.width
+  return projectX(t, spec.view, spec.plot)
 }
 
 function projectTickY(spec: ScatterSpec, t: number): number {
-  const span = spec.view.y.max - spec.view.y.min || 1
-  return spec.plot.y + spec.plot.height - ((t - spec.view.y.min) / span) * spec.plot.height
+  return projectY(t, spec.view, spec.plot)
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +519,10 @@ export interface ScatterSvgSpec {
   legend?: LegendItem[]
   /** Colour-bar stops for a sequential encoding, drawn instead of swatches. */
   ramp?: { label: string; stops: string[]; low: string; high: string }
+  /** Every mark as a vector shape, even past `CIRCLES_MAX`. */
+  vectorMarks?: boolean
+  /** Labels beside the points, as on screen. */
+  labels?: readonly PlacedLabel[]
 }
 
 /**
@@ -307,28 +554,26 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
   style.textContent = `text{font-family:${options.font};}`
   svg.append(style)
 
-  // --- grid and axes ------------------------------------------------------
-  const grid = element('g', { stroke: ink.grid, 'stroke-width': 1 })
-  for (const tick of spec.xTicks) {
-    const x = projectTickX(spec, tick)
-    if (x < plot.x || x > plot.x + plot.width) continue
-    grid.append(element('line', { x1: x, x2: x, y1: plot.y, y2: plot.y + plot.height }))
-  }
-  for (const tick of spec.yTicks) {
-    const y = projectTickY(spec, tick)
-    if (y < plot.y || y > plot.y + plot.height) continue
-    grid.append(element('line', { x1: plot.x, x2: plot.x + plot.width, y1: y, y2: y }))
-  }
-  svg.append(grid)
+  // Decided first: past `CIRCLES_MAX` the plot area is one opaque image carrying its own grid,
+  // and a vector grid under it would be written into the file and never seen.
+  const image =
+    !options.vectorMarks && drawsPixels(spec) ? marksImage(spec, options) : undefined
 
-  svg.append(
-    element('path', {
-      d: `M${round(plot.x)},${round(plot.y)}V${round(plot.y + plot.height)}H${round(plot.x + plot.width)}`,
-      fill: 'none',
-      stroke: ink.axis,
-      'stroke-width': 1,
-    }),
-  )
+  // --- grid ---------------------------------------------------------------
+  if (!image) {
+    const grid = element('g', { stroke: ink.grid, 'stroke-width': 1 })
+    for (const tick of spec.xTicks) {
+      const x = projectTickX(spec, tick)
+      if (x < plot.x || x > plot.x + plot.width) continue
+      grid.append(element('line', { x1: x, x2: x, y1: plot.y, y2: plot.y + plot.height }))
+    }
+    for (const tick of spec.yTicks) {
+      const y = projectTickY(spec, tick)
+      if (y < plot.y || y > plot.y + plot.height) continue
+      grid.append(element('line', { x1: plot.x, x2: plot.x + plot.width, y1: y, y2: y }))
+    }
+    svg.append(grid)
+  }
 
   // --- marks --------------------------------------------------------------
   const clip = document.createElementNS(SVG_NS, 'clipPath')
@@ -340,22 +585,24 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
 
   const marks = element('g', {
     'clip-path': 'url(#coda-scatter-plot)',
-    'fill-opacity': Math.max(0.02, Math.min(1, options.opacity)),
+    'fill-opacity': markAlpha(options.opacity),
   })
-  // One `<path>` per colour+shape bucket rather than per point: an SVG with fifty thousand
-  // elements opens in nothing, where fifty thousand subpaths in nine elements opens anywhere.
-  const buckets = new Map<string, string[]>()
-  for (let i = 0; i < spec.drawn; i++) {
-    const key = `${spec.colors[i]}|${spec.shapes[i]}`
-    const d = markPath(spec.shapes[i]!, spec.px[i]!, spec.py[i]!, spec.radius[i]!)
-    const bucket = buckets.get(key)
-    if (bucket) bucket.push(d)
-    else buckets.set(key, [d])
-  }
-  for (const [key, paths] of buckets) {
-    marks.append(
-      element('path', { d: paths.join(''), fill: key.slice(0, key.lastIndexOf('|')) }),
-    )
+  if (image) {
+    // The opacity is in the pixels already; the group's `fill-opacity` does not reach an image.
+    // `xlink:href` beside `href`, the older spelling being the only one Illustrator reads.
+    const { href, ...box } = image
+    const node = element('image', { ...box, href, preserveAspectRatio: 'none' })
+    node.setAttributeNS(XLINK_NS, 'xlink:href', href)
+    marks.append(node)
+  } else {
+    // One `<path>` per colour+shape bucket rather than per point: an SVG with fifty thousand
+    // elements opens in nothing, where fifty thousand subpaths in nine elements opens anywhere.
+    for (const bucket of visibleBuckets(spec)) {
+      const d = bucket.indices
+        .map((i) => markPath(bucket.shape, spec.px[i]!, spec.py[i]!, spec.marks.radius[i]!))
+        .join('')
+      marks.append(element('path', { d, fill: bucket.color }))
+    }
   }
 
   for (const trend of spec.trends) {
@@ -372,6 +619,17 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
     )
   }
   svg.append(marks)
+  if (options.labels?.length) svg.append(labelsSvg(options.labels, ink, options.background))
+
+  // Over the marks, as on screen, so the image cannot cover the inner half of the axis line.
+  svg.append(
+    element('path', {
+      d: `M${round(plot.x)},${round(plot.y)}V${round(plot.y + plot.height)}H${round(plot.x + plot.width)}`,
+      fill: 'none',
+      stroke: ink.axis,
+      'stroke-width': 1,
+    }),
+  )
 
   // --- tick labels and axis titles ----------------------------------------
   const ticks = element('g', { 'font-size': 9.5, fill: ink.muted })
@@ -379,7 +637,7 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
     const x = projectTickX(spec, tick)
     if (x < plot.x - 1 || x > plot.x + plot.width + 1) continue
     ticks.append(
-      textNode(formatCompact(inverse(spec.xScale, tick)), {
+      textNode(formatCompact(inverse(spec.marks.xScale, tick)), {
         x,
         y: plot.y + plot.height + 13,
         'text-anchor': 'middle',
@@ -390,7 +648,7 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
     const y = projectTickY(spec, tick)
     if (y < plot.y - 1 || y > plot.y + plot.height + 1) continue
     ticks.append(
-      textNode(formatCompact(inverse(spec.yScale, tick)), {
+      textNode(formatCompact(inverse(spec.marks.yScale, tick)), {
         x: plot.x - 5,
         y,
         'text-anchor': 'end',
@@ -492,4 +750,43 @@ export function scatterToSvg(options: ScatterSvgSpec): SVGSVGElement {
   }
 
   return svg
+}
+
+/** The labels as on screen: lines, then text haloed in the background (`textNode`'s outline). */
+function labelsSvg(
+  labels: readonly PlacedLabel[],
+  ink: PlotInk,
+  background: string,
+): SVGGElement {
+  const group = element('g', { 'font-size': LABEL_FONT_PX }) as SVGGElement
+  const lines = labels.flatMap((label) => (label.line ? [label.line] : []))
+  if (lines.length > 0) {
+    group.append(
+      element('path', {
+        d: lines
+          .map(([x0, y0, x1, y1]) => `M${round(x0)},${round(y0)}L${round(x1)},${round(y1)}`)
+          .join(''),
+        fill: 'none',
+        stroke: ink.muted,
+        'stroke-width': 1,
+        'stroke-opacity': 0.7,
+      }),
+    )
+  }
+  for (const label of labels) {
+    group.append(
+      textNode(
+        label.text,
+        {
+          x: label.x,
+          y: label.y + label.height / 2,
+          'dominant-baseline': 'central',
+          fill: ink.primary,
+          ...(label.dim ? { opacity: DIM_ALPHA } : {}),
+        },
+        background,
+      ),
+    )
+  }
+  return group
 }

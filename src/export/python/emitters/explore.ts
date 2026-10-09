@@ -9,8 +9,16 @@
  */
 
 import { pyStr } from '../py'
+import { CUSTOM_SOURCE_ID } from '../../../data/custom/layout'
 import { registerEmitter, registerHelper } from '../registry'
-import { caveLabels, codaNeurons, isCaveDataset, pyPopulationMask, pySelection } from './common'
+import {
+  datasetLabels,
+  codaNeurons,
+  hasLabelsFrame,
+  isCaveDataset,
+  pyPopulationMask,
+  pySelection,
+} from './common'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { explorePlan } from '../../plans/explore'
@@ -32,6 +40,7 @@ registerEmitter(
   (ctx) => {
     const c = ctx.wired('dataset')
     const cave = isCaveDataset(ctx)
+    const labelled = hasLabelsFrame(ctx)
 
     const all = ctx.output('all')
     const hits = ctx.output('hits')
@@ -52,15 +61,18 @@ registerEmitter(
 
     // `All` is the index handed on unchanged, and it is the download every other port is sliced
     // out of — one read rather than one per port.
-    const lines: string[] = cave
+    const lines: string[] = labelled
       ? [
           ...ctx.note(
-            'Explore Dataset searches the whole neuron table locally. This is the datastack\u2019s own ' +
-              'index — its neuron table joined to its annotations, or whatever is wired to the ' +
-              'Dataset\u2019s Annotations socket — fetched the first time anything asks for it. ' +
-              'On FlyWire that is 139,255 rows and takes a few seconds.',
+            cave
+              ? 'Explore Dataset searches the whole neuron table locally. This is the datastack\u2019s ' +
+                  'neuron table joined to its annotations (or to whatever is wired into the ' +
+                  'Dataset node\u2019s `Annotations` port), fetched the first time anything needs it. ' +
+                  'On FlyWire that is 139,255 rows and takes a few seconds.'
+              : 'Explore Dataset searches the whole neuron table locally: here the Custom ' +
+                  'Dataset\u2019s Neurons table, or every id its edge list names where none is wired.',
           ),
-          `${all} = ${caveLabels(c)}`,
+          `${all} = ${datasetLabels(c)}`,
         ]
       : [
           ...ctx.note(
@@ -76,7 +88,7 @@ registerEmitter(
           `${all}, _ = fetch_neurons(NeuronCriteria(client=${c}), client=${c})`,
           codaNeurons(ctx, all),
         ]
-    if (!cave) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+    if (!labelled) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
     // No length guard: `pyPopulationMask` answers an empty population with no lines.
     lines.push(
       ...pyPopulationMask(all, population, schemasFromType(ctx.inputType('dataset')).neurons),
@@ -125,7 +137,7 @@ registerEmitter(
 
     return lines
   },
-  { backends: ['neuprint', 'cave'] },
+  { backends: ['neuprint', 'cave', CUSTOM_SOURCE_ID] },
 )
 
 /**
@@ -151,7 +163,7 @@ registerHelper({
     '',
     '',
     'def _coda_tokenize(text):',
-    '    """Whitespace-split, but quotes hold a token together."""',
+    '    """Split on whitespace, keeping quoted text together."""',
     '    tokens, i = [], 0',
     '    while i < len(text):',
     '        while i < len(text) and text[i].isspace():',
@@ -180,10 +192,10 @@ registerHelper({
     '',
     '',
     'def _coda_split_operator(token):',
-    '    """Field/operator/value, or None for a bare word.',
+    '    """Split a token into (field, operator, value), or return None for a bare word.',
     '',
-    '    Operators are tried longest-first so "!=" is not read as "=", and the field has to',
-    '    look like a name -- otherwise "LC4-a" would parse as a comparison.',
+    '    Longer operators are tried first so "!=" is not read as "=". The field must look like',
+    '    a column name, so "LC4-a" is not parsed as a comparison.',
     '    """',
     '    for symbol, op in _CODA_OPERATORS:',
     '        at = token.find(symbol)',
@@ -206,14 +218,14 @@ registerHelper({
     '        if split is None:',
     '            value = _coda_unquote(raw)',
     '            if value.startswith("/"):',
-    '                # A bare regex, neuroglancer-style. The closing slash is optional; a lone',
-    '                # "/" is what the box holds mid-typing and narrows nothing.',
+    '                # A regex, as in neuroglancer. The closing slash is optional; a lone "/"',
+    '                # matches everything.',
     '                pattern = value[1:]',
     '                if pattern.endswith("/") and not pattern.endswith("\\\\/"):',
     '                    pattern = pattern[:-1]',
     '                if pattern:',
-    '                    # Not lowercased, unlike a literal: the pattern is insensitive by flag,',
-    '                    # and folding it would turn "[A-Z]" into a different question.',
+    '                    # Not lowercased: the regex is matched case-insensitively instead,',
+    '                    # and lowercasing would change patterns like "[A-Z]".',
     '                    terms.append(("regex", pattern, None, None, negate))',
     '                continue',
     '            if value:',
@@ -222,25 +234,26 @@ registerHelper({
     '        field, op, value = split',
     '        value = _coda_unquote(value)',
     '        if not value:',
-    '            # Every query mid-typing looks like this; it narrows nothing rather than',
-    '            # being an error.',
+    '            # A comparison without a value (e.g. "type=") is ignored.',
     '            continue',
     '        terms.append(("field", value, field, op, negate))',
     '    return terms',
     '',
     '',
     'def _coda_searchable(df):',
-    '    """The columns free text and a bare regex both look at.',
+    '    """Return the columns searched by free text and regex terms.',
     '',
-    '    String columns and neuronId only -- so a bare "1200" finds a neuron id and does not',
-    '    also match every neuron with 1200 synapses.',
+    '    Only text columns and neuronId, so "1200" finds a neuron id but not every neuron',
+    '    with 1200 synapses.',
     '    """',
+    '    # Check both: pandas 3 gives text its own `str` dtype, which is not `object`.',
     '    return [c for c in df.columns',
-    '            if df[c].dtype == object or str(c) == "neuronId"]',
+    '            if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c])',
+    '            or str(c) == "neuronId"]',
     '',
     '',
     'def _coda_haystack(df):',
-    '    """Lowercase text of every searchable column, one string per row."""',
+    '    """Join the searchable columns into one lowercase string per row."""',
     '    cols = _coda_searchable(df)',
     '    if not cols:',
     '        return pd.Series([""] * len(df), index=df.index)',
@@ -252,11 +265,10 @@ registerHelper({
     '',
     '',
     'def _coda_regex_mask(df, pattern):',
-    '    """A bare regex: does any searchable field of the row match?',
+    '    """Test whether any searchable field of a row matches a regex.',
     '',
-    '    Per field and not against the joined haystack -- an anchored pattern is the point of',
-    '    asking for a regex, and "^LC4$" cannot match a row\'s joined text. A missing value is',
-    '    skipped rather than matched as "", as every positive term skips it.',
+    '    Each field is tested on its own, so anchored patterns like "^LC4$" work. Missing',
+    '    values never match.',
     '    """',
     '    rx = re.compile(pattern, re.IGNORECASE)',
     '    mask = pd.Series(False, index=df.index)',
@@ -269,11 +281,10 @@ registerHelper({
     '',
     '',
     'def _coda_field_mask(df, field, op, value):',
-    '    """One field comparison.',
+    '    """Compare one column against a value.',
     '',
-    '    A missing value satisfies "!=" and nothing else -- so status!=Traced returns the',
-    '    untraced *and* the unlabelled, which is the question somebody auditing a dataset',
-    "    for gaps is actually asking. SQL's three-valued logic drops both, silently.",
+    '    A missing value satisfies "!=" and nothing else, so status!=Traced returns both the',
+    '    untraced and the unlabelled neurons (unlike SQL, which would drop the unlabelled).',
     '    """',
     '    col = next((c for c in df.columns if str(c).lower() == field.lower()), None)',
     '    if col is None:',
@@ -282,8 +293,7 @@ registerHelper({
     '    missing = series.isna()',
     '',
     '    if op == "match":',
-    '        # Unanchored, deliberately unlike neuPrint\'s "=~": this search is local and has',
-    '        # no server semantic to match.',
+    '        # Unanchored, unlike neuPrint\'s "=~".',
     '        rx = re.compile(value)',
     '        found = series.fillna("").astype(str).map(lambda v: rx.search(v) is not None)',
     '        return found & ~missing',
@@ -316,21 +326,20 @@ registerHelper({
     '',
     '',
     'def coda_search(df, query):',
-    '    """Rows matching Coda\'s Explore Dataset query language.',
+    '    """Filter rows with Coda\'s Explore Dataset query language.',
     '',
-    '    Terms are AND-ed; a leading "!" or "-" negates one. A bare word is a substring of',
-    '    the row\'s searchable text; a bare term starting with "/" is a regex tested against',
-    '    each searchable field on its own, so "/^LC4$" is the anchored search that a plain',
-    '    "^LC4$" is not. "field=value" compares one column, with ">" "<" ">=", "<=", "!="',
-    '    and "~" (unanchored regex) as the other operators.',
+    '    Terms are combined with AND; a leading "!" or "-" negates a term. A bare word matches',
+    '    as a substring of any text column. A term starting with "/" is a regex tested against',
+    '    each text column, e.g. "/^LC4$". "field=value" compares one column; the other',
+    '    operators are ">", "<", ">=", "<=", "!=" and "~" (unanchored regex).',
     '',
-    '    Two things this does NOT reproduce, both of which change which rows you get:',
+    '    Two differences from Coda, both of which can change which rows you get:',
     '',
-    '    * Hits come back in table order. Coda ranks them by relevance, which only matters',
-    '      where the result is capped -- but there it decides which rows survive the cap.',
-    '    * A query matching nothing returns nothing. Coda retries it as a subsequence, so',
-    '      "mechnosensory" still finds "mechanosensory" there and finds nothing here. A',
-    '      regex is exempt from that retry in Coda too, so "/^LC4$" agrees exactly.',
+    '    * Matches come back in table order. Coda ranks them by relevance, which decides',
+    '      which rows are kept when the result is capped.',
+    '    * A query matching nothing returns nothing. Coda then retries it as a fuzzy match,',
+    '      so "mechnosensory" finds "mechanosensory" there but not here. Regex terms are not',
+    '      retried in Coda either.',
     '    """',
     '    terms = _coda_parse_search(query)',
     '    if not terms:',

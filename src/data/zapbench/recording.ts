@@ -111,7 +111,7 @@ export function levelWindow(window: TraceWindow, scale: RecordingScale): TraceWi
 
 /** Refused at both stages, so worded once. */
 export function noDownsampledCopy(product: TraceProduct): string {
-  return `${traceLabel(product)} has no downsampled copy in this release — only Activity does. Set Scale to Full.`
+  return `${traceLabel(product)} has no downsampled copy in this release; only "Activity" does. Set \`Scale\` to "Full".`
 }
 
 export interface RecordingRead {
@@ -290,13 +290,13 @@ export async function fetchRecording(request: RecordingRequest): Promise<Recordi
     if (!sorting) {
       throw new Error(
         'The activity-sorted copy of ZapBench no longer matches its published traces, so a ' +
-          'downsampled row cannot be named. Set Scale to Full.',
+          'downsampled row cannot be labelled. Set `Scale` to "Full".',
       )
     }
     if (!levelHolds) {
       throw new Error(
         `ZapBench's ${scale} × ${scale} copy no longer averages its full-resolution one, so ` +
-          `its rows would not be the cells their labels name. Set Scale to Full.`,
+          `its row labels would name the wrong cells. Set \`Scale\` to "Full".`,
       )
     }
   }

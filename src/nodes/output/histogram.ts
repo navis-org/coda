@@ -30,9 +30,10 @@ registerNode({
   type: 'out.histogram',
   label: 'Histogram',
   category: 'visualisation',
-  description: 'Distribution of one numeric column, binned, optionally split into series.',
+  description:
+    'Histogram of one numeric column, optionally split into series by a second column.',
   guide:
-    'One numeric column binned into bars — the fastest way to see whether a score, a synapse count or a cable length is bimodal, skewed or all one number. Bins are chosen by the Freedman–Diaconis rule unless you set a count; a log axis, a cumulative curve and percent or density scaling are all there. Click a bar to send those rows on as Selected, which is how you pull out a tail.',
+    'Bins one numeric column into bars, e.g. to see whether a score or a cable length is skewed or bimodal. Bins follow the Freedman–Diaconis rule unless you set a count; a log axis, a cumulative curve and percent or density scaling are options. Click a bar to send its rows out of Selected.',
   cost: 'cheap',
   // Measured in a browser rather than guessed: the params take the top of the card, and at
   // 340 the plot was a fifty-pixel strip under them.
@@ -51,7 +52,7 @@ registerNode({
       dtypes: NUMERIC_DTYPES,
       default: '',
       // Not presentational: it decides which rows a selected range catches. See the header.
-      help: 'The column to bin. Also what a selected bar means, so changing it re-runs anything downstream of Selected.',
+      help: 'The column to bin. Changing it re-runs anything downstream of Selected.',
     },
     {
       id: 'binMode',
@@ -62,7 +63,7 @@ registerNode({
         { value: 'auto', label: 'automatic' },
         { value: 'fixed', label: 'a fixed number' },
       ],
-      help: '"Automatic" is the Freedman–Diaconis rule, capped at 80 bins.',
+      help: '"Automatic" uses the Freedman–Diaconis rule, up to 80 bins.',
       presentational: true,
     },
     {
@@ -89,7 +90,7 @@ registerNode({
       id: 'logX',
       kind: 'boolean',
       label: 'Log axis',
-      help: 'For data spanning orders of magnitude, where linear bins pile most of it into the first. Values at or below zero are dropped; the caption says how many.',
+      help: 'Use a log scale for data spanning orders of magnitude. Values at or below zero are dropped; the caption says how many.',
       default: false,
       presentational: true,
       advanced: true,
@@ -104,7 +105,7 @@ registerNode({
         { value: 'percent', label: 'percent of rows' },
         { value: 'density', label: 'density' },
       ],
-      help: '"Density" divides each bar by its own width, which stays comparable when a log axis makes the bars unequal.',
+      help: '"Density" divides each bar by its width, which keeps unequal bars comparable, e.g. on a log axis.',
       presentational: true,
       advanced: true,
     },
@@ -126,7 +127,7 @@ registerNode({
       label: 'Selected',
       noun: 'bins',
       default: [],
-      help: 'Set by clicking bars in the viewer. Holds the value ranges they covered, so a selection survives a change to the bin count. Feeds Selected.',
+      help: 'Set by clicking bars in the viewer. Survives a change to the bin count. Feeds Selected.',
     },
   ],
 
@@ -145,7 +146,7 @@ registerNode({
     if (!ctx.inputs.in) return []
     const series = ctx.column('series')
     return series && series === ctx.column('value')
-      ? ['Split-by and Value are the same column']
+      ? ['`Split by` and `Value` are the same column. Pick a different column for one of them.']
       : []
   },
 

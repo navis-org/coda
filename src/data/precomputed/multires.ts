@@ -16,7 +16,7 @@
 import type { ShardingSpec } from './sharded'
 import { locate, readShardedObject } from './sharded'
 import type { FetchOptions } from './transport'
-import { PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
+import { fetchBytes, fetchInfo, isNotFound } from './transport'
 
 export interface MultiResInfo {
   '@type': 'neuroglancer_multilod_draco'
@@ -230,7 +230,7 @@ export async function readManifest(
     } catch (error) {
       // A missing index means no mesh for this segment, which is normal — the same answer the
       // sharded path gives when a minishard holds no entry for the key.
-      if (error instanceof PrecomputedFetchError && error.status === 404) return undefined
+      if (isNotFound(error)) return undefined
       throw error
     }
     return { ...parseMultiResManifest(buffer, 0), dataStart: 0 }

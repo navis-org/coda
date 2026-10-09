@@ -13,7 +13,7 @@
  * would have to be handled correctly at every one of them. A placeholder that *is* a definition
  * needs no site to know about it: inference, the scheduler, the card, the inspector and the layout
  * all see an ordinary node with some ports and no params. What knows is small and named — the two
- * writers (`serializeGraph` and the clipboard's `fragmentBody`, through `documentNode`) and the
+ * writers (every graph written as text, through `graphText`'s `documentNode`) and the
  * Zoo's `layoutDigest`, `ports.ts` (its ports come from its params), and — through
  * `unknownTypeOf` — inference (its error) and the two exporters (its comment).
  *

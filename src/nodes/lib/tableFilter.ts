@@ -60,7 +60,7 @@
  *   `pre == 0`, null  Filter node keeps the null row (`Number(null)` is 0); a cell keeps none.
  *
  * Neither is wrong on its own — Explore's rules are the ones documented for a search box, and
- * `makePredicate`'s are the ones `core.filterTable` has always had — but a graph can hold both an
+ * `rowPredicate`'s are the ones `core.filterTable` has always had — but a graph can hold both an
  * inch apart, so the disagreement is recorded here rather than left to be discovered. Folding
  * one onto the other is a real decision about which semantics wins, and it changes what every
  * saved `core.filterTable` returns; it is not a tidy-up.

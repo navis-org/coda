@@ -7,11 +7,14 @@
  */
 
 import type { DashboardLayout } from './dashboard'
-import { pruneDashboard, validDashboard } from './dashboard'
+import { pruneDashboard, storedDashboard, validDashboard } from './dashboard'
+import { compactParams, expandParams } from './compactIds'
 import { MISSING_TYPE, documentNode, placeholderParams } from './missing'
 import type { ParamValues, ResolvedPort } from './node'
 import { hasPortGroups, allInputPorts, inputPorts, outputPorts } from './ports'
 import { currentType, getNodeDef, typesWithLoops, typesWithReferenceInputs } from './registry'
+import type { CalloutTone } from './markdown'
+import { CALLOUT_TONES } from './markdown'
 
 export const GRAPH_FORMAT_VERSION = 1
 
@@ -73,36 +76,26 @@ export interface GraphNode {
   captionOf?: string
 }
 
-/**
- * The tones a hint may be drawn in, by name.
+/*
+ * A hint's tone is one of `markdown.ts`'s `CALLOUT_TONES`, by name.
  *
  * **A name and not a colour**, for the reason `GROUP_COLORS` is: a `.coda.json` arrives from a
  * gist, from the Zoo, from a mailed file, and a tone spent straight into an inline `style` is a
  * CSS injection with a `--var` and a `url()` in it. These resolve to tokens in `theme.css` at
  * render time.
  *
- * The vocabulary is `markdown.ts`'s `CalloutTone` deliberately — the help documents already draw
+ * The vocabulary is the callout tones, imported rather than restated — the help documents already draw
  * admonitions in exactly these three, and a second three-word list meaning the same thing is how
- * "tip" comes to be blue in one place and green in another.
- *
- * **Stated twice rather than imported, and `src/core` being headless is only half the reason.**
- * That rules out `core` importing from `ui`; it does not rule out the reverse, which is allowed
- * and used everywhere. What rules the reverse out is that `markdown.ts` has **no imports at all**
- * and feeds `src/help/registry.ts`, which is the `nodes.html` entry — pulling `core/graph.ts` in
- * would drag the node registry and the dashboard model into a page bundle that `docs/pages.md`
- * requires to stay out of the main chunk, to save three words. So the two lists are held together
- * by a type-level assertion in `ui/nodes/nodeHints.test.tsx` instead, which fails to compile the
- * moment either gains a tone the other lacks. The stylesheet agrees by sharing one `--cal`.
+ * "tip" comes to be blue in one place and green in another. The stylesheet agrees by sharing one
+ * `--cal`.
  */
-export const HINT_TONES = ['note', 'tip', 'warning'] as const
-export type HintTone = (typeof HINT_TONES)[number]
 
 /** Which border a hint docks to. */
 export const HINT_SIDES = ['top', 'bottom'] as const
 export type HintSide = (typeof HINT_SIDES)[number]
 
 /** What an absent `NodeHint.tone` and `NodeHint.side` mean — the one spelling of each default. */
-export const DEFAULT_HINT_TONE: HintTone = 'note'
+export const DEFAULT_HINT_TONE: CalloutTone = 'note'
 export const DEFAULT_HINT_SIDE: HintSide = 'bottom'
 
 /**
@@ -154,7 +147,7 @@ export interface NodeHint {
    */
   text: string
   /** Absent means `DEFAULT_HINT_TONE`. */
-  tone?: HintTone
+  tone?: CalloutTone
   /** Absent means `DEFAULT_HINT_SIDE` — under the card, where the wire out of it is not. */
   side?: HintSide
 }
@@ -178,7 +171,7 @@ export type Wire = readonly [from: string, fromPort: string, to: string, toPort:
  * spent straight into an inline `style`, where an arbitrary string is a CSS injection with a
  * `--var` and a `url()` in it. A name off this list resolves to a token in `theme.css` at render
  * time, so the document carries a choice rather than a value, and the two themes each get the
- * hue that was validated for them (`ui/colors.ts`).
+ * hue that was validated for them (`style/colors.ts`).
  */
 export const GROUP_COLORS = ['grey', 'blue', 'orange', 'green', 'pink', 'violet'] as const
 export type GroupColor = (typeof GROUP_COLORS)[number]
@@ -962,6 +955,34 @@ export function reconnectEdge(
 // ---------------------------------------------------------------------------
 
 /**
+ * A graph — or a fragment of one carrying fields of its own, like a marker — as document text: the
+ * one place graph JSON is written, so every writer spells a node the same way. Each node goes out
+ * as `documentNode` spells it (a placeholder as the node it stands in for) with its long id
+ * lists compacted (`compactIds.ts`). Indented unless `compact`, because a file is read by people.
+ *
+ * `serializeGraph`, a clipboard fragment and a recipe file all end here. `fragmentBody` does not
+ * compact, being also an in-memory form a recipe keeps, where every reader expects a `string[]`.
+ */
+export function graphText<D extends { readonly nodes: readonly GraphNode[] }>(
+  doc: D,
+  compact = false,
+): string {
+  const out = { ...doc, nodes: doc.nodes.map(writtenNode) }
+  return compact ? JSON.stringify(out) : JSON.stringify(out, null, 2)
+}
+
+function writtenNode(node: GraphNode): GraphNode {
+  const written = documentNode(node)
+  // Only params declared as id lists: a list of column names or a rename map somebody typed is
+  // text a person reads in the file, whatever its entries happen to end in. A node this build does
+  // not have declares nothing, and is written as it was read.
+  const ids = getNodeDef(written.type)?.params?.filter((p) => p.kind === 'ids')
+  if (!ids?.length) return written
+  const params = compactParams(written.params, new Set(ids.map((p) => p.id)))
+  return params === written.params ? written : { ...written, params }
+}
+
+/**
  * The document as JSON.
  *
  * Indented by default, because a `.coda.json` is a file people read and diff. `compact` is for
@@ -971,17 +992,19 @@ export function reconnectEdge(
  *
  * A placeholder for a node this build does not have is written back as **the node it stands
  * in for** (`documentNode`), so a file passing through an older build comes out able to run
- * again in the build that made it. One of two writers that must do so; the clipboard's
- * `fragmentBody` is the other.
+ * again in the build that made it — `graphText`'s, as for every writer of graph JSON.
  */
 export function serializeGraph(graph: CodaGraph, options: { compact?: boolean } = {}): string {
-  const out: CodaGraph = {
+  // The dashboard is written in its stored form, which is not the in-memory one.
+  const out: Omit<CodaGraph, 'dashboard'> & { dashboard?: unknown } = {
     ...graph,
-    nodes: graph.nodes.map(documentNode),
     version: GRAPH_FORMAT_VERSION,
     meta: { ...graph.meta, modifiedAt: new Date().toISOString() },
+    // Overwritten in place rather than spread after, so the key keeps the position it had —
+    // a dashboard that does not use tabs must round trip byte-identically. See `storedDashboard`.
+    ...(graph.dashboard ? { dashboard: storedDashboard(graph.dashboard) } : {}),
   }
-  return options.compact ? JSON.stringify(out) : JSON.stringify(out, null, 2)
+  return graphText(out, options.compact)
 }
 
 /**
@@ -1004,7 +1027,7 @@ function validSize(raw: unknown): { width: number; height: number } | undefined 
  *
  * The same lenient-but-checked pass `validSize` and `validGroups` give the rest of the file, and
  * the two checks here are the ones that matter for a document somebody was mailed. A **tone is a
- * name off `HINT_TONES`** and an unknown one falls back to the default rather than reaching a
+ * name off `CALLOUT_TONES`** and an unknown one falls back to the default rather than reaching a
  * stylesheet — the note on the constant says why that is a safety property and not a theming
  * convenience. And an **empty hint is dropped**, because a box with nothing in it is a bar across
  * a card with a × on it and no way to tell what it was for.
@@ -1053,7 +1076,7 @@ function validHints(raw: unknown): NodeHint[] {
     if (!h || typeof h !== 'object') continue
     const { text, tone, side } = h as Record<string, unknown>
     if (typeof text !== 'string' || !text.trim()) continue
-    const named = HINT_TONES.find((t) => t === tone)
+    const named = CALLOUT_TONES.find((t) => t === tone)
     const docked = HINT_SIDES.find((s) => s === side)
     hints.push(normalHint({ text, tone: named, side: docked }))
     if (hints.length === MAX_HINTS) break
@@ -1140,9 +1163,9 @@ function droppedHandle(
   ports: readonly { id: string }[],
 ): string {
   const where = `Dropped edge ${side === 'output' ? 'from' : 'into'} ${nodeType} (${nodeId})`
-  if (typeof stored === 'string') return `${where}: no ${side} "${stored}"`
-  const has = ports.length === 0 ? `it has no ${side}s` : `it has ${ports.length}`
-  return `${where}: the file records no ${side} port, and ${has}`
+  if (typeof stored === 'string') return `${where}: the node has no ${side} "${stored}".`
+  const has = ports.length === 0 ? `the node has no ${side}s` : `the node has ${ports.length}`
+  return `${where}: the file does not say which ${side} the wire uses, and ${has}.`
 }
 
 /**
@@ -1173,7 +1196,7 @@ function droppedHandle(
  * the exception, since a rename moves its value rather than leaving a second copy behind.
  */
 function storedParams(raw: unknown, type: string): ParamValues {
-  const params = { ...((raw && typeof raw === 'object' ? raw : {}) as ParamValues) }
+  const params = expandParams({ ...(raw && typeof raw === 'object' ? raw : {}) })
   for (const param of getNodeDef(type)?.params ?? []) {
     // A value already under the new id wins: this document was written by a build that had it.
     if (param.formerId !== undefined && !(param.id in params) && param.formerId in params) {
@@ -1246,7 +1269,7 @@ export function deserializeGraph(json: string): LoadResult {
   }
   if (typeof obj.version === 'number' && obj.version > GRAPH_FORMAT_VERSION) {
     warnings.push(
-      `File format v${obj.version} is newer than this build (v${GRAPH_FORMAT_VERSION}); some nodes may not load.`,
+      `This file uses format v${obj.version}, which is newer than this build of Coda (v${GRAPH_FORMAT_VERSION}). Some nodes may not load.`,
     )
   }
 
@@ -1263,11 +1286,14 @@ export function deserializeGraph(json: string): LoadResult {
   const nodes: GraphNode[] = []
   for (const n of stored) {
     if (!n || typeof n.id !== 'string' || typeof n.type !== 'string') {
-      warnings.push('Dropped a node with no id/type')
+      warnings.push('Dropped a node that has no id or type.')
       continue
     }
     const ports = placeholderPorts.get(n.id)
-    if (ports) warnings.push(`Kept unknown node type "${n.type}" (${n.id}) as a placeholder`)
+    if (ports)
+      warnings.push(
+        `Node type "${n.type}" (${n.id}) is not in this build of Coda. It was kept as a placeholder.`,
+      )
     // Both hoisted: each validator allocates, and the `...(f(x) ? { k: f(x) } : {})` shape pays
     // for it twice per node on every load and every paste.
     const size = validSize(n.size)
@@ -1303,7 +1329,9 @@ export function deserializeGraph(json: string): LoadResult {
     const from = alive.get(e.source)
     const to = alive.get(e.target)
     if (!from || !to) {
-      warnings.push(`Dropped edge ${e.source} → ${e.target} (endpoint missing)`)
+      warnings.push(
+        `Dropped edge ${e.source} → ${e.target} because one of its ends is missing.`,
+      )
       continue
     }
     /*

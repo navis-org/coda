@@ -31,7 +31,7 @@ import { useGraphStore, useNodeStateCount, useStaleCount } from '../../store/gra
 import { pickGraphFile } from '../../store/persistence'
 import { graphName } from '../../core/graph'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
-import { formatAgo, plural } from '../format'
+import { formatAgo, plural } from '../../style/format'
 import { ShelfList, ShelfRow } from './ShelfRow'
 import { lockedTitle } from '../lockCopy'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'

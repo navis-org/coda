@@ -74,9 +74,12 @@ registerNode({
   label: 'Select Neurons',
   category: 'transform',
   description:
-    'Keep only the skeletons or meshes whose ids appear in a neuron table. Columns are untouched — the geometry arrives with the attributes it already had.',
+    'Keep only the skeletons or meshes whose ids appear in a neuron table. Columns are left as they are: the geometry keeps the attributes it already had.',
   guide:
-    'Takes a collection of skeletons or meshes and a table of neurons, and keeps the geometry whose ids the table names — so a Cut Tree cluster, an NBLAST shortlist or a Connectivity result can pick what a 3D View draws without re-fetching anything. Filtering the neuron table before the Skeletons or Meshes node is cheaper where that is still possible; this is for geometry that has no table left in front of it, or a subset chosen from something measured off the geometry itself. Ids the collection has no geometry for are counted and reported, never refused.',
+    'Keeps the skeletons or meshes whose ids appear in a table, e.g. a Cut Tree cluster, an ' +
+    'NBLAST shortlist or a Connectivity result, without fetching anything again. Where you ' +
+    'can, it is cheaper to filter the neuron table before the Skeletons or Meshes node. Ids ' +
+    'with no matching geometry are counted and reported.',
   cost: 'cheap',
 
   /*
@@ -106,7 +109,7 @@ registerNode({
        * picker would be refusing the data rather than the mistake.
        */
       default: ID_COLUMN_NAME,
-      help: 'The table column holding neuron ids, matched against the ids the geometry carries. A Cut Tree, Reduce Matrix or Embedding keys on “label”.',
+      help: 'The table column holding neuron ids. Use `label` for tables from Cut Tree, Reduce Matrix or Embedding.',
     },
   ],
 

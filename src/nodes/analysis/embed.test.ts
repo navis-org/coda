@@ -46,6 +46,14 @@ function scoreMatrix(): MatrixValue {
   )
 }
 
+/** A one-column table of neuron ids, as a selection arrives. */
+function idTable(...ids: string[]): TableValue {
+  return tableFromRows(
+    tableSchema(column('neuronId', 'str')),
+    ids.map((neuronId) => ({ neuronId })),
+  )
+}
+
 const NEIGHBOUR_SCHEMA = tableSchema(
   column('queryId', 'str'),
   column('targetId', 'str'),
@@ -124,18 +132,18 @@ function distance(a: [number, number], b: [number, number]): number {
 
 describe('the Embedding node', () => {
   it('refuses to guess when nothing, or more than one thing, is wired', () => {
-    expect(validateWith({})[0]).toMatch(/Wire one of Matrix, Features, Neighbours/)
+    expect(validateWith({})[0]).toMatch(/Wire one of `Matrix`, `Features`, `Neighbours`/)
     // Not a precedence: on an expensive node, silently picking one would put a picture on the
     // canvas computed from an input it ignored.
     const both = validateWith({ matrix: { kind: 'matrix' }, features: { kind: 'table' } })
-    expect(both[0]).toMatch(/Matrix and Features are wired at once/)
+    expect(both[0]).toMatch(/`Matrix` and `Features` are wired at once/)
   })
 
   it('refuses a Min distance above the Spread it packs within', () => {
     // umap-learn refuses this outright; umap-js does not, so an unfittable pair there comes
     // back as an arrangement that merely looks wrong.
     const issues = validateWith({ matrix: { kind: 'matrix' } }, { minDist: 0.9, spread: 0.2 })
-    expect(issues[0]).toMatch(/Min distance cannot exceed Spread/)
+    expect(issues[0]).toMatch(/`Min distance` cannot be larger than `Spread`/)
   })
 
   it('embeds a score matrix, one row per observation, in the matrix’s own order', async () => {
@@ -215,7 +223,95 @@ describe('the Embedding node', () => {
         scoreColumn: 'score',
       },
     })
-    expect(warnings.join(' ')).toMatch(/is not in "queryId"/)
+    expect(warnings.join(' ')).toMatch(/1 rows name a neighbour that is not itself a point/)
+  })
+
+  describe('Only these', () => {
+    const ONLY = idTable('a', 'b', 'c', 'e', 'f')
+    const labels = (table: TableValue) => getColumn(table, 'label').map(String).sort()
+
+    it('lays out only the listed neurons of a neighbour graph, and says why the rest went', async () => {
+      const { table, warnings } = await run({
+        inputs: { neighbours: neighbourTable(), only: ONLY },
+        params: { neighbors: 3, queryColumn: 'queryId', targetColumn: 'targetId' },
+      })
+      expect(labels(table)).toEqual(['a', 'b', 'c', 'e', 'f'])
+      // Five points, each listing the three outside: 15 neighbours left out, and not blamed on NBLAST.
+      expect(warnings.join(' ')).toMatch(/15 neighbours are outside `Only these`/)
+      expect(warnings.join(' ')).not.toMatch(/NBLAST/)
+    })
+
+    it('still says when a neighbour is never a point, apart from the ones it left out', async () => {
+      const table = tableFromRows(NEIGHBOUR_SCHEMA, [
+        ...neighbourRows(),
+        { queryId: 'a', targetId: 'stranger', score: 0.99 },
+      ])
+      const { warnings } = await run({
+        inputs: { neighbours: table, only: ONLY },
+        params: { neighbors: 3, queryColumn: 'queryId', targetColumn: 'targetId' },
+      })
+      expect(warnings.join(' ')).toMatch(/15 neighbours are outside `Only these`/)
+      expect(warnings.join(' ')).toMatch(/1 rows name a neighbour that is not itself a point/)
+    })
+
+    it('reads a blank id in Only these as nobody', async () => {
+      const blank = tableFromRows(tableSchema(column('neuronId', 'str')), [
+        ...['a', 'b', 'c', 'e', 'f'].map((neuronId) => ({ neuronId })),
+        { neuronId: null },
+      ])
+      const { warnings } = await run({
+        inputs: { matrix: scoreMatrix(), only: blank },
+        params: { neighbors: 3 },
+      })
+      expect(warnings.join(' ')).not.toMatch(/not in the input/)
+    })
+
+    it('takes the listed lines of a matrix, on both axes', async () => {
+      const { table } = await run({
+        inputs: { matrix: scoreMatrix(), only: ONLY },
+        params: { neighbors: 3 },
+      })
+      expect(labels(table)).toEqual(['a', 'b', 'c', 'e', 'f'])
+    })
+
+    it('restricts a feature table to the listed observations before the matrix is built', async () => {
+      // Two groups of four, each neuron one feature row per partner it shares with its group.
+      const features = tableFromRows(
+        tableSchema(
+          column('neuronId', 'str'),
+          column('partner', 'str'),
+          column('weight', 'f64'),
+        ),
+        ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].flatMap((id, i) => [
+          { neuronId: id, partner: i < 4 ? 'p1' : 'p2', weight: 10 },
+          { neuronId: id, partner: `own${i}`, weight: 1 },
+        ]),
+      )
+      const { table } = await run({
+        inputs: { features, only: ONLY },
+        params: {
+          neighbors: 3,
+          observations: 'neuronId',
+          featureColumn: 'partner',
+          value: 'weight',
+        },
+      })
+      expect(labels(table)).toEqual(['a', 'b', 'c', 'e', 'f'])
+    })
+
+    it('refuses an Only these that names nothing in the input, and counts a partial match', async () => {
+      const strangers = idTable('x', 'y')
+      await expect(
+        run({ inputs: { matrix: scoreMatrix(), only: strangers }, params: { neighbors: 3 } }),
+      ).rejects.toThrow(/None of the 2 neurons in `Only these`/)
+
+      const some = idTable('a', 'b', 'c', 'e', 'f', 'x')
+      const { warnings } = await run({
+        inputs: { matrix: scoreMatrix(), only: some },
+        params: { neighbors: 3 },
+      })
+      expect(warnings.join(' ')).toMatch(/1 of 6 neurons in `Only these` are not in the input/)
+    })
   })
 
   it('joins an Annotations table onto the label, leaving misses null', async () => {
