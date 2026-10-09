@@ -637,6 +637,13 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '13', cy: '17.4', r: '1.9' }],
     ['path', { d: 'M14.9 8.4l3.2 2.8M18.6 14.2l-3.9 2.4M13.2 15.5l.16-6.4' }],
   ],
+  'net.dotmotif': [
+    ['circle', { cx: '6', cy: '7', r: '2' }],
+    ['circle', { cx: '16', cy: '7', r: '2' }],
+    ['circle', { cx: '11', cy: '16', r: '2' }],
+    ['path', { d: 'M8 7h6M7 8.8l3 5.4M15 8.8l-3 5.4' }],
+    ['path', { d: 'M17 14a4 4 0 1 0 0 8 4 4 0 0 0 0-8M20 21l2 2' }],
+  ],
   // Filter Table’s funnel, unchanged, under a network instead of a table. Same verb, different
   // material — reusing the mark is what says the two nodes do the same thing, and it costs the
   // reader nothing to learn twice.

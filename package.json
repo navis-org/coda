@@ -39,6 +39,7 @@
     "probe:port-preview": "node scripts/probe-port-preview.mjs",
     "probe:node-tip": "node scripts/probe-node-tip.mjs",
     "probe:matches": "node scripts/probe-matches.mjs",
+    "probe:dotmotif": "node scripts/probe-dotmotif.mjs",
     "probe:heatmap-select": "node scripts/probe-heatmap-select.mjs",
     "probe:viewer3d-switch": "node scripts/probe-viewer3d-switch.mjs",
     "check:mirror": "python3 scripts/check-mirror.py",
