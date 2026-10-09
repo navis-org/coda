@@ -7,8 +7,8 @@ probe verifies those hashes before loading them.
 - DotMotif 0.19.0 is the official wheel from its GitHub release, at commit
   `125fdbca18c1c8ac7ed1b8d3f595669edc36574f`. That release is not on PyPI.
 - GrandIso 2.2.0 publishes only a source archive. The wheel here was built from
-  that archive with pinned build tools. DotMotif imports GrandIso even though
-  Coda uses its NetworkX executor.
+  that archive with pinned build tools. Coda searches with DotMotif's GrandIso
+  executor; NetworkX supplies the graph data structure and constraint helpers.
 
 Both wheels contain their upstream Apache-2.0 license in
 `<package>-<version>.dist-info/licenses/LICENSE`; a copy is included here as

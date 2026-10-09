@@ -11,10 +11,10 @@ registerNode({
   category: 'analysis',
   description: 'Search a network for a DotMotif pattern, locally in your browser.',
   guide:
-    'Searches the wired network using DotMotif, including node and link attributes. ' +
-    'Matches lists each variable’s node in each occurrence; Induced union contains every ' +
-    'link between the matched nodes, not just motif links. Runs in a local worker; difficult ' +
-    'searches can take a long time even with a small result limit, and can be cancelled.',
+    'Searches the wired network with DotMotif’s GrandIso executor, including node and link attributes. ' +
+    'Required edges must connect all roles; required self-loops are unsupported. ' +
+    'Matches lists each role’s node per occurrence; Induced union keeps every link between matched nodes. ' +
+    'Runs locally; difficult searches can take a long time and can be cancelled.',
   cost: 'expensive',
   inputs: [{ id: 'in', label: 'Network', type: T.network() }],
   outputs: [
@@ -28,7 +28,7 @@ registerNode({
       kind: 'string',
       multiline: true,
       default: 'A -> B\nB -> C\nA -> C',
-      help: 'DotMotif DSL, not Python or Cypher. The default finds feed-forward triangles. Use the node help for attribute constraints and supported syntax.',
+      help: 'DotMotif DSL, not Python or Cypher. The default finds feed-forward triangles. Required edges must connect all roles, without required self-loops. Use the node help for attribute constraints and supported syntax.',
     },
     {
       id: 'maxMatches',

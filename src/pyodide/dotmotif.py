@@ -1,11 +1,10 @@
 """DotMotif on a materialized Coda network, inside the cancellable Python worker.
 
-Use DotMotif's NetworkX executor rather than GrandIso: the pinned GrandIso executor
-loses negative-only variables and disconnected components, mishandles undirected
-queries, and can report a self-loop in a loop-free graph. DotMotif 0.19's NetworkX executor supports
-these cases and stops at the requested number of accepted matches. This module
-adapts inputs and rejects known unsupported semantics; it does not implement a
-second matcher. Extra host edges are allowed unless explicitly forbidden.
+Use DotMotif's GrandIso executor for local motif search, stopping at the requested
+number of accepted matches. Required edges must connect all motif variables and
+cannot be self-loops. This module adapts inputs and rejects unsupported semantics;
+it does not implement a second matcher or fall back to NetworkX search. Extra
+host edges are allowed unless explicitly forbidden.
 """
 
 import ast
@@ -14,7 +13,7 @@ import math
 import networkx as nx
 from lark import Token
 from dotmotif import Motif
-from dotmotif.executors import NetworkXExecutor
+from dotmotif.executors import GrandIsoExecutor
 from dotmotif.parsers import v2 as _dotmotif_parser
 from dotmotif.validators import (
     DisagreeingEdgesValidator,
@@ -111,7 +110,7 @@ class _UniqueMotifEdges(Validator):
         return True
 
 
-class _CodaNetworkXExecutor(NetworkXExecutor):
+class _CodaGrandIsoExecutor(GrandIsoExecutor):
     def _validate_dynamic_node_constraints(self, mapping, graph, constraints):
         # Static comparisons already treat incompatible/missing values as a
         # non-match. Apply the same rule to a dynamic comparison, e.g. a null
@@ -156,7 +155,7 @@ def _dotmotif_graph(req):
     graph = nx.DiGraph() if req["directed"] else nx.Graph()
     display_ids = sorted(ids)
     key_of = {node_id: key for key, node_id in enumerate(display_ids)}
-    # Directed VF2 iterates a set of host keys. Sorted *string* insertion alone
+    # GrandIso intersects sets of host keys. Sorted *string* insertion alone
     # is not deterministic across Python hash seeds; integer ranks are. Raw
     # id/source/target attribute cells retain their original values below.
     for row in sorted(range(node_count), key=lambda row: ids[row]):
@@ -183,13 +182,16 @@ def _dotmotif_graph(req):
     return graph, display_ids
 
 
-def _dotmotif_motif(query):
+def _dotmotif_motif(query, directed):
     if not isinstance(query, str) or not query.strip():
         raise ValueError("Enter a DotMotif query.")
     # Motif treats a single line as a potential filesystem path. Force text
     # parsing even when a supplied query happens to name an existing file.
     motif = Motif(
         query + "\n",
+        # GrandIso chooses the motif graph's direction from this flag. Set it
+        # explicitly to match Coda's host graph, including undirected inputs.
+        ignore_direction=not directed,
         enforce_inequality=True,
         exclude_automorphisms=False,
         parser=_CodaParser,
@@ -199,6 +201,8 @@ def _dotmotif_motif(query):
     if not graph:
         raise ValueError("A DotMotif query must declare at least one edge (present or absent).")
     for source, target, attrs in graph.edges(data=True):
+        if attrs["exists"] and source == target:
+            raise ValueError("Required self-loop edges are not supported by GrandIso.")
         if attrs["action"] != "SYN":
             raise ValueError("Typed edges (-+, -|, --) are not supported; use -> with an attribute constraint.")
         if not attrs["exists"] and motif.list_edge_constraints().get((source, target)):
@@ -214,6 +218,13 @@ def _dotmotif_motif(query):
     for source, target in motif.list_automorphisms():
         if source not in graph or target not in graph:
             raise ValueError("Every node in an === declaration must have a motif edge.")
+    # GrandIso traverses a connected positive-edge backbone. Negative edges
+    # filter its matches; they cannot introduce an otherwise unconnected role.
+    positive = nx.Graph()
+    positive.add_nodes_from(graph.nodes)
+    positive.add_edges_from((u, v) for u, v, attrs in graph.edges(data=True) if attrs["exists"])
+    if not positive.number_of_edges() or not nx.is_connected(positive):
+        raise ValueError("GrandIso requires every motif variable to be connected by required edges (->).")
     return motif
 
 
@@ -224,11 +235,11 @@ def coda_dotmotif_run(request, report=None):
         raise ValueError("Maximum matches must be a positive integer.")
     if not isinstance(req["directed"], bool):
         raise ValueError("Network directedness must be a boolean.")
-    motif = _dotmotif_motif(req["query"])
+    motif = _dotmotif_motif(req["query"], req["directed"])
     graph, display_ids = _dotmotif_graph(req)
     if report is not None:
         report(0.2, f"searching {len(graph):,} nodes and {graph.number_of_edges():,} edges")
-    matches = _CodaNetworkXExecutor(graph=graph).find(motif, limit=int(limit))
+    matches = _CodaGrandIsoExecutor(graph=graph).find(motif, limit=int(limit))
     roles = sorted(motif.to_nx().nodes)
     result = {"matchId": [], "variable": [], "nodeId": [], "count": len(matches), "limitReached": len(matches) == limit}
     for number, mapping in enumerate(matches, start=1):

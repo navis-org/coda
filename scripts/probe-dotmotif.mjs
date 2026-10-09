@@ -42,6 +42,15 @@ async function main() {
     JSON.stringify(Object.keys(py.loadedPackages).sort()) ===
       JSON.stringify(['dotmotif', 'grandiso', 'lark', 'networkx']),
   )
+  // Fail this whole probe if a future refactor silently restores the slower
+  // NetworkX search. GrandIso inherits constraint helpers, but not its find().
+  py.runPython(`
+from dotmotif.executors import NetworkXExecutor
+def _forbid_networkx_search(*args, **kwargs):
+    raise AssertionError("Coda must use GrandIso, not NetworkX search")
+NetworkXExecutor.find = _forbid_networkx_search
+assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
+`)
   const callable = py.globals.get('coda_dotmotif_run')
   const path = {
     directed: true,
@@ -110,8 +119,29 @@ async function main() {
   matches('macros', { query: 'chain(a,b,c) { a -> b\n b -> c }; chain(A,B,C)' }, 1)
   matches('absent closing edge', { query: 'A -> B; B -> C; C !> A' }, 1)
   matches('absent reverse edge', { query: 'A -> B; B !> A' }, 2)
-  matches('negative-only variables', { query: 'A !> B' }, 4)
-  matches('variable on negative edge only', { query: 'A -> B; B !> C' }, 1)
+  matches(
+    'default feed-forward triangle',
+    {
+      edges: { source: ['1', '2', '1'], target: ['2', '3', '3'] },
+      query: 'A -> B; B -> C; A -> C',
+    },
+    1,
+  )
+  matches(
+    'connected query on a disconnected host',
+    {
+      nodes: { id: ['1', '2', '3', '4', 'isolated'] },
+      edges: { source: ['1', '3'], target: ['2', '4'] },
+      query: 'A -> B',
+    },
+    2,
+  )
+  rejects('negative-only variables', { query: 'A !> B' }, 'connected by required edges')
+  rejects(
+    'variable on negative edge only',
+    { query: 'A -> B; B !> C' },
+    'connected by required edges',
+  )
   // Contradictions must be rejected, rather than reported as an empty set.
   rejects('contradictory topology', { query: 'A -> B; A !> B' }, 'conflict')
   matches('zero matches', { query: 'A -> B [weight > 100]' }, 0)
@@ -138,17 +168,29 @@ async function main() {
     },
     0,
   )
-  matches('self-loop cannot be invented', { query: 'A -> A' }, 0)
-  matches('actual self-loop', { query: 'A -> A', edges: { source: ['1'], target: ['1'] } }, 1)
+  rejects('self-loop cannot be invented', { query: 'A -> A' }, 'Required self-loop')
+  rejects(
+    'actual self-loop query',
+    { query: 'A -> A', edges: { source: ['1'], target: ['1'] } },
+    'Required self-loop',
+  )
   matches('negative self-loop', { query: 'A -> B; A !> A' }, 2)
   matches(
+    'negative self-loop excludes a real loop',
+    {
+      edges: { source: ['1', '2', '1'], target: ['2', '3', '1'] },
+      query: 'A -> B; A !> A',
+    },
+    1,
+  )
+  rejects(
     'disconnected positive components',
     {
       nodes: { id: ['1', '2', '3', '4'] },
       edges: { source: ['1', '3'], target: ['2', '4'] },
       query: 'A -> B; C -> D',
     },
-    2,
+    'connected by required edges',
   )
   matches('empty host', { nodes: { id: [] }, edges: { source: [], target: [] } }, 0)
   matches('undirected chain', { directed: false }, 2)
@@ -382,7 +424,7 @@ async function main() {
   callable.destroy()
 
   // A second CPython instance gets a fresh hash seed. A same-runtime rerun
-  // misses the directed VF2 string-set ordering bug this guards against.
+  // misses the host-key string-set ordering bug this guards against.
   const fresh = await bootPyodide()
   await loadModule(
     fresh,

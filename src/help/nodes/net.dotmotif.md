@@ -15,8 +15,8 @@ motif:matches -> matches:in
 motif:network -> network:in
 ```
 
-The search runs in your browser when you press **Run**. Its first use downloads the Python
-runtime and search packages; your graph and query are not uploaded to a compute service.
+The search uses GrandIso in your browser when you press **Run**. Its first use downloads the
+Python runtime and search packages; your graph and query are not uploaded to a compute service.
 **Cancel** stops the search. A large network or a hard query can take a long time even when
 you request few matches.
 
@@ -61,8 +61,10 @@ setting sums weights; other edge attributes survive only when their merged value
 ### Supported queries
 
 Directed and undirected networks are supported. On an undirected network, arrows test
-adjacency without imposing a direction. Patterns may be disconnected or contain self-loops;
-variables may appear only in negative edges.
+adjacency without imposing a direction. Required edges (`->`) must connect every variable.
+Disconnected patterns, variables appearing only in negative edges, and required self-loops
+(`A -> A`) are not supported and produce an error. Forbidden edges between connected roles
+still work, including `A !> A` to exclude a self-loop. There is no slower-executor fallback.
 
 You can use node and edge attribute constraints, named edges with static constraints, and
 comparisons between node attributes. Direct macros may contain topology and static

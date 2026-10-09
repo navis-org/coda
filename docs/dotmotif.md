@@ -33,16 +33,20 @@ automatic fallback that uploads the current network.
 
 ## Matching semantics
 
-The adapter uses DotMotif 0.19.0's `NetworkXExecutor`. Probes of the pinned GrandIso executor
-found wrong or missing answers for negative-only variables, disconnected patterns,
-undirected networks and self-loops. Correctness on those cases determines the choice here;
-this is not a claim that NetworkX is the faster implementation.
+The adapter uses DotMotif 0.19.0's `GrandIsoExecutor` with GrandIso 2.2.0, prioritizing
+search performance for connected motifs. There is no NetworkX search fallback. The required
+edges must connect every motif variable; disconnected patterns, negative-only variables and
+required self-loops are outside this node's supported surface and produce a clear error.
+Forbidden edges between connected roles still work, including forbidden self-loops.
 
 The input is a simple directed or undirected graph. Node and edge attributes retain their
 cell values, and returned node IDs are strings, including wide integer-looking IDs. Parallel
 endpoint pairs are refused, rather than silently overwriting attributes; users can choose
 `Merge parallel links` upstream. Duplicate or missing node IDs and dangling edges also fail
 explicitly.
+
+For undirected inputs, the adapter sets DotMotif's `ignore_direction` flag explicitly so
+GrandIso constructs an undirected pattern to match the host graph.
 
 Each motif variable receives a distinct host node. Extra host edges are permitted unless
 forbidden by the query, and different role assignments on the same node set remain separate
@@ -81,8 +85,8 @@ worker termination path, and a later run boots a new worker.
 
 The worker and runtime remain lazy. Only the first DotMotif call loads its four pure-Python
 dependencies, pinned in `src/pyodide/sources.json`: DotMotif, GrandIso, NetworkX and Lark.
-GrandIso is imported by DotMotif even though it is not the selected executor. Direct wheel
-loading avoids optional plotting and ingest dependencies.
+NetworkX supplies the graph data structure and constraint helpers, not the search algorithm.
+Direct wheel loading avoids optional plotting and ingest dependencies.
 
 DotMotif's official 0.19.0 wheel and a GrandIso wheel built with pinned tools are served from
 `public/wheels`; [the manifest and build instructions](../public/wheels/README.md) record
@@ -97,21 +101,27 @@ prefix; tests cover both directory layouts at the origin root and under a prefix
 
 ## Verification and export
 
-The real Pyodide probe found all 998 two-edge paths in a 1,000-node directed chain in
-63 ms, after about 3.1 seconds for the first runtime/package/import setup, using a 36 MB
+The real GrandIso Pyodide probe found all 998 two-edge paths in a 1,000-node directed chain in
+24 ms, after about 1.9 seconds for the first runtime/package/import setup, using a 43 MB
 WASM heap. This small sparse fixture verifies the plumbing; it is not a performance bound
 for arbitrary motifs, dense graphs or unsuccessful searches.
 
-Browser verification covered a complete workflow from the built-in mock dataset through
-Build Network, DotMotif, Table and Network Viewer (398 nodes, 3,348 edges). The result cap
+Initial browser verification, before the executor switch, covered a complete workflow from
+the built-in mock dataset through Build Network, DotMotif, Table and Network Viewer
+(398 nodes, 3,348 edges). The result cap
 produced the expected membership rows and warning, and the induced union rendered. A costly
 no-result query was cancelled, then a subsequent attributed query completed after the worker
 restarted. The production bundle was also served under `/coda/`; both vendored wheels loaded
 from `/coda/wheels/` and the full workflow completed. The checked runs had no console errors.
 
+After the switch, a real browser-worker smoke test verified a capped attributed triangle
+with a wide string ID, the GrandIso runtime label, an actionable unsupported-query error,
+cancellation during an active search, and identical results after restarting the worker.
+
 - `scripts/probe-dotmotif.mjs` runs the actual adapter and pinned wheels in Pyodide, checks
   artifact hashes and dependency loading, and exercises topology, constraints, IDs, limits,
-  invalid inputs and result transport. `.github/workflows/pyodide.yml` runs it in CI.
+  invalid inputs and result transport. It also checks the unsupported-query errors and fails
+  if a search falls back to NetworkX. `.github/workflows/pyodide.yml` runs it in CI.
 - `src/pyodide/dotmotif.test.ts` checks the typed worker seam, including malformed responses
   and cancellation propagation. `packageUrls.test.ts` covers deployment paths.
 - `src/nodes/analysis/dotmotif.test.ts` checks schema inference, original-table preservation,

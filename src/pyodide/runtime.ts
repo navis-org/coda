@@ -71,7 +71,7 @@ const MODULES: Record<string, PyModule> = {
     // Pure Python wheels only: Pyodide's networkx bundle also pulls plotting dependencies.
     // Resolve our vendored wheels against the deployment base, not the worker's assets/ URL.
     packages: packageUrls(sources.dotmotifPackages, import.meta.url, import.meta.env.DEV),
-    label: `DotMotif ${sources.dotmotifVersion} · NetworkX`,
+    label: `DotMotif ${sources.dotmotifVersion} · GrandIso`,
   },
   nblast: {
     source: NBLAST_PY,
