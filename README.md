@@ -114,6 +114,13 @@ The tag is injected at build time and only when `CODA_ANALYTICS` is set, which h
 repository's deploy workflow and nowhere else — so a fork you build and host reports nothing to
 anybody. See [docs/analytics.md](docs/analytics.md).
 
+## Contributors
+
+- [Jordan Matelsky](https://github.com/j6k4m8) (Kording lab/Mindspan) contributed the DotMotif node, which searches a
+  network for a motif pattern locally in the browser.
+- [Casey Schneider-Mizell](https://github.com/ceesem) (Allen Institute for Brain Science) provided the inspiration for the Cortex
+  Gallery node.
+
 ## Licence
 
 MIT
