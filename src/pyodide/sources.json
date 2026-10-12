@@ -8,9 +8,11 @@
     "carries an Origin header - a bare curl -I shows no CORS headers at all and reads as a host that",
     "would block a browser, which it is not. Same shape as the /api/roimeshes HEAD-vs-GET finding.",
     "",
-    "To self-host instead: drop the wheel in public/ and set fastcoreWheel to a BASE_URL-relative",
-    "path. It is 1.1 MB, against the ~10 MB of CPython and numpy that would still come from the CDN,",
-    "so hosting the algorithm and borrowing the runtime is a defensible middle."
+    "To self-host instead: drop the wheel in public/wheels/, record it in that folder's manifest.json,",
+    "and move it from each module's packages to its wheels in runtime.ts, as dotmotifWheels does. A",
+    "relative path in packages would resolve against the worker's assets/ chunk. It is 1.1 MB,",
+    "against the ~10 MB of CPython and numpy that would still come from the CDN, so hosting the",
+    "algorithm and borrowing the runtime is a defensible middle."
   ],
   "pyodideIndex": "https://cdn.jsdelivr.net/pyodide/v314.0.5/full/",
   "fastcoreWheel": "https://files.pythonhosted.org/packages/48/11/74206ba362a2b287cd94bc15605e0185f0e26397116e84a1ae27266a3e2e/navis_fastcore-0.13.0-cp39-abi3-pyemscripten_2026_0_wasm32.whl",
@@ -18,8 +20,7 @@
   "dotmotifVersion": "0.19.0",
   "dotmotifPackages": [
     "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl",
-    "https://files.pythonhosted.org/packages/82/3d/14ce75ef66813643812f3093ab17e46d3a206942ce7376d31ec2d36229e7/lark-1.3.1-py3-none-any.whl",
-    "wheels/grandiso-2.2.0-py3-none-any.whl",
-    "wheels/dotmotif-0.19.0-py3-none-any.whl"
-  ]
+    "https://files.pythonhosted.org/packages/82/3d/14ce75ef66813643812f3093ab17e46d3a206942ce7376d31ec2d36229e7/lark-1.3.1-py3-none-any.whl"
+  ],
+  "dotmotifWheels": ["grandiso-2.2.0-py3-none-any.whl", "dotmotif-0.19.0-py3-none-any.whl"]
 }

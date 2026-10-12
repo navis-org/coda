@@ -26,6 +26,7 @@
 
 import type { ParamValues } from '../../core/node'
 import { ID_COLUMN_NAME } from '../../core/ids'
+import sources from '../../pyodide/sources.json'
 import { resolveDatasetNames } from '../../nodes/lib/edgeComparison'
 import type { CompareParams } from '../../nodes/lib/edgeComparison'
 import { compareParamsFrom } from '../../nodes/lib/edgeComparison'
@@ -428,6 +429,38 @@ export function filterNetworkPlan(
       )
     : undefined
   return { condition, seed }
+}
+
+// ---------------------------------------------------------------------------
+// DotMotif
+// ---------------------------------------------------------------------------
+
+/** Always a TODO, plus the search itself as comments both languages read alike. */
+export interface DotMotifPlan {
+  refusal: string
+  comments: string[]
+}
+
+/**
+ * Never translated, in either language. A notebook calling DotMotif on the exported network
+ * could answer a different attributed query in silence, since Build Network's export carries
+ * fewer edge attributes than the canvas and does not make node keys Coda's string ids; and R has
+ * no DotMotif, an igraph motif census being a different question. So both bind neither output,
+ * and keep the query exactly: as a JSON string in a comment, because wrapping a DSL as prose can
+ * change quoted whitespace and inserting it as code would run it.
+ */
+export function dotmotifPlan(ctx: Pick<NeutralContext, 'params'>): DotMotifPlan {
+  const release = `https://github.com/aplbrain/dotmotif/releases/tag/v${sources.dotmotifVersion}`
+  return {
+    refusal:
+      `DotMotif runs only in Coda's browser, and this export does not translate it. To reproduce ` +
+      `it, run DotMotif ${sources.dotmotifVersion} (${release}) on the same network with the ` +
+      'same match limit, or download the Matches table from Coda.',
+    comments: [
+      `# DotMotif query (JSON string): ${JSON.stringify(String(ctx.params.query))}`,
+      `# Max matches: ${JSON.stringify(ctx.params.maxMatches)}`,
+    ],
+  }
 }
 
 // ---------------------------------------------------------------------------

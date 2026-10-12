@@ -8,7 +8,7 @@
  */
 
 import { errorMessage } from '../core/errors'
-import { callPython, heapBytes } from './runtime'
+import { callPython, heapBytes, setSiteRoot } from './runtime'
 import type { WorkerReply, WorkerRequest } from './types'
 
 /*
@@ -43,6 +43,10 @@ function transferable(result: Record<string, unknown>): Transferable[] {
 
 scope.addEventListener('message', (event) => {
   const request = event.data
+  if ('siteRoot' in request) {
+    setSiteRoot(request.siteRoot)
+    return
+  }
   if ('memory' in request) {
     void heapBytes().then((bytes) => {
       scope.postMessage({ id: request.id, kind: 'memory', bytes })

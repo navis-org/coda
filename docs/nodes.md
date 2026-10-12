@@ -42,6 +42,7 @@ what a port's declaration means.
 
 - [Connectivity similarity: Partner Vectors and Similarity Matrix](nodes-connectivity.md#connectivity-similarity-partner-vectors-and-similarity-matrix)
 - [Network Metrics and Network Centrality: two nodes because cost is a node property](nodes-connectivity.md#network-metrics-and-network-centrality-two-nodes-because-cost-is-a-node-property)
+- [DotMotif: motif search on the network on the wire, in the browser](dotmotif.md)
 - [Connectivity: hops and direction](nodes-connectivity.md#connectivity-hops-and-direction)
 - [Paths: how does this reach that?](nodes-connectivity.md#paths-how-does-this-reach-that)
 - [Influence: how much of this is attributable to that?](nodes-connectivity.md#influence-how-much-of-this-is-attributable-to-that)

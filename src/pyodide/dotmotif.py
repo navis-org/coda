@@ -1,14 +1,13 @@
-"""DotMotif on a materialized Coda network, inside the cancellable Python worker.
+"""DotMotif's GrandIso executor on a keyed Coda network, in the cancellable Python worker.
 
-Use DotMotif's GrandIso executor for local motif search, stopping at the requested
-number of accepted matches. Required edges must connect all motif variables and
-cannot be self-loops. This module adapts inputs and rejects unsupported semantics;
-it does not implement a second matcher or fall back to NetworkX search. Extra
-host edges are allowed unless explicitly forbidden.
+Adapts the request and refuses what the pinned parser or executor would otherwise misread.
 """
 
+import array
 import ast
+import gc
 import math
+from importlib.metadata import version
 
 import networkx as nx
 from lark import Token
@@ -45,6 +44,16 @@ def _dotmotif_literal(token):
 
 
 _dotmotif_parser.untype_string = _dotmotif_literal
+
+# The rebinding above takes only while the parser looks `untype_string` up as a module global,
+# which is how 0.19.0 imports it. An upgrade that reaches it any other way brings `eval` back for
+# query text that can arrive in a share link, and nothing else would say so: refuse to load
+# instead. The version is checked because every override below is written against 0.19.0 too.
+_DOTMOTIF_VERSION = "0.19.0"
+if version("dotmotif") != _DOTMOTIF_VERSION:
+    raise ImportError(f"Coda's DotMotif adapter is written for {_DOTMOTIF_VERSION}, not {version('dotmotif')}.")
+if Motif("A -> B\nA.x = abs\n").list_node_constraints()["A"]["x"]["="] != ["abs"]:
+    raise ImportError("DotMotif's value parser still evaluates Python; the eval guard did not take.")
 
 
 class _CodaParser(_dotmotif_parser.ParserV2):
@@ -121,69 +130,55 @@ class _CodaGrandIsoExecutor(GrandIsoExecutor):
             return False
 
 
-def _dotmotif_id(value):
-    """Match JavaScript String for the identifiers that can round-trip exactly."""
-    if isinstance(value, str):
-        if not value:
-            raise ValueError("Network IDs and edge endpoints must not be empty.")
-        return value
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        if math.isfinite(value) and int(value) == value and abs(value) <= 9007199254740991:
-            return str(int(value))
-        raise ValueError("Numeric network IDs must be safe integers; supply wide IDs as strings.")
-    raise ValueError("Network IDs and edge endpoints must not be null.")
+def _referenced(motif):
+    """The node and edge attributes a query reads: the only columns worth copying into the graph."""
+    nodes, edges = set(), set()
+    for constraints in motif.list_node_constraints().values():
+        nodes.update(constraints)
+    for constraints in motif.list_dynamic_node_constraints().values():
+        for name, operators in constraints.items():
+            nodes.add(name)
+            for comparisons in operators.values():
+                nodes.update(other for _, other in comparisons)
+    for constraints in motif.list_edge_constraints().values():
+        edges.update(constraints)
+    return nodes, edges
 
 
-def _dotmotif_table(columns, required, name):
-    if not isinstance(columns, dict) or any(key not in columns for key in required):
-        raise ValueError(f"The network {name} table needs {', '.join(required)} columns.")
-    length = len(columns[required[0]])
-    if any(not isinstance(values, list) or len(values) != length for values in columns.values()):
-        raise ValueError(f"The network {name} columns must have equal lengths.")
-    return length
+def _dotmotif_graph(request, motif):
+    """The host graph, carrying only the attributes the query reads.
 
-
-def _dotmotif_graph(req):
-    nodes, edges = req["nodes"], req["edges"]
-    node_count = _dotmotif_table(nodes, ("id",), "node")
-    edge_count = _dotmotif_table(edges, ("source", "target"), "edge")
-    ids = [_dotmotif_id(value) for value in nodes["id"]]
-    if len(set(ids)) != node_count:
-        raise ValueError("Network node IDs must be unique after converting them to strings.")
-    graph = nx.DiGraph() if req["directed"] else nx.Graph()
-    display_ids = sorted(ids)
-    key_of = {node_id: key for key, node_id in enumerate(display_ids)}
-    # GrandIso intersects sets of host keys. Sorted *string* insertion alone
-    # is not deterministic across Python hash seeds; integer ranks are. Raw
-    # id/source/target attribute cells retain their original values below.
-    for row in sorted(range(node_count), key=lambda row: ids[row]):
-        key = key_of[ids[row]]
-        graph.add_node(key)
-        graph.nodes[key].update({name: values[row] for name, values in nodes.items()})
-    pairs = set()
-    records = []
-    for row in range(edge_count):
-        source, target = _dotmotif_id(edges["source"][row]), _dotmotif_id(edges["target"][row])
-        if source not in key_of or target not in key_of:
-            raise ValueError("Every edge endpoint must have a row in the network node table.")
-        pair = (source, target) if req["directed"] else tuple(sorted((source, target)))
-        if pair in pairs:
-            raise ValueError("DotMotif requires one edge per node pair; aggregate parallel edges first.")
-        pairs.add(pair)
-        records.append((pair, source, target, row))
-    for _, source, target, row in sorted(records):
-        # Keep id/source/target as attributes too; their raw cells need not be
-        # strings even though the returned membership IDs always are.
-        source_key, target_key = key_of[source], key_of[target]
-        graph.add_edge(source_key, target_key)
-        graph[source_key][target_key].update({key: values[row] for key, values in edges.items()})
-    return graph, display_ids
+    Construction only: `dotmotifHost` has refused what is not a simple graph and sorted the links,
+    and nodes and links go in in the order given (see its header for why the order matters).
+    """
+    key_of_row = request.keyOfRow.to_py()
+    node_names, edge_names = _referenced(motif)
+    graph = nx.DiGraph() if request.directed else nx.Graph()
+    graph.add_nodes_from(range(len(key_of_row)))
+    nodes, edges = request.nodes.as_py_json(), request.edges.as_py_json()
+    for name in node_names & set(nodes):
+        for row, value in enumerate(nodes[name].to_py()):
+            graph.nodes[key_of_row[row]][name] = value
+    links = zip(request.sources.to_py(), request.targets.to_py())
+    columns = {name: edges[name].to_py() for name in edge_names & set(edges)}
+    if columns:
+        rows = request.linkRows.to_py()
+        links = (
+            (s, t, {name: values[row] for name, values in columns.items()})
+            for (s, t), row in zip(links, rows)
+        )
+    # Millions of acyclic dicts and tuples: every collection the build would trigger finds nothing.
+    # Measured at 2M links, about a third off natively and 8% (3.9 s to 3.6 s) in Pyodide.
+    gc.disable()
+    try:
+        graph.add_edges_from(links)
+    finally:
+        gc.enable()
+    return graph
 
 
 def _dotmotif_motif(query, directed):
-    if not isinstance(query, str) or not query.strip():
+    if not query.strip():
         raise ValueError("Enter a DotMotif query.")
     # Motif treats a single line as a potential filesystem path. Force text
     # parsing even when a supplied query happens to name an existing file.
@@ -195,9 +190,12 @@ def _dotmotif_motif(query, directed):
         enforce_inequality=True,
         exclude_automorphisms=False,
         parser=_CodaParser,
+        # `_UniqueMotifEdges` refuses everything `DisagreeingEdgesValidator` does; the latter runs
+        # first for its message, which says what `A -> B; A !> B` actually got wrong.
         validators=[DisagreeingEdgesValidator(), ImpossibleConstraintValidator(), _UniqueMotifEdges()],
     )
     graph = motif.to_nx()
+    edge_constraints = motif.list_edge_constraints()
     if not graph:
         raise ValueError("A DotMotif query must declare at least one edge (present or absent).")
     for source, target, attrs in graph.edges(data=True):
@@ -205,7 +203,7 @@ def _dotmotif_motif(query, directed):
             raise ValueError("Required self-loop edges are not supported by GrandIso.")
         if attrs["action"] != "SYN":
             raise ValueError("Typed edges (-+, -|, --) are not supported; use -> with an attribute constraint.")
-        if not attrs["exists"] and motif.list_edge_constraints().get((source, target)):
+        if not attrs["exists"] and edge_constraints.get((source, target)):
             raise ValueError("Absent edges (!> or ~>) cannot have attribute constraints.")
     if motif.list_dynamic_edge_constraints():
         raise ValueError("Comparisons between two edge attributes are not supported; use fixed edge constraints.")
@@ -225,28 +223,23 @@ def _dotmotif_motif(query, directed):
     positive.add_edges_from((u, v) for u, v, attrs in graph.edges(data=True) if attrs["exists"])
     if not positive.number_of_edges() or not nx.is_connected(positive):
         raise ValueError("GrandIso requires every motif variable to be connected by required edges (->).")
-    return motif
+    return motif, sorted(graph.nodes)
 
 
 def coda_dotmotif_run(request, report=None):
-    req = request.to_py() if hasattr(request, "to_py") else request
-    limit = req["maxMatches"]
-    if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit) or int(limit) != limit or limit < 1:
-        raise ValueError("Maximum matches must be a positive integer.")
-    if not isinstance(req["directed"], bool):
-        raise ValueError("Network directedness must be a boolean.")
-    motif = _dotmotif_motif(req["query"], req["directed"])
-    graph, display_ids = _dotmotif_graph(req)
+    motif, roles = _dotmotif_motif(request.query, request.directed)
+    # Only the parse knows the role count, and a match costs more the more it has: past what
+    # `Max matches` can afford at this count, stop before building anything. The node words it.
+    if len(roles) > request.maxRoles:
+        return {"count": 0, "roles": roles, "keys": array.array("i"), "refused": True}
+    graph = _dotmotif_graph(request, motif)
     if report is not None:
         report(0.2, f"searching {len(graph):,} nodes and {graph.number_of_edges():,} edges")
-    matches = _CodaGrandIsoExecutor(graph=graph).find(motif, limit=int(limit))
-    roles = sorted(motif.to_nx().nodes)
-    result = {"matchId": [], "variable": [], "nodeId": [], "count": len(matches), "limitReached": len(matches) == limit}
-    for number, mapping in enumerate(matches, start=1):
-        for role in roles:
-            result["matchId"].append(number)
-            result["variable"].append(role)
-            result["nodeId"].append(display_ids[mapping[role]])
+    limit = int(request.maxMatches)
+    matches = _CodaGrandIsoExecutor(graph=graph).find(motif, limit=limit)
+    keys = array.array("i")
+    for mapping in matches:
+        keys.extend(mapping[role] for role in roles)
     if report is not None:
-        report(1, f"{len(matches):,} matches" + (" (limit reached)" if result["limitReached"] else ""))
-    return result
+        report(1, f"{len(matches):,} matches" + (" (limit reached)" if len(matches) == limit else ""))
+    return {"count": len(matches), "roles": roles, "keys": keys}

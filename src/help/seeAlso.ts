@@ -91,9 +91,9 @@ const RELATED: readonly (readonly string[])[] = [
   // Partners as a list, as a matrix within a set, and as a vector per neuron.
   ['neuron.connectivity', 'neuron.adjacency', 'neuron.partnerVectors'],
   // An edge list, the graph it becomes, and what to ask of it.
-  ['net.build', 'net.filter', 'net.centrality', 'net.metrics', 'out.network'],
-  // A local motif query, its graph, and its results as a network or table.
-  ['net.dotmotif', 'net.build', 'out.network', 'out.table'],
+  ['net.build', 'net.filter', 'net.dotmotif', 'net.centrality', 'net.metrics', 'out.network'],
+  // DotMotif's Matches is a table of roles, read in a Table rather than drawn.
+  ['net.dotmotif', 'out.table'],
   // The two ways to draw a network: boxes and arrows for a few dozen nodes, WebGL for thousands.
   ['out.flowChart', 'out.network'],
   ['out.flowChart', 'neuron.paths'],

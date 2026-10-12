@@ -531,6 +531,10 @@ asks Python for lives in the one 1.1 MB wheel it already pins. A graph that resa
 without ever scoring anything pays the same ten megabytes the first NBLAST would have; a graph
 that does both pays it once.
 
+**DotMotif is the eighth row and the exception** ([dotmotif.md](dotmotif.md)): networkx, lark,
+grandiso and dotmotif, all pure Python and none of them shared, so its first use pays its own
+download whatever else the graph has run.
+
 **Measured on this build.** The Pyodide worker chunk went 20.1 kB → 47.6 kB, carrying the three
 new `.py` files inlined. `main-*.js` still matches `jsdelivr` nowhere, and `np.frombuffer`,
 `navis_fastcore` and `resample_skeleton` appear in the worker chunk and in no other. The node

@@ -93,6 +93,12 @@ function ensureWorker(): Worker {
     // a node that runs for ever with nothing to show.
     teardown(errorMessage(event.error ?? event.message))
   })
+  // Before any call, and messages arrive in order. `BASE_URL` against the document, the way
+  // every other `public/` asset is addressed.
+  const init: WorkerRequest = {
+    siteRoot: new URL(import.meta.env.BASE_URL, document.baseURI).href,
+  }
+  created.postMessage(init)
   worker = created
   return created
 }

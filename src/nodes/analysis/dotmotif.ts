@@ -2,7 +2,17 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isNetworkValue } from '../../core/values'
 import { runDotMotif } from '../../pyodide/dotmotif'
-import { dotmotifSchema, dotmotifTable } from '../lib/dotmotifOps'
+import { plural } from '../../style/format'
+import { matchColumns } from '../lib/dotmotifHost'
+import {
+  MAX_DOTMOTIF_MATCHES,
+  dotmotifSchema,
+  dotmotifTable,
+  maxMatchesIssue,
+  maxRolesFor,
+  networkHost,
+  queriedColumns,
+} from '../lib/dotmotifOps'
 import { induceSubnetwork } from '../lib/networkOps'
 
 registerNode({
@@ -12,9 +22,9 @@ registerNode({
   description: 'Search a network for a DotMotif pattern, locally in your browser.',
   guide:
     'Searches the wired network with DotMotif’s GrandIso executor, including node and link attributes. ' +
-    'Required edges must connect all roles; required self-loops are unsupported. ' +
+    'Required edges must connect all roles. ' +
     'Matches lists each role’s node per occurrence; Induced union keeps every link between matched nodes. ' +
-    'Runs locally; difficult searches can take a long time and can be cancelled.',
+    'Runs locally and can be cancelled.',
   cost: 'expensive',
   inputs: [{ id: 'in', label: 'Network', type: T.network() }],
   outputs: [
@@ -28,7 +38,7 @@ registerNode({
       kind: 'string',
       multiline: true,
       default: 'A -> B\nB -> C\nA -> C',
-      help: 'DotMotif DSL, not Python or Cypher. The default finds feed-forward triangles. Required edges must connect all roles, without required self-loops. Use the node help for attribute constraints and supported syntax.',
+      help: 'DotMotif DSL, not Python or Cypher. The default finds feed-forward triangles. See the node help for constraints and supported syntax.',
     },
     {
       id: 'maxMatches',
@@ -36,6 +46,7 @@ registerNode({
       kind: 'int',
       default: 1000,
       min: 1,
+      max: MAX_DOTMOTIF_MATCHES,
       help: 'Stop after this many role assignments. This limits returned matches, not search time; reaching it does not prove there are more. Symmetric assignments are separate matches.',
     },
   ],
@@ -46,34 +57,46 @@ registerNode({
   validate: (ctx) => {
     const issues: string[] = []
     if (!String(ctx.params.query).trim()) issues.push('Enter a DotMotif pattern.')
-    const limit = Number(ctx.params.maxMatches)
-    if (!Number.isSafeInteger(limit) || limit < 1) {
-      issues.push('Max matches must be a positive whole number.')
-    }
+    const problem = maxMatchesIssue(Number(ctx.params.maxMatches))
+    if (problem) issues.push(problem)
     return issues
   },
   evaluate: async (ctx) => {
     const network = ctx.input('in')
     if (!isNetworkValue(network)) throw new Error('Wire a Network into DotMotif.')
-    const result = await runDotMotif(
+    const maxMatches = Number(ctx.params.maxMatches)
+    // `validate` only warns, so a stored value it flags is refused here, before the worker.
+    const problem = maxMatchesIssue(maxMatches)
+    if (problem) throw new Error(problem)
+    const host = networkHost(network)
+    const query = String(ctx.params.query)
+    const matches = await runDotMotif(
       {
         directed: network.directed,
-        nodes: network.nodes.data,
-        edges: network.edges.data,
-        query: String(ctx.params.query),
-        maxMatches: Number(ctx.params.maxMatches),
+        query,
+        maxMatches,
+        maxRoles: maxRolesFor(maxMatches),
+        keyOfRow: host.keyOfRow,
+        sources: host.sources,
+        targets: host.targets,
+        linkRows: host.linkRows,
+        nodes: queriedColumns(network.nodes.data, query),
+        edges: queriedColumns(network.edges.data, query),
       },
       { signal: ctx.signal, onProgress: ctx.progress },
     )
-    if (result.limitReached) {
+    if (matches.refused) throw new Error(maxMatchesIssue(maxMatches, matches.roles.length))
+    if (matches.count === maxMatches) {
       ctx.warn(
-        `Stopped at ${result.count} matches; there may be more. Raise Max matches to search further. ` +
+        `Stopped at ${plural(matches.count, 'match', 'matches')}; there may be more. ` +
+          'Raise `Max matches` to search further. ' +
           'This is not a total motif count or a random sample.',
       )
     }
+    const columns = matchColumns(matches, host.ids)
     return {
-      matches: dotmotifTable(result),
-      network: induceSubnetwork(network, new Set(result.nodeId)),
+      matches: dotmotifTable(columns),
+      network: induceSubnetwork(network, new Set(columns.nodeId)),
     }
   },
 })

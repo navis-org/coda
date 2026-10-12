@@ -56,7 +56,6 @@ describe('DotMotif export gaps', () => {
 
       expect(text).toContain('DotMotif 0.19.0')
       expect(text).toContain('https://github.com/aplbrain/dotmotif/releases/tag/v0.19.0')
-      expect(text).toContain('matchId/variable/nodeId')
       expect(text).toContain(`# DotMotif query (JSON string): ${JSON.stringify(QUERY)}`)
       expect(text).toContain('# Max matches: 17')
       expect(result.todos).toContainEqual({ nodeId: 'dotmotif', label: 'DotMotif' })

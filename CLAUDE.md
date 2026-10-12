@@ -1404,13 +1404,15 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
 - [docs/neuronbridge.md](docs/neuronbridge.md) — the NeuronBridge card: Janelia's LM–EM match index read
   straight from its public bucket, why it is not a `DataSource`, and the four rules the bucket's
   layout imposes.
+- [docs/dotmotif.md](docs/dotmotif.md) — motif search in the Pyodide worker: why local, why
+  Python never sees an id (`dotmotifHost.ts`), the served wheels, and the `eval` guard.
 - [docs/annotations.md](docs/annotations.md) — labels that do not come from the connectome:
   the Annotations socket, SeaTable, Google Sheets, root-id drift.
 - [docs/export.md](docs/export.md) — the notebook and R Markdown exporters, the refusal
   policy, the emitter registry, the goldens.
 - [docs/python-pyodide.md](docs/python-pyodide.md) — the Pyodide bridge and the capabilities on
   it. Read before adding a Python-backed one: they all declare the same two packages, which is
-  the finding rather than a coincidence.
+  the finding rather than a coincidence. DotMotif is the exception.
 - [docs/persistence.md](docs/persistence.md) — share links, the autosave across tabs, the
   browser shelf.
 - [docs/recipes.md](docs/recipes.md) — saved sets of cards: why a recipe is a clipboard

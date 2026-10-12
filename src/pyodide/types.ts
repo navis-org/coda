@@ -66,7 +66,15 @@ export interface PyCall {
  * on a clock, and routing it through `callPython` would load a module to answer it — or, worse,
  * boot Python for somebody who has only opened a dialog.
  */
-export type WorkerRequest = { id: number; call: PyCall } | { id: number; memory: true }
+export type WorkerRequest =
+  | { id: number; call: PyCall }
+  | { id: number; memory: true }
+  /**
+   * Sent once, first: the site root, which a module's same-origin wheels are served under. The
+   * main thread resolves it because the worker cannot — its own URL is a chunk in `assets/`, and
+   * `base: './'` makes `BASE_URL` relative to whatever resolves it.
+   */
+  | { siteRoot: string }
 
 /** Worker to main thread. */
 export type WorkerReply =

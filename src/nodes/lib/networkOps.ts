@@ -125,14 +125,14 @@ function hasColumn(schema: TableSchema, name: string): boolean {
  * `String(cell ?? '')` rather than `idText`: these are *node* ids, which on a connectivity graph
  * are neuron ids but on `Match Cell Types`' label graph are `label/LC4` — the id column of a
  * `NetworkValue` is a join key, not the identity, which is the same reading `net.build` takes of
- * whatever it is handed. Written once because both walks below need all three and got them by
- * repeating the expression.
+ * whatever it is handed. Written once because every reader of a network's ids needs the same
+ * text — the walks below, and DotMotif's keys, which `induceSubnetwork` has to match.
  */
-function nodeIds(network: NetworkValue): string[] {
+export function nodeIds(network: NetworkValue): string[] {
   return getColumn(network.nodes, 'id').map((cell) => String(cell ?? ''))
 }
 
-function linkEnds(network: NetworkValue): { sources: string[]; targets: string[] } {
+export function linkEnds(network: NetworkValue): { sources: string[]; targets: string[] } {
   return {
     sources: getColumn(network.edges, 'source').map((cell) => String(cell ?? '')),
     targets: getColumn(network.edges, 'target').map((cell) => String(cell ?? '')),

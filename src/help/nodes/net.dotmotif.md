@@ -15,8 +15,9 @@ motif:matches -> matches:in
 motif:network -> network:in
 ```
 
-The search uses GrandIso in your browser when you press **Run**. Its first use downloads the
-Python runtime and search packages; your graph and query are not uploaded to a compute service.
+The search uses [GrandIso](https://github.com/aplbrain/grandiso-networkx) in your browser when
+you press **Run**. Its first use downloads the Python runtime and search packages; your graph
+and query are not uploaded to a compute service.
 **Cancel** stops the search. A large network or a hard query can take a long time even when
 you request few matches.
 
@@ -64,7 +65,7 @@ Directed and undirected networks are supported. On an undirected network, arrows
 adjacency without imposing a direction. Required edges (`->`) must connect every variable.
 Disconnected patterns, variables appearing only in negative edges, and required self-loops
 (`A -> A`) are not supported and produce an error. Forbidden edges between connected roles
-still work, including `A !> A` to exclude a self-loop. There is no slower-executor fallback.
+still work, including `A !> A` to exclude a self-loop.
 
 You can use node and edge attribute constraints, named edges with static constraints, and
 comparisons between node attributes. Direct macros may contain topology and static
@@ -75,8 +76,7 @@ This node also refuses edge-to-edge attribute comparisons, attributes on negativ
 typed relations such as `-+` and `-|`, and repeated declarations of the same directed pattern
 edge. Edge aliases must be unique within their scope and cannot share a name with a node role.
 Overlapping `===` groups are refused; write their constraints explicitly instead. These checks
-prevent query clauses from being ignored or applied to another entity. Use `->` for an edge
-and `!>` for a forbidden edge.
+prevent query clauses from being ignored or applied to another entity.
 
 ## Read the results
 
@@ -106,11 +106,32 @@ net.dotmotif: maxMatches
 ```
 
 `Max matches` limits occurrences, not table rows. A three-role query can return three times
-that many rows. Reaching the limit does not establish the total number of matches, and the
-first matches are not a random sample or a ranking by strength.
+that many rows. The first matches are not a random sample or a ranking by strength.
 
 ## Exporting the workflow
 
 Jupyter and R Markdown exports leave this step as an explicit TODO, preserving the query and
 match limit. Download the `Matches` table to use the browser's result elsewhere. Reproducing
 the search outside Coda requires the same attributed network and matching semantics.
+
+## Citation
+
+DotMotif and GrandIso are described in this paper. If the search helps your research, please
+cite it:
+
+```bibtex
+# https://doi.org/10.1038/s41598-021-91025-5
+@article{Matelsky_Motifs_2021,
+    title={{DotMotif: an open-source tool for connectome subgraph isomorphism search and graph queries}},
+    volume={11},
+    ISSN={2045-2322},
+    url={http://dx.doi.org/10.1038/s41598-021-91025-5},
+    DOI={10.1038/s41598-021-91025-5},
+    number={1},
+    journal={Scientific Reports},
+    publisher={Springer Science and Business Media LLC},
+    author={Matelsky, Jordan K. and Reilly, Elizabeth P. and Johnson, Erik C. and Stiso, Jennifer and Bassett, Danielle S. and Wester, Brock A. and Gray-Roncal, William},
+    year={2021},
+    month={Jun}
+}
+```

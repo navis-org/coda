@@ -112,6 +112,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: '2026-10-12',
+    title: 'Motif search',
+    summary:
+      'The new DotMotif node searches a network for a pattern of connections, such as feed-forward triangles, right in your browser.',
+    highlight: true,
+    items: [
+      {
+        kind: 'node',
+        date: '2026-10-12',
+        title: '**DotMotif** finds motifs in a network.',
+        body: 'Write a pattern in [DotMotif](https://github.com/aplbrain/dotmotif)’s query language, for example `A -> B`, `B -> C` and `A -> C`, optionally with constraints such as `[weight >= 5]` or `A.type = "LC4"`. The node lists which node fills each role in every match, and the network those nodes form. The search runs in your browser and nothing is uploaded. Contributed by [Jordan Matelsky](https://github.com/j6k4m8).',
+        demo: 'net.dotmotif',
+      },
+    ],
+  },
+  {
     date: '2026-10-11',
     title: 'Connections by compartment',
     summary:

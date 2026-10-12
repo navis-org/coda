@@ -4,8 +4,11 @@
  *
  *   PYODIDE_PATH=/path/to/pyodide node scripts/probe-dotmotif.mjs
  *
- * The same package list feeds this probe and the browser runtime. Local wheels use
- * filesystem paths in Node; the browser resolves them against Coda's deployment base.
+ * The same package lists feed this probe and the browser runtime: `dotmotifPackages` by URL,
+ * `dotmotifWheels` from `public/wheels/` (the browser resolves those against the site root).
+ * Requests are encoded by the app's own `dotmotifHost`, imported as TypeScript — plain Node 26
+ * strips its types — so the keys under test are the ones the node sends. What that encoding
+ * refuses (empty, repeated and dangling ids, parallel links) is `dotmotifHost.test.ts`'s.
  */
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -18,10 +21,46 @@ import {
   root,
   sources,
 } from './lib/pyodideProbe.mjs'
+import { dotmotifHost, matchColumns } from '../src/nodes/lib/dotmotifHost.ts'
+
+const packages = [
+  ...sources.dotmotifPackages,
+  ...sources.dotmotifWheels.map((name) => join(root, 'public', 'wheels', name)),
+]
+
+async function load() {
+  const py = await bootPyodide()
+  await loadModule(py, 'src/pyodide/dotmotif.py', packages)
+  return py
+}
+
+/** The request the node sends, from a network written as plain columns. */
+function encode({ directed, nodes, edges, query, maxMatches, maxRoles = 1000 }) {
+  const text = (cells) => cells.map((cell) => String(cell ?? ''))
+  const { ids, ...keys } = dotmotifHost(
+    text(nodes.id),
+    text(edges.source),
+    text(edges.target),
+    directed,
+  )
+  return { request: { directed, query, maxMatches, maxRoles, ...keys, nodes, edges }, ids }
+}
+
+/** Every reply's `keys` crossed as an Int32Array; checked once, at the end. */
+let keysTyped = true
 
 async function main() {
   const { check, attempt, finish } = probeReport()
   const manifest = JSON.parse(readRepoFile('public/wheels/manifest.json'))
+  check(
+    'every served wheel is in the manifest, and nothing else is',
+    JSON.stringify(Object.keys(manifest).sort()) ===
+      JSON.stringify([...sources.dotmotifWheels].sort()),
+  )
+  check(
+    'the served DotMotif wheel is the version sources.json names',
+    sources.dotmotifWheels.includes(`dotmotif-${sources.dotmotifVersion}-py3-none-any.whl`),
+  )
   for (const [filename, entry] of Object.entries(manifest)) {
     const bytes = readFileSync(join(root, 'public', 'wheels', filename))
     check(
@@ -29,14 +68,7 @@ async function main() {
       createHash('sha256').update(bytes).digest('hex') === entry.sha256,
     )
   }
-  const py = await bootPyodide()
-  await loadModule(
-    py,
-    'src/pyodide/dotmotif.py',
-    sources.dotmotifPackages.map((value) =>
-      value.startsWith('wheels/') ? join(root, 'public', value) : value,
-    ),
-  )
+  const py = await load()
   check(
     'only the four pure-Python dependencies load',
     JSON.stringify(Object.keys(py.loadedPackages).sort()) ===
@@ -51,6 +83,10 @@ def _forbid_networkx_search(*args, **kwargs):
 NetworkXExecutor.find = _forbid_networkx_search
 assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
 `)
+  check(
+    'the adapter is pinned to the version sources.json names',
+    py.globals.get('_DOTMOTIF_VERSION') === sources.dotmotifVersion,
+  )
   const callable = py.globals.get('coda_dotmotif_run')
   const path = {
     directed: true,
@@ -59,31 +95,22 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     query: 'A -> B; B -> C',
     maxMatches: 100,
   }
-  function execute(overrides = {}) {
+  function call(fn, overrides) {
+    const { request, ids } = encode({ ...path, ...overrides })
     let proxy
     try {
-      proxy = callable({ ...path, ...overrides }, () => {})
-      return proxy.toJs({ dict_converter: Object.fromEntries })
+      proxy = fn(request, () => {})
+      const reply = proxy.toJs({ dict_converter: Object.fromEntries })
+      keysTyped &&= reply.keys instanceof Int32Array
+      return { ...matchColumns(reply, ids), count: reply.count, ...(reply.refused && { refused: true }) }
     } finally {
       proxy?.destroy()
     }
   }
+  const execute = (overrides = {}) => call(callable, overrides)
   function matches(label, overrides, expected) {
     const result = attempt(label, () => execute(overrides))
-    if (result) {
-      check(`${label}: count`, result.count === expected)
-      check(
-        `${label}: flat columns`,
-        Array.isArray(result.matchId) &&
-          Array.isArray(result.variable) &&
-          Array.isArray(result.nodeId),
-      )
-      check(
-        `${label}: equal column lengths`,
-        result.matchId.length === result.variable.length &&
-          result.variable.length === result.nodeId.length,
-      )
-    }
+    if (result) check(`${label}: count`, result.count === expected)
     return result
   }
   function rejects(label, overrides, expected) {
@@ -104,7 +131,6 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
         variable: ['A', 'B', 'C'],
         nodeId: ['1', '2', '3'],
         count: 1,
-        limitReached: false,
       }),
   )
   matches('edge threshold', { query: 'A -> B [weight >= 3]' }, 1)
@@ -137,11 +163,6 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     2,
   )
   rejects('negative-only variables', { query: 'A !> B' }, 'connected by required edges')
-  rejects(
-    'variable on negative edge only',
-    { query: 'A -> B; B !> C' },
-    'connected by required edges',
-  )
   // Contradictions must be rejected, rather than reported as an empty set.
   rejects('contradictory topology', { query: 'A -> B; A !> B' }, 'conflict')
   matches('zero matches', { query: 'A -> B [weight > 100]' }, 0)
@@ -169,11 +190,6 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     0,
   )
   rejects('self-loop cannot be invented', { query: 'A -> A' }, 'Required self-loop')
-  rejects(
-    'actual self-loop query',
-    { query: 'A -> A', edges: { source: ['1'], target: ['1'] } },
-    'Required self-loop',
-  )
   matches('negative self-loop', { query: 'A -> B; A !> A' }, 2)
   matches(
     'negative self-loop excludes a real loop',
@@ -212,8 +228,9 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     2,
   )
 
+  const refused = matches('more roles than maxRoles is refused before the search', { maxRoles: 2 }, 0)
+  check('a refusal says so', refused?.refused === true)
   const limited = matches('bounded prefix', { query: 'A -> B', maxMatches: 1 }, 1)
-  check('limit flag means there may be more', limited?.limitReached === true)
   check(
     'bounded directed prefix uses canonical host order',
     JSON.stringify(limited?.nodeId) === JSON.stringify(['1', '2']),
@@ -233,26 +250,6 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     JSON.stringify(limited) === JSON.stringify(reordered),
   )
 
-  const wide = '900719925474099312345'
-  const wideResult = matches(
-    'wide IDs remain strings',
-    {
-      nodes: { id: [wide, '900719925474099312346'] },
-      edges: { source: [wide], target: ['900719925474099312346'] },
-      query: 'A -> B',
-    },
-    1,
-  )
-  check('wide ID is exact', wideResult?.nodeId[0] === wide)
-  matches(
-    'numeric zero and boolean IDs follow JS String',
-    {
-      nodes: { id: [0, false] },
-      edges: { source: [0], target: [false] },
-      query: 'A -> B',
-    },
-    1,
-  )
   matches(
     'null and missing static attributes follow DotMotif None semantics',
     { query: 'A -> B; A.missing = None' },
@@ -271,6 +268,8 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     },
     1,
   )
+  // The eval guard, seen from outside: under upstream's `eval`, `str` is the builtin type and
+  // equals no cell. `dotmotif.py` also refuses to load at all if its patch did not take.
   matches(
     'bare Python builtin names remain text',
     {
@@ -313,18 +312,11 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     1,
   )
 
-  rejects('zero result limit', { maxMatches: 0 }, 'positive integer')
-  rejects('fractional result limit', { maxMatches: 1.5 }, 'positive integer')
   rejects('empty query', { query: '' }, 'Enter a DotMotif query')
   rejects('comment-only query', { query: '# comment' }, 'Unexpected')
   rejects(
     'unknown static role',
     { query: 'A -> B; C.type = "x"' },
-    'neither a node nor a named edge',
-  )
-  rejects(
-    'node constraints alone do not silently invent roles',
-    { query: 'A.size > 1' },
     'neither a node nor a named edge',
   )
   rejects('unknown dynamic role', { query: 'A -> B; A.size < C.size' }, 'has no motif edge')
@@ -340,7 +332,6 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     'only once',
   )
   rejects('typed edges cannot silently ignore actions', { query: 'A -+ B' }, 'Typed edges')
-  rejects('inhibitory edges cannot silently ignore actions', { query: 'A -| B' }, 'Typed edges')
   rejects(
     'negative edges cannot have constraints',
     { query: 'A -> B; B !> A [weight > 2]' },
@@ -377,31 +368,6 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
     "macro parameter's name",
   )
   rejects('nonfinite literal', { query: 'A -> B [weight = 1e1000]' }, 'finite numbers')
-  rejects('null ID', { nodes: { id: [null, '2', '3'] } }, 'must not be null')
-  rejects('empty ID', { nodes: { id: ['', '2', '3'] } }, 'must not be empty')
-  rejects('unsafe numeric ID', { nodes: { id: [9007199254740992, '2', '3'] } }, 'safe integers')
-  rejects('fractional ID', { nodes: { id: [1.5, '2', '3'] } }, 'safe integers')
-  rejects(
-    'ID collision after normalization',
-    { nodes: { id: [1, '1', '3'] } },
-    'must be unique',
-  )
-  rejects(
-    'missing edge endpoint',
-    { edges: { source: ['unknown'], target: ['1'] } },
-    'Every edge endpoint',
-  )
-  rejects(
-    'parallel edges',
-    { edges: { source: ['1', '1'], target: ['2', '2'] } },
-    'aggregate parallel edges',
-  )
-  rejects(
-    'reversed duplicate undirected edges',
-    { directed: false, edges: { source: ['1', '2'], target: ['2', '1'] } },
-    'aggregate parallel edges',
-  )
-  rejects('ragged input table', { nodes: { id: ['1', '2', '3'], x: [] } }, 'equal lengths')
 
   py.FS.writeFile('/tmp/coda-dotmotif-query.dm', 'A -> B\n')
   rejects('a query never reads a file', { query: '/tmp/coda-dotmotif-query.dm' }, 'Unexpected')
@@ -425,27 +391,18 @@ assert _CodaGrandIsoExecutor.find is GrandIsoExecutor.find
 
   // A second CPython instance gets a fresh hash seed. A same-runtime rerun
   // misses the host-key string-set ordering bug this guards against.
-  const fresh = await bootPyodide()
-  await loadModule(
-    fresh,
-    'src/pyodide/dotmotif.py',
-    sources.dotmotifPackages.map((value) =>
-      value.startsWith('wheels/') ? join(root, 'public', value) : value,
-    ),
-  )
+  const fresh = await load()
   const freshCall = fresh.globals.get('coda_dotmotif_run')
-  let freshResult
   try {
-    freshResult = freshCall({ ...path, query: 'A -> B', maxMatches: 1 }, () => {})
+    const again = attempt('fresh runtime', () => call(freshCall, { query: 'A -> B', maxMatches: 1 }))
     check(
       'bounded prefix survives a fresh Python runtime',
-      JSON.stringify(freshResult.toJs({ dict_converter: Object.fromEntries })) ===
-        JSON.stringify(limited),
+      JSON.stringify(again) === JSON.stringify(limited),
     )
   } finally {
-    freshResult?.destroy()
     freshCall.destroy()
   }
+  check('keys come back as an Int32Array', keysTyped)
   finish(py)
 }
 

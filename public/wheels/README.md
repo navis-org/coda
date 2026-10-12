@@ -3,6 +3,8 @@
 These small, unmodified pure-Python wheels are served from Coda's own origin.
 `manifest.json` records their provenance and SHA-256 hashes. The real Pyodide
 probe verifies those hashes before loading them.
+`src/pyodide/sources.json` lists them by file name (`dotmotifWheels`), and the probe
+checks that list against this manifest.
 
 - DotMotif 0.19.0 is the official wheel from its GitHub release, at commit
   `125fdbca18c1c8ac7ed1b8d3f595669edc36574f`. That release is not on PyPI.

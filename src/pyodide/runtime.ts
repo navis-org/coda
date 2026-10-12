@@ -38,7 +38,6 @@ import SKELETONS_PY from './skeletons.py?raw'
 import TOPOLOGY_PY from './topology.py?raw'
 import WARP_PY from './warp.py?raw'
 import sources from './sources.json'
-import { packageUrls } from './packageUrls'
 import type { PyArg, PyResult } from './types'
 
 /** How far along, and what is happening. Both halves reach the node's status bar. */
@@ -59,18 +58,28 @@ type Report = (fraction: number, note?: string) => void
  */
 interface PyModule {
   source: string
-  /** Package names Pyodide resolves from its own lock, or a wheel URL. */
+  /** Package names Pyodide resolves from its own lock, or an absolute wheel URL. */
   packages: string[]
+  /**
+   * Wheels Coda serves itself, by file name under `public/wheels/`, whose `manifest.json` records
+   * where each came from and its hash. Resolved against the site root (`setSiteRoot`).
+   */
+  wheels?: string[]
   /** What to call the download in the node's status bar. */
   label: string
 }
 
 const MODULES: Record<string, PyModule> = {
+  /*
+   * The one module whose packages share nothing with the others: networkx, lark, grandiso and
+   * dotmotif, all pure Python. networkx and lark come from PyPI by URL, because Pyodide's own
+   * networkx also pulls in matplotlib and numpy; grandiso and dotmotif are not on PyPI as wheels,
+   * so Coda serves them. A first DotMotif therefore pays its own download whatever else has run.
+   */
   dotmotif: {
     source: DOTMOTIF_PY,
-    // Pure Python wheels only: Pyodide's networkx bundle also pulls plotting dependencies.
-    // Resolve our vendored wheels against the deployment base, not the worker's assets/ URL.
-    packages: packageUrls(sources.dotmotifPackages, import.meta.url, import.meta.env.DEV),
+    packages: sources.dotmotifPackages,
+    wheels: sources.dotmotifWheels,
     label: `DotMotif ${sources.dotmotifVersion} · GrandIso`,
   },
   nblast: {
@@ -217,6 +226,13 @@ export async function heapBytes(): Promise<number | undefined> {
 /** Where the boot ends and the called function's own progress begins. */
 const BOOT_SHARE = 0.22
 
+/** Where `public/` is served, which the main thread sends before any call. */
+let siteRoot: string | undefined
+
+export function setSiteRoot(root: string): void {
+  siteRoot = root
+}
+
 /**
  * Call a Python function, loading its module if this is the first time.
  *
@@ -245,7 +261,8 @@ export async function callPython(
     // One call, not one per package: these come from two different hosts, so awaited in turn
     // the second request's DNS, TLS and slow-start all wait on the first transfer finishing —
     // 2.9 MB and 1.1 MB, on the one path where the whole ten megabytes is already being paid.
-    await py.loadPackage(spec.packages, { messageCallback: () => {} })
+    const wheels = (spec.wheels ?? []).map((name) => new URL(`wheels/${name}`, siteRoot).href)
+    await py.loadPackage([...spec.packages, ...wheels], { messageCallback: () => {} })
     // `__name__` seeded, as an import would, so a class or a traceback names its module.
     namespace = py.toPy({ __name__: module }) as PyNamespace
     py.runPython(spec.source, { globals: namespace })

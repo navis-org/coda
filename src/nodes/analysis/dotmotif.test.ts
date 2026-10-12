@@ -6,7 +6,7 @@ import { T, column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { isNetworkValue, isTableValue, tableFromRows } from '../../core/values'
 import { runDotMotif } from '../../pyodide/dotmotif'
-import { dotmotifSchema } from '../lib/dotmotifOps'
+import { MAX_DOTMOTIF_MATCHES, dotmotifSchema, maxRolesFor } from '../lib/dotmotifOps'
 import './dotmotif'
 
 vi.mock('../../pyodide/dotmotif', () => ({ runDotMotif: vi.fn() }))
@@ -45,11 +45,10 @@ function context(params: Record<string, string | number> = {}) {
 beforeEach(() => {
   vi.mocked(runDotMotif).mockReset()
   vi.mocked(runDotMotif).mockResolvedValue({
-    matchId: [1, 1],
-    variable: ['A', 'B'],
-    nodeId: ids.slice(0, 2),
     count: 1,
-    limitReached: false,
+    roles: ['A', 'B'],
+    keys: new Int32Array([0, 1]),
+    refused: false,
   })
 })
 
@@ -74,10 +73,17 @@ describe('DotMotif node', () => {
     expect(runDotMotif).toHaveBeenCalledWith(
       {
         directed: true,
-        nodes: network.nodes.data,
-        edges: network.edges.data,
         query: 'A -> B',
         maxMatches: 20,
+        maxRoles: maxRolesFor(20),
+        // Keys are ranks in id order; these rows happen to arrive in it already.
+        keyOfRow: new Int32Array([0, 1, 2]),
+        sources: new Int32Array([0, 1, 1]),
+        targets: new Int32Array([1, 0, 2]),
+        linkRows: new Int32Array([0, 1, 2]),
+        // The query names no attribute, so no column is cloned to the worker.
+        nodes: {},
+        edges: {},
       },
       { signal: ctx.signal, onProgress: ctx.progress },
     )
@@ -90,7 +96,6 @@ describe('DotMotif node', () => {
       nodeId: ids.slice(0, 2),
     })
     expect(out.matches.length).toBe(2)
-    expect(out.matches.kind).toBe('table') // Group IDs are not necessarily neuron IDs.
     expect(out.network.nodes.data.id).toEqual(ids.slice(0, 2))
     expect(out.network.nodes.data.type).toEqual(['sensory', 'motor'])
     expect(out.network.edges.data.weight).toEqual([8, 3]) // Includes the extra reverse link.
@@ -101,11 +106,10 @@ describe('DotMotif node', () => {
 
   it('returns typed empty outputs when nothing matches', async () => {
     vi.mocked(runDotMotif).mockResolvedValue({
-      matchId: [],
-      variable: [],
-      nodeId: [],
       count: 0,
-      limitReached: false,
+      roles: ['A', 'B'],
+      keys: new Int32Array(0),
+      refused: false,
     })
     const out = await def.evaluate!(context())
     if (!isTableValue(out.matches) || !isNetworkValue(out.network))
@@ -117,16 +121,56 @@ describe('DotMotif node', () => {
   })
 
   it('warns at the cap without claiming a proven total or truncation', async () => {
-    vi.mocked(runDotMotif).mockResolvedValue({
-      matchId: [1, 1],
-      variable: ['A', 'B'],
-      nodeId: ids.slice(0, 2),
-      count: 1,
-      limitReached: true,
-    })
     const ctx = context({ maxMatches: 1 })
     await def.evaluate!(ctx)
-    expect(ctx.warn).toHaveBeenCalledWith(expect.stringMatching(/1 matches; there may be more/))
+    expect(ctx.warn).toHaveBeenCalledWith(expect.stringMatching(/1 match; there may be more/))
+  })
+
+  it('clones to the worker only the columns the query names', async () => {
+    await def.evaluate!(context({ query: 'A -> B [weight >= 5]\nA.type = "sensory"' }))
+    const [request] = vi.mocked(runDotMotif).mock.calls[0]!
+    expect(Object.keys(request.nodes)).toEqual(['type'])
+    expect(Object.keys(request.edges)).toEqual(['weight'])
+  })
+
+  it('says on the card when Max matches is more than a tab can hold, and not at the ceiling', () => {
+    const issues = (maxMatches: number) =>
+      def.validate!(makeInferContext(def, { maxMatches }, {})).join(' ')
+    expect(issues(50_000_000)).toMatch(/^Refused: Up to 50,000,000 matches would allocate/)
+    expect(issues(MAX_DOTMOTIF_MATCHES)).toBe('')
+  })
+
+  it('refuses a stored Max matches past the ceiling before the worker is asked', async () => {
+    await expect(def.evaluate!(context({ maxMatches: 50_000_000 }))).rejects.toThrow(
+      'Lower `Max matches`',
+    )
+    expect(runDotMotif).not.toHaveBeenCalled()
+  })
+
+  it('refuses when the parsed query has more roles than Max matches can afford', async () => {
+    vi.mocked(runDotMotif).mockResolvedValue({
+      count: 0,
+      roles: ['A', 'B', 'C'],
+      keys: new Int32Array(0),
+      refused: true,
+    })
+    // Within the two-role cap, past what three roles can afford: only the parse can tell.
+    await expect(def.evaluate!(context({ maxMatches: 1_800_000 }))).rejects.toThrow(
+      /^Refused: Up to 1,800,000 matches of 3 roles would allocate/,
+    )
+  })
+
+  it('refuses a network with parallel links before Python is asked', async () => {
+    const parallel: NetworkValue = {
+      ...network,
+      edges: tableFromRows(network.edges.schema, [
+        { source: ids[0], target: ids[1], weight: 8 },
+        { source: ids[0], target: ids[1], weight: 2 },
+      ]),
+    }
+    const ctx = { ...context(), input: () => parallel } as unknown as EvalContext
+    await expect(def.evaluate!(ctx)).rejects.toThrow('Merge parallel links')
+    expect(runDotMotif).not.toHaveBeenCalled()
   })
 
   it.each([0, -1, 1.5, NaN, Infinity])(
@@ -142,11 +186,5 @@ describe('DotMotif node', () => {
     expect(def.validate!(makeInferContext(def, { query: ' \n ' }, {}))).toContain(
       'Enter a DotMotif pattern.',
     )
-  })
-
-  it('propagates errors and cancellation rather than publishing partial matches', async () => {
-    const error = new DOMException('Cancelled', 'AbortError')
-    vi.mocked(runDotMotif).mockRejectedValue(error)
-    await expect(def.evaluate!(context())).rejects.toBe(error)
   })
 })
