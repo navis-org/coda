@@ -109,6 +109,27 @@ registerEmitter('net.metrics', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// DotMotif
+// ---------------------------------------------------------------------------
+
+// An igraph motif census does not express DotMotif's attributed role assignments. A faithful
+// translation would also need to preserve both the membership table and the induced union,
+// so this TODO intentionally binds neither output. Keep the exact DSL as a JSON string in a
+// comment, rather than changing quoted whitespace by wrapping it as prose.
+registerEmitter('net.dotmotif', (ctx) => [
+  ...ctx.todo(
+    'DotMotif has no R translation here. An igraph motif census is not the same attributed ' +
+      'role-assignment search. Reproduce manually with Python DotMotif 0.19.0 from its GitHub ' +
+      'release (https://github.com/aplbrain/dotmotif/releases/tag/v0.19.0), on an equivalent ' +
+      'attributed graph, preserving string IDs, the match limit, the matchId/variable/nodeId ' +
+      'table and the induced union network. The Jupyter export also leaves this step as a TODO; ' +
+      'download the Matches table from Coda to reuse the browser result directly.',
+  ),
+  `# DotMotif query (JSON string): ${JSON.stringify(String(ctx.params.query))}`,
+  `# Max matches: ${JSON.stringify(ctx.params.maxMatches)}`,
+])
+
+// ---------------------------------------------------------------------------
 // Network Centrality
 // ---------------------------------------------------------------------------
 

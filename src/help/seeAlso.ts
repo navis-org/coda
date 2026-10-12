@@ -92,6 +92,8 @@ const RELATED: readonly (readonly string[])[] = [
   ['neuron.connectivity', 'neuron.adjacency', 'neuron.partnerVectors'],
   // An edge list, the graph it becomes, and what to ask of it.
   ['net.build', 'net.filter', 'net.centrality', 'net.metrics', 'out.network'],
+  // A local motif query, its graph, and its results as a network or table.
+  ['net.dotmotif', 'net.build', 'out.network', 'out.table'],
   // The two ways to draw a network: boxes and arrows for a few dozen nodes, WebGL for thousands.
   ['out.flowChart', 'out.network'],
   ['out.flowChart', 'neuron.paths'],

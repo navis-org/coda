@@ -23,6 +23,8 @@ on:
       - 'scripts/probe-skeletons.mjs'
       - 'scripts/probe-meshes.mjs'
       - 'scripts/probe-matches.mjs'
+      - 'scripts/probe-dotmotif.mjs'
+      - 'public/wheels/**'
       # The landmark files and their manifest: the transform probe reads the real ones, so a
       # regenerated set is a change to what this job checks even when no Python moved.
       - 'public/transforms/**'
@@ -37,6 +39,8 @@ on:
       - 'scripts/probe-skeletons.mjs'
       - 'scripts/probe-meshes.mjs'
       - 'scripts/probe-matches.mjs'
+      - 'scripts/probe-dotmotif.mjs'
+      - 'public/wheels/**'
       - 'public/transforms/**'
       - 'src/data/transforms/manifest.json'
   workflow_dispatch:
@@ -97,3 +101,5 @@ jobs:
       # band around each group's own best, `skip_self` is the diagonal, and both are asserted
       # against a brute-force count written from the definition.
       - run: node scripts/probe-matches.mjs
+      # DotMotif's real parser, exact matcher, pinned pure-Python wheels and string IDs.
+      - run: node scripts/probe-dotmotif.mjs

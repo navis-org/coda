@@ -1,6 +1,8 @@
 # Python in the tab: NBLAST and clustering
 
-The Pyodide bridge and the two capabilities built on it.
+The Pyodide bridge and its numerical capabilities. [DotMotif](dotmotif.md) extends the same
+worker with local attributed-network search; that decision record covers its executor,
+package loading and the alternative of remote compute.
 
 ## NBLAST, and Python in the tab
 

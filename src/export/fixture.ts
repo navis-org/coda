@@ -1190,6 +1190,13 @@ export function everythingGraph(): CodaGraph {
         direction: 'downstream',
       },
     },
+    {
+      id: 'dotmotif',
+      type: 'net.dotmotif',
+      col: 8,
+      row: 4,
+      params: { query: 'A -> B\nB -> C\nA !> C', maxMatches: 25 },
+    },
 
     /*
      * The regex arm of the same node, and it earns its cells: `matches` is the one operator
@@ -1795,6 +1802,7 @@ export function everythingGraph(): CodaGraph {
     ['conn', 'connections', 'rankweights', 'in'],
     ['paths', 'network', 'flowview', 'in'],
     ['net', 'network', 'netfilter', 'in'],
+    ['net', 'network', 'dotmotif', 'in'],
     ['net', 'network', 'netregex', 'in'],
     ['net', 'network', 'central', 'in'],
     ['central', 'out', 'netmetrics', 'in'],
