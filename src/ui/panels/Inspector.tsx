@@ -36,6 +36,7 @@ export function Inspector() {
   const selectionCount = useGraphStore((s) => s.selection.length)
   const inference = useGraphStore((s) => s.inference)
   const setParam = useGraphStore((s) => s.setParam)
+  const setParams = useGraphStore((s) => s.setParams)
   const runNode = useGraphStore((s) => s.runNode)
   const invalidateNode = useGraphStore((s) => s.invalidateNode)
   const clearNodeCache = useGraphStore((s) => s.clearNodeCache)
@@ -259,6 +260,7 @@ export function Inspector() {
                 onError={setNotice}
                 onSelectionChange={(ids) => setParam(node.id, 'selection', ids)}
                 onParamChange={(paramId, next) => setParam(node.id, paramId, next)}
+                onParamsChange={(values) => setParams(node.id, values)}
                 inputValues={nodeInputs(node.id)}
               />
             </div>

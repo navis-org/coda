@@ -33,6 +33,7 @@ import { idText } from '../../core/ids'
 import type { DatasetAnnotations, DatasetEdges, TableValue } from '../../core/values'
 import { CODE_AXON, CODE_DENDRITE, CODE_LINKER, getRow, splitName } from '../../core/values'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
+import { constantColor } from '../../nodes/lib/encodingParams'
 import type { PartnerGrouping } from '../../nodes/lib/profileStats'
 import { morphometrics, sitesFrom, strahlerOrders } from '../../nodes/lib/topologyOps'
 import { CHART_INK, seriesColor, sequentialColor } from '../../style/colors'
@@ -46,7 +47,7 @@ import { hasNeuronMeshes, useNeuronMesh } from './useNeuronMesh'
 import { useNeuronTopology } from './useNeuronTopology'
 import { HIGHLIGHT_COLUMN, HIGHLIGHT_OTHER } from './synapseHighlight'
 import { usePartnerHighlight } from './usePartnerHighlight'
-import { PartnerPanel, RailTabs, TopoBar } from './topoChrome'
+import { PartnerPanel, RailTabs, TopoBar, neuronLabel } from './topoChrome'
 import { ViewerEmpty } from './ViewerEmpty'
 
 export interface TopologyViewerProps {
@@ -155,11 +156,6 @@ type LayerParam = 'showMesh' | 'showSkeleton' | 'showSynapses'
  * re-runs the live split and marks nothing stale; with it on they enter the provenance key.
  */
 type SplitParam = 'flowThresh' | 'splitVal'
-
-/** A `ColorSpec` that is just one colour. Spelled once; the interface requires every field. */
-function constantColor(constant: string): ColorSpec {
-  return { mode: 'constant', column: undefined, constant }
-}
 
 /**
  * Strahler order as a **sequential** ramp, and the reason it is not `seriesColor`.
@@ -438,7 +434,7 @@ export function TopologyViewer(props: TopologyViewerProps) {
     return <ViewerEmpty>No neurons in the incoming table.</ViewerEmpty>
   }
 
-  const name = String(row?.['type'] ?? row?.['instance'] ?? neuronId ?? '—')
+  const name = neuronLabel(row, neuronId)
 
   return (
     <div className="viewer topo nodrag" data-rail={railOpen ? 'open' : 'closed'}>

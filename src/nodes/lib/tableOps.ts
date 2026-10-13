@@ -344,6 +344,19 @@ export function dedupeTable(
 // Sort / limit
 // ---------------------------------------------------------------------------
 
+/** Text collated naturally (`LC10` after `LC4`); one collator, not one set up per comparison. */
+const NATURAL_TEXT = new Intl.Collator(undefined, { numeric: true })
+
+/**
+ * Two present cells in ascending order: numbers by value, anything else as text, naturally. The
+ * Sort node's and the table viewer's rule, and any other table's that sorts by a column — the same
+ * data must not order two ways in one session. Where nulls go is the caller's (`sortedRowIndices`
+ * puts them last whichever way).
+ */
+export function compareCells(a: CellValue, b: CellValue, numeric: boolean): number {
+  return numeric ? Number(a) - Number(b) : NATURAL_TEXT.compare(String(a), String(b))
+}
+
 /**
  * Row order after sorting, without materialising a new table.
  *
@@ -370,9 +383,7 @@ export function sortedRowIndices(
     if (av === null && bv === null) return a - b
     if (av === null) return 1
     if (bv === null) return -1
-    const cmp = numeric
-      ? Number(av) - Number(bv)
-      : String(av).localeCompare(String(bv), undefined, { numeric: true })
+    const cmp = compareCells(av, bv, numeric)
     if (cmp !== 0) return descending ? -cmp : cmp
     return a - b // stable
   })

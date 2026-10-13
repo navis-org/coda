@@ -20,7 +20,7 @@ registerNode({
   description:
     'Plot numeric columns against one numeric X as lines: one per Y column, per series value, or both. Voltage traces, time courses, profiles.',
   guide:
-    'Draws one line per Y column against a numeric X, or one per value of a Series column for a long table — or both. With no Y picked it draws every numeric column, so a table of traces needs no setting. Lines are joined in X order unless you ask for row order, and long ones keep every spike: each pixel column draws its highest and lowest sample.',
+    'Draws one line per Y column against a numeric X, or one per value of a Series column for a long table — or both. With no Y picked it draws every numeric column, so a table of traces such as Simulate’s needs no setting. Lines are joined in X order unless you ask for row order, and long ones keep every spike: each pixel column draws its highest and lowest sample.',
   cost: 'cheap',
   defaultSize: { width: 560, height: 380 },
 

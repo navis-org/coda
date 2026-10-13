@@ -328,6 +328,13 @@ export interface EnumOption {
    * value would hide the whole list from plan validation and the catalogue.
    */
   retired?: string
+  /**
+   * The pack whose node makes this option mean anything — "peak voltage" is Simulate's. Offered
+   * only while that pack is offered (the Plugins switches), except to a card already holding it,
+   * where hiding the stored value would read as it being dropped. Headless code declares it; the
+   * param field, which knows the switches, applies it.
+   */
+  pack?: string
 }
 
 /**

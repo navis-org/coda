@@ -113,11 +113,25 @@ export interface ChangelogEntry {
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: '2026-10-13',
-    title: 'Line Chart',
+    title: 'Biophysics, and the Line Chart',
     summary:
-      'The new Line Chart plots numeric columns against one X as lines, for traces, time courses and profiles. Hover reads every line at once, and scrolling zooms along X.',
+      'The new Biophysics plugin turns a neuron’s skeleton into a compartment model and simulates its synaptic input. The new Line Chart plots traces, time courses and profiles.',
     highlight: true,
     features: [
+      {
+        kind: 'node',
+        date: '2026-10-13',
+        title: 'Biophysics: simulate a neuron’s synaptic input',
+        body:
+          'Two new nodes in the **Biophysics** plugin. **Compartment Model** builds one neuron’s skeleton into a cable model and places the synapses from **Synapses Between** where they sit on the arbour, with separate inputs for excitatory and inhibitory synapses and published presets for each. Expand it to add voltage-gated channels by region, or to paint regions of your own onto the neuron, an axon initial segment say. **Simulate** fires its partners on spike trains and records the voltage at the soma and any points you choose; it can also run each partner alone to show how much it moves the soma, and says when the cell has not come back to rest by the end of a run.\n\n' +
+          'Expand Simulate and open **Playback** to watch the run spread over the neuron’s dendrogram and 3D view, and click a branch to add its trace. The solver runs in your browser and matches NEURON to within a few millionths of a millivolt. The Workflow Wizard offers it as **Simulate synaptic input**; **Open example** needs a neuPrint sign-in.',
+        image: {
+          file: 'simulate-playback.webp',
+          alt: 'Simulate’s Playback on a hemibrain DA1 projection neuron: its dendrogram and 3D view coloured by membrane voltage 13 ms into the run, with the soma’s trace and a clicked axon branch’s trace below.',
+        },
+        demo: 'biophys:simulate',
+        link: { href: './biophys/', label: 'Open Coda with Biophysics switched on' },
+      },
       {
         kind: 'chart',
         date: '2026-10-13',

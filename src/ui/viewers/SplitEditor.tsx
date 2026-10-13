@@ -5,9 +5,9 @@
  * has no depth to pick through. It is built from the Neuron Dendrogram's own layers — `arborLayout`,
  * `buildScene`/`paintScene`, `pickPiece`/`arborPointAt`, the pan and wheel gestures — not from that
  * viewer, which is welded to fetching a skeleton and to its partner list. The stage half (size,
- * transform, zoom, pan, paint, pick) is now the same dozen lines in both; a `useArborStage` hook is
- * the place for it once either needs to change. What it draws is the node's *output*: the labels
- * with every correction already applied, so what is on screen is what flows downstream.
+ * transform, zoom, pan, paint) is `useArborStage`, shared with the other arbour editors.
+ * What it draws is the node's *output*: the labels with every correction already applied, so what
+ * is on screen is what flows downstream.
  *
  * The layout is unrooted; the root is the dot, and corrections are measured from it. A click on a
  * branch opens a menu: the part away from the root, or everything else, becomes axon, dendrite or
@@ -17,7 +17,7 @@
  * split was computed from are drawn as ticks, and the bar shows the split's segregation index.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { idText } from '../../core/ids'
 import type { ParamValue } from '../../core/node'
@@ -44,6 +44,7 @@ import {
   CORRECTIONS_PARAM,
   CORRECTION_SCOPES,
   CORRECTION_TARGETS,
+  SCOPE_WORDS,
   readCorrections,
   snapToNode,
   splitArbor,
@@ -51,30 +52,19 @@ import {
 } from '../../nodes/lib/splitCorrections'
 import { CHART_INK, chartSurface, seriesColor } from '../../style/colors'
 import { compartmentInks, polarityInks, splitInks } from '../compartmentInk'
+import { positionOf } from '../../nodes/lib/anchors'
 import { ContextMenu } from '../menu/ContextMenu'
+import { Swatch } from './LegendKeys'
 import { currentMode } from '../useThemeMode'
-import type { ArborView } from './arborPlot'
-import {
-  arborPointAt,
-  fitTransform,
-  panBy,
-  pickPiece,
-  pieceGeometry,
-  subSegments,
-  synapseMarks,
-  zoomAbout,
-} from './arborPlot'
-import type { BranchGroup, TickGroup } from './arborScene'
-import { buildScene, paintScene } from './arborScene'
-import { prepareCanvas } from './canvas2d'
+import { arborPointAt, pickPiece, subSegments, synapseMarks } from './arborPlot'
+import type { TickGroup } from './arborScene'
+import { branchGroups, buildScene } from './arborScene'
 import { Pager } from './Pager'
 import { tooltipPoint } from './tooltipPoint'
 import { useArborLayout } from './useArborLayout'
-import { useElementSize } from './useElementSize'
-import { usePanGesture } from './usePanGesture'
-import { useWheelZoom } from './useWheelZoom'
+import { useArborStage, usePaintedScene } from './useArborStage'
 import { ViewerEmpty } from './ViewerEmpty'
-import { TopoName } from './topoChrome'
+import { TopoName, neuronLabel } from './topoChrome'
 import { useHealedSkeleton } from './useHealedSkeleton'
 
 export interface SplitEditorProps {
@@ -89,11 +79,6 @@ export interface SplitEditorProps {
   onParamChange?: ((paramId: string, value: ParamValue) => void) | undefined
 }
 
-const SCOPE_WORDS: Readonly<Record<CorrectionScope, string>> = {
-  distal: 'Away from the root',
-  proximal: 'Everything else',
-}
-
 /** One width for every branch: the colour carries the compartment, not the stroke. */
 const LINE_WIDTH = 1.5
 
@@ -103,16 +88,6 @@ interface Picked {
   readonly on: ArborPoint
   readonly x: number
   readonly y: number
-}
-
-/** A legend swatch and its word — the 3D View's key's markup. */
-function Swatch({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="legend__item">
-      <i className="legend__swatch" style={{ background: color }} />
-      {label}
-    </span>
-  )
 }
 
 export function SplitEditor({
@@ -130,7 +105,7 @@ export function SplitEditor({
   const index = Math.min(page, Math.max(0, skeletons.items.length - 1))
   const skeleton = skeletons.items[index]
   const row = getRow(skeletons.attributes, index)
-  const neuronName = String(row?.['type'] ?? row?.['instance'] ?? skeleton?.id ?? '—')
+  const neuronName = neuronLabel(row, skeleton?.id)
 
   const stored = useMemo(() => readCorrections(corrections), [corrections])
   const mine = stored.filter((c) => c.neuron === skeleton?.id)
@@ -195,20 +170,9 @@ export function SplitEditor({
     if (!arbor || !tree || !landmarkD) return undefined
     const colorOf = (v: number): string => codeInks[labels?.[v] ?? -1] ?? inks.unlabelled
     const sub = subSegments(arbor, tree, landmarkD, arbor.geodesic)
-    const groups = new Map<string, number[]>()
-    for (let i = 0; i < sub.node.length; i++) {
-      const color = colorOf(sub.node[i]!)
-      const group = groups.get(color)
-      if (group) group.push(i)
-      else groups.set(color, [i])
-    }
     return {
       sub,
-      groups: [...groups].map(([color, list]): BranchGroup => ({
-        color,
-        width: LINE_WIDTH,
-        sub: Int32Array.from(list),
-      })),
+      groups: branchGroups(sub.node.length, (i) => colorOf(sub.node[i]!), LINE_WIDTH),
       landmarkColor: Array.from(tree.nodes, colorOf),
     }
   }, [arbor, tree, landmarkD, labels, inks, codeInks])
@@ -266,36 +230,12 @@ export function SplitEditor({
 
   /* --- the stage ---------------------------------------------------------------------- */
 
-  const [stageRef, size] = useElementSize<HTMLDivElement>()
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [view, setView] = useState<ArborView | undefined>()
-  const [picked, setPicked] = useState<Picked | undefined>()
   // Another neuron starts fitted and with no menu open; a correction to this one keeps the view.
   const neuron = skeleton?.id
-  useEffect(() => {
-    setView(undefined)
-    setPicked(undefined)
-  }, [neuron])
-
-  const transform = useMemo(
-    () =>
-      shape && size.width > 0 && size.height > 0
-        ? fitTransform(shape, size.width, size.height, view)
-        : undefined,
-    [shape, size.width, size.height, view],
-  )
-  const pieces = useMemo(
-    () => (shape && transform ? pieceGeometry(shape, transform) : undefined),
-    [shape, transform],
-  )
-  useWheelZoom(stageRef, transform !== undefined, (factor, x, y) => {
-    if (!transform) return
-    const next = zoomAbout(transform, factor, x, y)
-    setView(next.zoom <= 1 ? undefined : next)
-  })
-  const { panning, handlers } = usePanGesture(view !== undefined, (dx, dy) => {
-    if (transform) setView(panBy(transform, dx, dy))
-  })
+  const stage = useArborStage(shape, neuron)
+  const { stageRef, canvasRef, transform, pieces, panning, handlers } = stage
+  const [picked, setPicked] = useState<Picked | undefined>()
+  useEffect(() => setPicked(undefined), [neuron])
 
   const scene = useMemo(() => {
     if (!shape || !transform || !pieces || !tree || !branches) return undefined
@@ -330,12 +270,7 @@ export function SplitEditor({
     })
   }, [shape, transform, pieces, tree, branches, marks, ticks, synapseInk, mode, neuronName])
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !scene) return
-    const ctx = prepareCanvas(canvas, scene.width, scene.height)
-    if (ctx) paintScene(ctx, scene)
-  }, [scene])
+  usePaintedScene(canvasRef, scene)
 
   /* --- correcting --------------------------------------------------------------------- */
 
@@ -433,10 +368,10 @@ export function SplitEditor({
           ref={stageRef}
           className="arbor__plot nodrag"
           data-panning={panning || undefined}
-          data-zoomed={view !== undefined || undefined}
+          data-zoomed={stage.zoomed || undefined}
           {...handlers}
           onClick={onClick}
-          onDoubleClick={() => setView(undefined)}
+          onDoubleClick={stage.resetView}
         >
           {heal.status === 'healing' ? (
             <ViewerEmpty>Joining the skeleton’s {heal.pieces} pieces…</ViewerEmpty>
@@ -534,11 +469,6 @@ export function SplitEditor({
       )}
     </div>
   )
-}
-
-/** Node `n`'s position, as a correction stores one. */
-function positionOf(p: Float32Array, n: number): [number, number, number] {
-  return [p[n * 3]!, p[n * 3 + 1]!, p[n * 3 + 2]!]
 }
 
 /*

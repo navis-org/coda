@@ -54,3 +54,23 @@ export function lowerBound<T extends bigint | string | number>(
   }
   return lo
 }
+
+/** A list per index, as compressed rows: index `i`'s entries are `list[start[i] .. start[i + 1])`. */
+export interface Csr {
+  readonly start: Int32Array
+  readonly list: Int32Array
+}
+
+/**
+ * Group `values` by `owners` as CSR — a counting sort, keeping their order within each owner.
+ * Without `values`, each owner's list is the positions it owns.
+ */
+export function csr(n: number, owners: ArrayLike<number>, values?: Int32Array): Csr {
+  const start = new Int32Array(n + 1)
+  for (let k = 0; k < owners.length; k++) start[owners[k]! + 1]!++
+  for (let i = 0; i < n; i++) start[i + 1]! += start[i]!
+  const cursor = start.slice(0, n)
+  const list = new Int32Array(owners.length)
+  for (let k = 0; k < owners.length; k++) list[cursor[owners[k]!]!++] = values ? values[k]! : k
+  return { start, list }
+}

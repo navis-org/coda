@@ -4,7 +4,7 @@ The Line Chart plots one or more numeric columns against a numeric X, one line e
 
 `X` is the axis the lines run along, e.g. `t`. Which lines you get depends on the shape of your table:
 
-- **Wide tables** have one column per line, e.g. voltage traces with `t`, `soma`, `site 1`, … Leave `Y` empty to draw every numeric column except X, or pick the ones you want.
+- **Wide tables** have one column per line, e.g. the `Traces` output of [Simulate](#biophys:simulate), with `t`, `soma`, `site 1`, … Leave `Y` empty to draw every numeric column except X, or pick the ones you want.
 - **Long tables** have one row per sample and a column saying which line it belongs to, e.g. `t`, `voltage` and `site`. Pick the value column as `Y` and the other as `Series`.
 
 You can use both at once: with two `Y` columns and a `Series` column you get every Y for every series, labelled `series · Y`.

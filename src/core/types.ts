@@ -157,6 +157,12 @@ export type CodaType =
    */
   | { kind: 'layers' }
   /**
+   * One neuron as a compartment model (`CellModelValue`): built by the biophysics pack, run by
+   * its Simulate node. Its own kind because nothing else could read it, and a skeleton socket
+   * that took one would draw compartments as if they were the reconstruction.
+   */
+  | { kind: 'cellModel' }
+  /**
    * A table held in a file rather than in memory — a Parquet or Feather file too large to load,
    * read a block at a time by the nodes that know how.
    *
@@ -222,6 +228,7 @@ export const T = {
   linkage: (): CodaType => ({ kind: 'linkage' }),
   transform: (): CodaType => ({ kind: 'transform' }),
   layers: (): CodaType => ({ kind: 'layers' }),
+  cellModel: (): CodaType => ({ kind: 'cellModel' }),
   tableFile: (schema?: TableSchema): CodaType =>
     schema ? { kind: 'tableFile', schema } : { kind: 'tableFile' },
 } as const
@@ -362,6 +369,8 @@ export function typeLabel(t: CodaType | undefined): string {
       return 'Layout'
     case 'linkage':
       return 'Linkage'
+    case 'cellModel':
+      return 'Cell model'
     case 'layers':
       return 'Layers'
     case 'dataset':

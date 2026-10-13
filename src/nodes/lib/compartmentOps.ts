@@ -12,18 +12,13 @@
  * the nodes that actually split import this.
  */
 
+import type { BUILT_IN_NODE_VALUES } from './nodeValues'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import type { ParamDef, ParamValues } from '../../core/node'
 import { listEntries } from '../../core/node'
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
-import type {
-  MeshesValue,
-  NODE_VALUES,
-  PointsValue,
-  SkeletonsValue,
-  TableValue,
-} from '../../core/values'
+import type { MeshesValue, PointsValue, SkeletonsValue, TableValue } from '../../core/values'
 import { makeTable, splitName } from '../../core/values'
 import type { CallOptions } from '../../pyodide/engine'
 import type { PropagationWeighting, PythonSplitMethod } from '../../pyodide/topology'
@@ -225,11 +220,8 @@ export const whenMethod =
   (params: ParamValues): boolean =>
     splitMethodOf(params) === method
 
-/** The node values a split writes, every one of which a re-split replaces — `NODE_VALUES`' names. */
-export type SplitValueName = Extract<
-  (typeof NODE_VALUES)[number]['value'],
-  'flow' | 'axonProbability'
->
+/** The node values a split writes, every one of which a re-split replaces: the built-in ones. */
+export type SplitValueName = (typeof BUILT_IN_NODE_VALUES)[number]['value']
 
 /**
  * The three controls, declared once for every card that splits — Neuron Topology behind its

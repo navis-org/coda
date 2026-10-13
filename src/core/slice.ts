@@ -130,6 +130,7 @@ const MAX_STRIDE = 64
  * cancellation from a failure by the name. A local copy for the reason `src/umap/run.ts` keeps
  * one — `src/core` may not import `src/data`, where the original lives.
  */
-function throwIfAborted(signal: AbortSignal | undefined): void {
+/** Reject the way an aborted run must: an `AbortError`, never a partial answer. */
+export function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
 }

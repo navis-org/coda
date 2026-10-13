@@ -29,6 +29,8 @@ export interface ShortcutDefinition {
 export const SHORTCUTS: readonly ShortcutDefinition[] = [
   // The Cortex Gallery and its frames; CAVE and Connectome come with it, being what it needs.
   { id: 'cortex', packs: ['cortex'] },
+  // Compartment models of single neurons; needs nothing else switched on.
+  { id: 'biophys', packs: ['biophys'] },
 ]
 
 export function shortcut(id: string): ShortcutDefinition | undefined {

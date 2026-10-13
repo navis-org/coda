@@ -69,6 +69,7 @@ export function valueCategory(value: Value): MemoryCategory {
     case 'network':
       return 'networks'
     case 'skeletons':
+    case 'cellModel':
       return 'skeletons'
     case 'meshes':
       return 'meshes'
@@ -235,6 +236,28 @@ export class ByteLedger {
           (value.clusters ? this.buffer(value.clusters) : 0) +
           this.array(value.labels)
         )
+      case 'cellModel': {
+        // The skeleton is the input's, shared: the ledger charges a buffer once wherever it sits.
+        const { compartments: k, synapses: y, skeleton } = value
+        return (
+          this.buffer(k.parent) +
+          this.buffer(k.area) +
+          this.buffer(k.gAxial) +
+          this.buffer(k.position) +
+          this.buffer(k.region) +
+          this.buffer(value.nodeCompartment) +
+          this.buffer(y.compartment) +
+          this.buffer(y.type) +
+          this.buffer(y.partner) +
+          this.buffer(value.sites.node) +
+          this.buffer(value.sites.from) +
+          this.buffer(value.sites.t) +
+          this.buffer(value.partners.synapses) +
+          this.buffer(value.partners.inhibitory) +
+          this.array(value.partners.id) +
+          skeletonBuffers(skeleton).reduce((sum, b) => sum + this.buffer(b), 0)
+        )
+      }
       case 'transform':
         return this.buffer(value.source) + this.buffer(value.target)
       case 'layout':

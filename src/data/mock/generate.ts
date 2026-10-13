@@ -8,6 +8,8 @@
  * cache keys stay stable across reloads.
  */
 
+import { fnv1a32 } from '../../core/hash'
+
 export interface MockNeuron {
   neuronId: number
   type: string
@@ -92,15 +94,6 @@ export function mulberry32(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
-}
-
-function hashSeed(text: string): number {
-  let h = 0x811c9dc5
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i)
-    h = Math.imul(h, 0x01000193) >>> 0
-  }
-  return h >>> 0
 }
 
 /** Positive-skewed draw around `mean`; synapse counts are never negative. */
@@ -410,12 +403,12 @@ function matchesType(pattern: string, type: string): boolean {
 }
 
 function build(def: (typeof DEFINITIONS)[number]): MockConnectome {
-  const rand = mulberry32(hashSeed(def.meta.id))
+  const rand = mulberry32(fnv1a32(def.meta.id))
 
   // --- neurons -------------------------------------------------------------
   const neurons: MockNeuron[] = []
   const byType = new Map<string, MockNeuron[]>()
-  let idCursor = 1_000_000_000 + (hashSeed(def.meta.id) % 100_000_000)
+  let idCursor = 1_000_000_000 + (fnv1a32(def.meta.id) % 100_000_000)
 
   for (const spec of def.types) {
     const group: MockNeuron[] = []

@@ -1135,6 +1135,12 @@ export interface GraphState {
     commit: boolean,
   ): void
   setParam(nodeId: string, paramId: string, value: ParamValue): void
+  /**
+   * Several params of one node in **one commit** — one undo step and one auto-run — for an edit
+   * that is one act across params (a region renamed in the strokes that paint it and the channel
+   * rows placed on it). Two `setParam`s would be two steps, and undoing one leaves the other.
+   */
+  setParams(nodeId: string, values: Readonly<Record<string, ParamValue>>): void
   renameNode(nodeId: string, title: string): void
   toggleDisabled(nodeIds: string[]): void
   toggleCollapsed(nodeIds: string[]): void
@@ -3072,6 +3078,15 @@ export const useGraphStore = create<GraphState>((set, get) => {
       commit((g) => setNodeParam(g, nodeId, paramId, value), {
         tag: `param:${nodeId}:${paramId}`,
       })
+    },
+
+    setParams: (nodeId, values) => {
+      const ids = Object.keys(values)
+      if (ids.length === 0) return
+      commit(
+        (g) => ids.reduce((graph, id) => setNodeParam(graph, nodeId, id, values[id]!), g),
+        { tag: `params:${nodeId}:${ids.sort().join(',')}` },
+      )
     },
 
     renameNode: (nodeId, title) => {

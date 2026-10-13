@@ -220,6 +220,8 @@ function valueHeadline(value: Value): string {
       return `${count(Object.keys(value.positions).length)} placed nodes`
     case 'linkage':
       return `linkage over ${count(value.labels.length)} leaves`
+    case 'cellModel':
+      return `a compartment model, ${count(value.compartments.count)} compartments`
     case 'layers':
       return `${count(value.items.length)} layers`
     case 'tableFile':

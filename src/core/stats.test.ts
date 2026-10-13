@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { quantileSorted } from './stats'
+import { csr, quantileSorted } from './stats'
 
 /*
  * Moved here with the function. It served `boxStats` first, which is why the tests lived
@@ -17,5 +17,17 @@ describe('quantileSorted', () => {
 
   it('answers the single value for a group of one', () => {
     expect(quantileSorted([9], 0.25)).toBe(9)
+  })
+})
+
+describe('csr', () => {
+  it('groups positions by owner in order, or the values given', () => {
+    const owners = Int32Array.of(2, 0, 2, 1, 0)
+    const { start, list } = csr(3, owners)
+    expect(Array.from(start)).toEqual([0, 2, 3, 5])
+    expect(Array.from(list)).toEqual([1, 4, 3, 0, 2])
+    expect(Array.from(csr(3, owners, Int32Array.of(9, 8, 7, 6, 5)).list)).toEqual([
+      8, 5, 6, 9, 7,
+    ])
   })
 })

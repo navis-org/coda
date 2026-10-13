@@ -75,8 +75,19 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  * 3,050 → 3,100 on 2026-10-11, at 3,061 kB against about 3,035 kB at the commit before it, for
  * Split Axon/Dendrite's three new methods (label propagation, by ROI, by tag), node tags on
  * skeletons and the node's rewritten help page. Code and prose of ours; no new library.
+ *
+ * 3,100 → 3,200 on 2026-10-13, at 3,177 kB against 3,100 kB at the commit before it (41da6c8,
+ * which the Line Chart had brought to the edge), for the Biophysics pack: the compartment solver
+ * (`src/biophys`), the model builder, Simulate's job, plan and tables, and the per-node value
+ * declarations its nodes write. Code of ours, registered with the pack's nodes; the solver runs in
+ * a worker or the node's `evaluate`, never in this bundle, but it is imported by them and cannot
+ * be an `external`, which is for packages. Phase 5's help pages will add prose on top.
+ *
+ * 3,200 → 3,300 on 2026-10-13, at 3,223 kB, for those help pages (`model.md`, `simulate.md`, 16 kB)
+ * and the pack's later phases: painted regions, two synapse sockets with sourced presets, and the
+ * audits' refusals and notes. Prose and code of ours; no new library.
  */
-const SIZE_BUDGET_KB = 3_100
+const SIZE_BUDGET_KB = 3_300
 
 /**
  * Fail the build if the bundle outgrows its budget.

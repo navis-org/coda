@@ -5,8 +5,9 @@ Every viewer, its export path, and the styling panel they share.
 ## Output widgets
 
 `ValuePreview` picks a viewer by node type — `VIEWERS`, a table keyed like `NODE_BODIES`, whose
-`withoutValue` entries draw from their inputs before the "No result yet" guard — then by value
-kind, and forwards a shared prop bundle
+`withoutValue` entries draw from their inputs before the "No result yet" guard, and so also open
+full size before their node has run (`opensWithoutValue`, which is how Simulate's partner list is
+reachable before the first Run) — then by value kind, and forwards a shared prop bundle
 (`baseName`, `onExpand`, `onError`, `compact`) so a new viewer cannot ship without export or expand.
 
 - **Export** lives in `ui/export.ts`. CSV is chunked `Blob` parts rather than one string — a

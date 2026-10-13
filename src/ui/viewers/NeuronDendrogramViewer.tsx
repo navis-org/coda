@@ -21,13 +21,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import { idText } from '../../core/ids'
 import type { EnumOption, ParamValue } from '../../core/node'
-import { lowerBound, quantileSorted } from '../../core/stats'
+import { lowerBound } from '../../core/stats'
 import { column, findColumn, tableSchema } from '../../core/types'
 import type { CellValue, DatasetAnnotations, DatasetEdges, TableValue } from '../../core/values'
 import { getColumn, getRow, makeTable } from '../../core/values'
 import { NM_PER_UM } from '../../data/units'
 import type { ArborLayoutKind, ArborOrder, ArborShape } from '../../nodes/lib/arborLayout'
 import { SUBWAY_DEFAULTS } from '../../nodes/lib/arborLayout'
+import { hasRadii } from '../../nodes/lib/skeletonRadii'
 import type { Arbor, DistalRow, KeyTree } from '../../nodes/lib/arborOps'
 import {
   buildArbor,
@@ -80,12 +81,20 @@ import {
   pickPiece,
   pieceGeometry,
   placeOnPiece,
+  radiusWidths,
   subSegments,
   synapseMarks,
   zoomAbout,
 } from './arborPlot'
 import type { BranchGroup, TickGroup } from './arborScene'
-import { blendPieces, buildScene, nearestTick, paintScene, sceneToSvg } from './arborScene'
+import {
+  blendPieces,
+  branchGroups,
+  buildScene,
+  nearestTick,
+  paintScene,
+  sceneToSvg,
+} from './arborScene'
 import { prepareCanvas, uiFontFamily } from './canvas2d'
 import { ChartTooltip, TooltipRow } from './ChartTooltip'
 import {
@@ -106,7 +115,7 @@ import { usePartnerHighlight } from './usePartnerHighlight'
 import { tooltipPoint } from './tooltipPoint'
 import { useStable } from './useStable'
 import { useWheelZoom } from './useWheelZoom'
-import { PartnerPanel, RailTabs, TopoBar } from './topoChrome'
+import { PartnerPanel, RailTabs, TopoBar, neuronLabel } from './topoChrome'
 import { ViewerEmpty } from './ViewerEmpty'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
@@ -254,9 +263,7 @@ interface BranchStyle {
  * Every skeleton edge's colour and width, grouped into strokes.
  *
  * Colour comes from a value per node — Strahler order, flow centrality, distance — on the edge's
- * child end. Width comes from the radius, the mean of the edge's two ends, scaled so the 95th
- * percentile radius is twice the line width: the 3D viewer's rule (`flexLineMaterial.ts`), since
- * a single wide soma node would otherwise set the scale and thin every neurite to a hair.
+ * child end. Width comes from the radius (`radiusWidths`).
  */
 function branchStyle(o: {
   arbor: Arbor
@@ -290,34 +297,10 @@ function branchStyle(o: {
     if (o.sqrt) t = Math.sqrt(Math.max(0, t))
     return branchRampColor(Math.round(t * (COLOR_STEPS - 1)), o.mode, o.palette)
   }
-  let p95 = 0
-  if (o.radii) {
-    const positive = Float64Array.from(o.arbor.order, (v) => o.radii![v]!)
-      .filter((r) => r > 0)
-      .sort()
-    p95 = quantileSorted(positive, 0.95)
-  }
-
-  const groups = new Map<string, { color: string; width: number; sub: number[] }>()
-  for (let i = 0; i < sub.node.length; i++) {
-    const v = sub.node[i]!
-    const color = colorOf(v)
-    let width = o.lineWidth
-    if (o.radii && p95 > 0) {
-      const r = (o.radii[v]! + o.radii[o.arbor.parent[v]!]!) / 2
-      // Quarter-pixel steps: enough to read, few enough strokes to paint every frame.
-      width =
-        Math.round(Math.min(o.lineWidth * 6, Math.max(0.5, (2 * o.lineWidth * r) / p95)) * 4) /
-        4
-    }
-    const key = `${color}|${width}`
-    const group = groups.get(key)
-    if (group) group.sub.push(i)
-    else groups.set(key, { color, width, sub: [i] })
-  }
+  const widths = o.radii ? radiusWidths(o.arbor, sub, o.radii, o.lineWidth) : undefined
   return {
     sub,
-    groups: [...groups.values()].map((g) => ({ ...g, sub: Int32Array.from(g.sub) })),
+    groups: branchGroups(sub.node.length, (i) => colorOf(sub.node[i]!), widths ?? o.lineWidth),
     ...(o.values ? { landmarkColor: Array.from(o.tree.nodes, colorOf) } : {}),
     ...(o.values && span >= 0 ? { legend: { lo, hi } } : {}),
   }
@@ -439,7 +422,7 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
   )
   // Through `idText`, never `Number` — invariant 8, and this is the fetch key.
   const neuronId = row ? idText(row['neuronId']) : null
-  const neuronName = String(row?.['type'] ?? row?.['instance'] ?? neuronId ?? '—')
+  const neuronName = neuronLabel(row, neuronId)
 
   const loaded = useNeuronTopology(
     sourceId,
@@ -704,10 +687,7 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
   /* --- the branches' colour and width ------------------------------------------------- */
 
   const byRadius = settings.widthBy === 'radius'
-  const hasRadii = useMemo(
-    () => (skeleton ? skeleton.radii.some((r) => r > 0) : false),
-    [skeleton],
-  )
+  const withRadii = useMemo(() => (skeleton ? hasRadii(skeleton.radii) : false), [skeleton])
   const branchColor = settings.branchColor
   // Per skeleton node, on the tree as rooted here: Strahler order and flow both move with the root.
   const nodeValue = useMemo(() => {
@@ -721,7 +701,7 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
     return undefined
   }, [branchColor, skeleton, arbor, placement, sideOf, nodeD])
   const branches = useMemo(() => {
-    const widthed = byRadius && hasRadii
+    const widthed = byRadius && withRadii
     if ((!nodeValue && !widthed) || !arbor || !pruned || !landmarkD || !nodeD || !skeleton) {
       return undefined
     }
@@ -742,7 +722,7 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
   }, [
     nodeValue,
     byRadius,
-    hasRadii,
+    withRadii,
     arbor,
     pruned,
     landmarkD,
@@ -1036,7 +1016,7 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
         'so electrotonic distance is close to geodesic here',
     })
   }
-  if (byRadius && skeleton && !hasRadii) {
+  if (byRadius && skeleton && !withRadii) {
     notes.push({ text: 'no radii on this skeleton, drawn at one width' })
   }
   if (pruned && pruned.hidden > 0) {

@@ -16,7 +16,15 @@ import type { PointsValue, SkeletonGeometry, SkeletonsValue } from '../../core/v
 import { cableLength, compartmentName, makeTable } from '../../core/values'
 import '../index'
 import type { Placement } from './skeletonPoints'
-import { pointCount, skeletonPointsSchema, skeletonPointsValue } from './skeletonPoints'
+import {
+  MANUAL_PARAM,
+  manualPointAt,
+  pointCount,
+  readManualPoints,
+  skeletonPointsSchema,
+  skeletonPointsValue,
+  writeManualPoint,
+} from './skeletonPoints'
 
 const def = requireNodeDef('neuron.skeletonPoints')
 
@@ -67,7 +75,7 @@ const sum = (values: readonly number[]) => values.reduce((a, b) => a + b, 0)
 /** One skeleton's cloud, columns as plain arrays. */
 async function sampleSkeleton(
   skeleton: SkeletonGeometry,
-  placement: Placement,
+  placement: Exclude<Placement, 'manual'>,
   spacingNm: number,
 ) {
   const value = skeletons([skeleton])
@@ -233,5 +241,97 @@ describe('the node', () => {
     await expect(run({ ...skeletons(), units: 'voxels' })).rejects.toThrow(
       /are in voxels. They must be in nanometres/,
     )
+  })
+
+  describe('placed by hand', () => {
+    const at = (neuron: string, x: number, y: number) =>
+      writeManualPoint({ neuron, at: [x, y, 0] })
+
+    it('lands each point on the cable where it was put, read as a midpoint is, with no cable', async () => {
+      const { points, warnings } = await run(skeletons(), {
+        placement: 'manual',
+        [MANUAL_PARAM]: [at('7', 0, 2000), at('7', 250, 3000)],
+      })
+      expect(Array.from(points.positions.slice(0, 3))).toEqual([0, 2000, 0])
+      const d = points.attributes.data
+      expect(d.cable).toEqual([null, null])
+      // Halfway along the trunk edge 1 → 2: radii 100 and 80 nm, the edge's child labelled axon.
+      expect(d.radius![0]).toBeCloseTo(0.09, 6)
+      expect(d.rootDistance![0]).toBeCloseTo(2, 6)
+      expect(d.compartment).toEqual([compartmentName(2), compartmentName(4)])
+      expect(d.neuronId).toEqual(['7', '7'])
+      expect(warnings).toEqual([])
+    })
+
+    it('counts a point far from its neuron as stale rather than moving it, and ignores other neurons’', async () => {
+      const { points, warnings } = await run(skeletons(), {
+        placement: 'manual',
+        [MANUAL_PARAM]: [at('7', 0, 2000), at('7', 9000, 2000), at('8', 0, 2000), 'not json'],
+      })
+      expect(points.attributes.data.neuronId).toEqual(['7'])
+      expect(warnings.join(' ')).toMatch(
+        /^1 point placed by hand no longer lands on its neuron/,
+      )
+    })
+
+    it('names a point in its own column, null where unnamed, and only under this placement', async () => {
+      const named = writeManualPoint({ neuron: '7', at: [0, 2000, 0], name: 'input A' })
+      const { points } = await run(skeletons(), {
+        placement: 'manual',
+        [MANUAL_PARAM]: [named, at('7', 250, 3000)],
+      })
+      expect(points.attributes.data.name).toEqual(['input A', null])
+      const promised = (
+        def.inferOutputs!(
+          makeInferContext(
+            def,
+            { ...defaultParams(def), placement: 'manual' },
+            { in: T.skeletons(ATTRIBUTES) },
+          ),
+        ) as Record<string, { schema?: unknown }>
+      ).out!.schema
+      expect(points.attributes.schema).toEqual(promised)
+      const { points: resampled } = await run(skeletons())
+      expect(columnNames(resampled.attributes.schema)).not.toContain('name')
+    })
+
+    it('says where to place points while none is placed, and nothing once one is', () => {
+      const lines = (points: string[]) =>
+        def.validate!(
+          makeInferContext(
+            def,
+            { ...defaultParams(def), placement: 'manual', [MANUAL_PARAM]: points },
+            { in: T.skeletons(ATTRIBUTES) },
+          ),
+        )
+      expect(lines([])).toEqual(['Expand the node (⤢) to place points on the skeletons.'])
+      expect(lines([at('7', 0, 2000)])).toEqual([])
+      expect(
+        def.validate!(
+          makeInferContext(def, defaultParams(def), { in: T.skeletons(ATTRIBUTES) }),
+        ),
+      ).toEqual([])
+    })
+
+    it('places a click t of the way down its edge, and at the node itself at a root', () => {
+      const { positions, parents } = yShape()
+      expect(manualPointAt(positions, parents, { node: 2, t: 0.5 })).toEqual([0, 2000, 0])
+      expect(manualPointAt(positions, parents, { node: 0, t: 0.5 })).toEqual([0, 0, 0])
+    })
+
+    it('reads back what it writes, dropping what does not parse', () => {
+      const point = { neuron: '7', at: [1, 2, 3] as const }
+      const named = { ...point, name: 'tip' }
+      expect(
+        readManualPoints([
+          writeManualPoint(point),
+          writeManualPoint(named),
+          '{"neuron":7}',
+          'x',
+        ]),
+      ).toEqual([point, named])
+      // A blank name is no name.
+      expect(writeManualPoint({ ...point, name: '  ' })).toBe(writeManualPoint(point))
+    })
   })
 })

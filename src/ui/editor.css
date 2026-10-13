@@ -14247,3 +14247,311 @@ select.annotate__input {
 .gallery__canvas[data-state='missing'] {
   opacity: 0.4;
 }
+
+/*
+ * The Compartment Model's channel list (`ui/biophys/ChannelsEditor.tsx`): a bar with the count and
+ * the add buttons, a row per channel with its regions as toggles, and a note on what is not there.
+ */
+.channels-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 8px;
+  overflow: auto;
+  font-size: 11px;
+}
+.channels-editor__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.channels-editor__count {
+  color: var(--text-secondary);
+  margin-right: auto;
+}
+.channels-editor__table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.channels-editor__table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.channels-editor__table td {
+  padding: 4px 6px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+.channels-editor__table td .field {
+  min-width: 0;
+}
+/* Numbers are a few digits: a field each as wide as that, not as wide as the column. */
+.channels-editor__table input.field {
+  width: 6em;
+}
+.channels-editor__amount {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.channels-editor__table td:last-child {
+  width: 1px;
+}
+.channels-editor__regions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+}
+.channels-editor__channel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.channels-editor__help {
+  padding: 0 6px;
+  border-radius: 50%;
+}
+.channels-editor__help[aria-expanded='true'] {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+/* A channel's "?" text, under its row. */
+.channels-editor__about td {
+  padding: 2px 6px 8px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.channels-editor__about p {
+  margin: 0 0 2px;
+}
+.channels-editor__everywhere,
+.channels-editor__note {
+  color: var(--text-muted);
+}
+/* A region the row names and the model no longer has: struck through, still untickable. */
+.channels-editor .chip-filter[data-missing] {
+  text-decoration: line-through;
+}
+
+/*
+ * Simulate's full-size view (`ui/biophys/SimulateView.tsx`): Partners and Playback as tabs.
+ * Playback is the Points editor's pair — dendrogram, 3D view — under a row of controls, with the
+ * traces beneath and a cursor on them at the frame shown.
+ */
+.simulate-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.simulate-view__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.playback {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  outline: none;
+}
+.playback__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.playback__scrubber {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.playback__time {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.playback__hint {
+  color: var(--text-muted);
+}
+.playback__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+/* The added traces, each with its line's colour — the tick on the dendrogram is the same — and ✕. */
+.playback__traces-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.playback__trace {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.playback__trace .btn {
+  padding: 0 4px;
+}
+.playback__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.playback__making {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.playback__main {
+  display: flex;
+  flex: 3 1 0;
+  min-height: 0;
+}
+.playback__dendrogram {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.playback__dendrogram > .arbor__plot {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.playback__scene {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+/* The 3D view fills its column, as the Points editor's does. */
+.playback__scene > .viewer {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  border-radius: 0;
+}
+.playback__traces {
+  display: flex;
+  flex: 2 1 0;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+.playback__traces > .viewer {
+  flex: 1 1 auto;
+  border-radius: 0;
+}
+
+/*
+ * Simulate's full-size partner list (`ui/biophys/SimulatePartners.tsx`): a bar of the count,
+ * Topology's search box and Explore's link buttons over the table viewer's own table.
+ */
+.sim-partners {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  min-height: 0;
+  padding: 8px;
+  font-size: 11px;
+}
+.sim-partners__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.sim-partners__count {
+  color: var(--text-secondary);
+}
+/* Topology's search box, given more of the bar. */
+.sim-partners__search {
+  flex-basis: 140px;
+  margin-left: 0;
+}
+.sim-partners__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.sim-partners__tick {
+  width: 1px;
+  text-align: center;
+}
+/* A partner that does not fire stays listed, quieter, so it can be ticked back. */
+.sim-partners tr[data-silenced] td:not(.sim-partners__tick) {
+  color: var(--text-muted);
+}
+.sim-partners__none {
+  padding: 8px;
+  color: var(--text-muted);
+}
+
+/*
+ * Skeleton to Points' hand placement (`PointsEditor.tsx`): the split editor's frame with a 3D view
+ * between the dendrogram and the list — the dendrogram to click on, the 3D view to look at.
+ */
+.points-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.points-editor__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.points-editor__main > .arbor__plot {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.points-editor__scene {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+/* The 3D view fills its column, as Neuron Topology's does. */
+.points-editor__scene > .viewer {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  border-radius: 0;
+}
+/* A point's row: its name field, its distance from the root, ✕. */
+.points-editor__point {
+  gap: 6px;
+}
+.points-editor__point .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.points-editor__distance {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}

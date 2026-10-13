@@ -10,6 +10,7 @@
  */
 
 import type { CompartmentKey, SkeletonsValue } from '../core/values'
+import { COMPARTMENT_KEYS } from '../core/values'
 import {
   CODE_AXON,
   CODE_DENDRITE,
@@ -24,7 +25,7 @@ import type { ResolvedColor } from '../style/encoding'
 import { literalColor } from '../style/encoding'
 
 /** The keys the compartment colours can draw, in the order a legend lists them. */
-const KEYS = ['axon', 'dendrite', 'linker', 'soma', 'unlabelled'] as const
+const KEYS = [...COMPARTMENT_KEYS, 'unlabelled'] as const
 type Key = CompartmentKey | 'unlabelled'
 
 /**

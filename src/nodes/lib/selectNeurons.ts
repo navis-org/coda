@@ -28,6 +28,7 @@
  */
 
 import { ID_COLUMN_NAME } from '../../core/ids'
+import { namedFew } from '../../core/prose'
 import type { CodaType, Kind } from '../../core/types'
 import { kindIn } from '../../core/types'
 import type { MeshesValue, SkeletonsValue, TableValue, Value } from '../../core/values'
@@ -36,9 +37,6 @@ import { idColumn } from './tableOps'
 
 /** The id column picker. Here rather than on the node, so both emitters reach it through lib. */
 export const ID_COLUMN_PARAM = 'idColumn'
-
-/** How many ids a warning names before it stops listing them. */
-const NAMED_IN_WARNING = 5
 
 /**
  * What this node subsets: a collection of neurons drawn as geometry.
@@ -216,10 +214,4 @@ export function skippedNeuronsReason(
     `${missing.length} of the ${wanted} neurons in "${column}" have no geometry here and were ` +
     `skipped: ${namedFew(missing)}. Fetch them above this node if you want them drawn.`
   )
-}
-
-/** A few ids by name, then an ellipsis. The inline idiom three other node files spell out. */
-function namedFew(ids: readonly string[]): string {
-  const named = ids.slice(0, NAMED_IN_WARNING).join(', ')
-  return ids.length > NAMED_IN_WARNING ? `${named}, …` : named
 }

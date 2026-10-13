@@ -60,6 +60,37 @@ describe('LineChartViewer', () => {
     expect(tooltip.textContent).toMatch(/tip -45/)
   })
 
+  it('marks the cursor at its X, and draws none without one', () => {
+    const { container, rerender } = render(
+      <LineChartViewer table={TRACES} x="t" ys={['soma']} cursor={2} />,
+    )
+    const cursors = () => container.querySelectorAll('g[clip-path] line')
+    expect(cursors()).toHaveLength(1)
+    // Halfway across a plot from t = 0 to 4.
+    const x = Number(cursors()[0]!.getAttribute('x1'))
+    rerender(<LineChartViewer table={TRACES} x="t" ys={['soma']} cursor={4} />)
+    expect(Number(cursors()[0]!.getAttribute('x1'))).toBeGreaterThan(x)
+    rerender(<LineChartViewer table={TRACES} x="t" ys={['soma']} />)
+    expect(cursors()).toHaveLength(0)
+  })
+
+  it('ticks each mark at the foot of the plot, inside the window, labelled', () => {
+    const { container } = render(
+      <LineChartViewer
+        table={TRACES}
+        x="t"
+        ys={['soma']}
+        xMarks={[1, 3, 99]}
+        xMarksLabel="input spikes arriving"
+      />,
+    )
+    const marks = [...container.querySelectorAll('g[clip-path] path')].find(
+      (path) => path.querySelector('title')?.textContent === 'input spikes arriving',
+    )
+    // Two inside the data's X range; the one at 99 is off the plot.
+    expect(marks?.getAttribute('d')?.match(/M/g)).toHaveLength(2)
+  })
+
   it('says when there is nothing to draw', () => {
     const empty = makeTable(tableSchema(column('t', 'f64'), column('v', 'f64')), {
       t: [null],

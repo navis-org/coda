@@ -149,7 +149,7 @@ export function usableRows(
 }
 
 /** Extent of a transformed coordinate, or undefined when there is none. */
-export function extentOf(values: Float64Array): Domain | undefined {
+export function extentOf(values: ArrayLike<number>): Domain | undefined {
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
   for (let i = 0; i < values.length; i++) {

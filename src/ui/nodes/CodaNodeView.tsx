@@ -39,7 +39,7 @@ import { IssueText } from '../IssueText'
 import { bucketParams } from '../params/paramGroups'
 import { portStyle } from '../../style/socketStyle'
 import { dragPortSocket, useDragOrigin } from '../dragOrigin'
-import { drawsFromInputs, ValuePreview } from '../viewers/ValuePreview'
+import { drawsFromInputs, opensWithoutValue, ValuePreview } from '../viewers/ValuePreview'
 import { CardCanvasScale } from '../viewers/canvasScale'
 import { ExportNodeContext } from '../viewers/exportRegistry'
 import { CacheAge } from './CacheAge'
@@ -112,6 +112,7 @@ function CodaNodeViewImpl({
 
   const inference = useGraphStore((s) => s.inference)
   const setParam = useGraphStore((s) => s.setParam)
+  const setParams = useGraphStore((s) => s.setParams)
   const renameNode = useGraphStore((s) => s.renameNode)
   const toggleCollapsed = useGraphStore((s) => s.toggleCollapsed)
   const toggleParamRows = useGraphStore((s) => s.toggleParamRows)
@@ -357,7 +358,8 @@ function CodaNodeViewImpl({
    * expand and pin buttons cannot drift apart — a third surface would otherwise add a third copy
    * of the same condition to the same header.
    */
-  const canOpenFullSize = outputValue !== undefined || body?.expandable
+  const canOpenFullSize =
+    outputValue !== undefined || body?.expandable || opensWithoutValue(node.type)
   /**
    * True when React Flow's wrapper carries an explicit width for this card, so the card fills it
    * rather than taking `--node-width`.
@@ -864,6 +866,7 @@ function CodaNodeViewImpl({
               onError={setNotice}
               onSelectionChange={(ids) => setParam(id, 'selection', ids)}
               onParamChange={(paramId, next) => setParam(id, paramId, next)}
+              onParamsChange={(values) => setParams(id, values)}
               inputValues={nodeInputs(id)}
             />
           </div>

@@ -13,7 +13,15 @@ import {
 import { ySkeleton } from '../../nodes/lib/__fixtures__/ySkeleton'
 import { fitTransform, pieceGeometry, synapseMarks } from './arborPlot'
 import type { SceneInput } from './arborScene'
-import { blendPieces, buildScene, nearestTick, sceneToSvg } from './arborScene'
+import {
+  blendPieces,
+  branchGroups,
+  branchParts,
+  buildScene,
+  nearestTick,
+  partStrokes,
+  sceneToSvg,
+} from './arborScene'
 
 const INK = { line: '#888888', text: '#ffffff', accent: '#3b82f6' }
 
@@ -126,6 +134,41 @@ describe('buildScene colouring', () => {
       legend: { title: 'Strahler order', stops: ['#000', '#fff'], lo: '1', hi: '4' },
     }).built
     expect(ranged.ramp).toBeDefined()
+  })
+})
+
+describe('branchGroups', () => {
+  it('is one group per colour, in first-seen order', () => {
+    const colors = ['red', 'blue', 'red', 'grey']
+    const groups = branchGroups(colors.length, (i) => colors[i]!, 2)
+    expect(groups.map((g) => [g.color, [...g.sub]])).toEqual([
+      ['red', [0, 2]],
+      ['blue', [1]],
+      ['grey', [3]],
+    ])
+    expect(groups.every((g) => g.width === 2)).toBe(true)
+  })
+  it('partitions once and strokes per colour each time it is coloured', () => {
+    // Edges by compartment: 0, 1, 0, 2 — then compartments 0 and 2 the same colour this frame.
+    const parts = branchParts(4, (i) => [0, 1, 0, 2][i]!, 1)
+    expect(parts.map((p) => [p.key, [...p.sub]])).toEqual([
+      [0, [0, 2]],
+      [1, [1]],
+      [2, [3]],
+    ])
+    const strokes = partStrokes(parts, (c) => (c === 1 ? 'blue' : 'red'))
+    expect(strokes.map((g) => [g.color, [...g.sub]])).toEqual([
+      ['red', [0, 2, 3]],
+      ['blue', [1]],
+    ])
+  })
+
+  it('splits a colour by width where each edge has its own', () => {
+    const groups = branchGroups(3, () => 'red', Float32Array.of(1, 2, 1))
+    expect(groups.map((g) => [g.color, g.width, [...g.sub]])).toEqual([
+      ['red', 1, [0, 2]],
+      ['red', 2, [1]],
+    ])
   })
 })
 

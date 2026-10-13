@@ -81,6 +81,19 @@ export function fmix32(h: number): number {
 }
 
 /**
+ * FNV-1a, 32-bit, over UTF-16 code units, as a number: a seed for `seededRandom` or `mulberry32`
+ * drawn from text. The first half of `hashString`.
+ */
+export function fnv1a32(input: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h
+}
+
+/**
  * FNV-1a, 64-bit, as two 32-bit halves to stay in safe-integer land.
  * Not cryptographic — we only need low collision probability across one session's graph.
  */

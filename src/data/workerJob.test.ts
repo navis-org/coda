@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { runWorkerJob } from './workerJob'
+import { buffersIn, runWorkerJob, serveJob } from './workerJob'
 
 class FakeWorker {
   onmessage: ((event: { data: unknown }) => void) | null = null
@@ -82,6 +82,31 @@ describe('a worker job', () => {
     await expect(result).rejects.toThrow(/test worker could not be loaded.*Reload the page/)
   })
 
+  it('says the worker stopped, not to reload, when it dies silently after it started', async () => {
+    // Its code loaded and ran; what ends a running worker without a word is nearly always memory.
+    const result = runWorkerJob(spawn, 'job', options)
+    spawned[0]!.onmessage!({ data: { type: 'started' } })
+    spawned[0]!.onerror!({ message: '' })
+    await expect(result).rejects.toThrow(
+      /test worker stopped while it was running.*out of memory/,
+    )
+  })
+
+  it('announces itself on receiving a job, before the handler runs', async () => {
+    const posted: unknown[] = []
+    vi.stubGlobal('self', { postMessage: (message: unknown) => posted.push(message) })
+    let started: unknown
+    serveJob(async () => {
+      started = posted[0]
+      return 1
+    })
+    await (
+      globalThis.self as unknown as { onmessage: (e: { data: unknown }) => Promise<void> }
+    ).onmessage({ data: 'job' })
+    expect(started).toEqual({ type: 'started' })
+    expect(posted.at(-1)).toEqual({ type: 'done', result: 1 })
+  })
+
   it('fails with the handler’s own message when the job threw inside the worker', async () => {
     const result = runWorkerJob(spawn, 'job', options)
     spawned[0]!.onmessage!({ data: { type: 'error', message: 'no such column' } })
@@ -100,5 +125,22 @@ describe('a worker job', () => {
     expect(spawned[0]!.terminated).toBe(false)
     spawned[0]!.onmessage!({ data: { type: 'done', result: 1 } })
     await expect(result).resolves.toBe(1)
+  })
+})
+
+describe('buffersIn', () => {
+  it('finds every typed array’s buffer however deep, each once', () => {
+    const shared = new Float64Array(4)
+    const result = {
+      t: shared,
+      views: [new Int32Array(2), shared.subarray(1)],
+      nested: { deep: { u: new Uint8Array(3) } },
+      text: 'x',
+      none: undefined,
+    }
+    const found = buffersIn(result)
+    expect(found).toHaveLength(3)
+    expect(found).toContain(shared.buffer)
+    expect(found).toContain(result.nested.deep.u.buffer)
   })
 })

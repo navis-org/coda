@@ -142,6 +142,7 @@ export function ViewerSurface({
 }) {
   const inference = useGraphStore((s) => s.inference)
   const setParam = useGraphStore((s) => s.setParam)
+  const setParams = useGraphStore((s) => s.setParams)
   const setNotice = useGraphStore((s) => s.setNotice)
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
   /*
@@ -367,6 +368,7 @@ export function ViewerSurface({
               onError={setNotice}
               onSelectionChange={(ids) => setParam(node.id, 'selection', ids)}
               onParamChange={(paramId, next) => setParam(node.id, paramId, next)}
+              onParamsChange={(values) => setParams(node.id, values)}
               inputValues={inputValues}
             />
           )}

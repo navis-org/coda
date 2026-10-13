@@ -17,14 +17,13 @@ import { T } from '../../core/types'
 import { isPointsValue } from '../../core/values'
 import {
   GROUP_PARAM,
-  ORIENTATION_PARAM,
-  POLARITY_PARAM,
   SOURCE_PARAM,
   SOURCE_TYPE_PARAM,
   TARGET_PARAM,
   TARGET_TYPE_PARAM,
   droppedGroupColumns,
   edgePlanRefusal,
+  orientationParams,
   readPlan,
   synapseEdgesSchema,
   synapseEdgesTable,
@@ -79,27 +78,10 @@ export const synapseEdgesNode = packNode({
      * `Synapses Between` cloud with `Location: post` reads `post` in every row of the column
      * that would drive the flip. See `synapseEdges.ts`.
      */
-    {
-      id: ORIENTATION_PARAM,
-      kind: 'enum',
-      label: 'Orientation',
-      default: 'fixed',
-      options: [
-        { value: 'fixed', label: 'columns are already oriented' },
-        { value: 'polarity', label: 'read from a polarity column' },
-      ],
-      help: 'Which end of each synapse is presynaptic. Leave the default for Synapses Between; for Synapses, pick the second option.',
-    },
-    {
-      id: POLARITY_PARAM,
-      kind: 'column',
-      label: 'Polarity',
-      from: 'in',
-      default: 'polarity',
-      dtypes: ['str'],
-      visibleIf: (params) => params[ORIENTATION_PARAM] === 'polarity',
-      help: 'Rows reading "post" have their two ends swapped. Rows with any other value are left as they are, and their number is reported.',
-    },
+    ...orientationParams('in', {
+      unreadable:
+        'Rows with any other value are left as they are, and their number is reported.',
+    }),
     {
       id: GROUP_PARAM,
       kind: 'columns',

@@ -22,6 +22,7 @@
 import { registerPack } from '../core/registry'
 import type { PackDefinition } from '../core/registry'
 import { annotation } from './annotation'
+import { biophys } from './biophys'
 import { catmaid } from './catmaid'
 import { cave } from './cave'
 import { connectome } from './connectome'
@@ -38,6 +39,7 @@ export const PACKS: readonly PackDefinition[] = [
   catmaid,
   zapbench,
   cortex,
+  biophys,
   annotation,
 ]
 

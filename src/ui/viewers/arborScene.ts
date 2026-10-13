@@ -64,6 +64,72 @@ export interface BranchGroup {
   readonly sub: Int32Array
 }
 
+/** Sub-segments that always share a stroke: one key, one width. */
+export interface BranchPart<K> {
+  readonly key: K
+  readonly width: number
+  readonly sub: Int32Array
+}
+
+/**
+ * `count` sub-segments partitioned by `keyOf` and width, in first-seen order — the half of
+ * grouping that does not change while a drawing animates, so a frame regroups parts rather than
+ * keying every edge again. `width` is one for every edge, or one per edge (`radiusWidths`).
+ */
+export function branchParts<K>(
+  count: number,
+  keyOf: (sub: number) => K,
+  width: number | Float32Array,
+): BranchPart<K>[] {
+  const parts = new Map<string, { key: K; width: number; sub: number[] }>()
+  for (let i = 0; i < count; i++) {
+    const key = keyOf(i)
+    const w = typeof width === 'number' ? width : width[i]!
+    const id = `${String(key)}|${w}`
+    const part = parts.get(id)
+    if (part) part.sub.push(i)
+    else parts.set(id, { key, width: w, sub: [i] })
+  }
+  return [...parts.values()].map((p) => ({ ...p, sub: Int32Array.from(p.sub) }))
+}
+
+/** Parts coloured by `colorOf`, those of one colour and width drawn as one stroke. */
+export function partStrokes<K>(
+  parts: readonly BranchPart<K>[],
+  colorOf: (key: K) => string,
+): BranchGroup[] {
+  const strokes = new Map<string, { color: string; width: number; parts: Int32Array[] }>()
+  for (const part of parts) {
+    const color = colorOf(part.key)
+    const id = `${color}|${part.width}`
+    const stroke = strokes.get(id)
+    if (stroke) stroke.parts.push(part.sub)
+    else strokes.set(id, { color, width: part.width, parts: [part.sub] })
+  }
+  return [...strokes.values()].map(({ color, width, parts: list }) => {
+    if (list.length === 1) return { color, width, sub: list[0]! }
+    const sub = new Int32Array(list.reduce((n, a) => n + a.length, 0))
+    let at = 0
+    for (const a of list) {
+      sub.set(a, at)
+      at += a.length
+    }
+    return { color, width, sub }
+  })
+}
+
+/**
+ * `count` sub-segments as one stroke per colour and width, in the order each first appears: a
+ * tree coloured edge by edge is then a stroke per colour rather than one per edge.
+ */
+export function branchGroups(
+  count: number,
+  colorOf: (sub: number) => string,
+  width: number | Float32Array,
+): BranchGroup[] {
+  return partStrokes(branchParts(count, colorOf, width), (color) => color)
+}
+
 /** Synapse ticks grouped by colour, with the unlit ones dimmed. */
 export interface TickGroup {
   readonly color: string

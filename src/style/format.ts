@@ -108,6 +108,15 @@ export function formatShare(share: number): string {
   return share >= 0.1 ? `${Math.round(share * 100)}%` : `${(share * 100).toFixed(1)}%`
 }
 
+/**
+ * A number read for its side of zero, with a proper minus (`formatNumber` gives a hyphen), and a
+ * `+` where asked for: `−25`, `+50`.
+ */
+export function formatSigned(value: number, options: { plus?: boolean } = {}): string {
+  const sign = value < 0 ? '−' : value > 0 && options.plus ? '+' : ''
+  return `${sign}${formatNumber(Math.abs(value))}`
+}
+
 /** Full precision with thousands separators, for tables and tooltips. */
 export function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return '—'
@@ -321,6 +330,11 @@ export function formatAgo(epochMs: number, now = Date.now()): string {
  */
 export function plural(n: number, noun: string, plural = `${noun}s`): string {
   return `${formatNumber(n)} ${n === 1 ? noun : plural}`
+}
+
+/** A verb agreeing with a count, beside `plural`: `agree(n, 'is', 'are')`. */
+export function agree(n: number, one: string, many: string): string {
+  return n === 1 ? one : many
 }
 
 /**

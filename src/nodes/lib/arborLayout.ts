@@ -28,7 +28,8 @@
  *   subtrees do not cross; it is the one that looks like the neuron rather than like a diagram.
  */
 
-import type { Csr, KeyTree } from './arborOps'
+import type { Csr } from '../../core/stats'
+import type { KeyTree } from './arborOps'
 import { keyChildren } from './arborOps'
 
 export type ArborLayoutKind = 'rectangular' | 'radial' | 'subway' | 'equalAngle'

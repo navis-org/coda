@@ -11,6 +11,7 @@
 import type { ArborShape } from '../../nodes/lib/arborLayout'
 import type { Arbor, ArborPoint, KeyTree, Placement } from '../../nodes/lib/arborOps'
 import { distanceAt } from '../../nodes/lib/arborOps'
+import { radiusReference } from '../../nodes/lib/skeletonRadii'
 
 /** Padding round the fitted drawing, in CSS pixels. */
 export const PLOT_PAD = 16
@@ -231,6 +232,29 @@ export function subSegments(
     f0: Float32Array.from(f0),
     f1: Float32Array.from(f1),
   }
+}
+
+/**
+ * Each sub-segment's line width from the radius, the mean of its edge's two ends, scaled so the
+ * 95th percentile radius (`radiusReference`, the 3D view's own, so one neuron gets one reference
+ * across both) is twice `lineWidth`, since a single wide soma node would otherwise set the scale
+ * and thin every neurite to a hair. Clamped
+ * to 0.5…6 × `lineWidth`, in quarter-pixel steps — enough to read, few enough strokes to paint
+ * every frame. Undefined for a skeleton with no radius to scale by.
+ */
+export function radiusWidths(
+  arbor: Arbor,
+  sub: SubSegments,
+  radii: Float32Array,
+  lineWidth: number,
+): Float32Array | undefined {
+  const p95 = radiusReference(Float32Array.from(arbor.order, (v) => radii[v]!))
+  if (!(p95 > 0)) return undefined
+  return Float32Array.from(sub.node, (v) => {
+    const r = (radii[v]! + radii[arbor.parent[v]!]!) / 2
+    const width = Math.min(lineWidth * 6, Math.max(0.5, (2 * lineWidth * r) / p95))
+    return Math.round(width * 4) / 4
+  })
 }
 
 /* ------------------------------------------------------------------------------------------

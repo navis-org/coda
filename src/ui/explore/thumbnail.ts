@@ -49,7 +49,7 @@
 import type { Bounds3 } from '../../core/values'
 import { boundsOf } from '../../core/values'
 import { drawSegment, fillTriangle } from '../raster'
-import { radiusReference } from '../viewers/viewer3dScene'
+import { radiusReference } from '../../nodes/lib/skeletonRadii'
 
 export interface Silhouette {
   /** Width and height in pixels. */

@@ -36,7 +36,7 @@ import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
 import { familyForNodeType } from '../nodes/lib/datasetFamilies'
 import { buildWorkflow } from './build'
 import type { VisualisationId } from './options'
-import { sourceCan } from './options'
+import { sourceCan } from './gates'
 
 export interface StarterSpec {
   /** Dataset node type to open with, e.g. `dataset.malecns`. */

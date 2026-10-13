@@ -1444,6 +1444,9 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   one.**
 - [docs/cortex.md](docs/cortex.md) — the Cortex pack and the gallery: MICrONS cell typing, the
   depth frame and layer bounds, compartment labels, what is deferred and why.
+- [docs/biophys.md](docs/biophys.md) — the Biophysics pack: our TypeScript cable solver and how it is held
+  to NEURON, the Compartment Model and Simulate, Playback's on-demand movie, and what navis's
+  `CompartmentModel` gets wrong. Read before touching `src/biophys` or `src/packs/biophys`.
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two

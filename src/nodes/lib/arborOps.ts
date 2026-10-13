@@ -28,7 +28,8 @@
  * answer within the frame.
  */
 
-import { quantileSorted } from '../../core/stats'
+import type { Csr } from '../../core/stats'
+import { csr, quantileSorted } from '../../core/stats'
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { GeometryUnits, PointsValue, SkeletonGeometry } from '../../core/values'
@@ -184,23 +185,6 @@ export function healedBridges(original: Int32Array, healed: Int32Array): Uint8Ar
     out[i] = 1
   }
   return out
-}
-
-/** A list per index, as compressed rows: index `i`'s entries are `list[start[i] .. start[i + 1])`. */
-export interface Csr {
-  readonly start: Int32Array
-  readonly list: Int32Array
-}
-
-/** Group `values` by `owners` as CSR, keeping their order within each owner. */
-function csr(n: number, owners: Int32Array, values: Int32Array): Csr {
-  const start = new Int32Array(n + 1)
-  for (let k = 0; k < owners.length; k++) start[owners[k]! + 1]!++
-  for (let i = 0; i < n; i++) start[i + 1]! += start[i]!
-  const cursor = start.slice(0, n)
-  const list = new Int32Array(owners.length)
-  for (let k = 0; k < owners.length; k++) list[cursor[owners[k]!]!++] = values[k]!
-  return { start, list }
 }
 
 /**
@@ -636,6 +620,25 @@ export interface SynapseProjection {
   readonly child: Int32Array
   readonly parent: Int32Array
   readonly t: Float32Array
+  /** How far each site is from the point it was projected to, in the skeleton's units. */
+  readonly distance: Float32Array
+}
+
+/**
+ * The point `t` of the way from node `from` to node `node` — the convention `projectSynapses`
+ * places points by, an edge's start being its parent — or `node` itself where there is no start
+ * (`from` is -1, a root). The one spelling of a point on an edge.
+ */
+export function pointOnEdge(
+  positions: Float32Array,
+  from: number,
+  node: number,
+  t: number,
+): [number, number, number] {
+  const start = from < 0 ? node : from
+  const lerp = (k: number) =>
+    positions[start * 3 + k]! + t * (positions[node * 3 + k]! - positions[start * 3 + k]!)
+  return [lerp(0), lerp(1), lerp(2)]
 }
 
 /**
@@ -653,6 +656,7 @@ export function projectSynapses(
   const child = new Int32Array(sites.length).fill(-1)
   const parent = new Int32Array(sites.length).fill(-1)
   const t = new Float32Array(sites.length).fill(1)
+  const distance = new Float32Array(sites.length).fill(Infinity)
   const { nodeOf } = assignSynapses(skeleton, sites)
   const children = deliveredChildren(skeleton.parents)
   const { parents, positions: pos } = skeleton
@@ -700,8 +704,16 @@ export function projectSynapses(
     if (p >= 0 && p < n) consider(v, p)
     for (let k = children.start[v]!; k < children.start[v + 1]!; k++)
       consider(children.list[k]!, v)
+    // A node with no edges at all is its own nearest point.
+    distance[s] = Math.sqrt(
+      Number.isFinite(bestDist)
+        ? bestDist
+        : (site.x - pos[v * 3]!) ** 2 +
+            (site.y - pos[v * 3 + 1]!) ** 2 +
+            (site.z - pos[v * 3 + 2]!) ** 2,
+    )
   }
-  return { child, parent, t }
+  return { child, parent, t, distance }
 }
 
 /**

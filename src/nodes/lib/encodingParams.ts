@@ -12,7 +12,7 @@
  */
 
 import type { AttributePart, DType } from '../../core/types'
-import { NODE_VALUES } from '../../core/values'
+import { BUILT_IN_NODE_VALUES, NODE_VALUES } from './nodeValues'
 import { NUMERIC_DTYPES } from '../../core/types'
 import type { CompositeRef, EnumOption, ParamDef, ParamValues } from '../../core/node'
 import type { ColorLimits, DivergingPalette, SequentialPalette } from './heatmapParams'
@@ -422,11 +422,18 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
             id: `${prefix}NodeValue`,
             kind: 'enum',
             label: `${label} node value`,
-            default: NODE_VALUES[0].value,
-            options: NODE_VALUES.map(({ value, label: name }) => ({ value, label: name })),
+            default: BUILT_IN_NODE_VALUES[0].value,
+            options: NODE_VALUES.map(({ value, label: name, pack }) => ({
+              value,
+              label: name,
+              ...(pack ? { pack } : {}),
+            })),
             help:
               'Which per-node number to colour by. ' +
-              NODE_VALUES.map((v) => `${v.label}: from ${v.source}.`).join(' '),
+              NODE_VALUES.map(
+                (v) =>
+                  `${v.label}: from ${v.source}${v.pack ? ` (the ${v.pack} pack, when on)` : ''}.`,
+              ).join(' '),
             visibleIf: (params) => params[modeId] === 'nodeValue',
           },
         ] satisfies ParamDef[])
@@ -976,6 +983,11 @@ export interface ColorSpec {
   nodeValue?: string
 }
 
+/** A `ColorSpec` that is just one colour. Spelled once; the interface requires every field. */
+export function constantColor(constant: string): ColorSpec {
+  return { mode: 'constant', column: undefined, constant }
+}
+
 /**
  * `by value`'s ramp, ends, centre and log, parsed. See `ColorParamOptions.valueScale`.
  *
@@ -1061,7 +1073,7 @@ export function readColorSpec(
     column: DATALESS_MODES.has(mode) ? undefined : resolveColumn(`${prefix}ColorBy`),
     constant: String(params[`${prefix}Color`] ?? '0'),
     ...(mode === 'nodeValue'
-      ? { nodeValue: String(params[`${prefix}NodeValue`] ?? NODE_VALUES[0].value) }
+      ? { nodeValue: String(params[`${prefix}NodeValue`] ?? BUILT_IN_NODE_VALUES[0].value) }
       : {}),
     // Tolerant like the rest of this reader: a graph saved before the dropdown existed has no
     // key at all, and `paletteColors` reads a missing or unknown name as `coda`.

@@ -37,6 +37,7 @@ import {
 import type { Affine, Domain, Rect, ScaleKind, Viewport } from './scatterPlot'
 import {
   axisTicks,
+  forward,
   inverse,
   padDomain,
   projectX,
@@ -62,6 +63,14 @@ export interface LineChartViewerProps {
   xLog?: boolean
   yLog?: boolean
   palette?: PaletteName
+  /** An X to mark with a solid line — a player's current time, say. Untransformed, as in the table. */
+  cursor?: number
+  /**
+   * Xs to mark with a short tick at the foot of the plot — when inputs arrive, say. Untransformed;
+   * `xMarksLabel` says what they are, on hover and in the exported SVG.
+   */
+  xMarks?: readonly number[]
+  xMarksLabel?: string
   compact?: boolean
   baseName?: string
   onExpand?: () => void
@@ -70,6 +79,8 @@ export interface LineChartViewerProps {
 
 const PAD = { left: 54, right: 16, top: 14, bottom: 26 }
 const LINE_WIDTH = 1.5
+/** How tall an `xMarks` tick is, px. */
+const MARK_HEIGHT = 7
 /** How many lines the crosshair's tooltip lists before it says how many more. */
 const TOOLTIP_LINES = 12
 
@@ -90,6 +101,9 @@ export function LineChartViewer({
   xLog = false,
   yLog = false,
   palette = 'coda',
+  cursor,
+  xMarks,
+  xMarksLabel,
   compact = false,
   baseName,
   onExpand,
@@ -183,6 +197,17 @@ export function LineChartViewer({
     setZoom(panWindow(frame.view.x, full, -dx / frame.affine.sx))
   })
 
+  // Every mark one short stroke up from the plot's foot, in one path — memoised, a moving cursor
+  // re-rendering the chart every frame of a playback.
+  const marksPath = useMemo(() => {
+    if (!xMarks || !frame) return undefined
+    return xMarks
+      .map((x) => forward(xScale, x))
+      .filter((x) => Number.isFinite(x) && x >= frame.view.x.min && x <= frame.view.x.max)
+      .map((x) => `M${projectX(x, frame.view, plot)} ${plot.y + plot.height}v${-MARK_HEIGHT}`)
+      .join('')
+  }, [xMarks, xScale, frame, plot])
+
   if (!frame) {
     return (
       <ViewerEmpty>
@@ -194,6 +219,8 @@ export function LineChartViewer({
   }
 
   const xOf = (t: number) => projectX(t, frame.view, plot)
+  // The cursor's X, transformed; NaN for none, or for one a log axis has no room for.
+  const cursorX = cursor === undefined ? Number.NaN : forward(xScale, cursor)
   const yOf = (t: number) => projectY(t, frame.view, plot)
   const xTicks = axisTicks(frame.view.x, xScale, plot.width > 360 ? 6 : 4)
   const yTicks = axisTicks(frame.view.y, yScale, Math.max(3, Math.floor(plot.height / 50)))
@@ -307,6 +334,27 @@ export function LineChartViewer({
                   strokeLinejoin="round"
                 />
               ))}
+              {marksPath && (
+                <path
+                  d={marksPath}
+                  stroke={ink.secondary}
+                  strokeWidth={1.5}
+                  pointerEvents="stroke"
+                >
+                  {xMarksLabel && <title>{xMarksLabel}</title>}
+                </path>
+              )}
+              {Number.isFinite(cursorX) && (
+                <line
+                  x1={xOf(cursorX)}
+                  y1={plot.y}
+                  x2={xOf(cursorX)}
+                  y2={plot.y + plot.height}
+                  stroke={ink.primary}
+                  strokeWidth={1.5}
+                  pointerEvents="none"
+                />
+              )}
             </g>
 
             {hover && !panning && (
