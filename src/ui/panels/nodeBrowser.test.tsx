@@ -242,6 +242,7 @@ describe('NodeBrowser filtering', () => {
       'Heatmap',
       'Histogram',
       'Laminar Profile',
+      'Line Chart',
       'Network Metrics',
       'Network Viewer',
       'Neuroglancer',
@@ -256,7 +257,7 @@ describe('NodeBrowser filtering', () => {
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('23 nodes')).toBeTruthy()
+    expect(screen.getByText('24 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

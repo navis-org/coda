@@ -33,6 +33,7 @@ import type { PickedLabels } from '../../plans/viewers'
 import {
   NEUROGLANCER_REFUSAL,
   barChartPlan,
+  lineChartPlan,
   distributionPlan,
   histogramPlan,
   piePlan,
@@ -162,6 +163,54 @@ registerEmitter('out.barChart', (ctx) => {
     )
   }
   lines.push(`plt.ylabel(${pyStr(value)})`, `plt.tight_layout()`, `plt.show()`)
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// Line chart
+// ---------------------------------------------------------------------------
+
+/**
+ * One `plt.plot` per (series value, Y column), as the canvas draws them. Each line drops its
+ * empty cells before plotting rather than leaving NaN in: matplotlib breaks a line at a NaN where
+ * the canvas joins across the gap, and a trace with one missing sample would come out as two.
+ */
+registerEmitter('out.lineChart', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('matplotlib')
+  const out = ctx.output('out')
+  const plan = lineChartPlan(ctx)
+
+  const lines = [`${out} = ${src}`]
+  if (plan.note !== undefined) return [...lines, ...ctx.note(plan.note)]
+  const { x, ys, series, byX, xLog, yLog } = plan
+
+  const skip = series ? `(${pyStr(x)}, ${pyStr(series)})` : `(${pyStr(x)},)`
+  lines.push(
+    ``,
+    ys.length > 0
+      ? `_y = ${pyList(ys)}`
+      : `# Every numeric column but X${series ? ' and the series' : ''}, as the canvas draws with no Y picked.
+` + `_y = [c for c in ${out}.select_dtypes('number').columns if c not in ${skip}]`,
+    `plt.figure(figsize=(9, 5))`,
+    series
+      ? `for _name, _group in ${out}.groupby(${pyStr(series)}, sort=False, dropna=False):`
+      : `for _name, _group in [(None, ${out})]:`,
+    ...(byX ? [`    _group = _group.sort_values(${pyStr(x)}, kind='stable')`] : []),
+    `    for _col in _y:`,
+    `        _line = _group[[${pyStr(x)}, _col]].dropna()`,
+    series
+      ? `        _label = str(_name) if len(_y) == 1 else f'{_name} · {_col}'`
+      : `        _label = _col`,
+    `        plt.plot(_line[${pyStr(x)}], _line[_col], label=_label, linewidth=1.5)`,
+    ...(xLog ? [`plt.xscale('log')`] : []),
+    ...(yLog ? [`plt.yscale('log')`] : []),
+    `plt.xlabel(${pyStr(x)})`,
+    `if len(plt.gca().get_lines()) > 1:`,
+    `    plt.legend()`,
+    `plt.tight_layout()`,
+    `plt.show()`,
+  )
   return lines
 })
 

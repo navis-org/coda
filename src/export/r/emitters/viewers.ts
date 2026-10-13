@@ -30,6 +30,7 @@ import type { PickedLabels } from '../../plans/viewers'
 import {
   NEUROGLANCER_REFUSAL,
   barChartPlan,
+  lineChartPlan,
   distributionPlan,
   flowChartPlan,
   rankPlan,
@@ -134,6 +135,47 @@ registerEmitter('out.barChart', (ctx) => {
     `  labs(y = ${rStr(value)}) +`,
     `  theme_minimal() +`,
     `  theme(axis.text.x = element_text(angle = 45, hjust = 1))`,
+  )
+  return lines
+})
+
+/**
+ * Long first, then one line per (series value, Y column) — `geom_line` joins in X order and
+ * `geom_path` in row order, which is the whole of the Join setting. Empty cells are dropped before
+ * plotting, as the canvas skips them; ggplot would warn and break the line instead.
+ */
+registerEmitter('out.lineChart', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('ggplot2')
+  ctx.library('tidyr')
+  ctx.library('dplyr')
+  const out = ctx.output('out')
+  const plan = lineChartPlan(ctx)
+
+  const lines = [`${out} <- ${src}`]
+  if (plan.note !== undefined) return [...lines, ...ctx.note(plan.note)]
+  const { x, ys, series, byX, xLog, yLog } = plan
+
+  const skip = rVector(series ? [x, series] : [x])
+  const label = series
+    ? `if (length(y_cols) == 1) as.character(${col(series)}) else paste(${col(series)}, .y, sep = " · ")`
+    : `.y`
+  lines.push(
+    ``,
+    ys.length > 0
+      ? `y_cols <- ${rVector(ys)}`
+      : `# Every numeric column but X${series ? ' and the series' : ''}, as the canvas draws with no Y picked.
+` + `y_cols <- setdiff(names(Filter(is.numeric, ${out})), ${skip})`,
+    `${out} |>`,
+    `  pivot_longer(all_of(y_cols), names_to = ".y", values_to = ".value") |>`,
+    `  filter(!is.na(${col(x)}), !is.na(.value)) |>`,
+    `  mutate(.line = ${label}) |>`,
+    `  ggplot(aes(x = ${col(x)}, y = .value, colour = .line, group = .line)) +`,
+    `  ${byX ? 'geom_line()' : 'geom_path()'} +`,
+    ...(xLog ? [`  scale_x_log10() +`] : []),
+    ...(yLog ? [`  scale_y_log10() +`] : []),
+    `  labs(x = ${rStr(x)}, y = NULL, colour = NULL) +`,
+    `  theme_minimal()`,
   )
   return lines
 })

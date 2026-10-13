@@ -1040,6 +1040,16 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '5.4', cy: '6.2', r: '1.4', fill: 'currentColor', stroke: 'none' }],
   ],
   /*
+   * Two axes and two lines running across them, one with a spike: what a voltage trace looks like,
+   * and unlike the rank plot's single curve, more than one.
+   */
+  'out.lineChart': [
+    ['line', { x1: '4', y1: '4', x2: '4', y2: '20' }],
+    ['line', { x1: '4', y1: '20', x2: '20', y2: '20' }],
+    ['path', { d: 'M5 15L9 15L10.5 6L12 16L15 14.5L19 14.5' }],
+    ['path', { d: 'M5 18L9 17L13 12L16 11L19 11.5' }],
+  ],
+  /*
    * A decaying curve with its head picked out as dots, over a rising share.
    *
    * The two marks are the node: `out.barChart`'s glyph is bars of decreasing length, which is

@@ -112,6 +112,27 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: '2026-10-13',
+    title: 'Line Chart',
+    summary:
+      'The new Line Chart plots numeric columns against one X as lines, for traces, time courses and profiles. Hover reads every line at once, and scrolling zooms along X.',
+    highlight: true,
+    features: [
+      {
+        kind: 'chart',
+        date: '2026-10-13',
+        title: 'Line Chart: traces, time courses and profiles',
+        body: 'One line per **Y** column for a wide table, or per value of a **Series** column for a long one, or both. Leave **Y** empty to draw every numeric column. Hover shows every line’s value at the pointer, scroll zooms along X and the Y axis rescales to what is in view. Long traces keep their spikes: each pixel column draws its highest and lowest sample, on screen and in the exported SVG.',
+        image: {
+          file: 'line-chart.webp',
+          alt: 'Line chart of several numeric columns against one X, with a legend and a crosshair reading every line at one point.',
+          capture: { expand: 'out.lineChart' },
+        },
+        demo: 'out.lineChart',
+      },
+    ],
+  },
+  {
     date: '2026-10-12',
     title: 'Motif search',
     summary:

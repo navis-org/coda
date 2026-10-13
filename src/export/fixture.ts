@@ -1373,6 +1373,22 @@ export function everythingGraph(): CodaGraph {
       params: { category: 'preType', value: 'sum_weight' },
     },
     {
+      // Long: one line per type, joined by X, X logged.
+      id: 'lines',
+      type: 'out.lineChart',
+      col: 9,
+      row: 3,
+      params: { x: 'pre', ys: ['post'], series: 'type', order: 'x', xLog: true },
+    },
+    {
+      // Wide: no Y picked, so every numeric column but X, joined in row order.
+      id: 'linesWide',
+      type: 'out.lineChart',
+      col: 9,
+      row: 4,
+      params: { x: 'pre', order: 'rows' },
+    },
+    {
       id: 'scatter',
       type: 'out.scatter',
       col: 8,
@@ -1711,6 +1727,8 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'betweenDown', 'sources'],
     ['labels', 'neurons', 'betweenUp', 'targets'],
     ['find', 'neurons', 'scatter', 'in'],
+    ['find', 'neurons', 'lines', 'in'],
+    ['find', 'neurons', 'linesWide', 'in'],
     ['find', 'neurons', 'combine', 'in'],
     ['find', 'neurons', 'joined', 'in'],
     ['find', 'neurons', 'extremes', 'in'],

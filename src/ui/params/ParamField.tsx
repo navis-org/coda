@@ -222,6 +222,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
           selected={selected}
           noun="column"
           emptyAvailable="no columns"
+          {...(param.emptyLabel ? { emptyChip: param.emptyLabel } : {})}
           onChange={onChange}
         />
       )

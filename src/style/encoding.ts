@@ -745,19 +745,39 @@ export function resolveColor(
     colors.set(label, overrideOf(label) ?? cycleColor(index, mode, spec.palette))
   })
 
-  const listed = ranked.slice(0, LEGEND_KEYS).map(([label]) => label)
-
   return {
     at: (rowIndex) => colors.get(cellKey(rowIndex)) ?? MUTED,
     labelAt: cellKey,
-    legend: {
-      kind: 'categorical',
-      column: spec.column,
-      entries: listed.map((label) => ({ label, color: colors.get(label)! })),
-      truncated: ranked.length > LEGEND_KEYS,
-      unlisted: Math.max(0, ranked.length - LEGEND_KEYS),
-      cycled: ranked.length > paletteColors(spec.palette, mode).length,
-    },
+    legend: categoricalLegend(
+      spec.column,
+      ranked.map(([label]) => label),
+      (label) => colors.get(label)!,
+      paletteColors(spec.palette, mode).length,
+    ),
+  }
+}
+
+/**
+ * A key for values coloured by cycling a palette of `paletteSize`: the first `LEGEND_KEYS` keyed,
+ * how many are not, and whether any two share a colour. The one statement of those three facts,
+ * for `resolveColor` and for a chart colouring something that is not a column (the Line Chart's
+ * lines).
+ */
+export function categoricalLegend(
+  column: string,
+  labels: readonly string[],
+  colorOf: (label: string, index: number) => string,
+  paletteSize: number,
+): CategoricalLegend {
+  return {
+    kind: 'categorical',
+    column,
+    entries: labels
+      .slice(0, LEGEND_KEYS)
+      .map((label, index) => ({ label, color: colorOf(label, index) })),
+    truncated: labels.length > LEGEND_KEYS,
+    unlisted: Math.max(0, labels.length - LEGEND_KEYS),
+    cycled: labels.length > paletteSize,
   }
 }
 

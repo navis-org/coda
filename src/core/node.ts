@@ -856,6 +856,11 @@ export interface ColumnsParam extends ParamBase {
    * nobody has touched.
    */
   optional?: boolean
+  /**
+   * What an empty selection means, in words, shown where the chips would be — `multiEnum`'s
+   * field, for a picker whose empty is a decision the node interprets ("every numeric column").
+   */
+  emptyLabel?: string
 }
 
 /**

@@ -3180,6 +3180,43 @@ written and never once executed by a golden, with every coverage test passing �
 that the node *type* is in the graph, not that its cell reached the document. Hence two fixture
 nodes, and the plain one is fed from Connectivity.
 
+## Line Chart: numeric columns against one numeric X
+
+`out.lineChart` (`nodes/output/lineChart.ts`, `ui/viewers/LineChartViewer.tsx`, the rules in
+`ui/viewers/lineSeries.ts`). Built for voltage traces (the biophysics pack's Simulate), and
+deliberately a node of its own rather than lines on the Scatter: the Scatter's model is one row, one
+mark, with colour-by, size-by, labels, a lasso that outputs *rows* and trends per group, and a
+several-Y picker would turn a row into several marks and give each of those a special case.
+
+- **A line is a (series value, Y column) pair**, so a wide table (Simulate's `t`, `soma`, `site 1`…)
+  and a long one (a Series column) both draw without an Unpivot, and both together draw every Y for
+  every series, labelled `series · Y`. **Empty Y is every numeric column but X and Series**
+  (`yColumnsOf`, headless in `nodes/lib/lineChart.ts` so the export plan resolves it too and the
+  notebook gets the literal list the canvas drew; only an unknown schema falls back to each
+  language's spelling of the rule). The picker says so with `ColumnsParam.emptyLabel`,
+  `multiEnum`'s field given to column multi-pickers, and the assistant's catalogue prints it for
+  both kinds.
+- **Joined in X order or in row order** (`Join`). X order sorts each line stably; row order is for a
+  path that doubles back. Empty cells are **skipped and the line runs across the gap**; both
+  exporters drop them before plotting for that reason (matplotlib and ggplot would break the line).
+- **Decimation is M4 per pixel column** — first, lowest, highest, last — and only on an X-ordered
+  line, whose columns mean something. Y refits from the decimated samples, which keep each column's
+  extremes, so a zoom frame reads the data once. A one-sample spike survives on screen and in the
+  SVG, where a stride would step over it. Unsorted lines are drawn whole.
+- **The crosshair reads every line at one X**: each line's sample nearest the pointer, one tooltip
+  row each (twelve, then a count), dots on the lines.
+- **Zoom is along X only** (wheel about the pointer, drag to pan once zoomed, double-click back),
+  and **Y refits to the window**, so a 2 ms onset on a 100 ms trace fills the height. Y alone is
+  never zoomed: a trace zoomed in voltage alone is a trace cut off. The window resets when the
+  table, X or its scale changes.
+- **Colours cycle** (`cycleColor`, the `Palette` param) — a line keeps its own mark, so folding into
+  `Other` buys nothing; the key lists twelve and says `+N more`, the caption `colours repeat`. A
+  single line draws no key.
+- **A tap**: every param presentational, the table through by identity with its `neurons`-ness.
+
+Measured in Chrome on Simulate's traces (1,001 samples, soma and three named record sites): four
+lines, the crosshair reading all four, and a zoom to 18–52 ms refitting Y to −0.2…−1.1 mV.
+
 ## Sankey: layered flow, where the width is the quantity
 
 The picture `Influence` needed and the one a node-link diagram could not be. The retired `Network`

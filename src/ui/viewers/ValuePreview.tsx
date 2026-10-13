@@ -65,6 +65,10 @@ import { scopedKey, WorkflowScope } from './workflowScope'
 import { ScatterViewer } from './ScatterViewer'
 import { DendrogramViewer } from './DendrogramViewer'
 import { RankViewer } from './RankViewer'
+import { LineChartViewer } from './LineChartViewer'
+import type { LineOrder } from './lineSeries'
+import { yColumnsOf } from '../../nodes/lib/lineChart'
+import type { PaletteName } from '../../nodes/lib/encodingParams'
 import { SankeyViewer } from './SankeyViewer'
 import type { SankeyDirection } from './sankeyLayout'
 import { FlowChartViewer } from './FlowChartViewer'
@@ -1038,6 +1042,32 @@ const VIEWERS: Record<string, ViewerEntry> = {
           trendPerGroup={params.trendPerGroup !== false}
           selection={selection}
           {...(onSelectionChange ? { onSelectionChange } : {})}
+          {...shared}
+        />
+      )
+    },
+  },
+  /*
+   * SVG, decimated to a few samples per pixel column, so not behind `LazyViewers` (Rank Plot's
+   * reason, below). The Y default — every numeric column but X and Series — is resolved here
+   * against the table that arrived, by `yColumnsOf`, the rule the export plan reads too.
+   */
+  'out.lineChart': {
+    render: ({ value, ctx, params, choice, shared }) => {
+      if (!isTableValue(value)) return undefined
+      const x = ctx.column('x')
+      if (!x) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a numeric X column" />
+      const series = ctx.column('series')
+      return (
+        <LineChartViewer
+          table={value}
+          x={x}
+          ys={yColumnsOf(value.schema, ctx.columns('ys'), x, series)}
+          series={series}
+          order={choice<LineOrder>('order')}
+          xLog={params.xLog === true}
+          yLog={params.yLog === true}
+          palette={choice<PaletteName>('palette')}
           {...shared}
         />
       )

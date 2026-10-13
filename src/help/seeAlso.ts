@@ -177,7 +177,7 @@ const RELATED: readonly (readonly string[])[] = [
   ['out.neuronDendrogram', 'out.topology', 'neuron.skeletons', 'out.viewer3d'],
 
   // --- charts ---------------------------------------------------------------
-  ['out.barChart', 'out.pie', 'out.histogram', 'out.distribution', 'out.rank'],
+  ['out.barChart', 'out.pie', 'out.histogram', 'out.distribution', 'out.rank', 'out.lineChart'],
   ['out.histogram', 'out.describe'],
 
   // --- running it several times ---------------------------------------------

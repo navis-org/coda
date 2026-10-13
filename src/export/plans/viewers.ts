@@ -25,9 +25,13 @@ import { decodeClauses, resolveFilters } from '../../nodes/lib/tableFilter'
 import type { NeutralContext, Noted, Refusable } from '../neutral'
 import { showsEdgeLabels } from '../../nodes/lib/flowChartOps'
 import { selectionIds } from '../selection'
+import { yColumnsOf } from '../../nodes/lib/lineChart'
 
 /** What the chart plans read: params and the column pickers. */
 type ChartContext = Pick<NeutralContext, 'params' | 'column'>
+
+/** What a plan reads that also resolves a multi-picker against the input's schema. */
+type SchemaChartContext = ChartContext & Pick<NeutralContext, 'columns' | 'schema'>
 
 /** The nodes whose selection note is planned here. */
 type SelectingNode =
@@ -117,6 +121,39 @@ export function barChartPlan(ctx: ChartContext): BarChartPlan {
   if (!category || !value) return { note: nothingDrawn('category or value') }
   const series = ctx.params.useSeries === true ? ctx.column('series') : undefined
   return { category, value, series }
+}
+
+/**
+ * A Line Chart: X, the Y columns, the series, whether lines are joined by X, and the two log axes.
+ * Zoom is the canvas's alone.
+ *
+ * `ys` is resolved here — with none picked, every numeric column but X and the series, by the
+ * canvas's own `yColumnsOf` — so a notebook gets the literal list the canvas drew. It comes back
+ * empty only where the input's schema is not known at export time, and each language then writes
+ * the same rule out against the table it has.
+ */
+export type LineChartPlan = Noted<{
+  x: string
+  ys: string[]
+  series?: string
+  byX: boolean
+  xLog: boolean
+  yLog: boolean
+}>
+
+export function lineChartPlan(ctx: SchemaChartContext): LineChartPlan {
+  const x = ctx.column('x')
+  if (!x) return { note: nothingDrawn('x') }
+  const series = ctx.column('series')
+  const schema = ctx.schema('in')
+  return {
+    x,
+    ys: schema ? yColumnsOf(schema, ctx.columns('ys'), x, series) : ctx.columns('ys'),
+    ...(series ? { series } : {}),
+    byX: ctx.params.order !== 'rows',
+    xLog: ctx.params.xLog === true,
+    yLog: ctx.params.yLog === true,
+  }
 }
 
 export interface HistogramPlan {

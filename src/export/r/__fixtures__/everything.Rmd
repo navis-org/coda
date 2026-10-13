@@ -1900,6 +1900,37 @@ ggplot(scatter_plot_out, aes(x = `pre`, y = `post`, colour = `type`, shape = `ty
   theme_minimal()
 ```
 
+```{r line-chart}
+# ── Line Chart ──
+line_chart <- find_neurons
+
+y_cols <- c("post")
+line_chart |>
+  pivot_longer(all_of(y_cols), names_to = ".y", values_to = ".value") |>
+  filter(!is.na(`pre`), !is.na(.value)) |>
+  mutate(.line = if (length(y_cols) == 1) as.character(`type`) else paste(`type`, .y, sep = " · ")) |>
+  ggplot(aes(x = `pre`, y = .value, colour = .line, group = .line)) +
+  geom_line() +
+  scale_x_log10() +
+  labs(x = "pre", y = NULL, colour = NULL) +
+  theme_minimal()
+```
+
+```{r line-chart-2}
+# ── Line Chart ──
+line_chart_2 <- find_neurons
+
+y_cols <- c("size", "post")
+line_chart_2 |>
+  pivot_longer(all_of(y_cols), names_to = ".y", values_to = ".value") |>
+  filter(!is.na(`pre`), !is.na(.value)) |>
+  mutate(.line = .y) |>
+  ggplot(aes(x = `pre`, y = .value, colour = .line, group = .line)) +
+  geom_path() +
+  labs(x = "pre", y = NULL, colour = NULL) +
+  theme_minimal()
+```
+
 ```{r combine-columns}
 # ── Combine Columns ──
 combine_columns <- find_neurons

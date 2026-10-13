@@ -226,7 +226,9 @@ function renderParam(
   }
   // What empty means, for the kind where empty is a choice rather than an omission. Without it
   // a model reads `[]` as "unset" and fills the list in to be helpful.
-  if (param.kind === 'multiEnum' && param.emptyLabel) bits.push(`(empty = ${param.emptyLabel})`)
+  if ((param.kind === 'multiEnum' || param.kind === 'columns') && param.emptyLabel) {
+    bits.push(`(empty = ${param.emptyLabel})`)
+  }
 
   if (param.kind === 'number' || param.kind === 'int') {
     // Printed because `validateParamValue` enforces them: a bound the model cannot see is a
