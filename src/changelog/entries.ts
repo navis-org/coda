@@ -131,6 +131,15 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         demo: 'out.lineChart',
       },
     ],
+    items: [
+      {
+        kind: 'node',
+        date: '2026-10-13',
+        title: '**Skeletonize Meshes** turns neuron meshes into skeletons.',
+        body: 'Skeletonizes each mesh with skeletor’s wavefront method, in the browser, and gives the same skeleton skeletor does in Python. **Waves** and **Step size** trade detail against noise, and **Min fragment size** drops small disconnected pieces of the mesh first. **Shave** removes the short twigs the method leaves along the backbone, as navis or fafbseg do, and **Fix zero radii** fills in radii at the tips. Where the dataset knows where the soma is (neuPrint, MICrONS and now FlyWire’s nucleus table), the soma is labelled and each skeleton is rooted there; **Clean up soma** merges the soma into one node and clears the tangle the method tends to leave inside it. The notebook export calls skeletor directly.',
+        demo: 'neuron.skeletonize',
+      },
+    ],
   },
   {
     date: '2026-10-12',

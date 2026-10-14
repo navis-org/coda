@@ -312,6 +312,9 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
       ...STANDARD_SYNAPSE_COLUMNS,
       scoreColumn: 'cleft_score',
     },
+    // Public, with `pt_root_id` and `pt_position` at v783 — checked live. What a mesh's soma
+    // comes from for Skeletonize Meshes; a nucleus position sits inside the soma's mesh.
+    nuclei: { table: 'nuclei_v1' },
   },
   {
     datastack: 'brain_and_nerve_cord_public',

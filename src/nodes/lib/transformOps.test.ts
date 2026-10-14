@@ -170,6 +170,29 @@ describe('mesh winding', () => {
     expect([...out.items[0]!.indices]).toEqual([2, 1, 0])
   })
 
+  it('flips a mesh’s soma with its vertices, since it is a point in the same frame', () => {
+    // Spread through untouched, the soma would stay on the other side of the brain from its
+    // neuron, and Skeletonize Meshes would look for it there with nothing to say so.
+    const withSoma: MeshesValue = {
+      ...meshes(),
+      items: [{ ...meshes().items[0]!, soma: [10, 0, 0] }],
+    }
+    const out = mirrorGeometry(withSoma, SPEC, 'FLYWIRE') as MeshesValue
+    const flipped = mirrorGeometry(
+      {
+        ...meshes(),
+        items: [{ ...meshes().items[0]!, positions: new Float32Array([10, 0, 0]) }],
+      },
+      SPEC,
+      'FLYWIRE',
+    ) as MeshesValue
+    expect(out.items[0]!.soma).toEqual([...flipped.items[0]!.positions])
+    // And nothing is invented for a mesh that had none.
+    expect('soma' in (mirrorGeometry(meshes(), SPEC, 'FLYWIRE') as MeshesValue).items[0]!).toBe(
+      false,
+    )
+  })
+
   it('leaves winding alone for skeletons and points, which have none', () => {
     // Stated so the rule is visibly about *reflections of surfaces* rather than about mirrors:
     // a bridging warp preserves orientation, and reversing there would cause the fault.

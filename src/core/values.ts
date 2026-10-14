@@ -299,6 +299,11 @@ export interface SkeletonGeometry {
    * `soma` node tag respectively. Never inferred here: a split computed from synapses is a
    * *result* (`out.topology`), and one written into the geometry would be indistinguishable from
    * one the source measured. Where present it is exactly as long as `radii`.
+   *
+   * **One exception, opt-in:** Skeletonize Meshes' `Detect soma` labels the widest node of a
+   * skeleton it computed itself as the soma, where the source gave no position. Its soma from a
+   * source position is the source's, as neuPrint's is; the detected one is a guess the card says
+   * is one.
    */
   readonly compartments?: Uint8Array
   /**
@@ -519,6 +524,16 @@ export interface MeshGeometry {
   readonly positions: Float32Array
   /** Triangle indices into `positions`. */
   readonly indices: Uint32Array
+  /**
+   * Where the source says this neuron's soma is, in the same frame and units as `positions` —
+   * neuPrint's `somaLocation`, a CAVE nucleus table's position. Absent means the source does not
+   * say, which is most of them and every region mesh.
+   *
+   * A *point*, so anything that moves the vertices has to move it too: Mirror flips it and every
+   * spline warp warps it with the mesh (`transformOps.ts`). An operation that only changes the
+   * surface — decimation, cleaning — carries it unchanged. Skeletonize Meshes is what reads it.
+   */
+  readonly soma?: readonly [number, number, number]
 }
 
 /**

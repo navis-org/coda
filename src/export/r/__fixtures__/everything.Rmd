@@ -2761,6 +2761,12 @@ embedding_3 <- coda_relabel(
 )
 ```
 
+```{r skeletonize-meshes}
+# ── Skeletonize Meshes ──
+# TODO: nothing upstream produced a value, because "Clean Meshes" was not
+# translated.
+```
+
 ```{r synapses-to-edges}
 # ── Synapses to Edges ──
 synapses_to_edges_fold <- coda_synapse_edges(

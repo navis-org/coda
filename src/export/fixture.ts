@@ -472,6 +472,26 @@ export function everythingGraph(): CodaGraph {
     },
 
     /*
+     * Every control the cell emits off its default, so each argument is named: a fragment
+     * threshold before skeletor's call and the thorough shave after it, the two steps it adds.
+     */
+    {
+      id: 'skeletonize',
+      type: 'neuron.skeletonize',
+      col: 4,
+      row: 12,
+      params: {
+        waves: 2,
+        stepSize: 3,
+        minFragment: 100,
+        radiusAgg: 'median',
+        shave: 'thorough',
+        shaveCutoff: 2,
+        fixZeroRadii: true,
+      },
+    },
+
+    /*
      * All three match modes, because they are three different fastcore functions returning
      * three different shapes — and the two cutoff spellings, because `percentage` is a band
      * around each row's own best and `threshold` is one number, which is the pair most likely
@@ -1837,6 +1857,7 @@ export function everythingGraph(): CodaGraph {
     ['skel', 'skeletons', 'simplifyrdp', 'in'],
     ['skel', 'skeletons', 'simplifyvw', 'in'],
     ['mesh', 'meshes', 'cleanmesh', 'in'],
+    ['cleanmesh', 'out', 'skeletonize', 'in'],
     ['nblast', 'scores', 'matchtop', 'in'],
     ['nblast', 'scores', 'matchabove', 'in'],
     ['nblast', 'scores', 'matchcount', 'in'],

@@ -21,9 +21,8 @@ import { defaultParams, makeInferContext } from '../../core/node'
 import type { ParamValues } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import type { Scheduler } from '../../core/scheduler'
-import { column, tableSchema } from '../../core/types'
 import type { MeshesValue } from '../../core/values'
-import { isMeshesValue, makeTable } from '../../core/values'
+import { isMeshesValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import type { CleanMeshesRequest, CleanMeshesResult } from '../../pyodide/meshes'
@@ -37,6 +36,7 @@ import {
 } from '../lib/cleanOps'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { meshesFixture } from '../../test/meshes'
 import { node } from '../../test/graph'
 import { mockScheduler } from '../../test/scheduler'
 
@@ -54,32 +54,6 @@ const OFF: MeshCleanParams = {
   smooth: 0,
   method: 'taubin',
   volumeCorrection: false,
-}
-
-/** Two tetrahedra and an empty mesh — the third being the case the item-count rule is about. */
-function meshesFixture(detail = false): MeshesValue {
-  const tetra = (offset: number) =>
-    new Float32Array(
-      [0, 0, 0, 1000, 0, 0, 0, 1000, 0, 0, 0, 1000].map((v, i) =>
-        i % 3 === 0 ? v + offset : v,
-      ),
-    )
-  const faces = new Uint32Array([0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3])
-  return {
-    kind: 'meshes',
-    items: [
-      { id: '11', positions: tetra(0), indices: faces },
-      { id: '22', positions: tetra(5000), indices: faces },
-      { id: '33', positions: new Float32Array([]), indices: new Uint32Array([]) },
-    ],
-    attributes: makeTable(tableSchema(column('neuronId', 'i64'), column('type', 'str')), {
-      neuronId: [11, 22, 33],
-      type: ['LC4', 'LC6', 'LC10'],
-    }),
-    bounds: { min: [0, 0, 0], max: [6000, 1000, 1000] },
-    units: 'nm',
-    ...(detail ? { detail: { lod: 1, levels: 4, triangles: 8 } } : {}),
-  }
 }
 
 function passThrough(request: CleanMeshesRequest): CleanMeshesResult {
@@ -176,6 +150,20 @@ describe('cleanOps — the scattering', () => {
     }
   })
 
+  it('keeps a soma where it was, since cleaning changes the surface and not the soma', () => {
+    const value = meshesFixture()
+    const withSoma = {
+      ...value,
+      items: value.items.map((item) => ({ ...item, soma: [1, 2, 3] as const })),
+    }
+    const out = meshesFromResult(withSoma, passThrough(meshRequestFrom(withSoma, OFF)), true)
+    expect(out.items.map((item) => item.soma)).toEqual([
+      [1, 2, 3],
+      [1, 2, 3],
+      [1, 2, 3],
+    ])
+  })
+
   it('recomputes the bounds, which a changed surface makes stale', () => {
     const value = meshesFixture()
     const moved = passThrough(meshRequestFrom(value, OFF))
@@ -196,7 +184,7 @@ describe('cleanOps — the scattering', () => {
   })
 
   it('keeps the level-of-detail caption when only the vertices moved', () => {
-    const value = meshesFixture(true)
+    const value = meshesFixture({ detail: true })
     const out = meshesFromResult(value, passThrough(meshRequestFrom(value, OFF)), true)
     expect(out.detail).toEqual({ lod: 1, levels: 4, triangles: 8 })
   })
@@ -209,7 +197,7 @@ describe('cleanOps — the scattering', () => {
      * about a mesh somebody decimated here on purpose. Two levels of detail in one collection
      * is no level of detail; so is a level that has been overwritten.
      */
-    const value = meshesFixture(true)
+    const value = meshesFixture({ detail: true })
     const out = meshesFromResult(value, passThrough(meshRequestFrom(value, OFF)), false)
     expect(out.detail).toBeUndefined()
     expect('detail' in out).toBe(false)

@@ -42,7 +42,12 @@ import type {
   SkeletonsValue,
 } from '../../core/values'
 import { boundsOf, cableLength, meshTriangleCount, skeletonPointCount } from '../../core/values'
-import type { CleanMeshesRequest, CleanMeshesResult, SmoothMethod } from '../../pyodide/meshes'
+import type {
+  CleanMeshesRequest,
+  CleanMeshesResult,
+  PackedMeshes,
+  SmoothMethod,
+} from '../../pyodide/meshes'
 import type {
   CleanSkeletonsRequest,
   CleanSkeletonsResult,
@@ -367,10 +372,20 @@ export function checkResampleSize(
   })
 }
 
-/** How many items came back with nothing in them, for the sentence the node warns with. */
-export function emptiedItems(offsets: Int32Array): number {
+/**
+ * How many items came back with nothing in them, for the sentence the node warns with.
+ *
+ * `hadContent` narrows that to items that had something going in, where an item arriving empty
+ * is not the node's doing — Skeletonize Meshes', whose sentence blames its own threshold.
+ */
+export function emptiedItems(
+  offsets: Int32Array,
+  hadContent: (item: number) => boolean = () => true,
+): number {
   let empty = 0
-  for (let i = 0; i + 1 < offsets.length; i++) if (offsets[i + 1]! === offsets[i]!) empty++
+  for (let i = 0; i + 1 < offsets.length; i++) {
+    if (offsets[i + 1]! === offsets[i]! && hadContent(i)) empty++
+  }
   return empty
 }
 
@@ -415,8 +430,28 @@ export function changesFaces(params: MeshCleanParams): boolean {
   return params.dropInternals || params.fillHoles || params.ratio < 1
 }
 
+/** Clean Meshes' request: the set flattened by `packMeshes`, and every control. */
+export function meshRequestFrom(
+  meshes: MeshesValue,
+  params: MeshCleanParams,
+): CleanMeshesRequest {
+  return {
+    ...packMeshes(meshes),
+    dropInternals: params.dropInternals,
+    openness: params.openness,
+    rays: params.rays,
+    passes: params.passes,
+    fillHoles: params.fillHoles,
+    ratio: params.ratio,
+    smooth: params.smooth,
+    method: params.method,
+    volumeCorrection: params.volumeCorrection,
+  }
+}
+
 /**
- * Lay a mesh set out flat.
+ * Lay a mesh set out flat, for every mesh call across the bridge — Clean Meshes and Skeletonize
+ * Meshes both send a set this way.
  *
  * Two offset arrays, because the two counts move independently: capping a hole adds faces and
  * no vertices, and decimating removes both at a ratio nothing on this side can predict. Face
@@ -426,10 +461,7 @@ export function changesFaces(params: MeshCleanParams): boolean {
  *
  * Buffers are built rather than borrowed, `cleanRequestFrom`'s reason.
  */
-export function meshRequestFrom(
-  meshes: MeshesValue,
-  params: MeshCleanParams,
-): CleanMeshesRequest {
+export function packMeshes(meshes: MeshesValue): PackedMeshes {
   const positions = new Float32Array(geometryPointCount(meshes) * 3)
   const indices = new Uint32Array(meshTriangleCount(meshes) * 3)
   const vertexOffsets = new Int32Array(meshes.items.length + 1)
@@ -447,21 +479,7 @@ export function meshRequestFrom(
     faceOffsets[n + 1] = fAt
   }
 
-  return {
-    positions,
-    indices,
-    vertexOffsets,
-    faceOffsets,
-    dropInternals: params.dropInternals,
-    openness: params.openness,
-    rays: params.rays,
-    passes: params.passes,
-    fillHoles: params.fillHoles,
-    ratio: params.ratio,
-    smooth: params.smooth,
-    method: params.method,
-    volumeCorrection: params.volumeCorrection,
-  }
+  return { positions, indices, vertexOffsets, faceOffsets }
 }
 
 /**
@@ -493,6 +511,8 @@ export function meshesFromResult(
       result.vertexOffsets[n + 1]! * 3,
     ),
     indices: result.indices.slice(result.faceOffsets[n]! * 3, result.faceOffsets[n + 1]! * 3),
+    // Decimation and smoothing change the surface, not where the soma is.
+    ...(item.soma ? { soma: item.soma } : {}),
   }))
 
   const { detail: _dropped, ...rest } = original

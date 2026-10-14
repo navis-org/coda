@@ -547,6 +547,12 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M14.2 9.6l5 2', strokeOpacity: '.4' }],
     ['path', { d: 'M16 9l-.8 3.2' }],
   ],
+  // The mesh solid drawn faint with an arbour inside it: the material that came in, and the
+  // skeleton that goes out. `neuron.skeletonPoints`' faint-material-under-result arrangement.
+  'neuron.skeletonize': [
+    ['path', { d: 'M12 3.6l7.4 4.2v8.4L12 20.4 4.6 16.2V7.8z', strokeOpacity: '.4' }],
+    ['path', { d: 'M12 18.2V12L8.2 8.4M12 12l3.8-3.6M12 14.8l2.8 1.4' }],
+  ],
   // The mesh solid with the same spark, smaller and in the corner. Two nodes, one verb, one
   // mark.
   'neuron.cleanMeshes': [

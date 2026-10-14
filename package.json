@@ -29,6 +29,8 @@
     "probe:transform": "node scripts/probe-transform.mjs",
     "probe:skeletons": "node scripts/probe-skeletons.mjs",
     "probe:split": "python3 scripts/probe-split.py",
+    "probe:skeletonize": "node scripts/probe-skeletonize.mjs",
+    "probe:skeletonize-parity": "python3 scripts/probe-skeletonize.py",
     "probe:meshes": "node scripts/probe-meshes.mjs",
     "probe:mobile": "node scripts/probe-mobile.mjs",
     "probe:memory": "node scripts/probe-memory.mjs",

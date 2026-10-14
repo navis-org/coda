@@ -302,6 +302,10 @@ describe('MockSource morphology', () => {
     ])
     expect(meshes.items.map((m) => m.id)).toEqual(skeletons.items.map((s) => s.id))
     expect(meshes.items[0]!.indices.length).toBeGreaterThan(0)
+    // Each mesh says where its soma is: the skeleton's root, which is the generated soma.
+    meshes.items.forEach((mesh, n) => {
+      expect(mesh.soma).toEqual([...skeletons.items[n]!.positions.subarray(0, 3)])
+    })
   })
 
   it('places synapses with one attribute row per point', async () => {

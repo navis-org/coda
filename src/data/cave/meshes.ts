@@ -44,6 +44,7 @@
  * `CaveSource.fetchCoarseGeometry`.
  */
 
+import { WAIT_WARN_SECONDS } from '../../core/limits'
 import { mapWithConcurrency } from '../concurrency'
 import type { Reduction } from '../meshDecimate'
 import { applyReduction } from '../meshDecimate'
@@ -77,11 +78,11 @@ export const MB_PER_NEURON = { low: 0.5, high: 4 } as const
  * answering the wrong question: twenty graphene meshes is half a minute, and a sentence about
  * cancelling in front of half a minute is a sentence that teaches people to dismiss the next one.
  *
- * Expressed here, the number is arguable on its own terms — five minutes is about where a wait
- * stops being something you sit through — where "20 neurons" could only be argued about by
- * somebody who already knew what a neuron costs.
+ * As a wait, the number is arguable on its own terms, where "20 neurons" could only be argued
+ * about by somebody who already knew what a neuron costs. The number itself is
+ * `WAIT_WARN_SECONDS`, shared with every warning stated in seconds.
  */
-export const MESH_WARN_SECONDS = 300
+export const MESH_WARN_SECONDS = WAIT_WARN_SECONDS
 
 /**
  * The neuron count that reaches `MESH_WARN_SECONDS`, which is what the fetch actually tests.

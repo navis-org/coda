@@ -1270,8 +1270,54 @@ export class CaveSource implements DataSource {
    */
   async fetchMeshes(req: GeometryRequest): Promise<MeshesValue> {
     const { spec, version } = this.require(req.datasetId)
+    // Started beside the meshes, needing only the ids: a cold lookup is a round trip that would
+    // otherwise come after the last mesh. Marked handled at once, since a mesh failure ends this
+    // call before the lookup is awaited and its own cancel would then be nobody's rejection.
+    const somas = this.meshSomas(req, spec, version)
+    somas.catch(() => undefined)
     const flat = await this.flatMeshDir(spec, version, req.signal)
-    return flat ? this.flatMeshes(req, spec, flat) : this.grapheneMeshes(req, spec)
+    const value = await (flat
+      ? this.flatMeshes(req, spec, flat)
+      : this.grapheneMeshes(req, spec))
+    return withSomas(value, await somas)
+  }
+
+  /**
+   * The somas for a mesh fetch, where the datastack declares a nucleus table — empty otherwise.
+   * Both mesh routes share it, so neither assembles a soma of its own; a partial does not carry
+   * one, the complete answer does.
+   *
+   * **A soma is an extra, so failing to find one costs nothing else.** The lookup is `quiet` — a
+   * refusal of the nucleus table must not open the Connections dialog over meshes that arrived —
+   * and any failure but a cancel answers "none".
+   */
+  private async meshSomas(
+    req: GeometryRequest,
+    spec: DatastackSpec,
+    version: number,
+  ): Promise<Map<NeuronId, readonly [number, number, number]>> {
+    if (!spec.nuclei || req.neuronIds.length === 0) return new Map()
+    try {
+      return await this.nuclei(spec, version, req.neuronIds, {
+        ...this.options(req.signal),
+        quiet: true,
+      })
+    } catch (error) {
+      if (req.signal?.aborted) throw error
+      return new Map()
+    }
+  }
+
+  /** Each id's soma from the datastack's nucleus table — `somaPositions` and the mesh fetch both. */
+  private async nuclei(
+    spec: DatastackSpec,
+    version: number,
+    neuronIds: readonly NeuronId[],
+    options: CaveRequestOptions,
+  ): Promise<Map<NeuronId, readonly [number, number, number]>> {
+    if (!spec.nuclei) throw new CaveError(`${spec.label} declares no nucleus table.`)
+    const server = await caveServerFor(spec.datastack, options)
+    return somataFor(server, spec.datastack, version, spec.nuclei.table, neuronIds, options)
   }
 
   /**
@@ -1862,10 +1908,7 @@ export class CaveSource implements DataSource {
     req: SomaRequest,
   ): Promise<Map<NeuronId, readonly [number, number, number]>> {
     const { spec, version } = this.require(req.datasetId)
-    if (!spec.nuclei) throw new CaveError(`${spec.label} declares no nucleus table.`)
-    const options = this.options(req.signal)
-    const server = await caveServerFor(spec.datastack, options)
-    return somataFor(server, spec.datastack, version, spec.nuclei.table, req.neuronIds, options)
+    return this.nuclei(spec, version, req.neuronIds, this.options(req.signal))
   }
 
   /**
@@ -2719,5 +2762,20 @@ function datasetInfoFor(
     // and only a spelunker-flavoured viewer speaks `middleauth+`, so the built-in default draws
     // the EM and no neurons.
     ...(viewerSite ? { viewerSite } : {}),
+  }
+}
+
+/** Each mesh with the soma its neuron has, where it has one. Items without one ride through. */
+function withSomas(
+  value: MeshesValue,
+  somas: ReadonlyMap<NeuronId, readonly [number, number, number]>,
+): MeshesValue {
+  if (somas.size === 0) return value
+  return {
+    ...value,
+    items: value.items.map((item) => {
+      const soma = somas.get(item.id)
+      return soma ? { ...item, soma } : item
+    }),
   }
 }

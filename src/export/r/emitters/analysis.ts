@@ -873,6 +873,18 @@ registerEmitter('neuron.nblastKnn', (ctx) =>
   ),
 )
 
+/**
+ * The natverse has no mesh skeletonizer of its own — its route to one is Python's skeletor through
+ * reticulate — so a translation would be a different algorithm wearing this node's name.
+ */
+registerEmitter('neuron.skeletonize', (ctx) =>
+  ctx.todo(
+    'The natverse has no wavefront skeletonizer. The notebook export runs this node as ' +
+      "skeletor's skeletonize.by_wavefront(), which gives the same skeletons as the card; from " +
+      'R, call it through reticulate, or export the skeletons from Coda.',
+  ),
+)
+
 // ---------------------------------------------------------------------------
 // Clustering
 // ---------------------------------------------------------------------------

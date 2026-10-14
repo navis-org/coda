@@ -56,7 +56,7 @@
 
 import type { Warner } from '../../core/limits'
 import { sliced } from '../../core/slice'
-import { describeDuration, refuseIfOverCrashFloor } from '../../core/limits'
+import { refuseIfOverCrashFloor, warnOverWait } from '../../core/limits'
 import { warnSideCount } from './limitParams'
 import type { EnumOption, ParamValues } from '../../core/node'
 import type { CodaType, Kind } from '../../core/types'
@@ -1051,22 +1051,6 @@ export const SEARCHES_PER_SECOND: Record<
 const CLOSEST_PAIR_MICROS = 75
 
 /**
- * How long a comparison has to threaten before it says so: **five minutes**.
- *
- * `MESH_WARN_SECONDS` exactly, and for its argument — five minutes is about where a wait stops
- * being something you sit through. **Restated rather than imported**, because that one lives in
- * `data/cave/meshes.ts` and is about a *fetch* from one backend: a node measuring geometry
- * reaching into a CAVE module for its own patience threshold would make the two move together
- * whether or not the argument still applied to both. If a third reader ever wants it, the number
- * belongs beside `describeDuration` in `core/limits.ts` rather than in either caller. It was thirty seconds, which is a sentence in front of a wait
- * the progress bar already describes, and a warning raised over half a minute is how a reader
- * learns to dismiss the next one.
- *
- * A **warning, not a refusal** — `NBLAST_PAIRS_WARN`'s argument, and the same history.
- */
-const DISTANCE_WARN_SECONDS = 300
-
-/**
  * Whether a pair can be answered by one dual-tree descent rather than a walk of samples.
  *
  * **The one statement of it**, read by three places that were each deciding it for themselves —
@@ -1314,22 +1298,20 @@ export function checkDistanceSize(
     `A ${rows.toLocaleString()} x ${cols.toLocaleString()} matrix`,
     rows * cols * 8,
   )
-  if (seconds <= DISTANCE_WARN_SECONDS) return
   /*
    * The lever is offered only where it works. A coarser resample is worth a factor of ten to a
    * statistic that asks every sample its own question, and the node's cable weighting is what
    * makes it safe — but a dual-tree descent walks the trees rather than the samples, so there it
    * would be advice that does nothing.
    */
-  const lever = closestPairApplies(shape)
-    ? ''
-    : ' Re-sampling with a coarser `Spacing` on Clean Skeletons makes this proportionally' +
-      ' faster without changing the answer, because these statistics are weighted by cable length.'
-  ctx.warn(
-    `A ${rows.toLocaleString()} × ${cols.toLocaleString()} comparison will take ` +
-      `${describeDuration(seconds)}.${lever} Running anyway; cancel if ` +
-      `that is not what you wanted.`,
-  )
+  warnOverWait(ctx, {
+    seconds,
+    what: `A ${rows.toLocaleString()} × ${cols.toLocaleString()} comparison`,
+    lever: closestPairApplies(shape)
+      ? undefined
+      : 'Re-sampling with a coarser `Spacing` on Clean Skeletons makes this proportionally ' +
+        'faster without changing the answer, because these statistics are weighted by cable length.',
+  })
 }
 
 // ---------------------------------------------------------------------------

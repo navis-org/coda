@@ -28,11 +28,13 @@ import { inferGraph } from '../../core/inference'
 import type { EvalContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import type { Scheduler } from '../../core/scheduler'
-import { schemaOf } from '../../core/types'
+import { column, schemaOf, tableSchema } from '../../core/types'
 import { isSkeletonsValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
-import { MIRRORED_COLUMN, checkWarpSize } from '../lib/transformOps'
+import type { MeshesValue } from '../../core/values'
+import { makeTable } from '../../core/values'
+import { MIRRORED_COLUMN, checkWarpSize, warpGeometry } from '../lib/transformOps'
 import { resetLandmarks } from '../../data/transforms/landmarks'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
@@ -364,6 +366,45 @@ describe('neuron.mirror — the override, which is the only way through here', (
 })
 
 describe('neuron.mirror — the spline half', () => {
+  it('warps a mesh’s soma with its vertices, in the same call', async () => {
+    // A soma is a point in the mesh's frame, so a warp that moved only the vertices would leave
+    // it where the neuron used to be.
+    mockedWarp.mockImplementation(async (_pairs, points) => ({
+      positions: points.map((v, i) => (i % 3 === 0 ? v + 100 : v)),
+      fitMs: 0,
+      applyMs: 0,
+    }))
+    const mesh: MeshesValue = {
+      kind: 'meshes',
+      items: [
+        {
+          id: '1',
+          positions: new Float32Array([0, 0, 0, 10, 0, 0, 0, 10, 0]),
+          indices: new Uint32Array([0, 1, 2]),
+          soma: [5, 5, 0],
+        },
+        { id: '2', positions: new Float32Array([1, 1, 1]), indices: new Uint32Array([]) },
+      ],
+      attributes: makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['1', '2'] }),
+      bounds: { min: [0, 0, 0], max: [10, 10, 1] },
+    }
+    const leg = {
+      id: 'test',
+      source: new Float64Array(3),
+      target: new Float64Array(3),
+      count: 1,
+    }
+    const out = (await warpGeometry(mesh, [leg], {
+      progress: () => undefined,
+      warn: { warn: () => undefined },
+    })) as MeshesValue
+    expect(mockedWarp).toHaveBeenCalledTimes(1)
+    expect(mockedWarp.mock.calls[0]![1].length).toBe((4 + 1) * 3)
+    expect(out.items[0]!.soma).toEqual([105, 5, 0])
+    expect(out.items[0]!.positions[3]).toBe(110)
+    expect('soma' in out.items[1]!).toBe(false)
+  })
+
   it('hands the spline the flipped coordinates, not the originals', async () => {
     /*
      * The order that matters, and the one nothing else can catch. A mirror landmark file's
