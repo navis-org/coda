@@ -19,6 +19,7 @@
     "probe:table-file": "node scripts/probe-table-file.mjs",
     "probe:mesh-decimate": "NODE_OPTIONS=--expose-gc vite-node scripts/probe-mesh-decimate.ts",
     "probe:zapbench": "vite-node scripts/probe-zapbench.ts",
+    "probe:vfb-classes": "vite-node scripts/probe-vfb-classes.ts",
     "probe:nblast": "node scripts/probe-nblast.mjs",
     "probe:netexport": "vite-node scripts/probe-network-export.ts && python3 scripts/probe-network-export.py && Rscript scripts/probe-network-export.R",
     "probe:influence": "vite-node scripts/probe-influence.ts /tmp/coda-influence-probe.json && python3 scripts/probe-influence.py /tmp/coda-influence-probe.json",

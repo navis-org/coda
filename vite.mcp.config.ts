@@ -75,8 +75,15 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  * 3,050 → 3,100 on 2026-10-11, at 3,061 kB against about 3,035 kB at the commit before it, for
  * Split Axon/Dendrite's three new methods (label propagation, by ROI, by tag), node tags on
  * skeletons and the node's rewritten help page. Code and prose of ours; no new library.
+ *
+ * 3,100 → 3,250 on 2026-10-14, at 3,179 kB against 3,115 kB at the commit before it — which was
+ * itself already past 3,100, the commits since the last raise (Line Chart, Skeletonize Meshes, the
+ * Neuroglancer layer bar) having used up its headroom. The 64 kB are the Virtual Fly Brain pack: its PDB bridge, term-info and
+ * markdown readers, point clouds and templates (`data/vfb`), seven node definitions and their help
+ * pages. Code and prose of ours; no new library — the image-stack reader (`data/nrrd.ts`) inflates
+ * with the browser's own `DecompressionStream`.
  */
-const SIZE_BUDGET_KB = 3_100
+const SIZE_BUDGET_KB = 3_250
 
 /**
  * Fail the build if the bundle outgrows its budget.

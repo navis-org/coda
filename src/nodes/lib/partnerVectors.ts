@@ -75,7 +75,7 @@ import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { TableSchema } from '../../core/types'
 import { column, findColumn, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
-import { getColumn, makeTable } from '../../core/values'
+import { getColumn, makeTable, optionalColumn } from '../../core/values'
 import {
   DIRECTION_COLUMN,
   HOP_COLUMN,
@@ -320,10 +320,8 @@ export function partnerVectorTable(
   const postId = getColumn(table, POST_ID)
   const byType = spec.partnerBy === 'type'
   const weight = getColumn(table, spec.weightColumn)
-  const direction = findColumn(table.schema, DIRECTION_COLUMN)
-    ? getColumn(table, DIRECTION_COLUMN)
-    : undefined
-  const hop = findColumn(table.schema, HOP_COLUMN) ? getColumn(table, HOP_COLUMN) : undefined
+  const direction = optionalColumn(table, DIRECTION_COLUMN)
+  const hop = optionalColumn(table, HOP_COLUMN)
 
   if (!spec.queries && !direction) {
     throw new Error(

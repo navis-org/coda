@@ -168,6 +168,12 @@ export function refuseIfOverCrashFloor(what: string, bytes: number, remedy?: str
 }
 
 /**
+ * Whether an allocation this size is past the crash floor: the one comparison, for a caller that
+ * must stop early (a fetch whose size grows as it runs) before it refuses through the sentence below.
+ */
+export const overCrashFloor = (bytes: number): boolean => bytes > CRASH_FLOOR_BYTES
+
+/**
  * The same sentence without the throw, for a `validate` that can compute a shape from params
  * alone and so should say it on the card before a Run. One comparison and one wording for both
  * stages, rather than a node restating `bytes > CRASH_FLOOR_BYTES` to reach the edit-time half.
@@ -180,7 +186,7 @@ export function crashFloorIssue(
   bytes: number,
   remedy = 'Reduce the data upstream, for example with a filter or a group-by, or split the run.',
 ): string | undefined {
-  if (bytes <= CRASH_FLOOR_BYTES) return undefined
+  if (!overCrashFloor(bytes)) return undefined
   return (
     `Refused: ${what} would allocate ${formatBytes(bytes)} at once, more than the ` +
     `${formatBytes(CRASH_FLOOR_BYTES)} a browser tab can hold. ${remedy}`

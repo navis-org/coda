@@ -31,11 +31,23 @@ export type DType = 'i64' | 'f64' | 'str' | 'bool'
  */
 export type PopulationFilter = 'traced' | 'typed' | 'superclass'
 
+/** What a column's values are identifiers of, where a viewer can turn one into a link. */
+export type ColumnLink = 'doi' | 'pmid' | 'vfb'
+
 export interface ColumnSchema {
   name: string
   dtype: DType
   /** Optional free-text unit ("nm", "synapses") surfaced in table headers. */
   unit?: string
+  /**
+   * Optional: the values are identifiers a viewer may draw as links — e.g. a bare DOI, drawn as a
+   * link to `https://doi.org/<doi>` labelled with the DOI. The data stays the identifier, so a
+   * join, a CSV and an emitted notebook carry `10.7554/eLife.04577` rather than a URL somebody has
+   * to strip again.
+   * Presentation only, like `unit`: an op that rebuilds a column without it draws plain text.
+   * `ui/columnLinks.ts` is the one table of URLs, `ui/ColumnLinkCell.tsx` of how each kind draws.
+   */
+  link?: ColumnLink
 }
 
 /**

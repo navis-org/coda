@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import { isNumericDType } from '../../core/types'
-import type { TableValue } from '../../core/values'
+import type { ColumnSchema } from '../../core/types'
+import type { CellValue, TableValue } from '../../core/values'
 import { selectRows } from '../../core/values'
 import type { FilterClause } from '../../nodes/lib/tableFilter'
 import {
@@ -13,6 +15,8 @@ import {
 import { sortedRowIndices } from '../../nodes/lib/tableOps'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCell } from '../../style/format'
+import { LinkedText } from '../LinkedText'
+import { ColumnLinkCell } from '../ColumnLinkCell'
 import { FilterIcon } from '../Icons'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
@@ -302,7 +306,7 @@ export function TableViewer({
                       data-null={cell === null || undefined}
                       title={cell === null ? 'null' : String(cell)}
                     >
-                      {formatCell(cell, col.name)}
+                      {renderCell(cell, col)}
                     </td>
                   )
                 })}
@@ -436,4 +440,16 @@ export function TableViewer({
       </div>
     </div>
   )
+}
+
+/**
+ * One cell's content: an identifier the column says is one (`ColumnSchema.link`) through
+ * `ColumnLinkCell`, a URL in an ordinary text cell as a link whose text is its href, and anything
+ * else `formatCell`'s string — a plain function rather than a component, so a plain cell stays a
+ * bare string child and a 500-row page mounts no extra fiber per cell.
+ */
+function renderCell(cell: CellValue, col: ColumnSchema): ReactNode {
+  if (typeof cell !== 'string') return formatCell(cell, col.name)
+  if (col.link) return <ColumnLinkCell link={col.link} value={cell} />
+  return cell.includes('://') ? <LinkedText text={cell} /> : cell
 }

@@ -152,8 +152,9 @@ rule belongs to one area, its record is in that area's doc.
 - **Whole-string patterns are anchored, in one place.** `anchoredPattern` (`data/terms.ts`)
   wraps them in `^(?:…)$` to match Neo4j's `=~`, so `LC.*` matches `LC4` but **not** `LPLC1`.
   Every builder goes through it. Don't "fix" this.
-- **One `fetchText`, in `src/data/fetchText.ts`.** A cross-origin GET that has to tell
-  "unreachable" from "CORS refused" is that function. Copied twice already; don't.
+- **One `fetchText`, in `src/data/fetchText.ts`.** A credential-less cross-origin read that has to
+  tell "unreachable" from "CORS refused" is that function — a GET, or a POST to a public read-only
+  query endpoint (`init`). Copied twice already; don't.
 - **`parseMarkdown`'s extended kinds are opt-in, and that is a safety property.** Fences,
   callouts, tables and images parse only under `{ extended: true }`. A dataset blurb arrives
   from whatever deployment a Custom node points at; an image in one is a tracking pixel, and

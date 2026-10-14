@@ -19,6 +19,11 @@
  *   rather than flashing `loading` for a value already in hand. That was `useNeuronTopology`'s
  *   `initial()`, and the other two did not have it.
  *
+ * **A loader without a cache is cancelled** when its key changes or the hook unmounts: it is handed
+ * an `AbortSignal`, which a large download (an image stack) needs. With a cache the request may be
+ * shared with another caller (`cache.share`), so one caller moving on must not abort it, and no
+ * signal is passed.
+ *
  * The settle delay is the one genuine difference between the callers and stays a parameter: it
  * exists so a held-down arrow key does not put twenty fetches in flight, and it is 0 where the
  * fetch is behind a deliberate click, because a delay before a two-second query only makes the
@@ -53,7 +58,7 @@ export interface SettledFetchOptions<T> {
 
 export function useSettledFetch<T>(
   key: string | undefined,
-  load: () => Promise<T>,
+  load: (signal?: AbortSignal) => Promise<T>,
   options: SettledFetchOptions<T> = {},
 ): SettledFetch<T> {
   const { settleMs = 0, cache } = options
@@ -78,10 +83,14 @@ export function useSettledFetch<T>(
     }
 
     let live = true
+    // Only an unshared request is ours to cancel — see the header.
+    const controller = cache ? undefined : new AbortController()
     setState({ status: 'loading' })
 
     const start = () => {
-      const pending = cache ? cache.share(key, () => loader.current()) : loader.current()
+      const pending = cache
+        ? cache.share(key, () => loader.current())
+        : loader.current(controller!.signal)
       pending
         .then((data) => {
           if (live) setState({ status: 'ready', data })
@@ -97,12 +106,14 @@ export function useSettledFetch<T>(
       start()
       return () => {
         live = false
+        controller?.abort()
       }
     }
     const timer = setTimeout(start, settleMs)
     return () => {
       live = false
       clearTimeout(timer)
+      controller?.abort()
     }
   }, [key, settleMs, cache])
 

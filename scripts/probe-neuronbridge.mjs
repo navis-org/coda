@@ -131,7 +131,7 @@ const NB = await inStore(`
 const CARD = `.react-flow__node[data-id="${NB}"]`
 
 const tilesReady = (scope) =>
-  `(() => { const n = document.querySelectorAll('${scope} .nbridge__tile'); return n.length > 0 })()`
+  `(() => { const n = document.querySelectorAll('${scope} .image-tile'); return n.length > 0 })()`
 
 try {
   await waitFor(tilesReady(CARD), 'tiles on the card', 60_000)
@@ -160,19 +160,19 @@ async function layout(scope) {
     const root = document.querySelector('${scope} .nbridge')
     const body = root?.querySelector('.nbridge__body')
     const view = body?.getBoundingClientRect()
-    const imgs = [...(root?.querySelectorAll('.nbridge__tile img') ?? [])].filter((img) => {
+    const imgs = [...(root?.querySelectorAll('.image-tile img') ?? [])].filter((img) => {
       const r = img.getBoundingClientRect()
       return view && r.bottom > view.top && r.top < view.bottom
     })
-    const spill = [...(root?.querySelectorAll('.nbridge__tile') ?? [])].filter((tile) => {
-      const name = tile.querySelector('.nbridge__line')
+    const spill = [...(root?.querySelectorAll('.image-tile') ?? [])].filter((tile) => {
+      const name = tile.querySelector('.image-tile__name')
       if (!name) return false
       const t = tile.getBoundingClientRect()
       const n = name.getBoundingClientRect()
       return n.right > t.right + 0.5
     }).length
     return {
-      tiles: root?.querySelectorAll('.nbridge__tile').length ?? 0,
+      tiles: root?.querySelectorAll('.image-tile').length ?? 0,
       visible: imgs.length,
       loaded: imgs.filter((img) => img.complete && img.naturalWidth > 0).length,
       broken: imgs.filter((img) => img.complete && img.naturalWidth === 0).map((img) => img.src).slice(0, 3),
@@ -212,7 +212,7 @@ await waitFor(tilesReady(OVERLAY), 'tiles in the overlay', 30_000)
   check(big.sideways <= 0 && big.controls <= 0, `the overlay does not scroll sideways (${big.sideways}px, ${big.controls}px)`)
   check(big.spill === 0, `no line name spills out of its tile in the overlay (${big.spill})`)
 
-  await evaluate(`document.querySelector('${OVERLAY} .nbridge__thumb')?.click()`)
+  await evaluate(`document.querySelector('${OVERLAY} .image-tile__thumb')?.click()`)
   await sleep(3000)
   const detail = await evaluate(`(() => {
     const d = document.querySelector('${OVERLAY} .nbridge__detail')
@@ -224,7 +224,7 @@ await waitFor(tilesReady(OVERLAY), 'tiles in the overlay', 30_000)
 
   // ── 7: frozen vs scrolling ──
   const detailTop = () => evaluate(`document.querySelector('${OVERLAY} .nbridge__detail')?.getBoundingClientRect().top ?? null`)
-  const tileTop = () => evaluate(`document.querySelector('${OVERLAY} .nbridge__grid .nbridge__tile')?.getBoundingClientRect().top ?? null`)
+  const tileTop = () => evaluate(`document.querySelector('${OVERLAY} .image-tiles .image-tile')?.getBoundingClientRect().top ?? null`)
   const scrollBy = (dy) => evaluate(`(() => { const s = document.querySelector('${OVERLAY} .nbridge__scroll'); s.scrollTop += ${dy}; return s.scrollTop })()`)
   {
     const [d0, t0] = [await detailTop(), await tileTop()]
@@ -355,7 +355,7 @@ await waitFor(tilesReady(OVERLAY), 'tiles in the overlay', 30_000)
     `)
     const state = await evaluate(`({
       button: document.querySelector('.nbridge-full .nbridge__pin')?.getAttribute('aria-pressed'),
-      tile: document.querySelector('${OVERLAY} .nbridge__tile[data-selected] .nbridge__star')?.getAttribute('aria-pressed'),
+      tile: document.querySelector('${OVERLAY} .image-tile[data-selected] .image-tile__star')?.getAttribute('aria-pressed'),
     })`)
     check(pinned.length === 1 && pinned[0] === onScreen && state.button === 'true' && state.tile === 'true', `☆ Pin in full screen pins ${onScreen} into the node, and the tile behind shows it (${JSON.stringify({ pinned, ...state })})`)
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
@@ -382,16 +382,16 @@ await waitFor(tilesReady(OVERLAY), 'tiles in the overlay', 30_000)
   // ── 11: stepping past the lines on screen ──
   {
     await evaluate(`document.querySelector('${OVERLAY} .nbridge__detail')?.focus()`)
-    const shownBefore = await evaluate(`document.querySelectorAll('${OVERLAY} .nbridge__tile[data-line]').length`)
+    const shownBefore = await evaluate(`document.querySelectorAll('${OVERLAY} .image-tile[data-line]').length`)
     for (let i = 0; i < 30; i++) await key('ArrowRight')
     await sleep(800)
     const after = await evaluate(`(() => {
       const scroll = document.querySelector('${OVERLAY} .nbridge__scroll').getBoundingClientRect()
-      const tile = document.querySelector('${OVERLAY} .nbridge__tile[data-selected]')
+      const tile = document.querySelector('${OVERLAY} .image-tile[data-selected]')
       const r = tile?.getBoundingClientRect()
       return {
-        shown: document.querySelectorAll('${OVERLAY} .nbridge__tile[data-line]').length,
-        index: [...document.querySelectorAll('${OVERLAY} .nbridge__tile[data-line]')].indexOf(tile),
+        shown: document.querySelectorAll('${OVERLAY} .image-tile[data-line]').length,
+        index: [...document.querySelectorAll('${OVERLAY} .image-tile[data-line]')].indexOf(tile),
         inside: !!r && r.top >= scroll.top - 1 && r.bottom <= scroll.bottom + 1,
         position: document.querySelector('${OVERLAY} .nbridge__detail .nbridge__stepper .profile__position')?.textContent,
       }
@@ -409,7 +409,7 @@ await waitFor(tilesReady(OVERLAY), 'tiles in the overlay', 30_000)
   const before = (await requests()).filter((n) => n.includes('/cdsresults/'))
   await evaluate(`document.querySelector('${OVERLAY} .profile__page-btn[aria-label="Next neuron"]')?.click()`)
   await waitFor(
-    `(() => { const n = document.querySelector('${OVERLAY} .profile__id')?.textContent; return n === '${IDS[1]}' && document.querySelectorAll('${OVERLAY} .nbridge__tile').length > 0 })()`,
+    `(() => { const n = document.querySelector('${OVERLAY} .profile__id')?.textContent; return n === '${IDS[1]}' && document.querySelectorAll('${OVERLAY} .image-tile').length > 0 })()`,
     'the second neuron’s tiles',
     30_000,
   )
@@ -417,7 +417,7 @@ await waitFor(tilesReady(OVERLAY), 'tiles in the overlay', 30_000)
   check(second.length === before.length + 1, `paging fetched the next neuron’s match file (${before.length} → ${second.length})`)
   await evaluate(`document.querySelector('${OVERLAY} .profile__page-btn[aria-label="Previous neuron"]')?.click()`)
   await waitFor(
-    `document.querySelector('${OVERLAY} .profile__id')?.textContent === '${IDS[0]}' && document.querySelectorAll('${OVERLAY} .nbridge__tile').length > 0`,
+    `document.querySelector('${OVERLAY} .profile__id')?.textContent === '${IDS[0]}' && document.querySelectorAll('${OVERLAY} .image-tile').length > 0`,
     'the first neuron again',
     10_000,
   )

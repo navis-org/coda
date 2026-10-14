@@ -59,6 +59,9 @@ import type { ArborSettings } from './NeuronDendrogramViewer'
 import { NeuronDendrogramViewer } from './NeuronDendrogramViewer'
 import { SplitEditor } from './SplitEditor'
 import { CORRECTIONS_PARAM } from '../../nodes/lib/splitCorrections'
+import { LineGalleryViewer } from '../vfb/LineGalleryViewer'
+import { VfbInfoViewer } from '../vfb/VfbInfoViewer'
+import type { GalleryView } from '../../packs/vfb/ops'
 import { NeuronBridgeViewer } from './NeuronBridgeViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { scopedKey, WorkflowScope } from './workflowScope'
@@ -752,6 +755,44 @@ const VIEWERS: Record<string, ViewerEntry> = {
             freeze: params.freeze === true,
           }}
           onView={(key, value) => onParamChange?.(key, value)}
+          {...shared}
+        />
+      )
+    },
+  },
+  'vfb:info': {
+    readsInputs: true,
+    render: ({ ctx, params, shared, inputValues, onParamChange }) => {
+      // Drawn from the *input*, like the gallery: this node's `out` port is a pass-through.
+      const terms = inputValues?.terms
+      return (
+        <VfbInfoViewer
+          terms={isTableValue(terms) ? terms : undefined}
+          column={ctx.column('termColumn')}
+          page={Number(params.page)}
+          onPage={(next) => onParamChange?.('page', next)}
+          {...shared}
+        />
+      )
+    },
+  },
+  'vfb:gallery': {
+    readsInputs: true,
+    render: ({ params, shared, inputValues, onParamChange }) => {
+      // Drawn from the *input*, like NeuronBridge: this node's `out` port is a pass-through.
+      const images = inputValues?.images
+      return (
+        <LineGalleryViewer
+          // Keyed on the step size, so changing it starts the card over at one step.
+          key={String(params.tiles)}
+          images={isTableValue(images) ? images : undefined}
+          tiles={Number(params.tiles)}
+          pins={idList(params.pins)}
+          onPins={(next) => onParamChange?.('pins', next)}
+          mode={params.view as GalleryView}
+          onMode={(next) => onParamChange?.('view', next)}
+          withTemplate={Boolean(params.withTemplate)}
+          onWithTemplate={(next) => onParamChange?.('withTemplate', next)}
           {...shared}
         />
       )

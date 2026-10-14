@@ -9,7 +9,7 @@
 
 import type { FilterOp } from './rowPredicate'
 import type { CodaType, DType, PopulationFilter, TableSchema } from './types'
-import { datasetRef } from './types'
+import { datasetRef, findColumn } from './types'
 import { isNeuronId } from './ids'
 
 export type CellValue = number | string | boolean | null
@@ -922,6 +922,14 @@ export function getColumn(table: TableValue, name: string): ColumnData {
     )
   }
   return col
+}
+
+/**
+ * A column's values when the table has it, else `undefined` — for a column read by name as a
+ * passthrough attribute, never for a picked one (`ctx.column`, invariant 5).
+ */
+export function optionalColumn(table: TableValue, name: string): ColumnData | undefined {
+  return findColumn(table.schema, name) ? getColumn(table, name) : undefined
 }
 
 export function getRow(table: TableValue, index: number): Record<string, CellValue> {
