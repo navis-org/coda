@@ -142,10 +142,14 @@ export interface NeuroglancerViewerProps {
    */
   summary?: string | undefined
   /**
-   * A small surface: button labels go, and so does neuroglancer's layer bar — in the frame only,
-   * never in the link ↗ and ⧉ hand out. See `withLayerPanel`.
+   * A small surface: button labels and the legend go.
    */
   compact?: boolean
+  /**
+   * Whether neuroglancer's layer bar shows — in the frame only, never in the link ↗ and ⧉ hand
+   * out. Off unless asked for, on every surface. See `withLayerPanel`.
+   */
+  layerBar?: boolean
   baseName?: string
   onExpand?: () => void
   onError?: (message: string) => void
@@ -298,6 +302,7 @@ export function NeuroglancerViewer({
   viewerId,
   summary: givenSummary,
   compact = false,
+  layerBar = false,
   baseName,
   onExpand,
   onError,
@@ -386,22 +391,21 @@ export function NeuroglancerViewer({
     // normalises — so flipping the control alone leaves this guard true and the frame showing
     // the scene built for the other one. The prop rather than the resolved kind, since
     // `viewerKind` is a pure function of the URL that is already being compared.
-    const shownBar = !compact
     const was = kept.applied
     const sameScene = was?.url === url && was.viewerType === viewerType
-    if (sameScene && was.layerPanel === shownBar) return
+    if (sameScene && was.layerPanel === layerBar) return
 
     /*
-     * Only the surface changed — a kept frame moving between card and overlay. The bar goes on its
-     * own, so no layer is rebuilt and no pointer hold applies. Only into a *loaded* document: a
-     * patch as the opening navigation would leave a scene of nothing but the bar.
+     * Only `layerBar` changed. The bar goes on its own, so no layer is rebuilt and no pointer
+     * hold applies. Only into a *loaded* document: a patch as the opening navigation would leave
+     * a scene of nothing but the bar.
      */
     if (sameScene && kept.loaded) {
       kept.frame.src = patchUrl(
         sameOriginViewer(was.base) ?? was.base,
-        layerPanelPatch(shownBar),
+        layerPanelPatch(layerBar),
       )
-      kept.applied = { ...was, layerPanel: shownBar }
+      kept.applied = { ...was, layerPanel: layerBar }
       return
     }
 
@@ -493,16 +497,16 @@ export function NeuroglancerViewer({
           : undefined
       const scene = spliced ?? split.scene
       // A merge carries the bar only when it changed, so one toggled inside the viewer survives a
-      // selection; a full navigation always takes this surface's, a resumed state being the card's.
+      // selection; a full navigation always takes the setting, whatever a resumed state said.
       kept.frame.src = canMerge
         ? scenePatchUrl(
             frameBase,
             scene,
             kind,
-            applied?.layerPanel === shownBar ? undefined : layerPanelPatch(shownBar),
+            applied?.layerPanel === layerBar ? undefined : layerPanelPatch(layerBar),
           )
-        : sceneUrl(frameBase, withLayerPanel(scene, shownBar), kind)
-      kept.applied = { url, base: split.base, identity, viewerType, layerPanel: shownBar }
+        : sceneUrl(frameBase, withLayerPanel(scene, layerBar), kind)
+      kept.applied = { url, base: split.base, identity, viewerType, layerPanel: layerBar }
     }
 
     /*
@@ -520,7 +524,7 @@ export function NeuroglancerViewer({
     return () => clearTimeout(timer)
     // `reloadCount` belongs here: the lease it swaps holds a frame that has applied nothing, and
     // this effect is what points it somewhere.
-  }, [url, reloadCount, viewerType, datasetId, extraLayers, viewerId, pointerInside, compact])
+  }, [url, reloadCount, viewerType, datasetId, extraLayers, viewerId, pointerInside, layerBar])
 
   /*
    * Recomputed rather than carried on the value: same table, same spec, same palette, so it

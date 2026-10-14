@@ -187,9 +187,9 @@ registerNode({
       kind: 'number',
       label: 'Interface scale',
       /*
-       * The one presentational param here, and it earns it: it scales the *frame*, so it
-       * cannot change a byte of the URL. Deliberately not called "zoom" — neuroglancer has a
-       * camera zoom of its own and two things by that name on one card is a trap.
+       * Presentational, and it earns it: it scales the *frame*, so it cannot change a byte of
+       * the URL. Deliberately not called "zoom" — neuroglancer has a camera zoom of its own and
+       * two things by that name on one card is a trap.
        *
        * Below 1 the frame is laid out larger and drawn smaller, so neuroglancer's toolbar and
        * panels take less of the card and the scene gets the room. It also means more pixels
@@ -202,6 +202,20 @@ registerNode({
       step: 0.05,
       presentational: true,
       advanced: true,
+    },
+    {
+      id: 'showLayerBar',
+      kind: 'boolean',
+      label: 'Layer bar',
+      /*
+       * Presentational for the same reason as `uiScale`: it is written into what the *frame* is
+       * pointed at and never into the URL, whose reader in a tab of its own has the room for the
+       * bar. Off by default on every surface, the overlay included.
+       */
+      default: false,
+      presentational: true,
+      advanced: true,
+      help: 'Show neuroglancer’s strip of layer chips along the top of the embed. The link always has it.',
     },
     {
       id: 'showSlices',

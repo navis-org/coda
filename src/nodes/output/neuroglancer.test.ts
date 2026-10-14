@@ -434,15 +434,22 @@ describe('provenance', () => {
   it('marks presentational exactly what cannot reach the URL', () => {
     // Marking a colour param presentational would keep a link showing colours nobody chose:
     // the node would stay `ok` while the URL still carried the old palette. `uiScale` is the
-    // other side of the same rule — it scales the iframe and cannot change a byte of output.
+    // other side of the same rule — it scales the iframe and cannot change a byte of output —
+    // and so is `showLayerBar`, written only into what the frame is pointed at.
     const presentational = (def().params ?? []).filter((p) => p.presentational).map((p) => p.id)
-    expect(presentational).toEqual(['uiScale'])
+    expect(presentational).toEqual(['uiScale', 'showLayerBar'])
   })
 
   it('does not let the interface scale change the link', async () => {
     const wide = await sceneFrom({ uiScale: 0.5 })
     const narrow = await sceneFrom({ uiScale: 1.25 })
     expect(wide.url).toBe(narrow.url)
+  })
+
+  it('does not let the layer bar change the link', async () => {
+    const shown = await sceneFrom({ showLayerBar: true })
+    const hidden = await sceneFrom({ showLayerBar: false })
+    expect(shown.url).toBe(hidden.url)
   })
 
   it('changes the link when the colour column changes', async () => {

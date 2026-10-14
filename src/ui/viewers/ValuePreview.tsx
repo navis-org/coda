@@ -923,6 +923,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
           neurons={isTableValue(neurons) ? neurons : undefined}
           color={readColorSpec('segment', params, ctx.column)}
           scale={Number(params.uiScale)}
+          layerBar={params.showLayerBar === true}
           viewerType={chosenViewerKind(params)}
           datasetId={dataset?.kind === 'dataset' ? dataset.datasetId : undefined}
           extraLayers={extra?.kind === 'layers' ? extra.items.length : 0}

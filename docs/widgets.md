@@ -1382,36 +1382,37 @@ rather than reimplementing it — the `#!+` merge is what keeps the camera acros
 it was established against the deployed viewer rather than reasoned about.
 
 **The frame hides neuroglancer's layer bar, and the link does not.** The strip of layer chips
-along the top costs the tile a real share of its height, so `NeuroglancerViewer`, being `compact`
-there, writes `uiControlVisibility.showLayerPanel: false` (`withLayerPanel`) into
+along the top costs the tile a real share of its height, so `NeuroglancerViewer`, unless told otherwise,
+writes `uiControlVisibility.showLayerPanel: false` (`withLayerPanel`) into
 what it points the *frame* at. The same `url` is what ↗ and ⧉ hand out, and a scene opened in a
 tab of its own has the room, so the key is applied at navigation rather than built into the scene:
-nothing has to be stripped on the way out. There is deliberately no control to bring it back — the
-link is the way to see the full UI. Checked against the deployed bundles: the demo deployment and
+nothing has to be stripped on the way out. The profile tile deliberately has no control to bring it
+back — the link is the way to see the full UI. Checked against the deployed bundles: the demo deployment and
 spelunker restore the key as state; `ngl.flywire.ai` has the control only as a constructor option,
 so a FlyWire profile keeps its bar — an unknown key is skipped, not refused.
 
-**The Neuroglancer node follows the same rule, and there it is a fact about the surface**: the bar
-goes with `compact`, so the card and the inspector hide it and the overlay, the dock and a dashboard
-cell show it. It is `compact` rather than a prop of its own because every caller passed exactly
-that. The trap is that the card and the overlay share **one kept frame**, so
-the setting cannot be an opening default only — the frame arrives in the overlay already loaded
-with the card's hidden bar and nothing re-navigates it. Three routes, all in the navigation effect,
+**The Neuroglancer node hides it too, on every surface, unless its `Layer bar` param asks for
+it.** It used to go with `compact` — hidden on the card and the inspector, shown in the overlay, the
+dock and a dashboard cell — and was changed on request (2026-10-14) to an inspector-only boolean,
+off by default, so the expanded node matches the card. `presentational`, like `Interface scale`:
+it reaches only the frame, never the URL. The profile tile passes nothing and stays hidden. The
+trap is that the card and the overlay share **one kept frame**, and the setting can change while it
+is loaded, so it cannot be an opening default only. Three routes, all in the navigation effect,
 with `HeldFrame.applied.layerPanel` recording what was last sent:
 
-- **Only the surface changed, frame loaded:** a `#!+` patch (`patchUrl`) holding `layerPanelPatch`
+- **Only the setting changed, frame loaded:** a `#!+` patch (`patchUrl`) holding `layerPanelPatch`
   and nothing else. `#!+` is `restoreState` without `reset`, so no layer is rebuilt and the camera stays; and
   `showLayerPanel` is the *only* member of the state's `uiControlVisibility`, so restoring that key
   resets nothing beside it. Sent immediately and not held for the pointer, since no layer is
   touched. Explicit `true` when showing, because a merge leaves an absent key alone.
 - **Not yet loaded:** the full navigation carries it — a fragment-only patch landing as the opening
   navigation would leave a scene holding nothing but the bar.
-- **A full navigation, including one resumed from `sceneMemo`:** the surface's setting is applied
-  whatever the state came from, since a state read off the card carries the card's `false`.
+- **A full navigation, including one resumed from `sceneMemo`:** the setting is applied
+  whatever the state came from, since a state read off the frame carries what it last showed.
   Showing *removes* the key rather than writing `true`, so an untouched scene comes back as itself.
 
 A selection merge carries the bar only when it changed in the same pass, so a bar somebody toggles
-inside the viewer stays put until the frame moves surface.
+inside the viewer stays put until the setting changes.
 
 **A tile renders only when its data exists.** Datasets disagree about nearly everything, so a
 tile that cannot say anything is absent rather than full of dashes, and nothing in the widget

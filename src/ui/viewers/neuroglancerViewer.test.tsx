@@ -16,7 +16,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import type { NgScene } from '../../data/neuroglancer/scene'
-import { parseSceneUrl, sceneUrl, layerSourceUrl } from '../../data/neuroglancer/scene'
+import {
+  layerSourceUrl,
+  parseSceneUrl,
+  sceneUrl,
+  withLayerPanel,
+} from '../../data/neuroglancer/scene'
 import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { RELEASE_AFTER_MS } from './persistentRoots'
@@ -85,6 +90,8 @@ function frame(container: HTMLElement): HTMLIFrameElement | null {
 const frameSrc = (container: HTMLElement): string => frame(container)?.getAttribute('src') ?? ''
 /** The scene the frame is pointed at, whichever host and whichever form the URL took. */
 const frameScene = (container: HTMLElement) => parseSceneUrl(frameSrc(container))
+/** A scene as the frame is pointed at it by default: the layer bar hidden, which the link never is. */
+const framed = (url: string) => withLayerPanel(parseSceneUrl(url)!, false)
 /** The layer list of a scene, which nine assertions here read and none of them care is `unknown`. */
 const layersOf = (scene: NgScene) => scene['layers'] as Array<Record<string, unknown>>
 
@@ -147,7 +154,7 @@ describe('mounting', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} compact />,
     )
-    // The scene the node built, less the layer bar a card has no room for.
+    // The scene the node built, less the layer bar, which is off unless asked for.
     expect(frameScene(container)).toEqual({
       ...parseSceneUrl(URL_A),
       uiControlVisibility: { showLayerPanel: false },
@@ -158,7 +165,7 @@ describe('mounting', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 
   it('merges a changed selection instead of replacing the scene', () => {
@@ -168,7 +175,7 @@ describe('mounting', () => {
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
     )
     const before = frame(container)
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
     frameLoaded(container)
 
     rerender(<NeuroglancerViewer url={URL_B} neurons={NEURONS} color={CATEGORICAL} />)
@@ -212,7 +219,7 @@ describe('mounting', () => {
     frameLoaded(container)
     rerender(<NeuroglancerViewer url={URL_OTHER} neurons={NEURONS} color={CATEGORICAL} />)
     expect(frameSrc(container)).not.toContain('#!+')
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_OTHER))
+    expect(frameScene(container)).toEqual(framed(URL_OTHER))
   })
 
   it('replaces rather than merges while the frame is still loading', () => {
@@ -224,7 +231,7 @@ describe('mounting', () => {
     )
     rerender(<NeuroglancerViewer url={URL_B} neurons={NEURONS} color={CATEGORICAL} />)
     expect(frameSrc(container)).not.toContain('#!+')
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+    expect(frameScene(container)).toEqual(framed(URL_B))
   })
 
   it('collapses a burst of updates into one navigation, carrying the last', () => {
@@ -255,7 +262,7 @@ describe('mounting', () => {
         vi.advanceTimersByTime(80)
       })
       // Nothing sent yet — the burst is still running.
-      expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+      expect(frameScene(container)).toEqual(framed(URL_A))
     }
 
     flushMerge()
@@ -274,7 +281,7 @@ describe('mounting', () => {
     rerender(
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} summary="x" />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 
   it('says what to do before the node has run', () => {
@@ -393,7 +400,7 @@ describe('where the proxy is actually served', () => {
       true,
     )
     // Still the same scene — this is about *which host*, not about what is shown.
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 
   it('still merges there, since only the splice needed same-origin', () => {
@@ -456,7 +463,7 @@ describe('holding an update back while the pointer is in the frame', () => {
     rerender(<NeuroglancerViewer url={URL_B} neurons={NEURONS} color={CATEGORICAL} />)
     flushMerge()
     // Still the opening scene: the patch is waiting, not lost.
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
 
     leave(container)
     flushMerge()
@@ -483,7 +490,7 @@ describe('holding an update back while the pointer is in the frame', () => {
       )
       flushMerge()
     }
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
 
     leave(container)
     flushMerge()
@@ -499,12 +506,12 @@ describe('holding an update back while the pointer is in the frame', () => {
     const { container, rerender } = hovered()
 
     rerender(<NeuroglancerViewer url={URL_OTHER} neurons={NEURONS} color={CATEGORICAL} />)
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
 
     leave(container)
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
     flushMerge()
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_OTHER))
+    expect(frameScene(container)).toEqual(framed(URL_OTHER))
   })
 
   it('does not hold the opening navigation', () => {
@@ -514,7 +521,7 @@ describe('holding an update back while the pointer is in the frame', () => {
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
     )
     enter(container)
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 })
 
@@ -578,8 +585,8 @@ describe('handing the live frame to the next surface', () => {
   })
 
   it('flips the layer bar on the frame it adopted, and sends nothing else', () => {
-    // The card hides the bar and the overlay shows it, and they share this one frame. A patch
-    // naming `layers` would rebuild every layer for a change that touches none.
+    // The card and the overlay share this one frame, and the setting can change while it is
+    // loaded. A patch naming `layers` would rebuild every layer for a change that touches none.
     const card = render(
       <NeuroglancerViewer
         url={URL_A}
@@ -597,11 +604,15 @@ describe('handing the live frame to the next surface', () => {
 
     const props = { url: URL_A, color: CATEGORICAL, datasetId: OWNED, viewerId: 'kept-bar' }
     const { container, rerender } = render(<NeuroglancerViewer {...props} />)
+    // Moving to the overlay alone sends nothing: the bar is hidden there too.
+    expect(frameScene(container)).toEqual(framed(URL_A))
+
+    rerender(<NeuroglancerViewer {...props} layerBar />)
     expect(frameSrc(container)).toContain('#!+')
     expect(frameScene(container)).toEqual({ uiControlVisibility: { showLayerPanel: true } })
 
-    // And back, on the way to the card.
-    rerender(<NeuroglancerViewer {...props} compact />)
+    // And back.
+    rerender(<NeuroglancerViewer {...props} />)
     expect(frameScene(container)).toEqual({ uiControlVisibility: { showLayerPanel: false } })
   })
 
@@ -619,7 +630,7 @@ describe('handing the live frame to the next surface', () => {
       fireEvent.click(screen.getByLabelText('Reload the viewer'))
     })
     expect(frame(container)).not.toBe(element)
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 
   it('keeps nothing without a viewerId, which the profile tile does not pass', () => {
@@ -711,7 +722,7 @@ describe('resuming across a remount', () => {
     expect(layers[1]!['segments']).toEqual(['1', '2'])
   })
 
-  it('shows the bar the card hid, when the state it resumes came from the card', () => {
+  it('shows the bar the card hid when asked to, though the state it resumes hid it', () => {
     const first = render(
       <NeuroglancerViewer
         url={URL_A}
@@ -726,7 +737,13 @@ describe('resuming across a remount', () => {
     first.unmount()
 
     const { container } = render(
-      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="bar" />,
+      <NeuroglancerViewer
+        url={URL_A}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId="bar"
+        layerBar
+      />,
     )
     const scene = frameScene(container)!
     expect(scene['position']).toEqual([900, 900, 900])
@@ -756,7 +773,7 @@ describe('resuming across a remount', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 
   it('refuses to resume into a different scene', () => {
@@ -771,7 +788,7 @@ describe('resuming across a remount', () => {
         viewerId="ng1"
       />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_OTHER))
+    expect(frameScene(container)).toEqual(framed(URL_OTHER))
   })
 
   it('keeps each viewer to itself', () => {
@@ -779,7 +796,7 @@ describe('resuming across a remount', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="ng2" />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 
   it('remembers nothing it could not read', () => {
@@ -793,7 +810,7 @@ describe('resuming across a remount', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+    expect(frameScene(container)).toEqual(framed(URL_B))
   })
 
   it('remembers nothing before the frame has loaded', () => {
@@ -807,7 +824,7 @@ describe('resuming across a remount', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+    expect(frameScene(container)).toEqual(framed(URL_B))
   })
 
   it('falls back to the published scene when the layers no longer line up', () => {
@@ -823,7 +840,7 @@ describe('resuming across a remount', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+    expect(frameScene(container)).toEqual(framed(URL_B))
   })
 
   it('drops the remembered state when the viewer is reloaded', () => {
@@ -837,14 +854,14 @@ describe('resuming across a remount', () => {
     act(() => {
       fireEvent.click(screen.getByLabelText('Reload the viewer'))
     })
-    expect(frameScene(second.container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(second.container)).toEqual(framed(URL_A))
     // The remounted frame holds no document, so the way out leaves nothing behind either.
     second.unmount()
 
     const { container } = render(
       <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 })
 
@@ -877,7 +894,7 @@ describe('interface scale', () => {
     rerender(
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} scale={0.6} />,
     )
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 })
 
@@ -907,7 +924,7 @@ describe('the caption', () => {
 
   it('still shows the scene when only a dataset is wired', () => {
     const { container } = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} />)
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 
   it('carries the legend, since the colours are inside an opaque frame', () => {
@@ -927,24 +944,31 @@ describe('the caption', () => {
 
 describe('hiding the layer bar', () => {
   it('hides it in the frame and leaves it on in the link', () => {
-    // The profile tile is too short to spare the strip; a tab of its own is not, so ↗ and ⧉
-    // hand out the scene exactly as built.
+    // The embed is too small to spare the strip; a tab of its own is not, so ↗ and ⧉ hand out
+    // the scene exactly as built.
     const { container } = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} compact />)
     expect(frameScene(container)!['uiControlVisibility']).toEqual({ showLayerPanel: false })
     expect(screen.getByLabelText('Open in a new tab').getAttribute('href')).toBe(URL_A)
   })
 
-  it('leaves the scene untouched when nobody asked', () => {
+  it('hides it on the expanded surface too', () => {
     const { container } = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} />)
+    expect(frameScene(container)!['uiControlVisibility']).toEqual({ showLayerPanel: false })
+  })
+
+  it('leaves the scene untouched when the bar is asked for', () => {
+    const { container } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} layerBar />,
+    )
     expect(frameScene(container)!['uiControlVisibility']).toBeUndefined()
   })
 
-  it('sends a change of surface along with a selection that changed in the same pass', () => {
+  it('sends a change of setting along with a selection that changed in the same pass', () => {
     const { container, rerender } = render(
-      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} compact />,
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} />,
     )
     frameLoaded(container)
-    rerender(<NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} />)
+    rerender(<NeuroglancerViewer url={URL_B} color={CATEGORICAL} datasetId={OWNED} layerBar />)
     flushMerge()
     const patch = frameScene(container)!
     expect(frameSrc(container)).toContain('#!+')
@@ -991,7 +1015,7 @@ describe('reloading the frame', () => {
     // A new element, or the browser has been asked to re-fetch nothing: assigning a src that
     // has not changed does not reload a document.
     expect(frame(container)).not.toBe(before)
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+    expect(frameScene(container)).toEqual(framed(URL_A))
   })
 
   it('sends the whole scene rather than a merge, since there is nothing left to merge into', () => {
@@ -1034,7 +1058,7 @@ describe('reloading the frame', () => {
     rerender(<NeuroglancerViewer url={URL_B} color={CATEGORICAL} />)
     flushMerge()
     expect(frameSrc(container)).not.toContain('#!+')
-    expect(frameScene(container)).toEqual(parseSceneUrl(URL_B))
+    expect(frameScene(container)).toEqual(framed(URL_B))
   })
 
   it('merges again once the reloaded document has landed', () => {

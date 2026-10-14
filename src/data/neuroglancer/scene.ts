@@ -241,15 +241,15 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
  * The scene with neuroglancer's layer bar — the strip of layer chips along the top — shown or
  * hidden.
  *
- * Which one is a fact about the *surface*, not the scene: a compact one (a node card, the Neuron
- * Profile tile) cannot spare the strip, the overlay can. Hence not a `buildScene` option — the scene
- * is also the link ↗ and ⧉ hand out, and whoever opens that in a tab of its own has the room. So
- * `NeuroglancerViewer` applies this to what it points the *frame* at and nothing else, and a kept
- * frame moving between surfaces is flipped with `layerPanelPatch`.
+ * Which one is a fact about the *embed*, not the scene: hidden unless the caller asks for it.
+ * Hence not a `buildScene` option — the scene is also the link ↗ and ⧉ hand out, and whoever opens
+ * that in a tab of its own has the room. So `NeuroglancerViewer` applies this to what it points the
+ * *frame* at and nothing else, and a loaded frame whose setting changes is flipped with
+ * `layerPanelPatch`.
  *
  * Shown means the key is *removed*, not set to true: a full navigation resets first, so absent is
- * neuroglancer's own default, and an untouched scene comes back as itself. That matters for a state
- * resumed from a card, which carries the card's `false`.
+ * neuroglancer's own default, and an untouched scene comes back as itself. That matters for a resumed
+ * state, which carries whatever the frame was last sent.
  *
  * `showLayerPanel` is the only entry `uiControlVisibility` has in the viewer state (the other
  * `show*` controls are constructor options). Checked against the deployed bundles: the demo
@@ -268,7 +268,8 @@ export function withLayerPanel(scene: NgScene, shown: boolean): NgScene {
 
 /**
  * The layer bar's setting as `#!+` patch content. Explicit either way, unlike `withLayerPanel`: a
- * merge leaves an absent key alone, so omitting it would keep a card's hidden bar in the overlay.
+ * merge leaves an absent key alone, so omitting it would keep a hidden bar hidden after it is
+ * asked for.
  */
 export function layerPanelPatch(shown: boolean): NgScene {
   return { uiControlVisibility: { showLayerPanel: shown } }
