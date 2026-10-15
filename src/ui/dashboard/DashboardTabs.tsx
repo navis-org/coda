@@ -19,11 +19,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
 import type { DashboardLayout } from '../../core/dashboard'
-import { tabLabel } from '../../core/dashboard'
+import { digitForTab, tabLabel } from '../../core/dashboard'
 import { useGraphStore } from '../../store/graphStore'
 import { ContextMenu } from '../menu/ContextMenu'
 import { RenameInput } from '../RenameInput'
 import { revealIn } from '../reveal'
+import { formatChord } from '../shortcuts'
 
 interface MenuState {
   at: { x: number; y: number }
@@ -93,6 +94,13 @@ export function DashboardTabs({
         {layout.tabs.map((tab, index) => {
           const label = tabLabel(layout, tab, index)
           const selected = tab.id === activeId
+          /*
+           * The ⌥digit that reaches this tab — drawn only once there are pages to choose between,
+           * so a dashboard that never grows a second looks as it did. `digitForTab` is the
+           * binding's own inverse, so the numeral cannot name a key that goes somewhere else.
+           */
+          const digit = layout.tabs.length > 1 ? digitForTab(layout, index) : undefined
+          const chord = digit === undefined ? undefined : { alt: true, key: String(digit) }
           if (editing === tab.id) {
             return (
               <RenameInput
@@ -115,7 +123,8 @@ export function DashboardTabs({
               data-tab-id={tab.id}
               aria-selected={selected}
               tabIndex={selected ? 0 : -1}
-              title={`${label}. Double-click to rename, right-click for more`}
+              title={`${label}${chord ? ` (${formatChord(chord)})` : ''}. Double-click to rename, right-click for more`}
+              aria-keyshortcuts={chord ? formatChord(chord, false) : undefined}
               onClick={() => setDashboardTab(tab.id)}
               onDoubleClick={() => setEditing(tab.id)}
               onKeyDown={(event) => onKeyDown(event, index)}
@@ -124,7 +133,13 @@ export function DashboardTabs({
                 setMenu({ at: { x: event.clientX, y: event.clientY }, id: tab.id })
               }}
             >
-              {label}
+              {/* Hidden from the name, which would read "2 Tab 2"; `aria-keyshortcuts` says it. */}
+              {digit !== undefined && (
+                <span className="dash-tabs__key" aria-hidden="true">
+                  {digit}
+                </span>
+              )}
+              <span className="dash-tabs__label">{label}</span>
             </button>
           )
         })}

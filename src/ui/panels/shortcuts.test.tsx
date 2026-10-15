@@ -107,6 +107,8 @@ describe('formatChord', () => {
     expect(formatChord({ mod: true, key: 'D' }, true)).toBe('⌘D')
     expect(formatChord({ shift: true, key: 'R' }, true)).toBe('⇧R')
     expect(formatChord({ key: '⌫' }, true)).toBe('⌫')
+    expect(formatChord({ alt: true, key: '2' }, true)).toBe('⌥2')
+    expect(formatChord({ alt: true, shift: true, mod: true, key: 'Z' }, true)).toBe('⌥⇧⌘Z')
   })
 
   it('writes Ctrl and spells the Apple-only glyphs out everywhere else', () => {
@@ -115,6 +117,7 @@ describe('formatChord', () => {
     expect(formatChord({ shift: true, key: 'R' }, false)).toBe('Shift+R')
     expect(formatChord({ key: '⌫' }, false)).toBe('Backspace')
     expect(formatChord({ mod: true, key: '⏎' }, false)).toBe('Ctrl+Enter')
+    expect(formatChord({ alt: true, key: '2' }, false)).toBe('Alt+2')
   })
 
   it('leaves a gesture alone on both platforms', () => {

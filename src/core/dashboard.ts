@@ -319,6 +319,32 @@ export function tabLabel(
 }
 
 /**
+ * The highest digit a tab is reached by. ⌥1–⌥8 are positions and ⌥9 is always the last tab, the
+ * browsers' own convention, so a dashboard of twelve pages still has a key for its end.
+ */
+export const TAB_DIGITS = 9
+
+/** The tab `⌥digit` goes to, or `undefined` when there is none in that place. */
+export function tabForDigit(layout: DashboardLayout, digit: number): DashboardTab | undefined {
+  if (digit < 1 || digit > TAB_DIGITS) return undefined
+  return digit === TAB_DIGITS ? layout.tabs.at(-1) : layout.tabs[digit - 1]
+}
+
+/**
+ * The digit that reaches the tab at `index`, which is what the strip draws and its tooltip names.
+ * Asked of `tabForDigit` rather than restating its rule, so the numeral and the key cannot
+ * disagree. The lowest digit wins, so a last tab that 9 also reaches still shows its position.
+ */
+export function digitForTab(layout: DashboardLayout, index: number): number | undefined {
+  const tab = layout.tabs[index]
+  if (!tab) return undefined
+  for (let digit = 1; digit <= TAB_DIGITS; digit++) {
+    if (tabForDigit(layout, digit) === tab) return digit
+  }
+  return undefined
+}
+
+/**
  * Whether every one of `ids` has a cell on this tab — what decides whether a gesture over a
  * selection reads Add or Remove, so the context menu and the palette ask it here and cannot
  * disagree. `every`, not `some`: with a mixed selection the useful act is to finish putting them

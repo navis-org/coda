@@ -26,6 +26,8 @@
 export interface Chord {
   /** ⌘ on Apple platforms, Ctrl elsewhere. */
   mod?: boolean
+  /** ⌥ on Apple platforms, Alt elsewhere. */
+  alt?: boolean
   shift?: boolean
   /** The key itself: `'Z'`, `'Tab'`, `'⌫'`, `'§'`, or a gesture like `'drag'`. */
   key: string
@@ -101,10 +103,12 @@ const SPELLED_OUT: Record<string, string> = {
  */
 export function formatChord(chord: Chord, apple = isApplePlatform()): string {
   if (apple) {
-    return `${chord.shift ? '⇧' : ''}${chord.mod ? '⌘' : ''}${chord.key}`
+    // Apple's own modifier order: ⌥ before ⇧ before ⌘.
+    return `${chord.alt ? '⌥' : ''}${chord.shift ? '⇧' : ''}${chord.mod ? '⌘' : ''}${chord.key}`
   }
   const parts: string[] = []
   if (chord.mod) parts.push('Ctrl')
+  if (chord.alt) parts.push('Alt')
   if (chord.shift) parts.push('Shift')
   parts.push(SPELLED_OUT[chord.key] ?? chord.key)
   return parts.join('+')
@@ -255,6 +259,12 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         label: 'Dashboard, and back',
         hint: 'The same graph as a grid of the nodes worth looking at — no canvas, no wires',
         short: 'dashboard',
+      },
+      {
+        id: 'dashboard-tab',
+        chords: [{ alt: true, key: '1–9' }],
+        label: 'Go to a dashboard tab',
+        hint: 'By position, and 9 is always the last tab. On the dashboard only',
       },
       {
         id: 'fullscreen',
