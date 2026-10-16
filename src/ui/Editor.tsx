@@ -79,7 +79,8 @@ import { isTourActive, refreshTour } from './tour/tourState'
 // `f`, `i`, `/` and `d` are bound in `useAppShortcuts`, not here: they are about the window, a
 // panel and which view is up, and none of them needs the canvas. This handler keeps the keys that
 // do. Both listeners share the two guards below.
-import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
+import { TOUR_DECLINES } from './appShortcuts'
+import { isTypingTarget } from '../core/keys'
 import { cardElement } from './cardSizes'
 import { useClipboardShortcuts } from './clipboard'
 import { LOCKED_NOTICE } from './lockCopy'

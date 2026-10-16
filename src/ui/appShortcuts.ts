@@ -23,6 +23,7 @@
 import { useEffect } from 'react'
 
 import { dashboardOf, tabForDigit } from '../core/dashboard'
+import { isTypingTarget } from '../core/keys'
 import { useGraphStore } from '../store/graphStore'
 import { appElement, toggleFullscreen } from './fullscreen'
 import { isTourActive } from './tour/tourState'
@@ -40,23 +41,6 @@ import { isTourActive } from './tour/tourState'
  * unmounts the entire canvas the tour is pointing at.
  */
 export const TOUR_DECLINES = new Set(['f', 'i', 'm', 'h', 'p', 'd', '/'])
-
-/**
- * True when a keypress is somebody typing rather than somebody reaching for a shortcut.
- *
- * The same test `Editor.tsx` opens with. Exported so the two cannot drift on the next field kind
- * that has to be exempt — a `contenteditable` cell, a combobox.
- */
-export function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
-  if (!el) return false
-  return (
-    el.tagName === 'INPUT' ||
-    el.tagName === 'TEXTAREA' ||
-    el.tagName === 'SELECT' ||
-    el.isContentEditable === true
-  )
-}
 
 /**
  * ⌥1–⌥9: a dashboard tab by position, 9 being the last. Answers whether the key was taken.

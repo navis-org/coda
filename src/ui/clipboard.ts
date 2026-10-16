@@ -24,7 +24,7 @@ import { useEffect } from 'react'
 import type { Point } from '../core/clipboard'
 import { readFragment } from '../core/clipboard'
 import { useGraphStore } from '../store/graphStore'
-import { isTypingTarget } from './appShortcuts'
+import { isTypingTarget } from '../core/keys'
 import { copyText } from './export'
 
 /**

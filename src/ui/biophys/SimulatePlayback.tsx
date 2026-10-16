@@ -45,7 +45,7 @@ import {
 import type { Mode } from '../../style/colors'
 import { CHART_INK, chartSurface, cycleColor } from '../../style/colors'
 import { formatBytes, formatNumber, plural } from '../../style/format'
-import { isTypingTarget } from '../appShortcuts'
+import { isTypingTarget } from '../../core/keys'
 import { currentMode } from '../useThemeMode'
 import {
   arborPointAt,

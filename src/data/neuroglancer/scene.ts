@@ -28,6 +28,7 @@
 import type { SegmentPlacement } from '../source'
 import { isSegmentId } from '../../core/ids'
 import { uniqueName } from '../../core/types'
+import { stableStringify } from '../../core/hash'
 
 /** A neuroglancer viewer state. Opaque apart from the handful of keys touched here. */
 export type NgScene = Readonly<Record<string, unknown>>
@@ -101,6 +102,8 @@ export interface SceneOptions {
    * have, goes to the target layer as every segment otherwise does.
    */
   placements?: ReadonlyMap<string, SegmentPlacement> | undefined
+  /** Segments listed but hidden, written `!id` — selected, not drawn. */
+  hiddenSegments?: ReadonlySet<string> | undefined
 }
 
 /**
@@ -132,14 +135,21 @@ function layerList(scene: NgScene): NgLayer[] {
 export function segmentationLayerIndex(scene: NgScene, datasetId: string): number {
   const layers = layerList(scene)
   const family = datasetId.split(':')[0] ?? datasetId
+  // Either flavour's type: a link written for the Seung-lab fork names a chunked-graph layer
+  // `segmentation_with_graph`, and Coda's own frame is read back against that link.
+  const isSegmentation = (layer: NgLayer) => SEGMENTATION_TYPES.has(String(layer.type))
   const named = layers.findIndex(
     (layer) =>
-      layer.type === 'segmentation' &&
-      typeof layer.name === 'string' &&
-      layer.name.startsWith(family),
+      isSegmentation(layer) && typeof layer.name === 'string' && layer.name.startsWith(family),
   )
   if (named >= 0) return named
-  return layers.findIndex((layer) => layer.type === 'segmentation')
+  return layers.findIndex(isSegmentation)
+}
+
+/** The name of the layer `buildScene` writes a dataset's neurons into, where it has one. */
+export function selectionLayerName(scene: NgScene, datasetId: string): string | undefined {
+  const name = layerList(scene)[segmentationLayerIndex(scene, datasetId)]?.name
+  return typeof name === 'string' ? name : undefined
 }
 
 /**
@@ -181,6 +191,7 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
     else byLayer.set(index, [segment])
   }
   const colors = options.segmentColors
+  const hide = options.hiddenSegments
 
   const decorated = layers.map((layer, index) => {
     if (index !== target && !byLayer.has(index)) return layer
@@ -191,7 +202,7 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
       colors && Object.fromEntries(own.flatMap((id) => (colors[id] ? [[id, colors[id]]] : [])))
     return {
       ...layer,
-      segments: own,
+      segments: own.map((id) => (hide?.has(id) ? `${HIDDEN_PREFIX}${id}` : id)),
       // Explicitly cleared rather than left behind: manc publishes a `segmentColors` entry
       // for one body, which would otherwise survive as a stray colour nobody chose.
       segmentColors: ownColors ?? {},
@@ -324,9 +335,9 @@ function withUniqueNames(
  * Profile 3D tile on a CAVE dataset drew the EM volume with no segmentation in it — precisely
  * the failure `DatasetInfo.viewerSite` exists to prevent, on the other one of its two callers.
  *
- * Empty means the dataset's own and then the built-in default, which `sceneUrl` applies. A CAVE
+ * Empty means the dataset's own, then the built-in default, which `sceneUrl` applies. A CAVE
  * segmentation is `graphene://middleauth+…`, which only a spelunker-flavoured viewer
- * authenticates.
+ * authenticates. Where the *card* embeds instead — Coda's own copy, by default — is `frameTarget`.
  */
 export function viewerBaseFor(
   chosen: string | undefined,
@@ -334,6 +345,22 @@ export function viewerBaseFor(
 ): string {
   return chosen?.trim() || viewerSite || ''
 }
+
+/**
+ * Coda's own copy of neuroglancer (`neuroglancer.html`, beside the page this runs in), or
+ * undefined where there is no page — the MCP server, a Node script, a test.
+ *
+ * The only deployment whose frame reports back: the neurons somebody double-clicks reach
+ * `Selected` only from here, which is why the card embeds it by default (`frameTarget`). It is
+ * Spelunker, so `viewerKind` reads it as spelunker-flavoured and a CAVE segmentation gets the
+ * `middleauth+` prefix it needs.
+ */
+export function selfHostedViewer(): string | undefined {
+  if (typeof location === 'undefined' || !/^https?:$/.test(location.protocol)) return undefined
+  return new URL(SELF_HOSTED_PAGE, location.href).href
+}
+
+const SELF_HOSTED_PAGE = './neuroglancer.html'
 
 /**
  * Which flavour of neuroglancer a deployment is, because they disagree about one prefix.
@@ -531,7 +558,18 @@ export function sceneUrl(
   kind: ViewerKind = viewerKind(viewerBase),
 ): string {
   const state = sceneForViewer(scene, kind)
-  return `${viewerRoot(viewerBase)}/#!${encodeURIComponent(JSON.stringify(state))}`
+  return `${fragmentBase(viewerBase)}#!${encodeURIComponent(JSON.stringify(state))}`
+}
+
+/**
+ * What a scene fragment is appended to: the root with a `/` after it, unless the viewer is a
+ * *page* (`…/neuroglancer.html`, Coda's own copy). `…/neuroglancer.html/` names nothing, and a
+ * server with an SPA fallback answers it with whatever app it serves — here, Coda itself, which
+ * then reads the fragment as one of its own share links.
+ */
+function fragmentBase(viewerBase: string | undefined): string {
+  const root = viewerRoot(viewerBase)
+  return /\/[^/]+\.html?$/i.test(root) ? root : `${root}/`
 }
 
 /** Viewer instance a URL is built against, normalised: no trailing slash, no fragment. */
@@ -597,7 +635,7 @@ export function scenePatchUrl(
 
 /** A `#!+` merge URL carrying exactly `patch` — no key picking, no source rewrite. */
 export function patchUrl(viewerBase: string | undefined, patch: NgScene): string {
-  return `${viewerRoot(viewerBase)}/#!+${encodeURIComponent(JSON.stringify(patch))}`
+  return `${fragmentBase(viewerBase)}#!+${encodeURIComponent(JSON.stringify(patch))}`
 }
 
 /**
@@ -641,6 +679,114 @@ export function proxiedViewer(viewerBase: string | undefined): string | undefine
 
 /** Layer keys that carry a selection. Copied as a set, so a mode change cannot leave a stray. */
 const SEGMENT_FIELDS = ['segments', 'segmentColors', 'segmentDefaultColor'] as const
+
+/** One layer's selection, as `SEGMENT_FIELDS` spell it in a scene. */
+export interface LayerSelection {
+  name: string
+  segments: string[]
+  segmentColors: Record<string, string>
+  segmentDefaultColor?: string
+}
+
+/**
+ * The selections that change between two scenes, or undefined where anything else changes too.
+ *
+ * The question behind the card's cheapest update: when a new scene differs from the one the frame
+ * holds only in which segments some layers show and how they are coloured, those layers can be set
+ * in place (`FrameSegmentsMessage`) rather than restored, which tears every layer down. Asked of
+ * the whole scene, every layer and every key, so a change to anything else — a layer added, a
+ * layout, a camera — is never applied this way and goes through a navigation as before. Empty
+ * means the scenes are the same.
+ */
+export function selectionChanges(before: NgScene, next: NgScene): LayerSelection[] | undefined {
+  if (sceneIdentity(before) !== sceneIdentity(next)) return undefined
+  const was = layerList(before)
+  const now = layerList(next)
+  if (was.length !== now.length) return undefined
+  const changes: LayerSelection[] = []
+  for (let i = 0; i < now.length; i++) {
+    const a = was[i]!
+    const b = now[i]!
+    if (a.name !== b.name || typeof b.name !== 'string') return undefined
+    if (stableStringify(withoutSelection(a)) !== stableStringify(withoutSelection(b))) {
+      return undefined
+    }
+    if (sameSelection(a, b)) continue
+    if (!SEGMENTATION_TYPES.has(String(b.type))) return undefined
+    changes.push({
+      name: b.name,
+      segments: stringList(b['segments']),
+      segmentColors: colorMap(b['segmentColors']),
+      ...(typeof b['segmentDefaultColor'] === 'string'
+        ? { segmentDefaultColor: b['segmentDefaultColor'] }
+        : {}),
+    })
+  }
+  return changes
+}
+
+function withoutSelection(layer: NgLayer): Record<string, unknown> {
+  const rest: Record<string, unknown> = {}
+  for (const key of Object.keys(layer)) {
+    if (!(SEGMENT_FIELDS as readonly string[]).includes(key)) rest[key] = layer[key]
+  }
+  return rest
+}
+
+/** Element by element rather than serialised: a selection can be tens of thousands of ids. */
+function sameSelection(a: NgLayer, b: NgLayer): boolean {
+  if (a['segmentDefaultColor'] !== b['segmentDefaultColor']) return false
+  const as = stringList(a['segments'])
+  const bs = stringList(b['segments'])
+  if (as.length !== bs.length || as.some((id, i) => id !== bs[i])) return false
+  const ac = colorMap(a['segmentColors'])
+  const bc = colorMap(b['segmentColors'])
+  const keys = Object.keys(bc)
+  return Object.keys(ac).length === keys.length && keys.every((id) => ac[id] === bc[id])
+}
+
+function stringList(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.map(String) : []
+}
+
+function colorMap(raw: unknown): Record<string, string> {
+  return raw && typeof raw === 'object' ? { ...(raw as Record<string, string>) } : {}
+}
+
+/** Neuroglancer's spelling of a segment listed but hidden: `!id`. */
+const HIDDEN_PREFIX = '!'
+
+/**
+ * One entry of a layer's `segments` list as an id and whether it is drawn, or undefined for
+ * anything that is not a segment id — one unparseable id costs the viewer. The one reader of the
+ * `!id` grammar, for the card and for the frame alike.
+ */
+export function segmentEntry(entry: unknown): { id: string; visible: boolean } | undefined {
+  const text = String(entry)
+  const visible = !text.startsWith(HIDDEN_PREFIX)
+  const id = visible ? text : text.slice(HIDDEN_PREFIX.length)
+  return isSegmentId(id) ? { id, visible } : undefined
+}
+
+/**
+ * The segments a named layer lists, which of those it draws, and which it hides (a chip un-ticked,
+ * or a neuron double-clicked out); undefined where the scene has no such layer.
+ */
+export function layerListing(
+  scene: NgScene,
+  name: string,
+): { listed: string[]; shown: string[]; hidden: string[] } | undefined {
+  const layer = layerList(scene).find((l) => l.name === name)
+  if (!layer) return undefined
+  const listing = { listed: [] as string[], shown: [] as string[], hidden: [] as string[] }
+  for (const raw of Array.isArray(layer['segments']) ? layer['segments'] : []) {
+    const entry = segmentEntry(raw)
+    if (!entry) continue
+    listing.listed.push(entry.id)
+    ;(entry.visible ? listing.shown : listing.hidden).push(entry.id)
+  }
+  return listing
+}
 
 /**
  * The layers **this app wrote** into a scene it built.
@@ -733,10 +879,15 @@ export function spliceSegments(
 
 /** Split a viewer URL back into the instance it points at and the scene it carries. */
 export function splitSceneUrl(url: string): { base: string; scene: NgScene } | undefined {
-  const at = url.indexOf('#!')
+  const base = sceneUrlBase(url)
   const scene = parseSceneUrl(url)
-  if (at === -1 || !scene) return undefined
-  return { base: url.slice(0, at).replace(/\/+$/, ''), scene }
+  return base !== undefined && scene ? { base, scene } : undefined
+}
+
+/** The instance a viewer URL points at, without parsing the scene it carries. */
+export function sceneUrlBase(url: string): string | undefined {
+  const at = url.indexOf('#!')
+  return at === -1 ? undefined : url.slice(0, at).replace(/\/+$/, '')
 }
 
 /** Read a scene back out of a viewer URL. The inverse of `sceneUrl`; used by tests. */

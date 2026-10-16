@@ -394,6 +394,14 @@ interface ParamBase {
    * space, but it is somebody's preference and stays countable.
    */
   internal?: boolean
+  /**
+   * Written without an undo step and without an auto-run — a viewer recording where somebody is
+   * looking, many times a gesture, which Ctrl+Z should not have to rewind through first. Saved in
+   * the document like any param. `setParam` reads it, so a writer cannot forget it. Undo and redo
+   * step around it: the write is carried into every history snapshot, so no step restores an old
+   * value.
+   */
+  unrecorded?: boolean
   /** Conditional visibility, evaluated against the node's current params. */
   visibleIf?: (params: ParamValues) => boolean
   /**

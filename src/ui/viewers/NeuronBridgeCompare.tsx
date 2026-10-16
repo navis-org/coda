@@ -34,7 +34,7 @@ import {
   comparisonFor,
   cornerClip,
 } from '../../data/neuronbridge/views'
-import { isTypingTarget } from '../appShortcuts'
+import { isTypingTarget } from '../../core/keys'
 import { formatNumber } from '../../style/format'
 import { Modal } from '../Modal'
 import { Pager } from './Pager'

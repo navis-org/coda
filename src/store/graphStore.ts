@@ -82,7 +82,7 @@ import type { InferenceResult } from '../core/inference'
 import { checkConnection, inferGraph } from '../core/inference'
 import { spliceCandidate, spliceGraph } from '../core/splice'
 import type { ParamValue } from '../core/node'
-import { defaultParams } from '../core/node'
+import { defaultParams, findParam } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
 import type {
   IterationInfo,
@@ -3098,9 +3098,26 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     setParam: (nodeId, paramId, value) => {
-      commit((g) => setNodeParam(g, nodeId, paramId, value), {
-        tag: `param:${nodeId}:${paramId}`,
-      })
+      const node = get().graph.nodes.find((n) => n.id === nodeId)
+      const def = node && getNodeDef(node.type)
+      const param = def && findParam(def, paramId)
+      if (!param?.unrecorded) {
+        commit((g) => setNodeParam(g, nodeId, paramId, value), {
+          tag: `param:${nodeId}:${paramId}`,
+        })
+        return
+      }
+      commit((g) => setNodeParam(g, nodeId, paramId, value), { history: false, autoRun: false })
+      // Into every undo and redo snapshot too, so stepping through history moves the edits around
+      // it and leaves this alone — a redo restoring the camera from before it was moved would hand
+      // the document a view the frame is no longer showing.
+      const carry = (entries: HistoryEntry[]) =>
+        entries.map((entry) =>
+          entry.graph.nodes.some((n) => n.id === nodeId)
+            ? { ...entry, graph: setNodeParam(entry.graph, nodeId, paramId, value) }
+            : entry,
+        )
+      set({ past: carry(get().past), future: carry(get().future) })
     },
 
     setParams: (nodeId, values) => {

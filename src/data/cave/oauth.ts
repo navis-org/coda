@@ -92,27 +92,11 @@ export async function discoverLoginService(
   options: { signal?: AbortSignal } = {},
 ): Promise<CaveLoginService> {
   const base = globalServer.trim().replace(/\/+$/, '')
-  const url = `${base}/auth_info`
-  const text = await fetchText(url, {
-    hint: 'Signing in needs that document; you can paste a token instead.',
-    notFound:
-      'This deployment publishes no login service, so it cannot be signed in to. Paste a ' +
-      'token instead.',
-    ...(options.signal ? { signal: options.signal } : {}),
-  })
-
-  let info: { login_url?: unknown }
-  try {
-    info = parseCaveJson<{ login_url?: unknown }>(text)
-  } catch {
-    throw new Error(`${url} did not answer JSON, so this deployment cannot be signed in to.`)
-  }
-
-  const loginUrl = absoluteUrl(info.login_url)
+  const loginUrl = absoluteUrl(await readLoginUrl(base, options))
   if (!loginUrl) {
     throw new Error(
-      `${url} names no login service, so this deployment cannot be signed in to. Paste ` +
-        `a token instead.`,
+      `${base}/auth_info names no login service, so this deployment cannot be signed in to. ` +
+        `Paste a token instead.`,
     )
   }
 
@@ -121,6 +105,33 @@ export async function discoverLoginService(
     authorizeUrl: `${loginUrl}/api/v1/authorize`,
     origin: new URL(loginUrl).origin,
   }
+}
+
+/**
+ * `login_url` from a server's `/auth_info`, **exactly as answered** — untrimmed, because that
+ * string is a key: Coda's own neuroglancer matches a data server to Coda's tokens by it, the way
+ * neuroglancer keys its token storage (`frameCredentials.ts`). Throws for a server that does not
+ * answer one; `discoverLoginService` turns that into what a sign-in shows.
+ */
+export async function readLoginUrl(
+  server: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<string | undefined> {
+  const url = `${server.trim().replace(/\/+$/, '')}/auth_info`
+  const text = await fetchText(url, {
+    hint: 'Signing in needs that document; you can paste a token instead.',
+    notFound:
+      'This deployment publishes no login service, so it cannot be signed in to. Paste a ' +
+      'token instead.',
+    ...(options.signal ? { signal: options.signal } : {}),
+  })
+  let info: { login_url?: unknown }
+  try {
+    info = parseCaveJson<{ login_url?: unknown }>(text)
+  } catch {
+    throw new Error(`${url} did not answer JSON, so this deployment cannot be signed in to.`)
+  }
+  return typeof info.login_url === 'string' ? info.login_url : undefined
 }
 
 /**

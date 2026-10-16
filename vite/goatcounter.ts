@@ -43,6 +43,8 @@
 import { basename } from 'node:path'
 import type { Plugin } from 'vite'
 
+import { FRAME_ENTRIES } from './entries'
+
 /** The site's own endpoint. One instance; the dashboard behind it is public. */
 const ENDPOINT = 'https://coda-science.goatcounter.com/count'
 
@@ -79,7 +81,9 @@ export function goatCounter(): Plugin {
     apply: 'build',
     transformIndexHtml(_html, ctx) {
       if (!enabled) return
-      const path = pinnedPath(ctx.path || ctx.filename)
+      const file = basename(ctx.path || ctx.filename)
+      if (FRAME_ENTRIES.has(file)) return
+      const path = pinnedPath(file)
       return [
         {
           tag: 'script',

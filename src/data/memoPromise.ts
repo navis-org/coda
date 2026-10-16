@@ -34,8 +34,15 @@
 /** What a memo holds on to once its promise has settled successfully. See the module header. */
 export type Keep = 'resolved' | 'inflight'
 
+/** Where the promises are held: a `Map`, or anything bounded with the same three methods (`LruMap`). */
+export interface PromiseSlots<K, V> {
+  get(key: K): Promise<V> | undefined
+  set(key: K, value: Promise<V>): unknown
+  delete(key: K): unknown
+}
+
 export function memoPromise<K, V>(
-  held: Map<K, Promise<V>>,
+  held: PromiseSlots<K, V>,
   key: K,
   run: () => Promise<V>,
   options: { keep: Keep },

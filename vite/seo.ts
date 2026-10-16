@@ -46,6 +46,8 @@ import { readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { Plugin, ResolvedConfig } from 'vite'
 
+import { FRAME_ENTRIES } from './entries'
+
 /**
  * Where the published site lives.
  *
@@ -366,7 +368,9 @@ export function seo(): Plugin {
           : Array.isArray(entries)
             ? entries
             : Object.values(entries)
-      ).map((e) => basename(e))
+      )
+        .map((e) => basename(e))
+        .filter((file) => !FRAME_ENTRIES.has(file))
 
       const rows = files
         .map((file) => ({ file, page: PAGES[file] }))

@@ -22,21 +22,35 @@
  * segments selected, which is a perfectly good thing to look at — and is what a starter graph
  * shows before anyone has ticked a neuron.
  *
- * No `Selected` output: an iframe on a foreign origin cannot be read, so unlike the network
- * and 3D viewers this one is genuinely one-way. Picking neurons stays upstream.
+ * **`Selected` is what the scene shows, including what somebody changed inside it.** The frame is
+ * Coda's own copy of neuroglancer (`neuroglancer.html`), so it can be read; double-clicking a
+ * neuron in or out of the scene is written into `selectionEdits` (`selectionEdits.ts` for the
+ * model), and the output is the input minus what was removed plus what was added. An added neuron
+ * the input did not have is looked up in the dataset for its columns — see `lookupNeurons`.
  */
 
 import type { Warner } from '../../core/limits'
 import { warnOverThreshold } from '../../core/limits'
 import { warnAboveParam } from '../lib/limitParams'
 import { registerNode } from '../../core/registry'
-import type { ParamValues } from '../../core/node'
-import { idText, isSegmentId } from '../../core/ids'
-import { T } from '../../core/types'
-import type { TableValue } from '../../core/values'
-import { isTableValue, str } from '../../core/values'
+import type { EvalContext, ParamValues } from '../../core/node'
+import { ID_COLUMN_NAME, idText, isSegmentId } from '../../core/ids'
+import type { TableSchema } from '../../core/types'
+import { T, column } from '../../core/types'
+import type { DatasetValue, TableValue } from '../../core/values'
+import { emptyTable, isTableValue, makeTable, str, tableFromRows } from '../../core/values'
+import { LruMap } from '../../core/lruMap'
+import { memoPromise, untilAborted } from '../../data/memoPromise'
+import { datasetCacheKey } from '../../data/neuronIndex'
+import { unmatchedIds } from '../lib/idList'
+import { errorMessage } from '../../core/errors'
+import { plural } from '../../style/format'
+import {
+  applySelectionEdits,
+  decodeSelectionEdits,
+} from '../../data/neuroglancer/selectionEdits'
 import type { NgLayerSet, NgLayout, ViewerKind } from '../../data/neuroglancer/scene'
-import type { SegmentPlacement } from '../../data/source'
+import type { DataSource, SegmentPlacement } from '../../data/source'
 import {
   DEFAULT_NEUROGLANCER_URL,
   buildScene,
@@ -49,9 +63,15 @@ import {
  * Reusing it is what makes a neuron the same colour in the 3D view and in neuroglancer.
  * Both modules are pure — no DOM, no React — so this stays testable headlessly.
  */
-import { resolveColor } from '../../style/encoding'
-import { requireDataset, sourceSupports } from '../lib/datasetParam'
-import type { ColorMode } from '../lib/encodingParams'
+import { constantColor, resolveColor } from '../../style/encoding'
+import {
+  datasetRequest,
+  requireDataset,
+  schemasForDataset,
+  neuronSchemaOf,
+  sourceSupports,
+} from '../lib/datasetParam'
+import { ID_ONLY_SCHEMA, concatBatches, foldColumns, rowsWithIds } from '../lib/tableOps'
 import { colorParams, readColorSpec } from '../lib/encodingParams'
 
 /**
@@ -72,16 +92,63 @@ const SEGMENTS_WARN = 10000
 const VIEWER_MODE = 'dark' as const
 
 /**
- * The `Viewer type` param as a kind, or undefined for "work it out".
+ * What the card's frame opens, from `Viewer type` and `Viewer`. The link is not decided here: it
+ * is always the datastack's own viewer, in that viewer's own format, so it opens the same thing for
+ * whoever it is sent to.
  *
- * One statement because two surfaces read it: this node, which bakes the answer into the URL,
- * and `ValuePreview`, which hands it to the embedded frame. The frame cannot recover it from the
- * URL — `sceneForViewer` *normalises*, so re-deriving from the host would strip an explicit
- * override back out, which is the whole of what the escape hatch is for.
+ *  - `own`: Coda's bundled neuroglancer — the default, and the only frame that can be read back.
+ *  - `link`: the link's own deployment, a one-way embed.
+ *  - `custom`: a deployment somebody typed into `Viewer`.
+ *
+ * `flavour` is the format the frame's scene is written in (`ViewerKind`), where it is not to be
+ * worked out from the deployment — a custom host this build has never met. Pure: the card resolves
+ * `own` against its page (`selfHostedViewer`).
  */
-export function chosenViewerKind(params: ParamValues): ViewerKind | undefined {
-  const chosen = String(params.viewerType ?? 'auto')
-  return chosen === 'auto' ? undefined : (chosen as ViewerKind)
+export type FrameTarget =
+  | { use: 'own'; flavour?: undefined }
+  | {
+      use: 'link'
+      flavour?: ViewerKind
+      /** A custom deployment was chosen and has no URL yet — `validate` asks for one. */
+      pending?: true
+    }
+  | { use: 'custom'; base: string; flavour?: ViewerKind }
+
+export function frameTarget(params: ParamValues): FrameTarget {
+  // Read plainly (invariant 4): every context fills declared defaults, `absentMeans` included.
+  const typed = typeof params.viewer === 'string' ? params.viewer.trim() : ''
+  const type = params.viewerType
+  switch (type) {
+    case 'dataset':
+      return { use: 'link' }
+    case 'spelunker':
+    case 'seunglab': {
+      const flavour: ViewerKind = type
+      // A custom choice with no URL yet frames the dataset's viewer in that format — which is also
+      // what a graph saved with `Seung-lab` and an empty `Viewer` did. `validate` says so.
+      return typed
+        ? { use: 'custom', base: typed, flavour }
+        : { use: 'link', flavour, pending: true }
+    }
+    case 'auto':
+      // Retired: a typed `Viewer`, in a format read off its host; otherwise Coda's own copy.
+      return typed ? { use: 'custom', base: typed } : { use: 'own' }
+    default:
+      return { use: 'own' }
+  }
+}
+
+/** Whether a neuron hidden in the viewer stays in `Selected`, with a `visible` column saying so. */
+export function keepsHidden(params: ParamValues): boolean {
+  return params.hiddenNeurons === 'keep'
+}
+
+/** The column `Selected` carries under `Hidden neurons: stay in Selected`. */
+const VISIBLE_COLUMN = 'visible'
+
+/** Added, or taking the place of an input column of that name (`foldColumns`, position kept). */
+function withVisibleColumn(schema: TableSchema): TableSchema {
+  return foldColumns(schema, [column(VISIBLE_COLUMN, 'bool')])
 }
 
 registerNode({
@@ -118,7 +185,10 @@ registerNode({
      */
     { id: 'layers', label: 'Extra layers', type: T.layers(), required: false },
   ],
-  outputs: [{ id: 'url', label: 'Link', type: T.string() }],
+  outputs: [
+    { id: 'url', label: 'Link', type: T.string() },
+    { id: 'selected', label: 'Selected', type: T.neurons() },
+  ],
   params: [
     /*
      * Every param on this node is `advanced`, i.e. inspector-only. The node body is the
@@ -225,45 +295,123 @@ registerNode({
       advanced: true,
       help: 'Draw the EM cross-sections inside the 3D panel. Off by default: they cut through the meshes.',
     },
+    {
+      /*
+       * Written by the frame, not typed: a neuron double-clicked into the scene or out of it. In
+       * the provenance key, since `Selected` reads it — and the scene does too, so an upstream
+       * edit keeps somebody's additions instead of rebuilding the scene without them.
+       */
+      id: 'selectionEdits',
+      kind: 'ids',
+      label: 'Viewer edits',
+      noun: 'changes',
+      default: [],
+      advanced: true,
+      help: 'Neurons added to or removed from the scene inside neuroglancer, by double-clicking. Applied on top of the Neurons input; clear to go back to it.',
+    },
+    {
+      /*
+       * Where the card's neuroglancer was looking — camera and panel layout — written by the
+       * frame as it settles and read when a frame opens, so a saved workflow and a share link
+       * reopen at the same spot. With the dataset it was taken in (`encodeSavedView`): applied to
+       * another volume a camera opens on empty space, so a mismatch clears it.
+       *
+       * Presentational, because it reaches only the frame — the link opens the dataset's own
+       * framing. Unrecorded, because a camera drag is not something to undo.
+       */
+      id: 'view',
+      kind: 'string',
+      label: 'Saved view',
+      default: '',
+      presentational: true,
+      internal: true,
+      unrecorded: true,
+      advanced: true,
+      help: 'Where the card’s neuroglancer was looking, saved with the workflow so it reopens there. Clear it to open at the dataset’s own framing.',
+    },
+    {
+      /*
+       * In neuroglancer a double-click *hides* a neuron and leaves its chip in the list; only
+       * removing the chip takes it out. "leave Selected" makes `Selected` what is drawn. "stay"
+       * makes it what is listed, hidden or not, with a `visible` column to tell them apart.
+       */
+      id: 'hiddenNeurons',
+      kind: 'enum',
+      label: 'Hidden neurons',
+      default: 'remove',
+      advanced: true,
+      options: [
+        { value: 'remove', label: 'leave Selected' },
+        { value: 'keep', label: 'stay in Selected' },
+      ],
+      help: 'A neuron hidden in neuroglancer (double-clicked out, or its chip un-ticked) either leaves Selected, or stays in it with visible = false.',
+    },
     warnAboveParam({
       threshold: SEGMENTS_WARN,
       min: 1,
       counting: 'putting more than this many segments in the scene',
     }),
     {
-      id: 'viewer',
-      kind: 'string',
-      label: 'Viewer',
-      // Empty rather than the constant, so the *dataset's* own deployment can win — see
-      // `evaluate`. A graph saved with the old explicit default keeps pointing where it did.
-      default: '',
-      advanced: true,
-      placeholder: DEFAULT_NEUROGLANCER_URL,
-      help: 'Which neuroglancer deployment to open. Empty uses the dataset’s own. The deployment must allow embedding.',
-    },
-    {
+      /*
+       * Which viewer the card embeds — never which one the link opens, which is always the
+       * datastack's own. Presentational for that reason: nothing `evaluate` returns depends on it.
+       *
+       * `spelunker` and `seunglab` keep the values they had as the format override, since a graph
+       * that set one did so for a typed `Viewer` — which is exactly what the Custom options are.
+       * `auto` is the old default, retired rather than renamed so a stored card keeps its frame.
+       */
       id: 'viewerType',
       kind: 'enum',
       label: 'Viewer type',
-      default: 'auto',
+      default: 'coda',
+      absentMeans: 'auto',
+      presentational: true,
       advanced: true,
       options: [
-        { value: 'auto', label: 'Automatic' },
-        { value: 'spelunker', label: 'Spelunker / mainline' },
-        { value: 'seunglab', label: 'Seung-lab (FlyWire, NeuVue)' },
+        { value: 'coda', label: 'Coda’s neuroglancer' },
+        { value: 'dataset', label: 'the dataset’s viewer' },
+        { value: 'spelunker', label: 'custom', note: 'Spelunker / mainline' },
+        { value: 'seunglab', label: 'custom', note: 'Seung-lab: FlyWire, NeuVue' },
+        {
+          value: 'auto',
+          label: 'automatic',
+          retired: 'now Coda’s neuroglancer, or custom for a typed Viewer',
+        },
       ],
-      /*
-       * The escape hatch for a deployment `viewerKind`'s table has not met. `Viewer` is free
-       * text, so the table can never be complete, and a wrong answer here is a scene that opens
-       * with no segmentation in it and nothing naming the cause — which has happened once
-       * already, in the other direction.
-       */
-      help: 'How a CAVE segmentation is authenticated: Spelunker builds need a middleauth+ source prefix, which the Seung-lab fork refuses. "Automatic" works it out from the deployment.',
+      help: 'Which neuroglancer the card shows. Only Coda’s own reports the neurons you pick back to Selected. The link always opens the dataset’s own viewer. For a custom deployment, pick the kind it is: Spelunker builds need a middleauth+ CAVE source, which the Seung-lab fork refuses.',
+    },
+    {
+      id: 'viewer',
+      kind: 'string',
+      label: 'Viewer',
+      default: '',
+      presentational: true,
+      advanced: true,
+      placeholder: DEFAULT_NEUROGLANCER_URL,
+      visibleIf: (params) => {
+        const target = frameTarget(params)
+        return target.use === 'custom' || (target.use === 'link' && target.pending === true)
+      },
+      help: 'The custom deployment the card embeds. It must allow being embedded.',
     },
   ],
 
+  inferOutputs: (ctx) => {
+    const schema = neuronSchemaOf(ctx.inputs)
+    return {
+      url: T.string(),
+      selected: T.neurons(keepsHidden(ctx.params) ? withVisibleColumn(schema) : schema),
+    }
+  },
+
   validate: (ctx) => {
     const issues: string[] = []
+    const target = frameTarget(ctx.params)
+    if (target.use === 'link' && target.pending) {
+      issues.push(
+        'Enter the custom deployment in Viewer. Until then the card shows the dataset’s own viewer.',
+      )
+    }
     if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'viewerScene')) {
       issues.push('This data source publishes no neuroglancer scene')
     }
@@ -285,7 +433,9 @@ registerNode({
 
     const limit = Number(ctx.params.limit) || SEGMENTS_WARN
     const spec = readColorSpec('segment', ctx.params, ctx.column)
-    const { segments, colors } = segmentColors(neurons, spec, limit, ctx)
+    const { segments: arrived, colors, dropped } = segmentColors(neurons, spec, limit, ctx)
+    const edits = decodeSelectionEdits(ctx.params.selectionEdits)
+    const segments = applySelectionEdits(arrived, edits)
 
     const published = await source.fetchViewerScene({
       datasetId: dataset.datasetId,
@@ -314,10 +464,13 @@ registerNode({
       throw new Error('Extra layers input is not a layer set')
     }
 
+    // Hidden neurons are listed `!id` only where they stay selected; otherwise hiding is removing.
+    const hidden = keepsHidden(ctx.params) ? shownOnly(edits.hidden, segments) : undefined
     const scene = buildScene(published, {
       datasetId: dataset.datasetId,
       segments,
-      ...(ownColors ?? colorFields(spec.mode, segments, colors)),
+      ...(hidden ? { hiddenSegments: hidden } : {}),
+      ...(ownColors ?? colorFields(spec, colors)),
       ...(placed ? { placements: placed } : {}),
       layout: String(ctx.params.layout) as NgLayout,
       layers: String(ctx.params.layers) as NgLayerSet,
@@ -325,13 +478,166 @@ registerNode({
       ...(extra ? { extraLayers: extra.items } : {}),
     })
 
-    const viewer = viewerBaseFor(
-      String(ctx.params.viewer),
-      source.peekDataset(dataset.datasetId)?.viewerSite,
-    )
-    return { url: str(sceneUrl(viewer, scene, chosenViewerKind(ctx.params))) }
+    // Always the datastack's own viewer, in its own format — `frameTarget` is what the card does.
+    const viewer = viewerBaseFor('', source.peekDataset(dataset.datasetId)?.viewerSite)
+    const selected = await selectedNeurons(source, dataset, ctx, {
+      neurons,
+      arrived,
+      shown: segments,
+      // Every row still shown, and already the kind the port declares.
+      whole: neurons?.kind === 'neurons' && dropped === 0 && edits.removed.size === 0,
+      adds: edits.added.size > 0,
+    })
+    return {
+      url: str(sceneUrl(viewer, scene)),
+      selected: hidden ? visibleColumn(selected, hidden) : selected,
+    }
   },
 })
+
+/** The hidden ids the scene still shows — a note about a neuron since removed means nothing. */
+function shownOnly(hidden: ReadonlySet<string>, segments: readonly string[]): Set<string> {
+  if (hidden.size === 0) return new Set()
+  const shown = new Set(segments)
+  return new Set([...hidden].filter((id) => shown.has(id)))
+}
+
+/** `Selected` with its `visible` column: false for a neuron listed but hidden in the viewer. */
+function visibleColumn(table: TableValue, hidden: ReadonlySet<string>): TableValue {
+  const ids = table.data[ID_COLUMN_NAME] ?? []
+  const visible =
+    hidden.size === 0
+      ? new Array<boolean>(table.length).fill(true)
+      : Array.from({ length: table.length }, (_, row) => {
+          const id = idText(ids[row])
+          return id === null || !hidden.has(id)
+        })
+  return makeTable(
+    withVisibleColumn(table.schema),
+    { ...table.data, [VISIBLE_COLUMN]: visible },
+    table.kind,
+  )
+}
+
+/**
+ * The `Selected` table: the input's rows for every neuron still shown, then a row for each one
+ * added in the viewer that the input did not hold.
+ *
+ * Added rows carry the dataset's columns where the lookup answers, and only an id where it does
+ * not — a segment double-clicked in the EM is often a fragment no neuron table lists, and it is
+ * still something somebody chose. The output keeps the input's schema, so an added row is null in
+ * any column the dataset does not publish.
+ */
+async function selectedNeurons(
+  source: DataSource,
+  dataset: DatasetValue,
+  ctx: EvalContext,
+  {
+    neurons,
+    arrived,
+    shown,
+    whole,
+    adds,
+  }: {
+    neurons: TableValue | undefined
+    /** The input's ids, before the edits. */
+    arrived: readonly string[]
+    /** What the scene shows, after them. */
+    shown: readonly string[]
+    /** Every input row is shown and the input is already a neuron table: pass it through. */
+    whole: boolean
+    /** Whether any edit adds a neuron. */
+    adds: boolean
+  },
+): Promise<TableValue> {
+  // The input itself where every row is still shown: a cheap node re-runs on every edit, and a
+  // copy of a 100k-row table per restyle is the cost of not checking.
+  const base = !neurons
+    ? emptyTable(schemasForDataset(source, dataset).neurons, 'neurons')
+    : whole
+      ? neurons
+      : rowsWithIds(neurons, shown)
+  // Only edits add anything; most runs have none, and need no set over the whole input.
+  if (!adds) return base
+  const held = new Set(arrived)
+  const added = shown.filter((id) => !held.has(id))
+  if (added.length === 0) return base
+
+  let found: TableValue | undefined
+  try {
+    found = await untilAborted(lookupNeurons(source, dataset, added), ctx.signal)
+  } catch (err) {
+    // A cancel is the run ending, not a lookup that failed.
+    if (ctx.signal.aborted) throw err
+    // Kept rather than thrown, so the scene stays on screen — but cached like any result, so say
+    // how to ask again.
+    ctx.warn(
+      `Could not look up the ${plural(added.length, 'neuron')} added in the viewer, so they ` +
+        `have only an id: ${errorMessage(err)}. Use Invalidate Results on this card to try again.`,
+    )
+  }
+  const bare = found ? unmatchedIds(added, found) : added
+  if (found && bare.length > 0) {
+    ctx.warn(
+      `${plural(bare.length, 'neuron')} added in the viewer ${bare.length === 1 ? 'is' : 'are'} ` +
+        `not in the dataset's neuron table, so ${bare.length === 1 ? 'it has' : 'they have'} ` +
+        `only an id.`,
+    )
+  }
+  return concatBatches([
+    base,
+    ...(found && found.length > 0 ? [found] : []),
+    ...(bare.length > 0
+      ? [
+          tableFromRows(
+            ID_ONLY_SCHEMA,
+            bare.map((neuronId) => ({ neuronId })),
+            'neurons',
+          ),
+        ]
+      : []),
+  ])
+}
+
+/**
+ * Neuron rows for ids added in the viewer — the one query this `cheap` node makes — kept **per id**,
+ * so a request only ever asks for ids nobody has looked up yet. Keyed by the set instead, every
+ * double-click re-asked for every earlier one, and an upstream filter moving an added id in and out
+ * of the input sent a request per keystroke (invariant 6). Shared without a signal, each run
+ * waiting on its own (`untilAborted`); a failure is forgotten, never kept (`memoPromise`).
+ */
+const lookups = new LruMap<string, Promise<TableValue>>(1024)
+
+async function lookupNeurons(
+  source: DataSource,
+  dataset: DatasetValue,
+  ids: readonly string[],
+): Promise<TableValue> {
+  // The annotation key too: a substituted table answers a different question about the same ids.
+  const prefix = datasetCacheKey(
+    'ng-lookup',
+    dataset.sourceId,
+    dataset.datasetId,
+    dataset.annotations?.key ?? '',
+  )
+  // Every held promise taken before anything is added, so the inserts cannot evict one being read.
+  const held: Promise<TableValue>[] = []
+  const missing: string[] = []
+  for (const id of ids) {
+    const kept = lookups.get(`${prefix}:${id}`)
+    if (kept) held.push(kept)
+    else missing.push(id)
+  }
+  if (missing.length > 0) {
+    const batch = source.findNeurons({ ...datasetRequest(dataset), neuronIds: missing })
+    for (const id of missing) {
+      held.push(memoPromise(lookups, `${prefix}:${id}`, () => batch, { keep: 'resolved' }))
+    }
+  }
+  // One table per request that answered, each cut to the ids asked about now.
+  const tables = [...new Set(await Promise.all(held))]
+  return concatBatches(tables.map((table) => rowsWithIds(table, ids)))
+}
 
 /**
  * The colours a source published for these segments, as `colorFields` writes them: one default
@@ -365,14 +671,14 @@ function placedColors(
  * the same thing two hundred times. Only a data-driven encoding needs the map.
  */
 function colorFields(
-  mode: ColorMode,
-  segments: readonly string[],
+  spec: ReturnType<typeof readColorSpec>,
   colors: Readonly<Record<string, string>>,
 ): { segmentColors?: Record<string, string>; segmentDefaultColor?: string } {
-  if (mode === 'default') return {}
-  if (mode === 'constant') {
-    const flat = colors[segments[0] ?? '']
-    return flat ? { segmentDefaultColor: flat } : {}
+  if (spec.mode === 'default') return {}
+  // From the spec, not from a row: the first segment can be one added in the viewer, which no row
+  // coloured, and an empty input has no rows at all.
+  if (spec.mode === 'constant') {
+    return { segmentDefaultColor: constantColor(spec, VIEWER_MODE) }
   }
   return { segmentColors: { ...colors } }
 }
@@ -390,8 +696,8 @@ function segmentColors(
   spec: ReturnType<typeof readColorSpec>,
   limit: number,
   ctx: Warner,
-): { segments: string[]; colors: Record<string, string> } {
-  if (!neurons) return { segments: [], colors: {} }
+): { segments: string[]; colors: Record<string, string>; dropped: number } {
+  if (!neurons) return { segments: [], colors: {}, dropped: 0 }
 
   const resolved = resolveColor(neurons, spec, VIEWER_MODE)
   const ids = neurons.data['neuronId']
@@ -401,9 +707,14 @@ function segmentColors(
   const colors: Record<string, string> = {}
   /** Rows that held something, but not something a segment id can be made of. */
   let unreadable = 0
+  /** Rows with no id at all — not worth a sentence, but not shown either. */
+  let blank = 0
   for (let row = 0; row < neurons.length; row++) {
     const raw = ids[row]
-    if (raw === null || raw === undefined) continue
+    if (raw === null || raw === undefined) {
+      blank++
+      continue
+    }
     /*
      * `idText` and then neuroglancer's own grammar, where this was `String(raw)`.
      *
@@ -455,5 +766,5 @@ function segmentColors(
         'the link, which some deployments and browsers cut off.',
     })
   }
-  return { segments, colors }
+  return { segments, colors, dropped: unreadable + blank }
 }

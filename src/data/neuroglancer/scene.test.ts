@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NgScene } from './scene'
+import { decodeSavedView, encodeSavedView, isAltDigit } from './frameMessage'
 import {
   buildScene,
   layerSourceUrl,
@@ -18,6 +19,7 @@ import {
   ownedLayerNames,
   spliceSegments,
   parseSceneUrl,
+  patchUrl,
   sceneIdentity,
   layerPanelPatch,
   withLayerPanel,
@@ -26,6 +28,13 @@ import {
   segmentationLayerIndex,
   viewerKind,
   splitSceneUrl,
+  selfHostedViewer,
+  selectionChanges,
+  selectionLayerName,
+  layerListing,
+  segmentEntry,
+  sceneUrlBase,
+  viewerBaseFor,
 } from './scene'
 
 /** Layers with each source read as its URL, the spelling a link changes when the bounds are off. */
@@ -768,6 +777,13 @@ describe('the URL', () => {
     ]) {
       expect(sceneUrl(base, scene).startsWith('https://ng.example.org/#!')).toBe(true)
     }
+    // A page rather than a host takes the fragment directly: `page.html/` names nothing.
+    for (const base of ['https://coda.example.org/neuroglancer.html', '/neuroglancer.html/']) {
+      const url = sceneUrl(base, scene)
+      expect(url).toMatch(/neuroglancer\.html#!/)
+      expect(splitSceneUrl(url)?.base).toBe(base.replace(/\/$/, ''))
+    }
+    expect(patchUrl('/neuroglancer.html', {})).toBe('/neuroglancer.html#!+%7B%7D')
     expect(sceneUrl('  ', scene).startsWith('https://neuroglancer-demo.appspot.com/#!')).toBe(
       true,
     )
@@ -1038,5 +1054,198 @@ describe('bounding boxes', () => {
 
   it('leaves the Seung-lab fork its own source spelling', () => {
     expect(sentTo('https://ngl.flywire.ai')[3]).toBe('graphene://https://cave/table/fw')
+  })
+})
+
+describe('which deployment opens', () => {
+  const OWN = 'https://coda.example.org/neuroglancer.html'
+
+  it('links the dataset’s own viewer, and lets a typed Viewer win over it', () => {
+    // Coda's own copy is where the card *frames* a scene, never what the link names.
+    expect(viewerBaseFor('', 'https://ngl.cave-explorer.org')).toBe(
+      'https://ngl.cave-explorer.org',
+    )
+    expect(viewerBaseFor(' https://mine.org ', 'https://ngl.cave-explorer.org')).toBe(
+      'https://mine.org',
+    )
+  })
+
+  it('has no copy of its own where there is no page to serve one', () => {
+    // The MCP server and Node scripts: nothing beside them serves `neuroglancer.html`.
+    expect(selfHostedViewer()).toBeUndefined()
+  })
+
+  it('reads Coda’s own copy as mainline, so a CAVE source gets middleauth+', () => {
+    expect(viewerKind(OWN)).toBe('spelunker')
+  })
+})
+
+describe('what can be set in place', () => {
+  const scene = (segments: string[], extra: Record<string, unknown> = {}) => ({
+    position: [1, 2, 3],
+    layout: '3d',
+    layers: [
+      { type: 'image', name: 'em', source: 'precomputed://gs://b/em' },
+      { type: 'segmentation', name: 'banc', source: 'graphene://x', segments, ...extra },
+    ],
+  })
+
+  it('names the layers whose segments or colours changed, and nothing else', () => {
+    expect(selectionChanges(scene(['1']), scene(['1', '2']))).toEqual([
+      { name: 'banc', segments: ['1', '2'], segmentColors: {} },
+    ])
+    expect(
+      selectionChanges(
+        scene(['1']),
+        scene(['1'], { segmentColors: { '1': '#ff0000' }, segmentDefaultColor: '#00ff00' }),
+      ),
+    ).toEqual([
+      {
+        name: 'banc',
+        segments: ['1'],
+        segmentColors: { '1': '#ff0000' },
+        segmentDefaultColor: '#00ff00',
+      },
+    ])
+  })
+
+  it('answers empty for the same scene', () => {
+    expect(selectionChanges(scene(['1']), scene(['1']))).toEqual([])
+  })
+
+  it('refuses anything that is not a selection, which then navigates', () => {
+    expect(
+      selectionChanges(scene(['1']), { ...scene(['1', '2']), layout: '4panel' }),
+    ).toBeUndefined()
+    expect(
+      selectionChanges(scene(['1']), { ...scene(['1']), position: [9, 9, 9] }),
+    ).toBeUndefined()
+    // Another key of the same layer.
+    expect(selectionChanges(scene(['1']), scene(['2'], { objectAlpha: 0.5 }))).toBeUndefined()
+    // A layer added, or renamed.
+    const more = scene(['1'])
+    expect(
+      selectionChanges(scene(['1']), { ...more, layers: [...more.layers, { name: 'shell' }] }),
+    ).toBeUndefined()
+    expect(
+      selectionChanges(scene(['1']), {
+        ...more,
+        layers: [more.layers[0]!, { ...more.layers[1]!, name: 'other' }],
+      }),
+    ).toBeUndefined()
+  })
+})
+
+describe('a listed but hidden segment', () => {
+  const scene = {
+    layers: [{ type: 'segmentation', name: 'banc', segments: ['10', '!11', 12, 'LC4', '!x'] }],
+  }
+
+  it('is listed, and hidden, and not shown', () => {
+    expect(layerListing(scene, 'banc')).toEqual({
+      listed: ['10', '11', '12'],
+      shown: ['10', '12'],
+      hidden: ['11'],
+    })
+    expect(segmentEntry('!11')).toEqual({ id: '11', visible: false })
+    expect(segmentEntry('!x')).toBeUndefined()
+    expect(layerListing(scene, 'gone')).toBeUndefined()
+  })
+
+  it('is written `!id` by the scene builder', () => {
+    const built = buildScene(
+      { layers: [{ type: 'segmentation', name: 'banc:v1', source: 'x' }] },
+      { datasetId: 'banc:v1', segments: ['1', '2'], hiddenSegments: new Set(['2']) },
+    )
+    expect((built['layers'] as Array<Record<string, unknown>>)[0]!['segments']).toEqual([
+      '1',
+      '!2',
+    ])
+  })
+})
+
+describe('framing a link at another deployment', () => {
+  it('rebuilds the scene for that deployment’s flavour', () => {
+    // What the card does with a FlyWire link when it frames Coda's own copy.
+    const link = sceneUrl('https://ngl.flywire.ai', {
+      layers: [{ type: 'segmentation', name: 'fw', source: 'graphene://https://x/seg' }],
+    })
+    const framed = sceneUrl(
+      'https://coda.example.org/neuroglancer.html',
+      splitSceneUrl(link)!.scene,
+    )
+    const layer = (parseSceneUrl(framed)!['layers'] as Array<Record<string, unknown>>)[0]!
+    // Mainline: a plain segmentation layer, and the prefix spelunker needs.
+    expect(layer['type']).toBe('segmentation')
+    expect(layerSourceUrl(layer['source'])).toBe('graphene://middleauth+https://x/seg')
+  })
+
+  it('reads the deployment off a link without parsing its scene', () => {
+    expect(sceneUrlBase('https://x.org/a/#!{"layers":[]}')).toBe('https://x.org/a')
+    expect(sceneUrlBase('https://x.org/a')).toBeUndefined()
+  })
+})
+
+describe('a saved view', () => {
+  it('round-trips with its dataset, and keeps only the view’s own keys', () => {
+    const text = encodeSavedView('banc:v1', { position: [1, 2, 3], layout: '4panel' })
+    expect(decodeSavedView(text)).toEqual({
+      dataset: 'banc:v1',
+      view: { position: [1, 2, 3], layout: '4panel' },
+    })
+    // A hand-edited file must not smuggle a scene in through the view.
+    const smuggled = JSON.stringify({ dataset: 'x', view: { layers: [], position: [0, 0, 0] } })
+    expect(decodeSavedView(smuggled)?.view).toEqual({ position: [0, 0, 0] })
+  })
+
+  it('reads anything else as no view', () => {
+    expect(decodeSavedView('')).toBeUndefined()
+    expect(decodeSavedView('{nope')).toBeUndefined()
+    expect(decodeSavedView(JSON.stringify({ view: {} }))).toBeUndefined()
+  })
+})
+
+describe('the dashboard tab keys', () => {
+  const press = (
+    code: string,
+    mods: Partial<Record<'altKey' | 'metaKey' | 'ctrlKey' | 'shiftKey', boolean>> = {},
+  ) =>
+    isAltDigit({
+      code,
+      altKey: false,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      ...mods,
+    })
+
+  it('are ⌥ and a digit 1–9, and nothing else', () => {
+    expect(press('Digit3', { altKey: true })).toBe(true)
+    expect(press('Digit0', { altKey: true })).toBe(false)
+    expect(press('Digit3')).toBe(false)
+    expect(press('Digit3', { altKey: true, shiftKey: true })).toBe(false)
+    expect(press('KeyA', { altKey: true })).toBe(false)
+  })
+})
+
+describe('a Seung-lab-flavoured scene', () => {
+  const scene = {
+    layers: [
+      { type: 'segmentation', name: 'shell', source: 'x' },
+      {
+        type: 'segmentation_with_graph',
+        name: 'flywire_fafb',
+        source: 'graphene://y',
+        segments: ['1'],
+      },
+    ],
+  }
+
+  it('still has its neuron layer found, and its selection set in place', () => {
+    expect(selectionLayerName(scene, 'flywire_fafb:783')).toBe('flywire_fafb')
+    const more = { layers: [scene.layers[0]!, { ...scene.layers[1]!, segments: ['1', '2'] }] }
+    expect(selectionChanges(scene, more)).toEqual([
+      { name: 'flywire_fafb', segments: ['1', '2'], segmentColors: {} },
+    ])
   })
 })
