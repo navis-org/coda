@@ -1805,6 +1805,20 @@ input.field--combo {
   color: var(--status-warn);
 }
 
+/* An edit rather than a re-read — Fit Model's Apply — so in the accent. */
+.coda-node__cache--action {
+  color: var(--accent);
+}
+.coda-node__cache--action:hover:not(:disabled),
+.coda-node__cache--action:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.coda-node__cache--action:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
 .coda-node__cache--empty,
 .coda-node__cache--busy {
   cursor: default;
@@ -10092,13 +10106,17 @@ details[open] > summary.tile__label {
  * a field a reader expects to hold one. The spinner is left on — this is a value somebody
  * nudges rather than types, and one step is one bar.
  */
-.tile__bins {
-  width: 40px;
+/* The small number inputs viewer chrome carries: a tile's bin count, the Regions tab's width factor. */
+.tile__bins,
+.topo__number {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-3);
   color: var(--text-secondary);
   font: inherit;
+}
+.tile__bins {
+  width: 40px;
   font-size: 9px;
   text-transform: none;
   letter-spacing: 0;
@@ -13799,6 +13817,11 @@ select.annotate__input {
   color: var(--text-secondary);
   cursor: pointer;
 }
+/* A number beside a `topo__check`, in its type (the rest is `.tile__bins`'). */
+.topo__number {
+  width: 48px;
+  padding: 1px 4px;
+}
 
 /*
  * The tile grid inside the rail is one column whatever the auto-fit would do: the rail is 340px
@@ -14029,6 +14052,24 @@ select.annotate__input {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+/* The Model tab's numbers: a name and its value a row, values aligned right. */
+.model-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin: 0 0 12px;
+}
+.model-stats > div {
+  display: contents;
+}
+.model-stats dt {
+  color: var(--text-secondary);
+}
+.model-stats dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .split-editor__list ol {
   margin: 0 0 8px;
@@ -14587,5 +14628,30 @@ select.annotate__input {
 }
 .recording-listing__source,
 .recording-listing__note {
+  color: var(--text-muted);
+}
+
+/* Fit Model's full-size view: the traces fill the main area, the error per iteration a strip of
+   the parameter list. */
+.fit-view__spacer {
+  flex: 1 1 auto;
+}
+.fit-view__plot {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.fit-view__iterations {
+  height: 140px;
+  display: flex;
+}
+/* The chart fills its box, as Playback's traces do. */
+.fit-view__plot > .viewer,
+.fit-view__iterations > .viewer {
+  flex: 1 1 auto;
+  border-radius: 0;
+}
+.fit-view__said {
   color: var(--text-muted);
 }

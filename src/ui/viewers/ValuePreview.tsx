@@ -84,6 +84,7 @@ import { TableSummary } from './TableSummary'
 import { TableViewer } from './TableViewer'
 import { LaminarProfileViewer } from '../cortex/LaminarProfileViewer'
 import { ModelView } from '../biophys/ModelView'
+import { FitView } from '../biophys/FitView'
 import { ClampPreview } from '../biophys/ClampPreview'
 import { SimulateView } from '../biophys/SimulateView'
 import { PointsEditor } from './PointsEditor'
@@ -1268,6 +1269,14 @@ const VIEWERS: Record<string, ViewerEntry> = {
         onParamChange={onParamChange}
       />
     ),
+  },
+  /*
+   * The Biophysics pack's. Not a viewer, so its card keeps its param rows; full size, the fit read
+   * whole — traces, parameters, error — with Apply to Compartment Model. Its outputs, so after a run.
+   */
+  'biophys:fit': {
+    inSummary: 'preview',
+    render: ({ node, value }) => <FitView nodeId={node.id} fitted={value} />,
   },
   /*
    * The Biophysics pack's. Not a viewer, so its card keeps its param rows and draws nothing; its

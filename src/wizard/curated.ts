@@ -84,6 +84,19 @@ const BY_TYPE = { skeletonColorMode: 'categorical', skeletonColorBy: 'type' }
 /** Whether an example runs on the synthetic dataset — every one without its own `published`. */
 export const isSynthetic = (spec: ExampleSpec): boolean => spec.published === undefined
 
+/**
+ * Fit Model's demo runs its simulation and its fit at one step, so the recording and the fit are the
+ * same arithmetic and the membrane comes back exactly rather than to the step's discretisation.
+ */
+const FIT_STEP = 0.025
+
+/**
+ * Both of that demo's models cut by length rather than by d_lambda: d_lambda cuts by Ra·Cm, so two
+ * models with different membranes get different compartments, and a fit only rescales the tree it
+ * starts from — the recording would come from another discretisation than the one fitted.
+ */
+const FIXED_CUT = { discretisation: 'maxLength' }
+
 const EXAMPLES: readonly ExampleSpec[] = [
   {
     types: ['connectome:customDataset'],
@@ -382,6 +395,52 @@ const EXAMPLES: readonly ExampleSpec[] = [
       ['skel', 'skeletons', 'attach', 'in'],
       ['reduce', 'out', 'attach', 'table'],
       ['attach', 'out', 'view', 'skeletons'],
+    ],
+  },
+  {
+    types: ['biophys:fit'],
+    focus: 'fit',
+    title: 'Fit Model',
+    about:
+      '**Fit Model** fits a compartment model’s passive membrane to a current-clamp recording. Here the recording is a simulation, so the answer is known: the top **Compartment Model** is the cell, with Rm 20,000 Ω·cm², Cm 1 µF/cm², Ra 150 Ω·cm and E leak −60 mV, injected with a current step in **Simulate**. Fit Model starts from the second model’s published constants and recovers the first one’s.\n\n' +
+      'Compare **Parameters** with the cell’s numbers, then swap Simulate for **Load Recording** and an ABF file of your own.',
+    cards: [
+      DS,
+      find('find', typeIs('T4a')),
+      { id: 'pick', type: 'core.selectOne' },
+      { id: 'skel', type: 'neuron.skeletons' },
+      {
+        id: 'cell',
+        type: 'biophys:model',
+        params: { preset: 'custom', rm: 20_000, cm: 1, ra: 150, eLeak: -60, ...FIXED_CUT },
+      },
+      { id: 'start', type: 'biophys:model', row: UNDER_TALL, params: FIXED_CUT },
+      {
+        id: 'sim',
+        type: 'biophys:simulate',
+        params: {
+          duration: 100,
+          dt: FIT_STEP,
+          clamp: true,
+          amplitude: -0.01,
+          clampDelay: 20,
+          clampDuration: 50,
+        },
+      },
+      { id: 'fit', type: 'biophys:fit', params: { dt: FIT_STEP } },
+      { id: 'chart', type: 'out.lineChart', params: { x: 't', ys: ['recorded', 'fitted'] } },
+      { id: 'table', type: 'out.table', row: UNDER_TALL },
+    ],
+    wires: [
+      ['find', 'neurons', 'pick', 'in'],
+      ['pick', 'item', 'skel', 'neurons'],
+      ['skel', 'skeletons', 'cell', 'neuron'],
+      ['skel', 'skeletons', 'start', 'neuron'],
+      ['cell', 'model', 'sim', 'model'],
+      ['start', 'model', 'fit', 'model'],
+      ['sim', 'traces', 'fit', 'recording'],
+      ['fit', 'traces', 'chart', 'in'],
+      ['fit', 'parameters', 'table', 'in'],
     ],
   },
 ]

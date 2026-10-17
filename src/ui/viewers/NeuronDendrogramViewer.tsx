@@ -65,15 +65,9 @@ import {
 import { REDUCED_MOTION, currentMode } from '../useThemeMode'
 import { LEGEND_KEYS, resolveColor } from '../../style/encoding'
 import { exportBaseName } from '../export'
-import {
-  formatCompact,
-  formatMeasure,
-  formatNumber,
-  niceTicks,
-  plural,
-} from '../../style/format'
+import { formatCompact, formatNumber, plural } from '../../style/format'
 import { mediaMatches } from '../mediaQuery'
-import type { ArborView, PieceGeometry, PlotTransform, SubSegments } from './arborPlot'
+import type { ArborView, PieceGeometry, SubSegments } from './arborPlot'
 import {
   arborPointAt,
   fitTransform,
@@ -82,11 +76,15 @@ import {
   pieceGeometry,
   placeOnPiece,
   radiusWidths,
+  scaleBarFor,
+  meanEdgeRadius,
+  scaleWidths,
+  showDistance,
   subSegments,
   synapseMarks,
   zoomAbout,
 } from './arborPlot'
-import type { BranchGroup, TickGroup } from './arborScene'
+import type { TickGroup } from './arborScene'
 import {
   blendPieces,
   branchGroups,
@@ -138,7 +136,7 @@ export interface ArborSettings {
   branchColor: BranchColor
   /** `red`, or one of the Heatmap's sequential palettes. */
   branchPalette: string
-  widthBy: 'uniform' | 'radius'
+  widthBy: 'uniform' | 'radius' | 'scale'
   lineWidth: number
   synapseSize: number
   unlitOpacity: number
@@ -211,21 +209,6 @@ function animates(): boolean {
   return typeof requestAnimationFrame === 'function' && !mediaMatches(REDUCED_MOTION)
 }
 
-/** A distance as the card prints it: µm from nanometres, or λ. */
-function showDistance(value: number, inLambda: boolean): string {
-  return inLambda ? `${value.toFixed(3)} λ` : formatMeasure(value / NM_PER_UM, 'µm')
-}
-
-/** A bar about a fifth of the plot wide, at a round length. */
-function scaleBarFor(t: PlotTransform, inLambda: boolean): { px: number; label: string } {
-  const visible = (t.width * 0.22) / t.sx
-  const length = niceTicks(visible, 1)[1] ?? visible
-  return {
-    px: length * t.sx,
-    label: inLambda ? `${length} λ` : formatMeasure(length / NM_PER_UM, 'µm'),
-  }
-}
-
 /** The number of colour steps a branch value is drawn in — one stroke each, so few. */
 const COLOR_STEPS = 24
 
@@ -251,33 +234,33 @@ function branchRampColor(
   return heatmapSequentialColor(0.1 + 0.8 * t, mode, palette)
 }
 
-interface BranchStyle {
+/** Every edge's colour, independent of width and zoom: grouped into strokes once widths are known. */
+interface BranchColors {
   readonly sub: SubSegments
-  readonly groups: BranchGroup[]
+  /** Per sub-segment, its colour. */
+  readonly colors: string[]
   /** Each drawn branch point's colour, for the connectors. */
   readonly landmarkColor?: string[]
   readonly legend?: { lo: number; hi: number }
 }
 
 /**
- * Every skeleton edge's colour and width, grouped into strokes.
+ * Every skeleton edge's colour.
  *
  * Colour comes from a value per node — Strahler order, flow centrality, distance — on the edge's
- * child end. Width comes from the radius (`radiusWidths`).
+ * child end. Widths, and with them the strokes, are the caller's: they follow the zoom when to scale.
  */
 function branchStyle(o: {
   arbor: Arbor
   tree: KeyTree
   landmarkD: Float64Array
   nodeD: Float64Array
-  radii: Float32Array | undefined
   values: Float64Array | undefined
   sqrt: boolean
-  lineWidth: number
   flat: string
   mode: ReturnType<typeof currentMode>
   palette: string
-}): BranchStyle {
+}): BranchColors {
   const sub = subSegments(o.arbor, o.tree, o.landmarkD, o.nodeD)
   let lo = Infinity
   let hi = -Infinity
@@ -297,10 +280,9 @@ function branchStyle(o: {
     if (o.sqrt) t = Math.sqrt(Math.max(0, t))
     return branchRampColor(Math.round(t * (COLOR_STEPS - 1)), o.mode, o.palette)
   }
-  const widths = o.radii ? radiusWidths(o.arbor, sub, o.radii, o.lineWidth) : undefined
   return {
     sub,
-    groups: branchGroups(sub.node.length, (i) => colorOf(sub.node[i]!), widths ?? o.lineWidth),
+    colors: Array.from(sub.node, colorOf),
     ...(o.values ? { landmarkColor: Array.from(o.tree.nodes, colorOf) } : {}),
     ...(o.values && span >= 0 ? { legend: { lo, hi } } : {}),
   }
@@ -686,8 +668,14 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
 
   /* --- the branches' colour and width ------------------------------------------------- */
 
-  const byRadius = settings.widthBy === 'radius'
   const withRadii = useMemo(() => (skeleton ? hasRadii(skeleton.radii) : false), [skeleton])
+  // The width rule that draws, resolved once: none without radii, and by radius where lengths in λ
+  // leave nothing for a width to be to scale with. A note says wherever it is not the one asked for.
+  const widthMode = !withRadii
+    ? 'uniform'
+    : settings.widthBy === 'scale' && inLambda
+      ? 'radius'
+      : settings.widthBy
   const branchColor = settings.branchColor
   // Per skeleton node, on the tree as rooted here: Strahler order and flow both move with the root.
   const nodeValue = useMemo(() => {
@@ -700,9 +688,8 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
     if (branchColor === 'distance') return nodeD
     return undefined
   }, [branchColor, skeleton, arbor, placement, sideOf, nodeD])
-  const branches = useMemo(() => {
-    const widthed = byRadius && withRadii
-    if ((!nodeValue && !widthed) || !arbor || !pruned || !landmarkD || !nodeD || !skeleton) {
+  const colored = useMemo(() => {
+    if ((!nodeValue && widthMode === 'uniform') || !arbor || !pruned || !landmarkD || !nodeD) {
       return undefined
     }
     return branchStyle({
@@ -710,29 +697,32 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
       tree: pruned.tree,
       landmarkD,
       nodeD,
-      radii: widthed ? skeleton.radii : undefined,
       values: nodeValue,
       // A heavy-tailed measure on a linear ramp is one bright branch and a dark tree.
       sqrt: branchColor === 'flow',
-      lineWidth: settings.lineWidth,
       flat: CHART_INK[mode].secondary,
       mode,
       palette: settings.branchPalette,
     })
   }, [
     nodeValue,
-    byRadius,
-    withRadii,
+    widthMode,
     arbor,
     pruned,
     landmarkD,
     nodeD,
-    skeleton,
     branchColor,
-    settings.lineWidth,
     settings.branchPalette,
     mode,
   ])
+  // Fixed widths by radius, independent of the zoom.
+  const radiusW = useMemo(
+    () =>
+      widthMode === 'radius' && colored && arbor && skeleton
+        ? radiusWidths(arbor, colored.sub, skeleton.radii, settings.lineWidth)
+        : undefined,
+    [widthMode, colored, arbor, skeleton, settings.lineWidth],
+  )
 
   /* --- the clicked point -------------------------------------------------------------- */
 
@@ -850,6 +840,30 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
     [target, pruned, blend],
   )
 
+  // The strokes: colours grouped by width. To scale, the widths follow the zoom — regrouped on a
+  // zoom (the scale moves), never on a pan, and never recoloured.
+  const pxPerUnit = widthMode === 'scale' && transform ? transform.sx : undefined
+  // Each edge's radius, once per arbour, not once per zoom step.
+  const edgeRadius = useMemo(
+    () =>
+      widthMode === 'scale' && arbor && skeleton
+        ? meanEdgeRadius(arbor, skeleton.radii)
+        : undefined,
+    [widthMode, arbor, skeleton],
+  )
+  const drawn = useMemo(() => {
+    if (!colored) return undefined
+    const widths =
+      pxPerUnit !== undefined && edgeRadius
+        ? scaleWidths(colored.sub, edgeRadius, pxPerUnit)
+        : radiusW
+    const { colors, ...rest } = colored
+    return {
+      ...rest,
+      groups: branchGroups(colors.length, (i) => colors[i]!, widths ?? settings.lineWidth),
+    }
+  }, [colored, pxPerUnit, edgeRadius, radiusW, settings.lineWidth])
+
   const scene = useMemo(() => {
     if (!shape || !transform || !pruned || !pieces) return undefined
     const ink = CHART_INK[mode]
@@ -865,7 +879,7 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
       settled: !blend,
       tree: pruned.tree,
       lineWidth: settings.lineWidth,
-      ...(branches ? { branches } : {}),
+      ...(drawn ? { branches: drawn } : {}),
       ...(dashed ? { dashed } : {}),
       ...(distalPieces && focusAt ? { distal: { pieces: distalPieces, focus: focusAt } } : {}),
       ...(marks ? { marks } : {}),
@@ -873,11 +887,11 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
       synapseSize: settings.synapseSize,
       ...(synapseKey ? { key: synapseKey } : {}),
       scaleBar: scaleBarFor(transform, inLambda),
-      ...(branches?.legend
+      ...(drawn?.legend
         ? {
             legend: legendFor(
               branchColor,
-              branches.legend,
+              drawn.legend,
               (v) => showDistance(v, inLambda),
               settings.branchPalette,
             ),
@@ -896,7 +910,7 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
     layout,
     settings.lineWidth,
     settings.synapseSize,
-    branches,
+    drawn,
     dashed,
     distalPieces,
     focusAt,
@@ -1016,8 +1030,10 @@ export function NeuronDendrogramViewer(props: NeuronDendrogramViewerProps) {
         'so electrotonic distance is close to geodesic here',
     })
   }
-  if (byRadius && skeleton && !withRadii) {
+  if (settings.widthBy !== 'uniform' && skeleton && !withRadii) {
     notes.push({ text: 'no radii on this skeleton, drawn at one width' })
+  } else if (settings.widthBy === 'scale' && widthMode === 'radius') {
+    notes.push({ text: 'lengths in λ have no width to scale, drawn by radius' })
   }
   if (pruned && pruned.hidden > 0) {
     notes.push({
@@ -1373,6 +1389,7 @@ function SettingsPanel({
         <select value={settings.widthBy} onChange={(e) => onSetting('widthBy', e.target.value)}>
           <option value="uniform">Uniform</option>
           <option value="radius">By radius</option>
+          <option value="scale">To scale</option>
         </select>
       </label>
       {number('lineWidth', 'Line width (px)', 0.25)}

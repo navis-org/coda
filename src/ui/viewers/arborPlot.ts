@@ -12,6 +12,8 @@ import type { ArborShape } from '../../nodes/lib/arborLayout'
 import type { Arbor, ArborPoint, KeyTree, Placement } from '../../nodes/lib/arborOps'
 import { distanceAt } from '../../nodes/lib/arborOps'
 import { radiusReference } from '../../nodes/lib/skeletonRadii'
+import { NM_PER_UM } from '../../data/units'
+import { formatMeasure, niceTicks } from '../../style/format'
 
 /** Padding round the fitted drawing, in CSS pixels. */
 export const PLOT_PAD = 16
@@ -238,9 +240,9 @@ export function subSegments(
  * Each sub-segment's line width from the radius, the mean of its edge's two ends, scaled so the
  * 95th percentile radius (`radiusReference`, the 3D view's own, so one neuron gets one reference
  * across both) is twice `lineWidth`, since a single wide soma node would otherwise set the scale
- * and thin every neurite to a hair. Clamped
- * to 0.5…6 × `lineWidth`, in quarter-pixel steps — enough to read, few enough strokes to paint
- * every frame. Undefined for a skeleton with no radius to scale by.
+ * and thin every neurite to a hair. Clamped to 0.5…6 × `lineWidth`, in quarter-pixel steps — enough
+ * to read, few enough strokes to paint every frame. Undefined for a skeleton with no radius to scale
+ * by.
  */
 export function radiusWidths(
   arbor: Arbor,
@@ -250,16 +252,72 @@ export function radiusWidths(
 ): Float32Array | undefined {
   const p95 = radiusReference(Float32Array.from(arbor.order, (v) => radii[v]!))
   if (!(p95 > 0)) return undefined
-  return Float32Array.from(sub.node, (v) => {
-    const r = (radii[v]! + radii[arbor.parent[v]!]!) / 2
-    const width = Math.min(lineWidth * 6, Math.max(0.5, (2 * lineWidth * r) / p95))
-    return Math.round(width * 4) / 4
+  const edge = meanEdgeRadius(arbor, radii)
+  return quarterPixels(sub, (v) =>
+    Math.min(lineWidth * 6, Math.max(0.5, (2 * lineWidth * edge[v]!) / p95)),
+  )
+}
+
+/**
+ * Per node, the radius of the edge into it: the mean of its two ends — what a skeleton's edge is
+ * drawn at. Once per arbour, since it does not move with the zoom.
+ */
+export function meanEdgeRadius(arbor: Arbor, radii: Float32Array): Float32Array {
+  return Float32Array.from(arbor.parent, (p, v) =>
+    p < 0 ? radii[v]! : (radii[v]! + radii[p]!) / 2,
+  )
+}
+
+/** Per sub-segment, `px` of its edge in quarter-pixel steps: one colour at one width is one stroke. */
+function quarterPixels(sub: SubSegments, px: (node: number) => number): Float32Array {
+  return Float32Array.from(sub.node, (v) => Math.round(px(v) * 4) / 4)
+}
+
+/**
+ * A scale bar about a fifth of the plot wide, at a round length: in µm where the layout's lengths
+ * are cable in nm, in λ where they are electrotonic. Every arbour drawing's, so two cannot label
+ * one length differently.
+ */
+export function scaleBarFor(t: PlotTransform, inLambda = false): { px: number; label: string } {
+  const visible = (t.width * 0.22) / t.sx
+  const length = niceTicks(visible, 1)[1] ?? visible
+  return {
+    px: length * t.sx,
+    label: inLambda ? `${length} λ` : formatMeasure(length / NM_PER_UM, 'µm'),
+  }
+}
+
+/** The narrowest a to-scale width draws, px: a twig thinner than this stays drawn and clickable. */
+export const SCALE_FLOOR_PX = 0.5
+
+/**
+ * Each sub-segment's width **to scale**: twice its edge's radius (`edgeRadius[v]`, the edge into
+ * `v`, in the layout's units — `meanEdgeRadius` for a skeleton, a built model's own for its cable)
+ * at `pxPerUnit`, as `PlotTransform.sx` is. It follows the zoom, where `radiusWidths` is a fixed
+ * pixel width. Never under `SCALE_FLOOR_PX`, so the thinnest branches are to scale only once zoomed
+ * in far enough.
+ */
+export function scaleWidths(
+  sub: SubSegments,
+  edgeRadius: Float32Array,
+  pxPerUnit: number,
+): Float32Array {
+  // An unmeasured radius (NaN, 0, negative) draws at the floor: `Math.max` passes NaN through, and a
+  // NaN line width is one canvas ignores, drawing the edge at whatever width came before it.
+  return quarterPixels(sub, (v) => {
+    const r = edgeRadius[v]!
+    return Math.max(SCALE_FLOOR_PX, r > 0 ? 2 * r * pxPerUnit : 0)
   })
 }
 
 /* ------------------------------------------------------------------------------------------
  * Clicking.
  * ---------------------------------------------------------------------------------------- */
+
+/** A distance as a dendrogram prints it: µm from nanometres, or λ. */
+export function showDistance(value: number, inLambda: boolean): string {
+  return inLambda ? `${value.toFixed(3)} λ` : formatMeasure(value / NM_PER_UM, 'µm')
+}
 
 /** How close, in CSS pixels, a click must land to a piece to pick it. */
 export const PICK_TOLERANCE = 8

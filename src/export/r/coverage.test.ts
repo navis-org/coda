@@ -44,6 +44,10 @@ const NO_EMITTER: Record<string, string> = {
   'biophys:combineTraces':
     'Linear interpolation onto one grid is `approx` per column, with `rule = 1` for nothing ' +
     'outside an input\u2019s range; the gap rule is the part to write and check against the node first.',
+  'biophys:fit':
+    'Fits the membrane of the model `biophys:model` builds, which has no emitter for the same ' +
+    'reason: a notebook would need that model first. The fit itself would be ' +
+    '`minpack.lm::nls.lm` around a NEURON run, held to the node by a probe first.',
   'biophys:loadRecording':
     'A recording read by Coda\u2019s own reader (`data/ephys`). R reads ABF through `readABF`, ' +
     'whose scaling and rebuilt command have not been held against this node; an emitter waits for ' +

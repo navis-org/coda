@@ -265,9 +265,11 @@ export function portPreview(value: Value): PortPreview {
           {
             label: 'Soma',
             value:
-              value.soma.diameter === undefined
-                ? 'none — the root stands in'
-                : `${formatNumber(value.soma.diameter)} µm, ${value.soma.source}`,
+              value.soma.diameter !== undefined
+                ? `${formatNumber(value.soma.diameter)} µm, ${value.soma.source}`
+                : value.soma.source === 'labelled'
+                  ? 'the skeleton’s own, kept as it is'
+                  : 'none — the root stands in',
           },
           { label: 'Membrane', value: value.preset.label },
         ],

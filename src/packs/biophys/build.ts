@@ -55,32 +55,44 @@ import { cableLength, getColumn } from '../../core/values'
 import type { Orientation } from '../../nodes/lib/synapseEdges'
 import { rowFlips } from '../../nodes/lib/synapseEdges'
 import { NM_PER_UM } from '../../data/units'
-import { widestSomaNode } from '../../data/soma'
 import type { Arbor, Placement } from '../../nodes/lib/arborOps'
 import { orientPlacement, projectSynapses, stampedRadius } from '../../nodes/lib/arborOps'
 import { requireSkeletonUnits, requireSynapseFrame } from '../../nodes/lib/compartmentOps'
 import { sitesFrom } from '../../nodes/lib/topologyOps'
 import { agree, formatNumber, plural } from '../../style/format'
 import type { CableTree, PlacingTree, SegmentRule } from '../../biophys/discretize'
-import { compartmentAt, discretize } from '../../biophys/discretize'
+import {
+  compartmentAt,
+  discretize,
+  edgeShareAt,
+  edgeSpans,
+  edgeStartRadius,
+} from '../../biophys/discretize'
 import type { ChannelRow } from './channelRows'
 import { resolveChannels } from './channelRows'
 import { SYNAPSE_SOCKETS } from './synapseParams'
-import type { RegionStroke } from './regions'
-import { SOMA_REGION, paintedRegions, regionLabels, staleStrokes } from './regions'
+import type { ModelRegionOptions, SomaMode } from './regions'
+import {
+  SOMA_REGION,
+  filledRadius,
+  modelRegions,
+  refusedStrokes,
+  staleStrokes,
+} from './regions'
 
 export interface ModelOptions {
   readonly preset: CellModelValue['preset']
   readonly membrane: CellModelValue['membrane']
+  /** Membrane per µm² of reconstructed surface (`CellModelValue.areaFactor`); 1 = as reconstructed. */
+  readonly areaFactor: number
   readonly rule: SegmentRule
-  /** Given to every node with no radius, nm. */
-  readonly defaultRadius: number
+  /**
+   * What the regions are made of (`modelRegions`): the strokes, the soma's mode and size, and the
+   * radius a node with none is given, nm. Passed whole, the Regions tab reading the same object.
+   */
+  readonly regions: ModelRegionOptions
   /** Moving-average window along each unbranched stretch, in nodes; 0 or 1 = off. */
   readonly smoothWindow: number
-  /** µm. 0 takes the skeleton's labelled soma, or none. */
-  readonly somaDiameter: number
-  /** The Regions tab's strokes (`regions.ts`), painted over the skeleton's own labels in order. */
-  readonly regionStrokes: readonly RegionStroke[]
   /** The card's channel list (`channelRows.ts`); resolved on the built cable. Empty = passive. */
   readonly channels: readonly ChannelRow[]
   /** °C the channels run at; read only when there are channels. */
@@ -118,9 +130,8 @@ const MANY =
 /** "… was left out", agreeing with the count. */
 const leftOut = (n: number) => `${agree(n, 'was', 'were')} left out`
 
-/** What depends on the skeleton alone: the soma, the re-rooted arbour, a stamped radius. */
+/** What depends on the skeleton alone: the re-rooted arbour, a stamped radius. */
 interface Geometry {
-  readonly labelled: number
   readonly arbor: Arbor
   readonly stamped: ReturnType<typeof stampedRadius>
   /** µm of cable on fragments that do not reach the soma. */
@@ -132,13 +143,11 @@ const GEOMETRY = new WeakMap<SkeletonGeometry, Geometry>()
 function geometryOf(skeleton: SkeletonGeometry): Geometry {
   const hit = GEOMETRY.get(skeleton)
   if (hit) return hit
-  const labelled = widestSomaNode(skeleton)
   // `splitArbor`'s default root and cache, so painting from it reuses this arbour, not a copy.
   const arbor = splitArbor(skeleton)
   let kept = 0
   for (const v of arbor.order) kept += arbor.edgeLength[v]!
   const geometry = {
-    labelled,
     arbor,
     stamped: stampedRadius(skeleton, arbor),
     offCable: Math.max(0, cableLength(skeleton) - kept) / NM_PER_UM,
@@ -174,16 +183,306 @@ interface Placer {
   /** Per skeleton node, its node in the cable tree. */
   readonly cableIndex: Int32Array
   readonly somaSet: Uint8Array
+  /** Per skeleton node, 1 where the model leaves it out: placed there, a point lands nowhere. */
+  readonly ignored: Uint8Array
   readonly somaCompartment: number
+  /**
+   * Per skeleton node whose edge leaves the idealised soma (`fibreEdges`): where a point `t` down
+   * that edge is along the cable's, `from + t · per` of it.
+   */
+  readonly fibres: ReadonlyMap<number, { readonly from: number; readonly per: number }>
 }
 
 const PLACERS = new WeakMap<CellModelValue, Placer>()
 
 /** The compartment holding a point on the edge above skeleton node `v`, `t` of the way down. */
 function compartmentOf(placer: Placer, v: number, t: number): number {
-  return placer.somaSet[v]
+  if (placer.ignored[v]) return -1
+  if (placer.somaSet[v]) return placer.somaCompartment
+  const node = placer.cableIndex[v]!
+  const fibre = placer.fibres.get(v)
+  if (!fibre) return compartmentAt(placer.tree, node, t)
+  // Inside the soma's radius is the soma's, as a point on a node it replaced is — never the
+  // zero-area junction at its centre that `compartmentAt` answers there.
+  const along = Math.min(1, Math.max(0, fibre.from + t * fibre.per))
+  return along <= edgeShareAt(placer.tree, node)
     ? placer.somaCompartment
-    : compartmentAt(placer.tree, placer.cableIndex[v]!, t)
+    : compartmentAt(placer.tree, node, along)
+}
+
+/**
+ * Each fibre leaving an idealised soma, by its skeleton node: its skeleton edge runs from a node the
+ * soma replaced — often several µm out — and its cable from the soma's centre, so a point `t` down
+ * the first is the projection onto the second, `from + t · per` of it. Read as the cable's own `t`,
+ * a point outside the soma landed in it wherever the replaced node was far from the centre.
+ */
+function fibreEdges(
+  skeleton: SkeletonGeometry,
+  arbor: Arbor,
+  somaSet: Uint8Array,
+  notCable: Uint8Array,
+): Map<number, { from: number; per: number }> {
+  const fibres = new Map<number, { from: number; per: number }>()
+  const q = skeleton.positions
+  const [cx, cy, cz] = positionOf(q, arbor.root)
+  for (const v of arbor.order) {
+    const p = arbor.parent[v]!
+    if (p < 0 || notCable[v] || !somaSet[p]) continue
+    const [px, py, pz] = positionOf(q, p)
+    const [vx, vy, vz] = positionOf(q, v)
+    const [ex, ey, ez] = [vx - cx, vy - cy, vz - cz]
+    const square = ex * ex + ey * ey + ez * ez
+    if (!(square > 0)) continue
+    fibres.set(v, {
+      from: ((px - cx) * ex + (py - cy) * ey + (pz - cz) * ez) / square,
+      per: ((vx - px) * ex + (vy - py) * ey + (vz - pz) * ez) / square,
+    })
+  }
+  return fibres
+}
+
+/**
+ * A soma radius no neuron has: past it, a soma is a unit slip far more often than a cell. Fly somata
+ * are a few µm across and the largest vertebrate ones about 100.
+ */
+export const MAX_SOMA_RADIUS_UM = 50
+
+/** How to get an idealised soma of a size you choose, under either soma mode, ending in `what`. */
+function somaRemedy(mode: SomaMode, what: string): string {
+  return mode === 'replace'
+    ? `Give a Soma diameter to ${what}`
+    : `Set Soma to cut off and replace, and give a Soma diameter, to ${what}`
+}
+
+/**
+ * The warning for a soma larger than any neuron's, or undefined. A soma millimetres across holds
+ * nearly all of the membrane, so the cell's input resistance collapses and every injected current
+ * moves it by a fraction of a millivolt — a model that looks passive and broken, and a Fit Model
+ * that can only draw a flat line. For the card's `validate` and the build alike.
+ */
+export function oversizedSoma(
+  diameter: number,
+  /** The soma mode, where the diameter is the labelled node's; absent for a typed Soma diameter. */
+  labelledUnder?: SomaMode,
+): string | undefined {
+  if (!(diameter / 2 > MAX_SOMA_RADIUS_UM)) return undefined
+  const [what, remedy] =
+    labelledUnder === undefined
+      ? ['Soma diameter makes a soma', 'Is the diameter meant in µm?']
+      : ['The soma the skeleton labels is', `${somaRemedy(labelledUnder, 'replace it')}.`]
+  return (
+    `${what} ${formatNumber(diameter)} µm across, larger than any neuron's (a fly's is a few µm). ` +
+    `It holds nearly all of the membrane, so currents barely move the voltage. ${remedy}`
+  )
+}
+
+/**
+ * Each edge's compartments: the edge into node `v` runs `t` from 0 at its parent to 1 at `v`, and
+ * is cut where a compartment ends (`edgeSpans`). Spans for `v` are `start[v]` to `start[v + 1]`,
+ * each `(t0, t1, compartment, shade)`; the root has none.
+ */
+interface EdgeCompartments {
+  readonly start: Int32Array
+  readonly t0: Float32Array
+  readonly t1: Float32Array
+  readonly compartment: Int32Array
+  /**
+   * 0 or 1, alternating along each section and continuing into each child (`sectionParity`), so a
+   * compartment differs from those before and after it; siblings meeting at a branch point can
+   * share one, two shades not separating three. Compartment numbers cannot say it: each section
+   * takes its segments and a junction, so a run of one-segment sections shares one parity.
+   */
+  readonly shade: Uint8Array
+}
+
+/**
+ * The built model as the solver has it, to be drawn literally: its cable tree as a skeleton in nm,
+ * rooted at node 0 — the soma's centre, where every neurite is wired, or the bare root without a
+ * soma — with the soma section's two ends left out, the soma being drawn whole as what it is (a
+ * cylinder as long as it is wide; `value.soma.diameter`). No node the soma replaced or the Regions
+ * tab ignored is in it: they are no cable.
+ */
+export interface ModelCable {
+  readonly skeleton: SkeletonGeometry
+  /** Per node, the radius the edge into it has, nm: its ends' mean, from `edgeStartRadius`. */
+  readonly edgeRadius: Float32Array
+  /** Per node, the cable length of the edge into it, nm: what is inside a soma is no cable. */
+  readonly edgeLength: Float32Array
+  /**
+   * Per node, the share of the edge into it inside the soma it starts in (`edgeShareAt`), 0 to 1:
+   * where its first span begins. A drawing whose lengths are cable alone (λ) starts the edge there.
+   */
+  readonly edgeShare: Float32Array
+  readonly edges: EdgeCompartments
+  /**
+   * Per compartment, what a hover says of it: µm of cable it covers, its mean diameter along that
+   * cable (µm), and which segment of its section it is, of how many — 0, 0, -1, 0 for a junction,
+   * which is no segment. A soma drawn whole (`value.soma.diameter`) covers no drawn cable.
+   */
+  readonly compartments: {
+    readonly length: Float64Array
+    readonly diameter: Float64Array
+    readonly segment: Int32Array
+    readonly of: Int32Array
+  }
+  /**
+   * The compartments of a soma drawn whole: its sections' segments and the junctions at their ends
+   * — what hovering the block stands for. Empty where the soma is not made (`value.soma.diameter`).
+   */
+  readonly somaCompartments: readonly number[]
+}
+
+/**
+ * The compartment at `t` along the edge into `v` (`edges`' convention), or undefined where that is
+ * no cable of the edge's own: inside the soma it starts in, or the root.
+ */
+export function cableCompartmentAt(
+  cable: ModelCable,
+  v: number,
+  t: number,
+): number | undefined {
+  const { start, t0, t1, compartment } = cable.edges
+  for (let k = start[v]!; k < start[v + 1]!; k++) {
+    if (t < t0[k]!) return undefined
+    if (t <= t1[k]!) return compartment[k]
+  }
+  return undefined
+}
+
+/** The cable tree as a built model was discretised from, until `modelCable` has read it. */
+interface KeptCable {
+  readonly positions: Float32Array
+  readonly radii: Float32Array
+  readonly parent: Int32Array
+  readonly startRadius: Float32Array
+  /** The soma section's two ends, beside its centre — what `cableTree` adds the soma as. */
+  readonly somaEnds: readonly number[]
+}
+
+/**
+ * Each section's starting shade, 0 or 1: its parent's flipped past the parent's segments, so a
+ * child's first compartment always differs from its parent's last — whatever either's `nseg`.
+ * Sections are listed parents first.
+ */
+function sectionParity(tree: Pick<PlacingTree, 'sections'>): Uint8Array {
+  const parity = new Uint8Array(tree.sections.length)
+  tree.sections.forEach((sec, i) => {
+    const p = sec.parentSection
+    if (p >= 0) parity[i] = (parity[p]! + tree.sections[p]!.nseg) % 2
+  })
+  return parity
+}
+
+const CABLES = new WeakMap<CellModelValue, KeptCable>()
+const MODEL_CABLES = new WeakMap<CellModelValue, ModelCable>()
+
+export function modelCable(value: CellModelValue): ModelCable | undefined {
+  const hit = MODEL_CABLES.get(value)
+  if (hit) return hit
+  const placer = PLACERS.get(value)
+  const cable = CABLES.get(value)
+  if (!placer || !cable) return undefined
+  const { tree } = placer
+  const count = cable.parent.length
+  const keep = new Int32Array(count).fill(-1)
+  let kept = 0
+  for (let c = 0; c < count; c++) if (!cable.somaEnds.includes(c)) keep[c] = kept++
+  const from = new Int32Array(kept)
+  for (let c = 0; c < count; c++) if (keep[c]! >= 0) from[keep[c]!] = c
+  const parents = Int32Array.from(from, (c) => keep[cable.parent[c]!] ?? -1)
+  const positions = new Float32Array(kept * 3)
+  const radii = new Float32Array(kept)
+  const edgeRadius = new Float32Array(kept)
+  const edgeLength = new Float32Array(kept)
+  const edgeShare = new Float32Array(kept)
+  const parity = sectionParity(tree)
+  const start = new Int32Array(kept + 1)
+  const t0: number[] = []
+  const t1: number[] = []
+  const compartment: number[] = []
+  const shade: number[] = []
+  const counted = value.compartments.count
+  const segmentLength = new Float64Array(counted)
+  const across = new Float64Array(counted)
+  const segment = new Int32Array(counted).fill(-1)
+  const of = new Int32Array(counted)
+  tree.sections.forEach(({ first, nseg }) => {
+    for (let k = 0; k < nseg; k++) {
+      segment[first + k] = k
+      of[first + k] = nseg
+    }
+  })
+  const soma = new Set<number>()
+  for (const { nodes, first, nseg } of tree.sections) {
+    if (!nodes.some((n) => cable.somaEnds.includes(n))) continue
+    soma.add(tree.parent[first]!)
+    for (let k = 0; k <= nseg; k++) soma.add(first + k)
+  }
+  from.forEach((c, v) => {
+    for (let k = 0; k < 3; k++) positions[v * 3 + k] = cable.positions[c * 3 + k]! * NM_PER_UM
+    radii[v] = cable.radii[c]! * NM_PER_UM
+    start[v] = compartment.length
+    if (parents[v]! < 0) return
+    const p = cable.parent[c]!
+    edgeRadius[v] = ((edgeStartRadius(cable, c) + cable.radii[c]!) / 2) * NM_PER_UM
+    const length = Math.hypot(
+      cable.positions[c * 3]! - cable.positions[p * 3]!,
+      cable.positions[c * 3 + 1]! - cable.positions[p * 3 + 1]!,
+      cable.positions[c * 3 + 2]! - cable.positions[p * 3 + 2]!,
+    )
+    const share = edgeShareAt(tree, c)
+    edgeShare[v] = share
+    edgeLength[v] = length * (1 - share) * NM_PER_UM
+    const s = tree.nodeSection[c]!
+    for (const span of edgeSpans(tree, c)) {
+      t0.push(span.t0)
+      t1.push(span.t1)
+      compartment.push(span.compartment)
+      shade.push((span.segment + parity[s]!) % 2)
+      const piece = (span.t1 - span.t0) * length
+      segmentLength[span.compartment]! += piece
+      across[span.compartment]! += piece * 2 * (edgeRadius[v]! / NM_PER_UM)
+    }
+  })
+  start[kept] = compartment.length
+  const out: ModelCable = {
+    skeleton: { id: value.skeleton.id, positions, radii, parents },
+    edgeRadius,
+    edgeLength,
+    edgeShare,
+    edges: {
+      start,
+      t0: Float32Array.from(t0),
+      t1: Float32Array.from(t1),
+      compartment: Int32Array.from(compartment),
+      shade: Uint8Array.from(shade),
+    },
+    compartments: {
+      length: segmentLength,
+      diameter: across.map((d, c) => (segmentLength[c]! > 0 ? d / segmentLength[c]! : 0)),
+      segment,
+      of,
+    },
+    somaCompartments: [...soma].sort((a, b) => a - b),
+  }
+  MODEL_CABLES.set(value, out)
+  CABLES.delete(value)
+  return out
+}
+
+/**
+ * `to`, a model made from the built `from` on the same cable — Fit Model's, another membrane on it —
+ * registered as placing points and drawing as `from` does: both are the cable's, which a membrane
+ * does not move. Without it `placePoints` refuses the derived model as one never built.
+ */
+export function onSameCable(from: CellModelValue, to: CellModelValue): CellModelValue {
+  const placer = PLACERS.get(from)
+  if (placer) PLACERS.set(to, placer)
+  const drawn = MODEL_CABLES.get(from)
+  if (drawn) MODEL_CABLES.set(to, drawn)
+  const kept = CABLES.get(from)
+  if (kept) CABLES.set(to, kept)
+  return to
 }
 
 /**
@@ -226,7 +525,7 @@ export function buildCellModel(
   const notes: string[] = []
 
   // 2–3. The soma, the tree re-rooted at it, and only the piece holding it.
-  const { labelled, arbor, stamped, offCable } = geometryOf(skeleton)
+  const { arbor, stamped, offCable } = geometryOf(skeleton)
   const rootNode = arbor.root
   if (arbor.unreached > 0) {
     notes.push(
@@ -235,22 +534,28 @@ export function buildCellModel(
         `${leftOut(arbor.unreached)}: nothing there can affect it.`,
     )
   }
+  // The regions the model is built with — what the soma replaces, what is ignored — the one
+  // statement the Regions tab draws as well (`modelRegions`), so the picture is the model.
+  const regions = modelRegions(skeleton, options.regions)
+  const { somaMode, defaultRadius } = options.regions
+  const { somaSet, ignored, notCable, source, somaDiameter } = regions
+  if (regions.stale > 0) notes.push(staleStrokes(regions.stale))
+  if (regions.refused > 0) notes.push(refusedStrokes(regions.refused))
 
   // 4. Radii: fill, note a stamped floor, smooth.
   const radius = new Float64Array(n)
   let filled = 0
   for (const v of arbor.order) {
-    const r = skeleton.radii[v]!
-    if (Number.isFinite(r) && r > 0) radius[v] = r
-    else {
-      radius[v] = options.defaultRadius
-      filled++
-    }
+    if (ignored[v]) continue
+    const own = filledRadius(skeleton.radii[v]!, 0)
+    radius[v] = own || defaultRadius
+    if (!own) filled++
   }
   if (filled > 0) {
+    // Out of the nodes kept: an ignored branch's radii are never read, so it is no denominator.
     notes.push(
-      `${formatNumber(filled)} of ${plural(arbor.order.length, 'node')} had no radius and ` +
-        `${agree(filled, 'was', 'were')} given ${formatNumber(options.defaultRadius)} nm.`,
+      `${formatNumber(filled)} of ${plural(arbor.order.length - regions.ignoredCount, 'node')} had no radius and ` +
+        `${agree(filled, 'was', 'were')} given ${formatNumber(defaultRadius)} nm.`,
     )
   }
   if (stamped) {
@@ -260,48 +565,30 @@ export function buildCellModel(
         'less axial resistance than they have.',
     )
   }
-  // 5. The soma, as a section of its own where there is one to make. Read before any smoothing,
-  // which would average the soma's radius with its neurite's and shrink it.
-  const source: CellModelValue['soma']['source'] =
-    options.somaDiameter > 0 ? 'added' : labelled >= 0 ? 'labelled' : 'root'
-  const somaDiameter =
-    source === 'added'
-      ? options.somaDiameter
-      : source === 'labelled'
-        ? (2 * radius[rootNode]!) / NM_PER_UM
-        : 0
-  if (source === 'labelled' && !(skeleton.radii[rootNode]! > 0)) {
+  // 5. The soma: an idealised section where one is made (`modelRegions` says which nodes it
+  // replaces), its diameter read before any smoothing, which would thin it towards its neurite's.
+  if (somaDiameter > 0 && source === 'labelled' && regions.labelledUnmeasured) {
     notes.push(
       `The labelled soma has no radius, so it is ${formatNumber(somaDiameter)} µm across, from ` +
         'Default radius. Give a Soma diameter.',
     )
   }
-  // The soma is found from the skeleton's own labels; the cable takes the painted ones, so a stroke
-  // can relabel the soma's membrane for channels without moving the soma.
-  const own = regionLabels(skeleton)
-  const regions = paintedRegions(skeleton, options.regionStrokes, own)
-  if (regions.stale > 0) notes.push(staleStrokes(regions.stale))
-  const somaSet = new Uint8Array(n)
-  if (labelled >= 0) {
-    // The labelled blob around the soma node: soma nodes reached from it through soma nodes.
-    for (const v of arbor.order) {
-      if (own.label[v] !== SOMA_REGION) continue
-      if (v === rootNode || somaSet[arbor.parent[v]!] === 1) somaSet[v] = 1
-    }
-  } else if (source === 'added') {
-    somaSet[rootNode] = 1
-  } else {
+  // A typed diameter is the card's `validate` to say, before any run; a labelled one only shows here.
+  const oversized =
+    source === 'labelled' ? oversizedSoma(regions.labelledDiameter, somaMode) : undefined
+  if (oversized) notes.push(oversized)
+  if (source === 'root') {
     notes.push(
       'No soma is labelled on this skeleton, so its root stands in: a point with no membrane of ' +
-        'its own, joined to thin cable. A clamp or recording "at the soma" is at that point. Give ' +
-        'a Soma diameter to add one.',
+        'its own, joined to thin cable. A clamp or recording "at the soma" is at that point. ' +
+        `${somaRemedy(somaMode, 'add one')}.`,
     )
   }
 
   // Smoothed only now, and never across the soma: averaging it with its fibre would thin the soma
   // and thicken the fibre's start, the shoulder `startRadius` exists to prevent.
   if (options.smoothWindow > 1)
-    smoothAlongStretches(arbor, radius, options.smoothWindow, somaSet)
+    smoothAlongStretches(arbor, radius, options.smoothWindow, notCable)
 
   // An added soma is no node's, so it is soma whatever its root was labelled or painted.
   const somaRegion = source === 'added' ? SOMA_REGION : regions.label[rootNode]!
@@ -311,21 +598,26 @@ export function buildCellModel(
     radius,
     regions.label,
     somaSet,
+    notCable,
     somaDiameter,
     somaRegion,
   )
+  // Extra membrane is extra capacitance per unit length, so d_lambda cuts for it, as NEURON's does
+  // where a spine factor is folded into cm.
+  const { areaFactor } = options
   const tree = discretize(cable.tree, {
     rule: options.rule,
     ra: options.membrane.ra,
-    cm: options.membrane.cm,
+    cm: options.membrane.cm * areaFactor,
   })
+  const area = areaFactor === 1 ? tree.area : tree.area.map((a) => a * areaFactor)
   // A cable with no membrane anywhere has nothing to integrate — a lone root, with no soma
   // diameter given — and every trace would come back NaN rather than an answer. (The bare root of
   // an ordinary cable has none of its own, and is held up by the cable around it.)
   if (!tree.area.some((a) => a > 0)) {
     throw new Error(
       'This skeleton has no cable to model: a single node, with no soma to give it membrane. ' +
-        'Give a Soma diameter.',
+        `${somaRemedy(somaMode, 'add one')}.`,
     )
   }
 
@@ -339,6 +631,7 @@ export function buildCellModel(
   }
   const nodeCompartment = new Int32Array(n).fill(-1)
   for (const v of arbor.order) {
+    if (ignored[v]) continue
     nodeCompartment[v] = somaSet[v] ? somaCompartment : tree.nodeCompartment[cable.index[v]!]!
   }
   const placer: Placer = {
@@ -352,7 +645,9 @@ export function buildCellModel(
     },
     cableIndex: cable.index,
     somaSet,
+    ignored,
     somaCompartment,
+    fibres: cable.somaCentre >= 0 ? fibreEdges(skeleton, arbor, somaSet, notCable) : new Map(),
   }
 
   // 6. Synapses.
@@ -360,8 +655,9 @@ export function buildCellModel(
 
   const channels = resolveChannels(
     options.channels,
-    { regionNames: regions.names, region: tree.region, area: tree.area },
+    { regionNames: regions.names, region: tree.region, area },
     notes,
+    somaRemedy(somaMode, 'add one'),
   )
 
   const value: CellModelValue = {
@@ -370,7 +666,7 @@ export function buildCellModel(
     compartments: {
       count: tree.count,
       parent: tree.parent,
-      area: tree.area,
+      area,
       gAxial: tree.gAxial,
       // Back in the skeleton's own units, so a viewer draws compartments over the neuron.
       position: tree.position.map((x) => x * NM_PER_UM),
@@ -383,9 +679,10 @@ export function buildCellModel(
     soma: {
       compartment: somaCompartment,
       source,
-      ...(source === 'root' ? {} : { diameter: somaDiameter }),
+      ...(somaDiameter > 0 ? { diameter: somaDiameter } : {}),
     },
     membrane: options.membrane,
+    ...(areaFactor !== 1 ? { areaFactor } : {}),
     channels,
     ...(channels.length > 0 ? { temperature: options.temperature } : {}),
     synapseTypes: SYNAPSE_SOCKETS.map(({ sign }) => options[sign]),
@@ -394,6 +691,14 @@ export function buildCellModel(
     notes,
   }
   PLACERS.set(value, placer)
+  // What the Model tab draws the model from, trimmed to what `modelCable` reads; dropped once it has.
+  CABLES.set(value, {
+    positions: Float32Array.from(cable.tree.positions),
+    radii: Float32Array.from(cable.tree.radii),
+    parent: cable.tree.parent,
+    startRadius: Float32Array.from(cable.tree.startRadius ?? []),
+    somaEnds: cable.somaEnds,
+  })
   return value
 }
 
@@ -406,7 +711,7 @@ function smoothAlongStretches(
   arbor: Arbor,
   radius: Float64Array,
   window: number,
-  /** Nodes left out — the soma — so a stretch starts below them. */
+  /** Nodes left out — the soma, ignored branches — so a stretch starts below them and stops above. */
   skip: Uint8Array,
 ): void {
   const half = Math.floor(window / 2)
@@ -426,7 +731,10 @@ function smoothAlongStretches(
       stretch[length] = v
       before[length++] = radius[v]!
       if (children(v) !== 1) break
-      v = arbor.childList[arbor.childStart[v]!]!
+      // Nor into a node left out — an ignored branch's radii were never filled, and are 0.
+      const next = arbor.childList[arbor.childStart[v]!]!
+      if (skip[next]) break
+      v = next
     }
     // A running sum over the window, clipped at the stretch's ends.
     let sum = 0
@@ -453,10 +761,12 @@ function cableTree(
   radius: Float64Array,
   label: Int32Array,
   somaSet: Uint8Array,
+  /** Nodes that are no cable of their own: the soma's, and those left out of the model. */
+  notCable: Uint8Array,
   somaDiameter: number,
   /** The soma section's region: its node's, or soma for an added one. */
   somaRegion: number,
-): { tree: CableTree; index: Int32Array; somaCentre: number } {
+): { tree: CableTree; index: Int32Array; somaCentre: number; somaEnds: readonly number[] } {
   const n = skeleton.parents.length
   const { positions: q } = skeleton
   const index = new Int32Array(n).fill(-1)
@@ -467,6 +777,7 @@ function cableTree(
   const parent = new Int32Array(size)
   const labels = new Int32Array(size)
   const startRadius = new Float64Array(size).fill(NaN)
+  const startOffset = new Float64Array(size)
   let count = 0
   const add = (x: number, y: number, z: number, r: number, p: number, label: number) => {
     positions[count * 3] = x / NM_PER_UM
@@ -484,12 +795,13 @@ function cableTree(
   // soma(0.5). Wired to one end instead, a fibre leaving another way crossed an invented bridge
   // of thin cable, several µm long and tens of MΩ, that is in no skeleton.
   let somaCentre = -1
+  let somaEnds: readonly number[] = []
   if (somaDiameter > 0) {
     // Along the first fibre leaving the soma, so a drawing of it points the way the neuron does —
     // the first one not sitting on the soma node, or a duplicated node gives no direction.
     const [x0, y0, z0] = positionOf(q, root)
     const fibre = arbor.order.find((v) => {
-      if (somaSet[v]) return false
+      if (notCable[v]) return false
       const [x, y, z] = positionOf(q, v)
       return x !== x0 || y !== y0 || z !== z0
     })
@@ -499,18 +811,22 @@ function cableTree(
     const r = somaDiameter / 2
     const start = add(x0 - dx, y0 - dy, z0 - dz, r, -1, somaRegion)
     somaCentre = add(x0, y0, z0, r, start, somaRegion)
-    add(x0 + dx, y0 + dy, z0 + dz, r, somaCentre, somaRegion)
+    somaEnds = [start, add(x0 + dx, y0 + dy, z0 + dz, r, somaCentre, somaRegion)]
   }
 
   for (const v of arbor.order) {
-    if (somaSet[v]) continue
+    if (notCable[v]) continue
     const p = arbor.parent[v]!
     const r = radius[v]! / NM_PER_UM
     const fromSoma = somaCentre >= 0 && (p < 0 || somaSet[p] === 1)
     const above = fromSoma ? somaCentre : p < 0 ? -1 : index[p]!
     index[v] = add(q[v * 3]!, q[v * 3 + 1]!, q[v * 3 + 2]!, r, above, label[v]!)
     // A fibre leaving the soma starts at its own radius, not the soma's.
-    if (fromSoma) startRadius[index[v]!] = r
+    if (fromSoma) {
+      startRadius[index[v]!] = r
+      // And at the soma's surface: the stretch from its centre is the soma's own membrane.
+      startOffset[index[v]!] = somaDiameter / 2
+    }
   }
   return {
     tree: {
@@ -519,9 +835,11 @@ function cableTree(
       parent: parent.subarray(0, count),
       labels: labels.subarray(0, count),
       startRadius: startRadius.subarray(0, count),
+      startOffset: startOffset.subarray(0, count),
     },
     index,
     somaCentre,
+    somaEnds,
   }
 }
 
@@ -581,6 +899,7 @@ function placeSynapses(
     let notInput = 0
     let unreadable = 0
     let unplaced = 0
+    let onIgnored = 0
     let far = 0
     for (let row = 0; row < rows; row++) {
       let pre = input.presynaptic?.[row]
@@ -608,6 +927,10 @@ function placeSynapses(
       const v = placement.node[row]!
       if (v < 0) {
         unplaced++
+        continue
+      }
+      if (placer.ignored[v]) {
+        onIgnored++
         continue
       }
       compartment.push(compartmentOf(placer, v, placement.t[row]!))
@@ -666,6 +989,12 @@ function placeSynapses(
       say(
         `${plural(unplaced, 'synapse')} ${agree(unplaced, 'lies', 'lie')} on fragments off the ` +
           `soma's piece and ${leftOut(unplaced)}.`,
+      )
+    }
+    if (onIgnored > 0) {
+      say(
+        `${plural(onIgnored, 'synapse')} ${agree(onIgnored, 'lies', 'lie')} on branches painted ` +
+          `ignored and ${leftOut(onIgnored)}.`,
       )
     }
     if (far > 0) {

@@ -152,6 +152,20 @@ export function describeChannel(option: ChannelOption): string[] {
  */
 export const UNLABELLED_REGION = 'unlabelled'
 
+/**
+ * Membrane per region, µm², indexed as `regionNames`: what says a region exists in a built model —
+ * the channel rows placed on it, and the Model tab's figures alike.
+ */
+export function regionAreas(cable: {
+  readonly regionNames: readonly string[]
+  readonly region: ArrayLike<number>
+  readonly area: ArrayLike<number>
+}): Float64Array {
+  const out = new Float64Array(cable.regionNames.length)
+  for (let c = 0; c < cable.area.length; c++) out[cable.region[c]!]! += cable.area[c]!
+  return out
+}
+
 /** Whether a row or a stroke can name a region: any name but unlabelled cable's, or none. */
 export function isNameableRegion(name: string): boolean {
   return name !== '' && name !== UNLABELLED_REGION
@@ -207,18 +221,17 @@ export function resolveChannels(
     readonly area: ArrayLike<number>
   },
   notes: string[],
+  /** How to get a soma under the card's soma mode, a sentence without its full stop. */
+  addSoma: string,
 ): CellModelValue['channels'] {
-  const areaOf = (codes: readonly number[]) => {
-    let sum = 0
-    for (let c = 0; c < cable.area.length; c++) {
-      if (codes.length === 0 || codes.includes(cable.region[c]!)) sum += cable.area[c]!
-    }
-    return sum
-  }
   // Membrane per region: a name the model has but no compartment carries — a fragment the build
   // dropped, a soma whose node was painted over — is as missing as one it never had.
-  const regionArea = new Float64Array(cable.regionNames.length)
-  for (let c = 0; c < cable.area.length; c++) regionArea[cable.region[c]!]! += cable.area[c]!
+  const regionArea = regionAreas(cable)
+  // A set of regions' membrane, each region once however often a row names it; none is everywhere.
+  const areaOf = (codes: readonly number[]) =>
+    codes.length === 0
+      ? regionArea.reduce((a, b) => a + b, 0)
+      : [...new Set(codes)].reduce((sum, code) => sum + (regionArea[code] ?? 0), 0)
   const missing = new Set<string>()
   const unknown = new Set<string>()
   const channels: CellModelValue['channels'][number][] = []
@@ -261,7 +274,7 @@ export function resolveChannels(
   if (missing.size > 0) {
     // The soma's remedy is its own: there is no soma to label, only one to add.
     const remedy = missing.has('soma')
-      ? 'Give a Soma diameter for a soma, label or paint the other regions, or place the channels everywhere.'
+      ? `${addSoma}, label or paint the other regions, or place the channels everywhere.`
       : 'Label the skeleton with Split Axon/Dendrite, paint the regions, or place them everywhere.'
     notes.push(
       `This model has no ${[...missing].join(' or ')} cable, so channels placed there sit nowhere. ${remedy}`,

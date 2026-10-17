@@ -12,6 +12,8 @@ const groups: readonly (readonly string[])[] = [
   ['biophys:simulate', 'neuron.skeletonPoints'],
   // A recording beside a simulation: read it, line the two up, draw them.
   ['biophys:loadRecording', 'biophys:combineTraces', 'biophys:simulate', 'out.lineChart'],
+  // Fitting a model's membrane to a recording, and running the fitted cell.
+  ['biophys:fit', 'biophys:loadRecording', 'biophys:model', 'biophys:simulate'],
   // The arbour without a model: electrotonic distance on the dendrogram.
   ['biophys:model', 'out.neuronDendrogram'],
 ]

@@ -30,6 +30,7 @@ import { column, tableSchema, uniqueName } from '../../core/types'
 import type { CellValue, TableValue } from '../../core/values'
 import { getColumn, makeTable } from '../../core/values'
 import { TIME_COLUMN } from './simulateOps'
+import { resample } from './resample'
 
 /** One input as the naming sees it. */
 export interface TraceInputSpec {
@@ -243,36 +244,6 @@ function medianStep(prepared: PreparedTraces): number {
     gaps.sort((a, b) => a - b),
     0.5,
   )
-}
-
-/**
- * A trace read at every time of an ascending grid, by walking the two together: linear between
- * neighbours, exact on a sample, null outside the trace or beside a gap (NaN in `y`).
- */
-export function resample(
-  t: Float64Array,
-  y: Float64Array,
-  grid: Float64Array,
-): (number | null)[] {
-  const out: (number | null)[] = new Array<number | null>(grid.length).fill(null)
-  const last = t.length - 1
-  if (last < 0) return out
-  let k = 0
-  for (let g = 0; g < grid.length; g++) {
-    const x = grid[g]!
-    if (x < t[0]! || x > t[last]!) continue
-    while (k < last && t[k + 1]! <= x) k++
-    if (t[k] === x || k === last) {
-      out[g] = Number.isNaN(y[k]!) ? null : y[k]!
-      continue
-    }
-    const a = y[k]!
-    const b = y[k + 1]!
-    if (Number.isNaN(a) || Number.isNaN(b)) continue
-    const span = t[k + 1]! - t[k]!
-    out[g] = span > 0 ? a + ((b - a) * (x - t[k]!)) / span : a
-  }
-  return out
 }
 
 export function combinedTable(

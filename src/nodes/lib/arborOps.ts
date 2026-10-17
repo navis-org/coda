@@ -355,12 +355,6 @@ export function electrotonicDistances(
     'electrotonic distance has no radius in a physical unit to compute a length constant from.',
   )
   if (units) return { ok: false, reason: units }
-  if (!(cable.rm > 0) || !(cable.ri > 0)) {
-    return {
-      ok: false,
-      reason: 'Membrane and axial resistance must both be greater than zero.',
-    }
-  }
   const { radii } = skeleton
   let missing = 0
   for (const v of arbor.order) {
@@ -378,15 +372,43 @@ export function electrotonicDistances(
     }
   }
 
-  const distance = new Float64Array(skeleton.parents.length).fill(NaN)
+  return electrotonicAlong(
+    arbor,
+    (v) => (radii[v]! + radii[arbor.parent[v]!]!) / 2,
+    (v) => arbor.edgeLength[v]!,
+    cable,
+  )
+}
+
+/**
+ * The walk under `electrotonicDistances`, for any tree whose edges say their own radius and length,
+ * nm (`radiusOf(v)`, `lengthOf(v)`: the edge into `v`) — a built model's, whose sections start at a
+ * radius of their own and inside a soma are no cable. Each edge adds `length / λ(radius)`. Refused
+ * where an edge has no radius, λ being zero there and the distance past it infinite.
+ */
+export function electrotonicAlong(
+  arbor: Arbor,
+  radiusOf: (v: number) => number,
+  lengthOf: (v: number) => number,
+  cable: CableConstants,
+): ElectrotonicResult {
+  if (!(cable.rm > 0) || !(cable.ri > 0)) {
+    return {
+      ok: false,
+      reason: 'Membrane and axial resistance must both be greater than zero.',
+    }
+  }
+  const distance = new Float64Array(arbor.parent.length).fill(NaN)
   for (const v of arbor.order) {
     const p = arbor.parent[v]!
     if (p < 0) {
       distance[v] = 0
       continue
     }
-    const lambda = lengthConstantNm((radii[v]! + radii[p]!) / 2, cable)
-    distance[v] = distance[p]! + arbor.edgeLength[v]! / lambda
+    const r = radiusOf(v)
+    if (!(r > 0))
+      return { ok: false, reason: 'Electrotonic distance needs a radius on every edge.' }
+    distance[v] = distance[p]! + lengthOf(v) / lengthConstantNm(r, cable)
   }
   return { ok: true, distance }
 }

@@ -1,11 +1,13 @@
 /**
- * The Compartment Model's full-size view: two tabs, Regions (painting named regions onto the
- * neuron) and Channels (placing channels on them). Channels opens first, the list being what most
- * visits are for; Regions is where a name the list does not yet offer comes from.
+ * The Compartment Model's full-size view: three tabs, Regions (painting named regions onto the
+ * neuron, and what the soma replaces), Channels (placing channels on them) and Model (the built
+ * compartments, and the numbers a broken model fails). Regions opens first, being what the other
+ * two are made from.
  *
- * The regions both tabs read are `paintedRegions` over the wired skeleton — what the build will
- * name them — so a region painted a moment ago is in the channel list before any run. Without a
- * skeleton, the last built model's names stand in.
+ * The regions both tabs read are `modelRegions` over the wired skeleton — what the build will
+ * name them, which nodes the soma replaces and which are ignored — so a region painted a moment
+ * ago is in the channel list before any run. Without a skeleton, the last built model's names
+ * stand in.
  */
 
 import { useMemo, useState } from 'react'
@@ -13,16 +15,23 @@ import { useMemo, useState } from 'react'
 import type { ParamValue } from '../../core/node'
 import type { CellModelValue, SkeletonsValue } from '../../core/values'
 import { CHANNELS_PARAM } from '../../packs/biophys/channelRows'
-import { REGIONS_PARAM, paintedRegions, readRegionStrokes } from '../../packs/biophys/regions'
+import {
+  REGIONS_PARAM,
+  modelRegions,
+  readRegionStrokes,
+  regionOptions,
+} from '../../packs/biophys/regions'
 import { RailTabs } from '../viewers/topoChrome'
 import { ChannelsEditor } from './ChannelsEditor'
+import { CompartmentsView } from './CompartmentsView'
 import { RegionsEditor } from './RegionsEditor'
 
-type Tab = 'regions' | 'channels'
+type Tab = 'regions' | 'channels' | 'model'
 
 const TABS: ReadonlyArray<{ readonly id: Tab; readonly label: string }> = [
   { id: 'regions', label: 'Regions' },
   { id: 'channels', label: 'Channels' },
+  { id: 'model', label: 'Model' },
 ]
 
 export interface ModelViewProps {
@@ -43,16 +52,15 @@ export function ModelView({
   onParamChange,
   onParamsChange,
 }: ModelViewProps) {
-  const [tab, setTab] = useState<Tab>('channels')
+  const [tab, setTab] = useState<Tab>('regions')
   // One neuron, as the build takes it; more is the build's refusal to make, not this view's.
   const skeleton = skeletons?.items.length === 1 ? skeletons.items[0] : undefined
   const strokes = params[REGIONS_PARAM]
   const stored = useMemo(() => readRegionStrokes(strokes), [strokes])
-  // Painted once, here, for both tabs: what the build will name this neuron's regions.
-  const painted = useMemo(
-    () => (skeleton ? paintedRegions(skeleton, stored) : undefined),
-    [skeleton, stored],
-  )
+  // Once, here, for both tabs: the regions the build will make of this neuron.
+  // The build's own options (`regionOptions`), so the picture is the model; `modelRegions` keeps its
+  // last answer per skeleton, which is the build's when it has run.
+  const painted = skeleton ? modelRegions(skeleton, regionOptions(params, stored)) : undefined
   return (
     <div className="simulate-view">
       <RailTabs tabs={TABS} tab={tab} onTab={setTab} />
@@ -66,6 +74,8 @@ export function ModelView({
             onParamChange={onParamChange}
             onParamsChange={onParamsChange}
           />
+        ) : tab === 'model' ? (
+          <CompartmentsView model={model} />
         ) : (
           <ChannelsEditor
             channels={params[CHANNELS_PARAM]}

@@ -32,6 +32,10 @@ def clamp_current(c, tm):
         return shape["offset"] + amp * math.sin(2 * math.pi * shape["frequency"] * t / 1000)
     if shape["kind"] == "pulses":
         return amp if math.fmod(t, shape["interval"]) < shape["width"] else 0.0
+    if shape["kind"] == "samples":
+        k = math.floor(t / shape["every"])
+        values = shape["values"]
+        return amp * values[k] if 0 <= k < len(values) else 0.0
     raise ValueError(f"unknown clamp shape {shape['kind']}")
 
 
@@ -46,7 +50,9 @@ def run_case(case):
         for j, node in enumerate(s["nodes"]):
             # A section may start at a diameter of its own (`CableTree.startRadius`).
             diam = s.get("startDiameter", 2 * rad[node]) if j == 0 else 2 * rad[node]
-            h.pt3dadd(pos[3 * node], pos[3 * node + 1], pos[3 * node + 2], diam, sec=sec)
+            # ...and begin past its first node (`CableTree.startOffset`), at a soma's surface.
+            x, y, z = s["startPoint"] if j == 0 and "startPoint" in s else pos[3 * node : 3 * node + 3]
+            h.pt3dadd(x, y, z, diam, sec=sec)
         secs.append(sec)
     for i, s in enumerate(case["sections"]):
         if s["parent"] >= 0:

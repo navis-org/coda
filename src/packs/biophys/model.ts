@@ -16,7 +16,7 @@ import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isSkeletonsValue } from '../../core/values'
 import type { SynapseInputs } from './build'
-import { buildCellModel } from './build'
+import { buildCellModel, oversizedSoma } from './build'
 import {
   EXCITATORY,
   INHIBITORY,
@@ -29,14 +29,20 @@ import {
 import { CUSTOM, MEMBRANE_PRESETS, membranePreset } from './presets'
 import { HH_TEMPERATURE, findChannel } from '../../biophys/channels'
 import { CHANNELS_PARAM, readChannelRows } from './channelRows'
-import { REGIONS_PARAM, readRegionStrokes } from './regions'
+import { REGIONS_PARAM, readRegionStrokes, regionOptions } from './regions'
 
 // Custom is any id that is not a preset — the reading `evaluate` takes, so a file naming a preset
 // this build lacks shows the four numbers it is built from and keys on them (invariant 4).
 const custom = (p: ParamValues) => membranePreset(String(p.preset)) === undefined
 const byLambda = (p: ParamValues) => p.discretisation === 'dLambda'
+/** The smallest Area factor the card takes, and so the lowest Fit Model may fit one to. */
+export const AREA_FACTOR_MIN = 0.01
+
 /** The custom numbers start from the first preset's: one copy of each number, in `presets.ts`. */
 const DEFAULT_PRESET = MEMBRANE_PRESETS[0]!
+
+/** Whether the card replaces the soma: `Soma diameter`'s `visibleIf`, and what its warning asks. */
+const replacing = (p: ParamValues) => regionOptions(p, []).somaMode === 'replace'
 
 export const modelNode = packNode({
   type: 'biophys:model',
@@ -122,6 +128,16 @@ export const modelNode = packNode({
       help: 'Leak reversal: where a passive model rests.',
     },
     {
+      id: 'areaFactor',
+      kind: 'number',
+      label: 'Area factor',
+      group: 'membrane',
+      default: 1,
+      min: AREA_FACTOR_MIN,
+      step: 0.1,
+      help: 'How much more membrane the cell has than its reconstruction: spines and fine branches the skeleton misses. Scales every compartment’s membrane, so capacitance, leak and channel conductances with it; what Fit Model fits as its area factor. 1 is the reconstruction as it is.',
+    },
+    {
       id: 'defaultRadius',
       kind: 'number',
       label: 'Default radius (nm)',
@@ -179,6 +195,18 @@ export const modelNode = packNode({
       help: 'Longest compartment.',
     },
     {
+      id: 'somaMode',
+      kind: 'enum',
+      label: 'Soma',
+      group: 'soma',
+      default: 'replace',
+      options: [
+        { value: 'replace', label: 'cut off and replace' },
+        { value: 'asIs', label: 'use the skeleton as is' },
+      ],
+      help: 'Cut off and replace takes the soma painted in Regions — at first the skeleton’s own taper around its soma node — off the skeleton and puts an idealised spherical soma in its place. As is keeps the skeleton’s nodes and radii there, the soma node only marking where the soma is.',
+    },
+    {
       id: 'somaDiameter',
       kind: 'number',
       label: 'Soma diameter (µm)',
@@ -186,6 +214,7 @@ export const modelNode = packNode({
       default: 0,
       min: 0,
       step: 0.1,
+      visibleIf: replacing,
       help: 'A soma of this diameter, as a sphere. 0 uses the soma the skeleton labels, if it labels one; reconstructions without somata usually need one added.',
     },
     {
@@ -232,12 +261,19 @@ export const modelNode = packNode({
 
   inferOutputs: () => ({ model: T.cellModel() }),
 
-  validate: (ctx) =>
-    SYNAPSE_SOCKETS.flatMap((socket) => {
+  validate: (ctx) => {
+    const issues = SYNAPSE_SOCKETS.flatMap((socket) => {
       if (!ctx.inputs[socket.port]) return []
       const refusal = socketRefusal((id) => ctx.column(id), ctx.params, socket)
       return refusal ? [refusal] : []
-    }),
+    })
+    // Said before a run as well as after it: the typed number is all there is to read here.
+    // Asked as `visibleIf` asks it, so a diameter the card does not show warns of nothing.
+    const oversized = replacing(ctx.params)
+      ? oversizedSoma(Number(ctx.params.somaDiameter))
+      : undefined
+    return oversized ? [...issues, oversized] : issues
+  },
 
   evaluate: (ctx) => {
     const skeletons = ctx.input('neuron')
@@ -253,13 +289,12 @@ export const modelNode = packNode({
     const value = buildCellModel(skeletons, inputs, {
       preset: preset ? { id: preset.id, label: preset.label } : CUSTOM,
       membrane,
+      areaFactor: Number(p.areaFactor),
       rule: byLambda(p)
         ? { kind: 'dLambda', dLambda: Number(p.dLambda), frequency: 100 }
         : { kind: 'maxLength', length: Number(p.maxLength) },
-      defaultRadius: Number(p.defaultRadius),
+      regions: regionOptions(p, readRegionStrokes(p[REGIONS_PARAM])),
       smoothWindow: Number(p.smooth),
-      somaDiameter: Number(p.somaDiameter),
-      regionStrokes: readRegionStrokes(p[REGIONS_PARAM]),
       channels: readChannelRows(p[CHANNELS_PARAM]),
       temperature: Number(p.temperature),
       excitatory: synapseType(p, EXCITATORY),

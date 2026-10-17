@@ -511,7 +511,7 @@ export function recordSites(
     }
     if (off > 0) {
       notes.push(
-        `${plural(off, 'record point')} on fragments the model left out ` +
+        `${plural(off, 'record point')} on fragments or ignored branches the model left out ` +
           `${agree(off, 'was', 'were')} not recorded.`,
       )
     }

@@ -6,7 +6,7 @@ import { getColumn, makeTable } from '../../core/values'
 import { simulateNode } from './simulate'
 import { writeManualPoint } from '../../nodes/lib/skeletonPoints'
 import { PEAK_VOLTAGE } from './nodeValues'
-import { HH, OPTIONS, exc, build, cloud, input } from './testFixtures'
+import { HH, OPTIONS, exc, build, cloud, input, regionsWith } from './testFixtures'
 import { partnerTrain } from './stimulus'
 import {
   MOVIE_BUDGET_BYTES,
@@ -423,7 +423,10 @@ describe('runSimulateJob', () => {
   })
 
   it('settles an active model before the run, and counts spikes every step', async () => {
-    const value = build({ ...HH, somaDiameter: 6 }, exc(input([['A', '7', 'pre', 45_000, 0]])))
+    const value = build(
+      { ...HH, ...regionsWith({ somaDiameter: 6 }) },
+      exc(input([['A', '7', 'pre', 45_000, 0]])),
+    )
     const result = await runSimulateJob(
       job(value, {
         duration: 60,
@@ -437,7 +440,10 @@ describe('runSimulateJob', () => {
   })
 
   it('starts from a rest it is handed rather than settling again', async () => {
-    const value = build({ ...HH, somaDiameter: 6 }, exc(input([['A', '7', 'pre', 45_000, 0]])))
+    const value = build(
+      { ...HH, ...regionsWith({ somaDiameter: 6 }) },
+      exc(input([['A', '7', 'pre', 45_000, 0]])),
+    )
     const first = await runSimulateJob(job(value, { duration: 5 }))
     const again = await runSimulateJob(job(value, { duration: 5, rest: first.settle }))
     expect(again.settle).toBe(first.settle)

@@ -19,6 +19,9 @@ import {
   pieceGeometry,
   placeOnPiece,
   radiusWidths,
+  meanEdgeRadius,
+  scaleWidths,
+  SCALE_FLOOR_PX,
   subSegments,
   synapseMarks,
   toLayout,
@@ -186,5 +189,26 @@ describe('radiusWidths', () => {
     const { arbor, tree, d } = y()
     const sub = subSegments(arbor, tree, d, arbor.geodesic)
     expect(radiusWidths(arbor, sub, new Float32Array(6), 1.5)).toBeUndefined()
+  })
+})
+
+describe('scaleWidths', () => {
+  it('draws each edge as wide as its diameter at the zoom, floored and in quarter pixels', () => {
+    const { arbor, tree, d } = y()
+    const sub = subSegments(arbor, tree, d, arbor.geodesic)
+    const radii = Float32Array.of(1000, 1000, 1000, 1, 500, 500)
+    const at = (widths: Float32Array, node: number) =>
+      widths[Array.from(sub.node).indexOf(node)]!
+    // 1 px per µm of layout (skeleton nm): a 2 µm-thick edge is 2 px, a 1 µm one 1 px.
+    const fitted = scaleWidths(sub, meanEdgeRadius(arbor, radii), 1e-3)
+    expect(at(fitted, 1)).toBe(2)
+    expect(at(fitted, 5)).toBe(1)
+    // Zoomed in fourfold, four times as wide: it follows the zoom, as a pixel width does not.
+    expect(at(scaleWidths(sub, meanEdgeRadius(arbor, radii), 4e-3), 1)).toBe(8)
+    // A twig too thin to see is still drawn, at the floor.
+    expect(Math.min(...scaleWidths(sub, meanEdgeRadius(arbor, radii), 1e-6))).toBe(
+      SCALE_FLOOR_PX,
+    )
+    expect(Array.from(fitted).every((w) => Number.isInteger(w * 4))).toBe(true)
   })
 })

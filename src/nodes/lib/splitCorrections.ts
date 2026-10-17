@@ -90,16 +90,23 @@ export function readCorrections(raw: unknown): SplitCorrection[] {
 }
 
 /** What every stored subtree stroke has: whose, where, which side, and from what root. */
-export type StoredStroke = Omit<SplitCorrection, 'to'>
+export type StoredStroke<S extends string = CorrectionScope> = Omit<
+  SplitCorrection,
+  'to' | 'scope'
+> & {
+  readonly scope: S
+}
 
 /**
  * A list of strokes stored as one JSON object per entry — split corrections, a compartment model's
  * painted regions — with anything malformed dropped: the shared fields checked here, the caller's
  * own by `rest`, which answers undefined to drop the entry.
  */
-export function readStrokes<T>(
+export function readStrokes<T, S extends string = CorrectionScope>(
   raw: unknown,
-  rest: (stroke: StoredStroke, fields: Record<string, unknown>) => T | undefined,
+  rest: (stroke: StoredStroke<S>, fields: Record<string, unknown>) => T | undefined,
+  /** The scopes a stroke of this kind may have; the split's two by default. */
+  scopes: readonly S[] = CORRECTION_SCOPES as unknown as readonly S[],
 ): T[] {
   if (!Array.isArray(raw)) return []
   const out: T[] = []
@@ -113,11 +120,11 @@ export function readStrokes<T>(
     if (!parsed || typeof parsed !== 'object') continue
     // Typed as what it should be, then every field checked as though it were not.
     const fields = parsed as Record<string, unknown>
-    const { neuron, at, scope, root } = fields as Partial<StoredStroke>
+    const { neuron, at, scope, root } = fields as Partial<StoredStroke<S>>
     if (typeof neuron !== 'string' || !neuron) continue
     if (!isPoint(at) || (root !== undefined && !isPoint(root))) continue
-    if (!scope || !CORRECTION_SCOPES.includes(scope)) continue
-    const stroke: StoredStroke = {
+    if (!scope || !scopes.includes(scope)) continue
+    const stroke: StoredStroke<S> = {
       neuron,
       at: [at[0], at[1], at[2]],
       scope,
@@ -167,6 +174,20 @@ export function fillDistal(
   if (from >= 0) fillRun(arbor, from, arbor.tout[node]!, code, out)
 }
 
+/** Paint a placed stroke's scope: the subtree distal of `node`, or everything else. */
+export function fillScope(
+  arbor: Arbor,
+  node: number,
+  scope: CorrectionScope,
+  code: number,
+  out: { [node: number]: number },
+): void {
+  if (scope === 'distal') return fillDistal(arbor, node, code, out)
+  // "Everything else" is the two runs of the pre-order either side of the subtree.
+  fillRun(arbor, 0, arbor.tin[node]!, code, out)
+  fillRun(arbor, arbor.tout[node]!, arbor.order.length, code, out)
+}
+
 function fillRun(
   arbor: Arbor,
   from: number,
@@ -192,6 +213,24 @@ interface SubtreeStroke {
 }
 
 /**
+ * Where a stroke lands: its anchor's node, in the arbour walked from its root — each snapped to a
+ * node within `SNAP_NM`, the root absent being `splitArbor`'s default. Undefined where it cannot be
+ * placed: no node there, or one the walk from its root never reaches, where "distal" means nothing.
+ * The one statement of a stroke landing, for every scope of every editor that paints.
+ */
+export function placeStroke(
+  skeleton: SkeletonGeometry,
+  at: readonly number[],
+  root?: readonly number[],
+): { arbor: Arbor; node: number } | undefined {
+  const rootNode = root ? snapToNode(skeleton, root) : undefined
+  if (rootNode === -1) return undefined
+  const arbor = splitArbor(skeleton, rootNode)
+  const node = snapToNode(skeleton, at)
+  return node >= 0 && arbor.tin[node]! >= 0 ? { arbor, node } : undefined
+}
+
+/**
  * Paint strokes onto per-node labels, in order, a later one over an earlier — a split's
  * corrections and a compartment model's painted regions alike. Each anchor and root snaps to a
  * node within `SNAP_NM`; a stroke that cannot be placed (no node there, or one the walk from its
@@ -205,20 +244,9 @@ export function paintSubtrees(
 ): number {
   let applied = 0
   for (const stroke of strokes) {
-    // Its own root, snapped like its anchor; a root that lands nowhere places nothing.
-    const root = stroke.root ? snapToNode(skeleton, stroke.root) : undefined
-    if (root === -1) continue
-    const arbor = splitArbor(skeleton, root)
-    const node = snapToNode(skeleton, stroke.at)
-    const from = node >= 0 ? arbor.tin[node]! : -1
-    if (from < 0) continue
-    const to = arbor.tout[node]!
-    if (stroke.scope === 'distal') fillDistal(arbor, node, stroke.code, out)
-    else {
-      // "Everything else" is the two runs of the pre-order either side of the subtree.
-      fillRun(arbor, 0, from, stroke.code, out)
-      fillRun(arbor, to, arbor.order.length, stroke.code, out)
-    }
+    const placed = placeStroke(skeleton, stroke.at, stroke.root)
+    if (!placed) continue
+    fillScope(placed.arbor, placed.node, stroke.scope, stroke.code, out)
     applied++
   }
   return applied

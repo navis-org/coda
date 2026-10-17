@@ -29,6 +29,18 @@
 
 import { lowerBound } from '../core/stats'
 
+/** µm of cable a `startOffset` always leaves, so a section never has no length. */
+const MIN_PIECE = 1e-3
+
+/**
+ * How much of an edge `length` µm long a `startOffset` takes: never all of it, a hair always left;
+ * 0 for none (absent, NaN, not positive). The solver's and the NEURON export's one clamp.
+ */
+function startOffsetOf(offset: number | undefined, length: number): number {
+  const taken = Math.min(offset ?? 0, length - MIN_PIECE)
+  return taken > 0 ? taken : 0
+}
+
 /** A rooted tree of points with radii, in micrometres. */
 export interface CableTree {
   /** xyz interleaved, µm. */
@@ -50,6 +62,14 @@ export interface CableTree {
    * positive: no jump, the parent's radius.
    */
   readonly startRadius?: ArrayLike<number>
+  /**
+   * Per node, µm of the edge into it that is **not cable**: it runs inside the parent — a soma —
+   * whose own section already holds that membrane, so a fibre's cable begins at the soma's surface
+   * rather than at its centre, as NEURON's first 3D point of a neurite does. Read where the edge
+   * begins a section; never more than the edge, of which a hair is always left. Absent, NaN or not
+   * positive: none.
+   */
+  readonly startOffset?: ArrayLike<number>
 }
 
 /**
@@ -87,6 +107,11 @@ export interface Section {
    * 0.9999… from a second arc sum maps to the last segment centre rather than the end node.
    */
   readonly x: Float64Array
+  /**
+   * The share of the section's first edge that is no cable: inside the parent, a soma, by the
+   * section's `startOffset`. `x` 0 is that edge this far along; 0 for every section without one.
+   */
+  readonly startShare: number
 }
 
 export interface CompartmentTree {
@@ -138,8 +163,106 @@ export function compartmentAt(tree: PlacingTree, node: number, t: number): numbe
   if (s < 0) return 0
   const section = tree.sections[s]!
   const j = tree.nodeIndex[node]!
-  const x = t >= 1 ? section.x[j]! : section.x[j - 1]! + t * (section.x[j]! - section.x[j - 1]!)
-  return compartmentAtX(section.first, section.nseg, tree.parent[section.first]!, x)
+  const attach = tree.parent[section.first]!
+  const x = t >= 1 ? section.x[j]! : edgeX(section, j, t)
+  return x === undefined ? attach : compartmentAtX(section.first, section.nseg, attach, x)
+}
+
+/**
+ * Where a point `t` of the way down the edge into node `j` of `section` is, in NEURON's `x`; or
+ * undefined where it is inside the parent (`startShare`), which is no cable of this section's.
+ */
+function edgeX(section: Section, j: number, t: number): number | undefined {
+  const share = edgeShareOf(section, j)
+  if (t < share) return undefined
+  const u = share < 1 ? (t - share) / (1 - share) : 1
+  return section.x[j - 1]! + u * (section.x[j]! - section.x[j - 1]!)
+}
+
+/** The share of the edge into node `j` of `section` inside its parent: only a first edge has one. */
+function edgeShareOf(section: Section, j: number): number {
+  return j === 1 ? section.startShare : 0
+}
+
+/** The share of the edge into `node` inside its parent soma, 0 to 1: no cable of its own. */
+export function edgeShareAt(tree: PlacingTree, node: number): number {
+  const s = tree.nodeSection[node]!
+  return s < 0 ? 0 : edgeShareOf(tree.sections[s]!, tree.nodeIndex[node]!)
+}
+
+export interface EdgeSpan {
+  readonly t0: number
+  readonly t1: number
+  readonly compartment: number
+  /** Which of its section's segments, 0 to `nseg − 1`. */
+  readonly segment: number
+}
+
+/**
+ * The edge into `node` cut where its compartments end, as `t` runs from its parent (0) to it (1):
+ * by `compartmentAtX`, the rule every point on the tree is placed by. The stretch inside a parent
+ * soma (`edgeShareAt`) is no cable and is left out; the root has no edge.
+ */
+export function edgeSpans(tree: PlacingTree, node: number): EdgeSpan[] {
+  const s = tree.nodeSection[node]!
+  const j = tree.nodeIndex[node]!
+  if (s < 0 || j < 1) return []
+  const section = tree.sections[s]!
+  const { first, nseg } = section
+  const attach = tree.parent[first]!
+  const share = edgeShareOf(section, j)
+  const xa = section.x[j - 1]!
+  const xb = section.x[j]!
+  // `edgeX` inverted: the `t` an `x` on this edge is at.
+  const tOf = (x: number) => (xb > xa ? share + ((1 - share) * (x - xa)) / (xb - xa) : 1)
+  const spans: EdgeSpan[] = []
+  let from = xa
+  do {
+    // The next segment boundary past `from`, or the edge's end.
+    const segment = Math.min(nseg - 1, Math.floor(from * nseg + 1e-9))
+    const to = Math.min(xb, (segment + 1) / nseg)
+    const compartment = compartmentAtX(first, nseg, attach, xb > xa ? (from + to) / 2 : xb)
+    spans.push({ t0: tOf(from), t1: tOf(to), compartment, segment })
+    from = to
+  } while (from < xb)
+  return spans
+}
+
+/**
+ * The radius the edge into node `v` begins at: its own `startRadius` where it has one (a fibre
+ * leaving a soma), else its parent's. The rule `discretize` integrates every section's first
+ * piece by, for any reader drawing the same cable.
+ */
+export function edgeStartRadius(
+  tree: Pick<CableTree, 'radii' | 'parent' | 'startRadius'>,
+  v: number,
+): number {
+  return ownStartRadius(tree, v) ?? tree.radii[tree.parent[v]!]!
+}
+
+/** The radius the edge into `v` begins at where it has one of its own; absent, NaN or not positive is none. */
+function ownStartRadius(tree: Pick<CableTree, 'startRadius'>, v: number): number | undefined {
+  const r = tree.startRadius?.[v]
+  return r !== undefined && r > 0 ? r : undefined
+}
+
+/**
+ * Where a first edge's cable begins once its parent has taken `share` of it (a section's
+ * `startShare`): the point that far along from `from` to `to` (xyz in `positions`); undefined for
+ * none. The solver's and the NEURON export's one answer.
+ */
+export function cableStartPoint(
+  positions: ArrayLike<number>,
+  from: number,
+  to: number,
+  share: number,
+): [number, number, number] | undefined {
+  if (share <= 0) return undefined
+  const a = from * 3
+  const b = to * 3
+  return [0, 1, 2].map(
+    (k) => positions[a + k]! + share * (positions[b + k]! - positions[a + k]!),
+  ) as [number, number, number]
 }
 
 /** `Ra·Δs/(π r₁ r₂)` in Ω·cm·µm/µm² is this many MΩ. */
@@ -178,6 +301,9 @@ export function discretize(tree: CableTree, options: DiscretizeOptions): Compart
   if (tree.startRadius && tree.startRadius.length !== n) {
     throw new Error('startRadius must have one entry per node.')
   }
+  if (tree.startOffset && tree.startOffset.length !== n) {
+    throw new Error('startOffset must have one entry per node.')
+  }
   if (root < 0) throw new Error('A cable tree must have exactly one root.')
 
   // Children as CSR.
@@ -188,14 +314,11 @@ export function discretize(tree: CableTree, options: DiscretizeOptions): Compart
   const childList = new Int32Array(Math.max(0, n - 1))
   for (let i = 0; i < n; i++) if (i !== root) childList[cursor[delivered[i]!]!++] = i
   const childCount = (v: number) => childStart[v + 1]! - childStart[v]!
-  /** The radius the edge into `v` starts at, where it has one of its own. */
-  const ownStart = (v: number) => {
-    const r = tree.startRadius?.[v]
-    return r !== undefined && r > 0 ? r : undefined
-  }
   // A single child starting at a radius of its own begins a section, so its parent ends one.
   const isLandmark = (v: number) =>
-    v === root || childCount(v) !== 1 || ownStart(childList[childStart[v]!]!) !== undefined
+    v === root ||
+    childCount(v) !== 1 ||
+    ownStartRadius(tree, childList[childStart[v]!]!) !== undefined
 
   const label = (v: number) => (labels ? labels[v]! : 0)
 
@@ -256,9 +379,15 @@ export function discretize(tree: CableTree, options: DiscretizeOptions): Compart
       const dz = positions[b + 2]! - positions[a + 2]!
       arc[j] = arc[j - 1]! + Math.sqrt(dx * dx + dy * dy + dz * dz)
     }
+    // The stretch inside a soma is the soma's membrane, not this section's: the cable starts past it.
+    const offset = startOffsetOf(tree.startOffset?.[nodes[1]!], arc[1]!)
+    const share = offset > 0 ? offset / arc[1]! : 0
+    // Where the cable then begins, on the first edge: what a position at arc 0 is, not the parent.
+    const cableStart = cableStartPoint(positions, nodes[0]!, nodes[1]!, share)
+    if (offset > 0) for (let j = 1; j < m; j++) arc[j]! -= offset
     const length = arc[m - 1]!
     // A section may begin at a radius of its own (`startRadius`); every other point is its node's.
-    const start = ownStart(nodes[1]!) ?? radii[nodes[0]!]!
+    const start = edgeStartRadius(tree, nodes[1]!)
     const r = (j: number) => (j === 0 ? start : radii[nodes[j]!]!)
 
     const nseg = segmentCount(options, length, arc, r)
@@ -325,15 +454,16 @@ export function discretize(tree: CableTree, options: DiscretizeOptions): Compart
       }
       return { lateral, resistance }
     }
-    const pointAt = (s: number): [number, number, number] => {
+    /** Push the point at arc `s` onto `position`: the first piece runs from where the cable begins. */
+    const pushPointAt = (s: number) => {
       const { j, t } = locate(s)
-      const a = nodes[j - 1]! * 3
       const b = nodes[j]! * 3
-      return [
-        positions[a]! + t * (positions[b]! - positions[a]!),
-        positions[a + 1]! + t * (positions[b + 1]! - positions[a + 1]!),
-        positions[a + 2]! + t * (positions[b + 2]! - positions[a + 2]!),
-      ]
+      const base = j === 1 && cableStart ? cableStart : undefined
+      const a = nodes[j - 1]! * 3
+      for (let k = 0; k < 3; k++) {
+        const from = base ? base[k]! : positions[a + k]!
+        position.push(from + t * (positions[b + k]! - from))
+      }
     }
     /**
      * The skeleton node nearest arc position `s`, a tie going to the lower node index. Nearest
@@ -364,7 +494,7 @@ export function discretize(tree: CableTree, options: DiscretizeOptions): Compart
       // the cable — and an annulus there — is never a hair beyond the last integration.
       area.push(integrate(i * step, i === nseg - 1 ? length : (i + 1) * step).lateral)
       gAxial.push(g(integrate(from, centre).resistance))
-      position.push(...pointAt(centre))
+      pushPointAt(centre)
       region.push(label(nearestNode(centre)))
     }
     // The zero-area end node, half a compartment beyond the last centre.
@@ -383,7 +513,7 @@ export function discretize(tree: CableTree, options: DiscretizeOptions): Compart
       nodeIndex[nodes[j]!] = j
     }
 
-    return { nodes, nseg, first, parentSection, x }
+    return { nodes, nseg, first, parentSection, x, startShare: share }
   }
 
   return {

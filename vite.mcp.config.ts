@@ -86,8 +86,13 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  * 3,200 → 3,300 on 2026-10-13, at 3,223 kB, for those help pages (`model.md`, `simulate.md`, 16 kB)
  * and the pack's later phases: painted regions, two synapse sockets with sourced presets, and the
  * audits' refusals and notes. Prose and code of ours; no new library.
+ *
+ * 3,300 → 3,400 on 2026-10-17, at 3,338 kB against 3,277 kB at the commit before it (363cc6d), for
+ * Fit Model — the bounded least squares (`biophys/leastSquares.ts`), the passive fit, its worker
+ * pool and tables, and its help page — and the Compartment Model's soma regions (the taper, `upTo`,
+ * ignored branches, the surface offset). Code and prose of ours; no new library.
  */
-const SIZE_BUDGET_KB = 3_300
+const SIZE_BUDGET_KB = 3_400
 
 /**
  * Fail the build if the bundle outgrows its budget.

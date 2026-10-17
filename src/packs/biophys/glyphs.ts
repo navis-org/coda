@@ -3,7 +3,7 @@
  *
  * Data only, held to `ui/glyphs.ts`' own lint rule: `nodes.html` draws these with no React and no
  * node definitions in it. The model and the run are on Skeletons' arbour, the material they are
- * made from; the two recording cards are on a trace, theirs.
+ * made from; the recording cards and the fit are on a trace, theirs.
  */
 
 import type { GlyphShape } from '../../ui/glyphs'
@@ -47,6 +47,20 @@ const glyphs: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M3 8.5h5l1.3-5 1.6 7 1.2-2H21' }],
     ['path', { d: 'M3 17h5l1.3-2.5 1.6 4 1.2-1.5H21' }],
     ['path', { d: 'M9.3 2.5v19', strokeOpacity: '.4' }],
+  ],
+  /*
+   * A noisy recorded trace faint, a smooth fitted curve through it: what comes out of a fit is the
+   * model that draws the second.
+   */
+  'biophys:fit': [
+    [
+      'path',
+      {
+        d: 'M3 18h4l.8-5.6.8 1.4.8-2.4.9 1.2.8-1.6.9.8.9-1 .9.6.9-.7.9.4H21',
+        strokeOpacity: '.4',
+      },
+    ],
+    ['path', { d: 'M3 18h4c.9-5 2.6-7.4 5.2-8 2.6-.5 5.5-.6 8.8-.6' }],
   ],
 }
 

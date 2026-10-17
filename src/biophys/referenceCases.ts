@@ -12,7 +12,7 @@
 
 import { HH_GBAR, HH_K, HH_NA, densityByRegion, leakChannel } from './channels'
 import type { CableTree, CompartmentTree, SegmentRule } from './discretize'
-import { discretize } from './discretize'
+import { cableStartPoint, discretize } from './discretize'
 import type {
   CellModel,
   ChannelPlacement,
@@ -38,6 +38,8 @@ export interface ReferenceCase {
     readonly labels?: readonly number[]
     /** `CableTree.startRadius`: where a section begins at a radius of its own. */
     readonly startRadius?: readonly number[]
+    /** `CableTree.startOffset`: where a section's cable begins past its first point, at a soma's surface. */
+    readonly startOffset?: readonly number[]
   }
   readonly rule: SegmentRule
   /** Ω·cm */
@@ -86,6 +88,7 @@ export function caseTree(c: Pick<ReferenceCase, 'tree'>): CableTree {
     // Int32, not Uint8: `discretize` refuses a label outside 0–255 rather than seeing it wrapped.
     ...(c.tree.labels ? { labels: Int32Array.from(c.tree.labels) } : {}),
     ...(c.tree.startRadius ? { startRadius: Float64Array.from(c.tree.startRadius) } : {}),
+    ...(c.tree.startOffset ? { startOffset: Float64Array.from(c.tree.startOffset) } : {}),
   }
 }
 
@@ -194,10 +197,13 @@ export function neuronExport(c: ReferenceCase, tree: CompartmentTree = buildCase
   })
   const sections = tree.sections.map((s, i) => {
     const start = c.tree.startRadius?.[s.nodes[1]!]
+    const startPoint = cableStartPoint(c.tree.positions, s.nodes[0]!, s.nodes[1]!, s.startShare)
     return {
       nodes: Array.from(s.nodes),
       nseg: s.nseg,
       ...(start !== undefined && start > 0 ? { startDiameter: 2 * start } : {}),
+      // NEURON's first 3D point of the section, moved to where its cable begins.
+      ...(startPoint ? { startPoint } : {}),
       parent: s.parentSection < 0 ? (i === rootSection ? -1 : rootSection) : s.parentSection,
       parentX: s.parentSection < 0 ? 0 : 1,
       hh:
@@ -328,12 +334,13 @@ export const SOMA_STEP_NODES = { root: 0, soma: 1, tipA: 6, tipB: 11 } as const
  * the first fibre, with every fibre wired to the centre (NEURON's soma(0.5)) — here one fibre along
  * the soma's axis and one at right angles to it, each starting at its own radius.
  */
-function somaCentreTree(): ReferenceCase['tree'] {
+function somaCentreTree(offset = 0): ReferenceCase['tree'] {
   const positions = [-1.3, 0, 0, 0, 0, 0, 1.3, 0, 0]
   const radii = [1.3, 1.3, 1.3]
   const parent = [-1, 0, 1]
   const labels = [1, 1, 1]
   const startRadius = [NaN, NaN, NaN]
+  const startOffset = [0, 0, 0]
   for (const [dx, dy, r] of [
     [10, 0, 0.2],
     [0, 8, 0.15],
@@ -345,10 +352,18 @@ function somaCentreTree(): ReferenceCase['tree'] {
       parent.push(p)
       labels.push(3)
       startRadius.push(i === 1 ? r : NaN)
+      startOffset.push(i === 1 ? offset : 0)
       p = radii.length - 1
     }
   }
-  return { positions, radii, parent, labels, startRadius }
+  return {
+    positions,
+    radii,
+    parent,
+    labels,
+    startRadius,
+    ...(offset > 0 ? { startOffset } : {}),
+  }
 }
 
 const SOMA_CENTRE_NODES = { start: 0, centre: 1, tipA: 7, tipB: 12 } as const
@@ -471,9 +486,65 @@ export const REFERENCE_CASES: readonly ReferenceCase[] = [
     duration: 40,
   },
   {
+    /*
+     * A recorded waveform replayed: a command sampled every 0.1 ms, as a fit drives a model with,
+     * on the HH arbour, kept subthreshold — on a spike's upstroke the rounding of two programs
+     * reaches 1e-5 mV, and spiking is the other cases' to hold. Its sample edges sit 0.01 ms off
+     * the half steps, so NEURON's accumulated `t` cannot decide which sample a step reads.
+     */
+    name: 'branched-sampled-clamp',
+    tree: BRANCHED,
+    rule: { kind: 'maxLength', length: 5 },
+    ...FLY_PASSIVE,
+    hh: { regions: [1, 2], gna: HH_GBAR.na, gk: HH_GBAR.k },
+    temperature: 22,
+    vInit: -65,
+    clamps: [
+      {
+        node: BRANCHED_NODES.soma,
+        delay: 3.01,
+        duration: 30,
+        amplitude: 1,
+        shape: {
+          kind: 'samples',
+          every: 0.1,
+          // A slow sine with a staircase on it: steps, ramps and both signs, deterministically.
+          values: Array.from(
+            { length: 300 },
+            (_, k) => 0.05 * Math.sin(k / 23) + 0.02 * (((k * 37) % 11) / 10 - 0.5),
+          ),
+        },
+      },
+    ],
+    record: [BRANCHED_NODES.soma, BRANCHED_NODES.fork, BRANCHED_NODES.twigA],
+    dt: 0.025,
+    duration: 40,
+  },
+  {
     // The soma as the model now builds it: fibres wired to its centre, one leaving at right angles.
     name: 'soma-centre',
     tree: somaCentreTree(),
+    rule: { kind: 'dLambda', dLambda: 0.1, frequency: 100 },
+    ...FLY_PASSIVE,
+    temperature: 22,
+    vInit: -60,
+    synapse: { scheme: 'exp2syn', tau1: 0.1, tau2: 10, eRev: 0, gmax: 0.0005 },
+    synapses: [{ node: SOMA_CENTRE_NODES.tipB, count: 2, times: [5] }],
+    clamps: [{ node: SOMA_CENTRE_NODES.centre, delay: 15, duration: 5, amplitude: 0.01 }],
+    record: [
+      SOMA_CENTRE_NODES.start,
+      SOMA_CENTRE_NODES.centre,
+      SOMA_CENTRE_NODES.tipA,
+      SOMA_CENTRE_NODES.tipB,
+    ],
+    dt: 0.025,
+    duration: 30,
+  },
+  {
+    // The same soma with every fibre's cable starting at its surface (`startOffset`), as the model
+    // builds it since the soma took its neighbours in: the stretch inside it is the soma's own.
+    name: 'soma-surface',
+    tree: somaCentreTree(1.3),
     rule: { kind: 'dLambda', dLambda: 0.1, frequency: 100 },
     ...FLY_PASSIVE,
     temperature: 22,

@@ -23,6 +23,8 @@ export interface Stroke {
   readonly width: number
   readonly alpha: number
   readonly dash?: readonly number[]
+  /** How a line ends: round unless said, `butt` for a shape that must be exactly its length. */
+  readonly cap?: 'butt'
   readonly lines: readonly number[]
   readonly arcs?: ReadonlyArray<{ cx: number; cy: number; r: number; a0: number; a1: number }>
 }
@@ -180,6 +182,21 @@ export interface SceneInput {
     readonly more: number
   }
   readonly scaleBar?: { readonly px: number; readonly label: string }
+  /**
+   * A dotted ring round the root, `r` in the layout's units — the Regions tab's idealised soma,
+   * the size of what replaces the nodes under it.
+   */
+  readonly rootRing?: { readonly r: number }
+  /**
+   * A block at the root, `r` in the layout's units each way from it — the Model tab's soma section,
+   * a cylinder as long as it is wide, seen from the side — drawn over the branches it centres.
+   */
+  readonly rootBlock?: {
+    /** Half its length and half its width, layout units: equal, unless widths are drawn thinner. */
+    readonly halfLength: number
+    readonly halfWidth: number
+    readonly color: string
+  }
   /** The branch colouring's key. `lo` absent means the measure is one value everywhere. */
   readonly legend?: {
     readonly title: string
@@ -319,6 +336,37 @@ export function buildScene(input: SceneInput): Scene {
     }
   }
 
+  if (input.rootBlock) {
+    const { sx } = input.transform
+    const r = input.rootBlock.halfLength * sx
+    strokes.push({
+      color: input.rootBlock.color,
+      width: 2 * input.rootBlock.halfWidth * sx,
+      alpha: 1,
+      cap: 'butt',
+      lines: [p.bx[0]! - r, p.by[0]!, p.bx[0]! + r, p.by[0]!],
+    })
+  }
+  if (input.rootRing) {
+    // In the text ink: drawn over branches in any colour, a hue of its own could vanish into one.
+    strokes.push({
+      color: ink.text,
+      width: 1,
+      alpha: 1,
+      dash: RING_DASH,
+      lines: [],
+      arcs: [
+        {
+          cx: p.bx[0]!,
+          cy: p.by[0]!,
+          r: input.rootRing.r * input.transform.sx,
+          a0: 0,
+          a1: 2 * Math.PI,
+        },
+      ],
+    })
+  }
+
   // The root, under the clicked point's dot.
   dots.unshift({ x: p.bx[0]!, y: p.by[0]!, r: 3.5, color: ink.text })
 
@@ -395,11 +443,14 @@ export function buildScene(input: SceneInput): Scene {
   }
 }
 
+/** A ring's dash, px: dotted, so it reads as an outline rather than as cable. */
+const RING_DASH = [2, 3]
+
 /** Paint a scene onto a canvas already sized for it (`prepareCanvas`). */
 export function paintScene(ctx: CanvasRenderingContext2D, scene: Scene): void {
   ctx.clearRect(0, 0, scene.width, scene.height)
-  ctx.lineCap = 'round'
   for (const stroke of scene.strokes) {
+    ctx.lineCap = stroke.cap ?? 'round'
     ctx.strokeStyle = stroke.color
     ctx.lineWidth = stroke.width
     ctx.globalAlpha = stroke.alpha
@@ -458,13 +509,23 @@ export function sceneToSvg(scene: Scene, font: string): SVGSVGElement {
     for (let i = 0; i < l.length; i += 4) {
       d += `M${l[i]!.toFixed(2)} ${l[i + 1]!.toFixed(2)}L${l[i + 2]!.toFixed(2)} ${l[i + 3]!.toFixed(2)}`
     }
-    for (const arc of stroke.arcs ?? []) {
-      const x0 = arc.cx + arc.r * Math.cos(arc.a0)
-      const y0 = arc.cy + arc.r * Math.sin(arc.a0)
-      const x1 = arc.cx + arc.r * Math.cos(arc.a1)
-      const y1 = arc.cy + arc.r * Math.sin(arc.a1)
-      const large = arc.a1 - arc.a0 > Math.PI ? 1 : 0
-      d += `M${x0.toFixed(2)} ${y0.toFixed(2)}A${arc.r.toFixed(2)} ${arc.r.toFixed(2)} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`
+    for (const whole of stroke.arcs ?? []) {
+      // An SVG arc whose ends coincide draws nothing, so a full circle (`rootRing`) is two halves.
+      const halves =
+        whole.a1 - whole.a0 >= 2 * Math.PI - 1e-9
+          ? [
+              { ...whole, a1: whole.a0 + Math.PI },
+              { ...whole, a0: whole.a0 + Math.PI, a1: whole.a0 + 2 * Math.PI },
+            ]
+          : [whole]
+      for (const arc of halves) {
+        const x0 = arc.cx + arc.r * Math.cos(arc.a0)
+        const y0 = arc.cy + arc.r * Math.sin(arc.a0)
+        const x1 = arc.cx + arc.r * Math.cos(arc.a1)
+        const y1 = arc.cy + arc.r * Math.sin(arc.a1)
+        const large = arc.a1 - arc.a0 > Math.PI ? 1 : 0
+        d += `M${x0.toFixed(2)} ${y0.toFixed(2)}A${arc.r.toFixed(2)} ${arc.r.toFixed(2)} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`
+      }
     }
     if (!d) continue
     svg.append(
@@ -473,7 +534,7 @@ export function sceneToSvg(scene: Scene, font: string): SVGSVGElement {
         fill: 'none',
         stroke: stroke.color,
         'stroke-width': stroke.width,
-        'stroke-linecap': 'round',
+        'stroke-linecap': stroke.cap ?? 'round',
         ...(stroke.alpha < 1 ? { 'stroke-opacity': stroke.alpha } : {}),
         ...(stroke.dash ? { 'stroke-dasharray': stroke.dash.join(' ') } : {}),
       }),

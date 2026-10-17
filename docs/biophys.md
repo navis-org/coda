@@ -73,8 +73,28 @@ resistance, which is why theirs reads a little less isolated.
   that stamp a floor radius (optic-lobe's 256 nm) trip `stampedRadius`'s note. A model built on
   radii far too thin saturates: every input drives the cell to the reversal potential.
 - **The soma.** A labelled soma (SWC 1) becomes one sphere-equivalent section, every fibre leaving
-  it starting at its own radius (`startRadius`, which forces a section break). `Soma diameter` adds
-  or overrides one. With neither, the bare root stands in, and it is a poor soma: a zero-area node,
+  it starting at its own radius (`startRadius`, which forces a section break) **and at its surface**
+  (`startOffset`: the stretch from the centre is the soma's own membrane). `Soma diameter` adds or
+  overrides one, under **`Soma`: cut off and replace** (default) — **use the skeleton as is** keeps
+  the skeleton's nodes and radii there, the soma node only where "the soma" is recorded and clamped.
+  **What is replaced is the `soma` region painted touching the soma node** (`modelRegions`, the one
+  statement the build and the Regions tab both read, the tab drawing it in a hue of its own,
+  `replacedInk`, the greys being taken). It **starts** as the
+  skeleton's taper (`somaNodes`) — a computed base layer, never stored as strokes, which would go
+  stale with the skeleton and fill the list with strokes nobody made — and strokes adjust it, an
+  `upTo` scope ("from the soma to here": the path out to a node and the twigs dying before it) being
+  how a cell body is outlined in one click per neurite. Why replace more than the labelled node: an
+  EM skeleton labels one node near the nucleus, its neighbours sit at nearly its radius, and
+  skeletonisation leaves dead-end side branches inside the cell body. On MaleCNS 10075 (soma 5.9 µm)
+  that kept cable was 190 µm² within 1.5 soma radii against the soma's 108, some of it inside the
+  soma's own volume; the neighbourhood went from 462 µm² to 142 within three radii once replaced.
+  The taper's rule (nodes at least half the soma's radius, within three radii, plus dead ends never
+  reaching three radii) was asked, not assumed: a fixed distance either leaves a fat stub (1×:
+  10075's 2.83 µm node at 3.1 µm) or reaches into neurites. A soma-painted patch not touching the
+  soma node stays cable. **`ignored`** leaves a subtree out like a fragment, its synapses dropped and
+  counted; a stroke that would ignore the soma node is refused whole. `soma-surface` holds the
+  offset to NEURON (its first 3D point moved to the surface). With neither a labelled soma nor a
+  `Soma diameter`, the bare root stands in, and it is a poor soma: a zero-area node,
   so current clamped there enters through thin neurites (0.05 nA drove a passive PN to +26 mV, and
   NEURON agrees). The card says so.
 - **Only the soma's component is modelled.** Fragments off it are dropped and counted; synapses on
@@ -123,14 +143,16 @@ resistance, which is why theirs reads a little less isolated.
   name, an existing region's or a new one. Four rules. **Strokes paint over, later wins**, over each
   other and over the skeleton's labels, so a compartment is in exactly one region and a channel row
   stays a set of regions rather than growing a compartment mask (the plan's "one value change",
-  not needed). **Anchored by position with their root**, through `paintSubtrees` — the painter
-  split corrections use, generalised from three codes to any — so a re-fetch that renumbers keeps
-  them, and one landing nowhere is counted on the card and **adds no name**: a stale stroke naming
-  an empty region would let a channel placed there cover no membrane in silence. **The soma is
-  found from the skeleton's own labels**, the cable taking the painted ones, so painting relabels
-  the soma's membrane (its section takes its node's painted region) without moving it; an *added*
+  not needed). **Anchored by position with their root**, through `placeStroke` and `fillScope` —
+  the landing and the painting split corrections use, generalised from three codes to any — so a
+  re-fetch that renumbers keeps them, and one landing nowhere is counted on the card and **adds no
+  name**: a stale stroke naming an empty region would let a channel placed there cover no membrane
+  in silence. **The soma node is found from the skeleton's own labels**, the cable taking the
+  painted ones, so painting relabels the soma's membrane (its section takes its node's painted
+  region) without moving its centre — though what it replaces is the painted `soma` touching it
+  (above), which is why `soma` is not offered for a rename; an *added*
   soma is no node's and stays `soma` whatever its root was painted. And **both
-  tabs read `paintedRegions` over the wired skeleton**, the function the build calls, so a region
+  tabs read `modelRegions` over the wired skeleton**, the function the build calls, so a region
   is in the channel list the moment it is painted, before any run. A rename reaches every stroke of
   that name, any neuron's, and every channel row placed on it — names are shared across neurons as
   rows are, in one commit (`setParams`). The two editors share the stroke reader (`readStrokes`), the scope words and
@@ -433,6 +455,65 @@ simulation.
   columns a fact about the data: the node observes its schema then, as Pivot does. A column two inputs
   share takes each input's label in front, decided on the **source** column's name — a simulated
   `soma` beside a recorded `soma 1` is one measurement, and the name has to say whose.
+
+## Fitting
+
+Fit Model (`fitModel.ts`; method in `fit.ts`, optimiser in `biophys/leastSquares.ts`) fits a
+Compartment Model's passive membrane — Rm, Cm, Ra, E leak and an area factor — to a current-clamp
+recording, and Apply writes the answer back into the card it came from.
+
+- **The model is rescaled, never rebuilt.** The membrane reaches the solver as a leak density, a
+  reversal, a capacitance and axial conductances that scale as 1/Ra, so an evaluation rescales those
+  on the compartment tree the model was built with. The fitted `Model` keeps that tree, and the card
+  says when the fitted length constant has shrunk past what its compartments were cut for.
+- **Each sweep gets the current the cell got**: its command replayed sample by sample (`ClampShape`
+  `samples`, held to NEURON by `branched-sampled-clamp`). A passive response is linear, so sweeps
+  whose commands are scaled copies — an I–V's steps — share one simulation. A model with channels is
+  fitted as its passive copy, said on the card.
+- **Bounded Levenberg–Marquardt in log space** for the positive parameters, with an active set: without
+  it, Ra ran onto its bound and the fit crept along it to the iteration limit (133 s against 37 s on
+  the user's MBON, the same answer). The finite-difference Jacobian runs over a worker pool kept for
+  the fit (`fitPool.ts`). Standard errors come from JᵀJ at the optimum, and a bound reached, a loose
+  parameter and a traded pair are each a sentence on the card.
+- **Area, Cm and Rm cannot all be free**: the model sees only Cm·F and F/Rm, so a fit freeing all
+  three is refused with the fix named.
+- **An unset voltage or current picker is asked, not guessed**, when several columns share the unit:
+  a Clampex file records the current monitor in pA before the command, and fitting the monitor gave
+  a plausible RMS for nonsense.
+
+The fitted model carries how the fit ended (`CellModelValue.fit`: settled or why not, the RMS before
+and after), which is the card's foot line through `describeValue` and what marks a model Apply can
+write back. Rules for Apply (decided 2026-10-17):
+
+- **It writes into the Compartment Model wired straight into `Model`**, one `setParams` — Custom,
+  the four numbers to four figures, and `Area factor`. Through Select One or another fit, which card
+  the numbers belong to is a guess, so it is refused with that reason. **Only a current result**:
+  a cached one outlives a rewire, an edit and a failed re-run, and would be written into a card it
+  was never fitted to; "applied" is asked first, applying being what makes the fit stale.
+- **The area factor is a Compartment Model param**, not folded into Rm and Cm, so the applied cell is
+  legible on the card. It multiplies `compartments.area` after discretisation (the soma's too), and
+  d_lambda cuts for `cm × F`, as NEURON does with a spine factor folded into cm. `areaFactor` rides on
+  the value for the readers that work an area out of geometry: the soma's π·d² (`somaMembrane`) and
+  a length constant from the reconstruction's radii (`cableConstants`, Rm / F).
+- **The fit's area factor is the card's own**, absolute rather than a share of the start model's:
+  it starts at the model's `areaFactor` and `PassiveBase.area0` turns it into a scale on the areas
+  the tree was built at. A relative factor put two numbers under one label — the Parameters table
+  said 2 where Apply wrote 3 — and its bounds now share the card's floor (`AREA_FACTOR_MIN`), or a
+  fitted value could be one the card refuses.
+- **A fitted model holds extra membrane the way a built one does.** `fittedModel` scales
+  `compartments.area` and sets `areaFactor`, rather than folding the factor into Rm and Cm (as it
+  did first): one meaning of `areaFactor` on every model, so Apply copies the fitted model's
+  membrane and factor as they stand.
+- **"Applied" is a comparison, not a flag**: the button stands down while the card holds exactly
+  what Apply would write, so an undo brings it back with no bookkeeping.
+- A total-per-cell channel row is resolved to a density when the model is built. On the fitted
+  `Model` that density meets the fit's extra area, so its total grows with it; the card rebuilt from
+  Apply spreads the row's total over the larger area and keeps it. For such a row the two differ.
+
+The full-size view (`FitView.tsx`) reads the four outputs: the traces one sweep at a time — a line is
+a (series, column) pair in the Line Chart, so every sweep at once would colour each sweep's recorded
+and fitted traces as two unrelated lines — the parameter table and the error per iteration. Foot
+controls are a table of their own (`nodeFooter`), Fit Model needing one without a body.
 
 ## In the wizard
 

@@ -35,6 +35,12 @@ None was fitted to the neuron you are modelling. Pick "Custom" to set `Rm`, `Ra`
 biophys:model: preset, rm, ra, cm, eLeak
 ```
 
+`Area factor` is for membrane the reconstruction misses, such as spines and fine branches. It multiplies every compartment's membrane area, the soma's included, so capacitance, leak and channel conductances all scale with it while channel densities stay as you set them. Leave it at 1 to model the reconstruction as it is. [Fit Model](#biophys:fit) can fit it, and its Apply button writes the fitted value here.
+
+```coda-params
+biophys:model: areaFactor
+```
+
 Radii matter more than anything else here: axial resistance goes with 1/r², so a skeleton with noisy or missing radii gives a model with spiky or arbitrary resistance. Nodes without a radius get `Default radius`, and the card says how many did. `Smooth radii` averages each radius with its neighbours along unbranched stretches.
 
 ```coda-params
@@ -55,13 +61,28 @@ Pieces of the skeleton that are not connected to the soma are left out, and the 
 
 If the skeleton labels a soma, it is used as one compartment. Most reconstructions do not label one; set `Soma diameter` to add a spherical soma at the root.
 
+`Soma` decides what happens around the soma node:
+
+- **Cut off and replace** (the default) takes the cell body off the skeleton and puts an idealised spherical soma in its place, `Soma diameter` across (or as wide as the labelled soma node, at 0). An EM skeleton usually labels a single node near the nucleus, but the nodes around it are cell body too, and skeletonisation often leaves short side branches inside it. Kept as cable, they would add a second soma's worth of membrane.
+- **Use the skeleton as is** keeps the nodes and radii there. The soma node only marks where "the soma" is for recording and current injection.
+
+What gets replaced is the region painted `soma` that touches the soma node, drawn in a colour of its own in Regions ("replaced by the soma" in the key), with a dotted circle at the size of the soma that replaces it. It starts out as every connected node at least half the soma's radius (up to three soma radii out) plus every side branch that ends within three soma radii. Paint over it to adjust it: `From the soma to here` paints the path out to the clicked node, and the twigs that end before it, in one click per neurite. Neurites leaving the soma start at its surface. Synapses on replaced nodes go to the soma.
+
+Soma painted somewhere that doesn't touch the soma node is soma membrane for channels and stays cable.
+
 ```coda-params
-biophys:model: somaDiameter
+biophys:model: somaMode, somaDiameter
 ```
+
+`Soma diameter` is in µm, and a fly soma is a few µm across. The card warns about a soma more than 100 µm across, whether you typed it or the skeleton labels it: a soma that size holds nearly all of the cell's membrane, so injected currents barely move the voltage, and [Fit Model](#biophys:fit) can only fit a flat line. It's usually a value meant in nm.
 
 ## Regions
 
 Channels are placed on regions. A model starts with the regions its skeleton is labelled with — `soma`, `axon`, `dendrite`, `linker` — taken from Split Axon/Dendrite where the skeleton went through it, otherwise from the source's own (SWC) compartments.
+
+To leave a branch out of the model, such as a stray twig or a wrongly merged piece, click it and choose `Ignore` under `Away from the root`. The branch and everything beyond it is dropped, and synapses on it are left out and counted on the card. Ignoring the soma's side of a branch is refused. Ignored branches are drawn faint.
+
+`To scale` draws each branch as wide as it really is, to scale with its length, which is what you judge a soma's outline by. Branches widen as you zoom in; the thinnest are kept at half a pixel. `Width ×` scales them down from their true radii, to draw thick neighbouring branches apart. Turn `To scale` off for even lines. The scale bar in the corner gives the length.
 
 To add your own, expand the card (⤢) and open the Regions tab. Click a branch of the dendrogram and choose what to paint: everything distal of that point (away from the soma), or everything else, becomes one of the existing regions or a new one. New regions are called `region 1`, `region 2` and so on; rename them in the list beside the dendrogram. Renaming a region also moves the channels placed on it.
 
@@ -132,3 +153,18 @@ biophys:model: synapsePreset, gmax, tau1, tau2, eRev, delay
 > The card says how many synapses were placed, how many were too far from the arbour, and how
 > many belonged to another neuron. If most were dropped, the usual cause is the wrong column in
 > `Postsynaptic`, or a synapse cloud fetched for a different neuron.
+
+## The built model
+
+The `Model` tab draws the model itself: the cable the solver runs on, laid out from the soma's centre, where every neurite is attached. The soma is drawn as what it is in the model, one section as long as it is wide. Ignored branches and the nodes the soma replaced aren't there at all, because they aren't cable. Each compartment is in its region's colour, with every other one lighter (flipping at each branch point), so you can see how finely each branch is cut. `To scale` and `Width ×` work as in `Regions`. Tick `Lengths in λ` to draw branch lengths in length constants at each section's own radius and the model's Rm and Ra, which shows the cell as it behaves electrically: where it's compact and where it's distant.
+
+Hover over a compartment to see its region, which segment of its section it is, its length and diameter (and its length in λ), its membrane area, the axial resistance to the compartment before it, and how far it is from the soma's centre. It also lists what that membrane carries: the leak conductance, each channel placed there with its density and its total conductance in that compartment, and how many synapses sit on it and from how many partners. A compartment holding a large share of the synapses is easy to spot this way. Hovering over the soma gives the same for the soma as a whole, plus its size and its share of the cell's membrane.
+
+Beside the drawing are a few numbers that catch a broken model:
+
+- the input resistance at the soma, and the membrane time constant (Rm × Cm), both for the passive membrane alone, without channels;
+- the soma's share of the membrane: a soma holding most of it means it's far too large;
+- the number of compartments, and the membrane area of each region.
+
+The tab shows the model from the last run. The Compartment Model re-runs on every edit, so this is normally up to date.
+

@@ -16,8 +16,8 @@ import {
   combinedTable,
   planGrid,
   prepareTraces,
-  resample,
 } from './traceOps'
+import { resample } from './resample'
 
 /** Simulate's shape: wide, a column per site, sampled every 1 ms from 0 to 4. */
 const simulated = makeTable(

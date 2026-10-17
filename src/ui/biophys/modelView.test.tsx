@@ -16,7 +16,8 @@ import {
 } from '../../packs/biophys/channelRows'
 import type { RegionStroke } from '../../packs/biophys/regions'
 import { readRegionStrokes, writeRegionStroke } from '../../packs/biophys/regions'
-import { neuron } from '../../packs/biophys/testFixtures'
+import { buildCellModel } from '../../packs/biophys/build'
+import { OPTIONS, neuron } from '../../packs/biophys/testFixtures'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { ModelView } from './ModelView'
 
@@ -45,9 +46,11 @@ function view(change = vi.fn()) {
 describe('ModelView', () => {
   it('offers a painted region in the channel list before any run', () => {
     view()
-    expect(screen.getByRole('tab', { name: 'Channels' }).getAttribute('aria-selected')).toBe(
+    // Regions opens first, being what the other two tabs are made from.
+    expect(screen.getByRole('tab', { name: 'Regions' }).getAttribute('aria-selected')).toBe(
       'true',
     )
+    fireEvent.click(screen.getByRole('tab', { name: 'Channels' }))
     expect(screen.getByRole('button', { name: 'branch' })).toBeTruthy()
     expect(screen.queryByText(/Run the model to see/)).toBeNull()
   })
@@ -59,6 +62,63 @@ describe('ModelView', () => {
     fireEvent.click(screen.getByLabelText('Remove stroke 1'))
     expect(change.mock.lastCall?.[0]).toBe('paintedRegions')
     expect(readRegionStrokes(change.mock.lastCall?.[1]).map((s) => s.neuron)).toEqual(['8'])
+  })
+
+  it('draws the model: what the soma replaces and what is ignored named in the key', () => {
+    const ignore = writeRegionStroke({ ...stroke, region: '', ignore: true })
+    render(
+      <ModelView
+        skeletons={neuron()}
+        model={undefined}
+        params={{
+          paintedRegions: [ignore],
+          somaMode: 'replace',
+          somaDiameter: 0,
+          defaultRadius: 100,
+        }}
+        onParamChange={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Regions' }))
+    expect(screen.getByText('replaced by the soma')).toBeTruthy()
+    expect(screen.getByText('ignored')).toBeTruthy()
+    expect(screen.getByText('Away from the root → ignored')).toBeTruthy()
+    expect((screen.getByLabelText('To scale') as HTMLInputElement).checked).toBe(true)
+    // True radii by default; a factor draws thick neighbours apart, never past 1 or below 0.1.
+    const factor = screen.getByLabelText('Width ×') as HTMLInputElement
+    expect(factor.value).toBe('1')
+    fireEvent.change(factor, { target: { value: '0.5' } })
+    expect(factor.value).toBe('0.5')
+    fireEvent.change(factor, { target: { value: '7' } })
+    expect(factor.value).toBe('1')
+  })
+
+  it('replaces nothing when the soma is kept as the skeleton has it', () => {
+    render(
+      <ModelView
+        skeletons={neuron()}
+        model={undefined}
+        params={{ paintedRegions: [], somaMode: 'asIs', somaDiameter: 0, defaultRadius: 100 }}
+        onParamChange={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Regions' }))
+    expect(screen.queryByText('replaced by the soma')).toBeNull()
+  })
+
+  it('shows the built model in numbers on the Model tab, and asks for a run without one', () => {
+    const { unmount } = render(
+      <ModelView skeletons={neuron()} model={undefined} params={{ defaultRadius: 100 }} />,
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Model' }))
+    expect(screen.getByText('Run the model to see its compartments.')).toBeTruthy()
+    unmount()
+    const model = buildCellModel(neuron(), {}, OPTIONS)
+    render(<ModelView skeletons={neuron()} model={model} params={{ defaultRadius: 100 }} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Model' }))
+    expect(screen.getByText('Input resistance')).toBeTruthy()
+    expect(screen.getByText(`${model.compartments.count}`)).toBeTruthy()
+    expect(screen.getByLabelText('Lengths in λ')).toBeTruthy()
   })
 
   // Every neuron's, as the channel rows naming it are every neuron's.

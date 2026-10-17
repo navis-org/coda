@@ -45,6 +45,10 @@ const NO_EMITTER: Record<string, string> = {
     'Linear interpolation onto one grid is `numpy.interp` per column, but with two rules numpy ' +
     'does not share: nothing outside an input\u2019s own range (numpy holds the end value) and no ' +
     'interpolation across a gap. Emitted once both are written out and held to the node.',
+  'biophys:fit':
+    'Fits the membrane of the model `biophys:model` builds, which has no emitter for the same ' +
+    'reason: a notebook would need that model first. The fit itself would be ' +
+    '`scipy.optimize.least_squares` over NEURON, which `pnpm probe:fit` will hold to the node.',
   'biophys:loadRecording':
     'A recording read by Coda\u2019s own reader (`data/ephys`), whose numbers agree with pyABF\u2019s ' +
     '(`pnpm probe:abf`), so an emitter is `pyabf.ABF(path)` and a long table per sweep. Not yet: ' +

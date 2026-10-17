@@ -117,6 +117,11 @@ export function formatSigned(value: number, options: { plus?: boolean } = {}): s
   return `${sign}${formatNumber(Math.abs(value))}`
 }
 
+/** `digits` significant figures, grouped: a measured quantity in a tooltip or a fitted value. */
+export function formatSignificant(value: number, digits: number): string {
+  return formatNumber(Number(value.toPrecision(digits)))
+}
+
 /** Full precision with thousands separators, for tables and tooltips. */
 export function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return '—'

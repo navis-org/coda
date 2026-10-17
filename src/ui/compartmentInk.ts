@@ -20,7 +20,7 @@ import {
 } from '../core/values'
 import type { ColorSpec } from '../nodes/lib/encodingParams'
 import type { Mode } from '../style/colors'
-import { CHART_INK, cycleColor } from '../style/colors'
+import { CHART_INK, MAX_SERIES, cycleColor } from '../style/colors'
 import type { ResolvedColor } from '../style/encoding'
 import { literalColor } from '../style/encoding'
 
@@ -41,6 +41,32 @@ export function compartmentInks(mode: Mode): Record<Key, string> {
     soma: ink.primary,
     unlabelled: ink.secondary,
   }
+}
+
+/**
+ * The palette slot for skeleton an idealised soma replaces, in the Compartment Model's Regions tab:
+ * a hue of its own, since the greys are taken — `muted` is the linker's, `secondary` unlabelled
+ * cable's, and a grey drawn beside them was reported indistinguishable. The slot furthest from
+ * dendrite's blue and axon's orange.
+ */
+const REPLACED_SLOT = 6
+
+/** The ink of skeleton the idealised soma replaces. */
+export function replacedInk(mode: Mode): string {
+  return cycleColor(REPLACED_SLOT, mode)
+}
+
+/**
+ * The slots painted regions take, in order: every one but dendrite's and axon's (0 and 1) and
+ * the replaced soma's — so a wrap past the last comes back to a painted slot, never theirs.
+ */
+const PAINTED_SLOTS = Array.from({ length: MAX_SERIES }, (_, k) => k).filter(
+  (k) => k > 1 && k !== REPLACED_SLOT,
+)
+
+/** The `k`th painted region's ink, counted from 0. */
+function paintedInk(k: number, mode: Mode): string {
+  return cycleColor(PAINTED_SLOTS[k % PAINTED_SLOTS.length]!, mode)
 }
 
 /**
@@ -123,4 +149,14 @@ export function compartmentShading(
       source: items.filter((item) => !item.computed && item.labels).length,
     },
   }
+}
+
+/**
+ * A region's ink: the compartment colours for the names the split and SWC labels give, the next
+ * palette slots for painted ones, in the order they first appear.
+ */
+export function regionInks(names: readonly string[], mode: Mode): string[] {
+  const own: Readonly<Record<string, string>> = compartmentInks(mode)
+  let painted = 0
+  return names.map((name) => own[name] ?? paintedInk(painted++, mode))
 }

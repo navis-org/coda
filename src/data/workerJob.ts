@@ -53,7 +53,7 @@ export interface JobOptions<J, R> extends JobRunOptions {
  * page's own modules are the old ones and keep working; a new worker fetches the new ones. So the
  * remedy is the one thing the sentence can offer.
  */
-function notLoaded(label: string): string {
+export function notLoaded(label: string): string {
   return (
     `The ${label} could not be loaded. Coda has probably been updated since this page was opened. ` +
     `Reload the page and run again.`
@@ -64,7 +64,7 @@ function notLoaded(label: string): string {
  * A worker's error with no message *after* it said it had started is not a load failure: its code
  * ran. What ends a running worker without a word is nearly always memory.
  */
-function stopped(label: string): string {
+export function stopped(label: string): string {
   return (
     `The ${label} stopped while it was running, most likely out of memory. ` +
     'Try a smaller run, or close other workflows and run again.'

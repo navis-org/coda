@@ -13,6 +13,31 @@ const RA = 100
 const CM = 1
 
 describe('discretize', () => {
+  it('starts a section’s cable past its start offset, the stretch inside a soma not counted twice', () => {
+    // A root and one 10 µm fibre of radius 1 leaving it at its own radius, its first 4 µm inside.
+    const tree = (offset: number) => ({
+      positions: [0, 0, 0, 10, 0, 0],
+      radii: [5, 1],
+      parent: Int32Array.of(-1, 0),
+      startRadius: [Number.NaN, 1],
+      startOffset: [0, offset],
+    })
+    const options = { rule: { kind: 'maxLength', length: 100 }, ra: 100, cm: 1 } as const
+    const membrane = (offset: number) =>
+      discretize(tree(offset), options).area.reduce((a, b) => a + b, 0)
+    expect(membrane(0)).toBeCloseTo(2 * Math.PI * 10, 6)
+    expect(membrane(4)).toBeCloseTo(2 * Math.PI * 6, 6)
+    // Never the whole edge: a hair of cable is left.
+    expect(membrane(50)).toBeGreaterThan(0)
+    // And its compartments sit on the cable: the first centre halfway along what is left, 7 µm out.
+    const one = discretize(tree(4), { ...options, rule: { kind: 'maxLength', length: 100 } })
+    const first = one.sections[0]!.first
+    expect(one.position[first * 3]).toBeCloseTo(7, 6)
+    // A point on the edge inside the parent is the parent's; past the surface, the fibre's.
+    expect(compartmentAt(one, 1, 0.2)).toBe(one.parent[first])
+    expect(compartmentAt(one, 1, 0.8)).toBe(first)
+  })
+
   it('cuts every section into the d_lambda count NEURON computes for it', () => {
     for (const fixture of reference.cases) {
       const { tree } = buildCase(caseNamed(fixture.name))

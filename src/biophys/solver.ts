@@ -209,12 +209,16 @@ export interface CurrentClamp {
  * - `ramp`: linear from `from` nA at the start to `amplitude` at the end.
  * - `sine`: `offset + amplitude · sin(2π · frequency · t)`, frequency in Hz, rising from the start.
  * - `pulses`: `amplitude` for `width` ms every `interval` ms, each pulse on and off by `stepAt`.
+ * - `samples`: a recorded waveform replayed — `values[k]` (nA) held from `k · every` ms after the
+ *   start to the next sample, times `amplitude` (1 replays it as recorded), zero past the last.
+ *   What a fit drives a model with, so every sweep gets the current the cell got.
  */
 export type ClampShape =
   | { readonly kind: 'step' }
   | { readonly kind: 'ramp'; readonly from: number }
   | { readonly kind: 'sine'; readonly frequency: number; readonly offset: number }
   | { readonly kind: 'pulses'; readonly width: number; readonly interval: number }
+  | { readonly kind: 'samples'; readonly every: number; readonly values: ArrayLike<number> }
 
 /** A clamp's waveform and window — everything but where it injects. */
 export type ClampWaveform = Omit<CurrentClamp, 'compartment'>
@@ -238,6 +242,10 @@ export function clampCurrent(clamp: ClampWaveform, step: number, dt: number): nu
   }
   if (shape.kind === 'sine') {
     return shape.offset + amplitude * Math.sin((2 * Math.PI * shape.frequency * since) / 1000)
+  }
+  if (shape.kind === 'samples') {
+    const k = Math.floor(since / shape.every)
+    return k >= 0 && k < shape.values.length ? amplitude * shape.values[k]! : 0
   }
   const { width, interval } = shape
   if (!(interval > 0 && width > 0)) return 0

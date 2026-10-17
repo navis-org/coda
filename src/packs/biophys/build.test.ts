@@ -2,12 +2,26 @@ import { describe, expect, it } from 'vitest'
 import { getColumn } from '../../core/values'
 import { CODE_AXON, CODE_DENDRITE } from '../../core/values'
 import { simulate } from '../../biophys/solver'
-import { buildCellModel } from './build'
+import { MAX_SOMA_RADIUS_UM, buildCellModel, placePoints } from './build'
+import { modelNode } from './model'
+import { defaultParams, makeInferContext, validationMessage } from '../../core/node'
 import { CHANNEL_OPTIONS, describeChannel, newChannelRow } from './channelRows'
 import { libraryChannels } from '../../biophys/channels'
 import { cellModelOf, eventsFor } from './solverInputs'
-import { HH, OPTIONS, build, cloud, exc, input, neuron, noted } from './testFixtures'
+import {
+  HH,
+  OPTIONS,
+  build,
+  cloud,
+  emSoma,
+  exc,
+  input,
+  neuron,
+  noted,
+  regionsWith,
+} from './testFixtures'
 import type { RegionStroke } from './regions'
+import type { CellModelValue } from '../../core/values'
 
 describe('buildCellModel', () => {
   it('refuses voxels, an empty wire and several neurons', () => {
@@ -50,12 +64,159 @@ describe('buildCellModel', () => {
       {},
       {
         ...OPTIONS,
-        somaDiameter: 2.6,
+        ...regionsWith({ somaDiameter: 2.6 }),
       },
     )
     expect(added.soma.source).toBe('added')
     expect(added.soma.diameter).toBe(2.6)
     expect(noted(added, /No soma is labelled/)).toBe(false)
+  })
+
+  it('takes the soma’s fat neighbours and dead-end stubs into it, never the fibre leaving it', () => {
+    const skeletons = emSoma()
+    const value = buildCellModel(skeletons, {}, OPTIONS)
+    const soma = value.soma.compartment
+    const at = (node: number) => value.nodeCompartment[node]
+    expect([0, 1, 2, 3, 4].map(at)).toEqual([soma, soma, soma, soma, soma])
+    expect([5, 6, 7, 8].map(at)).not.toContain(soma)
+    // The soma's own membrane (π d²) and cable only from its surface out: 4 → 5 from 3 µm to
+    // 10 µm at 1.6 µm, the cone 5 → 6 down to 0.3 µm, and the thin neurite's 1 µm past the surface
+    // and 26 more. Kept as cable, the neighbour, the stub and the stretches inside the soma would
+    // add some 60 µm².
+    const total = value.compartments.area.reduce((a, b) => a + b, 0)
+    const cone = Math.PI * (1.6 + 0.3) * Math.hypot(30, 1.3)
+    const expected = Math.PI * 36 + 2 * Math.PI * 1.6 * 7 + cone + 2 * Math.PI * 0.3 * 27
+    expect(total).toBeCloseTo(expected, 6)
+  })
+
+  it('places a point past the soma’s surface on the fibre, and one inside it on the soma', () => {
+    const value = buildCellModel(emSoma(), {}, OPTIONS)
+    const soma = value.soma.compartment
+    // 4.4 µm out along 4 → 5, whose skeleton edge starts at a replaced node 3 µm out while its
+    // cable starts at the centre: outside the 3 µm soma, so on the fibre's cable, with membrane.
+    // 2 µm down 0 → 7, inside the soma: the soma's compartment, not the junction at its centre.
+    const placed = placePoints(
+      value,
+      cloud([
+        ['7', '-', 'post', 4400, 0],
+        ['7', '-', 'post', 0, -2000],
+      ]),
+    )
+    const [fibre, inside] = Array.from(placed.compartment)
+    expect(fibre).not.toBe(soma)
+    expect(value.compartments.area[fibre!]).toBeGreaterThan(0)
+    expect(inside).toBe(soma)
+  })
+
+  it('leaves an ignored branch out, its synapses counted, and keeps the skeleton’s soma when asked', () => {
+    const p = emSoma().items[0]!.positions
+    const at = (k: number) => [p[k * 3]!, p[k * 3 + 1]!, 0] as [number, number, number]
+    const ignore: RegionStroke = {
+      neuron: '7',
+      at: at(7),
+      scope: 'distal',
+      region: '',
+      ignore: true,
+      root: at(0),
+    }
+    // One synapse on the thin neurite, one on the fibre.
+    const synapses = exc(
+      input([
+        ['3', '7', 'post', 0, -20_000],
+        ['3', '7', 'post', 20_000, 0],
+      ]),
+    )
+    const kept = buildCellModel(emSoma(), synapses, OPTIONS)
+    const without = buildCellModel(emSoma(), synapses, {
+      ...OPTIONS,
+      ...regionsWith({ strokes: [ignore] }),
+    })
+    expect([7, 8].map((v) => without.nodeCompartment[v])).toEqual([-1, -1])
+    const area = (v: CellModelValue) => v.compartments.area.reduce((a, b) => a + b, 0)
+    // The thin neurite's 1 + 26 µm at 0.3 µm, gone.
+    expect(area(kept) - area(without)).toBeCloseTo(2 * Math.PI * 0.3 * 27, 6)
+    expect(without.synapses.compartment).toHaveLength(1)
+    expect(noted(without, /1 synapse lies on branches painted ignored/)).toBe(true)
+
+    // As is: no idealised soma, the fat neighbour and the stub kept as the cable they were drawn as.
+    const asIs = buildCellModel(
+      emSoma(),
+      {},
+      { ...OPTIONS, ...regionsWith({ somaMode: 'asIs' }) },
+    )
+    expect(asIs.soma.source).toBe('labelled')
+    expect(asIs.soma.diameter).toBeUndefined()
+    expect(asIs.nodeCompartment[1]).not.toBe(asIs.soma.compartment)
+    expect(area(asIs)).toBeGreaterThan(area(kept))
+  })
+
+  it('never smooths kept cable into an ignored branch, whose radii are unfilled', () => {
+    const p = emSoma().items[0]!.positions
+    const at = (k: number) => [p[k * 3]!, p[k * 3 + 1]!, 0] as [number, number, number]
+    // Node 5 has one child, 6; ignoring 6 cuts the stretch there, so node 5 keeps its radius.
+    const ignore: RegionStroke = {
+      neuron: '7',
+      at: at(6),
+      scope: 'distal',
+      region: '',
+      ignore: true,
+      root: at(0),
+    }
+    const area = (smoothWindow: number) =>
+      buildCellModel(
+        emSoma(),
+        {},
+        { ...OPTIONS, smoothWindow, ...regionsWith({ strokes: [ignore] }) },
+      ).compartments.area.reduce((a, b) => a + b, 0)
+    expect(area(5)).toBeCloseTo(area(0), 9)
+  })
+
+  it('names a remedy the card shows, under either soma mode', () => {
+    const lone = {
+      ...neuron(),
+      items: [
+        {
+          ...neuron().items[0]!,
+          positions: Float32Array.of(0, 0, 0),
+          radii: Float32Array.of(0),
+          parents: Int32Array.of(-1),
+          compartments: Uint8Array.of(0),
+        },
+      ],
+    }
+    expect(() =>
+      buildCellModel(lone, {}, { ...OPTIONS, ...regionsWith({ somaMode: 'asIs' }) }),
+    ).toThrow(/Set Soma to cut off and replace, and give a Soma diameter, to add one/)
+  })
+
+  it('warns of a soma larger than any neuron’s, typed or labelled, and not at the boundary', () => {
+    const issues = (diameter: number) =>
+      modelNode.validate!(
+        makeInferContext(
+          modelNode,
+          { ...defaultParams(modelNode), somaDiameter: diameter },
+          {},
+        ),
+      ).map(validationMessage)
+    // 2000 µm, meant as nm: the slip this exists for.
+    expect(issues(2000).join(' ')).toMatch(/Soma diameter makes a soma 2,000 µm across/)
+    expect(issues(2 * MAX_SOMA_RADIUS_UM)).toEqual([])
+    expect(issues(0)).toEqual([])
+    // A typed one is validate's alone, or the card says it twice.
+    expect(noted(build(regionsWith({ somaDiameter: 2000 })), /larger than any neuron/)).toBe(
+      false,
+    )
+    const huge = neuron()
+    ;(huge.items[0]!.radii as Float32Array)[0] = 60_000
+    const labelled = buildCellModel(huge, {}, OPTIONS)
+    expect(labelled.soma.diameter).toBe(120)
+    expect(
+      noted(
+        labelled,
+        /The soma the skeleton labels is 120 µm across.*Give a Soma diameter to replace it/,
+      ),
+    ).toBe(true)
+    expect(noted(build(), /larger than any neuron/)).toBe(false)
   })
 
   it('leaves out fragments off the soma, and fills only the radii it keeps', () => {
@@ -448,7 +609,7 @@ describe('painted regions', () => {
 
   it('name the cable they paint, and a channel placed there sits only there', () => {
     const value = build({
-      regionStrokes: [stroke({})],
+      ...regionsWith({ strokes: [stroke({})] }),
       channels: [{ ...newChannelRow('pospischil.na'), regions: ['branch'] }],
     })
     expect(value.regionNames).toContain('branch')
@@ -461,14 +622,19 @@ describe('painted regions', () => {
 
   it('relabel the soma’s membrane without moving the soma', () => {
     const plain = build({})
-    const value = build({ regionStrokes: [stroke({ scope: 'proximal', region: 'rest' })] })
+    const value = build(
+      regionsWith({ strokes: [stroke({ scope: 'proximal', region: 'rest' })] }),
+    )
     expect(value.soma).toEqual(plain.soma)
     expect(value.regionNames[value.compartments.region[value.soma.compartment]!]).toBe('rest')
   })
 
   it('leave an added soma soma, whatever its root was labelled or painted', () => {
     const value = build(
-      { somaDiameter: 2.6, regionStrokes: [stroke({ scope: 'proximal', region: 'rest' })] },
+      regionsWith({
+        somaDiameter: 2.6,
+        strokes: [stroke({ scope: 'proximal', region: 'rest' })],
+      }),
       {},
       neuron({ labels: false }),
     )
@@ -477,7 +643,7 @@ describe('painted regions', () => {
   })
 
   it('say when a stroke lands on no node of this neuron', () => {
-    const value = build({ regionStrokes: [stroke({ at: [900_000, 0, 0] })] })
+    const value = build(regionsWith({ strokes: [stroke({ at: [900_000, 0, 0] })] }))
     expect(noted(value, /1 painted stroke lands on no node/)).toBe(true)
     expect(value.regionNames).not.toContain('branch')
   })

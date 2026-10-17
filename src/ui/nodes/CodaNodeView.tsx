@@ -45,7 +45,7 @@ import { ExportNodeContext } from '../viewers/exportRegistry'
 import { CacheAge } from './CacheAge'
 import { CacheLifetimeMenu } from './CacheLifetimeMenu'
 import { DatasetCacheAge } from './DatasetCacheAge'
-import { nodeBody } from './nodeBodies'
+import { nodeBody, nodeFooter } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
 import { readerHints } from '../hints'
 import { NodeHints } from './NodeHints'
@@ -298,6 +298,7 @@ function CodaNodeViewImpl({
    * as fields *as well* would put a raw "Search" text box under the search bar that writes it.
    */
   const body = nodeBody(node.type)
+  const Footer = nodeFooter(node.type)
   /*
    * Flattened out of the buckets rather than filtered a second time. `bucketParams` invents
    * nothing and drops nothing — a param the definition did not place lands in a trailing "Other"
@@ -910,8 +911,9 @@ function CodaNodeViewImpl({
               />
             )}
             {/* A body's own foot control — Link Table's re-read — beside the age it belongs with. */}
-            {body?.Footer && (
-              <body.Footer
+            {Footer && (
+              <Footer
+                node={node}
                 ctx={ctx}
                 setParam={(paramId, value) => setParam(id, paramId, value)}
               />

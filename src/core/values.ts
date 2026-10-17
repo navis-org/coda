@@ -692,9 +692,15 @@ export interface CellModelValue {
     readonly compartment: number
     /** Where it came from: the skeleton's labelled soma, a diameter given on the card, or neither. */
     readonly source: 'labelled' | 'added' | 'root'
-    /** µm; absent when the root stands in. */
+    /** µm across the idealised soma; absent where none is made — the root standing in, or a soma kept as the skeleton has it. */
     readonly diameter?: number
   }
+  /**
+   * Membrane per µm² of reconstructed surface — spines and fine branches a skeleton misses —
+   * already folded into `compartments.area`; absent is 1. For readers that work an area out of
+   * geometry rather than reading it: the soma's π·d², a length constant.
+   */
+  readonly areaFactor?: number
   /** Uniform passive membrane: Ω·cm², Ω·cm, µF/cm², mV. */
   readonly membrane: {
     readonly rm: number
@@ -761,6 +767,18 @@ export interface CellModelValue {
   }
   /** The named membrane parameter set, or `custom`, with what to call it. */
   readonly preset: { readonly id: string; readonly label: string }
+  /**
+   * How a model out of Fit Model ended: settled or why not, after how many iterations, and the RMS
+   * before and after. Absent on a built model. What the card's foot says, and what marks a model as
+   * one Apply can write back into the Compartment Model.
+   */
+  readonly fit?: {
+    readonly reason: 'converged' | 'max-iterations' | 'stalled'
+    readonly iterations: number
+    /** RMS of the residuals at the start and at the end, mV. */
+    readonly startRms: number
+    readonly rms: number
+  }
   /**
    * What building the model left out or made up, in sentences — on the value rather than only
    * warned, so a cached result says the same thing as the run that made it.
@@ -1403,6 +1421,20 @@ export function spaceLabel(space: TemplateSpaceId | undefined): string {
   return space ?? 'space unknown'
 }
 
+/** A fit's ending in one line: `Settled after 12 iterations · RMS 9.1 → 2.5 mV`. */
+function describeFit(fit: NonNullable<CellModelValue['fit']>): string {
+  const n = `${fit.iterations} iteration${fit.iterations === 1 ? '' : 's'}`
+  const ended =
+    fit.reason === 'converged'
+      ? `Settled after ${n}`
+      : fit.reason === 'stalled'
+        ? `Stalled after ${n}`
+        : `Stopped at ${n}, the limit`
+  // Two figures; a fit to a simulation ends near zero, which is a result, not "0".
+  const mv = (x: number) => (x < 0.01 ? '< 0.01' : Number(x.toPrecision(2)).toLocaleString())
+  return `${ended} · RMS ${mv(fit.startRms)} → ${mv(fit.rms)} mV`
+}
+
 /** Row count summary used in node footers: "1,234 rows". */
 export function describeValue(v: Value | undefined): string {
   if (!v) return '—'
@@ -1459,6 +1491,8 @@ export function describeValue(v: Value | undefined): string {
       const inhibitory = v.partners.inhibitory.reduce((sum, k) => sum + k, 0)
       const partners = v.partners.id.length
       return (
+        // A fitted model leads with how the fit ended: the card's foot line on Fit Model.
+        (v.fit ? `${describeFit(v.fit)} · ` : '') +
         `${v.compartments.count.toLocaleString()} compartments · ` +
         `${n.toLocaleString()} synapse${n === 1 ? '' : 's'} from ${partners.toLocaleString()} ` +
         `partner${partners === 1 ? '' : 's'}` +
