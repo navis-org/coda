@@ -13,6 +13,14 @@ You can use both at once: with two `Y` columns and a `Series` column you get eve
 out.lineChart: x, ys, series
 ```
 
+## A second Y axis
+
+To draw columns in other units beside the rest, such as an injected current beside voltage traces, pick them as `Y2`. They are drawn dashed against a second axis on the right, scaled to their own values, and the legend and tooltip mark them "(right)". With `Y` left empty, the `Y2` columns move off the left axis and every other numeric column stays, so on Simulate's `Traces` picking `injected` for `Y2` is the only setting you need.
+
+```coda-params
+out.lineChart: y2s, y2Log
+```
+
 ## Joining points
 
 By default each line is joined in X order, so a table whose rows are not sorted still draws as a function of X. Set `Join` to "in row order" to keep the rows as they come, e.g. for a phase plot where the curve doubles back on itself.

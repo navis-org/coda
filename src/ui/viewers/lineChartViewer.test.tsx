@@ -91,6 +91,21 @@ describe('LineChartViewer', () => {
     expect(marks?.getAttribute('d')?.match(/M/g)).toHaveLength(2)
   })
 
+  it('draws Y2 dashed against a right axis of its own, and names it in the key', () => {
+    const { container } = render(
+      <LineChartViewer table={TRACES} x="t" ys={['soma']} y2s={['tip']} />,
+    )
+    const drawn = paths(container)
+    expect(drawn.map((p) => p.getAttribute('stroke-dasharray'))).toEqual([null, '5 3'])
+    // The right axis's labels sit beyond the plot, starting there; the left axis's end there.
+    const right = [...container.querySelectorAll('text[text-anchor="start"]')].map(
+      (t) => t.textContent,
+    )
+    expect(right).toContain('-40')
+    expect(screen.getByText('tip (right)')).toBeTruthy()
+    expect(screen.getByText('2 lines · 9 points')).toBeTruthy()
+  })
+
   it('draws a strip under the plot on the same X, with a Y and a label of its own', () => {
     const strip = { label: 'injected', unit: 'nA', x: [0, 1, 2, 3, 4], y: [0, 0, 0.2, 0.2, 0] }
     const { container } = render(

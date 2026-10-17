@@ -778,7 +778,7 @@ function CodaNodeViewImpl({
               bandParams.map((param) => (
                 <div
                   key={param.id}
-                  className={`param${param.kind === 'boolean' ? ' param--wide' : param.kind === 'columns' ? ' param--stacked' : ''}`}
+                  className={`param${param.kind === 'boolean' ? ' param--wide' : param.kind === 'columns' ? ' param--chips' : ''}`}
                 >
                   <span className="param__label" title={param.help ?? param.label}>
                     {param.label}

@@ -1510,13 +1510,17 @@
   display: none;
 }
 /*
- * A chips picker takes the card's full width too, but draws no label of its own — so its row keeps
- * the label, above the chips rather than beside them. It used to share `.param--wide`, and every
- * multi-column picker on a card was a row of chips with nothing saying what they were for.
+ * A chips picker sits beside its label like any other field, its chips wrapping in the field's
+ * column. It draws no label of its own, so the row's is kept — it once shared `.param--wide` and
+ * every multi-column picker was a row of chips with nothing saying what they were for — and then
+ * sat above the chips, a second line per picker on a card that has few to spare. Aligned to the
+ * top, so a picker wrapped onto two lines is labelled at its first.
  */
-.param--stacked {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+.param--chips {
+  align-items: start;
+}
+.param--chips .param__label {
+  line-height: 22px;
 }
 
 .field {

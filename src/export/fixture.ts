@@ -1389,6 +1389,14 @@ export function everythingGraph(): CodaGraph {
       params: { x: 'pre', order: 'rows' },
     },
     {
+      // A second Y axis: no Y picked, so every numeric column but X and the one on Y2.
+      id: 'linesTwin',
+      type: 'out.lineChart',
+      col: 9,
+      row: 5,
+      params: { x: 'pre', y2s: ['post'] },
+    },
+    {
       id: 'scatter',
       type: 'out.scatter',
       col: 8,
@@ -1729,6 +1737,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'scatter', 'in'],
     ['find', 'neurons', 'lines', 'in'],
     ['find', 'neurons', 'linesWide', 'in'],
+    ['find', 'neurons', 'linesTwin', 'in'],
     ['find', 'neurons', 'combine', 'in'],
     ['find', 'neurons', 'joined', 'in'],
     ['find', 'neurons', 'extremes', 'in'],

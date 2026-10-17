@@ -16,4 +16,10 @@ describe('yColumnsOf', () => {
     expect(yColumnsOf(WIDE, ['tip'], 't', undefined)).toEqual(['tip'])
     expect(yColumnsOf(LONG, [], 't', 'site')).toEqual(['v'])
   })
+
+  it('leaves the second axis’s columns off the left one, unless Y is picked', () => {
+    expect(yColumnsOf(WIDE, [], 't', undefined, ['tip'])).toEqual(['soma'])
+    // A picked Y is the user's, even where it names a Y2 column as well.
+    expect(yColumnsOf(WIDE, ['soma', 'tip'], 't', undefined, ['tip'])).toEqual(['soma', 'tip'])
+  })
 })

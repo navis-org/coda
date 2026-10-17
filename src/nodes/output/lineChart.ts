@@ -20,7 +20,7 @@ registerNode({
   description:
     'Plot numeric columns against one numeric X as lines: one per Y column, per series value, or both. Voltage traces, time courses, profiles.',
   guide:
-    'Draws one line per Y column against a numeric X, or one per value of a Series column for a long table — or both. With no Y picked it draws every numeric column, so a table of traces such as Simulate’s needs no setting. Lines are joined in X order unless you ask for row order, and long ones keep every spike: each pixel column draws its highest and lowest sample.',
+    'Draws one line per Y column against a numeric X, or one per value of a Series column for a long table — or both. With no Y picked it draws every numeric column, so a table of traces such as Simulate’s needs no setting; Y2 puts columns in other units, such as a current, dashed on a second axis. Long lines keep every spike.',
   cost: 'cheap',
   defaultSize: { width: 560, height: 380 },
 
@@ -59,8 +59,23 @@ registerNode({
       help: 'The columns drawn as lines. Empty draws every numeric column except X and Series.',
     },
     {
+      id: 'y2s',
+      kind: 'columns',
+      label: 'Y2',
+      from: 'in',
+      dtypes: NUMERIC_DTYPES,
+      default: [],
+      optional: true,
+      emptyLabel: 'none',
+      presentational: true,
+      group: 'axes',
+      help: 'Columns drawn dashed against a second Y axis on the right, for a quantity in other units, such as an injected current beside voltage traces. With Y empty, these come off the left axis and every other numeric column stays.',
+    },
+    {
       id: 'xLog',
       kind: 'boolean',
+      // Inspector and the expanded card only: a setting changed once, not a control to keep in view.
+      advanced: true,
       label: 'Log X',
       default: false,
       presentational: true,
@@ -70,11 +85,23 @@ registerNode({
     {
       id: 'yLog',
       kind: 'boolean',
+      advanced: true,
       label: 'Log Y',
       default: false,
       presentational: true,
       group: 'axes',
       help: 'A log scale for Y. Values at or below zero are dropped; the caption counts them.',
+    },
+    {
+      id: 'y2Log',
+      kind: 'boolean',
+      advanced: true,
+      label: 'Log Y2',
+      default: false,
+      presentational: true,
+      group: 'axes',
+      visibleIf: (p) => Array.isArray(p.y2s) && p.y2s.length > 0,
+      help: 'A log scale for the second Y axis. Values at or below zero are dropped; the caption counts them.',
     },
 
     // ---- Lines -----------------------------------------------------------

@@ -1931,6 +1931,30 @@ line_chart_2 |>
   theme_minimal()
 ```
 
+```{r line-chart-3}
+# ── Line Chart ──
+line_chart_3 <- find_neurons
+
+y_cols <- c("size")
+y2_cols <- c("post")
+# Y2 drawn on Y's scale: each axis spans its own data, the right one labelled back in its units.
+.r1 <- range(unlist(line_chart_3[y_cols]), na.rm = TRUE)
+.r2 <- range(unlist(line_chart_3[y2_cols]), na.rm = TRUE)
+.k <- if (diff(.r2) > 0 && all(is.finite(.r1))) diff(.r1) / diff(.r2) else 1
+.b <- if (all(is.finite(.r1))) .r1[1] - .k * .r2[1] else 0
+line_chart_3 |>
+  pivot_longer(all_of(c(y_cols, y2_cols)), names_to = ".y", values_to = ".value") |>
+  filter(!is.na(`pre`), !is.na(.value)) |>
+  mutate(.right = .y %in% y2_cols) |>
+  mutate(.line = paste0(.y, if_else(.right, " (right)", "")), .value = if_else(.right, .value * .k + .b, .value)) |>
+  ggplot(aes(x = `pre`, y = .value, colour = .line, group = .line, linetype = .right)) +
+  geom_line() +
+  scale_linetype_manual(values = c("FALSE" = "solid", "TRUE" = "dashed"), guide = "none") +
+  scale_y_continuous(sec.axis = sec_axis(~ (. - .b) / .k)) +
+  labs(x = "pre", y = NULL, colour = NULL) +
+  theme_minimal()
+```
+
 ```{r combine-columns}
 # ── Combine Columns ──
 combine_columns <- find_neurons

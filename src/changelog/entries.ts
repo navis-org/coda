@@ -143,7 +143,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         kind: 'chart',
         date: '2026-10-13',
         title: 'Line Chart: traces, time courses and profiles',
-        body: 'One line per **Y** column for a wide table, or per value of a **Series** column for a long one, or both. Leave **Y** empty to draw every numeric column. Hover shows every line’s value at the pointer, scroll zooms along X and the Y axis rescales to what is in view. Long traces keep their spikes: each pixel column draws its highest and lowest sample, on screen and in the exported SVG.',
+        body: 'One line per **Y** column for a wide table, or per value of a **Series** column for a long one, or both. Leave **Y** empty to draw every numeric column, and put columns in other units, a current beside voltages say, on a dashed second axis with **Y2**. Hover shows every line’s value at the pointer, scroll zooms along X and the Y axis rescales to what is in view. Long traces keep their spikes: each pixel column draws its highest and lowest sample, on screen and in the exported SVG.',
         image: {
           file: 'line-chart.webp',
           alt: 'Line chart of several numeric columns against one X, with a legend and a crosshair reading every line at one point.',

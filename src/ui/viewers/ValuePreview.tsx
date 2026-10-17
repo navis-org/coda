@@ -1106,11 +1106,14 @@ const VIEWERS: Record<string, ViewerEntry> = {
       const x = ctx.column('x')
       if (!x) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a numeric X column" />
       const series = ctx.column('series')
+      const y2s = ctx.columns('y2s')
       return (
         <LineChartViewer
           table={value}
           x={x}
-          ys={yColumnsOf(value.schema, ctx.columns('ys'), x, series)}
+          ys={yColumnsOf(value.schema, ctx.columns('ys'), x, series, y2s)}
+          y2s={y2s}
+          y2Log={params.y2Log === true}
           series={series}
           order={choice<LineOrder>('order')}
           xLog={params.xLog === true}

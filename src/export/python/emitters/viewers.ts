@@ -29,7 +29,8 @@ import type {
   HeatmapSelectionStep,
 } from '../../plans/heatmap'
 import { heatmapExportPlan } from '../../plans/heatmap'
-import type { PickedLabels } from '../../plans/viewers'
+import type { LineChartPlan, PickedLabels } from '../../plans/viewers'
+import { Y2_TAG } from '../../../nodes/lib/lineChart'
 import {
   NEUROGLANCER_REFUSAL,
   barChartPlan,
@@ -183,15 +184,12 @@ registerEmitter('out.lineChart', (ctx) => {
 
   const lines = [`${out} = ${src}`]
   if (plan.note !== undefined) return [...lines, ...ctx.note(plan.note)]
-  const { x, ys, series, byX, xLog, yLog } = plan
+  const { x, series, byX, xLog, yLog, y2s } = plan
+  if (y2s.length > 0) return [...lines, ...lineChartTwinLines(out, plan)]
 
-  const skip = series ? `(${pyStr(x)}, ${pyStr(series)})` : `(${pyStr(x)},)`
   lines.push(
     ``,
-    ys.length > 0
-      ? `_y = ${pyList(ys)}`
-      : `# Every numeric column but X${series ? ' and the series' : ''}, as the canvas draws with no Y picked.
-` + `_y = [c for c in ${out}.select_dtypes('number').columns if c not in ${skip}]`,
+    lineChartYLine(out, plan),
     `plt.figure(figsize=(9, 5))`,
     series
       ? `for _name, _group in ${out}.groupby(${pyStr(series)}, sort=False, dropna=False):`
@@ -213,6 +211,74 @@ registerEmitter('out.lineChart', (ctx) => {
   )
   return lines
 })
+
+/**
+ * The Line Chart's `_y`: the picked columns, or the canvas's rule (`yColumnsOf`) spelled in pandas
+ * where the schema is not known. One statement for both arrangements of the chart.
+ */
+function lineChartYLine(out: string, plan: Exclude<LineChartPlan, { note: string }>): string {
+  const { x, ys, series, y2s } = plan
+  if (ys.length > 0) return `_y = ${pyList(ys)}`
+  const besides = series
+    ? y2s.length > 0
+      ? ', the series and Y2'
+      : ' and the series'
+    : y2s.length > 0
+      ? ' and Y2'
+      : ''
+  const skip =
+    y2s.length > 0
+      ? pyList([x, ...(series ? [series] : []), ...y2s])
+      : series
+        ? `(${pyStr(x)}, ${pyStr(series)})`
+        : `(${pyStr(x)},)`
+  return (
+    `# Every numeric column but X${besides}, as the canvas draws with no Y picked.\n` +
+    `_y = [c for c in ${out}.select_dtypes('number').columns if c not in ${skip}]`
+  )
+}
+
+/**
+ * The Line Chart with a second Y axis: matplotlib's `twinx`, its lines dashed as the canvas draws
+ * them. Colours are counted across both axes by hand — a twin axis starts its own colour cycle, so
+ * its first line would otherwise share the left axis's first colour — and the legend gathers both
+ * axes' lines, the right ones tagged as the canvas tags them.
+ */
+function lineChartTwinLines(
+  out: string,
+  plan: Exclude<LineChartPlan, { note: string }>,
+): string[] {
+  const { x, series, byX, xLog, yLog, y2s, y2Log } = plan
+  return [
+    ``,
+    lineChartYLine(out, plan),
+    `_y2 = ${pyList(y2s)}`,
+    `_fig, _ax = plt.subplots(figsize=(9, 5))`,
+    `_ax2 = _ax.twinx()`,
+    `_k = 0`,
+    series
+      ? `for _name, _group in ${out}.groupby(${pyStr(series)}, sort=False, dropna=False):`
+      : `for _name, _group in [(None, ${out})]:`,
+    ...(byX ? [`    _group = _group.sort_values(${pyStr(x)}, kind='stable')`] : []),
+    `    for _axis, _cols, _style, _tag in ((_ax, _y, '-', ''), (_ax2, _y2, '--', ${pyStr(Y2_TAG)})):`,
+    `        for _col in _cols:`,
+    `            _line = _group[[${pyStr(x)}, _col]].dropna()`,
+    series
+      ? `            _label = (str(_name) if len(_cols) == 1 else f'{_name} · {_col}') + _tag`
+      : `            _label = _col + _tag`,
+    `            _axis.plot(_line[${pyStr(x)}], _line[_col], linestyle=_style, color=f'C{_k % 10}', label=_label, linewidth=1.5)`,
+    `            _k += 1`,
+    ...(xLog ? [`_ax.set_xscale('log')`] : []),
+    ...(yLog ? [`_ax.set_yscale('log')`] : []),
+    ...(y2Log ? [`_ax2.set_yscale('log')`] : []),
+    `_ax.set_xlabel(${pyStr(x)})`,
+    `_handles = _ax.get_lines() + _ax2.get_lines()`,
+    `if len(_handles) > 1:`,
+    `    _ax.legend(_handles, [h.get_label() for h in _handles])`,
+    `plt.tight_layout()`,
+    `plt.show()`,
+  ]
+}
 
 // ---------------------------------------------------------------------------
 // Histogram, pie and box/violin — the three charts with a label-shaped selection
