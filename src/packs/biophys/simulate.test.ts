@@ -4,12 +4,14 @@ import { column, tableSchema } from '../../core/types'
 import { defaultParams } from '../../core/node'
 import { getColumn, makeTable } from '../../core/values'
 import { simulateNode } from './simulate'
+import { writeManualPoint } from '../../nodes/lib/skeletonPoints'
 import { PEAK_VOLTAGE } from './nodeValues'
 import { HH, OPTIONS, exc, build, cloud, input } from './testFixtures'
 import { partnerTrain } from './stimulus'
 import {
   MOVIE_BUDGET_BYTES,
   jobSteps,
+  movieBasis,
   movieFrameSteps,
   runMovieJob,
   runSimulateJob,
@@ -23,6 +25,9 @@ import {
   arbourValue,
   firingIndices,
   firingPartners,
+  clampEnvelope,
+  describeClamp,
+  inferredTracesSchema,
   inputSpikesTable,
   keepRest,
   partnersSchema,
@@ -60,6 +65,7 @@ function job(value: ReturnType<typeof model>, over: Partial<SimulateJob> = {}): 
     record: Int32Array.of(value.soma.compartment),
     threshold: 0,
     firing: [],
+    clamps: [],
     ...over,
   }
 }
@@ -259,6 +265,89 @@ describe('what to run', () => {
     expect(() => planRun(value, many, {})).toThrow(/^Refused: 12,000,000 synaptic events/)
   })
 
+  it('records Playback’s traces as well, named apart, and leaves the movie’s basis alone', () => {
+    const value = model()
+    const base = defaultParams(simulateNode)
+    const traces = [
+      writeManualPoint({ neuron: '7', at: [40_000, 0, 0], name: 'tip' }),
+      writeManualPoint({ neuron: '7', at: [30_000, 15_000, 0], name: 'soma' }),
+    ]
+    const plain = planRun(value, base, {})
+    const traced = planRun(value, { ...base, traces }, {})
+    // The soma, then each trace: a column of the Traces output, a name the soma's cannot take.
+    expect(traced.labels).toEqual(['soma', 'tip', 'soma (2)'])
+    expect(traced.job.record).toHaveLength(3)
+    // Playback draws the plan's own traces, so a line and its column carry one name.
+    expect(traced.traces.placed.map((trace) => trace.label)).toEqual(traced.labels.slice(1))
+    expect(plain.traces).toEqual({ placed: [], off: 0 })
+    expect(Array.from(traced.job.record.subarray(0, 1))).toEqual(Array.from(plain.job.record))
+    // What it records is not what a movie shows: one basis, so Playback keeps its movie.
+    expect(movieBasis(traced.job)).toBe(movieBasis(plain.job))
+    expect(movieBasis(planRun(value, { ...base, duration: 50 }, {}).job)).not.toBe(
+      movieBasis(plain.job),
+    )
+  })
+
+  it('injects at the sites Inject at names, by the run’s own names, and says what it cannot', () => {
+    const value = model()
+    const base = { ...defaultParams(simulateNode), clamp: true, drive: 'none' }
+    const traces = [writeManualPoint({ neuron: '7', at: [40_000, 0, 0], name: 'tip' })]
+    // A graph from before sites were picked: the soma, a step, as it always was.
+    const old = planRun(value, base, {})
+    expect(old.job.clamps).toEqual([
+      { compartment: value.soma.compartment, delay: 10, duration: 50, amplitude: 0.05 },
+    ])
+    const picked = planRun(
+      value,
+      { ...base, traces, clampSites: ['tip', 'gone'], clampShape: 'ramp', rampFrom: -0.1 },
+      {},
+    )
+    expect(picked.job.clamps).toEqual([
+      {
+        compartment: picked.job.record[1],
+        delay: 10,
+        duration: 50,
+        amplitude: 0.05,
+        shape: { kind: 'ramp', from: -0.1 },
+      },
+    ])
+    expect(picked.notes).toContainEqual(expect.stringMatching(/^Inject at names "gone", which/))
+    // Two names on one compartment: injected there once, and said.
+    const twice = planRun(value, { ...base, traces, clampSites: ['tip', 'tip', 'soma'] }, {})
+    expect(twice.job.clamps).toHaveLength(2)
+    expect(planRun(value, { ...base, clamp: false }, {}).job.clamps).toEqual([])
+    expect(planRun(value, { ...base, clampSites: [] }, {}).notes).toContain(
+      'Current injection is on, but no site is ticked in the Sites tab.',
+    )
+  })
+
+  it('folds a waveform into columns by their extremes, so a narrow pulse still shows', () => {
+    const pulses = {
+      delay: 10,
+      duration: 50,
+      amplitude: 0.3,
+      shape: { kind: 'pulses' as const, width: 0.1, interval: 20 },
+    }
+    // 100 ms in 20 columns: 5 ms each, a 0.1 ms pulse a fiftieth of one.
+    const { lo, hi } = clampEnvelope(pulses, 0.025, 100, 20)
+    expect(Array.from(hi, (v, i) => (v > 0 ? i : -1)).filter((i) => i >= 0)).toEqual([2, 6, 10])
+    expect(Math.min(...lo)).toBe(0)
+  })
+
+  it('describes each shape as the Sites tab says it', () => {
+    const p = { ...defaultParams(simulateNode), clamp: true }
+    expect(describeClamp(p)).toBe('a 0.05 nA step from 10 ms for 50 ms')
+    expect(describeClamp({ ...p, clampShape: 'ramp', rampFrom: -0.1 })).toBe(
+      'a ramp from −0.1 nA to 0.05 nA from 10 ms for 50 ms',
+    )
+    expect(describeClamp({ ...p, clampShape: 'sine' })).toBe(
+      'a 10 Hz sine of 0.05 nA about 0 nA from 10 ms for 50 ms',
+    )
+    expect(describeClamp({ ...p, clampShape: 'pulses' })).toBe(
+      '0.05 nA pulses of 2 ms every 10 ms from 10 ms for 50 ms',
+    )
+  })
+
   it('names an unset spike column rather than asking for a table that is wired', () => {
     const value = model()
     const params = { ...defaultParams(simulateNode), drive: 'table' }
@@ -338,7 +427,9 @@ describe('runSimulateJob', () => {
     const result = await runSimulateJob(
       job(value, {
         duration: 60,
-        clamp: { compartment: value.soma.compartment, delay: 10, duration: 40, amplitude: 0.5 },
+        clamps: [
+          { compartment: value.soma.compartment, delay: 10, duration: 40, amplitude: 0.5 },
+        ],
       }),
     )
     expect(result.settle?.converged).toBe(true)
@@ -495,7 +586,35 @@ describe('the tables agree with their schemas', () => {
       }),
     )
     const labels = ['soma', 'tip']
-    expect(tracesTable(labels, result).schema).toEqual(tracesSchema(labels))
+    expect(tracesTable(labels, result, { clamps: [], dt: 0.025 }).schema).toEqual(
+      tracesSchema(labels),
+    )
+    // With current injected, a last column in nA: the waveform at each sample, zero outside it.
+    const clamp = { compartment: 0, delay: 10, duration: 5, amplitude: 0.2 }
+    const injected = tracesTable(labels, result, { clamps: [clamp], dt: 0.025 })
+    expect(injected.schema).toEqual(tracesSchema(labels, 'injected'))
+    // Inference agrees with the run either way a switch went since the last one: the sites from
+    // the run it saw, the injected column from the params as they are now.
+    const uninjected = tracesTable(labels, result, { clamps: [], dt: 0.025 }).schema
+    expect(inferredTracesSchema(uninjected, true)).toEqual(injected.schema)
+    expect(inferredTracesSchema(injected.schema, false)).toEqual(uninjected)
+    expect(inferredTracesSchema(undefined, false)).toEqual(tracesSchema(['soma']))
+    const t = getColumn(injected, 't') as number[]
+    const current = getColumn(injected, 'injected') as number[]
+    expect(current[t.indexOf(5)]).toBe(0)
+    expect(current[t.findIndex((x) => x > 12)]).toBe(0.2)
+    expect(current.at(-1)).toBe(0)
+    // A site already called `injected` keeps its name; the current takes the next.
+    expect(
+      tracesTable(
+        [...labels, 'injected'],
+        { ...result, traces: [...result.traces, result.traces[0]!] },
+        {
+          clamps: [clamp],
+          dt: 0.025,
+        },
+      ).schema.columns.at(-1)?.name,
+    ).toBe('injected (2)')
     expect(outputSpikesTable(labels, result).schema).toEqual(OUTPUT_SPIKES_SCHEMA)
     expect(inputSpikesTable(value, [[0, [10]]]).schema).toEqual(INPUT_SPIKES_SCHEMA)
     const plain = partnersTable(value, [0], undefined)
@@ -511,7 +630,7 @@ describe('the tables agree with their schemas', () => {
 describe('unrestedNote', () => {
   const value = model()
   // Rm·Cm is 16.6 ms on the fixture, so the note waits 50 ms after the last input.
-  const job = { firing: [[0, [10]]] as SimulateJob['firing'], duration: 100, clamp: undefined }
+  const job = { firing: [[0, [10]]] as SimulateJob['firing'], duration: 100, clamps: [] }
   const atRest = new Float64Array(value.compartments.count).fill(-60)
   const stuck = atRest.slice()
   stuck[value.soma.compartment] = -25
@@ -539,6 +658,6 @@ describe('unrestedNote', () => {
       duration: 80,
       amplitude: 0.1,
     }
-    expect(unrestedNote(value, { ...job, clamp }, stuck, undefined)).toBeUndefined()
+    expect(unrestedNote(value, { ...job, clamps: [clamp] }, stuck, undefined)).toBeUndefined()
   })
 })

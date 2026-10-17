@@ -13,7 +13,13 @@
 import { HH_GBAR, HH_K, HH_NA, densityByRegion, leakChannel } from './channels'
 import type { CableTree, CompartmentTree, SegmentRule } from './discretize'
 import { discretize } from './discretize'
-import type { CellModel, ChannelPlacement, SimulationRequest, SynapseKind } from './solver'
+import type {
+  CellModel,
+  ChannelPlacement,
+  ClampShape,
+  SimulationRequest,
+  SynapseKind,
+} from './solver'
 import { synapticInput } from './solver'
 
 /** One synaptic site: a skeleton node, how many synapses it holds, and when they fire (ms). */
@@ -56,6 +62,8 @@ export interface ReferenceCase {
     readonly delay: number
     readonly duration: number
     readonly amplitude: number
+    /** A shaped clamp, which NEURON is driven through by setting `amp` before every step. */
+    readonly shape?: ClampShape
   }[]
   readonly record: readonly number[]
   readonly dt: number
@@ -158,6 +166,7 @@ export function buildCase(c: ReferenceCase): {
       delay: k.delay,
       duration: k.duration,
       amplitude: k.amplitude,
+      ...(k.shape ? { shape: k.shape } : {}),
     })),
     record: Int32Array.from(c.record, (node) => tree.nodeCompartment[node]!),
   }
@@ -418,6 +427,46 @@ export const REFERENCE_CASES: readonly ReferenceCase[] = [
     ],
     clamps: [{ node: BRANCHED_NODES.soma, delay: 15, duration: 10, amplitude: 0.2 }],
     record: [BRANCHED_NODES.soma, BRANCHED_NODES.fork, BRANCHED_NODES.twigA],
+    dt: 0.025,
+    duration: 40,
+  },
+  {
+    /*
+     * Every clamp shape at once, on the spiking arbour: a ramp at the soma, a sine on a twig, pulses
+     * at the long tip. No edge sits on a half step (`stepAt`), where NEURON's accumulated `t`
+     * would decide it rather than the rule.
+     */
+    name: 'branched-shaped-clamps',
+    tree: BRANCHED,
+    rule: { kind: 'maxLength', length: 5 },
+    ...FLY_PASSIVE,
+    hh: { regions: [1, 2], gna: HH_GBAR.na, gk: HH_GBAR.k },
+    temperature: 22,
+    vInit: -65,
+    clamps: [
+      {
+        node: BRANCHED_NODES.soma,
+        delay: 5.01,
+        duration: 20,
+        amplitude: 0.25,
+        shape: { kind: 'ramp', from: -0.05 },
+      },
+      {
+        node: BRANCHED_NODES.twigA,
+        delay: 2.01,
+        duration: 30,
+        amplitude: 0.03,
+        shape: { kind: 'sine', frequency: 150, offset: 0.01 },
+      },
+      {
+        node: BRANCHED_NODES.longTip,
+        delay: 10.01,
+        duration: 22,
+        amplitude: 0.04,
+        shape: { kind: 'pulses', width: 1, interval: 3 },
+      },
+    ],
+    record: [BRANCHED_NODES.soma, BRANCHED_NODES.twigA, BRANCHED_NODES.longTip],
     dt: 0.025,
     duration: 40,
   },

@@ -8,6 +8,7 @@
  */
 
 import { SLICE_MS, throwIfAborted, yieldToBrowser } from '../../core/slice'
+import { hashValue } from '../../core/hash'
 import type { JobRunOptions } from '../../data/workerJob'
 import type { CurrentClamp, Settled } from '../../biophys/solver'
 import type { SimulationRequest } from '../../biophys/solver'
@@ -27,7 +28,8 @@ export interface SimulateJob {
   readonly threshold: number
   /** Partner index → spike times, ms, for the main run. */
   readonly firing: readonly (readonly [number, readonly number[]])[]
-  readonly clamp?: CurrentClamp
+  /** Current injected at record sites, one clamp per compartment; none when off. */
+  readonly clamps: readonly CurrentClamp[]
   /**
    * A model with channels at rest, from an earlier run at this `dt`: settling depends on nothing
    * else, and a worker keeps nothing between jobs, so the page hands it back rather than have
@@ -62,6 +64,26 @@ export interface SimulateResult {
     /** Partners left unmeasured because the soma was still rising when the window closed. */
     readonly cut: number
   }
+}
+
+/**
+ * What a movie is a replay of: everything about a job that moves a compartment's voltage — its
+ * timing and its drive — and nothing that only says where the run records. Two jobs with one basis
+ * (on one model) give one movie, so a record site added since the run, a Playback trace clicked,
+ * leaves the movie Playback has as true as it was.
+ */
+export function movieBasis(job: SimulateJob): string {
+  // What is left out is named, not what is kept, so a field added to the job counts by default.
+  // The model is the caller's to compare (this is its solver form), and `rest` follows from it.
+  const {
+    model: _model,
+    record: _record,
+    threshold: _threshold,
+    rest: _rest,
+    summary: _summary,
+    ...basis
+  } = job
+  return hashValue(basis)
 }
 
 /**
@@ -168,7 +190,7 @@ function mainRequest(
     duration: job.duration,
     initial,
     events: eventsFor(job.model, new Map(job.firing)),
-    clamps: job.clamp ? [job.clamp] : undefined,
+    clamps: job.clamps,
   }
 }
 

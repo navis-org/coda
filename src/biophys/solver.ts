@@ -188,12 +188,82 @@ export function synapticInput(
   return { synapses, events: synapticEvents(slotOf, sites) }
 }
 
-/** NEURON's IClamp: `amplitude` nA from `delay` for `duration` ms. */
+/**
+ * NEURON's IClamp: `amplitude` nA from `delay` for `duration` ms — a step, or shaped over that
+ * window (`ClampShape`). On and off by `stepAt`'s rule, as an event is; zero outside the window.
+ */
 export interface CurrentClamp {
   readonly compartment: number
   readonly delay: number
   readonly duration: number
   readonly amplitude: number
+  /** How the current runs inside the window; a step when absent. */
+  readonly shape?: ClampShape
+}
+
+/**
+ * A clamp's waveform, read at each step's half-step time `tm` — the time NEURON evaluates an
+ * IClamp's current at — so an IClamp whose `amp` is set to it before every step is the same run.
+ * Times are from the clamp's start, in ms.
+ *
+ * - `ramp`: linear from `from` nA at the start to `amplitude` at the end.
+ * - `sine`: `offset + amplitude · sin(2π · frequency · t)`, frequency in Hz, rising from the start.
+ * - `pulses`: `amplitude` for `width` ms every `interval` ms, each pulse on and off by `stepAt`.
+ */
+export type ClampShape =
+  | { readonly kind: 'step' }
+  | { readonly kind: 'ramp'; readonly from: number }
+  | { readonly kind: 'sine'; readonly frequency: number; readonly offset: number }
+  | { readonly kind: 'pulses'; readonly width: number; readonly interval: number }
+
+/** A clamp's waveform and window — everything but where it injects. */
+export type ClampWaveform = Omit<CurrentClamp, 'compartment'>
+
+/**
+ * The current a clamp injects over the step from `step · dt`, nA: zero outside its window, which
+ * opens and closes by `stepAt` as an event does. The one rule for the run, the Traces output's
+ * `injected` column and every drawing of a stimulus.
+ */
+export function clampCurrent(clamp: ClampWaveform, step: number, dt: number): number {
+  const { shape, delay, amplitude, duration } = clamp
+  const [from, to] = clampWindow(clamp, dt)
+  if (step < from || step >= to) return 0
+  if (!shape || shape.kind === 'step') return amplitude
+  // The step's half-step time from the clamp's start: where NEURON reads an IClamp.
+  const since = (step + 0.5) * dt - delay
+  if (shape.kind === 'ramp') {
+    return duration > 0
+      ? shape.from + ((amplitude - shape.from) * since) / duration
+      : shape.from
+  }
+  if (shape.kind === 'sine') {
+    return shape.offset + amplitude * Math.sin((2 * Math.PI * shape.frequency * since) / 1000)
+  }
+  const { width, interval } = shape
+  if (!(interval > 0 && width > 0)) return 0
+  if (width >= interval) return amplitude
+  // Each pulse on and off by `stepAt`, as a step clamp of its own would be: the latest pulse to
+  // start is the only one that can be on, its neighbours asked too for the rounding at an edge.
+  const k = Math.floor(since / interval)
+  for (let n = Math.max(0, k - 1); n <= k + 1; n++) {
+    const start = delay + n * interval
+    if (step >= stepAt(start, dt) && step < stepAt(start + width, dt)) return amplitude
+  }
+  return 0
+}
+
+/** The half-open range of steps a clamp is on for, by `stepAt`: outside it, no current. */
+export function clampWindow(clamp: ClampWaveform, dt: number): [number, number] {
+  return [stepAt(clamp.delay, dt), stepAt(clamp.delay + clamp.duration, dt)]
+}
+
+/** A clamp's current at each of `times` (ms): the step starting there, as the Traces output reads it. */
+export function clampTrace(
+  clamp: ClampWaveform,
+  times: ArrayLike<number>,
+  dt: number,
+): Float64Array {
+  return Float64Array.from(times, (t) => clampCurrent(clamp, Math.round(t / dt), dt))
 }
 
 /**
@@ -453,12 +523,11 @@ export class Simulation {
   private readonly eventStep: Int32Array
   private readonly eventSlot: Int32Array
   private readonly eventWeight: Float64Array
-  /** Each clamp as the half-open range of steps it is on for. */
+  /** Each clamp, and the half-open range of steps it is on for: outside it, nothing to ask. */
   private readonly clampSteps: readonly {
-    readonly compartment: number
+    readonly clamp: CurrentClamp
     readonly from: number
     readonly to: number
-    readonly amplitude: number
   }[]
   private readonly d: Float64Array
   private readonly rhs: Float64Array
@@ -529,12 +598,10 @@ export class Simulation {
       events.weight,
       (w, e) => w * this.prepared.synFactor[events.slot[e]!]!,
     )
-    this.clampSteps = (request.clamps ?? []).map((k) => ({
-      compartment: k.compartment,
-      from: stepAt(k.delay, dt),
-      to: stepAt(k.delay + k.duration, dt),
-      amplitude: k.amplitude,
-    }))
+    this.clampSteps = (request.clamps ?? []).map((clamp) => {
+      const [from, to] = clampWindow(clamp, dt)
+      return { clamp, from, to }
+    })
 
     this.d = new Float64Array(count)
     this.rhs = new Float64Array(count)
@@ -644,8 +711,9 @@ export class Simulation {
       d[c]! += g
       rhs[c]! += g * synERev[s]!
     }
-    for (const clamp of this.clampSteps) {
-      if (step >= clamp.from && step < clamp.to) rhs[clamp.compartment]! += clamp.amplitude
+    for (const { clamp, from, to } of this.clampSteps) {
+      // A few flops beside the solve: no waveform is stored, whatever its shape.
+      if (step >= from && step < to) rhs[clamp.compartment]! += clampCurrent(clamp, step, dt)
     }
     hinesSolve(tree, d, rhs, v)
 

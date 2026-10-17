@@ -4,7 +4,8 @@
  * shown. Clicking a branch adds that compartment's trace.
  *
  * The movie is made when the tab opens (`useMovie`), not kept with the result; its rules — the
- * colours, the time readout, the traces and where a click places one — are `movie.ts`'. The dendrogram is the Points
+ * colours, the time readout — are `movie.ts`', and where a trace lands and what it is called is the
+ * run's own (`planRun`'s `traces`, handed over by `useMovie`). The dendrogram is the Points
  * editor's (`useArborStage`, `splitArbor`, `equalAngle`) and so is the memoised 3D half, which only
  * the frame's colours reach on a tick.
  */
@@ -15,7 +16,7 @@ import type { ParamValue } from '../../core/node'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { column, tableSchema } from '../../core/types'
 import type { CellModelValue, PointsValue, SkeletonsValue } from '../../core/values'
-import { boundsOf, makeTable } from '../../core/values'
+import { boundsOf, getColumn, makeTable } from '../../core/values'
 import { DAYLIGHT_PASSES, SUBWAY_DEFAULTS } from '../../nodes/lib/arborLayout'
 import { hasRadii } from '../../nodes/lib/skeletonRadii'
 import { keyTree, landmarkDistances, orientPlacement } from '../../nodes/lib/arborOps'
@@ -30,10 +31,14 @@ import {
 import { splitArbor } from '../../nodes/lib/splitCorrections'
 import type { Movie } from '../../packs/biophys/simulateJob'
 import { MOVIE_BUDGET_BYTES } from '../../packs/biophys/simulateJob'
+import type { MovieTrace, RunPlan } from '../../packs/biophys/simulateOps'
 import {
   modelSkeletons,
+  SHOW_TRACES_PARAM,
+  TIME_COLUMN,
   SIGN_COLUMN,
   SOMA_COLUMN,
+  traceCompartment,
   TRACES_PARAM,
 } from '../../packs/biophys/simulateOps'
 import type { Mode } from '../../style/colors'
@@ -52,7 +57,9 @@ import type { TickGroup } from '../viewers/arborScene'
 import { branchParts, buildScene, partStrokes, sceneToSvg } from '../viewers/arborScene'
 import { uiFontFamily } from '../viewers/canvas2d'
 import { LazyViewer3D } from '../viewers/LazyViewers'
+import type { ChartStrip } from '../viewers/LineChartViewer'
 import { LineChartViewer } from '../viewers/LineChartViewer'
+import { clampTrace } from '../../biophys/solver'
 import { tooltipPoint } from '../viewers/tooltipPoint'
 import { useArborLayout } from '../viewers/useArborLayout'
 import type { SkeletonWidthMode } from '../viewers/viewer3dScene'
@@ -60,7 +67,7 @@ import { useArborStage, usePaintedScene } from '../viewers/useArborStage'
 import type { ExportSource } from '../viewers/ViewerActions'
 import { ViewerActions } from '../viewers/ViewerActions'
 import { ViewerEmpty } from '../viewers/ViewerEmpty'
-import type { Firing, MovieScale, MovieTrace } from './movie'
+import type { Firing, MovieScale } from './movie'
 import {
   firedSites,
   baselineOf,
@@ -71,12 +78,10 @@ import {
   sitePositions,
   movieRamp,
   nextTraceName,
-  placeTraces,
   timeFormat,
-  traceCompartment,
   traceTable,
 } from './movie'
-import type { MovieRequest } from './useMovie'
+import type { MovieRequest, Stimulus } from './useMovie'
 import { useMovie } from './useMovie'
 
 export interface SimulatePlaybackProps extends MovieRequest {
@@ -104,7 +109,16 @@ export function SimulatePlayback(props: SimulatePlaybackProps) {
     )
   }
   // `model` is there whenever a movie is: the hook waits without one.
-  return <Player {...props} model={props.model!} movie={state.movie} firing={state.firing} />
+  return (
+    <Player
+      {...props}
+      model={props.model!}
+      movie={state.movie}
+      firing={state.firing}
+      placedTraces={state.traces}
+      stimulus={state.stimulus}
+    />
+  )
 }
 
 /** Playback speeds, as a multiple of the whole run in `RUN_SECONDS`. */
@@ -129,11 +143,19 @@ function Player({
   movie,
   firing,
   params,
+  placedTraces: { placed, off },
+  stimulus,
   viewerKey,
   baseName,
   onError,
   onParamChange,
-}: SimulatePlaybackProps & { model: CellModelValue; movie: Movie; firing: Firing }) {
+}: SimulatePlaybackProps & {
+  model: CellModelValue
+  movie: Movie
+  firing: Firing
+  placedTraces: RunPlan['traces']
+  stimulus: Stimulus | undefined
+}) {
   const mode = currentMode()
   const ink = CHART_INK[mode]
   const frames = movie.length
@@ -251,13 +273,9 @@ function Player({
   /* --- the traces ------------------------------------------------------------------------- */
 
   // Kept on the node as positions on the neuron (`TRACES_PARAM`), so a re-run, a rebuilt model or
-  // a reload keeps them; placed on this model by the rule a click is.
+  // a reload keeps them; placed and named by the run (`placedTraces`), by the rule a click is.
   const rawTraces = params[TRACES_PARAM]
   const stored = useMemo(() => readManualPoints(rawTraces), [rawTraces])
-  const { placed, off } = useMemo(
-    () => placeTraces(model, arbor, stored),
-    [model, arbor, stored],
-  )
   const writeTraces = (next: readonly ManualPoint[]) =>
     onParamChange?.(TRACES_PARAM, next.map(writeManualPoint))
   const traces = useMemo(
@@ -267,8 +285,21 @@ function Player({
     ],
     [model.soma.compartment, placed],
   )
+  // Kept on the node, so a view laid out without them stays so across a reopen and a reload.
+  const showTraces = params[SHOW_TRACES_PARAM] === true
   const table = useMemo(() => traceTable(movie, traces), [movie, traces])
   const ys = useMemo(() => traces.map(({ label }) => label), [traces])
+  // The injected current under the traces, on their time axis, as the Traces output's column has it.
+  const strip = useMemo((): ChartStrip | undefined => {
+    if (!stimulus) return undefined
+    const t = getColumn(table, TIME_COLUMN) as number[]
+    return {
+      label: stimulus.label,
+      unit: 'nA',
+      x: t,
+      y: clampTrace(stimulus.clamp, t, stimulus.dt),
+    }
+  }, [stimulus, table])
   const arrivals = useMemo(() => inputArrivals(model, firing), [model, firing])
 
   /*
@@ -530,6 +561,18 @@ function Player({
             {plural(off, 'trace')} not shown
           </span>
         )}
+        <label
+          className="playback__toggle nodrag"
+          title="Draw the traces under the scrubber. Off, the neuron takes the whole view; the Traces output carries them to a Line Chart."
+        >
+          <input
+            type="checkbox"
+            checked={showTraces}
+            disabled={!onParamChange}
+            onChange={(event) => onParamChange?.(SHOW_TRACES_PARAM, event.target.checked)}
+          />
+          Traces
+        </label>
         <label className="playback__toggle nodrag">
           <input
             type="checkbox"
@@ -625,17 +668,20 @@ function Player({
         </div>
       </div>
 
-      <div className="playback__traces">
-        <LineChartViewer
-          table={table}
-          x="t"
-          ys={ys}
-          cursor={time}
-          xMarks={arrivals}
-          xMarksLabel="input spikes arriving"
-          compact={false}
-        />
-      </div>
+      {showTraces && (
+        <div className="playback__traces">
+          <LineChartViewer
+            table={table}
+            x="t"
+            ys={ys}
+            cursor={time}
+            xMarks={arrivals}
+            xMarksLabel="input spikes arriving"
+            strip={strip}
+            compact={false}
+          />
+        </div>
+      )}
     </div>
   )
 }

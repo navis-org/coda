@@ -1,6 +1,6 @@
 /**
- * Simulate: run a Compartment Model — its partners firing, a clamp at the soma — and read the
- * voltage at the soma and wherever else is recorded.
+ * Simulate: run a Compartment Model — its partners firing, current injected at its record sites —
+ * and read the voltage at the soma and wherever else is recorded.
  *
  * **`expensive`**: a run is tens of milliseconds to minutes, so it waits for Run, and it runs in a
  * worker (`simulateJob.ts`), one job doing the settle, the main run and every per-partner run.
@@ -21,10 +21,12 @@ import type { SimulateResult } from './simulateJob'
 import { runSimulateJob } from './simulateJob'
 import {
   ARBOUR_SCHEMA,
+  CLAMP_SITES_PARAM,
   INPUT_SPIKES_SCHEMA,
   NO_SPIKE_TABLE,
   arbourValue,
   SILENCED_PARAM,
+  SHOW_TRACES_PARAM,
   TRACES_PARAM,
   SOMA_COLUMN,
   keepRest,
@@ -35,7 +37,7 @@ import {
   planRun,
   runInputs,
   outputSpikesTable,
-  tracesSchema,
+  inferredTracesSchema,
   tracesTable,
   summaryLeftOut,
   unrestedNote,
@@ -56,7 +58,8 @@ export const simulateNode = packNode({
     'peak voltage.',
   guide:
     'Runs a compartment model: partners fire on seeded spike trains or on times from a spike ' +
-    'table, with an optional current clamp at the soma. Records the soma and any wired points, ' +
+    'table, with optional current injection — a step, ramp, sine or pulse train — at any record ' +
+    'site. Records the soma, any wired points and the traces added in Playback, ' +
     'and can run each partner alone to say how much it moves the soma. Plot Traces in a Line ' +
     'Chart; colour Arbour by node value in a 3D View.',
   cost: 'expensive',
@@ -184,12 +187,24 @@ export const simulateNode = packNode({
       noun: 'traces',
       group: 'run',
       default: [],
-      // Written by clicking Playback's dendrogram and by nothing else (`ParamBase.internal`), and
-      // changes nothing a run returns.
-      presentational: true,
+      // Written by clicking Playback's dendrogram and by nothing else (`ParamBase.internal`). In
+      // the key: each is a record site, a column of the Traces output, so a click makes the card
+      // stale. Playback keeps playing its movie meanwhile, a record site changing nothing a movie
+      // shows (`movieBasis`, `simulateJob.ts`).
       advanced: true,
       internal: true,
-      help: 'Points on the neuron whose voltage Playback draws beside the soma.',
+      help: 'Points on the neuron, clicked on Playback’s dendrogram, whose voltage is recorded beside the soma: each is a column of the Traces output after the next run.',
+    },
+    {
+      id: SHOW_TRACES_PARAM,
+      kind: 'boolean',
+      label: 'Traces in Playback',
+      group: 'run',
+      default: true,
+      // Playback's own checkbox writes it; how the view is laid out, never what a run returns.
+      presentational: true,
+      advanced: true,
+      help: 'Whether Playback draws the traces under its scrubber. Off, the neuron takes the whole view, and the traces are for a Line Chart wired to the Traces output.',
     },
     {
       id: 'fire',
@@ -265,7 +280,40 @@ export const simulateNode = packNode({
       dtypes: ['f64', 'i64'],
       visibleIf: byTable,
     },
-    { id: 'clamp', kind: 'boolean', label: 'Clamp the soma', group: 'clamp', default: false },
+    {
+      id: 'clamp',
+      kind: 'boolean',
+      label: 'Inject current',
+      group: 'clamp',
+      default: false,
+      help: 'A current clamp at the record sites ticked in the Sites tab of the expanded card: the soma unless others are ticked. Combines with Drive, which still fires the partners.',
+    },
+    {
+      id: CLAMP_SITES_PARAM,
+      kind: 'ids',
+      label: 'Inject at',
+      noun: 'sites',
+      group: 'clamp',
+      // The soma, so a graph from before sites were picked injects where it always did.
+      default: [SOMA_COLUMN],
+      visibleIf: clamped,
+      help: 'The record sites the current is injected at, by name: the soma, `Record at`’s points and Playback’s traces. Picked in the Sites tab of the expanded card; every one gets the same current.',
+    },
+    {
+      id: 'clampShape',
+      kind: 'enum',
+      label: 'Shape',
+      group: 'clamp',
+      default: 'step',
+      options: [
+        { value: 'step', label: 'Step' },
+        { value: 'ramp', label: 'Ramp' },
+        { value: 'sine', label: 'Sine' },
+        { value: 'pulses', label: 'Pulse train' },
+      ],
+      visibleIf: clamped,
+      help: 'Step: Amplitude throughout. Ramp: from From to Amplitude, linearly. Sine: Offset plus Amplitude times a sine of Frequency, rising from Start. Pulse train: Amplitude for Width every Interval. Zero before Start and after Start plus Duration, whatever the shape.',
+    },
     {
       id: 'amplitude',
       kind: 'number',
@@ -274,11 +322,60 @@ export const simulateNode = packNode({
       default: 0.05,
       step: 0.01,
       visibleIf: clamped,
+      help: 'The current, or a ramp’s end, a sine’s swing either side of Offset, a pulse’s height. Positive depolarises.',
+    },
+    {
+      id: 'rampFrom',
+      kind: 'number',
+      label: 'From (nA)',
+      group: 'clamp',
+      default: 0,
+      step: 0.01,
+      visibleIf: (p) => clamped(p) && p.clampShape === 'ramp',
+      help: 'The current at Start, which the ramp runs from to Amplitude at its end.',
+    },
+    {
+      id: 'sineFrequency',
+      kind: 'number',
+      label: 'Frequency (Hz)',
+      group: 'clamp',
+      default: 10,
+      min: 0,
+      visibleIf: (p) => clamped(p) && p.clampShape === 'sine',
+    },
+    {
+      id: 'sineOffset',
+      kind: 'number',
+      label: 'Offset (nA)',
+      group: 'clamp',
+      default: 0,
+      step: 0.01,
+      visibleIf: (p) => clamped(p) && p.clampShape === 'sine',
+      help: 'A constant current the sine rides on.',
+    },
+    {
+      id: 'pulseWidth',
+      kind: 'number',
+      label: 'Width (ms)',
+      group: 'clamp',
+      default: 2,
+      min: 0.001,
+      visibleIf: (p) => clamped(p) && p.clampShape === 'pulses',
+    },
+    {
+      id: 'pulseInterval',
+      kind: 'number',
+      label: 'Interval (ms)',
+      group: 'clamp',
+      default: 10,
+      min: 0.001,
+      visibleIf: (p) => clamped(p) && p.clampShape === 'pulses',
+      help: 'From the start of one pulse to the start of the next.',
     },
     {
       id: 'clampDelay',
       kind: 'number',
-      label: 'Delay (ms)',
+      label: 'Start (ms)',
       group: 'clamp',
       default: 10,
       min: 0,
@@ -316,7 +413,7 @@ export const simulateNode = packNode({
   inferOutputs: (ctx) => ({
     // Record sites are named by the data, so after a run the observed schema; before, the two
     // columns every run has.
-    traces: T.table(ctx.observed ?? tracesSchema([SOMA_COLUMN])),
+    traces: T.table(inferredTracesSchema(ctx.observed, clamped(ctx.params))),
     inputSpikes: T.table(INPUT_SPIKES_SCHEMA),
     outputSpikes: T.table(OUTPUT_SPIKES_SCHEMA),
     partners: T.table(partnersSchema(summarised(ctx.params))),
@@ -367,7 +464,7 @@ export const simulateNode = packNode({
     }
 
     return {
-      traces: tracesTable(labels, result),
+      traces: tracesTable(labels, result, job),
       inputSpikes: inputSpikesTable(value, job.firing),
       outputSpikes: outputSpikesTable(labels, result),
       partners: partnersTable(

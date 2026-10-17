@@ -44,7 +44,7 @@ import type { GraphNode } from '../../core/graph'
 import type { NodeDefinition } from '../../core/node'
 import { makeInferContext } from '../../core/node'
 import { firstOutputPort } from '../../core/ports'
-import { getNodeDef } from '../../core/registry'
+import { filledParams, getNodeDef } from '../../core/registry'
 import { describeValue } from '../../core/values'
 import { hasHelp } from '../../help/registry'
 import { useGraphStore } from '../../store/graphStore'
@@ -58,7 +58,7 @@ import { panelTabs, railParams } from '../params/paramGroups'
 /** What a data-group control costs, said once for the sidebar's tab note and the rail's items. */
 const CHANGES_DATA = 'These change the data, not just the drawing — downstream nodes go stale.'
 import { NodeMap } from '../tour/NodeMap'
-import { ValuePreview } from '../viewers/ValuePreview'
+import { ValuePreview, tabFigure } from '../viewers/ValuePreview'
 import { ExportNodeContext } from '../viewers/exportRegistry'
 import { GlyphSvg, doorGlyph } from './startGlyphs'
 
@@ -235,6 +235,8 @@ export function ViewerSurface({
   // Falling back to the first tab rather than storing a reset makes an id that no longer
   // exists — a different node, or a tab whose params are all hidden — harmless.
   const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0]
+  // A drawing of what the open tab's params describe, where the node offers one.
+  const TabFigure = activeTab && tabFigure(node.type, activeTab.id)
   const baseName = exportBaseName(graphName, node.title ?? def.label)
 
   return (
@@ -407,6 +409,7 @@ export function ViewerSurface({
                 ctx={ctx}
                 onChange={(paramId, next) => setParam(node.id, paramId, next)}
               />
+              {TabFigure && <TabFigure params={filledParams(node)} />}
             </div>
           </aside>
         )}

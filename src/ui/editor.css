@@ -14555,3 +14555,16 @@ select.annotate__input {
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
+
+/* The Clamp tab's waveform preview (`ClampPreview`), under its params. */
+.clamp-preview {
+  margin: 12px 0 0;
+}
+.clamp-preview svg {
+  display: block;
+}
+.clamp-preview__note {
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}

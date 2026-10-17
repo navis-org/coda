@@ -1,5 +1,5 @@
 import { useContext, useMemo } from 'react'
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 
 import type { GraphNode } from '../../core/graph'
 import type { InferContext, ParamValue, ParamValues } from '../../core/node'
@@ -84,6 +84,7 @@ import { TableSummary } from './TableSummary'
 import { TableViewer } from './TableViewer'
 import { LaminarProfileViewer } from '../cortex/LaminarProfileViewer'
 import { ModelView } from '../biophys/ModelView'
+import { ClampPreview } from '../biophys/ClampPreview'
 import { SimulateView } from '../biophys/SimulateView'
 import { PointsEditor } from './PointsEditor'
 import { MANUAL_PARAM } from '../../nodes/lib/skeletonPoints'
@@ -392,6 +393,12 @@ interface ViewerEntry {
    *   Axon/Dendrite). Its card has no preview to keep, so the inspector keeps the generic one.
    */
   inSummary?: 'preview' | { drawnElsewhere: string }
+  /**
+   * Drawings under the full-size sidebar's tabs, keyed by `ParamGroup.id`: a picture of what that
+   * tab's params describe, redrawn as they change — Simulate's waveform under Clamp. Handed the
+   * node's params with defaults filled. `clampPreview.test.tsx` holds every key to a tab the node has.
+   */
+  tabFigures?: Readonly<Record<string, ComponentType<{ params: ParamValues }>>>
   /** The picture, or `undefined` to decline: dispatch carries on as though there were no entry. */
   render: (props: ViewerProps) => ReactNode
 }
@@ -1266,9 +1273,19 @@ const VIEWERS: Record<string, ViewerEntry> = {
    */
   'biophys:simulate': {
     withoutValue: true,
+    tabFigures: { clamp: ClampPreview },
     opensBeforeRun: true,
     inSummary: 'preview',
-    render: ({ node, inputValues, params, onParamChange, ctx, viewerKey, shared }) => {
+    render: ({
+      node,
+      inputValues,
+      params,
+      onParamChange,
+      onParamsChange,
+      ctx,
+      viewerKey,
+      shared,
+    }) => {
       const model = isCellModelValue(inputValues?.model) ? inputValues.model : undefined
       return (
         <SimulateView
@@ -1282,6 +1299,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
           baseName={shared.baseName}
           onError={shared.onError}
           onParamChange={onParamChange}
+          onParamsChange={onParamsChange}
         />
       )
     },
@@ -1365,6 +1383,21 @@ const VIEWERS: Record<string, ViewerEntry> = {
       )
     },
   },
+}
+
+/** The drawing under a node's sidebar tab, if its entry has one (`ViewerEntry.tabFigures`). */
+export function tabFigure(
+  type: string,
+  tab: string,
+): ComponentType<{ params: ParamValues }> | undefined {
+  return VIEWERS[type]?.tabFigures?.[tab]
+}
+
+/** Every node type's tab figures, for the sweep that holds their keys to real tabs. */
+export function tabFigureKeys(): readonly (readonly [type: string, tab: string])[] {
+  return Object.entries(VIEWERS).flatMap(([type, entry]) =>
+    Object.keys(entry.tabFigures ?? {}).map((tab) => [type, tab] as const),
+  )
 }
 
 /** Whether a node type's card has a preview before its own value, drawn from its inputs. */

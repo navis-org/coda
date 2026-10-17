@@ -10,9 +10,29 @@ Shared by `biophys-reference.py` (the committed fixture) and `probe-biophys.py` 
 Needs `pip install neuron`; nothing in the app or in CI depends on it.
 """
 
+import math
+
 from neuron import h
 
 h.load_file("stdrun.hoc")
+
+
+def clamp_current(c, tm):
+    """A shaped clamp's current at time `tm`, in IClamp's terms: on for `delay <= tm < delay + dur`.
+
+    Written from the shapes' definitions rather than from the TypeScript, which counts steps.
+    """
+    t = tm - c["delay"]
+    if t < 0 or t >= c["duration"]:
+        return 0.0
+    shape, amp = c["shape"], c["amplitude"]
+    if shape["kind"] == "ramp":
+        return shape["from"] + (amp - shape["from"]) * t / c["duration"]
+    if shape["kind"] == "sine":
+        return shape["offset"] + amp * math.sin(2 * math.pi * shape["frequency"] * t / 1000)
+    if shape["kind"] == "pulses":
+        return amp if math.fmod(t, shape["interval"]) < shape["width"] else 0.0
+    raise ValueError(f"unknown clamp shape {shape['kind']}")
 
 
 def run_case(case):
@@ -78,12 +98,20 @@ def run_case(case):
         nc.delay = 0
         keep.append(s)
         netcons.append((nc, site["times"]))
+    shaped = []
     for c in case.get("clamps", []):
         ic = h.IClamp(at(c["node"]))
-        ic.delay = c["delay"]
-        ic.dur = c["duration"]
-        ic.amp = c["amplitude"]
         keep.append(ic)
+        shape = c.get("shape")
+        if shape is None or shape["kind"] == "step":
+            ic.delay = c["delay"]
+            ic.dur = c["duration"]
+            ic.amp = c["amplitude"]
+        else:
+            # Always on, its `amp` set before every step to the waveform at that step's half time.
+            ic.delay = 0
+            ic.dur = 1e9
+            shaped.append((ic, c))
 
     def schedule():
         for nc, times in netcons:
@@ -95,6 +123,9 @@ def run_case(case):
     traces = [h.Vector().record(at(node)._ref_v) for node in case["record"]]
     h.finitialize(case["vInit"])
     while h.t < case["duration"] - case["dt"] / 2:
+        tm = h.t + case["dt"] / 2
+        for ic, c in shaped:
+            ic.amp = clamp_current(c, tm)
         h.fadvance()
 
     out = {"traces": [list(v) for v in traces]}

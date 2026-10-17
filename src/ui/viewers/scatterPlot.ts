@@ -161,6 +161,17 @@ export function extentOf(values: ArrayLike<number>): Domain | undefined {
 }
 
 /**
+ * The extent of `values` stretched to hold zero, and a unit tall where it is flat: an axis for a
+ * signed quantity — an injected current — whose sign reads off where its line sits against 0.
+ */
+export function zeroDomain(values: ArrayLike<number>): Domain {
+  const extent = extentOf(values)
+  const min = Math.min(0, extent?.min ?? 0)
+  const max = Math.max(0, extent?.max ?? 0)
+  return max > min ? { min, max } : { min, max: min + 1 }
+}
+
+/**
  * Breathing room around the data, and a domain for the degenerate case.
  *
  * A single distinct value has zero span, which would divide by zero on projection and put

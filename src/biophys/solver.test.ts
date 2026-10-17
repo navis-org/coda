@@ -12,7 +12,7 @@ import {
   hhPoint,
   straightCable,
 } from './referenceCases'
-import type { CellModel, SynapseSlots } from './solver'
+import type { CellModel, CurrentClamp, SynapseSlots } from './solver'
 import {
   NO_SYNAPSES,
   Simulation,
@@ -550,5 +550,51 @@ describe('Exp2Syn', () => {
       }
       expect(peak).toBeCloseTo(1, 4)
     }
+  })
+})
+
+describe('clamp shapes', () => {
+  const { request } = buildCase(caseNamed('branched-passive'))
+  const soma = request.record[1]!
+  const run = (clamp: Omit<CurrentClamp, 'compartment'>) =>
+    simulate({ ...request, events: undefined, clamps: [{ compartment: soma, ...clamp }] }).v[1]!
+  const window = { delay: 5.01, duration: 20 }
+
+  it('reads a step shape as the plain IClamp, and every shape as one where they agree', () => {
+    const step = run({ ...window, amplitude: 0.02 })
+    expect(maxDiff(run({ ...window, amplitude: 0.02, shape: { kind: 'step' } }), step)).toBe(0)
+    // A ramp from its own end is flat; a sine at 0 Hz is its offset; pulses as wide as their
+    // interval never switch off. Each the step, to the last bit of arithmetic.
+    const ramp = run({ ...window, amplitude: 0.02, shape: { kind: 'ramp', from: 0.02 } })
+    const sine = run({
+      ...window,
+      amplitude: 1,
+      shape: { kind: 'sine', frequency: 0, offset: 0.02 },
+    })
+    const pulses = run({
+      ...window,
+      amplitude: 0.02,
+      shape: { kind: 'pulses', width: 4, interval: 4 },
+    })
+    for (const shaped of [ramp, sine, pulses]) expect(maxDiff(shaped, step)).toBeLessThan(1e-12)
+  })
+
+  it('switches each pulse as a step clamp of its own would', () => {
+    const pulses = run({
+      ...window,
+      amplitude: 0.02,
+      shape: { kind: 'pulses', width: 1, interval: 5 },
+    })
+    const separate = simulate({
+      ...request,
+      events: undefined,
+      clamps: [0, 1, 2, 3].map((k) => ({
+        compartment: soma,
+        delay: window.delay + 5 * k,
+        duration: 1,
+        amplitude: 0.02,
+      })),
+    }).v[1]!
+    expect(maxDiff(pulses, separate)).toBeLessThan(1e-12)
   })
 })

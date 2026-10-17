@@ -282,6 +282,39 @@ resistance, which is why theirs reads a little less isolated.
   on receiving its job, so one that dies of memory before its first progress is no longer told to
   reload. The solver itself refuses a cable with no membrane, for callers other than the build.
 
+- **Current injection is the Clamp tab generalised, not a Drive** (decided 2026-10-16): a shape
+  (step, ramp, sine, pulse train) at any record site, picked by name. Not a fourth `Drive` because
+  Drive is exclusive and a clamp is not — injecting while partners fire is the ordinary case — and
+  because `Clamp the soma` already existed: `clamp` keeps its id and `clampSites` defaults to
+  `soma`, so a graph from before injects where it did. **Start + Duration, not Start + Stop**:
+  IClamp's own `del`/`dur`, and a Stop param could not have carried a saved Duration across. **One
+  waveform for every ticked site**, a clamp per **compartment**, two names on one compartment
+  injected once and said; a name no site has any more (a `Record at` point gone, a trace renamed)
+  injects nothing and is said too, since dropping it silently looks like a weaker cell.
+- **The sites are picked in the full view's Sites tab, not the inspector**, because a `Record at`
+  site is named by its label column's *value* and a param's options see only schemas. The tab
+  reads `runRecordSites`, the run's own list, so a ticked name is the compartment the run injects at;
+  ticking while off turns injection on there in one commit, unticking the last turns it off.
+- **A shape is read at the half-step time, and the solver precomputes it** (`clampWave`): NEURON
+  evaluates an IClamp's current at `t + dt/2`, so a NEURON IClamp whose `amp` is set before every
+  step to the waveform at that time is the same run, which is how `biophys_neuron.py` drives one
+  (`clamp_current`, written from the shapes' definitions, not from our step counting). Pulses
+  switch on and off by `stepAt` as separate step clamps would, and the test holds them to that.
+  `branched-shaped-clamps` puts all three on the spiking arbour at once, every edge off a half step.
+- **One per-step rule for the current, `clampCurrent`, read by everything that shows it**: the run
+  (precomputed per clamp), the Traces output's `injected` column (nA, the step starting at each
+  sample), Playback's strip under the traces, and the Clamp tab's preview. One column, not one per
+  site, the waveform being shared. The strip reads the clamp from the **plan that made the movie**
+  (the clamps are in `movieBasis`, so a served movie's are the card's), and is the chart's own
+  `Line`, decimated as the traces are. The preview is `ViewerEntry.tabFigures` on Simulate's viewer
+  entry — a drawing under a sidebar tab, on the per-type table that already exists rather than a
+  second one, its keys swept against the node's tabs — and folds the run into columns by each
+  column's extremes (`clampEnvelope`, asking only the steps inside the clamp's window), sampling
+  being what loses a pulse narrower than a pixel. **The column is decided from the params, not the
+  last run**: inference takes the site names from the observed schema (its `mV` columns) and the
+  `injected` column from `Inject current` now, both through `injectedColumn`, so ticking it reaches
+  a picker downstream before the next run, by the name the run will give it.
+
 ## Playback
 
 - **The movie is computed on demand, not kept.** It is compartments × frames of float32, tens of
@@ -293,14 +326,16 @@ resistance, which is why theirs reads a little less isolated.
   a compact arbour is *not* uniform: the first few hundred µs at a synapse. Past
   `MOVIE_BUDGET_BYTES` (128 MB, a quarter of `CRASH_FLOOR_BYTES`) the frames are spaced as little
   further apart as fits (`movieFrameSteps`), and the view says so; nothing is refused.
-- **Movies are cached weakly, up to `KEPT_BYTES`** (two at the per-movie budget), in a `WeakMap`
-  keyed on the card's `traces` value: a new Run makes a new value, and a run the scheduler drops —
-  node deleted, workflow closed — takes its movie with it. Bounded by bytes rather than by count,
+- **Movies are cached weakly, up to `KEPT_BYTES`** (two at the per-movie budget), keyed on what
+  the movie replays — the model, weakly, then the job's `movieBasis` — so a rebuilt or dropped
+  model takes its movies with it. It was keyed on the card's `traces` value first, which put the
+  record sites in the key and replayed an identical movie after a click and a Run. Bounded by bytes rather than by count,
   so the views on screen (pinned and expanded, a few dashboard cells) do not evict each other's,
   each eviction being a whole every-compartment replay; past the budget the **least recently played**
   go first, each kept while it fits (a read refreshes it; a small movie survives a large one).
-  A strong `Map` of two was tried and kept deleted nodes' movies alive. **Only an `ok` card plays**;
-  a stale one's params are not its run's, and a running one's output is still the last run's.
+  A strong `Map` of two was tried and kept deleted nodes' movies alive. **Only an `ok` card makes
+  one**: a stale one's params are not its run's, and a running one's output is still the last
+  run's. A stale card plays one already kept for its model and basis, below.
 - **One colour scale for the whole run**, never per frame: a per-frame scale makes every frame look
   equally eventful. **"From rest" is the default** (made so 2026-10-13): sequential, colouring each
   compartment's **rise above its own rest** (its frame 0) up to the run's largest, because on the diverging scale a few-mV EPSP and a 10–20% difference between two
@@ -319,10 +354,25 @@ resistance, which is why theirs reads a little less isolated.
   `nodeCompartment`. Clicking a branch adds that compartment's trace (`rootNodeFor`'s nearer-end
   rule), marked on the dendrogram in its line's colour; a second click or ✕ removes it.
 - **Added traces are kept on the node**, as positions on the neuron with a name (`TRACES_PARAM`,
-  the `ManualPoint` shape, presentational and `internal`), so a re-run, a rebuilt model or a
-  reload keeps them. They are placed on each model by the click's own rule (`placeTraces`); one
-  that lands nowhere — another neuron's, off the cable, at the soma — is counted on the controls.
-  A name is never reused (`nextTraceName`), and labels are made unique, being table columns.
+  the `ManualPoint` shape, `internal`), so a re-run, a rebuilt model or a reload keeps them. They
+  are placed on each model by the click's own rule (`placeTraces`, in `simulateOps.ts` so the run
+  and Playback share it); one that lands nowhere — another neuron's, off the cable, at the soma —
+  is counted on the controls. A name is never reused (`nextTraceName`), and labels are made
+  unique, being table columns.
+- **They are record sites, so a column each of the Traces output** (decided 2026-10-16). They were
+  presentational first, drawn from the movie alone, and a user found the output held only the
+  soma. In the key, a click makes the card stale until the next Run — so **Playback keeps playing
+  a stale card's movie where nothing a movie shows has moved** (`movieBasis`: the job minus
+  record sites, threshold, settled rest and summary — named as what is *left out*, so a field added
+  to the job counts by default), or every click would have taken the movie away with it. Anything
+  else that changed still asks for a Run. Playback draws the run's own placement
+  (`RunPlan.traces`, handed over by `useMovie`) rather than placing them again, so a line and its
+  column carry one name — a second placement named them against different columns once.
+- **The trace plot under the scrubber can be hidden** (`showTraces`, Playback's `Traces` checkbox),
+  because with the traces in the output a Line Chart wired to it draws them better. A param rather
+  than view state, so the layout survives a reopen and a reload; `presentational`, a layout
+  changing nothing a run returns. The clicked traces stay clickable while it is off, being record
+  sites as much as lines.
 - **`Inputs` marks the fired partners' synapses where they sit**, as ticks on the dendrogram and
   points in 3D (`sitePositions`, on the cable, the model keeping no cloud positions). The model value carries each
   synapse's `sites` (node, edge start, share along it) for this, a compartment being tens of µm

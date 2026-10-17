@@ -91,6 +91,20 @@ describe('LineChartViewer', () => {
     expect(marks?.getAttribute('d')?.match(/M/g)).toHaveLength(2)
   })
 
+  it('draws a strip under the plot on the same X, with a Y and a label of its own', () => {
+    const strip = { label: 'injected', unit: 'nA', x: [0, 1, 2, 3, 4], y: [0, 0, 0.2, 0.2, 0] }
+    const { container } = render(
+      <LineChartViewer table={TRACES} x="t" ys={['soma']} strip={strip} />,
+    )
+    expect(screen.getByText('injected (nA)')).toBeTruthy()
+    const line = [...container.querySelectorAll('path')].find((p) =>
+      p.getAttribute('clip-path')?.endsWith('-strip)'),
+    )
+    expect(line?.getAttribute('d')?.match(/[ML]/g)).toHaveLength(5)
+    // Its zero in its range, and its top the strip's largest value.
+    expect(screen.getByText('0.2')).toBeTruthy()
+  })
+
   it('says when there is nothing to draw', () => {
     const empty = makeTable(tableSchema(column('t', 'f64'), column('v', 'f64')), {
       t: [null],

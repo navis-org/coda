@@ -22,10 +22,10 @@ import {
   movieRamp,
   risesAboveRest,
   nextTraceName,
-  placeTraces,
   timeFormat,
   traceTable,
 } from './movie'
+import { placeTraces, SOMA_COLUMN } from '../../packs/biophys/simulateOps'
 
 /** Three compartments over three frames: at rest, the first depolarising, then the last dipping. */
 const MOVIE: Movie = {
@@ -154,7 +154,7 @@ describe('the stored traces', () => {
       { neuron: '7', at: [55_000, 90_000, 0] },
       { neuron: '7', at: [0, 0, 0] },
     ]
-    const { placed, off } = placeTraces(model, arbor, stored)
+    const { placed, off } = placeTraces(model, arbor, stored, [SOMA_COLUMN])
     // A stored name is the label; an unnamed one is numbered by its place, and a clash is told apart.
     expect(placed.map((trace) => trace.label)).toEqual(['branch 2', 'branch 2 (2)'])
     expect(placed).toHaveLength(2)

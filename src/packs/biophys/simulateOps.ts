@@ -27,10 +27,16 @@ import {
   partnerSign,
 } from '../../core/values'
 import { agree, formatNumber, formatSigned, plural } from '../../style/format'
+import type { Arbor } from '../../nodes/lib/arborOps'
+import { orientPlacement, rootNodeFor } from '../../nodes/lib/arborOps'
 import { orderByScores } from '../../nodes/lib/matrixShape'
+import type { ManualPoint } from '../../nodes/lib/skeletonPoints'
+import { projectManual, readManualPoints } from '../../nodes/lib/skeletonPoints'
+import { splitArbor } from '../../nodes/lib/splitCorrections'
 import { NO_PARTNER, placePoints } from './build'
 import { PEAK_VOLTAGE } from './nodeValues'
-import type { Settled } from '../../biophys/solver'
+import type { ClampShape, ClampWaveform, CurrentClamp, Settled } from '../../biophys/solver'
+import { clampCurrent, clampTrace, clampWindow } from '../../biophys/solver'
 import type { SimulateJob, SimulateResult } from './simulateJob'
 import { jobSteps, reachesInWindow, restOf, traceBytes } from './simulateJob'
 import { partnerDelays, solverPart } from './solverInputs'
@@ -38,7 +44,8 @@ import { partnerTrain } from './stimulus'
 import { isNameableRegion } from './channelRows'
 
 /** Column names the traces table owns; a record site's label may not take them. */
-const TIME_COLUMN = 't'
+/** The Traces output's time column, in ms. */
+export const TIME_COLUMN = 't'
 export const SOMA_COLUMN = 'soma'
 
 /**
@@ -51,10 +58,12 @@ const SIM_WARN_SECONDS = 60
 
 /**
  * The traces added on Playback's dendrogram, each a position on the neuron with a name
- * (`ManualPoint` as JSON). Presentational and never drawn as a row: it changes nothing a run
- * returns, and the dendrogram is where it is edited.
+ * (`ManualPoint` as JSON). Record sites, so in the key — each is a column of the Traces output —
+ * and never drawn as a row, the dendrogram being where it is edited.
  */
 export const TRACES_PARAM = 'traces'
+/** Whether Playback draws the traces under its scrubber: a layout preference, `presentational`. */
+export const SHOW_TRACES_PARAM = 'showTraces'
 
 /** The partners that do not fire: the param the expanded view's partner table edits. */
 export const SILENCED_PARAM = 'silenced'
@@ -121,6 +130,11 @@ export interface RunPlan {
   readonly job: SimulateJob
   /** One per record site, the soma's first: the traces table's columns. */
   readonly labels: readonly string[]
+  /**
+   * Playback's traces as this run records them, the tail of `labels`: what Playback draws and
+   * names, so a line under its scrubber and its column of the Traces output are one.
+   */
+  readonly traces: PlacedTraces
   /** Everything worth saying before the run: points not recorded, spikes reaching nothing, the wait. */
   readonly notes: readonly string[]
 }
@@ -139,10 +153,198 @@ export function summaryLeftOut(n: number, why: string): string {
   return `${plural(n, 'partner')} ${agree(n, 'is', 'are')} left out of the per-partner summary: ${why}`
 }
 
+/**
+ * Every record site of a run, in the Traces output's order: the soma, `Record at`'s points, then
+ * Playback's traces. One list for the run, Playback's lines and the Sites tab's picks, so a name
+ * means one compartment wherever it is read.
+ */
+export interface RecordSites {
+  readonly compartments: Int32Array
+  readonly labels: readonly string[]
+  /** How many lead the list from the soma and `Record at`; Playback's traces are the rest. */
+  readonly recorded: number
+  /** Playback's traces as placed, the tail of `labels`. */
+  readonly traces: PlacedTraces
+}
+
+export function runRecordSites(
+  value: CellModelValue,
+  record: RunInputs['record'],
+  /** `Record distance`, µm, and Playback's traces as stored (`TRACES_PARAM`). */
+  { snap, stored }: { readonly snap: number; readonly stored: readonly ManualPoint[] },
+  notes: string[],
+): RecordSites {
+  const sites = recordSites(value, record, snap, notes)
+  // Then Playback's traces, after `Record at`'s, named apart from every column before them.
+  // With none stored, no arbour: `splitArbor` is several passes over the skeleton, every evaluate.
+  const traces =
+    stored.length > 0
+      ? placeTraces(value, splitArbor(value.skeleton), stored, sites.labels)
+      : { placed: [], off: 0 }
+  return {
+    compartments: Int32Array.from([
+      ...sites.compartments,
+      ...traces.placed.map((t) => t.compartment),
+    ]),
+    labels: [...sites.labels, ...traces.placed.map((t) => t.label)],
+    recorded: sites.labels.length,
+    traces,
+  }
+}
+
+/** Where `Inject at` reads its sites from, and what a fresh card injects at. */
+export const CLAMP_SITES_PARAM = 'clampSites'
+
+/** The card's waveform, as the solver takes it. */
+function clampShapeOf(p: ParamValues): ClampShape {
+  switch (p.clampShape) {
+    case 'ramp':
+      return { kind: 'ramp', from: Number(p.rampFrom) }
+    case 'sine':
+      return { kind: 'sine', frequency: Number(p.sineFrequency), offset: Number(p.sineOffset) }
+    case 'pulses':
+      return { kind: 'pulses', width: Number(p.pulseWidth), interval: Number(p.pulseInterval) }
+    default:
+      return { kind: 'step' }
+  }
+}
+
+/** The card's injection in words, for the Sites tab: "a ramp from 0 to 0.2 nA from 10 ms for 50 ms". */
+export function describeClamp(p: ParamValues): string {
+  // Currents may be negative, so with a proper minus.
+  const nA = (key: string) => `${formatSigned(Number(p[key]))} nA`
+  const ms = (key: string) => `${formatNumber(Number(p[key]))} ms`
+  const shape = clampShapeOf(p)
+  const what =
+    shape.kind === 'ramp'
+      ? `a ramp from ${nA('rampFrom')} to ${nA('amplitude')}`
+      : shape.kind === 'sine'
+        ? `a ${formatNumber(shape.frequency)} Hz sine of ${nA('amplitude')} about ${nA('sineOffset')}`
+        : shape.kind === 'pulses'
+          ? `${nA('amplitude')} pulses of ${ms('pulseWidth')} every ${ms('pulseInterval')}`
+          : `a ${nA('amplitude')} step`
+  return `${what} from ${ms('clampDelay')} for ${ms('clampDuration')}`
+}
+
+/**
+ * One clamp per compartment `Inject at` names, each the card's waveform. A name no site has — a
+ * `Record at` point gone, a trace renamed — injects nothing and is said; two names on one
+ * compartment inject there once, and that is said too.
+ */
+function plannedClamps(
+  p: ParamValues,
+  sites: Pick<RecordSites, 'compartments' | 'labels'>,
+  notes: string[],
+): CurrentClamp[] {
+  if (p.clamp !== true) return []
+  const names = [...new Set(p[CLAMP_SITES_PARAM] as string[])]
+  const missing: string[] = []
+  const at = new Map<number, string[]>()
+  for (const name of names) {
+    const i = sites.labels.indexOf(name)
+    if (i < 0) missing.push(name)
+    else at.set(sites.compartments[i]!, [...(at.get(sites.compartments[i]!) ?? []), name])
+  }
+  if (missing.length > 0) {
+    notes.push(
+      `Inject at names ${namedFew(missing.map((m) => `"${m}"`))}, which no record site is called ` +
+        `now, so nothing is injected there. Pick the sites again in the Sites tab.`,
+    )
+  }
+  if (names.length === 0) {
+    notes.push('Current injection is on, but no site is ticked in the Sites tab.')
+  }
+  for (const shared of at.values()) {
+    if (shared.length > 1) {
+      notes.push(
+        `${namedFew(shared.map((n) => `"${n}"`))} are one compartment, so the current is injected ` +
+          'there once.',
+      )
+    }
+  }
+  const waveform = clampWaveformOf(p)
+  return [...at.keys()].map((compartment) => ({ compartment, ...waveform }))
+}
+
+/** The card's waveform and window, wherever it is injected: one for every ticked site. */
+export function clampWaveformOf(p: ParamValues): ClampWaveform {
+  const shape = clampShapeOf(p)
+  return {
+    delay: Number(p.clampDelay),
+    duration: Number(p.clampDuration),
+    amplitude: Number(p.amplitude),
+    ...(shape.kind === 'step' ? {} : { shape }),
+  }
+}
+
+/**
+ * A waveform over a run of `duration` ms, folded into `buckets` columns, each its least and
+ * greatest current over the steps it holds — so a pulse narrower than a column is still drawn,
+ * which sampling at the columns would lose. For the Clamp tab's preview.
+ */
+export function clampEnvelope(
+  clamp: ClampWaveform,
+  dt: number,
+  duration: number,
+  buckets: number,
+): { lo: Float64Array; hi: Float64Array } {
+  const lo = new Float64Array(buckets).fill(Infinity)
+  const hi = new Float64Array(buckets).fill(-Infinity)
+  const take = (b: number, current: number) => {
+    if (current < lo[b]!) lo[b] = current
+    if (current > hi[b]!) hi[b] = current
+  }
+  const steps = Math.max(1, Math.round(duration / dt))
+  // Column `b` holds the steps with `floor(step · buckets / steps) = b`.
+  const first = (b: number) => Math.ceil((b * steps) / buckets)
+  const bucketOf = (step: number) => Math.min(buckets - 1, Math.floor((step * buckets) / steps))
+  const [on, off] = clampWindow(clamp, dt)
+  const from = Math.max(0, on)
+  const to = Math.min(steps, off)
+  // Outside the window the current is zero: every column holding a step outside it has a zero.
+  for (let b = 0; b < buckets; b++) {
+    const s0 = first(b)
+    const s1 = first(b + 1)
+    if (s0 < s1 && (s0 < from || s1 > to)) take(b, 0)
+  }
+  if (to > from) {
+    if (!clamp.shape || clamp.shape.kind === 'step') {
+      // Constant inside: no step needs asking.
+      for (let b = bucketOf(from); b <= bucketOf(to - 1); b++) take(b, clamp.amplitude)
+    } else {
+      // Past a few hundred thousand steps a column's extremes are read at that many, not all.
+      const stride = Math.max(1, Math.floor((to - from) / ENVELOPE_STEPS))
+      for (let step = from; step < to; step += stride) {
+        take(bucketOf(step), clampCurrent(clamp, step, dt))
+      }
+    }
+  }
+  // A column no step fell in — more columns than steps — takes its neighbour's.
+  for (let b = 0; b < buckets; b++) {
+    if (lo[b] === Infinity) {
+      lo[b] = b > 0 ? lo[b - 1]! : 0
+      hi[b] = b > 0 ? hi[b - 1]! : 0
+    }
+  }
+  return { lo, hi }
+}
+
+/** Steps `clampEnvelope` reads at most. */
+const ENVELOPE_STEPS = 400_000
+
 /** A Simulate card's params and inputs as the job its worker runs — everything but the run. */
 export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs): RunPlan {
   const notes: string[] = []
-  const sites = recordSites(value, inputs.record, Number(p.recordSnap), notes)
+  const {
+    compartments: record,
+    labels,
+    traces,
+  } = runRecordSites(
+    value,
+    inputs.record,
+    { snap: Number(p.recordSnap), stored: readManualPoints(p[TRACES_PARAM]) },
+    notes,
+  )
   // The solver's own refusals, said here before anything below divides or multiplies by them: a
   // hand-edited file is the only way to them, and "would allocate NaN" would be the wrong sentence.
   if (!(Number(p.dt) > 0)) throw new Error('dt must be a positive number of milliseconds.')
@@ -167,7 +369,7 @@ export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs
     // A model built without synapses: nothing a train or a table names can reach it.
     notes.push(
       `This model has no synapses, so ${p.drive === 'table' ? 'the spike table drives' : 'spike trains drive'} ` +
-        'nothing: wire Synapses into its Compartment Model, or clamp the soma.',
+        'nothing: wire Synapses into its Compartment Model, or inject current (the Clamp tab).',
     )
   } else if (p.drive === 'trains') {
     const shape = {
@@ -230,18 +432,10 @@ export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs
     dt,
     duration,
     sampleEvery: Number(p.sampleEvery),
-    record: sites.compartments,
+    record,
     threshold: Number(p.threshold),
     firing: [...firing],
-    clamp:
-      p.clamp === true
-        ? {
-            compartment: value.soma.compartment,
-            delay: Number(p.clampDelay),
-            duration: Number(p.clampDuration),
-            amplitude: Number(p.amplitude),
-          }
-        : undefined,
+    clamps: plannedClamps(p, { compartments: record, labels }, notes),
     rest: RESTS.get(value)?.get(dt),
     summary:
       p.perPartner === true
@@ -279,7 +473,7 @@ export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs
         `${formatNumber(steps)} steps.`,
     )
   }
-  return { job, labels: sites.labels, notes }
+  return { job, labels, traces, notes }
 }
 
 /**
@@ -323,6 +517,81 @@ export function recordSites(
     }
   }
   return { compartments: Int32Array.from(compartments), labels }
+}
+
+/*
+ * Playback's traces — branches clicked on its dendrogram, kept on the node as positions — are
+ * record sites too, so each is a column of the Traces output beside the soma and `Record at`'s.
+ * Placed here, by the one rule Playback draws them with, so the output's trace and the one under
+ * the scrubber are the same compartment.
+ */
+
+/** One trace to draw under the scrubber: a name, and the compartment it reads. */
+export interface MovieTrace {
+  readonly label: string
+  readonly compartment: number
+}
+
+/** Playback's stored traces as placed on a model, and how many of them did not land on it. */
+export interface PlacedTraces {
+  readonly placed: readonly PlacedTrace[]
+  readonly off: number
+}
+
+/** A trace added on the dendrogram, as it lands on this model: what it reads, and where it sits. */
+export interface PlacedTrace extends MovieTrace {
+  /** As stored on the node: a position on the neuron, and its name. */
+  readonly point: ManualPoint
+  /** On `arbor`: the node at the far end of its edge, and the share of the way along it. */
+  readonly node: number
+  readonly t: number
+}
+
+/**
+ * The compartment a point on the arbour is traced at — its edge's nearer end, as it decides a root
+ * (`rootNodeFor`) — or undefined off the modelled cable or at the soma, which is always drawn. One
+ * rule for a click and for a stored trace placed again.
+ */
+export function traceCompartment(
+  model: CellModelValue,
+  arbor: Arbor,
+  on: { readonly node: number; readonly t: number },
+): number | undefined {
+  const compartment = model.nodeCompartment[rootNodeFor(on, arbor.parent)]!
+  return compartment < 0 || compartment === model.soma.compartment ? undefined : compartment
+}
+
+/**
+ * The stored traces (`TRACES_PARAM`) placed on this model, read by the rule a click is
+ * (`rootNodeFor`'s nearer end of the edge). Kept as positions, so they survive a re-run and a
+ * rebuilt model; a trace of another neuron, too far from this one's cable, or at the soma (which
+ * is always drawn) is counted in `off` rather than placed.
+ */
+export function placeTraces(
+  model: CellModelValue,
+  arbor: Arbor,
+  stored: readonly ManualPoint[],
+  /**
+   * The record sites' labels (`recordSites`), the soma's first: the traces follow them in the
+   * Traces output, so each is named apart from them and from the time column.
+   */
+  siteLabels: readonly string[],
+): PlacedTraces {
+  const taken = new Set([TIME_COLUMN, ...siteLabels])
+  const mine = stored.filter((point) => point.neuron === model.neuronId)
+  const at = orientPlacement(arbor, projectManual(model.skeleton, mine))
+  const placed: PlacedTrace[] = []
+  // Labels are the traces table's columns, so each is once — the soma's included.
+  mine.forEach((point, i) => {
+    const node = at.node[i]!
+    if (node < 0) return
+    const t = at.t[i]!
+    const compartment = traceCompartment(model, arbor, { node, t })
+    if (compartment === undefined) return
+    const label = uniqueName(taken, point.name ?? `branch ${i + 1}`, (n) => ` (${n})`)
+    placed.push({ label, compartment, point, node, t })
+  })
+  return { placed, off: stored.length - placed.length }
 }
 
 /**
@@ -396,15 +665,56 @@ export function trainsFromTable(
  * The three tables, schema beside value.
  * ---------------------------------------------------------------------------------------- */
 
-/** Time, then one column per record site — the soma first. Wide, for ZapBench's memory reason. */
-export function tracesSchema(labels: readonly string[]): TableSchema {
-  return tableSchema(column(TIME_COLUMN, 'f64'), ...labels.map((name) => column(name, 'f64')))
+/**
+ * The Traces output's last column while current is injected: the current, nA, at each sample —
+ * one waveform for every injected site, so one column.
+ */
+const INJECTED_COLUMN = 'injected'
+
+/** The injected column's name: `injected`, unless a record site is already called that. */
+export function injectedColumn(labels: readonly string[]): string {
+  return uniqueName(new Set([TIME_COLUMN, ...labels]), INJECTED_COLUMN, (n) => ` (${n})`)
 }
 
-export function tracesTable(labels: readonly string[], result: SimulateResult): TableValue {
+/**
+ * Time, then one column per record site — the soma first — in mV, then the injected current in nA
+ * when there is one. Wide, for ZapBench's memory reason.
+ */
+export function tracesSchema(labels: readonly string[], injected?: string): TableSchema {
+  return tableSchema(
+    column(TIME_COLUMN, 'f64', 'ms'),
+    ...labels.map((name) => column(name, 'f64', 'mV')),
+    ...(injected ? [column(injected, 'f64', 'nA')] : []),
+  )
+}
+
+export function tracesTable(
+  labels: readonly string[],
+  result: SimulateResult,
+  job: Pick<SimulateJob, 'clamps' | 'dt'>,
+): TableValue {
   const data: Record<string, number[]> = { [TIME_COLUMN]: Array.from(result.t) }
   labels.forEach((name, i) => (data[name] = Array.from(result.traces[i]!)))
-  return makeTable(tracesSchema(labels), data)
+  const clamp = job.clamps[0]
+  const injected = clamp && injectedColumn(labels)
+  if (injected) data[injected] = Array.from(clampTrace(clamp, result.t, job.dt))
+  return makeTable(tracesSchema(labels, injected), data)
+}
+
+/**
+ * The Traces schema as inference can know it: the record sites from the last run's own schema
+ * (its `mV` columns — sites are named by the data), the soma alone before one; the injected
+ * column from the params as they are now, so ticking `Inject current` reaches a picker downstream
+ * before the next run, by the name the run will give it.
+ */
+export function inferredTracesSchema(
+  observed: TableSchema | undefined,
+  injecting: boolean,
+): TableSchema {
+  const labels = observed
+    ? observed.columns.filter((c) => c.unit === 'mV').map((c) => c.name)
+    : [SOMA_COLUMN]
+  return tracesSchema(labels, injecting ? injectedColumn(labels) : undefined)
 }
 
 /** The Output spikes output: threshold crossings at each record site. */
@@ -608,7 +918,7 @@ const QUIET_TAUS = 3
  */
 export function unrestedNote(
   value: CellModelValue,
-  job: Pick<SimulateJob, 'firing' | 'duration' | 'clamp'>,
+  job: Pick<SimulateJob, 'firing' | 'duration' | 'clamps'>,
   final: ArrayLike<number>,
   settle: Settled | undefined,
 ): string | undefined {
@@ -616,7 +926,8 @@ export function unrestedNote(
   // When the last spike reaches its last synapse: each partner's latest spike plus its longest
   // delay.
   const { max: delay } = partnerDelays(value)
-  let lastDrive = job.clamp ? job.clamp.delay + job.clamp.duration : 0
+  let lastDrive = 0
+  for (const clamp of job.clamps) lastDrive = Math.max(lastDrive, clamp.delay + clamp.duration)
   for (const [partner, times] of job.firing) {
     for (const time of times) lastDrive = Math.max(lastDrive, time + delay[partner]!)
   }

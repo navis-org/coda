@@ -15,6 +15,7 @@
 
 import { useEffect, useId, useMemo, useState } from 'react'
 
+import { lowerBound } from '../../core/stats'
 import type { TableValue } from '../../core/values'
 import type { PaletteName } from '../../nodes/lib/encodingParams'
 import type { ResolvedColor } from '../../style/encoding'
@@ -24,7 +25,7 @@ import { formatCompact, formatNumber, plural } from '../../style/format'
 import { exportBaseName as makeBaseName } from '../export'
 import { ChartTooltip, TooltipRow } from './ChartTooltip'
 import { ColorKey } from './LegendKeys'
-import type { LineOrder } from './lineSeries'
+import type { Line, LineOrder } from './lineSeries'
 import {
   buildLines,
   decimate,
@@ -44,6 +45,7 @@ import {
   projectY,
   unprojectX,
   viewAffine,
+  zeroDomain,
 } from './scatterPlot'
 import { tooltipPoint } from './tooltipPoint'
 import { useChart } from './useChart'
@@ -71,13 +73,29 @@ export interface LineChartViewerProps {
    */
   xMarks?: readonly number[]
   xMarksLabel?: string
+  /**
+   * A short panel under the plot on the same X — a stimulus, say — with a Y of its own, its unit
+   * not being the lines'. Untransformed, as in the table; `x` ascending. For a caller drawing
+   * beside its own lines (Simulate's Playback); not reachable from the Line Chart node's params.
+   */
+  strip?: ChartStrip | undefined
   compact?: boolean
   baseName?: string
   onExpand?: () => void
   onError?: (message: string) => void
 }
 
+export interface ChartStrip {
+  readonly label: string
+  readonly unit: string
+  readonly x: ArrayLike<number>
+  readonly y: ArrayLike<number>
+}
+
 const PAD = { left: 54, right: 16, top: 14, bottom: 26 }
+/** The strip's height and its gap below the plot, px. */
+const STRIP_HEIGHT = 40
+const STRIP_GAP = 10
 const LINE_WIDTH = 1.5
 /** How tall an `xMarks` tick is, px. */
 const MARK_HEIGHT = 7
@@ -104,6 +122,7 @@ export function LineChartViewer({
   cursor,
   xMarks,
   xMarksLabel,
+  strip,
   compact = false,
   baseName,
   onExpand,
@@ -146,15 +165,36 @@ export function LineChartViewer({
     return { at: colorOf, legend: lines.length > 1 ? legend : undefined }
   }, [lines, mode, palette])
 
+  // A strip takes its height from the plot's, below it and above the X labels.
+  const stripSpace = strip ? STRIP_HEIGHT + STRIP_GAP : 0
   const plot = useMemo(
     (): Rect => ({
       x: PAD.left,
       y: PAD.top,
       width: Math.max(1, size.width - PAD.left - PAD.right),
-      height: Math.max(1, size.height - PAD.top - PAD.bottom),
+      height: Math.max(1, size.height - PAD.top - PAD.bottom - stripSpace),
     }),
-    [size.width, size.height],
+    [size.width, size.height, stripSpace],
   )
+  const stripTop = plot.y + plot.height + STRIP_GAP
+  const stripRect: Rect = { x: plot.x, y: stripTop, width: plot.width, height: STRIP_HEIGHT }
+  // The strip as a line of the chart's own, X through the axis's scale, so it is windowed and
+  // decimated as the lines are; its Y its own, zero always in it so a sign reads off the line.
+  const stripLine = useMemo((): Line | undefined => {
+    if (!strip) return undefined
+    const keep: number[] = []
+    for (let i = 0; i < strip.x.length; i++) {
+      if (Number.isFinite(forward(xScale, strip.x[i]!)) && Number.isFinite(strip.y[i]!))
+        keep.push(i)
+    }
+    return {
+      label: strip.label,
+      x: Float64Array.from(keep, (i) => forward(xScale, strip.x[i]!)),
+      y: Float64Array.from(keep, (i) => strip.y[i]!),
+      sorted: true,
+    }
+  }, [strip, xScale])
+  const stripY = useMemo(() => stripLine && zeroDomain(stripLine.y), [stripLine])
 
   // What each line draws in the window, decimated — and, since a pixel column keeps its extremes,
   // the Y extent over it is the window's, without a second pass over every sample.
@@ -207,6 +247,20 @@ export function LineChartViewer({
       .map((x) => `M${projectX(x, frame.view, plot)} ${plot.y + plot.height}v${-MARK_HEIGHT}`)
       .join('')
   }, [xMarks, xScale, frame, plot])
+
+  // The strip's path over the window, a pixel column's extremes each — memoised on the window
+  // and the plot, which a moving cursor leaves alone.
+  const stripPath = useMemo(() => {
+    if (!stripLine || !stripY || !view) return undefined
+    const window = { x: view, y: stripY }
+    const yOf = (y: number) =>
+      stripTop + STRIP_HEIGHT * (1 - (y - stripY.min) / (stripY.max - stripY.min))
+    let d = ''
+    for (const i of decimate(stripLine, view, Math.ceil(plot.width))) {
+      d += `${d === '' ? 'M' : 'L'}${projectX(stripLine.x[i]!, window, plot).toFixed(2)} ${yOf(stripLine.y[i]!).toFixed(2)}`
+    }
+    return { d, zero: yOf(0) }
+  }, [stripLine, stripY, view, plot, stripTop])
 
   if (!frame) {
     return (
@@ -297,7 +351,7 @@ export function LineChartViewer({
                 />
                 <text
                   x={xOf(t)}
-                  y={plot.y + plot.height + 14}
+                  y={plot.y + plot.height + stripSpace + 14}
                   textAnchor="middle"
                   fontSize={10}
                   fill={ink.muted}
@@ -322,6 +376,76 @@ export function LineChartViewer({
               stroke={ink.axis}
               strokeWidth={1}
             />
+
+            {strip && stripY && stripPath && (
+              <g>
+                <clipPath id={`${clipId}-strip`}>
+                  <rect
+                    x={stripRect.x}
+                    y={stripRect.y - 1}
+                    width={stripRect.width}
+                    height={stripRect.height + 2}
+                  />
+                </clipPath>
+                <line
+                  x1={stripRect.x}
+                  y1={stripPath.zero}
+                  x2={stripRect.x + stripRect.width}
+                  y2={stripPath.zero}
+                  stroke={ink.grid}
+                  strokeWidth={1}
+                />
+                <line
+                  x1={stripRect.x}
+                  y1={stripRect.y}
+                  x2={stripRect.x}
+                  y2={stripRect.y + stripRect.height}
+                  stroke={ink.axis}
+                  strokeWidth={1}
+                />
+                {[stripY.max, stripY.min].map((v, i) => (
+                  <text
+                    key={i}
+                    x={plot.x - 8}
+                    y={i === 0 ? stripRect.y : stripRect.y + stripRect.height}
+                    textAnchor="end"
+                    dominantBaseline="central"
+                    fontSize={10}
+                    fill={ink.muted}
+                  >
+                    {formatCompact(v)}
+                  </text>
+                ))}
+                <text
+                  x={stripRect.x + 4}
+                  y={stripRect.y + 1}
+                  dominantBaseline="hanging"
+                  fontSize={10}
+                  fill={ink.muted}
+                >
+                  {strip.label} ({strip.unit})
+                </text>
+                <path
+                  d={stripPath.d}
+                  fill="none"
+                  stroke={ink.secondary}
+                  strokeWidth={LINE_WIDTH}
+                  strokeLinejoin="round"
+                  clipPath={`url(#${clipId}-strip)`}
+                />
+                {Number.isFinite(cursorX) && (
+                  <line
+                    x1={xOf(cursorX)}
+                    y1={stripRect.y}
+                    x2={xOf(cursorX)}
+                    y2={stripRect.y + stripRect.height}
+                    stroke={ink.primary}
+                    strokeWidth={1.5}
+                    pointerEvents="none"
+                  />
+                )}
+              </g>
+            )}
 
             <g clipPath={`url(#${clipId}-plot)`}>
               {paths.map((d, i) => (
@@ -401,6 +525,11 @@ export function LineChartViewer({
             {lines.length > TOOLTIP_LINES && (
               <TooltipRow>{plural(lines.length - TOOLTIP_LINES, 'more line')}</TooltipRow>
             )}
+            {strip && stripLine && (
+              <TooltipRow>
+                {strip.label} {formatNumber(stripAt(stripLine, hover.at))} {strip.unit}
+              </TooltipRow>
+            )}
           </ChartTooltip>
         )}
       </div>
@@ -452,4 +581,14 @@ function dropTitle(missing: number, nonPositive: number): string {
     )
   }
   return `Not drawn: ${parts.join('; ')}.`
+}
+
+/**
+ * The strip's value at `x` (through the axis's scale): its last point at or before it, a stimulus
+ * holding until it changes.
+ */
+function stripAt(line: Line, x: number): number {
+  const i = lowerBound(line.x, x)
+  const at = line.x[i] === x ? i : i - 1
+  return at < 0 ? Number.NaN : line.y[at]!
 }

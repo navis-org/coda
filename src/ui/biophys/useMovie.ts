@@ -7,26 +7,43 @@
  * replays the main run in a worker with every compartment recorded (`runMovieJob`); the trains are
  * seeded and the rest is the one the run kept, so the replay is the run.
  *
- * **A small cache keyed on the run.** The card's `traces` value is the run's identity: a new Run
- * makes a new one, so an entry is right exactly while that value is — and held weakly by it, so a
- * deleted node's movie goes with its run. Reopening the view after a look elsewhere costs nothing,
- * and views open at once keep their movies up to `KEPT_BYTES`.
+ * **A small cache keyed on what the movie replays**: the model and the job's `movieBasis`, its
+ * timing and drive. So a Playback trace clicked — a record site, in the key, so the card goes stale
+ * and its next Run is a new run — plays on from the movie it has rather than replaying an
+ * identical one. Held weakly by the model, so a rebuilt or deleted one takes its movies with it;
+ * views open at once keep theirs up to `KEPT_BYTES`.
  *
- * **Only for a node that is up to date.** Planned from the card's params and inputs as they are
- * now, a stale card's movie would be of a run that never happened, beside traces of one that did.
+ * **Made only for a node that is up to date.** Planned from the card's params and inputs as they
+ * are now, a stale card's movie would be of a run that never happened — unless one with the same
+ * basis is already kept, which is then exactly as true as it was.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
+import type { ClampWaveform } from '../../biophys/solver'
 import { errorMessage } from '../../core/errors'
+import { visibleParams } from '../../core/node'
+import { hashValue } from '../../core/hash'
 import type { ParamValues } from '../../core/node'
 import type { CellModelValue, Value } from '../../core/values'
 import { runWorkerJob } from '../../data/workerJob'
-import type { Movie } from '../../packs/biophys/simulateJob'
-import { MOVIE_BUDGET_BYTES, runMovieJob } from '../../packs/biophys/simulateJob'
-import { planRun, runInputs } from '../../packs/biophys/simulateOps'
+import type { Movie, SimulateJob } from '../../packs/biophys/simulateJob'
+import { MOVIE_BUDGET_BYTES, movieBasis, runMovieJob } from '../../packs/biophys/simulateJob'
+import type { RunPlan } from '../../packs/biophys/simulateOps'
+import { injectedColumn, planRun, runInputs } from '../../packs/biophys/simulateOps'
+import { simulateNode } from '../../packs/biophys/simulate'
 import { useGraphStore } from '../../store/graphStore'
 import type { Firing } from './movie'
+
+/**
+ * A run's injected current: its waveform, the `dt` its steps are counted in, and the name the
+ * Traces output gives its column (`injectedColumn`).
+ */
+export interface Stimulus {
+  readonly clamp: ClampWaveform
+  readonly dt: number
+  readonly label: string
+}
 
 export type MovieState =
   | { readonly status: 'waiting'; readonly reason: string }
@@ -35,7 +52,18 @@ export type MovieState =
       readonly fraction: number
       readonly note?: string | undefined
     }
-  | { readonly status: 'ready'; readonly movie: Movie; readonly firing: Firing }
+  | {
+      readonly status: 'ready'
+      readonly movie: Movie
+      readonly firing: Firing
+      /** Playback's traces as the card's run names them (`RunPlan.traces`). */
+      readonly traces: RunPlan['traces']
+      /**
+       * The current the movie's run injects; undefined without injection. In the movie's basis, so
+       * it is the movie's.
+       */
+      readonly stimulus: Stimulus | undefined
+    }
   | { readonly status: 'refused'; readonly reason: string }
 
 /**
@@ -48,42 +76,63 @@ const KEPT_BYTES = 2 * MOVIE_BUDGET_BYTES
 type Entry = { readonly movie: Movie; readonly firing: Firing }
 
 /**
- * The movies made, keyed on the run each is of, **weakly**: a run the scheduler lets go of — its
- * node deleted, re-run, its workflow closed — takes its movie with it, and nothing here keeps it.
- * `order` remembers which was used last (by weak reference, for the same reason), so past
- * `KEPT_BYTES` the least recently played go first.
+ * The movies made, by model **weakly** and then by basis: a model let go of — rebuilt, its node
+ * deleted, its workflow closed — takes its movies with it. `order` remembers which was used last
+ * (the model by weak reference, for the same reason), so past `KEPT_BYTES` the least recently
+ * played go first.
  */
-const kept = new WeakMap<Value, Entry>()
-let order: WeakRef<Value>[] = []
+const kept = new WeakMap<CellModelValue, Map<string, Entry>>()
+type Key = { readonly model: WeakRef<CellModelValue>; readonly basis: string }
+let order: Key[] = []
 
-/** Move `run` to the newest end of `order`: made now, or played now. */
-function touch(run: Value): void {
+const isKey = (key: Key, model: CellModelValue, basis: string) =>
+  key.basis === basis && key.model.deref() === model
+
+/** Move a movie to the newest end of `order`: made now, or played now. */
+function touch(model: CellModelValue, basis: string): void {
   // Read on every render, frame ticks included: nothing to do when it is already the newest.
-  if (order.at(-1)?.deref() === run) return
-  order = [...order.filter((ref) => ref.deref() !== run), new WeakRef(run)]
+  const newest = order.at(-1)
+  if (newest && isKey(newest, model, basis)) return
+  order = [
+    ...order.filter((key) => !isKey(key, model, basis)),
+    { model: new WeakRef(model), basis },
+  ]
 }
 
-function keep(run: Value, entry: Entry): void {
-  kept.set(run, entry)
-  touch(run)
+function keep(model: CellModelValue, basis: string, entry: Entry): void {
+  let byBasis = kept.get(model)
+  if (!byBasis) kept.set(model, (byBasis = new Map()))
+  byBasis.set(basis, entry)
+  touch(model, basis)
   // Most recently used first, each kept while it fits — so a small movie survives a large one
   // that does not — and the newest always, whatever its size.
   let bytes = 0
-  const alive: WeakRef<Value>[] = []
-  for (const ref of [...order].reverse()) {
-    const key = ref.deref()
-    const held = key && kept.get(key)
-    if (!key || !held) continue
-    const size = held.movie.frames.byteLength
+  const alive: Key[] = []
+  for (const key of [...order].reverse()) {
+    const held = key.model.deref()
+    const movies = held && kept.get(held)
+    const entry = movies?.get(key.basis)
+    if (!movies || !entry) continue
+    const size = entry.movie.frames.byteLength
     if (alive.length > 0 && bytes + size > KEPT_BYTES) {
-      kept.delete(key)
+      movies.delete(key.basis)
       continue
     }
     bytes += size
-    alive.unshift(ref)
+    alive.unshift(key)
   }
   order = alive
 }
+
+type Plan =
+  | {
+      readonly model: CellModelValue
+      readonly job: SimulateJob
+      readonly basis: string
+      readonly traces: RunPlan['traces']
+      readonly stimulus: Stimulus | undefined
+    }
+  | { readonly refusal: string }
 
 export interface MovieRequest {
   readonly nodeId: string
@@ -95,32 +144,53 @@ export interface MovieRequest {
 }
 
 export function useMovie(request: MovieRequest): MovieState {
-  const { nodeId, model } = request
+  const { nodeId, model, params, record, spikes } = request
   const run = useGraphStore((s) => s.nodeOutput(nodeId, 'traces'))
-  // `ok` and nothing else: a stale card's params are not the run's, and while it runs its output is
+  // `ok` to make a movie: a stale card's params are not the run's, and while it runs its output is
   // still the last run's — or a partial one — beside params that are already the next.
   const state = useGraphStore((s) => s.nodeInfo(nodeId).state)
   const current = state === 'ok'
-  // What the job is planned from, read when it starts: none of it changes while the card stays
-  // `ok`, so it is not what the effect waits on.
+  // Through a ref, read when the plan is made: `column` is a fresh closure each render, resolving
+  // what `params` already says, and `params` is waited on through `planKey`.
   const latest = useRef(request)
   latest.current = request
-  const hit = current && run ? kept.get(run) : undefined
+  // What a run reads, by the provenance key's own rule — every visible param that is not
+  // presentational — so ticking `Traces`, or any layout param added later, re-plans nothing.
+  const planKey = hashValue(
+    Object.fromEntries(
+      visibleParams(simulateNode, params)
+        .filter((p) => !p.presentational)
+        .map((p) => [p.id, params[p.id]]),
+    ),
+  )
+  // The job as the card stands, and what it would replay: the cache's key, and the job to make.
+  const plan = useMemo((): Plan | undefined => {
+    if (!model) return undefined
+    const { params, column } = latest.current
+    try {
+      const { job, labels, traces } = planRun(model, params, runInputs(record, spikes, column))
+      // One waveform at every injected site, so the first; made here, so it keeps its identity.
+      const clamp = job.clamps[0]
+      const stimulus = clamp && { clamp, dt: job.dt, label: injectedColumn(labels) }
+      return { model, job, basis: movieBasis(job), traces, stimulus }
+    } catch (error) {
+      return { refusal: errorMessage(error) }
+    }
+  }, [model, planKey, record, spikes])
+  const ready = plan && 'basis' in plan ? plan : undefined
+  const hit = ready && kept.get(ready.model)?.get(ready.basis)
   // Played now: the last to be evicted, by when it was used rather than when it was made.
-  if (hit && run) touch(run)
+  if (ready && hit) touch(ready.model, ready.basis)
 
   const [made, setMade] = useState<MovieState>({ status: 'waiting', reason: '' })
 
   useEffect(() => {
-    if (!model || !run || !current || hit) return
-    const { params, record, spikes, column } = latest.current
-    let job
-    try {
-      job = planRun(model, params, runInputs(record, spikes, column)).job
-    } catch (error) {
-      setMade({ status: 'refused', reason: errorMessage(error) })
+    if (!plan || !current || hit) return
+    if ('refusal' in plan) {
+      setMade({ status: 'refused', reason: plan.refusal })
       return
     }
+    const { model, job, basis } = plan
     const controller = new AbortController()
     setMade({ status: 'running', fraction: 0 })
     runWorkerJob(
@@ -140,7 +210,7 @@ export function useMovie(request: MovieRequest): MovieState {
       },
     ).then(
       (movie) => {
-        keep(run, { movie, firing: job.firing })
+        keep(model, basis, { movie, firing: job.firing })
         // Served from `kept` from here on; this only moves the view off its progress bar.
         if (!controller.signal.aborted) setMade({ status: 'waiting', reason: '' })
       },
@@ -150,9 +220,11 @@ export function useMovie(request: MovieRequest): MovieState {
       },
     )
     return () => controller.abort()
-  }, [model, run, current, hit])
+  }, [plan, current, hit])
 
-  if (hit) return { status: 'ready', ...hit }
+  if (ready && hit) {
+    return { status: 'ready', ...hit, traces: ready.traces, stimulus: ready.stimulus }
+  }
   if (!model || !run)
     return { status: 'waiting', reason: 'Run the simulation to play it back.' }
   if (state === 'running') return { status: 'waiting', reason: 'The simulation is running.' }

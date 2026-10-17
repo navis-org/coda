@@ -1,27 +1,36 @@
 /**
- * Simulate's full-size view: two tabs, Partners (who fires, chosen before a run) and Playback (the
- * last run over the neuron). Playback opens first once the card has a result to play, Partners
- * before that, when choosing who fires is the only thing there is to do.
+ * Simulate's full-size view: three tabs, Partners (who fires, chosen before a run), Playback (the
+ * last run over the neuron) and Sites (where current is injected). Playback opens first once the
+ * card has a result to play, Partners before that, when choosing who fires is the only thing there
+ * is to do.
  */
 
 import { useState } from 'react'
 
+import type { ParamValue } from '../../core/node'
 import { SILENCED_PARAM, firingTop } from '../../packs/biophys/simulateOps'
 import { useGraphStore } from '../../store/graphStore'
 import { RailTabs } from '../viewers/topoChrome'
 import type { SimulatePlaybackProps } from './SimulatePlayback'
 import { SimulatePlayback } from './SimulatePlayback'
 import { SimulatePartners } from './SimulatePartners'
+import { SimulateSites } from './SimulateSites'
 
-type Tab = 'partners' | 'playback'
+type Tab = 'partners' | 'playback' | 'sites'
 
 const TABS: ReadonlyArray<{ readonly id: Tab; readonly label: string }> = [
   { id: 'partners', label: 'Partners' },
   { id: 'playback', label: 'Playback' },
+  { id: 'sites', label: 'Sites' },
 ]
 
-/** Playback's props, which already carry the param writer the Partners tab uses too. */
-export type SimulateViewProps = SimulatePlaybackProps
+/**
+ * Playback's props, which already carry the param writer the other tabs use too, and the
+ * several-at-once writer the Sites tab turns injection on with.
+ */
+export type SimulateViewProps = SimulatePlaybackProps & {
+  onParamsChange?: ((values: Readonly<Record<string, ParamValue>>) => void) | undefined
+}
 
 export function SimulateView(props: SimulateViewProps) {
   const ran = useGraphStore((s) => s.nodeOutput(props.nodeId, 'traces') !== undefined)
@@ -38,6 +47,14 @@ export function SimulateView(props: SimulateViewProps) {
             silenced={props.params[SILENCED_PARAM] as string[]}
             top={firingTop(props.params)}
             onParamChange={props.onParamChange}
+          />
+        ) : shown === 'sites' ? (
+          <SimulateSites
+            model={props.model}
+            params={props.params}
+            record={props.record}
+            column={props.column}
+            onParamsChange={props.onParamsChange}
           />
         ) : (
           <SimulatePlayback {...props} />
