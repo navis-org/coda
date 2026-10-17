@@ -61,6 +61,7 @@
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.scripts.json --noEmit",
     "zoo:index": "vite-node scripts/zoo-index.ts --",
     "probe:distance": "vite-node scripts/probe-distance.ts",
+    "probe:abf": "vite-node scripts/probe-abf.ts",
     "probe:biophys": "python3 scripts/probe-biophys.py export && vite-node scripts/probe-biophys.ts && python3 scripts/probe-biophys.py compare",
     "biophys:jaxley": "python3 scripts/jaxley-reference.py src/biophys/__fixtures__/jaxley-reference.json",
     "biophys:reference": "mkdir -p src/biophys/__fixtures__ && vite-node scripts/biophys-cases.ts /tmp/coda-biophys-cases.json && python3 scripts/biophys-reference.py /tmp/coda-biophys-cases.json src/biophys/__fixtures__/neuron-reference.json",

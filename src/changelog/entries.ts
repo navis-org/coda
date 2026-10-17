@@ -112,10 +112,10 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
-    date: '2026-10-13',
+    date: '2026-10-17',
     title: 'Biophysics, and the Line Chart',
     summary:
-      'The new Biophysics plugin turns a neuron’s skeleton into a compartment model and simulates its synaptic input. The new Line Chart plots traces, time courses and profiles.',
+      'The new Biophysics plugin turns a neuron’s skeleton into a compartment model, simulates its synaptic input, and puts the result beside a recording of your own. The new Line Chart plots traces, time courses and profiles.',
     highlight: true,
     features: [
       {
@@ -130,6 +130,13 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
           alt: 'Simulate’s Playback on a hemibrain DA1 projection neuron: its dendrogram and 3D view coloured by membrane voltage 13 ms into the run, with the soma’s trace and a clicked axon branch’s trace below.',
         },
         demo: 'biophys:simulate',
+        link: { href: './biophys/', label: 'Open Coda with Biophysics switched on' },
+      },
+      {
+        kind: 'node',
+        date: '2026-10-17',
+        title: 'Biophysics: compare a simulation with a recording',
+        body: '**Load Recording** reads a patch-clamp recording of your own (ABF files from Clampex) as a table of its sweeps: time, sweep, a column per channel and the command waveform rebuilt from the protocol, with channels, sweeps, a time window and downsampling chosen on the card. **Combine Traces** puts it and a simulation on one time axis, interpolating each onto it and shifting one to line up the stimulus, so a Line Chart draws them together.',
         link: { href: './biophys/', label: 'Open Coda with Biophysics switched on' },
       },
       {

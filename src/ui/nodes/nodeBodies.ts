@@ -48,6 +48,7 @@ import { UploadBody } from './UploadBody'
 import { LinkTableBody, LinkTableFooter } from './LinkTableBody'
 import { BigClustProjectBody, BigClustProjectFooter } from './BigClustProjectBody'
 import { UploadMeshBody } from './UploadMeshBody'
+import { RecordingBody } from '../biophys/RecordingBody'
 
 export interface NodeBodyProps {
   node: GraphNode
@@ -190,6 +191,11 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * them does not belong on a canvas.
    */
   'core.uploadMesh': { Component: UploadMeshBody, expandable: true },
+  /*
+   * `expandable` for the upload cards' reason: which channels and commands a recording holds is
+   * what somebody checks after picking one.
+   */
+  'biophys:loadRecording': { Component: RecordingBody, expandable: true },
   /*
    * `expandable` for the upload cards' reason: the column listing is what somebody checks after
    * opening a file, and a wide synapse table's does not belong on a canvas.

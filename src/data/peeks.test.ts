@@ -215,6 +215,7 @@ const NO_CREDENTIAL: Record<string, string> = {
   peekUploadSchema: 'reads the browser shelf (IndexedDB)',
   peekUploadMeta: 'reads the browser shelf (IndexedDB)',
   peekMeshUpload: 'reads the browser shelf (IndexedDB)',
+  peekRecordingUpload: 'reads the browser shelf (IndexedDB)',
   peekEdgeSets: 'reads the browser shelf (IndexedDB)',
   peekEdgeSet: 'reads the browser shelf (IndexedDB)',
   peekCurrentVersion: "NeuronBridge's public bucket",

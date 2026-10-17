@@ -2,7 +2,8 @@
  * The Biophysics pack's card drawings, merged into `NODE_GLYPHS` by `ui/glyphs.ts`.
  *
  * Data only, held to `ui/glyphs.ts`' own lint rule: `nodes.html` draws these with no React and no
- * node definitions in it. Both are on Skeletons' arbour, the material they are made from.
+ * node definitions in it. The model and the run are on Skeletons' arbour, the material they are
+ * made from; the two recording cards are on a trace, theirs.
  */
 
 import type { GlyphShape } from '../../ui/glyphs'
@@ -29,6 +30,23 @@ const glyphs: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '6.4', cy: '18.4', r: '2', strokeOpacity: '.4' }],
     ['path', { d: ARBOUR, strokeOpacity: '.4' }],
     ['path', { d: 'M3 10h5l1.4-6.5 1.8 10 1.3-3.5H21' }],
+  ],
+  /*
+   * A recorded trace under Upload Table's arrow: the mark that says "brought in", on the material
+   * — a voltage over time — that comes in.
+   */
+  'biophys:loadRecording': [
+    ['path', { d: 'M3 16.5h5l1.3-5 1.6 7.5 1.2-2.5H21' }],
+    ['path', { d: 'M12 2.6v5.4M9.5 5.1 12 2.6l2.5 2.5' }],
+  ],
+  /*
+   * Two traces of different shape, one above the other, and a faint line through both at one
+   * time: what the node does is put them on one axis.
+   */
+  'biophys:combineTraces': [
+    ['path', { d: 'M3 8.5h5l1.3-5 1.6 7 1.2-2H21' }],
+    ['path', { d: 'M3 17h5l1.3-2.5 1.6 4 1.2-1.5H21' }],
+    ['path', { d: 'M9.3 2.5v19', strokeOpacity: '.4' }],
   ],
 }
 

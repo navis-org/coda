@@ -8,6 +8,8 @@
  */
 
 import type { PackDefinition } from '../../core/registry'
+import { combineTracesNode } from './combineTraces'
+import { loadRecordingNode } from './loadRecording'
 import { modelNode } from './model'
 import { simulateNode } from './simulate'
 
@@ -18,5 +20,5 @@ export const biophys: PackDefinition = {
     'Compartment models of single neurons from their reconstructions, driven by their synaptic partners.',
   defaultOn: false,
   glyph: 'biophys:model',
-  nodes: [modelNode, simulateNode],
+  nodes: [modelNode, simulateNode, loadRecordingNode, combineTracesNode],
 }

@@ -14568,3 +14568,20 @@ select.annotate__input {
   font-size: 10.5px;
   color: var(--text-secondary);
 }
+
+/* Load Recording's full-size listing (`RecordingBody`): the format, then every column it can give. */
+.recording-listing {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.recording-listing p {
+  margin: 6px 0;
+}
+.recording-listing ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.recording-listing__source,
+.recording-listing__note {
+  color: var(--text-muted);
+}

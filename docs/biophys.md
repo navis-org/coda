@@ -384,6 +384,56 @@ resistance, which is why theirs reads a little less isolated.
   out of it so the two cannot drift — p95 radius at twice the line width, clamped, quarter-pixel
   steps. Session state, like the colour scale and the speed.
 
+## Recordings
+
+Load Recording and Combine Traces (decided 2026-10-17) put a patch-clamp recording beside a
+simulation.
+
+- **One node for every format, a reader per format** (`data/ephys/recording.ts`). Every reader
+  fills one `Recording` — sweeps of equal length, channels and commands with a name and a unit, a
+  rate — and is chosen by the file's **signature**, the extension only naming what an unrecognised
+  file was probably meant to be. HEKA PatchMaster and NWB would each be one entry in `READERS`, so
+  a workflow built today reads them the day they exist, with no node and no migration.
+- **The ABF2 reader is a port of pyABF** (MIT), layouts, scaling and stimulus rules, so a number
+  read here is the number most people check a file against. `pnpm probe:abf <file>` holds the two
+  side by side; on the first real file (an MBON I–V, 12 sweeps × 32,000 samples, two channels) every
+  recorded sample agreed to float32 rounding (7.6e-6) and the rebuilt command exactly. **No recording
+  is committed** — it was a colleague's data; the unit tests build ABF2 files byte by byte instead.
+- **The command is rebuilt, not read**: ABF stores the waveform as an epoch table, and the rules are
+  pyABF's — the first sixty-fourth of a sweep at the holding level (or, when the output keeps it, the
+  last sweep's final level), then the epochs with their per-sweep increments, then holding again.
+  Only outputs whose waveform is enabled and drawn from epochs become columns; a waveform played from
+  a stimulus file is not in the recording, so it is said rather than drawn flat.
+- **The file is stored, not a table** (`uploads.ts`, a third kind beside tables and meshes), and read
+  every run: the channel, sweep and window controls decide the table, and changing one must not mean
+  picking the file again. The summary stored beside it is what inference and the channel picker read
+  synchronously — Upload Table's peek. Its cost is Upload Table's too: a shared workflow arrives
+  without the file. Being `cheap`, the node reads through `storedRecording` (`data/ephys`), which keeps
+  the **recordings read, within a byte budget** (a quarter of the crash floor; a parsed recording
+  holds its whole file, so a count would not bound it), a read counting as a use and the newest
+  always kept — so a recording and its control do not evict each other; the card hands over the
+  one it has just parsed, and overlapping runs share one read, or every
+  keystroke in Sweeps read the file back out of IndexedDB and parsed it again; a channel is
+  decoded **only over the window** asked for, a short crop of a long gap-free file being the case;
+  and the crash floor is asked of the summary and the controls, so the card says it before a run.
+- **Long, not a column per sweep**: `t`, `sweep`, a column per channel and command. A protocol's sweep
+  count is the file's, and the Line Chart draws a line per sweep from `Series` as it is. Downsampling
+  **averages** blocks (timed at their middle, so a trace never shifts), keeping noise from aliasing at
+  the price of blunting a spike narrower than the block. Not read: ABF1, variable-length event mode,
+  digital outputs, tags.
+- **Combine Traces interpolates, and never past an input's own range**: a recording and a simulation
+  share almost no sample time, so Join cannot line them up. Linear onto one grid (the first input's
+  times, the finest step, or a fixed one), a **shift** per input to align stimuli, nothing
+  extrapolated (numpy's `interp` holds the end value, which is why there is no emitter yet), and no
+  interpolation across a gap. An input that names a time twice within a trace is said — the shape
+  of a long table not spread into its sweeps, which would otherwise draw every sweep interpolated
+  across one another. Each input is grouped by sweep and put in time order **once**, for
+  every column (no sort at all for a table already in order), and the grid is walked beside each
+  trace. A long input is **spread** into a column per sweep, which makes the
+  columns a fact about the data: the node observes its schema then, as Pivot does. A column two inputs
+  share takes each input's label in front, decided on the **source** column's name — a simulated
+  `soma` beside a recorded `soma 1` is one measurement, and the name has to say whose.
+
 ## In the wizard
 
 **Simulate synaptic input**, contributed through `wizard.ts`: the start's neurons → **Select One**
@@ -423,6 +473,12 @@ as is. Downloading the *model* for NEURON is the planned next step, and the harn
 which makes "it loads in NEURON and gives the same answer" a test.
 
 ## Not built yet
+
+- **More recording formats**: HEKA PatchMaster (`.dat`) and NWB next, then whatever is asked for,
+  each a reader in `data/ephys`. ABF1 the same way, if old files turn up.
+- **Emitters for Load Recording and Combine Traces**: pyABF and `numpy.interp` are the obvious
+  cells, but the window, the averaging, the rebuilt command and the no-extrapolation rule each want a
+  golden held to the node first.
 
 - **The model as a NEURON (then Jaxley) script**, from the value's modelled cable rather than the
   source skeleton, with counts handed over rather than recomputed.

@@ -41,6 +41,15 @@ const NO_EMITTER: Record<string, string> = {
     'reproduces as is: the discretisation is NEURON\u2019s, but the soma, the fragment pruning and ' +
     'the synapse placement are this node\u2019s. A navis + NEURON emitter is planned once the ' +
     'probe\u2019s direct NEURON build has settled what it must emit (`docs/biophys.md`).',
+  'biophys:combineTraces':
+    'Linear interpolation onto one grid is `numpy.interp` per column, but with two rules numpy ' +
+    'does not share: nothing outside an input\u2019s own range (numpy holds the end value) and no ' +
+    'interpolation across a gap. Emitted once both are written out and held to the node.',
+  'biophys:loadRecording':
+    'A recording read by Coda\u2019s own reader (`data/ephys`), whose numbers agree with pyABF\u2019s ' +
+    '(`pnpm probe:abf`), so an emitter is `pyabf.ABF(path)` and a long table per sweep. Not yet: ' +
+    'the window, the averaging and the rebuilt command each have to match the node to the sample, ' +
+    'and that wants a golden checked against the node rather than a cell written by eye.',
   'biophys:simulate':
     'Runs the compartment model `biophys:model` builds, which has no emitter for the same reason: ' +
     'a notebook would need that model first. Follows the navis + NEURON emitter planned there.',

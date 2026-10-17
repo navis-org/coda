@@ -21,13 +21,13 @@
  * a map it hands to `memoPromise`, which takes a real `Map` — as does Split Axon/Dendrite's
  * automatic-split cache (`nodes/transform/splitCompartments.ts`), for the same reason.
  *
- * The other kind is a **byte-budgeted, read-promoting** cache — `data/geometryCache.ts` and
- * `data/zapbench/traces.ts` — and both differ from this class on the rule above rather than on the
- * budget: there, *a read counts as a use*, because the thing being held is a download somebody
- * keeps asking for rather than a value somebody keeps rewriting. Sharing this class would mean
- * every hit calling `set` to promote, which is the escape hatch `layoutMemo` uses and a poor
- * default. They are two implementations of one shape and could be one helper in `src/data`; that
- * is worth doing when a third appears, not before.
+ * The other kind is a **byte-budgeted, read-promoting** cache — `data/geometryCache.ts`,
+ * `data/zapbench/traces.ts` and `data/ephys/recording.ts`' parsed recordings — and they differ from
+ * this class on the rule above rather than on the budget: there, *a read counts as a use*, because
+ * the thing being held is a download somebody keeps asking for rather than a value somebody keeps
+ * rewriting. Sharing this class would mean every hit calling `set` to promote, which is the escape
+ * hatch `layoutMemo` uses and a poor default. They are three implementations of one shape now, and
+ * the next change to any of them is the moment to make them one helper in `src/data`.
  */
 export class LruMap<K, V> {
   private readonly entries = new Map<K, V>()

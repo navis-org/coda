@@ -44,7 +44,7 @@ import { partnerTrain } from './stimulus'
 import { isNameableRegion } from './channelRows'
 
 /** Column names the traces table owns; a record site's label may not take them. */
-/** The Traces output's time column, in ms. */
+/** Every table of traces' time column, in ms: Simulate's, Load Recording's, Combine Traces'. */
 export const TIME_COLUMN = 't'
 export const SOMA_COLUMN = 'soma'
 
