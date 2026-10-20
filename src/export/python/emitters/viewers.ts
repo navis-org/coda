@@ -1485,10 +1485,9 @@ registerEmitter(
 
     const ids = neurons ? `${neurons}['neuronId']` : '[]'
     lines.push(
-      `${shown} = coda_shown_segments(${ids}, ${name}_added, ${name}_removed)`,
-      `if len(${shown}) > ${plan.limit}:`,
-      `    print(f'{len(${shown})} neurons is more than ${plan.limit}. Neuroglancer draws every one, '`,
-      `          'and some browsers cut off a link this long.')`,
+      `${shown} = coda_shown_segments(`,
+      `    ${ids}, ${name}_added, ${name}_removed, limit=${plan.limit}`,
+      `)`,
     )
 
     const colorLines: string[] = []
@@ -1536,40 +1535,48 @@ function neuroglancerColorLines(
       return []
     case 'constant':
       return [`default_color=${pyStr(colors.color)}`]
+    case 'flat':
     case 'literal':
     case 'categorical': {
-      // The plan only hands back a data-driven mode with the neurons wired.
+      // The plan only hands back a data-driven kind with the neurons wired. Each is a colour per
+      // row, folded to one per neuron by `coda_segment_colors`; only the per-row colours differ.
       const frame = neurons!
       const colorsVar = `${ctx.name}_colors`
       ctx.helper('coda_segment_colors')
-      if (colors.kind === 'literal') {
+      let perRow: string[]
+      if (colors.kind === 'flat') {
+        // No column to read: every input neuron in the one colour.
+        perRow = [`[${pyStr(colors.color)}] * len(${frame}),`]
+      } else if (colors.kind === 'literal') {
         ctx.helper('coda_literal_colors')
-        lines.push(
-          `${colorsVar} = coda_segment_colors(`,
-          `    ${frame}['neuronId'],`,
-          `    coda_literal_colors(${frame}[${pyStr(colors.column)}], ${pyStr(colors.fallback)}),`,
-          `)`,
-        )
+        perRow = [
+          `coda_literal_colors(${frame}[${pyStr(colors.column)}], ${pyStr(colors.fallback)}),`,
+        ]
       } else {
         ctx.helper('coda_category_colors')
         const overrides = Object.entries(colors.overrides)
         lines.push(
           `# Coda's palette, in the order the commonest value takes it.`,
           `${ctx.name}_palette = ${pyList(colors.palette)}`,
-          `${colorsVar} = coda_segment_colors(`,
-          `    ${frame}['neuronId'],`,
-          `    coda_category_colors(`,
-          `        ${frame}[${pyStr(colors.column)}],`,
-          `        ${ctx.name}_palette,`,
+        )
+        perRow = [
+          `coda_category_colors(`,
+          `    ${frame}[${pyStr(colors.column)}],`,
+          `    ${ctx.name}_palette,`,
           ...(overrides.length > 0
             ? [
-                `        {${overrides.map(([label, color]) => `${pyStr(label)}: ${pyStr(color)}`).join(', ')}},`,
+                `    {${overrides.map(([label, color]) => `${pyStr(label)}: ${pyStr(color)}`).join(', ')}},`,
               ]
             : []),
-          `    ),`,
-          `)`,
-        )
+          `),`,
+        ]
       }
+      lines.push(
+        `${colorsVar} = coda_segment_colors(`,
+        `    ${frame}['neuronId'],`,
+        ...perRow.map((line) => `    ${line}`),
+        `)`,
+      )
       return [`colors=${colorsVar}`]
     }
   }
@@ -1620,10 +1627,12 @@ function selectedLines(
       })()
   return [
     ...lines,
-    `_new = [i for i in ${shown} if i not in set(${selected}['neuronId'])]`,
+    `_held = set(${selected}['neuronId'])`,
+    `_new = [i for i in ${shown} if i not in _held]`,
     `if _new:`,
     ...lookup,
-    `    _bare = [i for i in _new if i not in set(_found['neuronId'])]`,
+    `    _listed = set(_found['neuronId'])`,
+    `    _bare = [i for i in _new if i not in _listed]`,
     `    if _bare:`,
     `        print(f'{len(_bare)} neurons added in the viewer are not in the dataset, so they have only an id.')`,
     `    _columns = ${neurons ? `${selected}.columns` : `_found.columns`}`,

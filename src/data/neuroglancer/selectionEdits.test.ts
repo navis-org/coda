@@ -13,6 +13,7 @@ import {
   applySelectionEdits,
   decodeSelectionEdits,
   encodeSelectionEdits,
+  keepUnseenChanges,
   mergeShownSegments,
 } from './selectionEdits'
 
@@ -103,5 +104,100 @@ describe('reading a scene', () => {
   it('says when the layer is not there at all, which is not the same as empty', () => {
     expect(layerListing(scene, 'gone')).toBeUndefined()
     expect(layerListing({ layers: [{ name: 'banc' }] }, 'banc')?.shown).toEqual([])
+  })
+})
+
+describe('an in-place update set while the user is still clicking', () => {
+  const sel = (entries: Array<[string, boolean]>) => new Map(entries)
+
+  it('keeps a double-click the card has not seen yet', () => {
+    // Told [A]; the user has since double-clicked B; the card's next update still lists only A.
+    const out = keepUnseenChanges(
+      sel([['A', true]]),
+      sel([['A', true]]),
+      sel([
+        ['A', true],
+        ['B', true],
+      ]),
+    )
+    expect([...out]).toEqual([
+      ['A', true],
+      ['B', true],
+    ])
+  })
+
+  it('keeps a removal and a hide the card has not seen yet', () => {
+    const told = sel([
+      ['A', true],
+      ['B', true],
+    ])
+    const out = keepUnseenChanges(told, told, sel([['B', false]]))
+    expect([...out]).toEqual([['B', false]])
+  })
+
+  it('lets an upstream change land where the user did nothing', () => {
+    const told = sel([
+      ['A', true],
+      ['B', true],
+    ])
+    const out = keepUnseenChanges(
+      sel([
+        ['A', true],
+        ['C', true],
+      ]),
+      told,
+      told,
+    )
+    expect([...out]).toEqual([
+      ['A', true],
+      ['C', true],
+    ])
+  })
+
+  it('lets the card decide about an id it has seen change, a hide it read as a removal included', () => {
+    // Told A shown; the user hid A; under "leave Selected" the card folded that into a removal.
+    const out = keepUnseenChanges(
+      sel([['B', true]]),
+      sel([
+        ['A', true],
+        ['B', true],
+      ]),
+      sel([
+        ['A', false],
+        ['B', true],
+      ]),
+    )
+    expect([...out]).toEqual([['B', true]])
+  })
+
+  it('does not repeat a double-click the card has already folded in', () => {
+    const told = sel([['A', true]])
+    const out = keepUnseenChanges(
+      sel([
+        ['A', true],
+        ['B', true],
+      ]),
+      told,
+      sel([
+        ['A', true],
+        ['B', true],
+      ]),
+    )
+    expect([...out]).toEqual([
+      ['A', true],
+      ['B', true],
+    ])
+  })
+
+  it('keeps nothing where the frame does not know what it was told', () => {
+    const out = keepUnseenChanges(
+      sel([['A', true]]),
+      undefined,
+      sel([
+        ['A', true],
+        ['B', true],
+      ]),
+    )
+    expect([...out]).toEqual([['A', true]])
   })
 })

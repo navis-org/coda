@@ -27,7 +27,7 @@ import { showsEdgeLabels } from '../../nodes/lib/flowChartOps'
 import { selectionIds } from '../selection'
 import { yColumnsOf } from '../../nodes/lib/lineChart'
 import { readColorSpec } from '../../nodes/lib/encodingParams'
-import { SEGMENTS_WARN, keepsHidden } from '../../nodes/output/neuroglancer'
+import { keepsHidden } from '../../nodes/output/neuroglancer'
 import { decodeSelectionEdits } from '../../data/neuroglancer/selectionEdits'
 import { compareIds } from '../../core/ids'
 import { MUTED, constantColor, literalColor } from '../../style/encoding'
@@ -460,7 +460,9 @@ export function viewer3dPlan(ctx: Pick<NeutralContext, 'params' | 'input'>): Vie
  * How a Neuroglancer node's segments are coloured, as both documents write it.
  *
  * `none` leaves neuroglancer's own hash colours, which is what the card's default mode sends: no
- * colour data at all. `constant` is one `segmentDefaultColor`. The two data-driven modes carry
+ * colour data at all. `constant` is one `segmentDefaultColor`. `flat` is a data-driven mode with
+ * no column to read: the card then colours each input neuron the flat colour, one map entry each,
+ * and leaves a neuron added in the viewer on neuroglancer's colour, which a default would not. The two data-driven modes carry
  * what the canvas would otherwise read from the palette module, so a document cannot pick a
  * different palette from the card's: `categorical` the palette's own hexes and the overrides that
  * are colours, `literal` the colour a cell that is not one is drawn in.
@@ -468,6 +470,7 @@ export function viewer3dPlan(ctx: Pick<NeutralContext, 'params' | 'input'>): Vie
 export type NeuroglancerColors =
   | { kind: 'none' }
   | { kind: 'constant'; color: string }
+  | { kind: 'flat'; color: string }
   | { kind: 'literal'; column: string; fallback: string }
   | {
       kind: 'categorical'
@@ -529,7 +532,7 @@ export function neuroglancerPlan(
     layout: String(ctx.params.layout),
     layers: String(ctx.params.layers),
     showSlices: ctx.params.showSlices === true,
-    limit: Number(ctx.params.limit) || SEGMENTS_WARN,
+    limit: Number(ctx.params.limit),
     colors: neuroglancerColors(ctx, notes),
     notes,
   }
@@ -541,9 +544,12 @@ function neuroglancerColors(
 ): NeuroglancerColors {
   const spec = readColorSpec('segment', ctx.params, ctx.column)
   if (spec.mode === 'default') return { kind: 'none' }
-  const flat: NeuroglancerColors = { kind: 'constant', color: constantColor(spec, 'dark') }
-  // `resolveColor`'s own fallback: no column, or no rows to read one from, draws every neuron flat.
-  if (spec.mode === 'constant' || !spec.column || !ctx.input('neurons')) return flat
+  const color = constantColor(spec, 'dark')
+  if (spec.mode === 'constant') return { kind: 'constant', color }
+  // No rows: nothing is coloured, and a neuron added in the viewer keeps neuroglancer's colour.
+  if (!ctx.input('neurons')) return { kind: 'none' }
+  // `resolveColor`'s own fallback with no column: every input neuron flat, one entry each.
+  if (!spec.column) return { kind: 'flat', color }
   switch (spec.mode) {
     case 'literal':
       return { kind: 'literal', column: spec.column, fallback: MUTED }

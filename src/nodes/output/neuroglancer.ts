@@ -40,7 +40,8 @@ import { T, column } from '../../core/types'
 import type { DatasetValue, TableValue } from '../../core/values'
 import { emptyTable, isTableValue, makeTable, str, tableFromRows } from '../../core/values'
 import { LruMap } from '../../core/lruMap'
-import { memoPromise, untilAborted } from '../../data/memoPromise'
+import { groupBy } from '../../core/collections'
+import { ReplayedFailures, memoPromise, untilAborted } from '../../data/memoPromise'
 import { datasetCacheKey } from '../../data/neuronIndex'
 import { unmatchedIds } from '../lib/idList'
 import { errorMessage } from '../../core/errors'
@@ -86,7 +87,7 @@ import { colorParams, readColorSpec } from '../lib/encodingParams'
  * else's*: a link too long for a browser or a deployment fails visibly, at the far end, and it
  * is not Coda's to prevent on a number nobody has measured against every neuroglancer in use.
  */
-export const SEGMENTS_WARN = 10000
+const SEGMENTS_WARN = 10000
 
 /** Neuroglancer renders on black, so the dark palette is the right one whatever Coda's theme is. */
 const VIEWER_MODE = 'dark' as const
@@ -431,7 +432,7 @@ registerNode({
       throw new Error('Neurons input is not a table')
     }
 
-    const limit = Number(ctx.params.limit) || SEGMENTS_WARN
+    const limit = Number(ctx.params.limit)
     const spec = readColorSpec('segment', ctx.params, ctx.column)
     const { segments: arrived, colors, dropped } = segmentColors(neurons, spec, limit, ctx)
     const edits = decodeSelectionEdits(ctx.params.selectionEdits)
@@ -565,7 +566,7 @@ async function selectedNeurons(
 
   let found: TableValue | undefined
   try {
-    found = await untilAborted(lookupNeurons(source, dataset, added), ctx.signal)
+    found = await untilAborted(lookupNeurons(source, dataset, added, ctx.refresh), ctx.signal)
   } catch (err) {
     // A cancel is the run ending, not a lookup that failed.
     if (ctx.signal.aborted) throw err
@@ -604,14 +605,20 @@ async function selectedNeurons(
  * so a request only ever asks for ids nobody has looked up yet. Keyed by the set instead, every
  * double-click re-asked for every earlier one, and an upstream filter moving an added id in and out
  * of the input sent a request per keystroke (invariant 6). Shared without a signal, each run
- * waiting on its own (`untilAborted`); a failure is forgotten, never kept (`memoPromise`).
+ * waiting on its own (`untilAborted`).
+ *
+ * A failure is not an answer, so it is never kept as one (`memoPromise` forgets it), but it is
+ * replayed under the same token (`ReplayedFailures`), or every upstream keystroke would ask a
+ * refusing server again. Signing in, or Invalidate Results (`refresh`), asks again at once.
  */
 const lookups = new LruMap<string, Promise<TableValue>>(1024)
+const failures = new ReplayedFailures<string>()
 
 async function lookupNeurons(
   source: DataSource,
   dataset: DatasetValue,
   ids: readonly string[],
+  refresh: boolean,
 ): Promise<TableValue> {
   // The annotation key too: a substituted table answers a different question about the same ids.
   const prefix = datasetCacheKey(
@@ -620,23 +627,39 @@ async function lookupNeurons(
     dataset.datasetId,
     dataset.annotations?.key ?? '',
   )
+  const credential = source.credential?.()
   // Every held promise taken before anything is added, so the inserts cannot evict one being read.
-  const held: Promise<TableValue>[] = []
+  const byId = new Map<string, Promise<TableValue>>()
   const missing: string[] = []
   for (const id of ids) {
-    const kept = lookups.get(`${prefix}:${id}`)
-    if (kept) held.push(kept)
+    const key = `${prefix}:${id}`
+    if (refresh) failures.forget(key)
+    failures.check(key, credential)
+    const kept = lookups.get(key)
+    if (kept) byId.set(id, kept)
     else missing.push(id)
   }
   if (missing.length > 0) {
     const batch = source.findNeurons({ ...datasetRequest(dataset), neuronIds: missing })
+    batch.catch((error: unknown) => {
+      for (const id of missing) failures.record(`${prefix}:${id}`, error, credential)
+    })
     for (const id of missing) {
-      held.push(memoPromise(lookups, `${prefix}:${id}`, () => batch, { keep: 'resolved' }))
+      byId.set(
+        id,
+        memoPromise(lookups, `${prefix}:${id}`, () => batch, { keep: 'resolved' }),
+      )
     }
   }
-  // One table per request that answered, each cut to the ids asked about now.
-  const tables = [...new Set(await Promise.all(held))]
-  return concatBatches(tables.map((table) => rowsWithIds(table, ids)))
+  /*
+   * Each id answered only by the request that looked it up, each table read once for its own ids.
+   * Every table cut to every id instead, an id asked twice — its entry evicted from the LRU while a
+   * neighbour's kept the first request alive — came back from both, a duplicate row in `Selected`.
+   */
+  const tables = await Promise.all(ids.map((id) => byId.get(id)!))
+  const tableOf = new Map(ids.map((id, at) => [id, tables[at]!]))
+  const idsOf = groupBy(ids, (id) => tableOf.get(id)!)
+  return concatBatches([...idsOf].map(([table, own]) => rowsWithIds(table, own)))
 }
 
 /**

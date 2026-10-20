@@ -9,7 +9,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { memoPromise, untilAborted } from './memoPromise'
+import { ReplayedFailures, memoPromise, untilAborted } from './memoPromise'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -89,5 +89,26 @@ describe('untilAborted', () => {
     } finally {
       process.off('unhandledRejection', unhandled)
     }
+  })
+})
+
+describe('ReplayedFailures', () => {
+  it('replays a failure under the credential it was met with, and not under another', () => {
+    const failures = new ReplayedFailures<string>()
+    failures.record('k', new Error('401'), 'old-token')
+    expect(() => failures.check('k', 'old-token')).toThrow('401')
+    // Signing in is a reason to ask again at once.
+    expect(() => failures.check('k', 'new-token')).not.toThrow()
+  })
+
+  it('never records a cancel, and forgets on request', () => {
+    const failures = new ReplayedFailures<string>()
+    const aborted = new AbortController()
+    aborted.abort()
+    failures.record('k', new Error('cancelled'), undefined, aborted.signal)
+    expect(() => failures.check('k', undefined)).not.toThrow()
+    failures.record('k', new Error('500'), undefined)
+    failures.forget('k')
+    expect(() => failures.check('k', undefined)).not.toThrow()
   })
 })

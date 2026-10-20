@@ -1040,7 +1040,13 @@ if (!requireNamespace("stringi", quietly = TRUE) || !requireNamespace("httr", qu
   published_text <- as.character(jsonlite::toJSON(record$published, auto_unbox = TRUE, digits = I(17),
                                                   null = "null"))
   stubs <- list(
-    GET = function(url, ...) { asked <<- c(asked, url); structure(list(), class = "response") },
+    # The config is forced, as the real GET does: R evaluates arguments lazily, and a stub that
+    # ignored it would never run the login the chunk takes it from.
+    GET = function(url, config = NULL, ...) {
+      force(config)
+      asked <<- c(asked, url)
+      structure(list(), class = "response")
+    },
     stop_for_status = function(x, ...) invisible(x),
     content = function(x, ...) published_text
   )
@@ -1050,6 +1056,12 @@ if (!requireNamespace("stringi", quietly = TRUE) || !requireNamespace("httr", qu
 
   hemibrain_neuprint <- list(server = "https://neuprint.janelia.org", dataset = "hemibrain:v1.2.1",
                              config = NULL)
+  # The chunk takes its config from a login, which is neuprintr's and would reach the server.
+  logged_in <- 0L
+  neuprint_login <- function(conn) {
+    logged_in <<- logged_in + 1L
+    conn
+  }
   find_neurons <- tibble(neuronId = column_of(record$neurons, "neuronId"),
                          type = column_of(record$neurons, "type"))
   neuprint_get_meta <- function(ids, conn) {
@@ -1068,6 +1080,8 @@ if (!requireNamespace("stringi", quietly = TRUE) || !requireNamespace("httr", qu
 
   if (isTRUE(ran)) {
     expected <- record$expected
+    check("neuroglancer: the request carries a login's config, not the bare connection's",
+          logged_in == 1L, logged_in)
     check("neuroglancer: the scene is asked of the endpoint the card reads",
           identical(asked, "https://neuprint.janelia.org/api/npexplorer/nglayers/hemibrain:v1.2.1.json"),
           asked)
@@ -1101,6 +1115,26 @@ if (!requireNamespace("stringi", quietly = TRUE) || !requireNamespace("httr", qu
     check("neuroglancer: Selected has the card's rows, in its order", identical(got, want),
           vapply(got, paste, "", collapse = "|"))
   }
+
+  # A scene showing nothing, which a dataset wired alone or an empty selection is: `ifelse` over no
+  # segments answers a logical(0), which nglscenes-r refuses as segment ids.
+  empty <- tryCatch(
+    coda_neuroglancer_scene(nglscenes::ngs_from_list(record$published), "hemibrain:v1.2.1", character(0)),
+    error = function(e) conditionMessage(e))
+  check("neuroglancer: a scene showing no neurons is built", !is.character(empty), empty)
+  if (!is.character(empty)) {
+    at <- regexpr("#!", url <- coda_neuroglancer_url(empty, "https://neuroglancer-demo.appspot.com"), fixed = TRUE)
+    state <- jsonlite::fromJSON(utils::URLdecode(substring(url, at + 2L)), simplifyVector = FALSE)
+    layer <- Filter(function(l) identical(l$name, "hemibrain:v1.2.1"), state$layers)[[1]]
+    check("neuroglancer: ...and writes an empty segment list and colour map",
+          identical(layer$segments, list()) && identical(names(layer$segmentColors), character(0)) &&
+            grepl('"segmentColors":{}', utils::URLdecode(url), fixed = TRUE))
+  }
+
+  # Numbers labelled as JavaScript spells them, so the canvas' categories and overrides match.
+  check("neuroglancer: number labels are JavaScript's",
+        identical(coda_label(c(0.1, 0.30000000000000004, 1e21, 1e-7, 100, NA)),
+                  c("0.1", "0.30000000000000004", "1e+21", "1e-7", "100", "\u2014")))
 }
 
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")

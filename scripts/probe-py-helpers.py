@@ -1548,6 +1548,7 @@ else:
           _client.session.asked == ['https://neuprint.janelia.org/api/npexplorer/nglayers/hemibrain:v1.2.1.json'],
           str(_client.session.asked))
     _compare('neuPrint', _ns, _np['expected'])
+    _everything = _ns
 
     # CAVE: the scene is built from the datastack's info, the link opens its own viewer, and an
     # added neuron is looked up in the dataset's labels.
@@ -1572,6 +1573,28 @@ else:
         'find_neurons': pd.DataFrame(_cv['neurons']).astype('string'),
     })
     _compare('CAVE', _ns, _cv['expected'])
+
+    # A scene showing nothing, which a dataset wired alone or an empty selection is.
+    _empty = _everything['coda_neuroglancer_scene'](_Scene.from_dict(_np['published']), 'hemibrain:v1.2.1', [])
+    _, _state = _link(_everything['coda_neuroglancer_url'](_empty, 'https://neuroglancer-demo.appspot.com'))
+    _layer = next(l for l in _state['layers'] if l['name'] == 'hemibrain:v1.2.1')
+    check('neuroglancer: a scene showing no neurons has an empty segment list and colour map',
+          _layer['segments'] == [] and _layer['segmentColors'] == {}, str(_layer))
+
+    # Numbers labelled as JavaScript spells them, so the canvas' categories and overrides match.
+    _labels = [_everything['_coda_label'](v) for v in [0.1, 0.30000000000000004, 1e21, 1e-7, 100.0, 10**22, None]]
+    check("neuroglancer: number labels are JavaScript's",
+          _labels == ['0.1', '0.30000000000000004', '1e+21', '1e-7', '100', '1e+22', '\u2014'], str(_labels))
+
+    # The warning counts the input's neurons, before the viewer's edits, as the card's does.
+    import io as _io, contextlib as _contextlib
+    _out = _io.StringIO()
+    with _contextlib.redirect_stdout(_out):
+        _everything['coda_shown_segments'](['1', '2'], ['3'], [], limit=2)
+        _everything['coda_shown_segments'](['1', '2', '3'], [], ['3'], limit=2)
+    check('neuroglancer: the size warning counts the input before the edits',
+          _out.getvalue().count('more than 2') == 1 and _out.getvalue().startswith('3 neurons'),
+          _out.getvalue())
 
 # ---- the Custom Dataset golden, run end to end -------------------------------
 # Every cell of `custom.ipynb` after its helpers, executed in order against synthetic parts: the

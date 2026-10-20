@@ -46,6 +46,7 @@ export type RPackage =
   | 'uwot'
   | 'nabor'
   | 'httr'
+  | 'jsonlite'
   | 'stringi'
   | 'nglscenes'
 
@@ -98,10 +99,13 @@ export const PACKAGES: Record<RPackage, PackageSpec> = {
   /*
    * The Neuroglancer node: `httr` asks neuPrint for the scene it publishes, with the connection's
    * own config, and `stringi` breaks a categorical tie in ICU's alphabetical order, which is the
-   * browser's — base R's `order()` collates by whatever locale the session happens to be in. Both
-   * arrive with neuprintr, which imports `httr` and `stringr` (built on `stringi`).
+   * browser's — base R's `order()` collates by whatever locale the session happens to be in.
+   * `jsonlite` reads a number back exactly when a category label is spelled the way JavaScript
+   * spells it, R's own `as.numeric()` misreading some (`1e300`). All three arrive with neuprintr,
+   * which imports `httr`, `jsonlite` and `stringr` (built on `stringi`).
    */
   httr: {},
+  jsonlite: {},
   stringi: {},
   /*
    * The scene itself: nglscenes-r reads it losslessly and writes it back exactly — 18-digit ids

@@ -1367,7 +1367,9 @@ registerEmitter('out.neuroglancer', (ctx) => {
     `# The scene neuPrint publishes for this dataset, as the card fetches it.`,
     `.response <- httr::GET(`,
     `  paste0(sub("/+$", "", ${conn}$server), "/api/npexplorer/nglayers/", ${conn}$dataset, ".json"),`,
-    `  ${conn}$config`,
+    // The token rides on the config only once neuprintr has logged in: `neuprint_connection`
+    // leaves it out, and neuPrint answers this endpoint 401 without one.
+    `  neuprint_login(${conn})$config`,
     `)`,
     `httr::stop_for_status(.response)`,
     `${name}_published <- nglscenes::ngs_from_string(httr::content(.response, as = "text", encoding = "UTF-8"))`,
@@ -1378,11 +1380,9 @@ registerEmitter('out.neuroglancer', (ctx) => {
     `${name}_added <- ${ids(added)}`,
     `${name}_removed <- ${ids(removed)}`,
     ...(plan.keepHidden ? [`${name}_hidden <- ${ids(hidden)}`] : []),
-    `${shown} <- coda_shown_segments(${neurons ? `${neurons}$neuronId` : 'character(0)'}, ${name}_added, ${name}_removed)`,
-    `if (length(${shown}) > ${plan.limit}) {`,
-    `  message(length(${shown}), " neurons is more than ${plan.limit}. Neuroglancer draws every one, ",`,
-    `          "and some browsers cut off a link this long.")`,
-    `}`,
+    `${shown} <- coda_shown_segments(`,
+    `  ${neurons ? `${neurons}$neuronId` : 'character(0)'}, ${name}_added, ${name}_removed, limit = ${plan.limit}`,
+    `)`,
   ]
 
   const colorLines: string[] = []
@@ -1451,40 +1451,48 @@ function neuroglancerColorLinesR(
       return []
     case 'constant':
       return [`default_color = ${rStr(colors.color)}`]
+    case 'flat':
     case 'literal':
     case 'categorical': {
-      // The plan only hands back a data-driven mode with the neurons wired.
+      // The plan only hands back a data-driven kind with the neurons wired. Each is a colour per
+      // row, folded to one per neuron by `coda_segment_colors`; only the per-row colours differ.
       const frame = neurons!
       const colorsVar = `${ctx.name}_colors`
       ctx.helper('coda_segment_colors')
-      if (colors.kind === 'literal') {
+      let perRow: string[]
+      if (colors.kind === 'flat') {
+        // No column to read: every input neuron in the one colour.
+        perRow = [`rep(${rStr(colors.color)}, nrow(${frame}))`]
+      } else if (colors.kind === 'literal') {
         ctx.helper('coda_literal_colors')
-        lines.push(
-          `${colorsVar} <- coda_segment_colors(`,
-          `  ${frame}$neuronId,`,
-          `  coda_literal_colors(${frame}[[${rStr(colors.column)}]], ${rStr(colors.fallback)})`,
-          `)`,
-        )
+        perRow = [
+          `coda_literal_colors(${frame}[[${rStr(colors.column)}]], ${rStr(colors.fallback)})`,
+        ]
       } else {
         ctx.helper('coda_category_colors')
         const overrides = Object.entries(colors.overrides)
         lines.push(
           `# Coda's palette, in the order the commonest value takes it.`,
           `${ctx.name}_palette <- ${rVector(colors.palette)}`,
-          `${colorsVar} <- coda_segment_colors(`,
-          `  ${frame}$neuronId,`,
-          `  coda_category_colors(`,
-          `    ${frame}[[${rStr(colors.column)}]],`,
-          `    ${ctx.name}_palette${overrides.length > 0 ? ',' : ''}`,
+        )
+        perRow = [
+          `coda_category_colors(`,
+          `  ${frame}[[${rStr(colors.column)}]],`,
+          `  ${ctx.name}_palette${overrides.length > 0 ? ',' : ''}`,
           ...(overrides.length > 0
             ? [
-                `    c(${overrides.map(([label, color]) => `${rStr(label)} = ${rStr(color)}`).join(', ')})`,
+                `  c(${overrides.map(([label, color]) => `${rStr(label)} = ${rStr(color)}`).join(', ')})`,
               ]
             : []),
-          `  )`,
           `)`,
-        )
+        ]
       }
+      lines.push(
+        `${colorsVar} <- coda_segment_colors(`,
+        `  ${frame}$neuronId,`,
+        ...perRow.map((line) => `  ${line}`),
+        `)`,
+      )
       return [`colors = ${colorsVar}`]
     }
   }

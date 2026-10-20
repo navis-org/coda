@@ -36,7 +36,8 @@ import {
   updateIn,
 } from '../data/neuroglancer/frameMessage'
 import type { LayerSelection } from '../data/neuroglancer/scene'
-import { parseSceneUrl, segmentEntry } from '../data/neuroglancer/scene'
+import { layerListing, parseSceneUrl, segmentEntry } from '../data/neuroglancer/scene'
+import { keepUnseenChanges } from '../data/neuroglancer/selectionEdits'
 
 /** Settled for this long before posting; neuroglancer's own hash binding waits 200 ms. */
 const SETTLE_MS = 250
@@ -50,9 +51,24 @@ let applied = hashUpdate() ?? 0
 // Coda's CAVE tokens first in line for every protected data server (`caveCredentials.ts`).
 registerCaveCredentials()
 const viewer = setupDefaultViewer()
+/*
+ * Whether the next settled view is the one a document opens on — the published framing, or the
+ * saved one — rather than somebody moving the camera. Such a view is noted and not posted
+ * (`reportChanges`), or every card that merely loaded would save a view. Decided here, where the
+ * navigation is seen: the card used to count one report after a navigation instead, and the two
+ * halves disagreed whenever an opening changed no view, so the user's next camera move was skipped.
+ */
+let opening = true
+
 window.addEventListener('hashchange', () => {
   // Neuroglancer restores the state on this same event, so a report after it describes this update.
   applied = hashUpdate() ?? applied
+  // A merge (`#!+`) restores only the keys it names. Anything else is a navigation, and opens.
+  const merge = window.location.hash.startsWith('#!+')
+  if (!merge) opening = true
+  // What each layer was told is now the fragment's, read from it when next needed — wherever the
+  // fragment names the layers. A merge naming none (the layer bar alone) told no layer anything.
+  if (!merge || Array.isArray(parseSceneUrl(window.location.hash)?.['layers'])) told.clear()
 })
 if (window.parent !== window) reportChanges(viewer)
 
@@ -81,7 +97,10 @@ function reportChanges(ng: typeof viewer): void {
         return child ? getCachedJson(child).value : undefined
       })
       const text = JSON.stringify(view)
-      if (text !== postedView) {
+      if (opening) {
+        opening = false
+        postedView = text
+      } else if (text !== postedView) {
         postedView = text
         post({ type: FRAME_VIEW_MESSAGE, view, update: applied })
       }
@@ -149,16 +168,42 @@ function segmentationDisplay(name: string): SegmentationDisplay | undefined {
     : undefined
 }
 
+/**
+ * What the card last said each layer holds, id → visible: its last in-place update, or the scene of
+ * the navigation that opened this one (read from the fragment when first needed). The difference
+ * between that and what the layer shows is the user's double-clicks the card has not seen yet.
+ */
+const told = new Map<string, Map<bigint, boolean>>()
+
+/** What the navigation's fragment says a layer holds, or undefined where it does not say. */
+function toldByNavigation(name: string): Map<bigint, boolean> | undefined {
+  const scene = parseSceneUrl(window.location.hash)
+  const listing = scene && layerListing(scene, name)
+  if (!listing) return undefined
+  // Already read through `segmentEntry`, so its ids are valid as they stand.
+  const hidden = new Set(listing.hidden)
+  return new Map(listing.listed.map((id) => [BigInt(id), !hidden.has(id)]))
+}
+
 function setSelection(selection: LayerSelection): boolean {
   const display = segmentationDisplay(selection.name)
   if (!display) return false
   const group = display.segmentationGroupState.value
-  // `!id` is listed but hidden, as neuroglancer writes it: selected, not visible.
-  const wanted = new Map<bigint, boolean>()
+  // id → visible; `!id` is listed but hidden, as neuroglancer writes it: selected, not visible.
+  const asked = new Map<bigint, boolean>()
   for (const raw of selection.segments) {
     const entry = segmentEntry(raw)
-    if (entry) wanted.set(BigInt(entry.id), entry.visible)
+    if (entry) asked.set(BigInt(entry.id), entry.visible)
   }
+  const current = new Map<bigint, boolean>()
+  for (const id of group.selectedSegments) current.set(id, group.visibleSegments.has(id))
+  // The user's own changes since the card last said survive an update computed before it saw them.
+  const wanted = keepUnseenChanges(
+    asked,
+    told.get(selection.name) ?? toldByNavigation(selection.name),
+    current,
+  )
+  told.set(selection.name, asked)
   for (const id of [...group.selectedSegments]) {
     if (!wanted.has(id)) group.selectedSegments.delete(id)
   }
@@ -184,19 +229,23 @@ function setSelection(selection: LayerSelection): boolean {
     colors.segmentStatedColors.clear()
     colors.restoreState({ segmentColors: stated })
   }
-  if (held.segmentDefaultColor !== selection.segmentDefaultColor) {
+  // Case-blind: neuroglancer writes its colours lowercase, and restoring one that differs only in
+  // case fires a state change and a report with nothing changed.
+  if (!sameColor(held.segmentDefaultColor, selection.segmentDefaultColor)) {
     colors.segmentDefaultColor.restoreState(selection.segmentDefaultColor)
   }
   return true
 }
 
-/** Two colour maps naming the same colour for the same ids, whatever the case of the hex. */
+/** Two colours, or two absences of one, whatever the case of the hex. */
+function sameColor(a: string | undefined, b: string | undefined): boolean {
+  return a?.toLowerCase() === b?.toLowerCase()
+}
+
+/** Two colour maps naming the same colour for the same ids. */
 function sameColors(a: Record<string, string>, b: Record<string, string>): boolean {
   const keys = Object.keys(b)
-  return (
-    Object.keys(a).length === keys.length &&
-    keys.every((id) => a[id]?.toLowerCase() === b[id]!.toLowerCase())
-  )
+  return Object.keys(a).length === keys.length && keys.every((id) => sameColor(a[id], b[id]))
 }
 
 /*

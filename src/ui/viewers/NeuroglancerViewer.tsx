@@ -275,12 +275,6 @@ interface HeldFrame {
   sent: number
   /** Whether this document was last told ⌥1–9 are Coda's (`FrameKeysMessage`). */
   claimsAltDigits?: boolean
-  /**
-   * Set by a full navigation: the next view report is the scene opening — published, or the saved
-   * view — not somebody moving the camera, and is not saved. Saving it wrote a view into every
-   * workflow whose card had merely loaded.
-   */
-  openingView?: boolean
 }
 
 /**
@@ -672,7 +666,6 @@ export function NeuroglancerViewer({
       // selection; a full navigation always takes the setting, whatever a resumed state said.
       const barChange = applied?.layerPanel === layerBar ? {} : layerPanelPatch(layerBar)
       if (applied && applied.base !== target) forgetDocument(kept)
-      if (!canMerge) kept.openingView = true
       kept.frame.src = canMerge
         ? scenePatchUrl(frameBase, scene, kind, withUpdate(barChange, nextUpdate()))
         : sceneUrl(frameBase, withUpdate(withLayerPanel(scene, layerBar), nextUpdate()), kind)
@@ -713,7 +706,6 @@ export function NeuroglancerViewer({
     layerBar,
     savedViewRef,
     resync,
-    readable,
   ])
 
   /**
@@ -791,8 +783,8 @@ export function NeuroglancerViewer({
       const latest = (event.data as { update?: unknown }).update === kept.sent
       if (!latest) return
       if (isFrameViewMessage(event.data)) {
-        if (kept.openingView) kept.openingView = false
-        else handlers.current.saveView(event.data.view)
+        // Never the opening view: the frame keeps that to itself (`reportChanges`).
+        handlers.current.saveView(event.data.view)
       } else if (isFrameStateMessage(event.data)) {
         // Only from a report of the latest update: a late one from the document before a
         // navigation would vouch for a document that has not reported.

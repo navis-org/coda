@@ -127,6 +127,10 @@ await sleep(6000)
 const before = await selected()
 check(before?.ids.length === 3, `Selected starts as the three neurons found (${before?.ids})`)
 check((await edits()).length === 0, 'the opening report of the scene is not an edit')
+check(
+  !(await inStore(`return S.getState().graph.nodes.find((n) => n.id === ${JSON.stringify(view)}).params.view`)),
+  'the opening view is not saved: a card nobody has touched writes no view',
+)
 
 const layerName = await evaluate(`(() => {
   const v = ${FRAME}.contentWindow.viewer
@@ -210,6 +214,26 @@ check(
     (await evaluate(`${FRAME}.getAttribute('src')`)) === srcInside,
   '…on the same layer, with no navigation',
 )
+
+// ── A double-click the card has not seen, overtaken by an update it computed before ────────────
+// The frame reports 250 ms after a change settles; an update the card sends inside that window was
+// computed without the double-click, and set in place it used to take the neuron back out with
+// nothing recorded. Back to the scene's own colours here: no fetch, so the update is immediate.
+await evaluate(`${SEGMENTS}.visibleSegments.add(${added}n)`)
+await inStore(`
+  S.getState().setParam(${JSON.stringify(view)}, 'segmentColorMode', 'default')
+  await S.getState().runAll()
+`)
+await sleep(3000)
+const raced = await edits()
+check(
+  JSON.stringify(raced) === JSON.stringify([`+${added}`]) &&
+    (await evaluate(`${SEGMENTS}.visibleSegments.has(${added}n)`)) === true,
+  `a double-click overtaken by an update survives it and lands as an edit (${JSON.stringify(raced)})`,
+)
+// Out again, so the hidden-neuron half below starts from the five the input names.
+await evaluate(`${SEGMENTS}.visibleSegments.delete(${added}n)`)
+await sleep(3000)
 
 // ── Hidden neurons: removed by default (above), kept and marked under `stay in Selected` ─────────
 await inStore(`

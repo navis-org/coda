@@ -1297,9 +1297,8 @@ describe('neurons changed inside the viewer', () => {
       const { container, onSavedView } = withView(URL_A, '')
       frameLoaded(container)
       frameShowing(container, sceneWith(['1']))
-      // The first report is the scene opening: a card nobody has touched writes nothing.
-      viewReport(container, { position: [1, 2, 3] })
-      expect(onSavedView).not.toHaveBeenCalled()
+      // Every view the frame reports is somebody moving the camera: the frame keeps the opening
+      // view to itself, so a card nobody has touched receives none (probed in the browser).
       viewReport(container, VIEW)
       expect(onSavedView).toHaveBeenCalledWith(saved(OWNED))
       // A report from before the latest update is the old framing, and is not saved.

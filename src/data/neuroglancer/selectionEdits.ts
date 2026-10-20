@@ -117,3 +117,42 @@ export function mergeShownSegments(
   }
   return { added, removed, hidden: hidden ? new Set(hidden) : edits.hidden }
 }
+
+/**
+ * A layer's selection as an in-place update should leave it: what the card asks for, plus every
+ * change the user has made in the frame that the card had not seen when it asked.
+ *
+ * Without the second half an update set mid-gesture takes back a double-click: the card computes
+ * update n+1 from the frame's report of A, the user double-clicks B before the frame reports again,
+ * and n+1 arrives listing A and not B. The frame then reports against n+1, which the card folds
+ * against the scene it sent, and B is gone without a trace.
+ *
+ * Decided per id, against `told` — the last selection the card sent for this layer. Where the
+ * frame shows an id differently from `told`, the user changed it. Where the card's new update also
+ * differs from `told` for that id, the card has decided about it since, from the user's own report
+ * or from upstream, and the card wins. Only where the update says the same as before is the user's
+ * change one it has not seen, and that is kept. The card's own spelling is why it has to be this
+ * way round: under "leave Selected" a neuron hidden in the viewer is a removal, so the card stops
+ * listing a neuron the frame still shows hidden, and keeping every difference from `told` would
+ * bring it back.
+ *
+ * Each map is id → visible; an absent id is not selected. `told` undefined means the frame does not
+ * know what it was last told, and then nothing is kept, rather than every segment shown counting as
+ * the user's.
+ */
+export function keepUnseenChanges<K>(
+  wanted: ReadonlyMap<K, boolean>,
+  told: ReadonlyMap<K, boolean> | undefined,
+  current: ReadonlyMap<K, boolean>,
+): Map<K, boolean> {
+  const out = new Map(wanted)
+  if (!told) return out
+  const unseen = (id: K) => wanted.get(id) === told.get(id)
+  // Selected, shown or hidden in the frame, where the card still says what it said before.
+  for (const [id, visible] of current) {
+    if (told.get(id) !== visible && unseen(id)) out.set(id, visible)
+  }
+  // Taken out in the frame, likewise.
+  for (const id of told.keys()) if (!current.has(id) && unseen(id)) out.delete(id)
+  return out
+}

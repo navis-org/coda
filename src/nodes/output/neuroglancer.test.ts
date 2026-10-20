@@ -742,10 +742,11 @@ describe('neurons changed inside the viewer', () => {
     source: DataSource,
     said: string[] = [],
     extra: ParamValues = {},
+    refresh = false,
   ) {
     const d = def()
     const params = { ...defaultParams(d), ...extra, selectionEdits } as ParamValues
-    const out = await d.evaluate(evalContext(d, params, table, source, said))
+    const out = await d.evaluate({ ...evalContext(d, params, table, source, said), refresh })
     return {
       scene: parseSceneUrl(asString(out['url']))!,
       selected: out['selected'] as TableValue,
@@ -786,7 +787,7 @@ describe('neurons changed inside the viewer', () => {
     expect(asked).toEqual([['921']])
   })
 
-  it('keeps the link and an id-only row when the lookup fails, and asks again next time', async () => {
+  it('keeps the link and an id-only row when the lookup fails, and asks again when invalidated', async () => {
     const { source, asked } = lookupSource({}, true)
     const said: string[] = []
     const { scene, selected } = await run(input(['130']), ['+931'], source, said)
@@ -795,9 +796,27 @@ describe('neurons changed inside the viewer', () => {
     expect(said.join(' ')).toMatch(
       /Could not look up the 1 neuron .*server said no.*Invalidate Results/,
     )
-    // A failure has not answered "none", so it is not kept.
-    await run(input(['130']), ['+931'], source)
+    // Replayed rather than asked again: this node is cheap, and an upstream keystroke re-runs it.
+    const again: string[] = []
+    await run(input(['130', '131']), ['+931'], source, again)
+    expect(asked).toHaveLength(1)
+    expect(again.join(' ')).toMatch(/Could not look up/)
+    // But a failure has not answered "none": Invalidate Results asks again at once.
+    await run(input(['130']), ['+931'], source, [], {}, true)
     expect(asked).toHaveLength(2)
+  })
+
+  it('answers an id once when its first request was evicted and a neighbour kept it alive', async () => {
+    // The lookup cache is an LRU of 1024 ids. 971 and 972 are looked up together, and filling the
+    // cache evicts one of them alone, so the next run holds the first request through the other
+    // and asks for the evicted one again — an id both requests can answer.
+    const known = { '971': 'A', '972': 'B' }
+    const { source } = lookupSource(known)
+    await run(input(['150']), ['+971', '+972'], source)
+    const filler = Array.from({ length: 1023 }, (_, i) => `+${980000 + i}`)
+    await run(input(['150']), ['+971', ...filler], source)
+    const { selected } = await run(input(['150']), ['+971', '+972'], source)
+    expect(selected.data['neuronId']).toEqual(['150', '971', '972'])
   })
 
   it('lets a cancel end the run rather than warn that the lookup failed', async () => {

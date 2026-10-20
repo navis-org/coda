@@ -31,6 +31,8 @@
  * Folding that rule in here would make it one boolean away from being wrong at every site.
  */
 
+import { LruMap } from '../core/lruMap'
+
 /** What a memo holds on to once its promise has settled successfully. See the module header. */
 export type Keep = 'resolved' | 'inflight'
 
@@ -89,4 +91,44 @@ export function untilAborted<T>(
     signal.addEventListener('abort', onAbort, { once: true })
     promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
   })
+}
+
+/** How long a failed request is answered from rather than asked again. */
+export const RETRY_AFTER_MS = 60_000
+
+/**
+ * Failures answered from for `RETRY_AFTER_MS` rather than asked again: the half `memoPromise`
+ * deliberately leaves out, since a failure kept as an answer is how a listing replayed one for the
+ * life of the tab. Replayed, not kept, so a `cheap` caller re-running per keystroke does not ask a
+ * refusing server once a keystroke (invariant 6).
+ *
+ * Under the credential it was met with: a 401 is a fact about the token, and signing in asks again
+ * at once. A cancel is never recorded, saying nothing about the server.
+ */
+export class ReplayedFailures<K> {
+  private readonly held: LruMap<
+    K,
+    { at: number; credential: string | undefined; error: unknown }
+  >
+
+  constructor(max = 1024) {
+    this.held = new LruMap(max)
+  }
+
+  /** Throw the failure `key` last met, if it is recent and was met under `credential`. */
+  check(key: K, credential: string | undefined): void {
+    const failed = this.held.get(key)
+    if (failed && failed.credential === credential && Date.now() - failed.at < RETRY_AFTER_MS) {
+      throw failed.error
+    }
+  }
+
+  record(key: K, error: unknown, credential: string | undefined, signal?: AbortSignal): void {
+    if (!signal?.aborted) this.held.set(key, { at: Date.now(), credential, error })
+  }
+
+  /** Ask again next time — what a refresh (Invalidate Results) means. */
+  forget(key: K): void {
+    this.held.delete(key)
+  }
 }

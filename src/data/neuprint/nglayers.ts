@@ -65,8 +65,8 @@ function nglayersPath(datasetId: string): string {
  *
  * The same document `meshSourceFromState` reads, kept whole rather than reduced to a mesh URL —
  * it also carries the curated camera, the ROI meshes and the synapse layers, which is
- * everything an embedded viewer wants. Needs no token; it does need the proxy, like every
- * other neuPrint path.
+ * everything an embedded viewer wants. Needs a token (an unauthenticated request was answered 401
+ * on 2026-10-20) and the proxy, like every other neuPrint path.
  */
 export async function fetchNgState(
   datasetId: string,

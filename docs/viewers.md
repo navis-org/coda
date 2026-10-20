@@ -4591,10 +4591,23 @@ Eleven things that were each a way to get it wrong:
    against the link, which for FlyWire is written for the Seung-lab fork and names the layer
    `segmentation_with_graph`.
    Anything else — a layer added, `Layout`, a different dataset — still navigates and still waits.
+   **An update set in place keeps the user's changes it was computed without.** The frame reports
+   250 ms after a change settles, so an update the card sends inside that window — an upstream edit,
+   a colour change — lists the selection as it was before the latest double-click, and applied
+   wholesale it took the neuron back out with nothing recorded (the probe's "overtaken" check, which
+   fails on the old frame). The frame keeps what the card last said each layer holds (`told`) and,
+   per id, keeps its own state where the update says the same about that id as before
+   (`keepUnseenChanges`). Where the update says something new about an id, the card has decided
+   about it since and wins — which is also what keeps a neuron hidden under "leave Selected", a
+   removal to the card, from coming back as hidden.
 5. **An added neuron is looked up, in a `cheap` node** (`lookupNeurons`), which bends invariant 6 on
    purpose: it fires per double-click, settled by the frame, never per keystroke, and only for ids
-   the input did not describe. Kept per dataset and id set so a restyle asks nothing; shared without
-   a signal; a failure is forgotten and the rows fall back to an id each, with a warning. A segment
+   the input did not describe. Kept per dataset and id so a restyle asks nothing, and each id is
+   answered only by the request that looked it up, or an id asked twice after an eviction comes back
+   twice. Shared without a signal. A failure is never kept as an answer, but it is replayed for a
+   minute rather than asked again on every upstream keystroke — under the token it was met with
+   (`ReplayedFailures`, beside `memoPromise`, keyed on `DataSource.credential`), so signing in asks
+   again at once, as does Invalidate Results. The rows fall back to an id each, with a warning. A segment
    the neuron table does not list (a fragment) keeps an id-only row, since somebody chose it.
 6. **A report says which update it describes.** Every navigation (in the frame-only fragment key
    `codaUpdate`) and every in-place message carries a number; the frame echoes the last one it
@@ -4615,9 +4628,15 @@ Eleven things that were each a way to get it wrong:
    `VIEW_KEYS` (layout, position, orientations, scales, depths) once it settles; the card stores
    them in `view` with the dataset id (`encodeSavedView`) through a param declared **`unrecorded`**,
    which `setParam` writes with no undo step and no auto-run, so a camera drag is never what Ctrl+Z
-   rewinds through, and undo and redo step around it, the write being carried into every history
-   snapshot. **The first view a frame reports after a full navigation is not saved** — it is the
-   scene opening, and saving it wrote a camera into every workflow whose card had merely loaded.
+   rewinds through, and undo and redo step around it: they lay the live value over whatever
+   snapshot they restore (`withLiveUnrecorded`), rather than the write being copied into every
+   holder of one — `past`, `future` and a gesture's start were each a copy, and the third was found
+   by its bug. **The view a frame opens on is not saved** — it is the scene opening, and saving it
+   wrote a camera into every workflow whose card had merely loaded. The frame decides that, where
+   the navigation is seen: it notes the first settled view of a document and after each full
+   navigation, and posts only views after it. The card used to skip one report per navigation
+   instead, and the two halves disagreed whenever an opening changed no view, the frame then posting
+   nothing and the user's next camera move being the one skipped.
    The view is applied **only by a frame opening from nothing**, never by a later
    full navigation — that one is somebody changing `Layout` or the dataset and means the published
    framing; and a view taken in another dataset is **cleared**, a camera being a position in one

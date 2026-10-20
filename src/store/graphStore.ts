@@ -1352,6 +1352,38 @@ function liveNodes(graph: CodaGraph, ids: readonly string[]): Set<string> {
 }
 
 /**
+ * A history snapshot with the live graph's `unrecorded` params laid over it, for every node in
+ * both.
+ *
+ * An unrecorded write is not an undo step, so undo and redo must step the edits around it and leave
+ * it alone — a redo handing back the camera from before somebody moved it gives the document a view
+ * the frame is no longer showing. Laid over at restore rather than written into every snapshot,
+ * because snapshots are held in more than one place (`past`, `future`, a gesture's start) and a
+ * copy into each was one rule written down per holder, the next of which would be found by its bug.
+ */
+function withLiveUnrecorded(restored: CodaGraph, live: CodaGraph): CodaGraph {
+  const liveById = new Map(live.nodes.map((n) => [n.id, n]))
+  let changed = false
+  const nodes = restored.nodes.map((node) => {
+    const now = liveById.get(node.id)
+    const def = now && getNodeDef(node.type)
+    // Only where a value differs, so a card whose camera nobody moved keeps its node object.
+    const keep = (def?.params ?? []).filter(
+      (p) => p.unrecorded && now?.params[p.id] !== node.params[p.id],
+    )
+    if (!now || keep.length === 0) return node
+    const params = { ...node.params }
+    for (const p of keep) {
+      if (p.id in now.params) params[p.id] = now.params[p.id]!
+      else delete params[p.id]
+    }
+    changed = true
+    return { ...node, params }
+  })
+  return changed ? { ...restored, nodes } : restored
+}
+
+/**
  * What to do after each pass of a `For Each` — installed by the UI, absent in a headless run.
  *
  * A slot rather than a direct call, because the arrow only goes one way: the UI reads the store,
@@ -3107,17 +3139,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
         })
         return
       }
+      // No undo step, and none of the snapshots history holds is touched: undo and redo lay the
+      // live value over whatever they restore (`withLiveUnrecorded`).
       commit((g) => setNodeParam(g, nodeId, paramId, value), { history: false, autoRun: false })
-      // Into every undo and redo snapshot too, so stepping through history moves the edits around
-      // it and leaves this alone — a redo restoring the camera from before it was moved would hand
-      // the document a view the frame is no longer showing.
-      const carry = (entries: HistoryEntry[]) =>
-        entries.map((entry) =>
-          entry.graph.nodes.some((n) => n.id === nodeId)
-            ? { ...entry, graph: setNodeParam(entry.graph, nodeId, paramId, value) }
-            : entry,
-        )
-      set({ past: carry(get().past), future: carry(get().future) })
     },
 
     setParams: (nodeId, values) => {
@@ -3422,12 +3446,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const { past, graph, future } = get()
       const entry = past.at(-1)
       if (!entry) return
+      const restored = withLiveUnrecorded(entry.graph, graph)
       set({
-        graph: entry.graph,
+        graph: restored,
         past: past.slice(0, -1),
         future: [...future, { graph, at: Date.now() }],
       })
-      afterGraphChange(entry.graph)
+      afterGraphChange(restored)
     },
 
     redo: () => {
@@ -3435,12 +3460,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const { future, graph, past } = get()
       const entry = future.at(-1)
       if (!entry) return
+      const restored = withLiveUnrecorded(entry.graph, graph)
       set({
-        graph: entry.graph,
+        graph: restored,
         future: future.slice(0, -1),
         past: [...past, { graph, at: Date.now() }],
       })
-      afterGraphChange(entry.graph)
+      afterGraphChange(restored)
     },
 
     // --- evaluation --------------------------------------------------------

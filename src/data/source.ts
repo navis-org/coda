@@ -1025,6 +1025,13 @@ export interface DataSource {
    */
   whyDatasetMissing?(ref: string): string | undefined
 
+  /**
+   * The credential this source's requests are made under now, or undefined where it holds none.
+   * Absent on a source that needs none. What a replayed failure is keyed on (`ReplayedFailures`):
+   * a refusal is a fact about a token, and signing in should ask again at once.
+   */
+  credential?(): string | undefined
+
   findNeurons(req: FindNeuronsRequest): Promise<TableValue>
   /**
    * Every neuron in a dataset with every scalar property, cached.

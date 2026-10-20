@@ -1012,6 +1012,17 @@ because they are what a fallback to bare jsonlite would run into again.
 colour, expand `#abc` and drop an alpha channel. Coda writes a literal-mode cell as it was typed. So
 `#ABC` reads differently in the JSON and draws the same, neuroglancer reading only the RGB.
 
+**Four more, found in review rather than by the probes, which is why each now has a check of its
+own.** neuPrint answers the scene endpoint 401 without a token (measured), and neuprintr puts the
+token on `config` only inside `neuprint_login`, so the R request goes through it. `ifelse` over no
+segments answers a `logical(0)`, which nglscenes-r refuses as ids, so a scene showing no neurons
+stopped the chunk. That scene is the one a dataset wired alone produces. A data-driven colour mode
+with nothing to read wrote one default colour, which on the card stays a per-neuron map and leaves
+a neuron added in the viewer on neuroglancer's colour. And a category label has to be the number
+the way JavaScript's `String()` spells it, or `0.30000000000000004` and `0.3` merge, and `1e+21`
+never matches an override. Both languages are checked against Node on 24 values, and R reads its
+candidates back with jsonlite, since its own `as.numeric()` misreads `1e300`.
+
 **What checks it is the node, not a reading of the node.** `src/export/neuroglancer.test.ts` runs
 the real `evaluate` for the fixture's two cards (params read off the fixture graph, not restated)
 over a committed scene, neuron table and lookup, and records the decoded link and the `Selected`
