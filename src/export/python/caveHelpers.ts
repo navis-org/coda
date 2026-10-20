@@ -401,6 +401,49 @@ registerHelper({
 })
 
 /**
+ * Which rows hold an outdated root id — the cost control both update helpers share: only these are
+ * looked up, so an unedited base costs one `is_latest_roots` pass and nothing else.
+ */
+registerHelper({
+  name: 'coda_stale_roots',
+  requires: [['pandas'], ['numpy']],
+  source: [
+    'def coda_stale_roots(client, ids):',
+    '    """Which rows hold a root id that is outdated at the client\'s timestamp."""',
+    '    askable = ids > 0',
+    '    stale = pd.Series(False, index=ids.index)',
+    '    if askable.any():',
+    '        latest = client.chunkedgraph.is_latest_roots(',
+    "            ids[askable].astype('int64').to_numpy(), timestamp=client.timestamp",
+    '        )',
+    '        stale.loc[askable] = ~np.asarray(latest, dtype=bool)',
+    '    return stale',
+  ],
+})
+
+/**
+ * Write repaired roots back keeping the id column's storage, for both update helpers. A CAVE id
+ * column is text: writing numpy `int64`s into it would change its dtype under every downstream
+ * operation, and an eighteen-digit id is not exact as a float the moment a null joins it.
+ */
+registerHelper({
+  name: 'coda_write_roots',
+  requires: [['pandas']],
+  source: [
+    'def coda_write_roots(out, id_column, repaired):',
+    '    """Write repaired root ids into `out[id_column]`, keeping the column\'s dtype."""',
+    '    if repaired.empty:',
+    '        return',
+    '    if out[id_column].dtype == object:',
+    '        repaired = repaired.astype(str)',
+    '    else:',
+    "        # Keep the column's dtype so later comparisons and sorts behave the same.",
+    '        repaired = repaired.astype(out[id_column].dtype)',
+    '    out.loc[repaired.index, id_column] = repaired',
+  ],
+})
+
+/**
  * Bring stale root ids forward to a materialization.
  *
  * `cave.updateRootIds`, and the shape is the whole cost control: **the staleness check runs
@@ -411,14 +454,10 @@ registerHelper({
  * proofreading regroups supervoxels rather than splitting them, and `get_roots(sv, timestamp=)`
  * answers which segment one belonged to at any past instant. A row without one is left alone:
  * there is nothing to recover from, and a stale id beats a null or a dropped row.
- *
- * The id column keeps its storage, which matters because a CAVE id column is text: writing
- * numpy `int64`s into it would change its dtype under every downstream operation, and an
- * eighteen-digit id is not exact as a float the moment a null joins it.
  */
 registerHelper({
   name: 'coda_update_root_ids',
-  needs: ['coda_int64'],
+  needs: ['coda_int64', 'coda_stale_roots', 'coda_write_roots'],
   requires: [['pandas'], ['numpy']],
   source: [
     'def coda_update_root_ids(',
@@ -426,36 +465,90 @@ registerHelper({
     '):',
     '    """Update outdated root ids to this materialization, using their supervoxels."""',
     '    out = df.copy()',
-    '    ids = coda_int64(out[id_column])',
     '    svids = coda_int64(out[supervoxel_column])',
-    '    askable = ids > 0',
-    '    if not askable.any():',
-    '        return out',
-    '',
     '    # Look up new roots only for ids that are outdated at this materialization.',
-    '    latest = client.chunkedgraph.is_latest_roots(',
-    "        ids[askable].astype('int64').to_numpy(), timestamp=client.timestamp",
-    '    )',
-    '    stale = pd.Series(False, index=out.index)',
-    '    stale.loc[askable] = ~np.asarray(latest, dtype=bool)',
-    '    stale &= svids > 0',
+    '    stale = coda_stale_roots(client, coda_int64(out[id_column])) & (svids > 0)',
     '    if not stale.any():',
     '        return out',
-    '',
     '    roots = client.chunkedgraph.get_roots(',
     "        svids[stale].astype('int64').to_numpy(), timestamp=client.timestamp",
     '    )',
     '    repaired = pd.Series(np.asarray(roots), index=out.index[stale])',
     '    # Unknown supervoxels return root 0; skip those.',
-    '    repaired = repaired[repaired > 0]',
-    '    if repaired.empty:',
-    '        return out',
-    '    if out[id_column].dtype == object:',
-    '        repaired = repaired.astype(str)',
-    '    else:',
-    "        # Keep the column's dtype so later comparisons and sorts behave the same.",
-    '        repaired = repaired.astype(out[id_column].dtype)',
-    '    out.loc[repaired.index, id_column] = repaired',
+    '    coda_write_roots(out, id_column, repaired[repaired > 0])',
+    '    return out',
+  ],
+})
+
+/**
+ * Bring stale root ids forward without a supervoxel: each old root's level-2 chunks vote.
+ *
+ * `cave.updateRootIds` under `Method: majority`, asking the canvas's question: a retired root id
+ * still lists the chunks it was made of, so a fixed sample of them — sorted and evenly strided,
+ * `rootsByMajority`'s rule, so the notebook asks about the same chunks the card did — is looked up
+ * at the client's timestamp and the root holding most of them wins, a tie going to the lower id.
+ * Its share goes to `idConfidence`: 1 for a current id, NaN where there is no id or nothing could
+ * be placed. `fafbseg.flywire.update_ids` with a timestamp, sampled.
+ */
+registerHelper({
+  name: 'coda_update_root_ids_majority',
+  needs: ['coda_int64', 'coda_stale_roots', 'coda_write_roots'],
+  requires: [['pandas'], ['numpy']],
+  source: [
+    'def coda_update_root_ids_majority(',
+    "    client, df, sample, id_column='neuronId'",
+    '):',
+    '    """Update outdated root ids to this materialization by a majority of their chunks."""',
+    '    out = df.copy()',
+    '    ids = coda_int64(out[id_column])',
+    '    stale = coda_stale_roots(client, ids)',
+    '    confidence = pd.Series(np.where(ids > 0, 1.0, np.nan), index=out.index)',
+    '    confidence[stale] = np.nan',
+    '    if stale.any():',
+    "        # Each stale root's level-2 chunks, sorted and evenly strided down to `sample`.",
+    "        old = np.unique(ids[stale].astype('int64').to_numpy())",
+    '        owners, chunks = [], []',
+    '        for i in range(0, len(old), 50):',
+    '            # Fifty roots a request, as on the canvas, each reply cut to its sample at once.',
+    '            batch = old[i:i + 50]',
+    '            leaves = client.chunkedgraph.get_leaves_many(batch, stop_layer=2)',
+    '            for root in batch:',
+    "                c = np.sort(np.asarray(leaves.get(root, []), dtype='int64'))",
+    '                if len(c) > sample:',
+    '                    c = c[(np.arange(sample) * len(c)) // sample]',
+    "                owners.append(np.full(len(c), root, dtype='int64'))",
+    '                chunks.append(c)',
+    '        flat = np.concatenate(chunks)',
+    '        if len(flat):',
+    '            asked = np.unique(flat)',
+    '            placed = np.asarray(',
+    '                client.chunkedgraph.get_roots(asked, timestamp=client.timestamp)',
+    "            ).astype('int64')",
+    '            votes = pd.DataFrame({',
+    "                'old': np.concatenate(owners),",
+    "                'new': placed[np.searchsorted(asked, flat)],",
+    '            })',
+    '            # Unknown chunks (root 0) do not vote, nor do chunks placed in a root that is not',
+    '            # itself current, as a retired chunk can be. A tie goes to the lower id.',
+    '            candidates = np.unique(placed[placed > 0])',
+    '            current = candidates[np.asarray(client.chunkedgraph.is_latest_roots(',
+    '                candidates, timestamp=client.timestamp), dtype=bool)]',
+    "            votes = votes[votes['new'].isin(current)]",
+    "            tally = votes.groupby(['old', 'new']).size().rename('n').reset_index()",
+    "            tally['share'] = tally['n'] / tally.groupby('old')['n'].transform('sum')",
+    '            winners = (',
+    "                tally.sort_values(['old', 'n', 'new'], ascending=[True, False, True])",
+    "                .drop_duplicates('old')",
+    "                .set_index('old')",
+    '            )',
+    '            # Only the rows that found a winner: a NaN in the map would make the roots float64,',
+    '            # and an eighteen-digit id is not exact as a float.',
+    "            stale_ids = ids[stale].astype('int64')",
+    '            hit = stale_ids[stale_ids.isin(winners.index)]',
+    "            confidence[hit.index] = hit.map(winners['share'])",
+    "            coda_write_roots(out, id_column, hit.map(winners['new']))",
+    '    # Written over an existing column in its place, appended otherwise, as on the canvas.',
+    "    out['idConfidence'] = confidence",
     '    return out',
   ],
 })

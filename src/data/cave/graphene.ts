@@ -29,3 +29,11 @@ export function parseGrapheneSource(source: string | undefined): GrapheneSource 
   const [, server, table] = match
   return server && table ? { server, table, base } : undefined
 }
+
+/**
+ * A chunkedgraph table endpoint: `{server}/segmentation/api/v1/table/{table}/{path}`. The one
+ * spelling of that grammar, so a path change or an encoding rule is made once.
+ */
+export function tableUrl(graphene: GrapheneSource, path: string): string {
+  return `${graphene.server}/segmentation/api/v1/table/${encodeURIComponent(graphene.table)}/${path}`
+}

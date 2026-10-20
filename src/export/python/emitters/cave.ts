@@ -27,6 +27,8 @@
  */
 
 import { splitDatasetId, specFor } from '../../../data/cave/spec'
+import { VOTE_SAMPLE } from '../../../data/cave/rootIds'
+import { byMajority } from '../../../nodes/transform/updateRootIds'
 import { caveTarget, caveTargetOfType, customCaveServer } from '../../../nodes/lib/caveParams'
 import {
   DEFAULT_CAVE_SERVER,
@@ -332,14 +334,21 @@ registerEmitter(
 registerEmitter(
   'cave.updateRootIds',
   (ctx) => {
-    const supervoxel = ctx.column('supervoxelColumn')
-    if (!supervoxel) {
-      return ctx.todo(
-        '`Supervoxel ID column` is not set. Outdated root ids can only be updated through ' +
-          'their supervoxel ids, so pick the column that holds them.',
-      )
+    // A majority vote reads no supervoxel; its helper is the canvas's `rootsByMajority`.
+    let helper = 'coda_update_root_ids_majority'
+    let traceBy = `sample=${VOTE_SAMPLE}`
+    if (!byMajority(ctx.params)) {
+      const supervoxel = ctx.column('supervoxelColumn')
+      if (!supervoxel) {
+        return ctx.todo(
+          '`Supervoxel ID column` is not set. Pick the column that holds each row’s supervoxel ' +
+            'id, or set `Method` to the majority of the root’s chunks.',
+        )
+      }
+      helper = 'coda_update_root_ids'
+      traceBy = `supervoxel_column=${pyStr(supervoxel)}`
     }
-    ctx.helper('coda_update_root_ids')
+    ctx.helper(helper)
     const idColumn = ctx.column('idColumn') ?? 'neuronId'
     const version = String(ctx.params.version).trim()
 
@@ -377,11 +386,11 @@ registerEmitter(
     }
 
     lines.push(
-      `${ctx.output('out')} = coda_update_root_ids(`,
+      `${ctx.output('out')} = ${helper}(`,
       `    ${client},`,
       `    ${ctx.wired('in')},`,
       `    id_column=${pyStr(idColumn)},`,
-      `    supervoxel_column=${pyStr(supervoxel)},`,
+      `    ${traceBy},`,
       `)`,
     )
     return lines

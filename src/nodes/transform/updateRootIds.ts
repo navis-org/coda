@@ -33,21 +33,35 @@
  * minute nobody else's ids match. Snapped in epoch time, which is UTC: the same boundaries locally
  * wherever the offset is a whole hour, and a full hour that falls at :30 in a half-hour zone.
  *
+ * **Without a supervoxel, the root's own chunks vote.** `Method: majority` lists a sample of the
+ * stale root's level-2 chunks — a retired root id still names what it was made of — asks which
+ * root each belonged to at the instant, and takes the root holding most of them. A merge has one
+ * answer; a split has several, so the winner's share goes into `idConfidence` and a share under
+ * two thirds is said on the card. A choice rather than a per-row fallback, by decision: one run is
+ * one route, and the card says which.
+ *
  * The Dataset input is a **reference**: it names the datastack rather than consuming a dataset,
  * which is what lets this node sit between an annotation source and the dataset it feeds without
  * that being a cycle. See `PortDef.reference`.
  */
 
 import { packNode } from '../../core/registry'
-import { T, findColumn, isNumericDType, isTabular, schemaOf } from '../../core/types'
+import type { TableSchema } from '../../core/types'
+import { T, column, findColumn, isNumericDType, isTabular, schemaOf } from '../../core/types'
 import { idText } from '../../core/ids'
-import { listed } from '../../core/prose'
-import type { CellValue, ColumnData } from '../../core/values'
+import { listed, namedFew } from '../../core/prose'
+import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { isTableValue, makeTable } from '../../core/values'
-import type { RootsAt } from '../../data/cave/rootIds'
-import { rootsForSupervoxels, staleRoots } from '../../data/cave/rootIds'
+import type { MajorityRoot, RootsAt } from '../../data/cave/rootIds'
+import {
+  VOTE_SAMPLE,
+  rootsByMajority,
+  rootsForSupervoxels,
+  staleRoots,
+} from '../../data/cave/rootIds'
 import { caveTargetOfValue } from '../lib/caveParams'
 import { foreignBackend } from '../lib/datasetParam'
+import { foldColumns } from '../lib/tableOps'
 import { formatNumber, plural } from '../../style/format'
 
 /**
@@ -62,15 +76,26 @@ const CLOCK_MODES = [
   { value: 'live', label: 'live (as of the last run)', stepMs: 1 },
 ] as const
 
+/**
+ * The column a majority vote adds: the winning root's share of the old root's sampled chunks.
+ *
+ * Named for the id rather than plain `confidence`, which a synapse table already uses for a
+ * predictor's score — a picker offered both would be offered two different measurements under
+ * one word. Folded rather than appended, so a second Update root IDs in a chain writes over the
+ * first's rather than beside it.
+ */
+const CONFIDENCE_COLUMN = 'idConfidence'
+
 export const updateRootIdsNode = packNode({
   type: 'cave.updateRootIds',
   label: 'Update root IDs',
   category: 'transform',
   description:
-    'Repoint stale CAVE root ids at a materialization or the live segmentation, using their supervoxel ids.',
+    'Repoint stale CAVE root ids at a materialization or the live segmentation, using their supervoxel ids or a majority vote of their chunks.',
   guide:
     'Brings outdated CAVE root ids in a table up to date with a materialization, or with the ' +
-    'live segmentation, using each row’s supervoxel id. Usually sits between an annotation table ' +
+    'live segmentation, using each row’s supervoxel id or, for a table without one, the root ' +
+    'that most of the old neuron’s chunks ended up in. Usually sits between an annotation table ' +
     'and the CAVE Dataset it annotates; wire that Dataset into its Dataset input to say which ' +
     'datastack to ask.',
   cost: 'expensive',
@@ -96,6 +121,21 @@ export const updateRootIdsNode = packNode({
       default: 'neuronId',
     },
     {
+      id: 'method',
+      kind: 'enum',
+      label: 'Method',
+      /*
+       * The default is what the node did before this control existed, so a graph saved without
+       * the key loads meaning exactly what it meant — no `absentMeans` needed.
+       */
+      default: 'supervoxel',
+      options: [
+        { value: 'supervoxel', label: 'each row’s supervoxel' },
+        { value: 'majority', label: 'majority of the root’s chunks' },
+      ],
+      help: `"each row’s supervoxel" looks up where the supervoxel each row was annotated at ended up, which is exact. "majority of the root’s chunks" needs no supervoxel: it samples ${VOTE_SAMPLE} of the old root’s level-2 chunks and picks the root most of them now belong to, adding an \`${CONFIDENCE_COLUMN}\` column with that root’s share. A neuron that was split goes to its largest piece.`,
+    },
+    {
       id: 'supervoxelColumn',
       kind: 'column',
       label: 'Supervoxel ID column',
@@ -117,6 +157,8 @@ export const updateRootIdsNode = packNode({
        * before, and `validateColumnParams` reports no drift for it.
        */
       default: 'supervoxel_id',
+      // Not read under a majority vote, which also takes it out of the provenance key.
+      visibleIf: (params) => !byMajority(params),
     },
     {
       id: 'updateTo',
@@ -150,13 +192,16 @@ export const updateRootIdsNode = packNode({
     },
   ],
 
-  // Schema and kind straight through: this rewrites values in one column and touches nothing else.
+  /*
+   * Kind straight through. The schema too under a supervoxel lookup, which rewrites values in one
+   * column and touches nothing else; a majority vote adds its confidence column.
+   */
   inferOutputs: (ctx) => {
     const input = ctx.inputs.in
     if (!isTabular(input)) return { out: T.table() }
-    return {
-      out: input.kind === 'neurons' ? T.neurons(schemaOf(input)) : T.table(schemaOf(input)),
-    }
+    const schema = schemaOf(input)
+    const out = byMajority(ctx.params) && schema ? confidenceSchema(schema) : schema
+    return { out: input.kind === 'neurons' ? T.neurons(out) : T.table(out) }
   },
 
   validate: (ctx) => {
@@ -174,7 +219,7 @@ export const updateRootIdsNode = packNode({
           `look them up in. Wire a CAVE Dataset into \`Dataset\`.`,
       ]
     }
-    if (!ctx.column('supervoxelColumn')) {
+    if (!byMajority(ctx.params) && !ctx.column('supervoxelColumn')) {
       return [
         'Pick a `Supervoxel ID column`. The ids cannot be updated without each row’s supervoxel id.',
       ]
@@ -210,13 +255,18 @@ export const updateRootIdsNode = packNode({
     // run for live, since the boundary for the clock modes.
     if (!('version' in at)) ctx.reportFetched('instant' in at ? at.instant : at.boundary)
 
+    const majority = byMajority(ctx.params)
     const idColumn = ctx.column('idColumn')
-    const svColumn = ctx.column('supervoxelColumn')
-    if (!idColumn || !svColumn)
-      throw new Error('Pick an `ID column` and a `Supervoxel ID column`.')
+    if (!idColumn) throw new Error('Pick an `ID column`.')
     const ids = table.data[idColumn]
-    const svs = table.data[svColumn]
-    if (!ids || !svs) throw new Error(`"${idColumn}" or "${svColumn}" is not in this table`)
+    if (!ids) throw new Error(`"${idColumn}" is not in this table`)
+    let svs: ColumnData | undefined
+    if (!majority) {
+      const svColumn = ctx.column('supervoxelColumn')
+      if (!svColumn) throw new Error('Pick a `Supervoxel ID column`.')
+      svs = table.data[svColumn]
+      if (!svs) throw new Error(`"${svColumn}" is not in this table`)
+    }
 
     ctx.progress(0.1, 'checking which ids moved')
     const options = { deployment, signal: ctx.signal }
@@ -227,26 +277,39 @@ export const updateRootIdsNode = packNode({
      */
     const present = [...new Set(textOf(ids))]
     const stale = await staleRoots(datastack, at, present, options)
-    if (stale.size === 0) return { out: table }
+
+    /*
+     * A row's confidence under a majority vote: 1 where its id was current, the winner's share
+     * where it was repaired, and null where there is no id or no repair.
+     */
+    const confidence = majority
+      ? Array.from(ids, (cell): CellValue => (idText(cell ?? null) ? 1 : null))
+      : undefined
+    // Nothing to rewrite — though a majority vote still writes its column, or the schema would grow
+    // one only when something was stale and disagree with `inferOutputs` on every unedited base.
+    if (stale.size === 0) {
+      return { out: confidence ? confidenceTable(table, table.data, confidence) : table }
+    }
 
     ctx.progress(0.5, `${stale.size.toLocaleString()} to update`)
-    // The rows that moved, each with the supervoxel to trace it by. Decided once, here; the
-    // rewrite below visits these and nothing else.
-    const moved: { row: number; sv: string }[] = []
-    const missed = { noSupervoxel: 0, unknownSupervoxel: 0 }
+    // The rows that moved, each with the handle to trace it by — its supervoxel, or under a
+    // majority vote its own old root. Decided once, here; the rewrite below visits these and
+    // nothing else.
+    const moved: { row: number; by: string }[] = []
+    const missed = { noSupervoxel: 0, unplaced: 0 }
     for (let i = 0; i < table.length; i++) {
       const id = idText(ids[i] ?? null)
       if (!id || !stale.has(id)) continue
-      const sv = idText(svs[i] ?? null)
-      if (sv) moved.push({ row: i, sv })
+      if (confidence) confidence[i] = null
+      const by = svs ? idText(svs[i] ?? null) : id
+      if (by) moved.push({ row: i, by })
       else missed.noSupervoxel++
     }
-    const roots = await rootsForSupervoxels(
-      datastack,
-      at,
-      moved.map((m) => m.sv),
-      options,
-    )
+    const handles = moved.map((m) => m.by)
+    // One lookup per route: a supervoxel answers a root, a vote a root and its share.
+    const traced: ReadonlyMap<string, string | MajorityRoot> = majority
+      ? await rootsByMajority(datastack, at, handles, options)
+      : await rootsForSupervoxels(datastack, at, handles, options)
 
     const updated: ColumnData = Array.from(ids, (cell) => cell ?? null)
     /*
@@ -257,10 +320,11 @@ export const updateRootIdsNode = packNode({
      * right there and says it for every row at once.
      */
     const numeric = isNumericDType(findColumn(table.schema, idColumn)?.dtype ?? 'str')
-    for (const { row, sv } of moved) {
-      const root = roots.get(sv)
-      if (root === undefined) {
-        missed.unknownSupervoxel++
+    const weak: string[] = []
+    for (const { row, by } of moved) {
+      const found = traced.get(by)
+      if (found === undefined) {
+        missed.unplaced++
         continue
       }
       /*
@@ -269,15 +333,63 @@ export const updateRootIdsNode = packNode({
        * them as numbers keeps doing so rather than changing dtype under everything downstream —
        * and `idText` refuses a number too wide to be exact, so nothing silently rounds.
        */
+      const root = typeof found === 'string' ? found : found.root
       updated[row] = numeric ? (Number(root) as CellValue) : root
+      if (typeof found !== 'string' && confidence) {
+        confidence[row] = found.share
+        if (found.share < WEAK_MAJORITY) weak.push(`${by} → ${root}`)
+      }
     }
-    const warning = unrepairedWarning(missed)
+    const warning = unrepairedWarning(missed, majority)
     if (warning) ctx.warn(warning)
-    return { out: makeTable(table.schema, { ...table.data, [idColumn]: updated }, table.kind) }
+    const split = weakMajorityWarning(weak)
+    if (split) ctx.warn(split)
+
+    const data = { ...table.data, [idColumn]: updated }
+    return {
+      out: confidence
+        ? confidenceTable(table, data, confidence)
+        : makeTable(table.schema, data, table.kind),
+    }
   },
 })
 
+/** The schema half of a majority vote's output: the input's, with the confidence column folded in. */
+function confidenceSchema(schema: TableSchema): TableSchema {
+  return foldColumns(schema, [column(CONFIDENCE_COLUMN, 'f64')])
+}
+
+/** The value half, beside it: the rewritten data with the confidence column folded in. */
+function confidenceTable(
+  table: TableValue,
+  data: Readonly<Record<string, ColumnData>>,
+  confidence: ColumnData,
+): TableValue {
+  return makeTable(
+    confidenceSchema(table.schema),
+    { ...data, [CONFIDENCE_COLUMN]: confidence },
+    table.kind,
+  )
+}
+
+/**
+ * Below this share the winner is said on the card. A neuron split in two roughly equal halves
+ * still has a winner, and the id now names half the cells it used to — which is a different claim
+ * from the one the row's label was making, and nothing downstream could tell.
+ */
+const WEAK_MAJORITY = 2 / 3
+
 type Params = Readonly<Record<string, unknown>>
+
+/**
+ * Whether the stale rows are traced by a majority of their old root's chunks — the one spelling of
+ * that test, read by `visibleIf`, `validate`, `inferOutputs`, `evaluate` and the Python emitter.
+ * Anything but `majority` is the supervoxel lookup, so a value nobody offers means the default
+ * everywhere.
+ */
+export function byMajority(params: Params): boolean {
+  return params.method === 'majority'
+}
 
 /** The clock mode chosen, or undefined for a materialization — including a value nobody offers. */
 function clockMode(params: Params) {
@@ -328,23 +440,39 @@ function rootsAt(params: Params, pinned: number | undefined): RootsAt | undefine
  * eventually, but a live run has nothing downstream to say so. Rows, not distinct ids, since a
  * row is what somebody fixes in the base.
  */
-function unrepairedWarning(missed: {
-  noSupervoxel: number
-  unknownSupervoxel: number
-}): string | undefined {
-  const { noSupervoxel, unknownSupervoxel } = missed
-  const total = noSupervoxel + unknownSupervoxel
+function unrepairedWarning(
+  missed: { noSupervoxel: number; unplaced: number },
+  majority: boolean,
+): string | undefined {
+  const { noSupervoxel, unplaced } = missed
+  const total = noSupervoxel + unplaced
   if (total === 0) return undefined
   const reasons = [
     noSupervoxel > 0 ? `${formatNumber(noSupervoxel)} without a supervoxel ID` : '',
-    unknownSupervoxel > 0
-      ? `${formatNumber(unknownSupervoxel)} whose supervoxel CAVE does not know`
+    unplaced > 0
+      ? `${formatNumber(unplaced)} whose ${majority ? 'old root CAVE could not place' : 'supervoxel CAVE does not know'}`
       : '',
   ].filter(Boolean)
   const one = total === 1
   return (
     `${plural(total, 'row')} ${one ? 'has' : 'have'} an out-of-date ID that could not be ` +
-    `updated: ${listed(reasons)}. ${one ? 'It is' : 'They are'} left as they were.`
+    `updated: ${listed(reasons)}. ${one ? 'It is left as it was' : 'They are left as they were'}.`
+  )
+}
+
+/**
+ * What a majority vote repaired on a thin margin, or nothing when every winner was clear.
+ *
+ * In rows, like the unrepaired count, with a few old → new pairs to look at. The confidence column
+ * carries the same fact per row; this is the half somebody sees without opening the table.
+ */
+function weakMajorityWarning(weak: readonly string[]): string | undefined {
+  if (weak.length === 0) return undefined
+  const one = weak.length === 1
+  return (
+    `${plural(weak.length, 'row')} ${one ? 'was' : 'were'} updated to a root holding less than ` +
+    `two thirds of the old neuron’s chunks, so the old neuron was split and the new ID may name ` +
+    `only part of it (e.g. ${namedFew([...new Set(weak)])}). See \`${CONFIDENCE_COLUMN}\`.`
   )
 }
 

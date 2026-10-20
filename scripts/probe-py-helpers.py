@@ -243,6 +243,63 @@ r3 = ns['coda_update_root_ids'](Client(None, CG(current={720575940628857210}, ro
 check('repair: int column stays int', str(r3['neuronId'].dtype).startswith('int'), str(r3['neuronId'].dtype))
 check('repair: int rewrite exact', r3['neuronId'].iloc[1] == 720575940628857299, str(r3['neuronId'].iloc[1]))
 
+# ---- coda_update_root_ids_majority ------------------------------------------
+#
+# No supervoxel: each stale root's level-2 chunks vote. `get_leaves_many` answers as caveclient
+# 8.2.1 does — int64 keys, int64 arrays — and the stub places chunks by the same `roots` map.
+class VoteCG(CG):
+    def __init__(self, current, roots, leaves):
+        super().__init__(current, roots); self.leaves = leaves; self.asked = []
+    def get_leaves_many(self, root_ids, stop_layer=None):
+        self.stop_layer = stop_layer
+        return {np.int64(r): np.int64(self.leaves.get(int(r), [])) for r in root_ids}
+    def get_roots(self, svids, timestamp=None):
+        self.asked.append([int(s) for s in svids]); return super().get_roots(svids, timestamp)
+
+A, B = 720575940628857299, 720575940628857288   # two pieces of a split, A > B
+L2 = 144115188075855872                          # eighteen digits, so a float would show
+vdf = pd.DataFrame({
+    'neuronId': ['720575940628857210', '720575940628857211', '720575940628857212', None, '720575940628857213'],
+    'note':     ['current', 'split 3:1', 'even split', 'no id', 'unplaceable'],
+})
+leaves = {
+    720575940628857211: [L2 + 3, L2 + 1, L2 + 2, L2 + 0],      # listed out of order
+    720575940628857212: [L2 + 10, L2 + 11],
+    720575940628857213: [L2 + 20],
+}
+placed = {L2 + 0: A, L2 + 1: A, L2 + 2: A, L2 + 3: B, L2 + 10: A, L2 + 11: B}
+vcg = VoteCG(current={720575940628857210, A, B}, roots=placed, leaves=leaves)
+v = ns['coda_update_root_ids_majority'](Client(None, vcg), vdf, sample=100)
+check('vote: current row untouched, confidence 1', v['neuronId'].iloc[0] == '720575940628857210' and v['idConfidence'].iloc[0] == 1.0)
+check('vote: 3:1 split goes to the larger piece', v['neuronId'].iloc[1] == str(A), v['neuronId'].iloc[1])
+check('vote: 3:1 share is 0.75', v['idConfidence'].iloc[1] == 0.75, str(v['idConfidence'].iloc[1]))
+check('vote: a tie goes to the lower id, as on the canvas', v['neuronId'].iloc[2] == str(B), v['neuronId'].iloc[2])
+check('vote: no id stays null, confidence NaN', pd.isna(v['neuronId'].iloc[3]) and np.isnan(v['idConfidence'].iloc[3]))
+check('vote: unplaceable root left alone, confidence NaN', v['neuronId'].iloc[4] == '720575940628857213' and np.isnan(v['idConfidence'].iloc[4]))
+check('vote: still text', v['neuronId'].dropna().map(type).eq(str).all())
+check('vote: asked at level 2', vcg.stop_layer == 2, str(vcg.stop_layer))
+check('vote: chunk ids exact', all(c >= L2 for c in vcg.asked[0]), str(vcg.asked))
+check('vote: confidence appended', list(v.columns) == ['neuronId', 'note', 'idConfidence'], str(list(v.columns)))
+check('vote: input not mutated', 'idConfidence' not in vdf.columns)
+
+# sampled the canvas's way: sorted, then strided — 250 chunks down to the same 100 ids
+many = list(range(L2, L2 + 250))[::-1]
+scg = VoteCG(current={A}, roots={c: A for c in many}, leaves={720575940628857211: many})
+ns['coda_update_root_ids_majority'](Client(None, scg), vdf.iloc[[1]], sample=100)
+check('vote: sample of 100', len(scg.asked[0]) == 100, str(len(scg.asked[0])))
+check('vote: strided over sorted ids', scg.asked[0][:3] == [L2 + 0, L2 + 2, L2 + 5], str(scg.asked[0][:3]))
+
+# a chunk placed in a root that is not itself current does not vote: B is retired here, so the
+# 3:1 split's one B vote abstains and A wins outright
+rcg = VoteCG(current={A}, roots=placed, leaves=leaves)
+rv = ns['coda_update_root_ids_majority'](Client(None, rcg), vdf.iloc[[1]], sample=100)
+check('vote: a non-current root does not vote', rv['neuronId'].iloc[0] == str(A) and rv['idConfidence'].iloc[0] == 1.0, f"{rv['neuronId'].iloc[0]} {rv['idConfidence'].iloc[0]}")
+
+# a column already there is written over in its place
+again = vdf.iloc[[1]].copy(); again.insert(0, 'idConfidence', 0.1)
+w = ns['coda_update_root_ids_majority'](Client(None, VoteCG(current={A, B}, roots=placed, leaves=leaves)), again, sample=100)
+check('vote: existing confidence column kept in its slot', list(w.columns) == ['idConfidence', 'neuronId', 'note'], str(list(w.columns)))
+
 # ---- coda_combine, out of the *other* golden ---------------------------------
 #
 # Combine Columns is an ordinary table op, so its helpers live in `everything.ipynb`'s general

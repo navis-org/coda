@@ -27,6 +27,7 @@ import type { TreePoint } from '../skeletonTree'
 import { spanningForest } from '../skeletonTree'
 import { caveGet, caveGetOr404, cavePost, sharedRequestOptions } from './client'
 import type { GrapheneSource } from './graphene'
+import { tableUrl } from './graphene'
 import type { CaveRequestOptions } from './client'
 import { memoPromise } from '../memoPromise'
 
@@ -170,7 +171,7 @@ async function readChunkGraph(
   options: CaveRequestOptions,
 ): Promise<Array<[string, string]>> {
   const graph = await caveGet<{ edge_graph?: unknown[] }>(
-    `${source.server}/segmentation/api/v1/table/${source.table}/node/${neuronId}/lvl2_graph`,
+    tableUrl(source, `node/${neuronId}/lvl2_graph`),
     options,
   )
   return (graph.edge_graph ?? [])

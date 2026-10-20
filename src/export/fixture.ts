@@ -2020,6 +2020,14 @@ export function caveGraph(): CodaGraph {
       col: 3,
       params: { idColumn: 'neuronId', supervoxelColumn: 'supervoxel_id' },
     },
+    // The other route, which reads no supervoxel and emits its own helper.
+    {
+      id: 'repairVote',
+      type: 'cave.updateRootIds',
+      col: 3,
+      row: 3,
+      params: { idColumn: 'neuronId', method: 'majority' },
+    },
     { id: 'table', type: 'out.table', col: 5, row: 1 },
     {
       id: 'find',
@@ -2118,6 +2126,8 @@ export function caveGraph(): CodaGraph {
     ['filter', 'out', 'repair', 'in'],
     ['repair', 'out', 'ds', 'annotations'],
     ['repair', 'out', 'table', 'in'],
+    ['ds', 'dataset', 'repairVote', 'dataset'],
+    ['filter', 'out', 'repairVote', 'in'],
     ['ds', 'dataset', 'find', 'dataset'],
     ['ds', 'dataset', 'summary', 'dataset'],
     ['ds', 'dataset', 'explore', 'dataset'],

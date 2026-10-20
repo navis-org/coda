@@ -19,12 +19,14 @@
 
 import { cacheGet, cacheSet } from '../cache'
 import type { CaveRequestOptions } from './client'
-import { cavePostBinary, cavePostRaw } from './client'
+import { CaveError, cavePostBinary, cavePostRaw } from './client'
 import { datastackRecord, materializationsFor, versionFrozenAt } from './datastack'
 import { deploymentKey } from './deployments'
 import type { GrapheneSource } from './graphene'
-import { parseGrapheneSource } from './graphene'
+import { parseGrapheneSource, tableUrl } from './graphene'
 import { channel } from '../channel'
+import { countStrings, distinctStrings } from '../../core/collections'
+import { compareIds } from '../../core/ids'
 
 /**
  * What a completed check found.
@@ -237,7 +239,7 @@ async function judge(
     // Sequential on purpose. This is an advisory against a shared production service; firing
     // every chunk at once would be the hammering it exists to avoid.
     const batch = unknown.slice(i, i + CHUNK)
-    const answer = await isLatestRoots(graphene.server, graphene.table, batch, at, options)
+    const answer = await isLatestRoots(graphene, batch, at, options)
     for (let k = 0; k < batch.length; k++) {
       ;(answer[k] === false ? stale : latest).add(batch[k]!)
     }
@@ -255,7 +257,7 @@ async function judge(
  * - `instant`: a moment asked about once. Held by nobody.
  *
  * The caller picks the moment rather than each request taking the server's "now", because a repair
- * is two calls — which ids moved, then where their supervoxels went — and both have to be about the
+ * is two calls — which ids moved, then where their supervoxels (or chunks) went — and both have to be about the
  * same instant, or an edit landing between them leaves a row repointed at a root that was itself
  * already retired.
  */
@@ -327,9 +329,22 @@ export async function staleRoots(
   options: CaveRequestOptions,
 ): Promise<Set<string>> {
   const graphene = await grapheneFor(datastack, options)
+  // Not a chunkedgraph: root ids do not move there, so every one is current — a real answer.
+  if (!graphene) return new Set()
   const asked = await askedAt(datastack, when, options)
-  if (!graphene || !asked) return new Set()
-  const { stale } = await judge(graphene, asked, [...new Set(ids)].filter(Boolean), options)
+  /*
+   * A materialization with no frozen instant is *not* an answer, and an empty set here would read
+   * as "nothing moved" — a table handed back as current, with a confidence of 1 on every row under
+   * a majority vote, about ids nobody checked.
+   */
+  if (!asked) {
+    const version = 'version' in when ? when.version : ''
+    throw new Error(
+      `Materialization ${version} of ${datastack} has no timestamp CAVE lists, so there is no ` +
+        `instant to check the ids against. Pick a materialization the datastack lists.`,
+    )
+  }
+  const { stale } = await judge(graphene, asked, distinctStrings(ids), options)
   return stale
 }
 
@@ -359,39 +374,213 @@ export async function rootsForSupervoxels(
   const graphene = await grapheneFor(datastack, options)
   const asked = await askedAt(datastack, when, options)
   if (!graphene || !asked) return out
-  const { at } = asked
 
-  const wanted = [...new Set(supervoxels)].filter(Boolean)
-  const key = `cave-sv-roots:${graphene.server}|${graphene.table}|${at}`
+  const key = `cave-sv-roots:${graphene.server}|${graphene.table}|${asked.at}`
   const held = await readKept<{ sv: string[]; root: string[] }>(key, asked)
   for (let i = 0; i < (held?.sv.length ?? 0); i++) out.set(held!.sv[i]!, held!.root[i]!)
 
-  const unknown = wanted.filter((id) => !out.has(id))
-  for (let i = 0; i < unknown.length; i += CHUNK) {
-    // Sequential, like the staleness check: an advisory repair has no business firing every
-    // chunk at a shared production service at once.
-    const batch = unknown.slice(i, i + CHUNK)
-    const answer = await getRoots(graphene.server, graphene.table, batch, at, options)
-    for (let k = 0; k < batch.length; k++) {
-      const root = answer[k]
-      // `0` is "no such supervoxel here" — not a root, and not something to write into a table.
-      if (root !== undefined && root !== 0n) out.set(batch[k]!, String(root))
-    }
+  const unknown = distinctStrings(supervoxels).filter((id) => !out.has(id))
+  for (const [sv, root] of await placeNodes(graphene, unknown, asked.at, options)) {
+    out.set(sv, root)
   }
   if (unknown.length > 0) keep(key, { sv: [...out.keys()], root: [...out.values()] }, asked)
   return out
 }
 
+/**
+ * The root each node id belonged to at an instant, uncached — `roots_binary` takes a node at any
+ * layer, a supervoxel or a level-2 chunk alike. A `0` ("no such node here") is left out.
+ */
+async function placeNodes(
+  graphene: GrapheneSource,
+  ids: readonly string[],
+  at: number,
+  options: CaveRequestOptions,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    // Sequential, like the staleness check: an advisory repair has no business firing every
+    // chunk at a shared production service at once.
+    const batch = ids.slice(i, i + CHUNK)
+    const answer = await getRoots(graphene, batch, at, options)
+    for (let k = 0; k < batch.length; k++) {
+      const root = answer[k]
+      // `0` is "no such node here" — not a root, and not something to write into a table.
+      if (root !== undefined && root !== 0n) out.set(batch[k]!, String(root))
+    }
+  }
+  return out
+}
+
+/**
+ * How many of a stale root's level-2 chunks are asked where they went. Enough that a two-thirds
+ * winner is far outside what sampling alone could produce (the standard error of a share at 100
+ * draws is under 0.05), and small enough that a whole stale base is a handful of `roots_binary`
+ * batches rather than one per neuron.
+ */
+export const VOTE_SAMPLE = 100
+
+/** Roots per `leaves_many` request: a few thousand chunk ids each, so a few MB a reply. */
+const LEAVES_CHUNK = 50
+
+/** The chunkedgraph layer a vote samples. Level 2 is a neuron's chunks; level 1 its supervoxels. */
+const VOTE_LAYER = 2
+
+/** Where a stale root went by majority: the root holding most of its sample, and that share. */
+export interface MajorityRoot {
+  root: string
+  /** The winner's share of the sampled chunks CAVE could place, in (0, 1]. */
+  share: number
+}
+
+/**
+ * Where each stale root went at an instant, by a majority of its own chunks.
+ *
+ * The route for a table that carries no supervoxel: a root id is immutable — an edit mints a new
+ * one rather than changing the old — so the chunks a retired root was made of are still listed
+ * under it. Each is asked which root it belonged to at the instant, and the root holding most of
+ * them wins. A merge leaves one answer; a split leaves several, and the share says how much of
+ * the old neuron the winner kept. `fafbseg.flywire.update_ids` with a timestamp, sampled.
+ *
+ * Level-2 chunks rather than supervoxels, because a neuron is thousands of the first and millions
+ * of the second, and only a hundred are asked about either way.
+ *
+ * **What is kept is the verdict, one pair per root**, under `RootsAt`'s lifetimes like every other
+ * answer here — not the samples or the chunk lookups, which are a hundred times the size and buy
+ * only a cheaper first run at a *second* instant. A root CAVE answers no chunks for, or whose every
+ * chunk answers `0`, is left out of the map and asked again next time.
+ */
+export async function rootsByMajority(
+  datastack: string,
+  when: RootsAt,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+): Promise<Map<string, MajorityRoot>> {
+  const out = new Map<string, MajorityRoot>()
+  const graphene = await grapheneFor(datastack, options)
+  const asked = await askedAt(datastack, when, options)
+  if (!graphene || !asked) return out
+
+  const key = `cave-votes:${graphene.server}|${graphene.table}|${VOTE_SAMPLE}|${asked.at}`
+  const held = await readKept<Record<string, MajorityRoot>>(key, asked)
+  for (const root of roots) {
+    const verdict = held?.[root]
+    if (verdict) out.set(root, verdict)
+  }
+  const unknown = distinctStrings(roots).filter((root) => !out.has(root))
+  for (let i = 0; i < unknown.length; i += LEAVES_CHUNK) {
+    // Sequential, like every other pass here against a shared production chunkedgraph.
+    const samples = await leavesMany(graphene, unknown.slice(i, i + LEAVES_CHUNK), options)
+    // Distinct: a stale root and its stale descendant in one batch share chunks.
+    const chunks = distinctStrings([...samples.values()].flat())
+    const placed = await placeNodes(graphene, chunks, asked.at, options)
+    /*
+     * A chunk an edit touched is itself retired, and placing a retired chunk can answer a root
+     * that is not current at the instant — the stale root, or one from mid-history. That is never
+     * the right answer to write, so such a vote abstains; the check is `judge`'s own, cached.
+     */
+    const { stale } = await judge(
+      graphene,
+      asked,
+      distinctStrings([...placed.values()]),
+      options,
+    )
+    for (const [old, sample] of samples) {
+      const current = sample.map((chunk) => placed.get(chunk))
+      const verdict = majorityOf(
+        current.map((root) => (root && stale.has(root) ? undefined : root)),
+      )
+      if (verdict) out.set(old, verdict)
+    }
+  }
+  if (unknown.some((root) => out.has(root))) {
+    keep(key, { ...held, ...Object.fromEntries(out) }, asked)
+  }
+  return out
+}
+
+/** The root most of these chunks were placed in, a tie going to the lower id; unplaced ones abstain. */
+function majorityOf(placed: readonly (string | undefined)[]): MajorityRoot | undefined {
+  let best: string | undefined
+  let most = 0
+  let counted = 0
+  for (const [root, n] of countStrings(placed)) {
+    counted += n
+    // The tie-break makes a rerun answer the same thing whatever order CAVE sent.
+    if (n > most || (n === most && compareIds(root, best!) < 0)) {
+      best = root
+      most = n
+    }
+  }
+  return best === undefined ? undefined : { root: best, share: most / counted }
+}
+
+/**
+ * `VOTE_SAMPLE` ids evenly strided over the sorted list, or all of them where there are fewer —
+ * sorting in place, the caller handing over a fresh array.
+ *
+ * **Strided, not random**: a provenance key promises the same answer for the same input
+ * (invariant 4), and a chunk id's high bits are its position in the volume, so sorted order
+ * spreads the stride across the neuron rather than bunching it in one arbour.
+ */
+function strided(ids: string[]): string[] {
+  const sorted = ids.sort(compareIds)
+  if (sorted.length <= VOTE_SAMPLE) return sorted
+  return Array.from(
+    { length: VOTE_SAMPLE },
+    (_, k) => sorted[Math.floor((k * sorted.length) / VOTE_SAMPLE)]!,
+  )
+}
+
+/**
+ * A sample of each root's level-2 chunks, from `leaves_many`. Only roots with chunks listed are in
+ * the answer.
+ *
+ * `caveclient.chunkedgraph.get_leaves_many`: `POST …/node/leaves_many?stop_layer=2` with
+ * `{"node_ids": [...]}`, answering `{"<root>": [chunk ids]}`. The body is spliced as text, as
+ * `isLatestRoots`' is, and the reply's ids come back as text through `parseCaveJson`.
+ *
+ * **A failure fails the run; it is never a root "not placed".** A batch holding an id the graph
+ * does not know answers 200 with that id simply absent (FlyWire, 2026-10-20), so a refusal is about
+ * the request or the server — a 429, a 5xx, a missing endpoint — and counting it as an answer about
+ * the data is the "a lookup that failed has not answered none" bug. A 404 is named, being the one a
+ * deployment without the endpoint gives on every request.
+ */
+async function leavesMany(
+  graphene: GrapheneSource,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+): Promise<Map<string, string[]>> {
+  const url = tableUrl(graphene, `node/leaves_many?stop_layer=${VOTE_LAYER}`)
+  const answer = await cavePostRaw<Record<string, (string | number)[]>>(
+    url,
+    `{"node_ids":[${roots.join(',')}]}`,
+    options,
+  ).catch((error: unknown) => {
+    if (error instanceof CaveError && error.status === 404) {
+      throw new CaveError(
+        `${graphene.server} has no \`leaves_many\` endpoint, so this datastack cannot be updated ` +
+          `by a majority of chunks. Use each row’s supervoxel instead.`,
+        404,
+      )
+    }
+    throw error
+  })
+  const out = new Map<string, string[]>()
+  for (const root of roots) {
+    const listed = answer[root]
+    if (listed?.length) out.set(root, strided(listed.map(String)))
+  }
+  return out
+}
+
 async function getRoots(
-  server: string,
-  table: string,
+  graphene: GrapheneSource,
   supervoxels: readonly string[],
   at: number,
   options: CaveRequestOptions,
 ): Promise<BigUint64Array> {
-  const url =
-    `${server}/segmentation/api/v1/table/${encodeURIComponent(table)}` +
-    `/roots_binary?timestamp=${at / 1000}`
+  const url = tableUrl(graphene, `roots_binary?timestamp=${at / 1000}`)
   // `BigInt` from a decimal string is exact where `Number` is not — the conversion
   // `precomputed/index.ts` already relies on for the same reason.
   const body = BigUint64Array.from(supervoxels, (id) => BigInt(id))
@@ -407,15 +596,12 @@ async function getRoots(
  * `pyLongIntList` for the notebook.
  */
 async function isLatestRoots(
-  server: string,
-  table: string,
+  graphene: GrapheneSource,
   ids: readonly string[],
   at: number,
   options: CaveRequestOptions,
 ): Promise<boolean[]> {
-  const url =
-    `${server}/segmentation/api/v1/table/${encodeURIComponent(table)}` +
-    `/is_latest_roots?timestamp=${at / 1000}`
+  const url = tableUrl(graphene, `is_latest_roots?timestamp=${at / 1000}`)
   const body = `{"node_ids":[${ids.join(',')}]}`
   const answer = await cavePostRaw<{ is_latest: boolean[] }>(url, body, options)
   return answer.is_latest ?? []

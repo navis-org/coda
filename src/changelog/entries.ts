@@ -184,6 +184,12 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         title: 'Notebooks and R Markdown now include the **Neuroglancer** card.',
         body: 'The exported notebook or document fetches the dataset’s scene, adds your neurons and prints the link; neurons you picked in the card appear as lists you can edit, and Selected is rebuilt from them. Python uses [nglscenes](https://github.com/schlegelp/nglscenes) and covers CAVE datasets too; R uses [nglscenes-r](https://github.com/schlegelp/nglscenes-r) and covers neuPrint.',
       },
+      {
+        kind: 'node',
+        date: '2026-10-20',
+        title: '**Update root IDs** works without supervoxel IDs.',
+        body: 'Set **Method** to *majority of the root’s chunks* and an outdated root ID is updated to the neuron that most of its old chunks now belong to. A new `idConfidence` column gives that neuron’s share, and the card warns when it holds less than two thirds of the old neuron. Supervoxel IDs remain the default, and the more exact choice where you have them.',
+      },
     ],
   },
   {

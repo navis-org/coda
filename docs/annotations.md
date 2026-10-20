@@ -841,8 +841,45 @@ Its Dataset input is a **reference** — see the reference-edges section — whi
 between an annotation source and the dataset it feeds. That wiring was a cycle until references
 existed, and it is the placement the node is for.
 
-Not exported: named in both `NO_EMITTER`s, since it is caveclient's chunkedgraph and only ever
-sits on a CAVE dataset, whose own node is excused for the same reason.
+**Without a supervoxel, the old root's own chunks vote** (`Method: majority`, `rootsByMajority`).
+A root id is immutable — an edit mints a new one — so a retired root still lists what it was made
+of. `leaves_many?stop_layer=2` gives its level-2 chunks (thousands per neuron, against millions of
+supervoxels), `VOTE_SAMPLE` (100) of them go through the same `roots_binary` lookup at
+the same instant, and the root holding most wins: `fafbseg.flywire.update_ids` with a timestamp,
+sampled. Five decisions, each pinned by a test:
+
+- **A method, not a per-row fallback**, by decision: one run is one route, and the card says which.
+  `Supervoxel ID column` is `visibleIf` only under the supervoxel route, so it leaves the key.
+- **The sample is sorted then strided, never random** — invariant 4 wants the same question for
+  the same input, and a chunk id's high bits are its position, so sorted order spreads the stride
+  over the arbour. A tie goes to the lower id. The Python helper samples the identical ids, so a
+  notebook and the card ask about the same chunks.
+- **What is kept is the verdict, one pair per root**, under `RootsAt`'s three lifetimes like
+  every other answer here. Keeping the samples (forever, per segmentation) was the first version:
+  a hundred ids per root in one record rewritten whole on every run, growing without eviction, to
+  save a `leaves_many` call only on a run at a *second* instant. The chunk lookups go through
+  `placeNodes` uncached for the same reason, rather than into the supervoxel map.
+- **A failed request fails the run, never a root "not placed".** A batch holding an id the graph
+  does not know answers 200 with the id absent (FlyWire, 2026-10-20), so a refusal is about the
+  request or the server. The first version retried a refused batch root by root and counted the
+  failures as unplaced — fifty more requests at a server already returning 503, then a green card
+  blaming the table. A 404 is named, a deployment without `leaves_many` giving one every time.
+- **A vote for a root that is not current at the instant abstains.** An edit retires the level-2
+  chunks it touched, and placing a retired chunk can answer the stale root itself or one from
+  mid-history — never a right answer to write. `judge` checks the candidates, cached like every
+  staleness check. Not measured live (FlyWire answered 502 that afternoon); the rule holds
+  regardless, a non-current root being wrong by definition.
+- **A materialization with no listed timestamp fails** rather than reading as "nothing moved",
+  which under a majority vote wrote a confidence of 1 on ids nobody had checked.
+- **The winner's share is data, so it is a column** — `idConfidence`, folded by `foldColumns`
+  (named for the id because a synapse table's `confidence` is a predictor score), 1 for a current
+  id and null where nothing was repaired. Written **on every run under this method, the unedited
+  base included**, or the schema would grow a column only when something was stale and disagree
+  with `inferOutputs`. A share under two thirds is also said on the card with a few `old → new`
+  pairs: a split neuron's largest piece is still a different claim from the one the label made.
+
+Exported to Python as `coda_update_root_ids` and `coda_update_root_ids_majority`, both probed by
+`probe-py-helpers.py`; R's `NO_EMITTER` names it, there being no caveclient there.
 
 ### Writing back: annotation targets
 

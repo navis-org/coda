@@ -38,6 +38,7 @@ const SV = '80000000000000001'
 
 interface Call {
   url: string
+  body?: BodyInit | null
 }
 
 /** `OLD` has moved on; `KEPT` has not. The supervoxel resolves to `NEW`. */
@@ -47,17 +48,22 @@ interface Call {
  * is correctly skipped — which is the right behaviour and the wrong fixture for a test about
  * which dtype the replacement takes.
  */
-function installFetch(stale: string = OLD, fresh: string = NEW): Call[] {
+function installFetch(
+  stale: string | string[] = OLD,
+  fresh: string = NEW,
+  vote: Vote = {},
+): Call[] {
   const calls: Call[] = []
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const text = String(url)
-    calls.push({ url: text })
-    const json = (value: unknown) =>
+    calls.push({ url: text, body: init?.body })
+    const respond = (body: string, status = 200) =>
       Promise.resolve({
-        ok: true,
-        status: 200,
-        text: () => Promise.resolve(JSON.stringify(value)),
+        ok: status < 400,
+        status,
+        text: () => Promise.resolve(body),
       } as Response)
+    const json = (value: unknown) => respond(JSON.stringify(value))
 
     if (text.includes('/datastack/full/')) {
       return json({
@@ -71,26 +77,44 @@ function installFetch(stale: string = OLD, fresh: string = NEW): Call[] {
     if (text.includes('is_latest_roots')) {
       const ids = /\[(.*)\]/.exec(String(init?.body ?? ''))?.[1] ?? ''
       const list = ids ? ids.split(',') : []
-      return json({ is_latest: list.map((id) => id !== stale) })
+      const moved = new Set([stale].flat())
+      return json({ is_latest: list.map((id) => !moved.has(id)) })
+    }
+    if (text.includes('leaves_many')) {
+      const ids = /\[(.*)\]/.exec(String(init?.body ?? ''))?.[1]?.split(',') ?? []
+      if (ids.some((id) => vote.refused?.includes(id))) {
+        return respond('{"message":"no such node"}', 500)
+      }
+      // Ids as bare JSON integers, as the server sends them — `parseCaveJson` must keep them exact.
+      const body = `{${ids.map((id) => `"${id}":[${(vote.leaves?.[id] ?? []).join(',')}]`).join(',')}}`
+      return respond(body)
     }
     if (text.includes('roots_binary')) {
       // Raw uint64 out, as `roots_binary` answers — one root per supervoxel sent, and `0` for a
       // supervoxel the graph does not know, which is how CAVE says so.
       const sent = new BigUint64Array(init?.body as ArrayBuffer)
-      const out = BigUint64Array.from(sent, (sv) => (sv === 0n ? 0n : BigInt(fresh)))
+      const out = BigUint64Array.from(sent, (sv) =>
+        sv === 0n ? 0n : BigInt(vote.placed?.[String(sv)] ?? fresh),
+      )
       return Promise.resolve({
         ok: true,
         status: 200,
         arrayBuffer: () => Promise.resolve(out.buffer),
       } as unknown as Response)
     }
-    return Promise.resolve({
-      ok: false,
-      status: 404,
-      text: () => Promise.resolve('{}'),
-    } as Response)
+    return respond('{}', 404)
   })
   return calls
+}
+
+/**
+ * What a majority vote is answered with: each root's level-2 chunks, where a chunk is placed when
+ * not at `fresh`, and roots whose `leaves_many` batch the server refuses.
+ */
+interface Vote {
+  leaves?: Record<string, string[]>
+  placed?: Record<string, string>
+  refused?: string[]
 }
 
 /** The timestamp each of the two chunkedgraph calls was asked at, in call order. */
@@ -605,5 +629,198 @@ describe('a Dataset from another backend', () => {
     let g = emptyGraph('x')
     g = addNode(g, node('upd', 'cave.updateRootIds'))
     expect(issues(g, 'upd')).not.toContain('chunkedgraph')
+  })
+})
+
+/**
+ * A majority of the old root's chunks — the route for a table that carries no supervoxel.
+ *
+ * What a test has to pin is that the vote is a vote: the winner is the root holding *most* of the
+ * sample, its share is written per row and said on the card when thin, the sample is fixed (sorted
+ * and strided, so a rerun is the same question), and a root's sample is asked for once.
+ */
+describe('majority of the root’s chunks', () => {
+  const OTHER = '720575940600000002'
+  /** Level-2 ids: eighteen digits, too wide for a double, so a lossy parse would show. */
+  const chunk = (n: number) => String(144115188075855872n + BigInt(n))
+  const chunks = (n: number) => Array.from({ length: n }, (_, i) => chunk(i))
+
+  /** A table of nothing but these root ids. */
+  const idsOnly = (...ids: string[]) =>
+    makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ids }, 'neurons')
+
+  function bare(): TableValue {
+    return makeTable(
+      tableSchema(column('neuronId', 'str'), column('type', 'str')),
+      { neuronId: [OLD, KEPT, null], type: ['LC4', 'LC6', '?'] },
+      'neurons',
+    )
+  }
+
+  it('repoints a stale row to the root holding most of its chunks, with that share', async () => {
+    // Three of four chunks went to NEW and one to OTHER: a split, and NEW is the larger piece.
+    installFetch(OLD, NEW, { leaves: { [OLD]: chunks(4) }, placed: { [chunk(3)]: OTHER } })
+    const said: string[] = []
+    const out = (await run(bare(), { method: 'majority' }, { warn: (m) => said.push(m) }))
+      .out as TableValue
+    expect(out.data.neuronId).toEqual([NEW, KEPT, null])
+    // A current id is certain, and a row with no id has nothing to be confident about.
+    expect(out.data.idConfidence).toEqual([0.75, 1, null])
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'idConfidence'])
+    expect(said).toEqual([])
+  })
+
+  it('agrees with inferOutputs about the schema', async () => {
+    installFetch(OLD, NEW, { leaves: { [OLD]: chunks(4) } })
+    const def = requireNodeDef('cave.updateRootIds')
+    const params = { ...defaultParams(def), method: 'majority' }
+    const inferred = def.inferOutputs!({
+      inputs: { in: T.neurons(bare().schema) },
+      params,
+    } as never).out
+    const out = (await run(bare(), { method: 'majority' })).out as TableValue
+    expect(inferred).toEqual(T.neurons(out.schema))
+  })
+
+  it('writes over a confidence column already there, in its slot', async () => {
+    installFetch(OLD, NEW, { leaves: { [OLD]: chunks(4) } })
+    const again = makeTable(
+      tableSchema(column('idConfidence', 'f64'), column('neuronId', 'str')),
+      { idConfidence: [0.5], neuronId: [OLD] },
+      'neurons',
+    )
+    const out = (await run(again, { method: 'majority' })).out as TableValue
+    expect(out.schema.columns.map((c) => c.name)).toEqual(['idConfidence', 'neuronId'])
+    expect(out.data.idConfidence).toEqual([1])
+  })
+
+  it('says so when the winner kept less than two thirds of the old neuron', async () => {
+    // An even split: the tie goes to the lower id, and the card says the margin was thin.
+    installFetch(OLD, OTHER, {
+      leaves: { [OLD]: chunks(4) },
+      placed: { [chunk(0)]: NEW, [chunk(1)]: NEW },
+    })
+    const said: string[] = []
+    const out = (await run(bare(), { method: 'majority' }, { warn: (m) => said.push(m) }))
+      .out as TableValue
+    expect(out.data.neuronId?.[0]).toBe(NEW)
+    expect(out.data.idConfidence?.[0]).toBe(0.5)
+    expect(said).toEqual([
+      '1 row was updated to a root holding less than two thirds of the old neuron’s chunks, so ' +
+        `the old neuron was split and the new ID may name only part of it (e.g. ${OLD} → ${NEW}). ` +
+        'See `idConfidence`.',
+    ])
+  })
+
+  it('asks for level-2 chunks of the stale roots only, and sends a fixed sample of them', async () => {
+    // 250 chunks, listed out of order: the sample is 100 of them strided over the sorted ids.
+    const calls = installFetch(OLD, NEW, { leaves: { [OLD]: chunks(250).reverse() } })
+    await run(bare(), { method: 'majority' })
+
+    const leaves = calls.find((c) => c.url.includes('leaves_many'))!
+    expect(new URL(leaves.url).searchParams.get('stop_layer')).toBe('2')
+    expect(leaves.body).toBe(`{"node_ids":[${OLD}]}`)
+    const roots = calls.find((c) => c.url.includes('roots_binary'))!
+    const sent = [...new BigUint64Array(roots.body as ArrayBuffer)].map(String)
+    expect(sent).toHaveLength(100)
+    expect(sent.slice(0, 3)).toEqual([chunk(0), chunk(2), chunk(5)])
+  })
+
+  it('keeps each verdict at a materialization, and keeps none for a live run', async () => {
+    const calls = installFetch(OLD, NEW, { leaves: { [OLD]: chunks(4) } })
+    const asked = () => calls.filter((c) => /leaves_many|roots_binary/.test(c.url)).length
+    await run(bare(), { method: 'majority' })
+    expect(asked()).toBe(2)
+    const again = (await run(bare(), { method: 'majority' })).out as TableValue
+    expect(again.data.neuronId?.[0]).toBe(NEW)
+    expect(again.data.idConfidence?.[0]).toBe(1)
+    expect(asked()).toBe(2)
+    await run(bare(), { method: 'majority', updateTo: 'live' })
+    expect(asked()).toBe(4)
+  })
+
+  it('carries the column on an unedited base, and asks nothing past the staleness check', async () => {
+    const calls = installFetch(OLD, NEW)
+    const current = idsOnly(KEPT)
+    const out = (await run(current, { method: 'majority' })).out as TableValue
+    expect(out.data.idConfidence).toEqual([1])
+    expect(calls.filter((c) => /leaves_many|roots_binary/.test(c.url))).toHaveLength(0)
+  })
+
+  it('counts a root it could not place, and leaves it as it was', async () => {
+    const LOST = '720575940628857299'
+    installFetch([OLD, LOST], NEW, { leaves: { [OLD]: chunks(4), [LOST]: [] } })
+    const said: string[] = []
+    const table = idsOnly(OLD, LOST)
+    const out = (await run(table, { method: 'majority' }, { warn: (m) => said.push(m) }))
+      .out as TableValue
+    expect(out.data.neuronId).toEqual([NEW, LOST])
+    expect(out.data.idConfidence).toEqual([1, null])
+    expect(said).toEqual([
+      '1 row has an out-of-date ID that could not be updated: 1 whose old root CAVE could not ' +
+        'place. It is left as it was.',
+    ])
+  })
+
+  it('fails the run on a refused batch rather than counting its roots as unplaced', async () => {
+    // A 5xx or a 429 says nothing about the data: reading it as "could not place" would finish
+    // green and blame the table for the server's state.
+    const BAD = '720575940628857298'
+    installFetch([OLD, BAD], NEW, { leaves: { [OLD]: chunks(4) }, refused: [BAD] })
+    await expect(run(idsOnly(OLD, BAD), { method: 'majority' })).rejects.toThrow(
+      'CAVE returned 500',
+    )
+  })
+
+  it('names a chunkedgraph with no leaves_many endpoint', async () => {
+    installFetch(OLD, NEW)
+    const original = globalThis.fetch as typeof fetch
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+      String(url).includes('leaves_many')
+        ? Promise.resolve({
+            ok: false,
+            status: 404,
+            text: () => Promise.resolve('{}'),
+          } as Response)
+        : original(url as never, init as never),
+    )
+    await expect(run(bare(), { method: 'majority' })).rejects.toThrow(
+      'has no `leaves_many` endpoint',
+    )
+  })
+
+  it('does not let a chunk placed in a root that is itself stale vote', async () => {
+    // Three chunks land in OTHER, which is not current at the instant (a retired chunk resolving
+    // into mid-history); the one that lands in NEW is the only vote that counts.
+    installFetch([OLD, OTHER], NEW, {
+      leaves: { [OLD]: chunks(4) },
+      placed: { [chunk(0)]: OTHER, [chunk(1)]: OTHER, [chunk(2)]: OTHER },
+    })
+    const out = (await run(bare(), { method: 'majority' })).out as TableValue
+    expect(out.data.neuronId?.[0]).toBe(NEW)
+    expect(out.data.idConfidence?.[0]).toBe(1)
+  })
+
+  it('refuses a materialization with no listed timestamp rather than calling every id current', async () => {
+    installFetch(OLD, NEW, { leaves: { [OLD]: chunks(4) } })
+    await expect(run(bare(), { method: 'majority', version: '700' })).rejects.toThrow(
+      'Materialization 700 of flywire_fafb_public has no timestamp CAVE lists',
+    )
+  })
+
+  it('needs no supervoxel column: hidden, out of the key, and not asked for by validate', () => {
+    const def = requireNodeDef('cave.updateRootIds')
+    const params = { ...defaultParams(def), method: 'majority' }
+    expect(visibleParams(def, params as never).map((p) => p.id)).not.toContain(
+      'supervoxelColumn',
+    )
+    const g = addNode(emptyGraph('x'), {
+      id: 'upd',
+      type: 'cave.updateRootIds',
+      position: { x: 0, y: 0 },
+      params: params as GraphNode['params'],
+    })
+    const messages = (inferGraph(g).nodes.upd?.issues ?? []).map((i) => i.message).join(' ')
+    expect(messages).not.toContain('Supervoxel')
   })
 })
