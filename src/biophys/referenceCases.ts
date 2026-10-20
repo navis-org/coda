@@ -10,8 +10,9 @@
  * real skeleton through the same two halves.
  */
 
-import { HH_GBAR, HH_K, HH_NA, densityByRegion, leakChannel } from './channels'
+import { HH_GBAR, HH_K, HH_NA, channelById, densityByRegion, leakChannel } from './channels'
 import type { CableTree, CompartmentTree, SegmentRule } from './discretize'
+import { modMechanism, writesMod } from './modFile'
 import { cableStartPoint, discretize } from './discretize'
 import type {
   CellModel,
@@ -55,6 +56,15 @@ export interface ReferenceCase {
     readonly gna: number
     readonly gk: number
   }
+  /**
+   * Library channels (`ChannelSpec.id`) where the region label is one of `regions`, densities in
+   * S/cm². NEURON runs each as the mechanism `modMechanism` names, generated into `scripts/biophys-mod/`.
+   * (Squid HH stays `hh`: NEURON's built-in `hh` is one mechanism holding both and a leak.)
+   */
+  readonly channels?: readonly {
+    readonly regions: readonly number[]
+    readonly densities: Readonly<Record<string, number>>
+  }[]
   readonly temperature: number
   readonly vInit: number
   readonly synapse?: SynapseKind & { readonly gmax: number }
@@ -118,19 +128,35 @@ export function cutMaxLength(
   return discretize(tree, { rule: { kind: 'maxLength', length }, ra, cm })
 }
 
-/** The densities a case puts in each compartment, one placement per channel. */
-function caseChannels(c: ReferenceCase, tree: CompartmentTree): ChannelPlacement[] {
+/**
+ * The densities a case puts in each compartment, one placement per channel, grouped as NEURON
+ * builds them: the leak (`pas`), squid HH (its built-in `hh`) and every other library channel (a
+ * mechanism from `scripts/biophys-mod/`). The solver takes them all at once.
+ */
+function caseChannels(c: ReferenceCase, tree: CompartmentTree) {
   const leak: ChannelPlacement = {
     spec: leakChannel(c.eLeak),
     gbar: new Float64Array(tree.count).fill(c.gLeak),
   }
-  if (!c.hh) return [leak]
-  const { regions, gna, gk } = c.hh
-  return [
-    leak,
-    { spec: HH_NA, gbar: densityByRegion(tree.region, regions, gna) },
-    { spec: HH_K, gbar: densityByRegion(tree.region, regions, gk) },
-  ]
+  const hh = c.hh && {
+    na: { spec: HH_NA, gbar: densityByRegion(tree.region, c.hh.regions, c.hh.gna) },
+    k: { spec: HH_K, gbar: densityByRegion(tree.region, c.hh.regions, c.hh.gk) },
+  }
+  const library: ChannelPlacement[] = []
+  for (const { regions, densities } of c.channels ?? []) {
+    for (const [id, density] of Object.entries(densities)) {
+      const spec = channelById(id)
+      // NEURON runs these from generated `.mod` files, which only the fitted kind has; squid HH is
+      // its built-in `hh`, which reads `c.hh`.
+      if (!writesMod(spec)) {
+        throw new Error(
+          `Case ${c.name}: ${id} has no generated mechanism (squid HH goes in \`hh\`).`,
+        )
+      }
+      library.push({ spec, gbar: densityByRegion(tree.region, regions, density) })
+    }
+  }
+  return { leak, hh, library, all: [leak, ...(hh ? [hh.na, hh.k] : []), ...library] }
 }
 
 export function buildCase(c: ReferenceCase): {
@@ -154,7 +180,7 @@ export function buildCase(c: ReferenceCase): {
   const model: CellModel = {
     tree,
     cm: new Float64Array(tree.count).fill(c.cm),
-    channels: caseChannels(c, tree),
+    channels: caseChannels(c, tree).all,
     temperature: c.temperature,
     synapses,
   }
@@ -178,14 +204,13 @@ export function buildCase(c: ReferenceCase): {
 
 /**
  * The case as NEURON should build it: sections as lists of skeleton nodes with our `nseg`, each
- * node's `x` along its section, the radius a section starts at where it starts at its own, and the
- * HH densities per segment. Takes the tree when the caller has already built it — a real skeleton
- * is not discretised twice.
+ * node's `x` along its section, the radius a section starts at where it starts at its own, the HH
+ * and library-channel densities per segment, and each library mechanism's reversal. Takes the tree
+ * when the caller has already built it — a real skeleton is not discretised twice.
  */
 export function neuronExport(c: ReferenceCase, tree: CompartmentTree = buildCase(c).tree) {
-  const channels = caseChannels(c, tree)
-  const na = channels.find((p) => p.spec === HH_NA)
-  const k = channels.find((p) => p.spec === HH_K)
+  const { hh, library } = caseChannels(c, tree)
+  const placed = library.map((p) => ({ ...p, name: modMechanism(p.spec.id) }))
   // The first section hung from the root is NEURON's root section; the root is its 0 end, and
   // every other section from the root hangs from that end too.
   const rootSection = tree.sections.findIndex((s) => s.parentSection < 0)
@@ -206,16 +231,27 @@ export function neuronExport(c: ReferenceCase, tree: CompartmentTree = buildCase
       ...(startPoint ? { startPoint } : {}),
       parent: s.parentSection < 0 ? (i === rootSection ? -1 : rootSection) : s.parentSection,
       parentX: s.parentSection < 0 ? 0 : 1,
-      hh:
-        na && k
-          ? Array.from({ length: s.nseg }, (_, n) => ({
-              gna: na.gbar[s.first + n]!,
-              gk: k.gbar[s.first + n]!,
-            }))
-          : undefined,
+      hh: hh
+        ? Array.from({ length: s.nseg }, (_, n) => ({
+            gna: hh.na.gbar[s.first + n]!,
+            gk: hh.k.gbar[s.first + n]!,
+          }))
+        : undefined,
+      // Each library channel's `gbar` per segment, by NEURON mechanism.
+      // Summed per mechanism: one channel placed twice (axon, and denser on its initial segment)
+      // is two placements to the solver, which adds them, and one mechanism to NEURON.
+      mechanisms: placed.length
+        ? Array.from({ length: s.nseg }, (_, n) => {
+            const out: Record<string, number> = {}
+            for (const p of placed) out[p.name] = (out[p.name] ?? 0) + p.gbar[s.first + n]!
+            return out
+          })
+        : undefined,
     }
   })
-  return { ...c, sections, location }
+  // Each mechanism's reversal from its spec, so the `.mod` files hold no copy NEURON would use.
+  const reversals = Object.fromEntries(placed.map((p) => [p.name, p.spec.eRev]))
+  return { ...c, sections, location, reversals }
 }
 
 /* ------------------------------------------------------------------------------------------
@@ -424,6 +460,52 @@ export const REFERENCE_CASES: readonly ReferenceCase[] = [
     ],
     dt: 0.025,
     duration: 40,
+  },
+  {
+    // The same arbour with Günay et al. 2015's fly channels: the soma at their reconstructed
+    // model's whole-cell densities and the axon stub at its axon's (Table 4; Kf, absent there, at
+    // their isopotential model's Kf:Ks ratio of 24.1:50, the editor's derivation), spiking. Two
+    // groups naming the same channels, so NEURON is handed their sum per mechanism, as the solver
+    // adds them. Every gate kind of the fitted scheme: sigmoid, exponential and constant τ.
+    name: 'branched-fly-channels',
+    tree: BRANCHED,
+    rule: { kind: 'maxLength', length: 5 },
+    ...FLY_PASSIVE,
+    channels: [
+      {
+        regions: [1],
+        densities: {
+          'gunay.nat': 0.03,
+          'gunay.nap': 1e-7,
+          'gunay.ks': 0.055,
+          'gunay.kf': 0.0265,
+        },
+      },
+      {
+        regions: [2],
+        densities: {
+          'gunay.nat': 0.18,
+          'gunay.nap': 1e-7,
+          'gunay.ks': 0.4,
+          'gunay.kf': 0.1928,
+        },
+      },
+    ],
+    temperature: 22,
+    vInit: -60,
+    synapse: { scheme: 'exp2syn', tau1: 0.1, tau2: 10, eRev: 0, gmax: 0.002 },
+    synapses: [
+      { node: 10, count: 5, times: [5, 5.5, 6] },
+      { node: BRANCHED_NODES.fork2, count: 4, times: [6] },
+    ],
+    clamps: [{ node: BRANCHED_NODES.soma, delay: 15, duration: 15, amplitude: 0.3 }],
+    record: [BRANCHED_NODES.soma, BRANCHED_NODES.fork, BRANCHED_NODES.stub],
+    dt: 0.025,
+    // 35, not 40: a third spike at 37 ms creeps up on threshold after the clamp ends, and a slow
+    // crossing turns rounding into timing — measured as 2.7e-5 mV on such an upstroke against 4e-6
+    // mV for the two before it, a shift of 1.5e-7 ms. A test of the scheme, not of float order,
+    // ends before it.
+    duration: 35,
   },
   {
     // The same arbour, HH at the soma and axon at room temperature, cut by a fixed length, spiking.

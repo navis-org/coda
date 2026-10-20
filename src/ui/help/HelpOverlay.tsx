@@ -31,6 +31,7 @@ import { MarkdownBlocks, MarkdownInlines } from '../MarkdownView'
 import type { MarkdownRenderOptions } from '../MarkdownView'
 import { parseInline } from '../../core/markdown'
 import { FigureView } from './FigureView'
+import { guidedPackOf, packGuideUrl } from '../packGuides'
 import { Modal } from '../Modal'
 
 const NODE_GUIDE_URL = `${import.meta.env.BASE_URL}nodes.html`
@@ -79,6 +80,7 @@ function HelpHeader({
   onClose: () => void
 }) {
   const def = getNodeDef(type)
+  const pack = guidedPackOf(type)
   return (
     <div className="overlay__header">
       {canGoBack && (
@@ -104,6 +106,17 @@ function HelpHeader({
       >
         Node guide ↗
       </a>
+      {/* A plugin's node: its plugin's guide, the overview this one document is a part of. */}
+      {pack && (
+        <a
+          className="btn btn--ghost"
+          href={packGuideUrl(pack)}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {pack.guide.title} ↗
+        </a>
+      )}
       <button
         type="button"
         className="btn btn--ghost"

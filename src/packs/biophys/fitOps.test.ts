@@ -12,7 +12,7 @@ import { T, column, tableSchema } from '../../core/types'
 import type { CellModelValue, TableValue } from '../../core/values'
 import { describeValue, getColumn, makeTable } from '../../core/values'
 import type { PassiveFitResult } from './fit'
-import { passiveResponses } from './fit'
+import { MEMBRANE_PARAMETERS, passiveResponses } from './fit'
 import { fitModelNode } from './fitModel'
 import { modelNode } from './model'
 import {
@@ -24,6 +24,7 @@ import {
   fitTracesSchema,
   fitTracesTable,
   appliedParams,
+  channelAreaNote,
   fittedModel,
   recordedSweeps,
 } from './fitOps'
@@ -143,7 +144,7 @@ describe('fittedModel', () => {
   it('rescales the axial path to the fitted Ra and scales the area as the build scales one', () => {
     const value = build({ ...HH, membrane: TRUTH, areaFactor: 1.5 })
     // The card's own area factor, 3 on a model built at 1.5: twice the membrane it was built with.
-    const fitted = fittedModel(value, settledOn({ ...TRUTH, ra: 360, area: 3 }))
+    const fitted = fittedModel(value, settledOn({ ...TRUTH, ra: 360, area: 3, seal: 0 }))
     expect(fitted.compartments.gAxial[3]).toBeCloseTo(value.compartments.gAxial[3]! / 2, 12)
     expect(fitted.membrane).toEqual({ ...TRUTH, ra: 360 })
     expect(fitted.areaFactor).toBe(3)
@@ -162,7 +163,7 @@ describe('fittedModel', () => {
 
   it('places points as the model it was fitted on does, so Simulate can record on it', () => {
     const value = build({ membrane: TRUTH })
-    const fitted = fittedModel(value, settledOn({ ...TRUTH, area: 1 }))
+    const fitted = fittedModel(value, settledOn({ ...TRUTH, area: 1, seal: 0 }))
     const points = cloud([['A', '7', 'pre', 45_000, 0]])
     expect(placePoints(fitted, points)).toEqual(placePoints(value, points))
   })
@@ -171,7 +172,7 @@ describe('fittedModel', () => {
 describe('appliedParams', () => {
   it('is the fit as the Compartment Model’s params: Custom, rounded, the card’s own area factor', () => {
     const value = build({ membrane: TRUTH, areaFactor: 1.5 })
-    const fitted = fittedModel(value, settledOn({ ...TRUTH, rm: 15_003.7, area: 3 }))
+    const fitted = fittedModel(value, settledOn({ ...TRUTH, rm: 15_003.7, area: 3, seal: 0 }))
     expect(appliedParams(fitted)).toEqual({
       preset: 'custom',
       rm: 15_000,
@@ -185,6 +186,27 @@ describe('appliedParams', () => {
     // Every key a param the Compartment Model declares: a renamed one would be written to nothing.
     const declared = new Set((modelNode.params ?? []).map((p) => p.id))
     expect(Object.keys(appliedParams(fitted)!).filter((id) => !declared.has(id))).toEqual([])
+  })
+})
+
+describe('channelAreaNote', () => {
+  /** A result whose area factor went from `start` to `fitted`, as the Parameters rows carry it. */
+  const areaFit = (start: number, fitted: number) =>
+    ({
+      parameters: [{ ...MEMBRANE_PARAMETERS.find((p) => p.key === 'area')!, start, fitted }],
+    }) as unknown as PassiveFitResult
+
+  it('says what a moved area factor does to the channels, and nothing otherwise', () => {
+    expect(channelAreaNote(4, areaFit(1, 3))).toBe(
+      'The model’s 4 channels keep their densities, so at the fitted area factor (3, from 1) they carry 3× the conductance.',
+    )
+    expect(channelAreaNote(1, areaFit(2, 1))).toMatch(
+      /1 channel keeps its density.*it carries 0\.5×/,
+    )
+    // Held, or settled where it started: the channels carry what they did.
+    expect(channelAreaNote(4, areaFit(1.5, 1.5))).toBeUndefined()
+    expect(channelAreaNote(4, areaFit(1, 1.004))).toBeUndefined()
+    expect(channelAreaNote(0, areaFit(1, 3))).toBeUndefined()
   })
 })
 
@@ -342,7 +364,8 @@ describe('Fit Model', () => {
     const model = out.model as CellModelValue
     expect(model.membrane.rm).toBeCloseTo(TRUTH.rm, -2)
     expect(model.membrane.eLeak).toBeCloseTo(TRUTH.eLeak, 1)
-    expect(warnings.some((w) => /passive cell/.test(w))).toBe(true)
+    // The area factor held, so the channels carry what they did: nothing to say about them.
+    expect(warnings.some((w) => /channels? keeps?/.test(w))).toBe(false)
 
     const inferred = fitModelNode.inferOutputs!(
       makeInferContext(fitModelNode, picked.params, { recording: T.table(table.schema) }),

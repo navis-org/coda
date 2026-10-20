@@ -104,13 +104,23 @@ function schemaOf(columns: readonly RecordingColumn[]): TableSchema {
   )
 }
 
+/** Each sweep's number: the file's own (`RecordingSummary.sweepNumbers`), else counted from 1. */
+export function sweepLabels(summary: RecordingSummary): readonly number[] {
+  return summary.sweepNumbers ?? Array.from({ length: summary.sweeps }, (_, i) => i + 1)
+}
+
 /**
- * `1-3, 7` as sweep indices from 0, sorted and once each; what names no sweep of `count` is
- * returned to be said. Empty text is every sweep.
+ * `1-3, 7` as sweep indices from 0, sorted and once each, read against the sweeps' numbers
+ * (`sweepLabels`). A token naming no sweep, or a
+ * range either of whose ends is none, is returned to be said. Empty text is every sweep.
  */
-export function parseSweeps(text: string, count: number): { sweeps: number[]; bad: string[] } {
-  const all = Array.from({ length: count }, (_, i) => i)
+export function parseSweeps(
+  text: string,
+  labels: readonly number[],
+): { sweeps: number[]; bad: string[] } {
+  const all = labels.map((_, i) => i)
   if (!text.trim()) return { sweeps: all, bad: [] }
+  const known = new Set(labels)
   const keep = new Set<number>()
   const bad: string[] = []
   // A range is closed up first — `1 - 3` is one range, not 1, a dash and 3 — then split on the
@@ -121,17 +131,13 @@ export function parseSweeps(text: string, count: number): { sweeps: number[]; ba
     const [from, to] = range
       ? [Number(range[1]), Number(range[2])]
       : [Number(token), Number(token)]
-    if (
-      !Number.isInteger(from) ||
-      !Number.isInteger(to) ||
-      from < 1 ||
-      to > count ||
-      from > to
-    ) {
+    if (!known.has(from) || !known.has(to) || from > to) {
       bad.push(token)
       continue
     }
-    for (let s = from; s <= to; s++) keep.add(s - 1)
+    labels.forEach((n, i) => {
+      if (n >= from && n <= to) keep.add(i)
+    })
   }
   return { sweeps: [...keep].sort((a, b) => a - b), bad }
 }
@@ -144,7 +150,7 @@ export function recordingPickIssues(summary: RecordingSummary, pick: RecordingPi
   const gone = pick.columns.filter((name) => !known.has(name))
   if (gone.length > 0) {
     issues.push(
-      `${plural(gone.length, 'picked channel')} ${agree(gone.length, 'is', 'are')} not in this recording: ${namedFew(gone)}.`,
+      `${plural(gone.length, 'picked channel')} ${agree(gone.length, 'is', 'are')} not in this recording: ${namedFew(gone)}. Pick again under Channels.`,
     )
   }
   if (plan.bad.length > 0) {
@@ -190,7 +196,7 @@ function planTable(summary: RecordingSummary, pick: RecordingPick): TablePlan {
     ? Math.min(summary.sweepSamples, Math.ceil(pick.window.end / dt - 1e-9))
     : summary.sweepSamples
   const perSweep = Math.ceil(Math.max(0, to - from) / pick.every)
-  const { sweeps, bad } = parseSweeps(pick.sweeps, summary.sweeps)
+  const { sweeps, bad } = parseSweeps(pick.sweeps, sweepLabels(summary))
   const all = recordingColumns(summary)
   const columns = pickedColumns(all, pick)
   return { all, columns, sweeps, bad, dt, from, to, perSweep, rows: perSweep * sweeps.length }
@@ -216,6 +222,7 @@ export function recordingTable(rec: Recording, pick: RecordingPick): TableValue 
   const size = sizeIssue(plan)
   if (size) throw new Error(size)
   const { every } = pick
+  const labels = sweepLabels(rec.summary)
   const shift = pick.rezero ? from * dt : 0
   const t = new Array<number>(rows)
   const sweep = new Array<number>(rows)
@@ -227,7 +234,7 @@ export function recordingTable(rec: Recording, pick: RecordingPick): TableValue 
       const last = Math.min(to - from, first + every)
       // A block's time is its middle, so averaging never shifts a trace.
       t[at + b] = (from + first + (last - first - 1) / 2) * dt - shift
-      sweep[at + b] = s + 1
+      sweep[at + b] = labels[s]!
     }
     // Column by column, only the window's samples, indexed from its start.
     columns.forEach((c, k) => {
@@ -241,7 +248,8 @@ export function recordingTable(rec: Recording, pick: RecordingPick): TableValue 
         const last = Math.min(data.length, first + every)
         let sum = 0
         for (let i = first; i < last; i++) sum += data[i]!
-        const mean = sum / (last - first)
+        // A block past the samples' end (a command shorter than its response) is no measurement.
+        const mean = last > first ? sum / (last - first) : Number.NaN
         out[at + b] = Number.isFinite(mean) ? mean : null
       }
     })

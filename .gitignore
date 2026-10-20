@@ -17,3 +17,6 @@ __pycache__/
 tutorials/out/
 # Background music. Licences rarely allow redistributing the file, and this repository is public.
 tutorials/music/
+
+# NEURON mechanisms compiled from scripts/biophys-mod/*.mod by the reference harness
+scripts/biophys-mod/*/

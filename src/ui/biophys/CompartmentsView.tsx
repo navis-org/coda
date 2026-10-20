@@ -32,7 +32,7 @@ import type { ModelCable } from '../../packs/biophys/build'
 import { cableCompartmentAt, modelCable } from '../../packs/biophys/build'
 import type { CompartmentLoad, ModelStats } from '../../packs/biophys/modelStats'
 import { cableConstants, compartmentLoads, modelStats } from '../../packs/biophys/modelStats'
-import { CHART_INK, chartSurface, seriesColor, withAlpha } from '../../style/colors'
+import { CHART_INK, chartSurface, mixHex, seriesColor } from '../../style/colors'
 import {
   formatMeasure,
   formatNumber,
@@ -65,8 +65,12 @@ import { useWidthControls } from './WidthControls'
 /** Every branch's width where widths are not to scale, px. */
 const LINE_WIDTH = 2
 
-/** How much of its region's colour every other compartment keeps, so a cut shows between two. */
-const ALTERNATE_ALPHA = 0.5
+/**
+ * How much of its region's colour every other compartment keeps, so a cut shows between two —
+ * mixed opaquely with the surface rather than drawn translucent, or the round caps where two edges
+ * meet stack and bead the lighter shade darker at every joint.
+ */
+const ALTERNATE_SHARE = 0.5
 
 /** What the pointer is over: a compartment, and how far out — undefined on the soma block. */
 interface Hovered {
@@ -240,8 +244,8 @@ export function CompartmentsView({ model }: CompartmentsViewProps) {
   const inks = useMemo(() => (model ? regionInks(model.regionNames, mode) : []), [model, mode])
   // Each region's ink and its lighter alternate, so a span's colour is a lookup.
   const palette = useMemo(
-    () => inks.flatMap((ink) => [ink, withAlpha(ink, ALTERNATE_ALPHA)]),
-    [inks],
+    () => inks.flatMap((ink) => [ink, mixHex(ink, chartSurface(mode), 1 - ALTERNATE_SHARE)]),
+    [inks, mode],
   )
   // The subdivision, which neither a zoom nor a theme moves: a palette index per span.
   const spans = useMemo(() => {

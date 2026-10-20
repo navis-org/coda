@@ -41,7 +41,7 @@ import {
   staleStrokes,
   writeRegionStroke,
 } from '../../packs/biophys/regions'
-import { CHART_INK, chartSurface, seriesColor, withAlpha } from '../../style/colors'
+import { CHART_INK, chartSurface, mixHex, seriesColor } from '../../style/colors'
 import { regionInks, replacedInk } from '../compartmentInk'
 import { ContextMenu } from '../menu/ContextMenu'
 import { TextField } from '../params/ParamField'
@@ -78,8 +78,12 @@ export interface RegionsEditorProps {
 
 const LINE_WIDTH = 1.5
 
-/** How much of the grey an ignored branch keeps: fainter than one the soma replaces, being in no model. */
-const IGNORED_ALPHA = 0.45
+/**
+ * How much of the grey an ignored branch keeps: fainter than one the soma replaces, being in no
+ * model. Mixed opaquely with the surface, as the Model tab's lighter compartments are, or the round
+ * caps at every joint stack into darker beads.
+ */
+const IGNORED_SHARE = 0.45
 
 /**
  * The first `region N` not already a name. Not `uniqueName`, whose first answer is the bare
@@ -114,7 +118,7 @@ export function RegionsEditor({
   const inks = useMemo(() => (painted ? regionInks(painted.names, mode) : []), [painted, mode])
   // What the model leaves as no cable of its own: replaced by the soma, or ignored.
   const replaced = replacedInk(mode)
-  const ignoredInk = withAlpha(CHART_INK[mode].muted, IGNORED_ALPHA)
+  const ignoredInk = mixHex(CHART_INK[mode].muted, chartSurface(mode), 1 - IGNORED_SHARE)
   const inkOf = (name: string) =>
     inks[painted?.names.indexOf(name) ?? -1] ?? CHART_INK[mode].muted
   // A stroke's swatch and words: an ignoring one names no region.

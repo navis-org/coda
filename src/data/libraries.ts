@@ -18,6 +18,7 @@ import type * as ArrowLibrary from 'apache-arrow'
 import type * as HyparquetLibrary from 'hyparquet'
 import type * as HyparquetConstants from 'hyparquet/src/constants.js'
 import type * as HyparquetThrift from 'hyparquet/src/thrift.js'
+import type * as H5wasmLibrary from 'h5wasm'
 import type * as Lz4Library from 'lz4js'
 
 import { memoPromise } from './memoPromise'
@@ -177,5 +178,21 @@ export function pageLibraries(): Promise<PageLibraries> {
         ZSTD: (input, length) => fzstd.decompress(input, new Uint8Array(length)),
       } satisfies Record<(typeof PARQUET_CODEC_NAMES)[number], PageLibraries['codecs'][string]>,
     }
+  })
+}
+
+/**
+ * `h5wasm`, HDF5 compiled to WebAssembly, ready to open a file: NWB's reader (`data/ephys/nwb.ts`).
+ * About 4 MB with its WebAssembly inlined, which is why it waits for the first NWB file and is kept
+ * out of the MCP bundle; its own module answers on Node as in the browser, so the tests use it.
+ */
+export function h5wasm(): Promise<{
+  library: typeof H5wasmLibrary
+  fs: Awaited<typeof H5wasmLibrary.ready>['FS']
+}> {
+  return load('h5wasm', async () => {
+    const library = await import('h5wasm')
+    const { FS } = await library.ready
+    return { library, fs: FS }
   })
 }

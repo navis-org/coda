@@ -19,11 +19,14 @@ import { getRecordingUpload, uploadMissingReason } from '../uploads'
 import { CRASH_FLOOR_BYTES } from '../../core/limits'
 import { memoPromise } from '../memoPromise'
 import { ABF_READER } from './abf'
+import { NWB_READER } from './nwb'
 
 /** A recorded channel or a command output: what it is called and the unit it is in. */
 export interface Signal {
   readonly name: string
   readonly unit: string
+  /** A command's: rebuilt from the protocol (ABF's epoch table) or stored as samples (NWB). */
+  readonly origin?: 'rebuilt' | 'stored'
 }
 
 /**
@@ -49,6 +52,25 @@ export interface RecordingSummary {
   readonly commands: readonly Signal[]
   /** What the reader could not do, said once: a command from a stimulus file, say. */
   readonly notes: readonly string[]
+  /**
+   * The file's own number for each sweep (NWB's `sweep_number`), the table's `sweep` column and
+   * what Sweeps is read against; absent, sweeps are counted from 1.
+   */
+  readonly sweepNumbers?: readonly number[]
+  /**
+   * Every group of a file holding several — an NWB file's protocols, each a summary of its own,
+   * named by `protocol` — the first of which this summary is. Load Recording reads one at a time.
+   */
+  readonly protocols?: readonly RecordingSummary[]
+}
+
+/** The summary of `protocol` in a file's summary: that group's, or the file's first where none is named. */
+export function protocolSummary(
+  summary: RecordingSummary,
+  protocol: string | undefined,
+): RecordingSummary | undefined {
+  if (!protocol) return summary
+  return summary.protocols?.find((s) => s.protocol === protocol)
 }
 
 export interface Recording {
@@ -61,6 +83,11 @@ export interface Recording {
   channel(channel: number, sweep: number, from?: number, to?: number): Float32Array
   /** Command `command`'s waveform in sweep `sweep`, in its unit, `from` up to `to` as `channel`'s; NaN where it is not defined. */
   command(command: number, sweep: number, from?: number, to?: number): Float32Array
+  /**
+   * Bytes it holds once read, where that is not its file's: an NWB group decodes its own sweeps
+   * and keeps nothing else. What the stored-recording budget charges; the file's size otherwise.
+   */
+  readonly heldBytes?: number
 }
 
 /** One file format. */
@@ -71,19 +98,20 @@ export interface RecordingReader {
   readonly extensions: readonly string[]
   /** Whether these bytes are this format: a signature, never the extension. */
   sniff(bytes: Uint8Array): boolean
-  /** Read the file; throws a sentence naming what it cannot read. */
-  read(buffer: ArrayBuffer): Recording
+  /**
+   * Read the file — group `protocol` of a file holding several, the first by default; throws a
+   * sentence naming what it cannot read. Asynchronous, for a reader that loads a library to do it.
+   */
+  read(buffer: ArrayBuffer, protocol?: string): Recording | Promise<Recording>
 }
 
 /**
  * Every format this build reads. A new one is an entry here.
  *
- * Two limits a later reader may hit, recorded rather than built for: `read` is synchronous over a
- * file held whole in memory (an NWB reader, HDF5 through a WebAssembly library, is likely to want
- * an asynchronous and ranged read, and files of gigabytes); and `sniff` sees the first 64 bytes,
- * where an HDF5 file with a user block keeps its signature at 512 or later.
+ * A limit recorded rather than built for: `sniff` sees the first 64 bytes, where an HDF5 file with
+ * a user block keeps its signature at 512 or later; no NWB writer measured here adds one.
  */
-const READERS: readonly RecordingReader[] = [ABF_READER]
+const READERS: readonly RecordingReader[] = [ABF_READER, NWB_READER]
 
 /** The file picker's `accept`: every reader's extensions. */
 export const RECORDING_EXTENSIONS: string = READERS.flatMap((r) => r.extensions).join(',')
@@ -96,11 +124,15 @@ function formatsRead(): string {
     : labels[0]!
 }
 
-/** Read a recording of any format this build knows, chosen by its bytes. */
-export function readRecording(buffer: ArrayBuffer, fileName: string): Recording {
+/** Read a recording of any format this build knows, chosen by its bytes; `protocol` as `RecordingReader.read`. */
+export async function readRecording(
+  buffer: ArrayBuffer,
+  fileName: string,
+  protocol?: string,
+): Promise<Recording> {
   const head = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 64))
   const reader = READERS.find((r) => r.sniff(head))
-  if (reader) return reader.read(buffer)
+  if (reader) return reader.read(buffer, protocol)
   const ext = /\.[^.]+$/.exec(fileName.toLowerCase())?.[0]
   const claimed = READERS.find((r) => ext !== undefined && r.extensions.includes(ext))
   throw new Error(
@@ -153,21 +185,48 @@ function keep(id: string, bytes: number): void {
  * check it before storing it, and handing over what it read saves the run reading it back.
  */
 export function rememberRecording(id: string, recording: Recording, bytes: number): void {
-  stored.delete(id)
-  stored.set(id, Promise.resolve(recording))
-  keep(id, bytes)
+  // Under the group it is, by name where the file has several: what the card then picks.
+  const { summary } = recording
+  const key = keyOf(id, summary.protocols ? summary.protocol : undefined)
+  const promise = Promise.resolve(recording)
+  stored.delete(key)
+  stored.set(key, promise)
+  keep(key, recording.heldBytes ?? bytes)
+  // The file's first group is also what no protocol names (a node saved before the picker), so it
+  // is found under that key too — charged once, under its name.
+  const first = keyOf(id, undefined)
+  if (first !== key) {
+    stored.delete(first)
+    stored.set(first, promise)
+    keep(first, 0)
+  }
 }
 
-export function storedRecording(id: string, fileName: string): Promise<Recording> {
-  promote(id)
+/**
+ * A stored recording read as one of its groups: each group is a recording of its own, kept apart.
+ * No protocol, or `''`, is the file's first.
+ */
+function keyOf(id: string, protocol: string | undefined): string {
+  return `${id}\u0000${protocol ?? ''}`
+}
+
+export function storedRecording(
+  id: string,
+  fileName: string,
+  /** The group of a file holding several (`RecordingSummary.protocols`); its first by default. */
+  protocol?: string,
+): Promise<Recording> {
+  const key = keyOf(id, protocol)
+  promote(key)
   return memoPromise(
     stored,
-    id,
+    key,
     async () => {
       const bytes = await getRecordingUpload(id)
       if (!bytes) throw new Error(uploadMissingReason(fileName, 'recording', 'node'))
-      const recording = readRecording(bytes, fileName)
-      keep(id, bytes.byteLength)
+      const size = bytes.byteLength
+      const recording = await readRecording(bytes, fileName, protocol || undefined)
+      keep(key, recording.heldBytes ?? size)
       return recording
     },
     { keep: 'resolved' },

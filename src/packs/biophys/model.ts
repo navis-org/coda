@@ -50,7 +50,7 @@ export const modelNode = packNode({
   category: 'analysis',
   description:
     'Builds one neuron’s skeleton into a compartment model — passive cable, voltage-gated ' +
-    'channels by region, and its input synapses placed where they sit — for Simulate to run.',
+    'channels by region, and its input synapses placed where they sit — for Simulate Model to run.',
   guide:
     'Turns one neuron into a compartment model: its skeleton cut into compartments, a passive ' +
     'membrane from a published preset, and a wired synapse cloud placed on the arbour, grouped by ' +
@@ -135,7 +135,7 @@ export const modelNode = packNode({
       default: 1,
       min: AREA_FACTOR_MIN,
       step: 0.1,
-      help: 'How much more membrane the cell has than its reconstruction: spines and fine branches the skeleton misses. Scales every compartment’s membrane, so capacitance, leak and channel conductances with it; what Fit Model fits as its area factor. 1 is the reconstruction as it is.',
+      help: 'How much more membrane the cell has than its reconstruction: spines and fine branches the skeleton misses. Scales every compartment’s membrane, so capacitance, leak and channel conductances with it; what Fit Model Passive fits as its area factor. 1 is the reconstruction as it is.',
     },
     {
       id: 'defaultRadius',
@@ -241,7 +241,8 @@ export const modelNode = packNode({
       label: 'Temperature (°C)',
       group: 'channels',
       default: HH_TEMPERATURE,
-      // Shown while some channel's kinetics depend on temperature: the squid ones, not Pospischil's.
+      // Shown while some channel's kinetics depend on temperature: the squid ones, not Pospischil's or
+      // the fly set's, neither stating a Q10.
       visibleIf: (p) =>
         readChannelRows(p[CHANNELS_PARAM]).some((row) => findChannel(row.channel)?.q10),
       help: 'The squid channels’ kinetics speed up threefold per 10 °C. 6.3 °C is what the squid model was recorded at.',

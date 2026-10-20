@@ -28,8 +28,13 @@ export interface SimulateJob {
   readonly threshold: number
   /** Partner index → spike times, ms, for the main run. */
   readonly firing: readonly (readonly [number, readonly number[]])[]
-  /** Current injected at record sites, one clamp per compartment; none when off. */
+  /** Current injected at record sites, one clamp per compartment; none when off. Every sweep's. */
   readonly clamps: readonly CurrentClamp[]
+  /**
+   * A table of injected current wired, one entry per sweep: that sweep's clamps, added to `clamps`
+   * (`sweepClamps`). Each sweep is a main run of its own, from the same rest. Absent: one run.
+   */
+  readonly sweeps?: readonly (readonly CurrentClamp[])[]
   /**
    * A model with channels at rest, from an earlier run at this `dt`: settling depends on nothing
    * else, and a worker keeps nothing between jobs, so the page hands it back rather than have
@@ -40,16 +45,23 @@ export interface SimulateJob {
   readonly summary?: { readonly onset: number; readonly window: number }
 }
 
-export interface SimulateResult {
-  readonly t: Float64Array
+/** One main run's recordings: a sweep's. */
+export interface SweepRun {
   /** One trace per record site, mV. */
   readonly traces: Float64Array[]
   /** Per record site, the spike times, ms. */
   readonly spikes: Float64Array[]
-  /** Per compartment, the highest membrane voltage over the main run, mV, the start included. */
-  readonly peak: Float64Array
-  /** Per compartment, the voltage the main run ended on, mV: whether the cell came back to rest. */
+  /** Per compartment, the voltage the run ended on, mV: whether the cell came back to rest. */
   readonly final: Float64Array
+}
+
+export interface SimulateResult {
+  /** The sample times, every sweep's. */
+  readonly t: Float64Array
+  /** One per sweep (`sweepCount`), in the job's order. */
+  readonly runs: readonly SweepRun[]
+  /** Per compartment, the highest membrane voltage over every main run, mV, the start included. */
+  readonly peak: Float64Array
   /** A model with channels: the state it settled to before t = 0, and how long that took. */
   readonly settle?: Settled
   /**
@@ -81,9 +93,12 @@ export function movieBasis(job: SimulateJob): string {
     threshold: _threshold,
     rest: _rest,
     summary: _summary,
+    sweeps,
     ...basis
   } = job
-  return hashValue(basis)
+  // Only the sweep the movie replays (`MOVIE_SWEEP`): an edit to another sweep's rows
+  // leaves this movie as true as it was, and hashing every sweep's held current costs a pass each.
+  return hashValue({ ...basis, sweep: sweeps?.[MOVIE_SWEEP] })
 }
 
 /**
@@ -102,17 +117,35 @@ function mainSteps(job: Pick<SimulateJob, 'duration' | 'dt'>): number {
   return Math.round(job.duration / job.dt)
 }
 
+/** How many main runs a job makes: one per sweep of a current table, else one. */
+export function sweepCount(job: Pick<SimulateJob, 'sweeps'>): number {
+  // Never none: a table with no rows is still one sweep (`tableSweeps`).
+  return job.sweeps?.length ?? 1
+}
+
+/** The sweep Playback's movie replays: the first. */
+export const MOVIE_SWEEP = 0
+
+/** The clamps of sweep `s`: the Clamp tab's, every sweep's, with that sweep's table currents. */
+export function sweepClamps(
+  job: Pick<SimulateJob, 'clamps' | 'sweeps'>,
+  s: number,
+): readonly CurrentClamp[] {
+  const table = job.sweeps?.[s]
+  return table ? [...job.clamps, ...table] : job.clamps
+}
+
 /**
  * Bytes the traces take: a float64 per record site per sample, twice — the worker's arrays, then the
  * table's columns on the page. Two independently set numbers multiply here (sites and samples), so
  * the product is checked before anything is allocated (`planRun`).
  */
 export function traceBytes(
-  job: Pick<SimulateJob, 'record' | 'duration' | 'dt' | 'sampleEvery'>,
+  job: Pick<SimulateJob, 'record' | 'duration' | 'dt' | 'sampleEvery' | 'sweeps'>,
 ): number {
   const samples = Math.floor(mainSteps(job) / sampleSteps(job)) + 1
-  // One column per record site, and the time column beside them.
-  return 2 * 8 * (job.record.length + 1) * samples
+  // One column per record site, and the time and sweep columns beside them, for every sweep.
+  return 2 * 8 * (job.record.length + 2) * samples * sweepCount(job)
 }
 
 /** Solver steps between the traces' samples: `Sample every` in whole steps of `dt`, at least one. */
@@ -120,9 +153,9 @@ function sampleSteps(job: Pick<SimulateJob, 'sampleEvery' | 'dt'>): number {
   return Math.max(1, Math.round(job.sampleEvery / job.dt))
 }
 
-/** Solver steps a job takes: the main run, then one window per firing partner. */
+/** Solver steps a job takes: the main run per sweep, then one window per firing partner. */
 export function jobSteps(job: SimulateJob): number {
-  const main = mainSteps(job)
+  const main = mainSteps(job) * sweepCount(job)
   return job.summary ? main + Math.round(job.summary.window / job.dt) * job.firing.length : main
 }
 
@@ -176,13 +209,14 @@ async function startOf(job: SimulateJob, options: JobRunOptions) {
 }
 
 /**
- * The main run's request, everything but what it records: one builder for the card's run and the
- * movie's replay, so the replay cannot drift from the run it claims to be.
+ * A main run's request — sweep `sweep`'s — everything but what it records: one builder for the
+ * card's runs and the movie's replay, so the replay cannot drift from the run it claims to be.
  */
 function mainRequest(
   job: SimulateJob,
   model: SimulationRequest['model'],
   initial: SimulationRequest['initial'],
+  sweep: number,
 ) {
   return {
     model,
@@ -190,7 +224,7 @@ function mainRequest(
     duration: job.duration,
     initial,
     events: eventsFor(job.model, new Map(job.firing)),
-    clamps: job.clamps,
+    clamps: sweepClamps(job, sweep),
   }
 }
 
@@ -221,17 +255,33 @@ export async function runSimulateJob(
   const { model, settled, initial, restAt } = await startOf(job, options)
   const advance = slicer(job, jobSteps(job), options)
 
-  const main = new Simulation({
-    ...mainRequest(job, model, initial),
-    record: job.record,
-    sampleEvery: sampleSteps(job),
-    threshold,
-    // Every compartment's highest voltage, read every step: the Arbour output. Measured at about
-    // 6% of a run (8,077 compartments), on the main run only.
-    peaks: true,
-  })
-  await advance(main, 'simulating')
-  const result = main.result()
+  // Every sweep from the same rest, its own clamps added to the Clamp tab's.
+  const runs: SweepRun[] = []
+  let t = new Float64Array()
+  let peak: Float64Array | undefined
+  const sweeps = sweepCount(job)
+  for (let s = 0; s < sweeps; s++) {
+    const main = new Simulation({
+      ...mainRequest(job, model, initial, s),
+      record: job.record,
+      sampleEvery: sampleSteps(job),
+      threshold,
+      // Every compartment's highest voltage, read every step: the Arbour output. Measured at about
+      // 6% of a run (8,077 compartments), on the main runs only.
+      peaks: true,
+    })
+    await advance(main, sweeps > 1 ? `sweep ${s + 1} of ${sweeps}` : 'simulating')
+    const result = main.result()
+    t = result.t
+    // The highest over every sweep: what the Arbour colours each node by.
+    if (!peak) peak = result.peak!
+    else for (let c = 0; c < peak.length; c++) peak[c] = Math.max(peak[c]!, result.peak![c]!)
+    runs.push({
+      traces: [...result.v],
+      spikes: [...(result.spikes ?? [])],
+      final: Float64Array.from(main.voltage()),
+    })
+  }
 
   let summary: SimulateResult['summary']
   if (job.summary) {
@@ -289,15 +339,7 @@ export async function runSimulateJob(
     summary = { somaPeak, localPeak, spiked, cut }
   }
 
-  return {
-    t: result.t,
-    traces: [...result.v],
-    spikes: [...(result.spikes ?? [])],
-    peak: result.peak!,
-    final: Float64Array.from(main.voltage()),
-    settle: settled,
-    summary,
-  }
+  return { t, runs, peak: peak!, settle: settled, summary }
 }
 
 /**
@@ -350,8 +392,9 @@ export async function runMovieJob(
 ): Promise<Movie> {
   const { model, initial } = await startOf(job, options)
   const every = movieFrameSteps(job)
+  // `MOVIE_SWEEP`'s: Playback replays one run, and names it (`useMovie`'s `sweep`).
   const run = new Simulation({
-    ...mainRequest(job, model, initial),
+    ...mainRequest(job, model, initial, MOVIE_SWEEP),
     record: new Int32Array(),
     frames: every,
   })

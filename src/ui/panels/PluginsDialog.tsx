@@ -22,6 +22,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { plural } from '../../style/format'
 import { GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX } from '../glyphs'
 import { Modal, ModalHeader } from '../Modal'
+import { isGuided, packGuideUrl } from '../packGuides'
 import {
   switchPack,
   useOwnSwitchedOffPacks,
@@ -91,7 +92,12 @@ function PackRow({ pack }: { pack: PackDefinition }) {
   return (
     <li>
       {/* The whole row is the label, so a click anywhere on it flips the switch. */}
-      <label className="plugins__row" data-on={on} data-part={pack.parent !== undefined}>
+      <label
+        className="plugins__row"
+        data-pack={pack.id}
+        data-on={on}
+        data-part={pack.parent !== undefined}
+      >
         {face && (
           <span className="plugins__tile">
             <NodeGlyph def={face} className="plugins__glyph" />
@@ -116,6 +122,19 @@ function PackRow({ pack }: { pack: PackDefinition }) {
           <span id={`${id}-blurb`} className="plugins__blurb">
             {pack.description}
           </span>
+          {/* A link inside the label: activating it does not flip the switch (HTML's rule for
+              interactive content in a label), and stopping the click keeps it that way. */}
+          {isGuided(pack) && (
+            <a
+              className="plugins__guide"
+              href={packGuideUrl(pack)}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {pack.guide.title} ↗
+            </a>
+          )}
           {notes.length > 0 && (
             <span id={`${id}-notes`} className="plugins__deps">
               {notes.join(' ')}

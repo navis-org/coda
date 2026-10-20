@@ -7,23 +7,24 @@
  * run in a pool of workers kept for the length of the fit (`fitPool.ts`), the Jacobian's in
  * parallel; Cancel ends them.
  *
- * **A model with channels is fitted as its passive copy**, and the fitted model keeps the channels
- * at their densities, said on the card: a passive fit says what the
- * membrane is with the channels left out, which is only the cell where they are closed.
+ * **A model with channels is fitted as its passive copy**, as the name says, and the fitted model
+ * keeps the channels at their densities — said on the card only where a fitted area factor has
+ * changed what they carry (`channelAreaNote`). A passive fit says what the membrane is with the
+ * channels left out, which is only the cell where they are closed.
  */
 
-import type { ColumnSchemaSource, InferContext, ParamDef, ParamValues } from '../../core/node'
+import type { InferContext, ParamDef, ParamValues } from '../../core/node'
 import { packNode } from '../../core/registry'
 import type { DType, TableSchema } from '../../core/types'
-import { NUMERIC_DTYPES, T, findColumn, isNumericDType, schemaOf } from '../../core/types'
+import { NUMERIC_DTYPES, T, findColumn } from '../../core/types'
 import { isCellModelValue, isTableValue } from '../../core/values'
-import { listed } from '../../core/prose'
-import { agree, formatNumber, plural } from '../../style/format'
+import { formatNumber } from '../../style/format'
 import type { MembraneKey } from './fit'
 import { MEMBRANE_PARAMETERS, fitPassive, freeParameterRefusal } from './fit'
 import { fitPool } from './fitPool'
-import type { Quantity, RecordingColumns } from './fitOps'
+import type { RecordingColumns } from './fitOps'
 import {
+  channelAreaNote,
   fitIterationsSchema,
   fitIterationsTable,
   fitNotes,
@@ -34,8 +35,8 @@ import {
   fittedModel,
   freeKeys,
   recordedSweeps,
-  unitScale,
 } from './fitOps'
+import { columnScale, columnsInUnit, unitParam, unsetAmbiguity } from './unitColumns'
 import { AREA_FACTOR_MIN } from './model'
 import { TIME_COLUMN } from './simulateOps'
 
@@ -49,59 +50,8 @@ const FREE_BY_DEFAULT: readonly MembraneKey[] = ['rm', 'cm', 'ra', 'eLeak']
 const freeOf = (p: ParamValues) => freeKeys((key) => p[tickId(key)] === true)
 const windowed = (p: ParamValues) => p.crop === true
 
-/** A unit control's choice: `auto` reads the column's own unit. */
-const unitParam = (
-  id: string,
-  label: string,
-  quantity: Quantity,
-  units: readonly string[],
-): ParamDef => ({
-  id,
-  kind: 'enum',
-  label,
-  group: 'data',
-  default: 'auto',
-  advanced: true,
-  options: [
-    { value: 'auto', label: 'the column’s own' },
-    ...units.map((u) => ({ value: u, label: u })),
-  ],
-  help: `The ${quantity === 'voltage' ? 'voltage' : 'current'} column’s unit. Its own, as Load Recording labels it, unless the column has none or a wrong one.`,
-})
-
-/**
- * The recording's columns that could be a `quantity`: those in a unit of it, or once the unit is set
- * by hand every numeric one — never the time or sweep column, which a unit set by hand does not make
- * a voltage.
- */
-function candidates(
-  schema: TableSchema,
-  quantity: Quantity,
-  unit: unknown,
-  taken: readonly unknown[],
-): TableSchema {
-  return {
-    ...schema,
-    columns: schema.columns.filter(
-      (c) =>
-        isNumericDType(c.dtype) &&
-        !taken.includes(c.name) &&
-        (unit !== 'auto' || unitScale(quantity, c.unit) !== undefined),
-    ),
-  }
-}
-
-/**
- * A picker's options: `candidates`, so a lone column in the unit — `Vm_prime` in mV — is what an
- * unset picker means, and a unit set by hand opens every column, which is what that control is for.
- */
-function inUnit(quantity: Quantity, unitId: string): ColumnSchemaSource {
-  return (inputs, params) => {
-    const schema = schemaOf(inputs.recording)
-    // The stored names: a schema source sees params, not their resolution.
-    return schema && candidates(schema, quantity, params[unitId], [params.time, params.sweep])
-  }
-}
+/** The recording's time and sweep pickers: never a voltage or a current, whatever the unit says. */
+const TAKEN = ['time', 'sweep']
 
 /**
  * An unset picker with more than one column to mean, said rather than guessed: a Clampex file
@@ -113,17 +63,22 @@ function ambiguity(
   schema: TableSchema,
   id: 'voltage' | 'command',
 ): string | undefined {
-  if (ctx.params[id] !== '') return undefined
-  const quantity = id === 'voltage' ? 'voltage' : 'current'
-  const unit = ctx.params[id === 'voltage' ? 'voltageUnit' : 'commandUnit']
-  const names = candidates(schema, quantity, unit, [
-    ctx.column('time'),
-    ctx.column('sweep'),
-  ]).columns.map((c) => c.name)
-  if (names.length < 2) return undefined
   return id === 'voltage'
-    ? `Pick the recorded voltage: ${listed(names)} could each be it.`
-    : `Pick the injected current: ${listed(names)} could each be it. The command is usually the right one; a current monitor is noisy.`
+    ? unsetAmbiguity(ctx, schema, {
+        id,
+        quantity: 'voltage',
+        unitId: 'voltageUnit',
+        takenIds: TAKEN,
+        ask: 'Pick the recorded voltage',
+      })
+    : unsetAmbiguity(ctx, schema, {
+        id,
+        quantity: 'current',
+        unitId: 'commandUnit',
+        takenIds: TAKEN,
+        ask: 'Pick the injected current',
+        after: 'The command is usually the right one; a current monitor is noisy.',
+      })
 }
 
 /**
@@ -152,29 +107,9 @@ function recordingColumns(
     issues.push(
       'No column is in pA or nA: set Current unit to pick the current from any column.',
     )
-  const unitOf = (name: string | undefined) =>
-    (name === undefined ? undefined : findColumn(schema, name))?.unit
-  const scaleOf = (quantity: Quantity, name: string | undefined, choice: unknown) => {
-    const unit = choice === 'auto' || choice === undefined ? unitOf(name) : String(choice)
-    const scale = unitScale(quantity, unit)
-    if (name && scale === undefined) {
-      // Voltage and current have a unit control; time has none, its unit being the table's to say.
-      const remedy =
-        quantity === 'time'
-          ? 'give the table its times in ms or s.'
-          : 'set its unit under the advanced controls.'
-      issues.push(
-        unit
-          ? `${name} is in ${unit}, which is not a ${quantity} unit: ${remedy}`
-          : `${name} has no unit: ${remedy}`,
-      )
-    }
-    return scale ?? 1
-  }
-  // A time column with no unit is taken as ms, which is what every table here writes.
-  const timeScale = unitOf(time) === undefined ? 1 : scaleOf('time', time, 'auto')
-  const voltageScale = scaleOf('voltage', voltage, ctx.params.voltageUnit)
-  const currentScale = scaleOf('current', command, ctx.params.commandUnit)
+  const timeScale = columnScale(schema, 'time', time, 'auto', issues)
+  const voltageScale = columnScale(schema, 'voltage', voltage, ctx.params.voltageUnit, issues)
+  const currentScale = columnScale(schema, 'current', command, ctx.params.commandUnit, issues)
   if (issues.length || !time || !voltage || !command) return { issues }
   return {
     cols: {
@@ -214,7 +149,7 @@ function settingIssues(p: ParamValues): string[] {
 
 export const fitModelNode = packNode({
   type: 'biophys:fit',
-  label: 'Fit Model',
+  label: 'Fit Model Passive',
   category: 'analysis',
   description:
     'Fits a Compartment Model’s passive membrane (Rm, Cm, Ra, E leak and an area factor) to a ' +
@@ -224,7 +159,7 @@ export const fitModelNode = packNode({
     'Fits the passive membrane of a compartment model to a current-clamp recording from Load ' +
     'Recording by least squares: every sweep replays its own recorded command at the soma and the ' +
     'voltage is compared within a window. Says how well each parameter was determined. Plot ' +
-    'Traces in a Line Chart to see the fit; wire Model into Simulate to run the fitted cell.',
+    'Traces in a Line Chart to see the fit; wire Model into Simulate Model to run the fitted cell.',
   cost: 'expensive',
   inputs: [
     { id: 'model', label: 'Model', type: T.cellModel() },
@@ -270,7 +205,7 @@ export const fitModelNode = packNode({
       label: 'Voltage',
       group: 'data',
       from: 'recording',
-      schemaFrom: inUnit('voltage', 'voltageUnit'),
+      schemaFrom: columnsInUnit('recording', 'voltage', 'voltageUnit', TAKEN),
       default: '',
       dtypes: NUMERIC_DTYPES,
       help: 'The recorded membrane voltage. Lists the columns in mV or V; set Voltage unit to choose any column.',
@@ -281,24 +216,30 @@ export const fitModelNode = packNode({
       label: 'Current',
       group: 'data',
       from: 'recording',
-      schemaFrom: inUnit('current', 'commandUnit'),
+      schemaFrom: columnsInUnit('recording', 'current', 'commandUnit', TAKEN),
       default: '',
       dtypes: NUMERIC_DTYPES,
       help: 'The current injected at the soma, replayed into the model sample by sample. Lists the columns in pA or nA; set Current unit to choose any column.',
     },
-    unitParam('voltageUnit', 'Voltage unit', 'voltage', ['mV', 'V']),
-    unitParam('commandUnit', 'Current unit', 'current', ['pA', 'nA']),
+    unitParam('voltageUnit', 'Voltage unit', 'voltage', ['mV', 'V'], { group: 'data' }),
+    unitParam('commandUnit', 'Current unit', 'current', ['pA', 'nA'], { group: 'data' }),
     ...MEMBRANE_PARAMETERS.map((m): ParamDef => ({
       id: tickId(m.key),
       kind: 'boolean',
       label: `Fit ${m.label}`,
       group: 'fit',
       default: FREE_BY_DEFAULT.includes(m.key),
-      help:
-        m.key === 'area'
-          ? 'How much more membrane the cell has than the reconstruction: spines and fine branches it misses. The Compartment Model’s own Area factor, which Apply writes back. Scales capacitance and leak together, so it is fitted against a fixed Cm.'
-          : `Unticked, ${m.label} stays at the model’s value.`,
+      help: m.tickHelp ?? `Unticked, ${m.label} stays at the model’s value.`,
     })),
+    {
+      id: 'seal',
+      kind: 'number',
+      label: 'Seal (nS)',
+      group: 'fit',
+      default: 0,
+      min: 0,
+      help: 'The recording electrode’s seal conductance: held at this while Fit Seal is unticked, and where its fit starts otherwise. Günay et al. (2015) fitted 0.2 nS on a larval motoneuron. Left at 0, a fitted E leak absorbs the seal and reads depolarised (Gouwens & Wilson 2009).',
+    },
     {
       id: 'crop',
       kind: 'boolean',
@@ -341,7 +282,7 @@ export const fitModelNode = packNode({
       default: 0.1,
       min: 0.001,
       advanced: true,
-      help: 'The solver’s step during the fit. A passive membrane is smooth, so a coarser step than Simulate’s usually fits the same.',
+      help: 'The solver’s step during the fit. A passive membrane is smooth, so a coarser step than Simulate Model’s usually fits the same.',
     },
     {
       id: 'maxIterations',
@@ -427,6 +368,7 @@ export const fitModelNode = packNode({
         {
           free,
           bounds,
+          seal: Number(p.seal),
           window: windowed(p)
             ? { start: Number(p.windowStart), end: Number(p.windowEnd) }
             : undefined,
@@ -448,16 +390,8 @@ export const fitModelNode = packNode({
             ctx.signal,
           )).evaluate,
       )
-      const channels = value.channels.length
-      if (channels > 0) {
-        ctx.warn(
-          `Fitted as a passive cell: the model’s ${plural(channels, 'channel')} ` +
-            `${agree(channels, 'was', 'were')} left out of the fit, and ` +
-            `${agree(channels, 'is', 'are')} carried into the fitted model at ` +
-            `${agree(channels, 'its density', 'their densities')}, so a fitted area factor ` +
-            `scales ${agree(channels, 'its', 'their')} total conductance with the membrane.`,
-        )
-      }
+      const carried = channelAreaNote(value.channels.length, result)
+      if (carried) ctx.warn(carried)
       for (const note of fitNotes(result)) ctx.warn(note)
       return {
         model: fittedModel(value, result),

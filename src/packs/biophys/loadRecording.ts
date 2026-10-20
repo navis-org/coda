@@ -18,7 +18,8 @@
 import type { InferContext, ParamValues } from '../../core/node'
 import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
-import { storedRecording } from '../../data/ephys/recording'
+import { protocolSummary, storedRecording } from '../../data/ephys/recording'
+import { plural } from '../../style/format'
 import { peekRecordingUpload, uploadMissingBadge, uploadPeekSettled } from '../../data/uploads'
 import {
   cropped,
@@ -31,8 +32,17 @@ import {
 
 const NO_FILE = 'No file chosen. Use the button on the node to pick a recording.'
 
-/** The summary of the recording the node names, if this session knows it yet. */
-const summaryOf = (p: ParamValues) => peekRecordingUpload(String(p.dataId))?.summary
+/** The stored file's summary, every protocol of it, if this session knows it yet. */
+const fileSummaryOf = (p: ParamValues) => peekRecordingUpload(String(p.dataId))?.summary
+
+/** The summary of the protocol the node reads — the file's first unless one is picked. */
+const summaryOf = (p: ParamValues) => {
+  const file = fileSummaryOf(p)
+  return file && protocolSummary(file, String(p.protocol))
+}
+
+/** Whether the file holds several protocols, so the card offers them. */
+const severalProtocols = (p: ParamValues) => (fileSummaryOf(p)?.protocols?.length ?? 0) > 1
 
 export const loadRecordingNode = packNode({
   type: 'biophys:loadRecording',
@@ -40,9 +50,9 @@ export const loadRecordingNode = packNode({
   category: 'utility',
   cardWidth: 300,
   description:
-    'Load an electrophysiology recording (ABF) as a table of its sweeps: time, sweep, a column per channel and the stimulus.',
+    'Load an electrophysiology recording (ABF or NWB) as a table of its sweeps: time, sweep, a column per channel and the stimulus.',
   guide:
-    'Brings in a patch-clamp recording of your own, such as an ABF file from Clampex, as one long ' +
+    'Brings in a patch-clamp recording, such as an ABF file from Clampex or an NWB file from DANDI, as one long ' +
     'table: time in ms, the sweep, a column per channel, and the command rebuilt from the ' +
     'protocol. Pick channels and sweeps, crop and downsample here; Combine Traces lines it up ' +
     'with a simulation. The file stays in this browser, so a colleague has to pick it again.',
@@ -60,6 +70,21 @@ export const loadRecordingNode = packNode({
       advanced: true,
       presentational: true,
       browserStored: 'an uploaded recording',
+    },
+    {
+      id: 'protocol',
+      kind: 'enum',
+      label: 'Protocol',
+      default: '',
+      // The file's own groups, read from the stored summary: an IndexedDB peek, no fetch.
+      options: (ctx: InferContext) =>
+        (fileSummaryOf(ctx.params)?.protocols ?? []).map((s) => ({
+          value: s.protocol,
+          label: `${s.protocol} (${plural(s.sweeps, 'sweep')})`,
+        })),
+      optionsWithoutPeek: true,
+      visibleIf: severalProtocols,
+      help: 'Which of the file’s protocols to read: the sweeps an NWB file recorded with one stimulus, sharing a clamp mode, a rate and a length. None picked is the first.',
     },
     {
       id: 'channels',
@@ -88,7 +113,7 @@ export const loadRecordingNode = packNode({
       label: 'Sweeps',
       default: '',
       placeholder: 'all, or e.g. 1-3, 7',
-      help: 'Which sweeps, counted from 1 as Clampex counts them: single sweeps and ranges, such as `1-3, 7`. Empty is every sweep.',
+      help: 'Which sweeps, by number: as Clampex counts them, from 1, or an NWB file’s own sweep numbers. Single sweeps and ranges, such as `1-3, 7`. Empty is every sweep.',
     },
     {
       id: 'crop',
@@ -146,15 +171,25 @@ export const loadRecordingNode = packNode({
     const dataId = String(ctx.params.dataId)
     if (!dataId) return [NO_FILE]
     if (!uploadPeekSettled(dataId)) return []
-    const summary = summaryOf(ctx.params)
-    if (!summary) return [uploadMissingBadge(String(ctx.params.fileName), 'recording')]
+    const file = fileSummaryOf(ctx.params)
+    if (!file) return [uploadMissingBadge(String(ctx.params.fileName), 'recording')]
+    const summary = protocolSummary(file, String(ctx.params.protocol))
+    if (!summary) {
+      return [
+        `This file has no protocol called "${String(ctx.params.protocol)}". Pick one again.`,
+      ]
+    }
     return recordingPickIssues(summary, readRecordingPick(ctx.params))
   },
 
   evaluate: async (ctx) => {
     const dataId = String(ctx.params.dataId)
     if (!dataId) throw new Error(NO_FILE)
-    const recording = await storedRecording(dataId, String(ctx.params.fileName))
+    const recording = await storedRecording(
+      dataId,
+      String(ctx.params.fileName),
+      String(ctx.params.protocol),
+    )
     const pick = readRecordingPick(ctx.params)
     // Refuses no sweeps and a table past the crash floor. A pick's other issues are `validate`'s,
     // already on the card; only what the file itself says is new here.

@@ -75,8 +75,11 @@ export function SimulateSites({
   const recordSnap = params.recordSnap
   const sites = useMemo(() => {
     if (!model) return undefined
-    const inputs = runInputs(record, undefined, (id) =>
-      id === 'recordLabel' ? labelColumn : undefined,
+    // Only `record` is wired here, and `runInputs` reads params for a Current table alone.
+    const inputs = runInputs(
+      { record },
+      (id) => (id === 'recordLabel' ? labelColumn : undefined),
+      {},
     )
     const placing = { snap: Number(recordSnap), stored: readManualPoints(traces) }
     return runRecordSites(model, inputs.record, placing, [])

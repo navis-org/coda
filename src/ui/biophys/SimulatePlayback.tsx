@@ -33,6 +33,7 @@ import type { Movie } from '../../packs/biophys/simulateJob'
 import { MOVIE_BUDGET_BYTES } from '../../packs/biophys/simulateJob'
 import type { MovieTrace, RunPlan } from '../../packs/biophys/simulateOps'
 import {
+  injectedTrace,
   modelSkeletons,
   SHOW_TRACES_PARAM,
   TIME_COLUMN,
@@ -59,7 +60,6 @@ import { uiFontFamily } from '../viewers/canvas2d'
 import { LazyViewer3D } from '../viewers/LazyViewers'
 import type { ChartStrip } from '../viewers/LineChartViewer'
 import { LineChartViewer } from '../viewers/LineChartViewer'
-import { clampTrace } from '../../biophys/solver'
 import { tooltipPoint } from '../viewers/tooltipPoint'
 import { useArborLayout } from '../viewers/useArborLayout'
 import type { SkeletonWidthMode } from '../viewers/viewer3dScene'
@@ -117,6 +117,7 @@ export function SimulatePlayback(props: SimulatePlaybackProps) {
       firing={state.firing}
       placedTraces={state.traces}
       stimulus={state.stimulus}
+      sweep={state.sweep}
     />
   )
 }
@@ -145,6 +146,7 @@ function Player({
   params,
   placedTraces: { placed, off },
   stimulus,
+  sweep,
   viewerKey,
   baseName,
   onError,
@@ -155,6 +157,7 @@ function Player({
   firing: Firing
   placedTraces: RunPlan['traces']
   stimulus: Stimulus | undefined
+  sweep: string | undefined
 }) {
   const mode = currentMode()
   const ink = CHART_INK[mode]
@@ -297,7 +300,7 @@ function Player({
       label: stimulus.label,
       unit: 'nA',
       x: t,
-      y: clampTrace(stimulus.clamp, t, stimulus.dt),
+      y: injectedTrace(stimulus.clamps, stimulus.compartment, t, stimulus.dt),
     }
   }, [stimulus, table])
   const arrivals = useMemo(() => inputArrivals(model, firing), [model, firing])
@@ -521,6 +524,14 @@ function Player({
         >
           {timeText(time)} / {end} ms
         </span>
+        {sweep && (
+          <span
+            className="playback__hint"
+            title="Playback replays one sweep of the current table: the first. The Traces output has every one."
+          >
+            {sweep}
+          </span>
+        )}
         {movie.coarse && (
           <span
             className="playback__hint"

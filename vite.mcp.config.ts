@@ -118,6 +118,8 @@ const EXTERNAL = [
   'hysnappy',
   'fzstd',
   'lz4js',
+  // NWB's reader: 4 MB of WebAssembly, reached only from Load Recording's card and run.
+  'h5wasm',
 ] as const
 
 /**

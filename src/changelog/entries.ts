@@ -112,10 +112,10 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
-    date: '2026-10-17',
+    date: '2026-10-20',
     title: 'Biophysics, and the Line Chart',
     summary:
-      'The new Biophysics plugin turns a neuron’s skeleton into a compartment model, simulates its synaptic input, and puts the result beside a recording of your own. The new Line Chart plots traces, time courses and profiles.',
+      'The new Biophysics plugin turns a neuron’s skeleton into a compartment model, simulates its synaptic input, and fits it to a recording of your own; a guide walks through it step by step. The new Line Chart plots traces, time courses and profiles.',
     highlight: true,
     features: [
       {
@@ -123,11 +123,11 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         date: '2026-10-13',
         title: 'Biophysics: simulate a neuron’s synaptic input',
         body:
-          'Two new nodes in the **Biophysics** plugin. **Compartment Model** builds one neuron’s skeleton into a cable model and places the synapses from **Synapses Between** where they sit on the arbour, with separate inputs for excitatory and inhibitory synapses and published presets for each. Expand it to add voltage-gated channels by region, or to paint regions of your own onto the neuron, an axon initial segment say. **Simulate** fires its partners on spike trains and records the voltage at the soma and any points you choose; it can inject a step, ramp, sine or pulse train of current at any of those sites, run each partner alone to show how much it moves the soma, and says when the cell has not come back to rest by the end of a run.\n\n' +
-          'Expand Simulate and open **Playback** to watch the run spread over the neuron’s dendrogram and 3D view, and click a branch to add its trace. The solver runs in your browser and matches NEURON to within a few millionths of a millivolt. The Workflow Wizard offers it as **Simulate synaptic input**; **Open example** needs a neuPrint sign-in.',
+          'Two new nodes in the **Biophysics** plugin. **Compartment Model** builds one neuron’s skeleton into a cable model and places the synapses from **Synapses Between** where they sit on the arbour, with separate inputs for excitatory and inhibitory synapses and published presets for each. Expand it to add voltage-gated channels by region, or to paint regions of your own onto the neuron, an axon initial segment say. **Simulate Model** fires its partners on spike trains and records the voltage at the soma and any points you choose; it can inject a step, ramp, sine or pulse train of current at any of those sites, run each partner alone to show how much it moves the soma, and says when the cell has not come back to rest by the end of a run.\n\n' +
+          'Expand Simulate Model and open **Playback** to watch the run spread over the neuron’s dendrogram and 3D view, and click a branch to add its trace. The solver runs in your browser and matches NEURON to within a few millionths of a millivolt. The Workflow Wizard offers it as **Simulate synaptic input**; **Open example** needs a neuPrint sign-in.',
         image: {
           file: 'simulate-playback.webp',
-          alt: 'Simulate’s Playback on a hemibrain DA1 projection neuron: its dendrogram and 3D view coloured by membrane voltage 13 ms into the run, with the soma’s trace and a clicked axon branch’s trace below.',
+          alt: 'Simulate Model’s Playback on a hemibrain DA1 projection neuron: its dendrogram and 3D view coloured by membrane voltage 13 ms into the run, with the soma’s trace and a clicked axon branch’s trace below.',
         },
         demo: 'biophys:simulate',
         link: { href: './biophys/', label: 'Open Coda with Biophysics switched on' },
@@ -136,8 +136,18 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         kind: 'node',
         date: '2026-10-17',
         title: 'Biophysics: compare a simulation with a recording',
-        body: '**Load Recording** reads a patch-clamp recording of your own (ABF files from Clampex) as a table of its sweeps: time, sweep, a column per channel and the command waveform rebuilt from the protocol, with channels, sweeps, a time window and downsampling chosen on the card. **Combine Traces** puts it and a simulation on one time axis, interpolating each onto it and shifting one to line up the stimulus, so a Line Chart draws them together.',
+        body: '**Load Recording** reads a patch-clamp recording of your own — ABF files from Clampex, old and new, and NWB files as DANDI and the Allen Institute publish them, one protocol at a time — as a table of its sweeps: time, sweep, a column per channel and the command. **Combine Traces** puts it and a simulation on one time axis, so a Line Chart draws them together, and **Simulate Model** can replay a recorded command as its injected current, a whole protocol in one card.',
         link: { href: './biophys/', label: 'Open Coda with Biophysics switched on' },
+      },
+      {
+        kind: 'node',
+        date: '2026-10-20',
+        title: 'Biophysics: fit a model to a recording, fly channels, and a guide',
+        body:
+          '**Fit Model Passive** adjusts a model’s membrane — Rm, Cm, Ra, E leak, an area factor and the recording electrode’s seal — until it reproduces a current-clamp recording, and outputs the fitted model with each value’s standard error. The Compartment Model now offers ion channels fitted to recordings from *Drosophila* neurons (Günay et al. 2015) beside the generic sets, and a passive preset for T4.\n\n' +
+          'New to compartment models? The **[Biophysics guide](./biophysics.html)** explains what one is and builds, drives and runs one step by step, with a screenshot for each step; it is also linked from the Plugins dialog, every Biophysics node’s help, and **? ▸ Documentation**.',
+        demo: 'biophys:fit',
+        link: { href: './biophysics.html', label: 'Read the Biophysics guide' },
       },
       {
         kind: 'chart',

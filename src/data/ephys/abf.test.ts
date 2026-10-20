@@ -1,8 +1,8 @@
 /**
- * The ABF2 reader against files built here, byte by byte, to the layouts `abf.ts` reads. What a
- * real Clampex file holds is `pnpm probe:abf`'s, which holds this reader to pyABF on one; these pin
- * the rules a probe on one file cannot reach — scaling, interleaving, gap-free, every epoch type
- * the reader rebuilds, the opening level, and the refusals.
+ * The ABF readers, ABF2 and ABF1, against files built here, byte by byte, to the layouts `abf.ts`
+ * reads. What real Clampex files hold is `pnpm probe:abf`'s, which holds this reader to pyABF on
+ * them; these pin the rules a probe cannot reach — scaling, interleaving, gap-free, every epoch
+ * type the reader rebuilds, the opening level, and the refusals.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -147,7 +147,7 @@ const VM: ChannelSpec = { name: 'Vm', unit: 'mV', scale: 0.01 }
 const IM: ChannelSpec = { name: 'Im', unit: 'µA', scale: 0.0005 }
 
 describe('reading an ABF2 file', () => {
-  it('names, scales and de-interleaves each channel, sweep by sweep', () => {
+  it('names, scales and de-interleaves each channel, sweep by sweep', async () => {
     const raw = [
       [
         [100, -200, 300],
@@ -158,7 +158,7 @@ describe('reading an ABF2 file', () => {
         [40, 50, 60],
       ],
     ]
-    const rec = readRecording(abf2({ channels: [VM, IM], raw }), 'cell.abf')
+    const rec = await readRecording(abf2({ channels: [VM, IM], raw }), 'cell.abf')
     expect(rec.summary).toMatchObject({
       format: 'ABF 2.6',
       protocol: 'IV_step',
@@ -185,8 +185,8 @@ describe('reading an ABF2 file', () => {
     )
   })
 
-  it('reads floats as they are, and a gap-free file as one sweep', () => {
-    const rec = readRecording(
+  it('reads floats as they are, and a gap-free file as one sweep', async () => {
+    const rec = await readRecording(
       abf2({ channels: [VM], raw: [[[1.5, -2.25, 3]]], float: true, mode: 3 }),
       'free.abf',
     )
@@ -195,21 +195,128 @@ describe('reading an ABF2 file', () => {
     expect(Array.from(rec.channel(0, 0))).toEqual([1.5, -2.25, 3])
   })
 
-  it('refuses an ABF1 file, a short file and a file no reader knows, each in its own words', () => {
+  it('refuses a short file and a file no reader knows, each in its own words', async () => {
     const abf1 = new Uint8Array(64)
     'ABF '.split('').forEach((ch, i) => (abf1[i] = ch.charCodeAt(0)))
-    expect(() => readRecording(abf1.buffer, 'old.abf')).toThrow(
-      /ABF1 file \(pCLAMP 9 or earlier\)/,
+    await expect(readRecording(abf1.buffer, 'old.abf')).rejects.toThrow(
+      /shorter than its header/,
     )
-    expect(() =>
+    await expect(
       readRecording(abf2({ channels: [VM], raw: [[[1, 2, 3, 4]]], truncate: 4 }), 'cut.abf'),
-    ).toThrow(/shorter than its header says/)
-    expect(() => readRecording(new ArrayBuffer(64), 'trace.abf')).toThrow(
+    ).rejects.toThrow(/shorter than its header says/)
+    await expect(readRecording(new ArrayBuffer(64), 'trace.abf')).rejects.toThrow(
       /named like ABF but is not one/,
     )
-    expect(() => readRecording(new ArrayBuffer(64), 'trace.dat')).toThrow(
-      /not a recording format this build reads\. It reads ABF \(\.abf\)/,
+    await expect(readRecording(new ArrayBuffer(64), 'trace.dat')).rejects.toThrow(
+      /not a recording format this build reads\. It reads ABF or NWB \(\.abf,\.nwb\)/,
     )
+  })
+})
+
+/**
+ * An ABF1 file: the fixed header at pyABF's `HeaderV1` positions, then interleaved 16-bit samples at
+ * block 12. Channel slots are mapped through the sampling sequence, here 1 then 0, so a reader that
+ * skips the map names and scales the two the wrong way round.
+ */
+function abf1(raw: number[][][], epochs: EpochSpec[] = []): ArrayBuffer {
+  const channels = raw[0]!.length
+  const samples = raw[0]![0]!.length
+  const start = 12 * 512
+  const buffer = new ArrayBuffer(start + raw.length * channels * samples * 2)
+  const v = new DataView(buffer)
+  const text = (at: number, s: string) =>
+    s.split('').forEach((ch, i) => v.setUint8(at + i, ch.charCodeAt(0)))
+  text(0, 'ABF ')
+  v.setFloat32(4, 1.83, true)
+  v.setInt16(8, 5, true) // episodic, stimulus-triggered
+  v.setInt32(10, raw.length * channels * samples, true)
+  v.setInt32(16, raw.length, true)
+  v.setInt32(20, 20090415, true)
+  v.setInt32(24, 3600, true)
+  v.setInt32(40, 12, true)
+  v.setInt16(120, channels, true)
+  // 30 µs across both channels: 16,666.67 Hz each, which pyABF truncates to 16,666.
+  v.setFloat32(122, 30 * (channels / 2), true)
+  v.setFloat32(244, 10, true)
+  v.setInt32(252, 32768, true)
+  const slots = [1, 0]
+  const specs = [VM, IM]
+  for (let c = 0; c < channels; c++) {
+    const slot = slots[c]!
+    v.setInt16(410 + 2 * c, slot, true)
+    text(442 + 10 * slot, specs[c]!.name)
+    text(602 + 8 * slot, specs[c]!.unit === 'µA' ? '\u00b5A' : specs[c]!.unit)
+    v.setFloat32(730 + 4 * slot, 1, true)
+    v.setFloat32(922 + 4 * slot, specs[c]!.scale, true)
+    v.setFloat32(1050 + 4 * slot, 1, true)
+  }
+  text(4898, 'C:\\protocols\\IV_abf1.pro')
+  if (epochs.length > 0) {
+    text(1306, 'Cmd 0')
+    text(1346, 'pA')
+    v.setInt16(2296, 1, true)
+    v.setInt16(2300, 1, true)
+    epochs.forEach((e, i) => {
+      v.setInt16(2308 + 2 * i, e.type, true)
+      v.setFloat32(2348 + 4 * i, e.level, true)
+      v.setFloat32(2428 + 4 * i, e.levelInc ?? 0, true)
+      v.setInt32(2508 + 4 * i, e.duration, true)
+      v.setInt32(2588 + 4 * i, e.durationInc ?? 0, true)
+    })
+  }
+  raw.forEach((sweep, s) => {
+    for (let i = 0; i < samples; i++) {
+      for (let c = 0; c < channels; c++) {
+        v.setInt16(start + 2 * ((s * samples + i) * channels + c), sweep[c]![i]!, true)
+      }
+    }
+  })
+  return buffer
+}
+
+describe('reading an ABF1 file', () => {
+  it('maps each sampled channel to its slot, scales it, and rebuilds the command from its epochs', async () => {
+    // 64 samples, so the pre-epoch sixty-fourth is one sample long.
+    const raw = [
+      [
+        [100, -200, 300, ...Array<number>(61).fill(0)],
+        Array.from({ length: 64 }, (_, i) => 10 * i),
+      ],
+    ]
+    const rec = await readRecording(
+      abf1(raw, [
+        { type: 1, level: 50, duration: 10 },
+        { type: 1, level: -20, duration: 20 },
+      ]),
+      'old.abf',
+    )
+    expect(rec.summary).toMatchObject({
+      format: 'ABF 1.83',
+      protocol: 'IV_abf1',
+      startedAt: '2009-04-15T01:00:00.000',
+      rate: 16_666,
+      sweeps: 1,
+      sweepSamples: 64,
+      mode: 'episodic',
+      channels: [
+        { name: 'Vm', unit: 'mV' },
+        { name: 'Im', unit: 'uA' },
+      ],
+      commands: [{ name: 'Cmd 0', unit: 'pA' }],
+    })
+    const lsb = 10 / 32768
+    expect(Array.from(rec.channel(0, 0, 0, 3))).toEqual(
+      [100, -200, 300].map((x) => Math.fround((x * lsb) / Math.fround(0.01))),
+    )
+    expect(rec.channel(1, 0)[5]).toBe(Math.fround((50 * lsb) / Math.fround(0.0005)))
+    // A sixty-fourth at the holding level — pyABF's for ABF1, the first epoch's level — then each
+    // epoch, then the holding level again to the sweep's end.
+    expect(Array.from(rec.command(0, 0))).toEqual([
+      ...Array(1).fill(50),
+      ...Array(10).fill(50),
+      ...Array(20).fill(-20),
+      ...Array(33).fill(50),
+    ])
   })
 })
 
@@ -217,8 +324,8 @@ describe('rebuilding the command', () => {
   const samples = 128 // the pre-epoch is the first 128 / 64 = 2 samples
   const zeros = () => [Array.from({ length: samples }, () => 0)]
 
-  it('offers only outputs a waveform drives, and says which come from a stimulus file', () => {
-    const rec = readRecording(
+  it('offers only outputs a waveform drives, and says which come from a stimulus file', async () => {
+    const rec = await readRecording(
       abf2({
         channels: [VM],
         raw: [zeros()],
@@ -230,14 +337,14 @@ describe('rebuilding the command', () => {
       }),
       'cell.abf',
     )
-    expect(rec.summary.commands).toEqual([{ name: 'I_clamp', unit: 'pA' }])
+    expect(rec.summary.commands).toEqual([{ name: 'I_clamp', unit: 'pA', origin: 'rebuilt' }])
     expect(rec.summary.notes).toEqual([
       'The command on Cmd 2 comes from a stimulus file, which is not in the recording, so it is not rebuilt.',
     ])
   })
 
-  it('steps each sweep by its increments after a sixty-fourth at the holding level', () => {
-    const rec = readRecording(
+  it('steps each sweep by its increments after a sixty-fourth at the holding level', async () => {
+    const rec = await readRecording(
       abf2({
         channels: [VM],
         raw: [zeros(), zeros(), zeros()],
@@ -267,7 +374,7 @@ describe('rebuilding the command', () => {
     expect(sweep2[samples - 1]).toBe(-5)
   })
 
-  it('draws a ramp from the level before it, both ends included, and a pulse train', () => {
+  it('draws a ramp from the level before it, both ends included, and a pulse train', async () => {
     const ramp = commandWaveform(
       { holding: 0, keepsLastLevel: false, epochs: [epoch(2, 10, 5)] },
       0,
@@ -288,7 +395,7 @@ describe('rebuilding the command', () => {
     expect(Array.from(train.slice(1, 11))).toEqual([1, 1, 0, 0, 1, 1, 0, 0, 0, 0])
   })
 
-  it('opens the next sweep at the last level when the output keeps it', () => {
+  it('opens the next sweep at the last level when the output keeps it', async () => {
     const waves = [0, 1].map((sweep) =>
       commandWaveform(
         { holding: 0, keepsLastLevel: true, epochs: [{ ...epoch(1, 3, 4), levelInc: 1 }] },

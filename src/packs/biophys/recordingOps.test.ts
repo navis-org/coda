@@ -53,14 +53,41 @@ const ALL: RecordingPick = {
   every: 1,
 }
 
+describe('a command shorter than its response', () => {
+  it('leaves the blocks past its end empty rather than reading them as zero current', () => {
+    const rec = recording(1)
+    // The command stops after 6 of the sweep's 10 samples, as a stimulus stored short would.
+    const short = { ...rec, command: () => Float32Array.from([1, 1, 1, 1, 1, 1]) }
+    const table = recordingTable(short, { ...ALL, every: 4 })
+    expect(getColumn(table, 'I_clamp')).toEqual([1, 1, null])
+  })
+})
+
+describe('a file’s own sweep numbers', () => {
+  it('read Sweeps against them, and name each row’s sweep by them', () => {
+    expect(parseSweeps('9-12', [5, 9, 12])).toEqual({ sweeps: [1, 2], bad: [] })
+    // A number the file has no sweep for, or a range either end of which is none, is said.
+    expect(parseSweeps('6, 5-10', [5, 9, 12])).toEqual({ sweeps: [], bad: ['6', '5-10'] })
+    const rec = recording(3, { sweepNumbers: [5, 9, 12] })
+    const table = recordingTable(rec, { ...ALL, sweeps: '9, 12' })
+    expect([...new Set(getColumn(table, 'sweep'))]).toEqual([9, 12])
+    expect(recordingPickIssues(rec.summary, { ...ALL, sweeps: '1' })).toEqual([
+      'Sweeps: 1 names no sweep of the 3 in this recording.',
+    ])
+  })
+})
+
 describe('parseSweeps', () => {
   it('reads single sweeps and ranges counted from 1, once each, and returns what names none', () => {
-    expect(parseSweeps('', 3)).toEqual({ sweeps: [0, 1, 2], bad: [] })
-    expect(parseSweeps('3, 1-2 2', 5)).toEqual({ sweeps: [0, 1, 2], bad: [] })
-    expect(parseSweeps('2-1, 9, x, 0', 5)).toEqual({ sweeps: [], bad: ['2-1', '9', 'x', '0'] })
+    expect(parseSweeps('', [1, 2, 3])).toEqual({ sweeps: [0, 1, 2], bad: [] })
+    expect(parseSweeps('3, 1-2 2', [1, 2, 3, 4, 5])).toEqual({ sweeps: [0, 1, 2], bad: [] })
+    expect(parseSweeps('2-1, 9, x, 0', [1, 2, 3, 4, 5])).toEqual({
+      sweeps: [],
+      bad: ['2-1', '9', 'x', '0'],
+    })
     // A range typed with spaces, or an en dash, is still one range: not 1, a dash and 3.
-    expect(parseSweeps('1 - 3', 5)).toEqual({ sweeps: [0, 1, 2], bad: [] })
-    expect(parseSweeps('[1 – 2, 5]', 5)).toEqual({ sweeps: [0, 1, 4], bad: [] })
+    expect(parseSweeps('1 - 3', [1, 2, 3, 4, 5])).toEqual({ sweeps: [0, 1, 2], bad: [] })
+    expect(parseSweeps('[1 – 2, 5]', [1, 2, 3, 4, 5])).toEqual({ sweeps: [0, 1, 4], bad: [] })
   })
 })
 
@@ -131,7 +158,7 @@ describe('recordingPickIssues', () => {
     expect(
       recordingPickIssues(summary, { ...ALL, columns: ['Vm', 'Iout'], sweeps: '4' }),
     ).toEqual([
-      '1 picked channel is not in this recording: Iout.',
+      '1 picked channel is not in this recording: Iout. Pick again under Channels.',
       'Sweeps: 4 names no sweep of the 3 in this recording.',
     ])
     expect(recordingPickIssues(summary, { ...ALL, window: { start: 20, end: 30 } })).toEqual([

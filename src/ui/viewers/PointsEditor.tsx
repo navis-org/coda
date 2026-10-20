@@ -263,7 +263,7 @@ export function PointsEditor({
                           label={`Name of point ${i + 1}`}
                           value={point.name ?? ''}
                           placeholder={`point ${i + 1}`}
-                          title="Its `name` column: a trace label in Simulate, or a partner in a Compartment Model, where points sharing a name fire together"
+                          title="Its `name` column: a trace label in Simulate Model, or a partner in a Compartment Model, where points sharing a name fire together"
                           // Committed on Enter or blur, not per keystroke: each commit re-runs the node.
                           debounce={false}
                           onChange={(name) => {

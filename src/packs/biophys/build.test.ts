@@ -5,7 +5,13 @@ import { simulate } from '../../biophys/solver'
 import { MAX_SOMA_RADIUS_UM, buildCellModel, placePoints } from './build'
 import { modelNode } from './model'
 import { defaultParams, makeInferContext, validationMessage } from '../../core/node'
-import { CHANNEL_OPTIONS, describeChannel, newChannelRow } from './channelRows'
+import {
+  CHANNEL_OPTIONS,
+  changeChannel,
+  densityStep,
+  describeChannel,
+  newChannelRow,
+} from './channelRows'
 import { libraryChannels } from '../../biophys/channels'
 import { cellModelOf, eventsFor } from './solverInputs'
 import {
@@ -586,6 +592,29 @@ describe('the editor’s channels', () => {
     expect(pospischil).toMatch(/Gating m³h, reversal \+50 mV\. No temperature dependence\./)
     expect(pospischil).toMatch(/Starts at 30 mS\/cm²/)
     expect(describeChannel(hh!).join(' ')).toMatch(/Rates ×3 per 10 °C from 6\.3 °C/)
+  })
+
+  it('step a density by the order of its channel’s start, at most 1, the same both ways', () => {
+    // Persistent sodium starts at 0.0001: one press reaches 0, and a press up undoes a press down.
+    expect(densityStep('gunay.nap')).toBeCloseTo(1e-4, 12)
+    for (const id of ['gunay.nat', 'gunay.ks', 'pospischil.k', 'hh.na'])
+      expect(densityStep(id)).toBe(1)
+  })
+
+  it('start a fly row as their model’s axon, and keep a hand placement whatever the clicks', () => {
+    const nat = newChannelRow('gunay.nat')
+    expect([nat.regions, nat.value]).toEqual([['axon'], 180])
+    expect(newChannelRow('pospischil.na').regions).toEqual([])
+    // A row at its channel's own placement takes the next channel's, both ways.
+    expect(changeChannel(newChannelRow('pospischil.na'), 'gunay.ks').regions).toEqual(['axon'])
+    expect(changeChannel(nat, 'pospischil.na').regions).toEqual([])
+    // Placed by hand — everywhere on a fly row, or on the soma — it stays.
+    expect(changeChannel({ ...nat, regions: [] }, 'gunay.ks').regions).toEqual([])
+    const onSoma = { ...newChannelRow('pospischil.na'), regions: ['soma'] }
+    expect(changeChannel(onSoma, 'gunay.ks').regions).toEqual(['soma'])
+    // A ΔV50 belongs to the channel it was set on.
+    const shifted = changeChannel({ ...nat, inactivation: -15 }, 'gunay.kf')
+    expect([shifted.activation, shifted.inactivation]).toEqual([0, 0])
   })
 
   it('are exactly the library’s', () => {

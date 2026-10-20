@@ -1,20 +1,94 @@
 """Build and run a `src/biophys/referenceCases.ts` case in NEURON.
 
 The case arrives as `neuronExport` writes it: our sections (lists of skeleton nodes), our `nseg`
-per section, our HH densities per segment and each node's arc fraction `x` along its section. So
+per section, our HH and library-channel densities per segment (the latter by mechanism, with each
+mechanism's reversal) and each node's arc fraction `x` along its section. So
 NEURON is handed the discretisation rather than re-deriving it, and a comparison measures the
 integrator. Its own d_lambda count is still computed — with NEURON's `lambda_f` — and returned
 beside ours, so the counting rule is checked too.
 
 Shared by `biophys-reference.py` (the committed fixture) and `probe-biophys.py` (a real skeleton).
-Needs `pip install neuron`; nothing in the app or in CI depends on it.
+Needs `pip install neuron`, and a C compiler for a case placing a library channel NEURON lacks (its
+`.mod` in `biophys-mod/` is compiled then); nothing in the app or in CI depends on it.
 """
 
+import glob
 import math
+import os
+import platform
+import shutil
+import subprocess
 
 from neuron import h
 
 h.load_file("stdrun.hoc")
+
+# Library channels NEURON has no mechanism for — Günay et al. 2015's fly channels, written from
+# their Table 5 as `.mod` files — compiled on first use by a case that places one.
+MOD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "biophys-mod")
+_loaded = set()
+
+
+def load_mechanisms(mod_dir):
+    """Compile the `.mod` files in `mod_dir` and load them, once a process: here, and a probe's own.
+
+    Recompiled when any `.mod` is newer than the library, or the library was built by another
+    NEURON — a pip upgrade leaves one newer than every `.mod` and built for the old ABI. At most
+    once, read from this machine's architecture directory and never another's. Anything that
+    leaves no fresh library there, or a library NEURON will not load, raises saying why.
+    """
+    if mod_dir in _loaded:
+        return
+    import neuron
+
+    mods = glob.glob(os.path.join(mod_dir, "*.mod"))
+    if not mods:
+        raise RuntimeError(f"No .mod files in {mod_dir}: `pnpm biophys:mods` writes them.")
+    newest = max(os.path.getmtime(m) for m in mods)
+    arch = os.path.join(mod_dir, platform.machine())
+    stamp = os.path.join(arch, ".neuron-version")
+
+    def fresh():
+        """The library nrnivmodl wrote last here, if it is no older than every `.mod` and is this NEURON's."""
+        libs = glob.glob(os.path.join(arch, "libnrnmech.*")) + glob.glob(
+            os.path.join(arch, ".libs", "libnrnmech.*")
+        )
+        latest = max(libs, key=os.path.getmtime, default=None)
+        if not latest or os.path.getmtime(latest) < newest:
+            return None
+        with open(stamp) if os.path.exists(stamp) else open(os.devnull) as f:
+            return latest if f.read().strip() == neuron.__version__ else None
+
+    lib = fresh()
+    if lib is None:
+        # From scratch: make rebuilds an object only when its `.mod` changed, so after a NEURON
+        # upgrade it would relink objects compiled against the old headers.
+        shutil.rmtree(arch, ignore_errors=True)
+        try:
+            done = subprocess.run(["nrnivmodl"], cwd=mod_dir, capture_output=True, text=True)
+        except FileNotFoundError as e:
+            raise RuntimeError("nrnivmodl is not on PATH: it comes with `pip install neuron`.") from e
+        if done.returncode != 0:
+            raise RuntimeError(f"nrnivmodl failed in {mod_dir}:\n{done.stdout}\n{done.stderr}")
+        if os.path.isdir(arch):
+            with open(stamp, "w") as f:
+                f.write(neuron.__version__)
+        lib = fresh()
+        if lib is None:
+            raise RuntimeError(f"nrnivmodl left no fresh library in {arch}.")
+    if not h.nrn_load_dll(lib):
+        raise RuntimeError(f"NEURON would not load {lib}: see its message above.")
+    _loaded.add(mod_dir)
+
+
+def dlambda_nseg(sec, rule):
+    """NEURON's d_lambda segment count for a section (fixnseg.hoc), under a case's `rule`.
+
+    NEURON's own `lambda_f` integrates over the 3d points; the `+ 0.9` rounding around it is
+    fixnseg.hoc's and copied on both sides, so agreement checks the integral.
+    """
+    lam = h.lambda_f(rule["frequency"], sec=sec)
+    return int((sec.L / (rule["dLambda"] * lam) + 0.9) / 2) * 2 + 1
 
 
 def clamp_current(c, tm):
@@ -64,10 +138,7 @@ def run_case(case):
         sec.Ra = case["ra"]
         sec.cm = case["cm"]
         if rule["kind"] == "dLambda":
-            # NEURON's own `lambda_f` integrates over the 3d points; the `+ 0.9` rounding around it
-            # is fixnseg.hoc's and copied on both sides, so agreement checks the integral.
-            lam = h.lambda_f(rule["frequency"], sec=sec)
-            neuron_nseg.append(int((sec.L / (rule["dLambda"] * lam) + 0.9) / 2) * 2 + 1)
+            neuron_nseg.append(dlambda_nseg(sec, rule))
         # nseg before any mechanism, or NEURON redistributes the densities set below.
         sec.nseg = s["nseg"]
         sec.insert("pas")
@@ -80,6 +151,19 @@ def run_case(case):
                 seg.hh.gnabar = d["gna"]
                 seg.hh.gkbar = d["gk"]
                 seg.hh.gl = 0
+        if s.get("mechanisms"):
+            load_mechanisms(MOD_DIR)
+            for name in s["mechanisms"][0]:
+                try:
+                    sec.insert(name)
+                except ValueError as e:
+                    raise ValueError(f"No mechanism {name}: add scripts/biophys-mod/{name}.mod") from e
+            for seg, d in zip(sec, s["mechanisms"]):
+                for name, gbar in d.items():
+                    mech = getattr(seg, name)
+                    mech.gbar = gbar
+                    # The reversal is the spec's, sent with the case, never the `.mod`'s own copy.
+                    mech.e = case["reversals"][name]
 
     h.celsius = case["temperature"]
     # hh.mod evaluates its rates directly (its TABLE is commented out since NEURON 8), as the

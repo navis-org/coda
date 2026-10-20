@@ -4,8 +4,9 @@
  * A model crosses to a worker, so a channel cannot be a closure: it is a description — gates with
  * an exponent and a named kinetic scheme — that `compileChannel` turns into rate functions on the
  * far side. The leak is a channel with no gates; the squid Hodgkin–Huxley sodium and potassium
- * currents are the first two with gates. Channels fitted to measurements (Boltzmann steady state,
- * bell-shaped τ) arrive as a second `GateKinetics` kind without the integrator changing.
+ * currents are the first two with gates. Channels fitted to measurements — a Boltzmann steady state
+ * and a fitted τ — are the `fitted` kind, the integrator unchanged: Günay et al. 2015's *Drosophila*
+ * channels are the first.
  *
  * Units throughout: membrane potential in mV, time in ms, temperature in °C.
  */
@@ -23,12 +24,41 @@ export type GateKinetics =
    * and potassium conductances implemented in Jaxley". No temperature dependence.
    */
   | { readonly kind: 'pospischil'; readonly gate: 'm' | 'h' | 'n' }
+  /**
+   * A gate fitted to voltage-clamp data: `x∞ = 1 / (1 + exp((v − vHalf) / k))`, negative `k` for a
+   * gate that opens with depolarisation, and a time constant of one of the `FittedTau` forms. How
+   * Günay et al. 2015 (Table 5) state theirs.
+   */
+  | {
+      readonly kind: 'fitted'
+      readonly gate: 'm' | 'h'
+      /** mV */
+      readonly vHalf: number
+      /** mV */
+      readonly k: number
+      readonly tau: FittedTau
+    }
 
-/**
- * Whether a gate opens with depolarisation (`activation`) or closes with it (`inactivation`) —
- * which of a channel's gates a "ΔV50 activation" or "ΔV50 inactivation" shift moves. Read off the
- * steady state's slope rather than the gate's name, so a fitted kinetics kind needs no naming rule.
- */
+/** A fitted gate's time constant, ms, as a function of voltage (mV). */
+export type FittedTau =
+  /** `tau`, whatever the voltage. */
+  | { readonly form: 'constant'; readonly tau: number }
+  /** `base + amplitude / (1 + exp((v − vHalf) / k))`. */
+  | {
+      readonly form: 'sigmoid'
+      readonly base: number
+      readonly amplitude: number
+      readonly vHalf: number
+      readonly k: number
+    }
+  /** `base + exp((v − vHalf) / k)`. */
+  | {
+      readonly form: 'exponential'
+      readonly base: number
+      readonly vHalf: number
+      readonly k: number
+    }
+
 /**
  * A gate's letter in a channel's gating formula (`m³h`). Asked of the kinetics kind, so a kind that
  * names no gates says what it is by role rather than borrowing another kind's letters.
@@ -37,14 +67,35 @@ export function gateSymbol(kinetics: GateKinetics): string {
   switch (kinetics.kind) {
     case 'hh':
     case 'pospischil':
+    case 'fitted':
       return kinetics.gate
   }
 }
 
-function gateRole(kinetics: GateKinetics): 'activation' | 'inactivation' {
-  const { inf } = compileKinetics(kinetics, 1)
-  return inf(0) >= inf(-80) ? 'activation' : 'inactivation'
+/**
+ * Whether a gate opens with depolarisation (`activation`) or closes with it (`inactivation`) —
+ * which of a channel's gates a "ΔV50 activation" or "ΔV50 inactivation" shift moves. Read off the
+ * steady state's slope rather than the gate's name, each kind saying how — a new kind cannot
+ * compile here without stating it, and none needs a naming rule.
+ */
+function gateRole(kinetics: GateKinetics): GateRole {
+  switch (kinetics.kind) {
+    case 'fitted':
+      // Stated by k's sign: probing voltages would call a steep gate far from them flat.
+      return kinetics.k < 0 ? 'activation' : 'inactivation'
+    case 'hh':
+    case 'pospischil': {
+      // Every rate-scheme gate is half open well inside this range, so two voltages read its slope.
+      const { alpha, beta } = (kinetics.kind === 'hh' ? HH_RATES : POSPISCHIL_RATES)[
+        kinetics.gate
+      ]
+      const inf = (v: number) => alpha(v) / (alpha(v) + beta(v))
+      return inf(0) >= inf(-80) ? 'activation' : 'inactivation'
+    }
+  }
 }
+
+type GateRole = 'activation' | 'inactivation'
 
 export interface GateSpec {
   /** The exponent: `m³h` is `m` at 3 and `h` at 1. */
@@ -75,11 +126,11 @@ export function shiftedChannel(
   spec: ChannelSpec,
   shift: { readonly activation?: number; readonly inactivation?: number },
 ): ChannelSpec {
-  const by = (gate: GateSpec) => shift[gateRole(gate.kinetics)] ?? 0
-  if (spec.gates.every((gate) => by(gate) === 0)) return spec
+  const by = spec.gates.map((gate) => shift[gateRole(gate.kinetics)] ?? 0)
+  if (by.every((x) => x === 0)) return spec
   return {
     ...spec,
-    gates: spec.gates.map((gate) => ({ ...gate, shift: (gate.shift ?? 0) + by(gate) })),
+    gates: spec.gates.map((gate, i) => ({ ...gate, shift: (gate.shift ?? 0) + by[i]! })),
   }
 }
 
@@ -144,12 +195,117 @@ export const POSPISCHIL_K: ChannelSpec = {
   gates: [{ power: 4, kinetics: { kind: 'pospischil', gate: 'n' } }],
 }
 
+/*
+ * Günay et al. 2015 (PLoS Comput Biol 11: e1004189, CC BY 4.0), Table 5: the four currents of their
+ * *Drosophila* larval aCC motoneuron model, fitted to voltage-clamp recordings from fly neurons.
+ * The reversals are those of their reconstructed model (65 and −74 mV; their isopotential model
+ * used −80 for potassium). No temperature dependence is stated, so none is applied. Their text
+ * mentions a second, slow inactivation of Kf; Table 5 and their own NEURON code have one, as here.
+ */
+
+/** The reversals of Günay et al.'s reconstructed model, mV. */
+const GUNAY_E = { na: 65, k: -74 } as const
+
+/** Transient sodium (NaT, the *para* current), `m³h`. */
+export const GUNAY_NAT: ChannelSpec = {
+  id: 'gunay.nat',
+  eRev: GUNAY_E.na,
+  gates: [
+    {
+      power: 3,
+      kinetics: {
+        kind: 'fitted',
+        gate: 'm',
+        vHalf: -29.13,
+        k: -8.92,
+        tau: { form: 'sigmoid', base: 0.13, amplitude: 3.43, vHalf: -45.35, k: 5.98 },
+      },
+    },
+    {
+      power: 1,
+      kinetics: {
+        kind: 'fitted',
+        gate: 'h',
+        vHalf: -47,
+        k: 5,
+        tau: { form: 'exponential', base: 0.36, vHalf: -20.65, k: -10.47 },
+      },
+    },
+  ],
+}
+
+/** Persistent sodium (NaP), `m`, with a time constant of 1 ms. */
+export const GUNAY_NAP: ChannelSpec = {
+  id: 'gunay.nap',
+  eRev: GUNAY_E.na,
+  gates: [
+    {
+      power: 1,
+      kinetics: {
+        kind: 'fitted',
+        gate: 'm',
+        vHalf: -48.77,
+        k: -3.68,
+        tau: { form: 'constant', tau: 1 },
+      },
+    },
+  ],
+}
+
+/** Slow delayed-rectifier potassium (Ks, the *Shab* current), `m⁴`. */
+export const GUNAY_KS: ChannelSpec = {
+  id: 'gunay.ks',
+  eRev: GUNAY_E.k,
+  gates: [
+    {
+      power: 4,
+      kinetics: {
+        kind: 'fitted',
+        gate: 'm',
+        vHalf: -12.85,
+        k: -19.91,
+        tau: { form: 'sigmoid', base: 2.03, amplitude: 1.96, vHalf: 29.83, k: 3.32 },
+      },
+    },
+  ],
+}
+
+/** Fast, inactivating A-type potassium (Kf, the *Shal* current), `m⁴h`. */
+export const GUNAY_KF: ChannelSpec = {
+  id: 'gunay.kf',
+  eRev: GUNAY_E.k,
+  gates: [
+    {
+      power: 4,
+      kinetics: {
+        kind: 'fitted',
+        gate: 'm',
+        vHalf: -17.55,
+        k: -7.27,
+        tau: { form: 'sigmoid', base: 1.94, amplitude: 2.66, vHalf: 8.12, k: 7.96 },
+      },
+    },
+    {
+      power: 1,
+      kinetics: {
+        kind: 'fitted',
+        gate: 'h',
+        vHalf: -45,
+        k: 6,
+        tau: { form: 'sigmoid', base: 1.79, amplitude: 515.8, vHalf: -147.4, k: 28.66 },
+      },
+    },
+  ],
+}
+
 /**
  * Every gated channel a model may name, by `ChannelSpec.id` — the library fitted channels join.
  * The leak is not in it: its reversal is a model's, so it is built per model by `leakChannel`.
  */
 const LIBRARY: ReadonlyMap<string, ChannelSpec> = new Map(
-  [HH_NA, HH_K, POSPISCHIL_NA, POSPISCHIL_K].map((c) => [c.id, c]),
+  [HH_NA, HH_K, POSPISCHIL_NA, POSPISCHIL_K, GUNAY_NAT, GUNAY_NAP, GUNAY_KS, GUNAY_KF].map(
+    (c) => [c.id, c],
+  ),
 )
 
 /** A library channel by id, or undefined — for a reader that must not throw (a param's `visibleIf`). */
@@ -236,18 +392,54 @@ export interface CompiledChannel {
 }
 
 function compileGate(gate: GateSpec, phi: number): CompiledGate {
-  const unshifted = compileKinetics(gate.kinetics, phi)
+  const { inf, advance } = compileKinetics(gate.kinetics, phi)
   const shift = gate.shift ?? 0
-  if (shift === 0) return { power: gate.power, ...unshifted }
+  if (shift === 0) return { power: gate.power, inf, advance }
   return {
     power: gate.power,
-    inf: (v) => unshifted.inf(v - shift),
-    advance: (x, v, dt) => unshifted.advance(x, v - shift, dt),
+    inf: (v) => inf(v - shift),
+    advance: (x, v, dt) => advance(x, v - shift, dt),
+  }
+}
+
+/** `1 / (1 + exp((v − vHalf) / k))`: a fitted gate's steady state, and its sigmoid τ's shape. */
+function boltzmann(v: number, vHalf: number, k: number): number {
+  return 1 / (1 + Math.exp((v - vHalf) / k))
+}
+
+/**
+ * A fitted gate's time constant as a function of `v`, ms: the form chosen once, at compile time,
+ * not per call in the integrator's innermost loop.
+ */
+function fittedTau(tau: FittedTau): (v: number) => number {
+  switch (tau.form) {
+    case 'constant': {
+      const { tau: t } = tau
+      return () => t
+    }
+    case 'sigmoid': {
+      const { base, amplitude, vHalf, k } = tau
+      return (v) => base + amplitude * boltzmann(v, vHalf, k)
+    }
+    case 'exponential': {
+      const { base, vHalf, k } = tau
+      return (v) => base + Math.exp((v - vHalf) / k)
+    }
   }
 }
 
 function compileKinetics(kinetics: GateKinetics, phi: number): Omit<CompiledGate, 'power'> {
   switch (kinetics.kind) {
+    case 'fitted': {
+      // x' = (x∞ − x)/τ, stepped as NEURON's `cnexp` steps it; φ divides τ, as a Q10 would.
+      const { vHalf, k } = kinetics
+      const tauAt = fittedTau(kinetics.tau)
+      const inf = (v: number) => boltzmann(v, vHalf, k)
+      return {
+        inf,
+        advance: (x, v, dt) => x + (1 - Math.exp((-dt * phi) / tauAt(v))) * (inf(v) - x),
+      }
+    }
     case 'hh':
     case 'pospischil': {
       // x∞ = α/(α+β) and τ = 1/(φ(α+β)): hh.mod multiplies α + β by the temperature factor, and a
@@ -255,11 +447,12 @@ function compileKinetics(kinetics: GateKinetics, phi: number): Omit<CompiledGate
       const { alpha, beta } = (kinetics.kind === 'hh' ? HH_RATES : POSPISCHIL_RATES)[
         kinetics.gate
       ]
+      const inf = (v: number) => {
+        const a = alpha(v)
+        return a / (a + beta(v))
+      }
       return {
-        inf: (v) => {
-          const a = alpha(v)
-          return a / (a + beta(v))
-        },
+        inf,
         advance: (x, v, dt) => {
           const a = alpha(v)
           const sum = a + beta(v)

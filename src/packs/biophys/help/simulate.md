@@ -1,4 +1,4 @@
-Simulate runs a [Compartment Model](#biophys:model): its partners fire, and the voltage is recorded at the soma and at any points you wire into `Record at`. It runs in the background, so you can keep working while it does.
+Simulate Model runs a [Compartment Model](#biophys:model): its partners fire, and the voltage is recorded at the soma and at any points you wire into `Record at`. It runs in the background, so you can keep working while it does.
 
 It has five outputs:
 
@@ -38,7 +38,7 @@ biophys:simulate: duration, dt, sampleEvery, threshold
 `Drive` decides how the partners fire:
 
 - "Spike trains" gives every partner its own train: `Spikes` spikes from `Start`, `Interval` apart. `Noise` jitters the intervals, from 0 (exactly regular) to 1 (Poisson), like NEURON's `NetStim`. The trains are seeded, so the same settings give the same run.
-- "Input spikes" reads times from a table wired into the `Input spikes` input, with a `Partner` and a `Time` column. Another Simulate's `Input spikes` output has exactly those columns, so wiring it in replays that run's drive, seeded trains included — on another model, say, or with some partners silenced.
+- "Input spikes" reads times from a table wired into the `Input spikes` input, with a `Partner` and a `Time` column. Another Simulate Model's `Input spikes` output has exactly those columns, so wiring it in replays that run's drive, seeded trains included — on another model, say, or with some partners silenced.
 - "None" fires nobody, which is what you want for injected current alone.
 
 ```coda-params
@@ -65,6 +65,20 @@ biophys:simulate: clamp, clampShape, amplitude, clampDelay, clampDuration
 
 A site is picked by its name, so if a `Record at` point goes away or a trace is renamed, the card says nothing is injected there; tick the sites again under Sites.
 
+### A table of current
+
+To inject a waveform the shapes above can't make, wire a table into `Current`: a recording's command from [Load Recording](#biophys:loadRecording), noise, or a few breakpoints written by hand. `Current` picks the column to inject. It lists the columns in pA or nA, and if the table has several it asks you to pick, since a recording often holds a noisy current monitor beside the command. Each value is held from its row's time until the next row's, as an amplifier holds a command, with times counted from the start of the run. Nothing is injected before the first row, or after the last row plus one sample: end the table with a row where the current should stop, and the card says when it doesn't.
+
+The current goes into the soma. To send rows elsewhere, set `Current site` to a column naming a record site (the soma, a `Record at` point or a Playback trace) in each row. A name no site has is said on the card, and those rows inject nothing.
+
+If the table has a `sweep` column, each sweep is its own run, every one starting from rest. The `Traces` and `Output spikes` outputs then gain a `sweep` column, so a whole I–V protocol is one card: plot `Traces` in a Line Chart with `Series` set to `sweep`. `Current sweep` names the column; set it to none to inject the whole table in one run. Playback replays the first sweep, and says so.
+
+A table adds to `Inject current` rather than replacing it: a holding current from the Clamp tab plus a recorded command, say. The `injected` column of `Traces` is the current into the first site that gets any, which is the soma when a recording is replayed.
+
+```coda-params
+biophys:simulate: currentValue, currentSite, currentSweep, currentTime, currentUnit
+```
+
 ## Recording
 
 The soma is always recorded. To record elsewhere, wire points into `Record at`: for instance this neuron's output synapses from Synapses, or points placed by hand in Skeleton to Points. Each point is snapped to the arbour; a point further than `Record distance` is not recorded and is counted on the card. `Record label` names each trace column from a column of the points, such as `name`.
@@ -75,7 +89,7 @@ biophys:simulate: recordLabel, recordSnap
 
 ## Which partners matter
 
-Tick `Per-partner summary` and Simulate also runs every firing partner alone: one spike at `Summary onset`, for `Summary window` ms. The `Partners` table then gives each partner's peak change in voltage at the soma and at its own synapses, and the ratio between the two, which is how much of it survives the trip to the soma. An inhibitory partner's change is negative: the fall below rest it causes. This is one extra run per partner, so it takes longer.
+Tick `Per-partner summary` and Simulate Model also runs every firing partner alone: one spike at `Summary onset`, for `Summary window` ms. The `Partners` table then gives each partner's peak change in voltage at the soma and at its own synapses, and the ratio between the two, which is how much of it survives the trip to the soma. An inhibitory partner's change is negative: the fall below rest it causes. This is one extra run per partner, so it takes longer.
 
 If the cell is still well away from rest at the end of the run, long after its last input, the card says where. An active model with too little potassium for its sodium can stay depolarised after a spike, or keep firing on its own; raising the potassium, or moving rest further from threshold, fixes it.
 

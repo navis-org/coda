@@ -33,7 +33,7 @@
  * file — the property the whole directory is arranged around.
  */
 
-import { typeKey } from '../core/nodeType'
+import { nodeAnchor } from '../core/nodeType'
 import { guideData, type GuideNode } from './data'
 import { CAT_LABEL, SECTIONS, appHref } from './sections'
 
@@ -55,17 +55,6 @@ export function esc(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-}
-
-/**
- * A stable, URL-safe anchor for a node type.
- *
- * `out.table` becomes `node-out-table`. Dots are legal in an HTML5 `id` and illegal in a CSS
- * selector without escaping, and an id nobody can write a selector for is one somebody will
- * eventually fix by hand into something that no longer matches the links.
- */
-export function nodeAnchor(type: string): string {
-  return 'node-' + typeKey(type)
 }
 
 /** `Dataset, Neurons → Table`, or an em dash where a node has no sockets at all. */

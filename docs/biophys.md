@@ -6,7 +6,7 @@ it, drive those partners, and read what the soma — or any point — sees. The 
 counterpart of Connectivity's synapse count.
 
 Two nodes: **Compartment Model** (`biophys:model`, `cheap`) builds a `cellModel` value from a
-skeleton and a synapse cloud; **Simulate** (`biophys:simulate`, `expensive`) runs it. The pack is
+skeleton and a synapse cloud; **Simulate Model** (`biophys:simulate`, `expensive`) runs it. The pack is
 off by default (`/biophys` switches it on) and requires no other: its inputs are the built-in
 skeleton and point kinds, whichever backend made them.
 
@@ -16,9 +16,10 @@ skeleton and point kinds, whichever backend made them.
 | --- | --- |
 | `src/biophys/` | The solver, headless and neuron-agnostic: `discretize.ts` (cable → compartments), `solver.ts` (Hines, backward Euler, HH, Exp2Syn, `Simulation`), `channels.ts`, `referenceCases.ts`. On eslint's headless list beside `src/umap`. |
 | `src/packs/biophys/` | The pack: `build.ts` (skeleton + cloud → `CellModelValue`, pure), `model.ts`, `solverInputs.ts` (value → solver model, the one bridge), `stimulus.ts` (seeded trains), `simulateOps.ts` (`planRun`, the tables and their schemas, the arbour), `simulateJob.ts` + `simulate.worker.ts` / `movie.worker.ts`, `simulate.ts`, `presets.ts`, `nodeValues.ts`, `wizard.ts`, `glyphs.ts`, `seeAlso.ts`, `help/`. |
-| `src/ui/biophys/` | Simulate's expanded view: `SimulateView` (tabs), `SimulatePartners` + `partnerRows.ts`, `SimulatePlayback` + `movie.ts` + `useMovie.ts`. |
+| `src/ui/biophys/` | Simulate Model's expanded view: `SimulateView` (tabs), `SimulatePartners` + `partnerRows.ts`, `SimulatePlayback` + `movie.ts` + `useMovie.ts`. |
 | `src/nodes/output/lineChart.ts` | The core Line Chart, which the traces are drawn on. See `docs/viewers.md`. |
-| `scripts/biophys_neuron.py`, `scripts/biophys-reference.py`, `pnpm biophys:reference`, `pnpm probe:biophys` | The NEURON harness. The reference writes `src/biophys/__fixtures__/neuron-reference.json` (byte-stable); `pnpm test` holds the solver to it with no NEURON installed. |
+| `scripts/biophys_neuron.py`, `scripts/biophys-reference.py`, `pnpm biophys:reference`, `pnpm probe:biophys` | The NEURON harness. The reference writes `src/biophys/__fixtures__/neuron-reference.json` (byte-stable); `pnpm test` holds the solver to it with no NEURON installed. `scripts/biophys-mod/` is the fly channels as `.mod` files, generated from their specs by `pnpm biophys:mods` and compiled by the harness on first use (the build directories are git-ignored). |
+| `pnpm probe:gouwens` (`scripts/probe-gouwens.{py,ts}`) | Gouwens & Wilson 2009's DM1 projection neurons in NEURON against our model of them: input resistance and steady-state attenuation. Local only; their files are fetched into `/tmp`. |
 
 ## Why our own solver, in TypeScript
 
@@ -161,13 +162,66 @@ resistance, which is why theirs reads a little less isolated.
   transcribed from `jaxley.channels.pospischil` and held to Jaxley's own run of one compartment,
   spikes included, at **5 × 10⁻⁸ mV** (`pnpm biophys:jaxley` writes the fixture; Jaxley 0.14.0 in a
   virtualenv of its own). Jaxley's `efun` answers NaN at its removable singularities (m's α at
-  −47 mV, β at −20 mV); ours fills them with the limit. **The fly channels are not here**: Vieira et
-  al.'s Zenodo record (10.5281/zenodo.20752905) holds their raw voltage-clamp recordings, not the
-  fitted models, and the paper states only Para's V50s. They slot in as a second kinetics kind
-  when their parameters are available.
-- **Presets are published models, and every deviation is on the preset.** Three ship: **Drosophila
-  PN** (Tobin et al. 2017 after Gouwens & Wilson 2009), **Fly visual** (Meier & Borst 2019, CT1)
-  and **Fly optic lobe** (Vieira et al. 2026, T4/T5). A source must state Rm, Ra and Cm; the leak
+  −47 mV, β at −20 mV); ours fills them with the limit. **Vieira et al.'s fly channels are not
+  here**: their Zenodo record (10.5281/zenodo.20752905) holds their raw voltage-clamp recordings, not
+  the fitted models, and the paper states only Para's V50s.
+- **Günay et al. 2015's are (decided 2026-10-18): the first fly channels.** NaT (para), NaP, Ks
+  (Shab) and Kf (Shal) of the larval aCC motoneuron, fitted to voltage-clamp recordings from fly
+  neurons, as a third kinetics kind, `fitted`: a Boltzmann steady state and a time constant that is
+  constant, sigmoid or exponential in voltage. **From the paper's Table 5, not their code**: the
+  paper is CC BY 4.0, the ModelDB repository (152028) carries no licence and stores its time
+  constants as 1,501-point `KSChan` tables, which Table 5 states as the formulas they were sampled
+  from — so nothing tabulated was copied and the solver needed no table gate. Three choices, each on
+  the spec's comment: the reversals are their reconstructed model's (65 / −74 mV; their isopotential
+  model used −80), no Q10 (none stated), and Kf has the one inactivation their table and code have
+  (their text mentions a second, slow one). Densities start at their reconstructed model's axon
+  (Table 4: NaT 180, NaP 0.0001, Ks 400 mS/cm²), where a new row goes; Kf, absent from that model,
+  at Ks's 400 scaled by their isopotential model's Kf : Ks (24.1 : 50 nS), said in its
+  `densitySource`.
+  **Held to NEURON** by `branched-fly-channels` in `neuron-reference.json`, NEURON running `.mod`
+  files **generated from the specs** (`src/biophys/modFile.ts`, `pnpm biophys:mods`, which
+  `biophys:reference` runs first; `modFile.test.ts` refuses a committed file that differs), so Table
+  5 has one transcription and NEURON runs it: 4 × 10⁻⁶ mV over two spikes — the soma at their
+  whole-cell densities and the axon stub at their axon's, two groups naming the same channels, which
+  NEURON is handed summed per mechanism — with Kf at the same derived density as the editor's. The
+  case ends at 35 ms, before a third spike (37 ms) that creeps up on threshold after the clamp ends,
+  where a slow crossing turns float rounding into timing (2.7 × 10⁻⁵ mV on such an upstroke, a shift
+  of 1.5 × 10⁻⁷ ms). nocmodl refuses a non-ASCII byte anywhere, comments included, which the
+  generator's test checks. **The `.mod` files hold no reversals** either: `neuronExport` sends each
+  mechanism's from its `ChannelSpec`. The harness compiles them only when a case places one (passive
+  and HH runs need no C compiler), rebuilds them when a `.mod` is newer than the library or the
+  library was built by another NEURON (`.neuron-version` beside it), refuses a library NEURON will
+  not load, and names a channel with no `.mod` rather than letting NEURON refuse a string. The
+  generator writes a file only when its text changed, since a new mtime is what triggers a rebuild.
+- **A new fly row is their model's axon (decided 2026-10-18/19).** On the axon (`ChannelOption.regions`),
+  at that axon's densities (Table 4 "Recon. axon only": NaT 180, Ks 400, NaP 0.1 µS/cm²; Kf, absent,
+  Ks × 24.1/50). Their NEURON session confirms Table 4's units (`gmax_DmNaT` 0.03 S/cm² whole-cell).
+  Why not the whole cell: NaT's window current (m V½ −29, h V½ −47) is large, and placed everywhere
+  it keeps a weak-leak cell firing on its own — the PN and Vieira presets fire at a few Hz from about
+  −56 mV, where the CT1 and T4 presets rest near −60 mV. **An I–V root is not a rest**: a first
+  version said the cell "sits at −34 mV", which is where the steady-state current crosses zero on
+  the PN preset, a fixed point the cell never stays at; a run checked that. The text now names no
+  voltage. A row at its channel's own placement takes the next channel's when switched, a row placed
+  by hand keeps its own, whichever order the channels were chosen in; a switch resets the ΔV50s. The
+  editor's step is the order of the starting density, fixed per channel: one read off the row's
+  value shrank tenfold per decade on the way down and never reached 0.
+- **Settling waits for the gates too**, not only the voltage: NaT h carries little current at rest
+  while its τ runs to hundreds of ms, so the voltage stopped moving while sodium availability was
+  still relaxing. The warning for a cell that never settles says it may be firing on its own.
+- **Every gate is held to their code**, not only to `.mod` files generated from the same reading of
+  Table 5: `channels.test.ts` compares each steady state with their `KSChan` sigmoid and each τ with
+  their table at five voltages. NaT's m τ alone differs, by 2.4% where it bottoms out — the paper's
+  caption says its NaT time constants differ slightly from the earlier published set.
+- **Kf inactivates fast and recovers slowly**, as Table 5 has it and as their own `KSChan` table
+  agrees to every digit: τh is about 5 ms at 0 mV and 14 ms at −40 mV, but 34 ms at −70 mV and 85
+  ms at −100 mV. The first description of it said it "inactivates over hundreds of milliseconds", which
+  is its recovery near rest, not its inactivation; `channels.test.ts` now holds τh to their table.
+- **Presets are published models, and every deviation is on the preset.** Four ship: **Drosophila
+  PN** (Tobin et al. 2017 after Gouwens & Wilson 2009), **Fly visual** (Meier & Borst 2019, CT1),
+  **Fly optic lobe** (Vieira et al. 2026, T4/T5) and **Fly T4** (Gruntman, Romani & Reiser 2018,
+  ModelDB 239435: Rm 100,000 Ω·cm² and Ra 100.07 Ω·cm fitted, E leak their −65 mV, Cm NEURON's
+  default since their code sets none — so 1 µF/cm² is what their model ran, said in its `source`).
+  The PN preset is **held to Gouwens & Wilson's own NEURON model** by `pnpm probe:gouwens` (below). A source must state Rm, Ra and Cm; the leak
   reversal may be missing (a model in voltage relative to rest states none), and is then −60 mV,
   said in the preset's `source` and its comment. The optic-lobe set carries two further notes: their
   2.6 µm soma is `Soma diameter`, not the preset, and their Fig. 1 HH model used a leak of 25
@@ -256,7 +310,7 @@ resistance, which is why theirs reads a little less isolated.
   (`firingIndices`, one rule for the run and the Partners tab's count). It exists because every
   partner at once saturates a real neuron: on hemibrain DA1 PN 1734350788 the defaults drive the
   soma to about −10 mV, near the synapses' reversal, and the arbour reads one flat colour. The
-  wizard builds Simulate on the top 1. A setting rather than a silenced list written by the
+  wizard builds Simulate Model on the top 1. A setting rather than a silenced list written by the
   wizard, because the wizard builds before any partner is known.
 - **Record sites** are the soma plus an optional point cloud, each placed by the synapses' rule
   (`placePoints`); far and off-piece points are counted.
@@ -270,7 +324,7 @@ resistance, which is why theirs reads a little less isolated.
   `Output spikes` the cell's threshold crossings; the input was "Spike table" and the output
   "Spikes", opposite things under one word. The **Input spikes output** is the run's own firing,
   seeded trains included, in the columns the input port reads by default (`partnerId`, `time`,
-  plus `partnerType` and `arrival`), so wiring it into another Simulate replays the drive.
+  plus `partnerType` and `arrival`), so wiring it into another Simulate Model replays the drive.
   Arrival is read from `partnerDelays`, kept per model: a partner's first delay for that output, and
   each distinct delay for Playback's ticks (`inputArrivals`).
 - **Spike threshold defaults to 0 mV**: a fly's somatic spikes arrive attenuated.
@@ -328,7 +382,7 @@ resistance, which is why theirs reads a little less isolated.
   sample), Playback's strip under the traces, and the Clamp tab's preview. One column, not one per
   site, the waveform being shared. The strip reads the clamp from the **plan that made the movie**
   (the clamps are in `movieBasis`, so a served movie's are the card's), and is the chart's own
-  `Line`, decimated as the traces are. The preview is `ViewerEntry.tabFigures` on Simulate's viewer
+  `Line`, decimated as the traces are. The preview is `ViewerEntry.tabFigures` on Simulate Model's viewer
   entry — a drawing under a sidebar tab, on the per-type table that already exists rather than a
   second one, its keys swept against the node's tabs — and folds the run into columns by each
   column's extremes (`clampEnvelope`, asking only the steps inside the clamp's window), sampling
@@ -406,6 +460,39 @@ resistance, which is why theirs reads a little less isolated.
   out of it so the two cannot drift — p95 radius at twice the line width, clamped, quarter-pixel
   steps. Session state, like the colour scale and the speed.
 
+### A table of current (decided 2026-10-18)
+
+Simulate Model's `Current` socket takes a table of injected current: a recording's command, noise,
+or breakpoints. Four rules, each put to the user:
+
+- **Held, not interpolated**, onto the run's steps (`held` in `resample.ts`, read at each step's
+  half-step time, where every clamp is read), and played as a `samples` clamp of 1×. A command is a
+  level held between samples, so linear interpolation would invent a ramp at every step. Any spacing
+  works; nothing is injected before the first row or after the last row plus one sample.
+- **Into the soma, or the site a row names** through an optional site column; a name no record site
+  has injects nothing and is said. Two names on one compartment add.
+- **One main run per sweep**, all from the same rest (`SimulateJob.sweeps`, `sweepClamps`). The
+  Traces and Output spikes tables gain a `sweep` column whenever the sweep picker resolves, even
+  for one sweep, so inference states the schema before a run. The Arbour is the peak over every
+  sweep; the per-partner summary runs once; Playback replays the first sweep and says so, its movie
+  basis hashing that sweep alone. An empty table is one run with no current, said, never a run of
+  no sweeps; a table ending on a non-zero current is said too, its last row being held one step. Traces stay wide over
+  sites and go long over sweeps, which is what a Line Chart's Series and Fit Model Passive read.
+- **It adds to the Clamp tab's current**: the solver sums every clamp on a compartment, so a
+  holding current and a recorded command are two clamps.
+
+The `injected` column is the current into the first record site that takes any (`injectedCompartment`). The
+Clamp tab's waveform is one for every ticked site, so that column was all of it; a table naming
+several sites is now summarised by its first. The current is read by unit through `unitColumns.ts`,
+shared with Fit Model Passive: a picker lists only columns in pA or nA, and an unset one with two
+candidates is asked rather than guessed; the column-scale rule (`columnScale`) and the walk that
+groups a long table by sweep (`rowsBySweep`) are shared with it too, so one recording splits into the
+same sweeps on either card. **Each table clamp spans only the steps carrying current**, trimmed at
+both ends, so its window says when its current stops as any clamp's does: the "not back at rest"
+note (run per sweep) reads that window, where a clamp padded to the whole run would never let it
+speak. And a typed array is hashed over its bytes (`stableStringify`), the held currents riding in
+the job that Playback's movie basis hashes on the page.
+
 ## Recordings
 
 Load Recording and Combine Traces (decided 2026-10-17) put a patch-clamp recording beside a
@@ -443,6 +530,43 @@ simulation.
   **averages** blocks (timed at their middle, so a trace never shifts), keeping noise from aliasing at
   the price of blunting a spike narrower than the block. Not read: ABF1, variable-length event mode,
   digital outputs, tags.
+- **ABF1 is a port of pyABF's `HeaderV1` and `_readHeadersV1`** (decided 2026-10-18): a fixed
+  header at set byte positions, the samples and the epoch table as ABF2's, so the command is rebuilt
+  by the same `commandWaveform`. pyABF's readings are kept where they are what a value is checked
+  against — the rate truncated to whole hertz, the ignored points added to the data start as bytes,
+  an output's holding level taken from its first epoch's level — and its string decoding is not,
+  `µ` reading as `u` as in ABF2 rather than being dropped. `pnpm probe:abf` agrees with pyABF on all
+  eleven ABF1 files in pyABF's own test data, samples to float32 rounding and commands exactly; it
+  now compares samples relative to their value, pyABF scaling in float32.
+- **NWB is read through h5wasm** (`data/ephys/nwb.ts`; decided 2026-10-18), HDF5 compiled to
+  WebAssembly, loaded on the first NWB file through `data/libraries.ts` and external to the MCP
+  bundle (4.8 MB in a chunk of its own). The reader is asynchronous now; the file is copied into
+  h5wasm's memory file system, the chosen group's samples copied out, and the file closed.
+- **A file is read as groups, and a group is a shape, not a description.** Every public file
+  measured holds several protocols at different rates and lengths (an Allen file 13, from 7,650 to
+  980,000 samples, at 50 and 200 kHz, voltage and current clamp), and a `Recording` is one rate and
+  one sweep length. So `protocols` lists the sweeps sharing an electrode, a series type, a unit, a
+  rate and a length, each named by the `stimulus_description` they share — but grouped by shape,
+  because a writer may give every sweep a description of its own (DANDI 001261: fourteen). Load
+  Recording's `Protocol` picks one; a group's sweeps carry the file's `sweepNumbers`, which the
+  table's `sweep` column and the Sweeps field read.
+- **Pairing a response with its stimulus is by sweep number and electrode**, a number counting only
+  where it reads as one (a one-element array does not). A file numbering no sweeps (DANDI 001789,
+  NWB 2.9) pairs in the order the file lists them — only where both lists are as long, one missing
+  stimulus shifting every pairing after it — said, and its groups count their sweeps from 1. A
+  stimulus at another rate or length than its response is no pairing at all: indexed by the
+  response's samples it would draw the command shifted against the voltage. Start times cannot
+  pair them: writers leave every series at 0. A series timed by `timestamps` has no rate and is set
+  aside and counted, never a table of NaN times.
+- **A group reads windows, not sweeps.** The HDF5 file stays open in h5wasm's file system while the
+  recording lives and closes when it is collected (a `FinalizationRegistry`), so a sweep is decoded
+  only as far as Sweeps and Crop reach, after Load Recording has checked the table's size against
+  the crash floor. The stored-recording budget charges the file's size. Group names are unique,
+  numbered where shapes round to one wording, or a later group could never be picked.
+- **Read in mV and pA**, and a trace whose values no cell gives is said, never corrected: three of six
+  public files measured carry a converter's unit error (mV stored under a pA conversion, mV as volts,
+  pA as amperes). `pnpm probe:nwb <file>` holds every group of a file to pynwb, sample by sample;
+  all six agreed to float32 rounding (relative 6e-8).
 - **Combine Traces interpolates, and never past an input's own range**: a recording and a simulation
   share almost no sample time, so Join cannot line them up. Linear onto one grid (the first input's
   times, the finest step, or a fixed one), a **shift** per input to align stimuli, nothing
@@ -458,7 +582,7 @@ simulation.
 
 ## Fitting
 
-Fit Model (`fitModel.ts`; method in `fit.ts`, optimiser in `biophys/leastSquares.ts`) fits a
+Fit Model Passive (`fitModel.ts`; method in `fit.ts`, optimiser in `biophys/leastSquares.ts`) fits a
 Compartment Model's passive membrane — Rm, Cm, Ra, E leak and an area factor — to a current-clamp
 recording, and Apply writes the answer back into the card it came from.
 
@@ -469,7 +593,8 @@ recording, and Apply writes the answer back into the card it came from.
 - **Each sweep gets the current the cell got**: its command replayed sample by sample (`ClampShape`
   `samples`, held to NEURON by `branched-sampled-clamp`). A passive response is linear, so sweeps
   whose commands are scaled copies — an I–V's steps — share one simulation. A model with channels is
-  fitted as its passive copy, said on the card.
+  fitted as its passive copy, which the node's name says; the card speaks of the channels only
+  where a fitted area factor changed what they carry (`channelAreaNote`).
 - **Bounded Levenberg–Marquardt in log space** for the positive parameters, with an active set: without
   it, Ra ran onto its bound and the fit crept along it to the iteration limit (133 s against 37 s on
   the user's MBON, the same answer). The finite-difference Jacobian runs over a worker pool kept for
@@ -480,6 +605,35 @@ recording, and Apply writes the answer back into the card it came from.
 - **An unset voltage or current picker is asked, not guessed**, when several columns share the unit:
   a Clampex file records the current monitor in pA before the command, and fitting the monitor gave
   a plausible RMS for nonsense.
+- **The electrode's seal is a parameter (decided 2026-10-18)**, after Gouwens & Wilson 2009: a
+  whole-cell recording adds a leak at the soma to 0 mV, and left out of the model a fitted E leak
+  absorbs it and reads depolarised (the test measures that) while Rm reads low. `Seal (nS)` holds
+  it, 0 by default — no channel is added at 0, so every fit before it is unchanged — and `Fit Seal`
+  frees it, linear rather than log since 0 is a value. Two consequences: **rest is not E leak**
+  once a seal is in, so the shared-simulation shortcut scales about the soma's zero-current steady
+  state (`restAt`), and a sweep with no command sits there; and **the fitted Model leaves the seal
+  behind** (`fittedModel` drops it), the seal being the electrode's. Günay et al. 2015's Table 2
+  fitted 0.20 ± 0.03 nS on a larval motoneuron.
+
+### Held to Gouwens & Wilson's model (measured 2026-10-18)
+
+`pnpm probe:gouwens` builds their three reconstructed DM1 projection neurons (ModelDB 118662,
+downloaded into `/tmp`, never committed) with the constants each Fig. 4A script sets, and compares
+input resistance at the soma and every tip's steady-state share of the soma's voltage with NEURON's
+on their own geometry. Against NEURON converged (0.1 µm segments): **ours at d_lambda's cut within
+0.03–0.09% on input resistance and 5 × 10⁻⁴ on every tip**, on all five cases. The residual is a
+skeleton's: their soma (10 µm) meets thin neurites at section joins, which a skeleton writes as two
+radii at one point, a 10 µm² annulus NEURON's sections never have. Two findings beside it:
+
+- **Their published model on its own segment counts is 0.3–0.55% low** — nearly converged — but
+  **NEURON at d_lambda's cut on their geometry is 7–14% low**: their export joins 30 children at
+  x = 0.99999994, one of them the primary neurite's, and NEURON hangs a child at x < 1 from its
+  parent's last segment centre (the rule this doc's `compartmentAt` note records), so at one segment
+  a section the whole dendrite hangs from the neurite's midpoint. A model built here joins at the
+  point, which is why ours is converged at the count where NEURON is not.
+- **`trueparentseg()` is the wrong question in an export**: it answers None for a section on the
+  root's 0 end, where these templates attach the soma's other half. The probe's first version
+  dropped that cylinder, 34 µm² beside the injection site, and read 0.7% high; `parentseg()`.
 
 The fitted model carries how the fit ended (`CellModelValue.fit`: settled or why not, the RMS before
 and after), which is the card's foot line through `describeValue` and what marks a model Apply can
@@ -513,12 +667,12 @@ write back. Rules for Apply (decided 2026-10-17):
 The full-size view (`FitView.tsx`) reads the four outputs: the traces one sweep at a time — a line is
 a (series, column) pair in the Line Chart, so every sweep at once would colour each sweep's recorded
 and fitted traces as two unrelated lines — the parameter table and the error per iteration. Foot
-controls are a table of their own (`nodeFooter`), Fit Model needing one without a body.
+controls are a table of their own (`nodeFooter`), Fit Model Passive needing one without a body.
 
 ## In the wizard
 
 **Simulate synaptic input**, contributed through `wizard.ts`: the start's neurons → **Select One**
-→ Skeletons and Synapses Between (the neuron as Targets) → Compartment Model → Simulate → a Line
+→ Skeletons and Synapses Between (the neuron as Targets) → Compartment Model → Simulate Model → a Line
 Chart or Table of the traces. Select One because a start is usually a search and the model takes
 one neuron. Gated on skeletons (`requires`) and synapses (`when`, through `wizard/gates.ts`, which
 exists so a pack can ask a capability without importing `options.ts` while it loads the packs),
@@ -550,10 +704,17 @@ Several of its behaviours give a plausible trace when wrong; each is answered he
 
 Both notebook exporters refuse both nodes (`NO_EMITTER`): no notebook library reproduces the model
 as is. Downloading the *model* for NEURON is the planned next step, and the harness's
-`biophys_neuron.py` is half of it: a downloaded script can be run against Simulate's soma trace,
+`biophys_neuron.py` is half of it: a downloaded script can be run against Simulate Model's soma trace,
 which makes "it loads in NEURON and gives the same answer" a test.
 
 ## Not built yet
+
+- **Fit Model Active** (noted 2026-10-17, deferred 2026-10-18 for want of data to test it on): a
+  second fit node freeing channel densities and ΔV50 shifts against feature targets (spike count,
+  threshold, width, adaptation) rather than a trace, by CMA-ES over the fit's worker pool — Fit
+  Model Passive's sibling, `biophys:fitActive` beside its `biophys:fit`. With it: an expanded fit
+  summary for both (goodness of fit per sweep, the fit over time), and whether Apply goes, the
+  fitted `Model` output already carrying the result.
 
 - **More recording formats**: HEKA PatchMaster (`.dat`) and NWB next, then whatever is asked for,
   each a reader in `data/ephys`. ABF1 the same way, if old files turn up.
@@ -563,8 +724,9 @@ which makes "it loads in NEURON and gives the same answer" a test.
 
 - **The model as a NEURON (then Jaxley) script**, from the value's modelled cable rather than the
   source skeleton, with counts handed over rather than recomputed.
-- **Channels by region**, to rebuild Vieira, Deistler et al. 2026 (PNAS 123(40)) Fig. 1 and 4: their
-  fly channels, whose fitted parameters are not in their Zenodo record.
+- **Vieira, Deistler et al. 2026's fly channels**, to rebuild their Fig. 1 and 4 (PNAS 123(40)):
+  their fitted parameters are not in their Zenodo record. Günay et al. 2015's are in.
+- **An adult central-brain fly channel set.** Günay et al.'s are a larval motoneuron's.
 - **Moving the soma** in the Regions tab, and a 3D view beside its dendrogram.
 - **Synaptic circuits**: graded synapses between point neurons, per-partner parameters.
 - **A rate lookup table for the gates** (NEURON's `TABLE`): gate kinetics dominate the solver's

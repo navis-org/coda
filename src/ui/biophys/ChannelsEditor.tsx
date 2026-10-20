@@ -18,6 +18,7 @@ import {
   DEFAULT_REGIONS,
   SQUID_SOMA,
   changeChannel,
+  densityStep,
   channelOption,
   nameableRegions,
   describeChannel,
@@ -187,7 +188,7 @@ export function ChannelsEditor({ channels, regionNames, onParamChange }: Channel
                           value={row.value}
                           integer={false}
                           min={0}
-                          step={row.mode === 'total' ? 0.1 : 1}
+                          step={row.mode === 'total' ? 0.1 : densityStep(row.channel)}
                           onChange={(value) => update(i, { value })}
                         />
                         <SelectField

@@ -1,4 +1,4 @@
-The Compartment Model turns one neuron's skeleton into a model that [Simulate](#biophys:simulate) can run. The skeleton is cut into compartments, each gets a passive membrane, and the synapses of a wired point cloud are placed on the arbour where they sit, grouped by presynaptic partner. Optionally, the soma gets Hodgkin–Huxley channels.
+The Compartment Model turns one neuron's skeleton into a model that [Simulate Model](#biophys:simulate) can run. The skeleton is cut into compartments, each gets a passive membrane, and the synapses of a wired point cloud are placed on the arbour where they sit, grouped by presynaptic partner. Optionally, voltage-gated channels go on any region of it: a fly's, from *Drosophila* recordings, or two generic sets.
 
 The usual way to wire it: [Skeletons](#neuron.skeletons) for the neuron, and Synapses Between with the neuron as `Targets` and its partners as `Sources`.
 
@@ -28,6 +28,7 @@ The model takes exactly one neuron. If your search returns several, put a [Selec
 - "Fly visual (Meier & Borst)" is from Meier & Borst 2019, fitted to calcium imaging of the optic-lobe cell CT1 and consistent with Yang et al. 2016's fits to Mi1. Its lower membrane resistance and higher axial resistivity give a length constant about half as long, so thin neurites isolate their ends much more. Their model works in voltage relative to rest, so `E leak` is not theirs: it is set to −60 mV.
 
 - "Fly optic lobe (Vieira et al.)" is the passive constants of Vieira et al. 2026's T4 and T5 models: round values they describe as standard for invertebrate neurons and consistent with T4's input resistance. They state no `E leak`, so it is −60 mV here, and their models add a 2.6 µm soma, which you set with `Soma diameter`.
+- "Fly T4 (Gruntman et al.)" is from Gruntman, Romani & Reiser 2018, a passive T4 fitted to its responses to moving bars. Its membrane resistance, 100,000 Ω·cm², is five times the others': a T4 is small and very compact. Their model sets no capacitance, so `Cm` is NEURON's default of 1 µF/cm², which is what their model ran with.
 
 None was fitted to the neuron you are modelling. Pick "Custom" to set `Rm`, `Ra`, `Cm` and `E leak` yourself.
 
@@ -35,7 +36,7 @@ None was fitted to the neuron you are modelling. Pick "Custom" to set `Rm`, `Ra`
 biophys:model: preset, rm, ra, cm, eLeak
 ```
 
-`Area factor` is for membrane the reconstruction misses, such as spines and fine branches. It multiplies every compartment's membrane area, the soma's included, so capacitance, leak and channel conductances all scale with it while channel densities stay as you set them. Leave it at 1 to model the reconstruction as it is. [Fit Model](#biophys:fit) can fit it, and its Apply button writes the fitted value here.
+`Area factor` is for membrane the reconstruction misses, such as spines and fine branches. It multiplies every compartment's membrane area, the soma's included, so capacitance, leak and channel conductances all scale with it while channel densities stay as you set them. Leave it at 1 to model the reconstruction as it is. [Fit Model Passive](#biophys:fit) can fit it, and its Apply button writes the fitted value here.
 
 ```coda-params
 biophys:model: areaFactor
@@ -74,7 +75,7 @@ Soma painted somewhere that doesn't touch the soma node is soma membrane for cha
 biophys:model: somaMode, somaDiameter
 ```
 
-`Soma diameter` is in µm, and a fly soma is a few µm across. The card warns about a soma more than 100 µm across, whether you typed it or the skeleton labels it: a soma that size holds nearly all of the cell's membrane, so injected currents barely move the voltage, and [Fit Model](#biophys:fit) can only fit a flat line. It's usually a value meant in nm.
+`Soma diameter` is in µm, and a fly soma is a few µm across. The card warns about a soma more than 100 µm across, whether you typed it or the skeleton labels it: a soma that size holds nearly all of the cell's membrane, so injected currents barely move the voltage, and [Fit Model Passive](#biophys:fit) can only fit a flat line. It's usually a value meant in nm.
 
 ## Regions
 
@@ -104,7 +105,13 @@ Without channels the model is a passive cable. To add voltage-gated channels, ex
 
 Each row's "?" says what its channel is, its gating and reversal potential, and the density it starts at. Choosing a different channel resets a density to that channel's own starting value; a total per cell is kept.
 
-Two sets of channels are available. "Pospischil" sodium and potassium are the ones Jaxley ships, as used by Vieira et al. (2026) for their Fig. 1. "Squid HH" are the squid axon's, with "+ Squid HH soma" adding both to the soma in one go. Neither is a fly's channel: use them to see whether inputs could drive a spike at all, not to predict a firing rate.
+Three sets of channels are available:
+
+- NaT, NaP, Ks and Kf ("fly, Günay" in the list) are four channels fitted to voltage-clamp recordings from *Drosophila* neurons (Günay et al. 2015): transient sodium (NaT, the *para* current), persistent sodium (NaP), and slow and fast potassium (Ks and Kf, the *Shab* and *Shal* currents). They are a fly's channels, though from a larval motoneuron rather than an adult central brain neuron. A new row is their reconstructed model's axon: placed on the axon, at that axon's densities (Kf, which their model lacks, worked out from another of theirs; the row's "?" says how). On the whole cell instead, NaT's window current can keep a cell with a weak leak firing on its own.
+- "Pospischil" sodium and potassium are the ones Jaxley ships, as used by Vieira et al. (2026) for their Fig. 1.
+- "Squid HH" are the squid axon's, with "+ Squid HH soma" adding both to the soma in one go.
+
+Pospischil and squid HH channels are not a fly's: use them to see whether inputs could drive a spike at all, not to predict a firing rate.
 
 ```coda-params
 biophys:model: channels, temperature

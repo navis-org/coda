@@ -1306,6 +1306,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
           params={params}
           record={inputValues?.record}
           spikes={inputValues?.spikes}
+          current={inputValues?.current}
           column={(id) => ctx.column(id)}
           viewerKey={viewerKey}
           baseName={shared.baseName}

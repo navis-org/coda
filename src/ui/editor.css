@@ -6924,6 +6924,12 @@ p.sources__hint {
   line-height: 1.45;
   color: var(--text-secondary);
 }
+.plugins__guide {
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
 
 .wizard__foot,
 .guides__foot {
@@ -8284,6 +8290,16 @@ p.sources__hint {
 .markdown__callout[data-tone='tip'],
 .node-hint[data-tone='tip'] {
   --cal: var(--accent);
+}
+/*
+ * "In depth": for the specialist, so a frame and a recessed surface rather than a hue — what a
+ * newcomer may skip is told by its shape and its title. Written for the pack guides
+ * (`src/packguide/`); a help document may use it too.
+ */
+.markdown__callout[data-tone='detail'] {
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface-2);
 }
 .markdown__callout-title {
   margin-bottom: 3px;

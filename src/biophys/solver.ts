@@ -265,15 +265,6 @@ export function clampWindow(clamp: ClampWaveform, dt: number): [number, number] 
   return [stepAt(clamp.delay, dt), stepAt(clamp.delay + clamp.duration, dt)]
 }
 
-/** A clamp's current at each of `times` (ms): the step starting there, as the Traces output reads it. */
-export function clampTrace(
-  clamp: ClampWaveform,
-  times: ArrayLike<number>,
-  dt: number,
-): Float64Array {
-  return Float64Array.from(times, (t) => clampCurrent(clamp, Math.round(t / dt), dt))
-}
-
 /**
  * The voltage and every gate: what `settle` hands a run to start from. Synaptic conductance and
  * pending events are deliberately not in it — a run that starts here starts with every synapse
@@ -675,6 +666,11 @@ export class Simulation {
     return this.v
   }
 
+  /** The gates now, as `CellState.gates`, live: valid until the next `advance`, and not to be written. */
+  gateValues(): readonly (readonly Float64Array[])[] {
+    return this.gates
+  }
+
   private takeStep(): void {
     const { dt, tree, v, d, rhs, step } = this
     const { placed, cdt, dBase, rhsBase, synERev, synDecay1, synDecay2 } = this.prepared
@@ -812,7 +808,7 @@ export interface Settled {
   readonly state: CellState
   /** ms of simulated time it took. */
   readonly time: number
-  /** Whether the voltage stopped moving before `maxTime`. */
+  /** Whether the voltage and every gate stopped moving before `maxTime`. */
   readonly converged: boolean
 }
 
@@ -823,7 +819,8 @@ export interface Settled {
  * the rest is wherever the currents balance, which is not the leak reversal; starting a run
  * anywhere else opens it with a drift that reads as a response (navis's `v_init = −65` against an
  * `e_pas` of −60 is that bug). So: start at `v`, gates at their steady state, and integrate with no
- * input until no compartment moves faster than `tolerance` mV/ms.
+ * input until no compartment's voltage moves faster than `tolerance` mV/ms, nor any gate faster than
+ * `tolerance` per ms.
  */
 export function settle(
   model: CellModel,
@@ -856,6 +853,16 @@ export async function settleSliced(
   }
 }
 
+/** The largest change between `now` and `previous`, which then takes `now`'s values. */
+function maxChange(now: ArrayLike<number>, previous: Float64Array): number {
+  let moved = 0
+  for (let c = 0; c < now.length; c++) {
+    moved = Math.max(moved, Math.abs(now[c]! - previous[c]!))
+    previous[c] = now[c]!
+  }
+  return moved
+}
+
 /** The settling loop, a chunk per step of the generator: one loop for `settle` and `settleSliced`. */
 function* settling(
   model: CellModel,
@@ -865,7 +872,9 @@ function* settling(
   const dt = options.dt ?? 0.025
   const tolerance = options.tolerance ?? 1e-6
   const maxTime = options.maxTime ?? 2000
-  // One millisecond at a time, then compare: the slowest gates drift for tens of ms.
+  // One millisecond at a time, then compare — the gates as well as the voltage: a slow gate carrying
+  // little current at rest (Günay's NaT h, τ ≈ 110 ms at −70 mV and nearly 2 s at −100) moves the
+  // voltage by less than the tolerance while it is still far from its own steady state.
   const chunk = Math.max(1, Math.round(1 / dt))
   const run = new Simulation({
     model,
@@ -875,15 +884,20 @@ function* settling(
     record: new Int32Array(),
   })
   const previous = Float64Array.from(run.voltage())
+  const previousGates = run.gateValues().map((g) => g.map((x) => Float64Array.from(x)))
   while (!run.done) {
     const before = run.stepsDone
     run.advance(chunk)
-    const now = run.voltage()
-    let moved = 0
-    for (let c = 0; c < now.length; c++)
-      moved = Math.max(moved, Math.abs(now[c]! - previous[c]!))
-    previous.set(now)
-    if (moved / ((run.stepsDone - before) * dt) < tolerance) {
+    const elapsed = (run.stepsDone - before) * dt
+    const moved = maxChange(run.voltage(), previous)
+    let gateMoved = 0
+    run.gateValues().forEach((channel, i) =>
+      channel.forEach((gate, j) => {
+        gateMoved = Math.max(gateMoved, maxChange(gate, previousGates[i]![j]!))
+      }),
+    )
+    // A gate is a fraction, so the same tolerance per ms reads as 1e-6 of fully open.
+    if (moved / elapsed < tolerance && gateMoved / elapsed < tolerance) {
       return { state: run.state(), time: run.stepsDone * dt, converged: true }
     }
     yield

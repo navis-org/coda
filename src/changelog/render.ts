@@ -62,7 +62,7 @@ const hrefOf = (c: { demo?: string }): string | undefined =>
   c.demo ? appHref(demoFragment(c.demo)) : undefined
 
 /**
- * The pixel size of a WebP or PNG under `public/changelog/`, or undefined for anything else.
+ * The pixel size of a WebP or PNG under `public/<folder>/`, or undefined for anything else.
  *
  * Read so the `<img>` can carry its **display** size: captures are taken at twice the density, and
  * a `srcset` saying `2x` is not enough on its own — a browser on an ordinary screen counts the
@@ -70,10 +70,13 @@ const hrefOf = (c: { demo?: string }): string | undefined =>
  * also hold the image's box before it loads, which keeps the timeline's marker from being thrown
  * by the page growing under it. Only the header is parsed; this runs in Node at build time.
  */
-export function imageSize(file: string): { width: number; height: number } | undefined {
+export function imageSize(
+  file: string,
+  folder = 'changelog',
+): { width: number; height: number } | undefined {
   let b: Buffer
   try {
-    b = readFileSync(new URL(`../../public/changelog/${file}`, import.meta.url))
+    b = readFileSync(new URL(`../../public/${folder}/${file}`, import.meta.url))
   } catch {
     return undefined
   }
@@ -189,14 +192,22 @@ function timelineHTML(entries: readonly ChangelogEntry[]): string {
 const tag = (kind: ChangeKind): string =>
   `<span class="tag" data-k="${kind}">${KIND_LABEL[kind].tag}</span>`
 
+/**
+ * An `<img>`'s `width` and `height` attributes for a file under `public/<folder>/` taken at
+ * `density`: its display size, which holds the box before the image loads. Empty where the size
+ * cannot be read. The changelog's figures and the pack guides' alike.
+ */
+export function displaySize(file: string, folder: string, density: number): string {
+  const size = imageSize(file, folder)
+  return size
+    ? ` width="${Math.round(size.width / density)}" height="${Math.round(size.height / density)}"`
+    : ''
+}
+
 function featureHTML(f: ChangelogFeature, id: string): string {
   let figure = ''
   if (f.image) {
-    const density = f.image.capture ? CAPTURE_DENSITY : 1
-    const size = imageSize(f.image.file)
-    const box = size
-      ? ` width="${Math.round(size.width / density)}" height="${Math.round(size.height / density)}"`
-      : ''
+    const box = displaySize(f.image.file, 'changelog', f.image.capture ? CAPTURE_DENSITY : 1)
     figure = `<figure class="feature__fig"><img src="./changelog/${esc(f.image.file)}"${box} alt="${esc(f.image.alt)}" loading="lazy" decoding="async"></figure>`
   }
   const href = hrefOf(f)

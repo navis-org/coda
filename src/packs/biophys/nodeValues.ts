@@ -12,7 +12,7 @@ const nodeValues: readonly NodeValueDef[] = [
   {
     value: PEAK_VOLTAGE,
     label: 'peak voltage (mV)',
-    source: 'Simulate’s Arbour output, the highest membrane voltage each node reached',
+    source: 'Simulate Model’s Arbour output, the highest membrane voltage each node reached',
   },
 ]
 

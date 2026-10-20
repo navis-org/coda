@@ -26,21 +26,32 @@ for note in s["notes"]:
 assert s["sweeps"] == abf.sweepCount, (s["sweeps"], abf.sweepCount)
 assert s["sweepSamples"] == abf.sweepPointCount
 assert math.isclose(s["rate"], abf.dataRate, rel_tol=1e-6), (s["rate"], abf.dataRate)
-assert [c["name"] for c in s["channels"]] == abf.adcNames
-assert [c["unit"] for c in s["channels"]] == abf.adcUnits
+# A blank name: Coda reads it as blank (the table then numbers the channel), where pyABF keeps
+# ABF1's NUL padding as characters, or puts "?" in its place.
+blank = lambda n: n.replace("\x00", "").strip().strip("?")
+assert [c["name"] for c in s["channels"]] == [blank(n) for n in abf.adcNames], ([c["name"] for c in s["channels"]], abf.adcNames)
+assert [c["unit"] for c in s["channels"]] == abf.adcUnits, ([c["unit"] for c in s["channels"]], abf.adcUnits)
 
 worst = 0.0
 for c in range(abf.channelCount):
     for sweep in range(abf.sweepCount):
         abf.setSweep(sweep, channel=c)
-        diff = np.max(np.abs(np.array(ours["channels"][c][sweep], dtype=np.float32) - abf.sweepY))
+        mine = np.array(ours["channels"][c][sweep], dtype=float)
+        # Relative to the value: pyABF scales in float32, so a pA trace in the thousands differs
+        # by a float32 step (1e-3) where a mV trace differs by 1e-5.
+        diff = np.max(np.abs(mine - abf.sweepY) / np.maximum(1.0, np.abs(abf.sweepY)))
         worst = max(worst, float(diff))
-print(f"channels: largest difference {worst:g} across {abf.channelCount} × {abf.sweepCount} sweeps")
-assert worst <= 1e-4, worst
+print(f"channels: largest relative difference {worst:g} across {abf.channelCount} × {abf.sweepCount} sweeps")
+assert worst <= 1e-6, worst
 
 # The commands Coda rebuilt are the DACs with an epoch waveform; pyABF's sweepC per DAC.
-enabled = [d for d in range(abf._dacSection._entryCount)
-           if abf._dacSection.nWaveformEnable[d] and abf._dacSection.nWaveformSource[d] == 1]
+if abf.abfVersion["major"] == 1:
+    # ABF1: two outputs, their switches in the one header.
+    h = abf._headerV1
+    enabled = [d for d in range(2) if h.nWaveformEnable[d] and h.nWaveformSource[d] == 1]
+else:
+    enabled = [d for d in range(abf._dacSection._entryCount)
+               if abf._dacSection.nWaveformEnable[d] and abf._dacSection.nWaveformSource[d] == 1]
 worst = 0.0
 for k, d in enumerate(enabled):
     for sweep in range(abf.sweepCount):

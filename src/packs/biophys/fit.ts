@@ -20,6 +20,11 @@
  * sweep (`V = E_leak + (a / a₀)(V₀ − E_leak)`); a sweep with no command sits at E_leak, and any other
  * sweep is simulated on its own. A model with channels is fitted as its **passive copy**.
  *
+ * **The electrode's seal can be a parameter** (Gouwens & Wilson 2009): a leak at the soma to 0 mV,
+ * which a whole-cell recording adds and the cell does not have. Left out, a fitted E_leak absorbs it
+ * and reads depolarised, and Rm reads low. It keeps the cell linear but moves rest off E_leak, so
+ * responses are scaled about rest (`restAt`), and the fitted model leaves the seal behind.
+ *
  * **The positive parameters are fitted in log space** — a step is a ratio, and they stay positive —
  * and E_leak in mV. Residuals are model minus recording at the recorded times inside the window,
  * leaving out the first `skipAfterSteps` ms after every command edge: a current-clamp recording
@@ -37,11 +42,11 @@ import { dot, leastSquares } from '../../biophys/leastSquares'
 import { sliced } from '../../core/slice'
 import type { CellModelValue, CellValue } from '../../core/values'
 import type { FitMembrane, Membrane, PassiveBase } from './passive'
-import { passiveBase, passiveModel, startMembrane, steadyUnder } from './passive'
+import { passiveBase, passiveModel, restAt, startMembrane, steadyUnder } from './passive'
 import { resample } from './resample'
 
-/** The passive parameters a fit can vary. */
-export type MembraneKey = 'rm' | 'cm' | 'ra' | 'eLeak' | 'area'
+/** The passive parameters a fit can vary: the membrane's, and the recording electrode's seal. */
+export type MembraneKey = 'rm' | 'cm' | 'ra' | 'eLeak' | 'area' | 'seal'
 
 export interface MembraneParameter {
   readonly key: MembraneKey
@@ -49,22 +54,58 @@ export interface MembraneParameter {
   readonly unit: string
   /** Fitted as a logarithm: positive, and a step a ratio. */
   readonly log: boolean
+  /** The finite-difference step: of the logarithm for a log parameter, in its unit otherwise. */
+  readonly step: number
   /** The box a fit keeps it in, unless the caller narrows it. */
   readonly lower: number
   readonly upper: number
+  /** What its `Fit` tick says, where more than that an unticked one stays at the model's value. */
+  readonly tickHelp?: string
 }
 
-export const MEMBRANE_PARAMETERS: readonly MembraneParameter[] = [
-  { key: 'rm', label: 'Rm', unit: 'Ω·cm²', log: true, lower: 1e3, upper: 1e6 },
-  { key: 'cm', label: 'Cm', unit: 'µF/cm²', log: true, lower: 0.2, upper: 5 },
-  { key: 'ra', label: 'Ra', unit: 'Ω·cm', log: true, lower: 20, upper: 2000 },
-  { key: 'eLeak', label: 'E leak', unit: 'mV', log: false, lower: -100, upper: -20 },
-  { key: 'area', label: 'Area factor', unit: '×', log: true, lower: 0.5, upper: 5 },
-]
-
-/** Finite-difference steps: 0.1% for a log parameter, 0.01 mV for E_leak. */
+/** A log parameter's step: 0.1%. */
 const LOG_STEP = 1e-3
-const MV_STEP = 0.01
+
+export const MEMBRANE_PARAMETERS: readonly MembraneParameter[] = [
+  { key: 'rm', label: 'Rm', unit: 'Ω·cm²', log: true, step: LOG_STEP, lower: 1e3, upper: 1e6 },
+  { key: 'cm', label: 'Cm', unit: 'µF/cm²', log: true, step: LOG_STEP, lower: 0.2, upper: 5 },
+  { key: 'ra', label: 'Ra', unit: 'Ω·cm', log: true, step: LOG_STEP, lower: 20, upper: 2000 },
+  {
+    key: 'eLeak',
+    label: 'E leak',
+    unit: 'mV',
+    log: false,
+    step: 0.01,
+    lower: -100,
+    upper: -20,
+  },
+  {
+    key: 'area',
+    label: 'Area factor',
+    unit: '×',
+    log: true,
+    step: LOG_STEP,
+    lower: 0.5,
+    upper: 5,
+    tickHelp:
+      'How much more membrane the cell has than the reconstruction: spines and fine branches it misses. The Compartment Model’s own Area factor, which Apply writes back. Scales capacitance and leak together, so it is fitted against a fixed Cm.',
+  },
+  /*
+   * Linear, not log, because none is a value it can take. Günay et al. 2015 fitted 0.20 ± 0.03 nS
+   * on a larval motoneuron (their Table 2); 0.001 nS a step.
+   */
+  {
+    key: 'seal',
+    label: 'Seal',
+    unit: 'nS',
+    log: false,
+    step: 1e-3,
+    lower: 0,
+    upper: 20,
+    tickHelp:
+      'The electrode’s seal: a leak at the soma to 0 mV, which a whole-cell recording adds and the cell does not have. Unticked, it stays at Seal (nS). The fitted model leaves it out.',
+  },
+]
 
 /** One recorded sweep, in the solver's units. */
 export interface RecordedSweep {
@@ -78,8 +119,10 @@ export interface RecordedSweep {
 }
 
 export interface PassiveFitOptions {
-  /** Which parameters vary; the rest stay at the model's (the area factor at 1). */
+  /** Which parameters vary; the rest stay where `startMembrane` puts them. */
   readonly free: readonly MembraneKey[]
+  /** The seal a fit starts from, or holds where it is not free, nS; none where absent. */
+  readonly seal?: number
   /** Narrower boxes than `MEMBRANE_PARAMETERS`' where given. */
   readonly bounds?: Partial<Record<MembraneKey, { lower: number; upper: number }>>
   /** The part of each sweep compared, ms; the whole sweep where absent. */
@@ -162,6 +205,7 @@ function replaying(
   sweep: RecordedSweep,
   until: number,
   dt: number,
+  rest: number,
 ) {
   const { t, command } = sweep
   const t0 = t[0] ?? 0
@@ -192,7 +236,7 @@ function replaying(
     const result = run.result()
     const times = result.t.map((x) => x + t0)
     // A time past where the run stopped is never compared; it reads as the cell at rest.
-    return Float64Array.from(resample(times, result.v[0]!, t), (v) => v ?? m.eLeak)
+    return Float64Array.from(resample(times, result.v[0]!, t), (v) => v ?? rest)
   }
   return { run, read }
 }
@@ -204,15 +248,16 @@ function replay(
   sweep: RecordedSweep,
   until: number,
   dt: number,
+  rest: number,
 ): Float64Array {
-  const { run, read } = replaying(base, m, sweep, until, dt)
+  const { run, read } = replaying(base, m, sweep, until, dt, rest)
   run.advance(run.steps)
   return read()
 }
 
 /**
  * Sweeps sharing a command shape: one simulation of `reference`, each member that response scaled
- * by `scale`. A sweep with no command is in none, sitting at E_leak.
+ * by `scale` about rest. A sweep with no command is in none, sitting at rest.
  */
 interface ShapeGroup {
   readonly reference: number
@@ -351,19 +396,19 @@ export function prepareFit(
 export function residualsAt(setup: FitSetup, m: FitMembrane): Float64Array {
   const { sweeps, compared, offset } = setup
   const r = new Float64Array(setup.total)
+  const rest = restAt(setup.base, m)
   // Every sweep at rest first; a simulated group writes over its members.
   sweeps.forEach((s, k) => {
     let at = offset[k]!
-    for (const i of compared[k]!) r[at++] = m.eLeak - s.v[i]!
+    for (const i of compared[k]!) r[at++] = rest - s.v[i]!
   })
   setup.groups.forEach((group, g) => {
     if (setup.until[g]! === -Infinity) return
-    const v = replay(setup.base, m, sweeps[group.reference]!, setup.until[g]!, setup.dt)
+    const v = replay(setup.base, m, sweeps[group.reference]!, setup.until[g]!, setup.dt, rest)
     for (const { sweep, scale } of group.members) {
       const recorded = sweeps[sweep]!.v
       let at = offset[sweep]!
-      for (const i of compared[sweep]!)
-        r[at++] = m.eLeak + scale * (v[i]! - m.eLeak) - recorded[i]!
+      for (const i of compared[sweep]!) r[at++] = rest + scale * (v[i]! - rest) - recorded[i]!
     }
   })
   return r
@@ -381,7 +426,7 @@ export async function fitPassive(
   evaluatorFor: (setup: FitSetup) => Evaluator = evaluatorHere,
 ): Promise<PassiveFitResult> {
   const setup = prepareFit(value, sweeps, options)
-  const start = startMembrane(value)
+  const start = startMembrane(value, options.seal)
   const refusal = freeParameterRefusal(options.free)
   if (refusal) throw new Error(refusal)
   const free = MEMBRANE_PARAMETERS.filter((p) => options.free.includes(p.key))
@@ -407,7 +452,7 @@ export async function fitPassive(
   const fit = await leastSquares(toTheta(start), (points) => evaluate(points.map(toMembrane)), {
     lower,
     upper,
-    steps: free.map((p) => (p.log ? LOG_STEP : MV_STEP)),
+    steps: free.map((p) => p.step),
     maxIterations: options.maxIterations ?? 50,
     signal: options.signal,
     onIteration: (record: IterationRecord) => {
@@ -480,11 +525,13 @@ export function passiveResponses(
   sweeps: readonly RecordedSweep[],
   dt: number,
 ): Float64Array[] {
-  const m = { area: value.areaFactor ?? 1, ...membrane }
+  const m = { area: value.areaFactor ?? 1, seal: 0, ...membrane }
   const groups = shapeGroups(sweeps)
-  const runs = wholeRuns(passiveBase(value), groups, sweeps, m, dt)
+  const base = passiveBase(value)
+  const rest = restAt(base, m)
+  const runs = wholeRuns(base, groups, sweeps, m, dt, rest)
   for (const { run } of runs) run.advance(run.steps)
-  return scaled(groups, sweeps, m, runs)
+  return scaled(groups, sweeps, rest, runs)
 }
 
 /** Steps between the clock reads `sliced` paces itself by. */
@@ -496,12 +543,13 @@ async function responsesSliced(
   m: FitMembrane,
   signal: AbortSignal | undefined,
 ): Promise<Float64Array[]> {
-  const runs = wholeRuns(setup.base, setup.groups, setup.sweeps, m, setup.dt)
+  const rest = restAt(setup.base, m)
+  const runs = wholeRuns(setup.base, setup.groups, setup.sweeps, m, setup.dt, rest)
   const chunks = runs.flatMap(({ run }) =>
     Array.from({ length: Math.ceil(run.steps / STEPS_PER_CHUNK) }, () => run),
   )
   await sliced(chunks.length, { signal }, (i) => chunks[i]!.advance(STEPS_PER_CHUNK))
-  return scaled(setup.groups, setup.sweeps, m, runs)
+  return scaled(setup.groups, setup.sweeps, rest, runs)
 }
 
 /** One replay per command shape, over the reference's whole sweep: what Traces show. */
@@ -511,26 +559,27 @@ function wholeRuns(
   sweeps: readonly RecordedSweep[],
   m: FitMembrane,
   dt: number,
+  rest: number,
 ) {
   return groups.map((group) => {
     const ref = sweeps[group.reference]!
-    return replaying(base, m, ref, ref.t[ref.t.length - 1] ?? 0, dt)
+    return replaying(base, m, ref, ref.t[ref.t.length - 1] ?? 0, dt, rest)
   })
 }
 
-/** Each group's run, read and scaled onto its members; a sweep in no group at E_leak. */
+/** Each group's run, read and scaled about `rest` onto its members; a sweep in no group at rest. */
 function scaled(
   groups: readonly ShapeGroup[],
   sweeps: readonly RecordedSweep[],
-  m: FitMembrane,
+  rest: number,
   runs: readonly { read: () => Float64Array }[],
 ): Float64Array[] {
-  const out = sweeps.map((s) => new Float64Array(s.t.length).fill(m.eLeak))
+  const out = sweeps.map((s) => new Float64Array(s.t.length).fill(rest))
   groups.forEach((group, g) => {
     const v = runs[g]!.read()
     for (const { sweep, scale } of group.members) {
       const into = out[sweep]!
-      for (let i = 0; i < into.length; i++) into[i] = m.eLeak + scale * (v[i]! - m.eLeak)
+      for (let i = 0; i < into.length; i++) into[i] = rest + scale * (v[i]! - rest)
     }
   })
   return out

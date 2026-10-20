@@ -36,7 +36,7 @@ src/packs/
 pack explicitly, for the reason `nodes/index.ts` gives — an analysable bundle and a deterministic
 order. Everything else is *found by file*: `ui/glyphs.ts`, `help/seeAlso.ts`,
 `help/registry.ts`, `wizard/contribute.ts` and `nodes/lib/nodeValues.ts` each glob the one file they
-need out of every pack directory. The last is how a pack's node adds a per-node value (Simulate's
+need out of every pack directory. The last is how a pack's node adds a per-node value (Simulate Model's
 `peakVoltage`) to the 3D View's "by node value" list without the core list naming it. The split is
 forced by `nodes.html`, which draws the glyph table and holds **no node definitions at all** — a
 glyph table that imported the manifest would pull every pack's nodes, and their data layers, in

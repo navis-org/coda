@@ -360,3 +360,17 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
+
+/**
+ * A slug: lower case, every run of anything else a hyphen, none at either end. One copy: the graph
+ * download, the chart exports and a pack guide's heading anchors had the same regexes side by side
+ * and differed only in what an empty result falls back to.
+ */
+export function slugify(text: string, fallback: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || fallback
+  )
+}

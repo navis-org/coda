@@ -40,7 +40,7 @@ registerNode({
     'the cable each point stands for and sums to the total cable length. `compartment` comes ' +
     'from the source: CAVE skeleton-service and SWC skeletons have one; neuPrint, CATMAID and ' +
     'level-2 skeletons do not. "placed by hand" takes points clicked onto each neuron in the ' +
-    'expanded view instead — record sites for Simulate, say, or synapses of your own for a ' +
+    'expanded view instead — record sites for Simulate Model, say, or synapses of your own for a ' +
     'Compartment Model.',
   cost: 'cheap',
   inputs: [{ id: 'in', label: 'Skeletons', type: T.skeletons() }],

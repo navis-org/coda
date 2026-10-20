@@ -81,8 +81,9 @@ const E = -65
 
 describe('agreement with NEURON', () => {
   // `pnpm biophys:reference` ran these cases in NEURON 8.2 on our sections and segment counts.
-  // Measured agreement: 2e-6 mV or better on every case, the fixture itself being rounded to
-  // 1e-7 mV — so this tolerance leaves room for rounding and none for a different scheme.
+  // Measured agreement: 2e-6 mV or better on every case but the fly channels' (4e-6 mV, on a spike's
+  // upstroke: a few 1e-8 ms), the fixture itself being rounded to 1e-7 mV — so this tolerance leaves
+  // room for rounding and none for a different scheme.
   for (const fixture of reference.cases) {
     it(`matches NEURON on ${fixture.name}`, () => {
       const result = simulate(buildCase(caseNamed(fixture.name)).request)
@@ -101,6 +102,8 @@ describe('agreement with NEURON', () => {
     }
     expect(crossings('hh-point')).toBeGreaterThan(1)
     expect(crossings('branched-hh-soma')).toBeGreaterThan(0)
+    // Its two spikes are what "held to NEURON" means for the fly channels.
+    expect(crossings('branched-fly-channels')).toBe(2)
   })
 })
 

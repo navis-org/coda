@@ -43,9 +43,17 @@ export interface ChannelOption {
   readonly about: string
   /** mS/cm², what a row starts at, and what it is reset to when the channel is changed. */
   readonly density: number
+  /**
+   * Where a new row of it goes, and where a row still at its old channel's placement goes on being
+   * switched to it: everywhere when absent. The fly set's is the axon, as their model's.
+   */
+  readonly regions?: readonly string[]
   /** Why that density, where it is somebody's. */
   readonly densitySource: string
 }
+
+/** The fly set's placement: the axon, where Günay et al.'s model put the channels. */
+const FLY_REGIONS: readonly string[] = ['axon']
 
 export const CHANNEL_OPTIONS: readonly ChannelOption[] = [
   {
@@ -80,10 +88,66 @@ export const CHANNEL_OPTIONS: readonly ChannelOption[] = [
     density: HH_GBAR.k * 1000,
     densitySource: 'hh.mod’s',
   },
+  /*
+   * Günay et al. 2015's four, fitted to voltage-clamp recordings from Drosophila neurons. A new row
+   * is their reconstructed model's axon: on the axon (`FLY_REGIONS`) at its densities (Table 4,
+   * "Recon. axon only"; their NEURON session sets the same in S/cm²). Placed on the whole cell,
+   * NaT's window current keeps a cell with a weak leak firing on its own (the PN and optic-lobe
+   * presets), where a leakier one rests near −60 mV — so the axon, where their model put them.
+   */
+  {
+    id: 'gunay.nat',
+    label: 'NaT (fly, Günay)',
+    about:
+      'Transient sodium of the Drosophila larval aCC motoneuron (Günay et al. 2015, Table 5): the para current, fitted to voltage-clamp recordings from fly neurons. A fly’s channel, though a motoneuron’s rather than a central brain neuron’s. A new row is their model’s axon, where they placed it: on the whole cell its window current can keep the cell firing on its own.',
+    regions: FLY_REGIONS,
+    density: 180,
+    densitySource: 'their reconstructed model’s axon',
+  },
+  {
+    id: 'gunay.nap',
+    label: 'NaP (fly, Günay)',
+    about:
+      'Persistent sodium of the Drosophila larval aCC motoneuron (Günay et al. 2015, Table 5): it never inactivates, so tiny densities matter.',
+    regions: FLY_REGIONS,
+    density: 0.0001,
+    densitySource: 'their reconstructed model’s axon, 0.1 µS/cm²',
+  },
+  {
+    id: 'gunay.ks',
+    label: 'Ks (fly, Günay)',
+    about:
+      'Slow delayed-rectifier potassium of the Drosophila larval aCC motoneuron (Günay et al. 2015, Table 5): the Shab current, non-inactivating, which repolarises the spike.',
+    regions: FLY_REGIONS,
+    density: 400,
+    densitySource: 'their reconstructed model’s axon',
+  },
+  {
+    id: 'gunay.kf',
+    label: 'Kf (fly, Günay)',
+    about:
+      'Fast A-type potassium of the Drosophila larval aCC motoneuron (Günay et al. 2015, Table 5): the Shal current. It inactivates within milliseconds once depolarised and recovers slowly near rest. Their text mentions a second, slower inactivation that their table and code leave out, as here.',
+    regions: FLY_REGIONS,
+    density: 192.8,
+    densitySource:
+      'Ks’s 400 at their isopotential model’s Kf : Ks ratio, 24.1 : 50 nS; their reconstructed model has no Kf',
+  },
 ]
 
 /** A new row's everything but its channel and amount: everywhere, a density, unshifted. */
 const NEW_ROW = { regions: [], mode: 'density', activation: 0, inactivation: 0 } as const
+
+/**
+ * How far one arrow press or one pixel of scrubbing moves a density, mS/cm²: the order of the
+ * channel's starting density, never more than 1. Fixed per channel, so a press down and a press up
+ * cancel and 0 is reachable — a step read off the row's value shrank tenfold at every decade on the
+ * way down and never arrived. Persistent sodium, starting at 0.0001, moves by 0.0001 rather than by
+ * ten thousand times itself; every other channel moves by 1.
+ */
+export function densityStep(channel: string): number {
+  const start = startingDensity(channel)
+  return start > 0 ? Math.min(1, 10 ** Math.floor(Math.log10(start))) : 1
+}
 
 /** mS/cm² a channel's row starts at: the option's own, 0 for a channel the editor does not offer. */
 function startingDensity(channel: string): number {
@@ -92,8 +156,21 @@ function startingDensity(channel: string): number {
 
 /** A new row: the channel at its own starting density, everywhere, unshifted. */
 export function newChannelRow(channel: string): ChannelRow {
-  return { ...NEW_ROW, channel, value: startingDensity(channel) }
+  return {
+    ...NEW_ROW,
+    channel,
+    value: startingDensity(channel),
+    regions: defaultRegions(channel),
+  }
 }
+
+/** Where a channel's new row goes: its own regions, or everywhere. */
+function defaultRegions(channel: string): readonly string[] {
+  return channelOption(channel)?.regions ?? []
+}
+
+const sameRegions = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((r) => b.includes(r))
 
 /**
  * A row moved to another channel: a density starts again at the new channel's own, since one
@@ -105,6 +182,14 @@ export function changeChannel(row: ChannelRow, channel: string): ChannelRow {
     ...row,
     channel,
     ...(row.mode === 'density' ? { value: startingDensity(channel) } : {}),
+    // A row still where its channel puts one takes the new channel's placement; one placed by hand
+    // keeps its own — whichever order the channels were chosen in.
+    ...(sameRegions(row.regions, defaultRegions(row.channel))
+      ? { regions: defaultRegions(channel) }
+      : {}),
+    // A ΔV50 is an experiment on one channel's gates, not something to carry onto another's.
+    activation: 0,
+    inactivation: 0,
   }
 }
 

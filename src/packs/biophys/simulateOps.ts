@@ -7,10 +7,11 @@ import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { ParamValues } from '../../core/node'
 import { refuseIfOverCrashFloor } from '../../core/limits'
 import { namedFew } from '../../core/prose'
-import type { TableSchema } from '../../core/types'
-import { column, tableSchema, uniqueName } from '../../core/types'
+import type { DType, TableSchema } from '../../core/types'
+import { column, findColumn, tableSchema, uniqueName } from '../../core/types'
 import type {
   CellModelValue,
+  CellValue,
   ColumnData,
   PointsValue,
   SkeletonGeometry,
@@ -36,17 +37,39 @@ import { splitArbor } from '../../nodes/lib/splitCorrections'
 import { NO_PARTNER, placePoints } from './build'
 import { PEAK_VOLTAGE } from './nodeValues'
 import type { ClampShape, ClampWaveform, CurrentClamp, Settled } from '../../biophys/solver'
-import { clampCurrent, clampTrace, clampWindow } from '../../biophys/solver'
+import { clampCurrent, clampWindow } from '../../biophys/solver'
 import type { SimulateJob, SimulateResult } from './simulateJob'
-import { jobSteps, reachesInWindow, restOf, traceBytes } from './simulateJob'
+import {
+  MOVIE_SWEEP,
+  jobSteps,
+  reachesInWindow,
+  restOf,
+  sweepClamps,
+  sweepCount,
+  traceBytes,
+} from './simulateJob'
 import { partnerDelays, solverPart } from './solverInputs'
 import { partnerTrain } from './stimulus'
+import { held, rowsBySweep } from './resample'
+import { columnScale, unsetAmbiguity } from './unitColumns'
 import { isNameableRegion } from './channelRows'
 
-/** Column names the traces table owns; a record site's label may not take them. */
 /** Every table of traces' time column, in ms: Simulate's, Load Recording's, Combine Traces'. */
 export const TIME_COLUMN = 't'
 export const SOMA_COLUMN = 'soma'
+/** The column every output of a run over sweeps names them by. */
+export const SWEEP_COLUMN = 'sweep'
+/** Column names the traces table owns; a record site's label, a trace's or the current's may not take them. */
+const RESERVED_COLUMNS = [TIME_COLUMN, SWEEP_COLUMN]
+
+/**
+ * Whether a card injects current at all: `Inject current` ticked or a Current table wired. The one
+ * rule for the Traces output's `injected` column, read by inference and by the run, so the column
+ * follows the card rather than whether any clamp landed on a record site.
+ */
+export function injects(p: ParamValues, currentWired: boolean): boolean {
+  return p.clamp === true || currentWired
+}
 
 /**
  * Compartment-steps a second, the slow end of what the Phase 0 probe measured on hemibrain PNs
@@ -118,18 +141,37 @@ export function keepRest(
   byDt.set(dt, settled)
 }
 
-/** What a run reads besides its params: the points to record at, and a spike table. */
+/**
+ * A table of injected current as the Current socket's pickers read it: time and current, each with
+ * its factor into ms and nA, and optionally the site each row goes into and the sweep it belongs to.
+ */
+export interface CurrentInput {
+  readonly time: ColumnData
+  readonly current: ColumnData
+  readonly scale: { readonly time: number; readonly current: number }
+  readonly site?: ColumnData
+  readonly sweep?: SweepLabels
+}
+
+/** What a run reads besides its params: the points to record at, a spike table, a current table. */
 export interface RunInputs {
   readonly record?: { readonly points: PointsValue; readonly label?: ColumnData }
   readonly spikes?: { readonly partner: ColumnData; readonly time: ColumnData }
   /** A table is wired to Input spikes and a column picker is not resolved: a different fix. */
   readonly spikesUnresolved?: true
+  readonly current?: CurrentInput
+  /** A table is wired to Current and cannot be read: why, in the card's words. */
+  readonly currentRefusal?: string
 }
 
 export interface RunPlan {
   readonly job: SimulateJob
   /** One per record site, the soma's first: the traces table's columns. */
   readonly labels: readonly string[]
+  /** A current table's sweeps, in the job's order, where it names them: the tables' `sweep` column. */
+  readonly sweeps?: SweepLabels
+  /** Whether the card injects at all (`injects`): the Traces output's `injected` column. */
+  readonly injecting: boolean
   /**
    * Playback's traces as this run records them, the tail of `labels`: what Playback draws and
    * names, so a line under its scrubber and its column of the Traces output are one.
@@ -333,7 +375,13 @@ export function clampEnvelope(
 const ENVELOPE_STEPS = 400_000
 
 /** A Simulate card's params and inputs as the job its worker runs — everything but the run. */
-export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs): RunPlan {
+export function planRun(
+  value: CellModelValue,
+  p: ParamValues,
+  inputs: RunInputs,
+  /** Playback's replan: a current table's held only for the sweep the movie replays. */
+  options: { readonly replay?: boolean } = {},
+): RunPlan {
   const notes: string[] = []
   const {
     compartments: record,
@@ -427,6 +475,15 @@ export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs
   )
 
   const dt = Number(p.dt)
+  if (inputs.currentRefusal) throw new Error(inputs.currentRefusal)
+  const table = inputs.current
+    ? tableSweeps(
+        inputs.current,
+        { compartments: record, labels },
+        { dt, duration, replay: options.replay === true },
+        notes,
+      )
+    : undefined
   const job: SimulateJob = {
     model: solverPart(value),
     dt,
@@ -436,6 +493,7 @@ export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs
     threshold: Number(p.threshold),
     firing: [...firing],
     clamps: plannedClamps(p, { compartments: record, labels }, notes),
+    sweeps: table?.clamps,
     rest: RESTS.get(value)?.get(dt),
     summary:
       p.perPartner === true
@@ -444,9 +502,13 @@ export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs
   }
 
   refuseIfOverCrashFloor(
-    `${plural(job.record.length, 'trace')} sampled every ${formatNumber(job.sampleEvery)} ms for ${formatNumber(job.duration)} ms`,
+    `${plural(job.record.length, 'trace')} sampled every ${formatNumber(job.sampleEvery)} ms for ` +
+      `${formatNumber(job.duration)} ms` +
+      (sweepCount(job) > 1 ? `, in each of ${formatNumber(sweepCount(job))} sweeps` : ''),
     traceBytes(job),
-    'Raise Sample every, shorten Duration, or record at fewer points.',
+    sweepCount(job) > 1
+      ? 'Wire fewer sweeps, raise Sample every, shorten Duration, or record at fewer points.'
+      : 'Raise Sample every, shorten Duration, or record at fewer points.',
   )
   if (job.summary) {
     const { onset, window } = job.summary
@@ -473,7 +535,126 @@ export function planRun(value: CellModelValue, p: ParamValues, inputs: RunInputs
         `${formatNumber(steps)} steps.`,
     )
   }
-  return { job, labels, traces, notes }
+  return {
+    job,
+    labels,
+    traces,
+    notes,
+    sweeps: table?.labels,
+    injecting: injects(p, inputs.current !== undefined),
+  }
+}
+
+/** A current table's sweeps as the output tables name them: each sweep's own cell, and its dtype. */
+export interface SweepLabels {
+  readonly cells: readonly CellValue[]
+  readonly dtype: DType
+}
+
+/**
+ * A table of injected current as clamps, one set per sweep (`rowsBySweep`): each site's rows held
+ * onto the run's steps (`held`, read at each step's half-step time as every clamp is) and played as
+ * a sampled clamp of 1×, so they add to the Clamp tab's. Each clamp spans only the steps carrying
+ * current, so its window says when its current starts and stops, as any clamp's does. A row names a
+ * record site by its label, the soma when it names none; a name no site has injects nothing and is
+ * said. Two names on one compartment add.
+ */
+function tableSweeps(
+  input: CurrentInput,
+  sites: Pick<RecordSites, 'compartments' | 'labels'>,
+  /** `replay`: only `MOVIE_SWEEP`'s clamps, every sweep still read for the notes and the labels. */
+  { dt, duration, replay }: { dt: number; duration: number; replay: boolean },
+  notes: string[],
+): { clamps: CurrentClamp[][]; labels?: SweepLabels } {
+  const steps = Math.max(0, Math.round(duration / dt))
+  const { time, current, site, sweep } = input
+  // Each sweep's rows by site name, in time order.
+  const grouped = rowsBySweep(time, sweep?.cells)
+  if (grouped.length === 0) {
+    // Nothing to inject is a run without it, said — not a run of no sweeps at all.
+    notes.push('The current table has no row with a time, so no current is injected.')
+    grouped.push({ cell: null, rows: [] })
+  }
+  const sweeps = grouped.map(({ cell, rows }) => {
+    const bySite = new Map<string, number[]>()
+    for (const row of rows) {
+      // Spelled as a record site's label is (`idText`): trimmed, and blank is the soma.
+      const name = (site ? idText(site[row]) : null) ?? SOMA_COLUMN
+      const list = bySite.get(name)
+      if (list) list.push(row)
+      else bySite.set(name, [row])
+    }
+    return { cell, bySite }
+  })
+  refuseIfOverCrashFloor(
+    `the current table held over ${formatNumber(steps)} steps`,
+    sweeps.reduce((n, g) => n + g.bySite.size, 0) * steps * 8,
+    'Shorten Duration, raise dt, or wire fewer sweeps or sites.',
+  )
+  // Each step's half-step time, where a clamp is read.
+  const grid = new Float64Array(steps)
+  for (let k = 0; k < steps; k++) grid[k] = (k + 0.5) * dt
+  const unknown = new Set<string>()
+  // Sweep-sites whose last row is not zero: held for one step of the table, then cut off.
+  let cutShort = 0
+  const clamps = sweeps.map(({ bySite }, s) => {
+    const at = new Map<number, Float64Array>()
+    for (const [name, rows] of bySite) {
+      const i = sites.labels.indexOf(name)
+      if (i < 0) {
+        unknown.add(name)
+        continue
+      }
+      const lastValue = current[rows.at(-1)!]
+      if (typeof lastValue === 'number' && lastValue !== 0) cutShort++
+      if (replay && s !== MOVIE_SWEEP) continue
+      const values = held(
+        Float64Array.from(rows, (r) => (time[r] as number) * input.scale.time),
+        Float64Array.from(rows, (r) => {
+          const v = current[r]
+          return typeof v === 'number' ? v * input.scale.current : Number.NaN
+        }),
+        grid,
+      )
+      const compartment = sites.compartments[i]!
+      const sum = at.get(compartment)
+      if (sum) for (let k = 0; k < steps; k++) sum[k]! += values[k]!
+      else at.set(compartment, values)
+    }
+    return [...at].flatMap(([compartment, values]): CurrentClamp[] => {
+      let first = 0
+      while (first < steps && values[first] === 0) first++
+      let last = steps - 1
+      while (last >= first && values[last] === 0) last--
+      if (last < first) return []
+      return [
+        {
+          compartment,
+          delay: first * dt,
+          duration: (last + 1 - first) * dt,
+          amplitude: 1,
+          shape: { kind: 'samples', every: dt, values: values.slice(first, last + 1) },
+        },
+      ]
+    })
+  })
+  if (cutShort > 0) {
+    notes.push(
+      `The current table ends on a current that is not zero ${cutShort === 1 ? 'once' : `${formatNumber(cutShort)} times`}: ` +
+        'a last row is held only as long as the step before it, or not at all when it is the only ' +
+        'row. Add a row where the current should stop.',
+    )
+  }
+  if (unknown.size > 0) {
+    notes.push(
+      `The current table names ${namedFew([...unknown].map((n) => `"${n}"`))}, which no record ` +
+        'site is called, so nothing is injected there. Name the soma or a Record at point.',
+    )
+  }
+  return {
+    clamps: replay ? clamps.slice(MOVIE_SWEEP, MOVIE_SWEEP + 1) : clamps,
+    labels: sweep && { cells: sweeps.map((g) => g.cell), dtype: sweep.dtype },
+  }
 }
 
 /**
@@ -491,7 +672,7 @@ export function recordSites(
   const labels = [SOMA_COLUMN]
   if (record) {
     const placed = placePoints(value, record.points)
-    const taken = new Set([TIME_COLUMN, SOMA_COLUMN])
+    const taken = new Set([...RESERVED_COLUMNS, SOMA_COLUMN])
     let far = 0
     let off = 0
     placed.compartment.forEach((compartment, i) => {
@@ -577,7 +758,7 @@ export function placeTraces(
    */
   siteLabels: readonly string[],
 ): PlacedTraces {
-  const taken = new Set([TIME_COLUMN, ...siteLabels])
+  const taken = new Set([...RESERVED_COLUMNS, ...siteLabels])
   const mine = stored.filter((point) => point.neuron === model.neuronId)
   const at = orientPlacement(arbor, projectManual(model.skeleton, mine))
   const placed: PlacedTrace[] = []
@@ -666,39 +847,111 @@ export function trainsFromTable(
  * ---------------------------------------------------------------------------------------- */
 
 /**
- * The Traces output's last column while current is injected: the current, nA, at each sample —
- * one waveform for every injected site, so one column.
+ * The Traces output's last column while current is injected: the current, nA, at each sample, into
+ * the first record site that takes any — the soma, where a recording is replayed. The Clamp tab's
+ * waveform is one for every ticked site, so that column is all of it; a table naming several sites
+ * says only the first one's here.
  */
 const INJECTED_COLUMN = 'injected'
 
 /** The injected column's name: `injected`, unless a record site is already called that. */
 export function injectedColumn(labels: readonly string[]): string {
-  return uniqueName(new Set([TIME_COLUMN, ...labels]), INJECTED_COLUMN, (n) => ` (${n})`)
+  return uniqueName(
+    new Set([...RESERVED_COLUMNS, ...labels]),
+    INJECTED_COLUMN,
+    (n) => ` (${n})`,
+  )
 }
 
 /**
- * Time, then one column per record site — the soma first — in mV, then the injected current in nA
- * when there is one. Wide, for ZapBench's memory reason.
+ * Time, the sweep where a current table names them, then one column per record site — the soma
+ * first — in mV, then the injected current in nA when there is one. Wide over sites, for ZapBench's
+ * memory reason; long over sweeps, which a Line Chart's Series and Fit Model Passive read as they are.
  */
-export function tracesSchema(labels: readonly string[], injected?: string): TableSchema {
+export function tracesSchema(
+  labels: readonly string[],
+  injected?: string,
+  sweepDtype?: DType,
+): TableSchema {
   return tableSchema(
     column(TIME_COLUMN, 'f64', 'ms'),
+    ...(sweepDtype ? [column(SWEEP_COLUMN, sweepDtype)] : []),
     ...labels.map((name) => column(name, 'f64', 'mV')),
     ...(injected ? [column(injected, 'f64', 'nA')] : []),
   )
 }
 
+/**
+ * The compartment whose injected current the Traces output carries: the first record site, in
+ * record order, that any sweep injects into; undefined where nothing is injected.
+ */
+export function injectedCompartment(
+  job: Pick<SimulateJob, 'clamps' | 'sweeps' | 'record'>,
+): number | undefined {
+  const into = new Set<number>()
+  for (let s = 0; s < sweepCount(job); s++) {
+    for (const clamp of sweepClamps(job, s)) into.add(clamp.compartment)
+  }
+  return Array.from(job.record).find((c) => into.has(c))
+}
+
+/**
+ * The current into compartment `c` at each of `times` (ms), nA: every clamp there summed, each read
+ * at the step starting at that time. What the Traces output's `injected` column and Playback's strip
+ * draw.
+ */
+export function injectedTrace(
+  clamps: readonly CurrentClamp[],
+  c: number,
+  times: ArrayLike<number>,
+  dt: number,
+): Float64Array {
+  const sum = new Float64Array(times.length)
+  for (const clamp of clamps) {
+    if (clamp.compartment !== c) continue
+    for (let i = 0; i < sum.length; i++)
+      sum[i]! += clampCurrent(clamp, Math.round(times[i]! / dt), dt)
+  }
+  return sum
+}
+
 export function tracesTable(
   labels: readonly string[],
   result: SimulateResult,
-  job: Pick<SimulateJob, 'clamps' | 'dt'>,
+  job: Pick<SimulateJob, 'clamps' | 'sweeps' | 'record' | 'dt'>,
+  sweeps: SweepLabels | undefined,
+  /** `RunPlan.injecting`. */
+  injecting: boolean,
 ): TableValue {
-  const data: Record<string, number[]> = { [TIME_COLUMN]: Array.from(result.t) }
-  labels.forEach((name, i) => (data[name] = Array.from(result.traces[i]!)))
-  const clamp = job.clamps[0]
-  const injected = clamp && injectedColumn(labels)
-  if (injected) data[injected] = Array.from(clampTrace(clamp, result.t, job.dt))
-  return makeTable(tracesSchema(labels, injected), data)
+  const into = injectedCompartment(job)
+  // Zeros where the card injects and nothing reached a record site: the column inference promised.
+  const injected = injecting ? injectedColumn(labels) : undefined
+  const schema = tracesSchema(labels, injected, sweeps?.dtype)
+  // Every column sized once and filled by index: a run is easily 100,000 samples a sweep, past
+  // what a spread into `push` can pass as arguments.
+  const n = result.t.length
+  const data: Record<string, CellValue[]> = Object.fromEntries(
+    schema.columns.map((c) => [c.name, new Array<CellValue>(n * result.runs.length)]),
+  )
+  result.runs.forEach((run, s) => {
+    const at = s * n
+    const current =
+      injected &&
+      (into === undefined
+        ? new Float64Array(n)
+        : injectedTrace(sweepClamps(job, s), into, result.t, job.dt))
+    for (let i = 0; i < n; i++) {
+      data[TIME_COLUMN]![at + i] = result.t[i]!
+      if (sweeps) data[SWEEP_COLUMN]![at + i] = sweeps.cells[s]!
+      if (current) data[injected!]![at + i] = current[i]!
+    }
+    labels.forEach((name, r) => {
+      const trace = run.traces[r]!
+      const column = data[name]!
+      for (let i = 0; i < n; i++) column[at + i] = trace[i]!
+    })
+  })
+  return makeTable(schema, data)
 }
 
 /**
@@ -710,32 +963,45 @@ export function tracesTable(
 export function inferredTracesSchema(
   observed: TableSchema | undefined,
   injecting: boolean,
+  sweepDtype?: DType,
 ): TableSchema {
   const labels = observed
     ? observed.columns.filter((c) => c.unit === 'mV').map((c) => c.name)
     : [SOMA_COLUMN]
-  return tracesSchema(labels, injecting ? injectedColumn(labels) : undefined)
+  return tracesSchema(labels, injecting ? injectedColumn(labels) : undefined, sweepDtype)
 }
 
-/** The Output spikes output: threshold crossings at each record site. */
-export const OUTPUT_SPIKES_SCHEMA: TableSchema = tableSchema(
-  column('site', 'str'),
-  column('time', 'f64'),
-)
+/** The Output spikes output: threshold crossings at each record site, and the sweep, where named. */
+export function outputSpikesSchema(sweepDtype?: DType): TableSchema {
+  return tableSchema(
+    ...(sweepDtype ? [column(SWEEP_COLUMN, sweepDtype)] : []),
+    column('site', 'str'),
+    column('time', 'f64'),
+  )
+}
 
 export function outputSpikesTable(
   labels: readonly string[],
   result: SimulateResult,
+  sweeps?: SweepLabels,
 ): TableValue {
+  const sweep: CellValue[] = []
   const site: string[] = []
   const time: number[] = []
-  result.spikes.forEach((times, i) => {
-    for (const t of times) {
-      site.push(labels[i]!)
-      time.push(t)
-    }
+  result.runs.forEach((run, s) => {
+    run.spikes.forEach((times, i) => {
+      for (const t of times) {
+        if (sweeps) sweep.push(sweeps.cells[s]!)
+        site.push(labels[i]!)
+        time.push(t)
+      }
+    })
   })
-  return makeTable(OUTPUT_SPIKES_SCHEMA, { site, time })
+  return makeTable(outputSpikesSchema(sweeps?.dtype), {
+    ...(sweeps ? { [SWEEP_COLUMN]: sweep } : {}),
+    site,
+    time,
+  })
 }
 
 /** One row per partner; with the summary, each one's effect alone. */
@@ -879,19 +1145,100 @@ export function modelSkeletons(
   }
 }
 
+/** The Current socket's pickers that are never the current, whatever the unit says. */
+export const CURRENT_TAKEN = ['currentTime', 'currentSweep', 'currentSite']
+
+/**
+ * A current table's columns and units, resolved through the card's pickers (invariant 5): the one
+ * statement of the choice for `validate`, inference and the run. Issues where it cannot be read.
+ */
+export function resolveCurrent(
+  schema: TableSchema,
+  column: (paramId: string) => string | undefined,
+  params: ParamValues,
+):
+  | {
+      readonly time: string
+      readonly current: string
+      readonly site?: string
+      readonly sweep?: { readonly name: string; readonly dtype: DType }
+      readonly scale: CurrentInput['scale']
+    }
+  | { readonly issues: string[] } {
+  const issues: string[] = []
+  const said = unsetAmbiguity({ column, params }, schema, {
+    id: 'currentValue',
+    quantity: 'current',
+    unitId: 'currentUnit',
+    takenIds: CURRENT_TAKEN,
+    ask: 'Pick the injected current',
+    after: 'A command is usually the right one; a current monitor is noisy.',
+  })
+  if (said) issues.push(said)
+  const time = column('currentTime')
+  const current = column('currentValue')
+  if (!time) issues.push('The current table has no numeric column to use as time.')
+  if (!current && !said) {
+    issues.push(
+      'No column of the current table is in pA or nA: set Current unit to pick one from any column.',
+    )
+  }
+  const timeScale = columnScale(schema, 'time', time, 'auto', issues)
+  const currentScale = columnScale(schema, 'current', current, params.currentUnit, issues)
+  if (issues.length || !time || !current) return { issues }
+  const site = column('currentSite')
+  const sweep = column('currentSweep')
+  const sweepDtype = sweep === undefined ? undefined : findColumn(schema, sweep)?.dtype
+  return {
+    time,
+    current,
+    site,
+    sweep: sweep && sweepDtype ? { name: sweep, dtype: sweepDtype } : undefined,
+    scale: { time: timeScale, current: currentScale },
+  }
+}
+
+/** The Current socket's table as `planRun` reads it, or why it cannot be read. */
+function currentInput(
+  table: TableValue,
+  column: (paramId: string) => string | undefined,
+  params: ParamValues,
+): Pick<RunInputs, 'current' | 'currentRefusal'> {
+  const read = resolveCurrent(table.schema, column, params)
+  if ('issues' in read) return { currentRefusal: read.issues[0] }
+  return {
+    current: {
+      time: getColumn(table, read.time),
+      current: getColumn(table, read.current),
+      scale: read.scale,
+      site: read.site === undefined ? undefined : getColumn(table, read.site),
+      sweep:
+        read.sweep === undefined
+          ? undefined
+          : { cells: getColumn(table, read.sweep.name), dtype: read.sweep.dtype },
+    },
+  }
+}
+
 /**
  * What a Simulate card's inputs hand `planRun`, read off its wires and column pickers — one reading
  * for the node's `evaluate` and for Playback, which rebuilds the same job to replay it.
  */
 export function runInputs(
-  record: Value | undefined,
-  spikes: Value | undefined,
+  wired: {
+    readonly record?: Value | undefined
+    readonly spikes?: Value | undefined
+    readonly current?: Value | undefined
+  },
   column: (paramId: string) => string | undefined,
+  params: ParamValues,
 ): RunInputs {
+  const { record, spikes, current } = wired
   const label = column('recordLabel')
   const partner = column('spikePartner')
   const time = column('spikeTime')
   return {
+    ...(isTableValue(current) ? currentInput(current, column, params) : {}),
     record: isPointsValue(record)
       ? { points: record, label: label ? getColumn(record.attributes, label) : undefined }
       : undefined,
@@ -918,7 +1265,9 @@ const QUIET_TAUS = 3
  */
 export function unrestedNote(
   value: CellModelValue,
-  job: Pick<SimulateJob, 'firing' | 'duration' | 'clamps'>,
+  job: Pick<SimulateJob, 'firing' | 'duration'>,
+  /** The run's clamps: its sweep's (`sweepClamps`). */
+  clamps: readonly CurrentClamp[],
   final: ArrayLike<number>,
   settle: Settled | undefined,
 ): string | undefined {
@@ -927,7 +1276,7 @@ export function unrestedNote(
   // delay.
   const { max: delay } = partnerDelays(value)
   let lastDrive = 0
-  for (const clamp of job.clamps) lastDrive = Math.max(lastDrive, clamp.delay + clamp.duration)
+  for (const clamp of clamps) lastDrive = Math.max(lastDrive, clamp.delay + clamp.duration)
   for (const [partner, times] of job.firing) {
     for (const time of times) lastDrive = Math.max(lastDrive, time + delay[partner]!)
   }

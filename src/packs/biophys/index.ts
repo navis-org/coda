@@ -21,5 +21,6 @@ export const biophys: PackDefinition = {
     'Compartment models of single neurons from their reconstructions, driven by their synaptic partners.',
   defaultOn: false,
   glyph: 'biophys:model',
+  guide: { page: 'biophysics.html', title: 'Biophysics guide' },
   nodes: [modelNode, simulateNode, loadRecordingNode, combineTracesNode, fitModelNode],
 }

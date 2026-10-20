@@ -16,9 +16,12 @@ import {
   rememberRecording,
 } from '../../data/ephys/recording'
 import type { RecordingSummary } from '../../data/ephys/recording'
+import { protocolSummary } from '../../data/ephys/recording'
 import { putRecordingUpload } from '../../data/uploads'
 import { recordingColumns } from '../../packs/biophys/recordingOps'
 import { formatBytes, formatNumber, plural } from '../../style/format'
+import type { ParamValue } from '../../core/node'
+import { useGraphStore } from '../../store/graphStore'
 import type { NodeBodyProps } from '../nodes/nodeBodies'
 import {
   UploadAbsent,
@@ -44,6 +47,9 @@ export function RecordingBody({ node, ctx, compact, setParam, onError }: NodeBod
   const dataId = String(node.params.dataId ?? '')
   const fileName = String(node.params.fileName ?? '')
   const { meta, state } = useUploadState(dataId, 'recording')
+  const setParams = useGraphStore((s) => s.setParams)
+  // The protocol the node reads, of a file holding several.
+  const shown = meta && protocolSummary(meta.summary, String(node.params.protocol ?? ''))
 
   const onPick = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -57,17 +63,35 @@ export function RecordingBody({ node, ctx, compact, setParam, onError }: NodeBod
       void file
         .arrayBuffer()
         .then(async (bytes) => {
-          const recording = readRecording(bytes, file.name)
+          const recording = await readRecording(bytes, file.name)
           const id = await putRecordingUpload(file.name, bytes, recording.summary)
           // What was just parsed serves the node's first run, which would otherwise read it back.
           rememberRecording(id, recording, bytes.byteLength)
-          setParam('fileName', file.name)
-          setParam('dataId', id)
+          // One commit, so no pass pairs the new file with the old protocol. A file of several
+          // protocols opens on its first, named, so the picker says which; the picks start over.
+          setParams(node.id, {
+            fileName: file.name,
+            protocol: recording.summary.protocols?.[0]?.protocol ?? '',
+            channels: [],
+            sweeps: '',
+            dataId: id,
+          })
         })
         .catch((err: unknown) => onError(err instanceof Error ? err.message : String(err)))
         .finally(() => setBusy(false))
     },
-    [onError, setParam],
+    [onError, setParams, node.id],
+  )
+
+  // Another protocol names its own channels (Vm or Im) and numbers its own sweeps, so a pick made
+  // for the last one starts over rather than refusing every run until it is cleared by hand.
+  const setCardParam = useCallback(
+    (id: string, value: ParamValue) => {
+      if (id === 'protocol' && value !== node.params.protocol) {
+        setParams(node.id, { protocol: value, channels: [], sweeps: '' })
+      } else setParam(id, value)
+    },
+    [setParam, setParams, node.id, node.params.protocol],
   )
 
   return (
@@ -88,22 +112,27 @@ export function RecordingBody({ node, ctx, compact, setParam, onError }: NodeBod
 
       <div className="upload-body__status" data-state={state}>
         {busy && 'Reading…'}
-        {!busy && state === 'empty' && 'No recording yet: choose an ABF file.'}
+        {!busy && state === 'empty' && 'No recording yet: choose an ABF or NWB file.'}
         {!busy && state === 'loading' && 'Looking for the stored recording…'}
         {!busy && state === 'ready' && meta && (
           <>
             <strong title={meta.name}>{meta.name}</strong>
             <span>
-              {recordingShape(meta.summary)} · {formatBytes(meta.bytes)}
+              {recordingShape(shown ?? meta.summary)}
+              {meta.summary.protocols &&
+                ` · ${plural(meta.summary.protocols.length, 'protocol')}`}{' '}
+              · {formatBytes(meta.bytes)}
             </span>
           </>
         )}
         {!busy && state === 'absent' && <UploadAbsent fileName={fileName} kind="recording" />}
       </div>
 
-      {state === 'ready' && <UploadFields node={node} ctx={ctx} setParam={setParam} />}
+      {state === 'ready' && <UploadFields node={node} ctx={ctx} setParam={setCardParam} />}
 
-      {!compact && state === 'ready' && meta && <RecordingListing summary={meta.summary} />}
+      {!compact && state === 'ready' && meta && (
+        <RecordingListing summary={shown ?? meta.summary} />
+      )}
     </div>
   )
 }
@@ -124,7 +153,12 @@ function RecordingListing({ summary }: { summary: RecordingSummary }) {
           <li key={c.name}>
             <code>{c.name}</code> {c.unit && <span>{c.unit}</span>}{' '}
             <span className="recording-listing__source">
-              {c.source === 'channel' ? 'recorded' : 'command, rebuilt from the protocol'}
+              {c.source === 'channel'
+                ? 'recorded'
+                : // A summary stored before commands said their origin is an ABF one: rebuilt.
+                  summary.commands[c.index]?.origin === 'stored'
+                  ? 'command, as stored'
+                  : 'command, rebuilt from the protocol'}
             </span>
           </li>
         ))}

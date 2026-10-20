@@ -23,6 +23,7 @@ describe('SimulateView', () => {
         params={{ silenced: [] }}
         record={undefined}
         spikes={undefined}
+        current={undefined}
         column={() => undefined}
         viewerKey="sim"
       />,

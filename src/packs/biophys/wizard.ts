@@ -32,12 +32,12 @@ const contribution: WizardContribution = {
       id: 'biophys:simulate',
       label: 'Simulate synaptic input',
       blurb:
-        'Skeletons and Synapses Between → Compartment Model → Simulate: one neuron as a cable, driven by its partners.',
+        'Skeletons and Synapses Between → Compartment Model → Simulate Model: one neuron as a cable, driven by its partners.',
       glyph: 'biophys:simulate',
       requires: 'skeletons',
       when: (key) => familyCan(key, 'synapses') && !datasetFamily(key)?.synthetic,
       hint: {
-        text: 'Every partner fires a seeded spike train. Select One picks the neuron; step it to model the next. Expand Simulate (⤢) to choose who fires, or to play the run back over the neuron.',
+        text: 'Every partner fires a seeded spike train. Select One picks the neuron; step it to model the next. Expand Simulate Model (⤢) to choose who fires, or to play the run back over the neuron.',
       },
       views: {
         'biophys:traces': { type: 'out.lineChart' },

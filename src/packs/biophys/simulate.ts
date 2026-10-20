@@ -11,14 +11,15 @@
  * every firing partner alone.
  */
 
-import type { ParamValues } from '../../core/node'
+import type { InferContext, ParamValues } from '../../core/node'
 import { packNode } from '../../core/registry'
-import { T } from '../../core/types'
+import { NUMERIC_DTYPES, T } from '../../core/types'
 import { isCellModelValue } from '../../core/values'
 import { runWorkerJob } from '../../data/workerJob'
 import { formatNumber } from '../../style/format'
 import type { SimulateResult } from './simulateJob'
-import { runSimulateJob } from './simulateJob'
+import { runSimulateJob, sweepClamps } from './simulateJob'
+import { columnsInUnit, unitParam } from './unitColumns'
 import {
   ARBOUR_SCHEMA,
   CLAMP_SITES_PARAM,
@@ -30,7 +31,11 @@ import {
   TRACES_PARAM,
   SOMA_COLUMN,
   keepRest,
-  OUTPUT_SPIKES_SCHEMA,
+  CURRENT_TAKEN,
+  injects,
+  TIME_COLUMN,
+  outputSpikesSchema,
+  resolveCurrent,
   partnersSchema,
   inputSpikesTable,
   partnersTable,
@@ -48,9 +53,15 @@ const byTable = (p: ParamValues) => p.drive === 'table'
 const clamped = (p: ParamValues) => p.clamp === true
 const summarised = (p: ParamValues) => p.perPartner === true
 
+/** The Current socket's table as its pickers read it, or undefined with nothing wired. */
+function currentRead(ctx: Pick<InferContext, 'schema' | 'column' | 'params'>) {
+  const schema = ctx.schema('current')
+  return schema ? resolveCurrent(schema, (id) => ctx.column(id), ctx.params) : undefined
+}
+
 export const simulateNode = packNode({
   type: 'biophys:simulate',
-  label: 'Simulate',
+  label: 'Simulate Model',
   category: 'analysis',
   description:
     'Runs a Compartment Model with its partners firing and records the voltage at the soma and at ' +
@@ -65,8 +76,9 @@ export const simulateNode = packNode({
   cost: 'expensive',
   inputs: [
     { id: 'model', label: 'Model', type: T.cellModel() },
-    { id: 'spikes', label: 'Input spikes', type: T.table(), required: false },
     { id: 'record', label: 'Record at', type: T.points(), required: false },
+    { id: 'spikes', label: 'Input spikes', type: T.table(), required: false },
+    { id: 'current', label: 'Current', type: T.table(), required: false },
   ],
   // Traces first: its schema is the one `observesOutputSchema` reads back after a run.
   outputs: [
@@ -169,7 +181,7 @@ export const simulateNode = packNode({
         { value: 'table', label: 'Input spikes' },
         { value: 'none', label: 'None' },
       ],
-      help: 'Spike trains: every firing partner on its own seeded train. Input spikes: times from a table wired into Input spikes, with a partner and a time column — another Simulate’s Input spikes output replays its drive. None: only the clamp drives the cell.',
+      help: 'Spike trains: every firing partner on its own seeded train. Input spikes: times from a table wired into Input spikes, with a partner and a time column — another Simulate Model’s Input spikes output replays its drive. None: only the clamp drives the cell.',
     },
     {
       id: SILENCED_PARAM,
@@ -391,6 +403,56 @@ export const simulateNode = packNode({
       visibleIf: clamped,
     },
     {
+      id: 'currentTime',
+      kind: 'column',
+      label: 'Current time',
+      group: 'clamp',
+      from: 'current',
+      default: TIME_COLUMN,
+      dtypes: NUMERIC_DTYPES,
+      whenWired: true,
+      advanced: true,
+      help: 'The current table’s times, from the start of the run; in ms unless the column says otherwise.',
+    },
+    {
+      id: 'currentValue',
+      kind: 'column',
+      label: 'Current',
+      group: 'clamp',
+      from: 'current',
+      schemaFrom: columnsInUnit('current', 'current', 'currentUnit', CURRENT_TAKEN),
+      default: '',
+      dtypes: NUMERIC_DTYPES,
+      whenWired: true,
+      help: 'The current to inject, held from each row’s time to the next, and added to the Clamp tab’s. Lists the columns in pA or nA; set Current unit to choose any column.',
+    },
+    {
+      id: 'currentSite',
+      kind: 'column',
+      label: 'Current site',
+      group: 'clamp',
+      from: 'current',
+      default: '',
+      optional: true,
+      whenWired: true,
+      help: 'A column naming the record site each row goes into: soma, a Record at point or a Playback trace. None, or an empty cell, is the soma.',
+    },
+    {
+      id: 'currentSweep',
+      kind: 'column',
+      label: 'Current sweep',
+      group: 'clamp',
+      from: 'current',
+      default: 'sweep',
+      optional: true,
+      whenWired: true,
+      help: 'A column naming each row’s sweep: every sweep its own run from rest, the outputs gaining a sweep column. None is one run.',
+    },
+    unitParam('currentUnit', 'Current unit', 'current', ['pA', 'nA'], {
+      group: 'clamp',
+      whenWired: 'current',
+    }),
+    {
       id: 'recordLabel',
       kind: 'column',
       label: 'Record label',
@@ -410,25 +472,45 @@ export const simulateNode = packNode({
     },
   ],
 
-  inferOutputs: (ctx) => ({
-    // Record sites are named by the data, so after a run the observed schema; before, the two
-    // columns every run has.
-    traces: T.table(inferredTracesSchema(ctx.observed, clamped(ctx.params))),
-    inputSpikes: T.table(INPUT_SPIKES_SCHEMA),
-    outputSpikes: T.table(OUTPUT_SPIKES_SCHEMA),
-    partners: T.table(partnersSchema(summarised(ctx.params))),
-    arbour: T.skeletons(ARBOUR_SCHEMA),
-  }),
+  inferOutputs: (ctx) => {
+    const current = currentRead(ctx)
+    const sweep = current && 'sweep' in current ? current.sweep?.dtype : undefined
+    return {
+      // Record sites are named by the data, so after a run the observed schema; before, the two
+      // columns every run has. A current table injects, and names the sweeps.
+      traces: T.table(
+        inferredTracesSchema(ctx.observed, injects(ctx.params, current !== undefined), sweep),
+      ),
+      inputSpikes: T.table(INPUT_SPIKES_SCHEMA),
+      outputSpikes: T.table(outputSpikesSchema(sweep)),
+      partners: T.table(partnersSchema(summarised(ctx.params))),
+      arbour: T.skeletons(ARBOUR_SCHEMA),
+    }
+  },
 
-  validate: (ctx) => (byTable(ctx.params) && !ctx.inputs.spikes ? [NO_SPIKE_TABLE] : []),
+  validate: (ctx) => {
+    const current = currentRead(ctx)
+    return [
+      ...(byTable(ctx.params) && !ctx.inputs.spikes ? [NO_SPIKE_TABLE] : []),
+      ...(current && 'issues' in current ? current.issues : []),
+    ]
+  },
 
   evaluate: async (ctx) => {
     const value = ctx.input('model')
     if (!isCellModelValue(value)) throw new Error('Wire a Compartment Model into Model.')
-    const { job, labels, notes } = planRun(
+    const { job, labels, notes, sweeps, injecting } = planRun(
       value,
       ctx.params,
-      runInputs(ctx.input('record'), ctx.input('spikes'), (id) => ctx.column(id)),
+      runInputs(
+        {
+          record: ctx.input('record'),
+          spikes: ctx.input('spikes'),
+          current: ctx.input('current'),
+        },
+        (id) => ctx.column(id),
+        ctx.params,
+      ),
     )
     for (const note of notes) ctx.warn(note)
 
@@ -454,19 +536,24 @@ export const simulateNode = packNode({
         ),
       )
     }
-    const unrested = unrestedNote(value, job, result.final, result.settle)
-    if (unrested) ctx.warn(unrested)
+    // Each sweep's own ending; the first that stayed away from rest is the one said.
+    for (const [s, run] of result.runs.entries()) {
+      const unrested = unrestedNote(value, job, sweepClamps(job, s), run.final, result.settle)
+      if (!unrested) continue
+      ctx.warn(sweeps ? `Sweep ${String(sweeps.cells[s])}: ${unrested}` : unrested)
+      break
+    }
     if (result.settle && !result.settle.converged) {
       ctx.warn(
-        `The model had not come to rest after ${formatNumber(result.settle.time)} ms of settling, so ` +
-          'the run starts while it is still drifting.',
+        `The model had not come to rest after ${formatNumber(result.settle.time)} ms of settling: ` +
+          'it is still drifting, or fires on its own with no input. The run starts from where it was.',
       )
     }
 
     return {
-      traces: tracesTable(labels, result, job),
+      traces: tracesTable(labels, result, job, sweeps, injecting),
       inputSpikes: inputSpikesTable(value, job.firing),
-      outputSpikes: outputSpikesTable(labels, result),
+      outputSpikes: outputSpikesTable(labels, result, sweeps),
       partners: partnersTable(
         value,
         job.firing.map(([p]) => p),

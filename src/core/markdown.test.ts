@@ -12,14 +12,14 @@ import { describe, expect, it } from 'vitest'
 
 import datasets from '../data/neuprint/__fixtures__/datasets.json'
 import type { MarkdownBlock, MarkdownInline, MarkdownList } from './markdown'
-import { parseMarkdown, safeHref } from './markdown'
+import { parseMarkdown, plainText, safeHref } from './markdown'
 
 /** Every link in a tree, in document order. */
 function links(blocks: MarkdownBlock[]): { text: string; href: string }[] {
   const found: { text: string; href: string }[] = []
   const walkInline = (nodes: MarkdownInline[]) => {
     for (const node of nodes) {
-      if (node.kind === 'link') found.push({ text: plain(node.children), href: node.href })
+      if (node.kind === 'link') found.push({ text: plainText(node.children), href: node.href })
       else if (node.kind === 'strong' || node.kind === 'em') walkInline(node.children)
     }
   }
@@ -40,20 +40,14 @@ function links(blocks: MarkdownBlock[]): { text: string; href: string }[] {
   return found
 }
 
-function plain(nodes: MarkdownInline[]): string {
-  return nodes
-    .map((n) => (n.kind === 'text' || n.kind === 'code' ? n.text : plain(n.children)))
-    .join('')
-}
-
 describe('blocks', () => {
   it('joins a wrapped paragraph and splits on the blank line', () => {
     const blocks = parseMarkdown('one line\nand its continuation\n\na second paragraph')
     expect(blocks).toHaveLength(2)
-    expect(plain((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
+    expect(plainText((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
       'one line and its continuation',
     )
-    expect(plain((blocks[1] as { children: MarkdownInline[] }).children)).toBe(
+    expect(plainText((blocks[1] as { children: MarkdownInline[] }).children)).toBe(
       'a second paragraph',
     )
   })
@@ -62,8 +56,8 @@ describe('blocks', () => {
     const blocks = parseMarkdown('- one\n- two:\n    - inner a\n    - inner b\n- three')
     const list = blocks[0] as MarkdownList
     expect(list.kind).toBe('list')
-    expect(list.items.map((i) => plain(i.children))).toEqual(['one', 'two:', 'three'])
-    expect(list.items[1]!.list?.items.map((i) => plain(i.children))).toEqual([
+    expect(list.items.map((i) => plainText(i.children))).toEqual(['one', 'two:', 'three'])
+    expect(list.items[1]!.list?.items.map((i) => plainText(i.children))).toEqual([
       'inner a',
       'inner b',
     ])
@@ -79,7 +73,7 @@ describe('blocks', () => {
   it('continues a bullet from an indented line that carries no marker', () => {
     const list = parseMarkdown('- Takemura et al.\n  (2024)') as MarkdownList[]
     expect(list[0]!.items).toHaveLength(1)
-    expect(plain(list[0]!.items[0]!.children)).toBe('Takemura et al. (2024)')
+    expect(plainText(list[0]!.items[0]!.children)).toBe('Takemura et al. (2024)')
   })
 
   it('clamps heading depth, since a card has three useful sizes', () => {
@@ -108,7 +102,7 @@ describe('inlines', () => {
 
   it('leaves an underscore inside a word alone', () => {
     const blocks = parseMarkdown('male_cns_v1 is one token')
-    expect(plain((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
+    expect(plainText((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
       'male_cns_v1 is one token',
     )
     expect(
@@ -118,7 +112,7 @@ describe('inlines', () => {
 
   it('treats an unclosed delimiter as the character it is', () => {
     const blocks = parseMarkdown('2 * 3 * 4 and a stray ` and [half](')
-    expect(plain((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
+    expect(plainText((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
       '2 * 3 * 4 and a stray ` and [half](',
     )
   })
@@ -130,7 +124,7 @@ describe('what a hostile blurb cannot do', () => {
     expect(links(blocks)).toEqual([])
     // Refused, not dropped: the label is still information, and losing it would hide that a
     // link had ever been written.
-    expect(plain((blocks[0] as { children: MarkdownInline[] }).children)).toBe('click me')
+    expect(plainText((blocks[0] as { children: MarkdownInline[] }).children)).toBe('click me')
   })
 
   it('refuses a scheme hidden behind control characters', () => {
@@ -148,7 +142,7 @@ describe('what a hostile blurb cannot do', () => {
 
   it('carries raw HTML through as text, so it can never become markup', () => {
     const blocks = parseMarkdown('<img src=x onerror=alert(1)>')
-    expect(plain((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
+    expect(plainText((blocks[0] as { children: MarkdownInline[] }).children)).toBe(
       '<img src=x onerror=alert(1)>',
     )
   })

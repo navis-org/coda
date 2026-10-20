@@ -1,4 +1,4 @@
-Fit Model adjusts the passive membrane of a [Compartment Model](#biophys:model) until it reproduces a current-clamp recording from [Load Recording](#biophys:loadRecording). It returns the fitted model, the fitted values with their standard errors, and the recorded and fitted traces side by side.
+Fit Model Passive adjusts the passive membrane of a [Compartment Model](#biophys:model) until it reproduces a current-clamp recording from [Load Recording](#biophys:loadRecording). It returns the fitted model, the fitted values with their standard errors, and the recorded and fitted traces side by side.
 
 Each sweep is simulated with the current that was actually injected into the cell: the recorded command is played into the model's soma sample by sample. The model's voltage at the soma is then compared with the recorded voltage, and the parameters are adjusted by least squares (Levenberg–Marquardt) until the difference stops shrinking.
 
@@ -11,14 +11,21 @@ Each sweep is simulated with the current that was actually injected into the cel
 | Ra          | Ω·cm   | axial resistivity                                                      |
 | E leak      | mV     | reversal potential of the leak, which is the passive resting potential |
 | Area factor | ×      | how much more membrane the cell has than the reconstruction            |
+| Seal        | nS     | the recording electrode's seal: a leak at the soma to 0 mV             |
 
 ```coda-params
-biophys:fit: fitRm, fitCm, fitRa, fitELeak, fitArea
+biophys:fit: fitRm, fitCm, fitRa, fitELeak, fitArea, fitSeal, seal
 ```
 
 An unticked parameter stays at the model's value. The fit only changes the membrane: the compartments, and therefore the morphology, stay the ones the model was built with.
 
 The area factor accounts for membrane the reconstruction misses, such as spines and fine branches. It scales capacitance and leak together, so the model only ever sees Cm × area and area ÷ Rm. That means Cm, Rm and the area factor can't all be fitted at once. The usual approach is to fix Cm at 1 µF/cm² and fit the area factor instead.
+
+### The seal
+
+A whole-cell recording adds a leak of its own: current escapes through the seal between the electrode and the membrane, and the bath it escapes to is at 0 mV. The cell does not have this leak, but the recording does. Left out of the model, the fit explains it with the cell's membrane: `E leak` comes out depolarised and `Rm` low (Gouwens & Wilson 2009).
+
+`Seal (nS)` puts it in, at the soma. It is 0 by default, which leaves it out. Set it if you know your seal conductance, or tick `Fit Seal` to fit it, starting from that value; Günay et al. (2015) fitted 0.2 nS on a *Drosophila* motoneuron. The seal belongs to the electrode, so the fitted `Model` leaves it behind: the model you simulate is the cell without the electrode.
 
 > [!NOTE] A model with channels is fitted without them
 > The fit treats the cell as passive and leaves the model's voltage-gated channels out. The fitted model keeps the channels at their densities, so a fitted area factor gives them more membrane to sit on. The fit describes the membrane where those channels are closed, so fit hyperpolarising or small sweeps.
@@ -49,7 +56,7 @@ After a run, the card says how the fit ended: "Settled after 12 iterations", "St
 
 `Traces` is a long table with `t`, `sweep`, `recorded` and `fitted`. Wire it into a [Line Chart](#out.lineChart) with `Series` set to `sweep` to plot it yourself. `Iterations` has the error and every parameter at each step of the fit.
 
-Wire the fitted `Model` into [Simulate](#biophys:simulate) to run the fitted cell.
+Wire the fitted `Model` into [Simulate Model](#biophys:simulate) to run the fitted cell.
 
 ## Applying the fit
 
@@ -70,4 +77,4 @@ Sweeps whose currents are scaled copies of one another, such as the steps of an 
 biophys:fit: dt, maxIterations
 ```
 
-The fit uses a `dt` of 0.1 ms by default, coarser than Simulate's, because a passive membrane changes slowly. A finer step costs proportionally more time and rarely changes the answer.
+The fit uses a `dt` of 0.1 ms by default, coarser than Simulate Model's, because a passive membrane changes slowly. A finer step costs proportionally more time and rarely changes the answer.

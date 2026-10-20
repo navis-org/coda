@@ -21,7 +21,7 @@ import { solverPart } from './solverInputs'
 import {
   ARBOUR_SCHEMA,
   INPUT_SPIKES_SCHEMA,
-  OUTPUT_SPIKES_SCHEMA,
+  outputSpikesSchema,
   arbourValue,
   firingIndices,
   firingPartners,
@@ -359,7 +359,7 @@ describe('runSimulateJob', () => {
   it('depolarises the soma when a partner fires, and not before', async () => {
     const value = model()
     const result = await runSimulateJob(job(value, { firing: [[0, [10]]] }))
-    const soma = result.traces[0]!
+    const soma = result.runs[0]!.traces[0]!
     const at = (ms: number) => soma[Math.round(ms / 0.1)]!
     expect(at(10)).toBeCloseTo(-60, 6)
     expect(Math.max(...soma) + 60).toBeGreaterThan(0.1)
@@ -436,7 +436,7 @@ describe('runSimulateJob', () => {
       }),
     )
     expect(result.settle?.converged).toBe(true)
-    expect(result.spikes[0]!.length).toBeGreaterThan(0)
+    expect(result.runs[0]!.spikes[0]!.length).toBeGreaterThan(0)
   })
 
   it('starts from a rest it is handed rather than settling again', async () => {
@@ -447,7 +447,7 @@ describe('runSimulateJob', () => {
     const first = await runSimulateJob(job(value, { duration: 5 }))
     const again = await runSimulateJob(job(value, { duration: 5, rest: first.settle }))
     expect(again.settle).toBe(first.settle)
-    expect(Array.from(again.traces[0]!)).toEqual(Array.from(first.traces[0]!))
+    expect(Array.from(again.runs[0]!.traces[0]!)).toEqual(Array.from(first.runs[0]!.traces[0]!))
   })
 
   it('rejects when cancelled', async () => {
@@ -465,7 +465,10 @@ describe('the arbour', () => {
     const result = await runSimulateJob(job(value, { sampleEvery: 0.025, firing: [[0, [10]]] }))
     expect(result.peak).toHaveLength(value.compartments.count)
     // Sampled every step, the soma's trace holds its own peak.
-    expect(result.peak[value.soma.compartment]).toBeCloseTo(Math.max(...result.traces[0]!), 9)
+    expect(result.peak[value.soma.compartment]).toBeCloseTo(
+      Math.max(...result.runs[0]!.traces[0]!),
+      9,
+    )
   })
 
   it('puts each node’s compartment peak on the model’s skeleton, NaN off the modelled piece', async () => {
@@ -505,7 +508,7 @@ describe('the movie', () => {
     // The soma traced at the movie's own frame interval is the movie's soma column.
     const traced = await runSimulateJob({ ...base, sampleEvery: movie.frameMs })
     const soma = value.soma.compartment
-    traced.traces[0]!.forEach((v, f) => {
+    traced.runs[0]!.traces[0]!.forEach((v, f) => {
       expect(movie.frames[f * movie.count + soma]).toBeCloseTo(v, 4)
     })
   })
@@ -584,24 +587,38 @@ describe('the input spikes', () => {
 describe('the tables agree with their schemas', () => {
   it('traces, spikes and partners, with and without the summary', async () => {
     const value = model()
+    const record = Int32Array.of(value.soma.compartment, value.nodeCompartment[7]!)
     const result = await runSimulateJob(
-      job(value, {
-        record: Int32Array.of(value.soma.compartment, value.nodeCompartment[7]!),
-        firing: [[0, [10]]],
-        summary: { onset: 5, window: 20 },
-      }),
+      job(value, { record, firing: [[0, [10]]], summary: { onset: 5, window: 20 } }),
     )
     const labels = ['soma', 'tip']
-    expect(tracesTable(labels, result, { clamps: [], dt: 0.025 }).schema).toEqual(
-      tracesSchema(labels),
-    )
+    expect(
+      tracesTable(labels, result, { clamps: [], dt: 0.025, record }, undefined, false).schema,
+    ).toEqual(tracesSchema(labels))
     // With current injected, a last column in nA: the waveform at each sample, zero outside it.
-    const clamp = { compartment: 0, delay: 10, duration: 5, amplitude: 0.2 }
-    const injected = tracesTable(labels, result, { clamps: [clamp], dt: 0.025 })
+    const clamp = {
+      compartment: value.soma.compartment,
+      delay: 10,
+      duration: 5,
+      amplitude: 0.2,
+    }
+    const injected = tracesTable(
+      labels,
+      result,
+      { clamps: [clamp], dt: 0.025, record },
+      undefined,
+      true,
+    )
     expect(injected.schema).toEqual(tracesSchema(labels, 'injected'))
     // Inference agrees with the run either way a switch went since the last one: the sites from
     // the run it saw, the injected column from the params as they are now.
-    const uninjected = tracesTable(labels, result, { clamps: [], dt: 0.025 }).schema
+    const uninjected = tracesTable(
+      labels,
+      result,
+      { clamps: [], dt: 0.025, record },
+      undefined,
+      false,
+    ).schema
     expect(inferredTracesSchema(uninjected, true)).toEqual(injected.schema)
     expect(inferredTracesSchema(injected.schema, false)).toEqual(uninjected)
     expect(inferredTracesSchema(undefined, false)).toEqual(tracesSchema(['soma']))
@@ -614,14 +631,21 @@ describe('the tables agree with their schemas', () => {
     expect(
       tracesTable(
         [...labels, 'injected'],
-        { ...result, traces: [...result.traces, result.traces[0]!] },
         {
-          clamps: [clamp],
-          dt: 0.025,
+          ...result,
+          runs: [
+            {
+              ...result.runs[0]!,
+              traces: [...result.runs[0]!.traces, result.runs[0]!.traces[0]!],
+            },
+          ],
         },
+        { clamps: [clamp], dt: 0.025, record },
+        undefined,
+        true,
       ).schema.columns.at(-1)?.name,
     ).toBe('injected (2)')
-    expect(outputSpikesTable(labels, result).schema).toEqual(OUTPUT_SPIKES_SCHEMA)
+    expect(outputSpikesTable(labels, result).schema).toEqual(outputSpikesSchema())
     expect(inputSpikesTable(value, [[0, [10]]]).schema).toEqual(INPUT_SPIKES_SCHEMA)
     const plain = partnersTable(value, [0], undefined)
     expect(plain.schema).toEqual(partnersSchema(false))
@@ -642,8 +666,8 @@ describe('unrestedNote', () => {
   stuck[value.soma.compartment] = -25
 
   it('says where a cell stayed away from rest long after its last input', () => {
-    expect(unrestedNote(value, job, atRest, undefined)).toBeUndefined()
-    expect(unrestedNote(value, job, stuck, undefined)).toBe(
+    expect(unrestedNote(value, job, job.clamps, atRest, undefined)).toBeUndefined()
+    expect(unrestedNote(value, job, job.clamps, stuck, undefined)).toBe(
       'The cell has not come back to rest: the soma ends the run at −25 mV, 35 mV above its rest, 89 ms after the last input.',
     )
   })
@@ -651,19 +675,23 @@ describe('unrestedNote', () => {
   it('says a fall below rest as one, and nothing where the model never settled', () => {
     const low = atRest.slice()
     low[value.soma.compartment] = -70
-    expect(unrestedNote(value, job, low, undefined)).toMatch(/at −70 mV, 10 mV below its rest/)
+    expect(unrestedNote(value, job, job.clamps, low, undefined)).toMatch(
+      /at −70 mV, 10 mV below its rest/,
+    )
     const drifting = { state: { v: atRest } as never, time: 2000, converged: false }
-    expect(unrestedNote(value, job, stuck, drifting)).toBeUndefined()
+    expect(unrestedNote(value, job, job.clamps, stuck, drifting)).toBeUndefined()
   })
 
   it('stays quiet while a slow tail could still be one, input or clamp', () => {
-    expect(unrestedNote(value, { ...job, duration: 40 }, stuck, undefined)).toBeUndefined()
+    expect(
+      unrestedNote(value, { ...job, duration: 40 }, job.clamps, stuck, undefined),
+    ).toBeUndefined()
     const clamp = {
       compartment: value.soma.compartment,
       delay: 10,
       duration: 80,
       amplitude: 0.1,
     }
-    expect(unrestedNote(value, { ...job, clamps: [clamp] }, stuck, undefined)).toBeUndefined()
+    expect(unrestedNote(value, job, [clamp], stuck, undefined)).toBeUndefined()
   })
 })

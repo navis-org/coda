@@ -13,7 +13,7 @@ if (!path) throw new Error('Usage: pnpm probe:abf <file.abf>')
 const bytes = readFileSync(path)
 const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
 const t0 = performance.now()
-const rec = readRecording(buffer, path)
+const rec = await readRecording(buffer, path)
 const { summary } = rec
 const channels = summary.channels.map((_, c) =>
   Array.from({ length: summary.sweeps }, (_, s) => Array.from(rec.channel(c, s))),

@@ -24,7 +24,7 @@ afterEach(cleanup)
 /** A model built at area factor 1.5, fitted to Rm 30,000, Cm 1.2, Ra 250, E leak −62, area 3. */
 function fitted() {
   const start = build({ areaFactor: 1.5 })
-  const membrane = { rm: 30_000.4, cm: 1.2, ra: 250, eLeak: -62, area: 3 }
+  const membrane = { rm: 30_000.4, cm: 1.2, ra: 250, eLeak: -62, area: 3, seal: 0 }
   return fittedModel(start, {
     membrane,
     reason: 'converged',

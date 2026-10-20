@@ -6,7 +6,12 @@
 import { describe, expect, it } from 'vitest'
 
 import jaxley from './__fixtures__/jaxley-reference.json'
+import type { ChannelSpec } from './channels'
 import {
+  GUNAY_KF,
+  GUNAY_KS,
+  GUNAY_NAP,
+  GUNAY_NAT,
   HH_NA,
   POSPISCHIL_K,
   POSPISCHIL_NA,
@@ -35,12 +40,18 @@ const JAXLEY: Record<number, readonly number[]> = {
   [25]: [23.039999, 0.0015551555, 0.00292780413, 3.99950647, 2.24000192, 0.0766774863],
 }
 
-/** α and β back out of a compiled gate: x∞ = α/(α+β), and one step gives α+β. */
-function rates(gate: ReturnType<typeof compileChannel>['gates'][number], v: number) {
-  const inf = gate.inf(v)
+type CompiledGate = ReturnType<typeof compileChannel>['gates'][number]
+
+/** A compiled gate's 1/τ at `v`: from x = 0 one exponential-Euler step reaches x∞·(1 − e^{−dt/τ}). */
+function inverseTau(gate: CompiledGate, v: number): number {
   const dt = 1e-4
-  // From x = 0 one exponential-Euler step reaches inf·(1 − e^{−dt(α+β)}).
-  const sum = -Math.log(1 - gate.advance(0, v, dt) / inf) / dt
+  return -Math.log(1 - gate.advance(0, v, dt) / gate.inf(v)) / dt
+}
+
+/** α and β back out of a compiled gate: x∞ = α/(α+β), and 1/τ is α+β. */
+function rates(gate: CompiledGate, v: number) {
+  const inf = gate.inf(v)
+  const sum = inverseTau(gate, v)
   return [inf * sum, (1 - inf) * sum]
 }
 
@@ -184,6 +195,130 @@ describe('shifts by gate role', () => {
     expect(shifted.gates.map((g) => g.shift ?? 0)).toEqual([0, -15])
     // Unshifted, the spec comes back as it was.
     expect(shiftedChannel(HH_NA, {})).toBe(HH_NA)
+  })
+})
+
+describe('the Günay et al. 2015 fly channels', () => {
+  const tauOf = (spec: ChannelSpec, gate: number, v: number) =>
+    1 / inverseTau(compileChannel(spec, 22).gates[gate]!, v)
+
+  /*
+   * Their own NEURON files (ModelDB 152028, `chan-Dm*.hoc`), which this repository does not hold:
+   * each gate's steady state as `KSChan`'s sigmoid `1/(1 + exp(slope·(v − vHalf)))`, and its time
+   * constant as tabulated every 0.1 mV, read here at five voltages. The spec transcribes the paper's
+   * Table 5, so this is the check against something other than the same reading of it. NaT's m
+   * τ alone differs, by 2.4% where it bottoms out (0.127 ms against the table's 0.13 base): the
+   * paper's caption says its NaT time constants differ slightly from the earlier published set.
+   */
+  const THEIRS: readonly {
+    spec: ChannelSpec
+    gate: number
+    slope: number
+    vHalf: number
+    tau?: Readonly<Record<number, number>>
+    within?: number
+  }[] = [
+    {
+      spec: GUNAY_NAT,
+      gate: 0,
+      slope: -0.1121,
+      vHalf: -29.13,
+      tau: { [-100]: 3.5606, [-70]: 3.5062, [-40]: 1.1234, [0]: 0.12875, [40]: 0.127 },
+      within: 0.03,
+    },
+    {
+      spec: GUNAY_NAT,
+      gate: 1,
+      slope: 0.2,
+      vHalf: -47,
+      tau: { [-100]: 1956.6, [-70]: 111.8, [-40]: 6.708, [0]: 0.49914, [40]: 0.36305 },
+    },
+    { spec: GUNAY_NAP, gate: 0, slope: -0.2717, vHalf: -48.77, tau: { [-70]: 1, [0]: 1 } },
+    {
+      spec: GUNAY_KS,
+      gate: 0,
+      slope: -0.0502,
+      vHalf: -12.85,
+      tau: { [-100]: 3.99, [-70]: 3.99, [-40]: 3.99, [0]: 3.9898, [40]: 2.1175 },
+    },
+    {
+      spec: GUNAY_KF,
+      gate: 0,
+      slope: -0.1376,
+      vHalf: -17.55,
+      tau: { [-100]: 4.6, [-70]: 4.5999, [-40]: 4.5937, [0]: 3.8951, [40]: 1.9876 },
+    },
+    {
+      spec: GUNAY_KF,
+      gate: 1,
+      slope: 0.1667,
+      vHalf: -45,
+      // Fast once depolarised, slow to recover near rest.
+      tau: { [-100]: 84.62, [-70]: 34.253, [-40]: 13.672, [0]: 4.7847, [40]: 2.5349 },
+    },
+  ]
+
+  it('opens and moves every gate as the authors’ own NEURON files do', () => {
+    for (const { spec, gate, slope, vHalf, tau, within = 0.005 } of THEIRS) {
+      const g = compileChannel(spec, 22).gates[gate]!
+      for (const v of [-90, -60, -40, -20, 0, 20]) {
+        expect(g.inf(v), `${spec.id} ${gate} x∞ at ${v}`).toBeCloseTo(
+          1 / (1 + Math.exp(slope * (v - vHalf))),
+          3,
+        )
+      }
+      for (const [v, t] of Object.entries(tau ?? {})) {
+        const ratio = tauOf(spec, gate, Number(v)) / t
+        expect(Math.abs(ratio - 1), `${spec.id} ${gate} τ at ${v}`).toBeLessThan(within)
+      }
+    }
+  })
+
+  it('speeds a fitted gate’s τ by its Q10 and leaves its steady state alone', () => {
+    // No Günay channel has a Q10, so every fixture runs φ = 1: this is the only check of where φ goes.
+    const warm: ChannelSpec = { ...GUNAY_KF, id: 'warm', q10: { q10: 3, temperature: 22 } }
+    const at22 = compileChannel(warm, 22).gates[1]!
+    const at32 = compileChannel(warm, 32).gates[1]!
+    expect(at32.inf(-50)).toBe(at22.inf(-50))
+    expect(1 / inverseTau(at32, -50)).toBeCloseTo(1 / inverseTau(at22, -50) / 3, 6)
+  })
+
+  it('shifts activation and inactivation by role, each gate’s whole voltage dependence', () => {
+    expect(shiftedChannel(GUNAY_NAT, { activation: 5 }).gates.map((g) => g.shift ?? 0)).toEqual(
+      [5, 0],
+    )
+    expect(
+      shiftedChannel(GUNAY_KF, { inactivation: -15 }).gates.map((g) => g.shift ?? 0),
+    ).toEqual([0, -15])
+    // Activation only: nothing for an inactivation shift to move.
+    expect(shiftedChannel(GUNAY_KS, { inactivation: -15 })).toBe(GUNAY_KS)
+    expect(shiftedChannel(GUNAY_NAP, { activation: 4 }).gates[0]!.shift).toBe(4)
+    // A steep fitted gate far from both of the rate schemes' probe voltages is still placed by k.
+    const far: ChannelSpec = {
+      id: 'far',
+      eRev: 0,
+      gates: [
+        {
+          power: 1,
+          kinetics: {
+            kind: 'fitted',
+            gate: 'h',
+            vHalf: 80,
+            k: 2,
+            tau: { form: 'constant', tau: 1 },
+          },
+        },
+      ],
+    }
+    expect(shiftedChannel(far, { inactivation: -5 }).gates[0]!.shift).toBe(-5)
+    expect(shiftedChannel(far, { activation: 5 })).toBe(far)
+    // Moved −15 mV, h at −60 is what it was at −45, and so is its time constant.
+    const moved = shiftedChannel(GUNAY_KF, { inactivation: -15 })
+    expect(compileChannel(moved, 22).gates[1]!.inf(-60)).toBeCloseTo(
+      compileChannel(GUNAY_KF, 22).gates[1]!.inf(-45),
+      12,
+    )
+    expect(tauOf(moved, 1, -55)).toBeCloseTo(tauOf(GUNAY_KF, 1, -40), 9)
   })
 })
 

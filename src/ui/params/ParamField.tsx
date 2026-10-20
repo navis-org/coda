@@ -383,8 +383,11 @@ export function NumberField({
       let out = integer ? Math.round(next) : next
       if (min !== undefined) out = Math.max(min, out)
       if (max !== undefined) out = Math.min(max, out)
-      // Avoid 0.30000000000000004 in the field.
-      return integer ? out : Math.round(out * 1e6) / 1e6
+      // Avoid 0.30000000000000004 in the field: twelve significant digits, not a fixed grid, which
+      // would round a channel density of 4e-7 mS/cm² to nothing — and a step's leftover near zero
+      // (0.3 − 3 × 0.1 is −5.6e-17) is zero.
+      if (integer) return out
+      return Math.abs(out) < 1e-12 ? 0 : Number(out.toPrecision(12))
     },
     [integer, min, max],
   )

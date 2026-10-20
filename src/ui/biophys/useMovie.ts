@@ -20,7 +20,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { ClampWaveform } from '../../biophys/solver'
+import type { CurrentClamp } from '../../biophys/solver'
 import { errorMessage } from '../../core/errors'
 import { visibleParams } from '../../core/node'
 import { hashValue } from '../../core/hash'
@@ -28,19 +28,33 @@ import type { ParamValues } from '../../core/node'
 import type { CellModelValue, Value } from '../../core/values'
 import { runWorkerJob } from '../../data/workerJob'
 import type { Movie, SimulateJob } from '../../packs/biophys/simulateJob'
-import { MOVIE_BUDGET_BYTES, movieBasis, runMovieJob } from '../../packs/biophys/simulateJob'
+import {
+  MOVIE_BUDGET_BYTES,
+  MOVIE_SWEEP,
+  movieBasis,
+  runMovieJob,
+  sweepClamps,
+} from '../../packs/biophys/simulateJob'
 import type { RunPlan } from '../../packs/biophys/simulateOps'
-import { injectedColumn, planRun, runInputs } from '../../packs/biophys/simulateOps'
+import {
+  injectedColumn,
+  injectedCompartment,
+  planRun,
+  runInputs,
+} from '../../packs/biophys/simulateOps'
 import { simulateNode } from '../../packs/biophys/simulate'
+import { formatNumber } from '../../style/format'
 import { useGraphStore } from '../../store/graphStore'
 import type { Firing } from './movie'
 
 /**
- * A run's injected current: its waveform, the `dt` its steps are counted in, and the name the
- * Traces output gives its column (`injectedColumn`).
+ * A run's injected current as the Traces output's column has it: the clamps of the replayed sweep,
+ * the first injected compartment (`injectedCompartment`), the `dt` its steps are counted in, and
+ * the column's name (`injectedColumn`).
  */
 export interface Stimulus {
-  readonly clamp: ClampWaveform
+  readonly clamps: readonly CurrentClamp[]
+  readonly compartment: number
   readonly dt: number
   readonly label: string
 }
@@ -63,6 +77,8 @@ export type MovieState =
        * it is the movie's.
        */
       readonly stimulus: Stimulus | undefined
+      /** Which sweep the movie replays, where the run has several: "sweep 1 of 12". */
+      readonly sweep: string | undefined
     }
   | { readonly status: 'refused'; readonly reason: string }
 
@@ -131,6 +147,7 @@ type Plan =
       readonly basis: string
       readonly traces: RunPlan['traces']
       readonly stimulus: Stimulus | undefined
+      readonly sweep: string | undefined
     }
   | { readonly refusal: string }
 
@@ -140,11 +157,12 @@ export interface MovieRequest {
   readonly params: ParamValues
   readonly record: Value | undefined
   readonly spikes: Value | undefined
+  readonly current: Value | undefined
   readonly column: (paramId: string) => string | undefined
 }
 
 export function useMovie(request: MovieRequest): MovieState {
-  const { nodeId, model, params, record, spikes } = request
+  const { nodeId, model, params, record, spikes, current: currentTable } = request
   const run = useGraphStore((s) => s.nodeOutput(nodeId, 'traces'))
   // `ok` to make a movie: a stale card's params are not the run's, and while it runs its output is
   // still the last run's — or a partial one — beside params that are already the next.
@@ -168,15 +186,32 @@ export function useMovie(request: MovieRequest): MovieState {
     if (!model) return undefined
     const { params, column } = latest.current
     try {
-      const { job, labels, traces } = planRun(model, params, runInputs(record, spikes, column))
-      // One waveform at every injected site, so the first; made here, so it keeps its identity.
-      const clamp = job.clamps[0]
-      const stimulus = clamp && { clamp, dt: job.dt, label: injectedColumn(labels) }
-      return { model, job, basis: movieBasis(job), traces, stimulus }
+      const { job, labels, traces, sweeps } = planRun(
+        model,
+        params,
+        runInputs({ record, spikes, current: currentTable }, column, params),
+        { replay: true },
+      )
+      // Of the sweep the movie replays (`MOVIE_SWEEP`); made here, so they keep their identity.
+      const compartment = injectedCompartment(job)
+      const stimulus =
+        compartment === undefined
+          ? undefined
+          : {
+              clamps: sweepClamps(job, MOVIE_SWEEP),
+              compartment,
+              dt: job.dt,
+              label: injectedColumn(labels),
+            }
+      const sweep =
+        sweeps && sweeps.cells.length > 1
+          ? `sweep ${String(sweeps.cells[MOVIE_SWEEP])} of ${formatNumber(sweeps.cells.length)}`
+          : undefined
+      return { model, job, basis: movieBasis(job), traces, stimulus, sweep }
     } catch (error) {
       return { refusal: errorMessage(error) }
     }
-  }, [model, planKey, record, spikes])
+  }, [model, planKey, record, spikes, currentTable])
   const ready = plan && 'basis' in plan ? plan : undefined
   const hit = ready && kept.get(ready.model)?.get(ready.basis)
   // Played now: the last to be evicted, by when it was used rather than when it was made.
@@ -223,7 +258,13 @@ export function useMovie(request: MovieRequest): MovieState {
   }, [plan, current, hit])
 
   if (ready && hit) {
-    return { status: 'ready', ...hit, traces: ready.traces, stimulus: ready.stimulus }
+    return {
+      status: 'ready',
+      ...hit,
+      traces: ready.traces,
+      stimulus: ready.stimulus,
+      sweep: ready.sweep,
+    }
   }
   if (!model || !run)
     return { status: 'waiting', reason: 'Run the simulation to play it back.' }

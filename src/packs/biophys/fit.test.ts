@@ -104,7 +104,7 @@ describe('what is compared', () => {
       skipAfterSteps: 0,
       dt: DT,
     })
-    const r = residualsAt(setup, { ...TRUTH, area: 1 })
+    const r = residualsAt(setup, { ...TRUTH, area: 1, seal: 0 })
     expect(Math.max(...r.map(Math.abs))).toBeLessThan(1e-9)
   })
 
@@ -192,7 +192,7 @@ describe('fitPassive', () => {
   })
 
   it('fits the area factor against a pinned Cm, and refuses to fit it beside Cm and Rm', async () => {
-    const truth = { ...TRUTH, cm: 1, area: 2.2 }
+    const truth = { ...TRUTH, cm: 1, area: 2.2, seal: 0 }
     const sweeps = recorded(protocol([-0.03, -0.015, 0.015, 0.03]), truth, 0.1)
     const start = build({ membrane: { rm: 25_000, cm: 1, ra: 120, eLeak: -60 } })
     const fit = await fitPassive(start, sweeps, {
@@ -213,6 +213,38 @@ describe('fitPassive', () => {
     await expect(
       fitPassive(start, sweeps, { free: ['rm', 'cm', 'area'], skipAfterSteps: 0, dt: DT }),
     ).rejects.toThrow(/cannot all be fitted/)
+  })
+
+  it('fits the electrode’s seal, which E leak absorbs when it is left out, and leaves it off the fitted cell', async () => {
+    const truth = { ...TRUTH, area: 1, seal: 0.5 }
+    const sweeps = recorded(protocol([-0.03, -0.015, 0, 0.015]), truth, 0.05)
+    // A seal keeps the cell linear about a rest it moves towards 0 mV: one simulation still serves
+    // every scaled sweep, scaled about that rest, and the sweep with no command sits there.
+    const start = build({ membrane: TRUTH })
+    const shared = passiveResponses(start, truth, sweeps, DT)
+    const alone = passiveResponses(start, truth, [sweeps[1]!], DT)[0]!
+    expect(Math.max(...shared[1]!.map((v, i) => Math.abs(v - alone[i]!)))).toBeLessThan(1e-9)
+    expect(shared[2]![0]!).toBeGreaterThan(TRUTH.eLeak + 1)
+
+    const from = build({ membrane: { rm: 25_000, cm: 1.1, ra: 180, eLeak: -60 } })
+    const fit = await fitPassive(from, sweeps, {
+      free: ['rm', 'eLeak', 'seal'],
+      seal: 0.2,
+      skipAfterSteps: 0,
+      dt: DT,
+    })
+    expect(fit.reason).toBe('converged')
+    for (const p of fit.parameters.filter((q) => q.free)) {
+      expect(Math.abs(p.fitted - truth[p.key]), p.key).toBeLessThan(4 * p.standardError!)
+    }
+    // Without it, the seal's pull towards 0 mV is read as the cell's own: E leak depolarised.
+    const sealless = await fitPassive(from, sweeps, {
+      free: ['rm', 'eLeak'],
+      skipAfterSteps: 0,
+      dt: DT,
+    })
+    expect(sealless.membrane.eLeak).toBeGreaterThan(TRUTH.eLeak + 1)
+    expect(fittedModel(from, fit).membrane).not.toHaveProperty('seal')
   })
 
   it('fits the passive copy of a model with channels', async () => {

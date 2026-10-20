@@ -83,7 +83,7 @@ export const combineTracesNode = packNode({
     'Put traces from several tables on one time axis, interpolating each onto it, so a recording and a simulation plot together.',
   guide:
     'Lines up tables of traces sampled at different times, such as a recording from Load ' +
-    'Recording and the Traces from Simulate, by interpolating each onto one time grid. Shift ' +
+    'Recording and the Traces from Simulate Model, by interpolating each onto one time grid. Shift ' +
     'an input to align its stimulus with another’s; a recording’s sweeps become a column each. ' +
     'Outside an input’s own time range its columns are empty rather than extrapolated.',
   cost: 'cheap',

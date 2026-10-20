@@ -326,10 +326,11 @@ export default defineConfig({
   worker: { format: 'es' },
 
   /*
-   * The editor, and six documents beside it. `overview.html` is the front
+   * The editor, and seven documents beside it. `overview.html` is the front
    * door, `tutorial.html` the scroll-through introduction, `nodes.html` the
    * node guide, `datasets.html` the dataset guide, `mcp.html` the MCP
-   * server's page and `changelog.html` what changed — every one of them
+   * server's page, `changelog.html` what changed and `biophysics.html` the
+   * Biophysics pack's guide — every one of them
    * plain TypeScript and CSS, importing nothing from `src/ui` but
    * `theme.css`, so they share the editor's palette without pulling React,
    * sigma or three into documents that draw none of them. Naming each here is
@@ -347,6 +348,7 @@ export default defineConfig({
         datasets: fileURLToPath(new URL('./datasets.html', import.meta.url)),
         mcp: fileURLToPath(new URL('./mcp.html', import.meta.url)),
         changelog: fileURLToPath(new URL('./changelog.html', import.meta.url)),
+        biophysics: fileURLToPath(new URL('./biophysics.html', import.meta.url)),
       },
     },
   },

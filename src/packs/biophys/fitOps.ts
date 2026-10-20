@@ -11,30 +11,11 @@ import { getColumn, makeTable } from '../../core/values'
 import type { MembraneKey, PassiveFitResult, RecordedSweep } from './fit'
 import { MEMBRANE_PARAMETERS } from './fit'
 import { rescaledAxial } from './passive'
+import { rowsBySweep } from './resample'
 import { onSameCable } from './build'
-import { formatNumber, plural } from '../../style/format'
+import { agree, formatNumber, formatSignificant, plural } from '../../style/format'
 import { CUSTOM } from './presets'
 import { TIME_COLUMN } from './simulateOps'
-
-/**
- * A unit's factor into the solver's (mV, nA, ms); undefined for one this does not know. Spelled as
- * an ABF file and Coda's own tables spell them.
- */
-const SCALES = {
-  voltage: { mV: 1, V: 1000, µV: 1e-3, uV: 1e-3 },
-  current: { nA: 1, pA: 1e-3, fA: 1e-6, µA: 1e3, uA: 1e3, mA: 1e6, A: 1e9 },
-  time: { ms: 1, s: 1000, µs: 1e-3, us: 1e-3 },
-} as const satisfies Record<string, Record<string, number>>
-
-export type Quantity = keyof typeof SCALES
-
-export function unitScale(quantity: Quantity, unit: string | undefined): number | undefined {
-  if (unit === undefined) return undefined
-  const scales: Record<string, number> = SCALES[quantity]
-  const key = unit.trim()
-  // Own keys only: a unit spelled `constructor` is no unit, not Object's constructor.
-  return Object.hasOwn(scales, key) ? scales[key] : undefined
-}
 
 export interface RecordingColumns {
   readonly time: string
@@ -56,18 +37,11 @@ export function recordedSweeps(table: TableValue, cols: RecordingColumns): Recor
   const v = getColumn(table, cols.voltage)
   const c = getColumn(table, cols.command)
   const s = cols.sweep === undefined ? undefined : getColumn(table, cols.sweep)
-  const rows = new Map<CellValue, number[]>()
-  for (let i = 0; i < t.length; i++) {
-    if (typeof t[i] !== 'number' || !Number.isFinite(t[i])) continue
-    const key = s ? s[i]! : 1
-    let list = rows.get(key)
-    if (!list) rows.set(key, (list = []))
-    list.push(i)
-  }
   const number = (x: CellValue, otherwise: number) =>
     typeof x === 'number' && Number.isFinite(x) ? x : otherwise
-  return [...rows].map(([sweep, list]) => {
-    list.sort((a, b) => (t[a] as number) - (t[b] as number))
+  return rowsBySweep(t, s).map(({ cell, rows: list }) => {
+    // No sweep column is one sweep, called 1.
+    const sweep = s ? cell : 1
     const times = Float64Array.from(list, (i) => (t[i] as number) * cols.scale.time)
     const step =
       times.length > 1 ? (times[times.length - 1]! - times[0]!) / (times.length - 1) : 1
@@ -75,7 +49,7 @@ export function recordedSweeps(table: TableValue, cols: RecordingColumns): Recor
       if (Math.abs(times[k]! - times[k - 1]! - step) > 1e-3 * step) {
         throw new Error(
           `Sweep ${String(sweep)}'s times are not evenly spaced (near ${times[k - 1]!.toFixed(3)} ms). ` +
-            'Fit Model replays the command sample by sample, so it needs a recording as it was sampled.',
+            'Fit Model Passive replays the command sample by sample, so it needs a recording as it was sampled.',
         )
       }
     }
@@ -103,7 +77,8 @@ export type FitOutcome = Pick<
  * Simulate places record points on it as on that one.
  */
 export function fittedModel(value: CellModelValue, outcome: FitOutcome): CellModelValue {
-  const { area: areaFactor, ...membrane } = outcome.membrane
+  // The seal is the electrode's: the fitted cell is the one without it.
+  const { area: areaFactor, seal: _seal, ...membrane } = outcome.membrane
   const area = areaFactor / (value.areaFactor ?? 1)
   return onSameCable(value, {
     ...value,
@@ -240,6 +215,31 @@ function recutShare(parameters: PassiveFitResult['parameters']): number {
 const LOOSE_SHARE = 0.5
 /** A correlation past which two free parameters say they were traded against each other. */
 const TRADED = 0.95
+
+/** How far the fitted area factor must move from the model's before its channels are said to follow. */
+const AREA_MOVED = 0.01
+
+/**
+ * What a fitted area factor does to a model's channels, or undefined where it did nothing: their
+ * densities are kept (`fittedModel`), so their total conductance follows the membrane. Not that
+ * they were left out of the fit — the node's name says that — and nothing at all where the factor
+ * was held or settled where it started, which is when there is nothing to know.
+ */
+export function channelAreaNote(
+  channels: number,
+  result: PassiveFitResult,
+): string | undefined {
+  const area = result.parameters.find((p) => p.key === 'area')
+  if (channels === 0 || !area) return undefined
+  const ratio = area.fitted / area.start
+  if (Math.abs(ratio - 1) < AREA_MOVED) return undefined
+  return (
+    `The model’s ${plural(channels, 'channel')} ${agree(channels, 'keeps', 'keep')} ` +
+    `${agree(channels, 'its density', 'their densities')}, so at the fitted area factor ` +
+    `(${formatSignificant(area.fitted, 3)}, from ${formatSignificant(area.start, 3)}) ` +
+    `${agree(channels, 'it carries', 'they carry')} ${formatSignificant(ratio, 3)}× the conductance.`
+  )
+}
 
 /**
  * What a reader should know about a fit before trusting it, one sentence each: a parameter on its

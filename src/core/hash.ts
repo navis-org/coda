@@ -49,7 +49,15 @@ export function stableStringify(value: unknown): string {
   if (cached !== undefined) return cached
 
   let out: string
-  if (Array.isArray(value)) {
+  if (ArrayBuffer.isView(value)) {
+    /*
+     * A typed array is stood in for by a digest of its bytes, its type named so two widths of the
+     * same numbers differ. Otherwise it fell into the object branch: every index a string key,
+     * sorted, then each element stringified — seconds and tens of megabytes for a held current of
+     * 100,000 steps per sweep, which Simulate Model's movie basis hashes on the page.
+     */
+    out = `[@${value.constructor.name}:${value.byteLength}:${hashBytes([value])}]`
+  } else if (Array.isArray(value)) {
     out = `[${value.map(stableStringify).join(',')}]`
     if (value.length > DIGEST_ABOVE) out = `[#${value.length}:${hashString(out)}]`
   } else {

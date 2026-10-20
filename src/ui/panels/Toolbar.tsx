@@ -47,6 +47,7 @@ import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
 import { PluginsDialog } from './PluginsDialog'
 import { useOfferedForNewWork } from '../packSwitches'
+import { packGuideUrl, useOfferedGuides } from '../packGuides'
 import { HiddenDatasetsNote } from './HiddenDatasetsNote'
 import type { TourAnchor } from '../tour/anchors'
 import { TOURS, startTour } from '../tour/tourState'
@@ -77,6 +78,7 @@ export function Toolbar() {
   const refreshLibrary = useGraphStore((s) => s.refreshLibrary)
   const loadStarter = useGraphStore((s) => s.loadStarter)
   const runAll = useGraphStore((s) => s.runAll)
+  const guides = useOfferedGuides()
   const cancelRun = useGraphStore((s) => s.cancelRun)
   const openStartPage = useGraphStore((s) => s.openStartPage)
   const openWhatsNew = useGraphStore((s) => s.openWhatsNew)
@@ -540,6 +542,23 @@ export function Toolbar() {
                 <strong>Dataset Guide</strong>
                 <span>Which connectome, and what to cite</span>
               </a>
+              {/*
+               * A plugin's own guide, one row per plugin that has one and is switched on: an
+               * overview and a worked workflow for a field the node guide only lists the parts of.
+               */}
+              {guides.map((pack) => (
+                <a
+                  key={pack.id}
+                  className="dropdown__item"
+                  href={packGuideUrl(pack)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  onClick={close}
+                >
+                  <strong>{pack.guide.title}</strong>
+                  <span>The {pack.label} plugin, start to finish</span>
+                </a>
+              ))}
               {/*
                * Last, and the only row here that is not about using this window: it is how to
                * get a workflow built somewhere else and opened here. A reader who wants it

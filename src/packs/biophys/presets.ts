@@ -67,6 +67,22 @@ export const MEMBRANE_PRESETS: readonly MembranePreset[] = [
     cm: 1,
     eLeak: UNSTATED_E_LEAK,
   },
+  /*
+   * Gruntman, Romani & Reiser 2018: a passive T4 fitted to its responses to moving bars (ModelDB
+   * 239435, `parameters.dat` and `moving_PD_start.hoc`). Rm and Ra are fitted, E leak is their
+   * `Vleak`, and Cm is NEURON's default — their code sets none, so 1 µF/cm² is what their model
+   * ran. Rm is five times the next preset's: a T4 is a small, very compact cell.
+   */
+  {
+    id: 'gruntman-t4',
+    label: 'Fly T4 (Gruntman et al.)',
+    source:
+      'Gruntman, Romani & Reiser 2018 (a passive T4 fitted to responses to moving bars; ModelDB 239435). Cm is NEURON’s default, their model setting none',
+    rm: 100_000,
+    ra: 100.07,
+    cm: 1,
+    eLeak: -65,
+  },
 ]
 
 /** The preset that means "the four numbers on the card", and what it is called. */

@@ -1,7 +1,7 @@
-# The six published pages
+# The published pages
 
-The overview, tutorial, node guide, dataset guide, the MCP page and the changelog — extra vite
-entries that ship beside the app.
+The overview, tutorial, node guide, dataset guide, the MCP page, the changelog and the pack guides —
+extra vite entries that ship beside the app.
 
 ## The overview page
 
@@ -846,4 +846,51 @@ disk with alt text, every demo link naming a registered node *with its plan surv
 (`parseShareFragment` and `demoGraph` both drop a bad plan without a word, so a typo would open
 *some* workflow), and every capture naming nodes, params and store actions that exist. The
 timeline's geometry is browser-only, as for the other pages.
+
+## Pack guides
+
+A pack can have a guide of its own: an overview of its field and a worked workflow, for a reader
+the node guide only lists the parts to. The first is `biophysics.html`. **Generic over packs**: the
+page's two slot markers name the pack (`<!--@pack-guide-head:<pack>-->` in the masthead,
+`<!--@pack-guide:<pack>-->` in `main`), `vite/renderedPages.ts` fills any such marker by pattern, and
+`src/packguide/render.ts` finds `src/packs/<pack>/guide/guide.md` by glob. So the next pack's guide is
+its Markdown, its HTML page carrying those markers, `PackDefinition.guide` (page and title), its
+figures in `public/guides/<pack>/` with their shots in `src/packguide/shots.ts`, and the page in
+`vite.config.ts`' inputs, `vite/seo.ts` and `knip.jsonc` — all checked by
+`src/packguide/render.test.ts`, and no edit to the renderer.
+
+**Markdown, not a table of TypeScript prose**, because a guide is a long read written in one voice,
+and the help's parser (`core/markdown.ts`, extended) already reads it — so the renderer is a dozen
+lines of AST to HTML, at build time like the dataset guide. What the guide's Markdown adds:
+`> [!DETAIL] Title`, a box for the specialist (a fourth callout tone, so the help overlay draws it
+too), framed and always open, so a newcomer can see where to skip; `[text](#pack:type)` to the node
+guide; `[text](#!demo://type)` as an Open button into the app; `![caption](file.webp)` from
+`public/guides/<pack>/`.
+
+**Diagrams are drawn, screenshots captured.** A figure whose file is an `.svg` is inlined at build
+time, so it draws in the page's colours (`currentColor`, the theme's tokens) in either theme, where
+an `<img>` could not; a screenshot is a link to itself, which the page's script opens full-screen.
+The Biophysics diagrams are written by `pnpm guide:diagrams` (`scripts/guide-diagrams.ts`), their
+curves computed — the spike by the solver, the fading by the cable equation — rather than sketched.
+
+**Three ways in**: the `?` menu's Documentation lists the guide of every pack that is *offered*
+(`useOfferedGuides`, so a switched-off plugin's guide is not advertised), a pack node's help header
+links its pack's guide (`guidedPackOf`), and the Plugins row links it. That row is a `<label>`; a
+link inside one does not flip its switch (HTML's activation rule for interactive content), and the
+click is stopped as well. One URL helper, `ui/packGuides.ts`.
+
+**Figures come from `pnpm guide:shots`** (`scripts/guide-shots.mjs`, needs `pnpm dev --port 5183`),
+the changelog script's construction, from `src/packguide/shots.ts` — one table per pack, held to
+the figures its guide shows. A canvas shot is cropped to the cards, the Workflows panel and canvas
+tools hidden. An example on a published dataset names its `signIn` (the neuPrint token from
+`NEUPRINT_APPLICATION_CREDENTIALS`, reads only). Two findings from taking the Biophysics ones: the
+searched `biophys:simulate` demo opened on an empty Find Neurons — no neurons by design — so it is
+curated now (`wizard/curated.ts`: hemibrain DA1 PN `754534424`, named by Input IDs because its
+painted AIS and axon are anchored to its skeleton, with channel densities swept in a browser until
+the axon fired and came back to rest), which fixed the node guide's, the help's and
+the changelog's link along with the guide's; and Playback captured at 0 ms is a dark neuron, so a
+shot can set a slider (`range`, by its accessible name). A step-by-step guide pictures its workflow
+as each step has built it: a shot `keep`s only the named cards of the finished example, so one
+curated workflow serves every step; `open` pictures a dialog (`switchOn` first, for a plugin's row),
+and a crop scrolls its element into view, a dialog's row being below its fold.
 
