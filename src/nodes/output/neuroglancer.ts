@@ -86,7 +86,7 @@ import { colorParams, readColorSpec } from '../lib/encodingParams'
  * else's*: a link too long for a browser or a deployment fails visibly, at the far end, and it
  * is not Coda's to prevent on a number nobody has measured against every neuroglancer in use.
  */
-const SEGMENTS_WARN = 10000
+export const SEGMENTS_WARN = 10000
 
 /** Neuroglancer renders on black, so the dark palette is the right one whatever Coda's theme is. */
 const VIEWER_MODE = 'dark' as const

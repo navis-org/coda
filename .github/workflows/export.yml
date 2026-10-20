@@ -82,6 +82,7 @@ jobs:
             any::igraph
             any::nat
             github::natverse/neuprintr
+            github::schlegelp/nglscenes-r
       - run: Rscript scripts/check-export.R --strict
 
       # The R half of the run-what-was-generated pass. `check-export.R` resolves function names

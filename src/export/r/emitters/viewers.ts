@@ -12,7 +12,8 @@ import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import { CHART_INK } from '../../../style/colors'
-import { rCol as col, rStr, rVector } from '../r'
+import { DEFAULT_NEUROGLANCER_URL } from '../../../data/neuroglancer/scene'
+import { rCol as col, rLongVector, rStr, rVector } from '../r'
 import { hclustMethod } from './analysis'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
@@ -26,12 +27,13 @@ import type {
   HeatmapSelectionStep,
 } from '../../plans/heatmap'
 import { heatmapExportPlan } from '../../plans/heatmap'
-import type { LineChartPlan, PickedLabels } from '../../plans/viewers'
+import type { LineChartPlan, NeuroglancerColors, PickedLabels } from '../../plans/viewers'
 import { Y2_TAG } from '../../../nodes/lib/lineChart'
 import {
-  NEUROGLANCER_REFUSAL,
   barChartPlan,
   lineChartPlan,
+  neuroglancerPlan,
+  EDITS_NOTE,
   distributionPlan,
   flowChartPlan,
   rankPlan,
@@ -1337,8 +1339,156 @@ registerEmitter('out.download', (ctx) => {
   return lines
 })
 
-// Refused whatever it is set to — `NEUROGLANCER_REFUSAL` says why.
-registerEmitter('out.neuroglancer', (ctx) => ctx.todo(NEUROGLANCER_REFUSAL))
+/**
+ * The Python emitter's chunk, one language over: the scene neuPrint publishes, fetched live with
+ * the connection the document already has and read by nglscenes-r, pointed at the neurons by
+ * `neuroglancerHelpers.ts` and written out as a link. neuPrint only — a CAVE graph is refused before this runs, R having no
+ * CAVE client.
+ */
+registerEmitter('out.neuroglancer', (ctx) => {
+  const conn = ctx.wired('dataset')
+  const neurons = ctx.input('neurons')
+  const plan = neuroglancerPlan(ctx)
+  const name = ctx.name
+  const url = ctx.output('url')
+  const selected = ctx.output('selected')
+  const shown = `${name}_shown`
+
+  ctx.library('dplyr')
+  ctx.library('httr')
+  ctx.library('nglscenes')
+  ctx.helper('coda_shown_segments')
+  ctx.helper('coda_neuroglancer_scene')
+  ctx.helper('coda_neuroglancer_url')
+
+  const { added, removed, hidden } = plan
+  const ids = (list: readonly string[]) => rLongVector(list).join('\n')
+  const lines = [
+    `# The scene neuPrint publishes for this dataset, as the card fetches it.`,
+    `.response <- httr::GET(`,
+    `  paste0(sub("/+$", "", ${conn}$server), "/api/npexplorer/nglayers/", ${conn}$dataset, ".json"),`,
+    `  ${conn}$config`,
+    `)`,
+    `httr::stop_for_status(.response)`,
+    `${name}_published <- nglscenes::ngs_from_string(httr::content(.response, as = "text", encoding = "UTF-8"))`,
+    '',
+    ...(added.length > 0 || removed.length > 0 || hidden.length > 0
+      ? ctx.note(EDITS_NOTE)
+      : []),
+    `${name}_added <- ${ids(added)}`,
+    `${name}_removed <- ${ids(removed)}`,
+    ...(plan.keepHidden ? [`${name}_hidden <- ${ids(hidden)}`] : []),
+    `${shown} <- coda_shown_segments(${neurons ? `${neurons}$neuronId` : 'character(0)'}, ${name}_added, ${name}_removed)`,
+    `if (length(${shown}) > ${plan.limit}) {`,
+    `  message(length(${shown}), " neurons is more than ${plan.limit}. Neuroglancer draws every one, ",`,
+    `          "and some browsers cut off a link this long.")`,
+    `}`,
+  ]
+
+  const colorLines: string[] = []
+  const colorArgs = neuroglancerColorLinesR(ctx, plan.colors, neurons, colorLines)
+  if (colorLines.length > 0) lines.push('', ...colorLines)
+  for (const note of plan.notes) lines.push(...ctx.note(note))
+
+  const args = [
+    `${name}_published`,
+    `${conn}$dataset`,
+    shown,
+    ...colorArgs,
+    ...(plan.keepHidden ? [`hidden = ${name}_hidden`] : []),
+    `layout = ${rStr(plan.layout)}`,
+    `layers = ${rStr(plan.layers)}`,
+    `show_slices = ${plan.showSlices ? 'TRUE' : 'FALSE'}`,
+  ]
+  lines.push(
+    '',
+    `${name}_scene <- coda_neuroglancer_scene(`,
+    ...args.map((arg, i) => `  ${arg}${i < args.length - 1 ? ',' : ''}`),
+    `)`,
+    `${url} <- coda_neuroglancer_url(${name}_scene, ${rStr(DEFAULT_NEUROGLANCER_URL)})`,
+    `cat(${url}, "\\n")`,
+    '',
+    neurons
+      ? `${selected} <- ${neurons}[${neurons}$neuronId %in% ${shown}, , drop = FALSE]`
+      : `${selected} <- tibble(neuronId = character(0))`,
+  )
+  if (added.length > 0) {
+    // Only the viewer adds a neuron the input does not have, and its additions are known now.
+    ctx.helper('coda_neurons')
+    lines.push(
+      `.new <- setdiff(${shown}, ${selected}$neuronId)`,
+      `if (length(.new) > 0) {`,
+      `  .found <- neuprint_get_meta(.new, conn = ${conn}) |> coda_neurons()`,
+      `  .bare <- setdiff(.new, .found$neuronId)`,
+      `  if (length(.bare) > 0) {`,
+      `    message(length(.bare), " neurons added in the viewer are not in the dataset, so they have only an id.")`,
+      `  }`,
+      ...(neurons
+        ? [`  .found <- .found[, intersect(names(${selected}), names(.found)), drop = FALSE]`]
+        : []),
+      `  ${selected} <- bind_rows(${selected}, .found, tibble(neuronId = .bare))`,
+      `}`,
+    )
+  }
+  if (plan.keepHidden) {
+    lines.push(
+      `# Hidden neurons stay in Selected here, with visible = FALSE.`,
+      `${selected}$visible <- !(${selected}$neuronId %in% ${name}_hidden)`,
+    )
+  }
+  return lines
+})
+
+/** The colour lines, written into `lines`, and the arguments they hand the scene helper. */
+function neuroglancerColorLinesR(
+  ctx: Parameters<Emitter>[0],
+  colors: NeuroglancerColors,
+  neurons: string | undefined,
+  lines: string[],
+): string[] {
+  switch (colors.kind) {
+    case 'none':
+      return []
+    case 'constant':
+      return [`default_color = ${rStr(colors.color)}`]
+    case 'literal':
+    case 'categorical': {
+      // The plan only hands back a data-driven mode with the neurons wired.
+      const frame = neurons!
+      const colorsVar = `${ctx.name}_colors`
+      ctx.helper('coda_segment_colors')
+      if (colors.kind === 'literal') {
+        ctx.helper('coda_literal_colors')
+        lines.push(
+          `${colorsVar} <- coda_segment_colors(`,
+          `  ${frame}$neuronId,`,
+          `  coda_literal_colors(${frame}[[${rStr(colors.column)}]], ${rStr(colors.fallback)})`,
+          `)`,
+        )
+      } else {
+        ctx.helper('coda_category_colors')
+        const overrides = Object.entries(colors.overrides)
+        lines.push(
+          `# Coda's palette, in the order the commonest value takes it.`,
+          `${ctx.name}_palette <- ${rVector(colors.palette)}`,
+          `${colorsVar} <- coda_segment_colors(`,
+          `  ${frame}$neuronId,`,
+          `  coda_category_colors(`,
+          `    ${frame}[[${rStr(colors.column)}]],`,
+          `    ${ctx.name}_palette${overrides.length > 0 ? ',' : ''}`,
+          ...(overrides.length > 0
+            ? [
+                `    c(${overrides.map(([label, color]) => `${rStr(label)} = ${rStr(color)}`).join(', ')})`,
+              ]
+            : []),
+          `  )`,
+          `)`,
+        )
+      }
+      return [`colors = ${colorsVar}`]
+    }
+  }
+}
 
 // A note rather than a TODO — see the Python emitter, which records why at length: the card is
 // prose with no outputs, and it is on every published dataset node by default.

@@ -405,8 +405,9 @@ function setupCell(modules: Map<PyModule, Set<string>>): Cell {
 
   const pip = entries.map(([m]) => MODULES[m].pip).filter((p): p is string => !!p)
   const lines: string[] = []
-  // A spec with extras is quoted, or zsh reads its brackets as a glob and refuses the paste.
-  const shellQuoted = (name: string) => (/[[\]]/.test(name) ? `'${name}'` : name)
+  // A spec with extras or a version is quoted, or zsh reads its brackets as a glob and a shell
+  // reads `>` as a redirect, which installs the latest release into a file called `=0.7`.
+  const shellQuoted = (name: string) => (/[[\]<>=]/.test(name) ? `'${name}'` : name)
   if (pip.length > 0) {
     lines.push(`# pip install ${[...new Set(pip)].sort().map(shellQuoted).join(' ')}`, '')
   }

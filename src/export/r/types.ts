@@ -45,6 +45,9 @@ export type RPackage =
   | 'Matrix'
   | 'uwot'
   | 'nabor'
+  | 'httr'
+  | 'stringi'
+  | 'nglscenes'
 
 export interface PackageSpec {
   /** Where it comes from, for the install comment. CRAN unless stated. */
@@ -92,6 +95,20 @@ export const PACKAGES: Record<RPackage, PackageSpec> = {
    * nearest point is found rather than on the answer alone.
    */
   nabor: {},
+  /*
+   * The Neuroglancer node: `httr` asks neuPrint for the scene it publishes, with the connection's
+   * own config, and `stringi` breaks a categorical tie in ICU's alphabetical order, which is the
+   * browser's — base R's `order()` collates by whatever locale the session happens to be in. Both
+   * arrive with neuprintr, which imports `httr` and `stringr` (built on `stringi`).
+   */
+  httr: {},
+  stringi: {},
+  /*
+   * The scene itself: nglscenes-r reads it losslessly and writes it back exactly — 18-digit ids
+   * verbatim, doubles in the shortest form that reads back the same, a one-element list still an
+   * array — which jsonlite's defaults do not. The R port of the Python package the notebook uses.
+   */
+  nglscenes: { github: 'schlegelp/nglscenes-r' },
 }
 
 export interface EmitContext<P extends ParamValues = ParamValues> {

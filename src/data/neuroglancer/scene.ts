@@ -402,7 +402,7 @@ export type ViewerKind = 'spelunker' | 'seunglab'
  * `ngl.flywire.ai` is the entry that matters — it is `flywire_fafb_public`'s published
  * `viewer_site`, so it is what a FlyWire Neuroglancer node opens with nothing configured.
  */
-const SEUNGLAB_HOSTS: ReadonlySet<string> = new Set([
+export const SEUNGLAB_HOSTS: ReadonlySet<string> = new Set([
   'ngl.flywire.ai',
   'neuroglancer.neuvue.io',
   'neuroglancer.bossdb.io',

@@ -7,6 +7,7 @@
  */
 
 import './helpers'
+import './neuroglancerHelpers'
 import './emitters/analysis'
 import './emitters/connectivity'
 import './emitters/googleSheet'

@@ -47,11 +47,13 @@ export type Cell = MarkdownCell | CodeCell
 export type PyModule =
   | 'os'
   | 're'
+  | 'unicodedata'
   | 'copy'
   | 'pandas'
   | 'numpy'
   | 'neuprint'
   | 'caveclient'
+  | 'nglscenes'
   | 'seaserpent'
   | 'navis'
   | 'navisNeuprint'
@@ -88,6 +90,7 @@ export interface ModuleSpec {
 export const MODULES: Record<PyModule, ModuleSpec> = {
   os: { statement: 'import os' },
   re: { statement: 'import re' },
+  unicodedata: { statement: 'import unicodedata' },
   copy: { statement: 'import copy' },
   pandas: { statement: 'import pandas as pd', pip: 'pandas' },
   numpy: { statement: 'import numpy as np', pip: 'numpy' },
@@ -157,6 +160,13 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * is why no dataset cell here has a `token=` argument, unlike the neuPrint one.
    */
   caveclient: { from: 'caveclient', pip: 'caveclient' },
+  /*
+   * Neuroglancer scenes, for the Neuroglancer node: parse the scene a dataset publishes, edit it,
+   * write it out for either viewer flavour. Pinned at 0.7, the first release that reads a scene
+   * back unchanged — earlier ones fill in layer defaults (`selectedAlpha` among them, a visible
+   * change) and rewrite a Seung-lab graphene layer into the other flavour on parse.
+   */
+  nglscenes: { from: 'nglscenes', pip: 'nglscenes>=0.7' },
   /*
    * SeaTable, through `sea-serpent` — which is the distribution name and `seaserpent` the module,
    * exactly the mismatch `neuprint-python`/`neuprint` has and the reason `MODULES` names both.

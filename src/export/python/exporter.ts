@@ -10,6 +10,7 @@
 import './helpers'
 import './caveHelpers'
 import './customHelpers'
+import './neuroglancerHelpers'
 import './emitters/analysis'
 import './emitters/cave'
 import './emitters/connectivity'

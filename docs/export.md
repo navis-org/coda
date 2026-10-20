@@ -728,8 +728,9 @@ neuPrint, and live the moment a CAVE selection could be exported. It answers exa
 and `isin(['1001'])` against an `i64` column matches nothing at all.
 
 Still not written, and each declines with a TODO naming the backend rather than emitting neuPrint
-code: **Connectivity, Adjacency, Skeletons, Meshes, Synapses, Neuron Profile, Dataset Summary, ROI Viewer,
-Neuroglancer**. The table ops downstream are backend-agnostic and already work.
+code: **Connectivity, Adjacency, Skeletons, Meshes, Synapses, Neuron Profile, Dataset Summary, ROI
+Viewer**. The table ops downstream are backend-agnostic and already work. Neuroglancer left this list
+when it was written for both: see *The Neuroglancer node* below.
 
 #### SeaTable, through sea-serpent
 
@@ -958,6 +959,71 @@ not forty onto forty; `roiInfo` nests, so regions are filtered to `fetch_primary
 summing or the totals roughly double; and a null type sorts **last** on a tie, matching
 `collate`, which `na_position="last"` reproduces.
 
+### The Neuroglancer node
+
+It used to be refused in both languages: its output is a URL built by editing the scene the
+dataset publishes, and that scene is a fetch. Now both documents **make the fetch** — Python with
+the neuprint-python client's own `session`, R with `httr` and the connection's `config` — because
+the scene is a few kilobytes and a copy embedded at export would freeze a dataset's curated layers
+on the day of export. A CAVE datastack publishes no scene, so the Python document builds one from
+`get_datastack_info()` exactly as `caveScene` does. What no fetch can recover is the neurons
+somebody double-clicked in or out of the card's viewer, so those are written as literal lists
+above the call, where a reader can see them and empty them.
+
+**Python is built on nglscenes 0.7, and the version is the finding.** 0.6.0 was measured against
+the four published neuPrint scenes first and passed 10 of 20 checks: a parsed layer had the
+constructor defaults merged in (`selectedAlpha: 0.14` among them, against neuroglancer's 0.5, so a
+visible change), a Seung-lab graphene layer was rewritten into the other flavour on parse, a
+graphene layer with an object source crashed, a `new` layer aborted the whole parse, and a page
+base came out as `…/neuroglancer.html/#!`. Those were fixed upstream and released as 0.7.0, which
+passes all of them, and the `pip` line pins it. nglscenes does the scene work — parsing, writing
+segments and colours, the two viewer flavours, the URL. `python/neuroglancerHelpers.ts` carries only
+Coda's rules, each mirroring one function: which layer the neurons go in (`buildScene`), the
+edits (`applySelectionEdits`), the colours (`resolveColor`), the bounding boxes
+(`layerForViewer`). R does the same on nglscenes-r, the package's R port (`r/neuroglancerHelpers.ts`).
+It was hand-written over jsonlite's nested lists at first, and the port replaced that half once it
+was measured: it reads each of the four published neuPrint scenes and writes it back unchanged, and
+the R helpers rebuilt on it matched `buildScene` in 16 of 16 cases, as before. Like neuprintr it
+installs from GitHub.
+
+**Three traps, two of them found only by running the cells against the canvas.** The second and
+third belonged to the hand-written R half, and nglscenes-r now handles both. They are kept here
+because they are what a fallback to bare jsonlite would run into again.
+
+- **A categorical tie is broken by the browser's collation.** `resolveColor` sorts tied labels
+  with `localeCompare`, which ignores case and accents until nothing else differs and puts
+  punctuation first, so Python's code-point order coloured `lc10` after `Mi1` where the card has it
+  before. That is every selection in which each type appears once, which is the common case. The
+  Python key reproduces the browser's order for ASCII punctuation, digits, letters and accents,
+  checked against Node's `localeCompare` on forty labels built to disagree. R uses ICU itself,
+  through stringi with `locale = "en"`, which matched outright. Base R's `order()` also matched, but
+  only in this session's locale.
+- **jsonlite rounds to 15 significant digits** by default, which changed the published camera on
+  three of the four scenes (`91364.04452716278` back as `91364.0445271628`). `digits = I(17)` is
+  exact on all four, at the cost of `8e-09` being written `8.0000000000000005e-09`. That is the same
+  number, spelled longer.
+- **An R segment list must be a list, never a vector.** This one was designed around rather than
+  found, and then confirmed: `auto_unbox` writes `c("1")` as `"1"` and `as.list(c("1"))` as
+  `["1"]`, so a scene showing one neuron would carry a bare string where neuroglancer expects an
+  array. Likewise an empty colour map has to be `setNames(list(), character(0))`, which writes `{}`
+  where `list()` writes `[]`.
+
+**One deliberate difference: colours are normalised.** Both nglscenes packages lowercase a hex
+colour, expand `#abc` and drop an alpha channel. Coda writes a literal-mode cell as it was typed. So
+`#ABC` reads differently in the JSON and draws the same, neuroglancer reading only the RGB.
+
+**What checks it is the node, not a reading of the node.** `src/export/neuroglancer.test.ts` runs
+the real `evaluate` for the fixture's two cards (params read off the fixture graph, not restated)
+over a committed scene, neuron table and lookup, and records the decoded link and the `Selected`
+rows in `__fixtures__/neuroglancer.json`. The inputs are chosen to trip a careless translation:
+categories tied on count, a blank one, a repeated id, an id neuroglancer cannot read, and an edit
+of each kind. `probe-py-helpers.py` and `probe-r-helpers.R` run the goldens' cells against the same
+inputs, with stub clients and the real nglscenes and jsonlite, and compare. Both pass. Both fail when
+the tie-break is replaced by plain ordering, which is how the probes themselves were checked.
+Before any of that, a prototype of each document's cell was compared with `buildScene` over all
+four real scenes, with edits, hidden neurons, both layer sets and both colour modes: 16 of 16
+identical in each language.
+
 ### Idea, not built: a fourth option is to ship the *result* beside the notebook
 
 Recorded because it keeps coming up and there is currently nothing between "emit it" and "emit a
@@ -1034,5 +1100,8 @@ cheap and is not written: the fixture comment is doing that job today.
 - **Upload Table names its file rather than carrying it.** The rows live in IndexedDB, so a
   `.coda.json` already arrives without them; the notebook emits `pd.read_csv("<filename>")`,
   which is the same accepted cost with the same honest statement of it.
-- **Neuroglancer** emits a note: the URL is built from a published scene, which is a fetch this
-  translation does not make.
+- **Neuroglancer** leaves three things out, each said in a `NOTE` where it applies: colours *by
+  value* (the ramp is not transcribed, so the scene keeps neuroglancer's own colours), the layers
+  wired to Extra layers (a Neuroglancer Source exports no layer), and a source that places
+  segments across several volumes, which no exportable dataset is. And in R it is neuPrint only,
+  R having no CAVE client.
