@@ -113,9 +113,9 @@ export interface ChangelogEntry {
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
     date: '2026-10-20',
-    title: 'Biophysics, and the Line Chart',
+    title: 'Biophysics, the Line Chart, and picking neurons in Neuroglancer',
     summary:
-      'The new Biophysics plugin turns a neuron’s skeleton into a compartment model, simulates its synaptic input, and fits it to a recording of your own; a guide walks through it step by step. The new Line Chart plots traces, time courses and profiles.',
+      'The new Biophysics plugin turns a neuron’s skeleton into a compartment model, simulates its synaptic input, and fits it to a recording of your own; a guide walks through it step by step. The new Line Chart plots traces, time courses and profiles. Neurons you pick in the Neuroglancer card now carry on into the rest of your workflow.',
     highlight: true,
     features: [
       {
@@ -150,6 +150,14 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         link: { href: './biophysics.html', label: 'Read the Biophysics guide' },
       },
       {
+        kind: 'node',
+        date: '2026-10-16',
+        title: 'Neuroglancer: pick neurons in the viewer and use them downstream',
+        body:
+          'The **Neuroglancer** card now runs Coda’s own copy of neuroglancer (Spelunker, CAVE’s build), so it can read back what you do in it. Double-click a neuron to add it to the scene or take it out, and the new **Selected** output follows: the neurons wired in, minus the ones you took out, plus the ones you added, looked up in the dataset for their columns. Wire it into anything that takes neurons. Your picks are kept on top of the input, so a change upstream still comes through. **Hidden neurons** decides whether a neuron you hide leaves Selected or stays in it, marked in a `visible` column.\n\n' +
+          'Changing which neurons are shown, or their colours, no longer reloads the scene: the camera stays where you left it and loaded meshes stay loaded, even with the pointer over the card. The card also remembers where it was looking, so a saved workflow or a share link reopens at the same spot. If you are signed in to a CAVE datastack in Coda, the card uses that sign-in. The **Link** output still opens the dataset’s own viewer; **Viewer type** sets what the card itself shows.',
+      },
+      {
         kind: 'chart',
         date: '2026-10-13',
         title: 'Line Chart: traces, time courses and profiles',
@@ -169,6 +177,12 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         title: '**Skeletonize Meshes** turns neuron meshes into skeletons.',
         body: 'Skeletonizes each mesh with skeletor’s wavefront method, in the browser, and gives the same skeleton skeletor does in Python. **Waves** and **Step size** trade detail against noise, and **Min fragment size** drops small disconnected pieces of the mesh first. **Shave** removes the short twigs the method leaves along the backbone, as navis or fafbseg do, and **Fix zero radii** fills in radii at the tips. Where the dataset knows where the soma is (neuPrint, MICrONS and now FlyWire’s nucleus table), the soma is labelled and each skeleton is rooted there; **Clean up soma** merges the soma into one node and clears the tangle the method tends to leave inside it. The notebook export calls skeletor directly.',
         demo: 'neuron.skeletonize',
+      },
+      {
+        kind: 'node',
+        date: '2026-10-20',
+        title: 'Notebooks and R Markdown now include the **Neuroglancer** card.',
+        body: 'The exported notebook or document fetches the dataset’s scene, adds your neurons and prints the link; neurons you picked in the card appear as lists you can edit, and Selected is rebuilt from them. Python uses [nglscenes](https://github.com/schlegelp/nglscenes) and covers CAVE datasets too; R uses [nglscenes-r](https://github.com/schlegelp/nglscenes-r) and covers neuPrint.',
       },
     ],
   },
