@@ -56,6 +56,7 @@ export type PyModule =
   | 'navis'
   | 'navisNeuprint'
   | 'fastcore'
+  | 'skeletor'
   | 'flybrains'
   | 'fishbrains'
   | 'networkx'
@@ -122,6 +123,12 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * two letters is a name a reader has to go and look up.
    */
   fastcore: { statement: 'import navis_fastcore as fastcore', pip: 'navis-fastcore' },
+  /*
+   * Skeletonize Meshes' cell. skeletor routes its wavefront graph work through navis-fastcore
+   * when it can import it, and only then is the answer the card's: its igraph fallback breaks
+   * spanning-tree ties differently. So the cell requires `fastcore` beside this.
+   */
+  skeletor: { statement: 'import skeletor as sk', pip: 'skeletor' },
   /*
    * Imported for its **side effect**, which is why the statement is a bare import of a package
    * nothing then names. `import flybrains` registers every fly template and every transform

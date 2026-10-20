@@ -78,6 +78,32 @@ const NO_EMITTER: Record<string, string> = {
     'this one. A faithful emitter is the per-run midpoint walk in ' +
     '`nodes/lib/skeletonPoints.ts`, about thirty lines, and it waits on being checked by ' +
     '*running* it against the node, `out.topology`\u2019s rule.',
+  'vfb:lines':
+    'Deferred with `vfb:neurons`, whose `fbbtId` column it reads: one parameterised Cypher ' +
+    'statement over the `INSTANCEOF`/`part_of` link, emitted with that node\u2019s or not at all.',
+  'vfb:images':
+    'Deferred with `vfb:lines`: one parameterised Cypher statement reading each image\u2019s file ' +
+    'URLs off its `in_register_with` edge, emitted with that node\u2019s or not at all.',
+  'vfb:info':
+    'A viewer whose picture is VFB\u2019s page for one term, asked of VFBquery by the card; its ' +
+    'output passes its input through. A notebook reads the same page with `requests` against ' +
+    '`get_term_info`, and waits with the VFB pack\u2019s other exports.',
+  'vfb:gallery':
+    'A viewer whose picture is a gallery of VFB thumbnails, chosen by paging like NeuronBridge\u2019s ' +
+    'card. Its one output that is data, `Pinned`, is the input\u2019s rows filtered to pinned image ' +
+    'ids, and waits with `vfb:images` and `vfb:expression`.',
+  'vfb:expression':
+    'Deferred with `vfb:images`. The faithful route downloads each `volume.obj` with `requests` and ' +
+    'reads its `v x y z intensity` lines, scaled to nm; the thinning stride in ' +
+    '`data/vfb/pointCloud.ts` is the part to check by running it against the node.',
+  'vfb:neurons':
+    'Deferred with the VFB pack\u2019s exports (`docs/vfb-plan.md`, Phase 5). The faithful route is ' +
+    'the same read-only Cypher POST to VFB\u2019s PDB with `requests`, plus the class walk and the ' +
+    '"most specific named class" rule in `data/vfb/classes.ts`, which is the part an emitter could ' +
+    'get plausibly wrong and so waits on being checked by running it against the node.',
+  'vfb:publications':
+    'Deferred with `vfb:neurons`, whose `fbbtId` column it reads: one parameterised Cypher ' +
+    'statement over `has_reference`, emitted together with that node\u2019s or not at all.',
   'out.neuronbridge':
     'NeuronBridge matches, and a viewer whose picture is a gallery of images read from Janelia\u2019s ' +
     'bucket for the neuron on screen. The faithful route is `neuronbridge-python`, which reads the ' +

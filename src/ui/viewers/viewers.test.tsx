@@ -607,6 +607,29 @@ describe('TableViewer', () => {
     expect(screen.getByText('1–10 of 50')).toBeTruthy()
   })
 
+  it('draws a URL in a text cell as a link whose text is its href, and nothing else as one', () => {
+    const papers = tableFromRows(ROI_SCHEMA, [
+      { roi: 'https://doi.org/10.7554/eLife.04577', type: 'javascript:alert(1)', sum_post: 1 },
+    ])
+    const { container } = render(<TableViewer table={papers} />)
+    const links = container.querySelectorAll('tbody a')
+    expect(links).toHaveLength(1)
+    expect(links[0]!.getAttribute('href')).toBe('https://doi.org/10.7554/eLife.04577')
+    expect(links[0]!.textContent).toBe('https://doi.org/10.7554/eLife.04577')
+    expect(links[0]!.getAttribute('rel')).toContain('noopener')
+  })
+
+  it('draws an identifier column the schema marks as a DOI as a link labelled with the DOI', () => {
+    const schema = tableSchema({ ...column('doi', 'str'), link: 'doi' }, column('pmid', 'str'))
+    const papers = tableFromRows(schema, [{ doi: '10.7554/eLife.04577', pmid: '25535793' }])
+    const { container } = render(<TableViewer table={papers} />)
+    const links = container.querySelectorAll('tbody a')
+    expect(links).toHaveLength(1)
+    expect(links[0]!.getAttribute('href')).toBe('https://doi.org/10.7554/eLife.04577')
+    // Labelled with the identifier: the URL is built on a fixed host (`ui/columnLinks.ts`).
+    expect(links[0]!.textContent).toBe('10.7554/eLife.04577')
+  })
+
   it('marks nulls rather than printing "null"', () => {
     const withNull = tableFromRows(ROI_SCHEMA, [{ roi: 'CA(R)', type: 'KC', sum_post: null }])
     const { container } = render(<TableViewer table={withNull} />)

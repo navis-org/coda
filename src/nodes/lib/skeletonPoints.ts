@@ -46,8 +46,6 @@
  * against each other.
  */
 
-import type { Warner } from '../../core/limits'
-import { formatBytes, refuseIfOverCrashFloor, warnOverThreshold } from '../../core/limits'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { Slicer } from '../../core/slice'
 import { sliced } from '../../core/slice'
@@ -273,37 +271,6 @@ export function pointCount(
   let count = 0
   for (const length of runLengthsOf(skeleton)) count += piecesOf(length, spacingNm)
   return count
-}
-
-/**
- * Twelve bytes of coordinates plus one eight-byte cell per attribute column — the columns being
- * plain arrays (`ColumnData`), so a repeated string costs a reference, not a copy.
- */
-const bytesPerPoint = (columns: number) => 12 + 8 * columns
-
-/*
- * Five million points is about 300 MB of cloud at the default columns — inside the crash floor, so
- * the warning is seen before the refusal. For scale, 500 traced neurons at 1 µm is about that.
- */
-const POINTS_WARN = 5_000_000
-
-/** Refuse past the crash floor, warn past `POINTS_WARN` — before anything is allocated. */
-export function checkPointsSize(
-  ctx: Warner,
-  points: number,
-  columns: number,
-  what: string,
-): void {
-  const bytes = points * bytesPerPoint(columns)
-  refuseIfOverCrashFloor(`About ${points.toLocaleString()} points${what}`, bytes)
-  if (points <= POINTS_WARN) return
-  warnOverThreshold(ctx, {
-    count: points,
-    threshold: POINTS_WARN,
-    unit: 'points',
-    control: 'the usual size for this node',
-    cost: `${formatBytes(bytes)} of point cloud${what}. A coarser \`Spacing (µm)\` makes it smaller.`,
-  })
 }
 
 /**

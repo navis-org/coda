@@ -22,6 +22,7 @@ on:
       - 'scripts/probe-transform.mjs'
       - 'scripts/probe-skeletons.mjs'
       - 'scripts/probe-meshes.mjs'
+      - 'scripts/probe-skeletonize.mjs'
       - 'scripts/probe-matches.mjs'
       - 'scripts/probe-dotmotif.mjs'
       - 'public/wheels/**'
@@ -38,6 +39,7 @@ on:
       - 'scripts/probe-transform.mjs'
       - 'scripts/probe-skeletons.mjs'
       - 'scripts/probe-meshes.mjs'
+      - 'scripts/probe-skeletonize.mjs'
       - 'scripts/probe-matches.mjs'
       - 'scripts/probe-dotmotif.mjs'
       - 'public/wheels/**'
@@ -96,6 +98,12 @@ jobs:
       # error. Its fixture is one closed icosphere and one with a face cut out, which is the
       # pair that tells "fill holes did something" from "fill holes capped a closed mesh".
       - run: node scripts/probe-meshes.mjs
+      # Skeletonize Meshes: the wasm build of every fastcore call the wavefront makes, which the
+      # parity probe against skeletor (`probe-skeletonize.py`) cannot reach. A tube has to come
+      # back as one tree running its length at the tube's radius, parents have to be local and
+      # before their children — the failure here that draws rather than raises — and a soma has
+      # to come back a root on the cell's tree, never on debris beside it.
+      - run: node scripts/probe-skeletonize.mjs
       # Match extraction, and the one probe that checks *numbers* rather than marshalling —
       # because parity is the entire reason that node crosses the bridge. `percentage` is a
       # band around each group's own best, `skip_self` is the diagonal, and both are asserted

@@ -19,7 +19,6 @@ import type { ManualPoint, OnEdge, Placement } from '../lib/skeletonPoints'
 import { plural } from '../../style/format'
 import {
   MANUAL_PARAM,
-  checkPointsSize,
   placeManual,
   pointCount,
   readManualPoints,
@@ -27,6 +26,7 @@ import {
   skeletonPointsValue,
 } from '../lib/skeletonPoints'
 import { checkGeometryUnits } from '../../data/units'
+import { checkPointsSize } from '../lib/pointsSize'
 
 registerNode({
   type: 'neuron.skeletonPoints',
@@ -171,7 +171,13 @@ registerNode({
     const what =
       ` from ${items.length.toLocaleString()} skeletons` +
       (placement === 'resample' ? ` at ${spacingUm.toLocaleString()} µm` : '')
-    checkPointsSize(ctx, total, schema.columns.length, what)
+    checkPointsSize(
+      ctx,
+      total,
+      schema.columns.length,
+      what,
+      'A coarser `Spacing (µm)` makes it smaller.',
+    )
 
     const unlabelled = items.filter((s) => !s.compartments).length
     if (unlabelled > 0) {

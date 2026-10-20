@@ -256,8 +256,10 @@ describe('NodeBrowser filtering', () => {
       'Sankey',
       'Scatter Plot',
       'Table',
+      'VFB Info',
+      'VFB Line Gallery',
     ])
-    expect(screen.getByText('24 nodes')).toBeTruthy()
+    expect(screen.getByText('26 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

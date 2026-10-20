@@ -135,6 +135,26 @@ The palette's add/remove acts on the active tab, naming it once there are pages,
 is up it offers a row per other tab. Whether a row reads Add or Remove is `allOnTab` in both, so the
 two cannot disagree.
 
+**⌥1–9 switches pages, on the grid only.** ⌥1–⌥8 go by position and ⌥9 is always the last tab
+(the browsers' convention), so a dashboard of twelve pages still has a key for its end.
+`tabForDigit` is the binding and `digitForTab` its inverse, which is what the strip draws: a muted
+numeral before each name, once there are two tabs or more, and `aria-keyshortcuts` beside it. Past
+the ninth tab, the ones between the eighth and the last get no numeral, because they have no key.
+Four decisions:
+
+- **Not ⌘/Ctrl.** Chrome takes ⌘1–9 / Ctrl+1–9 for its own tabs before the page sees them.
+- **Matched on `event.code`, not `key`.** ⌥ is a character modifier on a Mac, so ⌥2 arrives as
+  `™` on every layout. The UI test sends exactly that, so a binding reading `key` fails there.
+- **Not on the canvas.** The canvas's own digits are planned for saved views (Ctrl+1–9 to save,
+  bare 1–9 to restore), and a chord that silently swapped the surface would be the worse failure.
+  On the grid the canvas is unmounted, so nothing can clash with it there.
+- **A field keeps the key.** ⌥digit is how a Mac types `¡`, `™` and `£`. A digit with no tab in its
+  place is still taken and does nothing, rather than typing into nothing or reaching the browser's
+  own Alt+digit. Declined while a tour is up, for `d`'s reason.
+
+A Neuroglancer cell holding focus is an `<iframe>`, and its keys never reach the window. Click the
+bar first.
+
 ## The mode replaces the canvas
 
 `App.tsx` renders `DashboardView` **or** `Editor` into the same grid area. React Flow unmounts,
@@ -189,6 +209,47 @@ The layout mutators compose `setViewOpen` *around* their own change rather than 
 so a graph gains its first cell and its view flag in one commit — adding the first cell is the
 moment a layout comes into existence, and two commits would leave a state, briefly but reachable
 by an autosave tick, where the dashboard exists and does not know it is being looked at.
+
+## Focus mode
+
+The grid with the shell taken away: the toolbar, the status bar, the inspector and assistant, the
+dashboard's own bar and its gutters. `Focus` in the bar enters it; an **Exit focus** pill fades in
+while the pointer moves and fades `FOCUS_EXIT_IDLE_MS` (2 s) after it stops. ⌥1–9 still switches
+tabs, since the strip is gone with the bar. Measured on a 1400 × 900 window: the grid went from
+789 to 900px tall, a half-height cell from 387 to 448px, and nothing scrolls.
+
+**Session state, never the document's.** `graphStore.dashboardFocus` is per document like
+`dashboardOpen`, never read from a file, and false whenever the grid is not up. Leaving the
+dashboard ends it, and setting it on the canvas is refused, so `App` reads the one flag unpaired.
+This is the lock's rule rather than `open`'s. A saved view is the author's answer to which surface
+the workflow is for, while a graph arriving with every control hidden would be a disability.
+
+**What it hides is not rendered**, the rule for every closed surface. The panels' open state is
+untouched, so leaving brings back exactly what was there.
+
+**Each cell keeps a one-line strip with its title**, and the summary line goes. The grip, the
+buttons and the resize corner fade in on hover. Three choices here are load-bearing:
+
+- **Opacity, not `display`**, so the strip is one height either way. Measured: a cell is 699 × 448
+  hovered and not. A reveal that changed the strip's height would resize every viewer the pointer
+  crossed, WebGL scenes included.
+- **Opacity, not `visibility`**, so the controls stay in the tab order, and `:focus-within` reveals
+  them to a keyboard.
+- **The gap is re-read when the mode changes.** `DashboardView` reads `rowGap` once per observer
+  attach, and focus moves it from 5px to 1px.
+
+**The run bar moves to the window's top edge** (`.dashboard__edge`), overlaid for the reason it
+was overlaid in the bar: a strip that took height would resize every cell twice per run.
+
+**The pill sits over the first cell's title**, and the obvious places were wrong. It was top
+centre at first, and the screenshot put it on the left cell's ⤢: under any even column count the
+centre is the column boundary. The corners hold ✕, the grips and the tables' pagers. A fading pill
+is woken by exactly the movement heading for whatever it covers, so it has to cover a label, and
+the first cell's title is one in every layout. It is held awake while hovered, or it would fade
+from under the click. It stays in the tab order while faded, and keyboard focus shows it.
+
+Moving the pointer over a Neuroglancer cell does not wake the pill: an `<iframe>` sends this
+document nothing. Moving off the embed does.
 
 ## It is live under the lock
 
@@ -689,8 +750,7 @@ registered for the full-size surfaces, so a cell for one would draw a header ove
 `DashboardView`'s candidate list excludes annotations. If a caption is wanted later, the change is
 teaching `nodeBodies` about `NoteCard` — the canvas's side of the house, not this one.
 
-Not built with tabs: no keyboard shortcut for switching (⌥1–9 would collide with the planned
-saved-views keys), no dragging a cell onto another tab, and the wizard still builds one page even
+Not built with tabs: no dragging a cell onto another tab, and the wizard still builds one page even
 for a comparison.
 
 Smaller things not built: no per-cell title override (the node's title is the cell's), no way to

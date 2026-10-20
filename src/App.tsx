@@ -57,6 +57,14 @@ export function App() {
    */
   const dashboardOpen = useGraphStore((s) => s.dashboardOpen)
   /*
+   * Focus mode: only the grid. The shell's strips and panels are *not rendered* rather than
+   * hidden — the rule for every closed surface — and the panels' own open state is untouched, so
+   * leaving brings back exactly what was there. The store keeps this false off the dashboard.
+   */
+  const focused = useGraphStore((s) => s.dashboardFocus)
+  // What the shell lays out for and what it draws, asked once so the two cannot disagree.
+  const inspectorShown = inspectorOpen && !focused
+  /*
    * The narrow shell. Stamped here rather than asked as a media query in the stylesheet, so the
    * threshold has one spelling (`smallScreen.ts`) — the toolbar's half of it is a React branch
    * and the two must agree, or the buttons the CSS hides are buttons nothing put in the menu.
@@ -81,11 +89,11 @@ export function App() {
       <div
         className="app"
         data-dock={docked ? 'open' : undefined}
-        data-inspector={inspectorOpen ? 'open' : undefined}
+        data-inspector={inspectorShown ? 'open' : undefined}
         data-narrow={narrow ? 'true' : undefined}
         style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
       >
-        <Toolbar />
+        {!focused && <Toolbar />}
         {dashboardOpen ? <DashboardView /> : <Editor />}
         {/*
          * Between the canvas and the inspector, and before it in the DOM so tab order runs left to
@@ -100,9 +108,13 @@ export function App() {
          * the way in; this is what stops it coming back.
          */}
         {!dashboardOpen && <ViewerDock />}
-        <Inspector />
-        <AssistantPanel />
-        <StatusBar />
+        {!focused && (
+          <>
+            <Inspector />
+            <AssistantPanel />
+            <StatusBar />
+          </>
+        )}
         <ViewerOverlay />
         {/*
          * Beside the viewer overlay, and for the same reason it is beside the dock: both are a

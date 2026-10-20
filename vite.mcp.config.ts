@@ -91,8 +91,20 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  * Fit Model — the bounded least squares (`biophys/leastSquares.ts`), the passive fit, its worker
  * pool and tables, and its help page — and the Compartment Model's soma regions (the taper, `upTo`,
  * ignored branches, the surface offset). Code and prose of ours; no new library.
+ *
+ * 3,100 → 3,250 on 2026-10-14, at 3,179 kB against 3,115 kB at the commit before it — which was
+ * itself already past 3,100, the commits since the last raise (Line Chart, Skeletonize Meshes, the
+ * Neuroglancer layer bar) having used up its headroom. The 64 kB are the Virtual Fly Brain pack: its PDB bridge, term-info and
+ * markdown readers, point clouds and templates (`data/vfb`), seven node definitions and their help
+ * pages. Code and prose of ours; no new library — the image-stack reader (`data/nrrd.ts`) inflates
+ * with the browser's own `DecompressionStream`.
+ *
+ * 3,400 / 3,250 → 3,550 on 2026-10-20, at 3,462 kB, merging main into the Biophysics branch: the
+ * two raises above were made in parallel from 3,100, one for each pack, so the merged bundle carries
+ * both (the Biophysics pack's later work on top: fly channels, the seal, NWB and ABF1 recordings).
+ * Code and prose of ours; no new library.
  */
-const SIZE_BUDGET_KB = 3_400
+const SIZE_BUDGET_KB = 3_550
 
 /**
  * Fail the build if the bundle outgrows its budget.

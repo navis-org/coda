@@ -20,7 +20,7 @@ export type SmoothMethod = 'taubin' | 'laplacian' | 'humphrey'
  * predict. Face indices are **mesh-local** in both directions, which is what
  * `MeshGeometry.indices` already means — so nothing is re-based on either side.
  */
-export type CleanMeshesRequest = {
+export type PackedMeshes = {
   /** xyz interleaved, one mesh after the last. */
   positions: Float32Array
   /** Triangle corners, three per face, indexing each mesh's own vertices. */
@@ -29,7 +29,10 @@ export type CleanMeshesRequest = {
   vertexOffsets: Int32Array
   /** Where each mesh's faces start, counted in faces. Length is `count + 1`. */
   faceOffsets: Int32Array
+}
 
+/** Clean Meshes' request: the flattened set and every control. */
+export type CleanMeshesRequest = PackedMeshes & {
   /** Strip invaginated internal membrane and cap what that opens. The expensive one. */
   dropInternals: boolean
   /** Openness below which a face counts as buried. fastcore's operating range is 0.05–0.10. */

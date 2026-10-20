@@ -29,14 +29,16 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../../App'
 import { FIRST_TAB_ID, activeTab } from '../../core/dashboard'
+import { serializeGraph } from '../../core/graph'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { FOCUS_EXIT_IDLE_MS } from './FocusExit'
 import { DEMO_DATASET, buildWorkflow, demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 
@@ -58,6 +60,11 @@ afterEach(cleanup)
 const store = () => useGraphStore.getState()
 const cells = () => document.querySelectorAll('.dash-cell')
 const cellFor = (nodeId: string) => document.querySelector(`.dash-cell[data-node="${nodeId}"]`)
+/** ⌥digit as a Mac sends it: `key` names the character ⌥ typed, so only `code` says the digit. */
+const alt = (digit: number, target: Element = document.body) =>
+  act(() => {
+    fireEvent.keyDown(target, { key: '™', code: `Digit${digit}`, altKey: true })
+  })
 
 /** Render, run, then put these nodes on the grid and open it. */
 async function withCells(ids: string[]) {
@@ -572,7 +579,8 @@ describe('the run bar', () => {
  * neighbour that takes a removed tab's place — are `core/dashboard.test.ts`'s.
  */
 describe('tabs', () => {
-  const tabs = () => screen.getAllByRole('tab').map((t) => t.textContent)
+  const tabs = () =>
+    screen.getAllByRole('tab').map((t) => t.querySelector('.dash-tabs__label')?.textContent)
   const ids = () => [...cells()].map((c) => c.getAttribute('data-node'))
 
   it('draws one tab, reading "Dashboard", on a dashboard that never grew a second', async () => {
@@ -627,9 +635,55 @@ describe('tabs', () => {
     })
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Tab 1' }), { key: 'ArrowRight' })
     expect(ids()).toEqual(['group'])
-    expect(document.activeElement?.textContent).toBe('Tab 2')
+    expect(document.activeElement?.querySelector('.dash-tabs__label')?.textContent).toBe(
+      'Tab 2',
+    )
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Tab 2' }), { key: 'ArrowRight' })
     expect(ids()).toEqual(['view'])
+  })
+
+  /*
+   * ⌥digit is matched on `code`: on a Mac ⌥2 arrives with `key: '™'`, which is what the press
+   * below sends, so a binding reading `key` fails here as it would on the keyboard.
+   */
+  it('switches with ⌥1–9 on the grid, 9 being the last tab, and nowhere else', async () => {
+    await withCells(['view'])
+    act(() => {
+      store().addDashboardTab(['group'])
+      store().addDashboardTab(['conn'])
+      store().setDashboardTab('main')
+    })
+    alt(2)
+    expect(ids()).toEqual(['group'])
+    alt(9)
+    expect(ids()).toEqual(['conn'])
+    alt(1)
+    expect(ids()).toEqual(['view'])
+    // No fourth tab: the key is taken and nothing moves.
+    alt(4)
+    expect(ids()).toEqual(['view'])
+    // A field keeps the key — it is how a Mac types ™.
+    alt(2, document.querySelector('.toolbar__name')!)
+    expect(ids()).toEqual(['view'])
+
+    // Each tab draws the digit that reaches it, and names it for assistive technology.
+    const strip = screen.getAllByRole('tab')
+    expect(strip.map((t) => t.querySelector('.dash-tabs__key')?.textContent)).toEqual([
+      '1',
+      '2',
+      '3',
+    ])
+    expect(strip[1]!.getAttribute('aria-keyshortcuts')).toBe('Alt+2')
+
+    // Off the grid the chord is nobody's yet.
+    act(() => store().setDashboardOpen(false))
+    alt(2)
+    expect(activeTab(store().graph).id).toBe('main')
+  })
+
+  it('draws no numeral while there is only one tab to go to', async () => {
+    await withCells(['view'])
+    expect(document.querySelector('.dash-tabs__key')).toBeNull()
   })
 
   it('offers removal from the strip, and not for the only tab', async () => {
@@ -685,5 +739,88 @@ describe('tabs', () => {
       'true',
     )
     await waitFor(() => expect(cellFor('conn')?.textContent).toMatch(/rows/))
+  })
+})
+
+describe('focus mode', () => {
+  const shell = () => ({
+    toolbar: !!document.querySelector('.toolbar'),
+    statusbar: !!document.querySelector('.statusbar'),
+    inspector: !!document.querySelector('.inspector'),
+    bar: !!document.querySelector('.dashboard__bar'),
+  })
+  const enter = () => fireEvent.click(screen.getByRole('button', { name: 'Focus' }))
+  const pill = () => screen.getByRole('button', { name: 'Exit focus' })
+
+  it('takes the shell away and leaves the cells, and the way out puts it back', async () => {
+    await withCells(['view', 'group'])
+    act(() => store().togglePanel('inspector'))
+    const inspectorOpen = store().panels.inspector
+    const before = shell()
+    expect(before).toEqual({
+      toolbar: true,
+      statusbar: true,
+      inspector: inspectorOpen,
+      bar: true,
+    })
+
+    enter()
+    expect(shell()).toEqual({ toolbar: false, statusbar: false, inspector: false, bar: false })
+    expect(cells().length).toBe(2)
+    // The panel is not drawn, but it is still open — leaving brings back what was there.
+    expect(store().panels.inspector).toBe(inspectorOpen)
+
+    fireEvent.click(pill())
+    expect(shell()).toEqual(before)
+  })
+
+  it('ends with the dashboard, and cannot be switched on over the canvas', async () => {
+    await withCells(['view'])
+    enter()
+    act(() => store().setDashboardOpen(false))
+    expect(store().dashboardFocus).toBe(false)
+    expect(shell().toolbar).toBe(true)
+    act(() => store().setDashboardFocus(true))
+    expect(store().dashboardFocus).toBe(false)
+  })
+
+  /* The lock's rule: a graph somebody sends you never arrives with its controls hidden. */
+  it('is never written to the document', async () => {
+    await withCells(['view'])
+    const before = JSON.parse(serializeGraph(store().graph)).dashboard
+    enter()
+    expect(JSON.parse(serializeGraph(store().graph)).dashboard).toEqual(before)
+    const saved = store().graph
+    act(() => store().loadGraph(saved))
+    expect(store().dashboardOpen).toBe(true)
+    expect(store().dashboardFocus).toBe(false)
+  })
+
+  it('shows the way out on entry, fades it when the pointer rests, and wakes it on a move', async () => {
+    await withCells(['view'])
+    vi.useFakeTimers()
+    try {
+      enter()
+      expect(pill().hasAttribute('data-awake')).toBe(true)
+      act(() => vi.advanceTimersByTime(FOCUS_EXIT_IDLE_MS + 1))
+      expect(pill().hasAttribute('data-awake')).toBe(false)
+      act(() => {
+        fireEvent.pointerMove(window)
+      })
+      expect(pill().hasAttribute('data-awake')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps ⌥1–9, the one way between pages with the strip gone', async () => {
+    await withCells(['view'])
+    act(() => {
+      store().addDashboardTab(['group'])
+      store().setDashboardTab('main')
+    })
+    enter()
+    alt(2)
+    expect(cellFor('group')).not.toBeNull()
   })
 })

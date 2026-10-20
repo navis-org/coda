@@ -108,6 +108,43 @@ export function warnOverThreshold(ctx: Warner, w: ThresholdWarning): void {
   )
 }
 
+/**
+ * How long a wait has to threaten before a node says so: **five minutes**, about where a wait
+ * stops being something you sit through. Thirty seconds was tried first, and a warning raised over
+ * half a minute is a sentence in front of a wait the progress bar already describes, which is how
+ * a reader learns to dismiss the next one.
+ *
+ * One number for every wait estimated in seconds, compared by `warnOverWait` below. It lived as
+ * two restated copies (`MESH_WARN_SECONDS`, and a distance one) until a third reader arrived, which
+ * is the point at which the second recorded that it should move here.
+ */
+export const WAIT_WARN_SECONDS = 300
+
+export interface WaitWarning {
+  /** The estimated wait. */
+  seconds: number
+  /** What will take that long, as the sentence's subject: "Skeletonizing 4,000,000 vertices". */
+  what: string
+  /** A sentence naming what would shorten it, or nothing where nothing does. */
+  lever?: string
+}
+
+/**
+ * The house phrasing for a wait past `WAIT_WARN_SECONDS`, and the comparison that decides it.
+ *
+ * `warnOverThreshold`'s counterpart for a limit stated in seconds, which that one does not fit: it
+ * renders "N unit is past CONTROL (threshold)" and then the caller's sentence, so a duration came
+ * out twice. Like `refuseIfOverCrashFloor` it **makes the comparison itself**, so no caller
+ * restates the threshold, and it keeps the clause saying there will still be a result.
+ */
+export function warnOverWait(ctx: Warner, w: WaitWarning): void {
+  if (w.seconds <= WAIT_WARN_SECONDS) return
+  ctx.warn(
+    `${w.what} will take ${describeDuration(w.seconds)}.${w.lever ? ` ${w.lever}` : ''} ` +
+      'Running anyway; cancel if that is not what you wanted.',
+  )
+}
+
 /** Roughly how long something will take, in words a status line can hold. */
 export function describeDuration(seconds: number): string {
   if (seconds < 90) return `about ${Math.max(1, Math.round(seconds))} seconds`
@@ -134,6 +171,12 @@ export function refuseIfOverCrashFloor(what: string, bytes: number, remedy?: str
 }
 
 /**
+ * Whether an allocation this size is past the crash floor: the one comparison, for a caller that
+ * must stop early (a fetch whose size grows as it runs) before it refuses through the sentence below.
+ */
+export const overCrashFloor = (bytes: number): boolean => bytes > CRASH_FLOOR_BYTES
+
+/**
  * The same sentence without the throw, for a `validate` that can compute a shape from params
  * alone and so should say it on the card before a Run. One comparison and one wording for both
  * stages, rather than a node restating `bytes > CRASH_FLOOR_BYTES` to reach the edit-time half.
@@ -146,7 +189,7 @@ export function crashFloorIssue(
   bytes: number,
   remedy = 'Reduce the data upstream, for example with a filter or a group-by, or split the run.',
 ): string | undefined {
-  if (bytes <= CRASH_FLOOR_BYTES) return undefined
+  if (!overCrashFloor(bytes)) return undefined
   return (
     `Refused: ${what} would allocate ${formatBytes(bytes)} at once, more than the ` +
     `${formatBytes(CRASH_FLOOR_BYTES)} a browser tab can hold. ${remedy}`

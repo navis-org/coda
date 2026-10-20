@@ -1786,6 +1786,130 @@ registerHelper({
 })
 
 /**
+ * The tidy-up Skeletonize Meshes runs after the wavefront, on skeletor's SWC: navis' bristle shave
+ * or fafbseg's thorough one, then navis' zero-radius fix. `pyodide/skeletonize.py`'s `_tidy`,
+ * restated because neither navis nor fafbseg exposes these as functions of their own — and held to
+ * it by `scripts/probe-skeletonize.py`, which runs this text out of the committed golden.
+ */
+registerHelper({
+  name: 'coda_tidy_skeleton',
+  requires: [['numpy'], ['pandas']],
+  source: [
+    'def coda_tidy_skeleton(swc, shave="bristles", cutoff=1000.0, fix_zero_radii=True):',
+    '    """skeletor\'s SWC after a shave and the zero-radius fix, as Skeletonize Meshes runs them."""',
+    '    xyz = swc[["x", "y", "z"]].to_numpy(dtype=float)',
+    '    radii = swc["radius"].to_numpy(dtype=float)',
+    '    parents = swc["parent_id"].to_numpy(dtype=np.int64)',
+    '    if shave == "thorough":',
+    '        xyz, radii, parents = _coda_shave_thorough(xyz, radii, parents, cutoff)',
+    '    elif shave == "bristles":',
+    '        xyz, radii, parents = _coda_shave_bristles(xyz, radii, parents)',
+    '    if fix_zero_radii:',
+    '        zero = (radii == 0) & (parents >= 0)',
+    '        radii = radii.copy()',
+    '        radii[zero] = radii[parents[zero]] / 2',
+    '    return pd.DataFrame({',
+    '        "node_id": np.arange(len(parents)), "parent_id": parents,',
+    '        "x": xyz[:, 0], "y": xyz[:, 1], "z": xyz[:, 2], "radius": radii,',
+    '    })',
+    '',
+    '',
+    'def _coda_node_kinds(parents):',
+    '    has_parent = parents >= 0',
+    '    children = np.bincount(parents[has_parent], minlength=len(parents))',
+    '    return (children == 0) & has_parent, (children > 1) & has_parent',
+    '',
+    '',
+    'def _coda_keep_rows(keep, xyz, radii, parents, *extra):',
+    '    renumber = np.cumsum(keep) - 1',
+    '    kept = parents[keep]',
+    '    kept = np.where(kept >= 0, renumber[np.maximum(kept, 0)], -1)',
+    '    return (xyz[keep], radii[keep], kept, *(e[keep] for e in extra))',
+    '',
+    '',
+    'def _coda_shave_bristles(xyz, radii, parents):',
+    '    leaf, branch = _coda_node_kinds(parents)',
+    '    bristle = leaf.copy()',
+    '    bristle[leaf] = branch[parents[leaf]]',
+    '    return _coda_keep_rows(~bristle, xyz, radii, parents)',
+    '',
+    '',
+    'def _coda_shave_thorough(xyz, radii, parents, cutoff, max_nodes=10):',
+    '    has_parent = parents >= 0',
+    '    step = np.zeros(len(parents))',
+    '    step[has_parent] = np.linalg.norm(xyz[has_parent] - xyz[parents[has_parent]], axis=1)',
+    '    long = step >= cutoff',
+    '    while True:',
+    '        leaf, branch = _coda_node_kinds(parents)',
+    '        start = np.flatnonzero(leaf)',
+    '        cur = start.copy()',
+    '        length = np.ones(len(start), dtype=np.int64)',
+    '        has_long = long[start]',
+    '        ended = np.zeros(len(start), dtype=bool)',
+    '        walking = np.ones(len(start), dtype=bool)',
+    '        members = [start]',
+    '        for _ in range(max_nodes - 1):',
+    '            at = np.flatnonzero(walking)',
+    '            if not len(at):',
+    '                break',
+    '            up = parents[cur[at]]',
+    '            length[at] += 1',
+    '            has_long[at] |= long[up]',
+    '            stop = (parents[up] < 0) | branch[up]',
+    '            ended[at[stop]] = True',
+    '            walking[at[stop]] = False',
+    '            on = at[~stop]',
+    '            middle = np.full(len(start), -1)',
+    '            middle[on] = up[~stop]',
+    '            members.append(middle)',
+    '            cur[on] = up[~stop]',
+    '        cut = ended & (length < max_nodes) & ((length <= 2) | has_long)',
+    '        rows = np.concatenate([m[cut] for m in members])',
+    '        rows = rows[rows >= 0]',
+    '        if not len(rows):',
+    '            break',
+    '        keep = np.ones(len(parents), dtype=bool)',
+    '        keep[rows] = False',
+    '        xyz, radii, parents, long = _coda_keep_rows(keep, xyz, radii, parents, long)',
+    '    return _coda_shave_bristles(xyz, radii, parents)',
+  ],
+})
+
+/**
+ * A mesh as Skeletonize Meshes hands it to the wavefront: unreferenced vertices out, then every
+ * connected piece below `min_vertices` vertices, keeping the rest in their order.
+ *
+ * What `pyodide/skeletonize.py` does before it calls into skeletor's algorithm, restated because
+ * skeletor does neither. Order matters for more than tidiness — skeletor's seeds depend on each
+ * piece's position in the vertex order — so this compacts rather than splitting and re-joining.
+ */
+registerHelper({
+  name: 'coda_mesh_pieces',
+  requires: [['numpy'], ['fastcore']],
+  source: [
+    'def coda_mesh_pieces(vertices, faces, min_vertices=0):',
+    '    """Vertices and faces with unreferenced vertices and pieces under `min_vertices` removed."""',
+    '    vertices = np.asarray(vertices)',
+    '    faces = np.asarray(faces, dtype=np.uint32)',
+    '    vertices, faces = _coda_compact(vertices, faces)',
+    '    if min_vertices > 1 and len(faces):',
+    '        piece = fastcore.connected_components_graph(fastcore.unique_edges(faces), len(vertices))',
+    '        sizes = np.bincount(piece, minlength=len(vertices))',
+    '        vertices, faces = _coda_compact(vertices, faces[sizes[piece[faces[:, 0]]] >= min_vertices])',
+    '    return vertices, faces',
+    '',
+    '',
+    'def _coda_compact(vertices, faces):',
+    '    used = np.zeros(len(vertices), dtype=bool)',
+    '    used[faces.ravel()] = True',
+    '    if used.all():',
+    '        return vertices, faces',
+    '    remap = np.cumsum(used, dtype=np.uint32) - np.uint32(1)',
+    '    return vertices[used], remap[faces]',
+  ],
+})
+
+/**
  * Simplify Skeletons' twig pruning, as `skeletons.py`'s `_prune` runs it.
  *
  * A helper rather than a bare `fastcore.prune_twigs` call because Coda adds two protections the

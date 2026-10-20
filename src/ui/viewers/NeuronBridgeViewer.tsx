@@ -56,15 +56,11 @@ import { tableToCsvParts } from '../export'
 import { formatNumber, plural } from '../../style/format'
 import { revealIn } from '../reveal'
 import { useLatest } from '../useLatest'
+import { ImageTile, ShowMore, TileGroup } from './ImageTile'
 import type { NbView, SetView } from './NeuronBridgeCompare'
-import {
-  Comparison,
-  Segmented,
-  arrowStep,
-  preloadImages,
-  scoreText,
-} from './NeuronBridgeCompare'
+import { Comparison, arrowStep, preloadImages, scoreText } from './NeuronBridgeCompare'
 import { Pager } from './Pager'
+import { Segmented } from './Segmented'
 import { useNeuronBridgeLookup, useNeuronBridgeMatches } from './useNeuronBridge'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
@@ -511,7 +507,7 @@ function NeuronBridgePage(props: PageProps) {
                     : 'No matches in the ticked collections.'}
                 </div>
               ) : (
-                <div className="nbridge__grid">
+                <div className="image-tiles">
                   {lines.slice(0, shown).map((line) => (
                     <LineTiles
                       key={line.line}
@@ -531,20 +527,11 @@ function NeuronBridgePage(props: PageProps) {
                   ))}
                 </div>
               )}
-              {lines.length > shown && (
-                <div className="nbridge__more">
-                  <span className="nbridge__muted">
-                    Showing {formatNumber(shown)} of {plural(lines.length, 'line')}
-                  </span>
-                  <button
-                    type="button"
-                    className="tile__link"
-                    onClick={() => setShown((n) => n + tiles)}
-                  >
-                    Show more
-                  </button>
-                </div>
-              )}
+              <ShowMore
+                shown={shown}
+                total={lines.length}
+                onMore={() => setShown((n) => n + tiles)}
+              />
             </>
           )}
         </div>
@@ -658,7 +645,7 @@ const LineTiles = memo(function LineTiles({
   const others = line.images.length - 1
   const pinned = (match: NbMatch) => pinnedKeys.has(pinPrefix + match.image.id)
   return (
-    <>
+    <TileGroup open={expanded && others > 0} label={line.line}>
       <Tile
         match={line.best}
         config={config}
@@ -667,22 +654,7 @@ const LineTiles = memo(function LineTiles({
         onSelect={onSelect}
         pinned={pinned(line.best)}
         onPin={onPin}
-        extra={
-          others > 0 && (
-            <button
-              type="button"
-              className="nbridge__others"
-              aria-expanded={expanded}
-              title={
-                expanded ? 'Hide this line’s other images' : 'Show this line’s other images'
-              }
-              onClick={() => onExpand(line.line)}
-            >
-              {expanded ? '−' : '+'}
-              {others}
-            </button>
-          )
-        }
+        others={{ count: others, open: expanded, onToggle: () => onExpand(line.line) }}
       />
       {expanded &&
         line.images
@@ -700,7 +672,7 @@ const LineTiles = memo(function LineTiles({
               onPin={onPin}
             />
           ))}
-    </>
+    </TileGroup>
   )
 })
 
@@ -720,7 +692,7 @@ function Tile({
   onSelect,
   pinned,
   onPin,
-  extra,
+  others,
 }: {
   match: NbMatch
   config: NbConfig
@@ -730,69 +702,37 @@ function Tile({
   onSelect: (match: NbMatch) => void
   pinned: boolean
   onPin: (match: NbMatch) => void
-  extra?: React.ReactNode
+  others?: { count: number; open: boolean; onToggle: () => void }
 }) {
-  const src = matchThumb(config, match, method)
   const line = match.image.publishedName
-  const collection = collectionShort(collectionOf(match.image.libraryName))
   return (
-    <div
-      className="nbridge__tile"
-      data-secondary={secondary || undefined}
-      // A line's own tile, which stepping scrolls to; its other images are not stops.
-      data-line={secondary ? undefined : match.image.publishedName}
-      data-selected={selected || undefined}
-    >
-      <button
-        type="button"
-        className="nbridge__thumb"
-        title={`${line} · ${match.image.slideCode ?? ''} — open`}
-        onClick={() => onSelect(match)}
-      >
-        {src ? (
-          <img
-            src={src}
-            alt={`${line} colour-depth projection`}
-            loading="lazy"
-            draggable={false}
-          />
-        ) : (
-          <span className="nbridge__muted">no image</span>
-        )}
-      </button>
-      <div className="nbridge__tile-foot">
-        <span className="nbridge__line" title={line}>
-          {line}
-        </span>
-        <span className="nbridge__score" title={method === 'pppm' ? 'PPPM rank' : 'CDS score'}>
-          {scoreText(match, method)}
-        </span>
-      </div>
-      <div className="nbridge__tile-foot">
-        <span className="nbridge__badge" title={match.image.libraryName}>
-          {collection}
-        </span>
-        {match.mirrored && (
-          <span className="nbridge__mirror" title="Matched against the mirrored image">
-            ⇋
+    <ImageTile
+      src={matchThumb(config, match, method)}
+      alt={`${line} colour-depth projection`}
+      name={line}
+      figure={scoreText(match, method)}
+      figureTitle={method === 'pppm' ? 'PPPM rank' : 'CDS score'}
+      openTitle={`${line} · ${match.image.slideCode ?? ''} — open`}
+      onOpen={() => onSelect(match)}
+      secondary={secondary}
+      selected={selected}
+      group={line}
+      tags={
+        <>
+          <span className="image-tile__badge" title={match.image.libraryName}>
+            {collectionShort(collectionOf(match.image.libraryName))}
           </span>
-        )}
-        <span className="profile__spacer" />
-        {extra}
-        <button
-          type="button"
-          className="nbridge__star"
-          aria-pressed={pinned}
-          aria-label={pinned ? `Unpin ${line}` : `Pin ${line}`}
-          title={
-            pinned ? 'Unpin — remove from the Pinned port' : 'Pin — send to the Pinned port'
-          }
-          onClick={() => onPin(match)}
-        >
-          {pinned ? '★' : '☆'}
-        </button>
-      </div>
-    </div>
+          {match.mirrored && (
+            <span className="nbridge__mirror" title="Matched against the mirrored image">
+              ⇋
+            </span>
+          )}
+        </>
+      }
+      others={others}
+      pinned={pinned}
+      onPin={() => onPin(match)}
+    />
   )
 }
 

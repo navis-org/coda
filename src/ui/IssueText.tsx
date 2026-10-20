@@ -6,7 +6,8 @@
  * different amounts of "can I do anything with this". What it adds over a bare string is small
  * and was all missing at once:
  *
- *  - **Links are links.** `splitLinks` decides where they are and why the text is the href.
+ *  - **Links are links.** `LinkedText` draws them; `splitLinks` decides where they are and why the
+ *    text is the href.
  *  - **The text can be selected.** React Flow puts `user-select: none` on every node, which is
  *    right for a card you drag and wrong for the one part of it somebody wants to send to a
  *    colleague — so the card's copy carries `nodrag` too, or the drag that starts a selection
@@ -18,7 +19,7 @@
 import { useState } from 'react'
 
 import { copyText } from './export'
-import { splitLinks } from './linkify'
+import { LinkedText } from './LinkedText'
 
 export interface IssueTextProps {
   message: string
@@ -38,26 +39,7 @@ export function IssueText({ message, copyable }: IssueTextProps) {
       {/* `nodrag` is React Flow's, and harmless everywhere else: it only means anything to a
           pointer gesture that started inside a node. */}
       <span className="issue__text nodrag">
-        {splitLinks(message).map((span, index) =>
-          span.href ? (
-            <a
-              key={index}
-              href={span.href}
-              target="_blank"
-              rel="noreferrer noopener"
-              // Or the click reaches the canvas, which selects the node and — on a card that is
-              // already selected — starts a drag from under the pointer.
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {span.text}
-            </a>
-          ) : (
-            // A bare string needs no key and no element of its own; the wrapper carries the
-            // styling for both.
-            span.text
-          ),
-        )}
+        <LinkedText text={message} />
       </span>
       {copyable && (
         <button

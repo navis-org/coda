@@ -296,6 +296,7 @@ interface DocStash {
   expandedNodeId: string | undefined
   pinnedNodeId: string | undefined
   dashboardOpen: boolean
+  dashboardFocus: boolean
   edgePanelNode: string | undefined
   /** Both name a group by id, and two documents opened from one file share their ids. */
   peekGroupId: string | undefined
@@ -884,6 +885,19 @@ export interface GraphState {
   /** Switch the view. Both entry points go through one function — see `setDashboard`. */
   setDashboardOpen(open: boolean): void
   toggleDashboard(): void
+  /**
+   * Focus mode: the grid with the shell taken away — toolbar, status bar, side panels, the
+   * dashboard's own bar and its gutters — so the cells have the whole window.
+   *
+   * **Session state, never the document's.** The lock's rule rather than `DashboardLayout.open`'s:
+   * a graph somebody sends you must not arrive with every control hidden, which is a disability
+   * where the saved view is the author's answer to which surface the workflow is for. Per
+   * document like `dashboardOpen`, because it is meaningless without it, and **only ever true
+   * while the grid is up** — leaving the dashboard ends it, and setting it on the canvas is
+   * refused, so `App` can read the one flag without pairing it.
+   */
+  dashboardFocus: boolean
+  setDashboardFocus(on: boolean): void
   /**
    * Put these nodes on the dashboard, in the order given, skipping any already there.
    *
@@ -1759,7 +1773,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * already follows.
    */
   function setDashboard(open: boolean): void {
-    set({ dashboardOpen: open, ...(open ? { pinnedNodeId: undefined } : {}) })
+    set({
+      dashboardOpen: open,
+      // Focus mode is a way of looking at the grid, and goes with it.
+      ...(open ? { pinnedNodeId: undefined } : { dashboardFocus: false }),
+    })
     commit((g) => setViewOpen(g, open), { history: false, autoRun: false })
   }
 
@@ -1981,6 +1999,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       expandedNodeId: s.expandedNodeId,
       pinnedNodeId: s.pinnedNodeId,
       dashboardOpen: s.dashboardOpen,
+      dashboardFocus: s.dashboardFocus,
       edgePanelNode: s.edgePanelNode,
       peekGroupId: s.peekGroupId,
       editingGroupId: s.editingGroupId,
@@ -2025,6 +2044,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
        * from the lock's, which deliberately does not travel.
        */
       dashboardOpen: graph.dashboard?.open === true,
+      // Never read from the file — see `dashboardFocus`.
+      dashboardFocus: false,
       edgePanelNode: undefined,
       peekGroupId: undefined,
       editingGroupId: undefined,
@@ -2516,6 +2537,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     dashboardOpen: initialGraph.dashboard?.open === true,
     setDashboardOpen: setDashboard,
     toggleDashboard: () => setDashboard(!get().dashboardOpen),
+    dashboardFocus: false,
+    setDashboardFocus: (on) => set({ dashboardFocus: on && get().dashboardOpen }),
 
     addToDashboard: (nodeIds, tabId) => {
       if (nodeIds.length === 0) return

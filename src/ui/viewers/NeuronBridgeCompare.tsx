@@ -38,6 +38,8 @@ import { isTypingTarget } from '../appShortcuts'
 import { formatNumber } from '../../style/format'
 import { Modal } from '../Modal'
 import { Pager } from './Pager'
+import type { SegmentOption } from './Segmented'
+import { Segmented } from './Segmented'
 
 /**
  * How an opened match is drawn. One object because the five travel together from the node's
@@ -88,44 +90,6 @@ export function arrowStep(event: KeyboardEvent): -1 | 1 | undefined {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return undefined
   if (isTypingTarget(event.target)) return undefined
   return event.key === 'ArrowLeft' ? -1 : 1
-}
-
-/** One option of a segmented switch. */
-export interface SegmentOption<T extends string> {
-  id: T
-  label: string
-  disabled?: boolean
-  title?: string
-}
-
-/** A row of pressed/unpressed buttons choosing one of a few — the card's every either/or. */
-export function Segmented<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string
-  options: readonly SegmentOption<T>[]
-  value: T | undefined
-  onChange: (next: T) => void
-}) {
-  return (
-    <span className="nbridge__switch" role="group" aria-label={label}>
-      {options.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          aria-pressed={value === option.id}
-          disabled={option.disabled}
-          title={option.title}
-          onClick={() => onChange(option.id)}
-        >
-          {option.label}
-        </button>
-      ))}
-    </span>
-  )
 }
 
 /**

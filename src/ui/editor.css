@@ -9159,7 +9159,8 @@ p.sources__hint {
   min-height: 0;
   overflow-y: auto;
 }
-.nbridge__scroll {
+.nbridge__scroll,
+.vfb-gallery__scroll {
   flex: 1 1 0;
   min-height: 96px;
   overflow-y: auto;
@@ -9181,6 +9182,7 @@ p.sources__hint {
 }
 
 .nbridge__em {
+  position: relative;
   flex: 0 0 auto;
   width: 92px;
   height: 46px;
@@ -9192,18 +9194,13 @@ p.sources__hint {
   color: var(--text-muted);
   font-size: 9.5px;
 }
-.nbridge__em img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
 .nbridge__facts {
   min-width: 0;
   color: var(--text-secondary);
 }
 
-.nbridge__muted {
+.nbridge__muted,
+.image-tile__muted {
   color: var(--text-muted);
   font-size: 10.5px;
 }
@@ -9225,7 +9222,7 @@ p.sources__hint {
 }
 
 .nbridge__chip,
-.nbridge__switch button {
+.segmented button {
   font-size: 10px;
   padding: 2px 7px;
   border-radius: var(--radius-sm);
@@ -9235,12 +9232,12 @@ p.sources__hint {
   cursor: pointer;
 }
 .nbridge__chip:hover,
-.nbridge__switch button:hover {
+.segmented button:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
 .nbridge__chip[aria-pressed='true'],
-.nbridge__switch button[aria-pressed='true'] {
+.segmented button[aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
@@ -9254,14 +9251,18 @@ p.sources__hint {
   font-variant-numeric: tabular-nums;
 }
 
-.nbridge__switch {
+.segmented {
   display: inline-flex;
 }
-.nbridge__switch button + button {
+.segmented button + button {
   margin-left: -1px;
 }
+.segmented button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
-.nbridge__grid {
+.image-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 6px;
@@ -9269,7 +9270,24 @@ p.sources__hint {
   align-content: start;
 }
 
-.nbridge__tile {
+.image-tiles__group {
+  display: contents;
+}
+.image-tiles__group[data-open] {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+/* Inside a band the band says which line a tile belongs to; the dashed outline is not needed. */
+.image-tiles__group[data-open] .image-tile[data-secondary] {
+  border-style: solid;
+}
+.image-tile {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -9279,15 +9297,16 @@ p.sources__hint {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
 }
-.nbridge__tile[data-secondary] {
+.image-tile[data-secondary] {
   border-style: dashed;
   background: var(--surface-3);
 }
-.nbridge__tile[data-selected] {
+.image-tile[data-selected] {
   border-color: var(--accent);
 }
 
-.nbridge__thumb {
+.image-tile__thumb {
+  position: relative;
   display: grid;
   place-items: center;
   height: 64px;
@@ -9298,20 +9317,29 @@ p.sources__hint {
   overflow: hidden;
   cursor: zoom-in;
 }
-.nbridge__thumb img {
+/* An image fitted whole into its box. Pinned, because as a grid item in a content-sized row
+   `height: 100%` resolved to nothing and a tall image was cut off (a VNC image laid out 150×293 in
+   a 64px tile). The grids around these now only centre a text message. */
+.nbridge__em img,
+.image-tile__thumb img,
+.vfb-info__frame img,
+.vfb-stage__zoom img,
+.vfb-stage__slice {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
 
-.nbridge__tile-foot {
+.image-tile__foot {
   display: flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
 }
 
-.nbridge__line {
+.image-tile__name {
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -9323,7 +9351,7 @@ p.sources__hint {
   user-select: text;
 }
 
-.nbridge__score {
+.image-tile__figure {
   flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -9331,7 +9359,7 @@ p.sources__hint {
   font-variant-numeric: tabular-nums;
 }
 
-.nbridge__badge {
+.image-tile__badge {
   font-size: 9px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -9343,8 +9371,8 @@ p.sources__hint {
   color: var(--text-muted);
 }
 
-.nbridge__others,
-.nbridge__star,
+.image-tile__others,
+.image-tile__star,
 .nbridge__close {
   flex: 0 0 auto;
   padding: 0 4px;
@@ -9356,19 +9384,202 @@ p.sources__hint {
   line-height: 1.4;
   cursor: pointer;
 }
-.nbridge__others:hover,
-.nbridge__star:hover,
+.image-tile__others:hover,
+.image-tile__star:hover,
 .nbridge__close:hover {
   border-color: var(--border-strong);
   color: var(--text-primary);
 }
-.nbridge__others {
+.image-tile__others {
   font-family: var(--font-mono);
   font-size: 9.5px;
 }
 /* Pinned is the state with consequences downstream, so it is the one that gets the accent. */
-.nbridge__star[aria-pressed='true'] {
+.image-tile__star[aria-pressed='true'] {
   color: var(--accent);
+}
+
+.vfb-gallery {
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.vfb-gallery__view {
+  display: flex;
+  flex-direction: column;
+  flex: 3 1 0;
+  min-height: 180px;
+  gap: 4px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--border);
+}
+.vfb-gallery__facts,
+.vfb-gallery__links {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.vfb-gallery__facts .image-tile__muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vfb-gallery .vfb-gallery__scroll {
+  flex: 2 1 0;
+}
+.vfb-stage {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 4px;
+}
+.vfb-stage__frame {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: hidden;
+  background: #000;
+  border-radius: var(--radius-sm);
+}
+.vfb-stage__frame[data-zoomed] {
+  cursor: grab;
+}
+.vfb-stage__frame[data-panning] {
+  cursor: grabbing;
+  user-select: none;
+}
+.vfb-stage__zoom {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transform-origin: 0 0;
+}
+.vfb-stage__frame[data-zoomed] .vfb-stage__slice {
+  image-rendering: pixelated;
+}
+.vfb-stage__hint {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.6);
+  color: #ddd;
+  font-size: 10.5px;
+  pointer-events: none;
+}
+.vfb-stage__slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.vfb-stage__slider input {
+  flex: 1 1 auto;
+}
+
+/* VFB Info: one term's page, the pager row above and a scrolling body below. */
+.vfb-info {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.vfb-info__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  user-select: text;
+}
+.vfb-info__body p {
+  margin: 0;
+}
+.vfb-info__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.vfb-info__symbol {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-right: 4px;
+}
+.vfb-info__tag {
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.vfb-info__section {
+  margin-top: 9px;
+}
+.vfb-info__heading {
+  margin: 0 0 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.vfb-info__muted {
+  color: var(--text-muted);
+}
+.vfb-info__pairs {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
+}
+.vfb-info__pairs > div {
+  display: contents;
+}
+.vfb-info__pairs dt {
+  color: var(--text-muted);
+}
+.vfb-info__pairs dd {
+  margin: 0;
+}
+.vfb-info__list {
+  margin: 0;
+  padding-left: 16px;
+}
+.vfb-info__images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 6px;
+}
+.vfb-info__image {
+  margin: 0;
+  min-width: 0;
+}
+.vfb-info__frame {
+  position: relative;
+  height: 70px;
+  background: #000;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.vfb-info__image figcaption {
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  line-height: 1.3;
+}
+/* Each line ellipses on its own: a flex item does not inherit its column's ellipsis. */
+.vfb-info__image figcaption > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .nbridge__empty {
@@ -9377,14 +9588,14 @@ p.sources__hint {
   text-align: center;
 }
 
-.nbridge__more {
+.image-tiles__more {
   display: flex;
   gap: 8px;
   align-items: baseline;
   justify-content: space-between;
   padding: 2px 9px 10px;
 }
-.nbridge__more .tile__link {
+.image-tiles__more .tile__link {
   margin-top: 0;
 }
 
@@ -9437,10 +9648,6 @@ p.sources__hint {
   gap: 6px 10px;
   align-items: center;
   margin-bottom: 7px;
-}
-.nbridge__switch button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .nbridge__slider {
@@ -12793,6 +13000,8 @@ select.annotate__input {
 
 .dashboard {
   grid-area: canvas;
+  /* The containing block for focus mode's overlays — the run bar's edge and the exit pill. */
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -12952,9 +13161,10 @@ select.annotate__input {
 }
 .dash-tabs__tab {
   flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
   max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   padding: 3px 9px;
   font: inherit;
@@ -12963,6 +13173,20 @@ select.annotate__input {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
+}
+/* The ellipsis is the label's, so a long title truncates and its numeral stays. */
+.dash-tabs__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The ⌥digit that reaches the tab. Muted and tabular: a hint beside the name, not part of it. */
+.dash-tabs__key {
+  flex: none;
+  font-size: 0.85em;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
 }
 .dash-tabs__tab:hover {
   color: var(--text-primary);
@@ -13151,6 +13375,103 @@ select.annotate__input {
   overflow-x: auto;
   gap: 4px 12px;
   padding: 4px 8px;
+}
+
+/*
+ * Focus mode: the cells and nothing else.
+ *
+ * Every rule here changes something *inside* a cell or between cells, never a cell's outer size
+ * while the mode holds — the hover reveal in particular is opacity, not display, so the strip is
+ * one height whether or not the pointer is over it, and no viewer resizes as a mouse crosses the
+ * grid. Opacity rather than `visibility` too, because a hidden control leaves the tab order and a
+ * keyboard user would have no way to reach ⚙ or ✕ at all; `:focus-within` brings them back.
+ */
+/* The strip's geometry, named once: the exit pill is placed from the same numbers. */
+.dashboard[data-focus] {
+  --focus-gap: 1px;
+  --focus-strip-pad: 6px;
+  --focus-strip-gap: 4px;
+  --focus-grip: 14px;
+}
+.dashboard[data-focus] .dashboard__grid {
+  --dash-gap: var(--focus-gap);
+}
+.dashboard[data-focus] .dash-cell__panel {
+  border: none;
+  border-radius: 0;
+}
+.dashboard[data-focus] .dash-cell__panel .overlay__header {
+  padding: 1px var(--focus-strip-pad);
+  gap: var(--focus-strip-gap);
+}
+.dashboard[data-focus] .dash-cell__grip {
+  box-sizing: border-box;
+  width: var(--focus-grip);
+  text-align: center;
+}
+/* Title only: the summary line is what makes the strip two lines tall. */
+.dashboard[data-focus] .dash-cell__panel .overlay__title span {
+  display: none;
+}
+.dashboard[data-focus] .dash-cell__panel .overlay__header .btn {
+  padding: 0 5px;
+}
+.dashboard[data-focus]
+  .dash-cell:not(:hover, :focus-within)
+  .overlay__header
+  > :not(.overlay__title),
+.dashboard[data-focus] .dash-cell:not(:hover) .dash-cell__resize {
+  opacity: 0;
+}
+
+/* The run bar, along the top edge of a window that has no header for it to sit under. */
+.dashboard__edge {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  /* Over the cells, whose resize grip is the highest thing in them. */
+  z-index: 5;
+  pointer-events: none;
+}
+.dashboard__edge .dashboard__progress {
+  bottom: 0;
+}
+
+/*
+ * The way out, over the first cell's title. Every other spot was measured to sit on a control in
+ * some layout — top centre is the column boundary under an even column count, where the left
+ * cell's ⤢ is; the corners hold ✕, the grips and a table's pager — and a fading pill is woken by
+ * exactly the pointer movement that is heading for that control. A title is a label in every
+ * layout, and the first cell's always starts here, just past its grip. Sized to the strip.
+ */
+.dashboard__focusExit {
+  position: absolute;
+  top: 2px;
+  /* Just past the first cell's grip: the grid's edge, the strip's padding, the grip, the gap. */
+  left: calc(
+    var(--focus-gap) + var(--focus-strip-pad) + var(--focus-grip) + var(--focus-strip-gap)
+  );
+  z-index: 6;
+  padding: 1px 10px;
+  line-height: 16px;
+  color: var(--text-primary);
+  border-radius: 999px;
+  box-shadow: var(--shadow-panel);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+/* `:hover` holds it up while the pointer rests on it, so it cannot fade from under a click. */
+.dashboard__focusExit[data-awake],
+.dashboard__focusExit:hover,
+.dashboard__focusExit:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard__focusExit {
+    transition: none;
+  }
 }
 
 .dash-cell__grip {
@@ -14670,4 +14991,35 @@ select.annotate__input {
 }
 .fit-view__said {
   color: var(--text-muted);
+}
+/* A VFB term's hover panel (`ui/vfb/TermHover.tsx`), on `.hover-panel`'s frame. */
+.term-hover {
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow: hidden;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.term-hover__name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.term-hover__id,
+.term-hover__muted {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.term-hover__image {
+  height: 90px;
+  object-fit: contain;
+  background: #000;
+  border-radius: calc(var(--radius-sm) - 1px);
+}
+.term-hover__text {
+  color: var(--text-secondary, var(--text-primary));
 }

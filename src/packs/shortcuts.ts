@@ -31,6 +31,8 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
   { id: 'cortex', packs: ['cortex'] },
   // Compartment models of single neurons; needs nothing else switched on.
   { id: 'biophys', packs: ['biophys'] },
+  // Virtual Fly Brain for connectome neurons: their types, papers, driver lines and images.
+  { id: 'vfb', packs: ['vfb'] },
 ]
 
 export function shortcut(id: string): ShortcutDefinition | undefined {

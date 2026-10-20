@@ -40,6 +40,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { useDismissOnOutside } from '../useDismiss'
 import { DashboardCellView } from './DashboardCellView'
 import { DashboardTabs } from './DashboardTabs'
+import { FocusExit } from './FocusExit'
 import { RunProgressBar } from './RunProgressBar'
 import { dropIndex, rowHeight } from './gridGeometry'
 
@@ -55,6 +56,8 @@ export function DashboardView() {
   const addToDashboard = useGraphStore((s) => s.addToDashboard)
   const moveDashboardCell = useGraphStore((s) => s.moveDashboardCell)
   const setDashboardColumns = useGraphStore((s) => s.setDashboardColumns)
+  const focused = useGraphStore((s) => s.dashboardFocus)
+  const setDashboardFocus = useGraphStore((s) => s.setDashboardFocus)
   /*
    * The count, not the array. A primitive — invariant 7 — and it is all that is *rendered*: the
    * ids themselves are read in the click handler, which runs long after any tick that changed
@@ -148,8 +151,9 @@ export function DashboardView() {
     })
     observer.observe(grid)
     return () => observer.disconnect()
-    // Re-attached when the grid mounts or unmounts, which is what having any cells decides.
-  }, [hasCells])
+    // Re-attached when the grid mounts or unmounts, which is what having any cells decides —
+    // and when focus mode changes the gap the measurement above read once.
+  }, [hasCells, focused])
 
   /*
    * The drag's own state, mirrored into a ref so the four callbacks below can have empty dep
@@ -192,117 +196,142 @@ export function DashboardView() {
   }, [])
 
   return (
-    <div className="dashboard" data-tour="dashboard">
-      <div className="dashboard__bar">
-        <DashboardTabs layout={layout} activeId={tab.id} />
-        <span className="dashboard__count">
-          {tab.cells.length} of {graph.nodes.length} nodes
-        </span>
+    <div className="dashboard" data-tour="dashboard" data-focus={focused ? 'true' : undefined}>
+      {focused ? (
+        <>
+          {/*
+           * The bar's two survivors, both overlaid so the grid keeps every pixel it was given:
+           * the run bar along the window's top edge, where the bar's bottom edge was, and the
+           * way back out.
+           */}
+          <div className="dashboard__edge">
+            <RunProgressBar />
+          </div>
+          <FocusExit />
+        </>
+      ) : (
+        <div className="dashboard__bar">
+          <DashboardTabs layout={layout} activeId={tab.id} />
+          <span className="dashboard__count">
+            {tab.cells.length} of {graph.nodes.length} nodes
+          </span>
 
-        <div className="dashboard__spacer" />
+          <div className="dashboard__spacer" />
 
-        <label className="dashboard__cols">
-          Columns
-          <input
-            type="range"
-            min={MIN_COLUMNS}
-            max={MAX_COLUMNS}
-            step={1}
-            value={tab.columns}
-            onChange={(e) => setDashboardColumns(Number(e.target.value))}
-            aria-label="Grid columns"
-          />
-          <span>{tab.columns}</span>
-        </label>
+          <label className="dashboard__cols">
+            Columns
+            <input
+              type="range"
+              min={MIN_COLUMNS}
+              max={MAX_COLUMNS}
+              step={1}
+              value={tab.columns}
+              onChange={(e) => setDashboardColumns(Number(e.target.value))}
+              aria-label="Grid columns"
+            />
+            <span>{tab.columns}</span>
+          </label>
 
-        {/*
-         * Adding from *inside* the dashboard, as well as from the canvas. Without it the only
-         * route in is a right-click on a card, so building a dashboard means leaving it — and
-         * the thing you are trying to judge is how the grid looks with one more cell on it.
-         */}
-        {/* `dropdown`, not a fourth hand-written menu panel: the anchored-popover box is
+          {/*
+           * Adding from *inside* the dashboard, as well as from the canvas. Without it the only
+           * route in is a right-click on a card, so building a dashboard means leaving it — and
+           * the thing you are trying to judge is how the grid looks with one more cell on it.
+           */}
+          {/* `dropdown`, not a fourth hand-written menu panel: the anchored-popover box is
             `.dropdown__panel`'s, and this only moves it to the right-hand edge. */}
-        <div className="dropdown dashboard__add" ref={addRef}>
-          <button
-            type="button"
-            className="btn"
-            aria-expanded={addOpen}
-            disabled={candidateCount === 0}
-            title={
-              candidateCount === 0
-                ? `Every node is already on ${where}`
-                : `Put another node on ${where}`
-            }
-            onClick={() => setAddOpen((open) => !open)}
-          >
-            + Add node
-          </button>
-          {addOpen && (
-            <div className="dropdown__panel dashboard__addMenu" role="menu">
-              {selectionCount > 0 && (
-                <button
-                  type="button"
-                  className="dropdown__item"
-                  onClick={() => {
-                    // Read here rather than subscribed to: the ids cannot have moved between the
-                    // menu opening and this click, and the array is not something to re-render
-                    // the whole grid for. `addCells` drops any that cannot have a cell.
-                    addToDashboard(useGraphStore.getState().selection)
-                    setAddOpen(false)
-                  }}
-                >
-                  Add the {selectionCount} selected
-                </button>
-              )}
-              <div className={selectionCount > 0 ? 'dropdown__group' : undefined}>
-                {candidates.map((c) => (
+          <div className="dropdown dashboard__add" ref={addRef}>
+            <button
+              type="button"
+              className="btn"
+              aria-expanded={addOpen}
+              disabled={candidateCount === 0}
+              title={
+                candidateCount === 0
+                  ? `Every node is already on ${where}`
+                  : `Put another node on ${where}`
+              }
+              onClick={() => setAddOpen((open) => !open)}
+            >
+              + Add node
+            </button>
+            {addOpen && (
+              <div className="dropdown__panel dashboard__addMenu" role="menu">
+                {selectionCount > 0 && (
                   <button
-                    key={c.id}
                     type="button"
                     className="dropdown__item"
                     onClick={() => {
-                      addToDashboard([c.id])
+                      // Read here rather than subscribed to: the ids cannot have moved between the
+                      // menu opening and this click, and the array is not something to re-render
+                      // the whole grid for. `addCells` drops any that cannot have a cell.
+                      addToDashboard(useGraphStore.getState().selection)
                       setAddOpen(false)
                     }}
                   >
-                    {c.label}
+                    Add the {selectionCount} selected
                   </button>
-                ))}
+                )}
+                <div className={selectionCount > 0 ? 'dropdown__group' : undefined}>
+                  {candidates.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="dropdown__item"
+                      onClick={() => {
+                        addToDashboard([c.id])
+                        setAddOpen(false)
+                      }}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setDashboardFocus(true)}
+            title="Hide everything but the cells. Move the pointer to find the way back"
+          >
+            Focus
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setDashboardOpen(false)}
+            title="Back to the canvas (the dashboard is saved with the graph)"
+          >
+            ← Canvas
+          </button>
+
+          {/*
+           * The run indication this view otherwise has none of — a cell draws values, not badges,
+           * so a run under a wall of viewers is invisible until they change. Last child of the bar
+           * and absolutely positioned over its bottom border, which is both where "between the
+           * header and the cards" is and the only place it costs no layout: `--dash-row` is
+           * measured from the grid's content box, so a bar taking a row's worth of height would
+           * resize every cell twice per run. See `RunProgressBar`.
+           */}
+          <RunProgressBar />
         </div>
-
-        <button
-          type="button"
-          className="btn"
-          onClick={() => setDashboardOpen(false)}
-          title="Back to the canvas (the dashboard is saved with the graph)"
-        >
-          ← Canvas
-        </button>
-
-        {/*
-         * The run indication this view otherwise has none of — a cell draws values, not badges,
-         * so a run under a wall of viewers is invisible until they change. Last child of the bar
-         * and absolutely positioned over its bottom border, which is both where "between the
-         * header and the cards" is and the only place it costs no layout: `--dash-row` is
-         * measured from the grid's content box, so a bar taking a row's worth of height would
-         * resize every cell twice per run. See `RunProgressBar`.
-         */}
-        <RunProgressBar />
-      </div>
+      )}
 
       {!hasCells ? (
         <div className="dashboard__empty">
           <p>
             <strong>Nothing on {where} yet.</strong>
           </p>
-          <p>
-            Add the nodes you want to see with <em>+ Add node</em> above, or right-click a card
-            on the canvas. A cell shows that node, so changes you make on the canvas show up
-            here too.
-          </p>
+          {!focused && (
+            <p>
+              Add the nodes you want to see with <em>+ Add node</em> above, or right-click a
+              card on the canvas. A cell shows that node, so changes you make on the canvas show
+              up here too.
+            </p>
+          )}
         </div>
       ) : (
         <div

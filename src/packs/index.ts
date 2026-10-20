@@ -28,6 +28,7 @@ import { cave } from './cave'
 import { connectome } from './connectome'
 import { cortex } from './cortex'
 import { neuprint } from './neuprint'
+import { vfb } from './vfb'
 import { zapbench } from './zapbench'
 
 // A pack is listed after the packs it `requires` and its `parent`: `registerPack` refuses one
@@ -41,6 +42,7 @@ export const PACKS: readonly PackDefinition[] = [
   cortex,
   biophys,
   annotation,
+  vfb,
 ]
 
 for (const pack of PACKS) registerPack(pack)

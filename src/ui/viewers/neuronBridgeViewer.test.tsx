@@ -126,8 +126,8 @@ function card(props: Partial<NeuronBridgeViewerProps> & Partial<NbView> = {}) {
   return { ...handlers, view, props: all }
 }
 
-const tiles = () => document.querySelectorAll('.nbridge__tile')
-const firstTiles = () => document.querySelectorAll('.nbridge__tile:not([data-secondary])')
+const tiles = () => document.querySelectorAll('.image-tile')
+const firstTiles = () => document.querySelectorAll('.image-tile:not([data-secondary])')
 
 beforeAll(() => installJsdomStubs())
 beforeEach(() => {
@@ -161,7 +161,7 @@ describe('NeuronBridgeViewer', () => {
   it('pins a tile’s match whole, and unpins it', async () => {
     const { onPins, view, props } = card()
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
-    const star = firstTiles()[0]!.querySelector<HTMLButtonElement>('.nbridge__star')!
+    const star = firstTiles()[0]!.querySelector<HTMLButtonElement>('.image-tile__star')!
     fireEvent.click(star)
     expect(onPins).toHaveBeenCalledTimes(1)
     const written = onPins.mock.calls[0]![0] as string[]
@@ -174,10 +174,10 @@ describe('NeuronBridgeViewer', () => {
       nbVersion: 'v3_10_0',
       area: 'Brain',
     })
-    expect(firstTiles()[0]!.querySelector('.nbridge__line')!.textContent).toBe(pin.line)
+    expect(firstTiles()[0]!.querySelector('.image-tile__name')!.textContent).toBe(pin.line)
 
     view.rerender(<NeuronBridgeViewer {...props} pins={written} />)
-    const pressed = firstTiles()[0]!.querySelector<HTMLButtonElement>('.nbridge__star')!
+    const pressed = firstTiles()[0]!.querySelector<HTMLButtonElement>('.image-tile__star')!
     expect(pressed.getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(pressed)
     expect(onPins).toHaveBeenLastCalledWith([])
@@ -194,7 +194,7 @@ describe('NeuronBridgeViewer', () => {
     card({ tiles: 60 })
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
     const before = tiles().length
-    const more = document.querySelector<HTMLButtonElement>('.nbridge__others')!
+    const more = document.querySelector<HTMLButtonElement>('.image-tile__others')!
     const extra = Number(more.textContent!.replace(/\D/g, ''))
     fireEvent.click(more)
     expect(tiles().length).toBe(before + extra)
@@ -205,8 +205,8 @@ describe('NeuronBridgeViewer', () => {
   it('opens a match as the two images it compared, with a link to the line', async () => {
     card()
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
-    const line = firstTiles()[0]!.querySelector('.nbridge__line')!.textContent!
-    fireEvent.click(firstTiles()[0]!.querySelector('.nbridge__thumb')!)
+    const line = firstTiles()[0]!.querySelector('.image-tile__name')!.textContent!
+    fireEvent.click(firstTiles()[0]!.querySelector('.image-tile__thumb')!)
     const detail = screen.getByRole('region', { name: `Match ${line}` })
     const images = detail.querySelectorAll('img')
     expect(images).toHaveLength(2)
@@ -264,7 +264,7 @@ describe('NeuronBridgeViewer', () => {
     })
     const { onPins } = card({ pins: [elsewhere] })
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
-    fireEvent.click(firstTiles()[0]!.querySelector('.nbridge__star')!)
+    fireEvent.click(firstTiles()[0]!.querySelector('.image-tile__star')!)
     expect((onPins.mock.calls[0]![0] as string[])[0]).toBe(elsewhere)
   })
 })
@@ -274,7 +274,7 @@ describe('NeuronBridgeViewer — the comparison', () => {
     const handles = card(props)
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
     // The first line in the sample is SS02800, a mirrored match.
-    fireEvent.click(firstTiles()[0]!.querySelector('.nbridge__thumb')!)
+    fireEvent.click(firstTiles()[0]!.querySelector('.image-tile__thumb')!)
     return handles
   }
   const detail = () => document.querySelector<HTMLElement>('.nbridge__detail')!
@@ -284,7 +284,7 @@ describe('NeuronBridgeViewer — the comparison', () => {
   it('holds the comparison above the tiles when frozen, and scrolls it with them when not', async () => {
     const { view, props } = await opened()
     expect(document.querySelector('.nbridge__top .nbridge__detail')).not.toBeNull()
-    expect(document.querySelector('.nbridge__scroll .nbridge__grid')).not.toBeNull()
+    expect(document.querySelector('.nbridge__scroll .image-tiles')).not.toBeNull()
     view.rerender(<NeuronBridgeViewer {...props} view={{ ...props.view, freeze: false }} />)
     expect(document.querySelector('.nbridge__top .nbridge__detail')).toBeNull()
     expect(document.querySelector('.nbridge__scroll .nbridge__detail')).not.toBeNull()
@@ -379,7 +379,7 @@ describe('NeuronBridgeViewer — the comparison', () => {
       </div>,
     )
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
-    fireEvent.click(firstTiles()[0]!.querySelector('.nbridge__thumb')!)
+    fireEvent.click(firstTiles()[0]!.querySelector('.image-tile__thumb')!)
     fireEvent.click(detail().querySelector('.nbridge__open')!)
     onCardClick.mockClear()
     const dialog = screen.getByRole('dialog')
@@ -393,20 +393,20 @@ describe('NeuronBridgeViewer — the comparison', () => {
 describe('NeuronBridgeViewer — stepping through lines', () => {
   /** The line names on the tiles, in order: what ← and → step through. */
   const tileLines = () =>
-    [...document.querySelectorAll<HTMLElement>('.nbridge__tile[data-line]')].map(
+    [...document.querySelectorAll<HTMLElement>('.image-tile[data-line]')].map(
       (tile) => tile.dataset.line!,
     )
   const openLine = () =>
     document.querySelector('.nbridge__detail .nbridge__detail-line')?.textContent ?? null
   const selectedTile = () =>
-    document.querySelector<HTMLElement>('.nbridge__tile[data-selected]')?.dataset.line
+    document.querySelector<HTMLElement>('.image-tile[data-selected]')?.dataset.line
   const press = (key: string, target: Element = document.activeElement ?? document.body) =>
     fireEvent.keyDown(target, { key })
 
   async function openFirst(props: Partial<NeuronBridgeViewerProps> & Partial<NbView> = {}) {
     const handles = card(props)
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
-    const thumb = firstTiles()[0]!.querySelector<HTMLButtonElement>('.nbridge__thumb')!
+    const thumb = firstTiles()[0]!.querySelector<HTMLButtonElement>('.image-tile__thumb')!
     fireEvent.click(thumb)
     thumb.focus()
     return handles
@@ -438,9 +438,9 @@ describe('NeuronBridgeViewer — stepping through lines', () => {
 
   it('steps from a line’s second image to the next line, not the same one again', async () => {
     await openFirst({ tiles: 60 })
-    fireEvent.click(document.querySelector('.nbridge__others')!)
+    fireEvent.click(document.querySelector('.image-tile__others')!)
     const order = tileLines()
-    fireEvent.click(document.querySelector('.nbridge__tile[data-secondary] .nbridge__thumb')!)
+    fireEvent.click(document.querySelector('.image-tile[data-secondary] .image-tile__thumb')!)
     expect(openLine()).toBe(order[0])
     press('ArrowRight', detailRegion())
     expect(openLine()).toBe(order[1])
@@ -467,7 +467,7 @@ describe('NeuronBridgeViewer — stepping through lines', () => {
       </div>,
     )
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
-    fireEvent.click(firstTiles()[0]!.querySelector('.nbridge__thumb')!)
+    fireEvent.click(firstTiles()[0]!.querySelector('.image-tile__thumb')!)
     press('ArrowRight', detailRegion())
     expect(onNodeKeyDown).not.toHaveBeenCalled()
   })
@@ -477,7 +477,7 @@ describe('NeuronBridgeViewer — stepping through lines', () => {
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
     // Safari's behaviour: the click leaves focus on the body.
     ;(document.activeElement as HTMLElement | null)?.blur()
-    fireEvent.click(firstTiles()[0]!.querySelector('.nbridge__thumb')!)
+    fireEvent.click(firstTiles()[0]!.querySelector('.image-tile__thumb')!)
     expect(document.activeElement).toBe(detailRegion())
   })
 
@@ -518,7 +518,7 @@ describe('NeuronBridgeViewer — pinning from the image, and the pinned download
   async function openFirstLm() {
     const handles = card()
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
-    fireEvent.click(firstTiles()[0]!.querySelector('.nbridge__thumb')!)
+    fireEvent.click(firstTiles()[0]!.querySelector('.image-tile__thumb')!)
     fireEvent.click(detailRegion().querySelectorAll('.nbridge__open')[1]!)
     return handles
   }
@@ -538,9 +538,9 @@ describe('NeuronBridgeViewer — pinning from the image, and the pinned download
     view.rerender(<NeuronBridgeViewer {...props} pins={written} />)
     expect(pinButton().textContent).toBe('★ Pinned')
     // The tile behind agrees: one pin, one state, two places to see it.
-    expect(firstTiles()[0]!.querySelector('.nbridge__star')!.getAttribute('aria-pressed')).toBe(
-      'true',
-    )
+    expect(
+      firstTiles()[0]!.querySelector('.image-tile__star')!.getAttribute('aria-pressed'),
+    ).toBe('true')
     fireEvent.click(pinButton())
     expect(onPins).toHaveBeenLastCalledWith([])
   })
@@ -562,7 +562,7 @@ describe('NeuronBridgeViewer — pinning from the image, and the pinned download
   it('pins from the comparison on the card too', async () => {
     const { onPins } = card()
     await waitFor(() => expect(firstTiles().length).toBeGreaterThan(0))
-    fireEvent.click(firstTiles()[0]!.querySelector('.nbridge__thumb')!)
+    fireEvent.click(firstTiles()[0]!.querySelector('.image-tile__thumb')!)
     fireEvent.click(within(detailRegion()).getByRole('button', { name: /Pin/ }))
     expect(onPins).toHaveBeenCalledTimes(1)
   })

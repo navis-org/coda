@@ -14,6 +14,10 @@
  * is the only thing an anchor can lie about — the same reasoning that makes `parseMarkdown`'s
  * extended kinds opt-in rather than a default.
  *
+ * **One exception**, stated where it is drawn: `LinkedText.tsx`' `IdLink`, whose URL is built
+ * by `columnLinks.ts` around an identifier and so is never a server's choice. Any URL that arrives
+ * as text is still drawn here, as itself.
+ *
  * **Two schemes and no others.** `http` and `https`: a lab's own CAVE or CATMAID is routinely
  * plain http, so requiring TLS would drop exactly the deployments least likely to be documented
  * anywhere else. Everything else — `javascript:`, `data:`, `file:` — is left as text, so a

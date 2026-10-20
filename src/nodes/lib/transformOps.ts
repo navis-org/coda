@@ -269,6 +269,10 @@ export function mirrorGeometry(
     positions: flipPositions(item.positions, axis, flipAt),
     // The half that is easy to leave out and impossible to see in a test that checks numbers.
     indices: reverseWinding(item.indices),
+    // A point, so it moves with the vertices — spread above, it would stay on the other side.
+    ...(item.soma
+      ? { soma: asPoint(flipPositions(Float32Array.from(item.soma), axis, flipAt)) }
+      : {}),
   }))
   return {
     ...value,
@@ -299,13 +303,26 @@ export function gatherPositions(value: GeometryValue): Float32Array {
 
   let total = 0
   for (const item of value.items) total += item.positions.length
-  const out = new Float32Array(total)
+  const somas = meshSomas(value)
+  const out = new Float32Array(total + somas.length * 3)
   let at = 0
   for (const item of value.items) {
     out.set(item.positions, at)
     at += item.positions.length
   }
+  // Each mesh's soma after every vertex, in item order — a point in the same frame, so whatever
+  // moves the vertices moves it too, in the same crossing. `withPositions` reads them back.
+  for (const soma of somas) {
+    out.set(soma, at)
+    at += 3
+  }
   return out
+}
+
+/** The somas a mesh set carries, in item order; none for skeletons, points or a soma-less set. */
+function meshSomas(value: GeometryValue): (readonly [number, number, number])[] {
+  if (value.kind !== 'meshes') return []
+  return value.items.flatMap((item) => (item.soma ? [item.soma] : []))
 }
 
 /**
@@ -328,7 +345,8 @@ export function withPositions(
   positions: Float32Array,
   space?: string | null,
 ): GeometryValue {
-  if (positions.length !== geometryPointCount(value) * 3) {
+  const vertices = geometryPointCount(value) * 3
+  if (positions.length !== vertices + meshSomas(value).length * 3) {
     // A length mismatch scatters every coordinate after the discrepancy onto the wrong point,
     // which is a neuron that still draws and is no longer the neuron it was.
     throw new Error(
@@ -349,10 +367,13 @@ export function withPositions(
   }
 
   let at = 0
+  let soma = vertices
   const items = kept.items.map((item) => {
     const slice = positions.slice(at, at + item.positions.length)
     at += item.positions.length
-    return { ...item, positions: slice }
+    if (!('soma' in item && item.soma)) return { ...item, positions: slice }
+    soma += 3
+    return { ...item, positions: slice, soma: asPoint(positions.subarray(soma - 3, soma)) }
   })
   return {
     ...kept,
@@ -847,4 +868,9 @@ export async function warpGeometry(
     positions = result.positions
   }
   return withPositions(value, positions, options.space)
+}
+
+/** Three numbers as a soma position. */
+function asPoint(xyz: ArrayLike<number>): readonly [number, number, number] {
+  return [xyz[0]!, xyz[1]!, xyz[2]!]
 }

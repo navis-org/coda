@@ -800,7 +800,14 @@ export class MockSource implements DataSource {
     // Meshes are generated from the same skeletons, so the two views always agree.
     const skeletons = await this.fetchSkeletons(req)
     throwIfAborted(req.signal)
-    const items = skeletons.items.map((s) => skeletonToTubeMesh(s))
+    // The generated skeleton's root is its soma (`generateSkeleton`), so the mesh says so too —
+    // which is what gives Skeletonize Meshes a soma to work with on the synthetic dataset.
+    const items = skeletons.items.map((s) => ({
+      ...skeletonToTubeMesh(s),
+      ...(s.positions.length >= 3
+        ? { soma: [s.positions[0]!, s.positions[1]!, s.positions[2]!] as const }
+        : {}),
+    }))
     return {
       kind: 'meshes',
       items,

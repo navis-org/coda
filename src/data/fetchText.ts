@@ -1,5 +1,6 @@
 /**
- * A plain cross-origin GET, with the two failures worth telling apart.
+ * A credential-less cross-origin read — a GET, or a POST to a public read-only query endpoint —
+ * telling apart the failures worth telling apart: unreachable or refused, 404, and cancelled.
  *
  * A browser reports a cross-origin refusal as an opaque `TypeError` indistinguishable from a
  * dead host — the constraint `data/precomputed/transport.ts` works around by trying and
@@ -30,8 +31,8 @@ export class NotFoundError extends Error {
   override readonly name = 'NotFoundError'
 }
 
-/** Extra sentences for the two failures a caller may know something about. */
-export interface FetchTextMessages {
+/** What a caller knows about the request: the sentences for its failures, and how to make it. */
+export interface FetchTextOptions {
   /** Appended to the unreachable/cross-origin message: what the caller knows about this host. */
   hint?: string
   /** Replaces the generic status message for a 404, which usually has a specific meaning. */
@@ -44,6 +45,13 @@ export interface FetchTextMessages {
    * cancellation, or giving up on something reads downstream as the host being unreachable.
    */
   signal?: AbortSignal
+  /**
+   * A request that is not a plain GET — a POST with a body, for a query endpoint (the Neo4j
+   * transaction API Virtual Fly Brain exposes). The failures above are told apart the same way
+   * whatever the method, which is the reason this is an option here and not a second function.
+   * Deliberately narrow: no `credentials`, so no caller can undo `credentials: 'omit'`.
+   */
+  init?: { method: 'GET' | 'POST'; headers?: Record<string, string>; body?: string }
 }
 
 /**
@@ -57,25 +65,23 @@ export function unreachable(url: string, hint?: string): Error {
   )
 }
 
-export async function fetchText(
-  url: string,
-  messages: FetchTextMessages = {},
-): Promise<string> {
+export async function fetchText(url: string, options: FetchTextOptions = {}): Promise<string> {
   let response: Response
   try {
     response = await fetch(url, {
       credentials: 'omit',
       redirect: 'follow',
-      ...(messages.signal ? { signal: messages.signal } : {}),
+      ...options.init,
+      ...(options.signal ? { signal: options.signal } : {}),
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw unreachable(url, messages.hint)
+    throw unreachable(url, options.hint)
   }
   if (response.status === 404) {
     throw new NotFoundError(
-      messages.notFound
-        ? `${url} returned 404. ${messages.notFound}`
+      options.notFound
+        ? `${url} returned 404. ${options.notFound}`
         : `${url} returned 404 ${response.statusText}`.trim(),
     )
   }

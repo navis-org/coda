@@ -22,6 +22,7 @@
 
 import { useEffect } from 'react'
 
+import { dashboardOf, tabForDigit } from '../core/dashboard'
 import { useGraphStore } from '../store/graphStore'
 import { appElement, toggleFullscreen } from './fullscreen'
 import { isTourActive } from './tour/tourState'
@@ -57,11 +58,40 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   )
 }
 
+/**
+ * ⌥1–⌥9: a dashboard tab by position, 9 being the last. Answers whether the key was taken.
+ *
+ * **Matched on `code`, not `key`.** On a Mac ⌥ is a character modifier, so ⌥2 arrives as `™`
+ * and `key` names no digit at all — on every layout, not just some. `code` is the physical key,
+ * which is what a positional shortcut means anyway.
+ *
+ * **The grid only.** On the canvas the keys stay free: the canvas's own digits are planned for
+ * saved views, and a chord that silently swapped the whole surface out from under somebody
+ * reaching for one would be the worse failure. A field keeps the key too — `isTypingTarget` has
+ * already returned by the time this runs — since ⌥digit is how a Mac types `¡`, `™` and `£`.
+ *
+ * Declined while a tour is up, for `d`'s reason: a page switch unmounts the cells it points at.
+ */
+function dashboardTabKey(event: KeyboardEvent): boolean {
+  if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return false
+  const match = /^Digit([1-9])$/.exec(event.code)
+  if (!match) return false
+  const store = useGraphStore.getState()
+  if (!store.dashboardOpen || isTourActive()) return false
+  const tab = tabForDigit(dashboardOf(store.graph), Number(match[1]))
+  // Taken even when there is no tab in that place, so ⌥7 on a three-tab dashboard does not
+  // type `¶` into nothing or reach the browser's own Alt+digit.
+  event.preventDefault()
+  if (tab) store.setDashboardTab(tab.id)
+  return true
+}
+
 export function useAppShortcuts(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTypingTarget(event.target)) return
-      // Every key here is unmodified. Leaving the modified ones alone matters: ⌘D is Duplicate
+      if (dashboardTabKey(event)) return
+      // Every other key here is unmodified. Leaving the modified ones alone matters: ⌘D is Duplicate
       // and ⌘I is the browser's inspector, and neither is ours to take.
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
       const key = event.key.toLowerCase()

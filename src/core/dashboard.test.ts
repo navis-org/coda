@@ -43,6 +43,8 @@ import {
   renameTab,
   setActiveTab,
   tabLabel,
+  digitForTab,
+  tabForDigit,
 } from './dashboard'
 import type { DashboardCell, DashboardLayout } from './dashboard'
 
@@ -726,5 +728,30 @@ describe('tabs', () => {
         alive,
       )?.active,
     ).toBeUndefined()
+  })
+})
+
+describe('the digit that reaches a tab', () => {
+  const layoutOf = (count: number): DashboardLayout => ({
+    tabs: Array.from({ length: count }, (_, i) => ({
+      id: i === 0 ? FIRST_TAB_ID : `t${i}`,
+      columns: DEFAULT_COLUMNS,
+      cells: [],
+    })),
+  })
+  const digits = (layout: DashboardLayout) => layout.tabs.map((_, i) => digitForTab(layout, i))
+
+  it('is the position, with 9 always the last tab', () => {
+    const three = layoutOf(3)
+    expect(digits(three)).toEqual([1, 2, 3])
+    expect(tabForDigit(three, 9)?.id).toBe('t2')
+    expect(tabForDigit(three, 4)).toBeUndefined()
+    expect(tabForDigit(three, 0)).toBeUndefined()
+    expect(tabForDigit(three, 10)).toBeUndefined()
+  })
+
+  it('past the ninth, keeps the first eight and gives the last a key, the rest none', () => {
+    const twelve = layoutOf(12)
+    expect(digits(twelve)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, undefined, undefined, undefined, 9])
   })
 })

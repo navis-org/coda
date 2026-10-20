@@ -34,6 +34,7 @@ import LINKAGE_PY from './linkage.py?raw'
 import MATCHES_PY from './matches.py?raw'
 import MESHES_PY from './meshes.py?raw'
 import NBLAST_PY from './nblast.py?raw'
+import SKELETONIZE_PY from './skeletonize.py?raw'
 import SKELETONS_PY from './skeletons.py?raw'
 import TOPOLOGY_PY from './topology.py?raw'
 import WARP_PY from './warp.py?raw'
@@ -135,6 +136,13 @@ const MODULES: Record<string, PyModule> = {
   // already cleaned or NBLASTed anything it is not downloaded then either.
   topology: {
     source: TOPOLOGY_PY,
+    packages: ['numpy', sources.fastcoreWheel],
+    label: `numpy · navis-fastcore ${sources.fastcoreVersion}`,
+  },
+  // skeletor's wavefront skeletonizer trimmed to the calls it makes into fastcore, so the same
+  // two packages again rather than skeletor's own scipy, pandas, trimesh and igraph.
+  skeletonize: {
+    source: SKELETONIZE_PY,
     packages: ['numpy', sources.fastcoreWheel],
     label: `numpy · navis-fastcore ${sources.fastcoreVersion}`,
   },

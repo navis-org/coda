@@ -26,7 +26,7 @@ A [BigClust Project](#annotation:bigclust)'s `Scene` output is a scene of its ow
 
 ## Settings
 
-All settings are in the inspector, so the card is left for the viewer. Everything except `Interface scale` is written into the URL.
+All settings are in the inspector, so the card is left for the viewer. Everything except `Interface scale` and `Layer bar` is written into the URL.
 
 ```coda-params
 out.neuroglancer: layout, limit
@@ -38,3 +38,4 @@ out.neuroglancer: layout, limit
 - `Warn above` adds a warning when the scene would contain more than this many neurons. Very long links can fail to open in some browsers or deployments.
 - `Viewer` picks a different neuroglancer deployment. Leave it empty to use the one the dataset names. The deployment has to allow being embedded.
 - `Interface scale` shrinks or enlarges neuroglancer's toolbar and panels inside the card. This is not the camera zoom.
+- `Layer bar` shows neuroglancer's strip of layer chips along the top. It is off by default, in the card and in the expanded view; a link opened in a new tab always has it.

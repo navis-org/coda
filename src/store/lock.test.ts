@@ -396,6 +396,7 @@ describe('every store action is on one side of the lock', () => {
      */
     'setDashboardOpen',
     'toggleDashboard',
+    'setDashboardFocus',
     'addToDashboard',
     'removeFromDashboard',
     'moveDashboardCell',

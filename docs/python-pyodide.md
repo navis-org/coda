@@ -732,6 +732,136 @@ fastcore resampled correctly and whether the marshalling survived the trip, and 
 owns whether the right buffers went over and the right neurons came back. Neither can do the
 other's job — vitest has no Pyodide, and a probe has no scheduler.
 
+## Skeletonize Meshes: skeletor, trimmed to the calls it makes into fastcore
+
+`neuron.skeletonize`, `Add ▸ Transform ▸ Skeletonize Meshes`, module `skeletonize.py`. skeletor's
+wavefront skeletonizer, and the measurement that decided how it got here.
+
+**skeletor itself could not come.** It needs scipy (14.0 MB as a Pyodide wheel), pandas with its
+date libraries (4.9 MB), trimesh and networkx from PyPI (Pyodide's own networkx pulls in 7 MB of
+matplotlib), igraph (1.1 MB), and **ncollpyde, which has no wasm build at all** and is imported at
+the top of `skeletor.post`, which `import skeletor` imports. About 22 MB on top of the runtime, and
+then one package that cannot load. But with navis-fastcore installed, skeletor's wavefront path
+calls fastcore for every graph step — unique edges, components, the BFS, level-set components,
+vertex contraction, dotprops, the spanning tree, the orientation — and every one of those is in
+the 0.13.0 wheel Coda already pins. So the module is that path with trimesh and pandas cut out:
+the same two packages as every other capability, **nothing to download** on a runtime that has
+run anything else.
+
+A TypeScript port was the other option, and it lost on one point: the RNG. skeletor picks seeds
+with `np.random.seed(1985)` and `np.random.choice`, and with numpy present the module draws the
+identical stream (a local `RandomState`, so the worker's global generator is never reseeded). With
+the same seeds and the same fastcore calls in the same order, **the answer is skeletor's node for
+node** — positions and parents exactly, radii to within 1e-12, across waves, step sizes and every
+radius aggregation. A port could only have matched with `origins` pinned on both sides.
+
+**The code is contributed under MIT by skeletor's copyright holder**, and the header says so.
+skeletor is GPL-3; checked by blame before copying, the files drawn from are effectively one
+author's (three lines in `wave.py` by another contributor, none of them substantial).
+
+Three places it departs from skeletor, each on purpose and each run by the parity probe:
+
+- **Unreferenced vertices are dropped first.** skeletor makes each into a lone root of radius 0,
+  and a decimated mesh routinely carries them. Compacting *in order* is what leaves every other
+  node unchanged: seeds depend on a component's size, components are ordered by their lowest
+  vertex, and neither moves.
+- **`Min fragment size`** removes whole pieces below a vertex count the same way, before anything
+  else runs, so what is left is skeletor's answer for the mesh holding only the larger pieces.
+  Pruning the trees afterwards would not be.
+- **A skeleton with no positive edge weight does not raise.** skeletor's guard takes the minimum
+  of the positive weights, which is an error on an empty array — a lone triangle at step size 2 is
+  one node with no edges.
+
+Two numpy replacements for what skeletor did otherwise, both measured as identical: `np.unique`
+with an axis becomes a `lexsort` (about five times faster at a million rows), and the pandas
+groupby becomes `bincount` and `reduceat` — pandas' mean is Kahan-summed, so a radius may differ
+in the last bit, and the quantiles interpolate linearly as pandas does.
+
+**Two of skeletor's callers clean its answer, and the node offers both.** navis'
+`mesh2skeleton(shave=True)` removes every one-node twig hanging off a branch point, and then —
+unconditionally — gives every radius-0 non-root node half its parent's radius. fafbseg's
+`skeletonize_neuron(shave_skeleton=True)` first removes, repeatedly, terminal segments of at most
+two nodes or holding an edge of 1 µm or more (never one of ten nodes or more), then runs the same
+bristle pass. So the card has `Shave` (`off`/`bristles`/`thorough`, nested rather than combined)
+and `Fix zero radii` as a separate toggle, a radius fix not being a shave; both default on, as in
+navis, and both off is skeletor's answer. The 1 µm is fafbseg's and tuned on fly, so it is an
+advanced control (`Long edge`), shown wherever it is read — `thorough`, and `Clean up soma`'s
+shave around the soma — and, like the soma radius, refused on voxel coordinates by
+`checkCleanUnits` (`usesDistance`). Three things the parity probe found worth
+holding against the originals rather than a reading of them: **navis never treats a root as a
+branch point**, whatever its children, so a twig off a root is not a bristle; fafbseg's long-edge
+test covers **the segment's end node too**, whose edge is not part of the segment; and at
+fafbseg's own 1 µm neither the long-edge rule nor the ten-node cap changes anything on skeletor's
+example mesh, so the probe also compares at 200 and 150 nm, where both do. Each is checked against
+navis' `mesh2skeleton` and fafbseg's shave loop run on a navis neuron as fafbseg writes it, and
+the notebook's `coda_tidy_skeleton` against the module.
+
+**The soma: labelled from the source, cleaned up on request, detected as a last resort.**
+`MeshGeometry.soma` is the source's soma position in the mesh's frame — neuPrint's
+`somaLocation` scaled from voxels (with discovery now raced beside the rows, since nothing else on
+the mesh path waited for the scale), a CAVE nucleus table through `somataFor`, `quiet` and
+tolerated, with FlyWire's public `nuclei_v1` now declared; the mock's skeleton root. It is a point,
+so Mirror flips it and every spline warp warps it in the same crossing as the vertices
+(`gatherPositions` appends it, `withPositions` puts it back), and Clean Meshes carries it. The
+node snaps it to the nearest node within the soma radius on a tree reaching beyond it, labels
+that node SWC 1 and roots the tree there (`parents_from_edges(roots=)` roots only that
+component). Measured on six public FlyWire neurons against `nuclei_v1`:
+
+- **The soma "hairball" is mostly not a soma problem.** The mesh's edges are short (99th
+  percentile under 0.5 µm) and the skeleton's long (99th percentile 2–6 µm, up to 10 µm), across
+  the whole dense arbour: a level set winding through broad or membrane-filled stretches collapses
+  to a centroid far from its neighbours. The soma is where it is worst. Penalising length in the
+  spanning tree removed about a tenth of the long edges; decimating first helped somewhat; Clean
+  Meshes' internal-membrane drop took most of the axon with it on these meshes, which is its own
+  bug to chase. Splitting oversized rings is the open line.
+- **Collapsing the soma alone makes a star**, every piece of the tangle re-attached to one node.
+  What works is the collapse *plus* fafbseg's shave restricted to twigs lying wholly within three
+  soma radii (`_SOMA_SHAVE_REACH`) — restricted to twigs ending *at* the soma it left most of them.
+  Nodes within 6 µm of the nucleus went 463→61, 741→256, 267→56, 777→404, 626→257, 267→93, the
+  soma node keeping two to eight exits; the cost is real short twigs near the soma on the two
+  neurons whose arbour lies beside it, which is why it is opt-in.
+- **FlyWire somas carry the nuclear envelope as an internal shell**, so the nucleus position sits
+  50–640 nm from the nearest vertex — on the shell, not the cell surface. The soma region is
+  therefore every vertex within an *absolute* radius connected to the nearest one through the
+  ball (`_soma_region`), the connectivity keeping a passing neurite out; a radius relative to the
+  nearest vertex measured nothing.
+- **The clean-up also drops the mesh pieces lying wholly inside the soma radius**
+  (`_drop_soma_debris`), before the collapse. At the card's default `Min fragment size` of 0,
+  separate trees within 3 µm of the nucleus went 94→4, 14→2, 129→2, 18→3, 13→1, 4→1, and nodes
+  within 3 µm 328→48 and 676→52 on the worst two. It also repaired the collapse itself on two of
+  the six: there the vertex nearest the nucleus lay on the nuclear envelope, so the soma region
+  was the envelope and the soma node came out with no neurite attached; with the envelope dropped
+  it seeds on the cell. A piece reaching outside the radius stays, as it may be a neurite.
+- **Labelling alone snaps only onto a tree reaching outside the soma radius** (`_nearest_row`,
+  through the same `_debris` rule as the clean-up, fallback included). Snapping to the nearest
+  node anywhere, at `Min fragment size` 0, put the label on a 7-node, 0.3 µm piece on one of the
+  six, the cell's tree unrooted; with the rule it lands on each neuron's largest tree, 0.1–0.7 µm
+  from the nucleus, with nothing removed.
+- **The widest node lands 2–8 µm from the nucleus** on all six: beside the soma every time, in it
+  only sometimes. So `Detect soma` labels and roots but never collapses — collapsing around it
+  pulled one neuron's arbour into a star.
+
+**The cost is linear in vertices** and a warning rather than anything stronger. Measured in
+Pyodide on skeletor's example mesh subdivided to 26k–1.7M vertices: 0.35 µs a vertex plus
+0.39 µs a vertex per wave, so a 1.7M-vertex mesh is 1.3 s at one wave. `skeletonizeOps` prices it
+slightly high (0.4 + 0.45) and warns past `WAIT_WARN_SECONDS`, naming the decimation controls
+upstream. The node deliberately has no decimation of its own: that is Clean Meshes' `Keep faces`.
+
+**Two probes, because neither can do the other's job.** `pnpm probe:skeletonize-parity`
+(`probe-skeletonize.py`) runs the module beside skeletor in CPython, where skeletor installs and
+this wheel does not; it blocks `fastremap` as Pyodide lacks it (skeletor gives the same answer
+with or without it). `pnpm probe:skeletonize` (`probe-skeletonize.mjs`) runs it in Pyodide in CI:
+a tube must come back as one tree running its length at the tube's radius, an empty mesh keeps
+its slot, parents are local and precede their children, every radius aggregation and shave the
+card offers runs, and a soma — placed, collapsed, detected, beside debris — comes back a root on
+the cell's tree.
+
+**The notebook calls skeletor** (`sk.skeletonize.by_wavefront`), after `coda_mesh_pieces` does
+the two clean-up steps above, and requires navis-fastcore beside it: without fastcore, skeletor's
+igraph fallback breaks spanning-tree ties differently. Executed against the module, the emitted
+cell matches at both a zero and a non-zero fragment threshold. R is a TODO; the natverse has no
+wavefront skeletonizer.
+
 ## A seventh function, not a seventh module
 
 The Heatmap node's `clustering` order is `coda_cluster_order` in `linkage.py` — the same file,

@@ -10,6 +10,7 @@ import { clusterColor } from '../../../style/encoding'
 import { pyList, pyStr, pyValue } from '../py'
 import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib/cleanOps'
 import { skeletonSimplifyParamsFrom, thins } from '../../../nodes/lib/simplifyOps'
+import { skeletonizeParamsFrom } from '../../../nodes/lib/skeletonizeOps'
 import { NM_PER_UM } from '../../../data/units'
 import {
   distanceKindOf,
@@ -1708,6 +1709,70 @@ registerEmitter('neuron.cleanMeshes', (ctx) => {
     ...body,
     `    _cleaned.append(coda_mesh((v, f), id=_neuron.id, units=_neuron.units))`,
     `${out} = navis.NeuronList(_cleaned)`,
+  ]
+})
+
+/**
+ * skeletor itself, which is what the card's implementation was trimmed from and is held against
+ * (`scripts/probe-skeletonize.py`): with navis-fastcore installed the two agree node for node.
+ * What Coda adds is the mesh clean-up before the call (`coda_mesh_pieces`) and the tidy-up after
+ * it (`coda_tidy_skeleton`).
+ */
+registerEmitter('neuron.skeletonize', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('fastcore')
+  ctx.require('skeletor')
+  ctx.require('pandas')
+  ctx.require('navis')
+  ctx.helper('coda_mesh_pieces')
+
+  const out = ctx.output('out')
+  const p = skeletonizeParamsFrom(ctx.params)
+  // The tidy-up only where the card asks for one, so an all-off card is skeletor's call alone.
+  const tidies = p.shave !== 'off' || p.fixZeroRadii
+  if (tidies) ctx.helper('coda_tidy_skeleton')
+  const tidy = tidies
+    ? [
+        `    _swc = coda_tidy_skeleton(`,
+        `        _swc,`,
+        `        shave=${pyStr(p.shave)},`,
+        // The card's micrometres in the nanometres the coordinates are in.
+        `        cutoff=${p.shaveCutoff * NM_PER_UM},`,
+        `        fix_zero_radii=${p.fixZeroRadii ? 'True' : 'False'},`,
+        `    )`,
+      ]
+    : []
+  return [
+    ...ctx.note(
+      'skeletor gives the same skeleton as the card only with navis-fastcore installed; ' +
+        'without it, its igraph fallback can break spanning-tree ties differently.',
+    ),
+    // The meshes a notebook fetches carry no soma, so none of the card's soma steps can follow.
+    ...ctx.note(
+      'The card also labels the soma and roots each skeleton there, where the source gives a ' +
+        'soma position' +
+        (p.somaCleanup || p.detectSoma
+          ? ', and cleans up or detects the soma as set on it'
+          : '') +
+        '; this cell does not. Use navis.reroot_skeleton with the soma position to root it.',
+    ),
+    // The item count never changes: a mesh with nothing left keeps its slot as an empty skeleton.
+    `_skeletons = []`,
+    `for _neuron in navis.NeuronList(${src}):`,
+    `    v, f = coda_mesh_pieces(_neuron.vertices, _neuron.faces, min_vertices=${p.minFragment})`,
+    `    if len(f):`,
+    `        _swc = sk.skeletonize.by_wavefront(`,
+    `            (v, f),`,
+    `            waves=${p.waves},`,
+    `            step_size=${p.stepSize},`,
+    `            radius_agg=${pyStr(p.radiusAgg)},`,
+    `            progress=False,`,
+    `        ).swc`,
+    `    else:`,
+    `        _swc = pd.DataFrame(columns=['node_id', 'parent_id', 'x', 'y', 'z', 'radius'])`,
+    ...tidy,
+    `    _skeletons.append(navis.Skeleton(_swc, id=_neuron.id, units=_neuron.units))`,
+    `${out} = navis.NeuronList(_skeletons)`,
   ]
 })
 

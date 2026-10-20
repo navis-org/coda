@@ -665,6 +665,19 @@ export class NeuPrintSource implements DataSource {
     this.republish(datasetId, state)
   }
 
+  /**
+   * `somaLocation`, which is voxels, in the nanometres every geometry here is in by then. The one
+   * conversion, for the skeletons' label and the meshes' soma alike; both callers have awaited
+   * discovery, without which this would scale by the identity.
+   */
+  private somaInNm(
+    datasetId: string,
+    soma: readonly [number, number, number],
+  ): readonly [number, number, number] {
+    const scale = this.scaleFor(datasetId)
+    return [soma[0] * scale[0], soma[1] * scale[1], soma[2] * scale[2]]
+  }
+
   /** Voxels → nanometres for a dataset. Identity until discovery has run. */
   private scaleFor(datasetId: string): VoxelScale {
     return this.states.get(datasetId)?.scale ?? IDENTITY_SCALE
@@ -1358,7 +1371,6 @@ export class NeuPrintSource implements DataSource {
   ): SkeletonsValue {
     const data: Record<string, ColumnData> = {}
     for (const col of schema.columns) data[col.name] = []
-    const scale = this.scaleFor(datasetId)
     const items: SkeletonGeometry[] = []
     for (const [neuronId, item] of pairs) {
       const row = meta.get(neuronId)
@@ -1368,13 +1380,7 @@ export class NeuPrintSource implements DataSource {
       // Neither route labels a soma, so `somaLocation` says where it is — in voxels, where both
       // routes are nanometres by now, hence the scale.
       items.push(
-        row?.soma
-          ? withSomaAt(
-              item,
-              [row.soma[0] * scale[0], row.soma[1] * scale[1], row.soma[2] * scale[2]],
-              SOMA_SNAP_NM,
-            )
-          : item,
+        row?.soma ? withSomaAt(item, this.somaInNm(datasetId, row.soma), SOMA_SNAP_NM) : item,
       )
     }
     return {
@@ -1639,6 +1645,7 @@ export class NeuPrintSource implements DataSource {
       meshes: readonly MeshResult[],
       meta: Map<string, NeuronRow>,
       detail?: { lod: number; levels: number; triangles: number },
+      withSoma = false,
     ): MeshesValue => {
       const data: Record<string, ColumnData> = {}
       for (const col of schema.columns) data[col.name] = []
@@ -1650,11 +1657,15 @@ export class NeuPrintSource implements DataSource {
       }
       return {
         kind: 'meshes',
-        items: meshes.map((mesh) => ({
-          id: mesh.neuronId,
-          positions: mesh.positions,
-          indices: mesh.indices,
-        })),
+        items: meshes.map((mesh) => {
+          const soma = withSoma ? meta.get(mesh.neuronId)?.soma : undefined
+          return {
+            id: mesh.neuronId,
+            positions: mesh.positions,
+            indices: mesh.indices,
+            ...(soma ? { soma: this.somaInNm(req.datasetId, soma) } : {}),
+          }
+        }),
         attributes: makeTable(schema, data),
         bounds: boundsOf(meshes.map((mesh) => mesh.positions)),
         ...(detail ? { detail } : {}),
@@ -1667,9 +1678,14 @@ export class NeuPrintSource implements DataSource {
     const attributesReady = this.fetchNeuronRows(req.datasetId, req.neuronIds, req.signal).then(
       (r) => (rows = r),
     )
+    // The soma's voxel scale is `Meta`'s, and nothing else on this path waits for discovery:
+    // without it a soma would be scaled by the identity, in silence. Awaited for the complete
+    // answer only, so partials — which carry no soma, CAVE's rule — are not held back by it.
+    const discovered = this.discover(req.datasetId, req.signal)
 
-    const [, result] = await Promise.all([
+    const [, , result] = await Promise.all([
       attributesReady,
+      discovered,
       fetchMeshes(source, req.neuronIds, {
         ...(req.signal ? { signal: req.signal } : {}),
         ...(req.refresh ? { refresh: true } : {}),
@@ -1693,6 +1709,7 @@ export class NeuPrintSource implements DataSource {
       result.lod !== undefined && result.levels !== undefined
         ? { lod: result.lod, levels: result.levels, triangles: result.triangles }
         : undefined,
+      true,
     )
   }
 
