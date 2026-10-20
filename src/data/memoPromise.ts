@@ -69,13 +69,21 @@ export function memoPromise<K, V>(
  *
  * The other half of sharing a request: the shared work carries nobody's signal, since the first
  * caller's Cancel must not become every caller's, and each caller stops *waiting* on its own.
+ *
+ * `promise` is always observed, including when the signal had already aborted: a caller that stops
+ * waiting has not handled the work it stopped waiting for, and that work's rejection would
+ * otherwise surface as an unhandled one. The way in is ordinary: the work is started in the same
+ * expression, and a cancel that lands while it starts aborts the signal before this is reached.
  */
 export function untilAborted<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
 ): Promise<T> {
   if (!signal) return promise
-  if (signal.aborted) return Promise.reject(signal.reason)
+  if (signal.aborted) {
+    promise.catch(() => undefined)
+    return Promise.reject(signal.reason)
+  }
   return new Promise((resolve, reject) => {
     const onAbort = () => reject(signal.reason)
     signal.addEventListener('abort', onAbort, { once: true })

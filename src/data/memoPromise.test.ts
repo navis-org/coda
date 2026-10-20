@@ -9,7 +9,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { memoPromise } from './memoPromise'
+import { memoPromise, untilAborted } from './memoPromise'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -71,4 +71,23 @@ describe('memoPromise', () => {
       expect(held.get('k')).toBe(fresh)
     },
   )
+})
+
+describe('untilAborted', () => {
+  it('rejects at once on a signal already aborted, and still observes the work', async () => {
+    const aborted = new AbortController()
+    aborted.abort(new Error('cancelled'))
+    const work = deferred<number>()
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      await expect(untilAborted(work.promise, aborted.signal)).rejects.toThrow('cancelled')
+      // The work fails after nobody is waiting for it any more: that is not an unhandled rejection.
+      work.reject(new Error('server said no'))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
 })
