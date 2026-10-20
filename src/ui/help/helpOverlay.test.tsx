@@ -172,6 +172,17 @@ describe('the help overlay', () => {
     expect(screen.queryByRole('dialog', { name: /help/i })).toBeNull()
   })
 
+  it("links a plugin node's plugin guide, and nothing for a built-in node", async () => {
+    const dialog = await openHelp('biophys:model')
+    const link = within(dialog).getByRole('link', { name: /Biophysics guide/ })
+    expect(link.getAttribute('href')).toMatch(/biophysics\.html$/)
+    cleanup()
+    const builtIn = await openHelp('neuron.nblast')
+    expect(within(builtIn).queryByRole('link', { name: /guide ↗/ })?.textContent).toBe(
+      'Node guide ↗',
+    )
+  })
+
   it('draws the node’s own summary above the document', async () => {
     const dialog = await openHelp('neuron.nblast')
     expect(within(dialog).getByText(/Compare neurons by shape/)).toBeTruthy()

@@ -24,6 +24,7 @@ src/packs/
     glyphs.ts           default export: type → drawing, merged into NODE_GLYPHS
     seeAlso.ts          default export: See also groups, merged by help/seeAlso.ts
     wizard.ts           default export: Workflow Wizard answers, merged by wizard/contribute.ts
+    nodeValues.ts       default export: per-node values its nodes write, merged by nodes/lib/nodeValues.ts
     help/traces.md      the document for zapbench:traces
   connectome/           twelve node modules and a manifest; keeps built-in ids
   neuprint/ cave/ catmaid/
@@ -34,8 +35,9 @@ src/packs/
 `registerPack` takes the manifest and registers each node, and `src/packs/index.ts` lists every
 pack explicitly, for the reason `nodes/index.ts` gives — an analysable bundle and a deterministic
 order. Everything else is *found by file*: `ui/glyphs.ts`, `help/seeAlso.ts`,
-`help/registry.ts` and `wizard/contribute.ts` each glob the one file they need out of every pack
-directory. The split is
+`help/registry.ts`, `wizard/contribute.ts` and `nodes/lib/nodeValues.ts` each glob the one file they
+need out of every pack directory. The last is how a pack's node adds a per-node value (Simulate Model's
+`peakVoltage`) to the 3D View's "by node value" list without the core list naming it. The split is
 forced by `nodes.html`, which draws the glyph table and holds **no node definitions at all** — a
 glyph table that imported the manifest would pull every pack's nodes, and their data layers, in
 behind a static page. The help registry already worked this way (a document exists because its

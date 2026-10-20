@@ -39,13 +39,13 @@ import { IssueText } from '../IssueText'
 import { bucketParams } from '../params/paramGroups'
 import { portStyle } from '../../style/socketStyle'
 import { dragPortSocket, useDragOrigin } from '../dragOrigin'
-import { drawsFromInputs, ValuePreview } from '../viewers/ValuePreview'
+import { drawsFromInputs, opensWithoutValue, ValuePreview } from '../viewers/ValuePreview'
 import { CardCanvasScale } from '../viewers/canvasScale'
 import { ExportNodeContext } from '../viewers/exportRegistry'
 import { CacheAge } from './CacheAge'
 import { CacheLifetimeMenu } from './CacheLifetimeMenu'
 import { DatasetCacheAge } from './DatasetCacheAge'
-import { nodeBody } from './nodeBodies'
+import { nodeBody, nodeFooter } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
 import { readerHints } from '../hints'
 import { NodeHints } from './NodeHints'
@@ -112,6 +112,7 @@ function CodaNodeViewImpl({
 
   const inference = useGraphStore((s) => s.inference)
   const setParam = useGraphStore((s) => s.setParam)
+  const setParams = useGraphStore((s) => s.setParams)
   const renameNode = useGraphStore((s) => s.renameNode)
   const toggleCollapsed = useGraphStore((s) => s.toggleCollapsed)
   const toggleParamRows = useGraphStore((s) => s.toggleParamRows)
@@ -297,6 +298,7 @@ function CodaNodeViewImpl({
    * as fields *as well* would put a raw "Search" text box under the search bar that writes it.
    */
   const body = nodeBody(node.type)
+  const Footer = nodeFooter(node.type)
   /*
    * Flattened out of the buckets rather than filtered a second time. `bucketParams` invents
    * nothing and drops nothing — a param the definition did not place lands in a trailing "Other"
@@ -357,7 +359,8 @@ function CodaNodeViewImpl({
    * expand and pin buttons cannot drift apart — a third surface would otherwise add a third copy
    * of the same condition to the same header.
    */
-  const canOpenFullSize = outputValue !== undefined || body?.expandable
+  const canOpenFullSize =
+    outputValue !== undefined || body?.expandable || opensWithoutValue(node.type)
   /**
    * True when React Flow's wrapper carries an explicit width for this card, so the card fills it
    * rather than taking `--node-width`.
@@ -776,7 +779,7 @@ function CodaNodeViewImpl({
               bandParams.map((param) => (
                 <div
                   key={param.id}
-                  className={`param${param.kind === 'boolean' ? ' param--wide' : param.kind === 'columns' ? ' param--stacked' : ''}`}
+                  className={`param${param.kind === 'boolean' ? ' param--wide' : param.kind === 'columns' ? ' param--chips' : ''}`}
                 >
                   <span className="param__label" title={param.help ?? param.label}>
                     {param.label}
@@ -864,6 +867,7 @@ function CodaNodeViewImpl({
               onError={setNotice}
               onSelectionChange={(ids) => setParam(id, 'selection', ids)}
               onParamChange={(paramId, next) => setParam(id, paramId, next)}
+              onParamsChange={(values) => setParams(id, values)}
               inputValues={nodeInputs(id)}
             />
           </div>
@@ -907,8 +911,9 @@ function CodaNodeViewImpl({
               />
             )}
             {/* A body's own foot control — Link Table's re-read — beside the age it belongs with. */}
-            {body?.Footer && (
-              <body.Footer
+            {Footer && (
+              <Footer
+                node={node}
                 ctx={ctx}
                 setParam={(paramId, value) => setParam(id, paramId, value)}
               />

@@ -1510,13 +1510,17 @@
   display: none;
 }
 /*
- * A chips picker takes the card's full width too, but draws no label of its own — so its row keeps
- * the label, above the chips rather than beside them. It used to share `.param--wide`, and every
- * multi-column picker on a card was a row of chips with nothing saying what they were for.
+ * A chips picker sits beside its label like any other field, its chips wrapping in the field's
+ * column. It draws no label of its own, so the row's is kept — it once shared `.param--wide` and
+ * every multi-column picker was a row of chips with nothing saying what they were for — and then
+ * sat above the chips, a second line per picker on a card that has few to spare. Aligned to the
+ * top, so a picker wrapped onto two lines is labelled at its first.
  */
-.param--stacked {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+.param--chips {
+  align-items: start;
+}
+.param--chips .param__label {
+  line-height: 22px;
 }
 
 .field {
@@ -1799,6 +1803,20 @@ input.field--combo {
 .coda-node__cache--expired,
 .coda-node__cache--expired:hover {
   color: var(--status-warn);
+}
+
+/* An edit rather than a re-read — Fit Model's Apply — so in the accent. */
+.coda-node__cache--action {
+  color: var(--accent);
+}
+.coda-node__cache--action:hover:not(:disabled),
+.coda-node__cache--action:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.coda-node__cache--action:disabled {
+  color: var(--text-muted);
+  cursor: default;
 }
 
 .coda-node__cache--empty,
@@ -6906,6 +6924,12 @@ p.sources__hint {
   line-height: 1.45;
   color: var(--text-secondary);
 }
+.plugins__guide {
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
 
 .wizard__foot,
 .guides__foot {
@@ -8266,6 +8290,16 @@ p.sources__hint {
 .markdown__callout[data-tone='tip'],
 .node-hint[data-tone='tip'] {
   --cal: var(--accent);
+}
+/*
+ * "In depth": for the specialist, so a frame and a recessed surface rather than a hue — what a
+ * newcomer may skip is told by its shape and its title. Written for the pack guides
+ * (`src/packguide/`); a help document may use it too.
+ */
+.markdown__callout[data-tone='detail'] {
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface-2);
 }
 .markdown__callout-title {
   margin-bottom: 3px;
@@ -10295,13 +10329,17 @@ details[open] > summary.tile__label {
  * a field a reader expects to hold one. The spinner is left on — this is a value somebody
  * nudges rather than types, and one step is one bar.
  */
-.tile__bins {
-  width: 40px;
+/* The small number inputs viewer chrome carries: a tile's bin count, the Regions tab's width factor. */
+.tile__bins,
+.topo__number {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-3);
   color: var(--text-secondary);
   font: inherit;
+}
+.tile__bins {
+  width: 40px;
   font-size: 9px;
   text-transform: none;
   letter-spacing: 0;
@@ -14116,6 +14154,11 @@ select.annotate__input {
   color: var(--text-secondary);
   cursor: pointer;
 }
+/* A number beside a `topo__check`, in its type (the rest is `.tile__bins`'). */
+.topo__number {
+  width: 48px;
+  padding: 1px 4px;
+}
 
 /*
  * The tile grid inside the rail is one column whatever the auto-fit would do: the rail is 340px
@@ -14347,6 +14390,24 @@ select.annotate__input {
   font-weight: 600;
   color: var(--text-secondary);
 }
+/* The Model tab's numbers: a name and its value a row, values aligned right. */
+.model-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin: 0 0 12px;
+}
+.model-stats > div {
+  display: contents;
+}
+.model-stats dt {
+  color: var(--text-secondary);
+}
+.model-stats dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .split-editor__list ol {
   margin: 0 0 8px;
   padding: 0;
@@ -14569,6 +14630,368 @@ select.annotate__input {
   opacity: 0.4;
 }
 
+/*
+ * The Compartment Model's channel list (`ui/biophys/ChannelsEditor.tsx`): a bar with the count and
+ * the add buttons, a row per channel with its regions as toggles, and a note on what is not there.
+ */
+.channels-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 8px;
+  overflow: auto;
+  font-size: 11px;
+}
+.channels-editor__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.channels-editor__count {
+  color: var(--text-secondary);
+  margin-right: auto;
+}
+.channels-editor__table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.channels-editor__table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.channels-editor__table td {
+  padding: 4px 6px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+.channels-editor__table td .field {
+  min-width: 0;
+}
+/* Numbers are a few digits: a field each as wide as that, not as wide as the column. */
+.channels-editor__table input.field {
+  width: 6em;
+}
+.channels-editor__amount {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.channels-editor__table td:last-child {
+  width: 1px;
+}
+.channels-editor__regions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+}
+.channels-editor__channel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.channels-editor__help {
+  padding: 0 6px;
+  border-radius: 50%;
+}
+.channels-editor__help[aria-expanded='true'] {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+/* A channel's "?" text, under its row. */
+.channels-editor__about td {
+  padding: 2px 6px 8px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.channels-editor__about p {
+  margin: 0 0 2px;
+}
+.channels-editor__everywhere,
+.channels-editor__note {
+  color: var(--text-muted);
+}
+/* A region the row names and the model no longer has: struck through, still untickable. */
+.channels-editor .chip-filter[data-missing] {
+  text-decoration: line-through;
+}
+
+/*
+ * Simulate's full-size view (`ui/biophys/SimulateView.tsx`): Partners and Playback as tabs.
+ * Playback is the Points editor's pair — dendrogram, 3D view — under a row of controls, with the
+ * traces beneath and a cursor on them at the frame shown.
+ */
+.simulate-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.simulate-view__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.playback {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  outline: none;
+}
+.playback__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.playback__scrubber {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.playback__time {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.playback__hint {
+  color: var(--text-muted);
+}
+.playback__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+/* The added traces, each with its line's colour — the tick on the dendrogram is the same — and ✕. */
+.playback__traces-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.playback__trace {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.playback__trace .btn {
+  padding: 0 4px;
+}
+.playback__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.playback__making {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.playback__main {
+  display: flex;
+  flex: 3 1 0;
+  min-height: 0;
+}
+.playback__dendrogram {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.playback__dendrogram > .arbor__plot {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.playback__scene {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+/* The 3D view fills its column, as the Points editor's does. */
+.playback__scene > .viewer {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  border-radius: 0;
+}
+.playback__traces {
+  display: flex;
+  flex: 2 1 0;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+.playback__traces > .viewer {
+  flex: 1 1 auto;
+  border-radius: 0;
+}
+
+/*
+ * Simulate's full-size partner list (`ui/biophys/SimulatePartners.tsx`): a bar of the count,
+ * Topology's search box and Explore's link buttons over the table viewer's own table.
+ */
+.sim-partners {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  min-height: 0;
+  padding: 8px;
+  font-size: 11px;
+}
+.sim-partners__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.sim-partners__count {
+  color: var(--text-secondary);
+}
+/* Topology's search box, given more of the bar. */
+.sim-partners__search {
+  flex-basis: 140px;
+  margin-left: 0;
+}
+.sim-partners__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.sim-partners__tick {
+  width: 1px;
+  text-align: center;
+}
+/* A partner that does not fire stays listed, quieter, so it can be ticked back. */
+.sim-partners tr[data-silenced] td:not(.sim-partners__tick) {
+  color: var(--text-muted);
+}
+.sim-partners__none {
+  padding: 8px;
+  color: var(--text-muted);
+}
+
+/*
+ * Skeleton to Points' hand placement (`PointsEditor.tsx`): the split editor's frame with a 3D view
+ * between the dendrogram and the list — the dendrogram to click on, the 3D view to look at.
+ */
+.points-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.points-editor__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.points-editor__main > .arbor__plot {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.points-editor__scene {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+/* The 3D view fills its column, as Neuron Topology's does. */
+.points-editor__scene > .viewer {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  border-radius: 0;
+}
+/* A point's row: its name field, its distance from the root, ✕. */
+.points-editor__point {
+  gap: 6px;
+}
+.points-editor__point .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.points-editor__distance {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Clamp tab's waveform preview (`ClampPreview`), under its params. */
+.clamp-preview {
+  margin: 12px 0 0;
+}
+.clamp-preview svg {
+  display: block;
+}
+.clamp-preview__note {
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+/* Load Recording's full-size listing (`RecordingBody`): the format, then every column it can give. */
+.recording-listing {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.recording-listing p {
+  margin: 6px 0;
+}
+.recording-listing ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.recording-listing__source,
+.recording-listing__note {
+  color: var(--text-muted);
+}
+
+/* Fit Model's full-size view: the traces fill the main area, the error per iteration a strip of
+   the parameter list. */
+.fit-view__spacer {
+  flex: 1 1 auto;
+}
+.fit-view__plot {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.fit-view__iterations {
+  height: 140px;
+  display: flex;
+}
+/* The chart fills its box, as Playback's traces do. */
+.fit-view__plot > .viewer,
+.fit-view__iterations > .viewer {
+  flex: 1 1 auto;
+  border-radius: 0;
+}
+.fit-view__said {
+  color: var(--text-muted);
+}
 /* A VFB term's hover panel (`ui/vfb/TermHover.tsx`), on `.hover-panel`'s frame. */
 .term-hover {
   width: 300px;

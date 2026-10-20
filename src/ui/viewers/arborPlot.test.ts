@@ -18,6 +18,10 @@ import {
   pickPiece,
   pieceGeometry,
   placeOnPiece,
+  radiusWidths,
+  meanEdgeRadius,
+  scaleWidths,
+  SCALE_FLOOR_PX,
   subSegments,
   synapseMarks,
   toLayout,
@@ -162,5 +166,49 @@ describe('subSegments', () => {
     expect(sub.piece[at]).toBe(tree.nodes.indexOf(5))
     expect(sub.f0[at]).toBeCloseTo(0, 6)
     expect(sub.f1[at]).toBeCloseTo(0.5, 6)
+  })
+})
+
+describe('radiusWidths', () => {
+  it('scales each edge by its mean radius, the 95th percentile at twice the line width, clamped', () => {
+    const { arbor, tree, d } = y()
+    const sub = subSegments(arbor, tree, d, arbor.geodesic)
+    // Thick at the root, thin towards the tips; node 3's tip too thin to draw below the floor.
+    const radii = Float32Array.of(1000, 1000, 1000, 1, 500, 500)
+    const widths = radiusWidths(arbor, sub, radii, 1.5)!
+    const at = (node: number) => widths[Array.from(sub.node).indexOf(node)]!
+    expect(at(1)).toBe(3) // a p95-sized edge: twice 1.5
+    expect(at(5)).toBe(1.5) // half the radius, half the width
+    expect(at(3)).toBe(1.5) // (1000 + 1) / 2 → about half
+    expect(Math.min(...widths)).toBeGreaterThanOrEqual(0.5)
+    // Quarter-pixel steps, so a repaint groups into few strokes.
+    expect(Array.from(widths).every((w) => Number.isInteger(w * 4))).toBe(true)
+  })
+
+  it('declines on a skeleton with no radius to scale by', () => {
+    const { arbor, tree, d } = y()
+    const sub = subSegments(arbor, tree, d, arbor.geodesic)
+    expect(radiusWidths(arbor, sub, new Float32Array(6), 1.5)).toBeUndefined()
+  })
+})
+
+describe('scaleWidths', () => {
+  it('draws each edge as wide as its diameter at the zoom, floored and in quarter pixels', () => {
+    const { arbor, tree, d } = y()
+    const sub = subSegments(arbor, tree, d, arbor.geodesic)
+    const radii = Float32Array.of(1000, 1000, 1000, 1, 500, 500)
+    const at = (widths: Float32Array, node: number) =>
+      widths[Array.from(sub.node).indexOf(node)]!
+    // 1 px per µm of layout (skeleton nm): a 2 µm-thick edge is 2 px, a 1 µm one 1 px.
+    const fitted = scaleWidths(sub, meanEdgeRadius(arbor, radii), 1e-3)
+    expect(at(fitted, 1)).toBe(2)
+    expect(at(fitted, 5)).toBe(1)
+    // Zoomed in fourfold, four times as wide: it follows the zoom, as a pixel width does not.
+    expect(at(scaleWidths(sub, meanEdgeRadius(arbor, radii), 4e-3), 1)).toBe(8)
+    // A twig too thin to see is still drawn, at the floor.
+    expect(Math.min(...scaleWidths(sub, meanEdgeRadius(arbor, radii), 1e-6))).toBe(
+      SCALE_FLOOR_PX,
+    )
+    expect(Array.from(fitted).every((w) => Number.isInteger(w * 4))).toBe(true)
   })
 })

@@ -108,6 +108,20 @@ export function formatShare(share: number): string {
   return share >= 0.1 ? `${Math.round(share * 100)}%` : `${(share * 100).toFixed(1)}%`
 }
 
+/**
+ * A number read for its side of zero, with a proper minus (`formatNumber` gives a hyphen), and a
+ * `+` where asked for: `−25`, `+50`.
+ */
+export function formatSigned(value: number, options: { plus?: boolean } = {}): string {
+  const sign = value < 0 ? '−' : value > 0 && options.plus ? '+' : ''
+  return `${sign}${formatNumber(Math.abs(value))}`
+}
+
+/** `digits` significant figures, grouped: a measured quantity in a tooltip or a fitted value. */
+export function formatSignificant(value: number, digits: number): string {
+  return formatNumber(Number(value.toPrecision(digits)))
+}
+
 /** Full precision with thousands separators, for tables and tooltips. */
 export function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return '—'
@@ -323,6 +337,11 @@ export function plural(n: number, noun: string, plural = `${noun}s`): string {
   return `${formatNumber(n)} ${n === 1 ? noun : plural}`
 }
 
+/** A verb agreeing with a count, beside `plural`: `agree(n, 'is', 'are')`. */
+export function agree(n: number, one: string, many: string): string {
+  return n === 1 ? one : many
+}
+
 /**
  * A size in bytes, in the units storage is quoted in.
  *
@@ -340,4 +359,18 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+/**
+ * A slug: lower case, every run of anything else a hyphen, none at either end. One copy: the graph
+ * download, the chart exports and a pack guide's heading anchors had the same regexes side by side
+ * and differed only in what an empty result falls back to.
+ */
+export function slugify(text: string, fallback: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || fallback
+  )
 }

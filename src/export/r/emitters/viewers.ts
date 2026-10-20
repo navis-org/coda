@@ -26,7 +26,8 @@ import type {
   HeatmapSelectionStep,
 } from '../../plans/heatmap'
 import { heatmapExportPlan } from '../../plans/heatmap'
-import type { PickedLabels } from '../../plans/viewers'
+import type { LineChartPlan, PickedLabels } from '../../plans/viewers'
+import { Y2_TAG } from '../../../nodes/lib/lineChart'
 import {
   NEUROGLANCER_REFUSAL,
   barChartPlan,
@@ -154,18 +155,31 @@ registerEmitter('out.lineChart', (ctx) => {
 
   const lines = [`${out} <- ${src}`]
   if (plan.note !== undefined) return [...lines, ...ctx.note(plan.note)]
-  const { x, ys, series, byX, xLog, yLog } = plan
+  const { x, series, byX, xLog, yLog, y2s, y2Log } = plan
+  if (y2s.length > 0) {
+    /*
+     * ggplot2's second axis is a transform of the first, which no linear map carries a log through.
+     * A log is presentational, so the chart is drawn linear and the note says so — the drawing is
+     * still the answer, the way the Heatmap's notes keep a chart rather than refusing it.
+     */
+    const logged = yLog || y2Log
+    return [
+      ...lines,
+      ...(logged
+        ? ctx.note(
+            'The Y axes are linear here: ggplot2 draws a second axis only as a transform of the first, so a log scale on either side is not carried over with Y2.',
+          )
+        : []),
+      ...lineChartTwinLines(out, plan),
+    ]
+  }
 
-  const skip = rVector(series ? [x, series] : [x])
   const label = series
     ? `if (length(y_cols) == 1) as.character(${col(series)}) else paste(${col(series)}, .y, sep = " · ")`
     : `.y`
   lines.push(
     ``,
-    ys.length > 0
-      ? `y_cols <- ${rVector(ys)}`
-      : `# Every numeric column but X${series ? ' and the series' : ''}, as the canvas draws with no Y picked.
-` + `y_cols <- setdiff(names(Filter(is.numeric, ${out})), ${skip})`,
+    lineChartYLine(out, plan),
     `${out} |>`,
     `  pivot_longer(all_of(y_cols), names_to = ".y", values_to = ".value") |>`,
     `  filter(!is.na(${col(x)}), !is.na(.value)) |>`,
@@ -179,6 +193,65 @@ registerEmitter('out.lineChart', (ctx) => {
   )
   return lines
 })
+
+/**
+ * The Line Chart's `y_cols`: the picked columns, or the canvas's rule (`yColumnsOf`) spelled in base
+ * R where the schema is not known. One statement for both arrangements of the chart.
+ */
+function lineChartYLine(out: string, plan: Exclude<LineChartPlan, { note: string }>): string {
+  const { x, ys, series, y2s } = plan
+  if (ys.length > 0) return `y_cols <- ${rVector(ys)}`
+  const besides = series
+    ? y2s.length > 0
+      ? ', the series and Y2'
+      : ' and the series'
+    : y2s.length > 0
+      ? ' and Y2'
+      : ''
+  const skip = rVector([x, ...(series ? [series] : []), ...y2s])
+  return (
+    `# Every numeric column but X${besides}, as the canvas draws with no Y picked.\n` +
+    `y_cols <- setdiff(names(Filter(is.numeric, ${out})), ${skip})`
+  )
+}
+
+/**
+ * The Line Chart with a second Y axis, in ggplot2, which has one only as a transform of the first:
+ * the Y2 columns are mapped linearly onto Y's range (each axis spanning its own data, as on the
+ * canvas) and the right axis labelled with the inverse. Dashed, as the canvas draws them.
+ */
+function lineChartTwinLines(
+  out: string,
+  plan: Exclude<LineChartPlan, { note: string }>,
+): string[] {
+  const { x, series, byX, xLog, y2s } = plan
+  // Vectorised, so no row-by-row pass: a lone column on its axis is named by the series alone.
+  const name = series
+    ? `if_else(if_else(.right, length(y2_cols), length(y_cols)) == 1, as.character(${col(series)}), paste(${col(series)}, .y, sep = " · "))`
+    : `.y`
+  return [
+    ``,
+    lineChartYLine(out, plan),
+    `y2_cols <- ${rVector(y2s)}`,
+    `# Y2 drawn on Y's scale: each axis spans its own data, the right one labelled back in its units.`,
+    `.r1 <- range(unlist(${out}[y_cols]), na.rm = TRUE)`,
+    `.r2 <- range(unlist(${out}[y2_cols]), na.rm = TRUE)`,
+    `.k <- if (diff(.r2) > 0 && all(is.finite(.r1))) diff(.r1) / diff(.r2) else 1`,
+    `.b <- if (all(is.finite(.r1))) .r1[1] - .k * .r2[1] else 0`,
+    `${out} |>`,
+    `  pivot_longer(all_of(c(y_cols, y2_cols)), names_to = ".y", values_to = ".value") |>`,
+    `  filter(!is.na(${col(x)}), !is.na(.value)) |>`,
+    `  mutate(.right = .y %in% y2_cols) |>`,
+    `  mutate(.line = paste0(${name}, if_else(.right, ${rStr(Y2_TAG)}, "")), .value = if_else(.right, .value * .k + .b, .value)) |>`,
+    `  ggplot(aes(x = ${col(x)}, y = .value, colour = .line, group = .line, linetype = .right)) +`,
+    `  ${byX ? 'geom_line()' : 'geom_path()'} +`,
+    `  scale_linetype_manual(values = c("FALSE" = "solid", "TRUE" = "dashed"), guide = "none") +`,
+    `  scale_y_continuous(sec.axis = sec_axis(~ (. - .b) / .k)) +`,
+    ...(xLog ? [`  scale_x_log10() +`] : []),
+    `  labs(x = ${rStr(x)}, y = NULL, colour = NULL) +`,
+    `  theme_minimal()`,
+  ]
+}
 
 registerEmitter('out.heatmap', (ctx) => {
   const src = ctx.wired('in')

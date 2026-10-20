@@ -60,6 +60,66 @@ describe('LineChartViewer', () => {
     expect(tooltip.textContent).toMatch(/tip -45/)
   })
 
+  it('marks the cursor at its X, and draws none without one', () => {
+    const { container, rerender } = render(
+      <LineChartViewer table={TRACES} x="t" ys={['soma']} cursor={2} />,
+    )
+    const cursors = () => container.querySelectorAll('g[clip-path] line')
+    expect(cursors()).toHaveLength(1)
+    // Halfway across a plot from t = 0 to 4.
+    const x = Number(cursors()[0]!.getAttribute('x1'))
+    rerender(<LineChartViewer table={TRACES} x="t" ys={['soma']} cursor={4} />)
+    expect(Number(cursors()[0]!.getAttribute('x1'))).toBeGreaterThan(x)
+    rerender(<LineChartViewer table={TRACES} x="t" ys={['soma']} />)
+    expect(cursors()).toHaveLength(0)
+  })
+
+  it('ticks each mark at the foot of the plot, inside the window, labelled', () => {
+    const { container } = render(
+      <LineChartViewer
+        table={TRACES}
+        x="t"
+        ys={['soma']}
+        xMarks={[1, 3, 99]}
+        xMarksLabel="input spikes arriving"
+      />,
+    )
+    const marks = [...container.querySelectorAll('g[clip-path] path')].find(
+      (path) => path.querySelector('title')?.textContent === 'input spikes arriving',
+    )
+    // Two inside the data's X range; the one at 99 is off the plot.
+    expect(marks?.getAttribute('d')?.match(/M/g)).toHaveLength(2)
+  })
+
+  it('draws Y2 dashed against a right axis of its own, and names it in the key', () => {
+    const { container } = render(
+      <LineChartViewer table={TRACES} x="t" ys={['soma']} y2s={['tip']} />,
+    )
+    const drawn = paths(container)
+    expect(drawn.map((p) => p.getAttribute('stroke-dasharray'))).toEqual([null, '5 3'])
+    // The right axis's labels sit beyond the plot, starting there; the left axis's end there.
+    const right = [...container.querySelectorAll('text[text-anchor="start"]')].map(
+      (t) => t.textContent,
+    )
+    expect(right).toContain('-40')
+    expect(screen.getByText('tip (right)')).toBeTruthy()
+    expect(screen.getByText('2 lines · 9 points')).toBeTruthy()
+  })
+
+  it('draws a strip under the plot on the same X, with a Y and a label of its own', () => {
+    const strip = { label: 'injected', unit: 'nA', x: [0, 1, 2, 3, 4], y: [0, 0, 0.2, 0.2, 0] }
+    const { container } = render(
+      <LineChartViewer table={TRACES} x="t" ys={['soma']} strip={strip} />,
+    )
+    expect(screen.getByText('injected (nA)')).toBeTruthy()
+    const line = [...container.querySelectorAll('path')].find((p) =>
+      p.getAttribute('clip-path')?.endsWith('-strip)'),
+    )
+    expect(line?.getAttribute('d')?.match(/[ML]/g)).toHaveLength(5)
+    // Its zero in its range, and its top the strip's largest value.
+    expect(screen.getByText('0.2')).toBeTruthy()
+  })
+
   it('says when there is nothing to draw', () => {
     const empty = makeTable(tableSchema(column('t', 'f64'), column('v', 'f64')), {
       t: [null],

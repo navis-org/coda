@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { isNumericDType } from '../../core/types'
+import type { ColumnSort } from './sortCycle'
+import { nextSort, sortAria, sortGlyph } from './sortCycle'
 import type { ColumnSchema } from '../../core/types'
 import type { CellValue, TableValue } from '../../core/values'
 import { selectRows } from '../../core/values'
@@ -44,11 +46,6 @@ export interface TableViewerProps {
   /** Whether the filter row starts open. Forced open below whenever a filter is set. */
   showFilters?: boolean
   onShowFiltersChange?: (show: boolean) => void
-}
-
-interface SortState {
-  column: string
-  descending: boolean
 }
 
 const PAGE_SIZES = [25, 50, 100, 500]
@@ -106,7 +103,7 @@ export function TableViewer({
 }: TableViewerProps) {
   const [page, setPage] = useState(0)
   const [size, setSize] = useState(pageSize)
-  const [sort, setSort] = useState<SortState | undefined>(undefined)
+  const [sort, setSort] = useState<ColumnSort | undefined>(undefined)
 
   const filterable = !!filters && !!onFiltersChange
 
@@ -229,16 +226,7 @@ export function TableViewer({
     return <ViewerEmpty>Table has no columns</ViewerEmpty>
   }
 
-  const toggleSort = (columnName: string) => {
-    setSort((current) => {
-      // Cycle ascending → descending → unsorted, so there is always a way back to the
-      // order the graph actually produced.
-      if (!current || current.column !== columnName)
-        return { column: columnName, descending: false }
-      if (!current.descending) return { column: columnName, descending: true }
-      return undefined
-    })
-  }
+  const toggleSort = (columnName: string) => setSort((current) => nextSort(current, columnName))
 
   return (
     <div className="viewer">
@@ -247,16 +235,13 @@ export function TableViewer({
           <thead>
             <tr>
               {table.schema.columns.map((col) => {
-                const active = sort?.column === col.name
                 const expression = clauseFor(draft, col.name)
                 const problem = problems.get(col.name)
                 return (
                   <th
                     key={col.name}
-                    aria-sort={
-                      active ? (sort!.descending ? 'descending' : 'ascending') : 'none'
-                    }
-                    data-sorted={active || undefined}
+                    aria-sort={sortAria(sort, col.name)}
+                    data-sorted={sort?.column === col.name || undefined}
                     data-filtered={expression ? true : undefined}
                   >
                     {/* The name sorts; the field below it does not. Two targets in one cell
@@ -271,7 +256,7 @@ export function TableViewer({
                       {col.name}
                       {col.unit && !compact && <small>{col.unit}</small>}
                       <span className="data-table__sort" aria-hidden="true">
-                        {active ? (sort!.descending ? '▾' : '▴') : ''}
+                        {sortGlyph(sort, col.name)}
                       </span>
                     </button>
                     {filterRowOpen && (

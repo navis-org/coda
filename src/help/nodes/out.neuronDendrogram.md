@@ -74,7 +74,7 @@ Strahler order and flow centrality are computed with the root you chose, so both
 out.neuronDendrogram: branchColor, branchPalette, widthBy, lineWidth
 ```
 
-`Branch width` set to "By radius" draws each stretch of cable as wide as its radius. The 95th percentile radius is drawn at twice `Line width`, so a large soma does not squash everything else to a hairline.
+`Branch width` set to "By radius" draws each stretch of cable as wide as its radius. The 95th percentile radius is drawn at twice `Line width`, so a large soma does not squash everything else to a hairline. "To scale" draws it as wide as it really is, in the same units as its length, so branches widen as you zoom in. Branches thinner than half a pixel are drawn at half a pixel. With lengths in λ (electrotonic distance) there's no width to scale, so it's drawn by radius.
 
 ## Clicking a branch
 

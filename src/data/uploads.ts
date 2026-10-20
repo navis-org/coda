@@ -40,13 +40,14 @@
  * here for the same reason it is there: a synchronous peek is the only place a fetch can start
  * on inference's behalf, and being re-run when it lands is what closes the loop.
  *
- * ## Two kinds of upload, one of everything else
+ * ## Three kinds of upload, one of everything else
  *
- * `Upload Mesh` stores geometry rather than rows, and it is here rather than in a module of its
- * own because everything above this line would otherwise be written twice — the learned channel,
- * the revision counter that is the only correct `useSyncExternalStore` snapshot, the mirror that
- * makes the peek synchronous, the started-once rule, and the reset seam. What differs between
- * the two is a store name and a descriptor; what is shared is every decision that was hard.
+ * `Upload Mesh` stores geometry rather than rows, and `Load Recording` a file's own bytes, and
+ * both are here rather than in modules of their own because everything above this line would
+ * otherwise be written again — the learned channel, the revision counter that is the only correct
+ * `useSyncExternalStore` snapshot, the mirror that makes the peek synchronous, the started-once
+ * rule, and the reset seam. What differs between the kinds is a store name and a descriptor; what
+ * is shared is every decision that was hard.
  *
  * So `UploadMeta` is a union discriminated on `kind`, and **absence means `'table'`**: every
  * record any user already has in this database was written by a build in which a table was the
@@ -60,21 +61,28 @@ import type { StoredUsage } from './idb'
 import { commit, database, readKey, usage } from './idb'
 import { hashBytes, hashString } from '../core/hash'
 import type { TableSchema } from '../core/types'
+import type { RecordingSummary } from './ephys/recording'
 import type { TableValue } from '../core/values'
 
 const DB_NAME = 'coda-uploads'
 /*
- * 2 added the mesh store. `idb.ts` creates a store that is missing and never recreates one, so
- * the bump is additive: a browser holding uploaded tables at version 1 opens at 2 with those
- * tables untouched and an empty `meshes` store beside them.
+ * 2 added the mesh store, 3 the recording store. `idb.ts` creates a store that is missing and never
+ * recreates one, so each bump is additive: a browser holding uploads at an older version opens at
+ * this one with them untouched and an empty store beside them for each kind added since.
  */
-const DB_VERSION = 2
+const DB_VERSION = 3
 /** Small descriptors, read on their own so a peek does not pull a 26 MB table with it. */
 const META_STORE = 'meta'
 /** The parsed tables, keyed by the same id. */
 const TABLE_STORE = 'tables'
 /** The parsed meshes, keyed by the same id. Typed arrays survive IndexedDB's structured clone. */
 const MESH_STORE = 'meshes'
+/**
+ * Electrophysiology recordings, **as the file's own bytes**, keyed by the same id. Not parsed into
+ * a table on the way in, unlike a CSV: what `Load Recording` returns depends on its channel, sweep
+ * and window controls, so the node reads the file each run and a changed control needs no re-pick.
+ */
+const RECORDING_STORE = 'recordings'
 
 const NO_STORAGE = 'This browser has no storage available for uploads.'
 
@@ -126,6 +134,7 @@ interface UploadNoun {
 const UPLOAD_NOUNS: Record<UploadMeta['kind'], UploadNoun> = {
   table: { held: 'rows', file: 'the file', them: 'it', unnamed: 'this file' },
   meshes: { held: 'meshes', file: 'the files', them: 'them', unnamed: 'these meshes' },
+  recording: { held: 'recordings', file: 'the file', them: 'it', unnamed: 'this recording' },
 }
 
 /** The badge a `validate` returns: a clause, because the card draws it under the node's name. */
@@ -195,7 +204,13 @@ export interface MeshUploadMeta extends UploadBase {
   items: MeshItemMeta[]
 }
 
-export type UploadMeta = TableUploadMeta | MeshUploadMeta
+/** What the card can say about an uploaded recording without reading its samples. */
+export interface RecordingUploadMeta extends UploadBase {
+  kind: 'recording'
+  summary: RecordingSummary
+}
+
+export type UploadMeta = TableUploadMeta | MeshUploadMeta | RecordingUploadMeta
 
 /**
  * One mesh as it is stored: geometry plus the two names it answers to.
@@ -230,7 +245,7 @@ function normaliseMeta(meta: UploadMeta | undefined): UploadMeta | undefined {
 const db = database({
   name: DB_NAME,
   version: DB_VERSION,
-  stores: [META_STORE, TABLE_STORE, MESH_STORE],
+  stores: [META_STORE, TABLE_STORE, MESH_STORE, RECORDING_STORE],
 })
 
 const REFUSAL: RefusalWords = {
@@ -246,7 +261,7 @@ const REFUSAL: RefusalWords = {
  * is gone.
  */
 function write(
-  store: typeof TABLE_STORE | typeof MESH_STORE,
+  store: typeof TABLE_STORE | typeof MESH_STORE | typeof RECORDING_STORE,
   run: (meta: IDBObjectStore, payload: IDBObjectStore) => void,
 ): Promise<void> {
   return commit(
@@ -348,6 +363,12 @@ export function peekUploadMeta(id: string): UploadMeta | undefined {
 export function peekMeshUpload(id: string): MeshUploadMeta | undefined {
   const known = peekUploadMeta(id)
   return known?.kind === 'meshes' ? known : undefined
+}
+
+/** A recording's summary, if it is already known in this session; `peekMeshUpload`'s rule. */
+export function peekRecordingUpload(id: string): RecordingUploadMeta | undefined {
+  const known = peekUploadMeta(id)
+  return known?.kind === 'recording' ? known : undefined
 }
 
 /**
@@ -481,6 +502,37 @@ export async function putMeshUpload(
   return remember(meta)
 }
 
+/**
+ * Store a recording's file and its summary, and return its id. `putUpload`'s twin, rules included:
+ * content-addressed over the file's bytes, so the same file re-picked re-runs nothing.
+ */
+export async function putRecordingUpload(
+  name: string,
+  bytes: ArrayBuffer,
+  summary: RecordingSummary,
+): Promise<string> {
+  const id = `r_${hashBytes([new Uint8Array(bytes)])}`
+  const meta: RecordingUploadMeta = {
+    kind: 'recording',
+    id,
+    name,
+    bytes: bytes.byteLength,
+    summary,
+    savedAt: Date.now(),
+  }
+  await write(RECORDING_STORE, (metaStore, recordingStore) => {
+    metaStore.put(meta, id)
+    recordingStore.put(bytes, id)
+  })
+  return remember(meta)
+}
+
+/** The stored recording's bytes, or undefined when this browser does not have them. */
+export async function getRecordingUpload(id: string): Promise<ArrayBuffer | undefined> {
+  if (!id) return undefined
+  return readKey<ArrayBuffer | undefined>(db, RECORDING_STORE, id, undefined)
+}
+
 /** The stored table, or undefined when this browser does not have it. */
 export async function getUpload(id: string): Promise<TableValue | undefined> {
   if (!id) return undefined
@@ -549,7 +601,7 @@ function uploadId(table: TableValue): string {
 export function uploadsUsage(): Promise<StoredUsage | undefined> {
   // The source file's size stands in for the parsed copy, which is not read: close, not exact.
   return usage(db, META_STORE, {
-    skip: [TABLE_STORE, MESH_STORE],
+    skip: [TABLE_STORE, MESH_STORE, RECORDING_STORE],
     bytes: (record) => (record as UploadMeta).bytes,
   })
 }

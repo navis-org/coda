@@ -50,6 +50,7 @@ import {
   demoWorkflow,
   offeredCombinations,
 } from './build'
+import { familyCan } from './gates'
 import type { AnalysisId, VisualisationId, WizardAnswers, WizardOption } from './options'
 import {
   MULTI_DATASET,
@@ -1572,13 +1573,59 @@ describe('answers a pack adds', () => {
   })
 
   it('hides them while the pack is off, and leaves the built-in answers as they were', () => {
-    const off = offeredType(effectiveOff(packsOffByDefault()))!
+    const offPacks = packsOffByDefault()
+    const off = offeredType(effectiveOff(offPacks))!
     const kept = offeredCombinations(['minnie65'], off)
-    const cortex = (a: WizardAnswers) =>
-      packOf(a.start) === 'cortex' || packOf(a.analysis) === 'cortex'
-    expect(kept.some(cortex)).toBe(false)
-    const builtIn = everyCombination(['minnie65']).filter((a) => !cortex(a))
+    // Every pack off by default (Cortex and Biophysics among them) adds answers minnie65 offers.
+    const fromOffPack = (a: WizardAnswers) =>
+      [a.start, a.analysis].some((id) => offPacks.has(packOf(id) ?? ''))
+    expect(kept.some(fromOffPack)).toBe(false)
+    const builtIn = everyCombination(['minnie65']).filter((a) => !fromOffPack(a))
     expect(kept).toEqual(builtIn)
+  })
+
+  it('simulates one neuron of the start, its inputs from Synapses Between, ending on the traces', () => {
+    const graph = buildWorkflow({
+      datasets: ['hemibrain'],
+      start: 'search',
+      analysis: 'biophys:simulate',
+      visualisations: ['biophys:traces', 'table'],
+      notes: false,
+      dashboard: false,
+    })
+    const into = (id: string) =>
+      graph.edges
+        .filter((e) => e.target === id)
+        .map((e) => `${e.source}.${e.sourceHandle}>${e.targetHandle}`)
+        .sort()
+    // Select One between the start and both queries: the model takes one neuron.
+    expect(into('skel')).toContain('pick.item>neurons')
+    expect(into('syn')).toContain('pick.item>targets')
+    expect(into('model')).toEqual(['skel.skeletons>neuron', 'syn.points>synapses'])
+    const viewers = graph.nodes.filter((n) => into(n.id).includes('sim.traces>in'))
+    expect(viewers.map((n) => n.type).sort()).toEqual(['out.lineChart', 'out.table'])
+    // One partner fires: all of them at once saturate a real neuron.
+    expect(graph.nodes.find((n) => n.id === 'sim')?.params).toMatchObject({
+      fire: 'top',
+      top: 1,
+    })
+  })
+
+  it('offers it only where the dataset has skeletons and synapses, and never on Demo Data', () => {
+    const offered = (key: string) =>
+      analysisOptions([key]).some((option) => option.id === 'biophys:simulate')
+    const keys = starterFamilies().map((family) => family.key)
+    for (const key of keys) {
+      const real = !datasetFamily(key)?.synthetic
+      expect(offered(key), key).toBe(
+        real && familyCan(key, 'skeletons') && familyCan(key, 'synapses'),
+      )
+    }
+    // Demo Data's miniature neurons saturate on the defaults, so it is the one dataset refused.
+    expect(keys.some(offered)).toBe(true)
+    expect(
+      keys.filter((key) => !offered(key)).every((key) => datasetFamily(key)?.synthetic),
+    ).toBe(true)
   })
 
   it('ends the laminar profile on the Laminar Profile, fed the placed synapses and the Dataset', () => {

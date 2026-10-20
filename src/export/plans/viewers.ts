@@ -139,6 +139,9 @@ export type LineChartPlan = Noted<{
   byX: boolean
   xLog: boolean
   yLog: boolean
+  /** Columns on the second Y axis, on the right; empty for none. */
+  y2s: string[]
+  y2Log: boolean
 }>
 
 export function lineChartPlan(ctx: SchemaChartContext): LineChartPlan {
@@ -146,13 +149,16 @@ export function lineChartPlan(ctx: SchemaChartContext): LineChartPlan {
   if (!x) return { note: nothingDrawn('x') }
   const series = ctx.column('series')
   const schema = ctx.schema('in')
+  const y2s = ctx.columns('y2s')
   return {
     x,
-    ys: schema ? yColumnsOf(schema, ctx.columns('ys'), x, series) : ctx.columns('ys'),
+    ys: schema ? yColumnsOf(schema, ctx.columns('ys'), x, series, y2s) : ctx.columns('ys'),
     ...(series ? { series } : {}),
     byX: ctx.params.order !== 'rows',
     xLog: ctx.params.xLog === true,
     yLog: ctx.params.yLog === true,
+    y2s,
+    y2Log: y2s.length > 0 && ctx.params.y2Log === true,
   }
 }
 

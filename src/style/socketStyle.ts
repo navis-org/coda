@@ -102,6 +102,11 @@ function styleForKind(kind: Kind | undefined): SocketStyle {
       return { family: 'geometry', shape: 'hex' }
     case 'points':
       return { family: 'geometry', shape: 'dot' }
+    // A compartment model is built from one neuron's geometry, so it takes the geometry hue, and
+    // the diamond the family had not used — on a Compartment Model card the skeleton going in and
+    // the model coming out are the same material in different shapes.
+    case 'cellModel':
+      return { family: 'geometry', shape: 'diamond' }
     // A layout is about a network, so it takes the network's hue; square separates it from the
     // diamond and hex already spoken for.
     case 'layout':

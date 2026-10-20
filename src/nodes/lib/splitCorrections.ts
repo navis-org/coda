@@ -24,6 +24,9 @@
  *
  * Headless and pure: the node applies these after a memoised automatic split, so an edit is a
  * TypeScript pass over the labels rather than another trip through Python.
+ *
+ * The stroke half — reading (`readStrokes`), the scope words and painting (`paintSubtrees`) — is
+ * shared with a compartment model's painted regions (`packs/biophys/regions.ts`).
  */
 
 import { CODE_AXON, CODE_DENDRITE, CODE_LINKER, perGeometry } from '../../core/values'
@@ -31,12 +34,19 @@ import type { SkeletonGeometry } from '../../core/values'
 import type { Arbor } from './arborOps'
 import { buildArbor, resolveRoot } from './arborOps'
 import { nearestNode } from '../../data/soma'
+import { SNAP_NM, isPoint } from './anchors'
 
 /** The param the node stores them in, spelled once for the node and the editor. */
 export const CORRECTIONS_PARAM = 'corrections'
 
 /** Which side of the picked node is reassigned — away from the root, or everything else. */
 export const CORRECTION_SCOPES = ['distal', 'proximal'] as const
+
+/** A scope as a menu and a list say it — both editors that paint subtrees. */
+export const SCOPE_WORDS: Readonly<Record<CorrectionScope, string>> = {
+  distal: 'Away from the root',
+  proximal: 'Everything else',
+}
 export type CorrectionScope = (typeof CORRECTION_SCOPES)[number]
 
 /** What a reassigned subtree becomes, in the order the editor offers them. */
@@ -57,16 +67,6 @@ export interface SplitCorrection {
   readonly root?: readonly [number, number, number]
 }
 
-/**
- * How far an anchor may be from its node and still be that node, in nanometres.
- *
- * Re-fetching the same reconstruction gives the same positions, so the slack is for a different
- * route to the same neuron, which re-samples the cable. 2 µm is a few node spacings of a traced
- * skeleton and well inside the gap between two neurites that run apart — past it an anchor is
- * more likely on the wrong branch than a moved copy of the right one.
- */
-export const SNAP_NM = 2000
-
 const CODE: Readonly<Record<CorrectionTarget, number>> = {
   axon: CODE_AXON,
   dendrite: CODE_DENDRITE,
@@ -83,8 +83,33 @@ export function writeCorrection(correction: SplitCorrection): string {
  * arrives, and one that cannot be read cannot be applied either. Silent, `validDashboard`'s rule.
  */
 export function readCorrections(raw: unknown): SplitCorrection[] {
+  return readStrokes(raw, (stroke, fields) => {
+    const { to } = fields as Partial<SplitCorrection>
+    return to && CORRECTION_TARGETS.includes(to) ? { ...stroke, to } : undefined
+  })
+}
+
+/** What every stored subtree stroke has: whose, where, which side, and from what root. */
+export type StoredStroke<S extends string = CorrectionScope> = Omit<
+  SplitCorrection,
+  'to' | 'scope'
+> & {
+  readonly scope: S
+}
+
+/**
+ * A list of strokes stored as one JSON object per entry — split corrections, a compartment model's
+ * painted regions — with anything malformed dropped: the shared fields checked here, the caller's
+ * own by `rest`, which answers undefined to drop the entry.
+ */
+export function readStrokes<T, S extends string = CorrectionScope>(
+  raw: unknown,
+  rest: (stroke: StoredStroke<S>, fields: Record<string, unknown>) => T | undefined,
+  /** The scopes a stroke of this kind may have; the split's two by default. */
+  scopes: readonly S[] = CORRECTION_SCOPES as unknown as readonly S[],
+): T[] {
   if (!Array.isArray(raw)) return []
-  const out: SplitCorrection[] = []
+  const out: T[] = []
   for (const entry of raw) {
     let parsed: unknown
     try {
@@ -94,24 +119,21 @@ export function readCorrections(raw: unknown): SplitCorrection[] {
     }
     if (!parsed || typeof parsed !== 'object') continue
     // Typed as what it should be, then every field checked as though it were not.
-    const { neuron, at, scope, to, root } = parsed as SplitCorrection
+    const fields = parsed as Record<string, unknown>
+    const { neuron, at, scope, root } = fields as Partial<StoredStroke<S>>
     if (typeof neuron !== 'string' || !neuron) continue
     if (!isPoint(at) || (root !== undefined && !isPoint(root))) continue
-    if (!CORRECTION_SCOPES.includes(scope) || !CORRECTION_TARGETS.includes(to)) continue
-    out.push({
+    if (!scope || !scopes.includes(scope)) continue
+    const stroke: StoredStroke<S> = {
       neuron,
       at: [at[0], at[1], at[2]],
       scope,
-      to,
       ...(root ? { root: [root[0], root[1], root[2]] as const } : {}),
-    })
+    }
+    const item = rest(stroke, fields)
+    if (item !== undefined) out.push(item)
   }
   return out
-}
-
-/** Three finite numbers. */
-function isPoint(value: unknown): value is readonly [number, number, number] {
-  return Array.isArray(value) && value.length === 3 && value.every(Number.isFinite)
 }
 
 const arbors = perGeometry(() => new Map<number, Arbor>())
@@ -142,12 +164,37 @@ export function splitArbor(skeleton: SkeletonGeometry, root?: number): Arbor {
  * a split by tag alike. A subtree is one contiguous run of the pre-order, `tin`/`tout`'s whole
  * purpose. A node the walk never reached is left alone.
  */
-export function fillDistal(arbor: Arbor, node: number, code: number, out: Uint8Array): void {
+export function fillDistal(
+  arbor: Arbor,
+  node: number,
+  code: number,
+  out: { [node: number]: number },
+): void {
   const from = arbor.tin[node]!
   if (from >= 0) fillRun(arbor, from, arbor.tout[node]!, code, out)
 }
 
-function fillRun(arbor: Arbor, from: number, to: number, code: number, out: Uint8Array): void {
+/** Paint a placed stroke's scope: the subtree distal of `node`, or everything else. */
+export function fillScope(
+  arbor: Arbor,
+  node: number,
+  scope: CorrectionScope,
+  code: number,
+  out: { [node: number]: number },
+): void {
+  if (scope === 'distal') return fillDistal(arbor, node, code, out)
+  // "Everything else" is the two runs of the pre-order either side of the subtree.
+  fillRun(arbor, 0, arbor.tin[node]!, code, out)
+  fillRun(arbor, arbor.tout[node]!, arbor.order.length, code, out)
+}
+
+function fillRun(
+  arbor: Arbor,
+  from: number,
+  to: number,
+  code: number,
+  out: { [node: number]: number },
+): void {
   for (let k = from; k < to; k++) out[arbor.order[k]!] = code
 }
 
@@ -156,13 +203,58 @@ export function snapToNode(skeleton: SkeletonGeometry, at: readonly number[]): n
   return nearestNode(skeleton.positions, at, SNAP_NM)
 }
 
+/** A subtree to paint: everything distal of `at` (or everything else), from `root`, as `code`. */
+interface SubtreeStroke {
+  readonly at: readonly number[]
+  readonly scope: CorrectionScope
+  /** What "distal" was measured from; absent is `splitArbor`'s default root. */
+  readonly root?: readonly number[] | undefined
+  readonly code: number
+}
+
 /**
- * One neuron's labels with its corrections applied, in order.
- *
- * Returns the labels it was given, untouched, when there is nothing to apply. A correction that
- * cannot be placed — no node within `SNAP_NM`, or a node the walk from the root never reaches
- * (another fragment of a forest the caller did not heal), where "distal" has no meaning — is
- * skipped and not counted in `applied`, which is what the caller's stale count is the rest of.
+ * Where a stroke lands: its anchor's node, in the arbour walked from its root — each snapped to a
+ * node within `SNAP_NM`, the root absent being `splitArbor`'s default. Undefined where it cannot be
+ * placed: no node there, or one the walk from its root never reaches, where "distal" means nothing.
+ * The one statement of a stroke landing, for every scope of every editor that paints.
+ */
+export function placeStroke(
+  skeleton: SkeletonGeometry,
+  at: readonly number[],
+  root?: readonly number[],
+): { arbor: Arbor; node: number } | undefined {
+  const rootNode = root ? snapToNode(skeleton, root) : undefined
+  if (rootNode === -1) return undefined
+  const arbor = splitArbor(skeleton, rootNode)
+  const node = snapToNode(skeleton, at)
+  return node >= 0 && arbor.tin[node]! >= 0 ? { arbor, node } : undefined
+}
+
+/**
+ * Paint strokes onto per-node labels, in order, a later one over an earlier — a split's
+ * corrections and a compartment model's painted regions alike. Each anchor and root snaps to a
+ * node within `SNAP_NM`; a stroke that cannot be placed (no node there, or one the walk from its
+ * root never reaches, where "distal" has no meaning) is skipped and not counted in the return,
+ * which is what a caller's stale count is the rest of.
+ */
+export function paintSubtrees(
+  skeleton: SkeletonGeometry,
+  out: { [node: number]: number },
+  strokes: readonly SubtreeStroke[],
+): number {
+  let applied = 0
+  for (const stroke of strokes) {
+    const placed = placeStroke(skeleton, stroke.at, stroke.root)
+    if (!placed) continue
+    fillScope(placed.arbor, placed.node, stroke.scope, stroke.code, out)
+    applied++
+  }
+  return applied
+}
+
+/**
+ * One neuron's labels with its corrections applied, in order (`paintSubtrees`). Returns the
+ * labels it was given, untouched, when there is nothing to apply.
  */
 export function applyCorrections(
   skeleton: SkeletonGeometry,
@@ -171,24 +263,10 @@ export function applyCorrections(
 ): { labels: Uint8Array; applied: number } {
   if (corrections.length === 0) return { labels, applied: 0 }
   const out = labels.slice()
-  let applied = 0
-  for (const correction of corrections) {
-    // Its own root, snapped like its anchor; a root that lands nowhere places nothing.
-    const root = correction.root ? snapToNode(skeleton, correction.root) : undefined
-    if (root === -1) continue
-    const arbor = splitArbor(skeleton, root)
-    const node = snapToNode(skeleton, correction.at)
-    const from = node >= 0 ? arbor.tin[node]! : -1
-    if (from < 0) continue
-    const to = arbor.tout[node]!
-    const code = CODE[correction.to]
-    if (correction.scope === 'distal') fillDistal(arbor, node, code, out)
-    else {
-      // "Everything else" is the two runs of the pre-order either side of the subtree.
-      fillRun(arbor, 0, from, code, out)
-      fillRun(arbor, to, arbor.order.length, code, out)
-    }
-    applied++
-  }
+  const applied = paintSubtrees(
+    skeleton,
+    out,
+    corrections.map((c) => ({ at: c.at, scope: c.scope, root: c.root, code: CODE[c.to] })),
+  )
   return { labels: out, applied }
 }

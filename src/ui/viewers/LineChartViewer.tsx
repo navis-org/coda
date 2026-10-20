@@ -7,16 +7,22 @@
  * rules (which lines, in what order, what a pixel column keeps) are `lineSeries.ts`'; this is the
  * drawing and the gestures.
  *
+ * **A second Y axis, on the right** (`y2s`): its lines drawn dashed, so the axis a line is read
+ * against shows on the line itself, against a domain fitted to them alone; the key and the
+ * crosshair name them "(right)". Colour stays one per line, continuing the cycle.
+ *
  * **Zoom is along X only.** The wheel zooms about the pointer, a drag pans once zoomed, a double
  * click goes back to the whole extent, and Y refits to what the window holds — a 2 ms onset on a
  * 100 ms trace fills the height when it is looked at. Y is never zoomed on its own: a trace
  * zoomed in voltage alone is a trace cut off.
  */
 
-import { useEffect, useId, useMemo, useState } from 'react'
+import { Fragment, useEffect, useId, useMemo, useState } from 'react'
 
+import { lowerBound } from '../../core/stats'
 import type { TableValue } from '../../core/values'
 import type { PaletteName } from '../../nodes/lib/encodingParams'
+import { Y2_TAG } from '../../nodes/lib/lineChart'
 import type { ResolvedColor } from '../../style/encoding'
 import { categoricalLegend } from '../../style/encoding'
 import { cycleColor, paletteColors } from '../../style/colors'
@@ -24,7 +30,7 @@ import { formatCompact, formatNumber, plural } from '../../style/format'
 import { exportBaseName as makeBaseName } from '../export'
 import { ChartTooltip, TooltipRow } from './ChartTooltip'
 import { ColorKey } from './LegendKeys'
-import type { LineOrder } from './lineSeries'
+import type { Line, LineOrder } from './lineSeries'
 import {
   buildLines,
   decimate,
@@ -37,12 +43,14 @@ import {
 import type { Affine, Domain, Rect, ScaleKind, Viewport } from './scatterPlot'
 import {
   axisTicks,
+  forward,
   inverse,
   padDomain,
   projectX,
   projectY,
   unprojectX,
   viewAffine,
+  zeroDomain,
 } from './scatterPlot'
 import { tooltipPoint } from './tooltipPoint'
 import { useChart } from './useChart'
@@ -61,15 +69,49 @@ export interface LineChartViewerProps {
   order?: LineOrder
   xLog?: boolean
   yLog?: boolean
+  /** Resolved columns drawn against a second Y axis on the right, dashed; none by default. */
+  y2s?: readonly string[]
+  y2Log?: boolean
   palette?: PaletteName
+  /** An X to mark with a solid line — a player's current time, say. Untransformed, as in the table. */
+  cursor?: number
+  /**
+   * Xs to mark with a short tick at the foot of the plot — when inputs arrive, say. Untransformed;
+   * `xMarksLabel` says what they are, on hover and in the exported SVG.
+   */
+  xMarks?: readonly number[]
+  xMarksLabel?: string
+  /**
+   * A short panel under the plot on the same X — a stimulus, say — with a Y of its own, its unit
+   * not being the lines'. Untransformed, as in the table; `x` ascending. For a caller drawing
+   * beside its own lines (Simulate's Playback); not reachable from the Line Chart node's params.
+   */
+  strip?: ChartStrip | undefined
   compact?: boolean
   baseName?: string
   onExpand?: () => void
   onError?: (message: string) => void
 }
 
+export interface ChartStrip {
+  readonly label: string
+  readonly unit: string
+  readonly x: ArrayLike<number>
+  readonly y: ArrayLike<number>
+}
+
 const PAD = { left: 54, right: 16, top: 14, bottom: 26 }
+/** The right margin with a second Y axis: room for its tick labels, as the left has. */
+const PAD_RIGHT_Y2 = 54
+/** How a line on the second axis is drawn: dashed, the one mark that says which axis. */
+const Y2_DASH = '5 3'
+
+/** The strip's height and its gap below the plot, px. */
+const STRIP_HEIGHT = 40
+const STRIP_GAP = 10
 const LINE_WIDTH = 1.5
+/** How tall an `xMarks` tick is, px. */
+const MARK_HEIGHT = 7
 /** How many lines the crosshair's tooltip lists before it says how many more. */
 const TOOLTIP_LINES = 12
 
@@ -89,7 +131,13 @@ export function LineChartViewer({
   order = 'x',
   xLog = false,
   yLog = false,
+  y2s = NO_COLUMNS,
+  y2Log = false,
   palette = 'coda',
+  cursor,
+  xMarks,
+  xMarksLabel,
+  strip,
   compact = false,
   baseName,
   onExpand,
@@ -109,69 +157,119 @@ export function LineChartViewer({
     [table, x, yList, series, order, xScale, yScale],
   )
   const { lines } = built
-  const dropped = built.missing + built.nonPositive
+  // The second axis's lines: the same rules, their own Y scale.
+  const y2Scale: ScaleKind = y2Log ? 'log' : 'linear'
+  const y2List = useStable(y2s)
+  const built2 = useMemo(
+    () =>
+      y2List.length > 0
+        ? buildLines(table, { x, ys: y2List, series, order, xScale, yScale: y2Scale })
+        : undefined,
+    [table, x, y2List, series, order, xScale, y2Scale],
+  )
+  const lines2 = built2?.lines ?? NO_LINES
+  /**
+   * The two axes as one list, so every step after this is one pass over it: left, then right, a
+   * right line's colour continuing the cycle (`offset`), dashed and tagged.
+   */
+  const sides = useMemo(
+    (): Side[] => [
+      { lines, scale: yScale, tag: '', dash: undefined, offset: 0 },
+      { lines: lines2, scale: y2Scale, tag: Y2_TAG, dash: Y2_DASH, offset: lines.length },
+    ],
+    [lines, lines2, yScale, y2Scale],
+  )
+  const missing = built.missing + (built2?.missing ?? 0)
+  const nonPositive = built.nonPositive + (built2?.nonPositive ?? 0)
+  const dropped = missing + nonPositive
   // The whole extent, padded only when it is a single X, which has no width to draw across.
   const full = useMemo(() => {
-    const extent = xExtent(lines)
+    const extent = xExtent([...lines, ...lines2])
     return extent && extent.max > extent.min ? extent : extent && padDomain(extent)
-  }, [lines])
+  }, [lines, lines2])
 
   // The X window; undefined is the whole extent. Another table or axis starts unzoomed.
   const [zoom, setZoom] = useState<Domain | undefined>()
   useEffect(() => setZoom(undefined), [table, x, xScale])
   const view = zoom ?? full
 
+  // One colour per line across both axes, in `sides`' order.
+  const lineCount = lines.length + lines2.length
   const colors = useMemo((): ResolvedColor => {
     const colorOf = (i: number) => cycleColor(i, mode, palette)
     const legend = categoricalLegend(
       'line',
-      lines.map((line) => line.label),
+      sides.flatMap((side) => side.lines.map((line) => line.label + side.tag)),
       (_, i) => colorOf(i),
       paletteColors(palette, mode).length,
     )
-    return { at: colorOf, legend: lines.length > 1 ? legend : undefined }
-  }, [lines, mode, palette])
+    return { at: colorOf, legend: legend.entries.length > 1 ? legend : undefined }
+  }, [sides, mode, palette])
 
+  // A strip takes its height from the plot's, below it and above the X labels.
+  const stripSpace = strip ? STRIP_HEIGHT + STRIP_GAP : 0
+  const padRight = lines2.length > 0 ? PAD_RIGHT_Y2 : PAD.right
   const plot = useMemo(
     (): Rect => ({
       x: PAD.left,
       y: PAD.top,
-      width: Math.max(1, size.width - PAD.left - PAD.right),
-      height: Math.max(1, size.height - PAD.top - PAD.bottom),
+      width: Math.max(1, size.width - PAD.left - padRight),
+      height: Math.max(1, size.height - PAD.top - PAD.bottom - stripSpace),
     }),
-    [size.width, size.height],
+    [size.width, size.height, stripSpace, padRight],
   )
+  const stripTop = plot.y + plot.height + STRIP_GAP
+  const stripRect: Rect = { x: plot.x, y: stripTop, width: plot.width, height: STRIP_HEIGHT }
+  // The strip as a line of the chart's own, X through the axis's scale, so it is windowed and
+  // decimated as the lines are; its Y its own, zero always in it so a sign reads off the line.
+  const stripLine = useMemo((): Line | undefined => {
+    if (!strip) return undefined
+    const keep: number[] = []
+    for (let i = 0; i < strip.x.length; i++) {
+      if (Number.isFinite(forward(xScale, strip.x[i]!)) && Number.isFinite(strip.y[i]!))
+        keep.push(i)
+    }
+    return {
+      label: strip.label,
+      x: Float64Array.from(keep, (i) => forward(xScale, strip.x[i]!)),
+      y: Float64Array.from(keep, (i) => strip.y[i]!),
+      sorted: true,
+    }
+  }, [strip, xScale])
+  const stripY = useMemo(() => stripLine && zeroDomain(stripLine.y), [stripLine])
 
   // What each line draws in the window, decimated — and, since a pixel column keeps its extremes,
   // the Y extent over it is the window's, without a second pass over every sample.
   const kept = useMemo(
-    () => (view ? lines.map((line) => decimate(line, view, Math.ceil(plot.width))) : []),
-    [lines, view, plot.width],
+    () =>
+      sides.map((side) =>
+        view ? side.lines.map((line) => decimate(line, view, Math.ceil(plot.width))) : [],
+      ),
+    [sides, view, plot.width],
   )
-  const yDomain = useMemo(() => {
-    let extent: Domain | undefined
-    lines.forEach((line, i) => (extent = yExtentOf(line, kept[i] ?? [], extent)))
-    return extent && padDomain(extent, 0.05)
-  }, [lines, kept])
-
-  /** The window and the plot as `scatterPlot`'s projection takes them; undefined with nothing to draw. */
-  const frame = useMemo((): { view: Viewport; affine: Affine } | undefined => {
-    if (!view || !yDomain) return undefined
-    const window = { x: view, y: yDomain }
-    return { view: window, affine: viewAffine(window, plot) }
-  }, [view, yDomain, plot])
-
-  const paths = useMemo(() => {
-    if (!frame) return []
-    const { sx, ox, sy, oy } = frame.affine
-    return lines.map((line, l) => {
-      let d = ''
-      for (const i of kept[l] ?? []) {
-        d += `${d === '' ? 'M' : 'L'}${(line.x[i]! * sx + ox).toFixed(2)} ${(line.y[i]! * sy + oy).toFixed(2)}`
-      }
-      return d
+  /**
+   * Each side's window and projection, undefined with nothing to draw. With only second-axis
+   * lines the left frame takes their domain, there being nothing else for it.
+   */
+  const frames = useMemo(() => {
+    const domains = sides.map((side, k) => fittedY(side.lines, kept[k]!))
+    return domains.map((domain, k): Frame | undefined => {
+      const y = k === 0 ? (domain ?? domains[1]) : domain
+      if (!view || !y) return undefined
+      const window = { x: view, y }
+      return { view: window, affine: viewAffine(window, plot) }
     })
-  }, [lines, kept, frame])
+  }, [sides, kept, view, plot])
+  const frame = frames[0]
+  const frame2 = frames[1]
+  const paths = useMemo(
+    () =>
+      sides.map((side, k) => {
+        const f = frames[k]
+        return f ? pathsOf(side.lines, kept[k]!, f.affine) : []
+      }),
+    [sides, kept, frames],
+  )
 
   useWheelZoom(ref, frame !== undefined, (factor, px) => {
     if (!frame || !full) return
@@ -183,10 +281,35 @@ export function LineChartViewer({
     setZoom(panWindow(frame.view.x, full, -dx / frame.affine.sx))
   })
 
+  // Every mark one short stroke up from the plot's foot, in one path — memoised, a moving cursor
+  // re-rendering the chart every frame of a playback.
+  const marksPath = useMemo(() => {
+    if (!xMarks || !frame) return undefined
+    return xMarks
+      .map((x) => forward(xScale, x))
+      .filter((x) => Number.isFinite(x) && x >= frame.view.x.min && x <= frame.view.x.max)
+      .map((x) => `M${projectX(x, frame.view, plot)} ${plot.y + plot.height}v${-MARK_HEIGHT}`)
+      .join('')
+  }, [xMarks, xScale, frame, plot])
+
+  // The strip's path over the window, a pixel column's extremes each — memoised on the window
+  // and the plot, which a moving cursor leaves alone.
+  const stripPath = useMemo(() => {
+    if (!stripLine || !stripY || !view) return undefined
+    const window = { x: view, y: stripY }
+    const yOf = (y: number) =>
+      stripTop + STRIP_HEIGHT * (1 - (y - stripY.min) / (stripY.max - stripY.min))
+    let d = ''
+    for (const i of decimate(stripLine, view, Math.ceil(plot.width))) {
+      d += `${d === '' ? 'M' : 'L'}${projectX(stripLine.x[i]!, window, plot).toFixed(2)} ${yOf(stripLine.y[i]!).toFixed(2)}`
+    }
+    return { d, zero: yOf(0) }
+  }, [stripLine, stripY, view, plot, stripTop])
+
   if (!frame) {
     return (
       <ViewerEmpty>
-        {ys.length === 0
+        {ys.length === 0 && y2s.length === 0
           ? 'No numeric column to draw against X.'
           : `Nothing to draw${dropped > 0 ? `: ${plural(dropped, 'value')} could not be plotted` : ''}.`}
       </ViewerEmpty>
@@ -194,11 +317,20 @@ export function LineChartViewer({
   }
 
   const xOf = (t: number) => projectX(t, frame.view, plot)
+  // The cursor's X, transformed; NaN for none, or for one a log axis has no room for.
+  const cursorX = cursor === undefined ? Number.NaN : forward(xScale, cursor)
   const yOf = (t: number) => projectY(t, frame.view, plot)
   const xTicks = axisTicks(frame.view.x, xScale, plot.width > 360 ? 6 : 4)
-  const yTicks = axisTicks(frame.view.y, yScale, Math.max(3, Math.floor(plot.height / 50)))
-  const readings = hover && !panning ? valuesAt(lines, hover.at, frame.view.x) : []
-  const points = lines.reduce((sum, line) => sum + line.x.length, 0)
+  const yTickCount = Math.max(3, Math.floor(plot.height / 50))
+  const yTicks = axisTicks(frame.view.y, yScale, yTickCount)
+  const y2Ticks = frame2 ? axisTicks(frame2.view.y, y2Scale, yTickCount) : []
+  // Each side's lines read at the pointer, in `sides`' order; X is shared, so one window.
+  const readings = sides.map((side) =>
+    hover && !panning ? valuesAt(side.lines, hover.at, frame.view.x) : [],
+  )
+  const points =
+    lines.reduce((sum, line) => sum + line.x.length, 0) +
+    lines2.reduce((sum, line) => sum + line.x.length, 0)
 
   return (
     <div className="viewer">
@@ -221,7 +353,7 @@ export function LineChartViewer({
             width={size.width}
             height={size.height}
             role="img"
-            aria-label={`${plural(lines.length, 'line')} against ${x}`}
+            aria-label={`${plural(lineCount, 'line')} against ${x}`}
             onMouseMove={(event) => {
               const point = tooltipPoint(event, ref.current)
               if (point.x < plot.x || point.x > plot.x + plot.width) return setHover(null)
@@ -236,7 +368,7 @@ export function LineChartViewer({
               </clipPath>
             </defs>
 
-            {yTicks.map((t) => (
+            {(lines.length > 0 ? yTicks : []).map((t) => (
               <g key={`y${t}`}>
                 <line
                   x1={plot.x}
@@ -270,7 +402,7 @@ export function LineChartViewer({
                 />
                 <text
                   x={xOf(t)}
-                  y={plot.y + plot.height + 14}
+                  y={plot.y + plot.height + stripSpace + 14}
                   textAnchor="middle"
                   fontSize={10}
                   fill={ink.muted}
@@ -295,18 +427,147 @@ export function LineChartViewer({
               stroke={ink.axis}
               strokeWidth={1}
             />
+            {frame2 && (
+              <g>
+                <line
+                  x1={plot.x + plot.width}
+                  y1={plot.y}
+                  x2={plot.x + plot.width}
+                  y2={plot.y + plot.height}
+                  stroke={ink.axis}
+                  strokeWidth={1}
+                />
+                {/* Ticks and labels only: a second set of grid lines would cross the first. */}
+                {y2Ticks.map((t) => (
+                  <g key={`y2${t}`}>
+                    <line
+                      x1={plot.x + plot.width}
+                      y1={projectY(t, frame2.view, plot)}
+                      x2={plot.x + plot.width + 4}
+                      y2={projectY(t, frame2.view, plot)}
+                      stroke={ink.axis}
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={plot.x + plot.width + 8}
+                      y={projectY(t, frame2.view, plot)}
+                      textAnchor="start"
+                      dominantBaseline="central"
+                      fontSize={10}
+                      fill={ink.muted}
+                    >
+                      {formatCompact(inverse(y2Scale, t))}
+                    </text>
+                  </g>
+                ))}
+              </g>
+            )}
 
-            <g clipPath={`url(#${clipId}-plot)`}>
-              {paths.map((d, i) => (
+            {strip && stripY && stripPath && (
+              <g>
+                <clipPath id={`${clipId}-strip`}>
+                  <rect
+                    x={stripRect.x}
+                    y={stripRect.y - 1}
+                    width={stripRect.width}
+                    height={stripRect.height + 2}
+                  />
+                </clipPath>
+                <line
+                  x1={stripRect.x}
+                  y1={stripPath.zero}
+                  x2={stripRect.x + stripRect.width}
+                  y2={stripPath.zero}
+                  stroke={ink.grid}
+                  strokeWidth={1}
+                />
+                <line
+                  x1={stripRect.x}
+                  y1={stripRect.y}
+                  x2={stripRect.x}
+                  y2={stripRect.y + stripRect.height}
+                  stroke={ink.axis}
+                  strokeWidth={1}
+                />
+                {[stripY.max, stripY.min].map((v, i) => (
+                  <text
+                    key={i}
+                    x={plot.x - 8}
+                    y={i === 0 ? stripRect.y : stripRect.y + stripRect.height}
+                    textAnchor="end"
+                    dominantBaseline="central"
+                    fontSize={10}
+                    fill={ink.muted}
+                  >
+                    {formatCompact(v)}
+                  </text>
+                ))}
+                <text
+                  x={stripRect.x + 4}
+                  y={stripRect.y + 1}
+                  dominantBaseline="hanging"
+                  fontSize={10}
+                  fill={ink.muted}
+                >
+                  {strip.label} ({strip.unit})
+                </text>
                 <path
-                  key={i}
-                  d={d}
+                  d={stripPath.d}
                   fill="none"
-                  stroke={colors.at(i)}
+                  stroke={ink.secondary}
                   strokeWidth={LINE_WIDTH}
                   strokeLinejoin="round"
+                  clipPath={`url(#${clipId}-strip)`}
                 />
-              ))}
+                {Number.isFinite(cursorX) && (
+                  <line
+                    x1={xOf(cursorX)}
+                    y1={stripRect.y}
+                    x2={xOf(cursorX)}
+                    y2={stripRect.y + stripRect.height}
+                    stroke={ink.primary}
+                    strokeWidth={1.5}
+                    pointerEvents="none"
+                  />
+                )}
+              </g>
+            )}
+
+            <g clipPath={`url(#${clipId}-plot)`}>
+              {sides.map((side, k) =>
+                paths[k]!.map((d, i) => (
+                  <path
+                    key={`${k}-${i}`}
+                    d={d}
+                    fill="none"
+                    stroke={colors.at(side.offset + i)}
+                    strokeWidth={LINE_WIDTH}
+                    strokeLinejoin="round"
+                    strokeDasharray={side.dash}
+                  />
+                )),
+              )}
+              {marksPath && (
+                <path
+                  d={marksPath}
+                  stroke={ink.secondary}
+                  strokeWidth={1.5}
+                  pointerEvents="stroke"
+                >
+                  {xMarksLabel && <title>{xMarksLabel}</title>}
+                </path>
+              )}
+              {Number.isFinite(cursorX) && (
+                <line
+                  x1={xOf(cursorX)}
+                  y1={plot.y}
+                  x2={xOf(cursorX)}
+                  y2={plot.y + plot.height}
+                  stroke={ink.primary}
+                  strokeWidth={1.5}
+                  pointerEvents="none"
+                />
+              )}
             </g>
 
             {hover && !panning && (
@@ -320,19 +581,24 @@ export function LineChartViewer({
                   strokeWidth={1}
                   strokeDasharray="3 3"
                 />
-                {readings.map((reading, i) =>
-                  reading && reading.y >= frame.view.y.min && reading.y <= frame.view.y.max ? (
-                    <circle
-                      key={i}
-                      cx={xOf(reading.x)}
-                      cy={yOf(reading.y)}
-                      r={3}
-                      fill={colors.at(i)}
-                      stroke={surface}
-                      strokeWidth={1.5}
-                    />
-                  ) : null,
-                )}
+                {sides.map((side, k) => {
+                  const f = frames[k]
+                  return f
+                    ? readings[k]!.map((reading, i) =>
+                        reading && reading.y >= f.view.y.min && reading.y <= f.view.y.max ? (
+                          <circle
+                            key={`${k}-${i}`}
+                            cx={xOf(reading.x)}
+                            cy={projectY(reading.y, f.view, plot)}
+                            r={3}
+                            fill={colors.at(side.offset + i)}
+                            stroke={surface}
+                            strokeWidth={1.5}
+                          />
+                        ) : null,
+                      )
+                    : null
+                })}
               </g>
             )}
           </svg>
@@ -343,15 +609,27 @@ export function LineChartViewer({
             <strong>
               {x} {formatNumber(inverse(xScale, hover.at))}
             </strong>
-            {readings.slice(0, TOOLTIP_LINES).map((reading, i) =>
-              reading ? (
-                <TooltipRow key={i} swatch={colors.at(i)}>
-                  {lines[i]!.label} {formatNumber(inverse(yScale, reading.y))}
-                </TooltipRow>
-              ) : null,
-            )}
-            {lines.length > TOOLTIP_LINES && (
-              <TooltipRow>{plural(lines.length - TOOLTIP_LINES, 'more line')}</TooltipRow>
+            {sides.map((side, k) => (
+              <Fragment key={k}>
+                {readings[k]!.slice(0, TOOLTIP_LINES).map((reading, i) =>
+                  reading ? (
+                    <TooltipRow key={i} swatch={colors.at(side.offset + i)}>
+                      {side.lines[i]!.label + side.tag}{' '}
+                      {formatNumber(inverse(side.scale, reading.y))}
+                    </TooltipRow>
+                  ) : null,
+                )}
+                {side.lines.length > TOOLTIP_LINES && (
+                  <TooltipRow>
+                    {plural(side.lines.length - TOOLTIP_LINES, 'more line')}
+                  </TooltipRow>
+                )}
+              </Fragment>
+            ))}
+            {strip && stripLine && (
+              <TooltipRow>
+                {strip.label} {formatNumber(stripAt(stripLine, hover.at))} {strip.unit}
+              </TooltipRow>
             )}
           </ChartTooltip>
         )}
@@ -359,7 +637,7 @@ export function LineChartViewer({
 
       <div className="viewer__caption">
         <span>
-          {plural(lines.length, 'line')} · {plural(points, 'point')}
+          {plural(lineCount, 'line')} · {plural(points, 'point')}
         </span>
         <ColorKey colors={colors} />
         {colors.legend?.kind === 'categorical' && colors.legend.cycled && !compact && (
@@ -371,7 +649,7 @@ export function LineChartViewer({
           </span>
         )}
         {dropped > 0 && (
-          <span className="viewer__note" title={dropTitle(built.missing, built.nonPositive)}>
+          <span className="viewer__note" title={dropTitle(missing, nonPositive)}>
             {dropped.toLocaleString()} not plotted
           </span>
         )}
@@ -395,6 +673,41 @@ export function LineChartViewer({
   )
 }
 
+/** One Y axis's lines and how they are drawn. */
+interface Side {
+  readonly lines: readonly Line[]
+  readonly scale: ScaleKind
+  /** Added to a line's name in the key and the crosshair. */
+  readonly tag: string
+  readonly dash: string | undefined
+  /** Its first line's place in the colour cycle. */
+  readonly offset: number
+}
+
+type Frame = { view: Viewport; affine: Affine }
+
+const NO_COLUMNS: readonly string[] = []
+const NO_LINES: readonly Line[] = []
+
+/** A set of lines' Y extent over what the window draws of them, padded; undefined for none. */
+function fittedY(lines: readonly Line[], kept: readonly number[][]): Domain | undefined {
+  let extent: Domain | undefined
+  lines.forEach((line, i) => (extent = yExtentOf(line, kept[i] ?? [], extent)))
+  return extent && padDomain(extent, 0.05)
+}
+
+/** Each line's kept samples as one SVG path, through an axis's projection. */
+function pathsOf(lines: readonly Line[], kept: readonly number[][], affine: Affine): string[] {
+  const { sx, ox, sy, oy } = affine
+  return lines.map((line, l) => {
+    let d = ''
+    for (const i of kept[l] ?? []) {
+      d += `${d === '' ? 'M' : 'L'}${(line.x[i]! * sx + ox).toFixed(2)} ${(line.y[i]! * sy + oy).toFixed(2)}`
+    }
+    return d
+  })
+}
+
 function dropTitle(missing: number, nonPositive: number): string {
   const parts: string[] = []
   if (missing > 0) parts.push(`${plural(missing, 'value')} with no number in X or Y`)
@@ -404,4 +717,14 @@ function dropTitle(missing: number, nonPositive: number): string {
     )
   }
   return `Not drawn: ${parts.join('; ')}.`
+}
+
+/**
+ * The strip's value at `x` (through the axis's scale): its last point at or before it, a stimulus
+ * holding until it changes.
+ */
+function stripAt(line: Line, x: number): number {
+  const i = lowerBound(line.x, x)
+  const at = line.x[i] === x ? i : i - 1
+  return at < 0 ? Number.NaN : line.y[at]!
 }

@@ -30,6 +30,16 @@ const SHAPE_CHOICES = ALL_SHAPES.map((shape) => (
   </option>
 ))
 
+/** One categorical key: a swatch and its word. */
+export function Swatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="legend__item">
+      <i className="legend__swatch" style={{ background: color }} />
+      {label}
+    </span>
+  )
+}
+
 export interface SizeChannel {
   spec: SizeSpec
   resolved: ResolvedSize

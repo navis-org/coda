@@ -202,8 +202,7 @@ export function usePartnerHighlight(input: PartnerHighlightInput) {
           const label = partnerLabel(row.type)
           return (
             selected.has(label) ||
-            test.test(label) ||
-            (row.partnerType !== undefined && test.test(row.partnerType))
+            test.testAny(row.partnerType === undefined ? [label] : [label, row.partnerType])
           )
         })
       : partnerRows

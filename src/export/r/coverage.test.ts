@@ -36,6 +36,25 @@ const NO_EMITTER: Record<string, string> = {
     'Assembled from parts, with an object standing in for `CompositeSource` so downstream ' +
     'chunks have something to call. The Python exporter has one (`CodaCustomDataset`); an R ' +
     'port, and the Custom branches of the query emitters beside it, is the next step.',
+  'biophys:model':
+    'A compartment model built by Coda\u2019s own solver (`src/biophys`), which no notebook library ' +
+    'reproduces as is: the discretisation is NEURON\u2019s, but the soma, the fragment pruning and ' +
+    'the synapse placement are this node\u2019s. A navis + NEURON emitter is planned once the ' +
+    'probe\u2019s direct NEURON build has settled what it must emit (`docs/biophys.md`).',
+  'biophys:combineTraces':
+    'Linear interpolation onto one grid is `approx` per column, with `rule = 1` for nothing ' +
+    'outside an input\u2019s range; the gap rule is the part to write and check against the node first.',
+  'biophys:fit':
+    'Fits the membrane of the model `biophys:model` builds, which has no emitter for the same ' +
+    'reason: a notebook would need that model first. The fit itself would be ' +
+    '`minpack.lm::nls.lm` around a NEURON run, held to the node by a probe first.',
+  'biophys:loadRecording':
+    'A recording read by Coda\u2019s own reader (`data/ephys`). R reads ABF through `readABF`, ' +
+    'whose scaling and rebuilt command have not been held against this node; an emitter waits for ' +
+    'that check, as the Python one waits for its golden.',
+  'biophys:simulate':
+    'Runs the compartment model `biophys:model` builds, which has no emitter for the same reason: ' +
+    'a notebook would need that model first. Follows the navis + NEURON emitter planned there.',
   'cortex:depth':
     'Depth, layer and lateral position through a cortical frame (`packs/cortex/frames.ts`), the ' +
     'gallery\u2019s own reason: no notebook library carries the frame. The arithmetic is a ' +

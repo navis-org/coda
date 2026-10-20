@@ -1445,6 +1445,9 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   one.**
 - [docs/cortex.md](docs/cortex.md) — the Cortex pack and the gallery: MICrONS cell typing, the
   depth frame and layer bounds, compartment labels, what is deferred and why.
+- [docs/biophys.md](docs/biophys.md) — the Biophysics pack: our TypeScript cable solver and how it is held
+  to NEURON, the Compartment Model and Simulate, Playback's on-demand movie, and what navis's
+  `CompartmentModel` gets wrong. Read before touching `src/biophys` or `src/packs/biophys`.
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two
@@ -1455,8 +1458,8 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   indicator, the start page, keyboard shortcuts.
 - [docs/dashboard.md](docs/dashboard.md) — the grid view: the cell model, the mode that unmounts
   the canvas, the two gestures and what was measured in a real browser.
-- [docs/pages.md](docs/pages.md) — overview, tutorial, node guide, dataset guide, MCP page and
-  changelog. Extra vite entries; each must stay out of the main chunk.
+- [docs/pages.md](docs/pages.md) — overview, tutorial, node guide, dataset guide, MCP page,
+  changelog and pack guides. Extra vite entries; each must stay out of the main chunk.
 - [docs/help.md](docs/help.md) — the `?` on a node: the in-app overlay, the documents in
   `src/help/nodes/`, and the figures that draw real registry objects. **Read `## Voice` before
   writing or editing one** — the corpus was cut 34,060 → 28,528 words once and the five things

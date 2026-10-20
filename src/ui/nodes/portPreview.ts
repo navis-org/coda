@@ -25,7 +25,7 @@
 
 import type { MatrixValue, NetworkValue, TableValue, Value } from '../../core/values'
 import { describeValue } from '../../core/values'
-import { formatBytes, formatCell, truncateLabel } from '../../style/format'
+import { formatBytes, formatCell, formatNumber, truncateLabel } from '../../style/format'
 
 /**
  * The most fields drawn down the panel, across every table in it.
@@ -254,6 +254,27 @@ export function portPreview(value: Value): PortPreview {
     case 'transform':
     case 'layers':
       return { headline, facts: [], tables: [] }
+
+    // The headline counts compartments and synapses; what it cannot say is where the soma came
+    // from — the one fact that decides what a recording "at the soma" means — and whose numbers
+    // the membrane is.
+    case 'cellModel':
+      return {
+        headline,
+        facts: [
+          {
+            label: 'Soma',
+            value:
+              value.soma.diameter !== undefined
+                ? `${formatNumber(value.soma.diameter)} µm, ${value.soma.source}`
+                : value.soma.source === 'labelled'
+                  ? 'the skeleton’s own, kept as it is'
+                  : 'none — the root stands in',
+          },
+          { label: 'Membrane', value: value.preset.label },
+        ],
+        tables: [],
+      }
 
     // The headline says what is in the file; what it costs to read and how wide it is are the
     // two things it does not.

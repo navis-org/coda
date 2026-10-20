@@ -146,13 +146,28 @@ const PAGES: Record<string, Page> = {
     schema: 'WebPage',
   },
   /*
+   * A pack's guide, after the pages about Coda as a whole. Its text is the pack's
+   * `guide/guide.md` and its figures are in `public/guides/biophys/`.
+   */
+  'biophysics.html': {
+    url: '/biophysics.html',
+    order: 6,
+    sources: [
+      'biophysics.html',
+      'src/packguide/',
+      'src/packs/biophys/guide/',
+      'public/guides/biophys/',
+    ],
+    schema: 'WebPage',
+  },
+  /*
    * Last: nobody should meet the changelog before the pages that explain what it is changing.
    * `sources` is the directory for the dataset guide's reason — an entry is edited in
    * `src/changelog/entries.ts`, and the images it names live in `public/changelog/`.
    */
   'changelog.html': {
     url: '/changelog.html',
-    order: 6,
+    order: 7,
     sources: ['changelog.html', 'src/changelog/', 'public/changelog/'],
     schema: 'WebPage',
   },

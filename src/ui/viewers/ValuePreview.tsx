@@ -1,5 +1,5 @@
 import { useContext, useMemo } from 'react'
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 
 import type { GraphNode } from '../../core/graph'
 import type { InferContext, ParamValue, ParamValues } from '../../core/node'
@@ -13,6 +13,7 @@ import type { PartnerGrouping } from '../../nodes/lib/profileStats'
 import {
   asString,
   describeValue,
+  isCellModelValue,
   isDatasetValue,
   isLayoutValue,
   isLinkageValue,
@@ -85,6 +86,12 @@ import { describeTable } from '../../nodes/lib/describeOps'
 import { TableSummary } from './TableSummary'
 import { TableViewer } from './TableViewer'
 import { LaminarProfileViewer } from '../cortex/LaminarProfileViewer'
+import { ModelView } from '../biophys/ModelView'
+import { FitView } from '../biophys/FitView'
+import { ClampPreview } from '../biophys/ClampPreview'
+import { SimulateView } from '../biophys/SimulateView'
+import { PointsEditor } from './PointsEditor'
+import { MANUAL_PARAM } from '../../nodes/lib/skeletonPoints'
 import { frameOf } from '../../packs/cortex/frames'
 import { ViewerEmpty } from './ViewerEmpty'
 
@@ -110,6 +117,8 @@ export interface ValuePreviewProps {
    * says more than `onParamChange('selection', …)` does.
    */
   onParamChange?: (paramId: string, value: ParamValue) => void
+  /** Several params in one commit, for one edit that spans them: one undo step (`setParams`). */
+  onParamsChange?: (values: Readonly<Record<string, ParamValue>>) => void
   onSelectionChange?: (ids: string[]) => void
   /** Realised values on the node's input ports, for viewers that draw several at once. */
   inputValues?: Record<string, Value | undefined>
@@ -164,6 +173,7 @@ function ValuePreviewInner({
   onExpand,
   onError,
   onParamChange,
+  onParamsChange,
   onSelectionChange,
   inputValues,
   summary,
@@ -233,6 +243,7 @@ function ValuePreviewInner({
       shared,
       inputValues,
       onParamChange,
+      onParamsChange,
       onSelectionChange,
       selection,
       viewerKey,
@@ -324,6 +335,7 @@ function ValuePreviewInner({
   const summarised =
     value.kind === 'layout' ||
     value.kind === 'linkage' ||
+    value.kind === 'cellModel' ||
     value.kind === 'transform' ||
     value.kind === 'layers' ||
     value.kind === 'tableFile'
@@ -341,7 +353,13 @@ interface SharedViewerProps {
 /** What a `VIEWERS` entry is handed: `ValuePreview`'s own props, and the readers every entry shares. */
 type ViewerProps = Pick<
   ValuePreviewProps,
-  'node' | 'value' | 'ctx' | 'inputValues' | 'onParamChange' | 'onSelectionChange'
+  | 'node'
+  | 'value'
+  | 'ctx'
+  | 'inputValues'
+  | 'onParamChange'
+  | 'onParamsChange'
+  | 'onSelectionChange'
 > & {
   params: ParamValues
   choice: <T extends string>(id: string) => T
@@ -354,6 +372,13 @@ type ViewerProps = Pick<
 interface ViewerEntry {
   /** Drawn before the "No result yet" guard, from the node's inputs — see `VIEWERS`. */
   withoutValue?: boolean
+  /**
+   * The card offers ⤢ and ⇥ before a run, because its full-size surface is where the run is set
+   * up — Simulate's partner list, the Compartment Model's channels. An opt-in beside
+   * `withoutValue` rather than implied by it: the other entries drawing without a value open on
+   * "No result yet" full size, and had never offered to before.
+   */
+  opensBeforeRun?: true
   /**
    * Draws from its inputs too, so its card shows a preview before its own value — but after the
    * guard, unlike `withoutValue`. Profile and Neuroglancer.
@@ -372,6 +397,12 @@ interface ViewerEntry {
    *   Axon/Dendrite). Its card has no preview to keep, so the inspector keeps the generic one.
    */
   inSummary?: 'preview' | { drawnElsewhere: string }
+  /**
+   * Drawings under the full-size sidebar's tabs, keyed by `ParamGroup.id`: a picture of what that
+   * tab's params describe, redrawn as they change — Simulate's waveform under Clamp. Handed the
+   * node's params with defaults filled. `clampPreview.test.tsx` holds every key to a tab the node has.
+   */
+  tabFigures?: Readonly<Record<string, ComponentType<{ params: ParamValues }>>>
   /** The picture, or `undefined` to decline: dispatch carries on as though there were no entry. */
   render: (props: ViewerProps) => ReactNode
 }
@@ -381,10 +412,11 @@ interface ViewerEntry {
  * `ValuePreview`: one entry per type rather than a chain of `node.type ===` branches.
  *
  * **`withoutValue` and `inSummary` are the structural facts an entry carries** — the second is
- * what the inspector draws instead, and is documented on the field. Four viewers draw before the
+ * what the inspector draws instead, and is documented on the field. Five viewers draw before the
  * "No result yet" guard because their picture is on their *inputs*: two have no outputs, and so
  * never a value (Dataset Summary, ROI Viewer), and two have an output that arrives a scheduler
- * step after the thing they draw (3D View, Graph Metrics). Every other entry is handed a value.
+ * step after the thing they draw (3D View, Graph Metrics), and Simulate's partner list is chosen
+ * before the run that makes its value. Every other entry is handed a value.
  *
  * **An entry declines by returning `undefined`** — its input or its value is not the kind it
  * draws — and dispatch carries on to the guard and the value-kind fallbacks. Entries are called,
@@ -876,6 +908,23 @@ const VIEWERS: Record<string, ViewerEntry> = {
         />
       ) : undefined,
   },
+  /*
+   * Split Axon/Dendrite's shape again: a transform whose full-size view, under `placed by hand`, is
+   * where its points are placed. Drawn from the *input* skeletons, since the points go on them;
+   * under the other placements it declines and the cloud's ordinary preview is drawn.
+   */
+  'neuron.skeletonPoints': {
+    inSummary: 'preview',
+    render: ({ params, inputValues, onParamChange, viewerKey }) =>
+      params.placement === 'manual' && isSkeletonsValue(inputValues?.in) ? (
+        <PointsEditor
+          skeletons={inputValues.in}
+          points={params[MANUAL_PARAM]}
+          viewerKey={viewerKey}
+          onParamChange={onParamChange}
+        />
+      ) : undefined,
+  },
   'out.neuronDendrogram': {
     readsInputs: true,
     render: ({ node, ctx, params, choice, shared, inputValues, onParamChange, selection }) => {
@@ -1100,11 +1149,14 @@ const VIEWERS: Record<string, ViewerEntry> = {
       const x = ctx.column('x')
       if (!x) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a numeric X column" />
       const series = ctx.column('series')
+      const y2s = ctx.columns('y2s')
       return (
         <LineChartViewer
           table={value}
           x={x}
-          ys={yColumnsOf(value.schema, ctx.columns('ys'), x, series)}
+          ys={yColumnsOf(value.schema, ctx.columns('ys'), x, series, y2s)}
+          y2s={y2s}
+          y2Log={params.y2Log === true}
           series={series}
           order={choice<LineOrder>('order')}
           xLog={params.xLog === true}
@@ -1242,6 +1294,72 @@ const VIEWERS: Record<string, ViewerEntry> = {
     },
   },
   /*
+   * The Compartment Model's channel list, edited — the card shows it as a count. Before any run,
+   * like Simulate's partner list: which channels a model has is decided before it is built. The
+   * built model, where there is one, says which regions this neuron has.
+   */
+  'biophys:model': {
+    withoutValue: true,
+    opensBeforeRun: true,
+    inSummary: 'preview',
+    render: ({ value, inputValues, params, onParamChange, onParamsChange }) => (
+      <ModelView
+        onParamsChange={onParamsChange}
+        skeletons={isSkeletonsValue(inputValues?.neuron) ? inputValues.neuron : undefined}
+        model={isCellModelValue(value) ? value : undefined}
+        params={params}
+        onParamChange={onParamChange}
+      />
+    ),
+  },
+  /*
+   * The Biophysics pack's. Not a viewer, so its card keeps its param rows; full size, the fit read
+   * whole — traces, parameters, error — with Apply to Compartment Model. Its outputs, so after a run.
+   */
+  'biophys:fit': {
+    inSummary: 'preview',
+    render: ({ node, value }) => <FitView nodeId={node.id} fitted={value} />,
+  },
+  /*
+   * The Biophysics pack's. Not a viewer, so its card keeps its param rows and draws nothing; its
+   * full-size surfaces show the wired model's partners to tick, drawn before any run — `withoutValue`,
+   * since choosing who fires is what comes *before* the run — and, once it has run, Playback.
+   */
+  'biophys:simulate': {
+    withoutValue: true,
+    tabFigures: { clamp: ClampPreview },
+    opensBeforeRun: true,
+    inSummary: 'preview',
+    render: ({
+      node,
+      inputValues,
+      params,
+      onParamChange,
+      onParamsChange,
+      ctx,
+      viewerKey,
+      shared,
+    }) => {
+      const model = isCellModelValue(inputValues?.model) ? inputValues.model : undefined
+      return (
+        <SimulateView
+          nodeId={node.id}
+          model={model}
+          params={params}
+          record={inputValues?.record}
+          spikes={inputValues?.spikes}
+          current={inputValues?.current}
+          column={(id) => ctx.column(id)}
+          viewerKey={viewerKey}
+          baseName={shared.baseName}
+          onError={shared.onError}
+          onParamChange={onParamChange}
+          onParamsChange={onParamsChange}
+        />
+      )
+    },
+  },
+  /*
    * The Cortex pack's viewer. The frame is read off the Dataset wire's *type* — identity, known
    * before anything runs — so the layers draw with the first result rather than after a second.
    */
@@ -1322,10 +1440,35 @@ const VIEWERS: Record<string, ViewerEntry> = {
   },
 }
 
+/** The drawing under a node's sidebar tab, if its entry has one (`ViewerEntry.tabFigures`). */
+export function tabFigure(
+  type: string,
+  tab: string,
+): ComponentType<{ params: ParamValues }> | undefined {
+  return VIEWERS[type]?.tabFigures?.[tab]
+}
+
+/** Every node type's tab figures, for the sweep that holds their keys to real tabs. */
+export function tabFigureKeys(): readonly (readonly [type: string, tab: string])[] {
+  return Object.entries(VIEWERS).flatMap(([type, entry]) =>
+    Object.keys(entry.tabFigures ?? {}).map((tab) => [type, tab] as const),
+  )
+}
+
 /** Whether a node type's card has a preview before its own value, drawn from its inputs. */
 export function drawsFromInputs(type: string): boolean {
   const entry = VIEWERS[type]
   return entry?.withoutValue === true || entry?.readsInputs === true
+}
+
+/**
+ * Whether a node's full-size surface has something to draw before it has run: an entry that says
+ * so (`opensBeforeRun`). Narrower than `drawsFromInputs`, whose `readsInputs` entries still draw after
+ * the guard and so have nothing to show full size until a result arrives. Simulate's partner list
+ * is the case that asked — chosen before the run it feeds.
+ */
+export function opensWithoutValue(type: string): boolean {
+  return VIEWERS[type]?.opensBeforeRun === true
 }
 
 /**

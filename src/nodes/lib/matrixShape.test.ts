@@ -320,6 +320,17 @@ describe('the label filter', () => {
     expect(parseLabelFilter('   ')).toEqual({})
   })
 
+  it('asks a row known by several labels of all of them, the negation over the set', () => {
+    const lc4 = parseLabelFilter('LC4').filter!
+    const notLc4 = parseLabelFilter('!LC4').filter!
+    const notLc4Regex = parseLabelFilter('-/^LC4$/').filter!
+    // An id and a type: kept by either label, and a negation keeps it only if neither matches.
+    expect(lc4.testAny(['720575940', 'LC4'])).toBe(true)
+    expect(notLc4.testAny(['720575940', 'LC4'])).toBe(false)
+    expect(notLc4Regex.testAny(['720575940', 'LC4'])).toBe(false)
+    expect(notLc4.testAny(['720575940', 'LC6'])).toBe(true)
+  })
+
   it('matches a bare term as a case-insensitive substring', () => {
     expect(keep('lc')).toEqual(['LC4', 'LC10', 'lc6'])
     expect(keep('LC1')).toEqual(['LC10'])

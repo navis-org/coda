@@ -24,6 +24,8 @@ import { errorMessage } from '../core/errors'
 
 /** What a job worker posts back. */
 type JobMessage<R> =
+  /** Sent on receiving the job: the worker's code loaded, so a silent death after it is not a load failure. */
+  | { type: 'started' }
   | { type: 'progress'; fraction: number; note?: string }
   | { type: 'done'; result: R }
   | { type: 'error'; message: string }
@@ -51,10 +53,21 @@ export interface JobOptions<J, R> extends JobRunOptions {
  * page's own modules are the old ones and keep working; a new worker fetches the new ones. So the
  * remedy is the one thing the sentence can offer.
  */
-function notLoaded(label: string): string {
+export function notLoaded(label: string): string {
   return (
     `The ${label} could not be loaded. Coda has probably been updated since this page was opened. ` +
     `Reload the page and run again.`
+  )
+}
+
+/**
+ * A worker's error with no message *after* it said it had started is not a load failure: its code
+ * ran. What ends a running worker without a word is nearly always memory.
+ */
+export function stopped(label: string): string {
+  return (
+    `The ${label} stopped while it was running, most likely out of memory. ` +
+    'Try a smaller run, or close other workflows and run again.'
   )
 }
 
@@ -81,8 +94,13 @@ export function runWorkerJob<J, R>(
       options.signal?.removeEventListener('abort', stop)
       worker.terminate()
     }
+    // Whether the worker has said anything yet — it says `started` on receiving the job: an error
+    // with no message means "never loaded" before, and "died running" after.
+    let running = false
     worker.onmessage = (event: MessageEvent<JobMessage<R>>) => {
       const message = event.data
+      running = true
+      if (message.type === 'started') return
       if (message.type === 'progress')
         return options.onProgress?.(message.fraction, message.note)
       finish()
@@ -91,7 +109,11 @@ export function runWorkerJob<J, R>(
     }
     worker.onerror = (event) => {
       finish()
-      reject(new Error(event.message || notLoaded(options.label)))
+      reject(
+        new Error(
+          event.message || (running ? stopped(options.label) : notLoaded(options.label)),
+        ),
+      )
     }
     // A result the page cannot deserialise arrives as neither a message nor an error.
     worker.onmessageerror = () => {
@@ -103,21 +125,45 @@ export function runWorkerJob<J, R>(
 }
 
 /**
+ * Every typed array's buffer in a result, each once: what a worker moves back by default. Walking
+ * the result rather than listing fields means a field added to it later is moved too — a list
+ * written out by hand copies the one nobody added to it, and nothing says so.
+ */
+export function buffersIn(value: unknown, found = new Set<ArrayBuffer>()): ArrayBuffer[] {
+  walkBuffers(value, found)
+  return [...found]
+}
+
+function walkBuffers(value: unknown, found: Set<ArrayBuffer>): void {
+  if (ArrayBuffer.isView(value)) {
+    if (value.buffer instanceof ArrayBuffer) found.add(value.buffer)
+  } else if (Array.isArray(value)) {
+    // In place, and past primitives without a call: a file reader's result holds plain columns of
+    // millions of cells, where `Object.values` would copy each one to find nothing in it.
+    for (const item of value)
+      if (item !== null && typeof item === 'object') walkBuffers(item, found)
+  } else if (value !== null && typeof value === 'object') {
+    for (const key in value) walkBuffers((value as Record<string, unknown>)[key], found)
+  }
+}
+
+/**
  * The worker half: answer each posted job with `handle`, relaying its progress, and move the
- * buffers `transfer` names rather than copying them.
+ * buffers `transfer` names rather than copying them — by default, every one in the result.
  *
  * A no-op anywhere but a worker, so a module the page or a test also imports — for its types or its handler —
  * needs no guard of its own: `self.onmessage` in a window would make every page a message target.
  */
 export function serveJob<J, R>(
   handle: JobHandler<J, R>,
-  transfer: (result: R) => Transferable[] = () => [],
+  transfer: (result: R) => Transferable[] = (result) => buffersIn(result),
 ): void {
   // Not a worker: the page (which has a document) or Node, where a test imports the module.
   if (typeof self === 'undefined' || typeof document !== 'undefined') return
   self.onmessage = async (event: MessageEvent<J>) => {
     const post = (message: JobMessage<R>, moved: Transferable[] = []) =>
       self.postMessage(message, { transfer: moved })
+    post({ type: 'started' })
     try {
       const result = await handle(event.data, {
         onProgress: (fraction, note) =>

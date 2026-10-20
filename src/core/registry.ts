@@ -68,6 +68,12 @@ export interface PackDefinition {
    * a pack is its nodes, and one of them already says what the pack is about.
    */
   glyph?: string
+  /**
+   * The pack's guide: a static page of the site (`page`, a file next to `index.html`), rendered at
+   * build time from the pack's `guide/guide.md` by `src/packguide/render.ts`. The Plugins dialog,
+   * a node's help and the ? menu's Documentation link to it. `title` is how those links name it.
+   */
+  guide?: { readonly page: string; readonly title: string }
   nodes: readonly NodeDefinition[]
 }
 

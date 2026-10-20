@@ -18,6 +18,7 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
+import { fnv1a32 } from '../../core/hash'
 import { ID_COLUMN_NAME, compareIds, idText, numericIds } from '../../core/ids'
 import type { CellValue } from '../../core/values'
 import { boundsOf, cableLength, selectRows, tableFromRows } from '../../core/values'
@@ -1023,12 +1024,7 @@ function synapseTotal(
 }
 
 function mockReconstructedFraction(roi: string): number {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < roi.length; i++) {
-    hash ^= roi.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193) >>> 0
-  }
-  return 0.55 + (hash % 4400) / 10_000
+  return 0.55 + (fnv1a32(roi) % 4400) / 10_000
 }
 
 /**

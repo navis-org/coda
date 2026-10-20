@@ -44,13 +44,16 @@
  */
 export const CRASH_FLOOR_BYTES = 512 * 1024 * 1024
 
+/** A float64 cell, in bytes: what a size stated in cells is multiplied by to meet the floor. */
+export const CELL_BYTES = 8
+
 /**
  * That, in float64 cells — the unit tables and matrices actually allocate in.
  *
  * 67,108,864 of them. Every numeric column in `tableOps` is a `Float64Array` and every matrix
  * is one flat one, so a cell count is the honest common currency between them.
  */
-export const CRASH_FLOOR_CELLS = Math.floor(CRASH_FLOOR_BYTES / 8)
+export const CRASH_FLOOR_CELLS = Math.floor(CRASH_FLOOR_BYTES / CELL_BYTES)
 
 /** Anything that can be told about a cost. `EvalContext`, in practice. */
 export interface Warner {

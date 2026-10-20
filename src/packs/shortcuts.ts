@@ -29,6 +29,8 @@ export interface ShortcutDefinition {
 export const SHORTCUTS: readonly ShortcutDefinition[] = [
   // The Cortex Gallery and its frames; CAVE and Connectome come with it, being what it needs.
   { id: 'cortex', packs: ['cortex'] },
+  // Compartment models of single neurons; needs nothing else switched on.
+  { id: 'biophys', packs: ['biophys'] },
   // Virtual Fly Brain for connectome neurons: their types, papers, driver lines and images.
   { id: 'vfb', packs: ['vfb'] },
 ]

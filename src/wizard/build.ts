@@ -74,11 +74,11 @@ import {
   contributedAnalysis,
   contributedStart,
   everyCombination,
-  familyCan,
   startOption,
   viewsOf,
   visualisationOption,
 } from './options'
+import { familyCan } from './gates'
 
 /**
  * How many neurons a search on a published dataset comes back with until somebody says

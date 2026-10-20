@@ -149,7 +149,7 @@ export function usableRows(
 }
 
 /** Extent of a transformed coordinate, or undefined when there is none. */
-export function extentOf(values: Float64Array): Domain | undefined {
+export function extentOf(values: ArrayLike<number>): Domain | undefined {
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
   for (let i = 0; i < values.length; i++) {
@@ -158,6 +158,17 @@ export function extentOf(values: Float64Array): Domain | undefined {
     if (t > max) max = t
   }
   return Number.isFinite(min) ? { min, max } : undefined
+}
+
+/**
+ * The extent of `values` stretched to hold zero, and a unit tall where it is flat: an axis for a
+ * signed quantity — an injected current — whose sign reads off where its line sits against 0.
+ */
+export function zeroDomain(values: ArrayLike<number>): Domain {
+  const extent = extentOf(values)
+  const min = Math.min(0, extent?.min ?? 0)
+  const max = Math.max(0, extent?.max ?? 0)
+  return max > min ? { min, max } : { min, max: min + 1 }
 }
 
 /**

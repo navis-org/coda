@@ -34,6 +34,7 @@
  * either node then reads the same way across.
  */
 
+import type { ColumnParam, EnumParam } from '../../core/node'
 import { idText } from '../../core/ids'
 import type { ColumnSchema, TableSchema } from '../../core/types'
 import { column, findColumn, pickColumns, tableSchema } from '../../core/types'
@@ -58,7 +59,7 @@ export const GROUP_PARAM = 'by'
  * Presynaptic holds the presynaptic body. `polarity` is the reading a query-relative cloud
  * needs, and it is opt-in rather than detected — see the module head.
  */
-type Orientation = 'fixed' | 'polarity'
+export type Orientation = 'fixed' | 'polarity'
 
 /**
  * Everything the fold reads, resolved once so the schema half and the value half cannot
@@ -279,6 +280,62 @@ function polarityOf(cell: CellValue | undefined): string {
 }
 
 /**
+ * Whether a row's two ends are swapped under the polarity orientation: `true` for `post`, `false`
+ * for `pre`, `undefined` for a cell that reads as neither. The one rule every node reading a
+ * synapse cloud's ends by polarity applies; what to do with an unreadable row is each node's.
+ */
+export function rowFlips(cell: CellValue | undefined): boolean | undefined {
+  const polarity = polarityOf(cell)
+  return polarity === 'post' ? true : polarity === 'pre' ? false : undefined
+}
+
+/**
+ * The Orientation and Polarity params, as every node asking which end of a synapse row is which
+ * declares them — one wording, so two cards cannot describe one choice two ways. `unreadable` is
+ * the node's own sentence for a row whose polarity reads as neither.
+ */
+export function orientationParams(
+  from: string,
+  options: {
+    readonly unreadable: string
+    readonly group?: string
+    /** The two params' ids, where a node reads two clouds; `ORIENTATION_PARAM`/`POLARITY_PARAM` else. */
+    readonly ids?: { readonly orientation: string; readonly polarity: string }
+  },
+): [EnumParam, ColumnParam] {
+  const group = options.group ? { group: options.group } : {}
+  const { orientation, polarity } = options.ids ?? {
+    orientation: ORIENTATION_PARAM,
+    polarity: POLARITY_PARAM,
+  }
+  return [
+    {
+      id: orientation,
+      kind: 'enum',
+      label: 'Orientation',
+      default: 'fixed',
+      ...group,
+      options: [
+        { value: 'fixed', label: 'columns are already oriented' },
+        { value: 'polarity', label: 'read from a polarity column' },
+      ],
+      help: 'Which end of each synapse is presynaptic. Leave the default for Synapses Between; for Synapses, pick the second option.',
+    },
+    {
+      id: polarity,
+      kind: 'column',
+      label: 'Polarity',
+      from,
+      default: 'polarity',
+      dtypes: ['str'],
+      ...group,
+      visibleIf: (params) => params[orientation] === 'polarity',
+      help: `Rows reading "post" have their two ends swapped. ${options.unreadable}`,
+    },
+  ]
+}
+
+/**
  * One pass: orient every row, then count rows per (pre, post, …extras).
  *
  * Insertion order out, which is `groupByTable`'s — first appearance of a pair, so a sorted
@@ -326,9 +383,9 @@ export function synapseEdgesTable(attributes: TableValue, plan: EdgePlan): Synap
   for (let i = 0; i < attributes.length; i++) {
     let flip = false
     if (polarityData) {
-      const polarity = polarityOf(polarityData[i])
-      if (polarity === 'pre' || polarity === 'post') flip = polarity === 'post'
-      else unoriented += 1
+      const flips = rowFlips(polarityData[i])
+      if (flips === undefined) unoriented += 1
+      else flip = flips
     }
     const pre = idText(flip ? targetData[i] : sourceData[i])
     const post = idText(flip ? sourceData[i] : targetData[i])

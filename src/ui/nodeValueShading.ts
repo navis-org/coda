@@ -9,7 +9,7 @@
  */
 
 import type { SkeletonsValue } from '../core/values'
-import { NODE_VALUES } from '../core/values'
+import { NODE_VALUES } from '../nodes/lib/nodeValues'
 import type { ColorSpec } from '../nodes/lib/encodingParams'
 import type { Mode } from '../style/colors'
 import type { ResolvedColor } from '../style/encoding'

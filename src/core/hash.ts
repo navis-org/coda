@@ -49,7 +49,15 @@ export function stableStringify(value: unknown): string {
   if (cached !== undefined) return cached
 
   let out: string
-  if (Array.isArray(value)) {
+  if (ArrayBuffer.isView(value)) {
+    /*
+     * A typed array is stood in for by a digest of its bytes, its type named so two widths of the
+     * same numbers differ. Otherwise it fell into the object branch: every index a string key,
+     * sorted, then each element stringified — seconds and tens of megabytes for a held current of
+     * 100,000 steps per sweep, which Simulate Model's movie basis hashes on the page.
+     */
+    out = `[@${value.constructor.name}:${value.byteLength}:${hashBytes([value])}]`
+  } else if (Array.isArray(value)) {
     out = `[${value.map(stableStringify).join(',')}]`
     if (value.length > DIGEST_ABOVE) out = `[#${value.length}:${hashString(out)}]`
   } else {
@@ -78,6 +86,19 @@ export function fmix32(h: number): number {
   x = Math.imul(x, 0xc2b2ae35)
   x ^= x >>> 16
   return x >>> 0
+}
+
+/**
+ * FNV-1a, 32-bit, over UTF-16 code units, as a number: a seed for `seededRandom` or `mulberry32`
+ * drawn from text. The first half of `hashString`.
+ */
+export function fnv1a32(input: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h
 }
 
 /**

@@ -48,6 +48,8 @@ import { UploadBody } from './UploadBody'
 import { LinkTableBody, LinkTableFooter } from './LinkTableBody'
 import { BigClustProjectBody, BigClustProjectFooter } from './BigClustProjectBody'
 import { UploadMeshBody } from './UploadMeshBody'
+import { RecordingBody } from '../biophys/RecordingBody'
+import { FitFooter } from '../biophys/FitFooter'
 
 export interface NodeBodyProps {
   node: GraphNode
@@ -69,17 +71,11 @@ export interface NodeBodyProps {
   onError: (message: string) => void
 }
 
-/** What a body's footer control is handed: the body's own, less what only a body draws with. */
-export type NodeFooterProps = Pick<NodeBodyProps, 'ctx' | 'setParam'>
+/** What a foot control is handed: a body's own, less what only a body draws with. */
+export type NodeFooterProps = Pick<NodeBodyProps, 'node' | 'ctx' | 'setParam'>
 
 export interface NodeBodyEntry {
   Component: ComponentType<NodeBodyProps>
-  /**
-   * A control this body adds to the card's foot, beside the run state and the cache age — for a
-   * body whose re-read belongs where every other card's does. Link Table's ⟳ sat in the body,
-   * where no other card has one; the dataset cards' is in the foot.
-   */
-  Footer?: ComponentType<NodeFooterProps>
   /**
    * Whether the node offers the full-size overlay.
    *
@@ -191,17 +187,21 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    */
   'core.uploadMesh': { Component: UploadMeshBody, expandable: true },
   /*
+   * `expandable` for the upload cards' reason: which channels and commands a recording holds is
+   * what somebody checks after picking one.
+   */
+  'biophys:loadRecording': { Component: RecordingBody, expandable: true },
+  /*
    * `expandable` for the upload cards' reason: the column listing is what somebody checks after
    * opening a file, and a wide synapse table's does not belong on a canvas.
    */
-  'core.linkTable': { Component: LinkTableBody, Footer: LinkTableFooter, expandable: true },
+  'core.linkTable': { Component: LinkTableBody, expandable: true },
   /*
    * Link Table's card for a folder, `expandable` for its reason: the list of embeddings and what
    * each brings is what somebody checks after choosing a project.
    */
   'annotation:bigclust': {
     Component: BigClustProjectBody,
-    Footer: BigClustProjectFooter,
     expandable: true,
   },
   /*
@@ -231,4 +231,21 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
 
 export function nodeBody(type: string): NodeBodyEntry | undefined {
   return NODE_BODIES[type]
+}
+
+/**
+ * Controls a card adds to its foot, beside the run state and the cache age — a table of its own
+ * rather than a field on a body, a card with a foot control needing no body: Fit Model keeps its
+ * param rows. Link Table's ⟳ sat in its body, where no other card has one; the dataset cards' is
+ * in the foot.
+ */
+const NODE_FOOTERS: Record<string, ComponentType<NodeFooterProps>> = {
+  'core.linkTable': LinkTableFooter,
+  'annotation:bigclust': BigClustProjectFooter,
+  // Apply to Compartment Model, beside the line saying how the fit ended.
+  'biophys:fit': FitFooter,
+}
+
+export function nodeFooter(type: string): ComponentType<NodeFooterProps> | undefined {
+  return NODE_FOOTERS[type]
 }

@@ -13,7 +13,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { appendixHTML, esc, nodeAnchor } from './appendix'
+import { nodeAnchor } from '../core/nodeType'
+import { appendixHTML, esc } from './appendix'
 import { guideData } from './data'
 import { SECTIONS } from './sections'
 

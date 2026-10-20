@@ -31,7 +31,7 @@ import { elementNoun, isIterableKind, isIterableValue } from '../../nodes/lib/it
 import { batchSize, isGroupMode, loopPlanOf } from '../../nodes/flow/plan'
 import { useGraphStore } from '../../store/graphStore'
 import { formatNumber } from '../../style/format'
-import { slugify } from '../export'
+import { slugify } from '../../style/format'
 import { ParamField } from '../params/ParamField'
 import { armSink, bestSinkMode, canWriteFolder, chooseSink } from '../fileSink'
 import { DOWNLOAD_TYPE } from '../useDownloads'

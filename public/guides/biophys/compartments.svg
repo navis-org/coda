@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 330" width="760" height="330" fill="none" stroke-linecap="round" stroke-linejoin="round" font-size="13">
+<circle cx="70" cy="52" r="30" style="fill:var(--surface-2);stroke:currentColor" stroke-width="1.5"/>
+<text x="70" y="102" text-anchor="middle" style="fill:var(--text-muted)">soma</text>
+<rect x="120" y="40" width="110" height="24" style="fill:var(--surface-2);stroke:currentColor" stroke-width="1.5"/>
+<rect x="230" y="40" width="110" height="24" style="fill:var(--surface-3);stroke:currentColor" stroke-width="1.5"/>
+<rect x="340" y="40" width="110" height="24" style="fill:var(--surface-2);stroke:currentColor" stroke-width="1.5"/>
+<rect x="450" y="40" width="110" height="24" style="fill:var(--surface-3);stroke:currentColor" stroke-width="1.5"/>
+<rect x="560" y="40" width="110" height="24" style="fill:var(--surface-2);stroke:currentColor" stroke-width="1.5"/>
+<text x="395" y="30" text-anchor="middle" style="fill:var(--text-muted)">a neurite, cut into compartments</text>
+<line x1="175" y1="64" x2="175" y2="132" style="stroke:var(--border-strong)" stroke-width="1" stroke-dasharray="3 4"/>
+<circle cx="175" cy="140" r="3.5" style="fill:currentColor"/>
+<line x1="153" y1="140" x2="197" y2="140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="153" y1="140" x2="153" y2="206" style="stroke:currentColor" stroke-width="1.5"/><line x1="144" y1="206" x2="162" y2="206" style="stroke:currentColor" stroke-width="2"/><line x1="144" y1="214" x2="162" y2="214" style="stroke:currentColor" stroke-width="2"/><line x1="153" y1="214" x2="153" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M197,140 L197,155.4 L192,159.3 L202,167 L192,174.7 L202,182.4 L192,190.1 L202,197.8 L197,201.6 L197,217" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="197" y1="217" x2="197" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="188" y1="245.5" x2="206" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="192" y1="251.5" x2="202" y2="251.5" style="stroke:currentColor" stroke-width="3"/><line x1="197" y1="251.5" x2="197" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="153" y1="280" x2="197" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M175,140 L197,140 L202.5,135 L213.5,145 L224.5,135 L235.5,145 L246.5,135 L257.5,145 L263,140 L285,140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="285" y1="64" x2="285" y2="132" style="stroke:var(--border-strong)" stroke-width="1" stroke-dasharray="3 4"/>
+<circle cx="285" cy="140" r="3.5" style="fill:currentColor"/>
+<line x1="263" y1="140" x2="307" y2="140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="263" y1="140" x2="263" y2="206" style="stroke:currentColor" stroke-width="1.5"/><line x1="254" y1="206" x2="272" y2="206" style="stroke:currentColor" stroke-width="2"/><line x1="254" y1="214" x2="272" y2="214" style="stroke:currentColor" stroke-width="2"/><line x1="263" y1="214" x2="263" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M307,140 L307,155.4 L302,159.3 L312,167 L302,174.7 L312,182.4 L302,190.1 L312,197.8 L307,201.6 L307,217" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="307" y1="217" x2="307" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="298" y1="245.5" x2="316" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="302" y1="251.5" x2="312" y2="251.5" style="stroke:currentColor" stroke-width="3"/><line x1="307" y1="251.5" x2="307" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="263" y1="280" x2="307" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M285,140 L307,140 L312.5,135 L323.5,145 L334.5,135 L345.5,145 L356.5,135 L367.5,145 L373,140 L395,140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="395" y1="64" x2="395" y2="132" style="stroke:var(--border-strong)" stroke-width="1" stroke-dasharray="3 4"/>
+<circle cx="395" cy="140" r="3.5" style="fill:currentColor"/>
+<line x1="373" y1="140" x2="417" y2="140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="373" y1="140" x2="373" y2="206" style="stroke:currentColor" stroke-width="1.5"/><line x1="364" y1="206" x2="382" y2="206" style="stroke:currentColor" stroke-width="2"/><line x1="364" y1="214" x2="382" y2="214" style="stroke:currentColor" stroke-width="2"/><line x1="373" y1="214" x2="373" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M417,140 L417,155.4 L412,159.3 L422,167 L412,174.7 L422,182.4 L412,190.1 L422,197.8 L417,201.6 L417,217" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="417" y1="217" x2="417" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="408" y1="245.5" x2="426" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="412" y1="251.5" x2="422" y2="251.5" style="stroke:currentColor" stroke-width="3"/><line x1="417" y1="251.5" x2="417" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="373" y1="280" x2="417" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M395,140 L417,140 L422.5,135 L433.5,145 L444.5,135 L455.5,145 L466.5,135 L477.5,145 L483,140 L505,140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="505" y1="64" x2="505" y2="132" style="stroke:var(--border-strong)" stroke-width="1" stroke-dasharray="3 4"/>
+<circle cx="505" cy="140" r="3.5" style="fill:currentColor"/>
+<line x1="483" y1="140" x2="527" y2="140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="483" y1="140" x2="483" y2="206" style="stroke:currentColor" stroke-width="1.5"/><line x1="474" y1="206" x2="492" y2="206" style="stroke:currentColor" stroke-width="2"/><line x1="474" y1="214" x2="492" y2="214" style="stroke:currentColor" stroke-width="2"/><line x1="483" y1="214" x2="483" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M527,140 L527,155.4 L522,159.3 L532,167 L522,174.7 L532,182.4 L522,190.1 L532,197.8 L527,201.6 L527,217" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="527" y1="217" x2="527" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="518" y1="245.5" x2="536" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="522" y1="251.5" x2="532" y2="251.5" style="stroke:currentColor" stroke-width="3"/><line x1="527" y1="251.5" x2="527" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="483" y1="280" x2="527" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M505,140 L527,140 L532.5,135 L543.5,145 L554.5,135 L565.5,145 L576.5,135 L587.5,145 L593,140 L615,140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="615" y1="64" x2="615" y2="132" style="stroke:var(--border-strong)" stroke-width="1" stroke-dasharray="3 4"/>
+<circle cx="615" cy="140" r="3.5" style="fill:currentColor"/>
+<line x1="593" y1="140" x2="637" y2="140" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="593" y1="140" x2="593" y2="206" style="stroke:currentColor" stroke-width="1.5"/><line x1="584" y1="206" x2="602" y2="206" style="stroke:currentColor" stroke-width="2"/><line x1="584" y1="214" x2="602" y2="214" style="stroke:currentColor" stroke-width="2"/><line x1="593" y1="214" x2="593" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<path d="M637,140 L637,155.4 L632,159.3 L642,167 L632,174.7 L642,182.4 L632,190.1 L642,197.8 L637,201.6 L637,217" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="637" y1="217" x2="637" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="628" y1="245.5" x2="646" y2="245.5" style="stroke:currentColor" stroke-width="1.5"/><line x1="632" y1="251.5" x2="642" y2="251.5" style="stroke:currentColor" stroke-width="3"/><line x1="637" y1="251.5" x2="637" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="593" y1="280" x2="637" y2="280" style="stroke:currentColor" stroke-width="1.5"/>
+<line x1="145" y1="280" x2="645" y2="280" style="stroke:var(--text-muted)" stroke-width="1.5"/>
+<text x="651" y="284" text-anchor="start" style="fill:var(--text-muted)">outside</text>
+<text x="141" y="215" text-anchor="end" style="fill:var(--accent)">Cm</text>
+<text x="209" y="185" text-anchor="start" style="fill:var(--accent)">Rm</text>
+<text x="209" y="258" text-anchor="start" style="fill:var(--accent)">E leak</text>
+<text x="230" y="126" text-anchor="middle" style="fill:var(--accent)">Ra</text>
+<text x="380" y="318" text-anchor="middle" style="fill:var(--text-muted)">each compartment: a patch of membrane, joined to the next through the cytoplasm</text>
+</svg>

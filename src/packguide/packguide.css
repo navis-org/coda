@@ -1,0 +1,513 @@
+/*
+ * A pack's guide.
+ *
+ * The masthead, footer and base type are the dataset guide's, so the set reads as one publication;
+ * tokens come from the app's own `theme.css`. What is the guide's own is a reading column, the
+ * contents beside it on a wide screen, and the three things its Markdown means beyond the help's
+ * (`render.ts`): the "In depth" boxes, the figures and the Open buttons.
+ *
+ * Like the dataset guide this page does not pin a theme: it is kept open beside the editor, so it
+ * follows `prefers-color-scheme` and the stored preference `main.ts` reads.
+ *
+ * **No colour carries information here.** An "In depth" box is told apart from the newcomer's text
+ * by its frame, its surface and its title, a warning by its title and its mark; the accent is the
+ * one hue, and only on what can be clicked.
+ */
+
+@import '../ui/theme.css';
+
+:root {
+  --gutter: clamp(1rem, 4vw, 3rem);
+  --measure: 70ch;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  /* theme.css pins this off for the editor canvas; a document wants it back. */
+  overscroll-behavior: auto;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  text-wrap: balance;
+  letter-spacing: -0.028em;
+  font-weight: 800;
+  line-height: 1.12;
+}
+p {
+  margin: 0;
+}
+a {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-3);
+  border-radius: 4px;
+  padding: 0.08em 0.34em;
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-inline: var(--gutter);
+}
+
+/* --------------------------------------------------------------------------
+   Masthead — the node guide's, so the set reads as one publication
+   -------------------------------------------------------------------------- */
+.top {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(
+      900px 380px at 82% 10%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 68%
+    ),
+    var(--canvas);
+  overflow: hidden;
+}
+.top__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.top__inner {
+  position: relative;
+  display: grid;
+  gap: 1.1rem;
+  padding-block: clamp(1.6rem, 4vw, 2.9rem) clamp(1.4rem, 3vw, 2rem);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.brand svg {
+  color: var(--text-primary);
+  flex: none;
+}
+.brand__tag {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.1em 0.7em;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+.brand__spacer {
+  flex: 1;
+}
+.brand a {
+  color: var(--text-muted);
+}
+.brand a:hover {
+  color: var(--text-primary);
+}
+.top h1 {
+  font-size: clamp(1.9rem, 4.4vw, 3.1rem);
+  max-width: 20ch;
+  letter-spacing: -0.035em;
+}
+.top h1 em {
+  font-style: normal;
+  color: var(--text-muted);
+}
+.top__sub {
+  display: grid;
+  gap: 0.8em;
+  color: var(--text-secondary);
+  font-size: clamp(1rem, 1.5vw, 1.12rem);
+}
+
+.top__sub p {
+  max-width: 62ch;
+}
+
+/* --------------------------------------------------------------------------
+   The guide: contents in a column of their own on a wide screen, above the text on a narrow one
+   -------------------------------------------------------------------------- */
+.guide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2rem;
+  padding-block: clamp(1.8rem, 4vw, 3rem) clamp(2.5rem, 5vw, 4rem);
+}
+@media (min-width: 1000px) {
+  .guide {
+    grid-template-columns: 14rem minmax(0, 1fr);
+    gap: 3.5rem;
+  }
+  .guide__contents {
+    position: sticky;
+    top: 1.5rem;
+    align-self: start;
+  }
+}
+.guide__contents {
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.guide__contents-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.6rem;
+}
+.guide__contents ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+  color: var(--text-muted);
+}
+.guide__contents a {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+.guide__contents a:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+/* What is being read (`main.ts`): its own ink and weight, and a rule beside it, not a hue. */
+.guide__contents li {
+  position: relative;
+}
+.guide__contents a[aria-current='true'] {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.guide__contents li:has(> a[aria-current='true'])::before {
+  content: '';
+  position: absolute;
+  left: -0.75rem;
+  top: 0.15em;
+  bottom: 0.15em;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+/*
+ * A section's subsections, folded until its entry is hovered or focused, or it is the section being
+ * read (`data-reading`, so a click that scrolls there leaves it open). Folded by grid rows rather
+ * than `display`, so the unfolding animates and a reduced-motion reader gets it at once.
+ */
+.guide__subsections {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.18s ease;
+}
+.guide__subsections > ul {
+  min-height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding-left: 0.9rem;
+  list-style: none;
+  font-size: 0.86rem;
+}
+.guide__subsections li {
+  padding-top: 0.3rem;
+}
+.guide__contents li:hover > .guide__subsections,
+.guide__contents li:focus-within > .guide__subsections,
+.guide__contents li[data-reading] > .guide__subsections {
+  grid-template-rows: 1fr;
+}
+@media (prefers-reduced-motion: reduce) {
+  .guide__subsections {
+    transition: none;
+  }
+}
+
+.guide__body {
+  max-width: var(--measure);
+  display: grid;
+  gap: 1rem;
+}
+.guide__body h2 {
+  font-size: clamp(1.45rem, 2.6vw, 1.9rem);
+  margin-top: 2.2rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 1rem;
+}
+.guide__body h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.guide__body h3 {
+  font-size: 1.15rem;
+  margin-top: 1.1rem;
+  scroll-margin-top: 1rem;
+}
+.guide__body h4 {
+  font-size: 1rem;
+  margin-top: 0.6rem;
+}
+.guide__body ul,
+.guide__body ol {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: grid;
+  gap: 0.35rem;
+}
+.guide__body ul ul,
+.guide__body ol ol,
+.guide__body ol ul,
+.guide__body ul ol {
+  margin-top: 0.35rem;
+}
+.guide__body strong {
+  font-weight: 650;
+}
+.guide__body pre {
+  margin: 0;
+  overflow-x: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  font-size: 0.88rem;
+}
+.guide__body pre code {
+  background: none;
+  padding: 0;
+}
+
+/* An Open button: a workflow, built in the app on arrival. Inline, so it sits in its sentence. */
+.guide__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 999px;
+  padding: 0.12em 0.8em;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.92em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.guide__open::after {
+  content: '\2197';
+  font-size: 0.9em;
+}
+.guide__open:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* --------------------------------------------------------------------------
+   Callouts. "In depth" is for the specialist: a framed, recessed box with its own title, always
+   open, so a newcomer can see where to skip and a professional where to stop.
+   -------------------------------------------------------------------------- */
+.callout {
+  display: grid;
+  gap: 0.6rem;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-1);
+  border-radius: 0 8px 8px 0;
+  padding: 0.85rem 1.1rem;
+  font-size: 0.95rem;
+}
+.callout__title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.callout--tip .callout__title::before {
+  content: '\2726\00a0';
+}
+.callout--warning {
+  border-left-color: var(--text-primary);
+}
+.callout--warning .callout__title {
+  color: var(--text-primary);
+}
+.callout--warning .callout__title::before {
+  content: '\26a0\00a0';
+}
+.callout--detail {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+  padding: 1rem 1.2rem 1.1rem;
+}
+.callout__kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.callout--detail .callout__title {
+  font-size: 1rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-primary);
+}
+.callout code {
+  background: var(--surface-3);
+}
+
+/* --------------------------------------------------------------------------
+   Figures and tables
+   -------------------------------------------------------------------------- */
+.guide__body figure {
+  margin: 0.4rem 0;
+  display: grid;
+  gap: 0.5rem;
+}
+/* A drawn diagram, inlined: ink is the text colour, so it follows the theme; scaled to the column. */
+.guide__diagram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+
+/* A figure is a link to its full-size image, opened in the lightbox below. */
+.guide__zoom {
+  display: block;
+  cursor: zoom-in;
+  border-radius: 10px;
+}
+.guide__zoom:hover img {
+  border-color: var(--border-strong);
+}
+.guide__body figure img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+.guide__body figcaption {
+  font-size: 0.86rem;
+  color: var(--text-muted);
+}
+.guide__table {
+  overflow-x: auto;
+}
+.guide__table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+.guide__table th,
+.guide__table td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.45rem 0.7rem 0.45rem 0;
+  vertical-align: top;
+}
+.guide__table th {
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Footer
+   -------------------------------------------------------------------------- */
+.foot {
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.foot__inner {
+  display: grid;
+  gap: 1rem;
+  padding-block: 1.4rem 1.8rem;
+}
+.foot__ask {
+  max-width: 62ch;
+  font-size: 0.94rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.foot__ask strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.foot__ask a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.foot__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* The full-screen figure: the image as large as the window allows, on a dimmed page. */
+.guide__lightbox {
+  max-width: 100vw;
+  max-height: 100vh;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 2vmin;
+  border: 0;
+  background: transparent;
+  display: none;
+  place-items: center;
+  cursor: zoom-out;
+}
+.guide__lightbox[open] {
+  display: grid;
+}
+.guide__lightbox::backdrop {
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+}
+.guide__lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}

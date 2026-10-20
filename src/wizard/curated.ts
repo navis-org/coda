@@ -84,6 +84,19 @@ const BY_TYPE = { skeletonColorMode: 'categorical', skeletonColorBy: 'type' }
 /** Whether an example runs on the synthetic dataset — every one without its own `published`. */
 export const isSynthetic = (spec: ExampleSpec): boolean => spec.published === undefined
 
+/**
+ * Fit Model's demo runs its simulation and its fit at one step, so the recording and the fit are the
+ * same arithmetic and the membrane comes back exactly rather than to the step's discretisation.
+ */
+const FIT_STEP = 0.025
+
+/**
+ * Both of that demo's models cut by length rather than by d_lambda: d_lambda cuts by Ra·Cm, so two
+ * models with different membranes get different compartments, and a fit only rescales the tree it
+ * starts from — the recording would come from another discretisation than the one fitted.
+ */
+const FIXED_CUT = { discretisation: 'maxLength' }
+
 const EXAMPLES: readonly ExampleSpec[] = [
   {
     types: ['connectome:customDataset'],
@@ -384,6 +397,52 @@ const EXAMPLES: readonly ExampleSpec[] = [
       ['attach', 'out', 'view', 'skeletons'],
     ],
   },
+  {
+    types: ['biophys:fit'],
+    focus: 'fit',
+    title: 'Fit Model Passive',
+    about:
+      '**Fit Model Passive** fits a compartment model’s passive membrane to a current-clamp recording. Here the recording is a simulation, so the answer is known: the top **Compartment Model** is the cell, with Rm 20,000 Ω·cm², Cm 1 µF/cm², Ra 150 Ω·cm and E leak −60 mV, injected with a current step in **Simulate Model**. Fit Model Passive starts from the second model’s published constants and recovers the first one’s.\n\n' +
+      'Compare **Parameters** with the cell’s numbers, then swap Simulate Model for **Load Recording** and an ABF file of your own.',
+    cards: [
+      DS,
+      find('find', typeIs('T4a')),
+      { id: 'pick', type: 'core.selectOne' },
+      { id: 'skel', type: 'neuron.skeletons' },
+      {
+        id: 'cell',
+        type: 'biophys:model',
+        params: { preset: 'custom', rm: 20_000, cm: 1, ra: 150, eLeak: -60, ...FIXED_CUT },
+      },
+      { id: 'start', type: 'biophys:model', row: UNDER_TALL, params: FIXED_CUT },
+      {
+        id: 'sim',
+        type: 'biophys:simulate',
+        params: {
+          duration: 100,
+          dt: FIT_STEP,
+          clamp: true,
+          amplitude: -0.01,
+          clampDelay: 20,
+          clampDuration: 50,
+        },
+      },
+      { id: 'fit', type: 'biophys:fit', params: { dt: FIT_STEP } },
+      { id: 'chart', type: 'out.lineChart', params: { x: 't', ys: ['recorded', 'fitted'] } },
+      { id: 'table', type: 'out.table', row: UNDER_TALL },
+    ],
+    wires: [
+      ['find', 'neurons', 'pick', 'in'],
+      ['pick', 'item', 'skel', 'neurons'],
+      ['skel', 'skeletons', 'cell', 'neuron'],
+      ['skel', 'skeletons', 'start', 'neuron'],
+      ['cell', 'model', 'sim', 'model'],
+      ['start', 'model', 'fit', 'model'],
+      ['sim', 'traces', 'fit', 'recording'],
+      ['fit', 'traces', 'chart', 'in'],
+      ['fit', 'parameters', 'table', 'in'],
+    ],
+  },
 ]
 
 /**
@@ -401,10 +460,120 @@ const MINNIE = {
 } as const
 
 /*
- * Last, being the ones on a published dataset: the Cortex pack's, which have nothing to show on
- * synthetic data — no synthetic dataset has a cortical frame.
+ * Hemibrain as the Biophysics example uses it. A real neuron because a synthetic one is a
+ * miniature (`packs/biophys/wizard.ts`): on the card's defaults every input drives it to the
+ * synapses' reversal and the run is a flat line. One DA1 projection neuron, named rather than
+ * searched for, because its painted regions are anchored to its own skeleton — and one whose soma
+ * the skeleton labels, so the model's soma is where the cell body is. The Biophysics guide walks
+ * through this exact model (`src/packs/biophys/guide/guide.md`).
+ */
+const DA1_PN = '754534424'
+/** Where `DA1_PN` falls among the DA1_lPN neurons Find Neurons returns, for Select One. */
+const DA1_PN_INDEX = 1
+/** The skeleton's soma node, which "distal" in the strokes below is measured from, nm. */
+const DA1_ROOT = [121200, 282101.59375, 185092.796875] as const
+const HEMIBRAIN = {
+  card: { id: 'ds', type: 'dataset.hemibrain' },
+  note: '*Real data from the hemibrain connectome. It needs a neuPrint sign-in, under Connections (the branch icon in the toolbar).*',
+  /*
+   * The axon from where it leaves the dendrite (75 µm out along the primary neurite, the branch
+   * point with 1.5 mm of dendrite on one side and 0.6 mm of axon on the other), then its first
+   * 25 µm painted back as an initial segment — the guide's "later strokes paint over earlier ones".
+   */
+  regions: [
+    {
+      neuron: DA1_PN,
+      at: [138320, 269008, 218944],
+      scope: 'distal',
+      region: 'AIS',
+      root: DA1_ROOT,
+    },
+    {
+      neuron: DA1_PN,
+      at: [152720, 248688, 222784],
+      scope: 'distal',
+      region: 'axon',
+      root: DA1_ROOT,
+    },
+  ].map((stroke) => JSON.stringify(stroke)),
+  /**
+   * Pospischil sodium and potassium on the axon, five times as dense on its initial segment. Swept
+   * in a browser on this neuron with its three strongest partners firing: at Jaxley's 6:1 sodium to
+   * potassium the axon sticks on a plateau near −20 mV, at 3:2 it fires a train and comes back to
+   * rest.
+   */
+  channels: [
+    { channel: 'pospischil.na', regions: ['axon'], value: 30 },
+    { channel: 'pospischil.k', regions: ['axon'], value: 20 },
+    { channel: 'pospischil.na', regions: ['AIS'], value: 150 },
+    { channel: 'pospischil.k', regions: ['AIS'], value: 100 },
+  ].map((row) => JSON.stringify({ ...row, mode: 'density', activation: 0, inactivation: 0 })),
+  /**
+   * Two record sites beside the soma: 10 µm into the dendrite past the branch point, and the axon's
+   * farthest tip in the lateral horn, 455 µm from the soma.
+   */
+  traces: [
+    JSON.stringify({ neuron: DA1_PN, at: [133040, 277168, 214784], name: 'dendrite' }),
+    JSON.stringify({ neuron: DA1_PN, at: [34960, 188048, 112704], name: 'axon tip' }),
+  ],
+  /** The strongest ORN fires a train: 10 spikes from 10 ms, 5 ms apart. */
+  train: { drive: 'trains', start: 10, number: 10, interval: 5 },
+} as const
+
+/*
+ * Last, being the ones on a published dataset: the Biophysics example, whose neurons have to be
+ * real ones, and the Cortex pack's, which have nothing to show on synthetic data — no synthetic
+ * dataset has a cortical frame.
  */
 const PUBLISHED: readonly ExampleSpec[] = [
+  {
+    types: ['biophys:simulate', 'biophys:model'],
+    focus: 'sim',
+    title: 'Simulate synaptic input',
+    about:
+      'One DA1 projection neuron as a compartment model, step by step as the Biophysics guide builds it: **Find Neurons** and **Select One** pick the neuron and **Skeletons** its shape; **Compartment Model** gives its axon sodium and potassium channels, denser where spikes start; **Synapses Between** places the synapses its ORN_DA1 partners make onto it. **Simulate Model** fires the strongest ORN and records at the soma, the base of the dendrite and the tip of the axon.\n\n' +
+      'Expand Compartment Model (⤢) to see the regions and channels, or Simulate Model to watch the run spread over the neuron in **Playback**.',
+    published: HEMIBRAIN.note,
+    cards: [
+      HEMIBRAIN.card,
+      find('find', typeIs('DA1_lPN')),
+      {
+        id: 'pick',
+        type: 'core.selectOne',
+        params: { index: DA1_PN_INDEX, selected: DA1_PN_INDEX },
+      },
+      { id: 'skel', type: 'neuron.skeletons' },
+      find('orns', typeIs('ORN_DA1'), UNDER_TALL),
+      { id: 'syn', type: 'neuron.synapsesBetween', row: UNDER_TALL },
+      {
+        id: 'model',
+        type: 'biophys:model',
+        params: {
+          paintedRegions: HEMIBRAIN.regions,
+          channels: HEMIBRAIN.channels,
+          synapsePreset: 'orn-pn-nicotinic',
+        },
+      },
+      {
+        id: 'sim',
+        type: 'biophys:simulate',
+        params: { fire: 'top', top: 1, ...HEMIBRAIN.train, traces: HEMIBRAIN.traces },
+      },
+      { id: 'chart', type: 'out.lineChart' },
+      { id: 'spikes', type: 'out.table', row: UNDER_TALL },
+    ],
+    wires: [
+      ['find', 'neurons', 'pick', 'in'],
+      ['pick', 'item', 'skel', 'neurons'],
+      ['orns', 'neurons', 'syn', 'sources'],
+      ['pick', 'item', 'syn', 'targets'],
+      ['skel', 'skeletons', 'model', 'neuron'],
+      ['syn', 'points', 'model', 'synapses'],
+      ['model', 'model', 'sim', 'model'],
+      ['sim', 'traces', 'chart', 'in'],
+      ['sim', 'outputSpikes', 'spikes', 'in'],
+    ],
+  },
   {
     types: ['cortex:gallery'],
     focus: 'gallery',

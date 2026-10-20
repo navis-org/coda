@@ -71,6 +71,16 @@ export function typeKey(type: string): string {
 }
 
 /**
+ * A node's anchor in the node guide (`nodes.html`): `out.table` becomes `node-out-table`. Dots are
+ * legal in an HTML5 `id` and illegal in a CSS selector without escaping, and an id nobody can write
+ * a selector for is one somebody will eventually fix by hand into something that no longer matches
+ * the links — the guide's own entries and the pack guides' links both read this one.
+ */
+export function nodeAnchor(type: string): string {
+  return 'node-' + typeKey(type)
+}
+
+/**
  * The part of a type id that names the node rather than where it lives: `filterTable` for
  * `core.filterTable`, `traces` for `zapbench:traces`. For a readable node id, never for identity.
  */

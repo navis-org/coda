@@ -5,8 +5,9 @@ Every viewer, its export path, and the styling panel they share.
 ## Output widgets
 
 `ValuePreview` picks a viewer by node type — `VIEWERS`, a table keyed like `NODE_BODIES`, whose
-`withoutValue` entries draw from their inputs before the "No result yet" guard — then by value
-kind, and forwards a shared prop bundle
+`withoutValue` entries draw from their inputs before the "No result yet" guard, and so also open
+full size before their node has run (`opensWithoutValue`, which is how Simulate Model's partner list is
+reachable before the first Run) — then by value kind, and forwards a shared prop bundle
 (`baseName`, `onExpand`, `onError`, `compact`) so a new viewer cannot ship without export or expand.
 
 - **Export** lives in `ui/export.ts`. CSV is chunked `Blob` parts rather than one string — a
@@ -3183,12 +3184,12 @@ nodes, and the plain one is fed from Connectivity.
 ## Line Chart: numeric columns against one numeric X
 
 `out.lineChart` (`nodes/output/lineChart.ts`, `ui/viewers/LineChartViewer.tsx`, the rules in
-`ui/viewers/lineSeries.ts`). Built for voltage traces (the biophysics pack's Simulate), and
+`ui/viewers/lineSeries.ts`). Built for voltage traces (the biophysics pack's Simulate Model), and
 deliberately a node of its own rather than lines on the Scatter: the Scatter's model is one row, one
 mark, with colour-by, size-by, labels, a lasso that outputs *rows* and trends per group, and a
 several-Y picker would turn a row into several marks and give each of those a special case.
 
-- **A line is a (series value, Y column) pair**, so a wide table (Simulate's `t`, `soma`, `site 1`…)
+- **A line is a (series value, Y column) pair**, so a wide table (Simulate Model's `t`, `soma`, `site 1`…)
   and a long one (a Series column) both draw without an Unpivot, and both together draw every Y for
   every series, labelled `series · Y`. **Empty Y is every numeric column but X and Series**
   (`yColumnsOf`, headless in `nodes/lib/lineChart.ts` so the export plan resolves it too and the
@@ -3212,9 +3213,24 @@ several-Y picker would turn a row into several marks and give each of those a sp
 - **Colours cycle** (`cycleColor`, the `Palette` param) — a line keeps its own mark, so folding into
   `Other` buys nothing; the key lists twelve and says `+N more`, the caption `colours repeat`. A
   single line draws no key.
+- **A second Y axis** (`Y2`, decided 2026-10-17), for a quantity in other units beside the rest — a
+  current beside voltages. Its lines are **dashed** (the user's choice over a side-tagged key or an
+  axis inked to match: the axis a line is read against shows on the line itself), each axis fitted
+  to its own lines, the right one with ticks and labels but **no grid of its own**, which would
+  cross the left's. Colour continues the cycle across both axes; the key and the crosshair name a
+  right-hand line `(right)`. **Empty Y leaves Y2's columns out** (`yColumnsOf`'s fifth argument),
+  so on Simulate Model's Traces picking `injected` is the only setting. The exporters: matplotlib's
+  `twinx`, colours counted across both axes by hand (a twin axis restarts the cycle, so its first
+  line would share the left's first colour); ggplot2, whose second axis is only a transform of the
+  first, maps Y2 linearly onto Y's range and labels the right axis with the inverse — the same
+  picture, each axis spanning its own data — and draws a log on either axis linear with a note,
+  no linear map carrying one through: a log is presentational, so the chart is still the answer,
+  the Heatmap's notes' rule rather than a refusal. The `(right)` tag is one constant (`Y2_TAG`,
+  beside `yColumnsOf`) for the key, the crosshair and both legends. Both emitted cells were run on
+  a synthetic table, the R one with a series too.
 - **A tap**: every param presentational, the table through by identity with its `neurons`-ness.
 
-Measured in Chrome on Simulate's traces (1,001 samples, soma and three named record sites): four
+Measured in Chrome on Simulate Model's traces (1,001 samples, soma and three named record sites): four
 lines, the crosshair reading all four, and a zoom to 18–52 ms refitting Y to −0.2…−1.1 mV.
 
 ## Sankey: layered flow, where the width is the quantity

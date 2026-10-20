@@ -76,14 +76,35 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  * Split Axon/Dendrite's three new methods (label propagation, by ROI, by tag), node tags on
  * skeletons and the node's rewritten help page. Code and prose of ours; no new library.
  *
+ * 3,100 → 3,200 on 2026-10-13, at 3,177 kB against 3,100 kB at the commit before it (41da6c8,
+ * which the Line Chart had brought to the edge), for the Biophysics pack: the compartment solver
+ * (`src/biophys`), the model builder, Simulate's job, plan and tables, and the per-node value
+ * declarations its nodes write. Code of ours, registered with the pack's nodes; the solver runs in
+ * a worker or the node's `evaluate`, never in this bundle, but it is imported by them and cannot
+ * be an `external`, which is for packages. Phase 5's help pages will add prose on top.
+ *
+ * 3,200 → 3,300 on 2026-10-13, at 3,223 kB, for those help pages (`model.md`, `simulate.md`, 16 kB)
+ * and the pack's later phases: painted regions, two synapse sockets with sourced presets, and the
+ * audits' refusals and notes. Prose and code of ours; no new library.
+ *
+ * 3,300 → 3,400 on 2026-10-17, at 3,338 kB against 3,277 kB at the commit before it (363cc6d), for
+ * Fit Model — the bounded least squares (`biophys/leastSquares.ts`), the passive fit, its worker
+ * pool and tables, and its help page — and the Compartment Model's soma regions (the taper, `upTo`,
+ * ignored branches, the surface offset). Code and prose of ours; no new library.
+ *
  * 3,100 → 3,250 on 2026-10-14, at 3,179 kB against 3,115 kB at the commit before it — which was
  * itself already past 3,100, the commits since the last raise (Line Chart, Skeletonize Meshes, the
  * Neuroglancer layer bar) having used up its headroom. The 64 kB are the Virtual Fly Brain pack: its PDB bridge, term-info and
  * markdown readers, point clouds and templates (`data/vfb`), seven node definitions and their help
  * pages. Code and prose of ours; no new library — the image-stack reader (`data/nrrd.ts`) inflates
  * with the browser's own `DecompressionStream`.
+ *
+ * 3,400 / 3,250 → 3,550 on 2026-10-20, at 3,462 kB, merging main into the Biophysics branch: the
+ * two raises above were made in parallel from 3,100, one for each pack, so the merged bundle carries
+ * both (the Biophysics pack's later work on top: fly channels, the seal, NWB and ABF1 recordings).
+ * Code and prose of ours; no new library.
  */
-const SIZE_BUDGET_KB = 3_250
+const SIZE_BUDGET_KB = 3_550
 
 /**
  * Fail the build if the bundle outgrows its budget.
@@ -109,6 +130,8 @@ const EXTERNAL = [
   'hysnappy',
   'fzstd',
   'lz4js',
+  // NWB's reader: 4 MB of WebAssembly, reached only from Load Recording's card and run.
+  'h5wasm',
 ] as const
 
 /**

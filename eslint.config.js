@@ -99,6 +99,9 @@ export default tseslint.config(
       // Python only because `umap-learn` needs numba and Pyodide has none; that is a fact about
       // the runtime available, not a reason for it to sit closer to the UI than the others.
       'src/umap/**/*.ts',
+      // The third: the compartment-model solver. JavaScript for umap's reason — NEURON, Arbor and
+      // Brian2 are not in the Pyodide lock — and in this list for the same one.
+      'src/biophys/**/*.ts',
       // The build the MCP server runs in Node. It has no DOM to reach for, so an import of the
       // UI or the store would build green and throw on load in somebody else's process.
       'src/mcp/**/*.ts',
@@ -176,7 +179,7 @@ export default tseslint.config(
      * the static page's bundle. The drawings are merged into `ui/glyphs.ts`' table too, so they are
      * held to its no-React rule as well.
      */
-    files: ['src/packs/*/glyphs.ts', 'src/packs/*/seeAlso.ts'],
+    files: ['src/packs/*/glyphs.ts', 'src/packs/*/seeAlso.ts', 'src/packs/*/nodeValues.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

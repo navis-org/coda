@@ -18,24 +18,32 @@
  * without the shared module graph that one needs.
  *
  * This was the dataset guide's own plugin until the changelog arrived as a second page of the
- * same shape; a third is a row in `PAGES`. The node guide stays separate, its shared module graph
- * being the part worth keeping apart.
+ * same shape; a third is an entry in `PAGES`, and a marker may carry an argument, so every pack's
+ * guide shares the same two. The node guide stays separate, its shared module graph being the part
+ * worth keeping apart.
+ *
+ * The body is put in by a replacer function, never as a replacement string: a `$'` in rendered
+ * text would otherwise splice the rest of the page in after it.
  */
 
 import type { Plugin, ViteDevServer } from 'vite'
 import { createServer } from 'vite'
 
-/** A page: the marker its HTML carries, and the module and export that render the body. */
-interface RenderedPage {
-  slot: string
-  entry: string
-  render: string
+/**
+ * The markers a page carries, `<!--@name-->` or `<!--@name:arg-->`, by name: the module and export
+ * that render each, handed the argument where the marker has one — a pack guide's pack id.
+ */
+const PAGES: Readonly<Record<string, { entry: string; render: string }>> = {
+  'dataset-guide': { entry: '/src/datasetguide/render.ts', render: 'datasetGuideHTML' },
+  changelog: { entry: '/src/changelog/render.ts', render: 'changelogHTML' },
+  // A pack's guide fills two, the masthead's title and lead and the page's body, each naming the
+  // pack: every pack's guide is these two.
+  'pack-guide-head': { entry: '/src/packguide/render.ts', render: 'packGuideHeadHTML' },
+  'pack-guide': { entry: '/src/packguide/render.ts', render: 'packGuideHTML' },
 }
 
-const PAGES: readonly RenderedPage[] = [
-  { slot: '<!--@dataset-guide-->', entry: '/src/datasetguide/render.ts', render: 'datasetGuideHTML' },
-  { slot: '<!--@changelog-->', entry: '/src/changelog/render.ts', render: 'changelogHTML' },
-]
+/** One grammar for every marker: a name, and an optional argument after a colon. */
+const MARKER = /<!--@([\w-]+)(?::([\w-]+))?-->/g
 
 export function renderedPages(): Plugin {
   let server: ViteDevServer | undefined
@@ -62,14 +70,20 @@ export function renderedPages(): Plugin {
       owned = undefined
     },
     async transformIndexHtml(html) {
-      const page = PAGES.find((p) => html.includes(p.slot))
-      if (!page) return undefined
-      const mod = await ssr<Record<string, () => string>>(page.entry)
-      const render = mod[page.render]
-      if (typeof render !== 'function') {
-        throw new Error(`${page.entry} has no ${page.render}() to fill ${page.slot}`)
+      const names = new Set([...html.matchAll(MARKER)].map((m) => m[1]!).filter((n) => n in PAGES))
+      if (names.size === 0) return undefined
+      // Loaded first, since a replacer cannot wait: each named export, once.
+      const renders = new Map<string, (arg?: string) => string>()
+      for (const name of names) {
+        const { entry, render } = PAGES[name]!
+        const fn = (await ssr<Record<string, unknown>>(entry))[render]
+        if (typeof fn !== 'function') throw new Error(`${entry} has no ${render}() to fill @${name}`)
+        renders.set(name, fn as (arg?: string) => string)
       }
-      return html.replace(page.slot, render())
+      return html.replace(MARKER, (marker, name: string, arg?: string) => {
+        const render = renders.get(name)
+        return render ? render(arg) : marker
+      })
     },
   }
 }

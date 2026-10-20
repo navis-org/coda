@@ -11,13 +11,13 @@ import { CODE_AXON, CODE_DENDRITE, CODE_LINKER } from '../../core/values'
 import { ySkeleton } from './__fixtures__/ySkeleton'
 import type { SplitCorrection } from './splitCorrections'
 import {
-  SNAP_NM,
   applyCorrections,
   readCorrections,
   snapToNode,
   splitArbor,
   writeCorrection,
 } from './splitCorrections'
+import { SNAP_NM } from './anchors'
 
 const D = CODE_DENDRITE
 const A = CODE_AXON

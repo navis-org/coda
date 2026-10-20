@@ -330,8 +330,9 @@ registerNode({
       options: [
         { value: 'uniform', label: 'Uniform' },
         { value: 'radius', label: 'By radius' },
+        { value: 'scale', label: 'To scale' },
       ],
-      help: 'By radius draws each stretch of cable as wide as its radius, scaled so the 95th-percentile radius is twice the line width. A skeleton without radii is drawn uniform.',
+      help: 'By radius draws each stretch of cable as wide as its radius, scaled so the 95th-percentile radius is twice the line width. To scale draws it as wide as it is, in the units its length is drawn in, so it widens as you zoom in; thin branches are kept at least half a pixel wide. With lengths in λ there is no width to scale, and it is drawn by radius. A skeleton without radii is drawn uniform.',
       default: 'uniform',
       ...SHOWN,
     },

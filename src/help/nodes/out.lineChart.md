@@ -4,13 +4,21 @@ The Line Chart plots one or more numeric columns against a numeric X, one line e
 
 `X` is the axis the lines run along, e.g. `t`. Which lines you get depends on the shape of your table:
 
-- **Wide tables** have one column per line, e.g. voltage traces with `t`, `soma`, `site 1`, … Leave `Y` empty to draw every numeric column except X, or pick the ones you want.
+- **Wide tables** have one column per line, e.g. the `Traces` output of [Simulate Model](#biophys:simulate), with `t`, `soma`, `site 1`, … Leave `Y` empty to draw every numeric column except X, or pick the ones you want.
 - **Long tables** have one row per sample and a column saying which line it belongs to, e.g. `t`, `voltage` and `site`. Pick the value column as `Y` and the other as `Series`.
 
 You can use both at once: with two `Y` columns and a `Series` column you get every Y for every series, labelled `series · Y`.
 
 ```coda-params
 out.lineChart: x, ys, series
+```
+
+## A second Y axis
+
+To draw columns in other units beside the rest, such as an injected current beside voltage traces, pick them as `Y2`. They are drawn dashed against a second axis on the right, scaled to their own values, and the legend and tooltip mark them "(right)". With `Y` left empty, the `Y2` columns move off the left axis and every other numeric column stays, so on Simulate Model's `Traces` picking `injected` for `Y2` is the only setting you need.
+
+```coda-params
+out.lineChart: y2s, y2Log
 ```
 
 ## Joining points

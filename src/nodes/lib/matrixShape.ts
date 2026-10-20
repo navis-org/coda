@@ -276,6 +276,12 @@ export interface LabelFilter {
   regex: boolean
   negate: boolean
   test: (label: string) => boolean
+  /**
+   * Whether a row known by several labels — an id and a type, say — is kept. The negation is over
+   * the set: `!LC4` keeps a row only when *none* of its labels matches, where `some(test)` would
+   * keep every LC4 by its id.
+   */
+  testAny: (labels: readonly string[]) => boolean
 }
 
 export interface ParsedLabelFilter {
@@ -312,25 +318,33 @@ export function parseLabelFilter(query: string): ParsedLabelFilter {
     // `[A-Z]` into a different question.
     const expression = new RegExp(pattern, 'i')
     return {
-      filter: {
-        source,
-        pattern,
-        regex: true,
-        negate,
-        test: (label) => expression.test(label) !== negate,
-      },
+      filter: labelFilter(source, pattern, true, negate, (label) => expression.test(label)),
     }
   }
 
   const needle = body.toLowerCase()
   return {
-    filter: {
-      source,
-      pattern: body,
-      regex: false,
-      negate,
-      test: (label) => label.toLowerCase().includes(needle) !== negate,
-    },
+    filter: labelFilter(source, body, false, negate, (label) =>
+      label.toLowerCase().includes(needle),
+    ),
+  }
+}
+
+/** A filter from its positive match, the negation applied once for one label and for several. */
+function labelFilter(
+  source: string,
+  pattern: string,
+  regex: boolean,
+  negate: boolean,
+  matches: (label: string) => boolean,
+): LabelFilter {
+  return {
+    source,
+    pattern,
+    regex,
+    negate,
+    test: (label) => matches(label) !== negate,
+    testAny: (labels) => labels.some(matches) !== negate,
   }
 }
 

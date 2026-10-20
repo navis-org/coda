@@ -323,8 +323,8 @@ export interface SkeletonGeometry {
    */
   readonly split?: Uint8Array
   /**
-   * Computed numbers per point, by name — `flow` being the first (`NODE_VALUES`). Each array is
-   * exactly as long as `radii`.
+   * Computed numbers per point, by name — `flow` the first (listed in `nodes/lib/nodeValues.ts`).
+   * Each array is exactly as long as `radii`.
    *
    * One map rather than a field per measure, so the next per-node number (Strahler order, distance
    * from the soma) needs no new field, no new viewer mode and no new entry in `skeletonBuffers`.
@@ -368,25 +368,6 @@ export function perGeometry<V>(make: () => V): (skeleton: SkeletonGeometry) => V
     return slot
   }
 }
-
-/**
- * The per-node values Coda computes, and what each is called where somebody picks one. A fixed list
- * rather than discovery, because the 3D View's picker is drawn at edit time and a type carries no
- * geometry to discover them from.
- */
-export const NODE_VALUES = [
-  {
-    value: 'flow',
-    label: 'synapse flow (fraction of peak)',
-    /** Where the value comes from — so a picker can say it without naming nodes itself. */
-    source: 'Split Axon/Dendrite, with Write synapse flow on',
-  },
-  {
-    value: 'axonProbability',
-    label: 'compartment probability (label propagation)',
-    source: 'Split Axon/Dendrite by label propagation, with Write probability on',
-  },
-] as const satisfies readonly { value: string; label: string; source: string }[]
 
 /** SWC's structure codes — `SkeletonGeometry.compartments`' vocabulary, named once. */
 export const SWC_SOMA = 1
@@ -438,8 +419,9 @@ export function splitName(code: number): 'dendrite' | 'axon' | 'linker' | null {
   return null
 }
 
-/** What a compartment label can mean, in either vocabulary a skeleton carries. */
-export type CompartmentKey = 'axon' | 'dendrite' | 'linker' | 'soma'
+/** What a compartment label can mean, in either vocabulary a skeleton carries — the one list. */
+export const COMPARTMENT_KEYS = ['axon', 'dendrite', 'linker', 'soma'] as const
+export type CompartmentKey = (typeof COMPARTMENT_KEYS)[number]
 
 /**
  * A node's label as a compartment, read in the vocabulary it is in: a computed split
@@ -666,6 +648,160 @@ export interface LinkageValue {
 }
 
 /**
+ * One neuron as a compartment model: its cable cut into compartments, its membrane, its
+ * synapses and where each sits — the Compartment Model node's output and the Simulate node's
+ * input (`packs/biophys`).
+ *
+ * **Not a `SkeletonsValue` with extra fields**, on `LinkageValue`'s argument: a model is
+ * computed *for* one neuron, and a skeleton node handed this would draw it as if the compartments
+ * were the reconstruction. It keeps the skeleton it was built from (`skeleton`, shared rather than
+ * copied) so results can be drawn back on the neuron through `nodeCompartment`.
+ *
+ * Everything is in the solver's units: µm, µm², µS, µF/cm², Ω·cm, mV, ms, S/cm². Typed arrays
+ * throughout, so a model crosses to a worker without being copied.
+ */
+/** Which socket a synapse came in on: the Compartment Model's two. */
+export type SynapseSign = 'excitatory' | 'inhibitory'
+
+/** A partner's sign: its synapses' one, or `mixed` where it arrived on both sockets. */
+export function partnerSign(
+  partners: Pick<CellModelValue['partners'], 'synapses' | 'inhibitory'>,
+  p: number,
+): SynapseSign | 'mixed' {
+  const inhibitory = partners.inhibitory[p]!
+  return inhibitory === 0
+    ? 'excitatory'
+    : inhibitory === partners.synapses[p]
+      ? 'inhibitory'
+      : 'mixed'
+}
+
+export interface CellModelValue {
+  readonly kind: 'cellModel'
+  /** The neuron it models (invariant 8: text). */
+  readonly neuronId: string
+  readonly compartments: {
+    readonly count: number
+    /** Parent compartment, `-1` at 0; always lower than the child's index. */
+    readonly parent: Int32Array
+    /** Membrane area, µm². */
+    readonly area: Float64Array
+    /** Axial conductance to the parent, µS. */
+    readonly gAxial: Float64Array
+    /** xyz interleaved, in the skeleton's own units — for drawing. */
+    readonly position: Float64Array
+    /** Index into `regionNames`. */
+    readonly region: Uint8Array
+  }
+  readonly regionNames: readonly string[]
+  /** The skeleton the model was built from, unchanged. */
+  readonly skeleton: SkeletonGeometry
+  /**
+   * The template space that skeleton was in, where it named one — carried so geometry handed on
+   * from a run (Simulate's Arbour) draws beside the neuron's other layers rather than refused.
+   */
+  readonly space?: TemplateSpaceId
+  /** Per skeleton node, its compartment; `-1` for nodes off the soma's piece of the arbour. */
+  readonly nodeCompartment: Int32Array
+  readonly soma: {
+    readonly compartment: number
+    /** Where it came from: the skeleton's labelled soma, a diameter given on the card, or neither. */
+    readonly source: 'labelled' | 'added' | 'root'
+    /** µm across the idealised soma; absent where none is made — the root standing in, or a soma kept as the skeleton has it. */
+    readonly diameter?: number
+  }
+  /**
+   * Membrane per µm² of reconstructed surface — spines and fine branches a skeleton misses —
+   * already folded into `compartments.area`; absent is 1. For readers that work an area out of
+   * geometry rather than reading it: the soma's π·d², a length constant.
+   */
+  readonly areaFactor?: number
+  /** Uniform passive membrane: Ω·cm², Ω·cm, µF/cm², mV. */
+  readonly membrane: {
+    readonly rm: number
+    readonly ra: number
+    readonly cm: number
+    readonly eLeak: number
+  }
+  /**
+   * Voltage-gated channels, each placed on regions (by name; none = every compartment) at one
+   * density, S/cm², its gates optionally moved by mV (`shift`, the ΔV50 experiments). Empty = a
+   * passive cell. `id` names the solver's channel (`channelById`).
+   */
+  readonly channels: readonly {
+    readonly id: string
+    readonly regions: readonly string[]
+    readonly density: number
+    readonly shift?: { readonly activation?: number; readonly inactivation?: number }
+  }[]
+  /** °C, which the channels' kinetics are run at; absent for a passive cell, where it means nothing. */
+  readonly temperature?: number
+  /**
+   * The mechanisms a synapse can be, indexed by `synapses.type`: one per socket the card took
+   * synapses from, excitatory first. `sign` is which socket — what the synapse was wired as, not
+   * read off its reversal — and `preset` the published set its numbers came from, if any.
+   */
+  readonly synapseTypes: readonly {
+    readonly scheme: 'exp2syn'
+    readonly sign: SynapseSign
+    readonly preset?: { readonly id: string; readonly label: string }
+    /** Rise and decay, ms; reversal, mV; peak conductance of one synapse, µS; delay, ms. */
+    readonly tau1: number
+    readonly tau2: number
+    readonly eRev: number
+    readonly gmax: number
+    readonly delay: number
+  }[]
+  /** One row per synapse — never collapsed — with its compartment, type and partner. */
+  readonly synapses: {
+    readonly compartment: Int32Array
+    readonly type: Int32Array
+    /** Index into `partners`. */
+    readonly partner: Int32Array
+  }
+  /**
+   * Where each synapse sits on `skeleton`, by row of `synapses`: `t` of the way along the edge from
+   * node `from` to node `node` (`from` is `-1` at the root). For drawing the inputs where they
+   * are; the solver reads only `synapses.compartment`, a compartment being tens of µm long.
+   */
+  readonly sites: {
+    readonly node: Int32Array
+    readonly from: Int32Array
+    readonly t: Float32Array
+  }
+  /**
+   * One row per presynaptic partner: its id (`-` where none is named), type, and synapses — of
+   * which `inhibitory` arrived on the inhibitory socket. A partner on both sockets is one partner,
+   * firing as one, its synapses each keeping their own mechanism (`partnerSign`).
+   */
+  readonly partners: {
+    readonly id: readonly string[]
+    readonly type: readonly (string | null)[]
+    readonly synapses: Int32Array
+    readonly inhibitory: Int32Array
+  }
+  /** The named membrane parameter set, or `custom`, with what to call it. */
+  readonly preset: { readonly id: string; readonly label: string }
+  /**
+   * How a model out of Fit Model ended: settled or why not, after how many iterations, and the RMS
+   * before and after. Absent on a built model. What the card's foot says, and what marks a model as
+   * one Apply can write back into the Compartment Model.
+   */
+  readonly fit?: {
+    readonly reason: 'converged' | 'max-iterations' | 'stalled'
+    readonly iterations: number
+    /** RMS of the residuals at the start and at the end, mV. */
+    readonly startRms: number
+    readonly rms: number
+  }
+  /**
+   * What building the model left out or made up, in sentences — on the value rather than only
+   * warned, so a cached result says the same thing as the run that made it.
+   */
+  readonly notes: readonly string[]
+}
+
+/**
  * A landmark-based spatial transform, as a value on a wire.
  *
  * **Not a table of six columns**, on `LayoutValue`'s and `LinkageValue`'s exact argument: a
@@ -807,6 +943,7 @@ export type Value =
   | PointsValue
   | LayoutValue
   | LinkageValue
+  | CellModelValue
   | TransformValue
   | LayersValue
   | TableFileValue
@@ -1214,6 +1351,10 @@ export function isLinkageValue(v: Value | undefined): v is LinkageValue {
   return !!v && v.kind === 'linkage'
 }
 
+export function isCellModelValue(v: Value | undefined): v is CellModelValue {
+  return !!v && v.kind === 'cellModel'
+}
+
 export function isTableFileValue(v: Value | undefined): v is TableFileValue {
   return !!v && v.kind === 'tableFile'
 }
@@ -1303,6 +1444,20 @@ export function spaceLabel(space: TemplateSpaceId | undefined): string {
   return space ?? 'space unknown'
 }
 
+/** A fit's ending in one line: `Settled after 12 iterations · RMS 9.1 → 2.5 mV`. */
+function describeFit(fit: NonNullable<CellModelValue['fit']>): string {
+  const n = `${fit.iterations} iteration${fit.iterations === 1 ? '' : 's'}`
+  const ended =
+    fit.reason === 'converged'
+      ? `Settled after ${n}`
+      : fit.reason === 'stalled'
+        ? `Stalled after ${n}`
+        : `Stopped at ${n}, the limit`
+  // Two figures; a fit to a simulation ends near zero, which is a result, not "0".
+  const mv = (x: number) => (x < 0.01 ? '< 0.01' : Number(x.toPrecision(2)).toLocaleString())
+  return `${ended} · RMS ${mv(fit.startRms)} → ${mv(fit.rms)} mV`
+}
+
 /** Row count summary used in node footers: "1,234 rows". */
 export function describeValue(v: Value | undefined): string {
   if (!v) return '—'
@@ -1353,6 +1508,20 @@ export function describeValue(v: Value | undefined): string {
     case 'linkage': {
       const cut = v.clusters ? ` · ${new Set(v.clusters).size} clusters` : ''
       return `${v.labels.length} leaves${v.method ? ` · ${v.method}` : ''}${cut}`
+    }
+    case 'cellModel': {
+      const n = v.synapses.compartment.length
+      const inhibitory = v.partners.inhibitory.reduce((sum, k) => sum + k, 0)
+      const partners = v.partners.id.length
+      return (
+        // A fitted model leads with how the fit ended: the card's foot line on Fit Model.
+        (v.fit ? `${describeFit(v.fit)} · ` : '') +
+        `${v.compartments.count.toLocaleString()} compartments · ` +
+        `${n.toLocaleString()} synapse${n === 1 ? '' : 's'} from ${partners.toLocaleString()} ` +
+        `partner${partners === 1 ? '' : 's'}` +
+        (inhibitory > 0 ? ` · ${inhibitory.toLocaleString()} inhibitory` : '') +
+        (v.channels.length > 0 ? ' · active' : '')
+      )
     }
     case 'string': {
       // Elided, because this is a one-line footer and a string value can be enormous — the

@@ -429,6 +429,8 @@ describe('every store action is on one side of the lock', () => {
     'deleteRecipe',
     'openRecipes',
     'setParam',
+    // Several params in one commit: `setParam`'s kind of edit, made once.
+    'setParams',
     'renameNode',
     'toggleDisabled',
     'toggleCollapsed',

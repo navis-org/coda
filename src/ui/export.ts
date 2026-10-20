@@ -18,6 +18,7 @@ import { canExportNotebook } from '../export/canExport'
 import type { ExportRefusal } from '../export/canExport'
 import { serializeGraph } from '../core/graph'
 import { SVG_NS, XLINK_NS } from './viewers/svgElement'
+import { slugify } from '../style/format'
 
 /** The namespace a namespace *declaration* lives in — see `serializeSvg`. */
 const XMLNS_NS = 'http://www.w3.org/2000/xmlns/'
@@ -76,19 +77,6 @@ export function matrixToCsv(matrix: MatrixValue): string {
 // ---------------------------------------------------------------------------
 // Download plumbing
 // ---------------------------------------------------------------------------
-
-/**
- * Filesystem-safe slug. One copy: the graph download and the chart exports had the same two
- * regexes side by side and differed only in what an empty result falls back to.
- */
-export function slugify(text: string, fallback: string): string {
-  return (
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || fallback
-  )
-}
 
 /**
  * Put text on the clipboard, or reject with a sentence saying why not.

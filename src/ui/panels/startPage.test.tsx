@@ -24,6 +24,7 @@ import { demoWorkflow } from '../../wizard/build'
 import { loadStartPageDismissed } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { dismissHint, resetHintsForTest } from '../hints'
+import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 import { resetDocuments } from '../../test/storeReset'
 import { StartPage } from './StartPage'
 import { buildCommandItems } from './paletteItems'
@@ -57,6 +58,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   clearStorage()
+  resetPackSwitchesForTest()
   tours.started.length = 0
   act(() => {
     // The store is a module singleton, so state set by one case would otherwise decide the
@@ -570,6 +572,23 @@ describe('Start page', () => {
       const guide = await screen.findByRole('link', { name: /Node Guide/ })
       expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}nodes.html`)
       expect(guide.tagName).toBe('A')
+    })
+
+    it("offers a switched-on plugin's guide in the same submenu, and not a switched-off one's", async () => {
+      act(() => useGraphStore.getState().closeStartPage())
+      render(<App />)
+
+      // Biophysics is off by default.
+      openHelp('Documentation')
+      await screen.findByRole('link', { name: /Node Guide/ })
+      expect(screen.queryByRole('link', { name: /Biophysics guide/ })).toBeNull()
+      cleanup()
+
+      act(() => switchPack('biophys', true))
+      render(<App />)
+      openHelp('Documentation')
+      const guide = await screen.findByRole('link', { name: /Biophysics guide/ })
+      expect(guide.getAttribute('href')).toBe(`${import.meta.env.BASE_URL}biophysics.html`)
     })
 
     it('offers the overview in the same submenu, ahead of both guides', async () => {

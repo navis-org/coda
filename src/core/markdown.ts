@@ -63,10 +63,18 @@ export interface MarkdownFence {
 export const CALLOUT_TONES = ['note', 'tip', 'warning'] as const
 export type CalloutTone = (typeof CALLOUT_TONES)[number]
 
+/**
+ * Every tone a document may write: the three above, and `detail` — a pack guide's box of material
+ * for specialists, set apart from the newcomer's reading. Not a hint tone, a card having no use for
+ * one, so the hint editor keeps offering `CALLOUT_TONES`.
+ */
+export const DOCUMENT_TONES = [...CALLOUT_TONES, 'detail'] as const
+export type DocumentTone = (typeof DOCUMENT_TONES)[number]
+
 /** `> [!WARNING]` and the block quote under it. */
 export interface MarkdownCallout {
   kind: 'callout'
-  tone: CalloutTone
+  tone: DocumentTone
   /** Anything after the marker on the same line. The renderer falls back to the tone's name. */
   title?: string
   blocks: MarkdownBlock[]
@@ -172,7 +180,7 @@ function indentWidth(prefix: string): number {
 /** ```` ```lang ```` — three or more backticks, with an optional info string. */
 const FENCE_LINE = /^(\s*)(`{3,})\s*([^`]*)$/
 /** `> [!NOTE]`, `> [!WARNING] with a title`. */
-const CALLOUT_LINE = new RegExp(`^>\\s*\\[!(${CALLOUT_TONES.join('|')})\\]\\s*(.*)$`, 'i')
+const CALLOUT_LINE = new RegExp(`^>\\s*\\[!(${DOCUMENT_TONES.join('|')})\\]\\s*(.*)$`, 'i')
 /** `![alt](src)` alone on a line. */
 const IMAGE_LINE = /^!\[([^\]]*)\]\(([^)]*)\)$/
 /** `---`, `:--`, `--:`, `:-:`, piped — the row that makes the line above it a header. */
@@ -372,10 +380,11 @@ function readFence(
 }
 
 /** A tone's name as a reader sees it — the callout's default title, and the hint editor's choices. */
-export const TONE_TITLE: Record<CalloutTone, string> = {
+export const TONE_TITLE: Record<DocumentTone, string> = {
   note: 'Note',
   warning: 'Warning',
   tip: 'Tip',
+  detail: 'In depth',
 }
 
 /**
@@ -395,7 +404,7 @@ function readCallout(
   match: RegExpExecArray,
   out: MarkdownBlock[],
 ): number {
-  const tone = match[1]!.toLowerCase() as CalloutTone
+  const tone = match[1]!.toLowerCase() as DocumentTone
   const title = match[2]!.trim()
   const body: string[] = []
   let i = start + 1
@@ -457,6 +466,13 @@ function readTable(lines: readonly string[], start: number, out: MarkdownBlock[]
 // ---------------------------------------------------------------------------
 
 const PUNCTUATION = /[\\`*_[\]()#+\-.!]/
+
+/** Inline Markdown as its plain text: links, emphasis and code reduced to the words they hold. */
+export function plainText(nodes: readonly MarkdownInline[]): string {
+  return nodes
+    .map((n) => (n.kind === 'text' || n.kind === 'code' ? n.text : plainText(n.children)))
+    .join('')
+}
 
 export function parseInline(source: string): MarkdownInline[] {
   const out: MarkdownInline[] = []

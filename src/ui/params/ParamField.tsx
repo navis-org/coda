@@ -20,6 +20,7 @@ import {
 } from '../../core/node'
 import { ComboField } from './ComboField'
 import { useDraftText } from './useDraftText'
+import { useOfferedPack } from '../packSwitches'
 
 /**
  * What a column picker says when the port carries no schema at all.
@@ -45,6 +46,7 @@ export interface ParamFieldProps {
 }
 
 export function ParamField({ param, value, ctx, onChange, variant = 'node' }: ParamFieldProps) {
+  const offeredPack = useOfferedPack()
   // Every caller renders the label as a plain <span> in its own grid column, so the field
   // itself would otherwise have no accessible name. Naming it here covers the node body,
   // the inspector and the overlay rail in one place.
@@ -157,11 +159,15 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
     case 'enum': {
       const options = typeof param.options === 'function' ? param.options(ctx) : param.options
       const current = typeof value === 'string' ? value : param.default
+      // A pack's option only while the pack is offered, or where this card already holds it.
+      const live = options.filter(
+        (o) => o.pack === undefined || offeredPack(o.pack) || o.value === current,
+      )
       return (
         <SelectField
           label={label}
           value={current}
-          options={offeredOptions(options, current)}
+          options={offeredOptions(live, current)}
           {...(param.empty ? { empty: param.empty } : {})}
           onChange={onChange}
         />
@@ -353,7 +359,15 @@ interface NumberFieldProps {
  * the value, click without dragging to type. Scrubbing is what makes a threshold feel
  * explorable, and it pairs with cheap-node auto-evaluation to give live feedback.
  */
-function NumberField({ label, value, integer, min, max, step, onChange }: NumberFieldProps) {
+export function NumberField({
+  label,
+  value,
+  integer,
+  min,
+  max,
+  step,
+  onChange,
+}: NumberFieldProps) {
   const [text, setText] = useState(String(value))
   const [editing, setEditing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -369,8 +383,11 @@ function NumberField({ label, value, integer, min, max, step, onChange }: Number
       let out = integer ? Math.round(next) : next
       if (min !== undefined) out = Math.max(min, out)
       if (max !== undefined) out = Math.min(max, out)
-      // Avoid 0.30000000000000004 in the field.
-      return integer ? out : Math.round(out * 1e6) / 1e6
+      // Avoid 0.30000000000000004 in the field: twelve significant digits, not a fixed grid, which
+      // would round a channel density of 4e-7 mS/cm² to nothing — and a step's leftover near zero
+      // (0.3 − 3 × 0.1 is −5.6e-17) is zero.
+      if (integer) return out
+      return Math.abs(out) < 1e-12 ? 0 : Number(out.toPrecision(12))
     },
     [integer, min, max],
   )

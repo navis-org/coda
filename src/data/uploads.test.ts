@@ -30,18 +30,22 @@ import type { TableValue } from '../core/values'
 import { tableFromRows } from '../core/values'
 import {
   getMeshUpload,
+  getRecordingUpload,
   getUpload,
   getUploadMeta,
   peekMeshUpload,
+  peekRecordingUpload,
   peekUploadMeta,
   peekUploadSchema,
   putMeshUpload,
+  putRecordingUpload,
   putUpload,
   resetUploads,
   subscribeUploadLearned,
   uploadPeekSettled,
 } from './uploads'
 import { tetra } from '../test/meshes'
+import type { RecordingSummary } from './ephys/recording'
 
 const SCHEMA = tableSchema(column('neuronId', 'i64'), column('cellType', 'str'))
 
@@ -278,7 +282,8 @@ describe('meshes, in the same database', () => {
     if (meta?.kind !== 'table') throw new Error('expected a table descriptor')
     const { kind: _kind, ...legacy } = meta
     await new Promise<void>((resolve, reject) => {
-      const open = indexedDB.open('coda-uploads', 2)
+      // The database's current version: opening an older one is refused once it has moved on.
+      const open = indexedDB.open('coda-uploads', 3)
       open.onerror = () => reject(open.error)
       open.onsuccess = () => {
         const db = open.result
@@ -298,5 +303,33 @@ describe('meshes, in the same database', () => {
     expect(peekUploadMeta(id)?.kind).toBe('table')
     // And it is usable, not merely labelled: the schema is what every column picker reads.
     expect(peekUploadSchema(id)?.columns.map((c) => c.name)).toEqual(['neuronId', 'cellType'])
+  })
+})
+
+describe('recordings, in the same database', () => {
+  const SUMMARY: RecordingSummary = {
+    format: 'ABF 2.6',
+    protocol: 'IV',
+    rate: 10_000,
+    sweeps: 1,
+    sweepSamples: 4,
+    mode: 'episodic',
+    channels: [{ name: 'Vm', unit: 'mV' }],
+    commands: [],
+    notes: [],
+  }
+
+  it('keeps the file’s own bytes, addressed by them, and its summary for the peek', async () => {
+    const bytes = Uint8Array.of(65, 66, 70, 50, 1, 2, 3).buffer
+    const id = await putRecordingUpload('cell.abf', bytes, SUMMARY)
+    expect(id).toBe(await putRecordingUpload('renamed.abf', bytes.slice(0), SUMMARY))
+    expect(id).not.toBe(
+      await putRecordingUpload('cell.abf', Uint8Array.of(65, 66, 70, 50, 9).buffer, SUMMARY),
+    )
+    expect(new Uint8Array((await getRecordingUpload(id))!)).toEqual(new Uint8Array(bytes))
+    expect(peekRecordingUpload(id)?.summary).toEqual(SUMMARY)
+    // The wrong kind is an answer, not a wait: a recording's id is no table.
+    expect(peekUploadSchema(id)).toBeUndefined()
+    expect(uploadPeekSettled(id)).toBe(true)
   })
 })

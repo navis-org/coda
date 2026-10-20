@@ -34,6 +34,7 @@ registerPack({
   label: 'Opt-in tools',
   description: 'Only for the readers who ask for it.',
   defaultOn: false,
+  guide: { page: 'optin.html', title: 'Opt-in guide' },
   nodes: [
     {
       type: 'optin:thing',
@@ -103,6 +104,19 @@ describe('the Plugins dialog', () => {
     // Named by the pack alone, with the rest as its description.
     const zapbench = screen.getByRole('switch', { name: 'ZapBench' })
     expect(zapbench.getAttribute('aria-describedby')).toBeTruthy()
+  })
+
+  it("links a pack's guide from its row, and following the link flips nothing", () => {
+    openDialog()
+    const link = screen.getByRole('link', { name: /Opt-in guide/ })
+    expect(link.getAttribute('href')).toMatch(/optin\.html$/)
+    expect(link.getAttribute('target')).toBe('_blank')
+    fireEvent.click(link)
+    expect(box(/Opt-in tools/).checked).toBe(false)
+    // A pack without a guide has no link.
+    expect(
+      screen.getByRole('switch', { name: 'ZapBench' }).closest('label')!.querySelector('a'),
+    ).toBeNull()
   })
 
   it("names each pack's nodes, so a switch says what it hides", () => {

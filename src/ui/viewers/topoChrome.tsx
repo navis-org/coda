@@ -9,6 +9,14 @@ import type { PartnerGrouping } from '../../nodes/lib/profileStats'
 import type { PartnerListProps } from './PartnerList'
 import { PartnerList } from './PartnerList'
 
+/** What a neuron is called on a viewer's bar: its type, else its instance, else its id. */
+export function neuronLabel(
+  row: Readonly<Record<string, unknown>> | undefined,
+  id: string | null | undefined,
+): string {
+  return String(row?.['type'] ?? row?.['instance'] ?? id ?? '—')
+}
+
 /**
  * A neuron's name, then its id muted beside it — the id left out where the name already is the id
  * (a neuron with no type), rather than written twice.
@@ -94,17 +102,17 @@ export function TopoBar({
   )
 }
 
-/** The rail's tab strip, with the close button at its end. */
-export function RailTabs({
+/** The rail's tab strip, with the close button at its end where there is something to close. */
+export function RailTabs<Id extends string>({
   tabs,
   tab,
   onTab,
   onClose,
 }: {
-  tabs: ReadonlyArray<{ readonly id: string; readonly label: string }>
-  tab: string
-  onTab: (id: string) => void
-  onClose: () => void
+  tabs: ReadonlyArray<{ readonly id: Id; readonly label: string }>
+  tab: Id
+  onTab: (id: Id) => void
+  onClose?: () => void
 }) {
   return (
     <nav className="topo__tabs" role="tablist">
@@ -119,15 +127,19 @@ export function RailTabs({
           {t.label}
         </button>
       ))}
-      <span className="topo__spacer" />
-      <button
-        type="button"
-        className="topo__close"
-        aria-label="Hide the data rail"
-        onClick={onClose}
-      >
-        ×
-      </button>
+      {onClose && (
+        <>
+          <span className="topo__spacer" />
+          <button
+            type="button"
+            className="topo__close"
+            aria-label="Hide the data rail"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </>
+      )}
     </nav>
   )
 }

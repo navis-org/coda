@@ -204,7 +204,11 @@ describe('buildCommandItems', () => {
      * peek starts work, because the exporter has not been loaded yet either way.
      */
     requestExportWarnings(graph)
-    await waitFor(() => expect(peekExportWarnings(graph, 'python')).toBeTruthy())
+    // The warm-up is a dynamic import of every emitter, which under the full suite's load has
+    // taken past waitFor's default second; its time is not what this test checks.
+    await waitFor(() => expect(peekExportWarnings(graph, 'python')).toBeTruthy(), {
+      timeout: 5000,
+    })
     resetExportWarnings()
 
     /*
