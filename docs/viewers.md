@@ -4662,6 +4662,14 @@ Eleven things that were each a way to get it wrong:
    removed — an undo step like any other. Keys pressed in the frame stay in its document, so none
    of them reaches the editor's shortcuts. They were left off for a day as a precaution and turned
    on at the user's request; there is no technical reason against them.
+   **Nothing updates it by itself, so a weekly job says when it is behind**
+   (`.github/workflows/neuroglancer-freshness.yml`, `scripts/check-neuroglancer.mjs`). It opens one
+   issue with the tip, its newest commits and the update steps, updates it when the tip moves again,
+   and closes it once the bundle matches. An issue rather than a red run, which would email only the
+   workflow's last editor and say nothing about what changed; and a flag rather than an automatic
+   rebuild, because an update wants the selection probe and a CAVE dataset checked by hand. It
+   reports the tip's date and newest commits rather than a count of commits behind, the branch being
+   rebased: after a rebase every commit is new.
 
 10. **A key pressed in the frame never reaches Coda's document**, so the dashboard's ⌥1–9 did
    nothing once somebody had clicked into the scene — and neuroglancer, which binds `alt+digitN` to

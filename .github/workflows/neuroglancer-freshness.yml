@@ -1,0 +1,31 @@
+# Whether the bundled neuroglancer (Spelunker, `vendor/neuroglancer.tgz`) is still the tip of
+# `seung-lab/neuroglancer`'s `spelunker` branch.
+#
+# Flagged as an issue rather than a red run: a failing scheduled run emails only whoever last edited
+# this file and says nothing about what changed, where an issue is visible to everyone, lists the new
+# commits and the update steps, and closes itself once the bundle is current. The update itself stays
+# a person's job — see `scripts/check-neuroglancer.mjs` for why.
+name: Spelunker freshness
+
+on:
+  schedule:
+    # Mondays, 07:00 UTC.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      # No install: the script uses Node's own fetch and the GitHub REST API.
+      - run: node scripts/check-neuroglancer.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
