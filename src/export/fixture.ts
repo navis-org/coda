@@ -1638,7 +1638,27 @@ export function everythingGraph(): CodaGraph {
       params: { by: ['roi'] },
     },
     { id: 'v3d', type: 'out.viewer3d', col: 3, row: 5 },
-    { id: 'ng', type: 'out.neuroglancer', col: 3, row: 6 },
+    {
+      /*
+       * Everything the scene carries that a fetch cannot recover: an edit of each kind, hidden
+       * neurons kept with their `visible` column, and a categorical colour with an override — so
+       * the golden records the palette, the edit lists, the lookup an addition needs and the one
+       * a hidden neuron does not.
+       */
+      id: 'ng',
+      type: 'out.neuroglancer',
+      col: 3,
+      row: 6,
+      params: {
+        selectionEdits: ['+998', '+999', '-1001', '~1002'],
+        hiddenNeurons: 'keep',
+        segmentColorMode: 'categorical',
+        segmentColorBy: 'type',
+        segmentColorOverrides: JSON.stringify({ LC4: '#123456' }),
+        layout: 'xy-3d',
+        layers: 'segmentation',
+      },
+    },
     { id: 'profile', type: 'out.profile', col: 3, row: 7, params: { selection: ['1001'] } },
     {
       /*
@@ -2068,6 +2088,22 @@ export function caveGraph(): CodaGraph {
     },
     // Sources only, fragments off: one `in` filter and the index membership after it.
     { id: 'betweenDown', type: 'neuron.synapsesBetween', col: 6, row: 5 },
+    /*
+     * The CAVE scene, built from the datastack's info rather than fetched, and opened in the
+     * datastack's own viewer. One neuron added, so the lookup reads `labels` rather than
+     * neuprint-python; one colour for all, the mode with no data to read.
+     */
+    {
+      id: 'ngCave',
+      type: 'out.neuroglancer',
+      col: 6,
+      row: 6,
+      params: {
+        selectionEdits: ['+720575940600000001'],
+        segmentColorMode: 'constant',
+        segmentColor: '2',
+      },
+    },
   ]
   for (const spec of nodes) g = place(g, spec)
 
@@ -2094,6 +2130,8 @@ export function caveGraph(): CodaGraph {
     ['find', 'neurons', 'betweenAedes', 'targets'],
     ['ds', 'dataset', 'betweenDown', 'dataset'],
     ['find', 'neurons', 'betweenDown', 'sources'],
+    ['ds', 'dataset', 'ngCave', 'dataset'],
+    ['find', 'neurons', 'ngCave', 'neurons'],
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g

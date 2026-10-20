@@ -16,7 +16,12 @@
 import { useEffect, useState } from 'react'
 
 import type { NgScene } from '../../data/neuroglancer/scene'
-import { buildScene, sceneUrl, viewerBaseFor } from '../../data/neuroglancer/scene'
+import {
+  buildScene,
+  sceneUrl,
+  selfHostedViewer,
+  viewerBaseFor,
+} from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { formatNumber, plural } from '../../style/format'
@@ -168,6 +173,8 @@ export function NeuroglancerProfileFrame({
           ),
           scene,
         )}
+        // The card's split: the link opens the dataset's viewer, the frame Coda's own copy.
+        frameViewer={selfHostedViewer()}
         color={SEGMENT_COLOR}
         // This frame builds its own scene from the same `buildScene` and adds no extra layers, so
         // the one layer it owns is the dataset's own segmentation.

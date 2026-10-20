@@ -17,9 +17,10 @@ import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import { pyList, pyStr } from '../py'
 import { CHART_INK } from '../../../style/colors'
+import { DEFAULT_NEUROGLANCER_URL } from '../../../data/neuroglancer/scene'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
-import { codaNeurons, isCaveDataset, neuronIds, pySelection } from './common'
+import { codaNeurons, datasetLabels, isCaveDataset, neuronIds, pySelection } from './common'
 import { filterMasks } from './tableFilters'
 import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
 import type {
@@ -29,12 +30,13 @@ import type {
   HeatmapSelectionStep,
 } from '../../plans/heatmap'
 import { heatmapExportPlan } from '../../plans/heatmap'
-import type { LineChartPlan, PickedLabels } from '../../plans/viewers'
+import type { LineChartPlan, NeuroglancerColors, PickedLabels } from '../../plans/viewers'
 import { Y2_TAG } from '../../../nodes/lib/lineChart'
 import {
-  NEUROGLANCER_REFUSAL,
   barChartPlan,
   lineChartPlan,
+  neuroglancerPlan,
+  EDITS_NOTE,
   distributionPlan,
   histogramPlan,
   piePlan,
@@ -1410,8 +1412,240 @@ registerEmitter('out.copyIds', (ctx) => {
 // Neuroglancer  (Profile lives in its own file — it compiles real metrics)
 // ---------------------------------------------------------------------------
 
-// Refused whatever it is set to — `NEUROGLANCER_REFUSAL` says why.
-registerEmitter('out.neuroglancer', (ctx) => ctx.todo(NEUROGLANCER_REFUSAL))
+/**
+ * The dataset's own scene, fetched live as the card fetches it, pointed at the neurons and
+ * written out as a link — nglscenes for the scene, `neuroglancerHelpers.ts` for Coda's rules.
+ *
+ * Live rather than a copy of what the card last built: the scene is a few kilobytes the notebook
+ * can ask for with the client it already has, and a copy would freeze a dataset's curated layers
+ * at the day of export. What the card holds that no fetch can recover — the neurons somebody
+ * double-clicked in or out of its viewer — is written as literal lists, since those were gestures
+ * rather than data.
+ *
+ * `Selected` is the same rule as the card's: the input's rows still shown, then a row for each
+ * neuron added in the viewer, looked up in the dataset where it is there and only an id where it
+ * is not.
+ */
+registerEmitter(
+  'out.neuroglancer',
+  (ctx) => {
+    const dataset = ctx.wired('dataset')
+    const neurons = ctx.input('neurons')
+    const plan = neuroglancerPlan(ctx)
+    const cave = isCaveDataset(ctx)
+    const name = ctx.name
+    const url = ctx.output('url')
+    const selected = ctx.output('selected')
+    const published = `${name}_published`
+    const shown = `${name}_shown`
+
+    ctx.require('pandas')
+    ctx.require('nglscenes', 'Scene')
+    ctx.helper('coda_shown_segments')
+    ctx.helper('coda_neuroglancer_scene')
+    ctx.helper('coda_neuroglancer_url')
+
+    const lines: string[] = []
+    let datasetId: string
+    let viewer: string
+    if (cave) {
+      ctx.helper('coda_cave_scene')
+      lines.push(
+        `# CAVE publishes no curated scene, so this is built from the datastack's info, as on the card.`,
+        `${published} = coda_cave_scene(${dataset}.client)`,
+      )
+      datasetId = `${dataset}.client.datastack_name`
+      // The link opens the datastack's own viewer, as the card's does.
+      viewer = `${name}_viewer`
+      lines.push(
+        `${viewer} = ${dataset}.client.info.viewer_site() or ${pyStr(DEFAULT_NEUROGLANCER_URL)}`,
+      )
+    } else {
+      lines.push(
+        `# The scene neuPrint publishes for this dataset, as the card fetches it.`,
+        `_response = ${dataset}.session.get(`,
+        `    f'{${dataset}.server}/api/npexplorer/nglayers/{${dataset}.dataset}.json'`,
+        `)`,
+        `_response.raise_for_status()`,
+        `${published} = Scene.from_dict(_response.json())`,
+      )
+      datasetId = `${dataset}.dataset`
+      viewer = pyStr(DEFAULT_NEUROGLANCER_URL)
+    }
+
+    const { added, removed, hidden } = plan
+    if (added.length > 0 || removed.length > 0 || hidden.length > 0) {
+      lines.push('', ...ctx.note(EDITS_NOTE))
+    } else lines.push('')
+    lines.push(
+      `${name}_added = ${pySelection(added)}`,
+      `${name}_removed = ${pySelection(removed)}`,
+    )
+    if (plan.keepHidden) lines.push(`${name}_hidden = ${pySelection(hidden)}`)
+
+    const ids = neurons ? `${neurons}['neuronId']` : '[]'
+    lines.push(
+      `${shown} = coda_shown_segments(`,
+      `    ${ids}, ${name}_added, ${name}_removed, limit=${plan.limit}`,
+      `)`,
+    )
+
+    const colorLines: string[] = []
+    const colorArgs = neuroglancerColorLines(ctx, plan.colors, neurons, colorLines)
+    if (colorLines.length > 0) lines.push('', ...colorLines)
+    for (const note of plan.notes) lines.push(...ctx.note(note))
+
+    lines.push(
+      '',
+      `${name}_scene = coda_neuroglancer_scene(`,
+      `    ${published},`,
+      `    ${datasetId},`,
+      `    ${shown},`,
+      ...colorArgs.map((arg) => `    ${arg},`),
+      ...(plan.keepHidden ? [`    hidden=${name}_hidden,`] : []),
+      `    layout=${pyStr(plan.layout)},`,
+      `    layers=${pyStr(plan.layers)},`,
+      `    show_slices=${plan.showSlices ? 'True' : 'False'},`,
+      `)`,
+      `${url} = coda_neuroglancer_url(${name}_scene, ${viewer})`,
+      `print(${url})`,
+      '',
+      ...selectedLines(ctx, { dataset, neurons, cave, shown, selected, added }),
+    )
+    if (plan.keepHidden) {
+      lines.push(
+        `# Hidden neurons stay in Selected here, with visible = False.`,
+        `${selected}['visible'] = ~${selected}['neuronId'].isin(${name}_hidden)`,
+      )
+    }
+    return lines
+  },
+  { backends: ['neuprint', 'cave'] },
+)
+
+/** The colour lines, written into `lines`, and the arguments they hand the scene helper. */
+function neuroglancerColorLines(
+  ctx: Parameters<Emitter>[0],
+  colors: NeuroglancerColors,
+  neurons: string | undefined,
+  lines: string[],
+): string[] {
+  switch (colors.kind) {
+    case 'none':
+      return []
+    case 'constant':
+      return [`default_color=${pyStr(colors.color)}`]
+    case 'flat':
+    case 'literal':
+    case 'categorical': {
+      // The plan only hands back a data-driven kind with the neurons wired. Each is a colour per
+      // row, folded to one per neuron by `coda_segment_colors`; only the per-row colours differ.
+      const frame = neurons!
+      const colorsVar = `${ctx.name}_colors`
+      ctx.helper('coda_segment_colors')
+      let perRow: string[]
+      if (colors.kind === 'flat') {
+        // No column to read: every input neuron in the one colour.
+        perRow = [`[${pyStr(colors.color)}] * len(${frame}),`]
+      } else if (colors.kind === 'literal') {
+        ctx.helper('coda_literal_colors')
+        perRow = [
+          `coda_literal_colors(${frame}[${pyStr(colors.column)}], ${pyStr(colors.fallback)}),`,
+        ]
+      } else {
+        ctx.helper('coda_category_colors')
+        const overrides = Object.entries(colors.overrides)
+        lines.push(
+          `# Coda's palette, in the order the commonest value takes it.`,
+          `${ctx.name}_palette = ${pyList(colors.palette)}`,
+        )
+        perRow = [
+          `coda_category_colors(`,
+          `    ${frame}[${pyStr(colors.column)}],`,
+          `    ${ctx.name}_palette,`,
+          ...(overrides.length > 0
+            ? [
+                `    {${overrides.map(([label, color]) => `${pyStr(label)}: ${pyStr(color)}`).join(', ')}},`,
+              ]
+            : []),
+          `),`,
+        ]
+      }
+      lines.push(
+        `${colorsVar} = coda_segment_colors(`,
+        `    ${frame}['neuronId'],`,
+        ...perRow.map((line) => `    ${line}`),
+        `)`,
+      )
+      return [`colors=${colorsVar}`]
+    }
+  }
+}
+
+/**
+ * `Selected`: the input's rows still shown, then the neurons added in the viewer that the input
+ * did not hold — looked up in the dataset, and an id alone where the dataset does not list one.
+ */
+function selectedLines(
+  ctx: Parameters<Emitter>[0],
+  {
+    dataset,
+    neurons,
+    cave,
+    shown,
+    selected,
+    added,
+  }: {
+    dataset: string
+    neurons: string | undefined
+    cave: boolean
+    shown: string
+    selected: string
+    added: readonly string[]
+  },
+): string[] {
+  const base = neurons
+    ? `${neurons}[${neurons}['neuronId'].isin(${shown})].copy()`
+    : `pd.DataFrame({'neuronId': pd.Series([], dtype='string')})`
+  const lines = [`${selected} = ${base}`]
+  // Only the viewer adds a neuron the input does not have, and its additions are known now.
+  if (added.length === 0) return lines
+
+  const lookup = cave
+    ? [
+        `    _found = ${datasetLabels(dataset)}`,
+        `    _found = _found[_found['neuronId'].isin(_new)]`,
+      ]
+    : (() => {
+        ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+        return [
+          `    _found, _ = fetch_neurons(`,
+          `        NeuronCriteria(bodyId=[int(i) for i in _new], client=${dataset}), client=${dataset}`,
+          `    )`,
+          `    ${codaNeurons(ctx, '_found')}`,
+        ]
+      })()
+  return [
+    ...lines,
+    `_held = set(${selected}['neuronId'])`,
+    `_new = [i for i in ${shown} if i not in _held]`,
+    `if _new:`,
+    ...lookup,
+    `    _listed = set(_found['neuronId'])`,
+    `    _bare = [i for i in _new if i not in _listed]`,
+    `    if _bare:`,
+    `        print(f'{len(_bare)} neurons added in the viewer are not in the dataset, so they have only an id.')`,
+    `    _columns = ${neurons ? `${selected}.columns` : `_found.columns`}`,
+    `    ${selected} = pd.concat(`,
+    `        [`,
+    `            ${selected},`,
+    `            _found.reindex(columns=_columns),`,
+    `            pd.DataFrame({'neuronId': pd.Series(_bare, dtype='string')}),`,
+    `        ],`,
+    `        ignore_index=True,`,
+    `    )`,
+  ]
+}
 
 // ---------------------------------------------------------------------------
 // Dataset description

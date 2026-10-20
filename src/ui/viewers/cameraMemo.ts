@@ -16,6 +16,8 @@
  *
  *  - **Not persisted.** A camera is not provenance. It would put six floats in every
  *    `.coda.json` and hand somebody else's window aspect to whoever opened the file.
+ *    The Neuroglancer card is the exception and says why (`view` on `out.neuroglancer`): its
+ *    view is shared as a place, a zoomed-in section somebody wants a colleague to land on.
  *  - **Module-level rather than a ref**, because surviving unmount is the entire point. It is
  *    also what makes the card and the overlay one continuous view of a scene rather than two.
  *

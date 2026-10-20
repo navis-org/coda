@@ -5751,6 +5751,26 @@ a.dropdown__item {
   transform-origin: 0 0;
 }
 
+/* "From link": where a viewer that cannot be read hands its neurons back as a pasted link. */
+.ng-paste {
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--border);
+  flex: none;
+}
+.ng-paste__input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  color: var(--text-primary);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
 /* The caption's link-shaped actions, so an <a> matches the buttons beside it. */
 a.viewer-actions__btn {
   text-decoration: none;

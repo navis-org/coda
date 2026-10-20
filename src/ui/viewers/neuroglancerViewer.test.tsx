@@ -10,6 +10,7 @@
  * regresses — the camera just jumps, and nobody connects that to a filter three nodes away.
  */
 
+import type { ComponentProps } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -22,8 +23,15 @@ import {
   sceneUrl,
   withLayerPanel,
 } from '../../data/neuroglancer/scene'
+import {
+  FRAME_STATE_MESSAGE,
+  FRAME_UPDATE_KEY,
+  FRAME_VIEW_MESSAGE,
+  updateIn,
+} from '../../data/neuroglancer/frameMessage'
 import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { useGraphStore } from '../../store/graphStore'
 import { RELEASE_AFTER_MS } from './persistentRoots'
 import { resetSceneMemos } from './sceneMemo'
 
@@ -88,8 +96,18 @@ function frame(container: HTMLElement): HTMLIFrameElement | null {
 }
 
 const frameSrc = (container: HTMLElement): string => frame(container)?.getAttribute('src') ?? ''
-/** The scene the frame is pointed at, whichever host and whichever form the URL took. */
-const frameScene = (container: HTMLElement) => parseSceneUrl(frameSrc(container))
+/**
+ * The scene the frame is pointed at, whichever host and whichever form the URL took — less the
+ * update number every navigation carries (`FRAME_UPDATE_KEY`), which no scene assertion is about.
+ */
+const frameScene = (container: HTMLElement) => {
+  const scene = parseSceneUrl(frameSrc(container))
+  if (!scene) return scene
+  const { [FRAME_UPDATE_KEY]: _update, ...rest } = scene
+  return rest
+}
+/** The update number the frame was last navigated with. */
+const frameUpdate = (container: HTMLElement) => updateIn(parseSceneUrl(frameSrc(container)))
 /** A scene as the frame is pointed at it by default: the layer bar hidden, which the link never is. */
 const framed = (url: string) => withLayerPanel(parseSceneUrl(url)!, false)
 /** The layer list of a scene, which nine assertions here read and none of them care is `unknown`. */
@@ -115,12 +133,14 @@ function scaleBox(container: HTMLElement): HTMLElement | null {
  */
 function frameShowing(container: HTMLElement, scene: unknown): void {
   const found = frame(container)!
+  // One window object, as a browser keeps: a message's `source` is checked by identity.
+  const win = {
+    location: { hash: `#!${encodeURIComponent(JSON.stringify(scene))}` },
+    postMessage: () => undefined,
+  }
   Object.defineProperty(found, 'contentWindow', {
     configurable: true,
-    get: () =>
-      found.isConnected
-        ? { location: { hash: `#!${encodeURIComponent(JSON.stringify(scene))}` } }
-        : null,
+    get: () => (found.isConnected ? win : null),
   })
 }
 
@@ -1124,5 +1144,370 @@ describe('an explicit viewer type', () => {
     expect(sourceIn(container)).toContain('middleauth+')
     rerender(<NeuroglancerViewer url={url} color={CATEGORICAL} viewerType="seunglab" />)
     expect(sourceIn(container)).toBe(GRAPHENE)
+  })
+})
+
+describe('neurons changed inside the viewer', () => {
+  /** What Coda's own frame posts, from its own window, at this origin. */
+  /** A message as if from `source` (by default the card's own frame), at this origin. */
+  function post(container: HTMLElement, data: unknown, source?: unknown): void {
+    const event = new MessageEvent('message', { data, origin: window.location.origin })
+    // jsdom refuses a non-window `source` in the init dict; the listener only compares identity.
+    Object.defineProperty(event, 'source', { value: source ?? frame(container)!.contentWindow })
+    act(() => {
+      window.dispatchEvent(event)
+    })
+  }
+
+  function report(
+    container: HTMLElement,
+    scene: unknown,
+    source?: unknown,
+    update = frameUpdate(container),
+  ): void {
+    post(container, { type: FRAME_STATE_MESSAGE, state: scene, update }, source)
+  }
+
+  const viewer = (
+    url: string,
+    selectionEdits: string[],
+    onSelectionEdits: (next: string[]) => void,
+    extra: Partial<ComponentProps<typeof NeuroglancerViewer>> = {},
+  ) => (
+    <NeuroglancerViewer
+      url={url}
+      neurons={NEURONS}
+      color={CATEGORICAL}
+      datasetId={OWNED}
+      selectionEdits={selectionEdits}
+      onSelectionEdits={onSelectionEdits}
+      {...extra}
+    />
+  )
+
+  function mounted(url: string, selectionEdits: string[] = []) {
+    const onSelectionEdits = vi.fn<(next: string[]) => void>()
+    const view = render(viewer(url, selectionEdits, onSelectionEdits))
+    frameLoaded(view.container)
+    return { ...view, onSelectionEdits }
+  }
+
+  it('writes a neuron double-clicked into the scene back as an edit', () => {
+    const { container, onSelectionEdits } = mounted(URL_A)
+    frameShowing(container, sceneWith(['1']))
+    report(container, sceneWith(['1', '5']))
+    expect(onSelectionEdits).toHaveBeenCalledWith(['+5'])
+  })
+
+  it('writes a neuron taken out of the scene, on top of the edits already held', () => {
+    const { container, onSelectionEdits } = mounted(URL_B, ['+7'])
+    frameShowing(container, sceneWith(['1', '2']))
+    report(container, sceneWith(['2']))
+    expect(onSelectionEdits).toHaveBeenCalledWith(['+7', '-1'])
+  })
+
+  it('writes nothing for a report of the scene it was sent', () => {
+    // The frame posts after every navigation; that is not somebody's edit.
+    const { container, onSelectionEdits } = mounted(URL_B)
+    frameShowing(container, sceneWith(['1', '2']))
+    report(container, sceneWith(['2', '1']))
+    expect(onSelectionEdits).not.toHaveBeenCalled()
+  })
+
+  it('drops a report of an update the card has since replaced', () => {
+    // The frame's settle timer fired before it took the card's latest update: the report shows the
+    // old scene, and read against the new one every neuron the update added would be a removal.
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    rerendered(view, URL_B)
+    expect(posted).toHaveBeenCalled()
+    report(view.container, sceneWith(['1']), undefined, 1)
+    expect(view.onSelectionEdits).not.toHaveBeenCalled()
+    // A report of the update it was sent is read as before.
+    report(view.container, sceneWith(['1', '2', '5']), undefined, 2)
+    expect(view.onSelectionEdits).toHaveBeenCalledWith(['+5'])
+  })
+
+  it('opens the frame at Coda’s own copy, while the link stays the one the node built', () => {
+    const own = 'https://coda.example.org/neuroglancer.html'
+    const { container } = render(
+      <NeuroglancerViewer
+        url={URL_A}
+        neurons={NEURONS}
+        color={CATEGORICAL}
+        frameViewer={own}
+      />,
+    )
+    expect(frameSrc(container).startsWith(`${own}#!`)).toBe(true)
+    expect(screen.getByRole('link', { name: 'Open in a new tab' }).getAttribute('href')).toBe(
+      URL_A,
+    )
+  })
+
+  it('reads a hidden neuron as removed by default, and as hidden where it stays selected', () => {
+    const plain = mounted(URL_B)
+    frameShowing(plain.container, sceneWith(['1', '2']))
+    report(plain.container, sceneWith(['1', '!2']))
+    expect(plain.onSelectionEdits).toHaveBeenCalledWith(['-2'])
+    cleanup()
+
+    const onSelectionEdits = vi.fn<(next: string[]) => void>()
+    const kept = render(
+      <NeuroglancerViewer
+        url={URL_B}
+        neurons={NEURONS}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        selectionEdits={[]}
+        onSelectionEdits={onSelectionEdits}
+        keepHidden
+      />,
+    )
+    frameLoaded(kept.container)
+    frameShowing(kept.container, sceneWith(['1', '2']))
+    report(kept.container, sceneWith(['1', '!2']))
+    expect(onSelectionEdits).toHaveBeenCalledWith(['~2'])
+  })
+
+  describe('the saved view', () => {
+    const VIEW = { position: [5, 6, 7], projectionScale: 1234, layout: 'xy-3d' }
+    const saved = (dataset: string) => JSON.stringify({ dataset, view: VIEW })
+
+    const viewReport = (
+      container: HTMLElement,
+      view: unknown,
+      update = frameUpdate(container),
+    ) => post(container, { type: FRAME_VIEW_MESSAGE, view, update })
+
+    function withView(url: string, savedView: string) {
+      const onSavedView = vi.fn<(text: string) => void>()
+      const view = render(viewer(url, [], vi.fn(), { savedView, onSavedView }))
+      return { ...view, onSavedView }
+    }
+
+    it('opens where the workflow was saved looking', () => {
+      const { container } = withView(URL_A, saved(OWNED))
+      const scene = frameScene(container)!
+      expect(scene['position']).toEqual([5, 6, 7])
+      expect(scene['projectionScale']).toBe(1234)
+      expect(scene['layout']).toBe('xy-3d')
+    })
+
+    it('saves where the frame is looking, with the dataset it was taken in', () => {
+      const { container, onSavedView } = withView(URL_A, '')
+      frameLoaded(container)
+      frameShowing(container, sceneWith(['1']))
+      // Every view the frame reports is somebody moving the camera: the frame keeps the opening
+      // view to itself, so a card nobody has touched receives none (probed in the browser).
+      viewReport(container, VIEW)
+      expect(onSavedView).toHaveBeenCalledWith(saved(OWNED))
+      // A report from before the latest update is the old framing, and is not saved.
+      onSavedView.mockClear()
+      viewReport(container, { position: [0, 0, 0] }, 0)
+      expect(onSavedView).not.toHaveBeenCalled()
+    })
+
+    it('clears a view taken in another dataset, and opens as published', () => {
+      const { container, onSavedView } = withView(URL_A, saved('manc:v1.2.3'))
+      expect(frameScene(container)!['position']).toEqual([1, 2, 3])
+      expect(onSavedView).toHaveBeenCalledWith('')
+    })
+
+    it('is not applied by a later full navigation, which means the published framing', () => {
+      const { container, rerender, onSavedView } = withView(URL_A, saved(OWNED))
+      frameLoaded(container)
+      rerender(viewer(URL_OTHER, [], vi.fn(), { savedView: saved(OWNED), onSavedView }))
+      flushMerge()
+      expect(frameScene(container)!['position']).toEqual([900, 900, 900])
+    })
+  })
+
+  it('reads a FlyWire link’s neuron layer back, though the link names it for the Seung-lab fork', () => {
+    // The link is written for the datastack's own viewer (`segmentation_with_graph`); the frame is
+    // Coda's own, mainline, and reports a plain `segmentation` layer of the same name.
+    const layers = (segments: string[], type: string) => [
+      { type: 'image', name: 'em', source: 'precomputed://gs://b/em' },
+      { type, name: 'flywire_fafb', source: 'graphene://https://x/seg', segments },
+    ]
+    const link = sceneUrl('https://ngl.flywire.ai', { layers: layers(['1'], 'segmentation') })
+    expect(JSON.stringify(parseSceneUrl(link))).toContain('segmentation_with_graph')
+    const onSelectionEdits = vi.fn<(next: string[]) => void>()
+    const view = render(
+      <NeuroglancerViewer
+        url={link}
+        neurons={NEURONS}
+        color={CATEGORICAL}
+        datasetId="flywire_fafb:783"
+        onSelectionEdits={onSelectionEdits}
+        frameViewer="https://coda.example.org/neuroglancer.html"
+      />,
+    )
+    frameLoaded(view.container)
+    frameShowing(view.container, { layers: layers(['1', '5'], 'segmentation') })
+    report(view.container, { layers: layers(['1', '5'], 'segmentation') })
+    expect(onSelectionEdits).toHaveBeenCalledWith(['+5'])
+  })
+
+  it('navigates instead when the frame could not set a selection in place', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    const before = frameSrc(view.container)
+    rerendered(view, URL_B)
+    expect(posted).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'coda:ng-set-segments' }),
+      window.location.origin,
+    )
+    // The frame says it could not — somebody renamed the layer — so the card navigates.
+    post(view.container, {
+      type: 'coda:ng-unapplied',
+      update: frameUpdate(view.container)! + 1,
+    })
+    flushMerge()
+    expect(frameSrc(view.container)).not.toBe(before)
+    expect(layersOf(frameScene(view.container)!)[1]!['segments']).toEqual(['1', '2'])
+  })
+
+  it('forgets what it knew about a frame once it navigates to another deployment', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    // Re-pointed at a custom deployment: a new document, which has not reported.
+    view.rerender(
+      viewer(URL_A, [], view.onSelectionEdits, { frameViewer: 'https://custom.example.org' }),
+    )
+    flushMerge()
+    expect(frameSrc(view.container).startsWith('https://custom.example.org/#!')).toBe(true)
+    posted.mockClear()
+    view.rerender(
+      viewer(URL_B, [], view.onSelectionEdits, { frameViewer: 'https://custom.example.org' }),
+    )
+    flushMerge()
+    // Not set in place: nothing there has said it can take one.
+    expect(posted).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'coda:ng-set-segments' }),
+      expect.anything(),
+    )
+  })
+
+  describe('the dashboard’s tab keys', () => {
+    afterEach(() => useGraphStore.setState({ dashboardOpen: false }))
+
+    it('tells Coda’s own frame to hand ⌥1–9 over while the dashboard is open, and not after', () => {
+      const view = mounted(URL_A)
+      const posted = speakingFrame(view.container, sceneWith(['1']))
+      // Told on the frame's first report: on the canvas they stay neuroglancer's.
+      expect(posted).toHaveBeenCalledWith(
+        { type: 'coda:ng-keys', altDigits: false },
+        window.location.origin,
+      )
+      act(() => useGraphStore.setState({ dashboardOpen: true }))
+      expect(posted).toHaveBeenLastCalledWith(
+        { type: 'coda:ng-keys', altDigits: true },
+        window.location.origin,
+      )
+    })
+
+    it('presses a key the frame hands back as if it were pressed here', () => {
+      const view = mounted(URL_A)
+      frameShowing(view.container, sceneWith(['1']))
+      const heard = vi.fn()
+      const listen = (event: KeyboardEvent) => heard(event.code, event.altKey)
+      window.addEventListener('keydown', listen)
+      post(view.container, { type: 'coda:ng-key', code: 'Digit2', altKey: true })
+      window.removeEventListener('keydown', listen)
+      expect(heard).toHaveBeenCalledWith('Digit2', true)
+    })
+  })
+
+  it('ignores a message from any other window', () => {
+    const { container, onSelectionEdits } = mounted(URL_A)
+    report(container, sceneWith(['1', '5']), window)
+    expect(onSelectionEdits).not.toHaveBeenCalled()
+  })
+
+  /** The stable window, with a spy for what the card posts into the frame. */
+  function speakingFrame(container: HTMLElement, scene: unknown) {
+    frameShowing(container, scene)
+    const win = frame(container)!.contentWindow as unknown as { postMessage?: unknown }
+    const posted = vi.fn()
+    win.postMessage = posted
+    // The frame's report is what says it is Coda's own and can take a selection in place.
+    report(container, scene)
+    return posted
+  }
+
+  function rerendered(
+    view: ReturnType<typeof mounted>,
+    url: string,
+    selectionEdits: string[] = [],
+  ) {
+    view.rerender(viewer(url, selectionEdits, view.onSelectionEdits))
+  }
+
+  it('sets a changed selection in place, at once, with the pointer inside the frame', () => {
+    // Restoring `layers` rebuilds every layer, which is why an update used to wait for the pointer
+    // to leave; setting the segments in place rebuilds nothing.
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    const before = frameSrc(view.container)
+    fireEvent.mouseEnter(scaleBox(view.container)!)
+    rerendered(view, URL_B)
+    expect(posted).toHaveBeenCalledWith(
+      {
+        type: 'coda:ng-set-segments',
+        layers: [{ name: OWNED, segments: ['1', '2'], segmentColors: {} }],
+        // The navigation was update 1; this is the next.
+        update: 2,
+      },
+      window.location.origin,
+    )
+    flushMerge()
+    // No navigation at all: the camera, the layout and every other layer are left alone.
+    expect(frameSrc(view.container)).toBe(before)
+  })
+
+  it('treats the scene handed back after a double-click the same way', () => {
+    // The frame already shows it, so setting it in place changes nothing — and nothing rebuilds.
+    const view = mounted(URL_A)
+    speakingFrame(view.container, sceneWith(['1', '2']))
+    const before = frameSrc(view.container)
+    rerendered(view, URL_B, ['+2'])
+    flushMerge()
+    expect(frameSrc(view.container)).toBe(before)
+  })
+
+  it('navigates as before when more than the selection changes', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    const before = frameSrc(view.container)
+    rerendered(view, URL_OTHER)
+    flushMerge()
+    expect(posted).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'coda:ng-set-segments' }),
+      expect.anything(),
+    )
+    expect(frameSrc(view.container)).not.toBe(before)
+  })
+
+  it('navigates as before for a frame that never said it can take one', () => {
+    // A typed `Viewer`, or the public demo through the dev proxy: no report, no in-place update.
+    const view = mounted(URL_A)
+    frameShowing(view.container, sceneWith(['1']))
+    const before = frameSrc(view.container)
+    rerendered(view, URL_B)
+    flushMerge()
+    expect(frameSrc(view.container)).not.toBe(before)
+  })
+
+  it('reads the neurons from a pasted link where the frame cannot be read', () => {
+    // The default deployment is another origin, so nothing comes back by itself — once the dev
+    // proxy, which makes it readable, is out of the picture.
+    vi.stubEnv('DEV', false)
+    const { container, onSelectionEdits } = mounted(URL_A)
+    fireEvent.click(screen.getByRole('button', { name: 'Read neurons from a link' }))
+    const input = screen.getByRole('textbox', { name: 'Neuroglancer link' })
+    fireEvent.change(input, { target: { value: sceneUrl(undefined, sceneWith(['1', '8'])) } })
+    fireEvent.submit(input.closest('form')!)
+    expect(onSelectionEdits).toHaveBeenCalledWith(['+8'])
+    expect(container.querySelector('.ng-paste')).toBeNull()
   })
 })

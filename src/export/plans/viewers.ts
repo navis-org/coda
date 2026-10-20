@@ -26,6 +26,12 @@ import type { NeutralContext, Noted, Refusable } from '../neutral'
 import { showsEdgeLabels } from '../../nodes/lib/flowChartOps'
 import { selectionIds } from '../selection'
 import { yColumnsOf } from '../../nodes/lib/lineChart'
+import { readColorSpec } from '../../nodes/lib/encodingParams'
+import { keepsHidden } from '../../nodes/output/neuroglancer'
+import { decodeSelectionEdits } from '../../data/neuroglancer/selectionEdits'
+import { compareIds } from '../../core/ids'
+import { MUTED, constantColor, literalColor } from '../../style/encoding'
+import { paletteColors } from '../../style/colors'
 
 /** What the chart plans read: params and the column pickers. */
 type ChartContext = Pick<NeutralContext, 'params' | 'column'>
@@ -451,14 +457,122 @@ export function viewer3dPlan(ctx: Pick<NeutralContext, 'params' | 'input'>): Vie
 }
 
 /**
- * Why a Neuroglancer node exports nothing, whatever it is set to. Its output is a **URL**, not a
- * table, so there is nothing to pass through — binding the incoming neurons to it would hand a
- * frame to anything reading a link — and building the URL needs the scene JSON the dataset
- * publishes, which is a fetch no translation makes. Downstream reports being blocked.
+ * How a Neuroglancer node's segments are coloured, as both documents write it.
+ *
+ * `none` leaves neuroglancer's own hash colours, which is what the card's default mode sends: no
+ * colour data at all. `constant` is one `segmentDefaultColor`. `flat` is a data-driven mode with
+ * no column to read: the card then colours each input neuron the flat colour, one map entry each,
+ * and leaves a neuron added in the viewer on neuroglancer's colour, which a default would not. The two data-driven modes carry
+ * what the canvas would otherwise read from the palette module, so a document cannot pick a
+ * different palette from the card's: `categorical` the palette's own hexes and the overrides that
+ * are colours, `literal` the colour a cell that is not one is drawn in.
  */
-export const NEUROGLANCER_REFUSAL =
-  'This node builds a neuroglancer URL by editing the scene its dataset publishes. That ' +
-  'scene is a fetch this translation does not make, so no link is built here.'
+export type NeuroglancerColors =
+  | { kind: 'none' }
+  | { kind: 'constant'; color: string }
+  | { kind: 'flat'; color: string }
+  | { kind: 'literal'; column: string; fallback: string }
+  | {
+      kind: 'categorical'
+      column: string
+      palette: string[]
+      overrides: Record<string, string>
+    }
+
+/** Above the edit lists, in both documents. */
+export const EDITS_NOTE =
+  "Neurons added, removed or hidden by double-clicking in the card's neuroglancer. Coda " +
+  'applies these on top of the Neurons input; empty one to leave it out.'
+
+export interface NeuroglancerPlan {
+  /** Neurons double-clicked into the scene, sorted as the param stores them. */
+  added: string[]
+  /** Neurons double-clicked out of it. */
+  removed: string[]
+  /** Neurons listed but hidden. Empty unless `keepHidden`, where hiding is not removing. */
+  hidden: string[]
+  keepHidden: boolean
+  layout: string
+  layers: string
+  showSlices: boolean
+  /** The node's `Warn above`. */
+  limit: number
+  colors: NeuroglancerColors
+  /** What the document cannot carry over, one sentence each. */
+  notes: string[]
+}
+
+/**
+ * A Neuroglancer node, as both documents write it: the scene the dataset publishes, fetched live,
+ * pointed at the input's neurons plus the edits made in the card's own neuroglancer, which arrive as
+ * literal lists because they were gestures rather than data.
+ *
+ * The rules are the node's own readers (`decodeSelectionEdits`, `keepsHidden`, `readColorSpec`)
+ * and the palette module's, so the card and the documents cannot disagree about what the params
+ * mean. What a document does with them — which scene, which viewer — is the language's half.
+ */
+export function neuroglancerPlan(
+  ctx: Pick<NeutralContext, 'params' | 'input' | 'column'>,
+): NeuroglancerPlan {
+  const edits = decodeSelectionEdits(ctx.params.selectionEdits)
+  const keepHidden = keepsHidden(ctx.params)
+  const sorted = (ids: ReadonlySet<string>) => [...ids].sort(compareIds)
+  const notes: string[] = []
+  if (ctx.input('layers')) {
+    notes.push(
+      'The layers wired to Extra layers are not in this scene, since a Neuroglancer Source ' +
+        'exports no layer. Add them to the scene by hand if you need them.',
+    )
+  }
+  return {
+    added: sorted(edits.added),
+    removed: sorted(edits.removed),
+    hidden: keepHidden ? sorted(edits.hidden) : [],
+    keepHidden,
+    layout: String(ctx.params.layout),
+    layers: String(ctx.params.layers),
+    showSlices: ctx.params.showSlices === true,
+    limit: Number(ctx.params.limit),
+    colors: neuroglancerColors(ctx, notes),
+    notes,
+  }
+}
+
+function neuroglancerColors(
+  ctx: Pick<NeutralContext, 'params' | 'input' | 'column'>,
+  notes: string[],
+): NeuroglancerColors {
+  const spec = readColorSpec('segment', ctx.params, ctx.column)
+  if (spec.mode === 'default') return { kind: 'none' }
+  const color = constantColor(spec, 'dark')
+  if (spec.mode === 'constant') return { kind: 'constant', color }
+  // No rows: nothing is coloured, and a neuron added in the viewer keeps neuroglancer's colour.
+  if (!ctx.input('neurons')) return { kind: 'none' }
+  // `resolveColor`'s own fallback with no column: every input neuron flat, one entry each.
+  if (!spec.column) return { kind: 'flat', color }
+  switch (spec.mode) {
+    case 'literal':
+      return { kind: 'literal', column: spec.column, fallback: MUTED }
+    case 'categorical':
+      return {
+        kind: 'categorical',
+        column: spec.column,
+        palette: paletteColors(spec.palette, 'dark'),
+        overrides: Object.fromEntries(
+          Object.entries(spec.overrides ?? {}).flatMap(([label, value]) => {
+            const color = literalColor(value)
+            return color ? [[label, color]] : []
+          }),
+        ),
+      }
+    default:
+      notes.push(
+        `On the canvas the neurons are coloured by value of \`${spec.column}\`. That ramp is ` +
+          "not translated, so this scene keeps neuroglancer's own colours.",
+      )
+      return { kind: 'none' }
+  }
+}
 
 /**
  * The selected leaves, as *positions* rather than names: a label column can call two leaves the

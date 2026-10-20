@@ -20,6 +20,7 @@
  */
 
 import { DatasetListing } from '../datasetListing'
+import { credentialsFor } from './credentials'
 import { memoPromise } from '../memoPromise'
 import { describeDuration } from '../../core/limits'
 import { ID_COLUMN_NAME, idText, numericIds } from '../../core/ids'
@@ -331,6 +332,15 @@ export class CatmaidSource implements DataSource {
 
   async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
     return this.listing.get(signal)
+  }
+
+  /**
+   * The credentials requests to this instance are made under now (`DataSource.credential`): all
+   * three fields, since a change to any of them is a reason to ask again.
+   */
+  credential(): string | undefined {
+    const held = credentialsFor(this.server)
+    return held ? JSON.stringify([held.token, held.httpUser, held.httpPassword]) : undefined
   }
 
   /**

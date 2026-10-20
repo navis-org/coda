@@ -514,7 +514,7 @@ export function rampColors(
  */
 const FIXED_CONSTANTS: Record<string, string> = { black: '#000000', white: '#ffffff' }
 
-function constantColor(spec: ColorSpec, mode: Mode): string {
+export function constantColor(spec: ColorSpec, mode: Mode): string {
   if (spec.constant === 'muted') return MUTED
   const fixed = FIXED_CONSTANTS[spec.constant]
   if (fixed) return fixed

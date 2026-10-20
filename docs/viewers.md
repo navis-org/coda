@@ -4308,8 +4308,10 @@ and sends _that_ back — so the list written already contains everything the us
 neuroglancer frames fine cross-origin. Without the proxy the embed still works and falls back to
 merging, so a static deploy loses the preservation, not the viewer.
 
-Note the split: the **frame** goes to the proxied path, the **link** stays the absolute public
-URL. A copyable link that pointed at `/ng` on someone's dev server would be useless.
+Note the split: the **frame** goes to the proxied path, the **link** to the deployment the node
+chose. A copyable link that pointed at `/ng` on someone's dev server would be useless. Since Coda
+serves its own copy (below), the default deployment *is* this page's host — public in a deployed
+build, `localhost` under `pnpm dev` — so a link copied in development opens only there.
 
 **And "without the proxy" has to be asked of the build, not of the origin** — `sameOriginViewer`
 in `NeuroglancerViewer.tsx`, gating `proxiedViewer` on `import.meta.env.DEV`. `proxiedViewer`
@@ -4327,8 +4329,10 @@ though that server *does* mount the rule (`preview: { proxy: … }`) — which i
 there, since nothing in a preview build will ever request `/ng`; read the config first and it
 looks like a contradiction. That is the right way round:
 preview serves the deploy artefact, and a preview that behaves better than the thing it previews
-is not one. It also means the splice, `sceneMemo` and everything else same-origin are **dev-only
-behaviour** — worth knowing before concluding that a bug reported locally is what users see.
+is not one. It meant the splice, `sceneMemo` and everything else same-origin were **dev-only
+behaviour** — until Coda served its own copy of neuroglancer (below), which is same-origin in every
+build. That copy is now the default; the `/ng` proxy is reached only by a scene pointed explicitly
+at the public demo.
 
 **A remount is the other way the state dies, and none of the above touches it.** Expanding a
 Neuroglancer card reset the view, and closing the expansion reset it again — because the card
@@ -4534,5 +4538,177 @@ selection is and what a starter graph opens in. Only a port wired to something t
 table is an error. Getting this wrong turned the node into a dead card until someone had
 ticked a neuron, which is the opposite of an exploration surface.
 
-No `Selected` output, and there never will be one through an iframe: a foreign-origin frame
-cannot be read. Picking neurons stays upstream.
+### Coda's own neuroglancer, and the `Selected` output
+
+This paragraph used to say there would never be a `Selected` output, because a foreign-origin frame
+cannot be read. The answer was to stop embedding a foreign origin: `neuroglancer.html` is a second
+vite entry bundling **Spelunker** — CAVE's build, see below — so the frame is same-origin wherever
+Coda is served. **Two questions, answered by different things.** The `Link`
+is always the datastack's own viewer in that viewer's own format (`viewerBaseFor`, `viewerKind`),
+so it opens the same thing for whoever it is sent to. What the *card* embeds is `Viewer type` —
+Coda's copy (default), the dataset's viewer, or a custom deployment typed into `Viewer` with the
+format named, since an unknown host cannot be read — resolved by `frameTarget`; the frame's scene
+is rebuilt for that deployment by the same `sceneUrl` every navigation uses. Both params are
+therefore **presentational**: nothing `evaluate` returns depends on them. Pointing the link at
+Coda's copy was tried first and made it a fact about the host — a `localhost` URL out of
+`pnpm dev`, a different link from the MCP server, which has no page — and letting `Viewer` change
+the link made a shared link depend on somebody's embed preference. The old values migrate by
+meaning rather than by a pass: `spelunker`/`seunglab` were set for a typed `Viewer`, which is what
+the Custom options are, and the old default `auto` is a **retired** option (`absentMeans` too), read
+as before. Any frame other than Coda's is one-way, apart from **From link**. Measured: about 1.5 MB of script, 433 kB
+gzipped, loaded only inside the frame.
+
+Eleven things that were each a way to get it wrong:
+
+1. **Our own entry, not neuroglancer's `main.js`**, which imports `util/google_tag_manager.js` — a
+   third-party tag in a build that otherwise ships only the gated GoatCounter one. `vite/entries.ts`
+   keeps the page out of the sitemap and the analytics (a hit per mounted card is event tracking).
+2. **The frame posts; nothing polls.** Neuroglancer writes its hash with `replaceState`, which fires
+   no event, so `src/ngframe/main.ts` posts its state (`frameMessage.ts`) when the **layers**
+   subtree's generation moves — a camera drag posts nothing — and reuses the JSON the hash binding
+   already built (`getCachedJson`) rather than serialising a 38 kB state twice.
+3. **Edits, not a snapshot** (`selectionEdits.ts`): one `ids` param of `+id`/`-id`, applied on top of
+   the input, so an upstream edit keeps somebody's additions — one param because two are two undo
+   steps. The viewer folds a report in **against the scene it last sent, never against the input
+   table**, which can have moved in between; diffed against the input, every neuron an upstream edit
+   added reads as one the user removed. A neuron toggled twice leaves no trace.
+4. **A selection is set in place, not restored.** Restoring `layers` through the fragment — merge or
+   splice alike — clears the layer list and constructs every layer again, which is the teardown the
+   pointer hold exists for, and reloads every mesh. Where a new scene differs from the last one sent
+   only in some segmentation layers' `segments`/`segmentColors`/`segmentDefaultColor`
+   (`selectionChanges`, asked of every key of every layer), the card posts a
+   `FrameSegmentsMessage` and the frame edits the live `selectedSegments`/`visibleSegments` and colour
+   state, touching only ids that changed. No layer's lifetime is involved, so it applies **with the
+   pointer inside**, the camera and layout untouched and loaded meshes kept — measured by the probe
+   on the layer *object* surviving, which jsdom cannot see. It needs the frame to have reported once
+   (`speaksFor`, keyed by deployment), so a typed `Viewer` and the dev proxy's demo keep navigating.
+   The scene the node hands back after a double-click is this case with nothing left to change.
+   A frame that cannot apply one (the layer renamed or deleted) says so (`FrameUnappliedMessage`),
+   and the card stops updating in place and navigates, which restores what the scene needs. A
+   navigation to another deployment loads a new document, so what the card knew about the old
+   one — loaded, reported, told which keys are Coda's — is dropped with it (`forgetDocument`). And
+   the neuron layer is found by **either** flavour's type: the card reads its own frame back
+   against the link, which for FlyWire is written for the Seung-lab fork and names the layer
+   `segmentation_with_graph`.
+   Anything else — a layer added, `Layout`, a different dataset — still navigates and still waits.
+   **An update set in place keeps the user's changes it was computed without.** The frame reports
+   250 ms after a change settles, so an update the card sends inside that window — an upstream edit,
+   a colour change — lists the selection as it was before the latest double-click, and applied
+   wholesale it took the neuron back out with nothing recorded (the probe's "overtaken" check, which
+   fails on the old frame). The frame keeps what the card last said each layer holds (`told`) and,
+   per id, keeps its own state where the update says the same about that id as before
+   (`keepUnseenChanges`). Where the update says something new about an id, the card has decided
+   about it since and wins — which is also what keeps a neuron hidden under "leave Selected", a
+   removal to the card, from coming back as hidden.
+5. **An added neuron is looked up, in a `cheap` node** (`lookupNeurons`), which bends invariant 6 on
+   purpose: it fires per double-click, settled by the frame, never per keystroke, and only for ids
+   the input did not describe. Kept per dataset and id so a restyle asks nothing, and each id is
+   answered only by the request that looked it up, or an id asked twice after an eviction comes back
+   twice. Shared without a signal. A failure is never kept as an answer, but it is replayed for a
+   minute rather than asked again on every upstream keystroke — under the token it was met with
+   (`ReplayedFailures`, beside `memoPromise`, keyed on `DataSource.credential`), so signing in asks
+   again at once, as does Invalidate Results. The rows fall back to an id each, with a warning. A segment
+   the neuron table does not list (a fragment) keeps an id-only row, since somebody chose it.
+6. **A report says which update it describes.** Every navigation (in the frame-only fragment key
+   `codaUpdate`) and every in-place message carries a number; the frame echoes the last one it
+   *applied* on each report, and the card folds only a report of its latest. Without it, a report
+   taken before the frame handled an update (its settle timer already running) was read against
+   the new scene, and every neuron the update added was saved as the user's removal. A message the
+   frame cannot apply (no such layer) leaves the number behind, so its reports are dropped rather
+   than misread — the frame stays stale until the next update instead of corrupting the edits.
+7. **A double-click hides; it does not remove.** Neuroglancer's `select` action toggles
+   `visibleSegments` only, so the neuron stays in the list as `!id`. `Hidden neurons` decides what
+   that means: by default `Selected` is what is drawn and a hidden neuron is a removal (`-id`), so
+   the chip goes on the next update; under "stay in Selected" it is noted as `~id`, written back as
+   `!id`, and `Selected` gains a `visible` column — and only deleting the chip removes a neuron.
+8. **The view is saved, against the rule for every other viewer.** `cameraMemo.ts` keeps a camera
+   out of the document — six floats of somebody else's window aspect. Neuroglancer is the
+   exception because a neuroglancer view is shared *as a place*: a workflow reopened, or a share
+   link followed, has to land on the zoomed-in section somebody was looking at. The frame posts
+   `VIEW_KEYS` (layout, position, orientations, scales, depths) once it settles; the card stores
+   them in `view` with the dataset id (`encodeSavedView`) through a param declared **`unrecorded`**,
+   which `setParam` writes with no undo step and no auto-run, so a camera drag is never what Ctrl+Z
+   rewinds through, and undo and redo step around it: they lay the live value over whatever
+   snapshot they restore (`withLiveUnrecorded`), rather than the write being copied into every
+   holder of one — `past`, `future` and a gesture's start were each a copy, and the third was found
+   by its bug. **The view a frame opens on is not saved** — it is the scene opening, and saving it
+   wrote a camera into every workflow whose card had merely loaded. The frame decides that, where
+   the navigation is seen: it notes the first settled view of a document and after each full
+   navigation, and posts only views after it. The card used to skip one report per navigation
+   instead, and the two halves disagreed whenever an opening changed no view, the frame then posting
+   nothing and the user's next camera move being the one skipped.
+   The view is applied **only by a frame opening from nothing**, never by a later
+   full navigation — that one is somebody changing `Layout` or the dataset and means the published
+   framing; and a view taken in another dataset is **cleared**, a camera being a position in one
+   volume's coordinates. Frame only: the link opens the dataset's own framing.
+9. **The bundle is Spelunker, built here and committed** (`vendor/`, `scripts/build-neuroglancer.mjs`).
+   Spelunker is `seung-lab/neuroglancer`'s `spelunker` branch: Google's master with CAVE's commits
+   rebased on top — middleauth that understands a terms-of-service refusal, graphene tools,
+   annotation tags. It replaced the npm release, 2.41.2, which trailed master by a year: it could
+   not load the public FlyWire segmentation (fixed upstream in `ca5cd35b3c`, carried for a day as a
+   patch) and did not read `uiControlVisibility`, so the entry applied the layer bar by hand. Both
+   went with the switch. Nobody publishes it, and the branch is **force-pushed**, so a git
+   dependency pinned to a commit can stop resolving and would run neuroglancer's build on every
+   install; the script runs the same `npm pack` the npm releases come from, at one commit, and
+   writes the tarball and `vendor/neuroglancer.json` (which commit — the version inside still says
+   2.41.2). **Its keybindings are enabled, and reach neuroglancer by a route of their own.**
+   Spelunker's deployment injects `config/custom-keybinds.json` at build time as the global
+   `NEUROGLANCER_CUSTOM_INPUT_BINDINGS`, read once as `default_viewer_setup` is evaluated, so the
+   package carries none. The script vendors the file from the same commit and `src/ngframe/keybinds.ts`
+   sets the global, imported ahead of neuroglancer — a runtime global rather than a vite `define`,
+   which would have to reach into a dependency under the dev server. `m`, `c` and `f` arm graphene's
+   merge, multicut and find-path tools (merge and multicut write to the segmentation, for anybody
+   with access), and `Ctrl+Shift+X` clears the layer, which the card reads as every neuron
+   removed — an undo step like any other. Keys pressed in the frame stay in its document, so none
+   of them reaches the editor's shortcuts. They were left off for a day as a precaution and turned
+   on at the user's request; there is no technical reason against them.
+   **Nothing updates it by itself, so a weekly job says when it is behind**
+   (`.github/workflows/neuroglancer-freshness.yml`, `scripts/check-neuroglancer.mjs`). It opens one
+   issue with the tip, its newest commits and the update steps, updates it when the tip moves again,
+   and closes it once the bundle matches. An issue rather than a red run, which would email only the
+   workflow's last editor and say nothing about what changed; and a flag rather than an automatic
+   rebuild, because an update wants the selection probe and a CAVE dataset checked by hand. It
+   reports the tip's date and newest commits rather than a count of commits behind, the branch being
+   rebased: after a rebase every commit is new.
+
+10. **A key pressed in the frame never reaches Coda's document**, so the dashboard's ⌥1–9 did
+   nothing once somebody had clicked into the scene — and neuroglancer, which binds `alt+digitN` to
+   `toggle-pick-layer-N`, quietly changed a layer instead. The card tells its frame which chords are
+   Coda's (`FrameKeysMessage`: ⌥1–9 while the dashboard is open, none elsewhere, where Coda leaves
+   them free); the frame takes those in the capture phase, ahead of neuroglancer, and posts them
+   back; the card re-dispatches each as a `keydown` on its own window, so `appShortcuts` decides
+   exactly as for a key pressed outside — tour and all. A field in the frame keeps the key
+   (`isTypingTarget`, moved to `core/keys.ts` so the frame can share it). The claim is re-sent on
+   the frame's first report, a message posted before its script loads being lost. Other app keys
+   (`D`, `F`, `I`, `/`) are not forwarded: neuroglancer uses single letters of its own.
+
+11. **Coda's CAVE tokens are offered to neuroglancer as its credentials** (`src/ngframe/caveCredentials.ts`),
+   so somebody signed in to Coda is not asked again inside the card. The frame's entry registers a
+   `middleauthapp` provider before `setupDefaultViewer`, which copies neuroglancer's provider
+   registry into the viewer it builds. Neuroglancer asks it per data server, when a layer first
+   needs one, and it answers with Coda's token where that server's `/auth_info` names the login
+   service the token came from (`codaTokenFor` — the rule neuroglancer's own middleauth applies,
+   and the reason a server trusting another login service never sees the token). Otherwise, and
+   once Coda's token has been refused, it hands over to neuroglancer's own provider, so the stored
+   token or the sign-in popup work as they always did; a terms-of-service form accepted after a
+   refusal earns Coda's token one more try. This **replaced a first version that wrote the token
+   into neuroglancer's `localStorage` before boot**: that needed a three-second wait at start-up,
+   a reload whenever a scene needed a server the boot had not covered (neuroglancer reads that
+   entry once, and an in-memory token's `appUrls` never grow), a marker to keep neuroglancer's own
+   sign-in from being overwritten, and a sweep for tokens forgotten in Coda — all of it a
+   consequence of going through storage rather than the hook neuroglancer provides. Measured in a
+   browser with a stand-in token: the frame's first request to FlyWire's segmentation carries it,
+   nothing is written to storage, and the refusal brings up neuroglancer's own login prompt.
+
+Two dev-server traps, both silent: the page was first named `ng.html`, and the `/ng` proxy key
+matches by prefix, so the dev server forwarded the page itself to the public demo and it 404'd
+(measured). The page was renamed `neuroglancer.html`, which no prefix catches, and the key anchored
+anyway (`^/ng(?:/|$)`) so the next `/ng…` path is not caught either. And vite's dependency pre-bundling put neuroglancer in `.vite/deps`, where its
+`new Worker(new URL('./chunk_worker.bundle.js', import.meta.url))` 404s — a scene with no meshes
+and no CAVE sign-in, and only in `pnpm dev`. `optimizeDeps` excludes it and pre-bundles its
+CommonJS dependencies by name. `pnpm probe:neuroglancer-select` drives the whole loop in a browser.
+
+Limits: only the dataset's own segmentation layer is read back, so a neuron added in a second
+volume of a multi-volume scene (a BigClust project) is not seen; FlyWire's public segmentation
+fails in mainline and spelunker alike, upstream; and the exporters still refuse the node, so a
+`Selected` wired downstream blocks the notebook.

@@ -1460,6 +1460,142 @@ _none = walk_ns['coda_traverse_connectivity'](['9'], 'outputs', 1, 1, False, Non
 check('walk: nothing found is an empty edge list with every column',
       len(_none) == 0 and list(_none.columns)[:5] == ['preId', 'preType', 'postId', 'postType', 'weight'])
 
+# ---- the Neuroglancer cells, against what the node itself answers ---------------
+# Both goldens' Neuroglancer cells, run against the inputs `src/export/neuroglancer.test.ts` hands
+# the real node, and compared with what the node answered: the link's decoded state and the
+# Selected rows. The neuPrint client and the CAVE client are stubs serving the recorded scene and
+# datastack info; nglscenes is real, since what it writes is half of what is compared.
+try:
+    from nglscenes import Scene as _Scene
+except ImportError:
+    print()
+    print('skipped: the Neuroglancer cells need nglscenes')
+else:
+    import re as _re
+    import unicodedata as _unicodedata
+    from urllib.parse import unquote as _unquote
+
+    _record = json.loads((ROOT / 'src/export/__fixtures__/neuroglancer.json').read_text())
+
+    def _link(url):
+        base, _, fragment = url.partition('#!')
+        return base.rstrip('/'), json.loads(_unquote(fragment))
+
+    def _rows(frame, columns):
+        # NaN and pd.NA as None, so a blank reads the same as the record's null.
+        return [[None if (not isinstance(v, (list, dict)) and pd.isna(v)) else v for v in row]
+                for row in frame[columns].astype(object).itertuples(index=False)]
+
+    def _run_neuroglancer(notebook, ns):
+        load_cell(notebook, 'def coda_neuroglancer_scene', ns)
+        load_cell(notebook, '# ── Neuroglancer ──', ns)
+        return ns
+
+    def _compare(label, ns, expected):
+        base, state = _link(ns['neuroglancer_url'])
+        check(f'neuroglancer {label}: the link opens the viewer the card links to',
+              base == expected['base'], base)
+        check(f'neuroglancer {label}: the link carries the scene the card builds',
+              state == expected['state'],
+              json.dumps(state, sort_keys=True)[:400] + ' vs ' + json.dumps(expected['state'], sort_keys=True)[:400])
+        columns = expected['selected']['columns']
+        selected = ns['neuroglancer_selected']
+        check(f'neuroglancer {label}: Selected has the card\'s columns',
+              list(selected.columns) == columns, str(list(selected.columns)))
+        if list(selected.columns) == columns:
+            check(f'neuroglancer {label}: Selected has the card\'s rows, in its order',
+                  _rows(selected, columns) == expected['selected']['rows'],
+                  str(_rows(selected, columns)))
+
+    _modules = {'pd': pd, 'np': np, 're': _re, 'unicodedata': _unicodedata, 'Scene': _Scene}
+
+    # neuPrint: the scene comes off the client's session, an added neuron off fetch_neurons.
+    _np = _record['neuprint']
+
+    class _Response:
+        def __init__(self, body): self.body = body
+        def raise_for_status(self): pass
+        def json(self): return json.loads(json.dumps(self.body))
+
+    class _Session:
+        def __init__(self): self.asked = []
+        def get(self, url):
+            self.asked.append(url)
+            return _Response(_np['published'])
+
+    class _NeuPrint:
+        server = 'https://neuprint.janelia.org'
+        dataset = 'hemibrain:v1.2.1'
+        def __init__(self): self.session = _Session()
+
+    class _NgCriteria:
+        def __init__(self, bodyId=None, client=None): self.ids = bodyId
+
+    def _fetch_neurons(criteria, client=None):
+        found = pd.DataFrame(_np['lookup']).rename(columns={'neuronId': 'bodyId'})
+        found['bodyId'] = found['bodyId'].astype('int64')
+        return found[found['bodyId'].isin(criteria.ids)].reset_index(drop=True), None
+
+    _client = _NeuPrint()
+    _ns = _run_neuroglancer(FIXTURES / 'everything.ipynb', {
+        **_modules,
+        'hemibrain_neuprint': _client,
+        'find_neurons': pd.DataFrame(_np['neurons']).astype('string'),
+        'NeuronCriteria': _NgCriteria,
+        'fetch_neurons': _fetch_neurons,
+    })
+    check('neuroglancer neuPrint: the scene is asked of the endpoint the card reads',
+          _client.session.asked == ['https://neuprint.janelia.org/api/npexplorer/nglayers/hemibrain:v1.2.1.json'],
+          str(_client.session.asked))
+    _compare('neuPrint', _ns, _np['expected'])
+    _everything = _ns
+
+    # CAVE: the scene is built from the datastack's info, the link opens its own viewer, and an
+    # added neuron is looked up in the dataset's labels.
+    _cv = _record['cave']
+
+    class _Info:
+        def get_datastack_info(self): return json.loads(json.dumps(_cv['info']))
+        def viewer_site(self): return _cv['info']['viewer_site']
+
+    class _Cave:
+        datastack_name = 'flywire_fafb_public'
+        def __init__(self): self.info = _Info()
+
+    class _CaveDataset:
+        def __init__(self):
+            self.client = _Cave()
+            self.labels = pd.DataFrame(_cv['labels']).astype('string')
+
+    _ns = _run_neuroglancer(NOTEBOOK, {
+        **_modules,
+        'flywire_fafb_public_cave': _CaveDataset(),
+        'find_neurons': pd.DataFrame(_cv['neurons']).astype('string'),
+    })
+    _compare('CAVE', _ns, _cv['expected'])
+
+    # A scene showing nothing, which a dataset wired alone or an empty selection is.
+    _empty = _everything['coda_neuroglancer_scene'](_Scene.from_dict(_np['published']), 'hemibrain:v1.2.1', [])
+    _, _state = _link(_everything['coda_neuroglancer_url'](_empty, 'https://neuroglancer-demo.appspot.com'))
+    _layer = next(l for l in _state['layers'] if l['name'] == 'hemibrain:v1.2.1')
+    check('neuroglancer: a scene showing no neurons has an empty segment list and colour map',
+          _layer['segments'] == [] and _layer['segmentColors'] == {}, str(_layer))
+
+    # Numbers labelled as JavaScript spells them, so the canvas' categories and overrides match.
+    _labels = [_everything['_coda_label'](v) for v in [0.1, 0.30000000000000004, 1e21, 1e-7, 100.0, 10**22, None]]
+    check("neuroglancer: number labels are JavaScript's",
+          _labels == ['0.1', '0.30000000000000004', '1e+21', '1e-7', '100', '1e+22', '\u2014'], str(_labels))
+
+    # The warning counts the input's neurons, before the viewer's edits, as the card's does.
+    import io as _io, contextlib as _contextlib
+    _out = _io.StringIO()
+    with _contextlib.redirect_stdout(_out):
+        _everything['coda_shown_segments'](['1', '2'], ['3'], [], limit=2)
+        _everything['coda_shown_segments'](['1', '2', '3'], [], ['3'], limit=2)
+    check('neuroglancer: the size warning counts the input before the edits',
+          _out.getvalue().count('more than 2') == 1 and _out.getvalue().startswith('3 neurons'),
+          _out.getvalue())
+
 # ---- the Custom Dataset golden, run end to end -------------------------------
 # Every cell of `custom.ipynb` after its helpers, executed in order against synthetic parts: the
 # neuron table a frame, the edge list a Feather file and the synapse table a Parquet one, written

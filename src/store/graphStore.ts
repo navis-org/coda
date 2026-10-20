@@ -82,7 +82,7 @@ import type { InferenceResult } from '../core/inference'
 import { checkConnection, inferGraph } from '../core/inference'
 import { spliceCandidate, spliceGraph } from '../core/splice'
 import type { ParamValue } from '../core/node'
-import { defaultParams } from '../core/node'
+import { defaultParams, findParam } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
 import type {
   IterationInfo,
@@ -1349,6 +1349,38 @@ function liveNodes(graph: CodaGraph, ids: readonly string[]): Set<string> {
       return node !== undefined && !isAnnotation(node.type)
     }),
   )
+}
+
+/**
+ * A history snapshot with the live graph's `unrecorded` params laid over it, for every node in
+ * both.
+ *
+ * An unrecorded write is not an undo step, so undo and redo must step the edits around it and leave
+ * it alone — a redo handing back the camera from before somebody moved it gives the document a view
+ * the frame is no longer showing. Laid over at restore rather than written into every snapshot,
+ * because snapshots are held in more than one place (`past`, `future`, a gesture's start) and a
+ * copy into each was one rule written down per holder, the next of which would be found by its bug.
+ */
+function withLiveUnrecorded(restored: CodaGraph, live: CodaGraph): CodaGraph {
+  const liveById = new Map(live.nodes.map((n) => [n.id, n]))
+  let changed = false
+  const nodes = restored.nodes.map((node) => {
+    const now = liveById.get(node.id)
+    const def = now && getNodeDef(node.type)
+    // Only where a value differs, so a card whose camera nobody moved keeps its node object.
+    const keep = (def?.params ?? []).filter(
+      (p) => p.unrecorded && now?.params[p.id] !== node.params[p.id],
+    )
+    if (!now || keep.length === 0) return node
+    const params = { ...node.params }
+    for (const p of keep) {
+      if (p.id in now.params) params[p.id] = now.params[p.id]!
+      else delete params[p.id]
+    }
+    changed = true
+    return { ...node, params }
+  })
+  return changed ? { ...restored, nodes } : restored
 }
 
 /**
@@ -3098,9 +3130,18 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     setParam: (nodeId, paramId, value) => {
-      commit((g) => setNodeParam(g, nodeId, paramId, value), {
-        tag: `param:${nodeId}:${paramId}`,
-      })
+      const node = get().graph.nodes.find((n) => n.id === nodeId)
+      const def = node && getNodeDef(node.type)
+      const param = def && findParam(def, paramId)
+      if (!param?.unrecorded) {
+        commit((g) => setNodeParam(g, nodeId, paramId, value), {
+          tag: `param:${nodeId}:${paramId}`,
+        })
+        return
+      }
+      // No undo step, and none of the snapshots history holds is touched: undo and redo lay the
+      // live value over whatever they restore (`withLiveUnrecorded`).
+      commit((g) => setNodeParam(g, nodeId, paramId, value), { history: false, autoRun: false })
     },
 
     setParams: (nodeId, values) => {
@@ -3405,12 +3446,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const { past, graph, future } = get()
       const entry = past.at(-1)
       if (!entry) return
+      const restored = withLiveUnrecorded(entry.graph, graph)
       set({
-        graph: entry.graph,
+        graph: restored,
         past: past.slice(0, -1),
         future: [...future, { graph, at: Date.now() }],
       })
-      afterGraphChange(entry.graph)
+      afterGraphChange(restored)
     },
 
     redo: () => {
@@ -3418,12 +3460,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const { future, graph, past } = get()
       const entry = future.at(-1)
       if (!entry) return
+      const restored = withLiveUnrecorded(entry.graph, graph)
       set({
-        graph: entry.graph,
+        graph: restored,
         future: future.slice(0, -1),
         past: [...past, { graph, at: Date.now() }],
       })
-      afterGraphChange(entry.graph)
+      afterGraphChange(restored)
     },
 
     // --- evaluation --------------------------------------------------------

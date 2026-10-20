@@ -23,6 +23,15 @@ synapse cloud is not reused across nodes the way geometry is, and a cross produc
 for the session would cost real memory for no second reader. See
 [compartments-plan.md](compartments-plan.md).
 
+So does **Neuroglancer**, smaller: the neuron rows for ids double-clicked into its scene that the
+input did not describe (`lookupNeurons`, a 1024-entry `LruMap` through `memoPromise`, keyed **per
+id** with dataset and annotation key, and asking only for ids nobody has looked up — keyed by the
+set, every double-click re-asked for every earlier one, and an upstream filter moving an added id
+sent a request per keystroke). A `cheap` node re-runs on every restyle, and the scheduler's
+result cache cannot answer a run whose params moved, so without it every restyle re-asked. Not
+`loadCachedTable`: a month in IndexedDB is for bulk tables, and this is a handful of ids. It does
+not honour `ctx.refresh` — the node declares no `dataCache` — so an answer stays for the session.
+
 **The third exists because the first two cannot help each other.** A morphology node's key folds
 in its upstream *provenance*, so it re-runs whenever anything about its Neurons input changes —
 and re-running means re-downloading. Probed on a 12-neuron scene: widening a type pattern from

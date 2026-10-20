@@ -115,6 +115,9 @@ export default tseslint.config(
       // output. Below the viewers and above `nodes/lib`, whose param vocabulary they read and
       // which never imports them (`src/test/importGraph.test.ts`).
       'src/style/**/*.ts',
+      // Coda's own neuroglancer (`neuroglancer.html`). A separate document inside a frame: React or
+      // the store here would be a second copy of the app loaded behind every Neuroglancer card.
+      'src/ngframe/**/*.ts',
       // Not the Web Workers: what a worker may reach is transitive and wider than this rule
       // (Python as well as the UI), so `src/test/importGraph.test.ts` walks every one's graph.
     ],
@@ -133,9 +136,11 @@ export default tseslint.config(
               /*
                * Depth-independent. The enumerated `../ui/*` / `../../ui/*` form covered two
                * levels, and `src/data/ai/` is the first directory at three — the next nesting
-               * would have escaped the rule silently.
+               * would have escaped the rule silently. A regex over relative and `@/` paths only:
+               * the glob form this replaced also matched npm subpaths, such as neuroglancer's own
+               * `neuroglancer/unstable/ui/…` in `src/ngframe`.
                */
-              group: ['**/ui/*', '**/store/*', '@/ui/*', '@/store/*'],
+              regex: '^(?:(?:\\.{1,2}/)+(?:[^/]+/)*|@/)(?:ui|store)/',
               message: `${HEADLESS_AREA} must not depend on the UI or the store.`,
             },
           ],
@@ -161,7 +166,7 @@ export default tseslint.config(
           paths: DRAWING_TABLE_PATHS,
           patterns: [
             {
-              group: ['**/store/*', '@/store/*'],
+              regex: '^(?:(?:\\.{1,2}/)+(?:[^/]+/)*|@/)store/',
               message: 'A drawing table has no state.',
             },
           ],

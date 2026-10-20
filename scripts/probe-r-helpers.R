@@ -1015,5 +1015,127 @@ if (!requireNamespace("nabor", quietly = TRUE)) {
         all(diag(cen) == 0) && isTRUE(all.equal(cen, t(cen))))
 }
 
+# ---- the Neuroglancer chunk, against what the node itself answers ----------------
+#
+# `probe-py-helpers.py`'s check one language over: the golden's chunk run against the inputs
+# `src/export/neuroglancer.test.ts` hands the real node, compared with what the node answered. The
+# neuPrint request is httr's, so httr's three calls are replaced for the run; jsonlite is real,
+# since how it writes a scene back is most of what can go wrong here.
+if (!requireNamespace("stringi", quietly = TRUE) || !requireNamespace("httr", quietly = TRUE)) {
+  cat("\nskipped: the Neuroglancer chunk needs stringi and httr\n")
+} else {
+  record <- jsonlite::fromJSON(file.path(root, "src", "export", "__fixtures__", "neuroglancer.json"),
+                               simplifyVector = FALSE)$neuprint
+  chunk_of <- function(label) {
+    at <- grep(paste0("^```\\{r ", label, "\\}"), lines)
+    if (length(at) != 1L) stop("no single `", label, "` chunk in ", rmd)
+    end <- at + which(lines[(at + 1L):length(lines)] == "```")[1]
+    paste(lines[(at + 1L):(end - 1L)], collapse = "\n")
+  }
+  column_of <- function(rows, name) {
+    vapply(rows, function(r) if (is.null(r[[name]])) NA_character_ else as.character(r[[name]]), "")
+  }
+
+  asked <- character(0)
+  published_text <- as.character(jsonlite::toJSON(record$published, auto_unbox = TRUE, digits = I(17),
+                                                  null = "null"))
+  stubs <- list(
+    # The config is forced, as the real GET does: R evaluates arguments lazily, and a stub that
+    # ignored it would never run the login the chunk takes it from.
+    GET = function(url, config = NULL, ...) {
+      force(config)
+      asked <<- c(asked, url)
+      structure(list(), class = "response")
+    },
+    stop_for_status = function(x, ...) invisible(x),
+    content = function(x, ...) published_text
+  )
+  originals <- lapply(names(stubs), function(n) get(n, envir = asNamespace("httr")))
+  names(originals) <- names(stubs)
+  for (n in names(stubs)) utils::assignInNamespace(n, stubs[[n]], "httr")
+
+  hemibrain_neuprint <- list(server = "https://neuprint.janelia.org", dataset = "hemibrain:v1.2.1",
+                             config = NULL)
+  # The chunk takes its config from a login, which is neuprintr's and would reach the server.
+  logged_in <- 0L
+  neuprint_login <- function(conn) {
+    logged_in <<- logged_in + 1L
+    conn
+  }
+  find_neurons <- tibble(neuronId = column_of(record$neurons, "neuronId"),
+                         type = column_of(record$neurons, "type"))
+  neuprint_get_meta <- function(ids, conn) {
+    found <- tibble(bodyid = column_of(record$lookup, "neuronId"),
+                    type = column_of(record$lookup, "type"),
+                    instance = column_of(record$lookup, "instance"))
+    found[found$bodyid %in% ids, , drop = FALSE]
+  }
+  ran <- tryCatch({
+    eval(parse(text = chunk_of("neuroglancer")), envir = globalenv())
+    TRUE
+  }, error = function(e) conditionMessage(e), finally = {
+    for (n in names(originals)) utils::assignInNamespace(n, originals[[n]], "httr")
+  })
+  check("neuroglancer: the chunk runs", isTRUE(ran), ran)
+
+  if (isTRUE(ran)) {
+    expected <- record$expected
+    check("neuroglancer: the request carries a login's config, not the bare connection's",
+          logged_in == 1L, logged_in)
+    check("neuroglancer: the scene is asked of the endpoint the card reads",
+          identical(asked, "https://neuprint.janelia.org/api/npexplorer/nglayers/hemibrain:v1.2.1.json"),
+          asked)
+    at <- regexpr("#!", neuroglancer_url, fixed = TRUE)
+    base <- sub("/+$", "", substr(neuroglancer_url, 1L, at - 1L))
+    check("neuroglancer: the link opens the viewer the card links to",
+          identical(base, expected$base), base)
+    # Both sides through one serialiser, so the comparison is of the state, not of its spelling.
+    state <- jsonlite::fromJSON(utils::URLdecode(substring(neuroglancer_url, at + 2L)),
+                                simplifyVector = FALSE)
+    canon <- function(x) {
+      if (is.list(x) && !is.null(names(x))) x <- x[order(names(x))]
+      if (is.list(x)) x <- lapply(x, canon)
+      x
+    }
+    same <- identical(jsonlite::toJSON(canon(state), auto_unbox = TRUE, digits = I(17), null = "null"),
+                      jsonlite::toJSON(canon(expected$state), auto_unbox = TRUE, digits = I(17), null = "null"))
+    check("neuroglancer: the link carries the scene the card builds", same)
+
+    columns <- vapply(expected$selected$columns, as.character, "")
+    check("neuroglancer: Selected has the card's columns",
+          identical(names(neuroglancer_selected), columns), names(neuroglancer_selected))
+    cell <- function(v) {
+      if (is.null(v) || (length(v) == 1L && is.na(v))) NA_character_
+      else if (is.logical(v)) tolower(as.character(v)) else as.character(v)
+    }
+    want <- lapply(expected$selected$rows, function(r) vapply(r, cell, ""))
+    got <- lapply(seq_len(nrow(neuroglancer_selected)), function(i) {
+      vapply(columns, function(n) cell(neuroglancer_selected[[n]][i]), "", USE.NAMES = FALSE)
+    })
+    check("neuroglancer: Selected has the card's rows, in its order", identical(got, want),
+          vapply(got, paste, "", collapse = "|"))
+  }
+
+  # A scene showing nothing, which a dataset wired alone or an empty selection is: `ifelse` over no
+  # segments answers a logical(0), which nglscenes-r refuses as segment ids.
+  empty <- tryCatch(
+    coda_neuroglancer_scene(nglscenes::ngs_from_list(record$published), "hemibrain:v1.2.1", character(0)),
+    error = function(e) conditionMessage(e))
+  check("neuroglancer: a scene showing no neurons is built", !is.character(empty), empty)
+  if (!is.character(empty)) {
+    at <- regexpr("#!", url <- coda_neuroglancer_url(empty, "https://neuroglancer-demo.appspot.com"), fixed = TRUE)
+    state <- jsonlite::fromJSON(utils::URLdecode(substring(url, at + 2L)), simplifyVector = FALSE)
+    layer <- Filter(function(l) identical(l$name, "hemibrain:v1.2.1"), state$layers)[[1]]
+    check("neuroglancer: ...and writes an empty segment list and colour map",
+          identical(layer$segments, list()) && identical(names(layer$segmentColors), character(0)) &&
+            grepl('"segmentColors":{}', utils::URLdecode(url), fixed = TRUE))
+  }
+
+  # Numbers labelled as JavaScript spells them, so the canvas' categories and overrides match.
+  check("neuroglancer: number labels are JavaScript's",
+        identical(coda_label(c(0.1, 0.30000000000000004, 1e21, 1e-7, 100, NA)),
+                  c("0.1", "0.30000000000000004", "1e+21", "1e-7", "100", "\u2014")))
+}
+
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)

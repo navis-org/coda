@@ -110,6 +110,7 @@ import { openDvidMeshSource } from '../dvid/meshes'
 import { parseDvidRef } from '../dvid/refs'
 import { DEFAULT_SERVER, normaliseServer, serverLabel, sourceIdForServer } from './servers'
 import { getToken } from './credentials'
+import { RETRY_AFTER_MS, ReplayedFailures } from '../memoPromise'
 import {
   adjacencyCypher,
   connectivityCypher,
@@ -186,16 +187,6 @@ const PUBLISHED_ROUTE = route(
  * ~500ms of latency. Six at a time keeps a 50-neuron fetch to a few seconds without opening
  * fifty sockets against a server other people are using.
  */
-/**
- * How long a read that just failed is answered from its failure rather than asked again.
- *
- * For the reads that are asked per item rather than once — the edge sample per hop, the
- * neuroglancer state per neuron's thumbnail and per restyle of a Neuroglancer card. A failure is
- * never kept as an answer (`isNotFound`), so without this a server that is down is asked once per
- * item for as long as it stays down.
- */
-const RETRY_AFTER_MS = 60_000
-
 const SKELETON_CONCURRENCY = 6
 
 /**
@@ -292,8 +283,6 @@ interface DatasetState {
    */
   scene?: NgScene | null
   sceneResolving?: Promise<NgScene | null>
-  /** The last failed read of it, answered from for `RETRY_AFTER_MS` under the same token. */
-  sceneFailed?: { at: number; token: string | undefined; error: unknown }
   /** In flight, so two nodes inferring at once don't each trigger discovery. */
   discovering?: Promise<void>
   /** The same for the edge-property sample, which nothing but a property-asking query waits on. */
@@ -354,6 +343,8 @@ export class NeuPrintSource implements DataSource {
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
 
   private states = new Map<string, DatasetState>()
+  /** Failed reads of a dataset's neuroglancer state, replayed under the same token. */
+  private readonly sceneFailures = new ReplayedFailures<string>()
   /**
    * The listing — `DatasetListing`, re-fetched on every awaited call, which is how the Sources
    * panel refreshes it. `loadDatasets` is what makes a re-list keep what discovery learned.
@@ -466,6 +457,11 @@ export class NeuPrintSource implements DataSource {
     }
     // Published and announced by `DatasetListing`, in that order.
     return infos.map((info) => this.states.get(info.id)!.info)
+  }
+
+  /** The token requests are made under now (`DataSource.credential`). */
+  credential(): string | undefined {
+    return getToken()
   }
 
   /**
@@ -1753,17 +1749,14 @@ export class NeuPrintSource implements DataSource {
      * re-asked, per token, since thumbnails ask per neuron and a restyle asks again.
      */
     const token = getToken()
-    const failed = state.sceneFailed
-    if (failed && failed.token === token && Date.now() - failed.at < RETRY_AFTER_MS) {
-      throw failed.error
-    }
+    this.sceneFailures.check(datasetId, token)
     state.sceneResolving ??= fetchNgState(datasetId, this.options(signal))
       .then(
         (resolved) => (state.scene = resolved),
         (error: unknown) => {
           if (isNotFound(error)) return (state.scene = null)
           // A cancel says nothing about the server, so it holds nobody else back.
-          if (!signal?.aborted) state.sceneFailed = { at: Date.now(), token, error }
+          this.sceneFailures.record(datasetId, error, token, signal)
           throw error
         },
       )

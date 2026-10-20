@@ -9,7 +9,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { memoPromise } from './memoPromise'
+import { ReplayedFailures, memoPromise, untilAborted } from './memoPromise'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -71,4 +71,44 @@ describe('memoPromise', () => {
       expect(held.get('k')).toBe(fresh)
     },
   )
+})
+
+describe('untilAborted', () => {
+  it('rejects at once on a signal already aborted, and still observes the work', async () => {
+    const aborted = new AbortController()
+    aborted.abort(new Error('cancelled'))
+    const work = deferred<number>()
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      await expect(untilAborted(work.promise, aborted.signal)).rejects.toThrow('cancelled')
+      // The work fails after nobody is waiting for it any more: that is not an unhandled rejection.
+      work.reject(new Error('server said no'))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
+})
+
+describe('ReplayedFailures', () => {
+  it('replays a failure under the credential it was met with, and not under another', () => {
+    const failures = new ReplayedFailures<string>()
+    failures.record('k', new Error('401'), 'old-token')
+    expect(() => failures.check('k', 'old-token')).toThrow('401')
+    // Signing in is a reason to ask again at once.
+    expect(() => failures.check('k', 'new-token')).not.toThrow()
+  })
+
+  it('never records a cancel, and forgets on request', () => {
+    const failures = new ReplayedFailures<string>()
+    const aborted = new AbortController()
+    aborted.abort()
+    failures.record('k', new Error('cancelled'), undefined, aborted.signal)
+    expect(() => failures.check('k', undefined)).not.toThrow()
+    failures.record('k', new Error('500'), undefined)
+    failures.forget('k')
+    expect(() => failures.check('k', undefined)).not.toThrow()
+  })
 })

@@ -20,6 +20,7 @@ import {
   dendrogramSelection,
   distributionPlan,
   histogramPlan,
+  neuroglancerPlan,
   pickedIds,
   piePlan,
   scatterPlan,
@@ -208,5 +209,36 @@ describe('the other viewers', () => {
     // The card's own sentence, from `resolveFilters`, with the document's suffix.
     const [problem] = resolveFilters(schema, clauses).problems
     expect(plan.ignored).toEqual([`${problem!.message}, so this filter is not applied.`])
+  })
+})
+
+describe("a Neuroglancer node's colours", () => {
+  /*
+   * The card colours only the input's neurons in a data-driven mode, so a mode with nothing to read
+   * must not become one default colour: that would also paint a neuron added in the viewer, which
+   * keeps neuroglancer's own colour on the card.
+   */
+  const colors = (params: Record<string, unknown>, wired = true) =>
+    neuroglancerPlan(
+      fakeNeutralContext({
+        type: 'out.neuroglancer',
+        params: { segmentColor: '2', ...params } as ParamValues,
+        wires: { dataset: 'ds', ...(wired ? { neurons: 'neurons' } : {}) },
+      }),
+    ).colors
+
+  it('is one default colour only in the constant mode', () => {
+    expect(colors({ segmentColorMode: 'constant' })).toMatchObject({ kind: 'constant' })
+  })
+
+  it('colours each input neuron flat where a data-driven mode has no column', () => {
+    expect(colors({ segmentColorMode: 'categorical' })).toMatchObject({ kind: 'flat' })
+  })
+
+  it('colours nothing where no neurons are wired, whatever the mode', () => {
+    expect(colors({ segmentColorMode: 'categorical', segmentColorBy: 'type' }, false)).toEqual({
+      kind: 'none',
+    })
+    expect(colors({ segmentColorMode: 'literal' }, false)).toEqual({ kind: 'none' })
   })
 })

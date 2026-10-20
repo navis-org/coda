@@ -67,7 +67,9 @@ const NEUPRINT_PROXY = {
    * Without this rule the embed still works; it just falls back to replacing the layer list on
    * every update. `src/data/neuroglancer/scene.ts` owns the mapping and the fallback.
    */
-  '/ng': {
+  // Anchored: a plain `'/ng'` key matches by prefix, and forwarded `/neuroglancer.html` — this
+  // build's own copy — to the public viewer.
+  '^/ng(?:/|$)': {
     target: 'https://neuroglancer-demo.appspot.com',
     changeOrigin: true,
     rewrite: (path: string) => path.replace(/^\/ng/, '') || '/',
@@ -349,6 +351,9 @@ export default defineConfig({
         mcp: fileURLToPath(new URL('./mcp.html', import.meta.url)),
         changelog: fileURLToPath(new URL('./changelog.html', import.meta.url)),
         biophysics: fileURLToPath(new URL('./biophysics.html', import.meta.url)),
+        // Not a page: Coda's own neuroglancer, which the Neuroglancer card embeds so it can read
+        // the selection back. Kept out of the sitemap and the analytics by `vite/entries.ts`.
+        neuroglancer: fileURLToPath(new URL('./neuroglancer.html', import.meta.url)),
       },
     },
   },
@@ -356,6 +361,30 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
+  },
+  /*
+   * Neuroglancer (`neuroglancer.html`) is served as it is published, not pre-bundled: it starts its
+   * workers with `new Worker(new URL('./chunk_worker.bundle.js', import.meta.url))`, and a
+   * pre-bundled copy in `.vite/deps` resolves that next to itself, where nothing is — a 404 that
+   * leaves a scene with no meshes and no CAVE sign-in. Dev only; the build was never affected.
+   * Excluding it means its CommonJS dependencies have to be pre-bundled by name instead, or each
+   * fails as a missing `default` export; `neuroglancer > …` because none is a dependency of ours.
+   */
+  optimizeDeps: {
+    exclude: ['neuroglancer'],
+    include: [
+      'codemirror',
+      'codemirror/addon/fold/brace-fold.js',
+      'codemirror/addon/fold/foldcode.js',
+      'codemirror/addon/fold/foldgutter.js',
+      'codemirror/addon/lint/lint.js',
+      'codemirror/mode/javascript/javascript.js',
+      'core-js/actual/symbol/async-dispose.js',
+      'core-js/actual/symbol/dispose.js',
+      'crc-32',
+      'crc-32/crc32c.js',
+      'nifti-reader-js',
+    ].map((dep) => `neuroglancer > ${dep}`),
   },
   // Applied to `pnpm dev` *and* `pnpm preview` — they take separate proxy config, and a
   // preview server without it 404s every neuPrint request with an empty body.

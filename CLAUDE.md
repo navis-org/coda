@@ -867,9 +867,35 @@ rule belongs to one area, its record is in that area's doc.
   on `mouseout` rather than on the edit. Two ways in, both closed: an update is **held until
   `mouseleave`** (replacements too, but never the opening navigation), and every segment id goes
   through **`isSegmentId`**, since a miss deletes the layer rather than the id. That filter is in
-  **`buildScene`**, not in the node, because the profile frame is the other caller. Third rule, and
-  why none of this reproduces in production: **`proxiedViewer` says a prefix is declared, not that
-  anything serves it**, so a static deploy 404s instead of degrading.
+  **`buildScene`**, not in the node, because the profile frame is the other caller. Third rule:
+  **`proxiedViewer` says a prefix is declared, not that anything serves it**, so a static deploy
+  pointed at the public demo 404s instead of degrading.
+- **The Neuroglancer card embeds Coda's own neuroglancer (`neuroglancer.html`), because only a
+  same-origin frame can be read — and that is what `Selected` is. The `Link` is always the
+  datastack's viewer; `Viewer type`/`Viewer` choose only the frame (`frameTarget`) and are
+  presentational**, or a link becomes a fact about the host or about somebody's embed choice.
+  **It is the one viewer whose camera is saved** (`view`, an `unrecorded` param: no undo step), and
+  only an opening frame applies it, and only in the dataset it was taken in. A key pressed in the
+  frame never reaches Coda's window, so ⌥1–9 on the dashboard are **claimed by message and handed
+  back** (`FrameKeysMessage`), re-dispatched on Coda's window rather than handled twice. **Coda's
+  CAVE tokens reach it as a `middleauthapp` credentials provider** registered before the viewer is
+  built (`caveCredentials.ts`), per data server and only where its `/auth_info` names the token's
+  login service, with neuroglancer's own provider underneath — never by writing into its storage. The bundle is **Spelunker**, built by
+  `scripts/build-neuroglancer.mjs` into a committed `vendor/` tarball because the branch is
+  force-pushed and unpublished, its keybindings set from the vendored config by `keybinds.ts` before
+  neuroglancer loads (they are build-time in Spelunker), and loaded by our own entry (theirs imports
+  Google Tag Manager); the frame posts its state when the *layers*
+  move. What somebody double-clicks is stored as **edits on top of the input** (`selectionEdits.ts`,
+  one `+id`/`-id` param), folded in **against the scene last sent, never the input table**, which
+  may have moved — diffed against the input, an upstream addition reads as a user's removal. A
+  change that is **only a selection** (`selectionChanges`) is **set in place** by message, never
+  restored through the fragment: restoring `layers` rebuilds every layer, which is why other
+  updates wait for the pointer to leave and why meshes reload. **A report is folded only if it
+  names the card's latest update** (`FRAME_UPDATE_KEY`), or one taken just before an update lands
+  saves that update's additions as the user's removals. In `pnpm dev`, neuroglancer must
+  stay out of `optimizeDeps` or its worker 404s — no meshes, no CAVE sign-in — and no page may be
+  named `ng*`, which the `/ng` proxy forwarded by prefix before it was anchored. See
+  [docs/viewers.md](docs/viewers.md).
 
 ### Backends and data — [docs/backends.md](docs/backends.md)
 

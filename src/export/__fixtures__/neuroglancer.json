@@ -1,0 +1,305 @@
+{
+  "neuprint": {
+    "published": {
+      "dimensions": {
+        "x": [
+          8e-9,
+          "m"
+        ],
+        "y": [
+          8e-9,
+          "m"
+        ],
+        "z": [
+          8e-9,
+          "m"
+        ]
+      },
+      "position": [
+        17000.5,
+        20000,
+        18000
+      ],
+      "projectionScale": 91364.04452716278,
+      "layout": "xy",
+      "showSlices": true,
+      "selectedLayer": {
+        "layer": "hemibrain:v1.2.1",
+        "visible": true,
+        "size": 350
+      },
+      "badlayers": [
+        "old-roi"
+      ],
+      "layers": [
+        {
+          "type": "image",
+          "name": "em",
+          "source": "precomputed://gs://neuroglancer-janelia-flyem-hemibrain/emdata/clahe_yz/jpeg"
+        },
+        {
+          "type": "segmentation",
+          "name": "hemibrain:v1.2.1",
+          "source": {
+            "url": "precomputed://gs://neuroglancer-janelia-flyem-hemibrain/v1.2/segmentation",
+            "subsources": {
+              "default": true,
+              "meshes": true
+            }
+          },
+          "segmentColors": {
+            "5813105172": "#ff0000"
+          },
+          "selectedAlpha": 0.2
+        },
+        {
+          "type": "segmentation",
+          "name": "roi",
+          "source": "precomputed://gs://neuroglancer-janelia-flyem-hemibrain/v1.2/rois",
+          "segments": [
+            "1",
+            "2"
+          ]
+        },
+        {
+          "type": "annotation",
+          "name": "synapses",
+          "source": "precomputed://gs://neuroglancer-janelia-flyem-hemibrain/v1.2/synapses"
+        }
+      ]
+    },
+    "neurons": [
+      {
+        "neuronId": "1001",
+        "type": "LC4"
+      },
+      {
+        "neuronId": "1002",
+        "type": "Mi1"
+      },
+      {
+        "neuronId": "1003",
+        "type": "lc10"
+      },
+      {
+        "neuronId": "1004",
+        "type": null
+      },
+      {
+        "neuronId": "1005",
+        "type": "LC4"
+      },
+      {
+        "neuronId": "1003",
+        "type": "T4(a)"
+      },
+      {
+        "neuronId": "LC4",
+        "type": "T4_a"
+      },
+      {
+        "neuronId": null,
+        "type": "T4a"
+      }
+    ],
+    "lookup": [
+      {
+        "neuronId": "999",
+        "type": "Tm1",
+        "instance": "Tm1_R"
+      }
+    ],
+    "expected": {
+      "base": "https://neuroglancer-demo.appspot.com",
+      "state": {
+        "dimensions": {
+          "x": [
+            8e-9,
+            "m"
+          ],
+          "y": [
+            8e-9,
+            "m"
+          ],
+          "z": [
+            8e-9,
+            "m"
+          ]
+        },
+        "position": [
+          17000.5,
+          20000,
+          18000
+        ],
+        "projectionScale": 91364.04452716278,
+        "layout": "xy-3d",
+        "showSlices": false,
+        "selectedLayer": {
+          "layer": "hemibrain:v1.2.1",
+          "visible": false,
+          "size": 350
+        },
+        "layers": [
+          {
+            "type": "segmentation",
+            "name": "hemibrain:v1.2.1",
+            "source": {
+              "url": "precomputed://gs://neuroglancer-janelia-flyem-hemibrain/v1.2/segmentation",
+              "subsources": {
+                "default": true,
+                "meshes": true,
+                "bounds": false
+              }
+            },
+            "segmentColors": {
+              "1002": "#c98500",
+              "1003": "#199e70",
+              "1004": "#d95926",
+              "1005": "#123456"
+            },
+            "selectedAlpha": 0.2,
+            "segments": [
+              "!1002",
+              "1003",
+              "1004",
+              "1005",
+              "998",
+              "999"
+            ]
+          }
+        ],
+        "showAxisLines": false
+      },
+      "selected": {
+        "columns": [
+          "neuronId",
+          "type",
+          "visible"
+        ],
+        "rows": [
+          [
+            "1002",
+            "Mi1",
+            false
+          ],
+          [
+            "1003",
+            "lc10",
+            true
+          ],
+          [
+            "1004",
+            null,
+            true
+          ],
+          [
+            "1005",
+            "LC4",
+            true
+          ],
+          [
+            "1003",
+            "T4(a)",
+            true
+          ],
+          [
+            "999",
+            "Tm1",
+            true
+          ],
+          [
+            "998",
+            null,
+            true
+          ]
+        ]
+      }
+    }
+  },
+  "cave": {
+    "info": {
+      "segmentation_source": "graphene://https://prod.flywire-daf.com/segmentation/1.0/flywire_public",
+      "aligned_volume": {
+        "image_source": "precomputed://gs://flywire_em/aligned/v1"
+      },
+      "viewer_resolution_x": 4,
+      "viewer_resolution_y": 4,
+      "viewer_resolution_z": 40,
+      "viewer_site": "https://ngl.flywire.ai"
+    },
+    "labels": [
+      {
+        "neuronId": "720575940600000001",
+        "type": "DNa02",
+        "side": "left"
+      },
+      {
+        "neuronId": "720575940600000002",
+        "type": "DNa02",
+        "side": "right"
+      }
+    ],
+    "neurons": [
+      {
+        "neuronId": "720575940600000002",
+        "type": "DNa02"
+      }
+    ],
+    "expected": {
+      "base": "https://ngl.flywire.ai",
+      "state": {
+        "dimensions": {
+          "x": [
+            4e-9,
+            "m"
+          ],
+          "y": [
+            4e-9,
+            "m"
+          ],
+          "z": [
+            4e-8,
+            "m"
+          ]
+        },
+        "layers": [
+          {
+            "type": "image",
+            "name": "EM",
+            "source": "precomputed://gs://flywire_em/aligned/v1"
+          },
+          {
+            "type": "segmentation_with_graph",
+            "name": "flywire_fafb_public",
+            "source": "graphene://https://prod.flywire-daf.com/segmentation/1.0/flywire_public",
+            "segments": [
+              "720575940600000002",
+              "720575940600000001"
+            ],
+            "segmentColors": {},
+            "segmentDefaultColor": "#199e70"
+          }
+        ],
+        "layout": "3d",
+        "showSlices": false,
+        "showAxisLines": false
+      },
+      "selected": {
+        "columns": [
+          "neuronId",
+          "type"
+        ],
+        "rows": [
+          [
+            "720575940600000002",
+            "DNa02"
+          ],
+          [
+            "720575940600000001",
+            "DNa02"
+          ]
+        ]
+      }
+    }
+  }
+}

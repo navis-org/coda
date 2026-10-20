@@ -21,9 +21,10 @@ import type { NgScene } from '../../data/neuroglancer/scene'
 import { parseSceneUrl, layerSourceUrl } from '../../data/neuroglancer/scene'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
-import { registerSource, requireSource } from '../../data/source'
+import { CANONICAL_SCHEMAS, registerSource, requireSource } from '../../data/source'
 import { resolveColor } from '../../style/encoding'
 import { readColorSpec } from '../lib/encodingParams'
+import { frameTarget } from './neuroglancer'
 import '../index'
 
 const NEURON_SCHEMA = tableSchema(
@@ -79,6 +80,8 @@ function stubSource(scene: NgScene | null = PUBLISHED, id = 'stub'): DataSource 
       neuronIndex: false,
       viewerScene: scene !== null,
     },
+    // Required of every source; `Selected` reads the neuron schema when no table is wired.
+    schemas: CANONICAL_SCHEMAS,
     fetchViewerScene: () => Promise.resolve(scene ?? undefined),
     // Enough of a listing for the generic dataset node to resolve an id, which is all the
     // scheduler-level test below needs from it.
@@ -436,8 +439,10 @@ describe('provenance', () => {
     // the node would stay `ok` while the URL still carried the old palette. `uiScale` is the
     // other side of the same rule — it scales the iframe and cannot change a byte of output —
     // and so is `showLayerBar`, written only into what the frame is pointed at.
+    // `Viewer type` and `Viewer` too, now that they choose only what the *card* embeds: the link
+    // is the datastack's whatever they say, so changing them must not re-run anything.
     const presentational = (def().params ?? []).filter((p) => p.presentational).map((p) => p.id)
-    expect(presentational).toEqual(['uiScale', 'showLayerBar'])
+    expect(presentational).toEqual(['uiScale', 'showLayerBar', 'view', 'viewerType', 'viewer'])
   })
 
   it('does not let the interface scale change the link', async () => {
@@ -538,15 +543,15 @@ describe('which viewer the segmentation is authenticated for', () => {
     )
   })
 
-  it('follows the Viewer param when one is set, not the dataset’s own', async () => {
-    // Somebody who has pointed the node elsewhere has changed which viewer opens it, so the
-    // prefix has to follow the choice rather than the dataset.
-    const { scene } = await sceneFrom(
-      { viewer: 'https://ngl.flywire.ai/' },
+  it('links the datastack’s viewer whatever the card embeds', async () => {
+    // `Viewer` and `Viewer type` choose the card's frame; a link opens the same thing for anyone.
+    const { url, scene } = await sceneFrom(
+      { viewerType: 'seunglab', viewer: 'https://ngl.flywire.ai/' },
       undefined,
       sourceWithViewer('https://spelunker.cave-explorer.org/'),
     )
-    expect(segmentationSource(scene)).toBe(GRAPHENE)
+    expect(url.startsWith('https://spelunker.cave-explorer.org/#!')).toBe(true)
+    expect(segmentationSource(scene)).toContain('middleauth+')
   })
 
   it('names the graphene layer the way the chosen viewer expects', async () => {
@@ -572,21 +577,60 @@ describe('which viewer the segmentation is authenticated for', () => {
     const fly = await sceneFrom({}, undefined, sourceWithViewer('https://ngl.flywire.ai/'))
     expect(grapheneLayer(fly.scene)['segments']).toEqual(['10001', '10002', '10003'])
   })
+})
 
-  it('lets Viewer type override the guess, which is what an unknown host needs', async () => {
-    const { scene } = await sceneFrom(
-      { viewerType: 'spelunker' },
-      undefined,
-      sourceWithViewer('https://ngl.flywire.ai/'),
-    )
-    expect(segmentationSource(scene)).toContain('middleauth+')
+describe('what the card embeds', () => {
+  const with_ = (extra: ParamValues) => frameTarget({ ...defaultParams(def()), ...extra })
 
-    const back = await sceneFrom(
-      { viewerType: 'seunglab' },
-      undefined,
-      sourceWithViewer('https://spelunker.cave-explorer.org/'),
+  it('is Coda’s own neuroglancer by default, while the link stays the dataset’s viewer', async () => {
+    const { url } = await sceneFrom()
+    expect(url.includes('neuroglancer.html')).toBe(false)
+    expect(with_({})).toEqual({ use: 'own' })
+  })
+
+  it('is the dataset’s viewer, or a custom deployment in the format chosen', () => {
+    expect(with_({ viewerType: 'dataset' })).toEqual({ use: 'link' })
+    expect(with_({ viewerType: 'seunglab', viewer: ' https://ngl.flywire.ai ' })).toEqual({
+      use: 'custom',
+      base: 'https://ngl.flywire.ai',
+      flavour: 'seunglab',
+    })
+    // A custom choice with no URL yet: the dataset's viewer in that format, and a warning.
+    expect(with_({ viewerType: 'spelunker' })).toEqual({
+      use: 'link',
+      flavour: 'spelunker',
+      pending: true,
+    })
+    const d = def()
+    const lines = d.validate!(
+      makeInferContext(d, { ...defaultParams(d), viewerType: 'spelunker' }, {}),
     )
-    expect(segmentationSource(back.scene)).toBe(GRAPHENE)
+    expect(lines.join(' ')).toMatch(/Enter the custom deployment/)
+  })
+
+  it('keeps a graph saved before the choice existed doing what it did', () => {
+    // The retired `auto`: a typed Viewer, in a format read off its host; otherwise Coda's own.
+    expect(with_({ viewerType: 'auto' })).toEqual({ use: 'own' })
+    expect(with_({ viewerType: 'auto', viewer: 'https://x.org' })).toEqual({
+      use: 'custom',
+      base: 'https://x.org',
+    })
+    // `Seung-lab` with no Viewer embedded the dataset's viewer, in that format — and still does.
+    expect(with_({ viewerType: 'seunglab' })).toEqual({
+      use: 'link',
+      flavour: 'seunglab',
+      pending: true,
+    })
+    // And a stored card with no key at all predates the control, which was `auto`.
+    expect(findParam(def(), 'viewerType')?.absentMeans).toBe('auto')
+  })
+
+  it('shows Viewer only where a custom deployment is chosen', () => {
+    const viewer = findParam(def(), 'viewer')!
+    expect(viewer.visibleIf?.({ viewerType: 'coda' })).toBe(false)
+    expect(viewer.visibleIf?.({ viewerType: 'dataset' })).toBe(false)
+    expect(viewer.visibleIf?.({ viewerType: 'seunglab' })).toBe(true)
+    expect(viewer.visibleIf?.({ viewerType: 'auto', viewer: 'https://x.org' })).toBe(true)
   })
 })
 
@@ -658,5 +702,235 @@ describe('extra layers', () => {
       input: (port: string) => (port === 'layers' ? num(1) : ctx.input(port)),
     }
     await expect(d.evaluate(wrong)).rejects.toThrow(/not a layer set/)
+  })
+})
+
+describe('neurons changed inside the viewer', () => {
+  /** Ids are text, as every source publishes them (invariant 8). */
+  const STR_SCHEMA = tableSchema(column('neuronId', 'str'), column('type', 'str'))
+  const input = (ids: string[]) =>
+    tableFromRows(
+      STR_SCHEMA,
+      ids.map((neuronId) => ({ neuronId, type: `T${neuronId}` })),
+      'neurons',
+    )
+
+  /** A source that knows some neurons by id, and counts how often it was asked. */
+  function lookupSource(known: Record<string, string>, fail = false) {
+    const asked: string[][] = []
+    const source = {
+      ...stubSource(),
+      findNeurons: (req: { neuronIds?: readonly string[] }) => {
+        asked.push([...(req.neuronIds ?? [])])
+        if (fail) return Promise.reject(new Error('server said no'))
+        const ids = (req.neuronIds ?? []).filter((id) => id in known)
+        return Promise.resolve(
+          tableFromRows(
+            STR_SCHEMA,
+            ids.map((neuronId) => ({ neuronId, type: known[neuronId]! })),
+            'neurons',
+          ),
+        )
+      },
+    } as unknown as DataSource
+    return { source, asked }
+  }
+
+  async function run(
+    table: TableValue | undefined,
+    selectionEdits: string[],
+    source: DataSource,
+    said: string[] = [],
+    extra: ParamValues = {},
+    refresh = false,
+  ) {
+    const d = def()
+    const params = { ...defaultParams(d), ...extra, selectionEdits } as ParamValues
+    const out = await d.evaluate({ ...evalContext(d, params, table, source, said), refresh })
+    return {
+      scene: parseSceneUrl(asString(out['url']))!,
+      selected: out['selected'] as TableValue,
+    }
+  }
+
+  it('applies them to the scene on top of the input', async () => {
+    const { source } = lookupSource({})
+    const { scene } = await run(input(['101', '102', '103']), ['+900', '-102'], source)
+    expect(layersOf(scene)[1]!['segments']).toEqual(['101', '103', '900'])
+  })
+
+  it('emits what the scene shows, keeping the input’s rows and looking up the added ones', async () => {
+    const { source, asked } = lookupSource({ '911': 'LC4' })
+    const said: string[] = []
+    const { selected } = await run(
+      input(['111', '112']),
+      ['+911', '+912', '-112'],
+      source,
+      said,
+    )
+    expect(selected.schema).toEqual(STR_SCHEMA)
+    expect(selected.data['neuronId']).toEqual(['111', '911', '912'])
+    // The input's own row, the dataset's row, and an id the dataset does not list.
+    expect(selected.data['type']).toEqual(['T111', 'LC4', null])
+    // Only the ids the input did not already describe are asked about.
+    expect(asked).toEqual([['911', '912']])
+    expect(said.join(' ')).toMatch(/1 neuron added in the viewer is not in the dataset/)
+  })
+
+  it('asks nothing when nothing was added, and nothing again for the same additions', async () => {
+    const { source, asked } = lookupSource({ '921': 'A' })
+    await run(input(['120']), ['-120'], source)
+    expect(asked).toEqual([])
+    // A restyle re-runs this cheap node; it must not re-query.
+    await run(input(['120']), ['+921'], source)
+    await run(input(['120']), ['+921'], source)
+    expect(asked).toEqual([['921']])
+  })
+
+  it('keeps the link and an id-only row when the lookup fails, and asks again when invalidated', async () => {
+    const { source, asked } = lookupSource({}, true)
+    const said: string[] = []
+    const { scene, selected } = await run(input(['130']), ['+931'], source, said)
+    expect(layersOf(scene)[1]!['segments']).toEqual(['130', '931'])
+    expect(selected.data['neuronId']).toEqual(['130', '931'])
+    expect(said.join(' ')).toMatch(
+      /Could not look up the 1 neuron .*server said no.*Invalidate Results/,
+    )
+    // Replayed rather than asked again: this node is cheap, and an upstream keystroke re-runs it.
+    const again: string[] = []
+    await run(input(['130', '131']), ['+931'], source, again)
+    expect(asked).toHaveLength(1)
+    expect(again.join(' ')).toMatch(/Could not look up/)
+    // But a failure has not answered "none": Invalidate Results asks again at once.
+    await run(input(['130']), ['+931'], source, [], {}, true)
+    expect(asked).toHaveLength(2)
+  })
+
+  it('answers an id once when its first request was evicted and a neighbour kept it alive', async () => {
+    // The lookup cache is an LRU of 1024 ids. 971 and 972 are looked up together, and filling the
+    // cache evicts one of them alone, so the next run holds the first request through the other
+    // and asks for the evicted one again — an id both requests can answer.
+    const known = { '971': 'A', '972': 'B' }
+    const { source } = lookupSource(known)
+    await run(input(['150']), ['+971', '+972'], source)
+    const filler = Array.from({ length: 1023 }, (_, i) => `+${980000 + i}`)
+    await run(input(['150']), ['+971', ...filler], source)
+    const { selected } = await run(input(['150']), ['+971', '+972'], source)
+    expect(selected.data['neuronId']).toEqual(['150', '971', '972'])
+  })
+
+  it('lets a cancel end the run rather than warn that the lookup failed', async () => {
+    const aborted = new AbortController()
+    const source = {
+      ...stubSource(),
+      findNeurons: () => {
+        aborted.abort()
+        return Promise.reject(new Error('aborted'))
+      },
+    } as unknown as DataSource
+    const d = def()
+    const said: string[] = []
+    const ctx = {
+      ...evalContext(
+        d,
+        { ...defaultParams(d), selectionEdits: ['+991'] },
+        input(['190']),
+        source,
+        said,
+      ),
+      signal: aborted.signal,
+    }
+    await expect(d.evaluate(ctx)).rejects.toThrow()
+    expect(said.join(' ')).not.toMatch(/Could not look up/)
+  })
+
+  it('emits the added neurons with the dataset’s columns when no table is wired', async () => {
+    const { source } = lookupSource({ '941': 'B' })
+    const { scene, selected } = await run(undefined, ['+941'], source)
+    expect(layersOf(scene)[1]!['segments']).toEqual(['941'])
+    expect(selected.data['neuronId']).toEqual(['941'])
+  })
+
+  it('asks only for neurons nobody has looked up, however the added set moves', async () => {
+    const { source, asked } = lookupSource({ '951': 'A', '952': 'B' })
+    await run(input(['150']), ['+951'], source)
+    await run(input(['150']), ['+951', '+952'], source)
+    // An upstream edit taking 951 into the input and out again changes which ids are "added".
+    await run(input(['150', '951']), ['+951', '+952'], source)
+    const { selected } = await run(input(['150']), ['+951', '+952'], source)
+    expect(asked).toEqual([['951'], ['952']])
+    expect(selected.data['type']).toEqual(['T150', 'A', 'B'])
+  })
+
+  it('emits the same rows with and without an unrelated edit', async () => {
+    // With no edit the input passes through; with one the rows are filtered. A row with no id, or
+    // a plain table on this neurons port, must come out the same both ways.
+    const { source } = lookupSource({})
+    const blank = tableFromRows(
+      STR_SCHEMA,
+      [
+        { neuronId: '160', type: 'A' },
+        { neuronId: null, type: 'B' },
+        { neuronId: '161', type: 'C' },
+      ],
+      'table',
+    )
+    const plain = await run(blank, [], source)
+    const edited = await run(blank, ['-999'], source)
+    expect(plain.selected.kind).toBe('neurons')
+    expect(plain.selected.data['neuronId']).toEqual(['160', '161'])
+    expect(edited.selected.data).toEqual(plain.selected.data)
+    // And where nothing is dropped, the input itself — no copy per restyle.
+    const whole = input(['162', '163'])
+    expect((await run(whole, [], source)).selected).toBe(whole)
+  })
+
+  it('keeps a constant colour when the first neuron was added in the viewer', async () => {
+    const { source } = lookupSource({})
+    const { scene } = await run(input([]), ['+970'], source, [], {
+      segmentColorMode: 'constant',
+    })
+    const layer = layersOf(scene)[1]!
+    expect(layer['segments']).toEqual(['970'])
+    expect(typeof layer['segmentDefaultColor']).toBe('string')
+  })
+
+  it('drops a hidden neuron by default, and lists it hidden with a visible column on request', async () => {
+    const { source } = lookupSource({})
+    const removed = await run(input(['180', '181']), ['~181'], source)
+    // Default: the stored hidden note is ignored — hiding a neuron removes it, which the viewer
+    // writes as `-181`; nothing here is hidden.
+    expect(layersOf(removed.scene)[1]!['segments']).toEqual(['180', '181'])
+    expect(removed.selected.schema.columns.map((c) => c.name)).not.toContain('visible')
+
+    const keep = { hiddenNeurons: 'keep' }
+    const { scene, selected } = await run(input(['180', '181']), ['~181'], source, [], keep)
+    expect(layersOf(scene)[1]!['segments']).toEqual(['180', '!181'])
+    expect(selected.data['neuronId']).toEqual(['180', '181'])
+    expect(selected.data['visible']).toEqual([true, false])
+    // And declared before a run.
+    const d = def()
+    const types = makeInferContext(
+      d,
+      { ...defaultParams(d), ...keep },
+      {
+        dataset: T.dataset('stub', 'manc:v1.2.3'),
+        neurons: T.neurons(STR_SCHEMA),
+      },
+    )
+    const declared = d.inferOutputs!(types)['selected']
+    expect(declared?.kind === 'neurons' && declared.schema?.columns.map((c) => c.name)).toEqual(
+      ['neuronId', 'type', 'visible'],
+    )
+  })
+
+  it('declares Selected with the input’s schema, before anything has run', () => {
+    const d = def()
+    const types = makeInferContext(d, defaultParams(d), {
+      dataset: T.dataset('stub', 'manc:v1.2.3'),
+      neurons: T.neurons(STR_SCHEMA),
+    })
+    const out = d.inferOutputs!(types)
+    expect(out['selected']).toEqual(T.neurons(STR_SCHEMA))
   })
 })

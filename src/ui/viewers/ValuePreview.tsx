@@ -44,7 +44,9 @@ import {
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import type { BackgroundChoice } from './viewer3dScene'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
-import { chosenViewerKind } from '../../nodes/output/neuroglancer'
+import type { FrameTarget } from '../../nodes/output/neuroglancer'
+import { frameTarget, keepsHidden } from '../../nodes/output/neuroglancer'
+import { selfHostedViewer } from '../../data/neuroglancer/scene'
 import { widthModeOf } from '../../nodes/output/viewer3d'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { NetworkMetricsViewer } from './NetworkMetricsViewer'
@@ -996,7 +998,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
   },
   'out.neuroglancer': {
     readsInputs: true,
-    render: ({ value, ctx, params, shared, inputValues, viewerKey }) => {
+    render: ({ value, ctx, params, shared, inputValues, viewerKey, onParamChange }) => {
       // The scene, the segments and the colours are all in the URL the node emitted; the
       // neuron table comes along only so the legend can be drawn beside the frame.
       const neurons = inputValues?.neurons
@@ -1007,6 +1009,8 @@ const VIEWERS: Record<string, ViewerEntry> = {
        */
       const dataset = inputValues?.dataset
       const extra = inputValues?.layers
+      // What the frame opens — `Viewer type` and `Viewer`. The link (`value`) is the datastack's.
+      const target = frameTarget(params)
       return (
         <NeuroglancerViewer
           url={asString(value)}
@@ -1014,7 +1018,20 @@ const VIEWERS: Record<string, ViewerEntry> = {
           color={readColorSpec('segment', params, ctx.column)}
           scale={Number(params.uiScale)}
           layerBar={params.showLayerBar === true}
-          viewerType={chosenViewerKind(params)}
+          // Neurons double-clicked into or out of the scene, written back onto the node. Absent
+          // where this surface cannot write params, and the frame is then only looked at.
+          selectionEdits={params.selectionEdits}
+          // Where it was looking, so a saved workflow or a share link reopens there.
+          savedView={params.view}
+          {...(onParamChange
+            ? {
+                onSelectionEdits: (next: string[]) => onParamChange('selectionEdits', next),
+                onSavedView: (text: string) => onParamChange('view', text),
+              }
+            : {})}
+          viewerType={target.flavour}
+          frameViewer={frameBase(target)}
+          keepHidden={keepsHidden(params)}
           datasetId={dataset?.kind === 'dataset' ? dataset.datasetId : undefined}
           extraLayers={extra?.kind === 'layers' ? extra.items.length : 0}
           // The node's key within its workflow, so the card and the overlay are one continuous
@@ -1521,4 +1538,10 @@ function NoColumns({ known, what }: { known: boolean; what: string }) {
       {known ? `Pick ${what} to plot.` : 'Columns not known yet — run the graph.'}
     </ViewerEmpty>
   )
+}
+
+/** The deployment a Neuroglancer card's frame opens; undefined frames the link's own. */
+function frameBase(target: FrameTarget): string | undefined {
+  if (target.use === 'own') return selfHostedViewer()
+  return target.use === 'custom' ? target.base : undefined
 }

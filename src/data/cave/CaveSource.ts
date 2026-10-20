@@ -529,6 +529,11 @@ export class CaveSource implements DataSource {
     return this.listing.get(signal)
   }
 
+  /** The token requests are made under now (`DataSource.credential`). */
+  credential(): string | undefined {
+    return getToken(this.deployment)
+  }
+
   /**
    * `DatasetListing.peek`: starts the listing once per token, and answers what has landed. Gated
    * on this deployment's token through the listing's `credential`, `peekDatastacks`' rule and for
