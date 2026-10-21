@@ -24,9 +24,10 @@
  * well as a success, so `validate` can say why a URL cannot be read before anybody presses Run.
  *
  * **The peek starts the read it cannot answer**, for a URL — `peekDatasets`' rule, and the reason
- * is the one CLAUDE.md records for it: without it, a reloaded graph's pickers below a URL stay
- * empty until something runs, and the first Run behaves differently from the second. Once per
- * file: a read in flight is shared, and a failure is remembered rather than retried per peek.
+ * is the one docs/gotchas.md records for it: without it, a reloaded graph's pickers below a
+ * URL stay empty until something runs, and the first Run behaves differently from the second.
+ * Once per file: a read in flight is shared, and a failure is remembered rather than retried per
+ * peek.
  *
  * **A summary is kept with the refresh nonce it was read under**, so the node re-reads a footer
  * only when that moves — not when somebody ticks Detect id columns, which changes the node's key

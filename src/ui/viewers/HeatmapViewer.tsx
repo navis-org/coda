@@ -243,7 +243,7 @@ export function HeatmapViewer({
    * By value, not by identity: `readColorLimits` parses two params into a fresh object on every
    * render of the editor, and the domain is a dependency of the *fold* — so an unstable one
    * would re-fold a four-million-cell matrix every time anything on the canvas re-rendered.
-   * `useStable` is the rule CLAUDE.md states for exactly this, and the network and scatter
+   * `useStable` is the rule docs/viewers-network.md records for exactly this, and the network and scatter
    * viewers were both bitten by it first.
    */
   const limits = useStable(rawLimits)
@@ -556,7 +556,7 @@ export function HeatmapViewer({
    * that number could not see — the band's other neighbour is the inter-cell separator, and that
    * is the *surface* showing through rather than a painted colour, so on each theme one of the
    * casing's two tones is already the grid. An interrupted line cannot be mistaken for a
-   * continuous one whatever colour either is. See `docs/viewers.md`.
+   * continuous one whatever colour either is. See `docs/viewers-matrix.md`.
    *
    * `data-axis` because the two are indistinguishable by shape once a selection is wide: a
    * column band spans the plot's whole height, so every row tick's y falls inside one.

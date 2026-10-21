@@ -162,7 +162,7 @@ export function isTypedId(value: string): value is NeuronId {
  * `can't access property "generation" of undefined` on every mouse movement for the life of
  * the document, long after the scene that caused it is gone. `segmentColors` on a layer is
  * parsed by the same function, so its keys are the same rule.
- * See [docs/viewers.md](../../docs/viewers.md).
+ * See [docs/viewers-neuroglancer.md](../../docs/viewers-neuroglancer.md).
  *
  * `out.neuroglancer` applies it a second time, before `buildScene` does, for the one thing that
  * layer cannot do: **count** what it drops and say so. That is the division —

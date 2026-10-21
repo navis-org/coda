@@ -537,7 +537,7 @@ export class CaveSource implements DataSource {
   /**
    * `DatasetListing.peek`: starts the listing once per token, and answers what has landed. Gated
    * on this deployment's token through the listing's `credential`, `peekDatastacks`' rule and for
-   * its reason — see docs/backends.md.
+   * its reason — see docs/backends-cave.md.
    */
   peekDatasets(): DatasetInfo[] | undefined {
     return this.listing.peek()

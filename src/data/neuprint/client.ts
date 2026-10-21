@@ -44,7 +44,7 @@ export class NeuPrintError extends Error {
  *
  * Anything else (no token, a 401, a 5xx, a cancel, a proxy that is not there) says nothing about
  * the dataset, and a lookup that caches it as "none" keeps that for the session: CLAUDE.md's
- * *a lookup that failed has not answered "none"*, learned on CAVE first.
+ * *a failed lookup has not answered "none"*, learned on CAVE first.
  */
 export function isNotFound(error: unknown): boolean {
   return error instanceof NeuPrintError && error.status === 404 && !error.unreached

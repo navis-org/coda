@@ -1,8 +1,8 @@
 /**
  * The matched characters of a fuzzy hit, marked up.
  *
- * Shared by the two add-node surfaces — the browser and the palette — which CLAUDE.md keeps
- * as a deliberate pair. They consume the same `matches: number[]` out of `fuzzy.ts`, so a
+ * Shared by two of the add-node surfaces — the browser and the palette, kept apart on purpose
+ * (docs/canvas-interaction.md). They consume the same `matches: number[]` out of `fuzzy.ts`, so a
  * second copy meant a fix to how a hit reads landed in only one of them.
  */
 

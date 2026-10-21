@@ -137,7 +137,7 @@ const renderer = await evaluate(`(() => {
 })()`)
 console.log(`renderer  ${renderer}`)
 if (/swiftshader/i.test(renderer)) {
-  console.error('Software rasteriser — these numbers would mean nothing. See docs/viewers.md.')
+  console.error('Software rasteriser — these numbers would mean nothing. See docs/viewers-3d.md.')
   process.exit(1)
 }
 

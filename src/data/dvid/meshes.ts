@@ -16,7 +16,7 @@
  * ## Vertices are in nanometres — unlike the skeletons
  *
  * So this file scales nothing and `skeletons.ts` scales everything, and neither is free to assume
- * the other's rule. Measured on the same body in the same repo; `docs/backends.md` has the
+ * the other's rule. Measured on the same body in the same repo; `docs/backends-dvid.md` has the
  * numbers.
  *
  * ## These meshes are enormous, and there is no coarser one

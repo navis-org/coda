@@ -607,7 +607,7 @@ registerHelper({
  * is closest to what a query returns, but **neither is it**: a `count=true` query answers 512,957
  * and 139,255 respectively, which is the number `refuseIfCapped` actually checks against. This
  * card shows the two the card is about. Printing one of them without saying which is what
- * `docs/backends.md` records as having cost a debugging round trip.
+ * `docs/backends-cave.md` records as having cost a debugging round trip.
  *
  * **`split_positions=True` is what makes this agree with Coda.** caveclient's default folds a
  * bound point back into one object column (`pt_position` holding an array), where Coda's raw

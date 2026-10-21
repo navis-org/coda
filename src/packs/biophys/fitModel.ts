@@ -1,7 +1,7 @@
 /**
  * Fit Model: a Compartment Model's passive membrane — Rm, Cm, Ra, E leak and an area factor —
- * fitted to a current-clamp recording, each sweep replaying the current the cell got. Phase 8 of
- * `docs/biophys-plan.md`; the method and its shortcuts are `fit.ts`'.
+ * fitted to a current-clamp recording, each sweep replaying the current the cell got. See
+ * `docs/biophys.md`, Fitting; the method and its shortcuts are `fit.ts`'.
  *
  * **`expensive`**: a fit is tens to hundreds of simulations, seconds to minutes. Its evaluations
  * run in a pool of workers kept for the length of the fit (`fitPool.ts`), the Jacobian's in

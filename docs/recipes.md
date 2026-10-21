@@ -17,7 +17,7 @@ what a selection takes (internal wires, whole frames, captions), `deserializeGra
 and `insertFragment` re-identifies it. So a recipe saved months ago gets the renames
 (`formerId`, `formerIds`), the `absentMeans` and the unknown-type drops that a file gets. A second
 reader for "a saved set of nodes" is where those repairs would quietly stop happening, which is
-`canvas.md`'s argument for the clipboard, reached again.
+`canvas-editing.md`'s argument for the clipboard, reached again.
 
 What a fragment throws away is every wire with one end outside the selection. That is right for a
 paste, which must not steal an input. For the case this exists for it is useless: the FlyWire
@@ -180,7 +180,7 @@ of.
 - the save dialog from a card's menu, with the slot list;
 - the palette's recipe rows and an insert;
 - Manage Recipes;
-- the **+** band. Its bottom row sits level with the rail button it came out of, 458px against 458px, which is the measurement jsdom cannot take (`canvas.md`, "The **+** menu").
+- the **+** band. Its bottom row sits level with the rail button it came out of, 458px against 458px, which is the measurement jsdom cannot take (`canvas-interaction.md`, "The **+** menu").
 - the wire-drop palette listing a recipe first when dropped from Sort's output.
 
 **Not checked in a browser:** the file picker and the download (jsdom has neither, and the probe

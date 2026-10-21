@@ -51,7 +51,7 @@ describe('the glyph table', () => {
   it('keeps the category fallback complete, so adding a node needs no drawing', () => {
     /*
      * Deliberately not an exhaustive list of which nodes fall through: `glyphs.ts` and
-     * `docs/canvas.md` both promise that adding a node without a drawing is free, and a test
+     * `docs/canvas-interaction.md` both promise that adding a node without a drawing is free, and a test
      * that fails when somebody does exactly that would make the promise false. What has to hold
      * is that the fallback covers every category a node can declare.
      */

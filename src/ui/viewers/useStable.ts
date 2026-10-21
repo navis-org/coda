@@ -5,7 +5,7 @@
  * render of the parent, so anything keyed on their identity — a memo, an effect's dependency
  * list — invalidates on every unrelated re-render of the editor. In the network viewer that
  * tore down the renderer and threw away the camera; in the scatter it rebuilt the whole point
- * set and repainted the canvas. The rule in CLAUDE.md is short for a reason: **memoise
+ * set and repainted the canvas. The rule (docs/viewers-network.md) is short for a reason: **memoise
  * encoding specs by value.**
  *
  * Extracted from `NetworkViewer` when the second viewer needed it. A copy would have been the

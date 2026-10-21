@@ -46,7 +46,7 @@ export interface Point {
  *
  * The half of a copy that has nothing to do with the clipboard, and the reason it is exported:
  * `duplicateSelection` in the store is `subgraphOf` + `insertFragment`, so "what comes along with
- * a selection" is one answer rather than two that agree by restatement. `docs/canvas.md` records
+ * a selection" is one answer rather than two that agree by restatement. `docs/canvas-editing.md` records
  * why that matters here — the next field on the document that references a node id has to be
  * found in one clone path, not two.
  *

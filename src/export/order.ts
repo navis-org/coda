@@ -10,7 +10,7 @@
  *
  * Here rather than in `src/core` because the rationale is entirely `src/export`'s — emitters,
  * TODO cells, `blocked` — and one function rather than two lines copied into each walk. The two
- * walks are deliberate copies (see CLAUDE.md), but what that protects is the *assembly*: chunk
+ * walks are deliberate copies (docs/export.md), but what that protects is the *assembly*: chunk
  * building, variable naming, unwired-versus-blocked, where the notes land. An ordering rule with
  * no language in it is the same class as `canExport.ts`'s refusal policy, which both surfaces
  * already share.

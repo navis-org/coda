@@ -152,7 +152,7 @@ describe('the tag search opt-out', () => {
      * `chips` and `fieldsMode` were replaced by the one `layout` list, dropped outright in beta. A
      * stored value is an undeclared param now: the graph must still load, and nothing may carry
      * it into the list — a half-honoured pick beside the list is the disagreement it replaced.
-     * The cost, recorded in `docs/widgets.md`, is that the picks revert to the automatic fields.
+     * The cost, recorded in `docs/widgets-explore.md`, is that the picks revert to the automatic fields.
      */
     const def = requireNodeDef('neuron.explore')
     const ids = def.params?.map((p) => p.id)

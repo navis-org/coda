@@ -5,7 +5,7 @@
  * `neuron.connectivity`, and it applies here with a demonstrated history behind it: `!== false`
  * is a claim about what an **absent** key means on a stored document, and this is the param that
  * shipped declared, documented and honoured by both emitters while the card ignored it entirely
- * (see `docs/widgets.md`). Four readers had their own copy of the reading — the card, the
+ * (see `docs/widgets-roi-viewer.md`). Four readers had their own copy of the reading — the card, the
  * outline loader, and both exporters — which is exactly the shape that let the two halves
  * disagree for as long as they did.
  *

@@ -108,7 +108,7 @@ describe('the companion spec this is all about', () => {
 
   it('is placed under the host’s declared height on add, not at a fixed depth', () => {
     /*
-     * The insertion half of the overlap (`docs/canvas.md` has the measurements). The card has not
+     * The insertion half of the overlap (`docs/canvas-layout.md` has the measurements). The card has not
      * been drawn when it is added, so the declared height is the only one there is.
      */
     const graph = addNodeWithCompanion(emptyGraph(), node('ds', HOST, 100, 100))
@@ -156,7 +156,7 @@ describe('companionView', () => {
 
   it('floors a short measurement by the declared height, since the card may still be growing', () => {
     /*
-     * Found in a browser: a card measured at an arrange can still be growing (`docs/canvas.md`).
+     * Found in a browser: a card measured at an arrange can still be growing (`docs/canvas-layout.md`).
      * A measurement shorter than the declaration must not pull the companion up into the card.
      */
     const { nodes, edges } = pair()

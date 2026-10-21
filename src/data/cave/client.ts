@@ -319,7 +319,7 @@ export function caveGet<T>(url: string, options: CaveRequestOptions): Promise<T>
  * The rule for a lookup whose absence is a verdict (a deployment running no L2 cache, no skeleton
  * cache): only the server saying "not here" is one. A 5xx, a timeout or a cancel read as "none"
  * was kept for the session by the memo above it, and switched a route off on a datastack that has
- * it (`docs/backends.md`, "A failed lookup is not an answer").
+ * it (`docs/backends-cave-geometry.md`, "A failed lookup is not an answer").
  */
 export function caveGetOr404<T>(url: string, none: T, options: CaveRequestOptions): Promise<T> {
   return caveGet<T>(url, options).catch((err: unknown) => {

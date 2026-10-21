@@ -53,7 +53,7 @@ live('precomputed datasources, live', () => {
   it('follows male-CNS down to its multi-resolution meshes', async () => {
     // The one that matters: male-CNS's *published viewer state* advertises
     // `meshes-malecns/single-res-meshes`, and its volume declares `mesh: multi-res-meshes`. This
-    // node follows the volume, which is the branch docs/backends.md records as the correct one —
+    // node follows the volume, which is the branch docs/backends-precomputed.md records as the correct one —
     // the other resolves and downloads several megabytes a neuron with nothing failing.
     const probe = await probePrecomputed(parseNgSource(MALECNS)!.url!)
     expect(probe.ok).toBe(true)

@@ -15,7 +15,7 @@
  *
  * That walk is load-bearing and was already written once. Everything that reads a skeleton —
  * cable length, the morphometrics, the SWC writer, the 3D viewer — assumes parent-before-child,
- * and `docs/backends.md` records what a surviving cycle does to a consumer that walks to a root:
+ * and `docs/backends-precomputed.md` records what a surviving cycle does to a consumer that walks to a root:
  * it loops forever. So `skeletonFromRows` is one implementation with two front ends rather than
  * a second parser that gets the traversal nearly right.
  *

@@ -14,7 +14,7 @@
  * writes it into the matrix, because its Filter tab matches on axis labels and its Order tab
  * sorts by them — a name on screen that those two cannot see would be the worse kind of wrong,
  * since the picture looks right. See the header of each node for its own argument, and
- * `docs/viewers.md` for why one operation ends in two places.
+ * `docs/viewers-matrix.md` for why one operation ends in two places.
  *
  * **The join itself is `labelsByNeuron`**, which is the same operation under the same two rules
  * and already has three callers — an id column and a label column of *some* table, resolved

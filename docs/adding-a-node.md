@@ -396,7 +396,7 @@ canvas, the socket dimming during a drag, the socket's own fill and tooltip, the
 the node browser's signature line, and the node guide. Every one of them believed `any` literally.
 
 The bill came due on the drop palette — dropping a `Linkage` opened on `Mirror Neurons` and three
-more `… Neurons` nodes above `Cut Tree` — and [canvas.md](canvas.md#dropping-a-wire-on-empty-canvas)
+more `… Neurons` nodes above `Cut Tree` — and [canvas-wiring.md](canvas-wiring.md#dropping-a-wire-on-empty-canvas)
 has the numbers. What belongs here is the shape of the declaration.
 
 **It takes the array the predicate already reads, never a copy of it.** Six kind sets exist and
@@ -461,7 +461,7 @@ message for the case the wire cannot see.
 ### Why "Geometries" is a label and not a `CodaType` kind
 
 A socket declaring only geometry kinds draws as a violet ring and reads *Geometries*
-([canvas.md](canvas.md#geometries-a-seventh-row-on-the-socket-table-that-cost-no-seventh-hue) has
+([canvas-interaction.md](canvas-interaction.md#geometries-a-seventh-row-on-the-socket-table-that-cost-no-seventh-hue) has
 the colour argument, which is that it cost nothing). The obvious alternative was a real
 `{ kind: 'geometries' }` in `CodaType`, assignable from the three, and it is worse on the case
 that matters:

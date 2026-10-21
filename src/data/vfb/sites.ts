@@ -5,7 +5,7 @@
  * `male_cns_v0_9` and `male_cns_v1_0` are both there (166,681 and 166,693 individuals on
  * 2026-10-14), as are `BANC626` and `BANC888`, and hemibrain v1.0.1 beside v1.2.1. A root id or
  * body id is an identity only within one release (a CAVE root id at another materialization is a
- * different neuron, `docs/backends.md`), so the mapping is **version-exact**. A dataset whose family
+ * different neuron, `docs/backends-cave-geometry.md`), so the mapping is **version-exact**. A dataset whose family
  * VFB holds but whose version it does not is answered `undefined` from `vfbSiteFor`, and
  * `siteRefusal` names the versions it does hold. It is never mapped to the nearest one.
  *

@@ -1,7 +1,7 @@
 /**
  * Fitting a model's passive membrane to a current-clamp recording: Rm, Cm, Ra, E_leak and a
  * membrane-area factor, by least squares on the recorded voltage (`biophys/leastSquares.ts`).
- * Phase 8 of `docs/biophys-plan.md`.
+ * See `docs/biophys.md`, Fitting.
  *
  * **The model is rescaled, never rebuilt.** The membrane reaches the solver as a leak density
  * `1/Rm`, a reversal `E_leak`, a capacitance `cm` and the axial conductances, which scale as `1/Ra`

@@ -261,7 +261,7 @@ export const THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024
  *
  * **12 MB, measured on fish2 rather than chosen**: its real arbors stop at 8.31 MB and it holds
  * bodies four times denser than their own volume explains, which is what an unsplit merge looks
- * like. The ceiling sits between them. [docs/backends.md](../../../docs/backends.md) has the
+ * like. The ceiling sits between them. [docs/backends-precomputed.md](../../../docs/backends-precomputed.md) has the
  * distributions and `neuprint.test.ts`'s `FISH2_NGMESH_BYTES` is where they are machine-checked —
  * one place to re-measure rather than three prose copies that drift apart.
  *

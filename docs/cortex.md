@@ -127,7 +127,7 @@ that data is.
 `SkeletonGeometry.compartments` is SWC's structure codes per point — 1 soma, 2 axon, 3 basal and 4
 apical dendrite, 0 unlabelled — and **absent where the source labels nothing**, which is most
 sources. It is filled by minnie65's skeleton service and by any SWC file whose `type` column says
-something ([backends.md](backends.md#a-geometry-is-the-id-asked-for--why-there-is-no-swc-release-route)).
+something ([backends-cave-geometry.md](backends-cave-geometry.md#a-geometry-is-the-id-asked-for--why-there-is-no-swc-release-route)).
 
 Three things to know before drawing with it:
 
@@ -292,7 +292,7 @@ Six reports from the first person to use it, each a thing no probe had asked.
   in the release, median 49% of the current cable. **The rule, the user's: a geometry is the
   morphology of exactly the id asked for — never an id mapped to another timepoint.** The route is
   removed, and the root-lookup batching it needed with it
-  ([backends.md](backends.md#a-geometry-is-the-id-asked-for--why-there-is-no-swc-release-route)).
+  ([backends-cave-geometry.md](backends-cave-geometry.md#a-geometry-is-the-id-asked-for--why-there-is-no-swc-release-route)).
 
 - **The card drew at CSS resolution on a zoomed canvas.** React Flow magnifies a card by a
   transform, so a backing store sized for CSS pixels × device ratio was stretched — 110 px shown

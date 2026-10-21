@@ -50,7 +50,7 @@
  * A note that **declares** its host (`GraphNode.captionOf` — never inferred from what a note
  * happens to be near) is condensed exactly like a companion: its host's box grows to cover it, it
  * is not an obstacle to `dodge`, and it is snapped back `CAPTION_GAP` under the host. The host is
- * the card it names, or the folded box standing in for it. `docs/canvas.md` has why.
+ * the card it names, or the folded box standing in for it. `docs/canvas-layout.md` has why.
  */
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
@@ -160,7 +160,7 @@ function under(
   const size = resolveSize(card, measured)
   /*
    * The declared `cardHeight` is a floor under the measurement, because a card measured at the
-   * moment an arrange runs can still be growing (`docs/canvas.md` has the measurements). Only
+   * moment an arrange runs can still be growing (`docs/canvas-layout.md` has the measurements). Only
    * `cardHeight`, not `declaredHeight`: a `defaultSize` is a resizable card's starting size, and a
    * card resized shorter is drawn shorter.
    */

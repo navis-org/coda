@@ -31,7 +31,7 @@
  * ### Why it is mounted conditionally rather than switched off
  *
  * An idle `EffectComposer` still holds its render targets — two full-size colour buffers, plus
- * `GTAOPass`'s normal, AO and denoise targets. `docs/viewers.md` records what a WebGL viewer's
+ * `GTAOPass`'s normal, AO and denoise targets. `docs/viewers-3d.md` records what a WebGL viewer's
  * memory does when it is per-surface rather than per-node, and this is the same arithmetic one
  * level down. Not mounting is the only way to actually not pay.
  */

@@ -13,7 +13,7 @@
  *     not — mushroombody publishes no region summary at all — and a partial answer is a state
  *     the widget already has to render, so what matters is how partial.
  *  3. **The units, and this is the one that produces a silently wrong picture.** neuPrint
- *     returns skeletons and synapses in dataset *voxels* and `src/data/neuprint/units.ts`
+ *     returns skeletons and synapses in dataset *voxels* and `src/data/units.ts`
  *     scales them to nanometres; precomputed meshes already arrive in nanometres. If region
  *     meshes come back in voxels and nothing scales them, the shells sit a whole factor away
  *     from any neuron drawn beside them, with nothing failing and both sets internally

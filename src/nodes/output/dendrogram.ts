@@ -37,7 +37,7 @@
  *   the Order tab sorts by them, both `affectsData`, so a presentational rename there would show
  *   `LC4` on screen while a filter typed `LC4` matched nothing. `displayLabels` is shared; what
  *   differs is that `out.heatmap`'s `evaluate` reads the port and this one does not, and it pays
- *   for that with the identity the axis arrived with. See `docs/viewers.md`.
+ *   for that with the identity the axis arrived with. See `docs/viewers-matrix.md`.
  * - **An unnamed leaf keeps its own label**, which inverts `core.relabel`'s `Unmatched` default
  *   on purpose: there, a value that passes for mapped is the confusion being prevented, where
  *   here a blank leaf is strictly worse than the id it replaced. The caption counts them.

@@ -24,7 +24,7 @@
  * `/api/repos/info`, which answers with **every repo on the host** — 42 kB naming aliases,
  * uuids and instances of other people's data on the public server alone. Asking
  * `<instance>_meshes/info` instead is one narrow question about the one node somebody already
- * has the address of. See `docs/backends.md`.
+ * has the address of. See `docs/backends-dvid.md`.
  *
  * ## A query string is dropped, not refused
  *

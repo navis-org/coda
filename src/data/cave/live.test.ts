@@ -549,7 +549,7 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
      * route here once, reached by mapping today's id through its nucleus to the root it had at
      * 661 — and this cell came back 2.9 mm of dendrite with no axon, where the segment the id
      * names is 22.9 mm with a proofread axon. Across 40 doubly-proofread cells the release held a
-     * median 49% of the current cable. See `docs/backends.md`.
+     * median 49% of the current cable. See `docs/backends-cave-geometry.md`.
      */
     setToken(DEFAULT_CAVE_SERVER, TOKEN!)
     const cave = new CaveSource()
@@ -660,7 +660,7 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
   }, 60_000)
 
   /**
-   * The count that `docs/backends.md` recorded as pointing the wrong way, with the reason.
+   * The count that `docs/backends-cave.md` recorded as pointing the wrong way, with the reason.
    *
    * Both are real and they measure different things: the annotation service counts the table as
    * it stands, the materialization engine counts what this snapshot froze. Asserted as an

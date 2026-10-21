@@ -372,7 +372,7 @@ not decline such a table; it asked the server for `pt_root_id` and handed back
 `CAVE returned 500: pt_root_id not in model or models for codex_annotations`, which names a
 column the user typed and no reason it should be wrong. Now `read` asks the table's metadata for
 `reference_table` and, where there is one, issues the join query instead — see
-[backends.md](backends.md#a-reference-table-has-no-root-id-in-it-anywhere) for the three ways
+[backends-cave.md](backends-cave.md#a-reference-table-has-no-root-id-in-it-anywhere) for the three ways
 that endpoint differs. Nothing about it is FlyWire-specific, which is what keeps this provider
 about *tables*.
 

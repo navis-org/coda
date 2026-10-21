@@ -43,7 +43,7 @@ export interface CompanionSpec {
    * sits where the *next* step in the pipeline goes, and reads as part of the chain.
    *
    * **A gap below the host's height, not an offset from its top**, because a dataset card's
-   * height varies by backend and a fixed depth overlapped the tallest (`docs/canvas.md`). The
+   * height varies by backend and a fixed depth overlapped the tallest (`docs/canvas-layout.md`). The
    * height comes from the canvas's measurement where there is one (`layout/companions.ts`, at an
    * arrange) and from the host's declared height where there is not (here, on add).
    *

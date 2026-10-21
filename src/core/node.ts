@@ -1323,7 +1323,7 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    *
    * It is also a **floor** under the measurement wherever something is snapped beneath the card
    * (`layout/companions.ts`), because a measurement taken at the moment an arrange runs can belong
-   * to a card that is still growing (`docs/canvas.md` has the numbers). So declare the tallest the
+   * to a card that is still growing (`docs/canvas-layout.md` has the numbers). So declare the tallest the
    * card was measured at. A chain caption's host may declare one for the same reason
    * (`annotation.caveTable` does).
    */
@@ -1419,7 +1419,7 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * cannot keep a local file across a reload". Drawn on the card beside the document's own hints
    * (`NodeHint`) with the same box and the same dismissal, and never written to the document: a
    * sentence saved when a Firefox user added the node would ride a share link to a Chrome user,
-   * for whom it is false. See "Hints on a card" in `docs/canvas.md`.
+   * for whom it is false. See "Hints on a card" in `docs/canvas-editing.md`.
    *
    * **Return a module-level constant**, or an empty one: the card asks on every render to decide
    * whether to mount its hint stack at all.

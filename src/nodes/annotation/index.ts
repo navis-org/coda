@@ -100,7 +100,7 @@ export const caveAnnotationNode = packNode({
   category: 'dataset',
   /*
    * The height a chain caption hangs under (BANC's is this card), measured in a browser on a cold
-   * session and a floor under an early measurement (`docs/canvas.md`). See
+   * session and a floor under an early measurement (`docs/canvas-layout.md`). See
    * `NodeDefinition.cardHeight`.
    */
   cardHeight: 265,

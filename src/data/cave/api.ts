@@ -666,7 +666,7 @@ export function tableMetadata(
 /**
  * How many rows this materialization holds for a table. **Not how many the table has.**
  *
- * This is the count `docs/backends.md` records as pointing the wrong way, and the reason is now
+ * This is the count `docs/backends-cave.md` records as pointing the wrong way, and the reason is now
  * measured rather than guessed at: it is the *materialized* count, and the annotation service
  * keeps its own. Against v783 —
  *

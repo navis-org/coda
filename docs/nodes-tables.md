@@ -422,7 +422,7 @@ and cells by reference. There is deliberately **no `Unmatched` control**: an unn
 its own label, because blanks on an axis collide and the Filter box could no longer address them,
 and the *count* is what the card says. Why the port is not a separate `Relabel Matrix` node, what
 the two warnings are for, and what the exporters had to do differently are in
-[viewers.md](viewers.md).
+[viewers-matrix.md](viewers-matrix.md).
 
 ### The filter and the sort are one mechanism
 
@@ -441,7 +441,8 @@ half is where the pattern *ends* — a second reader of that rule is how one box
 for a trailing slash. The opt-in exists for the reason it exists there: cell-type labels are
 full of metacharacters (`LC4(R)`, `SMP001(a)`), so a box that compiled every term would widen
 itself silently. Verified by running the emitted R, where that label as a regex matches nothing
-and as a literal matches one row — which is why `fixed = TRUE` is not a detail.
+and as a literal matches one row — which is why `fixed = TRUE` is not a detail, and why the
+notebook's literal arm says `regex=False` rather than leaning on pandas' default.
 
 Only one term per axis, where Explore takes several ANDed: two substrings ANDed against a single
 short label is almost always empty, which reads as a broken control, and the useful question
@@ -556,13 +557,13 @@ matrix is a neuron with no partners among these columns — a thing with no prof
 
 A shift-dragged rectangle leaves the node as two tables. The gesture, why the selection is stored
 as **labels** rather than as a rectangle, and how the bands are drawn are in
-[viewers.md](viewers.md); what belongs here is the node half.
+[viewers-matrix.md](viewers-matrix.md); what belongs here is the node half.
 
 The selection is **positions** into the matrix this node outputs. It was the drawn labels first,
 which survives a sort where positions do not — and it was reported as a bug within the hour,
 because the Labels tab's whole purpose is to put one name on many lines: a box round one cell of
 a fourteen-row `LC4` block took all fourteen. `chartSelection.ts` carries that argument and
-[viewers.md](viewers.md) the gesture; what matters here is that `selectedLines` walks the *lines*
+[viewers-matrix.md](viewers-matrix.md) the gesture; what matters here is that `selectedLines` walks the *lines*
 and asks whether each position is in the set, so the result is in the card's own order and a
 position the matrix no longer reaches carries no row (invariant 5's corollary).
 
@@ -628,7 +629,7 @@ arrangement for the categorical sets. Two lists because they are two kinds of th
 ramp has a middle — and two params so a choice survives toggling the scale and back;
 `heatmapPaletteOf` is the one reader, so a name from the wrong list degrades to Coda's ramp
 everywhere at once. The published ones are transcribed by a script from the installed matplotlib
-and seaborn, and how they were measured is in [viewers.md](viewers.md); what matters here is
+and seaborn, and how they were measured is in [viewers-matrix.md](viewers-matrix.md); what matters here is
 that every name was chosen to be spelled the same way in Python and in R's viridisLite or
 ColorBrewer, so the exporters **name** the palette somebody picked. Coda's own two have no name
 there, so `Blues` and `RdBu_r` stand in with a note saying so.
@@ -893,6 +894,10 @@ answers **`Inf`** with a warning — a value that survives `is.na`, is not dropp
 plots off the end of an axis. Those two are generated helpers (`coda_min`, `coda_max`), and the
 golden's second Group By node exists to reach one of them so `probe-r-helpers.R` can run it; the
 other is pinned at the emitter in `export.test.ts`.
+
+How the three drifted unnoticed is the general lesson: **the goldens compare emitted *text***, so a
+notebook and an R document that each disagreed with the canvas over one null passed byte for byte.
+Only running the emitted code against a fixture with an absence in it could see it.
 
 ## Normalize
 
@@ -1613,6 +1618,11 @@ quietly, and both are **declared rather than spelled**: `PortGroupDef.formerIds`
 moves a stored `topLabel` onto `label1` — an undeclared param is *ignored* by `normalizeParams`,
 not migrated, so a label somebody typed would otherwise revert with nothing said. The old defaults
 ride along in `absentMeans`, so a saved graph's source column holds the values it always did.
+The declarations are of one shape across all three halves — `formerIds` (positional, on a port
+group), `formerId` (singular, on a param) and `NodeDefinition.formerTypes` for a renamed type
+([packs.md](packs.md)) — each read at load and only after the live id has missed. That is
+deliberately **not** a per-type migration table in the loader: a table there is a second place a
+rename has to be remembered, where a declaration sits on the thing that was renamed.
 See [stackParams.ts](../src/nodes/lib/stackParams.ts).
 
 **The source column is off by default and refused on a collision.** Empty adds none; a name adds a

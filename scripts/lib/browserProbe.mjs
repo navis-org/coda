@@ -48,7 +48,7 @@ export async function launchChrome({
   /**
    * Extra command-line flags. A probe timing WebGL needs `--use-angle=metal --enable-gpu`: without
    * them headless Chrome falls back to SwiftShader, which penalises full-screen passes and uploads
-   * in ways no GPU does (`docs/viewers.md`, the ambient-occlusion cost measurement).
+   * in ways no GPU does (`docs/viewers-3d.md`, the ambient-occlusion cost measurement).
    */
   args = [],
 }) {

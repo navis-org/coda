@@ -14,7 +14,7 @@
  *  - **The layering is already decided.** `flowChartOps.flowGraph` assigns it, from a column
  *    where one is picked. ELK layered assigns its own, and there is no way to hand it one —
  *    `elk.partitioning` *ignores* a column assignment fed back to it, which
- *    `docs/canvas.md` records from a sweep. Two layerers on one picture is one of them being
+ *    `docs/canvas-layout.md` records from a sweep. Two layerers on one picture is one of them being
  *    silently overruled.
  *  - **Back edges have to keep their direction.** ELK breaks cycles by reversing edges
  *    internally and hands back a route for the reversed one, so a recurrent connection comes

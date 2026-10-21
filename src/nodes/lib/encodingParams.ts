@@ -280,7 +280,7 @@ export interface ColorParamOptions {
    * thin line is the case: the receding end of the blue ramp measures 1.46:1 against the dark
    * surface, and clamping it to clear 3:1 pushes adjacent steps to ΔL 0.047 against a 0.06
    * floor — so the ramp cannot carry both visibility and step separation at that width. See
-   * the network viewer's notes in CLAUDE.md.
+   * the Network Viewer section of docs/viewers-network.md.
    */
   modes?: Array<'categorical' | 'sequential'>
   /**

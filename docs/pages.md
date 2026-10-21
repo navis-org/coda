@@ -262,7 +262,7 @@ Five decisions, and four of them are silent when wrong:
   the one nothing would catch.
 - **The default is All**, so the no-CSS, no-JS and crawler views are the whole table.
 - **The inputs are hidden with the clip pattern**, never `display: none` or `visibility: hidden`
-  — both take the control out of the tab order. That is `canvas.md`'s add-menu trap reached from
+  — both take the control out of the tab order. That is `canvas-interaction.md`'s add-menu trap reached from
   the other side: there a closed surface had to be *unmounted* so its buttons left the tab order;
   here a control has to stay in it while leaving the page.
 - **A clade is a field, not a substring of `specs.specimen`.** That cell is prose ("Adult male
@@ -422,7 +422,7 @@ the same chain against it*. It is on the demos and not on the wizard's own Demo 
 because there the dataset was **asked for** — the dialog offered every connectome and this is the
 answer somebody gave — where a demo link hands synthetic data to somebody who clicked "Open in a
 workflow" on Filter Table. Dismissal is `localStorage` keyed on the hint's text (see
-[canvas.md](canvas.md)), so it is read once and then gone from all 102. A hint's box is its card's
+[canvas-editing.md](canvas-editing.md)), so it is read once and then gone from all 102. A hint's box is its card's
 width and a dataset card is among the narrowest on the canvas, which is what set the length: the
 first draft wrapped to six lines under it.
 
@@ -438,6 +438,13 @@ running `inferGraph` over candidate graphs whose dataset nodes belong to every b
 `inferOutputs` on a dataset node *peeks* — so doing it on a click fired project listings at two
 CATMAID servers and a datastack listing at CAVE, and opened a Connections dialog demanding a token
 over a workflow about filtering a table. Seen in a browser; jsdom reaches none of it.
+
+**The wiring is scored, not reasoned about.** Half the ports a demo has to fill are declared
+`any` — Mirror, Transform, Stack Neurons, For Each, Select One — and `any` says nothing about what
+a node wants: a first-compatible rule handed Mirror the neuron table, and its demo opened saying
+it takes skeletons, meshes or points. So `bestAppend` (`src/wizard/demo.ts`) builds candidates and
+keeps the arrangement with the fewest inference issues, and the viewer on the end is chosen from
+the node's **inferred** output type, never its declared one.
 
 **Optional ports compose, until one node's do not.** The wiring pass fills every input port that
 has a compatible source, which is right for `neuron.connectivity`'s `neurons` and `labels` — a

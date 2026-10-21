@@ -659,7 +659,7 @@ describe('the datastacks a token can see', () => {
     stop()
   })
 
-  // The source's own listing peek, which is the one inference reaches (docs/backends.md).
+  // The source's own listing peek, which is the one inference reaches (docs/backends-cave.md).
   it('keeps the source’s listing peek silent too when there is no token', async () => {
     const captured = installFetch()
     setToken(DEFAULT_CAVE_SERVER, undefined)
@@ -1417,7 +1417,7 @@ describe('meshes', () => {
   it('reads a frozen fragment as a byte range under initial/, and an edited one from unsharded_mesh_dir', async () => {
     /*
      * The address each kind of manifest name decomposes to — see `fragmentLocation`, and
-     * `docs/backends.md` for what reading either one verbatim cost. This is the half a fixture
+     * `docs/backends-cave-geometry.md` for what reading either one verbatim cost. This is the half a fixture
      * can pin; that the bucket answers these URLs is `live.test.ts`'.
      */
     const captured = installFetch({

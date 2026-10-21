@@ -14,7 +14,7 @@
  * itself is Firefox's and this runs Chrome, so `meshPicking.test.ts` is where the split is pinned
  * against the number; what is here is the evidence that the number is the whole story.
  *
- * Real GPU, not SwiftShader: `--use-angle=metal --enable-gpu`, the flags `docs/viewers.md`
+ * Real GPU, not SwiftShader: `--use-angle=metal --enable-gpu`, the flags `docs/viewers-3d.md`
  * records for the ambient-occlusion measurement and for the same reason.
  */
 

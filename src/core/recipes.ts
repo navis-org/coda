@@ -24,8 +24,8 @@
  *
  * **What a recipe attaches to is the caller's to say, and only ever one node.** The rule chosen
  * for the canvas is *the selection, never a search*: two datasets on one canvas are exactly where
- * "the compatible one" is a guess, and CLAUDE.md records two automatic matchers that picked a
- * plausible wrong candidate with nothing to say so. Given that node, the first slot that fits it
+ * "the compatible one" is a guess, and docs/recipes.md records two automatic matchers that picked
+ * a plausible wrong candidate with nothing to say so. Given that node, the first slot that fits it
  * takes it, slots with a wire *into* the recipe ahead of the rest — a selection is usually what
  * the recipe should read from, and a slot that only *feeds* a node would otherwise attach a
  * recipe's output to whatever input on the selected dataset happened to take a table.

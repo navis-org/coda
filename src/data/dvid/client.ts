@@ -31,7 +31,7 @@
  *
  * **Nothing here logs a URL.** A DVID address is the whole of the access control on these
  * deployments, so it belongs on screen where somebody asked for it and nowhere else — not in a
- * console, and Coda has no event analytics for it to reach. See `docs/backends.md`.
+ * console, and Coda has no event analytics for it to reach. See `docs/backends-dvid.md`.
  */
 
 import type { FetchOptions } from '../precomputed/transport'

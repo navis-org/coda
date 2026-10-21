@@ -642,7 +642,7 @@ listing agree with Coda's — caveclient's default folds a bound point back into
 the two answer ten columns and sixteen against the same table. And the **two row counts** are two
 methods on two sub-clients — `materialize.get_annotation_count` and
 `annotation.get_annotation_count` — which is the clearest statement anyone has written of a
-difference [backends.md](backends.md) records as having cost a debugging round trip; the notebook
+difference [backends-cave.md](backends-cave.md) records as having cost a debugging round trip; the notebook
 prints both, labelled, as the card does.
 
 The `type` column there reports the **pandas** dtype rather than Coda's four-name vocabulary, and

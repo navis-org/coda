@@ -501,7 +501,7 @@ What it deliberately does not do yet:
 - **No revival within a session.** A type registered after the document loaded leaves its
   placeholders as they are until the document is next read.
 - **Its inputs are never references**, since nothing says which were. An unknown node that read its
-  dataset by reference *and* fed it (the annotation-chain shape in `docs/canvas.md`) is a two-edge
+  dataset by reference *and* fed it (the annotation-chain shape in `docs/canvas-layout.md`) is a two-edge
   loop, and inference marks the loop's known nodes as cyclic too.
 - **A pasted placeholder's stored `captionOf` is not remapped** by `cloneCaptions`, being inside
   the stored text; it names the id the original card captioned.
@@ -554,6 +554,14 @@ register handlers.
 **Deriving is not running.** Boot says what is stale and stops. Starting queries against a shared
 server because somebody reloaded a tab is a different decision, and it belongs to auto-run on the
 next edit.
+
+Putting a derive on the boot path made its cost a first-paint cost, so `refreshStates` **skips its
+key pass on an empty cache** (and no evaluation in flight), which is every boot: the keys' one
+reader is the freshness test against a cache entry that cannot exist, and a stored Explore
+selection can make one node's key cost milliseconds. The first edit pays it instead.
+
+The general shape is worth keeping: **a second surface is how you find out which invariants the
+first one's side effects were quietly maintaining.** Nothing here was a dashboard bug.
 
 ## What the budget actually is
 

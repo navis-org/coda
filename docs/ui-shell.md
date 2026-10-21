@@ -74,7 +74,7 @@ size on the _user_ node, which in a controlled flow is whatever the app put ther
 `Editor.tsx` keeps `measuredSizes` and hands React Flow's own measurements back to it; without
 it the map showed only the cards with a `node.size` or a `defaultSize` and silently omitted
 everything that cannot be resized. The mechanism is written up under *Measurements, and who
-keeps them* in [canvas.md](canvas.md).
+keeps them* in [canvas-interaction.md](canvas-interaction.md).
 
 `installStorageStub()` in `test/jsdomStubs.ts` is what makes any of the persistence testable —
 Node 26 shadows jsdom's `localStorage`, so by default every persistence path silently degrades
@@ -102,7 +102,7 @@ in the toolbar it was a subtitle shown only to people already inside.
 
 **Two buttons left the toolbar, and only one of them moved.** `+ Add Tab` became the round **+**
 in the canvas's bottom-right corner — which now unfolds into the six node categories rather than
-opening the browser outright (see [canvas.md](canvas.md) for that menu, and for why the button
+opening the browser outright (see [canvas-interaction.md](canvas-interaction.md) for that menu, and for why the button
 asks for the canvas anchor rather than the pointer); `Commands Space` was deleted outright,
 keeping the key. Both were
 wide word-plus-shortcut buttons for things the status bar's hint strip already advertises, and
@@ -1495,6 +1495,11 @@ out of building it:
   workflow name, Auto-run and Run keep their own components. The first three take a `variant`
   instead; the name field and Auto-run are rendered *as themselves* inside a `.dropdown__row`,
   which is what lets every other row close the menu on its click with no exception.
+  **Later corrected, and the correction is the rule:** it is decided by the *shape a menu row can
+  take*, never by holding state. The bell keeps its `useState` and still builds a `ToolbarAction`
+  descriptor from it (`NotifyToggle` in `Toolbar.tsx`) — written out by hand it was a third copy of
+  both renderers, and a change to a menu row's shape did not reach it. Run, the workflow name and
+  Auto-run stay out because they are shapes a row cannot take.
 - **The Connections trigger moved from `SourcesPanel` to the table**, leaving that component the
   dialog and nothing else — the shape `EdgeSetPanel` always had. It had to: the `⋯` menu unmounts
   on the click that opens the dialog, so a trigger rendered inside the menu would take the dialog

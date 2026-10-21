@@ -9,7 +9,7 @@
  *
  * So the decision is made here instead, the way Cytoscape's layouts make it: lay each
  * component out on its own, then arrange the results as boxes. This matters far more than the
- * choice of force law on a fragmented graph — see [docs/viewers.md](../../../docs/viewers.md)
+ * choice of force law on a fragmented graph — see [docs/viewers-network.md](../../../docs/viewers-network.md)
  * for the measurement on a 36k-node correspondence graph, where it is worth 8× on
  * `neighbourPurity` and the force law is worth almost nothing without it.
  *

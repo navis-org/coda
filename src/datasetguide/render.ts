@@ -131,8 +131,8 @@ export const appHref = (fragment: string): string => `./index.html${fragment}`
  * in one glance, which is the question somebody arriving from the wizard's *Don't know which
  * dataset to use?* actually has. Every row links to its card.
  *
- * Its own `overflow-x` container: seven columns do not fit a phone, and per CLAUDE.md a table
- * is one of the three things allowed to be wider than the body.
+ * Its own `overflow-x` container: seven columns do not fit a phone, and the document must never
+ * be wider than the viewport (docs/pages.md, docs/ui-shell.md).
  */
 /**
  * Small numbers as words, because a sentence is where they are going.

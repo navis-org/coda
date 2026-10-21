@@ -5,7 +5,7 @@
  * split `thumbnail.ts` uses, and for the same reason.
  *
  * **Three of these cost nothing, and that is why they are here rather than in a node.** Explore
- * downloads the whole neuron table once and searches it locally (see `docs/widgets.md`), so every
+ * downloads the whole neuron table once and searches it locally (see `docs/widgets-explore.md`), so every
  * number below is already in memory: a balance is two columns divided, and a percentile is a
  * column sorted. Nothing else in Coda can show a neuron against its dataset's *own* distribution
  * without a query, because nothing else holds the column.

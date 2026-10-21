@@ -334,7 +334,7 @@ function rememberFrame(held: HeldFrame): void {
 
 /**
  * Frames kept between surfaces — only where `moveBefore` keeps one alive through a move, and pinned
- * at their size while parked, since neuroglancer watches its own. See `docs/viewers.md`.
+ * at their size while parked, since neuroglancer watches its own. See `docs/viewers-neuroglancer.md`.
  */
 const frames = new RootRegistry<HeldFrame>({
   create: createFrame,
@@ -422,7 +422,7 @@ export function NeuroglancerViewer({
    * patch landing under the cursor does, and holding the patch until the pointer leaves is what
    * removes the precondition. It cannot be fixed from here: neuroglancer never disposes the
    * subscription, so one such failure poisons hover for the life of the document.
-   * See [docs/viewers.md](../../../docs/viewers.md).
+   * See [docs/viewers-neuroglancer.md](../../../docs/viewers-neuroglancer.md).
    *
    * State rather than a ref, because the navigation effect has to *re-run* when it clears.
    */

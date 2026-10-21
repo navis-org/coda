@@ -27,7 +27,7 @@
  * one-row query against the plain `proofread_neurons_view` came back in **0.77 s**; the same
  * query against `nt_summary_view` and `valid_connection_v2` had not answered after **45 s**.
  * Those two are `GROUP BY` roll-ups, so the server builds the whole result and then takes one row
- * off it — which is the same fact `docs/backends.md` records from the other side, that CAVE's
+ * off it — which is the same fact `docs/backends-cave.md` records from the other side, that CAVE's
  * query API has no `GROUP BY` for *us* because the aggregation is baked into the view.
  *
  * That is why the facts and the column sample are **two memos rather than one record**. The card

@@ -173,7 +173,9 @@ This is the one surface in Coda that cannot work offline, so all three cases are
   refusal, which a browser reports identically as an opaque `TypeError`. That is `data/fetchText.ts`,
   shared with the share-link resolver rather than copied from it: the function carries a comment
   warning that two functions of one name two directories apart is a grep hazard, and the zoo
-  briefly made that warning come true.
+  briefly made that warning come true. It is the one credential-less cross-origin read that has
+  to tell "unreachable" from "CORS refused" — a GET, or a POST to a public read-only query
+  endpoint through its `init` option — so a new caller reaches for it rather than a copy.
 
 - **A failed *refresh* over a list already in hand does not take the list away.** The rows are
   still the best answer available, so the failure goes to the footer beside the age and the list

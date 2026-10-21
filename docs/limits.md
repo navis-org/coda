@@ -317,6 +317,10 @@ Three conventions, each of which existed in two or three spellings before this f
    slow one (warn), or the same one (silent)?
 2. If it warns, say the cost in the units the reader is spending — minutes, megabytes,
    requests — and say that the work is going ahead. `warnOverThreshold` is the house phrasing.
+   The threshold itself is stated in the units of the thing it protects (bytes for memory,
+   seconds for a wait, `TRIANGLE_WORK_WARN`'s comparisons for a nested loop), never in a proxy
+   such as a row or node count: a limit worth arguing about is one somebody can check against
+   what it is guarding.
 3. If it refuses, derive it from `CRASH_FLOOR_BYTES` rather than picking a round number, and
    say what would have been allocated.
 4. Measure. Every number above came from a measurement recorded next to it; the ones that had

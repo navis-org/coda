@@ -95,7 +95,7 @@ function urls(layer: NgLayer): string[] {
  * **The format must have been stated.** `parseNgSource` reads a bare `gs://…` as precomputed,
  * because somebody pasting one into a node means precomputed. A `source` field with no format is
  * a different thing: a string nobody wrote as a source. The preference order below is measured
- * (see docs/backends.md — preferring the wrong candidate downloaded male-CNS at full resolution
+ * (see docs/backends-precomputed.md — preferring the wrong candidate downloaded male-CNS at full resolution
  * with nothing failing), so widening what counts as a candidate re-opens that decision.
  *
  * **The location must be an object store.** `dvid://` is the case: DVID serves meshes through a

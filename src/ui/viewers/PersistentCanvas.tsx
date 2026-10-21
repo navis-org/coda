@@ -8,7 +8,7 @@
  * Without a key, or while another surface holds it, the root is private — `<Canvas>` exactly.
  *
  * Deliberately **no context bridge** and no suspend-to-parent; why, and the measurements, are in
- * `docs/viewers.md` — "A 3D renderer is handed between surfaces, not rebuilt".
+ * `docs/viewers-3d.md` — "A 3D renderer is handed between surfaces, not rebuilt".
  */
 
 import { Component, Suspense, useCallback, useLayoutEffect, useRef, useState } from 'react'

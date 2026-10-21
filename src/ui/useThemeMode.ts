@@ -57,7 +57,7 @@ export function usePrefersReducedMotion(): boolean {
  * paint is an effect keyed on the mask, and nothing re-renders a row: Explore fetches for itself
  * and its rows subscribe to no graph state. The chart viewers have the same read-during-render
  * of `currentMode()` and go stale on a flip too, and there the next edit repaints them
- * (docs/viewers.md records that as pre-existing); here there is no next edit, so a list rendered
+ * (docs/viewers-matrix.md records that as pre-existing); here there is no next edit, so a list rendered
  * in dark mode kept `#c3c2b7` on a light card for as long as it stayed open. Light grey on
  * white — which is the "too faint" this fixes, rather than anything about the ramp.
  *

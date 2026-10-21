@@ -298,7 +298,7 @@ export interface PropagateResult {
    *
    * Raw, before the per-hop gain, so it conserves: travelling `inputs` under the traversal
    * denominator a neuron's outgoing shares sum to exactly one, which is the property a Sankey's
-   * widths mean something under. See `docs/viewers.md`.
+   * widths mean something under. See `docs/viewers-network.md`.
    *
    * Keyed by hop and both ends. The key is an implementation detail and is never parsed — every
    * part of it is on the `Ribbon` as well.

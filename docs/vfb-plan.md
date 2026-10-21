@@ -199,7 +199,7 @@ made against the six types in the UC3 table.
 
 VFB cross-references each materialization separately: male-cns v0.9 *and* v1.0 (166,681 and
 166,693), BANC 626 *and* 888 (80,505 and 145,948), FlyWire 783 and hemibrain v1.2.1. A root id at
-a different materialization is a different neuron (backends.md), so `sites.ts` maps a Coda dataset
+a different materialization is a different neuron (backends-cave-geometry.md), so `sites.ts` maps a Coda dataset
 version to a VFB site only on an exact match. Anything else is refused by name. Getting a table to
 VFB's version is a separate, explicit step (*Gaps in Coda*, G3).
 

@@ -18,7 +18,7 @@
  * That is also why the region is not a *subgraph*. The obvious design — a collapsible group with
  * the body built inside it — needs boundary ports, a nested document and a `parentId` that
  * re-bases every child's `position`, which five subsystems read absolutely (see
- * `docs/canvas.md`). The region is derived from the wires instead: everything reachable from
+ * `docs/canvas-editing.md`). The region is derived from the wires instead: everything reachable from
  * this node that is not past a `Collect`.
  *
  * ## The index is not a param, and that is load-bearing

@@ -559,6 +559,13 @@ the top of the axis. `ctx.warn` says how many rows and how many neurons. And a f
 is left alone: under `connected` the numerator includes connections to fragments that the
 denominator does not, and clamping would hide exactly the case the basis exists for.
 
+**The queried end of the totals query is `:Segment`, in both directions.** Every body carries that
+label — a `:Neuron` is a `:Segment` that cleared the synapse threshold — and `bodyId` is indexed on
+it, so a fragment that turned up on the far end of somebody's edge still gets a denominator.
+Matching `:Neuron` there turns every such row into a silent null. (`synapseTotalsCypher`'s comment
+has the rest; the type arm of `groupTotalsCypher` deliberately does the opposite — see
+[Normalising a route](#normalising-a-route).)
+
 ### Split and restrict by region, which are one operation
 
 `ConnectsTo` carries its own `roiInfo` in neuPrint — the connection's synapses broken down by
@@ -672,7 +679,7 @@ neuPrint rather than assumed:
 
 **A picker of what discovery found, not an "everything" checkbox.** The checkbox was the first
 idea, because it was not clear a dataset's edge properties could be listed at all. They can — see
-[backends.md](backends.md#what-else-a-connection-carries-and-how-to-find-out) for the sample and why
+[backends-neuprint.md](backends-neuprint.md#what-else-a-connection-carries-and-how-to-find-out) for the sample and why
 it is not the exact schema call. A picker puts the chosen *names* in the provenance key and in the
 schema, so a dataset that grows a property does not change what an existing node returns, and a
 picker downstream is configured against columns that are promised rather than whatever turned up.
@@ -928,6 +935,12 @@ that arrived second gets the wrong answer. Same capability flag, since a source 
 per-neuron totals can group them; a separate predicate, `canTotalGroups`, because the *method* is
 separately optional and a source with the flag and without it has to refuse before the run rather
 than during it.
+
+**Its type arm matches `:Neuron` where the per-neuron totals match `:Segment`**, and the two are
+not an inconsistency: a denominator counts the population its numerator came from, and the
+numerator is `pathStepCypher`'s, which matches `(a:Neuron)` at both ends. Summing every `:Segment`
+carrying the type would put synapses into the denominator that no hop of this traversal could ever
+have contributed. The id arm keeps `:Segment` for the per-neuron reason.
 
 **The denominators are fetched per hop, not once at the end.** That is what `Min fraction` buys:
 a connection below it is not followed, so the groups behind it never enter the network. A
@@ -1417,7 +1430,10 @@ before anybody runs it.
 source that learned this rule would break both. `asksNothing` in `nodes/lib/findNeuronsRows.ts`
 owns it, one call above the seam, and four surfaces read it: `evaluate`, the card's foot line, and
 both emitters, which write an empty frame rather than a cell fetching a connectome the canvas never
-asked for.
+asked for. **The empty table carries the dataset's own neuron schema**
+(`schemasForDataset(source, dataset).neurons`), never a bare one: an empty schema empties every
+column picker downstream on Run, which reads as a broken dataset rather than as a question not yet
+asked.
 
 **Two of the three controls, and only two, count as asking something.** `In ROI` does — it is not a
 row only because a region is not a column, and a card set to `In ROI: LO(R)` is visibly asking a

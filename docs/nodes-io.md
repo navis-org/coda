@@ -1133,13 +1133,13 @@ nothing.
 
 `cave.tables` and `cave.tableInfo`, both under `Add ▸ Dataset`. They answer the question a CAVE
 datastack does not answer about itself — *what is in here* — and the reason that question needs a
-node is written up in [backends.md](backends.md#a-datastack-does-not-describe-itself). Before
+node is written up in [backends-cave.md](backends-cave.md#a-datastack-does-not-describe-itself). Before
 them, the only way to learn that `hierarchical_neuron_annotations` was FlyWire's cell typing was
 to already know: `CAVE table` has a text field with `nuclei_v1` as its placeholder, and anything
 else got a 404 at Run.
 
 The fetching is `data/cave/tables.ts` and is documented there and in
-[backends.md](backends.md#discovery-what-is-in-a-datastack). What follows is what the *nodes*
+[backends-cave.md](backends-cave.md#discovery-what-is-in-a-datastack). What follows is what the *nodes*
 decided.
 
 ### Two nodes, not one, and where the datastack comes from
@@ -1181,7 +1181,7 @@ The card fills from `peekTableFacts` without a Run, the way the Description card
 `nuclei_v1` publishes six paragraphs of provenance and a request for acknowledgement.
 
 **The card shows two row counts and labels which is which.** They disagree by up to a third and
-each answers a different question; [backends.md](backends.md#the-row-cap-is-a-per-deployment-number-and-counting-is-the-only-tell)
+each answers a different question; [backends-cave.md](backends-cave.md#the-row-cap-is-a-per-deployment-number-and-counting-is-the-only-tell)
 has the measured table and the round trip that showing one of them cost.
 
 **The `type` column is a Coda `DType`** — `i64`, `f64`, `str`, `bool` — because those four are
@@ -1199,7 +1199,7 @@ own runtime, and a notebook claiming Coda's answer would describe a frame the re
 
 `zapbench:neuronTraces` reads the released ZapBench calcium-imaging traces for whichever neurons in a
 fish2 table carry a `zapbenchId`. The array facts, the cost model and the id measurement are in
-[backends.md](backends.md#zapbench-a-released-zarr-array-not-a-server); what belongs here is what
+[backends-zapbench.md](backends-zapbench.md#zapbench-a-released-zarr-array-not-a-server); what belongs here is what
 the node decides.
 
 ### One output, and what removing the second one cost
@@ -1322,7 +1322,7 @@ offsets and two windows are comparable.
 
 It is the only control that reduces cost on the row-major copy, because neurons are on that
 array's contiguous axis — [limits.md](limits.md) has the arithmetic. On the transposed copy the
-node usually reads (see [backends.md](backends.md#two-layouts-and-why-the-reader-chooses-per-request))
+node usually reads (see [backends-zapbench.md](backends-zapbench.md#two-layouts-and-why-the-reader-chooses-per-request))
 a wide window is cheap and a narrow one over many neurons is what gets expensive, which is why
 the *reader* chooses the layout and the node only reports what it chose. The default is still the whole recording: that is the
 honest answer to "the traces for these neurons", and the cost is said out loud rather than
@@ -1347,7 +1347,7 @@ that grows a selection and asserts which block was read.
 recording, a Heatmap selection names a band of cells, and `zapbench:neurons` looks up the fish2
 neurons carrying them — `ZapBench Traces → Heatmap ▸ Selected Rows → ZapBench to Neurons → Skeletons`,
 with nothing to set on the last three. The array facts behind both are in
-[backends.md](backends.md#the-pyramid-a-row-is-a-bin).
+[backends-zapbench.md](backends-zapbench.md#the-pyramid-a-row-is-a-bin).
 
 ### A row is a cell, and at a reduced scale a row is several
 

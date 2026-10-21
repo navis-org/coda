@@ -153,7 +153,7 @@ registerNode({
        * whole row, and hiding a default field was only possible from the inspector. Their stored
        * values are now undeclared: `normalizeParams` ignores them, and a saved workflow's
        * hand-picked chips revert to the automatic ones. Cosmetic, both being presentational, and
-       * accepted in beta; `docs/widgets.md` records it.
+       * accepted in beta; `docs/widgets-explore.md` records it.
        *
        * **Empty means automatic**, which is also what absence means, so it needs no `absentMeans`.
        * Presentational because only the drawing reads it — `evaluate` never sees a field, so no

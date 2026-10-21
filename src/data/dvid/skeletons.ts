@@ -2,13 +2,13 @@
  * DVID skeletons: one SWC per body, in a keyvalue instance — **in voxels**.
  *
  * **Not yet reachable from the app**: nothing wires this up, because a DVID skeleton route needs
- * a port on `SkeletonSource` mirroring `MeshBodyReader`. See `docs/backends.md` § What is not
+ * a port on `SkeletonSource` mirroring `MeshBodyReader`. See `docs/backends-dvid.md` § What is not
  * built.
  *
  * ## The unit split, which is the whole reason this file is careful
  *
  * DVID's skeletons are in **voxels** and its meshes are in **nanometres** — same body, same repo,
- * measured; `docs/backends.md` has the numbers. So the skeleton is scaled and the mesh is not,
+ * measured; `docs/backends-dvid.md` has the numbers. So the skeleton is scaled and the mesh is not,
  * and neither file may assume the other's rule. Left unscaled a DVID skeleton draws at 1/8 inside
  * the mesh it should thread, with a cable length 8× short — and nothing fails, which is what
  * makes this worth a paragraph rather than a line. `data/units.ts` is where

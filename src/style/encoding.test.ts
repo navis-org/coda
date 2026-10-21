@@ -1033,7 +1033,7 @@ describe('resolveShape', () => {
  * What it deliberately does not pin is the dash, which is the other half and is not a contrast
  * question at all: the band's other neighbour is the inter-cell separator, and that is the
  * *surface* showing through rather than a painted colour. See `editor.css`, and the screenshots
- * that found it, in `docs/viewers.md`.
+ * that found it, in `docs/viewers-matrix.md`.
  */
 describe('the heatmap selection band', () => {
   const BAND = { core: '#ffffff', casing: '#000000' }

@@ -114,7 +114,7 @@ export function connectionViewAt(
  * defines exactly two bound points, `pre_pt` and `post_pt`. **The cleft centre is not among them**:
  * `ctr_pt` belongs to `SynapseSchema` (registered as `synapse`) alone, and `NoCleftSynapse`,
  * `NoCenterSynapse` and the Buhmann schemas have none — so only a spec that knows its table's
- * schema names it (BANC, minnie65); `docs/backends.md` has why it stopped being the default.
+ * schema names it (BANC, minnie65); `docs/backends-cave.md` has why it stopped being the default.
  * `scoreColumn` is
  * deliberately absent — a confidence column is per-schema (`cleft_score` on FlyWire, nothing
  * comparable on Aedes, which has `size`).

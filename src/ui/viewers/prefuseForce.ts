@@ -12,7 +12,7 @@
  *   (11,936 components, largest 39 nodes), FA2 scored 0.047 on `neighbourPurity` after 25
  *   iterations and *0.034* after 1,000 — it converges, and what it converges to is a pile.
  * - Prefuse repels as 1/r², has no gravity at all, and bleeds energy through a drag term. A
- *   component drifts away from its neighbours and stops. See {@link docs/viewers.md}.
+ *   component drifts away from its neighbours and stops. See {@link docs/viewers-network.md}.
  *
  * Everything here is index-based arithmetic over typed arrays with no renderer in sight, for
  * the reason `networkStyle.ts` is: sigma needs WebGL and jsdom has none.

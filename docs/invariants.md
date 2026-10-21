@@ -10,7 +10,10 @@ verbatim. Read the entry before arguing with the rule.
    rule, and transitively by `src/test/importGraph.test.ts`, which also holds every Web Worker off
    the UI and, outside `src/pyodide`, off Python. The reason is non-React consumers — the MCP
    server's Node build today; a CLI runner or a Python-side executor over the same graph JSON
-   later — plus DOM-free unit tests.
+   later — plus DOM-free unit tests. `*.test.ts(x)` files are exempt from `no-restricted-imports`
+   so they can reach test helpers, and that exemption is **not** a way around this invariant: a
+   data-layer test asserts in the data layer's own terms (`data/cave/live.test.ts` checks a BANC
+   thumbnail's edges and extent rather than rasterising it through `src/ui`).
 
    The walk found the MCP build reaching React through three nodes taking a colour from
    `ui/encoding` (whose palette asked the browser for the theme) and the help pages parsing
@@ -147,6 +150,11 @@ verbatim. Read the entry before arguing with the rule.
    rule, both exporters need both, and `src/data` may not import `src/nodes` (invariant 1), so
    anywhere higher leaves somebody out. There is deliberately **no re-export**: a shim is how a
    symbol acquires a second spelling and then a third.
+
+   **The transport grammar is not the only one.** Neuroglancer's `parseUint64` is narrower than
+   `isNeuronId`, and a segment id it cannot parse deletes the layer rather than the id, so the
+   Neuroglancer card filters through `isSegmentId` — a second *predicate* over a different
+   grammar, not a second spelling of this one ([viewers-neuroglancer.md](viewers-neuroglancer.md)).
 
    That is worth saying because the rule was written four times before it was written once, and
    the copies had already drifted: two accepted a leading `-` and two did not, while the type's

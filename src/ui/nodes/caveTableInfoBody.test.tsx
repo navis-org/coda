@@ -93,7 +93,7 @@ describe('the CAVE table info card', () => {
     /*
      * Both counts, each with a label saying which it is. They disagree by up to a third on a real
      * table and each answers a different question; showing one without saying which is what
-     * `docs/backends.md` records as having cost a debugging round trip, so the fixture makes
+     * `docs/backends-cave.md` records as having cost a debugging round trip, so the fixture makes
      * them differ deliberately.
      */
     expect(screen.getByText('rows')).toBeTruthy()

@@ -34,7 +34,7 @@
  * an `ImageData` 16.7 ms (8.7 ms of main thread); WebGL `gl.POINTS` 16.7 ms (6.7 ms). The
  * `ImageData` number was wrong — its stamps were ~2 device pixels where a mark is 6 — and built
  * properly the CPU raster took 67 ms, so the pass is one shared WebGL context (`scatterGl.ts`)
- * with the CPU raster as its fallback and the export path. `docs/viewers.md` has the account.
+ * with the CPU raster as its fallback and the export path. `docs/viewers-charts.md` has the account.
  *
  * ## Data
  *

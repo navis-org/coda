@@ -118,7 +118,7 @@ const DESCRIPTION_COMPANION: CompanionSpec = {
  * Description is placed under when the node is added. See `NodeDefinition.cardHeight`.
  *
  * Measured in a browser on a cold session with no credentials, which is the state a card arrives
- * in (`docs/canvas.md` has the numbers). The tallest of each backend, since a card placed under a
+ * in (`docs/canvas-layout.md` has the numbers). The tallest of each backend, since a card placed under a
  * shorter guess is drawn over. A card that later grows — a token arriving, a listing landing — is
  * caught by the next arrange, which reads the measurement instead.
  */

@@ -4,7 +4,7 @@
  * The canvas paints it, the ⤓ turns it into an SVG (and a PNG of that SVG), and the hover reads
  * where every synapse tick ended up. The heatmap learned why this is one function: two drawings
  * carrying the same numbers part company within an afternoon, and a downloaded figure that does
- * not match the card is worse than none (`docs/viewers.md`, "The chrome is shared").
+ * not match the card is worse than none (`docs/viewers-matrix.md`, "The chrome is shared").
  *
  * Everything is in screen pixels and built from `PieceGeometry` — each drawn piece's two ends — so
  * the animation, which interpolates only those ends, gets every tick, colour stop and highlight

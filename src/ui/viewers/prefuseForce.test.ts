@@ -11,7 +11,7 @@
  *   takes the whole layout with it, silently, one iteration later.
  *
  * The pictures themselves were checked by rendering the real 36k-node graph — see
- * [docs/viewers.md](../../../docs/viewers.md).
+ * [docs/viewers-network.md](../../../docs/viewers-network.md).
  */
 
 import { describe, expect, it } from 'vitest'

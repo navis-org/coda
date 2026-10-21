@@ -349,7 +349,7 @@ export function Viewer3D(props: Viewer3DProps) {
   const dim = useMemo(() => sceneDim(background, mode), [background, mode])
 
   /*
-   * Memoised **by value**, which is the rule CLAUDE.md states and this viewer was breaking.
+   * Memoised **by value**, which is the rule docs/viewers-network.md records and this viewer was breaking.
    * `readColorSpec` mints a fresh object on every render of the parent, so every memo keyed on
    * one invalidated on every unrelated store tick — and what hangs off these is a 40k-segment
    * colour buffer, rebuilt from scratch each time. `useStable` exists for exactly this; the

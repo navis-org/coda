@@ -272,7 +272,7 @@ harmless rather than something to word around: no token, a login token whose sev
 and the first render of every session, all of which a `select` would draw as a card that had
 forgotten what the graph says. The listing needs the credential, and answers what the account may
 *view* rather than what it can query today, so the peek behind it is gated on having one; see
-[backends.md](backends.md#the-datastack-listing-is-a-fact-about-the-credential-so-its-peek-is-gated-on-one).
+[backends-cave.md](backends-cave.md#the-datastack-listing-is-a-fact-about-the-credential-so-its-peek-is-gated-on-one).
 It is **not** filtered against `DATASTACK_SPECS` — a shipped datastack works from this card, the
 spec simply winning over the settings on it, and `validate` says exactly that in words, where
 dropping those names would leave the field disagreeing with the count the Connections panel prints
@@ -286,7 +286,7 @@ that almost never changes above the three that always do. Its default is the URL
 rather than empty, so a graph saved before the field existed reads as the default deployment —
 which is where every such graph was. The card publishes `publishedCaveSourceId(server)` as its source, so a
 node wired below it learns the deployment from the wire; see
-[backends.md](backends.md#a-deployment-is-a-global-server-and-each-has-its-own-token).
+[backends-cave.md](backends-cave.md#a-deployment-is-a-global-server-and-each-has-its-own-token).
 
 The mechanism is `StringParam.suggestions`, which is a general control rather than this node's:
 `EnumParam.options`' contract exactly — synchronous, network-free, asked on every render — drawn
@@ -401,7 +401,7 @@ each node refuses on its own card. Most segmentations name no skeleton directory
 the ordinary answer rather than an edge case. `roiMeshes` needs only a mesh directory: it once
 needed a sidecar too, which left a nameless bucket of region shells unfetchable by anything, so a
 nameless one now says `regionsById` and the region picker takes typed segment ids instead — see
-[backends.md](backends.md#segment-properties-and-what-they-unlock).
+[backends-cave.md](backends-cave.md#segment-properties-and-what-they-unlock).
 
 **A source with segment properties stops needing Input IDs.** The sidecar is a neuron index, so
 Explore can browse it and Find Neurons can query it — locally, through the same
@@ -827,7 +827,7 @@ once the Berg _et al._ sentence was added, so it is 320; BANC's CAVE table card 
 cold session, so a fixed 220 drop put the note 45 units inside it, and the card declares that
 height (`cardHeight`) and the caption goes `CAPTION_GAP` under it. The note names its card
 (`GraphNode.captionOf`), so an arrange carries it with the chain — see
-[canvas.md](canvas.md#a-chain-caption-is-carried-the-same-way-and-it-is-the-one-note-that-moves).
+[canvas-layout.md](canvas-layout.md#a-chain-caption-is-carried-the-same-way-and-it-is-the-one-note-that-moves).
 
 **BANC's labels need no `DatastackSpec.annotations` entry, and cannot have one.** That spec joins
 through the datastack's own `neurons.table`, and `codex_annotations` is a reference table into
@@ -947,11 +947,11 @@ box's width, BANC's under its CAVE table card, 16 units below each. Two findings
 
 - **A caption did not follow its chain through the arrange**, since notes never move. Fixed by
   carrying it
-  ([canvas.md](canvas.md#a-chain-caption-is-carried-the-same-way-and-it-is-the-one-note-that-moves)).
+  ([canvas-layout.md](canvas-layout.md#a-chain-caption-is-carried-the-same-way-and-it-is-the-one-note-that-moves)).
 - **A dataset card's Description overlapped it on neuPrint**, as placed and after the arrange —
   and on a dataset node added by hand, so it was never a starter's doing. It is placed a gap under
   the card's height now, floored by the declared one
-  ([canvas.md](canvas.md#a-companion-is-placed-with-its-host-not-after-it)).
+  ([canvas-layout.md](canvas-layout.md#a-companion-is-placed-with-its-host-not-after-it)).
 
 ## Custom Dataset: a dataset assembled from parts
 

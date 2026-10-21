@@ -352,6 +352,15 @@ verbatim.
   which needs `ImageData` — a global jsdom only defines when the optional `canvas` package is
   installed.
 - **`erasableSyntaxOnly` is on**, so no TS parameter properties (`constructor(private x)`).
+- **Prettier owns `src/**/*.{ts,tsx,css}` and nothing else**, and `pnpm format` is the one
+  declaration of that scope. `prettier --write .` is the wrong reflex: it touched 111 files nobody
+  asked for. Every `*.md` is outside the scope because prettier rewrites `*em*` throughout, burying
+  the design records under emphasis churn; the recorded `__fixtures__/*.json` are outside it
+  because they are verbatim wire responses. CI enforces the scope by running `pnpm format` and then
+  `git diff --exit-code` — deliberately **not** a second `prettier --check` script, because two
+  spellings of one scope drift into a guard that passes while `pnpm format` still rewrites the
+  tree. The one documented exception runs the other way: a `<!-- prettier-ignore -->` pins each
+  `<meta name="description">` onto one line ([seo.md](seo.md)).
 
 - **CAVE's row cap is a per-deployment number, and a reference table has no root id.** Two
   failures on the same table, and each read as a fact about the data.

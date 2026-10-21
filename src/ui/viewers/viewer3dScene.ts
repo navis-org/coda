@@ -144,7 +144,7 @@ export const DIMMED_MIN_CONTRAST = 3
  * *upwards* by the same rule — `sceneDim` is the caller that knows which surface that is.
  * What no grey can do is separate hues of equal lightness, and the validated categorical palette
  * is built from exactly those: its eight slots dim to within a few L* of each other. The numbers
- * are in `docs/viewers.md`.
+ * are in `docs/viewers-3d.md`.
  */
 export function dimFor(surface: string, ceiling: string): Dim {
   const surfaceY = luminanceOf(surface)
@@ -1086,7 +1086,7 @@ export function framingFor(bounds: Bounds3 | undefined): Framing {
 /**
  * Whether `CameraRig` should frame the scene now, rather than leave the view where it was put: on
  * the first real extent, under `Frame each` (`refit`), and on a new subject (`frameKey`). Why the
- * last exists is in `docs/viewers.md`. `size > 1` tells a real extent from the placeholder
+ * last exists is in `docs/viewers-3d.md`. `size > 1` tells a real extent from the placeholder
  * `framingFor(undefined)` returns, so nothing frames onto an empty scene.
  */
 export function shouldFrame(args: {

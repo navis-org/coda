@@ -353,7 +353,7 @@ browser's footer already links the node guide, which is the reference the row's 
 and a rest on a row opens `NodeDefinition.guide` in a hover panel, which is not a second door
 into *this* document: it is the registry's own two or three sentences, and a panel is
 `pointer-events: none`, so the markup rule above does not reach it. See
-[canvas](canvas.md) for where it lands.
+[canvas](canvas-interaction.md) for where it lands.
 
 Keyed on the type rather than on a node id is the whole design. A document is about a *kind* of
 node, which is what lets the same overlay open from a card, from a menu, and from a

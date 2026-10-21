@@ -213,7 +213,7 @@ code {
  *
  * The inputs are visually hidden but **focusable** — the clip pattern, never `display: none` or
  * `visibility: hidden`, both of which take a control out of the tab order. That is the same trap
- * `canvas.md` records for the add menu, reached from the other direction: there a closed surface
+ * `canvas-interaction.md` records for the add menu, reached from the other direction: there a closed surface
  * had to be unmounted so its buttons left the tab order, here a control has to stay in it while
  * leaving the page.
  *

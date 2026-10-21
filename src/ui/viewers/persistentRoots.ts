@@ -1,7 +1,7 @@
 /**
  * Roots kept between the surfaces that draw them — a React Three Fiber root, a Neuroglancer frame —
  * and the lease, park and release rules they share. Generic over the root, so the rules are testable
- * without WebGL or a loaded document. Why, and what it measured: `docs/viewers.md`.
+ * without WebGL or a loaded document. Why, and what it measured: `docs/viewers-3d.md`.
  */
 
 /**

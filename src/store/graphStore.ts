@@ -2285,7 +2285,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * catalogue is an IndexedDB read, so a graph naming a set is validated against "I have not
    * looked yet" — which `edgeSetIssues` deliberately answers with silence rather than with a
    * warning it cannot substantiate. Without this the warning would then sit unshown until some
-   * unrelated edit, which is the shape of the root-drift bug written up in CLAUDE.md.
+   * unrelated edit, which is the shape of the root-drift bug written up in docs/annotations.md.
    */
   subscribeEdgeSetsLearned(afterSourceLearned)
   /*

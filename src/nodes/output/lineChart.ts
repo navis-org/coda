@@ -4,7 +4,7 @@
  *
  * **A tap**: the table passes through by identity and every param is presentational, so nothing
  * here can make a result stale. The rules are `nodes/lib/lineChart.ts` (which Y columns) and
- * `ui/viewers/lineSeries.ts` (lines, joining, decimation); the record is `docs/viewers.md`.
+ * `ui/viewers/lineSeries.ts` (lines, joining, decimation); the record is `docs/viewers-charts.md`.
  */
 
 import { registerNode } from '../../core/registry'

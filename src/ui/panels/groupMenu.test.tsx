@@ -6,7 +6,7 @@
  * What jsdom can see here is everything except the pointer. It performs no layout and dispatches
  * no real pointer sequences, so **the drag is not asserted anywhere, and cannot be** — that the
  * outline is grabbable, that the interior still pans and box-selects, and that the canvas does
- * not slide out from under a frame being moved each need a real browser. `docs/canvas.md` lists
+ * not slide out from under a frame being moved each need a real browser. `docs/canvas-editing.md` lists
  * those checks and records that they have not been run against this implementation yet.
  * What is observable here is the DOM the frame draws, the menu's rows, the keys and the palette
  */

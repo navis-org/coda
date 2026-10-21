@@ -23,7 +23,7 @@ difference is who advances the index.
 ### Not a subgraph, and that was the first decision
 
 `_TODOs.md` proposed the obvious shape: a collapsible group with the loop body built inside it.
-It was rejected on `docs/canvas.md`'s own terms. A group frame in Coda **owns nothing** —
+It was rejected on `docs/canvas-editing.md`'s own terms. A group frame in Coda **owns nothing** —
 membership is a list of node ids, the box is derived, and `parentId` was refused because it
 re-bases every child's `position`, which five subsystems read absolutely. Making groups into
 scoping constructs means boundary ports, a nested document model, a nested canvas, and a second

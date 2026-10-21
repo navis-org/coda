@@ -1198,7 +1198,7 @@ export function matchCellTypes(
  *
  * Here rather than in the node, and that is [invariant 8](../../../docs/invariants.md)'s doing:
  * this is the one place an id crosses out of a `TableValue` and into the mapper, `idText` is the
- * rule for doing it, and CLAUDE.md records the UI and glue layers as where that keeps being
+ * rule for doing it, and invariants.md records the UI and glue layers as where that keeps being
  * re-broken with a `String(...)` or a `Number(...)`. Beside the algorithm it has a unit test; in
  * a node's `evaluate` it would have none.
  *

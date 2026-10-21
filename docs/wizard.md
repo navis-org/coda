@@ -45,7 +45,7 @@ deliberately safe `false` for an unpeeked datastack, so the wizard hid **View mo
 **NBLAST clustering** for all three CAVE families — every one of which has skeletons (FlyWire's
 published beside materialization 783, BANC's and minnie65's from the level-2 cache).
 `capabilitiesAnywhere` on `DataSource` is the ceiling; only CAVE declares one, for `skeletons` alone
-(`docs/backends.md`).
+(`docs/backends-cave-geometry.md`).
 
 Two load-bearing properties. **The floor is still what the node reads**, so a dataset that really has
 no skeletons says so on the Skeletons card — an over-offer lands a message, an over-refusal leaves a
@@ -560,7 +560,7 @@ subject is **one card**, printed on a card of its own some distance below it. Th
   with it.
 - **Dismissing one meant deleting a node**, so the choice was between prose they had finished with and
   an edit to their own document — an edit in the undo stack, the saved file and the share link.
-  Dismissing a hint is none of those (`docs/canvas.md`), and it is remembered by *text*, so a second
+  Dismissing a hint is none of those (`docs/canvas-editing.md`), and it is remembered by *text*, so a second
   generated workflow does not re-teach the same sentence.
 
 **The overview stayed a note**, and the split is about what the sentence points at: the overview is

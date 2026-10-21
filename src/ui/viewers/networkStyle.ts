@@ -2,8 +2,8 @@
  * Focus, dimming, tooltips and the two canvas drawers the network viewer hands to sigma.
  *
  * Split out of `NetworkViewer` because none of it needs a GPU. jsdom has no WebGL, so
- * anything left inside that component is untestable by construction — which is why
- * CLAUDE.md has to record that this viewer's pixels have never been verified by anyone.
+ * anything left inside that component is untestable by construction and can only be checked by
+ * hand in a real browser (docs/viewers-network.md).
  * Everything here is a pure function over colours, ids and attribute rows, so it is as much
  * of the drawing as can be pinned down headlessly.
  */

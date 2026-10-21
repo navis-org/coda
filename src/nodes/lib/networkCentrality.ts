@@ -388,9 +388,10 @@ function brandesSweep(
      *
      * Four `fill`s and an n-long loop per source is Θ(V) whatever the walk reached, so the sweep
      * was Θ(V²) on the resets alone — invisible on a connected graph and the entire runtime on a
-     * fragmented one. The correspondence graph in CLAUDE.md is the case that matters: 36k nodes
-     * in 11,936 components, largest 39, so almost every source walks a handful of nodes and then
-     * cleared 36,000. Bounded by the walk instead, that is ~70× less work for the same answer.
+     * fragmented one. The correspondence graph in docs/viewers-network.md is the case that matters: 36k
+     * nodes in 11,936 components, largest 39, so almost every source walks a handful of nodes
+     * and then cleared 36,000. Bounded by the walk instead, that is ~70× less work for the same
+     * answer.
      */
     for (let i = 0; i < counted; i++) {
       const u = order[i]!
