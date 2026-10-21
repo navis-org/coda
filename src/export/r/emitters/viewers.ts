@@ -7,17 +7,18 @@
  * silently ignored is worse than a knob visibly not translated.
  */
 
+import { CATMAID_TEXT } from '../../plans/query'
 import { readColorSpec, readShapeSpec, readSizeSpec } from '../../../nodes/lib/encodingParams'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import { CHART_INK } from '../../../style/colors'
 import { DEFAULT_NEUROGLANCER_URL } from '../../../data/neuroglancer/scene'
-import { rCol as col, rLongVector, rStr, rVector } from '../r'
+import { rArgs, rCol as col, rLongVector, rStr, rVector } from '../r'
 import { hclustMethod } from './analysis'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
-import { neuronIds } from './common'
+import { isCatmaidDataset, isCaveDataset, neuronIds } from './common'
 import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
 import type {
@@ -1403,7 +1404,7 @@ registerEmitter('out.neuroglancer', (ctx) => {
   lines.push(
     '',
     `${name}_scene <- coda_neuroglancer_scene(`,
-    ...args.map((arg, i) => `  ${arg}${i < args.length - 1 ? ',' : ''}`),
+    ...rArgs(args),
     `)`,
     `${url} <- coda_neuroglancer_url(${name}_scene, ${rStr(DEFAULT_NEUROGLANCER_URL)})`,
     `cat(${url}, "\\n")`,
@@ -1500,12 +1501,23 @@ function neuroglancerColorLinesR(
 
 // A note rather than a TODO — see the Python emitter, which records why at length: the card is
 // prose with no outputs, and it is on every published dataset node by default.
-registerEmitter('dataset.description', (ctx) => {
-  return ctx.note(
-    "This card shows the dataset's published description and citation. It does no analysis, so " +
-      'nothing is exported. Read it with neuprint_get_meta() / neuprint_datasets() if you need it here.',
-  )
-})
+registerEmitter(
+  'dataset.description',
+  (ctx) => {
+    if (isCatmaidDataset(ctx)) {
+      return ctx.note(CATMAID_TEXT.description)
+    }
+    return ctx.note(
+      "This card shows the dataset's published description and citation. It does no analysis, so " +
+        'nothing is exported. Read it with ' +
+        (isCaveDataset(ctx)
+          ? `coda_cave_client(${ctx.input('dataset') ?? 'dataset'})$info$get_datastack_info()`
+          : 'neuprint_get_meta() / neuprint_datasets()') +
+        ' if you need it here.',
+    )
+  },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
+)
 
 // ---------------------------------------------------------------------------
 // Dataset Summary / ROIs
@@ -1513,7 +1525,6 @@ registerEmitter('dataset.description', (ctx) => {
 
 registerEmitter('out.datasetSummary', (ctx) => {
   const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
   ctx.library('dplyr')
   const neurons = `${ctx.name}_neurons`
   const status = String(ctx.params.status)
@@ -1539,20 +1550,33 @@ registerEmitter('out.datasetSummary', (ctx) => {
   ]
 })
 
-registerEmitter('out.rois', (ctx) => {
-  const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
-  const primaryOnly = roisPrimaryOnly(ctx.params)
+registerEmitter(
+  'out.rois',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    if (isCatmaidDataset(ctx)) {
+      // A CATMAID project's regions are its neuropil volumes, none nested in another, so the card
+      // draws all of them and `Primary only` has nothing to leave out.
+      return [
+        `${ctx.name}_meshes <- coda_catmaid_volumes(${conn})`,
+        ``,
+        `# Each element is a mesh3d. nat::plot3d() draws them: lapply(${ctx.name}_meshes, plot3d)`,
+        `names(${ctx.name}_meshes)`,
+      ]
+    }
+    const primaryOnly = roisPrimaryOnly(ctx.params)
 
-  return [
-    ...ctx.note(
-      'Region meshes are published for visualization only, so a volume measured from one ' +
-        'is approximate.',
-    ),
-    `${ctx.name}_rois <- neuprint_ROIs(superLevel = ${primaryOnly ? 'FALSE' : 'NA'}, conn = ${conn})`,
-    ``,
-    `# One request each. nat::plot3d() draws them once read.`,
-    `# ${ctx.name}_meshes <- lapply(${ctx.name}_rois, neuprint_ROI_mesh, conn = ${conn})`,
-    `${ctx.name}_rois`,
-  ]
-})
+    return [
+      ...ctx.note(
+        'Region meshes are published for visualization only, so a volume measured from one ' +
+          'is approximate.',
+      ),
+      `${ctx.name}_rois <- neuprint_ROIs(superLevel = ${primaryOnly ? 'FALSE' : 'NA'}, conn = ${conn})`,
+      ``,
+      `# One request each. nat::plot3d() draws them once read.`,
+      `# ${ctx.name}_meshes <- lapply(${ctx.name}_rois, neuprint_ROI_mesh, conn = ${conn})`,
+      `${ctx.name}_rois`,
+    ]
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)

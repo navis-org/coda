@@ -45,7 +45,11 @@ import {
 } from '../../data/annotations'
 import { annotationColumn, namedColumns } from '../../data/annotations/types'
 import { SEATABLE_HOSTS } from '../../data/annotations/credentials'
-import { peekBases, resolveWorkspace } from '../../data/annotations/seaTable'
+import {
+  peekBases,
+  resolveWorkspace,
+  seaTableConfigFrom,
+} from '../../data/annotations/seaTable'
 
 import { joinAnnotations, joinedSchema } from '../lib/annotationOps'
 import type { DatasetIdentity } from '../lib/caveParams'
@@ -364,10 +368,9 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
     }),
 
     validate: (ctx) => {
+      const { error } = seaTableConfigFrom(ctx.params, spec.host)
+      if (error) return [error]
       const base = String(ctx.params.base).trim()
-      if (!base) return ['Enter the name of a base in `Base`.']
-      if (!String(ctx.params.table).trim())
-        return ['Enter the name of a table in this base in `Table`.']
       /*
        * The workspace is **not** required. It used to be, which was wrong twice over: a base name
        * is very nearly always unique across an account, and the field is `advanced`, so the card
@@ -395,7 +398,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
 
     evaluate: async (ctx) => {
       const ref = seaRef(ctx.params, spec.host)
-      if (!ref) throw new Error('Name a base and a table')
+      if (!ref) throw new Error(seaTableConfigFrom(ctx.params, spec.host).error)
       return { annotations: await resolve(ctx, ref) }
     },
   })
@@ -405,23 +408,8 @@ function seaRef(
   params: Record<string, unknown>,
   fallbackHost: string,
 ): AnnotationRef | undefined {
-  const base = String(params.base).trim()
-  const table = String(params.table).trim()
-  // No workspace needed to name a ref: it is resolved from the base when it is empty, and a ref
-  // that could not be built until somebody supplied one would leave the column picker empty on
-  // exactly the configuration that is now the ordinary one.
-  if (!base || !table) return undefined
-  return {
-    provider: SEATABLE_PROVIDER,
-    config: {
-      host: String(params.host).trim() || fallbackHost,
-      workspace: String(params.workspace).trim(),
-      base,
-      table,
-      idColumn: String(params.idColumn).trim() || 'root_id',
-      columns: String(params.columns).trim(),
-    },
-  }
+  const { config } = seaTableConfigFrom(params, fallbackHost)
+  return config && { provider: SEATABLE_PROVIDER, config }
 }
 
 buildSeaTableNode({

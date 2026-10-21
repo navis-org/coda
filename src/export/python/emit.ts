@@ -16,11 +16,10 @@ import { makeInferContext } from '../../core/node'
 import { unknownTypeOf } from '../../core/missing'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import { findInputPort, inputPorts, outputPorts } from '../../core/ports'
-import { backendName } from '../../nodes/lib/datasetFamilies'
-import { backendOf } from '../../data/source'
 import type { CodaType } from '../../core/types'
 import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook } from '../canExport'
+import { unsupportedBackend, unsupportedBackendText } from '../backends'
 import { nodeLabel } from '../../core/graph'
 import type { Notebook } from './notebook'
 import { buildNotebook } from './notebook'
@@ -98,33 +97,6 @@ function outputName(
   const outputs = outputPorts(def, params)
   if (outputs.length <= 1) return base
   return `${base}_${pyPortIdent(portId)}`
-}
-
-/**
- * A dataset backend this node's emitter was not written against, or undefined.
- *
- * Read off `def.inputs` rather than by asking for a port called `dataset`, which is the bug
- * class `ports.test.ts` exists for — a hardcoded port id that is wrong for one node and fails
- * silently on it. Every dataset-shaped port is checked, reference ports included, since a
- * reference names a datastack and naming a CAVE one is exactly the case at issue.
- *
- * An *unresolved* dataset type says nothing and refuses nothing: no `sourceId` is the ordinary
- * state before a listing lands (invariant 2), and refusing there would turn a cold session into
- * a notebook of TODOs.
- */
-function unsupportedBackend(
-  def: NodeDefinition,
-  params: ParamValues,
-  inputTypes: Readonly<Record<string, CodaType | undefined>>,
-): string | undefined {
-  const supported = emitterBackends(def.type)
-  for (const port of inputPorts(def, params)) {
-    if (port.type.kind !== 'dataset') continue
-    const resolved = inputTypes[port.id]
-    const sourceId = resolved?.kind === 'dataset' ? resolved.sourceId : undefined
-    if (sourceId && !supported.includes(backendOf(sourceId))) return backendOf(sourceId)
-  }
-  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +270,8 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
       blockedBy.push(nodeLabel(nodes.get(edge.source)))
     }
 
-    const foreign = unsupportedBackend(def, node.params, inputTypes)
+    const supported = emitterBackends(def.type)
+    const foreign = unsupportedBackend(def, node.params, inputTypes, supported)
 
     let body: string[]
     let blockedHere = false
@@ -320,20 +293,9 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
           `Everything downstream of it refers to variables that were never bound.`,
       )
     } else if (foreign !== undefined) {
-      /*
-       * A third way a node fails to translate, and worth saying apart from the other two for the
-       * same reason those are said apart: this is a graph that is perfectly well wired, on a
-       * backend nobody has written *this node's* cell for. Sending the reader to the canvas to
-       * check a wire would be sending them nowhere.
-       */
-      const named = backendName(foreign)
-      warnings.push(`${def.label} has no ${named} equivalent yet.`)
-      const written = listed(emitterBackends(def.type).map(backendName))
-      body = ctx.todo(
-        `"${def.label}" is wired to a ${named} dataset, but its notebook cell has only ` +
-          `been written for ${written}. The dataset is bound above, so fill this ` +
-          `step in by hand.`,
-      )
+      const text = unsupportedBackendText(def.label, foreign, supported, 'notebook cell')
+      warnings.push(text.warning)
+      body = ctx.todo(text.todo)
     } else {
       try {
         body = emitter(ctx)

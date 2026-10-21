@@ -45,6 +45,7 @@ export type Cell = MarkdownCell | CodeCell
  * exactly the kind of thing nobody remembers at the point of use.
  */
 export type PyModule =
+  | 'ast'
   | 'os'
   | 're'
   | 'unicodedata'
@@ -53,6 +54,7 @@ export type PyModule =
   | 'numpy'
   | 'neuprint'
   | 'caveclient'
+  | 'pymaid'
   | 'nglscenes'
   | 'seaserpent'
   | 'navis'
@@ -88,6 +90,7 @@ export interface ModuleSpec {
 
 /** Declaration order is the order the setup cell reads in. See `setupCell`. */
 export const MODULES: Record<PyModule, ModuleSpec> = {
+  ast: { statement: 'import ast' },
   os: { statement: 'import os' },
   re: { statement: 'import re' },
   unicodedata: { statement: 'import unicodedata' },
@@ -160,6 +163,12 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * is why no dataset cell here has a `token=` argument, unlike the neuPrint one.
    */
   caveclient: { from: 'caveclient', pip: 'caveclient' },
+  /*
+   * A CATMAID project — pymaid, whose distribution is `python-catmaid`. Imported whole: only the
+   * generated `CodaCatmaidDataset` calls it, as `pymaid.get_partners(...)`, which says which library
+   * answered in a notebook that may also hold neuprint-python's `fetch_neurons`.
+   */
+  pymaid: { statement: 'import pymaid', pip: 'python-catmaid' },
   /*
    * Neuroglancer scenes, for the Neuroglancer node: parse the scene a dataset publishes, edit it,
    * write it out for either viewer flavour. Pinned at 0.7, the first release that reads a scene

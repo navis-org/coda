@@ -2,6 +2,8 @@
 
 import type { EmitContext } from '../types'
 import type { PopulationFilter, TableSchema } from '../../../core/types'
+import { datasetBackend } from '../../backends'
+import { localIndex, type LocalIndexText } from '../../plans/query'
 import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
 import { carryable } from '../../../nodes/lib/carryParams'
 import { rStr } from '../r'
@@ -134,4 +136,47 @@ export function carryLines(
     `idx_ <- match(${leftKeys}, ${frame}[[${rStr(keyColumn)}]])`,
     ...taken.map((name) => `${list}[, ${rStr(name)}] <- ${frame}[[${rStr(name)}]][idx_]`),
   ]
+}
+
+/**
+ * Is the dataset on this port a CATMAID project — a `coda_catmaid_dataset`? Read off the resolved
+ * type, the same thing the walk's backend guard reads, so an emitter branching on this and the
+ * guard letting it through cannot disagree. An emitter asking it declares `'catmaid'` in its
+ * `backends`.
+ */
+export function isCatmaidDataset(ctx: EmitContext, portId = 'dataset'): boolean {
+  return datasetBackend(ctx, portId) === 'catmaid'
+}
+
+/** Is the dataset on this port a CAVE datastack — a `coda_cave_dataset`? */
+export function isCaveDataset(ctx: EmitContext, portId = 'dataset'): boolean {
+  return datasetBackend(ctx, portId) === 'cave'
+}
+
+/**
+ * The neuron table a dataset searched locally is read from — a CATMAID project's or a CAVE
+ * datastack's, each built once and shared — with what its index says (`localIndex`), or undefined
+ * for neuPrint, which answers a search on the server. Declares the helper it names.
+ */
+export function labelsFrame(
+  ctx: EmitContext,
+  dataset: string,
+): { frame: string; text: LocalIndexText } | undefined {
+  const text = localIndex(ctx)
+  if (!text) return undefined
+  if (isCatmaidDataset(ctx)) return { frame: `coda_catmaid_labels(${dataset})`, text }
+  if (!isCaveDataset(ctx)) return undefined
+  ctx.helper('coda_cave_labels')
+  return { frame: `coda_cave_labels(${dataset})`, text }
+}
+
+/**
+ * A chained annotation source's last line: joined onto the source wired upstream, where there is
+ * one, by `coda_join_annotations` — a later source wins a collision unless its value is missing.
+ */
+export function chainAnnotations(ctx: EmitContext, out: string): string[] {
+  const upstream = ctx.input('annotations')
+  if (!upstream) return []
+  ctx.helper('coda_join_annotations')
+  return [`${out} <- coda_join_annotations(${upstream}, ${out})`]
 }

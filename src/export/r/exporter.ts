@@ -7,10 +7,15 @@
  */
 
 import './helpers'
+import './catmaidHelpers'
+import './caveHelpers'
 import './neuroglancerHelpers'
 import './emitters/analysis'
+import './emitters/catmaid'
+import './emitters/cave'
 import './emitters/connectivity'
 import './emitters/googleSheet'
+import './emitters/seaTable'
 import './emitters/query'
 import './emitters/table'
 import './emitters/viewers'

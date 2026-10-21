@@ -56,6 +56,15 @@ export function normaliseCaveServer(raw: string | undefined): string {
 const normalised = new Map<string, string>()
 
 /**
+ * Is this deployment CAVE's own global server? The question every export of a CAVE target asks:
+ * the notebook passes `server_address` only where it is not, and the R document, whose fafbseg
+ * reaches no other server, refuses where it is not.
+ */
+export function isDefaultCaveServer(server: string | undefined): boolean {
+  return normaliseCaveServer(server) === DEFAULT_CAVE_SERVER
+}
+
+/**
  * A global server's origin, or undefined where the text names none — empty, or not a URL.
  *
  * `normaliseCaveServer` is this with the default filled in, which is right for a param nobody

@@ -10,7 +10,7 @@ import { portIdAt } from '../../../core/ports'
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
-import { codaIds, neuronIds } from './common'
+import { codaIds, labelsFrame, neuronIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { populationCypher } from '../../../data/neuprint/cypher'
 import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
@@ -293,7 +293,6 @@ registerEmitter('neuron.paths', (ctx) => {
     )
   }
 
-  ctx.library('neuprintr')
   // `neuprint_get_paths` takes a hop budget directly, which `fetch_shortest_paths` does not —
   // one of the few places R gives up less than Python here.
   /*
@@ -335,14 +334,53 @@ registerEmitter('neuron.paths', (ctx) => {
 // Explore
 // ---------------------------------------------------------------------------
 
-registerEmitter('neuron.explore', (ctx) => {
-  const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
-  ctx.library('dplyr')
-  const all = ctx.output('all')
-  const hits = ctx.output('hits')
-  const selected = ctx.output('selected')
-  const plan = explorePlan(ctx)
+registerEmitter(
+  'neuron.explore',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    ctx.library('dplyr')
+    const all = ctx.output('all')
+    const hits = ctx.output('hits')
+    const selected = ctx.output('selected')
+    const plan = explorePlan(ctx)
+    // A CATMAID project and a CAVE datastack are searched over their neuron table, held once.
+    const labels = labelsFrame(ctx, conn)
+    const lines: string[] = labels
+      ? [...ctx.note(labels.text.explore), `${all} <- ${labels.frame}`]
+      : neuprintExplore(ctx, conn, all)
+
+    if (plan.hits.note === undefined) {
+      const { query, cap: limit } = plan.hits
+      ctx.helper('coda_search')
+      lines.push(``, `${hits} <- coda_search(${all}, ${rStr(query)})`)
+      if (limit !== undefined) {
+        lines.push(
+          ...ctx.note(
+            `Coda caps this at ${limit} hits and keeps the ${limit} most relevant. That ` +
+              'ranking is not reproduced, so this keeps the first matches in table order.',
+          ),
+          `${hits} <- ${hits} |> head(${limit})`,
+        )
+      }
+    } else {
+      lines.push(``, ...ctx.note(plan.hits.note), `${hits} <- ${all}`)
+    }
+
+    lines.push(``)
+    if (plan.selected.note !== undefined) {
+      lines.push(...ctx.note(plan.selected.note), `${selected} <- ${all} |> slice(0)`)
+    } else {
+      // Resolved against the whole table rather than against hits, exactly as the node does:
+      // refining a search must not drop a neuron somebody already chose.
+      lines.push(`${selected} <- ${all} |> filter(neuronId %in% ${rVector(plan.selected.ids)})`)
+    }
+    return lines
+  },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
+)
+
+/** The neuPrint index: every neuron, through the Cypher this chunk writes by hand. */
+function neuprintExplore(ctx: EmitContext, conn: string, all: string): string[] {
   /*
    * The dataset's population, in the `WHERE` of the Cypher this chunk writes by hand.
    *
@@ -356,8 +394,7 @@ registerEmitter('neuron.explore', (ctx) => {
     schemasFromType(ctx.inputType('dataset')).neurons,
   )
   const where = clause ? ` WHERE ${clause}` : ''
-
-  const lines: string[] = [
+  return [
     ...ctx.note(
       'Explore Dataset downloads the whole neuron table once and searches it locally. On male-CNS ' +
         'that is around 165,000 rows; expect this chunk to take a few seconds.',
@@ -374,34 +411,7 @@ registerEmitter('neuron.explore', (ctx) => {
     `  conn = ${conn}`,
     `)`,
   ]
-
-  if (plan.hits.note === undefined) {
-    const { query, cap: limit } = plan.hits
-    ctx.helper('coda_search')
-    lines.push(``, `${hits} <- coda_search(${all}, ${rStr(query)})`)
-    if (limit !== undefined) {
-      lines.push(
-        ...ctx.note(
-          `Coda caps this at ${limit} hits and keeps the ${limit} most relevant. That ` +
-            'ranking is not reproduced, so this keeps the first matches in table order.',
-        ),
-        `${hits} <- ${hits} |> head(${limit})`,
-      )
-    }
-  } else {
-    lines.push(``, ...ctx.note(plan.hits.note), `${hits} <- ${all}`)
-  }
-
-  lines.push(``)
-  if (plan.selected.note !== undefined) {
-    lines.push(...ctx.note(plan.selected.note), `${selected} <- ${all} |> slice(0)`)
-  } else {
-    // Resolved against the whole table rather than against hits, exactly as the node does:
-    // refining a search must not drop a neuron somebody already chose.
-    lines.push(`${selected} <- ${all} |> filter(neuronId %in% ${rVector(plan.selected.ids)})`)
-  }
-  return lines
-})
+}
 
 /**
  * Coda's neuron search, matching only.

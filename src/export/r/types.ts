@@ -35,6 +35,11 @@ export type Cell = MarkdownCell | CodeCell
  */
 export type RPackage =
   | 'neuprintr'
+  | 'catmaid'
+  | 'fafbseg'
+  | 'arrow'
+  | 'reticulate'
+  | 'seatabler'
   | 'nat'
   | 'nat.nblast'
   | 'dplyr'
@@ -54,6 +59,17 @@ export interface PackageSpec {
   /** Where it comes from, for the install comment. CRAN unless stated. */
   github?: string
   /**
+   * Lines the setup chunk prints under the install line, for a package that needs a one-time
+   * step of its own before the document runs.
+   */
+  setup?: string[]
+  /**
+   * `false` for a package the document calls only by namespace (`arrow`, `reticulate`): it is
+   * named in the install line and never attached, so its masking messages and its exports stay
+   * out of the reader's session.
+   */
+  attach?: boolean
+  /**
    * The oldest version every emitted call runs on, and what needs it — said once in the setup
    * chunk, where the install line is, rather than in every chunk that calls it.
    */
@@ -63,6 +79,35 @@ export interface PackageSpec {
 /** Declaration order is the order the setup chunk attaches them in. */
 export const PACKAGES: Record<RPackage, PackageSpec> = {
   neuprintr: { github: 'natverse/neuprintr' },
+  // A CATMAID project — the natverse's rcatmaid, whose package is `catmaid`. Not on CRAN either.
+  catmaid: { github: 'natverse/rcatmaid' },
+  /*
+   * CAVE, through the natverse: fafbseg drives the Python caveclient through reticulate, so it
+   * needs a Python with caveclient once. `simple_python()` is fafbseg's own route to one, and
+   * `dr_fafbseg()` reports what is missing — the two lines a reader needs before and after.
+   */
+  fafbseg: {
+    github: 'natverse/fafbseg',
+    setup: [
+      "fafbseg drives Python's caveclient through reticulate. Once per machine, run",
+      'fafbseg::simple_python(); if a chunk below fails, fafbseg::dr_fafbseg() says why.',
+      'The CAVE token is read from ~/.cloudvolume/secrets, as caveclient does in Python.',
+    ],
+  },
+  // fafbseg reads CAVE's rows through arrow, which is what keeps an 18-digit id exact.
+  arrow: { attach: false },
+  reticulate: { attach: false },
+  // SeaTable and FlyTable. Called by namespace only; its Python is nat.python's, not fafbseg's.
+  seatabler: {
+    github: 'flyconnectome/seatabler',
+    attach: false,
+    setup: [
+      "seatabler drives Python's seatable_api through reticulate. Once per machine, run",
+      'nat.python::simple_python("minimal", pkgs = "seatable_api"). The account token is',
+      'read from FLYTABLE_TOKEN for FlyTable and SEATABLE_TOKEN for any other SeaTable server',
+      '(e.g. set in ~/.Renviron).',
+    ],
+  },
   nat: {},
   // On CRAN, unlike neuprintr — `install.packages` finds it.
   'nat.nblast': {},

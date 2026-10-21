@@ -282,13 +282,16 @@ describe('CAVE families and datastack specs', () => {
   it('names a notebook client per language, since the two exporters differ here', () => {
     /*
      * The field is what both dataset emitter loops and `canExportNotebook` read, and it is per
-     * language because the exporters no longer cover the same backends: caveclient in Python,
-     * nothing in R. One flag for both would either refuse an export Python can produce or offer
-     * an R document of nothing but TODOs.
+     * language because the exporters need not cover the same backends. CAVE is caveclient in
+     * Python and fafbseg in R — two clients, so two names.
      */
     for (const family of DATASET_FAMILIES.filter((f) => f.sourceId === 'cave')) {
-      expect(family.notebook?.python).toBe('caveclient')
-      expect(family.notebook?.r).toBeUndefined()
+      expect(family.notebook).toEqual({ python: 'caveclient', r: 'fafbseg' })
+    }
+    // CATMAID is the one backend both exporters cover past neuPrint: pymaid and the natverse's
+    // rcatmaid read the same endpoints, so neither language refuses a CATMAID project.
+    for (const family of DATASET_FAMILIES.filter((f) => f.backend === 'catmaid')) {
+      expect(family.notebook).toEqual({ python: 'pymaid', r: 'rcatmaid' })
     }
   })
 })

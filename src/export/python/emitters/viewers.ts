@@ -11,6 +11,7 @@
  * worse than a knob visibly not translated.
  */
 
+import { CATMAID_TEXT } from '../../plans/query'
 import { readColorSpec, readShapeSpec, readSizeSpec } from '../../../nodes/lib/encodingParams'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
@@ -20,7 +21,14 @@ import { CHART_INK } from '../../../style/colors'
 import { DEFAULT_NEUROGLANCER_URL } from '../../../data/neuroglancer/scene'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
-import { codaNeurons, datasetLabels, isCaveDataset, neuronIds, pySelection } from './common'
+import {
+  codaNeurons,
+  datasetLabels,
+  isCatmaidDataset,
+  isCaveDataset,
+  neuronIds,
+  pySelection,
+} from './common'
 import { filterMasks } from './tableFilters'
 import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
 import type {
@@ -1667,6 +1675,9 @@ registerEmitter(
   'dataset.description',
   (ctx) => {
     const cave = isCaveDataset(ctx)
+    if (isCatmaidDataset(ctx)) {
+      return ctx.note(CATMAID_TEXT.description)
+    }
     return ctx.note(
       "This card shows the dataset's published description and citation, so there is no " +
         'code to export. Read it with ' +
@@ -1683,7 +1694,7 @@ registerEmitter(
    * the card is on every published dataset node by default, that is a warning on every CAVE
    * graph anybody exports, about the one node nobody expected in a notebook.
    */
-  { backends: ['neuprint', 'cave'] },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
 )
 
 // ---------------------------------------------------------------------------
@@ -1783,43 +1794,57 @@ registerEmitter('out.datasetSummary', (ctx) => {
  * notebook's dependency set — a generated file that fails on an import nobody asked for is
  * worse than one that hands over the bytes and says what to do with them.
  */
-registerEmitter('out.rois', (ctx) => {
-  const client = ctx.wired('dataset')
-  const meshes = `${ctx.name}_meshes`
-  const primaryOnly = roisPrimaryOnly(ctx.params)
-  const rois = primaryOnly ? `${client}.primary_rois` : `${client}.all_rois`
+registerEmitter(
+  'out.rois',
+  (ctx) => {
+    const client = ctx.wired('dataset')
+    const meshes = `${ctx.name}_meshes`
+    if (isCatmaidDataset(ctx)) {
+      // A CATMAID project's regions are its neuropil volumes, none nested in another, so the card
+      // draws all of them and `Primary only` has nothing to leave out.
+      return [
+        `${meshes} = {_volume.name: _volume for _volume in ${client}.volumes()}`,
+        `print(f"{len(${meshes})} region meshes")`,
+        ``,
+        `# Each value is a navis.Volume. To look at them: navis.plot3d(list(${meshes}.values()))`,
+      ]
+    }
+    const primaryOnly = roisPrimaryOnly(ctx.params)
+    const rois = primaryOnly ? `${client}.primary_rois` : `${client}.all_rois`
 
-  return [
-    ...ctx.note(
-      'Region meshes arrive as OBJ bytes, one request each. neuPrint publishes these meshes ' +
-        'for display only: they are simplified surfaces, so a volume measured from one is an ' +
-        'approximation.',
-    ),
-    ...(primaryOnly
-      ? [
-          `# Some published regions are nested inside others, so this uses the primary`,
-          `# regions, which do not overlap. The card does the same by default.`,
-        ]
-      : [`# Every published region, including the ones nested inside others.`]),
-    `${meshes} = {}`,
-    `_skipped = []`,
-    `for _roi in ${rois}:`,
-    `    try:`,
-    `        ${meshes}[_roi] = ${client}.fetch_roi_mesh(_roi)`,
-    `    except Exception:`,
-    `        # No mesh published for this one. On male-CNS every such region is an`,
-    `        # "-unspecified" bucket, which collects unassigned synapses and is not a shape.`,
-    `        _skipped.append(_roi)`,
-    ``,
-    `print(f"{len(${meshes})} region meshes"`,
-    `      f" · {sum(len(_m) for _m in ${meshes}.values()) / 1e6:.1f} MB of OBJ"`,
-    `      f" · {len(_skipped)} without one")`,
-    ``,
-    `# Each value is the contents of an .obj file. To look at one:`,
-    `#     open("ME(R).obj", "wb").write(${meshes}["ME(R)"])`,
-    `# or pass the bytes to trimesh / navis, neither of which this notebook imports.`,
-  ]
-})
+    return [
+      ...ctx.note(
+        'Region meshes arrive as OBJ bytes, one request each. neuPrint publishes these meshes ' +
+          'for display only: they are simplified surfaces, so a volume measured from one is an ' +
+          'approximation.',
+      ),
+      ...(primaryOnly
+        ? [
+            `# Some published regions are nested inside others, so this uses the primary`,
+            `# regions, which do not overlap. The card does the same by default.`,
+          ]
+        : [`# Every published region, including the ones nested inside others.`]),
+      `${meshes} = {}`,
+      `_skipped = []`,
+      `for _roi in ${rois}:`,
+      `    try:`,
+      `        ${meshes}[_roi] = ${client}.fetch_roi_mesh(_roi)`,
+      `    except Exception:`,
+      `        # No mesh published for this one. On male-CNS every such region is an`,
+      `        # "-unspecified" bucket, which collects unassigned synapses and is not a shape.`,
+      `        _skipped.append(_roi)`,
+      ``,
+      `print(f"{len(${meshes})} region meshes"`,
+      `      f" · {sum(len(_m) for _m in ${meshes}.values()) / 1e6:.1f} MB of OBJ"`,
+      `      f" · {len(_skipped)} without one")`,
+      ``,
+      `# Each value is the contents of an .obj file. To look at one:`,
+      `#     open("ME(R).obj", "wb").write(${meshes}["ME(R)"])`,
+      `# or pass the bytes to trimesh / navis, neither of which this notebook imports.`,
+    ]
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
 /**
  * The default chart list, transcribed from `summaryAttributes`.

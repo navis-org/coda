@@ -11,6 +11,7 @@
  * `bodyId_pre`/`bodyId_post` would break every column picker in the rest of the notebook.
  */
 
+import { CATMAID_TEXT } from '../../plans/query'
 import { pyList, pyStr, pyValue } from '../py'
 import {
   readEdgeProperties,
@@ -28,7 +29,8 @@ import {
   codaIds,
   codaNeurons,
   cypherIdList,
-  isCustomDataset,
+  isCatmaidDataset,
+  isLabelledHelper,
   neuronIdInts,
   neuronIds,
 } from './common'
@@ -90,6 +92,10 @@ function populationNote(ctx: EmitContext): string[] {
 function endpointLines(
   ctx: EmitContext,
   edges: string,
+  /**
+   * The seed *table*, not its ids: a seed no edge survived for keeps the type it arrived with,
+   * which `endpointNeurons` reads off the seeds and the edge list cannot supply.
+   */
   seeds: string,
   client: string,
 ): string[] {
@@ -100,7 +106,7 @@ function endpointLines(
     return ['', `${out} = coda_endpoint_neurons(${edges}, ${seeds})`]
   }
   const endpoints = ['', `_endpoints = coda_endpoint_neurons(${edges}, ${seeds})`]
-  if (isCustomDataset(ctx)) {
+  if (isLabelledHelper(ctx)) {
     // The neuron table's rows for them: a partner it does not hold has none, as on the canvas.
     return [
       ...endpoints,
@@ -196,43 +202,46 @@ function cypherConnectivity(
       ? `${out} = pd.concat([${frames.join(', ')}], ignore_index=True).drop_duplicates(subset=${pyList(plan.dedupe)})`
       : `${out} = ${frames[0]}`,
     codaIds(ctx, out, 'preId', 'postId'),
-    ...endpointLines(ctx, out, neuronIds(neurons), client),
+    ...endpointLines(ctx, out, neurons, client),
   )
   return lines
 }
 
 /**
- * The same node over a Custom Dataset's edge list: `CodaCustomDataset.connectivity`, the canvas'
- * walk (`coda_walk`, shared with `coda_traverse_connectivity`), and `Include fragments` meaning what it
- * means there — a partner outside the Neurons table. A Custom Dataset has no regions and no edge
- * properties, so those controls are not on its card; `Normalize` is, and is refused here, its
- * denominators being totals over the whole edge list that this helper does not compute.
+ * The same node over a helper dataset: `CodaCustomDataset.connectivity` or
+ * `CodaCatmaidDataset.connectivity`, both the canvas' walk (`coda_walk`, shared with
+ * `coda_traverse_connectivity`), and `Include fragments` meaning what it means there — a partner
+ * outside the neuron table. Neither has regions or edge properties, so those controls are not on
+ * their cards. `Normalize` is refused: a Custom Dataset's denominators are totals over the whole
+ * edge list that the helper does not compute, and CATMAID publishes none, as the canvas says.
  */
-function customConnectivity(
+function helperConnectivity(
   ctx: EmitContext,
   c: string,
-  ids: string,
+  neurons: string,
   direction: string,
   hops: number,
   minWeight: number,
 ): string[] {
   if (ctx.params.normalize === true) {
     return ctx.todo(
-      '`Normalize` divides by each neuron’s synapse total over the whole edge list, which ' +
-        'this notebook does not compute. Sum weight per postId (or preId) over the edge list ' +
-        'and divide by it, or untick `Normalize`.',
+      isCatmaidDataset(ctx)
+        ? CATMAID_TEXT.normalize
+        : '`Normalize` divides by each neuron’s synapse total over the whole edge list, which ' +
+            'this notebook does not compute. Sum weight per postId (or preId) over the edge list ' +
+            'and divide by it, or untick `Normalize`.',
     )
   }
   const out = ctx.output('connections')
   return [
     `${out} = ${c}.connectivity(`,
-    `    ${ids},`,
+    `    ${neuronIds(neurons)},`,
     `    direction=${pyStr(direction)},`,
     `    hops=${hops},`,
     `    min_weight=${minWeight},`,
     `    include_fragments=${pyValue(ctx.params.includeFragments === true)},`,
     `)`,
-    ...endpointLines(ctx, out, ids, c),
+    ...endpointLines(ctx, out, neurons, c),
   ]
 }
 
@@ -248,7 +257,8 @@ registerEmitter(
     const minWeight = Math.max(1, Number(ctx.params.minWeight))
     const ids = neuronIds(neurons)
 
-    if (isCustomDataset(ctx)) return customConnectivity(ctx, c, ids, direction, hops, minWeight)
+    if (isLabelledHelper(ctx))
+      return helperConnectivity(ctx, c, neurons, direction, hops, minWeight)
 
     // The node's own decoder rather than a second reading of the same params — the route
     // `readUnpivotSpec` and `decodeRenames` already take. `primaryRoisOnly !== false` in
@@ -309,7 +319,7 @@ registerEmitter(
         `    all_segments=${ctx.params.includeFragments === true ? 'True' : 'False'},`,
         `    client=${c},`,
         `)`,
-        ...endpointLines(ctx, out, ids, c),
+        ...endpointLines(ctx, out, neurons, c),
       ]
     }
 
@@ -413,7 +423,7 @@ registerEmitter(
         // `preId`/`postId` are Coda columns, and a Coda id column is text — `bodyId_pre` arrives
         // from neuprint-python as `int64`, so the rename has to retype as well as rename.
         codaIds(ctx, out, 'preId', 'postId'),
-        ...endpointLines(ctx, out, ids, c),
+        ...endpointLines(ctx, out, neurons, c),
       ]
     }
 
@@ -433,10 +443,10 @@ registerEmitter(
       `    .assign(hop=1, direction=${pyStr(label)})`,
       `)`,
       codaIds(ctx, out, 'preId', 'postId'),
-      ...endpointLines(ctx, out, ids, c),
+      ...endpointLines(ctx, out, neurons, c),
     ]
   },
-  { backends: ['neuprint', CUSTOM_SOURCE_ID] },
+  { backends: ['neuprint', 'catmaid', CUSTOM_SOURCE_ID] },
 )
 
 /**
@@ -461,17 +471,18 @@ registerHelper({
    */
   needs: ['coda_ids'],
   source: [
-    'def coda_endpoint_neurons(connections, seed_ids=None):',
+    'def coda_endpoint_neurons(connections, seeds=None):',
     '    """List the neurons in an edge list: the seeds, then every partner, one row each.',
     '',
     "    This is the Neuron Set output of Coda's Connectivity node. Seeds are always included,",
-    '    even those left without edges after min_weight.',
+    '    even those left without edges after min_weight. `seeds` is the seed table; its `type`',
+    '    column is used where it has one.',
     '    """',
     '    frames = []',
-    '    if seed_ids is not None:',
-    '        frames.append(',
-    "            coda_ids(pd.DataFrame({'neuronId': list(seed_ids), 'type': None}), 'neuronId')",
-    '        )',
+    '    if seeds is not None:',
+    "        types = seeds['type'].values if 'type' in seeds.columns else None",
+    "        seeds = pd.DataFrame({'neuronId': seeds['neuronId'].values, 'type': types})",
+    "        frames.append(coda_ids(seeds, 'neuronId'))",
     "    connections = coda_ids(connections.copy(), 'preId', 'postId')",
     "    for id_col, type_col in (('preId', 'preType'), ('postId', 'postType')):",
     '        frames.append(',

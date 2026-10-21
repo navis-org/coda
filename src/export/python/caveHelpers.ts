@@ -203,7 +203,8 @@ registerHelper({
     '    """Build Coda\'s neuron table for a CAVE datastack, one column per annotation kind."""',
     '    neurons = client.materialize.query_table(',
     "        neuron_table, select_columns=['id', id_column], merge_reference=False",
-    '    )',
+    "    )[['id', id_column]]",
+    '    # Only the columns asked for: a bound point brings its supervoxel along regardless.',
     '    if annotation_table is None:',
     "        return coda_annotation_columns(neurons.drop(columns=['id']), id_column)",
     '',
@@ -337,19 +338,42 @@ registerHelper({
  * against 0.8 s for three columns through `query(..., no_limit=True)` — so the narrowing is a
  * real win where it is wanted, and the emitter offers it as a comment beside the call rather
  * than as the default.
+ *
+ * **A multiple-select cell is joined with `', '`**, as `cellFor` does on the canvas. sea-serpent
+ * hands one over as the *text* of a Python list, `"['extra branches in male']"` under pandas'
+ * `string` dtype — measured against the canvas by `pnpm probe:flytable` on `main.info`'s
+ * `matching_notes`. So the list is read back with `ast.literal_eval`, only in the columns the
+ * table's metadata types as multiple-select (a text column holding brackets is text), and a cell
+ * that does not parse is left as it came. A link cell is left alone: its items are records.
+ *
+ * **A column named but absent is a column of `None`**, as on the canvas and in the R helper.
  */
 registerHelper({
   name: 'coda_seatable',
   needs: ['coda_annotation_columns'],
-  requires: [['pandas']],
+  requires: [['pandas'], ['ast']],
   source: [
     "def coda_seatable(table, id_column='root_id', columns=None):",
     '    """Read a SeaTable table as a Coda neuron table."""',
     '    df = table.to_frame(row_id_index=False)',
     '    # sea-serpent uses numpy `str_` for column names; make them plain strings.',
     '    df.columns = [str(c) for c in df.columns]',
+    '    # A multiple-select cell arrives as the text of a list; Coda joins its values.',
+    '    def joined(v):',
+    "        if isinstance(v, str) and v.startswith('['):",
+    '            try:',
+    '                v = ast.literal_eval(v)',
+    '            except (ValueError, SyntaxError):',
+    '                return v',
+    "        return ', '.join(map(str, v)) if isinstance(v, list) else v",
+    "    for col in table.meta['columns']:",
+    "        if col['type'] == 'multiple-select' and col['name'] in df.columns:",
+    "            df[col['name']] = df[col['name']].map(joined)",
     '    if columns:',
-    '        keep = [c for c in columns if c in df.columns and c != id_column]',
+    '        keep = [c for c in columns if c != id_column]',
+    '        for c in keep:',
+    '            if c not in df.columns:',
+    '                df[c] = None  # named but absent: a column of None, as on the canvas',
     '    else:',
     '        # No columns given: keep every column.',
     '        keep = [c for c in df.columns if c != id_column]',

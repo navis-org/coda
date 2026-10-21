@@ -49,6 +49,19 @@ export function catmaidSourceId(server: string | undefined): string {
 export const L1_CATMAID_SOURCE_ID = catmaidSourceId(L1_CATMAID_SERVER)
 
 /**
+ * The server a CATMAID source id names — `catmaidSourceId` read backwards, or undefined for an id
+ * that is not a CATMAID one.
+ *
+ * For a reader that holds only the id, which is what a published family carries: the exporters
+ * write the server into the document, and asking the source registry for it would make an
+ * export depend on which sources happen to be registered in the tab.
+ */
+export function catmaidServerOfSource(sourceId: string): string | undefined {
+  if (sourceId === 'catmaid') return DEFAULT_CATMAID_SERVER
+  return sourceId.startsWith('catmaid:') ? sourceId.slice('catmaid:'.length) : undefined
+}
+
+/**
  * A readable label, since the source id is a URL for anything but the default.
  *
  * The named deployments get a name; everything else gets its hostname, which is the only thing

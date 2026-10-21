@@ -22,7 +22,10 @@
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { nodeLabel } from '../core/graph'
 import type { ExportLanguage } from '../nodes/lib/datasetFamilies'
-import { familyForNodeType } from '../nodes/lib/datasetFamilies'
+import { CLIENT_NAMES, DATASET_FAMILIES, familyForNodeType } from '../nodes/lib/datasetFamilies'
+import { caveServerOfSource, isDefaultCaveServer } from '../data/cave/deployments'
+import { customCaveServer } from '../nodes/lib/caveParams'
+import { listed } from '../core/prose'
 
 /**
  * A node the walk could not translate, so its cell is a TODO.
@@ -109,10 +112,35 @@ export function untranslatableDatasetNodes(
   })
 }
 
-/** What the generated document would be built on, for a message naming what is missing. */
-const STACK: Record<ExportLanguage, string> = {
-  python: 'neuprint-python and caveclient',
-  r: 'neuprintr',
+/**
+ * CAVE dataset nodes on a server this language's client cannot reach — the third refusal, for the
+ * second's reason: the dataset chunk is the one with nothing behind it, so a TODO there would
+ * cascade into a document of nothing but TODOs. Only R has one: fafbseg reaches CAVE's global
+ * server and no other, where caveclient takes the server as an argument.
+ */
+export function unreachableDatasetNodes(
+  graph: CodaGraph,
+  language: ExportLanguage,
+): GraphNode[] {
+  if (language !== 'r') return []
+  return graph.nodes.filter((node) => {
+    const server =
+      node.type === 'dataset.cave'
+        ? customCaveServer(node.params)
+        : familyForNodeType(node.type)?.backend === 'cave'
+          ? caveServerOfSource(familyForNodeType(node.type)?.sourceId)
+          : undefined
+    return server !== undefined && !isDefaultCaveServer(server)
+  })
+}
+
+/**
+ * What the generated document is built on, for a message naming what is missing — read off the
+ * families' `notebook` clients, so a backend added there is named here without an edit.
+ */
+function stack(language: ExportLanguage): string {
+  const clients = new Set(DATASET_FAMILIES.flatMap((f) => f.notebook?.[language] ?? []))
+  return listed([...clients].map((client) => CLIENT_NAMES[language][client]))
 }
 
 /** The refusal, or undefined when the graph can be exported as this. */
@@ -152,10 +180,24 @@ export function canExportNotebook(
           ? `${names[0]} has no ${what} equivalent`
           : `${names.join(', ')} have no ${what} equivalent`,
       detail:
-        `The generated ${what} is built on ${STACK[language]}, which cannot read this ` +
+        `The generated ${what} is built on ${stack(language)}, which cannot read this ` +
         `backend yet, so every cell after the dataset would be a TODO.` +
         (language === 'r' ? ' The Jupyter notebook may still cover it.' : ''),
       fix: `no ${what} can be built for this backend yet`,
+    }
+  }
+  const unreachable = unreachableDatasetNodes(graph, language)
+  if (unreachable.length > 0) {
+    const names = unreachable.map((n) => `“${nodeLabel(n)}”`)
+    return {
+      reason:
+        names.length === 1
+          ? `${names[0]} is not on CAVE's global server`
+          : `${names.join(', ')} are not on CAVE's global server`,
+      detail:
+        "The R document reads CAVE through fafbseg, which reaches CAVE's global server only. " +
+        'The Jupyter notebook names the server to caveclient, so it can export this graph.',
+      fix: "fafbseg reaches CAVE's global server only, so export the notebook",
     }
   }
   return undefined

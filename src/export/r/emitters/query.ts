@@ -16,7 +16,7 @@ import { DATASET_FAMILIES } from '../../../nodes/lib/datasetFamilies'
 import { SYNAPSE_UNITS } from '../../../data/synapseUnits'
 import { minSynapseConfidence, synapseUnitFor } from '../../../nodes/lib/synapseParams'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
-import { rCol, rLongVector, rStr, rVector } from '../r'
+import { rArgs, rCol, rLongVector, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { FieldTerm } from '../../../data/terms'
 import { anchoredPattern, escapeRegex } from '../../../data/terms'
@@ -32,7 +32,16 @@ import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../plans/connectiv
 import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { carryLines, codaIds, cypherIdList, neuronIds, rPopulationPredicate } from './common'
+import {
+  carryLines,
+  codaIds,
+  cypherIdList,
+  isCatmaidDataset,
+  isCaveDataset,
+  labelsFrame,
+  neuronIds,
+  rPopulationPredicate,
+} from './common'
 import { STATUS_COLUMN, withoutStatedStatus } from '../../../data/neuronFilter'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 
@@ -46,6 +55,7 @@ import {
   skeletonsPlan,
   synapsesBetweenPlan,
 } from '../../plans/query'
+import { CAVE_TEXT, caveSynapsePlan } from '../../plans/cave'
 
 // ---------------------------------------------------------------------------
 // Dataset
@@ -68,6 +78,7 @@ function connectionLines(
   server: string,
   datasetId: string,
 ): string[] {
+  // The only place neuprintr is attached: every chunk that calls it reads a connection made here.
   ctx.library('neuprintr')
   return [
     `${out} <- neuprint_connection(`,
@@ -151,143 +162,171 @@ function searchPattern(term: FieldTerm): string | undefined {
   return undefined
 }
 
-registerEmitter('neuron.findNeurons', (ctx) => {
-  const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
-  const out = ctx.output('neurons')
+registerEmitter(
+  'neuron.findNeurons',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    const out = ctx.output('neurons')
 
-  const schema = schemasFromType(ctx.inputType('dataset')).neurons
-  // `resolveRows` lowers unchecked when the schema has not arrived, so this reads the same in
-  // both emitters rather than each carrying its own unknown-is-not-missing branch.
-  const rows = rowsFromParams(ctx.params)
-  const resolved = resolveRows(schema, rows)
-  const roi = String(ctx.params.roi)
-  const limit = Number(ctx.params.limit)
+    const schema = schemasFromType(ctx.inputType('dataset')).neurons
+    // `resolveRows` lowers unchecked when the schema has not arrived, so this reads the same in
+    // both emitters rather than each carrying its own unknown-is-not-missing branch.
+    const rows = rowsFromParams(ctx.params)
+    const resolved = resolveRows(schema, rows)
+    const roi = String(ctx.params.roi)
+    const limit = Number(ctx.params.limit)
 
-  const lines: string[] = resolved.problems.flatMap((p) => ctx.note(p.message))
+    const lines: string[] = resolved.problems.flatMap((p) => ctx.note(p.message))
 
-  /*
-   * Asking nothing answers nothing, ahead of the searchable-row check below — and the two are
-   * different statements about different cards. This one reproduces what the canvas does: an
-   * empty frame, deterministically, because that is the node's answer. The `todo` below is a
-   * node that *does* filter in a way `neuprint_search` has no argument for, which is a gap in
-   * this emitter rather than a result.
-   */
-  if (asksNothing(ctx.params, rows)) {
     /*
-     * `data.frame` and `rCol`, which is the house pair: base R needs no library, and a backticked
-     * name is right for every column rather than for the ones that happen to need it.
-     *
-     * The zero-length vectors are **typed off the schema** rather than all `character(0)`. On a
-     * frame with no rows nothing downstream can go wrong today — `filter()` on an empty character
-     * column returns `logical(0)` either way — but the reader's next move is to write a real query
-     * in place of this, and a template declaring `size` as text is a template that quietly teaches
-     * the wrong shape.
+     * Asking nothing answers nothing, ahead of the searchable-row check below — and the two are
+     * different statements about different cards. This one reproduces what the canvas does: an
+     * empty frame, deterministically, because that is the node's answer. The `todo` below is a
+     * node that *does* filter in a way `neuprint_search` has no argument for, which is a gap in
+     * this emitter rather than a result.
      */
-    const empty = (col: { name: string; dtype: DType }) => {
-      // The id column is text whatever the schema calls it — invariant 8, and a template is
-      // exactly where that gets learned wrong. `CANONICAL_SCHEMAS` types `neuronId` numerically
-      // because a `CellValue` is a float64, and an eighteen-digit root id through one is a
-      // different neuron; every real frame in this document reaches the reader as character.
-      if (col.name === ID_COLUMN_NAME) return 'character(0)'
-      if (isNumericDType(col.dtype)) return 'numeric(0)'
-      return col.dtype === 'bool' ? 'logical(0)' : 'character(0)'
+    if (asksNothing(ctx.params, rows)) {
+      /*
+       * `data.frame` and `rCol`, which is the house pair: base R needs no library, and a backticked
+       * name is right for every column rather than for the ones that happen to need it.
+       *
+       * The zero-length vectors are **typed off the schema** rather than all `character(0)`. On a
+       * frame with no rows nothing downstream can go wrong today — `filter()` on an empty character
+       * column returns `logical(0)` either way — but the reader's next move is to write a real query
+       * in place of this, and a template declaring `size` as text is a template that quietly teaches
+       * the wrong shape.
+       */
+      const empty = (col: { name: string; dtype: DType }) => {
+        // The id column is text whatever the schema calls it — invariant 8, and a template is
+        // exactly where that gets learned wrong. `CANONICAL_SCHEMAS` types `neuronId` numerically
+        // because a `CellValue` is a float64, and an eighteen-digit root id through one is a
+        // different neuron; every real frame in this document reaches the reader as character.
+        if (col.name === ID_COLUMN_NAME) return 'character(0)'
+        if (isNumericDType(col.dtype)) return 'numeric(0)'
+        return col.dtype === 'bool' ? 'logical(0)' : 'character(0)'
+      }
+      const columns = (schema?.columns ?? []).map(
+        (col) => `  ${rCol(col.name)} = ${empty(col)},`,
+      )
+      return [
+        ...lines,
+        ...ctx.note(
+          `${noFiltersReason()} This chunk builds the same empty table. Add a filter row ` +
+            'on the canvas and export again, or write the query here.',
+        ),
+        `${out} <- data.frame(`,
+        ...columns,
+        '  stringsAsFactors = FALSE',
+        ')',
+      ]
     }
-    const columns = (schema?.columns ?? []).map((col) => `  ${rCol(col.name)} = ${empty(col)},`)
-    return [
-      ...lines,
-      ...ctx.note(
-        `${noFiltersReason()} This chunk builds the same empty table. Add a filter row ` +
-          'on the canvas and export again, or write the query here.',
-      ),
-      `${out} <- data.frame(`,
-      ...columns,
-      '  stringsAsFactors = FALSE',
-      ')',
-    ]
-  }
 
-  /*
-   * `neuprint_search` takes one field and one pattern, where Coda's node narrows on several rows
-   * at once. So the search runs on whichever row can be one — type first, then instance — and
-   * every other row becomes a filter on the returned metadata. The same rows, one larger
-   * response, and stated so that nobody reads the absence of a `status=` argument as the status
-   * having been ignored.
-   */
-  const searchable = resolved.terms.findIndex(
-    (t) => (t.field === 'type' || t.field === 'instance') && searchPattern(t) !== undefined,
-  )
-  if (searchable === -1) {
-    return ctx.todo(
-      'This Find Neurons has no type or instance filter that neuprint_search can express. Add ' +
-        'a `type` or `instance` row to `Filters` and export again. Without one, the query ' +
-        'would fetch every neuron from a shared production server.',
+    /*
+     * A CATMAID project is searched locally, as on the canvas: CATMAID's own name search matches
+     * substrings rather than patterns. So every row is a `filter()` over the neuron table, the
+     * compiler `out.table`'s header filters use. A region is refused rather than answered empty,
+     * because the canvas refuses it — CATMAID has volumes but no query naming what is in one.
+     */
+    const labels = labelsFrame(ctx, conn)
+    if (labels) {
+      const { text } = labels
+      const region = roi ? text.region(roi) : undefined
+      if (region && 'refusal' in region) return ctx.todo(region.refusal)
+      ctx.library('dplyr')
+      lines.push(...ctx.note(text.search), `${out} <- ${labels.frame}`)
+      if (region) return [...lines, ...ctx.note(region.emptyNote), `${out} <- ${out}[0, ]`]
+      if (resolved.terms.length > 0) {
+        lines.push(
+          `${out} <- ${out} |> filter(${filterPredicates(resolved.terms, schema).join(', ')})`,
+        )
+      }
+      if (limit > 0) lines.push(`${out} <- ${out} |> head(${limit})`)
+      return lines
+    }
+
+    /*
+     * `neuprint_search` takes one field and one pattern, where Coda's node narrows on several rows
+     * at once. So the search runs on whichever row can be one — type first, then instance — and
+     * every other row becomes a filter on the returned metadata. The same rows, one larger
+     * response, and stated so that nobody reads the absence of a `status=` argument as the status
+     * having been ignored.
+     */
+    const searchable = resolved.terms.findIndex(
+      (t) => (t.field === 'type' || t.field === 'instance') && searchPattern(t) !== undefined,
     )
-  }
+    if (searchable === -1) {
+      return ctx.todo(
+        'This Find Neurons has no type or instance filter that neuprint_search can express. Add ' +
+          'a `type` or `instance` row to `Filters` and export again. Without one, the query ' +
+          'would fetch every neuron from a shared production server.',
+      )
+    }
 
-  const search = resolved.terms[searchable]!
-  const rest = resolved.terms.filter((_, i) => i !== searchable)
+    const search = resolved.terms[searchable]!
+    const rest = resolved.terms.filter((_, i) => i !== searchable)
 
-  ctx.helper('coda_neurons')
-  lines.push(
-    `${out} <- neuprint_search(`,
-    `  ${rStr(searchPattern(search)!)},`,
-    `  field = ${rStr(search.field)},`,
-    `  meta = TRUE,`,
-    `  conn = ${conn}`,
-    `) |> coda_neurons()`,
-  )
-
-  // An ROI restriction is a different question — `neuprint_bodies_in_ROI` answers it — so it
-  // is reported rather than silently dropped from a search that cannot express it.
-  if (roi) {
+    ctx.helper('coda_neurons')
     lines.push(
-      ...ctx.note(
-        `Coda restricts this to neurons with synapses in ${roi}. neuprint_search cannot ` +
-          'do that. Use neuprint_bodies_in_ROI() and intersect it with the result.',
-      ),
+      `${out} <- neuprint_search(`,
+      `  ${rStr(searchPattern(search)!)},`,
+      `  field = ${rStr(search.field)},`,
+      `  meta = TRUE,`,
+      `  conn = ${conn}`,
+      `) |> coda_neurons()`,
     )
-  }
 
-  if (rest.length > 0) {
-    ctx.library('dplyr')
-    lines.push(
-      ...ctx.note(
-        "neuprint_search filters on one field only, so Coda's other filters are applied to the " +
-          'result below. The rows are the same; the download is larger.',
-      ),
-      // `filter()` ANDs its arguments, which is what a list of rows means — and it is the same
-      // compiler `out.table`'s header filters use, so the null rule and the per-term case
-      // handling arrive written out rather than approximated.
-      `${out} <- ${out} |> filter(${filterPredicates(rest, schema).join(', ')})`,
+    // An ROI restriction is a different question — `neuprint_bodies_in_ROI` answers it — so it
+    // is reported rather than silently dropped from a search that cannot express it.
+    if (roi) {
+      lines.push(
+        ...ctx.note(
+          `Coda restricts this to neurons with synapses in ${roi}. neuprint_search cannot ` +
+            'do that. Use neuprint_bodies_in_ROI() and intersect it with the result.',
+        ),
+      )
+    }
+
+    if (rest.length > 0) {
+      ctx.library('dplyr')
+      lines.push(
+        ...ctx.note(
+          "neuprint_search filters on one field only, so Coda's other filters are applied to the " +
+            'result below. The rows are the same; the download is larger.',
+        ),
+        // `filter()` ANDs its arguments, which is what a list of rows means — and it is the same
+        // compiler `out.table`'s header filters use, so the null rule and the per-term case
+        // handling arrive written out rather than approximated.
+        `${out} <- ${out} |> filter(${filterPredicates(rest, schema).join(', ')})`,
+      )
+    }
+    /*
+     * The dataset's population, as one `filter()` on the returned metadata.
+     *
+     * A `filter()` rather than a search argument because `neuprint_search` narrows on one field
+     * and that field is already spent on the type or instance pattern above — and because the
+     * disjuncts are ORed, which no combination of its arguments could say.
+     *
+     * A `status` row on this node removes the `traced` disjunct: `findNeuronsCypher`' precedence,
+     * third copy. It removes only that one, so a dataset also asking for `typed` keeps the rest of
+     * the group and the row simply ANDs with it, exactly as the canvas does.
+     */
+    const population = withoutStatedStatus(
+      populationFromType(ctx.inputType('dataset')),
+      rest.some((t) => t.field === STATUS_COLUMN),
     )
-  }
-  /*
-   * The dataset's population, as one `filter()` on the returned metadata.
-   *
-   * A `filter()` rather than a search argument because `neuprint_search` narrows on one field
-   * and that field is already spent on the type or instance pattern above — and because the
-   * disjuncts are ORed, which no combination of its arguments could say.
-   *
-   * A `status` row on this node removes the `traced` disjunct: `findNeuronsCypher`' precedence,
-   * third copy. It removes only that one, so a dataset also asking for `typed` keeps the rest of
-   * the group and the row simply ANDs with it, exactly as the canvas does.
-   */
-  const population = withoutStatedStatus(
-    populationFromType(ctx.inputType('dataset')),
-    rest.some((t) => t.field === STATUS_COLUMN),
-  )
-  const predicate = rPopulationPredicate(population, schema)
-  if (predicate) {
-    ctx.library('dplyr')
-    lines.push(`${out} <- ${out} |> filter(${predicate})`)
-  }
-  if (limit > 0) {
-    ctx.library('dplyr')
-    lines.push(`${out} <- ${out} |> head(${limit})`)
-  }
-  return lines
-})
+    const predicate = rPopulationPredicate(population, schema)
+    if (predicate) {
+      ctx.library('dplyr')
+      lines.push(`${out} <- ${out} |> filter(${predicate})`)
+    }
+    if (limit > 0) {
+      ctx.library('dplyr')
+      lines.push(`${out} <- ${out} |> head(${limit})`)
+    }
+    return lines
+  },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
+)
 
 // ---------------------------------------------------------------------------
 // Input IDs / IDs from Label
@@ -303,105 +342,152 @@ registerEmitter('neuron.findNeurons', (ctx) => {
  * takes character ids for exactly this reason — it is the natverse convention, and why
  * `bit64::integer64` exists in that stack at all.
  */
-registerEmitter('neuron.inputIds', (ctx) => {
-  const out = ctx.output('neurons')
-  const plan = inputIdsPlan(ctx)
-  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
-  const { ids, from: wired, column, dataset } = plan
-  const lines: string[] = []
+registerEmitter(
+  'neuron.inputIds',
+  (ctx) => {
+    const out = ctx.output('neurons')
+    const plan = inputIdsPlan(ctx)
+    if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+    const { ids, from: wired, column, dataset } = plan
+    const lines: string[] = []
 
-  if (ids.length > 0 && wired) {
-    const [first, ...rest] = rLongVector(ids)
+    if (ids.length > 0 && wired) {
+      const [first, ...rest] = rLongVector(ids)
+      lines.push(
+        `ids <- unique(c(`,
+        `  ${first}`,
+        ...rest.map((l) => `  ${l}`),
+        `, ${wired}$${column}))`,
+      )
+    } else if (wired) {
+      lines.push(`ids <- unique(${wired}$${column})`)
+    } else {
+      const [first, ...rest] = rLongVector(ids)
+      lines.push(`ids <- ${first}`, ...rest)
+    }
+
+    if (dataset.note !== undefined) {
+      ctx.library('dplyr')
+      return [...lines, ...ctx.note(dataset.note), `${out} <- tibble(neuronId = ids)`]
+    }
+    if (isCatmaidDataset(ctx)) {
+      // The neuron table's rows for them: an id it does not hold has no row, as on the canvas.
+      return [...lines, `${out} <- coda_catmaid_lookup(${dataset.connection}, ids)`]
+    }
+    ctx.helper('coda_neurons')
+    return [
+      ...lines,
+      `${out} <- neuprint_get_meta(ids, conn = ${dataset.connection}) |> coda_neurons()`,
+    ]
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
+
+/**
+ * `labels` as one regex, each entry anchored on its own — folding them into one surrounding
+ * `^(?:…)$` splices their alternations together and matches a superset.
+ */
+const ANCHORED_LABELS = 'paste0("^(?:", paste(labels, collapse = ")$|^(?:"), ")$")'
+
+registerEmitter(
+  'neuron.idsFromLabel',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    const out = ctx.output('neurons')
+
+    const field = ctx.column('field') || 'type'
+    const typed = parseTypedLabels(ctx.params.labels)
+    const wired = ctx.input('labels')
+    const wiredColumn = ctx.column('column')
+    const regex = String(ctx.params.match) === 'regex'
+
+    const lines: string[] = []
+    if (wired && wiredColumn) {
+      lines.push(`labels <- unique(c(${rVector(typed)}, ${wired}$${wiredColumn}))`)
+    } else {
+      lines.push(`labels <- ${rVector(typed)}`)
+    }
+
+    if (isCatmaidDataset(ctx)) {
+      return [
+        ...lines,
+        ...labelsIdsFromLabel(out, conn, field, regex, ctx.params.ignoreCase === true),
+      ]
+    }
+
+    /*
+     * neuprint_search takes one pattern, so a set of labels becomes one alternation, anchored per
+     * entry (`ANCHORED_LABELS`).
+     */
+    const pattern = regex
+      ? ANCHORED_LABELS
+      : 'paste0("^", paste(gsub("([.\\\\\\\\^$|()\\\\[\\\\]{}*+?])", "\\\\\\\\\\\\\\\\\\\\1", labels), collapse = "$|^"), "$")'
+
+    ctx.helper('coda_neurons')
     lines.push(
-      `ids <- unique(c(`,
-      `  ${first}`,
-      ...rest.map((l) => `  ${l}`),
-      `, ${wired}$${column}))`,
+      `${out} <- neuprint_search(`,
+      `  ${pattern},`,
+      // neuPrint's own spelling, not Coda's — `neuprint_search(field = "neuronId")` matches
+      // nothing at all, silently. Same seam `labelClause` applies to the built query.
+      `  field = ${rStr(neuprintProperty(field))},`,
+      `  meta = TRUE,`,
+      `  conn = ${conn}`,
+      `) |> coda_neurons()`,
     )
-  } else if (wired) {
-    lines.push(`ids <- unique(${wired}$${column})`)
-  } else {
-    const [first, ...rest] = rLongVector(ids)
-    lines.push(`ids <- ${first}`, ...rest)
-  }
 
-  if (dataset.note !== undefined) {
-    ctx.library('dplyr')
-    return [...lines, ...ctx.note(dataset.note), `${out} <- tibble(neuronId = ids)`]
-  }
-  ctx.library('neuprintr')
-  ctx.helper('coda_neurons')
+    // This node's own `Status` first, then the dataset's population — the same precedence as Find
+    // Neurons above, and it removes only the `traced` disjunct rather than the whole group.
+    const status = String(ctx.params.status)
+    if (status) {
+      ctx.library('dplyr')
+      lines.push(`${out} <- ${out} |> filter(status == ${rStr(status)})`)
+    }
+    const predicate = rPopulationPredicate(
+      withoutStatedStatus(populationFromType(ctx.inputType('dataset')), Boolean(status)),
+      schemasFromType(ctx.inputType('dataset')).neurons,
+    )
+    if (predicate) {
+      ctx.library('dplyr')
+      lines.push(`${out} <- ${out} |> filter(${predicate})`)
+    }
+    if (ctx.params.ignoreCase === true) {
+      lines.push(
+        ...ctx.note(
+          'Coda matches these labels case-insensitively; this search is case-sensitive and may ' +
+            'return fewer neurons.',
+        ),
+      )
+    }
+    return lines
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
+
+/**
+ * The same lookup over a CATMAID project's neuron table — `compileLabelMatch`, the canvas'
+ * matcher: an exact value or, under `regex`, a pattern anchored at both ends; a missing value
+ * matches nothing; no labels at all answers no neurons. `perl = TRUE` because the anchoring
+ * group is `(?:…)`, which R's default regex engine does not read. A project with no status
+ * column ignores `Status`, as the canvas does.
+ */
+function labelsIdsFromLabel(
+  out: string,
+  conn: string,
+  field: string,
+  regex: boolean,
+  ignoreCase: boolean,
+): string[] {
+  const col = `${out}[[${rStr(field)}]]`
+  const mask = regex
+    ? `!is.na(${col}) & grepl(${ANCHORED_LABELS}, ${col}, ignore.case = ${ignoreCase ? 'TRUE' : 'FALSE'}, perl = TRUE)`
+    : ignoreCase
+      ? `!is.na(${col}) & tolower(${col}) %in% tolower(labels)`
+      : `!is.na(${col}) & ${col} %in% labels`
   return [
-    ...lines,
-    `${out} <- neuprint_get_meta(ids, conn = ${dataset.connection}) |> coda_neurons()`,
+    `${out} <- coda_catmaid_labels(${conn})`,
+    `${out} <- if (length(labels) > 0) ${out}[${mask}, ] else ${out}[0, ]`,
   ]
-})
-
-registerEmitter('neuron.idsFromLabel', (ctx) => {
-  const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
-  const out = ctx.output('neurons')
-
-  const field = ctx.column('field') || 'type'
-  const typed = parseTypedLabels(ctx.params.labels)
-  const wired = ctx.input('labels')
-  const wiredColumn = ctx.column('column')
-  const regex = String(ctx.params.match) === 'regex'
-
-  const lines: string[] = []
-  if (wired && wiredColumn) {
-    lines.push(`labels <- unique(c(${rVector(typed)}, ${wired}$${wiredColumn}))`)
-  } else {
-    lines.push(`labels <- ${rVector(typed)}`)
-  }
-
-  /*
-   * neuprint_search takes one pattern, so a set of labels becomes one alternation — and it has
-   * to be anchored per entry. Coda matches each label on its own precisely because folding
-   * them into a surrounding `^(?:…)$` splices their alternations together and matches a
-   * superset; `paste0` with per-entry anchors keeps each one meaning what it means alone.
-   */
-  const pattern = regex
-    ? 'paste0("^(?:", paste(labels, collapse = ")$|^(?:"), ")$")'
-    : 'paste0("^", paste(gsub("([.\\\\\\\\^$|()\\\\[\\\\]{}*+?])", "\\\\\\\\\\\\\\\\\\\\1", labels), collapse = "$|^"), "$")'
-
-  ctx.helper('coda_neurons')
-  lines.push(
-    `${out} <- neuprint_search(`,
-    `  ${pattern},`,
-    // neuPrint's own spelling, not Coda's — `neuprint_search(field = "neuronId")` matches
-    // nothing at all, silently. Same seam `labelClause` applies to the built query.
-    `  field = ${rStr(neuprintProperty(field))},`,
-    `  meta = TRUE,`,
-    `  conn = ${conn}`,
-    `) |> coda_neurons()`,
-  )
-
-  // This node's own `Status` first, then the dataset's population — the same precedence as Find
-  // Neurons above, and it removes only the `traced` disjunct rather than the whole group.
-  const status = String(ctx.params.status)
-  if (status) {
-    ctx.library('dplyr')
-    lines.push(`${out} <- ${out} |> filter(status == ${rStr(status)})`)
-  }
-  const predicate = rPopulationPredicate(
-    withoutStatedStatus(populationFromType(ctx.inputType('dataset')), Boolean(status)),
-    schemasFromType(ctx.inputType('dataset')).neurons,
-  )
-  if (predicate) {
-    ctx.library('dplyr')
-    lines.push(`${out} <- ${out} |> filter(${predicate})`)
-  }
-  if (ctx.params.ignoreCase === true) {
-    lines.push(
-      ...ctx.note(
-        'Coda matches these labels case-insensitively; this search is case-sensitive and may ' +
-          'return fewer neurons.',
-      ),
-    )
-  }
-  return lines
-})
+}
 
 // ---------------------------------------------------------------------------
 // Adjacency / ROI
@@ -439,55 +525,72 @@ function cypherAdjacency(
   ]
 }
 
-registerEmitter('neuron.adjacency', (ctx) => {
-  const conn = ctx.wired('dataset')
-  const sources = ctx.wired('sources')
-  const targets = ctx.wired('targets')
-  ctx.library('neuprintr')
-  const out = ctx.output('matrix')
-  const links = ctx.output('links')
+registerEmitter(
+  'neuron.adjacency',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    const sources = ctx.wired('sources')
+    const targets = ctx.wired('targets')
+    const out = ctx.output('matrix')
+    const links = ctx.output('links')
+    if (isCatmaidDataset(ctx)) {
+      // The matrix and its links from one `catmaid_adjacency_matrix` call — every source and target
+      // once, in the order they arrived, summed per type where the node groups. CATMAID's only
+      // connection property is the synapse count, so `Weight` has nothing else to name.
+      return [
+        `.adjacency <- coda_catmaid_adjacency(`,
+        `  ${conn},`,
+        `  ${neuronIds(sources)},`,
+        `  ${neuronIds(targets)},`,
+        `  by_type = ${ctx.params.groupByType === true ? 'TRUE' : 'FALSE'}`,
+        `)`,
+        `${out} <- .adjacency$matrix`,
+        `${links} <- .adjacency$links`,
+      ]
+    }
 
-  const weight = readWeightProperty(ctx.params.weight)
-  const lines = [
-    ...(weight === undefined
-      ? [
-          `${out} <- neuprint_get_adjacency_matrix(`,
-          `  inputids = ${neuronIds(sources)},`,
-          `  outputids = ${neuronIds(targets)},`,
-          `  conn = ${conn}`,
-          `)`,
-        ]
-      : cypherAdjacency(out, sources, targets, conn, weight)),
-    ``,
-    // The long half, melted off the matrix and stripped of its zeros — `matrixToLinks`' rule,
-    // for its reason: a matrix cell is 0 where nothing was found, and keeping those would make
-    // a complete graph of zero-weight links. `as.table` names the axes Var1/Var2/Freq.
-    // Connectivity's columns (`MATRIX_LINKS_SCHEMA`): the matrix here is per body, so its axis
-    // names are the ids, and the types come from the neurons' metadata.
-    `${links} <- as.data.frame(as.table(as.matrix(${out})), stringsAsFactors = FALSE)`,
-    `names(${links}) <- c("preId", "postId", "weight")`,
-    `${links} <- ${links}[${links}$weight != 0, ]`,
-    `.meta <- neuprint_get_meta(unique(c(${links}$preId, ${links}$postId)), conn = ${conn})`,
-    `${links}$preType <- .meta$type[match(${links}$preId, as.character(.meta$bodyid))]`,
-    `${links}$postType <- .meta$type[match(${links}$postId, as.character(.meta$bodyid))]`,
-    `${links} <- ${links}[c("preId", "preType", "postId", "postType", "weight")]`,
-    codaIds(ctx, links, 'preId', 'postId'),
-  ]
-  if (ctx.params.groupByType === true) {
-    lines.push(
-      ...ctx.note(
-        'Coda groups this matrix by cell type (`Group by type`). neuprint_get_adjacency_matrix ' +
-          'returns one row and column per body, so group the result yourself to match.',
-      ),
-    )
-  }
-  return lines
-})
+    const weight = readWeightProperty(ctx.params.weight)
+    const lines = [
+      ...(weight === undefined
+        ? [
+            `${out} <- neuprint_get_adjacency_matrix(`,
+            `  inputids = ${neuronIds(sources)},`,
+            `  outputids = ${neuronIds(targets)},`,
+            `  conn = ${conn}`,
+            `)`,
+          ]
+        : cypherAdjacency(out, sources, targets, conn, weight)),
+      ``,
+      // The long half, melted off the matrix and stripped of its zeros — `matrixToLinks`' rule,
+      // for its reason: a matrix cell is 0 where nothing was found, and keeping those would make
+      // a complete graph of zero-weight links. `as.table` names the axes Var1/Var2/Freq.
+      // Connectivity's columns (`MATRIX_LINKS_SCHEMA`): the matrix here is per body, so its axis
+      // names are the ids, and the types come from the neurons' metadata.
+      `${links} <- as.data.frame(as.table(as.matrix(${out})), stringsAsFactors = FALSE)`,
+      `names(${links}) <- c("preId", "postId", "weight")`,
+      `${links} <- ${links}[${links}$weight != 0, ]`,
+      `.meta <- neuprint_get_meta(unique(c(${links}$preId, ${links}$postId)), conn = ${conn})`,
+      `${links}$preType <- .meta$type[match(${links}$preId, as.character(.meta$bodyid))]`,
+      `${links}$postType <- .meta$type[match(${links}$postId, as.character(.meta$bodyid))]`,
+      `${links} <- ${links}[c("preId", "preType", "postId", "postType", "weight")]`,
+      codaIds(ctx, links, 'preId', 'postId'),
+    ]
+    if (ctx.params.groupByType === true) {
+      lines.push(
+        ...ctx.note(
+          'Coda groups this matrix by cell type (`Group by type`). neuprint_get_adjacency_matrix ' +
+            'returns one row and column per body, so group the result yourself to match.',
+        ),
+      )
+    }
+    return lines
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
 registerEmitter('neuron.roiCounts', (ctx) => {
   const conn = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
-  ctx.library('neuprintr')
   ctx.helper('coda_neurons')
   return [
     ...ctx.note(
@@ -501,7 +604,6 @@ registerEmitter('neuron.roiCounts', (ctx) => {
 
 registerEmitter('neuron.roiConnectivity', (ctx) => {
   const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
   const matrix = ctx.output('matrix')
   const links = ctx.output('links')
   // The one node with a better fit in R than in Python: neuprintr publishes this directly.
@@ -516,7 +618,6 @@ registerEmitter('neuron.roiConnectivity', (ctx) => {
 
 registerEmitter('neuron.roiCompleteness', (ctx) => {
   const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
   return [
     ...ctx.note(
       'neuprintr publishes no completeness helper, so this is the Cypher the node sends.',
@@ -536,32 +637,43 @@ registerEmitter('neuron.roiCompleteness', (ctx) => {
  * something downstream reads, so a commented fetch would leave the next chunk referring to a
  * name that was never bound. One request per region is the cost, and the note says so.
  */
-registerEmitter('neuron.roiMeshes', (ctx) => {
-  const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
-  const chosen = (Array.isArray(ctx.params.rois) ? ctx.params.rois : []).map(String)
-  const out = ctx.output('meshes')
-  const names = `${out}_rois`
+registerEmitter(
+  'neuron.roiMeshes',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    const chosen = (Array.isArray(ctx.params.rois) ? ctx.params.rois : []).map(String)
+    const out = ctx.output('meshes')
+    if (isCatmaidDataset(ctx)) {
+      // A project's regions are its volumes, none nested in another, so empty means all of them.
+      return [
+        ...(chosen.length > 0
+          ? []
+          : [`# \`Regions\` was left empty, so this reads every volume.`]),
+        `${out} <- coda_catmaid_volumes(${conn}${chosen.length > 0 ? `, ${rVector(chosen)}` : ''})`,
+      ]
+    }
+    const names = `${out}_rois`
 
-  return [
-    ...ctx.note(
-      'This makes one request per region. neuPrint publishes these meshes for visualization ' +
-        'only: they are decimated, so a volume measured from one is approximate.',
-    ),
-    chosen.length > 0
-      ? `${names} <- c(${chosen.map((roi) => JSON.stringify(roi)).join(', ')})`
-      : // Empty means the set that tiles the volume; the published list nests, so "every
-        // region" would draw each shell inside another one.
-        `${names} <- neuprint_ROIs(superLevel = FALSE, conn = ${conn})`,
-    `${out} <- lapply(${names}, neuprint_ROI_mesh, conn = ${conn})`,
-    `names(${out}) <- ${names}`,
-    `${names}`,
-  ]
-})
+    return [
+      ...ctx.note(
+        'This makes one request per region. neuPrint publishes these meshes for visualization ' +
+          'only: they are decimated, so a volume measured from one is approximate.',
+      ),
+      chosen.length > 0
+        ? `${names} <- c(${chosen.map((roi) => JSON.stringify(roi)).join(', ')})`
+        : // Empty means the set that tiles the volume; the published list nests, so "every
+          // region" would draw each shell inside another one.
+          `${names} <- neuprint_ROIs(superLevel = FALSE, conn = ${conn})`,
+      `${out} <- lapply(${names}, neuprint_ROI_mesh, conn = ${conn})`,
+      `names(${out}) <- ${names}`,
+      `${names}`,
+    ]
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
 registerEmitter('neuron.rawCypher', (ctx) => {
   const conn = ctx.wired('dataset')
-  ctx.library('neuprintr')
   const plan = rawCypherPlan(ctx.params)
   if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
   const { query } = plan
@@ -586,22 +698,28 @@ const SKELETON_NOTES: Record<SkeletonsNote, string> = {
     'exported into it.',
 }
 
-registerEmitter('neuron.skeletons', (ctx) => {
-  const conn = ctx.wired('dataset')
-  const neurons = ctx.wired('neurons')
-  ctx.library('neuprintr')
-  ctx.library('nat')
-  const { limit, notes } = skeletonsPlan(ctx.params)
-  const ids = limit > 0 ? `head(${neuronIds(neurons)}, ${limit})` : neuronIds(neurons)
-  const out = ctx.output('skeletons')
-  // Returns a nat neuronlist, which is what every downstream nat call wants — the same
-  // relationship navis has to the Python side, since navis is nat's port.
-  return [
-    ...notes.flatMap((note) => ctx.note(SKELETON_NOTES[note])),
-    `${out} <- neuprint_read_neurons(${ids}, conn = ${conn})`,
-    ...carryLines(out, neurons, ctx.columns(CARRY_PARAM_ID), ID_COLUMN_NAME, `names(${out})`),
-  ]
-})
+registerEmitter(
+  'neuron.skeletons',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    const neurons = ctx.wired('neurons')
+    ctx.library('nat')
+    const { limit, notes } = skeletonsPlan(ctx.params)
+    const ids = limit > 0 ? `head(${neuronIds(neurons)}, ${limit})` : neuronIds(neurons)
+    const out = ctx.output('skeletons')
+    // Both return a nat neuronlist, which is what every downstream nat call wants — the same
+    // relationship navis has to the Python side, since navis is nat's port.
+    const catmaid = isCatmaidDataset(ctx)
+    return [
+      ...(catmaid ? [] : notes.flatMap((note) => ctx.note(SKELETON_NOTES[note]))),
+      catmaid
+        ? `${out} <- coda_catmaid_skeletons(${conn}, ${ids})`
+        : `${out} <- neuprint_read_neurons(${ids}, conn = ${conn})`,
+      ...carryLines(out, neurons, ctx.columns(CARRY_PARAM_ID), ID_COLUMN_NAME, `names(${out})`),
+    ]
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
 registerEmitter('neuron.meshes', (ctx) => {
   // The one capability neuprintr does not have. `neuprint_ROI_mesh` is ROI shells, not neurons.
@@ -612,63 +730,81 @@ registerEmitter('neuron.meshes', (ctx) => {
   )
 })
 
-registerEmitter('neuron.synapses', (ctx) => {
-  const conn = ctx.wired('dataset')
-  const neurons = ctx.wired('neurons')
-  ctx.library('neuprintr')
-  const polarity = String(ctx.params.polarity)
-  const minConfidence = minSynapseConfidence(ctx.params)
-  const unit = synapseUnitFor(ctx.inputType('dataset'), ctx.params)
-  const args = [
-    neuronIds(neurons),
-    ...(polarity ? [`prepost = ${rStr(polarity.toUpperCase())}`] : []),
-  ]
-  /*
-   * **This frame is in neuprintr's vocabulary, not Coda's**, and unlike every other R cell here
-   * nothing normalises it: `neuprint_get_synapses` returns `bodyid` and `prepost` (0/1) where
-   * Coda's point cloud carries `neuronId` and `polarity` ("pre"/"post"). The Python side gained
-   * `coda_synapses` for exactly this; R has `coda_neurons` and the same seam, and the mapping
-   * would be a factor rather than a rename, so it is a TODO with the gap named rather than a
-   * silent inconsistency between the two exports of one graph.
-   */
-  return [
-    ...ctx.note(
-      'neuprintr returns the columns bodyid and prepost (0/1). Coda calls them neuronId and ' +
-        'polarity ("pre"/"post"). This exporter does not rename them yet, so check any cell ' +
-        'below that names a synapse column.',
-    ),
+registerEmitter(
+  'neuron.synapses',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    const neurons = ctx.wired('neurons')
+    const polarity = String(ctx.params.polarity)
+    const minConfidence = minSynapseConfidence(ctx.params)
+    if (isCatmaidDataset(ctx)) {
+      // The queried skeletons' connector links, already in Coda's columns. A connector is one
+      // presynaptic site, so the rows are sites — the one unit CATMAID offers.
+      return [
+        `${ctx.output('points')} <- coda_catmaid_synapses(`,
+        ...rArgs([
+          conn,
+          neuronIds(neurons),
+          `polarity = ${polarity ? rStr(polarity) : 'NULL'}`,
+          ...(minConfidence > 0 ? [`min_confidence = ${minConfidence}`] : []),
+        ]),
+        `)`,
+      ]
+    }
+    const unit = synapseUnitFor(ctx.inputType('dataset'), ctx.params)
+    const args = [
+      neuronIds(neurons),
+      ...(polarity ? [`prepost = ${rStr(polarity.toUpperCase())}`] : []),
+    ]
     /*
-     * **Two of the node's controls have no neuprintr spelling**, and each is a TODO with the gap
-     * named rather than a cell that quietly runs a different query — the rule this emitter
-     * already follows for the column vocabulary above.
-     *
-     * `neuprint_get_synapses` takes no confidence argument: its Cypher returns
-     * `s.confidence` and filters nothing, so a threshold is a `subset()` the reader has to write
-     * against whatever `confidence` column the fetch produced. And its query matches
-     * `(n)-[:Contains]->(:SynapseSet)-[:Contains]->(s:Synapse)` with no `DISTINCT`, which is the
-     * `links` unit — so a node set to `sites` (the default on neuPrint) is the one that diverges
-     * here, in the opposite direction from the notebook export.
+     * **This frame is in neuprintr's vocabulary, not Coda's**, and unlike every other R cell here
+     * nothing normalises it: `neuprint_get_synapses` returns `bodyid` and `prepost` (0/1) where
+     * Coda's point cloud carries `neuronId` and `polarity` ("pre"/"post"). The Python side gained
+     * `coda_synapses` for exactly this; R has `coda_neurons` and the same seam, and the mapping
+     * would be a factor rather than a rename, so it is a TODO with the gap named rather than a
+     * silent inconsistency between the two exports of one graph.
      */
-    ...(minConfidence > 0
-      ? ctx.note(
-          `neuprintr has no confidence argument. Filter this frame yourself, e.g. ` +
-            `subset(<points>, confidence >= ${minConfidence}).`,
-        )
-      : []),
-    ...(unit !== SYNAPSE_UNITS.links
-      ? ctx.note(
-          'neuprint_get_synapses returns a presynaptic site once for each partner it connects to, ' +
-            'but the Synapses node’s `Rows` is set to one row per site. This frame therefore has ' +
-            'more rows than Coda. De-duplicate on the location columns to match. Postsynaptic ' +
-            'rows are unaffected.',
-        )
-      : []),
-    `${ctx.output('points')} <- neuprint_get_synapses(${args.join(', ')}, conn = ${conn})`,
-  ]
-})
+    return [
+      ...ctx.note(
+        'neuprintr returns the columns bodyid and prepost (0/1). Coda calls them neuronId and ' +
+          'polarity ("pre"/"post"). This exporter does not rename them yet, so check any cell ' +
+          'below that names a synapse column.',
+      ),
+      /*
+       * **Two of the node's controls have no neuprintr spelling**, and each is a TODO with the gap
+       * named rather than a cell that quietly runs a different query — the rule this emitter
+       * already follows for the column vocabulary above.
+       *
+       * `neuprint_get_synapses` takes no confidence argument: its Cypher returns
+       * `s.confidence` and filters nothing, so a threshold is a `subset()` the reader has to write
+       * against whatever `confidence` column the fetch produced. And its query matches
+       * `(n)-[:Contains]->(:SynapseSet)-[:Contains]->(s:Synapse)` with no `DISTINCT`, which is the
+       * `links` unit — so a node set to `sites` (the default on neuPrint) is the one that diverges
+       * here, in the opposite direction from the notebook export.
+       */
+      ...(minConfidence > 0
+        ? ctx.note(
+            `neuprintr has no confidence argument. Filter this frame yourself, e.g. ` +
+              `subset(<points>, confidence >= ${minConfidence}).`,
+          )
+        : []),
+      ...(unit !== SYNAPSE_UNITS.links
+        ? ctx.note(
+            'neuprint_get_synapses returns a presynaptic site once for each partner it connects to, ' +
+              'but the Synapses node’s `Rows` is set to one row per site. This frame therefore has ' +
+              'more rows than Coda. De-duplicate on the location columns to match. Postsynaptic ' +
+              'rows are unaffected.',
+          )
+        : []),
+      `${ctx.output('points')} <- neuprint_get_synapses(${args.join(', ')}, conn = ${conn})`,
+    ]
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
 /**
- * Synapses Between, through the canvas's own Cypher.
+ * Synapses Between: on CATMAID `coda_catmaid_synapses_between`, and on neuPrint the canvas's
+ * own Cypher.
  *
  * neuprintr has no synapse-connection call — `neuprint_get_synapses` takes one body set and names
  * no partner — so the choice was between transcribing neuprint-python's query into R and running
@@ -676,40 +812,109 @@ registerEmitter('neuron.synapses', (ctx) => {
  * which is `Connectivity`'s edge-property route. So unlike the Synapses chunk above, this frame is
  * already in Coda's vocabulary, types included, and needs no note about it.
  */
-registerEmitter('neuron.synapsesBetween', (ctx) => {
-  const conn = ctx.wired('dataset')
-  const sources = ctx.input('sources')
-  const targets = ctx.input('targets')
-  const plan = synapsesBetweenPlan(ctx.params, {
-    sources: sources !== undefined,
-    targets: targets !== undefined,
-  })
-  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
-  ctx.library('neuprintr')
-  const labelled = plan.open !== undefined && !plan.includeFragments
-  const out = ctx.output('points')
-  let filled = rStr(plan.query)
-  if (sources)
-    filled = `sub(${rStr(CYPHER_PLACEHOLDERS.sources)}, .sources, ${filled}, fixed = TRUE)`
-  if (targets)
-    filled = `sub(${rStr(CYPHER_PLACEHOLDERS.targets)}, .targets, ${filled}, fixed = TRUE)`
-  return [
-    ...(labelled
-      ? ctx.note(
-          "The side with no neurons wired is matched on neuPrint's :Neuron label. Coda uses the " +
-            "neurons selected by the Dataset node's population instead. The two are the same " +
-            'unless that population is narrower.',
-        )
-      : []),
-    ...(sources ? [`.sources <- ${cypherIdList(sources)}`] : []),
-    ...(targets ? [`.targets <- ${cypherIdList(targets)}`] : []),
-    `${out} <- neuprint_fetch_custom(`,
-    `  ${filled},`,
-    `  conn = ${conn}`,
-    `)`,
-    // By position: neuprint_fetch_custom names its columns after the RETURN expressions.
-    `names(${out}) <- ${rVector(['neuronId', 'type', 'partnerId', 'partnerType', 'x', 'y', 'z', 'confidence'])}`,
-    codaIds(ctx, out, 'neuronId', 'partnerId'),
-    `${out}$polarity <- ${rStr(plan.location)}`,
-  ]
-})
+registerEmitter(
+  'neuron.synapsesBetween',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    const sources = ctx.input('sources')
+    const targets = ctx.input('targets')
+    const plan = synapsesBetweenPlan(ctx.params, {
+      sources: sources !== undefined,
+      targets: targets !== undefined,
+    })
+    if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+    const labelled = plan.open !== undefined && !plan.includeFragments
+    const out = ctx.output('points')
+    if (isCaveDataset(ctx)) {
+      // The notebook's CAVE route through fafbseg: the datastack's synapse table or view, both
+      // ends bound where wired, the score floored, positions at the drawn end in nanometres.
+      const synapses = caveSynapsePlan(ctx.inputType('dataset'), plan.location)
+      if (synapses.refusal !== undefined) return ctx.todo(synapses.refusal)
+      const { table, preColumn, postColumn, position, score } = synapses
+      const filters = [
+        ...(sources ? [`${preColumn} = as.list(${neuronIds(sources)})`] : []),
+        ...(targets ? [`${postColumn} = as.list(${neuronIds(targets)})`] : []),
+      ]
+      ctx.helper('coda_synapses_between')
+      return [
+        ...(table ? [] : ctx.note(CAVE_TEXT.unspecced)),
+        `${out} <- coda_cave_query(`,
+        ...rArgs([
+          conn,
+          table
+            ? rStr(table.name)
+            : `coda_cave_client(${conn})$info$get_datastack_info()$synapse_table`,
+          `filter_in_dict = list(${filters.join(', ')})`,
+          ...(plan.minConfidence > 0 && score
+            ? [`filter_greater_equal_dict = list(${score} = ${plan.minConfidence})`]
+            : []),
+          'desired_resolution = c(1, 1, 1)',
+          'split_positions = TRUE',
+        ]),
+        `)`,
+        `${out} <- coda_synapses_between(`,
+        ...rArgs([
+          out,
+          rStr(preColumn),
+          rStr(postColumn),
+          rStr(position),
+          score ? rStr(score) : 'NA_character_',
+          rStr(plan.location),
+        ]),
+        `)`,
+        // The open side's fragments: on CAVE "published" is the datastack's index.
+        ...(labelled
+          ? [
+              `${out} <- ${out}[${out}[[${rStr(plan.open!)}]] %in% ${labelsFrame(ctx, conn)!.frame}$neuronId, ]`,
+            ]
+          : []),
+        ...(plan.minConfidence > 0 && !score
+          ? ctx.note(CAVE_TEXT.noScore(plan.minConfidence))
+          : []),
+        ...ctx.note(CAVE_TEXT.noTypes),
+      ]
+    }
+    if (isCatmaidDataset(ctx)) {
+      // Drawn at the connector whichever end `Location` names, so Location picks which link's
+      // confidence the row carries. `Include fragments` is real: a project's connectors reach
+      // skeletons its skeleton list does not hold.
+      return [
+        `${out} <- coda_catmaid_synapses_between(`,
+        ...rArgs([
+          conn,
+          `sources = ${sources ? neuronIds(sources) : 'NULL'}`,
+          `targets = ${targets ? neuronIds(targets) : 'NULL'}`,
+          `location = ${rStr(plan.location)}`,
+          ...(plan.minConfidence > 0 ? [`min_confidence = ${plan.minConfidence}`] : []),
+          ...(labelled ? ['include_fragments = FALSE'] : []),
+        ]),
+        `)`,
+      ]
+    }
+    let filled = rStr(plan.query)
+    if (sources)
+      filled = `sub(${rStr(CYPHER_PLACEHOLDERS.sources)}, .sources, ${filled}, fixed = TRUE)`
+    if (targets)
+      filled = `sub(${rStr(CYPHER_PLACEHOLDERS.targets)}, .targets, ${filled}, fixed = TRUE)`
+    return [
+      ...(labelled
+        ? ctx.note(
+            "The side with no neurons wired is matched on neuPrint's :Neuron label. Coda uses the " +
+              "neurons selected by the Dataset node's population instead. The two are the same " +
+              'unless that population is narrower.',
+          )
+        : []),
+      ...(sources ? [`.sources <- ${cypherIdList(sources)}`] : []),
+      ...(targets ? [`.targets <- ${cypherIdList(targets)}`] : []),
+      `${out} <- neuprint_fetch_custom(`,
+      `  ${filled},`,
+      `  conn = ${conn}`,
+      `)`,
+      // By position: neuprint_fetch_custom names its columns after the RETURN expressions.
+      `names(${out}) <- ${rVector(['neuronId', 'type', 'partnerId', 'partnerType', 'x', 'y', 'z', 'confidence'])}`,
+      codaIds(ctx, out, 'neuronId', 'partnerId'),
+      `${out}$polarity <- ${rStr(plan.location)}`,
+    ]
+  },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
+)

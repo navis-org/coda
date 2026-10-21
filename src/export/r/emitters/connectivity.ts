@@ -8,9 +8,10 @@
  * either way, because everything downstream addresses them by name.
  */
 
+import { CATMAID_TEXT } from '../../plans/query'
 import { rStr, rVector } from '../r'
 import { registerEmitter, registerHelper } from '../registry'
-import { codaIds, cypherIdList, neuronIds } from './common'
+import { codaIds, cypherIdList, isCatmaidDataset, neuronIds } from './common'
 import type { EmitContext } from '../types'
 import {
   readEdgeProperties,
@@ -68,7 +69,14 @@ function endpointLines(ctx: EmitContext, edges: string, seeds: string, conn: str
   if (ctx.params.neuronRows !== 'full') {
     return ['', `${out} <- coda_endpoint_neurons(${edges}, ${seeds})`]
   }
-  ctx.library('neuprintr')
+  if (isCatmaidDataset(ctx)) {
+    // The neuron table's rows for them: a partner it does not hold has none, as on the canvas.
+    return [
+      '',
+      `.endpoints <- coda_endpoint_neurons(${edges}, ${seeds})`,
+      `${out} <- dplyr::inner_join(.endpoints["neuronId"], coda_catmaid_labels(${conn}), by = "neuronId")`,
+    ]
+  }
   ctx.helper('coda_neurons')
   return [
     '',
@@ -140,93 +148,119 @@ function cypherConnectivity(
       ? `${out} <- bind_rows(${frames.join(', ')}) |> distinct(${plan.dedupe.join(', ')}, .keep_all = TRUE)`
       : `${out} <- ${frames[0]}`,
     codaIds(ctx, out, 'preId', 'postId'),
-    ...endpointLines(ctx, out, neuronIds(neurons), conn),
+    ...endpointLines(ctx, out, neurons, conn),
   )
   return lines
 }
 
-registerEmitter('neuron.connectivity', (ctx) => {
-  const conn = ctx.wired('dataset')
-  const neurons = ctx.wired('neurons')
-  ctx.library('neuprintr')
-  ctx.library('dplyr')
+registerEmitter(
+  'neuron.connectivity',
+  (ctx) => {
+    const conn = ctx.wired('dataset')
+    const neurons = ctx.wired('neurons')
+    ctx.library('dplyr')
 
-  const out = ctx.output('connections')
-  const ids = neuronIds(neurons)
-  const direction = readTraversalDirection(ctx.params.direction)
-  const hops = Math.max(1, Number(ctx.params.hops))
-  const minWeight = Math.max(1, Number(ctx.params.minWeight))
-  // One sentence for both routes, which refuse Normalize for the same reason.
-  const normalizeTodo =
-    '`Normalize` is not translated. To divide by all synapses, use the upstream/downstream columns of neuprint_get_meta(). To divide by reconstructed partners only, you need a separate aggregate query. The two denominators differ by a factor of two and a half on male-CNS.'
+    const out = ctx.output('connections')
+    const ids = neuronIds(neurons)
+    const direction = readTraversalDirection(ctx.params.direction)
+    const hops = Math.max(1, Number(ctx.params.hops))
+    const minWeight = Math.max(1, Number(ctx.params.minWeight))
 
-  /*
-   * Edge properties go through the canvas's own query (`cypherConnectivity`), which states the
-   * region options in its own text — so they are exported on this route where the library route
-   * below refuses them. Normalize and multiple hops are still refused: neither has a translation
-   * that was checked.
-   */
-  const properties = readEdgeProperties(ctx.params.edgeProperties)
-  if (properties.length > 0) {
-    if (ctx.params.normalize === true) return ctx.todo(normalizeTodo)
-    if (hops > 1) {
+    /*
+     * CATMAID through `coda_walk`, the notebook's walk transcribed, one hop a
+     * `catmaid_query_connected` call. CATMAID publishes no synapse totals, no per-region split and
+     * no connection property but the count, so the canvas offers none of those controls on a
+     * CATMAID dataset; a graph that still carries `Normalize` is refused as it is there.
+     */
+    if (isCatmaidDataset(ctx)) {
+      if (ctx.params.normalize === true) {
+        return ctx.todo(CATMAID_TEXT.normalize)
+      }
+      return [
+        `${out} <- coda_catmaid_connectivity(`,
+        `  ${conn},`,
+        `  ${ids},`,
+        `  direction = ${rStr(direction)},`,
+        `  hops = ${hops},`,
+        `  min_weight = ${minWeight},`,
+        `  include_fragments = ${allSegments(ctx)}`,
+        `)`,
+        ...endpointLines(ctx, out, neurons, conn),
+      ]
+    }
+    // One sentence for both routes, which refuse Normalize for the same reason.
+    const normalizeTodo =
+      '`Normalize` is not translated. To divide by all synapses, use the upstream/downstream columns of neuprint_get_meta(). To divide by reconstructed partners only, you need a separate aggregate query. The two denominators differ by a factor of two and a half on male-CNS.'
+
+    /*
+     * Edge properties go through the canvas's own query (`cypherConnectivity`), which states the
+     * region options in its own text — so they are exported on this route where the library route
+     * below refuses them. Normalize and multiple hops are still refused: neither has a translation
+     * that was checked.
+     */
+    const properties = readEdgeProperties(ctx.params.edgeProperties)
+    if (properties.length > 0) {
+      if (ctx.params.normalize === true) return ctx.todo(normalizeTodo)
+      if (hops > 1) {
+        return ctx.todo(
+          `Edge properties (${properties.join(', ')}) can only be exported for one hop. The multi-hop traversal helper uses neuprint_connection_table, which returns only the weight of each connection. Set \`Hops\` to 1, or clear \`Edge properties\`.`,
+        )
+      }
+      return cypherConnectivity(ctx, out, neurons, conn, properties)
+    }
+
+    /*
+     * The region and normalisation options are refused here where the Python emitter translates
+     * the region half, and the asymmetry is about what could be *checked* rather than about what
+     * neuprintr can do. `fetch_adjacencies`' signature, its defaults and its `"NotPrimary"`
+     * bucket were read off the installed neuprint-python 0.6.3 by introspection; neuprintr was
+     * not installed, and its argument names are exactly the kind of thing this codebase has been
+     * bitten by recalling — `Client.fetch_roi_hierarchy` does not exist, to take the case already
+     * written down in `roiHierarchy.ts`. A cell that names an argument neuprintr does not have
+     * fails at the reader's console, which is worse than a cell that says what to write.
+     */
+    // The node's own decoder, shared with the notebook emitter. Written by hand here, this test
+    // read `rois.length > 0` without filtering empty strings — so a stored `rois: ['']` refused
+    // the export while the node and the notebook treated it as no regions at all.
+    if (regionOptions(ctx.params).used) {
       return ctx.todo(
-        `Edge properties (${properties.join(', ')}) can only be exported for one hop. The multi-hop traversal helper uses neuprint_connection_table, which returns only the weight of each connection. Set \`Hops\` to 1, or clear \`Edge properties\`.`,
+        'The region options are not translated (`Split by region`, `Regions`, `Primary regions only`). neuprint_connection_table() can break a connection down by region, but its argument names were not checked against an installed neuprintr. Add them by hand and check them against the neuprintr documentation.',
       )
     }
-    return cypherConnectivity(ctx, out, neurons, conn, properties)
-  }
+    if (ctx.params.normalize === true) return ctx.todo(normalizeTodo)
 
-  /*
-   * The region and normalisation options are refused here where the Python emitter translates
-   * the region half, and the asymmetry is about what could be *checked* rather than about what
-   * neuprintr can do. `fetch_adjacencies`' signature, its defaults and its `"NotPrimary"`
-   * bucket were read off the installed neuprint-python 0.6.3 by introspection; neuprintr was
-   * not installed, and its argument names are exactly the kind of thing this codebase has been
-   * bitten by recalling — `Client.fetch_roi_hierarchy` does not exist, to take the case already
-   * written down in `roiHierarchy.ts`. A cell that names an argument neuprintr does not have
-   * fails at the reader's console, which is worse than a cell that says what to write.
-   */
-  // The node's own decoder, shared with the notebook emitter. Written by hand here, this test
-  // read `rois.length > 0` without filtering empty strings — so a stored `rois: ['']` refused
-  // the export while the node and the notebook treated it as no regions at all.
-  if (regionOptions(ctx.params).used) {
-    return ctx.todo(
-      'The region options are not translated (`Split by region`, `Regions`, `Primary regions only`). neuprint_connection_table() can break a connection down by region, but its argument names were not checked against an installed neuprintr. Add them by hand and check them against the neuprintr documentation.',
-    )
-  }
-  if (ctx.params.normalize === true) return ctx.todo(normalizeTodo)
+    if (hops > 1) {
+      ctx.helper('coda_traverse_connectivity')
+      return [
+        ...populationNote(ctx),
+        `${out} <- coda_traverse_connectivity(`,
+        `  ${ids},`,
+        `  direction = ${rStr(direction)},`,
+        `  hops = ${hops},`,
+        `  min_weight = ${minWeight},`,
+        `  all_segments = ${allSegments(ctx)},`,
+        `  conn = ${conn}`,
+        `)`,
+        ...endpointLines(ctx, out, neurons, conn),
+      ]
+    }
 
-  if (hops > 1) {
-    ctx.helper('coda_traverse_connectivity')
+    ctx.helper('coda_edge_list')
+    const prepost = direction === 'inputs' ? 'PRE' : direction === 'both' ? 'BOTH' : 'POST'
     return [
       ...populationNote(ctx),
-      `${out} <- coda_traverse_connectivity(`,
+      `${out} <- coda_edge_list(`,
       `  ${ids},`,
-      `  direction = ${rStr(direction)},`,
-      `  hops = ${hops},`,
+      `  prepost = ${rStr(prepost)},`,
       `  min_weight = ${minWeight},`,
       `  all_segments = ${allSegments(ctx)},`,
       `  conn = ${conn}`,
       `)`,
-      ...endpointLines(ctx, out, ids, conn),
+      ...endpointLines(ctx, out, neurons, conn),
     ]
-  }
-
-  ctx.helper('coda_edge_list')
-  const prepost = direction === 'inputs' ? 'PRE' : direction === 'both' ? 'BOTH' : 'POST'
-  return [
-    ...populationNote(ctx),
-    `${out} <- coda_edge_list(`,
-    `  ${ids},`,
-    `  prepost = ${rStr(prepost)},`,
-    `  min_weight = ${minWeight},`,
-    `  all_segments = ${allSegments(ctx)},`,
-    `  conn = ${conn}`,
-    `)`,
-    ...endpointLines(ctx, out, ids, conn),
-  ]
-})
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
 /**
  * The `Neuron Set` port's derivation, transcribed from `endpointNeurons` in
@@ -250,15 +284,17 @@ registerHelper({
    */
   needs: ['coda_ids'],
   source: [
-    'coda_endpoint_neurons <- function(connections, seed_ids = NULL) {',
+    'coda_endpoint_neurons <- function(connections, seeds = NULL) {',
     '  # One row per neuron in an edge list: the seeds first, then every partner.',
     '  #',
-    '  # Seeds are included even if none of their edges passed min_weight.',
+    '  # Seeds are included even if none of their edges passed min_weight. `seeds` is the seed',
+    '  # table; its `type` column is used where it has one.',
     '  parts <- list()',
     '  connections <- coda_ids(connections, "preId", "postId")',
-    '  if (!is.null(seed_ids)) {',
+    '  if (!is.null(seeds)) {',
+    '    types <- if ("type" %in% names(seeds)) as.character(seeds$type) else NA_character_',
     '    parts[[length(parts) + 1]] <- tibble::tibble(',
-    '      neuronId = as.character(seed_ids), type = NA_character_',
+    '      neuronId = as.character(seeds$neuronId), type = types',
     '    )',
     '  }',
     '  parts[[length(parts) + 1]] <- tibble::tibble(',
@@ -340,57 +376,88 @@ registerHelper({
 })
 
 /**
- * The multi-hop traversal.
- *
- * The same three rules as the Python helper, and they matter for the same reason: each
- * produces a plausible wrong answer rather than an error.
+ * The walk itself, whatever answers a hop — the notebook's `coda_walk`, transcribed with its
+ * three rules: each neuron expanded once, an edge keeping the hop and direction it was first
+ * found at, and `both` expanding both ways at every hop and labelling an edge found from both
+ * ends at one hop `"both"`. One walk for neuPrint and CATMAID, as in the notebook; two had already
+ * disagreed about that label.
  */
 registerHelper({
+  name: 'coda_walk',
+  requires: ['dplyr'],
+  source: [
+    'coda_walk <- function(seed_ids, direction, hops, one_hop) {',
+    "  # Walk the connectome breadth-first from the seeds, as Coda's Connectivity node.",
+    '  #',
+    '  # `one_hop(ids, way)` returns the edges leaving `ids` in direction `way` ("downstream" or',
+    '  # "upstream") with columns preId, preType, postId, postType and weight (ids as text). The',
+    '  # result has the same columns plus `hop` and `direction`, each row oriented from',
+    '  # presynaptic to postsynaptic.',
+    '  #',
+    '  #  * Each neuron is expanded at most once, so recurrent loops do not repeat. Edges back',
+    '  #    into visited neurons are still reported.',
+    '  #  * An edge found again at a later hop keeps the hop and direction it was first found at.',
+    '  #  * direction = "both" expands both ways at every hop, so it also finds neurons that share',
+    '  #    inputs with a seed.',
+    '  ways <- switch(direction, both = c("downstream", "upstream"), inputs = "upstream", "downstream")',
+    '  frontier <- unique(as.character(seed_ids))',
+    '  expanded <- character(0)',
+    '  # One entry per edge found, in the order found: its key, hop and direction.',
+    '  seen <- character(0)',
+    '  seen_hop <- integer(0)',
+    '  seen_way <- character(0)',
+    '  parts <- list()',
+    '  for (hop in seq_len(hops)) {',
+    '    todo <- setdiff(frontier, expanded)',
+    '    if (length(todo) == 0) break',
+    '    expanded <- union(expanded, todo)',
+    '    reached <- character(0)',
+    '    for (way in ways) {',
+    '      step <- one_hop(todo, way)',
+    '      if (nrow(step) == 0) next',
+    '      keys <- paste(step$preId, step$postId)',
+    '      at <- match(keys, seen)',
+    '      # Found from both ends at the same hop: label it "both".',
+    '      again <- at[!is.na(at)]',
+    '      seen_way[again[seen_hop[again] == hop & seen_way[again] != way]] <- "both"',
+    '      fresh <- is.na(at) & !duplicated(keys)',
+    '      step <- step[fresh, ]',
+    '      seen <- c(seen, keys[fresh])',
+    '      seen_hop <- c(seen_hop, rep(hop, nrow(step)))',
+    '      seen_way <- c(seen_way, rep(way, nrow(step)))',
+    '      parts[[length(parts) + 1]] <- step',
+    '      reached <- c(reached, if (way == "downstream") step$postId else step$preId)',
+    '    }',
+    '    frontier <- setdiff(unique(reached), expanded)',
+    '  }',
+    '  if (length(parts) == 0) {',
+    '    return(tibble::tibble(',
+    '      preId = character(0), preType = character(0), postId = character(0),',
+    '      postType = character(0), weight = integer(0), hop = integer(0), direction = character(0)',
+    '    ))',
+    '  }',
+    '  out <- dplyr::bind_rows(parts)',
+    '  out$hop <- seen_hop',
+    '  out$direction <- seen_way',
+    '  out',
+    '}',
+  ],
+})
+
+/** The multi-hop traversal against neuPrint: `coda_walk`, one hop a `coda_edge_list` call. */
+registerHelper({
   name: 'coda_traverse_connectivity',
-  needs: ['coda_edge_list'],
+  needs: ['coda_walk', 'coda_edge_list'],
   requires: ['neuprintr', 'dplyr'],
   source: [
     'coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight,',
     '                                       all_segments, conn) {',
     '  # Walk the connectome breadth-first for `hops` steps and return the edge list, like',
-    "  # Coda's Connectivity node with more than one hop.",
-    '  #',
-    '  #  * Each neuron is expanded at most once, so recurrent loops terminate. Edges back',
-    '  #    into an already-visited neuron are still reported.',
-    '  #  * An edge found again at a later hop keeps the hop it was first found at.',
-    '  #  * direction = "both" expands both ways at every hop, so it also finds neurons that',
-    '  #    share input with a seed.',
-    '  prepost <- switch(direction, inputs = "PRE", both = "BOTH", "POST")',
-    '  frontier <- unique(as.numeric(seed_ids))',
-    '  expanded <- numeric(0)',
-    '  found <- NULL',
-    '',
-    '  for (hop in seq_len(hops)) {',
-    '    todo <- setdiff(frontier, expanded)',
-    '    if (length(todo) == 0) break',
-    '    expanded <- union(expanded, todo)',
-    '',
-    '    step <- coda_edge_list(todo, prepost, min_weight, all_segments, conn)',
-    '    if (nrow(step) == 0) break',
-    '    step$hop <- hop',
-    '',
-    '    if (is.null(found)) {',
-    '      found <- step',
-    '    } else {',
-    '      # Keep the hop and direction an edge was first found with.',
-    '      fresh <- dplyr::anti_join(step, found, by = c("preId", "postId"))',
-    '      found <- dplyr::bind_rows(found, fresh)',
-    '      step <- fresh',
-    '    }',
-    '',
-    '    reached <- ifelse(step$direction == "downstream", step$postId, step$preId)',
-    '    frontier <- setdiff(unique(reached), expanded)',
-    '  }',
-    '',
-    '  if (is.null(found)) {',
-    '    return(coda_edge_list(numeric(0), prepost, min_weight, all_segments, conn))',
-    '  }',
-    '  found',
+    "  # Coda's Connectivity node with more than one hop: coda_walk, one hop a",
+    '  # neuprint_connection_table() call per direction.',
+    '  coda_walk(seed_ids, direction, hops, function(ids, way) {',
+    '    coda_edge_list(ids, if (way == "downstream") "POST" else "PRE", min_weight, all_segments, conn)',
+    '  })',
     '}',
   ],
 })

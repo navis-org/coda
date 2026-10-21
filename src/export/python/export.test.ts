@@ -18,7 +18,14 @@ import type { ParamValues } from '../../core/node'
 import { allNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import { exportNotebook } from './exporter'
-import { caveGraph, customGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
+import {
+  catmaidGraph,
+  caveGraph,
+  customGraph,
+  everythingGraph,
+  pathsGraph,
+  twoNodeGraph,
+} from '../fixture'
 import { getEmitter } from './registry'
 import { serializeNotebook } from './notebook'
 import { inputPorts, outputPorts } from '../../core/ports'
@@ -29,6 +36,7 @@ import { holdLocalFile, readTableFileSummary } from '../../data/files/registry'
 const GOLDEN = new URL('./__fixtures__/everything.ipynb', import.meta.url).pathname
 const CAVE_GOLDEN = new URL('./__fixtures__/cave.ipynb', import.meta.url).pathname
 const CUSTOM_GOLDEN = new URL('./__fixtures__/custom.ipynb', import.meta.url).pathname
+const CATMAID_GOLDEN = new URL('./__fixtures__/catmaid.ipynb', import.meta.url).pathname
 
 /** Fixed, so the golden file does not change every time it is written. */
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
@@ -48,8 +56,8 @@ function exportFixture(graph = everythingGraph()): string {
   return serializeNotebook(result.notebook)
 }
 
-/** Every fixture graph: the CAVE and Custom halves are their own for the reason `fixture.ts` records. */
-const FIXTURES = [everythingGraph, caveGraph, customGraph]
+/** Every fixture graph: the CAVE, Custom and CATMAID halves are their own for the reasons `fixture.ts` records. */
+const FIXTURES = [everythingGraph, caveGraph, customGraph, catmaidGraph]
 
 describe('the fixture itself', () => {
   /*
@@ -115,6 +123,23 @@ describe('notebook export', () => {
       return
     }
     expect(actual).toEqual(readFileSync(CUSTOM_GOLDEN, 'utf-8'))
+  })
+
+  it('builds a CATMAID notebook with no step left as a TODO', () => {
+    // Every node in the fixture is one a CATMAID project answers, so a TODO is a branch missing.
+    const result = exportNotebook(catmaidGraph(), OPTIONS)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.todos.map((t) => t.label)).toEqual([])
+    expect(notebookText(catmaidGraph())).not.toContain('neuprint')
+  })
+
+  it('matches the golden CATMAID notebook', () => {
+    const actual = exportFixture(catmaidGraph())
+    if (process.env.UPDATE_GOLDEN) {
+      writeFileSync(CATMAID_GOLDEN, actual)
+      return
+    }
+    expect(actual).toEqual(readFileSync(CATMAID_GOLDEN, 'utf-8'))
   })
 
   it('answers every query below a Custom Dataset from its helper, never neuprint-python', () => {
@@ -387,7 +412,7 @@ describe('the region and normalisation options', () => {
     const text = connectivityCell({ direction: 'outputs', hops: 1, minWeight: 1 })
     expect(text).toContain('def coda_endpoint_neurons(')
     expect(text).toContain(
-      "connectivity_neuron_set = coda_endpoint_neurons(connectivity_connections, find_neurons['neuronId'].tolist())",
+      'connectivity_neuron_set = coda_endpoint_neurons(connectivity_connections, find_neurons)',
     )
     // The derived form binds the port directly; only `full` needs a lookup in between.
     expect(text).not.toContain('_endpoints = ')

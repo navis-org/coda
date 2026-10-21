@@ -561,8 +561,9 @@ would either refuse an export Python can produce or offer an R document of nothi
 palette asks twice and the two rows disagree, which is the honest state.
 
 `src/export/fixture.ts` gained a **second graph** for the same reason: a CAVE node in
-`everythingGraph` would make R refuse the whole thing and leave its golden with nothing in it.
-`caveGraph` is exported as its own notebook and asserted to be *refused* on the R side.
+`everythingGraph` would have made R refuse the whole thing and left its golden with nothing in it.
+`caveGraph` is exported as its own document — refused in R until R had fafbseg (*The CAVE half in
+R*, below), and an R golden of its own since.
 
 #### A backend an emitter was not written against is a third kind of TODO
 
@@ -580,7 +581,7 @@ was never tested against.
 The backend is read off `def.inputs` (any port whose declared type is `dataset`) rather than by
 asking for a port called `dataset`, which is the bug class `ports.test.ts` exists for. An
 *unresolved* dataset type refuses nothing: no `sourceId` is invariant 2's ordinary state on a cold
-session.
+session. R has the same declaration since the CATMAID half (*The CATMAID half*, below).
 
 #### A reference port yields no variable, and sometimes cannot
 
@@ -599,9 +600,10 @@ Two changes, and they are a pair:
   dependency, so an emitter reading one falls back to the referenced node's *type*, which is all a
   reference ever promised.
 
-`clientFor` in `cave.ts` is that fallback, in one place so the two readers cannot drift: the
-bound variable's `.client` where the walk bound one, and a fresh `CAVEclient` built from the
-reference's type where it did not. The golden covers both branches.
+`caveTargetPlan` in `plans/cave.ts` is that fallback, in one place for every reader in both
+languages: the bound variable where the walk bound one, and a fresh target built from the
+reference's type where it did not — which the notebook spells as a `CAVEclient` (`clientLines`)
+and the R document as a `coda_cave_dataset`. The golden covers both branches.
 
 #### What a Coda Dataset is on CAVE, and why it is not a bare client
 
@@ -771,11 +773,14 @@ names its `server=`.
 
 #### What has not been run
 
-**Nothing has been run against a live CAVE datastack.** `CAVE_TOKEN` is absent here, so for that
-half what is verified is the signatures (against the installed caveclient 8.2.1), the syntax and
-name resolution (`check-export.py`), and the pandas (`probe-py-helpers.py` against a stub). The
-wire format is `src/data/cave`'s business and is covered by `live.test.ts` there. The SeaTable
-half *has* been run live, as above.
+**Until the R half arrived, nothing here had been run against a live CAVE datastack**: what was
+verified was the signatures (against caveclient 8.2.1), the syntax and name resolution
+(`check-export.py`), and the pandas (`probe-py-helpers.py` against a stub). `pnpm probe:cave` now
+runs the notebook against `flywire_fafb_public` and compares it with the canvas — see *The CAVE
+half in R* below — and the first run found one thing the stubs could not: the neuron table carried
+a `pt_supervoxel_id` the canvas does not, because caveclient returns a bound point's supervoxel
+beside its root id whatever `select_columns` asked for. Fixed in both languages by keeping the
+columns asked for. The SeaTable half had already been run live, as above.
 
 ### The Custom Dataset half of the notebook exporter
 
@@ -837,6 +842,209 @@ walk's edge back into a seed, the row-group-filtered read, an 18-digit id round 
 half was run live by hand against `gs://flywire_v141_m783`: one mesh (1,181,103 vertices) and a
 missing segment counted, and a 191,525-node skeleton in nanometres.
 
+### The CATMAID half, in both languages
+
+`python/catmaidHelpers.ts` + `python/emitters/catmaid.ts`, and `r/catmaidHelpers.ts` +
+`r/emitters/catmaid.ts`. A graph on VFB's FAFB or L1, or on a Custom CATMAID, exports as a
+notebook on **pymaid** and as an R document on **rcatmaid** — the first backend past neuPrint that
+both languages cover. `DatasetFamily.notebook` is `{ python: 'pymaid', r: 'rcatmaid' }` on both
+families.
+
+**A dataset is a generated object, not a bare connection**, for `CodaCaveDataset`'s reason: a Coda
+dataset value is a connection *and* a neuron table, and on CATMAID the table is derived rather than
+read (`data/catmaid/annotations.ts`). `CodaCatmaidDataset` (a class) and `coda_catmaid_dataset`
+(an environment) hold both, the table built on first use and shared by every cell. Its method
+names and columns are `CodaCustomDataset`'s — `labels`, `lookup`, `connectivity`, `synapses`,
+`synapses_between`, `skeletons` — so a Python branch written for one serves both
+(`isLabelledHelper`). What is behind each method is pymaid's or rcatmaid's high-level call, with
+direct fetches only where the library's call answers a different question: `skeletons/summary`
+in both (node count and cable length, which neither wraps short of a whole node table per
+neuron), and in the notebook the annotation list and `skeletons/connectivity` (below).
+
+**Both documents answer anonymously on VFB.** pymaid sets the `Referer` and replays the CSRF
+cookie a browser cannot (`docs/catmaid_vfb.md`), and rcatmaid's `catmaid_login` with a server and
+nothing else is what its own `vfbcatmaid()` does, so the published token the canvas needs is not
+in either document. A Custom CATMAID reads `CATMAID_API_TOKEN` and is anonymous where it is unset.
+
+**Every output was checked by running it, which is the only reason any of this is trusted.**
+`pnpm probe:catmaid` runs `catmaidGraph` against VFB through a real Scheduler
+(`export/live.test.ts` with `EXPORT_LIVE=catmaid`), writes the canvas's outputs
+and both exported documents into one directory, and two scripts execute the documents there and
+compare each node's variable with the canvas: 20 outputs across 14 nodes, rows as a set, about a
+minute. The first run disagreed on three of them, and every disagreement was the canvas being
+right:
+
+- **Not every skeleton a connector reaches is in the project's skeleton list.** One-sided
+  Synapses Between came back with 3,179 rows against the canvas's 2,346; the extra partners were
+  skeletons `skeletons/` does not list, which `Include fragments` drops on the canvas. The helper
+  had been written on the assumption that a CATMAID project has no fragments, because the index
+  is every skeleton — it is every skeleton *listed*. So `include_fragments` is real in both
+  `connectivity` and `synapses_between`, and Connectivity had only agreed because nothing below
+  weight 5 reached that far.
+- **`coda_endpoint_neurons` dropped a seed's type when no edge survived**, in both languages and
+  on every backend. `endpointNeurons` reads a seed's type off the seed *table*; both helpers were
+  handed the ids alone. They take the table now, which moved one line per Connectivity cell in the
+  neuPrint goldens. A seed with an edge was typed by the edge, which is why no golden could see it.
+- **A volume's vertex count is not a fact about its surface**: the canvas keeps a vertex per
+  triangle corner (2,400 for `LAL_L`), pymaid and rcatmaid share them (402). The probe compares
+  faces and bounds.
+
+**The index agrees cell for cell** — 5,601 rows × 8 columns on FAFB in both languages, the
+meta-annotated `type`, the `#` split and the trailing space it leaves on `DA1 ORN ` included —
+with one difference that is kept. rcatmaid reads annotations through `annotations/forskeletons`
+where the canvas reads `skeleton/annotationlist`, and the two order a neuron's labels differently
+(1,911 cells). CATMAID's annotations are a bag and nothing downstream reads their order, so the R
+probe compares that cell as a set rather than reaching past the library for a second direct fetch.
+
+These library behaviours each produce a plausible wrong table or a failure far from its cause,
+and each is written into the helper's header where it is worked around:
+
+- **pymaid's `get_annotated` on an annotation the project lacks returns every entity on the
+  server** — 718,790 on L1, with a warning — and `get_annotation_id` reads the *global* instance
+  before the one it is handed (pymaid 2.4), so a second CATMAID in the notebook put its server, and
+  its credentials, on this one's path. The helper reads this server's annotation list once and
+  asks `query-targets` itself, and its instance is not made global at all.
+- **`get_partners` spreads a hop into a dense partners-by-queried frame** and fetches every
+  partner's name — tens of millions of mostly-zero cells per hop on a deep walk. Its `threshold`
+  is also on the total over the queried skeletons where `Min weight` is per pair, and `min_size=2`
+  drops single-node partners. The helper reads the sparse `skeletons/connectivity` answer the
+  canvas reads.
+- **`get_neurons` returns a bare neuron for one id**, and a cell carrying fields onto it then
+  calls a NeuronList method that is not there; `skeletons` always returns a list.
+- **An empty id list is an error to some calls and no constraint at all to others** — rcatmaid
+  builds no `skeleton_ids` field from one, so an empty Sources side asked for every synapse onto
+  the targets. Every method in both languages answers an empty set of neurons with an empty table
+  before asking anything, as `asksForNoSynapses` does on the canvas.
+- **A refused `skeletons/summary` leaves two columns empty**, as `buildIndex` does, rather than
+  failing every cell that reads the neuron table.
+- **rcatmaid's `catmaid_skids("name:.")` is 1,132,353 ids on FAFB**, not the 5,601 skeletons
+  `skeletons/` lists, so the R index reads that endpoint.
+- **`catmaid_query_meta_annotations` errors** on a missing annotation, which on L1 is both
+  conventions.
+- **`catmaid_get_connector_table` is one row per partner** by default (3,527 outgoing rows for
+  skeleton 16, against 1,709 links); `partner.skids = FALSE` is the canvas's links.
+- **A Synapses Between confidence is the drawn end's link**, so a postsynaptic `Location` reads
+  `confidence2` / `post_confidence`; the fixture floors it at 3 so the other link is exercised.
+
+**R has one walk now, as the notebook does.** `coda_walk` was first written for CATMAID beside
+neuPrint's own loop in `coda_traverse_connectivity`, and the two already disagreed: only the new
+one labelled an edge found from both ends at one hop `"both"`, as the canvas does. Both call
+`coda_walk` now, neuPrint's hop being `coda_edge_list`, which moved that label into the neuPrint
+golden. neuprintr is not installed here, so the neuPrint half was checked by running both walks
+over one stub graph with loops and comparing them with the notebook's row for row.
+
+**R gained the `backends` declaration** the notebook has had since the CAVE half: until CATMAID,
+R refused every non-neuPrint dataset outright, so it never needed one. The guard, its default
+and its sentence are one copy in `export/backends.ts`, which both walks call — it holds no
+language, so the reason the walks are copied does not reach it. And in R **only the dataset chunk
+attaches its client library**: every query chunk reads that chunk's connection, so the per-query
+`library(neuprintr)` calls were redundant, and with them gone a CATMAID branch needs no particular
+place in its emitter. `export.test.ts` asserts the CATMAID document names no neuprintr at all — a
+document for a CATMAID project that asks for a GitHub install of the neuPrint client is a document
+nobody can run without wondering why.
+
+What a CATMAID graph still cannot export, each as the walk's backend TODO naming CATMAID:
+**Influence, Neuron Profile and Dataset Summary**, whose cells are neuprint-python and neuprintr
+throughout, and **Cypher**, the ROI count and completeness nodes, the ROI Connectivity node and
+Neuroglancer, which the canvas does not offer on CATMAID either. `Normalize` and a region filter
+are refused in the cell, as the canvas refuses them.
+
+### The CAVE half in R
+
+`r/caveHelpers.ts` and `r/emitters/cave.ts`. A FlyWire, BANC, MICrONS or Custom CAVE graph exports
+as an R document on **fafbseg**, the natverse's route into CAVE: it drives Python's caveclient
+through reticulate. The notebook's CAVE coverage, node for node, except the two annotation sources
+below. Checked by running it: `pnpm probe:cave` executes both documents against
+`flywire_fafb_public` v783 and compares them with the canvas — 11 outputs across 9 nodes, every one
+agreeing in both languages.
+
+**The setup is one line a reader runs once**, and the document says so rather than doing it. The
+setup chunk names `fafbseg::simple_python()` — fafbseg's own installer, which also brings
+cloudvolume — and `fafbseg::dr_fafbseg()`, which reports what is missing and which datastacks the
+token reaches. `reticulate::py_require("caveclient")` would make a fresh machine run with no step at
+all (measured: it provisioned caveclient and the client read the token), and was not chosen: it
+builds its own Python and does not fit one a reader already manages. The token is the same
+`~/.cloudvolume/secrets` file the notebook reads.
+
+**No id crosses from pandas into R by reticulate's own conversion, and that is the finding the
+design hangs on.** Converted directly, `client$materialize$query_table(...)` returned every
+`pt_root_id` and `pt_supervoxel_id` as `NA` — an eighteen-digit id overflows R's 32-bit integer and
+reticulate says so only in a warning. `fafbseg::flywire_cave_query` carries the frame through arrow
+and returns them exact as `integer64`, so every row in this document comes through it, and
+`coda_cave_query` turns each `integer64` column into text (invariant 8). Three consequences:
+
+- **fafbseg's query pins the materialization per call**, where its client follows the newest one,
+  so listings and metadata go to caveclient's own `CAVEclient(datastack, version=N)` — pinned, like
+  the notebook's. `...` reaches caveclient, so `merge_reference`, `split_positions` and
+  `desired_resolution` pass straight through.
+- **fafbseg reaches CAVE's global server only**: its client takes a datastack name and no server.
+  A datastack elsewhere — H01 on `global.brain-wire-test.org` — is a TODO naming the notebook,
+  which passes `server_address`.
+- **Update root IDs is the notebook's Python**, defined in reticulate's session from the same
+  registry the notebook is written from (`resolveHelpers` reaches across). The vote is int64
+  arithmetic R has no exact type for; the ids cross both ways as text, and the frame comes back
+  through a wrapper that turns pandas' Arrow-backed strings into plain ones, which reticulate
+  cannot convert — found because the probe's Python was newer than the one the helpers were
+  written against.
+
+Two R helpers already existed and are reused, not copied: `coda_annotation_columns` and
+`coda_join_annotations`. **Every CAVE decision is `plans/cave.ts`**, which both emitters render:
+which datastack a node reads, what a dataset binds, a CAVE table's reading, Update root IDs'
+method, where a synapse table keeps its ends, and every refusal (`CAVE_TEXT`). The R emitter was
+first written as a copy of the notebook's decision trees with the sentences shared, which is the
+arrangement `neutral.ts` exists to prevent; the two now spell one plan. What a locally searched
+index says — and whether a region filter is refused or answered empty — is `localIndexText` in
+`plans/query.ts`, one entry per backend for CATMAID, CAVE and a Custom Dataset.
+
+**A CAVE dataset off the global server is refused in R up front** (`unreachableDatasetNodes` in
+`canExport.ts`), not left to a TODO in its dataset chunk that would block every chunk after it —
+`canExport`'s whole reason for existing. `isDefaultCaveServer` is the one predicate, read there and
+by the notebook (which passes `server_address` where it is false). R's chunks do not ask it again: a
+datastack a chunk names itself is either typed, which is always the global server, or borrowed from
+a Dataset node the refusal has already covered.
+
+**Not covered in R, each a TODO:** Dataset Summary and Neuroglancer, which stay neuPrint-only in
+R, as in the CAVE notebook.
+
+### SeaTable and FlyTable in R
+
+Both nodes read through **seatabler** (`flyconnectome/seatabler`), the generic SeaTable client
+fafbseg's `flytable_*` functions are being moved onto; one helper, `coda_seatable`, and one
+connection per host. What either reads is `seaTablePlan` in `plans/query.ts`, which the notebook's
+sea-serpent cell renders too. Measured against FlyWire's `main.info` by `pnpm probe:flytable`
+(58,340 rows, 52 columns, every column type the base has), in both languages:
+
+- **SQL, never `seatable_list_rows`.** The rows endpoint `seatable_api` 2.8.2 calls answers
+  FlyTable with `404 table not found` for a table its SQL endpoint reads — sea-serpent reads
+  through SQL for the same reason. SQL also selects columns on the server, which the canvas
+  cannot: 0.7 s for three columns against 9 s for all. seatabler finds the table in the SQL text
+  with a pattern that takes no backticks, so the table name goes in **unquoted** — and a name
+  holding a space, comma or quote is a TODO naming the notebook, since it would read as another
+  table. A failed read is a warning and `NULL` from seatabler, so the helper stops on `NULL`.
+- **Empty `Columns` means the schema's columns, not `SELECT *`**, which adds eight bookkeeping
+  columns (`_id`, `_ctime`, …) the canvas never shows. A column named but absent is a column of
+  nulls in all three, and so in R is one no row has a value in, which SQL leaves out entirely.
+- **The token's variable follows the host in R only**: `FLYTABLE_TOKEN` for FlyTable (matched
+  without its scheme and in any case), as fafbseg and seatabler name it, `SEATABLE_TOKEN` for any
+  other server. The notebook reads
+  `SEATABLE_TOKEN` for both, which `probe:flytable` bridges by handing it the FlyTable token.
+- **An unticked checkbox is `false`** in all three. SeaTable leaves the key out of a row whose box
+  was never ticked; the canvas read that as null until this probe, against sea-serpent's `false`,
+  and a checkbox has two states. The R helper turns seatabler's `NA` into `FALSE` the same way.
+- **A multiple-select cell is joined with `', '`** in all three. sea-serpent hands one over as the
+  *text* of a Python list (`"['…']"`), so the notebook's helper reads it back with
+  `ast.literal_eval`, in the columns the table's metadata types as multiple-select only, leaving a
+  cell that does not parse as it came. A link column is not touched: its items are records.
+- **A date is an hour late in both documents in summer, and the cause is upstream of both.** The
+  server stores `2019-06-14T22:18:00+01:00`; `seatable_api`'s `convert=True` reformats it to the
+  column's display format with the offset dropped, and sea-serpent and seatabler then read that
+  wall clock as UTC. The canvas keeps the server's text. Neither document can correct it without
+  the base's time zone, so the probe leaves `root_last_modified` uncompared and says why.
+
+`caveGraph`'s second CAVE table keys a reference table by `target_id`. The canvas refuses that
+("column target_id not found in proofread_neurons"), and so do both documents: a fixture reaching
+a branch, not a question. The probe graph (`caveProbeGraph`) asks real questions instead.
+
 ### The R Markdown exporter
 
 `Save ▸ Export as R Markdown` writes the same graph as an `.Rmd` on **neuprintr, dplyr, nat,
@@ -890,12 +1098,11 @@ other**. What stops them drifting on *coverage* is `src/export/fixture.ts`: `eve
 two golden files, and a node that emits Python but nothing in R shows up as a TODO rather than as
 a document nobody noticed was shorter.
 
-**The one place they have parted company is the backend.** `caveGraph` is the second fixture and
-R refuses it outright — `canExportNotebook` is asked per language now, and
-`DatasetFamily.notebook` names a client per language. That is a real coverage gap rather than a
-loophole, and R's `export.test.ts` asserts the refusal so it cannot become a silent one; see
-*The CAVE half of the notebook exporter* above. The refusal message points at the notebook, or
-"no document can be built" reads as "Coda cannot export this at all".
+**The backend is where they could part company**, which is why `canExportNotebook` is asked per
+language and `DatasetFamily.notebook` names a client per language. For a while they did: R refused
+every CAVE graph. Both cover neuPrint, CAVE and CATMAID now, and where a family is refused in one
+language the message points at the other, or "no document can be built" reads as "Coda cannot
+export this at all".
 
 **R's stack is the same lineage, which is why the mapping is clean** — navis is the Python port
 of `nat`, and neuprintr is the natverse's neuPrint client. Three things are genuinely *better*
@@ -1090,8 +1297,8 @@ the fixture graph* — neither asks whether the emitter's output is in the docum
 The fix is at the fixture: a node whose emitter is worth checking needs a path to it in **both**
 languages, which for a viewer means feeding one instance from something both emit. `out.rank` has
 two for that reason, and the comment on each says which half it covers. Worth knowing before
-adding a viewer downstream of Influence, Neuron Topology, `compare.matchTypes` or either CATMAID
-dataset — the refusal list in `NO_EMITTER` is the list of places this can happen.
+adding a viewer downstream of Influence, Neuron Topology or `compare.matchTypes` — the refusal
+list in `NO_EMITTER` is the list of places this can happen.
 
 A sharper guard would compare the emitted source against the node's own variable prefix, which is
 cheap and is not written: the fixture comment is doing that job today.
@@ -1114,5 +1321,6 @@ cheap and is not written: the fixture comment is doing that job today.
 - **Neuroglancer** leaves three things out, each said in a `NOTE` where it applies: colours *by
   value* (the ramp is not transcribed, so the scene keeps neuroglancer's own colours), the layers
   wired to Extra layers (a Neuroglancer Source exports no layer), and a source that places
-  segments across several volumes, which no exportable dataset is. And in R it is neuPrint only,
-  R having no CAVE client.
+  segments across several volumes, which no exportable dataset is. And in R it is neuPrint only:
+  R's CAVE route is fafbseg, and the scene would be built from the datastack's info record, which
+  nobody has written an R chunk for.

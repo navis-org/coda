@@ -1,11 +1,10 @@
 /**
  * `Google Sheet`, in readr.
  *
- * The only annotation source with an emitter in **both** languages, and the reason is that it
- * needs no client at all: a sheet shared as "anyone with the link" is a CSV at a URL, so
- * `readr::read_csv` reaches it directly with no credential, no token file and no library
- * specific to it. FlyTable is `sea-serpent`, which has no natverse counterpart; a CAVE table is
- * caveclient, which R refuses the whole graph over. This one is a fetch.
+ * The one annotation source that needs no client at all: a sheet shared as "anyone with the link"
+ * is a CSV at a URL, so `readr::read_csv` reaches it directly with no credential, no token file and
+ * no library specific to it. FlyTable and SeaTable need seatabler and a token, a CAVE table fafbseg
+ * and Python. This one is a fetch.
  *
  * The tab is resolved through the same `sheetConfigFrom` and `sheetExportUrl` the node and the
  * Python emitter use — `src/export → src/data` on `neuprintProperty`'s licence, and for its
@@ -16,6 +15,7 @@
 
 import { googleSheetPlan } from '../../plans/query'
 import { rStr, rVector } from '../r'
+import { chainAnnotations } from './common'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
@@ -29,19 +29,12 @@ registerEmitter('annotation.googleSheet', (ctx: EmitContext) => {
   const { idColumn, columns } = plan
   const out = ctx.output('annotations')
 
-  const lines: string[] = [
+  return [
     `${out} <- coda_google_sheet(`,
     `  ${rStr(plan.url)},`,
     `  id_column = ${rStr(idColumn)}${columns.length > 0 ? ',' : ''}`,
     ...(columns.length > 0 ? [`  columns = ${rVector(columns)}`] : []),
     `)`,
+    ...chainAnnotations(ctx, out),
   ]
-
-  const upstream = ctx.input('annotations')
-  if (upstream) {
-    ctx.library('dplyr')
-    ctx.helper('coda_join_annotations')
-    lines.push(`${out} <- coda_join_annotations(${upstream}, ${out})`)
-  }
-  return lines
 })

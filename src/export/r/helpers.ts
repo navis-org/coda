@@ -544,6 +544,55 @@ registerHelper({
 })
 
 /**
+ * A SeaTable table as a Coda neuron table, through seatabler — `FlyTable` and `SeaTable` alike.
+ * Why SQL rather than `seatable_list_rows`, why the schema's columns rather than `SELECT *`, and
+ * why an unticked checkbox is `FALSE`: docs/export.md, "SeaTable and FlyTable in R". The table name
+ * stays unquoted because seatabler finds it in the SQL text with a pattern that takes no
+ * backticks. A base storing ids as numbers comes back `integer64`, which `coda_annotation_columns`'
+ * `as.character` spells exactly.
+ */
+registerHelper({
+  name: 'coda_seatable',
+  needs: ['coda_annotation_columns'],
+  requires: ['seatabler'],
+  source: [
+    "#' A table in a SeaTable base, read with seatabler.",
+    'coda_seatable <- function(host, base, table, id_column = "root_id", columns = NULL,',
+    '                          token_envvar = "SEATABLE_TOKEN", workspace = NULL) {',
+    '  con <- seatabler::seatable_connection(host, token_envvar = token_envvar,',
+    '                                        workspace_id = workspace)',
+    '  # One base object for both reads below, so seatabler resolves it, and the schema, once;',
+    '  # without `table`, which is part of its cache key, so every table in a base shares it.',
+    '  base <- seatabler::seatable_base(base_name = base, con = con)',
+    '  info <- seatabler::seatable_columns(table, base = base, con = con)',
+    '  schema <- info$name',
+    '  if (!(id_column %in% schema)) {',
+    '    stop(sprintf("\'%s\' is not a column of %s. It has: %s",',
+    '                 id_column, table, paste(schema, collapse = ", ")))',
+    '  }',
+    '  # Empty means every column of the table except the id.',
+    '  if (!length(columns)) columns <- setdiff(schema, id_column)',
+    '  fields <- c(id_column, intersect(columns, schema))',
+    '  sql <- sprintf("SELECT %s FROM %s", paste0("`", fields, "`", collapse = ", "), table)',
+    '  df <- seatabler::seatable_query(sql, con = con, base = base, limit = Inf,',
+    '                                  collapse_lists = ", ", progress = FALSE)',
+    '  # seatabler answers a failed read with a warning and NULL.',
+    '  if (is.null(df)) stop(sprintf("Could not read %s from %s; see the warning above.", table, host))',
+    '  # A column the table lacks, or one no row has a value in (so no row carries the key), is',
+    '  # a column of NA, as on the canvas.',
+    '  for (missing in setdiff(c(id_column, columns), names(df))) {',
+    '    df[[missing]] <- rep(NA, nrow(df))',
+    '  }',
+    '  # A checkbox nobody ticked has no value in its row; it is unticked, as on the canvas.',
+    '  for (box in intersect(schema[info$type == "checkbox"], columns)) {',
+    '    df[[box]][is.na(df[[box]])] <- FALSE',
+    '  }',
+    '  coda_annotation_columns(df[, c(id_column, columns), drop = FALSE], id_column)',
+    '}',
+  ],
+})
+
+/**
  * A connectivity edge list as one long feature vector per query neuron.
  *
  * Mirrors `nodes/lib/partnerVectors.ts` and the Python helper beside it. The three rules that

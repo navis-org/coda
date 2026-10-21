@@ -218,6 +218,15 @@ describe('shaping SeaTable rows', () => {
     expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'side'])
   })
 
+  it('reads a checkbox nobody ticked as false, not as missing', () => {
+    const table = shapeRows(
+      [{ root_id: '1', checked: true }, { root_id: '2', checked: false }, { root_id: '3' }],
+      config({ columns: 'checked' }),
+      meta,
+    )
+    expect(table.data.checked).toEqual([true, false, false])
+  })
+
   it('keeps every column but the id when none are named', () => {
     const table = shapeRows([{ root_id: '1' }], config(), meta)
     expect(table.schema.columns.map((c) => c.name)).toEqual([

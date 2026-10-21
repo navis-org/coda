@@ -8,7 +8,8 @@
  * The one place they part company is the **backend**. Python emits caveclient and R has no
  * equivalent, so `caveGraph` is refused outright here rather than exported as a document of
  * TODOs — which is what `DatasetFamily.notebook` being per language buys, and what the last
- * test in this file pins.
+ * test in this file pins. `catmaidGraph` is the other way round: rcatmaid covers it, so it has a
+ * golden of its own here as in the notebook suite.
  *
  * Regenerate with `pnpm export:golden` after an intentional change, and read the diff.
  */
@@ -20,12 +21,14 @@ import { addNode, emptyGraph } from '../../core/graph'
 import type { ParamValues } from '../../core/node'
 import { allNodeDefs } from '../../core/registry'
 import '../../nodes'
-import { caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
+import { catmaidGraph, caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
 import { exportRmd } from './exporter'
 import { getEmitter } from './registry'
 import { searchFor } from '../../test/findNeurons'
 
 const GOLDEN = new URL('./__fixtures__/everything.Rmd', import.meta.url).pathname
+const CATMAID_GOLDEN = new URL('./__fixtures__/catmaid.Rmd', import.meta.url).pathname
+const CAVE_GOLDEN = new URL('./__fixtures__/cave.Rmd', import.meta.url).pathname
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
 
 /** The whole document, for the assertions that search it. */
@@ -46,8 +49,35 @@ describe('R Markdown export', () => {
     expect(result.source).toEqual(readFileSync(GOLDEN, 'utf-8'))
   })
 
+  it('matches the golden CATMAID document', () => {
+    const result = exportRmd(catmaidGraph(), OPTIONS)
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    if (process.env.UPDATE_GOLDEN) {
+      writeFileSync(CATMAID_GOLDEN, result.source)
+      return
+    }
+    expect(result.source).toEqual(readFileSync(CATMAID_GOLDEN, 'utf-8'))
+  })
+
+  it('builds a CATMAID document on rcatmaid alone, with no step left as a TODO', () => {
+    /*
+     * neuprintr is attached only by a neuPrint dataset chunk, so a document with no neuPrint
+     * dataset in it should not ask anybody to install neuprintr from GitHub. And every
+     * node in the fixture is one a CATMAID project answers, so a TODO here is a branch missing.
+     */
+    const result = exportRmd(catmaidGraph(), OPTIONS)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.source).not.toContain('neuprintr')
+    expect(result.source).toContain('library(catmaid)')
+    expect(result.todos.map((t) => t.label)).toEqual([])
+  })
+
   it('reaches every emitting node type', () => {
-    const covered = new Set(everythingGraph().nodes.map((n) => n.type))
+    const covered = new Set(
+      [everythingGraph(), catmaidGraph(), caveGraph()].flatMap((g) =>
+        g.nodes.map((n) => n.type),
+      ),
+    )
     const missed = allNodeDefs()
       .map((d) => d.type)
       .filter((t) => getEmitter(t) && !covered.has(t))
@@ -62,18 +92,75 @@ describe('R Markdown export', () => {
     expect(new Set(labels).size).toBe(labels.length)
   })
 
-  it('refuses a CAVE graph the notebook exporter accepts', () => {
-    /*
-     * Not a gap being papered over: R's route into FlyWire is `fafbseg`, which wraps FlyWire
-     * specifically rather than CAVE generally, and no emitter has been written for it. Refusing
-     * says so once; exporting would say it in a TODO per cell.
-     */
+  it('matches the golden CAVE document', () => {
     const result = exportRmd(caveGraph(), OPTIONS)
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    if (process.env.UPDATE_GOLDEN) {
+      writeFileSync(CAVE_GOLDEN, result.source)
+      return
+    }
+    expect(result.source).toEqual(readFileSync(CAVE_GOLDEN, 'utf-8'))
+  })
+
+  it('refuses a CAVE dataset off the global server, which fafbseg cannot reach', () => {
+    const g = addNode(emptyGraph('H01'), {
+      id: 'h01',
+      type: 'dataset.cave',
+      position: { x: 0, y: 0 },
+      params: {
+        datastack: 'h01_c3_flat',
+        version: '7',
+        server: 'https://global.brain-wire-test.org',
+      },
+    })
+    const result = exportRmd(g, OPTIONS)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.detail).toContain('neuprintr')
-    // And it points at the format that *can* do it, or the refusal reads as "not supported".
+    expect(result.detail).toContain('fafbseg')
     expect(result.detail).toContain('Jupyter notebook')
+  })
+
+  it('builds a CAVE document on fafbseg, leaving only what R cannot read as TODOs', () => {
+    /*
+     * The CAVE half reaches R through fafbseg, which needs a Python with caveclient once — the
+     * setup chunk says so and names the diagnostic. What stays a TODO is what the notebook has no
+     * R route for: the Dataset Summary and Neuroglancer cells are neuPrint's alone here.
+     */
+    const result = exportRmd(caveGraph(), OPTIONS)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.source).toContain('library(fafbseg)')
+    expect(result.source).toContain('fafbseg::simple_python()')
+    expect(result.source).toContain('fafbseg::dr_fafbseg()')
+    expect(result.source).not.toContain('library(arrow)')
+    expect(result.source).not.toContain('neuprintr')
+    expect(result.todos.map((t) => t.nodeId).sort()).toEqual(['ngCave', 'summary'])
+  })
+
+  it('reads FlyTable with FLYTABLE_TOKEN however its host is spelled, and refuses a table seatabler cannot name', () => {
+    const fly = (id: string, params: Record<string, unknown>) =>
+      exportRmd(
+        addNode(emptyGraph('FlyTable'), {
+          id,
+          type: 'annotation.flyTable',
+          position: { x: 0, y: 0 },
+          params: { base: 'main', table: 'info', ...params },
+        }),
+        OPTIONS,
+      )
+    const typed = fly('fly', { host: 'http://FlyTable.mrc-lmb.cam.ac.uk/' })
+    if (!typed.ok) throw new Error(typed.reason)
+    expect(typed.source).toContain('token_envvar = "FLYTABLE_TOKEN"')
+    expect(typed.todos).toEqual([])
+
+    const elsewhere = fly('sea', { host: 'cloud.seatable.io' })
+    if (!elsewhere.ok) throw new Error(elsewhere.reason)
+    expect(elsewhere.source).toContain('token_envvar = "SEATABLE_TOKEN"')
+
+    // seatabler finds the table in the SQL text, and a space ends the name it finds.
+    const spaced = fly('spaced', { table: 'neuron info' })
+    if (!spaced.ok) throw new Error(spaced.reason)
+    expect(spaced.todos.map((t) => t.nodeId)).toEqual(['spaced'])
+    expect(spaced.source).not.toContain('coda_seatable(')
   })
 
   it('refuses a graph holding a synthetic dataset', () => {
@@ -162,7 +249,7 @@ describe('include fragments', () => {
     })
     expect(source).toContain('all_segments = TRUE')
     expect(source).toContain(
-      'step <- coda_edge_list(todo, prepost, min_weight, all_segments, conn)',
+      'coda_edge_list(ids, if (way == "downstream") "POST" else "PRE", min_weight, all_segments, conn)',
     )
   })
 
@@ -234,7 +321,7 @@ describe('the Neuron Set port', () => {
     const source = connectivityChunk({ direction: 'outputs', hops: 1, minWeight: 1 })
     expect(source).toContain('coda_endpoint_neurons <- function(')
     expect(source).toContain(
-      'connectivity_neuron_set <- coda_endpoint_neurons(connectivity_connections, find_neurons$neuronId)',
+      'connectivity_neuron_set <- coda_endpoint_neurons(connectivity_connections, find_neurons)',
     )
     // The derived form binds the port directly; only `full` needs a lookup in between.
     expect(source).not.toContain('.endpoints <-')

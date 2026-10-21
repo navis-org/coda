@@ -14,7 +14,13 @@ import type { ParamValues } from '../../core/node'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { sheetConfigFrom, sheetExportUrl } from '../../data/annotations'
 import { namedColumns } from '../../data/annotations/types'
+import { seaTableConfigFrom } from '../../data/annotations/seaTable'
+import { normaliseHost } from '../../data/annotations/credentials'
 import { DEFAULT_SERVER } from '../../data/neuprint/servers'
+import { catmaidServerOfSource, normaliseCatmaidServer } from '../../data/catmaid/registry'
+import { CUSTOM_SOURCE_ID } from '../../data/custom/layout'
+import { CAVE_TEXT } from './cave'
+import { datasetBackend } from '../backends'
 import { SKELETON_ROUTES } from '../../data/skeletonRoutes'
 import { datasetFamily, resolveDatasetId } from '../../nodes/lib/datasetFamilies'
 import { parseIdList } from '../../nodes/lib/idList'
@@ -73,6 +79,120 @@ export function datasetNodePlan(params: ParamValues): DatasetPlan {
   const datasetId = String(params.dataset)
   if (!datasetId) return { refusal: 'This Dataset node names no dataset.' }
   return { datasetId, server: DEFAULT_SERVER, notes: [] }
+}
+
+/**
+ * Which CATMAID project on which server a document connects to.
+ *
+ * `token` says whether the document should pass the reader's own API token. A published family
+ * is a public instance that answers anonymously, so its cell carries none; a Custom CATMAID is
+ * usually a lab server, so its cell reads one from the environment and falls back to anonymous
+ * where none is set — which is also what the canvas does with no credential stored.
+ */
+export type CatmaidDatasetPlan = Refusable<{
+  server: string
+  projectId: string
+  token: boolean
+}>
+
+/**
+ * A published CATMAID family. Its project is `family.family` and its server is read back out of
+ * its source id, since the two VFB families share a project number and differ only by server.
+ */
+export function catmaidFamilyPlan(familyKey: string): CatmaidDatasetPlan {
+  const family = datasetFamily(familyKey)
+  const server = family && catmaidServerOfSource(family.sourceId)
+  if (!family || !server) return { refusal: `Unknown CATMAID family "${familyKey}".` }
+  return { server, projectId: family.family, token: false }
+}
+
+/**
+ * What a CATMAID document says where it departs from a neuPrint one, or where the canvas refuses:
+ * one wording for both languages, since none of it is about either.
+ */
+export const CATMAID_TEXT = {
+  token:
+    'A CATMAID server that needs an account takes an API token (your CATMAID profile ' +
+    'page has one). Set CATMAID_API_TOKEN, or leave it unset for anonymous access.',
+  normalize:
+    '`Normalize` needs each neuron’s synapse total, which CATMAID does not publish, so the ' +
+    'canvas refuses it too. Untick `Normalize`.',
+  region: (roi: string) =>
+    `This node filters on region "${roi}", and CATMAID cannot say which neurons are in a ` +
+    'region, so the canvas refuses it too. Clear `In ROI`.',
+  search:
+    'CATMAID’s own name search matches substrings rather than patterns, so this reads ' +
+    'the project’s neuron table once and filters it here, as Coda does.',
+  explore:
+    'Explore Dataset searches the whole neuron table locally: here the CATMAID ' +
+    'project’s, built from its annotations the first time anything needs it.',
+  description:
+    "This card shows the project's description from the CATMAID server's project list, " +
+    'so there is no code to export.',
+}
+
+/**
+ * What a dataset searched over a local neuron index says, and what a region filter does there —
+ * one entry per backend. Having an entry *is* being searched locally: `localIndex` is the one
+ * question both languages' emitters ask, so the list of such backends cannot be kept twice. A region is refused where the canvas
+ * refuses it (CATMAID has volumes but no query naming what is in one) and answers empty where the
+ * canvas answers empty (CAVE and a Custom Dataset publish no regions at all).
+ */
+export interface LocalIndexText {
+  search: string
+  explore: string
+  region: (roi: string) => { refusal: string } | { emptyNote: string }
+}
+
+const LOCAL_INDEX_TEXT: Record<string, LocalIndexText> = {
+  catmaid: {
+    search: CATMAID_TEXT.search,
+    explore: CATMAID_TEXT.explore,
+    region: (roi) => ({ refusal: CATMAID_TEXT.region(roi) }),
+  },
+  cave: {
+    search: CAVE_TEXT.search,
+    explore: CAVE_TEXT.explore,
+    region: (roi) => ({ emptyNote: CAVE_TEXT.noRegions(roi) }),
+  },
+  [CUSTOM_SOURCE_ID]: {
+    search: 'A Custom Dataset’s neurons are its Neurons table, filtered here as on the canvas.',
+    explore:
+      'Explore Dataset searches the whole neuron table locally: here the Custom Dataset’s ' +
+      'Neurons table, or every id its edge list names where none is wired.',
+    region: (roi) => ({
+      emptyNote:
+        `This node filters on region "${roi}", and a Custom Dataset publishes no regions, so ` +
+        'the result is empty. Clear `In ROI` to get neurons back.',
+    }),
+  },
+}
+
+/**
+ * The local index of the dataset on a port — CATMAID's, CAVE's or a Custom Dataset's — or
+ * undefined where the search runs on the server.
+ */
+export function localIndex(
+  ctx: Pick<NeutralContext, 'inputType'>,
+  portId = 'dataset',
+): LocalIndexText | undefined {
+  return LOCAL_INDEX_TEXT[datasetBackend(ctx, portId)]
+}
+
+/** A project id as a literal: bare where it is a number, which a CATMAID project id always is. */
+export function catmaidProjectLiteral(projectId: string, quote: (s: string) => string): string {
+  return /^\d+$/.test(projectId) ? projectId : quote(projectId)
+}
+
+/** Custom CATMAID, which names its own server and project. */
+export function catmaidNodePlan(params: ParamValues): CatmaidDatasetPlan {
+  const projectId = String(params.project ?? '').trim()
+  if (!projectId) return { refusal: 'This CATMAID node has no `Project` chosen.' }
+  return {
+    server: normaliseCatmaidServer(String(params.server ?? '')),
+    projectId,
+    token: true,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +333,36 @@ export function skeletonsPlan(params: ParamValues): SkeletonsPlan {
     limit: Number(params.limit),
     notes:
       params[SKELETON_SOURCE_PARAM] === SKELETON_ROUTES.published ? ['publishedLayer'] : [],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SeaTable and FlyTable
+// ---------------------------------------------------------------------------
+
+export type SeaTablePlan = Refusable<{
+  /** The deployment, normalised: what is typed on the card or the node's own, with a scheme. */
+  host: string
+  base: string
+  table: string
+  /** The workspace id where the card names one; empty, it is worked out from the base. */
+  workspace: string
+  idColumn: string
+  /** The named annotation columns, the id column aside. Empty reads every column. */
+  columns: string[]
+}>
+
+/**
+ * What a `FlyTable` or `SeaTable` node reads, through the node's own `seaTableConfigFrom`: the two
+ * are one implementation at two hosts, so `defaultHost` is the only thing the registration adds.
+ */
+export function seaTablePlan(params: ParamValues, defaultHost: string): SeaTablePlan {
+  const { config, error } = seaTableConfigFrom(params, defaultHost)
+  if (error !== undefined) return { refusal: error }
+  return {
+    ...config,
+    host: normaliseHost(config.host),
+    columns: namedColumns(config.columns, config.idColumn),
   }
 }
 

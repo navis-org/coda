@@ -143,28 +143,6 @@ const NO_EMITTER: Record<string, string> = {
     'could. That makes it the clearest case for bundling the mapping as a CSV beside the ' +
     'document rather than emitting it at all (docs/export.md). Python declines it too, for a ' +
     'different reason; see the note there.',
-  'dataset.catmaid.fafb':
-    'A CATMAID project rather than a neuPrint dataset. The natverse has `catmaid` (rcatmaid), ' +
-    'which is the R counterpart of pymaid and would map as cleanly, but no emitter has been ' +
-    'written for either language \u2014 see the Python note.',
-  'dataset.catmaid.l1':
-    'A second CATMAID instance \u2014 see `dataset.catmaid.fafb`. Which server a project lives ' +
-    'on is a constructor argument to rcatmaid, not a different translation.',
-  'dataset.catmaid':
-    'A CATMAID instance named by hand \u2014 see `dataset.catmaid.fafb`. Naming the server ' +
-    'changes nothing about the translation: there is no emitter in either language.',
-  'dataset.cave':
-    'A CAVE datastack named by hand, so it has the same reason as `dataset.flywire`: this ' +
-    'document is built on neuprintr and there is no fafbseg/CAVE emitter yet.',
-  'cave.updateRootIds': 'A CAVE chunkedgraph repair \u2014 see the Python note.',
-  'cave.tables':
-    'A listing of a CAVE datastack\u2019s annotation tables. The Python notebook emits this ' +
-    'through caveclient; R has no CAVE client of its own \u2014 fafbseg reaches one through ' +
-    'reticulate, which would put a Python dependency in the middle of an R document to answer a ' +
-    'question this one cannot use, since every node downstream of it is a TODO here anyway.',
-  'cave.tableInfo':
-    'What one CAVE table is \u2014 see cave.tables. The same four caveclient calls, blocked on ' +
-    'the same absent client.',
   'dataset.ngsource':
     'A neuroglancer datasource. `fafbseg::read_cloudvolume_meshes` is the R counterpart of the ' +
     'Python exporter\u2019s `CodaPrecomputed`, and it waits on the same thing: this document is ' +
@@ -189,28 +167,6 @@ const NO_EMITTER: Record<string, string> = {
     'bare symbol that does not resolve \u2014 which is the `navis.interfaces` failure ' +
     'check-export.py was written for, in a language whose equivalent check cannot run here ' +
     'because the packages are not installed. Refusing is the smaller lie.',
-  'annotation.caveTable':
-    'An annotation source. It has no neuPrint counterpart at all — neuPrint carries its cell ' +
-    'typing as properties on the neuron, so there is nothing for a generated chunk to fetch ' +
-    'separately. It reaches a document when the CAVE emitters do.',
-  'annotation.flyTable':
-    'An annotation source — see annotation.caveTable. The notebook exporter emits this one ' +
-    'through `sea-serpent`; the natverse\u2019s `fafbseg::flytable_*` is the R equivalent and ' +
-    'no emitter has been written for it. Moot until a CAVE dataset can be emitted here at all, ' +
-    'since a graph holding one is refused before the walk starts.',
-  'annotation.seaTable': 'An annotation source \u2014 see annotation.flyTable.',
-  'dataset.flywire':
-    'A CAVE datastack rather than a neuPrint one. This document is built on neuprintr, and a ' +
-    'faithful translation needs fafbseg or a CAVE client plus a materialization version — see ' +
-    'src/data/cave. Until that is written it degrades to a TODO, which is the honest outcome: ' +
-    'emitting neuPrint code against a dataset neuPrint has never heard of would produce a ' +
-    'document that runs and answers nothing.',
-  'dataset.banc':
-    'A second CAVE datastack \u2014 see `dataset.flywire`. Which datastack a node names changes ' +
-    'nothing about the translation: neuprintr cannot read any of them.',
-  'dataset.minnie65':
-    'A third CAVE datastack \u2014 see `dataset.flywire`. Mouse cortex rather than a fly brain, ' +
-    'which is not the obstacle: the obstacle is that this document is built on neuprintr.',
   'neuron.influence':
     'The bounded influence score, and the refusal is about what could be *checked* rather than ' +
     'about what R can do \u2014 the same split `neuron.connectivity`\u2019s region options are ' +
@@ -246,6 +202,12 @@ describe('R emitter coverage', () => {
 
   it('every registered node type is either emitted or explicitly excused', () => {
     expect(types.filter((t) => !getEmitter(t) && !(t in NO_EMITTER))).toEqual([])
+  })
+
+  // An excuse outlives its reason silently: the emitter lands and the sentence saying R cannot
+  // do this stays in the file, describing a refusal nothing makes.
+  it('no excused type has an emitter', () => {
+    expect(Object.keys(NO_EMITTER).filter((t) => getEmitter(t))).toEqual([])
   })
 
   it('no emitter is registered for a type that does not exist', () => {
