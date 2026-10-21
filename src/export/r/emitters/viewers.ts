@@ -1253,7 +1253,18 @@ registerEmitter('out.viewer3d', (ctx) => {
   ctx.library('dplyr')
   const selected = ctx.output('selected')
 
-  const lines = wired.length > 0 ? [`plot3d(${wired.join(', ')})`] : []
+  /*
+   * One call per socket. `plot3d` draws one neuronlist and reads a second positional argument as
+   * its `subset`, so `plot3d(skeletons, synapses)` failed with "invalid subscript type 'list'"
+   * the moment a second socket was wired. Each call adds to the open scene (nat's default
+   * `add = TRUE`), and a points table — every synapse reader here has `x`, `y`, `z` — goes in
+   * through rgl, nat having no method for a data frame.
+   */
+  const lines = wired.map(({ port, variable }) =>
+    port === 'points'
+      ? `rgl::points3d(as.numeric(${variable}$x), as.numeric(${variable}$y), as.numeric(${variable}$z), size = 3)`
+      : `plot3d(${variable})`,
+  )
   if (volumes) {
     /*
      * Shells go in through rgl rather than through `plot3d`, because what that socket carries

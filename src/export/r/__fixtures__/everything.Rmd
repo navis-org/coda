@@ -2739,15 +2739,6 @@ distance_between_2 <- coda_neuron_distance(
 )
 ```
 
-```{r n-3d-view}
-# ── 3D View ──
-plot3d(skeletons)
-for (.mesh in roi_meshes) rgl::shade3d(.mesh, alpha = 0.12, col = "grey70")
-
-# NOTE: Nothing is picked in the viewer, so Selected is empty.
-n_3d_view <- tibble(neuronId = character(0))
-```
-
 ```{r clean-meshes}
 # ── Clean Meshes ──
 # TODO: nothing upstream produced a value, because "Meshes" was not
@@ -2789,6 +2780,16 @@ attach_attributes[, "status"] <- find_neurons[["status"]][idx_]
 attach_attributes[, "size"] <- find_neurons[["size"]][idx_]
 attach_attributes[, "pre"] <- find_neurons[["pre"]][idx_]
 attach_attributes[, "post"] <- find_neurons[["post"]][idx_]
+```
+
+```{r n-3d-view}
+# ── 3D View ──
+plot3d(skeletons)
+rgl::points3d(as.numeric(synapses$x), as.numeric(synapses$y), as.numeric(synapses$z), size = 3)
+for (.mesh in roi_meshes) rgl::shade3d(.mesh, alpha = 0.12, col = "grey70")
+
+# NOTE: Nothing is picked in the viewer, so Selected is empty.
+n_3d_view <- tibble(neuronId = character(0))
 ```
 
 ```{r relabel}

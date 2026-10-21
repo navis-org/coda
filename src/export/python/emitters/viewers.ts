@@ -1319,7 +1319,7 @@ registerEmitter('out.viewer3d', (ctx) => {
   const selected = ctx.output('selected')
 
   ctx.require('pandas')
-  const args = [...wired, ...(volumes ? [`*${volumes}`] : [])].join(', ')
+  const args = [...wired.map((g) => g.variable), ...(volumes ? [`*${volumes}`] : [])].join(', ')
   const lines = [`navis.plot3d([${args}])`, '']
   if (selection.note === undefined) {
     lines.push(`${selected} = pd.DataFrame({'neuronId': ${pySelection(selection.ids)}})`)

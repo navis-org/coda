@@ -1923,6 +1923,8 @@ export function everythingGraph(): CodaGraph {
     ['cut', 'clusters', 'clu', 'labels'],
     ['find', 'neurons', 'clu', 'neurons'],
     ['skel', 'skeletons', 'v3d', 'skeletons'],
+    // A second socket, which R drew as `plot3d(skeletons, synapses)`: a subset, and an error.
+    ['syn', 'points', 'v3d', 'points'],
     ['ds', 'dataset', 'roimesh', 'dataset'],
     ['roimesh', 'meshes', 'v3d', 'volumes'],
     ['between', 'points', 'inrois', 'points'],

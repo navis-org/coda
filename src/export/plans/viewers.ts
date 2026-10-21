@@ -433,8 +433,12 @@ export function flowChartPlan(ctx: ChartContext): FlowChartPlan {
 // ---------------------------------------------------------------------------
 
 export type Viewer3dPlan = Refusable<{
-  /** The upstream variables on the Skeletons, Meshes and Points sockets that are wired. */
-  geometry: string[]
+  /**
+   * The wired Skeletons, Meshes and Points sockets, each with its upstream variable. The port is
+   * kept because R draws each kind with a different call: `plot3d` takes one neuronlist and reads
+   * a second argument as its `subset`, and a points table is not a neuronlist at all.
+   */
+  geometry: Array<{ port: 'skeletons' | 'meshes' | 'points'; variable: string }>
   /** The Volumes socket, which carries a list of shells where the other three carry one object. */
   volumes?: string
   selected: Noted<{ ids: string[] }>
@@ -446,9 +450,10 @@ export type Viewer3dPlan = Refusable<{
  * has is what once made it emit "nothing is wired" for a node plainly wired up.
  */
 export function viewer3dPlan(ctx: Pick<NeutralContext, 'params' | 'input'>): Viewer3dPlan {
-  const geometry = ['skeletons', 'meshes', 'points']
-    .map((port) => ctx.input(port))
-    .filter((v): v is string => !!v)
+  const geometry = (['skeletons', 'meshes', 'points'] as const).flatMap((port) => {
+    const variable = ctx.input(port)
+    return variable ? [{ port, variable }] : []
+  })
   const volumes = ctx.input('volumes')
   if (geometry.length === 0 && !volumes) {
     return { refusal: 'No geometry is wired to this 3D Viewer.' }
