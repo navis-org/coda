@@ -33,6 +33,9 @@ caveclient
 # numba and Pyodide ships none — so `probe-py-helpers.py` runs both emitted call shapes against
 # it, `metric='precomputed'` and `precomputed_knn=`, rather than only resolving their names.
 umap-learn
+# CATMAID, for a CATMAID project's notebook. The distribution is `python-catmaid` and the module
+# `pymaid`.
+python-catmaid
 # SeaTable, for the annotation sources. The distribution is `sea-serpent` and the module
 # `seaserpent`, which is the mismatch `MODULES` exists to record.
 sea-serpent

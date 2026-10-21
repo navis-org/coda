@@ -630,7 +630,8 @@ conn <- data.frame(
   stringsAsFactors = FALSE
 )
 
-eps <- coda_endpoint_neurons(conn, c("1", "9"))
+# The seeds are the seed table, as the emitted call passes it; its `type` is used where present.
+eps <- coda_endpoint_neurons(conn, data.frame(neuronId = c("1", "9"), stringsAsFactors = FALSE))
 check("endpoints: seeds first, then partners in first-appearance order",
       identical(eps$neuronId, c("1", "9", "2", "3")), paste(eps$neuronId, collapse = " "))
 check("endpoints: one row per neuron",
@@ -653,7 +654,7 @@ check("endpoints: a type from either end is picked up",
 bare <- coda_endpoint_neurons(conn)
 check("endpoints: no seeds is the edges alone",
       identical(bare$neuronId, c("1", "2", "3")), paste(bare$neuronId, collapse = " "))
-empty <- coda_endpoint_neurons(conn[0, ], "7")
+empty <- coda_endpoint_neurons(conn[0, ], data.frame(neuronId = "7", stringsAsFactors = FALSE))
 check("endpoints: an empty edge list is the seeds",
       identical(empty$neuronId, "7"), paste(empty$neuronId, collapse = " "))
 

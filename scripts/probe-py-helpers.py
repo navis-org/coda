@@ -56,7 +56,7 @@ def load_cell(notebook: Path, marker: str, ns: dict) -> dict:
     return ns
 
 
-ns = load_cell(NOTEBOOK, "def coda_annotation_columns", {"pd": pd, "np": np})
+ns = load_cell(NOTEBOOK, "def coda_annotation_columns", {"pd": pd, "np": np, "ast": __import__("ast")})
 
 # ---- stub CAVE client -------------------------------------------------------
 class Mat:
@@ -164,11 +164,14 @@ class SeaStub:
 
     The dtypes are the ones sea-serpent really hands back, checked live against FlyTable:
     `string` for a text column — which is why an eighteen-digit root id survives here at all —
-    and `category` for a single-select.
+    `category` for a single-select, and for a multiple-select the *text* of a Python list. `meta`
+    is the table's metadata, which the helper reads for the column types.
     """
 
-    def __init__(self, frame):
+    def __init__(self, frame, types=None):
         self._frame = frame
+        types = types or {}
+        self.meta = {'columns': [{'name': c, 'type': types.get(c, 'text')} for c in frame.columns]}
 
     def to_frame(self, row_id_index=True, workers=None):
         return self._frame.copy()
@@ -183,21 +186,37 @@ sea = pd.DataFrame(
         "cell_type": pd.array(["LC4", "DNp01", "DNp01", "x", "y"], dtype="string"),
         "side": pd.Categorical(["left", "right", "right", "left", "left"]),
         "notes": pd.array(["a", "b", "c", "d", "e"], dtype="string"),
+        "tags": pd.array(["['x', 'y']", None, "['z']", "[not a list", "[]"], dtype="string"),
     }
 )
-st = ns["coda_seatable"](SeaStub(sea), id_column="root_id", columns=["cell_type", "side"])
+SEA_TYPES = {'side': 'single-select', 'tags': 'multiple-select'}
+st = ns["coda_seatable"](SeaStub(sea, SEA_TYPES), id_column="root_id", columns=["cell_type", "side"])
 check("seatable: named columns kept, in order", list(st.columns) == ["neuronId", "type", "side"], str(list(st.columns)))
 check("seatable: 18-digit id exact", st["neuronId"].iloc[0] == "720575940621522189", st["neuronId"].iloc[0])
 check("seatable: blank and null ids dropped", len(st) == 3, str(len(st)))
 check("seatable: a repeated id is kept", (st["neuronId"] == "720575940628857210").sum() == 2)
 check("seatable: cell_type renamed to type", "type" in st.columns and "cell_type" not in st.columns)
 
-st_all = ns["coda_seatable"](SeaStub(sea), id_column="root_id")
+st_all = ns["coda_seatable"](SeaStub(sea, SEA_TYPES), id_column="root_id")
 check(
     "seatable: empty columns keeps everything but the id",
-    list(st_all.columns) == ["neuronId", "type", "side", "notes"],
+    list(st_all.columns) == ["neuronId", "type", "side", "notes", "tags"],
     str(list(st_all.columns)),
 )
+# sea-serpent hands a multiple-select over as the text of a list; the canvas joins with ', '.
+check("seatable: a multiple-select is joined", st_all["tags"].iloc[0] == "x, y", str(st_all["tags"].iloc[0]))
+check("seatable: a missing multiple-select stays missing", pd.isna(st_all["tags"].iloc[1]))
+# Text in a multiple-select column that is not a list is left as it came, never an error.
+plain = ns["coda_seatable"](SeaStub(sea.assign(root_id=sea["root_id"].fillna("1").replace("", "2")), SEA_TYPES), id_column="root_id")
+check("seatable: an unparsable cell is left as it came", "[not a list" in list(plain["tags"]), str(list(plain["tags"])))
+# Only a column the metadata types as multiple-select is parsed: brackets in text are text.
+check("seatable: a text column holding brackets is untouched",
+      ns["coda_seatable"](SeaStub(sea), id_column="root_id")["tags"].iloc[0] == "['x', 'y']")
+# A column named but absent is a column of None, as on the canvas and in R.
+st_missing = ns["coda_seatable"](SeaStub(sea, SEA_TYPES), id_column="root_id", columns=["side", "nope"])
+check("seatable: a named column the table lacks is a column of None",
+      list(st_missing.columns) == ["neuronId", "side", "nope"] and st_missing["nope"].isna().all(),
+      str(list(st_missing.columns)))
 
 # ---- coda_join_annotations --------------------------------------------------
 left  = pd.DataFrame({'neuronId': ['1', '2'], 'type': ['A', 'B'], 'side': ['L', None]})
@@ -993,7 +1012,8 @@ conn = pd.DataFrame({
 })
 
 # Text seeds against numeric edge ends — the mixture a real document produces.
-eps = ens["coda_endpoint_neurons"](conn.copy(), ["1", "9"])
+# The seeds are the seed table, as the emitted call passes it; its `type` is used where present.
+eps = ens["coda_endpoint_neurons"](conn.copy(), pd.DataFrame({"neuronId": ["1", "9"]}))
 check("endpoints: seeds first, then partners in first-appearance order",
       list(eps["neuronId"]) == ["1", "9", "2", "3"], str(list(eps["neuronId"])))
 check("endpoints: one row per neuron", len(eps) == eps["neuronId"].nunique(), str(len(eps)))
@@ -1018,7 +1038,7 @@ check("endpoints: a type from either end is picked up",
 bare = ens["coda_endpoint_neurons"](conn.copy())
 check("endpoints: no seeds is the edges alone", list(bare["neuronId"]) == ["1", "2", "3"],
       str(list(bare["neuronId"])))
-empty = ens["coda_endpoint_neurons"](conn.iloc[0:0].copy(), ["7"])
+empty = ens["coda_endpoint_neurons"](conn.iloc[0:0].copy(), pd.DataFrame({"neuronId": ["7"]}))
 check("endpoints: an empty edge list is the seeds", list(empty["neuronId"]) == ["7"],
       str(list(empty["neuronId"])))
 
