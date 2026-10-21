@@ -208,7 +208,10 @@ check("seatable: a multiple-select is joined", st_all["tags"].iloc[0] == "x, y",
 check("seatable: a missing multiple-select stays missing", pd.isna(st_all["tags"].iloc[1]))
 # Text in a multiple-select column that is not a list is left as it came, never an error.
 plain = ns["coda_seatable"](SeaStub(sea.assign(root_id=sea["root_id"].fillna("1").replace("", "2")), SEA_TYPES), id_column="root_id")
-check("seatable: an unparsable cell is left as it came", "[not a list" in list(plain["tags"]), str(list(plain["tags"])))
+# Compared as strings only: under pandas' `string` dtype a missing cell is `pd.NA`, and `==` on it
+# raises rather than answering False.
+check("seatable: an unparsable cell is left as it came",
+      any(isinstance(v, str) and v == "[not a list" for v in plain["tags"]), str(list(plain["tags"])))
 # Only a column the metadata types as multiple-select is parsed: brackets in text are text.
 check("seatable: a text column holding brackets is untouched",
       ns["coda_seatable"](SeaStub(sea), id_column="root_id")["tags"].iloc[0] == "['x', 'y']")
