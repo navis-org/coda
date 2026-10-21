@@ -121,10 +121,10 @@ describe('buildCommandItems', () => {
    * while `canExportNotebook` refused on `synthetic` alone, so the row lit, the dataset cell
    * emitted a TODO and every node after it cascaded to "nothing upstream produced a value".
    *
-   * It is now asked **per format**, because the two exporters cover different backends: FlyWire
-   * emits caveclient in Python and nothing in R. The two rows disagreeing is the point.
+   * It is asked **per format**, because the two exporters may cover different backends. Both
+   * cover CAVE now — caveclient in Python, fafbseg in R — so both rows are live on FlyWire.
    */
-  it('offers the notebook and refuses the R document on a CAVE dataset', () => {
+  it('offers both documents on a CAVE dataset, each through its own client', () => {
     act(() => {
       let graph = emptyGraph('FlyWire')
       graph = addNode(graph, {
@@ -137,9 +137,7 @@ describe('buildCommandItems', () => {
     })
     expect(byId(commands(), 'cmd:export-notebook').disabled).toBe(false)
 
-    const rmd = byId(commands(), 'cmd:export-rmd')
-    expect(rmd.disabled).toBe(true)
-    expect(rmd.hint).toContain('no document can be built for this backend yet')
+    expect(byId(commands(), 'cmd:export-rmd').disabled).toBe(false)
   })
 
   /*

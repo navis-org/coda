@@ -561,8 +561,9 @@ would either refuse an export Python can produce or offer an R document of nothi
 palette asks twice and the two rows disagree, which is the honest state.
 
 `src/export/fixture.ts` gained a **second graph** for the same reason: a CAVE node in
-`everythingGraph` would make R refuse the whole thing and leave its golden with nothing in it.
-`caveGraph` is exported as its own notebook and asserted to be *refused* on the R side.
+`everythingGraph` would have made R refuse the whole thing and left its golden with nothing in it.
+`caveGraph` is exported as its own document — refused in R until R had fafbseg (*The CAVE half in
+R*, below), and an R golden of its own since.
 
 #### A backend an emitter was not written against is a third kind of TODO
 
@@ -599,9 +600,10 @@ Two changes, and they are a pair:
   dependency, so an emitter reading one falls back to the referenced node's *type*, which is all a
   reference ever promised.
 
-`clientFor` in `cave.ts` is that fallback, in one place so the two readers cannot drift: the
-bound variable's `.client` where the walk bound one, and a fresh `CAVEclient` built from the
-reference's type where it did not. The golden covers both branches.
+`caveTargetPlan` in `plans/cave.ts` is that fallback, in one place for every reader in both
+languages: the bound variable where the walk bound one, and a fresh target built from the
+reference's type where it did not — which the notebook spells as a `CAVEclient` (`clientLines`)
+and the R document as a `coda_cave_dataset`. The golden covers both branches.
 
 #### What a Coda Dataset is on CAVE, and why it is not a bare client
 
@@ -771,11 +773,14 @@ names its `server=`.
 
 #### What has not been run
 
-**Nothing has been run against a live CAVE datastack.** `CAVE_TOKEN` is absent here, so for that
-half what is verified is the signatures (against the installed caveclient 8.2.1), the syntax and
-name resolution (`check-export.py`), and the pandas (`probe-py-helpers.py` against a stub). The
-wire format is `src/data/cave`'s business and is covered by `live.test.ts` there. The SeaTable
-half *has* been run live, as above.
+**Until the R half arrived, nothing here had been run against a live CAVE datastack**: what was
+verified was the signatures (against caveclient 8.2.1), the syntax and name resolution
+(`check-export.py`), and the pandas (`probe-py-helpers.py` against a stub). `pnpm probe:cave` now
+runs the notebook against `flywire_fafb_public` and compares it with the canvas — see *The CAVE
+half in R* below — and the first run found one thing the stubs could not: the neuron table carried
+a `pt_supervoxel_id` the canvas does not, because caveclient returns a bound point's supervoxel
+beside its root id whatever `select_columns` asked for. Fixed in both languages by keeping the
+columns asked for. The SeaTable half had already been run live, as above.
 
 ### The Custom Dataset half of the notebook exporter
 
@@ -863,7 +868,7 @@ in either document. A Custom CATMAID reads `CATMAID_API_TOKEN` and is anonymous 
 
 **Every output was checked by running it, which is the only reason any of this is trusted.**
 `pnpm probe:catmaid` runs `catmaidGraph` against VFB through a real Scheduler
-(`export/catmaid.live.test.ts`, skipped without `CATMAID_LIVE=1`), writes the canvas's outputs
+(`export/live.test.ts` with `EXPORT_LIVE=catmaid`), writes the canvas's outputs
 and both exported documents into one directory, and two scripts execute the documents there and
 compare each node's variable with the canvas: 20 outputs across 14 nodes, rows as a set, about a
 minute. The first run disagreed on three of them, and every disagreement was the canvas being
@@ -944,6 +949,71 @@ throughout, and **Cypher**, the ROI count and completeness nodes, the ROI Connec
 Neuroglancer, which the canvas does not offer on CATMAID either. `Normalize` and a region filter
 are refused in the cell, as the canvas refuses them.
 
+### The CAVE half in R
+
+`r/caveHelpers.ts` and `r/emitters/cave.ts`. A FlyWire, BANC, MICrONS or Custom CAVE graph exports
+as an R document on **fafbseg**, the natverse's route into CAVE: it drives Python's caveclient
+through reticulate. The notebook's CAVE coverage, node for node, except the two annotation sources
+below. Checked by running it: `pnpm probe:cave` executes both documents against
+`flywire_fafb_public` v783 and compares them with the canvas — 11 outputs across 9 nodes, every one
+agreeing in both languages.
+
+**The setup is one line a reader runs once**, and the document says so rather than doing it. The
+setup chunk names `fafbseg::simple_python()` — fafbseg's own installer, which also brings
+cloudvolume — and `fafbseg::dr_fafbseg()`, which reports what is missing and which datastacks the
+token reaches. `reticulate::py_require("caveclient")` would make a fresh machine run with no step at
+all (measured: it provisioned caveclient and the client read the token), and was not chosen: it
+builds its own Python and does not fit one a reader already manages. The token is the same
+`~/.cloudvolume/secrets` file the notebook reads.
+
+**No id crosses from pandas into R by reticulate's own conversion, and that is the finding the
+design hangs on.** Converted directly, `client$materialize$query_table(...)` returned every
+`pt_root_id` and `pt_supervoxel_id` as `NA` — an eighteen-digit id overflows R's 32-bit integer and
+reticulate says so only in a warning. `fafbseg::flywire_cave_query` carries the frame through arrow
+and returns them exact as `integer64`, so every row in this document comes through it, and
+`coda_cave_query` turns each `integer64` column into text (invariant 8). Three consequences:
+
+- **fafbseg's query pins the materialization per call**, where its client follows the newest one,
+  so listings and metadata go to caveclient's own `CAVEclient(datastack, version=N)` — pinned, like
+  the notebook's. `...` reaches caveclient, so `merge_reference`, `split_positions` and
+  `desired_resolution` pass straight through.
+- **fafbseg reaches CAVE's global server only**: its client takes a datastack name and no server.
+  A datastack elsewhere — H01 on `global.brain-wire-test.org` — is a TODO naming the notebook,
+  which passes `server_address`.
+- **Update root IDs is the notebook's Python**, defined in reticulate's session from the same
+  registry the notebook is written from (`resolveHelpers` reaches across). The vote is int64
+  arithmetic R has no exact type for; the ids cross both ways as text, and the frame comes back
+  through a wrapper that turns pandas' Arrow-backed strings into plain ones, which reticulate
+  cannot convert — found because the probe's Python was newer than the one the helpers were
+  written against.
+
+Two R helpers already existed and are reused, not copied: `coda_annotation_columns` and
+`coda_join_annotations`. **Every CAVE decision is `plans/cave.ts`**, which both emitters render:
+which datastack a node reads, what a dataset binds, a CAVE table's reading, Update root IDs'
+method, where a synapse table keeps its ends, and every refusal (`CAVE_TEXT`). The R emitter was
+first written as a copy of the notebook's decision trees with the sentences shared, which is the
+arrangement `neutral.ts` exists to prevent; the two now spell one plan. What a locally searched
+index says — and whether a region filter is refused or answered empty — is `localIndexText` in
+`plans/query.ts`, one entry per backend for CATMAID, CAVE and a Custom Dataset.
+
+**A CAVE dataset off the global server is refused in R up front** (`unreachableDatasetNodes` in
+`canExport.ts`), not left to a TODO in its dataset chunk that would block every chunk after it —
+`canExport`'s whole reason for existing. `isDefaultCaveServer` is the one predicate, read there and
+by the notebook (which passes `server_address` where it is false). R's chunks do not ask it again: a
+datastack a chunk names itself is either typed, which is always the global server, or borrowed from
+a Dataset node the refusal has already covered.
+
+**Not covered in R, each a TODO:** FlyTable and SeaTable. fafbseg reads FlyTable
+(`flytable_list_rows`, which also needs Python's seatable_api) but it has not been run here — the
+probe has no FlyTable token — and a chunk nobody executed is what this exporter refuses to ship;
+for SeaTable at another host R has no client. `caveGraph`, whose annotation chain starts with
+both, is exported for the R golden with `withSeaTable: false`, or their TODO would block every node
+after them. Dataset Summary and Neuroglancer stay neuPrint-only in R, as in the CAVE notebook.
+
+`caveGraph`'s second CAVE table keys a reference table by `target_id`. The canvas refuses that
+("column target_id not found in proofread_neurons"), and so do both documents: a fixture reaching
+a branch, not a question. The probe graph (`caveProbeGraph`) asks real questions instead.
+
 ### The R Markdown exporter
 
 `Save ▸ Export as R Markdown` writes the same graph as an `.Rmd` on **neuprintr, dplyr, nat,
@@ -997,12 +1067,11 @@ other**. What stops them drifting on *coverage* is `src/export/fixture.ts`: `eve
 two golden files, and a node that emits Python but nothing in R shows up as a TODO rather than as
 a document nobody noticed was shorter.
 
-**The one place they have parted company is the backend.** `caveGraph` is the second fixture and
-R refuses it outright (`catmaidGraph`, the other way round, both languages emit) — `canExportNotebook` is asked per language now, and
-`DatasetFamily.notebook` names a client per language. That is a real coverage gap rather than a
-loophole, and R's `export.test.ts` asserts the refusal so it cannot become a silent one; see
-*The CAVE half of the notebook exporter* above. The refusal message points at the notebook, or
-"no document can be built" reads as "Coda cannot export this at all".
+**The backend is where they could part company**, which is why `canExportNotebook` is asked per
+language and `DatasetFamily.notebook` names a client per language. For a while they did: R refused
+every CAVE graph. Both cover neuPrint, CAVE and CATMAID now, and where a family is refused in one
+language the message points at the other, or "no document can be built" reads as "Coda cannot
+export this at all".
 
 **R's stack is the same lineage, which is why the mapping is clean** — navis is the Python port
 of `nat`, and neuprintr is the natverse's neuPrint client. Three things are genuinely *better*
@@ -1221,5 +1290,6 @@ cheap and is not written: the fixture comment is doing that job today.
 - **Neuroglancer** leaves three things out, each said in a `NOTE` where it applies: colours *by
   value* (the ramp is not transcribed, so the scene keeps neuroglancer's own colours), the layers
   wired to Extra layers (a Neuroglancer Source exports no layer), and a source that places
-  segments across several volumes, which no exportable dataset is. And in R it is neuPrint only,
-  R having no CAVE client.
+  segments across several volumes, which no exportable dataset is. And in R it is neuPrint only:
+  R's CAVE route is fafbseg, and the scene would be built from the datastack's info record, which
+  nobody has written an R chunk for.

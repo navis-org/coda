@@ -18,7 +18,7 @@ import { rArgs, rCol as col, rLongVector, rStr, rVector } from '../r'
 import { hclustMethod } from './analysis'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
-import { isCatmaidDataset, neuronIds } from './common'
+import { isCatmaidDataset, isCaveDataset, neuronIds } from './common'
 import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
 import type {
@@ -1509,10 +1509,14 @@ registerEmitter(
     }
     return ctx.note(
       "This card shows the dataset's published description and citation. It does no analysis, so " +
-        'nothing is exported. Read it with neuprint_get_meta() / neuprint_datasets() if you need it here.',
+        'nothing is exported. Read it with ' +
+        (isCaveDataset(ctx)
+          ? `coda_cave_client(${ctx.input('dataset') ?? 'dataset'})$info$get_datastack_info()`
+          : 'neuprint_get_meta() / neuprint_datasets()') +
+        ' if you need it here.',
     )
   },
-  { backends: ['neuprint', 'catmaid'] },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
 )
 
 // ---------------------------------------------------------------------------

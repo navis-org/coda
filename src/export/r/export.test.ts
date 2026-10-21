@@ -28,6 +28,7 @@ import { searchFor } from '../../test/findNeurons'
 
 const GOLDEN = new URL('./__fixtures__/everything.Rmd', import.meta.url).pathname
 const CATMAID_GOLDEN = new URL('./__fixtures__/catmaid.Rmd', import.meta.url).pathname
+const CAVE_GOLDEN = new URL('./__fixtures__/cave.Rmd', import.meta.url).pathname
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
 
 /** The whole document, for the assertions that search it. */
@@ -73,7 +74,9 @@ describe('R Markdown export', () => {
 
   it('reaches every emitting node type', () => {
     const covered = new Set(
-      [everythingGraph(), catmaidGraph()].flatMap((g) => g.nodes.map((n) => n.type)),
+      [everythingGraph(), catmaidGraph(), caveGraph()].flatMap((g) =>
+        g.nodes.map((n) => n.type),
+      ),
     )
     const missed = allNodeDefs()
       .map((d) => d.type)
@@ -89,18 +92,48 @@ describe('R Markdown export', () => {
     expect(new Set(labels).size).toBe(labels.length)
   })
 
-  it('refuses a CAVE graph the notebook exporter accepts', () => {
-    /*
-     * Not a gap being papered over: R's route into FlyWire is `fafbseg`, which wraps FlyWire
-     * specifically rather than CAVE generally, and no emitter has been written for it. Refusing
-     * says so once; exporting would say it in a TODO per cell.
-     */
-    const result = exportRmd(caveGraph(), OPTIONS)
+  it('matches the golden CAVE document', () => {
+    const result = exportRmd(caveGraph({ withSeaTable: false }), OPTIONS)
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    if (process.env.UPDATE_GOLDEN) {
+      writeFileSync(CAVE_GOLDEN, result.source)
+      return
+    }
+    expect(result.source).toEqual(readFileSync(CAVE_GOLDEN, 'utf-8'))
+  })
+
+  it('refuses a CAVE dataset off the global server, which fafbseg cannot reach', () => {
+    const g = addNode(emptyGraph('H01'), {
+      id: 'h01',
+      type: 'dataset.cave',
+      position: { x: 0, y: 0 },
+      params: {
+        datastack: 'h01_c3_flat',
+        version: '7',
+        server: 'https://global.brain-wire-test.org',
+      },
+    })
+    const result = exportRmd(g, OPTIONS)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.detail).toContain('neuprintr')
-    // And it points at the format that *can* do it, or the refusal reads as "not supported".
+    expect(result.detail).toContain('fafbseg')
     expect(result.detail).toContain('Jupyter notebook')
+  })
+
+  it('builds a CAVE document on fafbseg, leaving only what R cannot read as TODOs', () => {
+    /*
+     * The CAVE half reaches R through fafbseg, which needs a Python with caveclient once — the
+     * setup chunk says so and names the diagnostic. What stays a TODO is what the notebook has no
+     * R route for: the Dataset Summary and Neuroglancer cells are neuPrint's alone here.
+     */
+    const result = exportRmd(caveGraph({ withSeaTable: false }), OPTIONS)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.source).toContain('library(fafbseg)')
+    expect(result.source).toContain('fafbseg::simple_python()')
+    expect(result.source).toContain('fafbseg::dr_fafbseg()')
+    expect(result.source).not.toContain('library(arrow)')
+    expect(result.source).not.toContain('neuprintr')
+    expect(result.todos.map((t) => t.nodeId).sort()).toEqual(['ngCave', 'summary'])
   })
 
   it('refuses a graph holding a synthetic dataset', () => {

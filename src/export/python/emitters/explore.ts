@@ -8,19 +8,11 @@
  * that costs something are stated where they cost it rather than in a comment nobody reads.
  */
 
-import { CATMAID_TEXT } from '../../plans/query'
+import { localIndex } from '../../plans/query'
 import { pyStr } from '../py'
 import { CUSTOM_SOURCE_ID } from '../../../data/custom/layout'
 import { registerEmitter, registerHelper } from '../registry'
-import {
-  datasetLabels,
-  codaNeurons,
-  hasLabelsFrame,
-  isCatmaidDataset,
-  isCaveDataset,
-  pyPopulationMask,
-  pySelection,
-} from './common'
+import { datasetLabels, codaNeurons, pyPopulationMask, pySelection } from './common'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { explorePlan } from '../../plans/explore'
@@ -41,8 +33,7 @@ registerEmitter(
   'neuron.explore',
   (ctx) => {
     const c = ctx.wired('dataset')
-    const cave = isCaveDataset(ctx)
-    const labelled = hasLabelsFrame(ctx)
+    const index = localIndex(ctx)
 
     const all = ctx.output('all')
     const hits = ctx.output('hits')
@@ -63,21 +54,8 @@ registerEmitter(
 
     // `All` is the index handed on unchanged, and it is the download every other port is sliced
     // out of — one read rather than one per port.
-    const lines: string[] = labelled
-      ? [
-          ...ctx.note(
-            cave
-              ? 'Explore Dataset searches the whole neuron table locally. This is the datastack\u2019s ' +
-                  'neuron table joined to its annotations (or to whatever is wired into the ' +
-                  'Dataset node\u2019s `Annotations` port), fetched the first time anything needs it. ' +
-                  'On FlyWire that is 139,255 rows and takes a few seconds.'
-              : isCatmaidDataset(ctx)
-                ? CATMAID_TEXT.explore
-                : 'Explore Dataset searches the whole neuron table locally: here the Custom ' +
-                  'Dataset\u2019s Neurons table, or every id its edge list names where none is wired.',
-          ),
-          `${all} = ${datasetLabels(c)}`,
-        ]
+    const lines: string[] = index
+      ? [...ctx.note(index.explore), `${all} = ${datasetLabels(c)}`]
       : [
           ...ctx.note(
             'Explore Dataset downloads the whole neuron table once and searches it locally. On male-CNS ' +
@@ -92,7 +70,7 @@ registerEmitter(
           `${all}, _ = fetch_neurons(NeuronCriteria(client=${c}), client=${c})`,
           codaNeurons(ctx, all),
         ]
-    if (!labelled) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+    if (!index) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
     // No length guard: `pyPopulationMask` answers an empty population with no lines.
     lines.push(
       ...pyPopulationMask(all, population, schemasFromType(ctx.inputType('dataset')).neurons),

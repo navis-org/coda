@@ -20,30 +20,33 @@
  *   `~/.cloudvolume/secrets/cave-secret.json`, written once by `client.auth.setup_token()`,
  *   where neuprint-python takes one per client.
  *
- * What is *not* here yet is the query half: Find Neurons is below, and Connectivity, the
- * morphology nodes and Explore are not. Those decline through `emitterBackends` in the registry
- * rather than through a guard in each of them — see `emit.ts`, which turns an undeclared backend
- * into a TODO naming it.
+ * What each node decides — which datastack it reads, its refusals — is `plans/cave.ts`, which the R
+ * document's `r/emitters/cave.ts` renders too. The query half (Find Neurons, Explore, Synapses
+ * Between) lives with the other query emitters; Connectivity and the morphology nodes are not
+ * written for CAVE and decline through `emitterBackends` (`export/backends.ts`).
  */
 
-import { splitDatasetId, specFor } from '../../../data/cave/spec'
-import { VOTE_SAMPLE } from '../../../data/cave/rootIds'
-import { byMajority } from '../../../nodes/transform/updateRootIds'
-import { caveTarget, caveTargetOfType, customCaveServer } from '../../../nodes/lib/caveParams'
-import {
-  DEFAULT_CAVE_SERVER,
-  caveServerOfSource,
-  normaliseCaveServer,
-} from '../../../data/cave/deployments'
-import { DATASET_FAMILIES, resolveDatasetId } from '../../../nodes/lib/datasetFamilies'
+import type { CaveTarget } from '../../../nodes/lib/caveParams'
+import { isDefaultCaveServer, normaliseCaveServer } from '../../../data/cave/deployments'
+import { DATASET_FAMILIES } from '../../../nodes/lib/datasetFamilies'
 import { namedColumns } from '../../../data/annotations/types'
 import { SEATABLE_HOSTS } from '../../../data/annotations/credentials'
+import type { CaveDatasetPlan, CaveTargetPlan } from '../../plans/cave'
+import {
+  CAVE_TEXT,
+  caveFamilyDatasetPlan,
+  caveInfoTable,
+  caveNodeDatasetPlan,
+  caveTablePlan,
+  caveTargetPlan,
+  rootIdsMethodPlan,
+} from '../../plans/cave'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
 /** Backends these emitters are written against. */
-const CAVE_ONLY = ['cave'] as const
+const CAVE_ONLY = { backends: ['cave'] }
 
 /**
  * A `CAVEclient` pinned to a datastack and materialization, on the deployment it lives on.
@@ -55,58 +58,36 @@ const CAVE_ONLY = ['cave'] as const
  * it is the difference between the notebook asking the right info service and asking
  * `global.daf-apis.com` about a datastack it has never heard of: H01's `h01_c3_flat` is listed by
  * `global.brain-wire-test.org` alone, which is also what navis' `h01.py` passes.
- *
- * One spelling for every cell that builds a client, so no emitter can pin a version on one
- * deployment and forget the server on another.
  */
-function caveClient(deployment: string, datastack: string, version: number): string {
-  const server = normaliseCaveServer(deployment)
-  const address = server === DEFAULT_CAVE_SERVER ? '' : `, server_address=${pyStr(server)}`
-  return `CAVEclient(${pyStr(datastack)}${address}, version=${version})`
+function caveClient(target: CaveTarget): string {
+  const address = isDefaultCaveServer(target.deployment)
+    ? ''
+    : `, server_address=${pyStr(normaliseCaveServer(target.deployment))}`
+  return `CAVEclient(${pyStr(target.datastack)}${address}, version=${target.version})`
 }
 
-// ---------------------------------------------------------------------------
-// Reading a reference
-// ---------------------------------------------------------------------------
-
 /**
- * The client for a **reference** port, and the variable it took to get there.
- *
- * A reference names a node rather than consuming its output, so the referenced node's cell may
- * not have been written yet — and for the wiring references exist for it provably has not, since
- * there the dataset consumes the very node referencing it (`CAVE table → Update root IDs →
- * Dataset`). Two answers, one rule, in one place so the two readers cannot drift:
- *
- * - **The variable, where the walk bound one.** `dataset.client` reuses the connection and reads
- *   as what it is.
- * - **A fresh `CAVEclient` from the reference's *type*, where it did not.** That is exactly what
- *   a reference promises — a datastack and a materialization knowable from the referenced node's
- *   params alone — so it is a faithful equivalent rather than a guess, and the extra client costs
- *   an info call.
- *
- * Answers `undefined` where the type cannot say which datastack, which is invariant 2's ordinary
- * state on a cold session and a TODO the caller words for itself.
+ * The client a planned target spells: the bound dataset's `.client`, or a fresh `CAVEclient`
+ * under `local` — with a note where it is borrowed from a reference whose cell comes later, the
+ * wiring references exist for (`CAVE table → Update root IDs → Dataset`).
  */
-function clientFor(
+function clientLines(
   ctx: EmitContext,
-  portId: string,
+  plan: Exclude<CaveTargetPlan, { refusal: string }>,
   local: string,
-): { expr: string; setup: string[] } | undefined {
-  const bound = ctx.input(portId)
-  if (bound) return { expr: `${bound}.client`, setup: [] }
-
-  // The wire alone: a reference port's typed field is its caller's to read.
-  const target = caveTargetOfType(ctx.inputType(portId), {})
-  if (!target) return undefined
+): { expr: string; setup: string[] } {
+  if ('bound' in plan) return { expr: `${plan.bound}.client`, setup: [] }
   ctx.require('caveclient', 'CAVEclient')
   return {
     expr: local,
     setup: [
-      ...ctx.note(
-        'The Dataset wired here only names a datastack, and its cell comes after this one, so ' +
-          'this cell builds its own client for the same datastack and materialization.',
-      ),
-      `${local} = ${caveClient(target.deployment, target.datastack, target.version)}`,
+      ...(plan.borrowed
+        ? ctx.note(
+            'The Dataset wired here only names a datastack, and its cell comes after this one, so ' +
+              'this cell builds its own client for the same datastack and materialization.',
+          )
+        : []),
+      `${local} = ${caveClient(plan.fresh)}`,
     ],
   }
 }
@@ -121,71 +102,43 @@ function clientFor(
  * The neuPrint side binds a bare `Client`, and this deliberately does not. A Coda dataset value
  * on CAVE is a client **and** a neuron table, because the datastack's labels live in an
  * annotation table that anything wired to the Annotations socket *replaces* — so one Python name
- * has to carry both. The helper's docstring says so; see `caveHelpers.ts` for why `labels` is
- * lazy rather than fetched here.
+ * has to carry both. See `caveHelpers.ts` for why `labels` is lazy rather than fetched here.
  */
-function datasetCell(
-  ctx: EmitContext,
-  datasetId: string | undefined,
-  deployment: string,
-): string[] {
-  if (!datasetId) {
-    return ctx.todo(
-      'Coda could not work out which datastack and materialization this CAVE dataset uses, ' +
-        'so no client was created. Set `Materialization` on the node and export again.',
-    )
-  }
-  const parsed = splitDatasetId(datasetId)
-  if (!parsed) return ctx.todo(`"${datasetId}" is not a datastack and materialization.`)
-
+function datasetCell(ctx: EmitContext, plan: CaveDatasetPlan): string[] {
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
   ctx.require('caveclient', 'CAVEclient')
   ctx.helper('CodaCaveDataset')
-
   const out = ctx.output('dataset')
-  const client = caveClient(deployment, parsed.datastack, parsed.version)
+  const client = caveClient(plan.target)
 
-  /*
-   * A wired chain replaces the datastack's own labels, which is what the socket means on the
-   * canvas — so the frame goes straight in and nothing is fetched. Note this is the *only* way
-   * a datastack with no neuron table (Aedes publishes synapses and nuclei and no annotations at
-   * all) can say which neurons exist.
-   */
+  // A wired chain replaces the datastack's own labels, which is what the socket means on the
+  // canvas — and the only way a datastack with no neuron table can say which neurons exist.
   const chain = ctx.input('annotations')
   if (chain) {
     return [
-      ...ctx.note(
-        'Annotations are wired to this dataset in Coda, so they replace the ' +
-          "datastack's own labels entirely.",
-      ),
+      ...ctx.note(CAVE_TEXT.chainReplaces),
       `${out} = CodaCaveDataset(`,
       `    ${client},`,
       `    labels=${chain},`,
       `)`,
     ]
   }
-
-  const spec = specFor(deployment, parsed.datastack)
-  if (!spec?.neurons) {
+  if (!plan.neurons) {
     return [
-      ...ctx.note(
-        `Coda has no table spec for "${parsed.datastack}", so this client can be queried ` +
-          `by root id but cannot enumerate neurons. Pass \`neuron_table=\` and \`id_column=\` ` +
-          `below, or wire an Annotations source.`,
-      ),
+      ...ctx.note(CAVE_TEXT.noNeuronTable(plan.target.datastack)),
       `${out} = CodaCaveDataset(${client})`,
     ]
   }
-
   const args = [
-    `    neuron_table=${pyStr(spec.neurons.table)},`,
-    `    id_column=${pyStr(spec.neurons.idColumn)},`,
+    `    neuron_table=${pyStr(plan.neurons.table)},`,
+    `    id_column=${pyStr(plan.neurons.idColumn)},`,
   ]
-  if (spec.annotations) {
+  if (plan.annotations) {
     args.push(
-      `    annotation_table=${pyStr(spec.annotations.table)},`,
-      `    ref_column=${pyStr(spec.annotations.refColumn)},`,
-      `    system_column=${pyStr(spec.annotations.systemColumn)},`,
-      `    value_column=${pyStr(spec.annotations.valueColumn)},`,
+      `    annotation_table=${pyStr(plan.annotations.table)},`,
+      `    ref_column=${pyStr(plan.annotations.refColumn)},`,
+      `    system_column=${pyStr(plan.annotations.systemColumn)},`,
+      `    value_column=${pyStr(plan.annotations.valueColumn)},`,
     )
   }
   return [`${out} = CodaCaveDataset(`, `    ${client},`, ...args, `)`]
@@ -193,47 +146,21 @@ function datasetCell(
 
 /*
  * The published families, on the same `DatasetFamily.notebook` test the neuPrint loop makes —
- * one statement of which families each exporter covers, read by `canExportNotebook` too, rather
- * than a source-id test that would part company with it.
+ * one statement of which families each exporter covers, read by `canExportNotebook` too.
  */
 for (const family of DATASET_FAMILIES) {
   if (family.notebook?.python !== 'caveclient') continue
   registerEmitter(
     `dataset.${family.key}`,
-    (ctx) =>
-      datasetCell(
-        ctx,
-        resolveDatasetId(family, ctx.params.version),
-        caveServerOfSource(family.sourceId) ?? DEFAULT_CAVE_SERVER,
-      ),
-    { backends: [...CAVE_ONLY] },
+    (ctx) => datasetCell(ctx, caveFamilyDatasetPlan(family, ctx.params)),
+    CAVE_ONLY,
   )
 }
 
 registerEmitter(
   'dataset.cave',
-  (ctx) => {
-    const datastack = String(ctx.params.datastack).trim()
-    if (!datastack) return ctx.todo('This CAVE node has no `Datastack` set.')
-    const version = String(ctx.params.version).trim()
-    if (!version) {
-      /*
-       * "Latest" is resolved by a network call the exporter has not made — the same gap the
-       * neuPrint dataset emitter notes for an unpinned release, and a worse one here: a
-       * materialization *expires*, so an unpinned notebook answers a different question every
-       * few months with nothing saying so.
-       */
-      return [
-        ...ctx.todo(
-          `\`Materialization\` is empty, so this node uses the newest materialization of ` +
-            `"${datastack}", and the exporter could not find out which one that is. Pick one ` +
-            'in `Materialization`, or pass `version=` below.',
-        ),
-      ]
-    }
-    return datasetCell(ctx, `${datastack}:${version}`, customCaveServer(ctx.params))
-  },
-  { backends: [...CAVE_ONLY] },
+  (ctx) => datasetCell(ctx, caveNodeDatasetPlan(ctx.params)),
+  CAVE_ONLY,
 )
 
 // ---------------------------------------------------------------------------
@@ -245,67 +172,34 @@ registerEmitter(
  *
  * Its Dataset input is a **reference**: it names the datastack to read the table out of and
  * consumes nothing, which is what lets `Dataset → CAVE table → Dataset` exist on the canvas at
- * all. Unwired, the `datastack` param names one — so the emitted cell may have to build a second
- * client, and does so rather than reaching for the referenced one, because the whole point of
- * the param is reading a table out of a *different* datastack.
+ * all. Unwired, the `datastack` param names one — so the cell may build a second client, rather
+ * than reaching for the referenced one, because the whole point of the param is reading a table
+ * out of a *different* datastack.
  */
 registerEmitter(
   'annotation.caveTable',
   (ctx) => {
-    const table = String(ctx.params.table).trim()
-    if (!table) return ctx.todo('This CAVE table node has no `Table` set.')
-
-    /*
-     * A wired Dataset wins over the param, which is the precedence a socket always takes here and
-     * the one `caveRef` applies on the canvas. Unwired, the param names the datastack — which is
-     * the node's ordinary configuration, since the wire exists for the *cross-datastack* case.
-     */
-    const lines: string[] = []
-    let client: string
-    if (ctx.inputType('dataset')) {
-      const resolved = clientFor(ctx, 'dataset', '_cave')
-      if (!resolved) {
-        return ctx.todo(
-          'Coda could not yet tell which datastack and materialization the Dataset wired to ' +
-            'this CAVE table uses, so no client was created. Pin a materialization on the ' +
-            'Dataset node and export again.',
-        )
-      }
-      client = resolved.expr
-      lines.push(...resolved.setup)
-    } else {
-      const datastackParam = String(ctx.params.datastack).trim()
-      const typed = caveTarget(undefined, ctx.params)
-      if (!typed) {
-        return ctx.todo(
-          `\`Datastack\` ("${datastackParam || '(none)'}") is not a datastack and ` +
-            'materialization. Write it as `flywire_fafb_public:783`, or wire a Dataset.',
-        )
-      }
-      ctx.require('caveclient', 'CAVEclient')
-      client = '_cave'
-      lines.push(`_cave = ${caveClient(typed.deployment, typed.datastack, typed.version)}`)
-    }
+    const reading = caveTablePlan(ctx.params)
+    if (reading.refusal !== undefined) return ctx.todo(reading.refusal)
+    const target = caveTargetPlan(ctx, 'table')
+    if (target.refusal !== undefined) return ctx.todo(target.refusal)
+    const { expr, setup } = clientLines(ctx, target, '_cave')
 
     ctx.helper('coda_cave_table')
-    const idColumn = String(ctx.params.idColumn).trim() || 'pt_root_id'
-    const pivotOn = String(ctx.params.pivotOn).trim()
-    const valueColumn = String(ctx.params.valueColumn).trim()
-    const columns = namedColumns(String(ctx.params.columns), idColumn)
-
-    const args = [`    ${client},`, `    ${pyStr(table)},`, `    id_column=${pyStr(idColumn)},`]
-    if (columns.length > 0) args.push(`    columns=${pyList(columns)},`)
-    if (pivotOn) {
-      if (!valueColumn) {
-        return ctx.todo(
-          '`Pivot on` is set on this CAVE table but `Value column` is empty. Set `Value column`, or clear `Pivot on`.',
-        )
-      }
-      args.push(`    pivot_on=${pyStr(pivotOn)},`, `    value_column=${pyStr(valueColumn)},`)
+    const args = [
+      `    ${expr},`,
+      `    ${pyStr(reading.table)},`,
+      `    id_column=${pyStr(reading.idColumn)},`,
+    ]
+    if (reading.columns.length > 0) args.push(`    columns=${pyList(reading.columns)},`)
+    if (reading.pivot) {
+      args.push(
+        `    pivot_on=${pyStr(reading.pivot.on)},`,
+        `    value_column=${pyStr(reading.pivot.value)},`,
+      )
     }
-
     const out = ctx.output('annotations')
-    lines.push(`${out} = coda_cave_table(`, ...args, `)`)
+    const lines = [...setup, `${out} = coda_cave_table(`, ...args, `)`]
 
     // Sources chain, and a later one wins a collision — falling back to the earlier where it
     // has no value. `coda_join_annotations` is that rule; see its docstring.
@@ -316,7 +210,7 @@ registerEmitter(
     }
     return lines
   },
-  { backends: [...CAVE_ONLY] },
+  CAVE_ONLY,
 )
 
 // ---------------------------------------------------------------------------
@@ -324,78 +218,38 @@ registerEmitter(
 // ---------------------------------------------------------------------------
 
 /**
- * The repair, and the reason its Dataset input is a reference.
- *
- * It sits between an annotation source and the dataset that source feeds, which at node
- * granularity is a cycle — so the port names the datastack rather than consuming its value.
- * Nothing here reads `dataset.labels`; what it wants is `dataset.client`, whose `timestamp` is
- * the materialization the ids are being brought forward *to*.
+ * The repair, and the reason its Dataset input is a reference: it sits between an annotation
+ * source and the dataset that source feeds, which at node granularity is a cycle. What it wants is
+ * `dataset.client`, whose `timestamp` is the materialization the ids are brought forward *to*.
  */
 registerEmitter(
   'cave.updateRootIds',
   (ctx) => {
+    const method = rootIdsMethodPlan(ctx)
+    if (method.refusal !== undefined) return ctx.todo(method.refusal)
+    const target = caveTargetPlan(ctx, 'repair')
+    if (target.refusal !== undefined) return ctx.todo(target.refusal)
+    const { expr, setup } = clientLines(ctx, target, '_repair_at')
+
     // A majority vote reads no supervoxel; its helper is the canvas's `rootsByMajority`.
-    let helper = 'coda_update_root_ids_majority'
-    let traceBy = `sample=${VOTE_SAMPLE}`
-    if (!byMajority(ctx.params)) {
-      const supervoxel = ctx.column('supervoxelColumn')
-      if (!supervoxel) {
-        return ctx.todo(
-          '`Supervoxel ID column` is not set. Pick the column that holds each row’s supervoxel ' +
-            'id, or set `Method` to the majority of the root’s chunks.',
-        )
-      }
-      helper = 'coda_update_root_ids'
-      traceBy = `supervoxel_column=${pyStr(supervoxel)}`
-    }
+    const helper =
+      method.supervoxelColumn === undefined
+        ? 'coda_update_root_ids_majority'
+        : 'coda_update_root_ids'
     ctx.helper(helper)
-    const idColumn = ctx.column('idColumn') ?? 'neuronId'
-    const version = String(ctx.params.version).trim()
-
-    const lines: string[] = []
-    let client: string
-    if (version) {
-      /*
-       * A materialization named on the node overrides the dataset's, and `client.timestamp` is
-       * read off the client — so honouring it means a second client rather than an argument.
-       * Uncommon, and silently ignoring it would repair the ids to the wrong instant.
-       */
-      const target = caveTargetOfType(ctx.inputType('dataset'), {})
-      if (!target) {
-        return ctx.todo(
-          '`Materialization` is set on this Update root IDs node, but Coda could not tell ' +
-            'which datastack the wired Dataset uses, so there is no datastack to apply it to.',
-        )
-      }
-      ctx.require('caveclient', 'CAVEclient')
-      client = '_repair_at'
-      lines.push(
-        `_repair_at = ${caveClient(target.deployment, target.datastack, Number(version))}`,
-      )
-    } else {
-      const resolved = clientFor(ctx, 'dataset', '_repair_at')
-      if (!resolved) {
-        return ctx.todo(
-          'Coda could not tell which datastack and materialization the Dataset wired to this ' +
-            'Update root IDs node uses, so it does not know which point in time to update the ' +
-            'ids to. Pin a materialization on the Dataset node and export again.',
-        )
-      }
-      client = resolved.expr
-      lines.push(...resolved.setup)
-    }
-
-    lines.push(
+    return [
+      ...setup,
       `${ctx.output('out')} = ${helper}(`,
-      `    ${client},`,
+      `    ${expr},`,
       `    ${ctx.wired('in')},`,
-      `    id_column=${pyStr(idColumn)},`,
-      `    ${traceBy},`,
+      `    id_column=${pyStr(ctx.column('idColumn') ?? 'neuronId')},`,
+      method.supervoxelColumn === undefined
+        ? `    sample=${method.sample},`
+        : `    supervoxel_column=${pyStr(method.supervoxelColumn)},`,
       `)`,
-    )
-    return lines
+    ]
   },
-  { backends: [...CAVE_ONLY] },
+  CAVE_ONLY,
 )
 
 // ---------------------------------------------------------------------------
@@ -499,75 +353,46 @@ for (const [type, host] of [
 
 /**
  * `List CAVE tables` and `CAVE table info`, which map onto caveclient about as directly as
- * anything in this file.
- *
- * Both take the datastack the same way the nodes do — a **reference** Dataset input that names a
- * datastack without consuming it, or the `datastack` param when nothing is wired — so `clientFor`
- * above is the whole of that logic and these two do not restate it. The wire wins, which is the
- * precedence every CAVE emitter here applies.
- *
- * The work is in the helpers rather than inline, because in both cases it is more than one call
- * and the interesting part is *which* calls: two listing endpoints for the first, and for the
- * second a metadata read, two counts that disagree, and a one-row query whose `split_positions`
- * argument is what makes the answer the same one the app gives. See `caveHelpers.ts`.
+ * anything in this file. Both take the datastack the way the nodes do — the wired reference, or
+ * the `datastack` param when nothing is wired — which is `caveTargetPlan`'s `discovery` reading.
+ * The work is in the helpers: two listing endpoints for the first, and for the second a metadata
+ * read, two counts that disagree, and a one-row query whose `split_positions` argument is what
+ * makes the answer the same one the app gives. See `caveHelpers.ts`.
  */
-function discoveryClient(ctx: EmitContext): { expr: string; setup: string[] } | undefined {
-  // One local name, unlike `clientFor`'s caller above — `Update root IDs` needs `_repair_at`
-  // because it may pin a *different* materialization than the dataset it hangs off.
-  const local = '_cave'
-  if (ctx.inputType('dataset')) return clientFor(ctx, 'dataset', local)
-  const typed = caveTarget(undefined, ctx.params)
-  if (!typed) return undefined
-  ctx.require('caveclient', 'CAVEclient')
-  return {
-    expr: local,
-    setup: [`${local} = ${caveClient(typed.deployment, typed.datastack, typed.version)}`],
-  }
-}
-
-/** The sentence both of these say when neither the wire nor the field named a datastack. */
-const NO_DATASTACK =
-  'This node has no datastack and materialization: none comes from a wired Dataset, and ' +
-  '`Datastack` is empty. Enter one in `Datastack` as `flywire_fafb_public:783`, or pin a ' +
-  'materialization on the Dataset node, and export again.'
-
 registerEmitter(
   'cave.tables',
   (ctx) => {
-    const resolved = discoveryClient(ctx)
-    if (!resolved) return ctx.todo(NO_DATASTACK)
+    const target = caveTargetPlan(ctx, 'discovery')
+    if (target.refusal !== undefined) return ctx.todo(target.refusal)
+    const { expr, setup } = clientLines(ctx, target, '_cave')
     ctx.helper('coda_cave_tables')
-    /*
-     * `include_views` is passed rather than defaulted, so the cell states the node's setting even
-     * where it matches the helper's default. A reader comparing the notebook against the canvas
-     * should not have to know which way the default went.
-     */
+    // Passed rather than defaulted, so the cell states the node's setting.
     const includeViews = Boolean(ctx.params.includeViews)
     return [
-      ...resolved.setup,
-      `${ctx.output('out')} = coda_cave_tables(${resolved.expr}, include_views=${includeViews ? 'True' : 'False'})`,
+      ...setup,
+      `${ctx.output('out')} = coda_cave_tables(${expr}, include_views=${includeViews ? 'True' : 'False'})`,
     ]
   },
-  { backends: [...CAVE_ONLY] },
+  CAVE_ONLY,
 )
 
 registerEmitter(
   'cave.tableInfo',
   (ctx) => {
-    const table = String(ctx.params.table).trim()
-    if (!table)
-      return ctx.todo('This CAVE table info node has no table or view set in `Table`.')
-    const resolved = discoveryClient(ctx)
-    if (!resolved) return ctx.todo(NO_DATASTACK)
+    const info = caveInfoTable(ctx.params)
+    if (info.refusal !== undefined) return ctx.todo(info.refusal)
+    const target = caveTargetPlan(ctx, 'discovery')
+    if (target.refusal !== undefined) return ctx.todo(target.refusal)
+    const { expr, setup } = clientLines(ctx, target, '_cave')
     ctx.helper('coda_cave_table_info')
     return [
       ...ctx.note(
         'In Coda the card shows this table’s description and row counts. Here they are ' +
           'printed, and the cell’s output is the list of columns.',
       ),
-      ...resolved.setup,
-      `${ctx.output('columns')} = coda_cave_table_info(${resolved.expr}, ${pyStr(table)})`,
+      ...setup,
+      `${ctx.output('columns')} = coda_cave_table_info(${expr}, ${pyStr(info.table)})`,
     ]
   },
-  { backends: [...CAVE_ONLY] },
+  CAVE_ONLY,
 )

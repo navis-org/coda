@@ -198,15 +198,14 @@ describe('Export as Jupyter Notebook', () => {
    * The FlyWire starter, which is where this was reported from: `Dataset → Explore → Table`,
    * plus Neuroglancer. Two things are worth pinning about it.
    *
-   * **The two rows disagree**, which is the whole reason a refusal had to become a fact about
-   * one row: Python builds a notebook, R has no CAVE emitter at all and refuses. Before this the
-   * R row looked ordinary and said nothing, which is the opposite of the truth.
+   * **Both rows are offered**: the refusal is a fact about one row, and on CAVE neither format
+   * refuses any more — caveclient in the notebook, fafbseg in R.
    *
    * **The notebook's warning names Explore and counts the rest**, rather than listing Table and
    * Neuroglancer as having "no notebook equivalent" — they translate perfectly well and are only
    * TODOs because the step in front of them is not.
    */
-  it('disagrees per format on a CAVE graph, and names the cause rather than the cascade', async () => {
+  it('offers both formats on a CAVE graph, and names the cause rather than the cascade', async () => {
     render(<App />)
     let g = emptyGraph('FlyWire')
     g = addNode(g, {
@@ -260,15 +259,9 @@ describe('Export as Jupyter Notebook', () => {
     expect(warning.textContent).toContain('1 step after it')
     expect(warning.textContent).not.toContain('Table')
 
-    // R cannot do it at all, and says so on its own row rather than staying silent.
-    const rmd = screen.getByRole('button', { name: /Export as R Markdown/ })
-    expect(rmd).toHaveProperty('disabled', true)
-    expect(rmd.textContent).toContain('no document equivalent')
-    // While the notebook beside it is still offered.
-    expect(screen.getByRole('button', { name: /Export as Jupyter Notebook/ })).toHaveProperty(
-      'disabled',
-      false,
-    )
+    for (const name of [/Export as R Markdown/, /Export as Jupyter Notebook/]) {
+      expect(screen.getByRole('button', { name })).toHaveProperty('disabled', false)
+    }
   })
 
   it('says nothing about a graph that exports whole', async () => {

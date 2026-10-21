@@ -234,16 +234,7 @@ export function isLabelledHelper(ctx: EmitContext, portId = 'dataset'): boolean 
 }
 
 /**
- * Does the dataset hold its neuron index as a frame, `.labels`? A CAVE datastack's is fetched, a
- * Custom Dataset's is its Neurons table and a CATMAID project's is derived from its annotations,
- * and every node that searches the index locally reads all three the same way.
- */
-export function hasLabelsFrame(ctx: EmitContext, portId = 'dataset'): boolean {
-  return isCaveDataset(ctx, portId) || isLabelledHelper(ctx, portId)
-}
-
-/**
- * The neuron table a `hasLabelsFrame` dataset labels its neurons with — Coda's index, one row per
+ * The neuron table a locally searched dataset (`localIndex`) labels its neurons with — Coda's index, one row per
  * neuron.
  *
  * `CodaCaveDataset.labels`, which is fetched on first use and is exactly what `CaveSource`

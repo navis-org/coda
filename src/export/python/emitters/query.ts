@@ -28,9 +28,9 @@ import { CARRY_PARAM_ID } from '../../../nodes/lib/carryParams'
 import { filterMasks } from './tableFilters'
 import type { EmitContext } from '../types'
 
-import type { DatasetNote, SkeletonsNote } from '../../plans/query'
+import type { DatasetNote, LocalIndexText, SkeletonsNote } from '../../plans/query'
 import {
-  CATMAID_TEXT,
+  localIndex,
   datasetFamilyPlan,
   datasetNodePlan,
   inputIdsPlan,
@@ -39,9 +39,8 @@ import {
   skeletonsPlan,
   synapsesBetweenPlan,
 } from '../../plans/query'
+import { CAVE_TEXT, caveSynapsePlan } from '../../plans/cave'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { STANDARD_SYNAPSE_COLUMNS, endPositionColumn, specFor } from '../../../data/cave/spec'
-import { caveTargetOfType } from '../../../nodes/lib/caveParams'
 import {
   carryLines,
   datasetLabels,
@@ -49,7 +48,6 @@ import {
   codaNeurons,
   cypherIdList,
   codaSynapses,
-  hasLabelsFrame,
   isCatmaidDataset,
   isCaveDataset,
   isLabelledHelper,
@@ -255,7 +253,8 @@ registerEmitter(
       ]
     }
 
-    if (hasLabelsFrame(ctx)) return [...notes, ...labelsFindNeurons(ctx, c, terms, schema)]
+    const index = localIndex(ctx)
+    if (index) return [...notes, ...labelsFindNeurons(ctx, c, index, terms, schema)]
 
     ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
     const out = ctx.output('neurons')
@@ -355,6 +354,7 @@ registerEmitter(
 function labelsFindNeurons(
   ctx: EmitContext,
   dataset: string,
+  text: LocalIndexText,
   terms: FieldTerm[],
   schema: TableSchema | undefined,
 ): string[] {
@@ -362,31 +362,10 @@ function labelsFindNeurons(
   const roi = String(ctx.params.roi)
   const limit = Number(ctx.params.limit)
 
-  const cave = isCaveDataset(ctx)
-  const catmaid = isCatmaidDataset(ctx)
-  if (roi && catmaid) return ctx.todo(CATMAID_TEXT.region(roi))
-  const lines: string[] = [
-    ...ctx.note(
-      cave
-        ? 'A CAVE datastack has no server-side neuron query, so this reads the whole neuron ' +
-            'index once and filters it here, as Coda does. Explore Dataset uses the same table.'
-        : catmaid
-          ? CATMAID_TEXT.search
-          : 'A Custom Dataset’s neurons are its Neurons table, filtered here as on the canvas.',
-    ),
-    `${out} = ${datasetLabels(dataset)}`,
-  ]
-
-  if (roi) {
-    return [
-      ...lines,
-      ...ctx.note(
-        `This node filters on region "${roi}", and a ${cave ? 'CAVE datastack' : 'Custom Dataset'} ` +
-          `publishes no regions, so the result is empty. Clear \`In ROI\` to get neurons back.`,
-      ),
-      `${out} = ${out}.iloc[0:0]`,
-    ]
-  }
+  const region = roi ? text.region(roi) : undefined
+  if (region && 'refusal' in region) return ctx.todo(region.refusal)
+  const lines: string[] = [...ctx.note(text.search), `${out} = ${datasetLabels(dataset)}`]
+  if (region) return [...lines, ...ctx.note(region.emptyNote), `${out} = ${out}.iloc[0:0]`]
 
   lines.push(...maskLines(out, terms, schema))
   if (limit > 0) lines.push(`${out} = ${out}.head(${limit})`)
@@ -1043,11 +1022,7 @@ registerEmitter(
     if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
     const { location, minConfidence, includeFragments, open } = plan
     const out = ctx.output('points')
-    const typeNote = ctx.note(
-      'This table names the two bodies of each synapse but not their cell types, which ' +
-        'the canvas fills in from the dataset. Join them from a neuron table if you need ' +
-        'them.',
-    )
+    const typeNote = ctx.note(CAVE_TEXT.noTypes)
 
     /*
      * Both helper datasets answer `synapses_between`. A Custom Dataset's synapse table has one
@@ -1078,31 +1053,17 @@ registerEmitter(
     }
 
     if (isCaveDataset(ctx)) {
-      const target = caveTargetOfType(ctx.inputType('dataset'), {})
-      const spec = target ? specFor(target.deployment, target.datastack)?.synapses : undefined
-      const columns = spec ?? STANDARD_SYNAPSE_COLUMNS
-      const position = endPositionColumn(columns, location)
-      if (!position) {
-        return ctx.todo(
-          `This datastack's synapse table names its ${location}synaptic end ` +
-            `"${location === 'pre' ? columns.preColumn : columns.postColumn}", which is not a ` +
-            'bound point, so there is no position column to read. The canvas refuses this too.',
-        )
-      }
-      const score = spec?.scoreColumn
+      const synapses = caveSynapsePlan(ctx.inputType('dataset'), location)
+      if (synapses.refusal !== undefined) return ctx.todo(synapses.refusal)
+      const { table, preColumn, postColumn, position, score } = synapses
       ctx.helper('coda_synapses_between')
       return [
-        ...(spec
-          ? []
-          : ctx.note(
-              'Coda has no entry for this datastack, so the synapse table name is read from ' +
-                'its info record, as the canvas does.',
-            )),
-        `${out} = ${c}.client.materialize.${spec?.kind === 'view' ? 'query_view' : 'query_table'}(`,
-        `    ${spec ? pyStr(spec.table) : `${c}.client.info.get_datastack_info()['synapse_table']`},`,
+        ...(table ? [] : ctx.note(CAVE_TEXT.unspecced)),
+        `${out} = ${c}.client.materialize.${table?.view ? 'query_view' : 'query_table'}(`,
+        `    ${table ? pyStr(table.name) : `${c}.client.info.get_datastack_info()['synapse_table']`},`,
         `    filter_in_dict={`,
-        ...(sources ? [`        ${pyStr(columns.preColumn)}: ${neuronIdInts(sources)},`] : []),
-        ...(targets ? [`        ${pyStr(columns.postColumn)}: ${neuronIdInts(targets)},`] : []),
+        ...(sources ? [`        ${pyStr(preColumn)}: ${neuronIdInts(sources)},`] : []),
+        ...(targets ? [`        ${pyStr(postColumn)}: ${neuronIdInts(targets)},`] : []),
         `    },`,
         ...(minConfidence > 0 && score
           ? [`    filter_greater_equal_dict={${pyStr(score)}: ${minConfidence}},`]
@@ -1112,9 +1073,9 @@ registerEmitter(
         `)`,
         `${out} = coda_synapses_between(`,
         `    ${out},`,
-        `    ${pyStr(columns.preColumn)},`,
-        `    ${pyStr(columns.postColumn)},`,
-        `    ${pyStr(`${position}_{axis}`)},`,
+        `    ${pyStr(preColumn)},`,
+        `    ${pyStr(postColumn)},`,
+        `    ${pyStr(position)},`,
         `    ${score ? pyStr(score) : 'None'},`,
         `    ${pyStr(location)},`,
         `)`,
@@ -1125,12 +1086,7 @@ registerEmitter(
               `${out} = ${out}[${out}[${pyStr(open)}].isin(${datasetLabels(c)}['neuronId'])].reset_index(drop=True)`,
             ]
           : []),
-        ...(minConfidence > 0 && !score
-          ? ctx.note(
-              `This synapse table has no score column, so \`Min confidence\` (${minConfidence}) ` +
-                'is ignored here and on the canvas.',
-            )
-          : []),
+        ...(minConfidence > 0 && !score ? ctx.note(CAVE_TEXT.noScore(minConfidence)) : []),
         ...typeNote,
       ]
     }

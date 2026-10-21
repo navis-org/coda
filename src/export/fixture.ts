@@ -13,11 +13,11 @@
  * It is deliberately not a workflow anybody would build. Coverage is the job; the branches
  * exist to reach node types, not to answer a question.
  *
- * **There are two graphs, and that is new.** The exporters no longer cover the same backends —
- * FlyWire emits caveclient in Python and nothing in R — so a CAVE node in `everythingGraph`
- * would make `canExportNotebook(graph, 'r')` refuse the whole thing and leave the R golden with
- * nothing in it. `caveGraph` is the CAVE half, exported as its own notebook and asserted to be
- * *refused* on the R side, which is the honest shape of a split neither language can hide.
+ * **There is a graph per backend.** `everythingGraph` is neuPrint's, `caveGraph` CAVE's,
+ * `customGraph` the Custom Dataset's and `catmaidGraph` CATMAID's — each its own document in both
+ * languages, so a backend one language could not read (R refused CAVE until it had fafbseg) never
+ * left another backend's golden empty. `caveGraph({ withSeaTable: false })` is R's: R has no
+ * SeaTable emitter, and as the head of the annotation chain its TODO would block every node after.
  */
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
@@ -1949,8 +1949,8 @@ export function everythingGraph(): CodaGraph {
 /**
  * The CAVE half.
  *
- * Kept apart from `everythingGraph` because R refuses it outright — see the note above — and
- * because it wants a shape the everything graph does not: the reference wiring that made
+ * Kept apart from `everythingGraph` because its datasets are CAVE's — a document of its own in
+ * either language — and because it wants a shape the everything graph does not: the reference wiring that made
  * reference edges necessary in the first place. `CAVE table → Update root IDs → Dataset`, with
  * both nodes pointing their Dataset sockets *back* at the dataset they feed, which is two edges
  * between one pair in opposite directions and a cycle at node granularity.
@@ -1962,8 +1962,12 @@ export function everythingGraph(): CodaGraph {
  * The chain is three sources deep — FlyTable, then a wide CAVE table, then a long one — because
  * what each adds is different: SeaTable is a whole other library, the wide and long CAVE forms
  * are two branches of one emitter, and only a chain exercises the outer join between them.
+ *
+ * `withSeaTable: false` leaves out the SeaTable and FlyTable sources at the head of the annotation
+ * chain, for the R document: R has no emitter for either, and as the head of the chain their
+ * TODO would block every node after them, the dataset included.
  */
-export function caveGraph(): CodaGraph {
+export function caveGraph({ withSeaTable = true }: { withSeaTable?: boolean } = {}): CodaGraph {
   let g = emptyGraph('CAVE')
   g.meta = { ...g.meta, description: 'The CAVE nodes, wired the way references exist for.' }
 
@@ -2113,7 +2117,8 @@ export function caveGraph(): CodaGraph {
       },
     },
   ]
-  for (const spec of nodes) g = place(g, spec)
+  const left = new Set(withSeaTable ? [] : ['sea', 'fly'])
+  for (const spec of nodes) if (!left.has(spec.id)) g = place(g, spec)
 
   const edges: Array<[string, string, string, string]> = [
     // The reference wiring: both of these name the dataset they feed.
@@ -2143,7 +2148,9 @@ export function caveGraph(): CodaGraph {
     ['ds', 'dataset', 'ngCave', 'dataset'],
     ['find', 'neurons', 'ngCave', 'neurons'],
   ]
-  for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
+  for (const [from, out, to, into] of edges) {
+    if (!left.has(from) && !left.has(to)) g = wire(g, from, out, to, into)
+  }
   return g
 }
 
@@ -2268,7 +2275,7 @@ export function customGraph(): CodaGraph {
  * dataset's cells read from a generated class rather than a client, so they are a different
  * document, and keeping them apart keeps the everything golden a neuPrint document.
  *
- * It is also the graph `catmaid.live.test.ts` runs against VFB and hands to the two probe scripts,
+ * It is also the graph `live.test.ts` runs against VFB (`EXPORT_LIVE=catmaid`) and hands to the probe scripts,
  * which is why its questions are real ones with small answers — fifteen DA1 projection neurons and
  * two named skeletons — rather than the everything graph's placeholders. `lab` is the one node the
  * live run leaves out (`withLab: false`): its server is invented.
@@ -2376,6 +2383,87 @@ export function catmaidGraph({ withLab = true }: { withLab?: boolean } = {}): Co
     ['l1', 'dataset', 'l1find', 'dataset'],
   ]
   if (withLab) edges.push(['lab', 'dataset', 'labExplore', 'dataset'])
+  for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
+  return g
+}
+
+/**
+ * The CAVE graph `live.test.ts` runs (`EXPORT_LIVE=cave`) against FlyWire's public datastack and hands to the
+ * probe scripts — `caveGraph`'s node types asked real, small questions, where that graph's
+ * params exist to reach branches. Read-only throughout.
+ *
+ * Its stale ids are four roots of v630's `proofread_neurons` that v783 no longer has, so Update
+ * root IDs has something to repair. The CAVE table is keyed by `pt_root_id`, the node's default:
+ * `caveGraph` keys the same reference table by `target_id`, which the canvas refuses with "column
+ * target_id not found in proofread_neurons", as both documents do — a fixture reaching a branch,
+ * not a question anybody can ask.
+ */
+export function caveProbeGraph(): CodaGraph {
+  let g = emptyGraph('CAVE probe')
+  g.meta = { ...g.meta, description: 'FlyWire public, asked through every CAVE node.' }
+
+  const lc14b = encodeRows([{ field: 'type', op: 'is', values: ['LC14b'] }])
+  const pivot = {
+    datastack: 'flywire_fafb_public:783',
+    table: 'hierarchical_neuron_annotations',
+    pivotOn: 'classification_system',
+    valueColumn: 'cell_type',
+  }
+  const nodes: Spec[] = [
+    { id: 'ds', type: 'dataset.flywire', col: 0, params: { version: '783' } },
+    { id: 'find', type: 'neuron.findNeurons', col: 1, params: { filters: lc14b } },
+    { id: 'explore', type: 'neuron.explore', col: 1, row: 1, params: { query: 'LC14' } },
+    { id: 'between', type: 'neuron.synapsesBetween', col: 2, params: { minConfidence: 50 } },
+    { id: 'betweenOut', type: 'neuron.synapsesBetween', col: 2, row: 1 },
+    { id: 'ann', type: 'annotation.caveTable', col: 2, row: 2, params: pivot },
+    {
+      id: 'stale',
+      type: 'neuron.inputIds',
+      col: 1,
+      row: 4,
+      params: {
+        ids: '720575940620360528 720575940626062364 720575940631118354 720575940621553279',
+      },
+    },
+    // Its supervoxel picker falls back to the id column, the only one the ids carry.
+    { id: 'repair', type: 'cave.updateRootIds', col: 2, row: 4 },
+    {
+      id: 'repairVote',
+      type: 'cave.updateRootIds',
+      col: 2,
+      row: 6,
+      params: { method: 'majority' },
+    },
+    {
+      id: 'tables',
+      type: 'cave.tables',
+      col: 2,
+      row: 5,
+      params: { datastack: 'flywire_fafb_public:783', includeViews: true },
+    },
+    {
+      id: 'info',
+      type: 'cave.tableInfo',
+      col: 2,
+      row: 6,
+      params: { datastack: 'flywire_fafb_public:783', table: 'proofread_neurons' },
+    },
+  ]
+  for (const spec of nodes) g = place(g, spec)
+
+  const edges: Array<[string, string, string, string]> = [
+    ['ds', 'dataset', 'find', 'dataset'],
+    ['ds', 'dataset', 'explore', 'dataset'],
+    ['ds', 'dataset', 'between', 'dataset'],
+    ['find', 'neurons', 'between', 'sources'],
+    ['find', 'neurons', 'between', 'targets'],
+    ['ds', 'dataset', 'betweenOut', 'dataset'],
+    ['find', 'neurons', 'betweenOut', 'sources'],
+    ['stale', 'neurons', 'repair', 'in'],
+    ['ds', 'dataset', 'repair', 'dataset'],
+    ['stale', 'neurons', 'repairVote', 'in'],
+    ['ds', 'dataset', 'repairVote', 'dataset'],
+  ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g
 }

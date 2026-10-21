@@ -326,11 +326,10 @@ export interface DatasetFamily {
    * a value". The Save menu offered an export that produces a document of nothing but TODOs,
    * which is exactly the outcome `canExport.ts` exists to prevent.
    *
-   * **Per language, which it was not at first**, and the day the comment here predicted has
-   * arrived: FlyWire emits caveclient in Python and nothing in R, because R's route in is
-   * `fafbseg` rather than the natverse's neuPrint client and no emitter has been written for it.
-   * One flag for both formats would either refuse an export Python can produce or offer an R
-   * document of nothing but TODOs.
+   * **Per language, which it was not at first.** For a while FlyWire emitted caveclient in Python
+   * and nothing in R, and one flag for both formats would either have refused an export Python
+   * could produce or offered an R document of nothing but TODOs. R reads CAVE through fafbseg
+   * now, but a backend arriving in one language first is the ordinary case, not the exception.
    *
    * Deliberately not derived from `sourceId`: what decides this is whether an emitter has been
    * written, not which backend the data comes from.
@@ -348,7 +347,7 @@ export type ExportLanguage = 'python' | 'r'
  * a family exported through a library nobody has named here is a library nobody installed.
  */
 export type ExportClients = Partial<
-  Record<ExportLanguage, 'neuprint' | 'caveclient' | 'pymaid' | 'rcatmaid'>
+  Record<ExportLanguage, 'neuprint' | 'caveclient' | 'fafbseg' | 'pymaid' | 'rcatmaid'>
 >
 
 /**
@@ -360,6 +359,7 @@ type ClientNames = Record<NonNullable<ExportClients[ExportLanguage]>, string>
 const CLIENTS: ClientNames = {
   neuprint: 'neuprint',
   caveclient: 'caveclient',
+  fafbseg: 'fafbseg',
   pymaid: 'pymaid',
   rcatmaid: 'rcatmaid',
 }
@@ -714,6 +714,12 @@ const MINNIE_CHAIN: AnnotationChain = {
   unlabelled: 'MICrONS keeps its cell types in separate CAVE tables',
 }
 
+/**
+ * caveclient in the notebook, and fafbseg in R — the natverse's CAVE route, which reaches the same
+ * caveclient through reticulate and brings its rows back with exact `integer64` ids.
+ */
+const CAVE_NOTEBOOK: ExportClients = { python: 'caveclient', r: 'fafbseg' }
+
 const CAVE_FAMILIES: DatasetFamily[] = [
   {
     key: 'flywire',
@@ -730,12 +736,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
       'The public FlyWire whole-brain connectome, read through CAVE; the version is a materialization number. Meshes, synapses and connectivity work, skeletons only on materialization 783. The built-in cell types are outdated, so use the Use current annotations button on the card to wire in the current ones.',
     glyph: 'fly_brain',
     annotationChain: FLYWIRE_CHAIN,
-    /*
-     * Python only. `caveclient` is a faithful route in — the dataset cell is a real `CAVEclient`
-     * pinned to the materialization the node resolved — where R's would be `fafbseg`, which wraps
-     * FlyWire specifically rather than CAVE generally and has no emitter here yet.
-     */
-    notebook: { python: 'caveclient' },
+    notebook: CAVE_NOTEBOOK,
   },
   {
     key: 'banc',
@@ -748,7 +749,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
       'The public BANC (brain and nerve cord) connectome, read through CAVE. The version is a materialization number, and the neuron table is the public cell list published with the datastack.',
     glyph: 'fly_cns',
     annotationChain: BANC_CHAIN,
-    notebook: { python: 'caveclient' },
+    notebook: CAVE_NOTEBOOK,
   },
   {
     key: 'minnie65',
@@ -762,7 +763,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     glyph: 'mouse_brain',
     annotationChain: MINNIE_CHAIN,
     typeColumns: ['type', 'mtype'],
-    notebook: { python: 'caveclient' },
+    notebook: CAVE_NOTEBOOK,
   },
 ]
 

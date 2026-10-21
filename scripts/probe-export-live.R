@@ -1,19 +1,23 @@
-# Run the R Markdown exported from `catmaidGraph` and compare it with what the canvas produced.
+# Run the R Markdown exported from a live fixture and compare it with what the canvas produced.
 #
-#     pnpm probe:catmaid
+#     pnpm probe:catmaid           # Rscript scripts/probe-export-live.R catmaid
+#     CAVE_TOKEN=… pnpm probe:cave    # Rscript scripts/probe-export-live.R cave
 #
-# The R half of `scripts/probe-catmaid-export.py`, for the same reason and against the same
-# directory: `src/export/catmaid.live.test.ts` ran the graph against Virtual Fly Brain and wrote
-# `canvas.json` and `catmaid.Rmd` side by side. This evaluates every chunk of the document in one
-# environment, against the same public servers and only reading, and compares each node's
-# variable with the canvas's value for it.
+# The R half of `scripts/probe-export-live.py`, for the same reason and against the same
+# directory: `src/export/live.test.ts` ran the fixture's graph against the live servers and wrote
+# `canvas.json` and `<fixture>.Rmd` side by side. This evaluates every chunk of the document in
+# one environment, against the same servers and only reading, and compares each node's variable
+# with the canvas's value for it.
 #
-# Rows are compared as a set, for the Python probe's reason. One column is compared as a set
-# *within* each cell: rcatmaid reads a neuron's annotations through a different endpoint from the
-# canvas, which hands back the same labels in another order (see `r/catmaidHelpers.ts`).
+# Rows are compared as a set, for the Python probe's reason, and the same columns are left out
+# (`uncompared`). One column is compared as a set *within* each cell: rcatmaid reads a neuron's
+# annotations through a different endpoint from the canvas, which hands back the same labels in
+# another order (see `r/catmaidHelpers.ts`).
 #
-# Needs rcatmaid (`remotes::install_github("natverse/rcatmaid")`), nat, dplyr, jsonlite and a
-# network. Exits non-zero on any disagreement.
+# Needs the fixture's packages (rcatmaid; fafbseg, arrow and reticulate) and a network. The CAVE
+# fixture reaches caveclient through reticulate: where no Python is configured, this points
+# RETICULATE_PYTHON at the `python3` on the PATH, which must have caveclient. Exits non-zero on
+# any disagreement.
 
 suppressPackageStartupMessages({
   library(jsonlite)
@@ -21,11 +25,16 @@ suppressPackageStartupMessages({
 options(warn = -1)
 
 args <- commandArgs(trailingOnly = TRUE)
-dir <- if (length(args) > 0) args[[1]] else Sys.getenv("CATMAID_PROBE_OUT", "/tmp/coda-catmaid-probe")
+fixture <- if (length(args) > 0) args[[1]] else Sys.getenv("EXPORT_LIVE")
+dir <- Sys.getenv("EXPORT_LIVE_OUT", file.path("/tmp/coda-export-live", fixture))
+if (fixture == "cave" && !nzchar(Sys.getenv("RETICULATE_PYTHON"))) {
+  Sys.setenv(RETICULATE_PYTHON = Sys.which("python3"))
+}
 
 # Node id on the canvas -> port -> the document variable bound to it. Written out, as in the
 # Python probe: a variable an emitter stops binding should fail here by name.
-ports <- list(
+ports <- list()
+ports$catmaid <- list(
   find = list(neurons = "find_neurons"),
   explore = list(all = "explore_dataset_all", hits = "explore_dataset_hits", selected = "explore_dataset_selected"),
   ids = list(neurons = "input_ids"),
@@ -40,6 +49,27 @@ ports <- list(
   betweenOut = list(points = "synapses_between_2"),
   rmesh = list(meshes = "roi_meshes"),
   l1find = list(neurons = "find_neurons_2")
+)
+ports$cave <- list(
+  find = list(neurons = "find_neurons"),
+  explore = list(all = "explore_dataset_all", hits = "explore_dataset_hits", selected = "explore_dataset_selected"),
+  between = list(points = "synapses_between"),
+  betweenOut = list(points = "synapses_between_2"),
+  ann = list(annotations = "cave_table"),
+  stale = list(neurons = "input_ids"),
+  repair = list(out = "update_root_ids"),
+  repairVote = list(out = "update_root_ids_2"),
+  tables = list(out = "list_cave_tables"),
+  info = list(columns = "cave_table_info")
+)
+
+# Node -> canvas columns a document leaves out on purpose, as in the Python probe.
+uncompared <- list(
+  cave = list(
+    between = c("type", "partnerType"),
+    betweenOut = c("type", "partnerType"),
+    info = c("type", "example")
+  )
 )
 
 run_document <- function(path) {
@@ -70,15 +100,20 @@ row_strings <- function(frame, columns) {
   }, ""))
 }
 
-compare_rows <- function(label, canvas_rows, frame) {
+compare_rows <- function(label, canvas_rows, frame, skip = character(0)) {
   frame <- as.data.frame(frame)
   canvas <- if (length(canvas_rows) == 0) data.frame() else as.data.frame(canvas_rows)
-  columns <- if (ncol(canvas)) names(canvas) else names(frame)
+  columns <- setdiff(if (ncol(canvas)) names(canvas) else names(frame), skip)
   missing <- setdiff(columns, names(frame))
   if (length(missing)) return(sprintf("%s: the document has no column(s) %s; it has %s", label, paste(missing, collapse = ", "), paste(names(frame), collapse = ", ")))
+  problems <- character(0)
+  extra <- setdiff(names(frame), c(names(canvas), skip))
+  if (ncol(canvas) && length(extra)) {
+    problems <- c(problems, sprintf("%s: the document has column(s) the canvas does not: %s",
+                                    label, paste(extra, collapse = ", ")))
+  }
   a <- row_strings(canvas, columns)
   b <- row_strings(frame, columns)
-  problems <- character(0)
   if (length(a) != length(b)) problems <- c(problems, sprintf("%s: %d rows on the canvas, %d in the document", label, length(a), length(b)))
   differ <- setdiff(a, b)
   if (length(differ)) {
@@ -88,9 +123,9 @@ compare_rows <- function(label, canvas_rows, frame) {
   problems
 }
 
-compare <- function(label, canvas, value) {
+compare <- function(label, canvas, value, skip = character(0)) {
   kind <- canvas$kind
-  if (kind %in% c("table", "points")) return(compare_rows(label, canvas$rows, value))
+  if (kind %in% c("table", "points")) return(compare_rows(label, canvas$rows, value, skip))
   if (kind == "matrix") {
     problems <- character(0)
     if (!identical(rownames(value), as.character(canvas$rowLabels))) problems <- c(problems, sprintf("%s: row labels differ", label))
@@ -139,17 +174,20 @@ compare <- function(label, canvas, value) {
   sprintf("%s: no comparison for kind %s", label, kind)
 }
 
+if (!fixture %in% names(ports)) stop("Which fixture? One of ", paste(names(ports), collapse = ", "))
 canvas <- fromJSON(file.path(dir, "canvas.json"), simplifyVector = TRUE)
-env <- run_document(file.path(dir, "catmaid.Rmd"))
+env <- run_document(file.path(dir, paste0(fixture, ".Rmd")))
 problems <- character(0)
 checked <- 0
-for (node in names(ports)) {
+for (node in names(ports[[fixture]])) {
   entry <- canvas[[node]]
   if (entry$state != "ok") { problems <- c(problems, sprintf("%s: the canvas did not run it", node)); next }
-  for (port in names(ports[[node]])) {
-    variable <- ports[[node]][[port]]
+  for (port in names(ports[[fixture]][[node]])) {
+    variable <- ports[[fixture]][[node]][[port]]
     if (!exists(variable, envir = env)) { problems <- c(problems, sprintf("%s.%s: the document binds no `%s`", node, port, variable)); next }
-    found <- compare(sprintf("%s.%s", node, port), entry$outputs[[port]], get(variable, envir = env))
+    skip <- uncompared[[fixture]][[node]]
+    if (is.null(skip)) skip <- character(0)
+    found <- compare(sprintf("%s.%s", node, port), entry$outputs[[port]], get(variable, envir = env), skip)
     problems <- c(problems, found)
     checked <- checked + 1
     cat(sprintf("%s %s.%s (%s)\n", if (length(found)) "FAIL" else "ok  ", node, port, variable))

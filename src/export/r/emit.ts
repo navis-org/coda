@@ -399,9 +399,10 @@ function setupChunk(packages: Set<RPackage>): Cell {
   for (const pkg of declared) {
     const minimum = PACKAGES[pkg].minimum
     if (minimum) lines.push(`# ${pkg} >= ${minimum.version}, for ${minimum.for}.`)
+    for (const line of PACKAGES[pkg].setup ?? []) lines.push(`# ${line}`)
   }
   lines.push('')
-  for (const pkg of declared) lines.push(`library(${pkg})`)
+  for (const pkg of declared) if (PACKAGES[pkg].attach !== false) lines.push(`library(${pkg})`)
 
   return { kind: 'code', label: 'setup', source: lines }
 }

@@ -1,7 +1,6 @@
 /** Build Network, Paths, Explore, Profile, the clustering trio, and the similarity pair. */
 
 // An emitter may reach `src/ui` — see the notebook emitter for why the palette lives there.
-import { CATMAID_TEXT } from '../../plans/query'
 import { profileExportPin } from '../../plans/profile'
 import { MAX_SERIES } from '../../../style/colors'
 import { clusterColor } from '../../../style/encoding'
@@ -11,7 +10,7 @@ import { portIdAt } from '../../../core/ports'
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
-import { codaIds, isCatmaidDataset, neuronIds } from './common'
+import { codaIds, labelsFrame, neuronIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { populationCypher } from '../../../data/neuprint/cypher'
 import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
@@ -344,8 +343,10 @@ registerEmitter(
     const hits = ctx.output('hits')
     const selected = ctx.output('selected')
     const plan = explorePlan(ctx)
-    const lines: string[] = isCatmaidDataset(ctx)
-      ? [...ctx.note(CATMAID_TEXT.explore), `${all} <- coda_catmaid_labels(${conn})`]
+    // A CATMAID project and a CAVE datastack are searched over their neuron table, held once.
+    const labels = labelsFrame(ctx, conn)
+    const lines: string[] = labels
+      ? [...ctx.note(labels.text.explore), `${all} <- ${labels.frame}`]
       : neuprintExplore(ctx, conn, all)
 
     if (plan.hits.note === undefined) {
@@ -375,7 +376,7 @@ registerEmitter(
     }
     return lines
   },
-  { backends: ['neuprint', 'catmaid'] },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
 )
 
 /** The neuPrint index: every neuron, through the Cypher this chunk writes by hand. */

@@ -16,6 +16,9 @@ import { sheetConfigFrom, sheetExportUrl } from '../../data/annotations'
 import { namedColumns } from '../../data/annotations/types'
 import { DEFAULT_SERVER } from '../../data/neuprint/servers'
 import { catmaidServerOfSource, normaliseCatmaidServer } from '../../data/catmaid/registry'
+import { CUSTOM_SOURCE_ID } from '../../data/custom/layout'
+import { CAVE_TEXT } from './cave'
+import { datasetBackend } from '../backends'
 import { SKELETON_ROUTES } from '../../data/skeletonRoutes'
 import { datasetFamily, resolveDatasetId } from '../../nodes/lib/datasetFamilies'
 import { parseIdList } from '../../nodes/lib/idList'
@@ -124,6 +127,54 @@ export const CATMAID_TEXT = {
   description:
     "This card shows the project's description from the CATMAID server's project list, " +
     'so there is no code to export.',
+}
+
+/**
+ * What a dataset searched over a local neuron index says, and what a region filter does there —
+ * one entry per backend. Having an entry *is* being searched locally: `localIndex` is the one
+ * question both languages' emitters ask, so the list of such backends cannot be kept twice. A region is refused where the canvas
+ * refuses it (CATMAID has volumes but no query naming what is in one) and answers empty where the
+ * canvas answers empty (CAVE and a Custom Dataset publish no regions at all).
+ */
+export interface LocalIndexText {
+  search: string
+  explore: string
+  region: (roi: string) => { refusal: string } | { emptyNote: string }
+}
+
+const LOCAL_INDEX_TEXT: Record<string, LocalIndexText> = {
+  catmaid: {
+    search: CATMAID_TEXT.search,
+    explore: CATMAID_TEXT.explore,
+    region: (roi) => ({ refusal: CATMAID_TEXT.region(roi) }),
+  },
+  cave: {
+    search: CAVE_TEXT.search,
+    explore: CAVE_TEXT.explore,
+    region: (roi) => ({ emptyNote: CAVE_TEXT.noRegions(roi) }),
+  },
+  [CUSTOM_SOURCE_ID]: {
+    search: 'A Custom Dataset’s neurons are its Neurons table, filtered here as on the canvas.',
+    explore:
+      'Explore Dataset searches the whole neuron table locally: here the Custom Dataset’s ' +
+      'Neurons table, or every id its edge list names where none is wired.',
+    region: (roi) => ({
+      emptyNote:
+        `This node filters on region "${roi}", and a Custom Dataset publishes no regions, so ` +
+        'the result is empty. Clear `In ROI` to get neurons back.',
+    }),
+  },
+}
+
+/**
+ * The local index of the dataset on a port — CATMAID's, CAVE's or a Custom Dataset's — or
+ * undefined where the search runs on the server.
+ */
+export function localIndex(
+  ctx: Pick<NeutralContext, 'inputType'>,
+  portId = 'dataset',
+): LocalIndexText | undefined {
+  return LOCAL_INDEX_TEXT[datasetBackend(ctx, portId)]
 }
 
 /** A project id as a literal: bare where it is a number, which a CATMAID project id always is. */

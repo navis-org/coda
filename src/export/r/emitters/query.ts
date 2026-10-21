@@ -37,6 +37,8 @@ import {
   codaIds,
   cypherIdList,
   isCatmaidDataset,
+  isCaveDataset,
+  labelsFrame,
   neuronIds,
   rPopulationPredicate,
 } from './common'
@@ -45,7 +47,6 @@ import { populationFromType } from '../../../nodes/lib/populationParams'
 
 import type { DatasetNote, SkeletonsNote } from '../../plans/query'
 import {
-  CATMAID_TEXT,
   datasetFamilyPlan,
   datasetNodePlan,
   inputIdsPlan,
@@ -54,6 +55,7 @@ import {
   skeletonsPlan,
   synapsesBetweenPlan,
 } from '../../plans/query'
+import { CAVE_TEXT, caveSynapsePlan } from '../../plans/cave'
 
 // ---------------------------------------------------------------------------
 // Dataset
@@ -225,12 +227,14 @@ registerEmitter(
      * compiler `out.table`'s header filters use. A region is refused rather than answered empty,
      * because the canvas refuses it — CATMAID has volumes but no query naming what is in one.
      */
-    if (isCatmaidDataset(ctx)) {
-      if (roi) {
-        return ctx.todo(CATMAID_TEXT.region(roi))
-      }
+    const labels = labelsFrame(ctx, conn)
+    if (labels) {
+      const { text } = labels
+      const region = roi ? text.region(roi) : undefined
+      if (region && 'refusal' in region) return ctx.todo(region.refusal)
       ctx.library('dplyr')
-      lines.push(...ctx.note(CATMAID_TEXT.search), `${out} <- coda_catmaid_labels(${conn})`)
+      lines.push(...ctx.note(text.search), `${out} <- ${labels.frame}`)
+      if (region) return [...lines, ...ctx.note(region.emptyNote), `${out} <- ${out}[0, ]`]
       if (resolved.terms.length > 0) {
         lines.push(
           `${out} <- ${out} |> filter(${filterPredicates(resolved.terms, schema).join(', ')})`,
@@ -321,7 +325,7 @@ registerEmitter(
     }
     return lines
   },
-  { backends: ['neuprint', 'catmaid'] },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
 )
 
 // ---------------------------------------------------------------------------
@@ -821,6 +825,55 @@ registerEmitter(
     if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
     const labelled = plan.open !== undefined && !plan.includeFragments
     const out = ctx.output('points')
+    if (isCaveDataset(ctx)) {
+      // The notebook's CAVE route through fafbseg: the datastack's synapse table or view, both
+      // ends bound where wired, the score floored, positions at the drawn end in nanometres.
+      const synapses = caveSynapsePlan(ctx.inputType('dataset'), plan.location)
+      if (synapses.refusal !== undefined) return ctx.todo(synapses.refusal)
+      const { table, preColumn, postColumn, position, score } = synapses
+      const filters = [
+        ...(sources ? [`${preColumn} = as.list(${neuronIds(sources)})`] : []),
+        ...(targets ? [`${postColumn} = as.list(${neuronIds(targets)})`] : []),
+      ]
+      ctx.helper('coda_synapses_between')
+      return [
+        ...(table ? [] : ctx.note(CAVE_TEXT.unspecced)),
+        `${out} <- coda_cave_query(`,
+        ...rArgs([
+          conn,
+          table
+            ? rStr(table.name)
+            : `coda_cave_client(${conn})$info$get_datastack_info()$synapse_table`,
+          `filter_in_dict = list(${filters.join(', ')})`,
+          ...(plan.minConfidence > 0 && score
+            ? [`filter_greater_equal_dict = list(${score} = ${plan.minConfidence})`]
+            : []),
+          'desired_resolution = c(1, 1, 1)',
+          'split_positions = TRUE',
+        ]),
+        `)`,
+        `${out} <- coda_synapses_between(`,
+        ...rArgs([
+          out,
+          rStr(preColumn),
+          rStr(postColumn),
+          rStr(position),
+          score ? rStr(score) : 'NA_character_',
+          rStr(plan.location),
+        ]),
+        `)`,
+        // The open side's fragments: on CAVE "published" is the datastack's index.
+        ...(labelled
+          ? [
+              `${out} <- ${out}[${out}[[${rStr(plan.open!)}]] %in% ${labelsFrame(ctx, conn)!.frame}$neuronId, ]`,
+            ]
+          : []),
+        ...(plan.minConfidence > 0 && !score
+          ? ctx.note(CAVE_TEXT.noScore(plan.minConfidence))
+          : []),
+        ...ctx.note(CAVE_TEXT.noTypes),
+      ]
+    }
     if (isCatmaidDataset(ctx)) {
       // Drawn at the connector whichever end `Location` names, so Location picks which link's
       // confidence the row carries. `Include fragments` is real: a project's connectors reach
@@ -863,5 +916,5 @@ registerEmitter(
       `${out}$polarity <- ${rStr(plan.location)}`,
     ]
   },
-  { backends: ['neuprint', 'catmaid'] },
+  { backends: ['neuprint', 'cave', 'catmaid'] },
 )

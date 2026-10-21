@@ -1,18 +1,21 @@
-"""Run the notebook exported from `catmaidGraph` and compare it with what the canvas produced.
+"""Run the notebook exported from a live fixture and compare it with what the canvas produced.
 
-    pnpm probe:catmaid
+    pnpm probe:catmaid          # python3 scripts/probe-export-live.py catmaid
+    CAVE_TOKEN=… pnpm probe:cave   # python3 scripts/probe-export-live.py cave
 
-The second half of `src/export/catmaid.live.test.ts`, which ran the same graph against Virtual
-Fly Brain through a real Scheduler and wrote `canvas.json` and `catmaid.ipynb` into one directory.
-This executes every code cell of the notebook in one namespace — against the same public servers,
-read only — and compares each node's variable with the canvas's value for it.
+The second half of `src/export/live.test.ts`, which ran the fixture's graph against the live
+servers through a real Scheduler and wrote `canvas.json` and `<fixture>.ipynb` into one
+directory. This executes every code cell of the notebook in one namespace — against the same
+servers, read only — and compares each node's variable with the canvas's value for it.
 
-The comparison is of *rows as a set*: pymaid fetches connector links in chunks of fifty skeletons
-and the canvas fetches them per relation, so the same links arrive in a different order, and
-nothing downstream of either reads that order. Everything else must agree exactly, apart from the
-float tolerance a position or a cable length rounded through JSON needs.
+The comparison is of *rows as a set*: a library fetches in chunks of its own choosing, and the
+same rows arrive in another order, which nothing downstream of either reads. Everything else
+must agree exactly, apart from the float tolerance a position or a length rounded through JSON
+needs, and apart from the columns `UNCOMPARED` names — each one a column the document says, in a
+NOTE, that it leaves out.
 
-Needs pymaid (`pip install python-catmaid`) and a network. Exits non-zero on any disagreement.
+Needs the fixture's client (pymaid, caveclient) and a network. Exits non-zero on any
+disagreement.
 """
 
 import json
@@ -22,11 +25,13 @@ import sys
 
 import pandas as pd
 
-DIR = sys.argv[1] if len(sys.argv) > 1 else os.environ.get('CATMAID_PROBE_OUT', '/tmp/coda-catmaid-probe')
+FIXTURE = sys.argv[1] if len(sys.argv) > 1 else os.environ.get('EXPORT_LIVE', '')
+DIR = os.environ.get('EXPORT_LIVE_OUT', f'/tmp/coda-export-live/{FIXTURE}')
 
 # Node id on the canvas -> port -> the notebook variable bound to it. Written out rather than
 # derived: a variable a renamed emitter stops binding should fail here by name, not vanish.
-PORTS = {
+PORTS = {}
+PORTS['catmaid'] = {
     'find': {'neurons': 'find_neurons'},
     'explore': {'all': 'explore_dataset_all_', 'hits': 'explore_dataset_hits',
                 'selected': 'explore_dataset_selected'},
@@ -45,12 +50,39 @@ PORTS = {
     'l1find': {'neurons': 'find_neurons_2'},
 }
 
+PORTS['cave'] = {
+    'find': {'neurons': 'find_neurons'},
+    'explore': {'all': 'explore_dataset_all_', 'hits': 'explore_dataset_hits',
+                'selected': 'explore_dataset_selected'},
+    'between': {'points': 'synapses_between'},
+    'betweenOut': {'points': 'synapses_between_2'},
+    'ann': {'annotations': 'cave_table'},
+    'stale': {'neurons': 'input_ids'},
+    'repair': {'out': 'update_root_ids'},
+    'repairVote': {'out': 'update_root_ids_2'},
+    'tables': {'out': 'list_cave_tables'},
+    'info': {'columns': 'cave_table_info'},
+}
+
+# Node -> canvas columns a document leaves out on purpose, each said in that cell's NOTE.
+UNCOMPARED = {
+    'cave': {
+        # "This table names the two bodies of each synapse but not their cell types."
+        'between': {'type', 'partnerType'},
+        'betweenOut': {'type', 'partnerType'},
+        # The card shows a dtype in Coda's vocabulary and an example in its own format; the cell
+        # shows its library's (`2023-06-19 06:43:32…` for a timestamp, `True` for a flag).
+        'info': {'type', 'example'},
+    },
+}
+
 def run_notebook(path):
     # Quiet, before the notebook's own `import pymaid` rebinds the same module: its progress bars
     # and cache notices would bury the comparison.
-    import pymaid
-    pymaid.set_loggers('WARNING')
-    pymaid.set_pbars(hide=True)
+    if FIXTURE == 'catmaid':
+        import pymaid
+        pymaid.set_loggers('WARNING')
+        pymaid.set_pbars(hide=True)
     notebook = json.load(open(path))
     scope = {}
     for cell in notebook['cells']:
@@ -85,13 +117,17 @@ def normalised(rows, columns):
     return sorted(out, key=lambda t: tuple('' if v is None else str(v) for v in t))
 
 
-def compare_rows(label, canvas_rows, frame):
+def compare_rows(label, canvas_rows, frame, skip=()):
     problems = []
     notebook_rows = frame.to_dict('records')
     columns = list(canvas_rows[0].keys()) if canvas_rows else list(frame.columns)
+    columns = [c for c in columns if c not in skip]
     missing = [c for c in columns if c not in frame.columns]
     if missing:
         return [f'{label}: notebook has no column(s) {missing}; it has {list(frame.columns)}']
+    extra = [c for c in frame.columns if canvas_rows and c not in canvas_rows[0] and c not in skip]
+    if extra:
+        problems.append(f'{label}: notebook has column(s) the canvas does not: {extra}')
     if len(canvas_rows) != len(notebook_rows):
         problems.append(f'{label}: {len(canvas_rows)} rows on the canvas, {len(notebook_rows)} in the notebook')
     a = normalised(canvas_rows, columns)
@@ -107,10 +143,10 @@ def compare_rows(label, canvas_rows, frame):
     return problems
 
 
-def compare(label, canvas, value):
+def compare(label, canvas, value, skip=()):
     kind = canvas['kind']
     if kind in ('table', 'points'):
-        return compare_rows(label, canvas['rows'], value)
+        return compare_rows(label, canvas['rows'], value, skip)
     if kind == 'matrix':
         frame = value
         problems = []
@@ -163,11 +199,13 @@ def compare(label, canvas, value):
 
 
 def main():
+    if FIXTURE not in PORTS:
+        sys.exit(f'Which fixture? One of {sorted(PORTS)}.')
     canvas = json.load(open(os.path.join(DIR, 'canvas.json')))
-    scope = run_notebook(os.path.join(DIR, 'catmaid.ipynb'))
+    scope = run_notebook(os.path.join(DIR, f'{FIXTURE}.ipynb'))
     problems = []
     checked = 0
-    for node, ports in PORTS.items():
+    for node, ports in PORTS[FIXTURE].items():
         entry = canvas[node]
         if entry['state'] != 'ok':
             problems.append(f'{node}: the canvas did not run it ({entry["state"]}: {entry.get("error")})')
@@ -176,7 +214,8 @@ def main():
             if variable not in scope:
                 problems.append(f'{node}.{port}: the notebook binds no `{variable}`')
                 continue
-            found = compare(f'{node}.{port}', entry['outputs'][port], scope[variable])
+            skip = UNCOMPARED.get(FIXTURE, {}).get(node, set())
+            found = compare(f'{node}.{port}', entry['outputs'][port], scope[variable], skip)
             problems.extend(found)
             checked += 1
             print(f'{"FAIL" if found else "ok  "} {node}.{port} ({variable})')
