@@ -1316,7 +1316,7 @@ registerHelper({
  * Read one mesh file, whichever of the three formats it is.
  *
  * A helper rather than a definition inside `core.uploadMesh`'s own chunk, which is what every
- * other `coda_*` function here is and what `resolveHelpers` dedupes: emitters run once per node,
+ * other `coda_*` function here is and what `helperClosure` dedupes: emitters run once per node,
  * so two Upload Mesh cards wrote the definition into the document twice.
  *
  * **Three routes, because R has no one reader.** `rgl::readOBJ` answers a `mesh3d` directly.

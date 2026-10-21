@@ -339,7 +339,7 @@ describe('the Neuron Set port', () => {
       'connectivity_neuron_set <- neuprint_get_meta(.endpoints$neuronId, conn = hemibrain_neuprint) |> coda_neurons()',
     )
     expect(source).toContain("below the dataset's neuron threshold")
-    // The helper the pipe calls has to be declared, not merely called: `resolveHelpers` only
+    // The helper the pipe calls has to be declared, not merely called: `helperClosure` only
     // writes out what was asked for, and a chunk calling an undefined function knits and fails.
     expect(source).toContain('coda_neurons <- function(')
   })

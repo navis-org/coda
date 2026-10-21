@@ -41,6 +41,8 @@ import { registerHelper } from './registry'
 registerHelper({
   name: 'CodaCatmaidDataset',
   needs: ['coda_walk'],
+  // Only the methods a notebook calls are written out, `trimHelpers.ts`.
+  trim: 'methods',
   requires: [['pandas'], ['navis'], ['pymaid']],
   source: [
     'class CodaCatmaidDataset:',

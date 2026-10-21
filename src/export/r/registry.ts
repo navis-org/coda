@@ -37,18 +37,7 @@ export function registerHelper(spec: HelperSpec): void {
   helpers.set(spec.name, spec)
 }
 
-/** A helper's transitive closure, dependency first, deterministic. */
-export function resolveHelpers(names: Iterable<string>): HelperSpec[] {
-  const out: HelperSpec[] = []
-  const seen = new Set<string>()
-  const visit = (name: string): void => {
-    if (seen.has(name)) return
-    seen.add(name)
-    const spec = helpers.get(name)
-    if (!spec) throw new Error(`Unknown R helper "${name}"`)
-    for (const dep of spec.needs ?? []) visit(dep)
-    out.push(spec)
-  }
-  for (const name of [...names].sort()) visit(name)
-  return out
+/** Every registered helper, for `assembleHelpers`. */
+export function helperRegistry(): ReadonlyMap<string, HelperSpec> {
+  return helpers
 }

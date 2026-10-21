@@ -109,6 +109,8 @@ registerHelper({
  */
 registerHelper({
   name: 'CodaTableFile',
+  // Only the methods a notebook calls are written out, `trimHelpers.ts`.
+  trim: 'methods',
   needs: ['coda_typed_ids', 'coda_is_id_name'],
   requires: [
     ['copy'],
@@ -443,6 +445,8 @@ registerHelper({
  */
 registerHelper({
   name: 'CodaCustomDataset',
+  // Only the methods a notebook calls are written out, `trimHelpers.ts`.
+  trim: 'methods',
   needs: ['coda_id_column', 'coda_typed_ids', 'CodaTableFile', 'CodaFrameTable', 'coda_walk'],
   requires: [['pandas']],
   source: [

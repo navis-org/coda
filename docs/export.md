@@ -1045,6 +1045,37 @@ sea-serpent cell renders too. Measured against FlyWire's `main.info` by `pnpm pr
 ("column target_id not found in proofread_neurons"), and so do both documents: a fixture reaching
 a branch, not a question. The probe graph (`caveProbeGraph`) asks real questions instead.
 
+### A helper is written out only as far as the document uses it
+
+A backend's helper can be a class (`CodaCatmaidDataset`, `CodaCustomDataset`, `CodaTableFile`)
+or a file of functions (R's `coda_catmaid_dataset` and its siblings), and every graph on that
+backend pulled it in whole. Measured on workflows the wizard builds: a seven-node FAFB partners
+notebook was 397 lines, 356 of them helpers and 19 the workflow's own. A helper declaring `trim`
+(`'methods'` or `'functions'`) is now split into members by `src/export/trimHelpers.ts`, and only
+the members the document refers to are written out: that notebook is 258 lines in Python and 273
+in R, a FAFB morphology workflow 165.
+
+**What is kept is read off the document, never declared.** Calls to these methods are spread
+over a dozen emitters, several of them shared with the Custom Dataset, whose class has methods of
+the same names, so a declared list is one an emitter forgets and the result is an
+`AttributeError` at run time that no golden shows. A member is kept when the body cells, a helper
+kept whole, or a member already kept refers to it — `.name` in Python, the name as a word in R —
+to a fixed point. A whole-line comment is not a reference: the R entry function names
+`coda_catmaid_labels` in one, which kept the neuron table's builder in every CATMAID document. The rule's cost is a false positive, a few extra lines, never a missing method.
+A trimmed helper's `needs` are conditional the same way, so `coda_walk` leaves with
+`connectivity`, and so are a trimmed Python class's imports, each kept only where the kept source
+uses its alias, so a partners notebook no longer imports navis for a `skeletons` it does not have.
+The class head, constants and dunder methods (R: the function named after the helper) are always
+kept, and a class with code after it is refused, that code having no member to belong to.
+`trimHelpers.test.ts` splits every registered trimmable helper and checks no line is lost or
+absorbed, since a mis-split would drop a line silently.
+
+Trimming changed nothing in the goldens: the fixtures exist to reach every branch, so they call
+every method (the 3D View cell that moved in both is the separate one-call-per-socket fix).
+The trimmed output was run instead: the four FAFB wizard workflows (partners, network, matrix,
+morphology), in both languages, against VFB, with three typed neurons in place of the wizard's
+filterless Find Neurons, which answers none by design.
+
 ### The R Markdown exporter
 
 `Save ▸ Export as R Markdown` writes the same graph as an `.Rmd` on **neuprintr, dplyr, nat,

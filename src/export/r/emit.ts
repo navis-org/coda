@@ -30,7 +30,8 @@ import { unsupportedBackend, unsupportedBackendText } from '../backends'
 import { nodeLabel } from '../../core/graph'
 import { renderRmd } from './rmarkdown'
 import { chunkLabel, rComment, rIdent, rPortIdent } from './r'
-import { emitterBackends, getEmitter, resolveHelpers } from './registry'
+import { emitterBackends, getEmitter, helperRegistry } from './registry'
+import { assembleHelpers } from '../trimHelpers'
 import type { Cell, EmitContext, RPackage } from './types'
 import { PACKAGES } from './types'
 
@@ -336,7 +337,7 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
   // Helpers first, and not for tidiness: a helper attaches packages of its own, so building
   // the setup chunk before them would leave a generated function calling a library nobody
   // attached.
-  const helperCell = helperChunk(helpers, library)
+  const helperCell = helperChunk(helpers, library, bodyCells)
 
   const cells: Cell[] = [
     ...titleCells(graph),
@@ -414,10 +415,14 @@ function setupChunk(packages: Set<RPackage>): Cell {
  * none of it. Packages a helper needs are collected here, after the walk, which is why
  * `library` is threaded in rather than closed over at the call site.
  */
-function helperChunk(names: Set<string>, library: (pkg: RPackage) => void): Cell[] {
+function helperChunk(
+  names: Set<string>,
+  library: (pkg: RPackage) => void,
+  body: readonly Cell[],
+): Cell[] {
   if (names.size === 0) return []
-  const specs = resolveHelpers(names)
-  for (const spec of specs) for (const pkg of spec.requires ?? []) library(pkg)
+  const assembled = assembleHelpers(names, helperRegistry(), 'R', body)
+  for (const { spec } of assembled) for (const pkg of spec.requires ?? []) library(pkg)
 
   const lines: string[] = [
     ...rComment(
@@ -427,9 +432,9 @@ function helperChunk(names: Set<string>, library: (pkg: RPackage) => void): Cell
     ),
     '',
   ]
-  specs.forEach((spec, i) => {
+  assembled.forEach(({ source }, i) => {
     if (i > 0) lines.push('', '')
-    lines.push(...spec.source)
+    lines.push(...source)
   })
 
   return [{ kind: 'code', label: 'coda-helpers', source: lines }]

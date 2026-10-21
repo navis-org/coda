@@ -13,6 +13,7 @@
  */
 
 import type { GraphNode } from '../../core/graph'
+import type { TrimRule } from '../trimHelpers'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import type { AttributePart, CodaType, TableSchema } from '../../core/types'
 
@@ -362,4 +363,9 @@ export interface HelperSpec {
   /** Modules the body uses. */
   requires?: Array<[PyModule, ...string[]]>
   source: string[]
+  /**
+   * `'methods'` for a class of which a document carries only the methods it calls, and only the
+   * `needs` those methods name. See `trimHelpers.ts`.
+   */
+  trim?: TrimRule
 }

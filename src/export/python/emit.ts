@@ -24,7 +24,9 @@ import { nodeLabel } from '../../core/graph'
 import type { Notebook } from './notebook'
 import { buildNotebook } from './notebook'
 import { pyComment, pyIdent, pyPortIdent } from './py'
-import { emitterBackends, getEmitter, resolveHelpers } from './registry'
+import { emitterBackends, getEmitter, helperRegistry } from './registry'
+import { assembleHelpers } from '../trimHelpers'
+import { escapeRegex } from '../../data/terms'
 import type { Cell, EmitContext, PyModule } from './types'
 import { MODULES } from './types'
 
@@ -327,7 +329,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
 
   // Helpers first, and not for tidiness: a helper declares modules of its own, so building
   // the setup cell before them would leave a generated function calling an import nobody made.
-  const helperCell = helperCells(helpers, require)
+  const helperCell = helperCells(helpers, require, bodyCells)
 
   const cells: Cell[] = [
     ...titleCells(graph, options),
@@ -388,6 +390,23 @@ function setupCell(modules: Map<PyModule, Set<string>>): Cell {
 }
 
 /**
+ * Whether helper source uses a module: by one of the names a `from` import binds, or through the
+ * alias a whole-module import binds (`pd.`, `navis.`) — `setupCell`'s two forms, asked the same
+ * way it decides between them. A module this cannot read an alias off is kept.
+ */
+function usesModule(source: string, module: PyModule, imported: readonly string[]): boolean {
+  const spec = MODULES[module]
+  if (spec.from)
+    return imported.some((name) =>
+      new RegExp(`(?<![.\\w])${escapeRegex(name)}\\b`).test(source),
+    )
+  const bound = /^import ([\w.]+)(?: as (\w+))?$/.exec(spec.statement ?? '')
+  if (!bound) return true
+  const alias = bound[2] ?? bound[1]!.split('.')[0]!
+  return new RegExp(`(?<![.\\w])${escapeRegex(alias)}\\.`).test(source)
+}
+
+/**
  * The helper cell.
  *
  * Emitted only when something asked for a helper, so a workflow of pandas one-liners carries
@@ -397,12 +416,17 @@ function setupCell(modules: Map<PyModule, Set<string>>): Cell {
 function helperCells(
   names: Set<string>,
   require: (module: PyModule, ...names: string[]) => void,
+  body: readonly Cell[],
 ): Cell[] {
   if (names.size === 0) return []
-  const specs = resolveHelpers(names)
+  const assembled = assembleHelpers(names, helperRegistry(), 'Python', body)
 
-  for (const spec of specs) {
-    for (const [module, ...imported] of spec.requires ?? []) require(module, ...imported)
+  for (const { spec, source } of assembled) {
+    for (const [module, ...imported] of spec.requires ?? []) {
+      // A trimmed class imports only what its kept methods use: `navis` leaves with `skeletons`.
+      if (!spec.trim || usesModule(source.join('\n'), module, imported))
+        require(module, ...imported)
+    }
   }
 
   const lines: string[] = [
@@ -413,9 +437,9 @@ function helperCells(
     ),
     '',
   ]
-  specs.forEach((spec, i) => {
+  assembled.forEach(({ source }, i) => {
     if (i > 0) lines.push('', '')
-    lines.push(...spec.source)
+    lines.push(...source)
   })
 
   return [{ kind: 'code', source: lines }]

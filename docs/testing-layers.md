@@ -412,6 +412,7 @@ lean on:
 | `export/r/coverage.test.ts`            | the R drift tripwire, at the notebook's bar                                                          |
 | `export/r/edgeProperties.test.ts`      | edge properties in the R document via `neuprint_fetch_custom`                                        |
 | `export/r/export.test.ts`              | the R Markdown goldens and the population filter in R's two spellings                                |
+| `export/trimHelpers.test.ts`           | trimming a helper to the members a document refers to: Python methods and R functions, private closure, conditional `needs` |
 
 ### Assistant, MCP, Pyodide and the wizard
 

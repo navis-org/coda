@@ -35,6 +35,8 @@ import { registerHelper } from './registry'
 registerHelper({
   name: 'coda_catmaid_dataset',
   needs: ['coda_walk'],
+  // Only the functions a document calls are written out, `trimHelpers.ts`.
+  trim: 'functions',
   requires: ['catmaid', 'dplyr'],
   source: [
     'coda_catmaid_dataset <- function(server, project_id, token = NULL) {',

@@ -8,6 +8,7 @@
  */
 
 import type { GraphNode } from '../../core/graph'
+import type { TrimRule } from '../trimHelpers'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import type { AttributePart, CodaType, TableSchema } from '../../core/types'
 
@@ -207,4 +208,9 @@ export interface HelperSpec {
   needs?: string[]
   requires?: RPackage[]
   source: string[]
+  /**
+   * `'functions'` for a file of functions of which a document carries only the ones it calls, and
+   * only the `needs` those name. See `trimHelpers.ts`.
+   */
+  trim?: TrimRule
 }
