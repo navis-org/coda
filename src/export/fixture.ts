@@ -2261,6 +2261,126 @@ export function customGraph(): CodaGraph {
 }
 
 /**
+ * The CATMAID half: both published VFB instances, a Custom CATMAID, and every query node a CATMAID
+ * project can answer.
+ *
+ * Its own graph rather than part of `everythingGraph`, though both languages emit it: a CATMAID
+ * dataset's cells read from a generated class rather than a client, so they are a different
+ * document, and keeping them apart keeps the everything golden a neuPrint document.
+ *
+ * It is also the graph `catmaid.live.test.ts` runs against VFB and hands to the two probe scripts,
+ * which is why its questions are real ones with small answers — fifteen DA1 projection neurons and
+ * two named skeletons — rather than the everything graph's placeholders. `lab` is the one node the
+ * live run leaves out (`withLab: false`): its server is invented.
+ */
+export function catmaidGraph({ withLab = true }: { withLab?: boolean } = {}): CodaGraph {
+  let g = emptyGraph('CATMAID')
+  g.meta = { ...g.meta, description: 'A CATMAID project, and what asks it.' }
+
+  const da1 = encodeRows([{ field: 'type', op: 'is', values: ['Uniglomerular mALT DA1 lPN'] }])
+  const nodes: Spec[] = [
+    { id: 'fafb', type: 'dataset.catmaid.fafb', col: 0 },
+    { id: 'find', type: 'neuron.findNeurons', col: 1, params: { filters: da1 } },
+    { id: 'explore', type: 'neuron.explore', col: 1, row: 1, params: { query: 'DA1' } },
+    { id: 'ids', type: 'neuron.inputIds', col: 1, row: 2, params: { ids: '16 27' } },
+    // One hop with the neuron table's rows for the set, and a two-hop walk both ways.
+    {
+      id: 'conn',
+      type: 'neuron.connectivity',
+      col: 2,
+      params: { minWeight: 5, neuronRows: 'full' },
+    },
+    {
+      id: 'walk',
+      type: 'neuron.connectivity',
+      col: 2,
+      row: 1,
+      params: { hops: 2, direction: 'both', minWeight: 20, includeFragments: true },
+    },
+    { id: 'adj', type: 'neuron.adjacency', col: 2, row: 2 },
+    { id: 'adjType', type: 'neuron.adjacency', col: 2, row: 3, params: { groupByType: true } },
+    { id: 'skel', type: 'neuron.skeletons', col: 3 },
+    { id: 'syn', type: 'neuron.synapses', col: 3, row: 1 },
+    {
+      id: 'synPre',
+      type: 'neuron.synapses',
+      col: 3,
+      row: 2,
+      params: { polarity: 'pre', minConfidence: 4 },
+    },
+    // Both sides bound, and one side open: the two routes a CATMAID answer takes. The bound pair
+    // reads the postsynaptic link's confidence, floored, which is the other link of each pair.
+    {
+      id: 'between',
+      type: 'neuron.synapsesBetween',
+      col: 3,
+      row: 3,
+      params: { location: 'post', minConfidence: 3 },
+    },
+    { id: 'betweenOut', type: 'neuron.synapsesBetween', col: 3, row: 4 },
+    { id: 'rmesh', type: 'neuron.roiMeshes', col: 4, params: { rois: ['LAL_L', 'MB_PED_R'] } },
+    { id: 'rois', type: 'out.rois', col: 4, row: 1 },
+    { id: 'desc', type: 'dataset.description', col: 4, row: 2 },
+    // L1 meta-annotates no neuron names, so its `type` is each neuron's name.
+    { id: 'l1', type: 'dataset.catmaid.l1', col: 0, row: 5 },
+    {
+      id: 'l1find',
+      type: 'neuron.findNeurons',
+      col: 1,
+      row: 5,
+      params: { filters: encodeRows([{ field: 'type', op: 'matches', values: ['MBON-.*'] }]) },
+    },
+    ...(withLab
+      ? [
+          {
+            id: 'lab',
+            type: 'dataset.catmaid',
+            col: 0,
+            row: 6,
+            params: { server: 'catmaid.example.org', project: '3' },
+          },
+          { id: 'labExplore', type: 'neuron.explore', col: 1, row: 6 },
+        ]
+      : []),
+  ]
+  for (const spec of nodes) g = place(g, spec)
+
+  const edges: Array<[string, string, string, string]> = [
+    ['fafb', 'dataset', 'find', 'dataset'],
+    ['fafb', 'dataset', 'explore', 'dataset'],
+    ['fafb', 'dataset', 'ids', 'dataset'],
+    ['fafb', 'dataset', 'conn', 'dataset'],
+    ['find', 'neurons', 'conn', 'neurons'],
+    ['fafb', 'dataset', 'walk', 'dataset'],
+    ['ids', 'neurons', 'walk', 'neurons'],
+    ['fafb', 'dataset', 'adj', 'dataset'],
+    ['find', 'neurons', 'adj', 'sources'],
+    ['find', 'neurons', 'adj', 'targets'],
+    ['fafb', 'dataset', 'adjType', 'dataset'],
+    ['find', 'neurons', 'adjType', 'sources'],
+    ['find', 'neurons', 'adjType', 'targets'],
+    ['fafb', 'dataset', 'skel', 'dataset'],
+    ['ids', 'neurons', 'skel', 'neurons'],
+    ['fafb', 'dataset', 'syn', 'dataset'],
+    ['ids', 'neurons', 'syn', 'neurons'],
+    ['fafb', 'dataset', 'synPre', 'dataset'],
+    ['ids', 'neurons', 'synPre', 'neurons'],
+    ['fafb', 'dataset', 'between', 'dataset'],
+    ['find', 'neurons', 'between', 'sources'],
+    ['find', 'neurons', 'between', 'targets'],
+    ['fafb', 'dataset', 'betweenOut', 'dataset'],
+    ['ids', 'neurons', 'betweenOut', 'sources'],
+    ['fafb', 'dataset', 'rmesh', 'dataset'],
+    ['fafb', 'dataset', 'rois', 'dataset'],
+    ['fafb', 'dataset', 'desc', 'dataset'],
+    ['l1', 'dataset', 'l1find', 'dataset'],
+  ]
+  if (withLab) edges.push(['lab', 'dataset', 'labExplore', 'dataset'])
+  for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
+  return g
+}
+
+/**
  * A dataset node wired to one query node, both built over their declared defaults.
  *
  * The counterpart of `everythingGraph` for a setting that lives on the **dataset** and shows up

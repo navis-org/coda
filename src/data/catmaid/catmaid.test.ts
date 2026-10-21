@@ -30,6 +30,8 @@ import { synapseWeight } from './api'
 import { labelsForSkeleton, readVocabulary, typeFromLabel } from './annotations'
 import { encodeParams, forgetCatmaidRoutes } from './client'
 import {
+  DEFAULT_CATMAID_SERVER,
+  L1_CATMAID_SERVER,
   credentialsFor,
   hostPattern,
   listInstances,
@@ -38,6 +40,7 @@ import {
   setInstances,
 } from './credentials'
 import { parseX3dMesh } from './x3d'
+import { L1_CATMAID_SOURCE_ID, catmaidServerOfSource, catmaidSourceId } from './registry'
 import { SYNAPSES_BETWEEN_SCHEMA } from '../source'
 
 const SERVER = 'https://catmaid.example.org'
@@ -120,6 +123,14 @@ afterEach(() => {
 })
 
 describe('which instance a request uses', () => {
+  it('reads the server back out of a source id, which is what an exported document is given', () => {
+    expect(catmaidServerOfSource('catmaid')).toBe(DEFAULT_CATMAID_SERVER)
+    expect(catmaidServerOfSource(L1_CATMAID_SOURCE_ID)).toBe(L1_CATMAID_SERVER)
+    const lab = catmaidSourceId('catmaid.example.org/')
+    expect(catmaidServerOfSource(lab)).toBe('https://catmaid.example.org')
+    expect(catmaidServerOfSource('neuprint')).toBeUndefined()
+  })
+
   it('accepts every spelling of a host somebody might paste', () => {
     for (const typed of [
       'https://catmaid.example.org',

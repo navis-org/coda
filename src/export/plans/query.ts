@@ -15,6 +15,7 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import { sheetConfigFrom, sheetExportUrl } from '../../data/annotations'
 import { namedColumns } from '../../data/annotations/types'
 import { DEFAULT_SERVER } from '../../data/neuprint/servers'
+import { catmaidServerOfSource, normaliseCatmaidServer } from '../../data/catmaid/registry'
 import { SKELETON_ROUTES } from '../../data/skeletonRoutes'
 import { datasetFamily, resolveDatasetId } from '../../nodes/lib/datasetFamilies'
 import { parseIdList } from '../../nodes/lib/idList'
@@ -73,6 +74,72 @@ export function datasetNodePlan(params: ParamValues): DatasetPlan {
   const datasetId = String(params.dataset)
   if (!datasetId) return { refusal: 'This Dataset node names no dataset.' }
   return { datasetId, server: DEFAULT_SERVER, notes: [] }
+}
+
+/**
+ * Which CATMAID project on which server a document connects to.
+ *
+ * `token` says whether the document should pass the reader's own API token. A published family
+ * is a public instance that answers anonymously, so its cell carries none; a Custom CATMAID is
+ * usually a lab server, so its cell reads one from the environment and falls back to anonymous
+ * where none is set — which is also what the canvas does with no credential stored.
+ */
+export type CatmaidDatasetPlan = Refusable<{
+  server: string
+  projectId: string
+  token: boolean
+}>
+
+/**
+ * A published CATMAID family. Its project is `family.family` and its server is read back out of
+ * its source id, since the two VFB families share a project number and differ only by server.
+ */
+export function catmaidFamilyPlan(familyKey: string): CatmaidDatasetPlan {
+  const family = datasetFamily(familyKey)
+  const server = family && catmaidServerOfSource(family.sourceId)
+  if (!family || !server) return { refusal: `Unknown CATMAID family "${familyKey}".` }
+  return { server, projectId: family.family, token: false }
+}
+
+/**
+ * What a CATMAID document says where it departs from a neuPrint one, or where the canvas refuses:
+ * one wording for both languages, since none of it is about either.
+ */
+export const CATMAID_TEXT = {
+  token:
+    'A CATMAID server that needs an account takes an API token (your CATMAID profile ' +
+    'page has one). Set CATMAID_API_TOKEN, or leave it unset for anonymous access.',
+  normalize:
+    '`Normalize` needs each neuron’s synapse total, which CATMAID does not publish, so the ' +
+    'canvas refuses it too. Untick `Normalize`.',
+  region: (roi: string) =>
+    `This node filters on region "${roi}", and CATMAID cannot say which neurons are in a ` +
+    'region, so the canvas refuses it too. Clear `In ROI`.',
+  search:
+    'CATMAID’s own name search matches substrings rather than patterns, so this reads ' +
+    'the project’s neuron table once and filters it here, as Coda does.',
+  explore:
+    'Explore Dataset searches the whole neuron table locally: here the CATMAID ' +
+    'project’s, built from its annotations the first time anything needs it.',
+  description:
+    "This card shows the project's description from the CATMAID server's project list, " +
+    'so there is no code to export.',
+}
+
+/** A project id as a literal: bare where it is a number, which a CATMAID project id always is. */
+export function catmaidProjectLiteral(projectId: string, quote: (s: string) => string): string {
+  return /^\d+$/.test(projectId) ? projectId : quote(projectId)
+}
+
+/** Custom CATMAID, which names its own server and project. */
+export function catmaidNodePlan(params: ParamValues): CatmaidDatasetPlan {
+  const projectId = String(params.project ?? '').trim()
+  if (!projectId) return { refusal: 'This CATMAID node has no `Project` chosen.' }
+  return {
+    server: normaliseCatmaidServer(String(params.server ?? '')),
+    projectId,
+    token: true,
+  }
 }
 
 // ---------------------------------------------------------------------------

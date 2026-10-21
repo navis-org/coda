@@ -2,6 +2,7 @@
 
 import type { EmitContext } from '../types'
 import type { PopulationFilter, TableSchema } from '../../../core/types'
+import { datasetBackend } from '../../backends'
 import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
 import { carryable } from '../../../nodes/lib/carryParams'
 import { rStr } from '../r'
@@ -134,4 +135,14 @@ export function carryLines(
     `idx_ <- match(${leftKeys}, ${frame}[[${rStr(keyColumn)}]])`,
     ...taken.map((name) => `${list}[, ${rStr(name)}] <- ${frame}[[${rStr(name)}]][idx_]`),
   ]
+}
+
+/**
+ * Is the dataset on this port a CATMAID project — a `coda_catmaid_dataset`? Read off the resolved
+ * type, the same thing the walk's backend guard reads, so an emitter branching on this and the
+ * guard letting it through cannot disagree. An emitter asking it declares `'catmaid'` in its
+ * `backends`.
+ */
+export function isCatmaidDataset(ctx: EmitContext, portId = 'dataset'): boolean {
+  return datasetBackend(ctx, portId) === 'catmaid'
 }

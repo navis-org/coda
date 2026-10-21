@@ -135,20 +135,6 @@ const NO_EMITTER: Record<string, string> = {
     'reproduction. A mapping is small and tabular, so this is the strongest candidate for ' +
     'bundling the result as a CSV beside the notebook instead of emitting the computation; see ' +
     'docs/export.md.',
-  'dataset.catmaid.fafb':
-    'A CATMAID project rather than a neuPrint dataset. The route in is pymaid, which is a ' +
-    'faithful one \u2014 `pymaid.CatmaidInstance` plus `get_neuron`/`get_partners` maps cleanly ' +
-    'onto what this backend answers \u2014 but no emitter has been written for it, so it ' +
-    'degrades to a TODO rather than emitting neuprint-python against a server neuPrint has ' +
-    'never heard of.',
-  'dataset.catmaid.l1':
-    'The same backend as `dataset.catmaid.fafb` on a second instance, so the same reason: ' +
-    'pymaid points at whichever server it is given and would emit both, and nobody has written ' +
-    'the emitter for either.',
-  'dataset.catmaid':
-    'A CATMAID instance named by hand \u2014 the same reason as `dataset.catmaid.fafb`, and no ' +
-    'different for being a server this build ships no node for. pymaid would emit it; nobody ' +
-    'has written that emitter.',
   'zapbench:neuronTraces':
     'ZapBench traces. The faithful route is short and obvious \u2014 `tensorstore.open` against ' +
     'the same `gs://zapbench-release/\u2026/traces/` zarr3 kvstore zapbench\u2019s own ' +

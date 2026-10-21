@@ -7,8 +7,10 @@
  */
 
 import './helpers'
+import './catmaidHelpers'
 import './neuroglancerHelpers'
 import './emitters/analysis'
+import './emitters/catmaid'
 import './emitters/connectivity'
 import './emitters/googleSheet'
 import './emitters/query'

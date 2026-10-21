@@ -240,6 +240,13 @@ One implementation note for anyone writing such a proxy: **the CSRF cookie name 
 suffixed per instance** — `csrftoken_6666cd76f96956469e7be39d750cc7d9`, not
 `csrftoken` — so the name has to be discovered from `Set-Cookie` rather than assumed.
 
+**The exported notebook and R document carry no token**, published or otherwise. pymaid and
+rcatmaid are not browsers: both send the `Referer` and replay the cookie, so every endpoint above
+answers them anonymously — checked by running both documents against both VFB instances
+(`pnpm probe:catmaid`, [export.md](export.md#the-catmaid-half-in-both-languages)). Writing the
+published token into a file somebody shares would make a rotation break documents nobody can
+trace back to it.
+
 ## Ask 2 — turn on gzip
 
 Verified: byte-identical responses with and without `Accept-Encoding: gzip, deflate,

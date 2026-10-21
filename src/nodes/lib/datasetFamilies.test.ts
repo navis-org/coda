@@ -290,5 +290,10 @@ describe('CAVE families and datastack specs', () => {
       expect(family.notebook?.python).toBe('caveclient')
       expect(family.notebook?.r).toBeUndefined()
     }
+    // CATMAID is the one backend both exporters cover past neuPrint: pymaid and the natverse's
+    // rcatmaid read the same endpoints, so neither language refuses a CATMAID project.
+    for (const family of DATASET_FAMILIES.filter((f) => f.backend === 'catmaid')) {
+      expect(family.notebook).toEqual({ python: 'pymaid', r: 'rcatmaid' })
+    }
   })
 })

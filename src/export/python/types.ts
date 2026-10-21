@@ -53,6 +53,7 @@ export type PyModule =
   | 'numpy'
   | 'neuprint'
   | 'caveclient'
+  | 'pymaid'
   | 'nglscenes'
   | 'seaserpent'
   | 'navis'
@@ -160,6 +161,12 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * is why no dataset cell here has a `token=` argument, unlike the neuPrint one.
    */
   caveclient: { from: 'caveclient', pip: 'caveclient' },
+  /*
+   * A CATMAID project — pymaid, whose distribution is `python-catmaid`. Imported whole: only the
+   * generated `CodaCatmaidDataset` calls it, as `pymaid.get_partners(...)`, which says which library
+   * answered in a notebook that may also hold neuprint-python's `fetch_neurons`.
+   */
+  pymaid: { statement: 'import pymaid', pip: 'python-catmaid' },
   /*
    * Neuroglancer scenes, for the Neuroglancer node: parse the scene a dataset publishes, edit it,
    * write it out for either viewer flavour. Pinned at 0.7, the first release that reads a scene

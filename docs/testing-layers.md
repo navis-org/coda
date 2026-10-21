@@ -395,6 +395,7 @@ lean on:
 
 | File                                   | Covers                                                                                               |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `export/catmaid.live.test.ts`          | `catmaidGraph` run live against VFB and both documents beside it, for `pnpm probe:catmaid`; skipped unless `CATMAID_LIVE` |
 | `export/dotmotif.test.ts`              | DotMotif's export in both languages: query quoting, the cap, its outputs                             |
 | `export/neuroglancer.test.ts`          | the Neuroglancer node's answers recorded to `__fixtures__/neuroglancer.json` for the py/R helper probes |
 | `export/plans/analysis.test.ts`        | Similarity, Embedding, Linkage, Cut Tree and smaller analysis export plans on branches no fixture takes |

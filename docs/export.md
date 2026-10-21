@@ -580,7 +580,7 @@ was never tested against.
 The backend is read off `def.inputs` (any port whose declared type is `dataset`) rather than by
 asking for a port called `dataset`, which is the bug class `ports.test.ts` exists for. An
 *unresolved* dataset type refuses nothing: no `sourceId` is invariant 2's ordinary state on a cold
-session.
+session. R has the same declaration since the CATMAID half (*The CATMAID half*, below).
 
 #### A reference port yields no variable, and sometimes cannot
 
@@ -837,6 +837,113 @@ walk's edge back into a seed, the row-group-filtered read, an 18-digit id round 
 half was run live by hand against `gs://flywire_v141_m783`: one mesh (1,181,103 vertices) and a
 missing segment counted, and a 191,525-node skeleton in nanometres.
 
+### The CATMAID half, in both languages
+
+`python/catmaidHelpers.ts` + `python/emitters/catmaid.ts`, and `r/catmaidHelpers.ts` +
+`r/emitters/catmaid.ts`. A graph on VFB's FAFB or L1, or on a Custom CATMAID, exports as a
+notebook on **pymaid** and as an R document on **rcatmaid** — the first backend past neuPrint that
+both languages cover. `DatasetFamily.notebook` is `{ python: 'pymaid', r: 'rcatmaid' }` on both
+families.
+
+**A dataset is a generated object, not a bare connection**, for `CodaCaveDataset`'s reason: a Coda
+dataset value is a connection *and* a neuron table, and on CATMAID the table is derived rather than
+read (`data/catmaid/annotations.ts`). `CodaCatmaidDataset` (a class) and `coda_catmaid_dataset`
+(an environment) hold both, the table built on first use and shared by every cell. Its method
+names and columns are `CodaCustomDataset`'s — `labels`, `lookup`, `connectivity`, `synapses`,
+`synapses_between`, `skeletons` — so a Python branch written for one serves both
+(`isLabelledHelper`). What is behind each method is pymaid's or rcatmaid's high-level call, with
+direct fetches only where the library's call answers a different question: `skeletons/summary`
+in both (node count and cable length, which neither wraps short of a whole node table per
+neuron), and in the notebook the annotation list and `skeletons/connectivity` (below).
+
+**Both documents answer anonymously on VFB.** pymaid sets the `Referer` and replays the CSRF
+cookie a browser cannot (`docs/catmaid_vfb.md`), and rcatmaid's `catmaid_login` with a server and
+nothing else is what its own `vfbcatmaid()` does, so the published token the canvas needs is not
+in either document. A Custom CATMAID reads `CATMAID_API_TOKEN` and is anonymous where it is unset.
+
+**Every output was checked by running it, which is the only reason any of this is trusted.**
+`pnpm probe:catmaid` runs `catmaidGraph` against VFB through a real Scheduler
+(`export/catmaid.live.test.ts`, skipped without `CATMAID_LIVE=1`), writes the canvas's outputs
+and both exported documents into one directory, and two scripts execute the documents there and
+compare each node's variable with the canvas: 20 outputs across 14 nodes, rows as a set, about a
+minute. The first run disagreed on three of them, and every disagreement was the canvas being
+right:
+
+- **Not every skeleton a connector reaches is in the project's skeleton list.** One-sided
+  Synapses Between came back with 3,179 rows against the canvas's 2,346; the extra partners were
+  skeletons `skeletons/` does not list, which `Include fragments` drops on the canvas. The helper
+  had been written on the assumption that a CATMAID project has no fragments, because the index
+  is every skeleton — it is every skeleton *listed*. So `include_fragments` is real in both
+  `connectivity` and `synapses_between`, and Connectivity had only agreed because nothing below
+  weight 5 reached that far.
+- **`coda_endpoint_neurons` dropped a seed's type when no edge survived**, in both languages and
+  on every backend. `endpointNeurons` reads a seed's type off the seed *table*; both helpers were
+  handed the ids alone. They take the table now, which moved one line per Connectivity cell in the
+  neuPrint goldens. A seed with an edge was typed by the edge, which is why no golden could see it.
+- **A volume's vertex count is not a fact about its surface**: the canvas keeps a vertex per
+  triangle corner (2,400 for `LAL_L`), pymaid and rcatmaid share them (402). The probe compares
+  faces and bounds.
+
+**The index agrees cell for cell** — 5,601 rows × 8 columns on FAFB in both languages, the
+meta-annotated `type`, the `#` split and the trailing space it leaves on `DA1 ORN ` included —
+with one difference that is kept. rcatmaid reads annotations through `annotations/forskeletons`
+where the canvas reads `skeleton/annotationlist`, and the two order a neuron's labels differently
+(1,911 cells). CATMAID's annotations are a bag and nothing downstream reads their order, so the R
+probe compares that cell as a set rather than reaching past the library for a second direct fetch.
+
+These library behaviours each produce a plausible wrong table or a failure far from its cause,
+and each is written into the helper's header where it is worked around:
+
+- **pymaid's `get_annotated` on an annotation the project lacks returns every entity on the
+  server** — 718,790 on L1, with a warning — and `get_annotation_id` reads the *global* instance
+  before the one it is handed (pymaid 2.4), so a second CATMAID in the notebook put its server, and
+  its credentials, on this one's path. The helper reads this server's annotation list once and
+  asks `query-targets` itself, and its instance is not made global at all.
+- **`get_partners` spreads a hop into a dense partners-by-queried frame** and fetches every
+  partner's name — tens of millions of mostly-zero cells per hop on a deep walk. Its `threshold`
+  is also on the total over the queried skeletons where `Min weight` is per pair, and `min_size=2`
+  drops single-node partners. The helper reads the sparse `skeletons/connectivity` answer the
+  canvas reads.
+- **`get_neurons` returns a bare neuron for one id**, and a cell carrying fields onto it then
+  calls a NeuronList method that is not there; `skeletons` always returns a list.
+- **An empty id list is an error to some calls and no constraint at all to others** — rcatmaid
+  builds no `skeleton_ids` field from one, so an empty Sources side asked for every synapse onto
+  the targets. Every method in both languages answers an empty set of neurons with an empty table
+  before asking anything, as `asksForNoSynapses` does on the canvas.
+- **A refused `skeletons/summary` leaves two columns empty**, as `buildIndex` does, rather than
+  failing every cell that reads the neuron table.
+- **rcatmaid's `catmaid_skids("name:.")` is 1,132,353 ids on FAFB**, not the 5,601 skeletons
+  `skeletons/` lists, so the R index reads that endpoint.
+- **`catmaid_query_meta_annotations` errors** on a missing annotation, which on L1 is both
+  conventions.
+- **`catmaid_get_connector_table` is one row per partner** by default (3,527 outgoing rows for
+  skeleton 16, against 1,709 links); `partner.skids = FALSE` is the canvas's links.
+- **A Synapses Between confidence is the drawn end's link**, so a postsynaptic `Location` reads
+  `confidence2` / `post_confidence`; the fixture floors it at 3 so the other link is exercised.
+
+**R has one walk now, as the notebook does.** `coda_walk` was first written for CATMAID beside
+neuPrint's own loop in `coda_traverse_connectivity`, and the two already disagreed: only the new
+one labelled an edge found from both ends at one hop `"both"`, as the canvas does. Both call
+`coda_walk` now, neuPrint's hop being `coda_edge_list`, which moved that label into the neuPrint
+golden. neuprintr is not installed here, so the neuPrint half was checked by running both walks
+over one stub graph with loops and comparing them with the notebook's row for row.
+
+**R gained the `backends` declaration** the notebook has had since the CAVE half: until CATMAID,
+R refused every non-neuPrint dataset outright, so it never needed one. The guard, its default
+and its sentence are one copy in `export/backends.ts`, which both walks call — it holds no
+language, so the reason the walks are copied does not reach it. And in R **only the dataset chunk
+attaches its client library**: every query chunk reads that chunk's connection, so the per-query
+`library(neuprintr)` calls were redundant, and with them gone a CATMAID branch needs no particular
+place in its emitter. `export.test.ts` asserts the CATMAID document names no neuprintr at all — a
+document for a CATMAID project that asks for a GitHub install of the neuPrint client is a document
+nobody can run without wondering why.
+
+What a CATMAID graph still cannot export, each as the walk's backend TODO naming CATMAID:
+**Influence, Neuron Profile and Dataset Summary**, whose cells are neuprint-python and neuprintr
+throughout, and **Cypher**, the ROI count and completeness nodes, the ROI Connectivity node and
+Neuroglancer, which the canvas does not offer on CATMAID either. `Normalize` and a region filter
+are refused in the cell, as the canvas refuses them.
+
 ### The R Markdown exporter
 
 `Save ▸ Export as R Markdown` writes the same graph as an `.Rmd` on **neuprintr, dplyr, nat,
@@ -891,7 +998,7 @@ two golden files, and a node that emits Python but nothing in R shows up as a TO
 a document nobody noticed was shorter.
 
 **The one place they have parted company is the backend.** `caveGraph` is the second fixture and
-R refuses it outright — `canExportNotebook` is asked per language now, and
+R refuses it outright (`catmaidGraph`, the other way round, both languages emit) — `canExportNotebook` is asked per language now, and
 `DatasetFamily.notebook` names a client per language. That is a real coverage gap rather than a
 loophole, and R's `export.test.ts` asserts the refusal so it cannot become a silent one; see
 *The CAVE half of the notebook exporter* above. The refusal message points at the notebook, or
@@ -1090,8 +1197,8 @@ the fixture graph* — neither asks whether the emitter's output is in the docum
 The fix is at the fixture: a node whose emitter is worth checking needs a path to it in **both**
 languages, which for a viewer means feeding one instance from something both emit. `out.rank` has
 two for that reason, and the comment on each says which half it covers. Worth knowing before
-adding a viewer downstream of Influence, Neuron Topology, `compare.matchTypes` or either CATMAID
-dataset — the refusal list in `NO_EMITTER` is the list of places this can happen.
+adding a viewer downstream of Influence, Neuron Topology or `compare.matchTypes` — the refusal
+list in `NO_EMITTER` is the list of places this can happen.
 
 A sharper guard would compare the emitted source against the node's own variable prefix, which is
 cheap and is not written: the fixture comment is doing that job today.

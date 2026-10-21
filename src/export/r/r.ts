@@ -74,6 +74,14 @@ export function rVector(values: readonly ParamValue[]): string {
   return `c(${values.map((v) => rValue(v)).join(', ')})`
 }
 
+/**
+ * A call's argument lines, indented, with the comma between them and none after the last: R reads
+ * a trailing comma in a call as an empty argument (`c(a = 1,)` is a parse error).
+ */
+export function rArgs(args: readonly string[]): string[] {
+  return args.map((arg, i) => `  ${arg}${i < args.length - 1 ? ',' : ''}`)
+}
+
 /** A vector wrapped across lines once it stops fitting — an `ids` param holds thousands. */
 export function rLongVector(
   values: readonly ParamValue[],

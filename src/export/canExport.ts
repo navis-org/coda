@@ -22,7 +22,8 @@
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { nodeLabel } from '../core/graph'
 import type { ExportLanguage } from '../nodes/lib/datasetFamilies'
-import { familyForNodeType } from '../nodes/lib/datasetFamilies'
+import { CLIENT_NAMES, DATASET_FAMILIES, familyForNodeType } from '../nodes/lib/datasetFamilies'
+import { listed } from '../core/prose'
 
 /**
  * A node the walk could not translate, so its cell is a TODO.
@@ -109,10 +110,13 @@ export function untranslatableDatasetNodes(
   })
 }
 
-/** What the generated document would be built on, for a message naming what is missing. */
-const STACK: Record<ExportLanguage, string> = {
-  python: 'neuprint-python and caveclient',
-  r: 'neuprintr',
+/**
+ * What the generated document is built on, for a message naming what is missing — read off the
+ * families' `notebook` clients, so a backend added there is named here without an edit.
+ */
+function stack(language: ExportLanguage): string {
+  const clients = new Set(DATASET_FAMILIES.flatMap((f) => f.notebook?.[language] ?? []))
+  return listed([...clients].map((client) => CLIENT_NAMES[language][client]))
 }
 
 /** The refusal, or undefined when the graph can be exported as this. */
@@ -152,7 +156,7 @@ export function canExportNotebook(
           ? `${names[0]} has no ${what} equivalent`
           : `${names.join(', ')} have no ${what} equivalent`,
       detail:
-        `The generated ${what} is built on ${STACK[language]}, which cannot read this ` +
+        `The generated ${what} is built on ${stack(language)}, which cannot read this ` +
         `backend yet, so every cell after the dataset would be a TODO.` +
         (language === 'r' ? ' The Jupyter notebook may still cover it.' : ''),
       fix: `no ${what} can be built for this backend yet`,

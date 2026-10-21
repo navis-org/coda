@@ -9,9 +9,11 @@
 
 import './helpers'
 import './caveHelpers'
+import './catmaidHelpers'
 import './customHelpers'
 import './neuroglancerHelpers'
 import './emitters/analysis'
+import './emitters/catmaid'
 import './emitters/cave'
 import './emitters/connectivity'
 import './emitters/custom'

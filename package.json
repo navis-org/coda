@@ -48,6 +48,7 @@
     "probe:neuroglancer-select": "node scripts/probe-neuroglancer-select.mjs",
     "check:mirror": "python3 scripts/check-mirror.py",
     "probe:helpers": "python3 scripts/probe-py-helpers.py",
+    "probe:catmaid": "CATMAID_LIVE=1 vitest run src/export/catmaid.live.test.ts && python3 scripts/probe-catmaid-export.py && Rscript scripts/probe-catmaid-export.R",
     "probe:r-helpers": "Rscript scripts/probe-r-helpers.R",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "changelog:shots": "vite-node scripts/changelog-shots.mjs",

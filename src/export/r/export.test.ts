@@ -8,7 +8,8 @@
  * The one place they part company is the **backend**. Python emits caveclient and R has no
  * equivalent, so `caveGraph` is refused outright here rather than exported as a document of
  * TODOs — which is what `DatasetFamily.notebook` being per language buys, and what the last
- * test in this file pins.
+ * test in this file pins. `catmaidGraph` is the other way round: rcatmaid covers it, so it has a
+ * golden of its own here as in the notebook suite.
  *
  * Regenerate with `pnpm export:golden` after an intentional change, and read the diff.
  */
@@ -20,12 +21,13 @@ import { addNode, emptyGraph } from '../../core/graph'
 import type { ParamValues } from '../../core/node'
 import { allNodeDefs } from '../../core/registry'
 import '../../nodes'
-import { caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
+import { catmaidGraph, caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
 import { exportRmd } from './exporter'
 import { getEmitter } from './registry'
 import { searchFor } from '../../test/findNeurons'
 
 const GOLDEN = new URL('./__fixtures__/everything.Rmd', import.meta.url).pathname
+const CATMAID_GOLDEN = new URL('./__fixtures__/catmaid.Rmd', import.meta.url).pathname
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
 
 /** The whole document, for the assertions that search it. */
@@ -46,8 +48,33 @@ describe('R Markdown export', () => {
     expect(result.source).toEqual(readFileSync(GOLDEN, 'utf-8'))
   })
 
+  it('matches the golden CATMAID document', () => {
+    const result = exportRmd(catmaidGraph(), OPTIONS)
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    if (process.env.UPDATE_GOLDEN) {
+      writeFileSync(CATMAID_GOLDEN, result.source)
+      return
+    }
+    expect(result.source).toEqual(readFileSync(CATMAID_GOLDEN, 'utf-8'))
+  })
+
+  it('builds a CATMAID document on rcatmaid alone, with no step left as a TODO', () => {
+    /*
+     * neuprintr is attached only by a neuPrint dataset chunk, so a document with no neuPrint
+     * dataset in it should not ask anybody to install neuprintr from GitHub. And every
+     * node in the fixture is one a CATMAID project answers, so a TODO here is a branch missing.
+     */
+    const result = exportRmd(catmaidGraph(), OPTIONS)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.source).not.toContain('neuprintr')
+    expect(result.source).toContain('library(catmaid)')
+    expect(result.todos.map((t) => t.label)).toEqual([])
+  })
+
   it('reaches every emitting node type', () => {
-    const covered = new Set(everythingGraph().nodes.map((n) => n.type))
+    const covered = new Set(
+      [everythingGraph(), catmaidGraph()].flatMap((g) => g.nodes.map((n) => n.type)),
+    )
     const missed = allNodeDefs()
       .map((d) => d.type)
       .filter((t) => getEmitter(t) && !covered.has(t))
@@ -162,7 +189,7 @@ describe('include fragments', () => {
     })
     expect(source).toContain('all_segments = TRUE')
     expect(source).toContain(
-      'step <- coda_edge_list(todo, prepost, min_weight, all_segments, conn)',
+      'coda_edge_list(ids, if (way == "downstream") "POST" else "PRE", min_weight, all_segments, conn)',
     )
   })
 
@@ -234,7 +261,7 @@ describe('the Neuron Set port', () => {
     const source = connectivityChunk({ direction: 'outputs', hops: 1, minWeight: 1 })
     expect(source).toContain('coda_endpoint_neurons <- function(')
     expect(source).toContain(
-      'connectivity_neuron_set <- coda_endpoint_neurons(connectivity_connections, find_neurons$neuronId)',
+      'connectivity_neuron_set <- coda_endpoint_neurons(connectivity_connections, find_neurons)',
     )
     // The derived form binds the port directly; only `full` needs a lookup in between.
     expect(source).not.toContain('.endpoints <-')

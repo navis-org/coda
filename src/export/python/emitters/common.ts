@@ -7,8 +7,7 @@
  */
 
 import type { PopulationFilter, TableSchema } from '../../../core/types'
-import { datasetRef } from '../../../core/types'
-import { backendOf } from '../../../data/source'
+import { datasetBackend } from '../../backends'
 import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { CUSTOM_SOURCE_ID } from '../../../data/custom/layout'
@@ -219,28 +218,40 @@ export function isCustomDataset(ctx: EmitContext, portId = 'dataset'): boolean {
   return datasetBackend(ctx, portId) === CUSTOM_SOURCE_ID
 }
 
+/** Is it a CATMAID project — a `CodaCatmaidDataset`? The same reading, and the same declaration. */
+export function isCatmaidDataset(ctx: EmitContext, portId = 'dataset'): boolean {
+  return datasetBackend(ctx, portId) === 'catmaid'
+}
+
 /**
- * Does the dataset hold its neuron index as a frame, `.labels`? A CAVE datastack's is fetched and
- * a Custom Dataset's is its Neurons table, and every node that searches the index locally reads
- * either the same way.
+ * Is the dataset a generated helper answering the query methods itself — `lookup`,
+ * `connectivity`, `synapses`, `synapses_between`, `skeletons`? A `CodaCustomDataset` and a
+ * `CodaCatmaidDataset` share those names and their columns, so a node's cell for one is its cell
+ * for the other; what differs is behind the method, where the notebook reader can read it.
+ */
+export function isLabelledHelper(ctx: EmitContext, portId = 'dataset'): boolean {
+  return isCustomDataset(ctx, portId) || isCatmaidDataset(ctx, portId)
+}
+
+/**
+ * Does the dataset hold its neuron index as a frame, `.labels`? A CAVE datastack's is fetched, a
+ * Custom Dataset's is its Neurons table and a CATMAID project's is derived from its annotations,
+ * and every node that searches the index locally reads all three the same way.
  */
 export function hasLabelsFrame(ctx: EmitContext, portId = 'dataset'): boolean {
-  return isCaveDataset(ctx, portId) || isCustomDataset(ctx, portId)
-}
-
-/** The backend of the dataset on this port — `backendOf` its resolved source id. */
-export function datasetBackend(ctx: EmitContext, portId = 'dataset'): string {
-  return backendOf(datasetRef(ctx.inputType(portId))?.sourceId ?? '')
+  return isCaveDataset(ctx, portId) || isLabelledHelper(ctx, portId)
 }
 
 /**
- * The neuron table a CAVE or Custom dataset labels its neurons with — Coda's index, one row per neuron.
+ * The neuron table a `hasLabelsFrame` dataset labels its neurons with — Coda's index, one row per
+ * neuron.
  *
  * `CodaCaveDataset.labels`, which is fetched on first use and is exactly what `CaveSource`
  * builds: the datastack's neuron table joined to its annotations, or whatever an Annotations
  * source supplied instead. Every node that would otherwise download an index goes through this,
  * so a graph with three of them pays for one. `CodaCustomDataset.labels` is the same frame for a
- * Custom Dataset: its Neurons table keyed by text `neuronId` (`hasLabelsFrame`).
+ * Custom Dataset: its Neurons table keyed by text `neuronId`. `CodaCatmaidDataset.labels` is the
+ * project's, derived from its annotations on first use.
  */
 export function datasetLabels(dataset: string): string {
   return `${dataset}.labels`

@@ -8,6 +8,7 @@
  * that costs something are stated where they cost it rather than in a comment nobody reads.
  */
 
+import { CATMAID_TEXT } from '../../plans/query'
 import { pyStr } from '../py'
 import { CUSTOM_SOURCE_ID } from '../../../data/custom/layout'
 import { registerEmitter, registerHelper } from '../registry'
@@ -15,6 +16,7 @@ import {
   datasetLabels,
   codaNeurons,
   hasLabelsFrame,
+  isCatmaidDataset,
   isCaveDataset,
   pyPopulationMask,
   pySelection,
@@ -69,7 +71,9 @@ registerEmitter(
                   'neuron table joined to its annotations (or to whatever is wired into the ' +
                   'Dataset node\u2019s `Annotations` port), fetched the first time anything needs it. ' +
                   'On FlyWire that is 139,255 rows and takes a few seconds.'
-              : 'Explore Dataset searches the whole neuron table locally: here the Custom ' +
+              : isCatmaidDataset(ctx)
+                ? CATMAID_TEXT.explore
+                : 'Explore Dataset searches the whole neuron table locally: here the Custom ' +
                   'Dataset\u2019s Neurons table, or every id its edge list names where none is wired.',
           ),
           `${all} = ${datasetLabels(c)}`,
@@ -137,7 +141,7 @@ registerEmitter(
 
     return lines
   },
-  { backends: ['neuprint', 'cave', CUSTOM_SOURCE_ID] },
+  { backends: ['neuprint', 'cave', 'catmaid', CUSTOM_SOURCE_ID] },
 )
 
 /**

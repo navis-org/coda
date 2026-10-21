@@ -347,9 +347,28 @@ export type ExportLanguage = 'python' | 'r'
  * The *value* is what a refusal message names, so it is a closed set rather than a free string:
  * a family exported through a library nobody has named here is a library nobody installed.
  */
-export type ExportClients = Partial<Record<ExportLanguage, 'neuprint' | 'caveclient'>>
+export type ExportClients = Partial<
+  Record<ExportLanguage, 'neuprint' | 'caveclient' | 'pymaid' | 'rcatmaid'>
+>
 
-/** Both exporters are built on the neuPrint clients, which is every family but FlyWire. */
+/**
+ * What each client is called in prose, per language — `neuprint` is neuprint-python in a notebook
+ * and neuprintr in R. A `Record` over the closed set, so a new client fails to compile until it
+ * has a name in both.
+ */
+type ClientNames = Record<NonNullable<ExportClients[ExportLanguage]>, string>
+const CLIENTS: ClientNames = {
+  neuprint: 'neuprint',
+  caveclient: 'caveclient',
+  pymaid: 'pymaid',
+  rcatmaid: 'rcatmaid',
+}
+export const CLIENT_NAMES: Record<ExportLanguage, ClientNames> = {
+  python: { ...CLIENTS, neuprint: 'neuprint-python' },
+  r: { ...CLIENTS, neuprint: 'neuprintr' },
+}
+
+/** Both exporters are built on the neuPrint clients for every neuPrint family. */
 const NEUPRINT_NOTEBOOK: ExportClients = { python: 'neuprint', r: 'neuprint' }
 
 /**
@@ -762,10 +781,13 @@ const CAVE_FAMILIES: DatasetFamily[] = [
  * `sourceId`, which is why this is the only backend whose families do not share one. A lab
  * server's project 1 is a third thing again, and `Custom CATMAID` is where it goes.
  *
- * Neither exporter emits it. pymaid is the obvious Python route and `natverse`'s `catmaid` the R
- * one, but no emitter has been written for either, so both languages refuse rather than
- * producing a document of TODOs — `DatasetFamily.notebook` absent is what says so.
+ * Both exporters emit it, through pymaid in Python and the natverse's `catmaid` (rcatmaid) in R.
+ * Neither library builds Coda's neuron table, whose `type` is derived from the project's
+ * meta-annotations, so each document carries a generated port of that rule — `CodaCatmaidDataset`
+ * in the notebook and `coda_catmaid_dataset` in R. See docs/export.md, *The CATMAID half*.
  */
+const CATMAID_NOTEBOOK: ExportClients = { python: 'pymaid', r: 'rcatmaid' }
+
 const CATMAID_FAMILIES: DatasetFamily[] = [
   {
     /*
@@ -785,6 +807,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     guide:
       'A few thousand neurons traced by hand in CATMAID on the same image volume as FlyWire, with skeletons, synapses, connectivity and free-text annotations. Hosted by Virtual Fly Brain at https://catmaid-fafb.virtualflybrain.org/; no credentials needed.',
     glyph: 'fly_brain',
+    notebook: CATMAID_NOTEBOOK,
   },
   {
     // `catmaid.l1` for `catmaid.fafb`'s reason: the key is a permanent flat namespace, and `l1`
@@ -800,6 +823,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     guide:
       'The larval connectome: 5,013 hand-traced neurons across the whole first-instar central nervous system, hosted by Virtual Fly Brain at https://l1em.catmaid.virtualflybrain.org/. A neuron\u2019s type is its own name, and its many annotations (lineages, clusters, papers) show up as tags.',
     glyph: 'fly_larva',
+    notebook: CATMAID_NOTEBOOK,
   },
 ]
 

@@ -35,6 +35,7 @@ export type Cell = MarkdownCell | CodeCell
  */
 export type RPackage =
   | 'neuprintr'
+  | 'catmaid'
   | 'nat'
   | 'nat.nblast'
   | 'dplyr'
@@ -63,6 +64,8 @@ export interface PackageSpec {
 /** Declaration order is the order the setup chunk attaches them in. */
 export const PACKAGES: Record<RPackage, PackageSpec> = {
   neuprintr: { github: 'natverse/neuprintr' },
+  // A CATMAID project — the natverse's rcatmaid, whose package is `catmaid`. Not on CRAN either.
+  catmaid: { github: 'natverse/rcatmaid' },
   nat: {},
   // On CRAN, unlike neuprintr — `install.packages` finds it.
   'nat.nblast': {},

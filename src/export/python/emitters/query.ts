@@ -30,6 +30,7 @@ import type { EmitContext } from '../types'
 
 import type { DatasetNote, SkeletonsNote } from '../../plans/query'
 import {
+  CATMAID_TEXT,
   datasetFamilyPlan,
   datasetNodePlan,
   inputIdsPlan,
@@ -48,15 +49,16 @@ import {
   codaNeurons,
   cypherIdList,
   codaSynapses,
-  datasetBackend,
   hasLabelsFrame,
+  isCatmaidDataset,
   isCaveDataset,
-  isCustomDataset,
+  isLabelledHelper,
   neuronIdInts,
   neuronIds,
   pyMaskFrame,
   pyPopulationMask,
 } from './common'
+import { datasetBackend } from '../../backends'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { withoutStatedStatus } from '../../../data/neuronFilter'
@@ -331,14 +333,17 @@ registerEmitter(
     if (limit > 0) lines.push(`${out} = ${out}.head(${limit})`)
     return lines
   },
-  { backends: ['neuprint', 'cave', CUSTOM_SOURCE_ID] },
+  { backends: ['neuprint', 'cave', 'catmaid', CUSTOM_SOURCE_ID] },
 )
 
 /**
- * The same node against a CAVE datastack or a Custom Dataset: the index, filtered locally.
+ * The same node against a CAVE datastack, a Custom Dataset or a CATMAID project: the index,
+ * filtered locally.
  *
- * **A region filter answers empty** — neither publishes regions at all, so the clause can match
- * nothing, and that is Coda's answer rather than an oversight. It is no longer reachable from the
+ * **A region filter answers empty** on the first two — neither publishes regions at all, so the
+ * clause can match nothing, and that is Coda's answer rather than an oversight. A CATMAID project
+ * does have regions, its neuropil volumes, but no query naming what is in one, so the canvas
+ * refuses the filter there and the notebook says the same. It is no longer reachable from the
  * card, whose region picker now reads `capabilities.roiFilter` rather than a region list, so this
  * is what a graph saved against another backend meets.
  *
@@ -358,12 +363,16 @@ function labelsFindNeurons(
   const limit = Number(ctx.params.limit)
 
   const cave = isCaveDataset(ctx)
+  const catmaid = isCatmaidDataset(ctx)
+  if (roi && catmaid) return ctx.todo(CATMAID_TEXT.region(roi))
   const lines: string[] = [
     ...ctx.note(
       cave
         ? 'A CAVE datastack has no server-side neuron query, so this reads the whole neuron ' +
             'index once and filters it here, as Coda does. Explore Dataset uses the same table.'
-        : 'A Custom Dataset’s neurons are its Neurons table, filtered here as on the canvas.',
+        : catmaid
+          ? CATMAID_TEXT.search
+          : 'A Custom Dataset’s neurons are its Neurons table, filtered here as on the canvas.',
     ),
     `${out} = ${datasetLabels(dataset)}`,
   ]
@@ -428,7 +437,7 @@ registerEmitter(
     }
 
     const c = dataset.connection
-    if (isCustomDataset(ctx)) {
+    if (isLabelledHelper(ctx)) {
       // The rows of its neuron table, which on the canvas is the lookup too: an id the table does
       // not hold has no row, as a body neuPrint does not publish has none from `fetch_neurons`.
       // With no neuron table the ids pass as given, as `CompositeSource.findNeurons` passes them.
@@ -441,85 +450,128 @@ registerEmitter(
       codaNeurons(ctx, out),
     ]
   },
-  { backends: ['neuprint', CUSTOM_SOURCE_ID] },
+  { backends: ['neuprint', 'catmaid', CUSTOM_SOURCE_ID] },
 )
 
 // ---------------------------------------------------------------------------
 // IDs from Label
 // ---------------------------------------------------------------------------
 
-registerEmitter('neuron.idsFromLabel', (ctx) => {
-  const c = ctx.wired('dataset')
+registerEmitter(
+  'neuron.idsFromLabel',
+  (ctx) => {
+    const c = ctx.wired('dataset')
 
-  const field = ctx.column('field') || 'type'
-  const typed = parseTypedLabels(ctx.params.labels)
-  const wired = ctx.input('labels')
-  const wiredColumn = ctx.column('column')
-  const regex = String(ctx.params.match) === 'regex'
-  const status = String(ctx.params.status)
+    const field = ctx.column('field') || 'type'
+    const typed = parseTypedLabels(ctx.params.labels)
+    const wired = ctx.input('labels')
+    const wiredColumn = ctx.column('column')
+    const regex = String(ctx.params.match) === 'regex'
+    const status = String(ctx.params.status)
 
-  ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
-  const out = ctx.output('neurons')
-  const lines: string[] = []
+    const out = ctx.output('neurons')
+    const lines: string[] = []
 
-  if (wired && wiredColumn) {
-    lines.push(
-      `_labels = ${typed.length > 0 ? pyList(typed) : '[]'} + ${wired}[${pyStr(wiredColumn)}].dropna().astype(str).tolist()`,
-      `_labels = list(dict.fromkeys(_labels))`,
+    if (wired && wiredColumn) {
+      lines.push(
+        `_labels = ${typed.length > 0 ? pyList(typed) : '[]'} + ${wired}[${pyStr(wiredColumn)}].dropna().astype(str).tolist()`,
+        `_labels = list(dict.fromkeys(_labels))`,
+      )
+    } else {
+      lines.push(`_labels = ${pyList(typed)}`)
+    }
+
+    if (isCatmaidDataset(ctx)) {
+      return [
+        ...lines,
+        ...labelsIdsFromLabel(
+          out,
+          datasetLabels(c),
+          field,
+          regex,
+          ctx.params.ignoreCase === true,
+        ),
+      ]
+    }
+    ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+
+    /*
+     * NeuronCriteria's kwargs are the neuron's own *neuPrint* properties, so the field chosen on
+     * the node has to cross the same vocabulary seam `labelClause` puts it through — the id column
+     * is `neuronId` here and `bodyId` there, and `NeuronCriteria(neuronId=…)` is a TypeError.
+     * `class_` is a separate and genuinely local concern: a Python reserved word, not a rename.
+     */
+    const property = neuprintProperty(field)
+    const kw = property === 'class' ? 'class_' : property
+    const schema = schemasFromType(ctx.inputType('dataset')).neurons
+    const population = withoutStatedStatus(
+      populationFromType(ctx.inputType('dataset')),
+      Boolean(status),
     )
-  } else {
-    lines.push(`_labels = ${pyList(typed)}`)
-  }
+    const pushable = population.length === 1 && population[0] === 'traced'
+    const criteria = [`${kw}=_labels`]
+    // Same two routes as Find Neurons above, and the same precedence: this node's own `Status`
+    // removes the `traced` disjunct rather than ANDing with it.
+    if (status) criteria.push(`status=${pyStr(status)}`)
+    else if (pushable) criteria.push(`status=${pyStr(TRACED_STATUS)}`)
+    if (regex) criteria.push('regex=True')
+    criteria.push(`client=${c}`)
 
-  /*
-   * NeuronCriteria's kwargs are the neuron's own *neuPrint* properties, so the field chosen on
-   * the node has to cross the same vocabulary seam `labelClause` puts it through — the id column
-   * is `neuronId` here and `bodyId` there, and `NeuronCriteria(neuronId=…)` is a TypeError.
-   * `class_` is a separate and genuinely local concern: a Python reserved word, not a rename.
-   */
-  const property = neuprintProperty(field)
-  const kw = property === 'class' ? 'class_' : property
-  const schema = schemasFromType(ctx.inputType('dataset')).neurons
-  const population = withoutStatedStatus(
-    populationFromType(ctx.inputType('dataset')),
-    Boolean(status),
-  )
-  const pushable = population.length === 1 && population[0] === 'traced'
-  const criteria = [`${kw}=_labels`]
-  // Same two routes as Find Neurons above, and the same precedence: this node's own `Status`
-  // removes the `traced` disjunct rather than ANDing with it.
-  if (status) criteria.push(`status=${pyStr(status)}`)
-  else if (pushable) criteria.push(`status=${pyStr(TRACED_STATUS)}`)
-  if (regex) criteria.push('regex=True')
-  criteria.push(`client=${c}`)
+    if (ctx.params.ignoreCase === true) {
+      lines.push(
+        ...ctx.note(
+          'Coda matches these labels case-insensitively; NeuronCriteria has no such flag, so ' +
+            'this query is case-sensitive and may return fewer neurons.',
+        ),
+      )
+    }
 
-  if (ctx.params.ignoreCase === true) {
     lines.push(
-      ...ctx.note(
-        'Coda matches these labels case-insensitively; NeuronCriteria has no such flag, so ' +
-          'this query is case-sensitive and may return fewer neurons.',
-      ),
+      `${out}, _ = fetch_neurons(`,
+      `    NeuronCriteria(${criteria.join(', ')}),`,
+      `    client=${c},`,
+      `)`,
+      codaNeurons(ctx, out),
     )
-  }
+    if (!pushable && population.length > 0) {
+      lines.push(
+        ...ctx.note(
+          'NeuronCriteria cannot express the Dataset node’s population settings, so they are ' +
+            'applied as a filter on the result instead. The rows are the same.',
+        ),
+        ...pyPopulationMask(out, population, schema),
+      )
+    }
+    return lines
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
-  lines.push(
-    `${out}, _ = fetch_neurons(`,
-    `    NeuronCriteria(${criteria.join(', ')}),`,
-    `    client=${c},`,
-    `)`,
-    codaNeurons(ctx, out),
-  )
-  if (!pushable && population.length > 0) {
-    lines.push(
-      ...ctx.note(
-        'NeuronCriteria cannot express the Dataset node’s population settings, so they are ' +
-          'applied as a filter on the result instead. The rows are the same.',
-      ),
-      ...pyPopulationMask(out, population, schema),
-    )
-  }
-  return lines
-})
+/**
+ * The same lookup over a neuron table held as a frame — `compileLabelMatch`, the canvas' matcher,
+ * in pandas: a label is an exact value or, under `regex`, a pattern anchored at both ends (Neo4j's
+ * `=~`, which every backend's label lookup agrees with); a missing value matches nothing; and no
+ * labels at all answers no neurons, never the whole table. A dataset without a status column
+ * ignores `Status`, as the canvas does.
+ */
+function labelsIdsFromLabel(
+  out: string,
+  labels: string,
+  field: string,
+  regex: boolean,
+  ignoreCase: boolean,
+): string[] {
+  const col = `${out}[${pyStr(field)}]`
+  const mask = regex
+    ? `${col}.notna() & ${col}.astype(str).str.fullmatch('|'.join(f'(?:{p})' for p in _labels), case=${ignoreCase ? 'False' : 'True'})`
+    : ignoreCase
+      ? `${col}.notna() & ${col}.astype(str).str.lower().isin([l.lower() for l in _labels])`
+      : `${col}.isin(_labels)`
+  return [
+    `${out} = ${labels}`,
+    `${out} = (${out}[${mask}] if _labels else ${out}.iloc[0:0]).reset_index(drop=True)`,
+  ]
+}
 
 // ---------------------------------------------------------------------------
 // Adjacency
@@ -558,72 +610,90 @@ function cypherAdjacency(
   ]
 }
 
-registerEmitter('neuron.adjacency', (ctx) => {
-  const c = ctx.wired('dataset')
-  const sources = ctx.wired('sources')
-  const targets = ctx.wired('targets')
-  if (!sources || !targets)
-    return ctx.todo('Adjacency needs both `Sources` and `Targets` wired.')
+registerEmitter(
+  'neuron.adjacency',
+  (ctx) => {
+    const c = ctx.wired('dataset')
+    const sources = ctx.wired('sources')
+    const targets = ctx.wired('targets')
+    if (!sources || !targets)
+      return ctx.todo('Adjacency needs both `Sources` and `Targets` wired.')
 
-  ctx.require(
-    'neuprint',
-    'NeuronCriteria',
-    'fetch_adjacencies',
-    'merge_neuron_properties',
-    'connection_table_to_matrix',
-  )
-  const out = ctx.output('matrix')
-  const links = ctx.output('links')
-  const byType = ctx.params.groupByType === true
-  // What a link is per: a type pair, or a neuron pair with each end's type riding along.
-  const linkKeys = byType
-    ? ['type_pre', 'type_post']
-    : ['bodyId_pre', 'type_pre', 'bodyId_post', 'type_post']
-  // neuprint-python's own vocabulary, not Coda's: `connection_table_to_matrix` appends
-  // `_pre`/`_post` to this itself, and the columns it is indexing are `fetch_adjacencies`'
-  // output — which `merge_neuron_properties` has just written `bodyId_pre`/`bodyId_post` into.
-  const group = byType ? 'type' : 'bodyId'
-  const weight = readWeightProperty(ctx.params.weight)
+    if (isCatmaidDataset(ctx)) {
+      // The matrix and its links together, both from one `adjacency_matrix` call: every source and
+      // target in the order they arrived, which is the canvas' axis order, summed per type where
+      // the node groups. CATMAID's only connection property is the synapse count, so `Weight` has
+      // nothing else to name here.
+      return [
+        `${ctx.output('matrix')}, ${ctx.output('links')} = ${c}.adjacency(`,
+        `    ${neuronIds(sources)},`,
+        `    ${neuronIds(targets)},`,
+        `    by_type=${ctx.params.groupByType === true ? 'True' : 'False'},`,
+        `)`,
+      ]
+    }
 
-  return [
-    ...(weight === undefined
-      ? [
-          `_neurons, _conn = fetch_adjacencies(`,
-          `    NeuronCriteria(bodyId=${neuronIdInts(sources)}, client=${c}),`,
-          `    NeuronCriteria(bodyId=${neuronIdInts(targets)}, client=${c}),`,
-          `    client=${c},`,
-          `)`,
-          `_conn = merge_neuron_properties(_neurons, _conn, ['type'])`,
-        ]
-      : cypherAdjacency(ctx, sources, targets, c, weight)),
-    `${out} = connection_table_to_matrix(_conn, ${pyStr(group)}, sort_by=${pyStr(group)})`,
-    ``,
-    /*
-     * The long half, from `_conn` rather than by melting the matrix back down.
-     *
-     * They agree, and that is worth saying because the canvas does it the other way round:
-     * `matrixToLinks` drops the zero cells, and `_conn` has no zero rows to drop — a connection
-     * table only holds connections that exist. `fetch_adjacencies` answers one row per
-     * (pre, post, ROI), so the sum is across regions, which is exactly what
-     * `connection_table_to_matrix` collapses into a cell.
-     */
-    // Connectivity's columns (`MATRIX_LINKS_SCHEMA`). Per neuron the ids are the body ids; grouped
-    // by type a line is a type, so the ids are empty — as on the canvas.
-    `${links} = (`,
-    `    _conn`,
-    `    .groupby([${linkKeys.map(pyStr).join(', ')}], as_index=False, dropna=False)['weight']`,
-    `    .sum()`,
-    // Connectivity's rename; a grouped frame has no body ids, and pandas skips absent keys.
-    `    .rename(columns={`,
-    ...renameLines('        '),
-    `    })`,
-    `)`,
-    ...(byType
-      ? [`${links}.insert(0, 'preId', None)`, `${links}.insert(2, 'postId', None)`]
-      : []),
-    codaIds(ctx, links, 'preId', 'postId'),
-  ]
-})
+    ctx.require(
+      'neuprint',
+      'NeuronCriteria',
+      'fetch_adjacencies',
+      'merge_neuron_properties',
+      'connection_table_to_matrix',
+    )
+    const out = ctx.output('matrix')
+    const links = ctx.output('links')
+    const byType = ctx.params.groupByType === true
+    // What a link is per: a type pair, or a neuron pair with each end's type riding along.
+    const linkKeys = byType
+      ? ['type_pre', 'type_post']
+      : ['bodyId_pre', 'type_pre', 'bodyId_post', 'type_post']
+    // neuprint-python's own vocabulary, not Coda's: `connection_table_to_matrix` appends
+    // `_pre`/`_post` to this itself, and the columns it is indexing are `fetch_adjacencies`'
+    // output — which `merge_neuron_properties` has just written `bodyId_pre`/`bodyId_post` into.
+    const group = byType ? 'type' : 'bodyId'
+    const weight = readWeightProperty(ctx.params.weight)
+
+    return [
+      ...(weight === undefined
+        ? [
+            `_neurons, _conn = fetch_adjacencies(`,
+            `    NeuronCriteria(bodyId=${neuronIdInts(sources)}, client=${c}),`,
+            `    NeuronCriteria(bodyId=${neuronIdInts(targets)}, client=${c}),`,
+            `    client=${c},`,
+            `)`,
+            `_conn = merge_neuron_properties(_neurons, _conn, ['type'])`,
+          ]
+        : cypherAdjacency(ctx, sources, targets, c, weight)),
+      `${out} = connection_table_to_matrix(_conn, ${pyStr(group)}, sort_by=${pyStr(group)})`,
+      ``,
+      /*
+       * The long half, from `_conn` rather than by melting the matrix back down.
+       *
+       * They agree, and that is worth saying because the canvas does it the other way round:
+       * `matrixToLinks` drops the zero cells, and `_conn` has no zero rows to drop — a connection
+       * table only holds connections that exist. `fetch_adjacencies` answers one row per
+       * (pre, post, ROI), so the sum is across regions, which is exactly what
+       * `connection_table_to_matrix` collapses into a cell.
+       */
+      // Connectivity's columns (`MATRIX_LINKS_SCHEMA`). Per neuron the ids are the body ids; grouped
+      // by type a line is a type, so the ids are empty — as on the canvas.
+      `${links} = (`,
+      `    _conn`,
+      `    .groupby([${linkKeys.map(pyStr).join(', ')}], as_index=False, dropna=False)['weight']`,
+      `    .sum()`,
+      // Connectivity's rename; a grouped frame has no body ids, and pandas skips absent keys.
+      `    .rename(columns={`,
+      ...renameLines('        '),
+      `    })`,
+      `)`,
+      ...(byType
+        ? [`${links}.insert(0, 'preId', None)`, `${links}.insert(2, 'postId', None)`]
+        : []),
+      codaIds(ctx, links, 'preId', 'postId'),
+    ]
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
 // ---------------------------------------------------------------------------
 // ROI Counts
@@ -692,12 +762,20 @@ const SKELETON_NOTES: Record<SkeletonsNote, string> = {
 
 /**
  * Backends whose dataset is a generated helper object answering `meshes`/`skeletons` itself — a
- * `CodaPrecomputed` or a `CodaCustomDataset`, at full resolution (the canvas' default Downsample).
+ * `CodaPrecomputed`, a `CodaCustomDataset` or (skeletons only) a `CodaCatmaidDataset`, at full
+ * resolution (the canvas' default Downsample).
  */
-const HELPER_GEOMETRY: readonly string[] = [CUSTOM_SOURCE_ID, 'precomputed']
+const MESH_HELPERS: readonly string[] = [CUSTOM_SOURCE_ID, 'precomputed']
+const HELPER_GEOMETRY: Record<'meshes' | 'skeletons', readonly string[]> = {
+  meshes: MESH_HELPERS,
+  // A CATMAID project holds traced skeletons and no neuron meshes — its volumes are neuropil.
+  skeletons: [...MESH_HELPERS, 'catmaid'],
+}
 
-/** Every backend a notebook can fetch geometry from: those, and neuPrint through navis. */
-const GEOMETRY_BACKENDS = { backends: ['neuprint', ...HELPER_GEOMETRY] }
+/** Every backend a notebook can fetch `kind` from: those, and neuPrint through navis. */
+function geometryBackends(kind: 'meshes' | 'skeletons'): { backends: string[] } {
+  return { backends: ['neuprint', ...HELPER_GEOMETRY[kind]] }
+}
 
 /**
  * The Python expression fetching `kind` for `ids` from the dataset on `portId`, or undefined where
@@ -718,7 +796,7 @@ export function geometryCall(
   portId = 'dataset',
 ): string | undefined {
   const backend = datasetBackend(ctx, portId)
-  if (HELPER_GEOMETRY.includes(backend)) return `${dataset}.${kind}(${ids})`
+  if (HELPER_GEOMETRY[kind].includes(backend)) return `${dataset}.${kind}(${ids})`
   if (backend !== 'neuprint') return undefined
   ctx.require('navisNeuprint')
   return kind === 'meshes'
@@ -739,6 +817,12 @@ function geometryLines(
   const call = geometryCall(ctx, kind, neuronIdInts(neurons, limit), ctx.wired('dataset'))!
   return [
     ...(datasetBackend(ctx) === 'neuprint' ? notes : []),
+    ...(kind === 'skeletons' && isCatmaidDataset(ctx)
+      ? ctx.note(
+          'CATMAID leaves a radius it was not given at -1, which pymaid keeps; the canvas ' +
+            'draws those nodes at zero radius. Cable length and the tree are the same.',
+        )
+      : []),
     `${out} = ${call}`,
     ...carryLines(ctx, out, neurons, ctx.columns(CARRY_PARAM_ID), ID_COLUMN_NAME),
   ]
@@ -755,7 +839,7 @@ registerEmitter(
       plan.notes.flatMap((note) => ctx.note(SKELETON_NOTES[note])),
     )
   },
-  GEOMETRY_BACKENDS,
+  geometryBackends('skeletons'),
 )
 
 registerEmitter(
@@ -771,7 +855,7 @@ registerEmitter(
           'it for finer ones.',
       ),
     ),
-  GEOMETRY_BACKENDS,
+  geometryBackends('meshes'),
 )
 
 /**
@@ -791,48 +875,62 @@ registerEmitter(
  * surfaces, which matters more here than there: a node that binds them to a name invites
  * measuring them.
  */
-registerEmitter('neuron.roiMeshes', (ctx) => {
-  const client = ctx.wired('dataset')
-  const out = ctx.output('meshes')
-  const chosen = (Array.isArray(ctx.params.rois) ? ctx.params.rois : []).map(String)
-  const list =
-    chosen.length > 0
-      ? `[${chosen.map((roi) => JSON.stringify(roi)).join(', ')}]`
-      : `${client}.primary_rois`
+registerEmitter(
+  'neuron.roiMeshes',
+  (ctx) => {
+    const client = ctx.wired('dataset')
+    const out = ctx.output('meshes')
+    const chosen = (Array.isArray(ctx.params.rois) ? ctx.params.rois : []).map(String)
+    if (isCatmaidDataset(ctx)) {
+      // A CATMAID project's regions are its volumes, every one a mesh and none nested in another,
+      // so there is no primary set to fall back to: empty means all of them, as on the canvas.
+      return [
+        ...(chosen.length > 0
+          ? []
+          : [`# \`Regions\` was left empty, so this reads every volume.`]),
+        `${out} = ${client}.volumes(${chosen.length > 0 ? pyList(chosen) : ''})`,
+      ]
+    }
+    const list =
+      chosen.length > 0
+        ? `[${chosen.map((roi) => JSON.stringify(roi)).join(', ')}]`
+        : `${client}.primary_rois`
 
-  ctx.require('navisNeuprint')
-  return [
-    ...ctx.note(
-      'Each region mesh is a separate request. neuPrint publishes these meshes for ' +
-        'display only: they are simplified surfaces, so a volume measured from one is an ' +
-        'approximation.',
-    ),
-    ...(chosen.length > 0
-      ? []
-      : [
-          `# \`Regions\` was left empty, so this uses the primary regions, which do not overlap.`,
-          `# The full published list has regions nested inside others.`,
-        ]),
-    `${out} = []`,
-    `_skipped = []`,
-    `for _roi in ${list}:`,
-    `    try:`,
-    `        ${out}.append(neu.fetch_roi(_roi, client=${client}))`,
-    `    except Exception:`,
-    `        # No mesh published for this one. On male-CNS every such region is an`,
-    `        # "-unspecified" bucket, which collects unassigned synapses and is not a shape.`,
-    `        _skipped.append(_roi)`,
-    ``,
-    `print(f"{len(${out})} region meshes · {len(_skipped)} without one")`,
-  ]
-})
+    ctx.require('navisNeuprint')
+    return [
+      ...ctx.note(
+        'Each region mesh is a separate request. neuPrint publishes these meshes for ' +
+          'display only: they are simplified surfaces, so a volume measured from one is an ' +
+          'approximation.',
+      ),
+      ...(chosen.length > 0
+        ? []
+        : [
+            `# \`Regions\` was left empty, so this uses the primary regions, which do not overlap.`,
+            `# The full published list has regions nested inside others.`,
+          ]),
+      `${out} = []`,
+      `_skipped = []`,
+      `for _roi in ${list}:`,
+      `    try:`,
+      `        ${out}.append(neu.fetch_roi(_roi, client=${client}))`,
+      `    except Exception:`,
+      `        # No mesh published for this one. On male-CNS every such region is an`,
+      `        # "-unspecified" bucket, which collects unassigned synapses and is not a shape.`,
+      `        _skipped.append(_roi)`,
+      ``,
+      `print(f"{len(${out})} region meshes · {len(_skipped)} without one")`,
+    ]
+  },
+  { backends: ['neuprint', 'catmaid'] },
+)
 
 registerEmitter(
   'neuron.synapses',
   (ctx) => {
     const c = ctx.wired('dataset')
     const neurons = ctx.wired('neurons')
-    if (isCustomDataset(ctx)) return customSynapses(ctx, c, neurons)
+    if (isLabelledHelper(ctx)) return helperSynapses(ctx, c, neurons)
 
     ctx.require('neuprint', 'NeuronCriteria', 'SynapseCriteria', 'fetch_synapses')
     const out = ctx.output('points')
@@ -888,24 +986,30 @@ registerEmitter(
         : []),
     ]
   },
-  { backends: ['neuprint', CUSTOM_SOURCE_ID] },
+  { backends: ['neuprint', 'catmaid', CUSTOM_SOURCE_ID] },
 )
 
 /**
- * Synapses from a Custom Dataset's synapse table: `CodaCustomDataset.synapses`, the lookup of
- * `data/custom/synapses.ts` — the rows naming these neurons at the end asked about, one per
- * synaptic connection (the only unit a table's rows can be), positions in nanometres, the carried
- * columns after them.
+ * Synapses from a helper dataset's `synapses` method, which both answer in Coda's columns.
+ *
+ * A Custom Dataset's are the rows of its synapse table naming these neurons at the end asked about
+ * (`data/custom/synapses.ts`), one per synaptic connection, positions in nanometres, the carried
+ * columns after them — and a table has no confidence scale, so a floor is noted rather than passed.
+ * A CATMAID project's are the queried skeletons' connector links, one per site, with a confidence
+ * of 1–5 that the floor applies to.
  */
-function customSynapses(ctx: EmitContext, c: string, neurons: string): string[] {
+function helperSynapses(ctx: EmitContext, c: string, neurons: string): string[] {
   const polarity = String(ctx.params.polarity)
+  const minConfidence = minSynapseConfidence(ctx.params)
+  const catmaid = isCatmaidDataset(ctx)
   return [
-    ...(minSynapseConfidence(ctx.params) > 0
+    ...(minConfidence > 0 && !catmaid
       ? ctx.note(confidenceIgnoredWarning('This synapse table'))
       : []),
     `${ctx.output('points')} = ${c}.synapses(`,
     `    ${neuronIds(neurons)},`,
     `    polarity=${polarity ? pyStr(polarity) : 'None'},`,
+    ...(minConfidence > 0 && catmaid ? [`    min_confidence=${minConfidence},`] : []),
     `)`,
   ]
 }
@@ -945,16 +1049,29 @@ registerEmitter(
         'them.',
     )
 
-    if (isCustomDataset(ctx)) {
+    /*
+     * Both helper datasets answer `synapses_between`. A Custom Dataset's synapse table has one
+     * position per synapse, no end and no confidence scale, so `Location` and a floor are noted
+     * rather than passed. A CATMAID synapse is drawn at its connector whichever end `Location`
+     * names, so there it picks which link's confidence the row carries.
+     */
+    if (isLabelledHelper(ctx)) {
+      const catmaid = isCatmaidDataset(ctx)
       return [
-        ...(minConfidence > 0 ? ctx.note(confidenceIgnoredWarning('This synapse table')) : []),
-        ...ctx.note(
-          'A synapse table has one position per synapse and does not say which end it is ' +
-            'at, so `Location` has no effect and polarity is left empty, as on the canvas.',
-        ),
+        ...(minConfidence > 0 && !catmaid
+          ? ctx.note(confidenceIgnoredWarning('This synapse table'))
+          : []),
+        ...(catmaid
+          ? []
+          : ctx.note(
+              'A synapse table has one position per synapse and does not say which end it is ' +
+                'at, so `Location` has no effect and polarity is left empty, as on the canvas.',
+            )),
         `${out} = ${c}.synapses_between(`,
         `    sources=${sources ? neuronIds(sources) : 'None'},`,
         `    targets=${targets ? neuronIds(targets) : 'None'},`,
+        ...(catmaid ? [`    location=${pyStr(location)},`] : []),
+        ...(minConfidence > 0 && catmaid ? [`    min_confidence=${minConfidence},`] : []),
         ...(open && !includeFragments ? [`    include_fragments=False,`] : []),
         `)`,
       ]
@@ -1078,7 +1195,7 @@ registerEmitter(
       ...typeNote,
     ]
   },
-  { backends: ['neuprint', 'cave', CUSTOM_SOURCE_ID] },
+  { backends: ['neuprint', 'cave', 'catmaid', CUSTOM_SOURCE_ID] },
 )
 
 // ---------------------------------------------------------------------------
