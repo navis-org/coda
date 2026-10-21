@@ -169,3 +169,14 @@ export function labelsFrame(
   ctx.helper('coda_cave_labels')
   return { frame: `coda_cave_labels(${dataset})`, text }
 }
+
+/**
+ * A chained annotation source's last line: joined onto the source wired upstream, where there is
+ * one, by `coda_join_annotations` — a later source wins a collision unless its value is missing.
+ */
+export function chainAnnotations(ctx: EmitContext, out: string): string[] {
+  const upstream = ctx.input('annotations')
+  if (!upstream) return []
+  ctx.helper('coda_join_annotations')
+  return [`${out} <- coda_join_annotations(${upstream}, ${out})`]
+}

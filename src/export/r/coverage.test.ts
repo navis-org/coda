@@ -167,14 +167,6 @@ const NO_EMITTER: Record<string, string> = {
     'bare symbol that does not resolve \u2014 which is the `navis.interfaces` failure ' +
     'check-export.py was written for, in a language whose equivalent check cannot run here ' +
     'because the packages are not installed. Refusing is the smaller lie.',
-  'annotation.flyTable':
-    "FlyTable through `fafbseg::flytable_list_rows`, which is the route and needs Python's " +
-    'seatable_api beside caveclient. Not emitted until it has been run against FlyTable the ' +
-    'way every CAVE chunk here was run against `flywire_fafb_public` (`pnpm probe:cave`): a ' +
-    'chunk nobody executed is the failure this list exists to avoid.',
-  'annotation.seaTable':
-    "A SeaTable base on a server other than FlyTable. fafbseg's `flytable_*` functions are " +
-    "FlyTable's; there is no general SeaTable client in R to translate to.",
   'neuron.influence':
     'The bounded influence score, and the refusal is about what could be *checked* rather than ' +
     'about what R can do \u2014 the same split `neuron.connectivity`\u2019s region options are ' +
@@ -210,6 +202,12 @@ describe('R emitter coverage', () => {
 
   it('every registered node type is either emitted or explicitly excused', () => {
     expect(types.filter((t) => !getEmitter(t) && !(t in NO_EMITTER))).toEqual([])
+  })
+
+  // An excuse outlives its reason silently: the emitter lands and the sentence saying R cannot
+  // do this stays in the file, describing a refusal nothing makes.
+  it('no excused type has an emitter', () => {
+    expect(Object.keys(NO_EMITTER).filter((t) => getEmitter(t))).toEqual([])
   })
 
   it('no emitter is registered for a type that does not exist', () => {

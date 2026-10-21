@@ -14,10 +14,10 @@
 # annotations through a different endpoint from the canvas, which hands back the same labels in
 # another order (see `r/catmaidHelpers.ts`).
 #
-# Needs the fixture's packages (rcatmaid; fafbseg, arrow and reticulate) and a network. The CAVE
-# fixture reaches caveclient through reticulate: where no Python is configured, this points
-# RETICULATE_PYTHON at the `python3` on the PATH, which must have caveclient. Exits non-zero on
-# any disagreement.
+# Needs the fixture's packages (rcatmaid; fafbseg, arrow and reticulate; seatabler) and a
+# network. The CAVE and FlyTable fixtures reach Python through reticulate: where no Python is
+# configured, this points RETICULATE_PYTHON at the `python3` on the PATH, which must have
+# caveclient or seatable_api. Exits non-zero on any disagreement.
 
 suppressPackageStartupMessages({
   library(jsonlite)
@@ -27,7 +27,7 @@ options(warn = -1)
 args <- commandArgs(trailingOnly = TRUE)
 fixture <- if (length(args) > 0) args[[1]] else Sys.getenv("EXPORT_LIVE")
 dir <- Sys.getenv("EXPORT_LIVE_OUT", file.path("/tmp/coda-export-live", fixture))
-if (fixture == "cave" && !nzchar(Sys.getenv("RETICULATE_PYTHON"))) {
+if (fixture %in% c("cave", "flytable") && !nzchar(Sys.getenv("RETICULATE_PYTHON"))) {
   Sys.setenv(RETICULATE_PYTHON = Sys.which("python3"))
 }
 
@@ -62,6 +62,11 @@ ports$cave <- list(
   tables = list(out = "list_cave_tables"),
   info = list(columns = "cave_table_info")
 )
+ports$flytable <- list(
+  fly = list(annotations = "flytable"),
+  flyAll = list(annotations = "flytable_2"),
+  flyChain = list(annotations = "flytable_3")
+)
 
 # Node -> canvas columns a document leaves out on purpose, as in the Python probe.
 uncompared <- list(
@@ -69,7 +74,9 @@ uncompared <- list(
     between = c("type", "partnerType"),
     betweenOut = c("type", "partnerType"),
     info = c("type", "example")
-  )
+  ),
+  # Not left out but read wrong, upstream, as in the Python probe.
+  flytable = list(flyAll = "root_last_modified")
 )
 
 run_document <- function(path) {
@@ -85,9 +92,10 @@ run_document <- function(path) {
 }
 
 # One cell as text, so a row can be compared as one string. Numbers to six significant figures:
-# a position or a cable length has been through JSON and a float32 on the canvas side.
+# a position or a cable length has been through JSON and a float32 on the canvas side. A blank is
+# missing, as Coda reads it (`tableOps.ts`).
 cell <- function(value, column) {
-  if (is.null(value) || length(value) == 0 || is.na(value)) return("NA")
+  if (is.null(value) || length(value) == 0 || is.na(value) || identical(value, "")) return("NA")
   if (column == "annotations") return(paste(sort(strsplit(as.character(value), "; ", fixed = TRUE)[[1]]), collapse = "; "))
   if (is.numeric(value)) return(format(signif(as.numeric(value), 6), scientific = FALSE, trim = TRUE))
   as.character(value)

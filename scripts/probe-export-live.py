@@ -64,6 +64,12 @@ PORTS['cave'] = {
     'info': {'columns': 'cave_table_info'},
 }
 
+PORTS['flytable'] = {
+    'fly': {'annotations': 'flytable'},
+    'flyAll': {'annotations': 'flytable_2'},
+    'flyChain': {'annotations': 'flytable_3'},
+}
+
 # Node -> canvas columns a document leaves out on purpose, each said in that cell's NOTE.
 UNCOMPARED = {
     'cave': {
@@ -73,6 +79,11 @@ UNCOMPARED = {
         # The card shows a dtype in Coda's vocabulary and an example in its own format; the cell
         # shows its library's (`2023-06-19 06:43:32…` for a timestamp, `True` for a flag).
         'info': {'type', 'example'},
+    },
+    'flytable': {
+        # Not left out but read wrong, upstream of both documents: the time-zone offset is lost in
+        # seatable_api, an hour late for a summer date. See docs/export.md.
+        'flyAll': {'root_last_modified'},
     },
 }
 
@@ -104,13 +115,17 @@ def same(a, b):
 
 
 def normalised(rows, columns):
-    """Rows as tuples over `columns`, sorted, with NaN and NA read as None."""
+    """Rows as tuples over `columns`, sorted, with NaN, NA and '' read as None.
+
+    The empty string is folded in because Coda reads null and blank as one absence
+    (`tableOps.ts`), and sea-serpent hands a blank cell back as None where the canvas keeps ''.
+    """
     out = []
     for row in rows:
         values = []
         for c in columns:
             v = row.get(c)
-            if v is pd.NA or (isinstance(v, float) and math.isnan(v)):
+            if v is pd.NA or v == '' or (isinstance(v, float) and math.isnan(v)):
                 v = None
             values.append(v)
         out.append(tuple(values))

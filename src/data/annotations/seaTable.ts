@@ -84,6 +84,34 @@ export interface SeaTableConfig extends Record<string, string> {
   columns: string
 }
 
+/**
+ * A `FlyTable` or `SeaTable` node's params as a config, or the sentence saying what it is missing
+ * — the one reading, for the node and both exporters, as `sheetConfigFrom` is the Google Sheet's:
+ * the card shows the error, the run throws it and an export's TODO says it. No workspace is
+ * needed: it is resolved from the base when empty, and a config that could not be built until
+ * somebody supplied one would leave the column picker empty on exactly the ordinary configuration.
+ */
+export function seaTableConfigFrom(
+  params: Record<string, unknown>,
+  fallbackHost: string,
+): { config: SeaTableConfig; error?: undefined } | { config?: undefined; error: string } {
+  const base = String(params.base).trim()
+  const table = String(params.table).trim()
+  if (!base) return { error: 'Enter the name of a base in `Base`.' }
+  if (!table) return { error: 'Enter the name of a table in this base in `Table`.' }
+  return {
+    config: {
+      host: String(params.host).trim() || fallbackHost,
+      workspace: String(params.workspace).trim(),
+      base,
+      table,
+      // A cleared field, not the declared default: `withDefaults` cannot see an empty string.
+      idColumn: String(params.idColumn).trim() || 'root_id',
+      columns: String(params.columns).trim(),
+    },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Transport
 // ---------------------------------------------------------------------------
@@ -565,8 +593,10 @@ function dtypeFor(type: string): DType {
 
 /** A cell, refusing anything a column cannot hold rather than stringifying it into noise. */
 function cellFor(value: unknown, dtype: DType): CellValue {
-  if (value === null || value === undefined) return null
+  // Before the absence check: a checkbox nobody ever ticked has no key in its row, and a SeaTable
+  // checkbox has two states, so absent is unticked. See docs/annotations.md.
   if (dtype === 'bool') return value === true
+  if (value === null || value === undefined) return null
   if (dtype === 'f64') {
     const n = Number(value)
     return Number.isFinite(n) ? n : null

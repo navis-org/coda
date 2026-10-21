@@ -1003,12 +1003,43 @@ by the notebook (which passes `server_address` where it is false). R's chunks do
 datastack a chunk names itself is either typed, which is always the global server, or borrowed from
 a Dataset node the refusal has already covered.
 
-**Not covered in R, each a TODO:** FlyTable and SeaTable. fafbseg reads FlyTable
-(`flytable_list_rows`, which also needs Python's seatable_api) but it has not been run here — the
-probe has no FlyTable token — and a chunk nobody executed is what this exporter refuses to ship;
-for SeaTable at another host R has no client. `caveGraph`, whose annotation chain starts with
-both, is exported for the R golden with `withSeaTable: false`, or their TODO would block every node
-after them. Dataset Summary and Neuroglancer stay neuPrint-only in R, as in the CAVE notebook.
+**Not covered in R, each a TODO:** Dataset Summary and Neuroglancer, which stay neuPrint-only in
+R, as in the CAVE notebook.
+
+### SeaTable and FlyTable in R
+
+Both nodes read through **seatabler** (`flyconnectome/seatabler`), the generic SeaTable client
+fafbseg's `flytable_*` functions are being moved onto; one helper, `coda_seatable`, and one
+connection per host. What either reads is `seaTablePlan` in `plans/query.ts`, which the notebook's
+sea-serpent cell renders too. Measured against FlyWire's `main.info` by `pnpm probe:flytable`
+(58,340 rows, 52 columns, every column type the base has), in both languages:
+
+- **SQL, never `seatable_list_rows`.** The rows endpoint `seatable_api` 2.8.2 calls answers
+  FlyTable with `404 table not found` for a table its SQL endpoint reads — sea-serpent reads
+  through SQL for the same reason. SQL also selects columns on the server, which the canvas
+  cannot: 0.7 s for three columns against 9 s for all. seatabler finds the table in the SQL text
+  with a pattern that takes no backticks, so the table name goes in **unquoted** — and a name
+  holding a space, comma or quote is a TODO naming the notebook, since it would read as another
+  table. A failed read is a warning and `NULL` from seatabler, so the helper stops on `NULL`.
+- **Empty `Columns` means the schema's columns, not `SELECT *`**, which adds eight bookkeeping
+  columns (`_id`, `_ctime`, …) the canvas never shows. A column named but absent is a column of
+  nulls in all three, and so in R is one no row has a value in, which SQL leaves out entirely.
+- **The token's variable follows the host in R only**: `FLYTABLE_TOKEN` for FlyTable (matched
+  without its scheme and in any case), as fafbseg and seatabler name it, `SEATABLE_TOKEN` for any
+  other server. The notebook reads
+  `SEATABLE_TOKEN` for both, which `probe:flytable` bridges by handing it the FlyTable token.
+- **An unticked checkbox is `false`** in all three. SeaTable leaves the key out of a row whose box
+  was never ticked; the canvas read that as null until this probe, against sea-serpent's `false`,
+  and a checkbox has two states. The R helper turns seatabler's `NA` into `FALSE` the same way.
+- **A multiple-select cell is joined with `', '`** in all three. sea-serpent hands one over as the
+  *text* of a Python list (`"['…']"`), so the notebook's helper reads it back with
+  `ast.literal_eval`, in the columns the table's metadata types as multiple-select only, leaving a
+  cell that does not parse as it came. A link column is not touched: its items are records.
+- **A date is an hour late in both documents in summer, and the cause is upstream of both.** The
+  server stores `2019-06-14T22:18:00+01:00`; `seatable_api`'s `convert=True` reformats it to the
+  column's display format with the offset dropped, and sea-serpent and seatabler then read that
+  wall clock as UTC. The canvas keeps the server's text. Neither document can correct it without
+  the base's time zone, so the probe leaves `root_last_modified` uncompared and says why.
 
 `caveGraph`'s second CAVE table keys a reference table by `target_id`. The canvas refuses that
 ("column target_id not found in proofread_neurons"), and so do both documents: a fixture reaching

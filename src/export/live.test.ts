@@ -3,6 +3,7 @@
  *
  *     pnpm probe:catmaid        # EXPORT_LIVE=catmaid — VFB's FAFB and L1, anonymously
  *     CAVE_TOKEN=… pnpm probe:cave   # EXPORT_LIVE=cave — FlyWire's public datastack
+ *     FLYTABLE_TOKEN=… pnpm probe:flytable   # EXPORT_LIVE=flytable — FlyWire's main.info
  *
  * Runs the fixture's graph through a real Scheduler, writes every node's outputs to
  * `<dir>/canvas.json`, and writes the notebook and the R Markdown exported from the same graph
@@ -17,7 +18,9 @@
  * produce a plausible wrong table rather than an error.
  *
  * Out of CI for the live tests' reason: these are somebody's servers. It only reads. The CAVE
- * fixture needs `CAVE_TOKEN` (`jq -r .token ~/.cloudvolume/secrets/cave-secret.json`).
+ * fixture needs `CAVE_TOKEN` (`jq -r .token ~/.cloudvolume/secrets/cave-secret.json`); the
+ * FlyTable one an account token in `FLYTABLE_TOKEN`, which `probe:flytable` also hands the notebook
+ * as `SEATABLE_TOKEN`, the variable its cells read.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -33,8 +36,9 @@ import { registerBuiltinSources } from '../data/builtins'
 import { requireSource } from '../data/source'
 import { DEFAULT_CAVE_SERVER } from '../data/cave/deployments'
 import { setToken } from '../data/cave/credentials'
+import { SEATABLE_HOSTS, setToken as setSeaTableToken } from '../data/annotations/credentials'
 import type { CodaGraph } from '../core/graph'
-import { catmaidGraph, caveProbeGraph } from './fixture'
+import { catmaidGraph, caveProbeGraph, flytableProbeGraph } from './fixture'
 import { exportNotebook, serializeNotebook } from './python/exporter'
 import { exportRmd } from './r/exporter'
 
@@ -42,6 +46,7 @@ import { exportRmd } from './r/exporter'
 const FIXTURES: Record<string, () => CodaGraph> = {
   catmaid: () => catmaidGraph({ withLab: false }),
   cave: caveProbeGraph,
+  flytable: flytableProbeGraph,
 }
 
 const FIXTURE = process.env.EXPORT_LIVE ?? ''
@@ -107,6 +112,12 @@ describe.skipIf(!(FIXTURE in FIXTURES))('export probe, against the live servers'
       const token = process.env.CAVE_TOKEN
       if (!token) throw new Error('The CAVE probe needs CAVE_TOKEN; see the note at the top.')
       setToken(DEFAULT_CAVE_SERVER, token)
+    }
+    if (FIXTURE === 'flytable') {
+      const token = process.env.FLYTABLE_TOKEN
+      if (!token)
+        throw new Error('The FlyTable probe needs FLYTABLE_TOKEN; see the note at the top.')
+      setSeaTableToken(SEATABLE_HOSTS.flytable, token)
     }
     const graph = FIXTURES[FIXTURE]!()
     const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })

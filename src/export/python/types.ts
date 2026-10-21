@@ -45,6 +45,7 @@ export type Cell = MarkdownCell | CodeCell
  * exactly the kind of thing nobody remembers at the point of use.
  */
 export type PyModule =
+  | 'ast'
   | 'os'
   | 're'
   | 'unicodedata'
@@ -89,6 +90,7 @@ export interface ModuleSpec {
 
 /** Declaration order is the order the setup cell reads in. See `setupCell`. */
 export const MODULES: Record<PyModule, ModuleSpec> = {
+  ast: { statement: 'import ast' },
   os: { statement: 'import os' },
   re: { statement: 'import re' },
   unicodedata: { statement: 'import unicodedata' },

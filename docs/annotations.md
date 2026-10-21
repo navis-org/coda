@@ -272,6 +272,10 @@ GET  {server}/api/v1/dtables/{uuid}/rows/?table_name=…&limit=…  → the rows
   was free, and it is why these two backends join at all — the live test asserts most of a
   sample is genuinely beyond double precision, because an id merely *ending* in zeroes proves
   nothing.
+- **An unticked checkbox is `false`, not missing.** The rows endpoint leaves the key out of a row
+  whose box was never ticked, and `cellFor` read that as null — so `is false` missed those rows,
+  while the write target, sea-serpent and the R export all read `false`. Found by
+  `pnpm probe:flytable` comparing the exported documents against the canvas.
 - **Pages are sequential, not concurrent.** `start` is an offset into a base that is being edited
   while you read it; firing six at once is how a page gets read twice and another missed.
 - **The workspace is worked out, not asked for.** A base is addressed by workspace *and* name,
@@ -527,12 +531,10 @@ is not boilerplate: it is the `MAX_UPLOAD_BYTES` ceiling stated twice and the ru
 parsing to nothing must quote what arrived. The *fetch* is deliberately not shared, because what
 a thrown fetch means differs completely between the two — see below.
 
-**Both exporters emit it, and it is the only annotation source that does.** That is not a gap in
-the other two: FlyTable is `sea-serpent`, which has no natverse counterpart, and a CAVE table is
-caveclient, which R refuses the whole graph over. This one needs no client, so `pd.read_csv` and
-`readr::read_csv` reach it directly — which is also why it sits in `everythingGraph` rather than
-in `caveGraph`, chained onto the Upload node so the join branch is recorded rather than only the
-bare cell.
+**Both exporters emit it, and it needs no client**: `pd.read_csv` and `readr::read_csv` reach it
+directly, where FlyTable and SeaTable need sea-serpent or seatabler and a CAVE table caveclient or
+fafbseg. That is also why it sits in `everythingGraph` rather than in `caveGraph`, chained onto
+the Upload node so the join branch is recorded rather than only the bare cell.
 
 Each language has one trap and it is the same trap from opposite directions, and **each was caught
 by running the generated helper rather than by reading it**. pandas types a column of

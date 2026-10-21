@@ -383,3 +383,14 @@ export function carryLines(
   }
   return lines
 }
+
+/**
+ * A chained annotation source's last line: joined onto the source wired upstream, where there is
+ * one, by `coda_join_annotations` — a later source wins a collision unless its value is missing.
+ */
+export function chainAnnotations(ctx: EmitContext, out: string): string[] {
+  const upstream = ctx.input('annotations')
+  if (!upstream) return []
+  ctx.helper('coda_join_annotations')
+  return [`${out} = coda_join_annotations(${upstream}, ${out})`]
+}

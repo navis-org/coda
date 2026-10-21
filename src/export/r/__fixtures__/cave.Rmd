@@ -14,9 +14,14 @@ The CAVE nodes, wired the way references exist for.
 ```{r setup}
 # install.packages(c("arrow", "reticulate", "dplyr"))
 # remotes::install_github("natverse/fafbseg")  # not on CRAN
+# remotes::install_github("flyconnectome/seatabler")  # not on CRAN
 # fafbseg drives Python's caveclient through reticulate. Once per machine, run
 # fafbseg::simple_python(); if a chunk below fails, fafbseg::dr_fafbseg() says why.
 # The CAVE token is read from ~/.cloudvolume/secrets, as caveclient does in Python.
+# seatabler drives Python's seatable_api through reticulate. Once per machine, run
+# nat.python::simple_python("minimal", pkgs = "seatable_api"). The account token is
+# read from FLYTABLE_TOKEN for FlyTable and SEATABLE_TOKEN for any other SeaTable server
+# (e.g. set in ~/.Renviron).
 
 library(fafbseg)
 library(dplyr)
@@ -352,6 +357,41 @@ coda_search <- function(df, query) {
 }
 
 
+#' A table in a SeaTable base, read with seatabler.
+coda_seatable <- function(host, base, table, id_column = "root_id", columns = NULL,
+                          token_envvar = "SEATABLE_TOKEN", workspace = NULL) {
+  con <- seatabler::seatable_connection(host, token_envvar = token_envvar,
+                                        workspace_id = workspace)
+  # One base object for both reads below, so seatabler resolves it, and the schema, once;
+  # without `table`, which is part of its cache key, so every table in a base shares it.
+  base <- seatabler::seatable_base(base_name = base, con = con)
+  info <- seatabler::seatable_columns(table, base = base, con = con)
+  schema <- info$name
+  if (!(id_column %in% schema)) {
+    stop(sprintf("'%s' is not a column of %s. It has: %s",
+                 id_column, table, paste(schema, collapse = ", ")))
+  }
+  # Empty means every column of the table except the id.
+  if (!length(columns)) columns <- setdiff(schema, id_column)
+  fields <- c(id_column, intersect(columns, schema))
+  sql <- sprintf("SELECT %s FROM %s", paste0("`", fields, "`", collapse = ", "), table)
+  df <- seatabler::seatable_query(sql, con = con, base = base, limit = Inf,
+                                  collapse_lists = ", ", progress = FALSE)
+  # seatabler answers a failed read with a warning and NULL.
+  if (is.null(df)) stop(sprintf("Could not read %s from %s; see the warning above.", table, host))
+  # A column the table lacks, or one no row has a value in (so no row carries the key), is
+  # a column of NA, as on the canvas.
+  for (missing in setdiff(c(id_column, columns), names(df))) {
+    df[[missing]] <- rep(NA, nrow(df))
+  }
+  # A checkbox nobody ticked has no value in its row; it is unticked, as on the canvas.
+  for (box in intersect(schema[info$type == "checkbox"], columns)) {
+    df[[box]][is.na(df[[box]])] <- FALSE
+  }
+  coda_annotation_columns(df[, c(id_column, columns), drop = FALSE], id_column)
+}
+
+
 coda_synapses_between <- function(df, pre, post, position, confidence, location) {
   # Reshape a synapse-connection table into Coda's Synapses Between columns. `position` names
   # the drawn end's columns with {axis} for x, y and z.
@@ -553,14 +593,14 @@ microns_minnie65_public_cave <- coda_cave_dataset(
 )
 ```
 
-```{r cave-table}
-# ── CAVE table ──
-.cave <- coda_cave_dataset("flywire_fafb_public", 783)
-cave_table <- coda_cave_table(
-  .cave,
-  "nuclei_v1",
-  id_column = "pt_root_id",
-  columns = c("volume")
+```{r seatable}
+# ── SeaTable ──
+seatable <- coda_seatable(
+  "https://cloud.seatable.io",
+  "my base",
+  "types",
+  id_column = "root_id",
+  token_envvar = "SEATABLE_TOKEN"
 )
 ```
 
@@ -589,6 +629,31 @@ list_cave_tables <- coda_cave_tables(.cave, include_views = TRUE)
 # they are printed, and the chunk’s output is the list of columns.
 .cave <- coda_cave_dataset("flywire_fafb_public", 783)
 cave_table_info <- coda_cave_table_info(.cave, "nuclei_v1")
+```
+
+```{r flytable}
+# ── FlyTable ──
+flytable <- coda_seatable(
+  "https://flytable.mrc-lmb.cam.ac.uk",
+  "main",
+  "info",
+  id_column = "root_id",
+  columns = c("cell_type", "side"),
+  token_envvar = "FLYTABLE_TOKEN"
+)
+flytable <- coda_join_annotations(seatable, flytable)
+```
+
+```{r cave-table}
+# ── CAVE table ──
+.cave <- coda_cave_dataset("flywire_fafb_public", 783)
+cave_table <- coda_cave_table(
+  .cave,
+  "nuclei_v1",
+  id_column = "pt_root_id",
+  columns = c("volume")
+)
+cave_table <- coda_join_annotations(flytable, cave_table)
 ```
 
 ```{r cave-table-2}

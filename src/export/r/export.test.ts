@@ -93,7 +93,7 @@ describe('R Markdown export', () => {
   })
 
   it('matches the golden CAVE document', () => {
-    const result = exportRmd(caveGraph({ withSeaTable: false }), OPTIONS)
+    const result = exportRmd(caveGraph(), OPTIONS)
     if (!result.ok) throw new Error(`refused: ${result.reason}`)
     if (process.env.UPDATE_GOLDEN) {
       writeFileSync(CAVE_GOLDEN, result.source)
@@ -126,7 +126,7 @@ describe('R Markdown export', () => {
      * setup chunk says so and names the diagnostic. What stays a TODO is what the notebook has no
      * R route for: the Dataset Summary and Neuroglancer cells are neuPrint's alone here.
      */
-    const result = exportRmd(caveGraph({ withSeaTable: false }), OPTIONS)
+    const result = exportRmd(caveGraph(), OPTIONS)
     if (!result.ok) throw new Error(result.reason)
     expect(result.source).toContain('library(fafbseg)')
     expect(result.source).toContain('fafbseg::simple_python()')
@@ -134,6 +134,33 @@ describe('R Markdown export', () => {
     expect(result.source).not.toContain('library(arrow)')
     expect(result.source).not.toContain('neuprintr')
     expect(result.todos.map((t) => t.nodeId).sort()).toEqual(['ngCave', 'summary'])
+  })
+
+  it('reads FlyTable with FLYTABLE_TOKEN however its host is spelled, and refuses a table seatabler cannot name', () => {
+    const fly = (id: string, params: Record<string, unknown>) =>
+      exportRmd(
+        addNode(emptyGraph('FlyTable'), {
+          id,
+          type: 'annotation.flyTable',
+          position: { x: 0, y: 0 },
+          params: { base: 'main', table: 'info', ...params },
+        }),
+        OPTIONS,
+      )
+    const typed = fly('fly', { host: 'http://FlyTable.mrc-lmb.cam.ac.uk/' })
+    if (!typed.ok) throw new Error(typed.reason)
+    expect(typed.source).toContain('token_envvar = "FLYTABLE_TOKEN"')
+    expect(typed.todos).toEqual([])
+
+    const elsewhere = fly('sea', { host: 'cloud.seatable.io' })
+    if (!elsewhere.ok) throw new Error(elsewhere.reason)
+    expect(elsewhere.source).toContain('token_envvar = "SEATABLE_TOKEN"')
+
+    // seatabler finds the table in the SQL text, and a space ends the name it finds.
+    const spaced = fly('spaced', { table: 'neuron info' })
+    if (!spaced.ok) throw new Error(spaced.reason)
+    expect(spaced.todos.map((t) => t.nodeId)).toEqual(['spaced'])
+    expect(spaced.source).not.toContain('coda_seatable(')
   })
 
   it('refuses a graph holding a synthetic dataset', () => {

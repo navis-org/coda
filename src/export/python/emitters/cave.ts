@@ -29,7 +29,6 @@
 import type { CaveTarget } from '../../../nodes/lib/caveParams'
 import { isDefaultCaveServer, normaliseCaveServer } from '../../../data/cave/deployments'
 import { DATASET_FAMILIES } from '../../../nodes/lib/datasetFamilies'
-import { namedColumns } from '../../../data/annotations/types'
 import { SEATABLE_HOSTS } from '../../../data/annotations/credentials'
 import type { CaveDatasetPlan, CaveTargetPlan } from '../../plans/cave'
 import {
@@ -41,7 +40,9 @@ import {
   caveTargetPlan,
   rootIdsMethodPlan,
 } from '../../plans/cave'
+import { seaTablePlan } from '../../plans/query'
 import { pyList, pyStr } from '../py'
+import { chainAnnotations } from './common'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
@@ -199,16 +200,7 @@ registerEmitter(
       )
     }
     const out = ctx.output('annotations')
-    const lines = [...setup, `${out} = coda_cave_table(`, ...args, `)`]
-
-    // Sources chain, and a later one wins a collision — falling back to the earlier where it
-    // has no value. `coda_join_annotations` is that rule; see its docstring.
-    const upstream = ctx.input('annotations')
-    if (upstream) {
-      ctx.helper('coda_join_annotations')
-      lines.push(`${out} = coda_join_annotations(${upstream}, ${out})`)
-    }
-    return lines
+    return [...setup, `${out} = coda_cave_table(`, ...args, `)`, ...chainAnnotations(ctx, out)]
   },
   CAVE_ONLY,
 )
@@ -273,21 +265,17 @@ registerEmitter(
  *   serve them — the note says which server each cell is pointed at.
  */
 function seaTableCell(ctx: EmitContext, defaultHost: string): string[] {
-  const base = String(ctx.params.base).trim()
-  const table = String(ctx.params.table).trim()
-  if (!base || !table) return ctx.todo('This node has no `Base` or `Table` set.')
+  const plan = seaTablePlan(ctx.params, defaultHost)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.require('os')
   ctx.require('seaserpent')
   ctx.helper('coda_seatable')
 
-  const host = String(ctx.params.host).trim() || defaultHost
-  const idColumn = String(ctx.params.idColumn).trim() || 'root_id'
-  const columns = namedColumns(String(ctx.params.columns), idColumn)
+  const { host, base, table, workspace, idColumn, columns } = plan
   const out = ctx.output('annotations')
   const lines: string[] = []
 
-  const workspace = String(ctx.params.workspace).trim()
   if (workspace) {
     lines.push(
       ...ctx.note(
@@ -330,13 +318,8 @@ function seaTableCell(ctx: EmitContext, defaultHost: string): string[] {
     `    id_column=${pyStr(idColumn)},`,
     ...(columns.length > 0 ? [`    columns=${pyList(columns)},`] : []),
     `)`,
+    ...chainAnnotations(ctx, out),
   )
-
-  const upstream = ctx.input('annotations')
-  if (upstream) {
-    ctx.helper('coda_join_annotations')
-    lines.push(`${out} = coda_join_annotations(${upstream}, ${out})`)
-  }
   return lines
 }
 

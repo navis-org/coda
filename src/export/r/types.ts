@@ -39,6 +39,7 @@ export type RPackage =
   | 'fafbseg'
   | 'arrow'
   | 'reticulate'
+  | 'seatabler'
   | 'nat'
   | 'nat.nblast'
   | 'dplyr'
@@ -96,6 +97,17 @@ export const PACKAGES: Record<RPackage, PackageSpec> = {
   // fafbseg reads CAVE's rows through arrow, which is what keeps an 18-digit id exact.
   arrow: { attach: false },
   reticulate: { attach: false },
+  // SeaTable and FlyTable. Called by namespace only; its Python is nat.python's, not fafbseg's.
+  seatabler: {
+    github: 'flyconnectome/seatabler',
+    attach: false,
+    setup: [
+      "seatabler drives Python's seatable_api through reticulate. Once per machine, run",
+      'nat.python::simple_python("minimal", pkgs = "seatable_api"). The account token is',
+      'read from FLYTABLE_TOKEN for FlyTable and SEATABLE_TOKEN for any other SeaTable server',
+      '(e.g. set in ~/.Renviron).',
+    ],
+  },
   nat: {},
   // On CRAN, unlike neuprintr — `install.packages` finds it.
   'nat.nblast': {},

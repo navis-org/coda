@@ -16,8 +16,7 @@
  * **There is a graph per backend.** `everythingGraph` is neuPrint's, `caveGraph` CAVE's,
  * `customGraph` the Custom Dataset's and `catmaidGraph` CATMAID's — each its own document in both
  * languages, so a backend one language could not read (R refused CAVE until it had fafbseg) never
- * left another backend's golden empty. `caveGraph({ withSeaTable: false })` is R's: R has no
- * SeaTable emitter, and as the head of the annotation chain its TODO would block every node after.
+ * left another backend's golden empty.
  */
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
@@ -1962,12 +1961,8 @@ export function everythingGraph(): CodaGraph {
  * The chain is three sources deep — FlyTable, then a wide CAVE table, then a long one — because
  * what each adds is different: SeaTable is a whole other library, the wide and long CAVE forms
  * are two branches of one emitter, and only a chain exercises the outer join between them.
- *
- * `withSeaTable: false` leaves out the SeaTable and FlyTable sources at the head of the annotation
- * chain, for the R document: R has no emitter for either, and as the head of the chain their
- * TODO would block every node after them, the dataset included.
  */
-export function caveGraph({ withSeaTable = true }: { withSeaTable?: boolean } = {}): CodaGraph {
+export function caveGraph(): CodaGraph {
   let g = emptyGraph('CAVE')
   g.meta = { ...g.meta, description: 'The CAVE nodes, wired the way references exist for.' }
 
@@ -2117,8 +2112,7 @@ export function caveGraph({ withSeaTable = true }: { withSeaTable?: boolean } = 
       },
     },
   ]
-  const left = new Set(withSeaTable ? [] : ['sea', 'fly'])
-  for (const spec of nodes) if (!left.has(spec.id)) g = place(g, spec)
+  for (const spec of nodes) g = place(g, spec)
 
   const edges: Array<[string, string, string, string]> = [
     // The reference wiring: both of these name the dataset they feed.
@@ -2148,9 +2142,7 @@ export function caveGraph({ withSeaTable = true }: { withSeaTable?: boolean } = 
     ['ds', 'dataset', 'ngCave', 'dataset'],
     ['find', 'neurons', 'ngCave', 'neurons'],
   ]
-  for (const [from, out, to, into] of edges) {
-    if (!left.has(from) && !left.has(to)) g = wire(g, from, out, to, into)
-  }
+  for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g
 }
 
@@ -2579,4 +2571,35 @@ export function findChainGraph(
     g = wire(g, from === 'dataset' ? 'ds' : 'find', from, 'n', port)
   }
   return g
+}
+
+/**
+ * The FlyTable graph `live.test.ts` runs (`EXPORT_LIVE=flytable`) against FlyWire's `main.info`,
+ * read-only. Three reads of one table, because each reaches a different half of the helpers: a
+ * named handful spanning the column types the canvas distinguishes (text, single-select, number,
+ * checkbox); every column, which adds a date, a multiple-select, long text and a last-modifier,
+ * and is where SeaTable's bookkeeping columns would show if a document read them; and a chain,
+ * whose `side` collides with the first read's so the join's coalescing rule is exercised.
+ */
+export function flytableProbeGraph(): CodaGraph {
+  let g = emptyGraph('FlyTable probe')
+  g.meta = { ...g.meta, description: 'FlyWire’s main.info on FlyTable, read three ways.' }
+  const info = { base: 'main', table: 'info' }
+  const nodes: Spec[] = [
+    {
+      id: 'fly',
+      type: 'annotation.flyTable',
+      col: 0,
+      params: { ...info, columns: 'cell_type, side, super_class, top_nt_conf, proofread' },
+    },
+    { id: 'flyAll', type: 'annotation.flyTable', col: 0, row: 1, params: info },
+    {
+      id: 'flyChain',
+      type: 'annotation.flyTable',
+      col: 1,
+      params: { ...info, columns: 'hemibrain_type, side' },
+    },
+  ]
+  for (const spec of nodes) g = place(g, spec)
+  return wire(g, 'fly', 'annotations', 'flyChain', 'annotations')
 }

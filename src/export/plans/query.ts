@@ -14,6 +14,8 @@ import type { ParamValues } from '../../core/node'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { sheetConfigFrom, sheetExportUrl } from '../../data/annotations'
 import { namedColumns } from '../../data/annotations/types'
+import { seaTableConfigFrom } from '../../data/annotations/seaTable'
+import { normaliseHost } from '../../data/annotations/credentials'
 import { DEFAULT_SERVER } from '../../data/neuprint/servers'
 import { catmaidServerOfSource, normaliseCatmaidServer } from '../../data/catmaid/registry'
 import { CUSTOM_SOURCE_ID } from '../../data/custom/layout'
@@ -331,6 +333,36 @@ export function skeletonsPlan(params: ParamValues): SkeletonsPlan {
     limit: Number(params.limit),
     notes:
       params[SKELETON_SOURCE_PARAM] === SKELETON_ROUTES.published ? ['publishedLayer'] : [],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SeaTable and FlyTable
+// ---------------------------------------------------------------------------
+
+export type SeaTablePlan = Refusable<{
+  /** The deployment, normalised: what is typed on the card or the node's own, with a scheme. */
+  host: string
+  base: string
+  table: string
+  /** The workspace id where the card names one; empty, it is worked out from the base. */
+  workspace: string
+  idColumn: string
+  /** The named annotation columns, the id column aside. Empty reads every column. */
+  columns: string[]
+}>
+
+/**
+ * What a `FlyTable` or `SeaTable` node reads, through the node's own `seaTableConfigFrom`: the two
+ * are one implementation at two hosts, so `defaultHost` is the only thing the registration adds.
+ */
+export function seaTablePlan(params: ParamValues, defaultHost: string): SeaTablePlan {
+  const { config, error } = seaTableConfigFrom(params, defaultHost)
+  if (error !== undefined) return { refusal: error }
+  return {
+    ...config,
+    host: normaliseHost(config.host),
+    columns: namedColumns(config.columns, config.idColumn),
   }
 }
 

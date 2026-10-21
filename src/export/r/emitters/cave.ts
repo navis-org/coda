@@ -28,6 +28,7 @@ import {
   rootIdsMethodPlan,
 } from '../../plans/cave'
 import { rArgs, rStr, rValue, rVector } from '../r'
+import { chainAnnotations } from './common'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
@@ -144,15 +145,13 @@ registerEmitter(
       )
     }
     const out = ctx.output('annotations')
-    const lines = [...dataset.setup, `${out} <- coda_cave_table(`, ...rArgs(args), `)`]
-
-    // Sources chain, and a later one wins a collision unless its value is missing.
-    const upstream = ctx.input('annotations')
-    if (upstream) {
-      ctx.helper('coda_join_annotations')
-      lines.push(`${out} <- coda_join_annotations(${upstream}, ${out})`)
-    }
-    return lines
+    return [
+      ...dataset.setup,
+      `${out} <- coda_cave_table(`,
+      ...rArgs(args),
+      `)`,
+      ...chainAnnotations(ctx, out),
+    ]
   },
   CAVE_ONLY,
 )
