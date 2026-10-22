@@ -305,7 +305,7 @@ live('CAVE, live', () => {
  * Aedes: a datastack with **no** connection roll-up and no configured synapse table.
  *
  * The case most CAVE datastacks are in, and the whole reason the fallback exists. Nothing about
- * it is configured here — `wclee_aedes_brain` declares `synapse_table: "synapses"` in its own
+ * it is configured here — `wclee_aedes_brain` declares `synapse_table: "synapses_v2"` in its own
  * info record, and its columns are the standard `synapse` schema's, so the spec names only the
  * neuron table.
  */
