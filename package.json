@@ -84,7 +84,9 @@
     "probe:bigclust": "node scripts/probe-bigclust.mjs",
     "probe:selection-scale": "vite-node scripts/probe-selection-scale.ts",
     "probe:scatter-labels": "node scripts/probe-scatter-labels.mjs",
-    "probe:radii": "vite-node scripts/probe-radii.ts"
+    "probe:radii": "vite-node scripts/probe-radii.ts",
+    "convert:affinity": "python3 scripts/convert-affinity-model.py",
+    "probe:affinity-export": "python3 scripts/probe-affinity.py"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",
