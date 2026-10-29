@@ -219,6 +219,72 @@ Nothing here writes to production.
 contrastive DeepSet head (~5 MB on top of latents we already have) for neuron-type suggestion, which
 costs almost nothing once Phase 1 exists and is the cheapest proof that the manifest seam works.
 
+## Phase 1 findings — the browser half
+
+Measured on an Apple **metal-3** adapter via `pnpm probe:affinity-runtime`, which drives headless
+Chrome over the DevTools protocol. Two things about that harness are load-bearing and both were
+found the hard way:
+
+- **Headless Chrome gives a real GPU for WebGPU on macOS.** [canvas.md](canvas.md)'s "headless
+  Chrome is SwiftShader" holds for WebGL and *not* for WebGPU here, so these timings are honest.
+  The probe reports the adapter every run, so a software adapter can never be mistaken for a GPU.
+- **The page must be on an http origin.** On `about:blank` `navigator.gpu` is simply absent, which
+  reads exactly like "this Chrome has no WebGPU" and produced a false negative before it was
+  caught. The probe serves a directory on localhost for this reason alone.
+
+### Which variants the browser can actually run
+
+| variant | size | encoder @ N=1024 | decoder pairs/s | full 1024² decode |
+| --- | --- | --- | --- | --- |
+| **mixed** (nbits8 encoder, fp16 decoder) | **406 MB** | 513 ms | **89,201** | **11.8 s** |
+| fp16 | 762 MB | 123 ms | 88,074 | 11.9 s |
+| nbits8 | 396 MB | 505 ms | 30,845 | 34.0 s |
+| nbits4 | 206 MB | 493 ms | 32,814 | 32.0 s |
+| int8 | 384 MB | **8,402 ms** | 2,605 | 402 s |
+
+**int8's fallback is now measured rather than inferred**: 16× slower encoder, 13× slower decode,
+exactly as the `MatMulInteger` op inventory predicted. It is out, and the plan's original choice
+of it was wrong for a reason no fidelity measurement could have surfaced.
+
+**Two surprises overturn the Phase 0 reading.** fp16 is the *fastest* variant, not the slowest —
+weight-only quantisation must dequantise on the fly, which costs ALU, while fp16 hits native
+half-precision throughput. And nbits4 is no faster than nbits8, so 4 bits buys size alone and the
+fidelity it costs (ARI 0.884) buys nothing back.
+
+### The answer: quantise the encoder, leave the decoder alone
+
+The decoder is **2% of the bytes and ~95% of the runtime**. Those are opposite ends, so one recipe
+for both parts was always the wrong shape:
+
+> **mixed — 406 MB, 11.8 s, ARI 1.0000 against fp32.** It takes nbits8's encoder (385 MB, where
+> the bytes are) and fp16's decoder (21 MB, where the time is).
+
+It is not a compromise but a dominating choice: fp16's speed at 53% of its download, nbits8's
+exact clustering for +10 MB, and measured fidelity identical to nbits8 (meanAbs 0.0029, 0.070% of
+pairs crossing t, VOI 0) because the quantisation error lives in the 24-layer encoder and not in
+the 2-layer decoder. `VARIANTS` in the converter is keyed per part so this is a row, not a special
+case.
+
+### What this sets for the node
+
+A run is the encoder once plus an N² decode, so at the measured 89k pairs/s:
+
+| points N | decode | total |
+| --- | --- | --- |
+| 256 | 0.7 s | ~1.2 s |
+| 512 | 2.9 s | ~3.4 s |
+| 1024 | 11.8 s | ~12.3 s |
+| 2048 | 47 s | ~47.5 s |
+
+Phase 0's FLOP arithmetic predicted 15–45 s at N=1024 against 11.8 s measured, so the shape of
+that estimate held. **N=1024 is the default** — the training point count, and about ten seconds.
+The warn tier belongs just above it and the refusal well above; both go in
+[limits.md](limits.md) derived from this table rather than picked.
+
+Still to measure in Phase 1: cold-cache download over a real network (the figures above are
+localhost), peak GPU memory, and whether a second adapter — a discrete NVIDIA or an Intel iGPU —
+changes the ranking. Nothing above should be read as cross-platform until it is.
+
 ## What this plan does not do
 
 - No chunkedgraph writes, in any phase.

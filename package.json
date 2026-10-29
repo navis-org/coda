@@ -86,7 +86,8 @@
     "probe:scatter-labels": "node scripts/probe-scatter-labels.mjs",
     "probe:radii": "vite-node scripts/probe-radii.ts",
     "convert:affinity": "python3 scripts/convert-affinity-model.py",
-    "probe:affinity-export": "python3 scripts/probe-affinity.py"
+    "probe:affinity-export": "python3 scripts/probe-affinity.py",
+    "probe:affinity-runtime": "node scripts/probe-affinity-runtime.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",
@@ -107,6 +108,7 @@
     "hysnappy": "1.1.1",
     "lz4js": "^0.2.0",
     "neuroglancer": "file:vendor/neuroglancer.tgz",
+    "onnxruntime-web": "^1.31.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "sigma": "^3.0.3",
@@ -124,6 +126,7 @@
     "@types/react-dom": "^19.0.4",
     "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^4.3.4",
+    "@webgpu/types": "^0.1.74",
     "eslint": "^9.22.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "fake-indexeddb": "^6.2.5",

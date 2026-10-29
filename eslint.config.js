@@ -115,6 +115,12 @@ export default tseslint.config(
       // output. Below the viewers and above `nodes/lib`, whose param vocabulary they read and
       // which never imports them (`src/test/importGraph.test.ts`).
       'src/style/**/*.ts',
+      // The model runtime: manifest, weight cache and the worker seam. Headless for the reason
+      // every compute backend above is -- it runs in a worker, where there is no React and no
+      // store to reach for -- and for one of its own: `onnxruntime-web` is ~20 MB, so the rule
+      // that keeps it behind the worker boundary is the same rule that keeps it out of
+      // `nodes.html` and the MCP build.
+      'src/ml/**/*.ts',
       // Coda's own neuroglancer (`neuroglancer.html`). A separate document inside a frame: React or
       // the store here would be a second copy of the app loaded behind every Neuroglancer card.
       'src/ngframe/**/*.ts',

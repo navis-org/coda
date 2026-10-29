@@ -72,23 +72,32 @@ MANIFEST_SCHEMA = 1
 OPSET = 17
 PARTS = ("encoder", "decoder")
 
-# One row per variant: which stage it belongs to (`torch` needs the live model, `onnx` reads
-# `raw/` from disk) and how each part is made. Per *part* rather than per variant, because the
-# plan's own Phase 0 fallback is "fp16 for the decoder MLP only" -- a mixed variant has to be a
-# row here, not a rewrite of the loop. The names below are the one list: the `--variants`
-# default, its help text and the validation all read it.
-VARIANTS: dict[str, dict] = {
-    "fp32": {"stage": "onnx", "recipe": {"kind": "none"}},
-    "fp16": {"stage": "torch", "recipe": {"kind": "fp16", "io": "fp32"}},
-    "int8": {"stage": "onnx", "recipe": {"kind": "dynamic-int8", "ops": ["MatMul"]}},
-    "nbits4": {"stage": "onnx", "recipe": {"kind": "nbits", "bits": 4, "blockSize": 128}},
-    "nbits8": {"stage": "onnx", "recipe": {"kind": "nbits", "bits": 8, "blockSize": 128}},
+# One recipe per *part*, because the parts genuinely want different ones: the decoder is 2% of
+# the bytes and ~95% of the runtime (measured, docs/proofread-plan.md), so quantising it to save
+# space is the wrong trade while quantising the encoder is the right one. `mixed` is that, and it
+# is a row here rather than a rewrite of the loop.
+#
+# `stage` is per recipe too: `torch` needs the live model (fp16 is exported from a halved copy),
+# `onnx` reads the raw fp32 export back off disk. A variant may span both, which `mixed` does.
+_NONE = {"stage": "onnx", "kind": "none"}
+_FP16 = {"stage": "torch", "kind": "fp16", "io": "fp32"}
+_INT8 = {"stage": "onnx", "kind": "dynamic-int8", "ops": ["MatMul"]}
+_NBITS4 = {"stage": "onnx", "kind": "nbits", "bits": 4, "blockSize": 128}
+_NBITS8 = {"stage": "onnx", "kind": "nbits", "bits": 8, "blockSize": 128}
+
+VARIANTS: dict[str, dict[str, dict]] = {
+    "fp32": {"encoder": _NONE, "decoder": _NONE},
+    "fp16": {"encoder": _FP16, "decoder": _FP16},
+    "int8": {"encoder": _INT8, "decoder": _INT8},
+    "nbits4": {"encoder": _NBITS4, "decoder": _NBITS4},
+    "nbits8": {"encoder": _NBITS8, "decoder": _NBITS8},
+    "mixed": {"encoder": _NBITS8, "decoder": _FP16},
 }
 
-# onnxconverter_common and the ORT quantisers warn once per subnormal constant and once per
-# model; on a 24-layer model that is thousands of lines over a conversion whose fidelity the
-# probe measures anyway.
-warnings.filterwarnings("ignore", message=r"the float32 number .* will be truncated")
+
+def staged(requested: list[str], stage: str) -> list[tuple[str, str]]:
+    """Every (variant, part) whose recipe belongs to `stage`, in a stable order."""
+    return [(v, part) for v in requested for part in PARTS if VARIANTS[v][part]["stage"] == stage]
 
 
 # `src/models.py` imports DropPath from timm, which has no parameters and is the identity in
@@ -346,7 +355,7 @@ def entry(variant: str, part: str, path: Path, root: Path) -> dict:
         "url": None,
         "bytes": size,
         "sha256": sha,
-        "quantisation": VARIANTS[variant]["recipe"],
+        "quantisation": VARIANTS[variant][part],
     }
 
 
@@ -412,24 +421,25 @@ def torch_stage(args, card: dict, requested: list[str]) -> tuple[list[dict], dic
     # or uploading `--out` wholesale double-counts about 1.5 GB. Skipped entirely when nothing
     # downstream of it was asked for.
     raw = args.out / "raw"
-    if any(VARIANTS[v]["stage"] == "onnx" for v in requested):
-        for part in PARTS:
-            module, inputs, names = signatures[part]
-            export(module, inputs, raw / f"{part}.onnx", names)
-            refuse_sidecar(raw / f"{part}.onnx")
+    # Only the parts something quantises from; `mixed` needs the raw encoder and not the decoder.
+    for part in [p for p in PARTS if any(q == p for _, q in staged(requested, "onnx"))]:
+        module, inputs, names = signatures[part]
+        export(module, inputs, raw / f"{part}.onnx", names)
+        refuse_sidecar(raw / f"{part}.onnx")
 
     entries = []
-    torch_variants = [v for v in requested if VARIANTS[v]["stage"] == "torch"]
-    if torch_variants:
+    torch_parts = staged(requested, "torch")
+    if torch_parts:
+        # After the raw export, never before: halving is in place and both parts share `pat`.
         pat.half()
-        for variant in torch_variants:
-            for part in PARTS:
-                module, inputs, names = signatures[part]
-                dst = args.out / variant / f"{part}.onnx"
-                export(HalfIO(module), inputs, dst, names)
-                record = entry(variant, part, dst, args.out)
-                entries.append(record)
-                print(f"{variant}/{part}: {record['bytes'] / 1e6:.1f} MB")
+        for variant, part in torch_parts:
+            module, inputs, names = signatures[part]
+            dst = args.out / variant / f"{part}.onnx"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            export(HalfIO(module), inputs, dst, names)
+            record = entry(variant, part, dst, args.out)
+            entries.append(record)
+            print(f"{variant}/{part}: {record['bytes'] / 1e6:.1f} MB")
 
     return entries, {part: signatures[part][2] for part in PARTS}, params
 
@@ -483,20 +493,19 @@ def main() -> int:
     # the traced tensors, so the collection frees nothing and the peak happens anyway.
     gc.collect()
 
-    for variant in [v for v in requested if VARIANTS[v]["stage"] == "onnx"]:
-        recipe = VARIANTS[variant]["recipe"]
-        (args.out / variant).mkdir(parents=True, exist_ok=True)
-        for part in PARTS:
-            src, dst = raw / f"{part}.onnx", args.out / variant / f"{part}.onnx"
-            if recipe["kind"] == "none":
-                link_or_copy(src, dst)
-            elif recipe["kind"] == "dynamic-int8":
-                to_int8(src, dst, recipe["ops"])
-            else:
-                to_nbits(src, dst, bits=recipe["bits"], block_size=recipe["blockSize"])
-            record = entry(variant, part, dst, args.out)
-            entries.append(record)
-            print(f"{variant}/{part}: {record['bytes'] / 1e6:.1f} MB")
+    for variant, part in staged(requested, "onnx"):
+        recipe = VARIANTS[variant][part]
+        src, dst = raw / f"{part}.onnx", args.out / variant / f"{part}.onnx"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if recipe["kind"] == "none":
+            link_or_copy(src, dst)
+        elif recipe["kind"] == "dynamic-int8":
+            to_int8(src, dst, recipe["ops"])
+        else:
+            to_nbits(src, dst, bits=recipe["bits"], block_size=recipe["blockSize"])
+        record = entry(variant, part, dst, args.out)
+        entries.append(record)
+        print(f"{variant}/{part}: {record['bytes'] / 1e6:.1f} MB")
 
     manifest = {
         # `card` is spread first: a checkpoint entry carrying `id` or `manifestSchema` must not
