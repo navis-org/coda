@@ -2,6 +2,8 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // WebGPU is not in TypeScript's DOM lib yet; `src/ml` asks `navigator.gpu` for an adapter.
+    "types": ["vite/client", "@webgpu/types"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
