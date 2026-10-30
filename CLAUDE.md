@@ -573,6 +573,8 @@ Each is a design record: what was tried, what was measured, which failures are s
 - [neuronbridge.md](docs/neuronbridge.md), [dotmotif.md](docs/dotmotif.md),
   [annotations.md](docs/annotations.md), [catmaid_vfb.md](docs/catmaid_vfb.md) — single features.
 - [export.md](docs/export.md) — notebook and R Markdown exporters, refusals, goldens.
+- [ml.md](docs/ml.md) — the model runtime: manifests, the verified weight cache, the WebGPU
+  worker. **A manifest's `config` is opaque to `src/ml`**; read before adding a model or a task.
 - [python-pyodide.md](docs/python-pyodide.md) — the bridge; read before adding a Python capability.
 - [persistence.md](docs/persistence.md), [recipes.md](docs/recipes.md) — share links, autosave,
   shelf; recipes as fragments plus slots.

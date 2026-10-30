@@ -64,11 +64,15 @@ try:
 except ImportError:  # pragma: no cover - the converter is opt-in
     sys.exit("torch is not installed; see docs/proofread-plan.md for the venv this needs")
 
+# onnxconverter_common warns once per subnormal constant it rounds; on a 24-layer model that is
+# thousands of lines of noise over a conversion whose fidelity the probe measures anyway.
+warnings.filterwarnings("ignore", message=r"the float32 number .* will be truncated")
+
 CHECKPOINTS = Path(__file__).resolve().parent / "affinity-checkpoints.json"
 
 # Bumped when the shape of the emitted manifest changes, so a stale conversion is detectable
 # rather than merely wrong.
-MANIFEST_SCHEMA = 1
+MANIFEST_SCHEMA = 2
 OPSET = 17
 PARTS = ("encoder", "decoder")
 
@@ -79,11 +83,20 @@ PARTS = ("encoder", "decoder")
 #
 # `stage` is per recipe too: `torch` needs the live model (fp16 is exported from a halved copy),
 # `onnx` reads the raw fp32 export back off disk. A variant may span both, which `mixed` does.
-_NONE = {"stage": "onnx", "kind": "none"}
-_FP16 = {"stage": "torch", "kind": "fp16", "io": "fp32"}
-_INT8 = {"stage": "onnx", "kind": "dynamic-int8", "ops": ["MatMul"]}
-_NBITS4 = {"stage": "onnx", "kind": "nbits", "bits": 4, "blockSize": 128}
-_NBITS8 = {"stage": "onnx", "kind": "nbits", "bits": 8, "blockSize": 128}
+# `quantises` is what the recipe rewrites; `emits` is the matmul op the resulting graph actually
+# contains. They are different things and conflating them is easy: dynamic int8 *quantises*
+# MatMul and *emits* MatMulInteger, and it is the second that decides whether WebGPU can run it.
+# Verified against the exported graphs by `--verify-ops` (and recorded in docs/ml.md).
+_NONE = {"stage": "onnx", "kind": "none", "emits": ["MatMul"]}
+_FP16 = {"stage": "torch", "kind": "fp16", "io": "fp32", "emits": ["MatMul"]}
+_INT8 = {
+    "stage": "onnx",
+    "kind": "dynamic-int8",
+    "quantises": ["MatMul"],
+    "emits": ["MatMulInteger"],
+}
+_NBITS4 = {"stage": "onnx", "kind": "nbits", "bits": 4, "blockSize": 128, "emits": ["MatMulNBits"]}
+_NBITS8 = {"stage": "onnx", "kind": "nbits", "bits": 8, "blockSize": 128, "emits": ["MatMulNBits"]}
 
 VARIANTS: dict[str, dict[str, dict]] = {
     "fp32": {"encoder": _NONE, "decoder": _NONE},
@@ -149,12 +162,15 @@ def describe(checkpoint_id: str) -> dict:
         )
     card = entries[checkpoint_id]
     # Checked here, not where they are read: a missing constant otherwise surfaces as a bare
-    # KeyError in the probe, after a conversion that took minutes.
+    # KeyError much later. `config` is the task's own -- `src/ml` never reads it -- so what is
+    # checked is that the task *this script* serves has what it needs.
     required = {
-        "model": (), "depth": (), "datasets": (), "license": (), "citation": (), "source": (),
-        "preprocessing": ("units", "globalScale", "centre", "samplesPerNeuron", "jitter",
-                          "translate", "padValue"),
-        "clustering": ("linkage", "threshold", "minClusterSize"),
+        "task": (),
+        "datasets": (),
+        "license": (),
+        "citation": (),
+        "source": (),
+        "config": ("model", "depth", "preprocessing", "clustering"),
     }
     for key, fields in required.items():
         if key not in card:
@@ -162,6 +178,14 @@ def describe(checkpoint_id: str) -> dict:
         missing = [f for f in fields if f not in card[key]]
         if missing:
             raise SystemExit(f"{checkpoint_id}: {key} is missing {', '.join(missing)}")
+    for key, fields in (
+        ("preprocessing", ("units", "globalScale", "centre", "samplesPerNeuron", "jitter",
+                           "translate", "padValue")),
+        ("clustering", ("linkage", "threshold", "minClusterSize")),
+    ):
+        missing = [f for f in fields if f not in card["config"][key]]
+        if missing:
+            raise SystemExit(f"{checkpoint_id}: config.{key} is missing {', '.join(missing)}")
     return card
 
 
@@ -306,6 +330,27 @@ def to_nbits(src: Path, dst: Path, bits: int, block_size: int) -> None:
     quantizer.model.save_model_to_file(str(dst), use_external_data_format=False)
 
 
+def verify_emits(path: Path, expected: list[str]) -> None:
+    """
+    Check the graph really contains the matmul op its recipe claims.
+
+    `emits` is what `src/ml` refuses a variant by, so a wrong one is a model that loads, answers,
+    and runs on the CPU with nothing to say about it. Cheap to check and impossible to notice if
+    it drifts.
+    """
+    import onnx
+
+    graph = onnx.load(str(path), load_external_data=False).graph
+    present = {node.op_type for node in graph.node}
+    missing = [op for op in expected if op not in present]
+    if missing:
+        raise SystemExit(
+            f"{path.name} declares it emits {', '.join(expected)} but contains none of "
+            f"{', '.join(missing)}; present matmuls: "
+            f"{', '.join(sorted(op for op in present if 'MatMul' in op)) or 'none'}"
+        )
+
+
 def digest(path: Path) -> tuple[str, int]:
     h = hashlib.sha256()
     size = 0
@@ -344,8 +389,10 @@ def refuse_sidecar(path: Path) -> None:
         raise SystemExit(f"{path.name} produced an unexpected sidecar {sidecar.name}")
 
 
-def entry(variant: str, part: str, path: Path, root: Path) -> dict:
+def entry(variant: str, part: str, path: Path, root: Path, verify: bool) -> dict:
     refuse_sidecar(path)
+    if verify:
+        verify_emits(path, VARIANTS[variant][part]["emits"])
     sha, size = digest(path)
     return {
         "variant": variant,
@@ -376,11 +423,11 @@ def torch_stage(args, card: dict, requested: list[str]) -> tuple[list[dict], dic
     pat, models = load_model(
         args.repo,
         None if args.random_weights else args.checkpoint,
-        card["model"],
-        card["depth"],
+        card["config"]["model"],
+        card["config"]["depth"],
     )
     params = sum(t.numel() for t in pat.parameters())
-    print(f"{args.checkpoint_id}: {card['model']}, {params / 1e6:.1f}M parameters")
+    print(f"{args.checkpoint_id}: {card['config']['model']}, {params / 1e6:.1f}M parameters")
 
     n = args.points
     points = torch.randn(1, n, 3).clamp(-1, 1)
@@ -437,7 +484,7 @@ def torch_stage(args, card: dict, requested: list[str]) -> tuple[list[dict], dic
             dst = args.out / variant / f"{part}.onnx"
             dst.parent.mkdir(parents=True, exist_ok=True)
             export(HalfIO(module), inputs, dst, names)
-            record = entry(variant, part, dst, args.out)
+            record = entry(variant, part, dst, args.out, args.verify_ops)
             entries.append(record)
             print(f"{variant}/{part}: {record['bytes'] / 1e6:.1f} MB")
 
@@ -461,6 +508,11 @@ def main() -> int:
         help=f"comma-separated: {', '.join(VARIANTS)}",
     )
     p.add_argument("--random-weights", action="store_true", help="skip the checkpoint; shape test")
+    p.add_argument(
+        "--verify-ops",
+        action="store_true",
+        help="re-parse each graph and check it emits the matmul op its recipe declares",
+    )
     args = p.parse_args()
 
     # Every argument check before the 4.5 GB load: a typo in --variants should fail in a second,
@@ -500,10 +552,10 @@ def main() -> int:
         if recipe["kind"] == "none":
             link_or_copy(src, dst)
         elif recipe["kind"] == "dynamic-int8":
-            to_int8(src, dst, recipe["ops"])
+            to_int8(src, dst, recipe["quantises"])
         else:
             to_nbits(src, dst, bits=recipe["bits"], block_size=recipe["blockSize"])
-        record = entry(variant, part, dst, args.out)
+        record = entry(variant, part, dst, args.out, args.verify_ops)
         entries.append(record)
         print(f"{variant}/{part}: {record['bytes'] / 1e6:.1f} MB")
 
@@ -513,15 +565,19 @@ def main() -> int:
         **card,
         "id": args.checkpoint_id,
         "manifestSchema": MANIFEST_SCHEMA,
-        "parameters": params,
-        "opset": OPSET,
+        # The graphs, declared rather than assumed. `src/ml` reads this instead of fixing a
+        # vocabulary of its own, so a one-graph model is an entry and not a schema bump.
+        "parts": list(PARTS),
         # A shape test carries every other field of a real conversion -- citation, licence,
-        # training constants, parameter count -- so without this the two are indistinguishable
-        # and a random-weight export could be hosted by mistake.
+        # training constants -- so without this the two are indistinguishable and a random-weight
+        # export could be hosted by mistake.
         "randomWeights": bool(args.random_weights),
         "upstreamCommit": upstream_commit(args.repo),
         "signatures": {part: signatures_record[part] for part in PARTS},
         "files": entries,
+        # Measured facts about the architecture, which belong with the task's own constants
+        # rather than in the half of the manifest `src/ml` reads.
+        "config": {**card["config"], "parameters": params, "opset": OPSET},
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"\nwrote {args.out / 'manifest.json'}")
