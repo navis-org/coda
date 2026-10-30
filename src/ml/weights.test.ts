@@ -72,7 +72,7 @@ describe('loadWeights', () => {
     const got = await loadWeights(await loaded(), 'mixed', 'encoder', {
       onProgress: (p) => seen.push(p.received),
     })
-    expect(new Uint8Array(got)).toEqual(BODY)
+    expect(new Uint8Array(got.bytes)).toEqual(BODY)
     expect(seen).toEqual([4, 8])
     expect(fetched.mock.calls[0]?.[0]).toBe(
       'https://models.invalid/affinity/mixed/encoder.onnx',
@@ -102,12 +102,12 @@ describe('loadWeights', () => {
     const fetched = respondWith(BODY)
     vi.stubGlobal('fetch', fetched)
     const at = await loaded()
-    await loadWeights(at, 'mixed', 'encoder', {})
+    ;(await loadWeights(at, 'mixed', 'encoder', {})).remember()
     const second: boolean[] = []
     const got = await loadWeights(at, 'mixed', 'encoder', {
       onProgress: (p) => second.push(p.cached),
     })
-    expect(new Uint8Array(got)).toEqual(BODY)
+    expect(new Uint8Array(got.bytes)).toEqual(BODY)
     expect(fetched).toHaveBeenCalledTimes(1)
     expect(second).toEqual([true])
   })
@@ -115,12 +115,12 @@ describe('loadWeights', () => {
   /** The key carries the hash, so a reconverted model cannot be served from the old one's entry. */
   it('does not serve a differently-hashed entry from the cache', async () => {
     vi.stubGlobal('fetch', respondWith(BODY))
-    await loadWeights(await loaded(), 'mixed', 'encoder', {})
+    ;(await loadWeights(await loaded(), 'mixed', 'encoder', {})).remember()
     const other = new Uint8Array([8, 7, 6, 5, 4, 3, 2, 1])
     const fetched = respondWith(other)
     vi.stubGlobal('fetch', fetched)
     const at = await loaded({ sha256: await sha256Of(other) })
-    expect(new Uint8Array(await loadWeights(at, 'mixed', 'encoder', {}))).toEqual(other)
+    expect(new Uint8Array((await loadWeights(at, 'mixed', 'encoder', {})).bytes)).toEqual(other)
     expect(fetched).toHaveBeenCalledTimes(1)
   })
 
@@ -129,13 +129,65 @@ describe('loadWeights', () => {
     await expect(loadWeights(await loaded(), 'mixed', 'encoder', {})).rejects.toThrow(/404/)
   })
 
+  /**
+   * Two dashboard cells opening one model must be one 385 MB download, not two.
+   */
+  it('shares one download between concurrent callers', async () => {
+    const fetched = respondWith(BODY)
+    vi.stubGlobal('fetch', fetched)
+    const at = await loaded()
+    const [a, b] = await Promise.all([
+      loadWeights(at, 'mixed', 'encoder', {}),
+      loadWeights(at, 'mixed', 'encoder', {}),
+    ])
+    expect(new Uint8Array(a.bytes)).toEqual(BODY)
+    expect(new Uint8Array(b.bytes)).toEqual(BODY)
+    expect(fetched).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * The cache hit must not re-hash: the key contains the sha256, so a hit was verified when it
+   * was written, and hashing 385 MB again costs a second on every open to learn nothing the
+   * caller can act on. Checked by making the hash itself unavailable.
+   */
+  it('serves a cache hit without hashing it again', async () => {
+    vi.stubGlobal('fetch', respondWith(BODY))
+    const at = await loaded()
+    ;(await loadWeights(at, 'mixed', 'encoder', {})).remember()
+
+    const digest = vi.fn(() => Promise.reject(new Error('should not hash a cache hit')))
+    vi.stubGlobal('crypto', {
+      ...globalThis.crypto,
+      subtle: { ...globalThis.crypto.subtle, digest },
+    })
+    expect(new Uint8Array((await loadWeights(at, 'mixed', 'encoder', {})).bytes)).toEqual(BODY)
+    expect(digest).not.toHaveBeenCalled()
+  })
+
+  /**
+   * One caller's Cancel must not abort the download another is sharing. The shared work carries
+   * nobody's signal; each caller stops waiting on its own (`untilAborted`).
+   */
+  it('lets one caller give up without aborting the shared download', async () => {
+    const fetched = respondWith(BODY)
+    vi.stubGlobal('fetch', fetched)
+    const at = await loaded()
+    const giving = new AbortController()
+    const abandoned = loadWeights(at, 'mixed', 'encoder', { signal: giving.signal })
+    const waiting = loadWeights(at, 'mixed', 'encoder', {})
+    giving.abort()
+    await expect(abandoned).rejects.toThrow()
+    expect(new Uint8Array((await waiting).bytes)).toEqual(BODY)
+    expect(fetched).toHaveBeenCalledTimes(1)
+  })
+
   it('refetches after the cache is cleared', async () => {
     const fetched = respondWith(BODY)
     vi.stubGlobal('fetch', fetched)
     const at = await loaded()
-    await loadWeights(at, 'mixed', 'encoder', {})
+    ;(await loadWeights(at, 'mixed', 'encoder', {})).remember()
     await clearWeights()
-    await loadWeights(at, 'mixed', 'encoder', {})
+    ;(await loadWeights(at, 'mixed', 'encoder', {})).remember()
     expect(fetched).toHaveBeenCalledTimes(2)
   })
 })

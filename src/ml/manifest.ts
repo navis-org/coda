@@ -1,51 +1,58 @@
 /**
- * What a model is: the one place a URL, a hash, a threshold or a dataset list appears.
+ * What a model is: the one place a URL, a hash, a tensor name or a licence appears.
  *
- * A manifest is written by `scripts/convert-affinity-model.py` and served beside its graphs. It
- * carries three kinds of fact, and keeping them in one document is the point:
+ * A manifest is written by a conversion script and served beside its graphs. It carries two
+ * kinds of fact and the split between them is the whole design:
  *
- *  - **what the checkpoint is** — architecture, which connectomes it was trained on, licence and
- *    citation, and the training constants (`preprocessing`, `clustering`) a caller must reproduce
- *    to feed it. These come from `scripts/affinity-checkpoints.json` and are copied verbatim.
- *  - **what was built from it** — one `files` entry per variant and part, with its size, its
- *    sha256 and the quantisation recipe that produced it.
- *  - **how to drive the graphs** — `signatures`, the tensor names and dynamic axes per part.
+ *  - **What this module understands** — where the files are, what they hash to, which graphs the
+ *    model is cut into and what each graph's tensors are called. Provenance and addressing.
+ *  - **What it must not** — `config`, an opaque blob the converter copies verbatim and only the
+ *    pack that owns the task reads. A point affinity model's point sampling and clustering
+ *    thresholds live there, and `src/ml` neither parses nor validates them.
  *
- * The third is why this file exists rather than a few constants. Re-typing `"latents"` or
- * `"point_emb"` here is how a renamed output becomes a runtime `KeyError` nobody connects to the
- * rename, and `scripts/probe-affinity.py` already reads them from the manifest for that reason.
+ * The second half was learnt the hard way one level down: the converter's `VARIANTS` table
+ * claimed to be keyed per part and was not. A seam that names one task's vocabulary is the same
+ * mistake, and the test for it is the plan's own next model — a one-graph DeepSet head on top of
+ * the encoder's latents. That must cost a manifest entry, which means **a part is a string the
+ * manifest declares**, not a union this file fixes.
  *
- * **A node names a model id; it never names a URL.** That is what makes a second model — the
- * retrained, smaller checkpoint in the plan — an entry rather than a rewrite.
+ * Re-typing `"latents"` here rather than reading `signatures` is how a renamed output becomes a
+ * runtime error nobody connects to the rename, which is why the signatures travel with the files.
  */
 
-/** Bumped by the converter when this shape changes. A mismatch is refused, never coerced. */
-export const MANIFEST_SCHEMA = 1
+import { fetchText } from '../data/fetchText'
 
-/** The two graphs a point affinity model is cut into. */
-export type ModelPart = 'encoder' | 'decoder'
-
-export const MODEL_PARTS: readonly ModelPart[] = ['encoder', 'decoder']
+/** Bumped by a converter when this shape changes. A mismatch is refused, never coerced. */
+export const MANIFEST_SCHEMA = 2
 
 /** How one file's weights were quantised. Recorded so two recipes cannot look alike. */
 export interface Quantisation {
-  readonly kind: 'none' | 'fp16' | 'dynamic-int8' | 'nbits'
+  readonly kind: string
   readonly bits?: number
   readonly blockSize?: number
-  readonly ops?: readonly string[]
+  /** Ops the recipe rewrote. Not what the graph ends up containing — see `emits`. */
+  readonly quantises?: readonly string[]
+  /**
+   * The matmul op the exported graph actually contains, checked against it by the converter.
+   *
+   * This is what decides whether a browser can run the variant, and it is **not** derivable from
+   * `quantises`: dynamic int8 quantises `MatMul` and emits `MatMulInteger`, which WebGPU declines.
+   */
+  readonly emits?: readonly string[]
   readonly io?: string
 }
 
 export interface ModelFile {
   readonly variant: string
-  readonly part: ModelPart
+  /** Which graph this is, from the manifest's own `parts`. */
+  readonly part: string
   /** Path relative to the manifest, which is how the browser finds it. See `fileUrl`. */
   readonly file: string
   /**
    * An absolute address, when the file is not served beside its manifest.
    *
    * Normally `null`: the manifest knows where it was fetched from, so a file beside it resolves
-   * against that and the same artefact directory works at any host without being rewritten. The
+   * against that and the same artefact directory works at any host without being rewritten. A
    * converter cannot know the address, and a hand-edited one is a second source of truth.
    */
   readonly url: string | null
@@ -62,90 +69,76 @@ export interface PartSignature {
   readonly dynamic: Readonly<Record<string, Readonly<Record<string, string>>>>
 }
 
-/**
- * How to turn a neuron into this model's input.
- *
- * Reproduced by `src/packs/proofread/pointCloud.ts` and checked against the Python reference by
- * `pnpm probe:affinity-parity`. Note `jitter` and `translate` are *training* augmentations and a
- * caller must not apply them: they describe how the benchmark's synthetic merges were built, not
- * how a real segment is fed in.
- */
-export interface Preprocessing {
-  readonly units: string
-  readonly globalScale: number
-  readonly centre: string
-  readonly samplesPerNeuron: number
-  readonly jitter: number
-  readonly translate: number
-  readonly padValue: number
-}
-
-/**
- * How affinities become labels.
- *
- * `threshold` is a **distance** threshold applied to `1 - affinity`, not an affinity cut — the
- * paper's 0.8 links points whose average affinity exceeds 0.2. Reading it the other way round
- * silently over-fragments every answer.
- */
-export interface Clustering {
-  readonly linkage: string
-  readonly threshold: number
-  readonly minClusterSize: number
-}
-
 export interface ModelManifest {
   readonly id: string
   readonly manifestSchema: number
-  readonly model: string
-  readonly depth: number
-  /** Which connectomes this checkpoint was trained on. A node warns outside them. */
+  /** Which pack owns the `config` blob. `src/ml` compares it and never interprets it. */
+  readonly task: string
+  /** The graphs this model is cut into, in the order they must be run. */
+  readonly parts: readonly string[]
+  /** Which datasets this checkpoint was trained on. A node warns outside them. */
   readonly datasets: readonly string[]
   readonly license: string
   readonly citation: string
   readonly source: string
-  readonly parameters: number
-  readonly opset: number
   /** The upstream commit the architecture was exported from, or null where git could not say. */
   readonly upstreamCommit: string | null
   /** True for a shape-test export. Never run one as if it meant something. */
   readonly randomWeights: boolean
-  readonly preprocessing: Preprocessing
-  readonly clustering: Clustering
-  readonly signatures: Readonly<Record<ModelPart, PartSignature>>
+  /**
+   * The task's own constants — preprocessing, thresholds, architecture. **Opaque here.**
+   * The owning pack parses it and says what is wrong with it; a block in this file would make
+   * every new task either edit a shared type or smuggle its config somewhere else.
+   */
+  readonly config: unknown
+  readonly signatures: Readonly<Record<string, PartSignature>>
   readonly files: readonly ModelFile[]
 }
 
 /** A manifest and where it came from, which is what `fileUrl` resolves against. */
 export interface LoadedManifest {
   readonly manifest: ModelManifest
+  /**
+   * The URL this manifest was requested from, which every file resolves against.
+   *
+   * Note it is the *requested* URL, not the final one: `fetchText` does not expose
+   * `response.url`, so a manifest served through a redirect resolves its files against the
+   * address asked for rather than the one answered. Host a model's files beside the manifest a
+   * caller actually names, or give each file an absolute `url`.
+   */
   readonly url: string
 }
 
 export class ManifestError extends Error {}
 
+/** One file entry, with the one lookup and the one sentence for a miss. */
+export function modelFile(loaded: LoadedManifest, variant: string, part: string): ModelFile {
+  const entry = loaded.manifest.files.find((f) => f.variant === variant && f.part === part)
+  if (!entry) throw new ManifestError(`${loaded.manifest.id} has no ${variant}/${part}`)
+  return entry
+}
+
 /**
  * The absolute address of one file, resolved against the manifest's own location.
  *
- * `new URL(file, manifestUrl)` is the whole trick, and it is what lets the same uploaded
- * directory work from any host, behind any path, without the converter or a human knowing where
- * it will live.
+ * `new URL(file, manifestUrl)` is the whole trick, and it is what lets one uploaded directory
+ * work from any host, behind any path, without a converter or a human knowing where it will live.
  */
-export function fileUrl(loaded: LoadedManifest, variant: string, part: ModelPart): string {
-  const entry = loaded.manifest.files.find((f) => f.variant === variant && f.part === part)
-  if (!entry) throw new ManifestError(`${loaded.manifest.id} has no ${variant}/${part}`)
+export function fileUrl(loaded: LoadedManifest, variant: string, part: string): string {
+  const entry = modelFile(loaded, variant, part)
   return entry.url ?? new URL(entry.file, loaded.url).toString()
 }
 
-/** The variants this manifest actually carries both halves of. */
+/** The variants carrying every part the manifest declares. */
 export function completeVariants(manifest: ModelManifest): string[] {
-  const seen = new Map<string, Set<string>>()
+  const parts = new Map<string, Set<string>>()
   for (const file of manifest.files) {
-    const parts = seen.get(file.variant) ?? new Set<string>()
-    parts.add(file.part)
-    seen.set(file.variant, parts)
+    const held = parts.get(file.variant) ?? new Set<string>()
+    held.add(file.part)
+    parts.set(file.variant, held)
   }
-  return [...seen]
-    .filter(([, parts]) => MODEL_PARTS.every((p) => parts.has(p)))
+  return [...parts]
+    .filter(([, held]) => manifest.parts.every((part) => held.has(part)))
     .map(([variant]) => variant)
     .sort()
 }
@@ -154,11 +147,18 @@ export function completeVariants(manifest: ModelManifest): string[] {
  * Check a parsed manifest enough that every later reader can trust it.
  *
  * Deliberately not a schema validator: what is checked is what a *caller* would otherwise find
- * out by crashing — the schema version, a shape-test export, the per-part signatures, and that at
- * least one variant has both halves. A manifest is fetched from a server, so this is a trust
- * boundary and not only a typo check.
+ * out by crashing — the schema version, a shape-test export, a signature per declared part, and
+ * one variant that is actually complete. A manifest comes off a server, so this is a trust
+ * boundary and not only a typo check. What it does **not** check is `config`: that belongs to
+ * whoever declared the task.
  */
 export function checkManifest(manifest: ModelManifest): ModelManifest {
+  // The body came off a server, so it may be anything at all. Checked before any field is read,
+  // or a null or an array surfaces as a raw TypeError from whichever line touched it first.
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    throw new ManifestError('That is not a model manifest')
+  }
+  if (!Array.isArray(manifest.files)) throw new ManifestError('The manifest lists no files')
   if (manifest.manifestSchema !== MANIFEST_SCHEMA) {
     throw new ManifestError(
       `${manifest.id ?? 'manifest'} is schema ${manifest.manifestSchema}, this build reads ` +
@@ -168,26 +168,37 @@ export function checkManifest(manifest: ModelManifest): ModelManifest {
   if (manifest.randomWeights) {
     throw new ManifestError(`${manifest.id} is a random-weights export and means nothing`)
   }
-  for (const part of MODEL_PARTS) {
+  if (!manifest.parts?.length) throw new ManifestError(`${manifest.id} declares no parts`)
+  for (const part of manifest.parts) {
     const signature = manifest.signatures?.[part]
     if (!signature?.inputs?.length || !signature.outputs?.length) {
       throw new ManifestError(`${manifest.id} has no ${part} signature`)
     }
   }
   if (completeVariants(manifest).length === 0) {
-    throw new ManifestError(`${manifest.id} has no variant with both an encoder and a decoder`)
+    throw new ManifestError(`${manifest.id} has no variant carrying every part`)
   }
   return manifest
 }
 
-/** Fetch and check a manifest, keeping the URL it came from so its files can be resolved. */
-export async function loadManifest(url: string, init?: RequestInit): Promise<LoadedManifest> {
-  const response = await fetch(url, init)
-  if (!response.ok) {
-    throw new ManifestError(`${url} answered ${response.status}`)
+/**
+ * Fetch and check a manifest, keeping the URL it came from so its files can be resolved.
+ *
+ * Through `fetchText` rather than a bare `fetch`, which is the house rule for any credential-less
+ * cross-origin read: it omits credentials and tells an unreachable host from a CORS refusal,
+ * where `fetch` alone gives an unqualified `TypeError` for both.
+ */
+export async function loadManifest(url: string, signal?: AbortSignal): Promise<LoadedManifest> {
+  const text = await fetchText(url, {
+    ...(signal ? { signal } : {}),
+    notFound: 'There is no model manifest at that address.',
+    hint: 'A model is served from wherever its manifest is.',
+  })
+  let parsed: ModelManifest
+  try {
+    parsed = JSON.parse(text) as ModelManifest
+  } catch {
+    throw new ManifestError(`${url} did not answer with JSON`)
   }
-  return {
-    manifest: checkManifest((await response.json()) as ModelManifest),
-    url: response.url,
-  }
+  return { manifest: checkManifest(parsed), url }
 }

@@ -292,7 +292,9 @@ def main() -> int:
     if not manifest["files"]:
         raise SystemExit(f"{args.exported}/manifest.json lists no files")
 
-    pre, clus = manifest["preprocessing"], manifest["clustering"]
+    # Schema 2 moved the task's own constants under `config`; `src/ml` never reads them.
+    config = manifest["config"]
+    pre, clus = config["preprocessing"], config["clustering"]
     threshold = args.distance_threshold if args.distance_threshold is not None else clus["threshold"]
     min_size = args.min_cluster_size if args.min_cluster_size is not None else clus["minClusterSize"]
     cut = 1.0 - threshold
@@ -308,13 +310,13 @@ def main() -> int:
             f"{converter_commit[:12]}; the PyTorch reference may not be the exported model"
         )
     pat, models = converter.load_model(
-        args.repo, args.checkpoint, manifest["model"], manifest["depth"]
+        args.repo, args.checkpoint, config["model"], config["depth"]
     )
     encoder, decoder = converter.Encoder(pat), converter.Decoder(pat, models.pair)
 
     variants = sorted({e["variant"] for e in manifest["files"]})
     n = args.neurons * args.points
-    print(f"{manifest['id']}: {manifest['model']}, {manifest['parameters'] / 1e6:.1f}M parameters")
+    print(f"{manifest['id']}: {config['model']}, {config['parameters'] / 1e6:.1f}M parameters")
     print(f"variants: {', '.join(variants)}")
     print(
         f"{args.cases} cases, {args.neurons} neurons x {args.points} points = {n}, "

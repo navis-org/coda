@@ -371,7 +371,11 @@ export default defineConfig({
    * fails as a missing `default` export; `neuroglancer > …` because none is a dependency of ours.
    */
   optimizeDeps: {
-    exclude: ['neuroglancer'],
+    // `onnxruntime-web` joins neuroglancer: pre-bundling it leaves `InferenceSession.create`
+    // never settling inside `src/ml`'s module worker -- no error, no rejection, just a model
+    // that opens for ever. Served as-is it initialises normally. Dev only; the build is
+    // unaffected.
+    exclude: ['neuroglancer', 'onnxruntime-web'],
     include: [
       'codemirror',
       'codemirror/addon/fold/brace-fold.js',

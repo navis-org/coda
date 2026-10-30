@@ -117,13 +117,25 @@ export async function launchChrome({
     return new Promise((resolve) => pending.set(id, resolve))
   }
 
-  /** Evaluate in the page and get the value back. Throws what the page threw. */
-  const evaluate = async (expression) => {
+  /**
+   * Evaluate in the page and get the value back. Throws what the page threw.
+   *
+   * `timeout` is CDP's own, in milliseconds, and is worth passing for anything that runs for
+   * minutes — a model download, a long measurement loop. Without it the default applies and a
+   * caller that passed one as a second argument was silently ignored.
+   */
+  const evaluate = async (expression, timeout) => {
     const reply = await send('Runtime.evaluate', {
       expression,
       awaitPromise: true,
       returnByValue: true,
+      ...(timeout ? { timeout } : {}),
     })
+    // A CDP-level failure answers with `error` and no `result` at all — "Execution context was
+    // destroyed" when the page reloaded under it, for instance, which vite's HMR will do to a
+    // probe running while its source is edited. Without this the call quietly returns
+    // `undefined` and the probe reports a nonsense reading instead of a failure.
+    if (reply.error) throw new Error(`Runtime.evaluate: ${reply.error.message ?? reply.error}`)
     const failed = reply.result?.exceptionDetails
     if (failed) throw new Error(failed.exception?.description ?? failed.text)
     return reply.result?.result?.value
@@ -137,7 +149,16 @@ export async function launchChrome({
    */
   const waitFor = async (expression, what, { tries = 150, every = 100 } = {}) => {
     for (let i = 0; i < tries; i++) {
-      if (await evaluate(expression)) return
+      // Errors are a *normal* answer while polling: right after `Page.navigate` the old
+      // execution context is being torn down, and asking it anything answers "Execution context
+      // was destroyed". That is precisely the state this loop exists to wait out, so it counts
+      // as "not yet" rather than as a failure — `evaluate` still throws for a caller that is
+      // not polling.
+      try {
+        if (await evaluate(expression)) return
+      } catch {
+        // Not ready. The timeout below is what reports a page that never arrives.
+      }
       await sleep(every)
     }
     throw new Error(`timed out waiting for ${what}`)

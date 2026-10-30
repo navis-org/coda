@@ -1,154 +1,136 @@
 /**
- * Phase 1: can a browser actually run the point affinity transformer, and how fast?
+ * Does `src/ml` actually work?
  *
- * Phase 0 produced five quantised variants and measured their *fidelity* on the CPU. It could not
- * answer which of them a browser can execute, because that is a question about ONNX Runtime's
- * WebGPU backend and the ops each variant emits:
+ * Everything in `src/ml` — the manifest check, the verified weight cache, the worker protocol —
+ * is unreachable from vitest: it needs a real `Worker`, a real IndexedDB and a WebGPU adapter.
+ * Without this probe none of it has ever run, and `docs/ml.md` would be a design note written in
+ * the past tense. `probe:affinity-variants` does not help: it drives ONNX Runtime directly to
+ * answer a conversion question and imports none of this.
  *
- *   fp16   / fp32   plain MatMul      expected native
- *   int8            MatMulInteger     expected NOT implemented on WebGPU -> CPU fallback
- *   nbits4 / nbits8 MatMulNBits       expected accelerated
+ * So this one drives the app's own modules through the dev server (`APP_MODULE`, the house
+ * pattern), and measures the two things only a real browser can say: what a cold open costs when
+ * the weights come over the network, and what a warm one costs when they come from the cache.
  *
- * This probe replaces "expected" with a measurement. A variant that silently falls back does not
- * error -- it loads, it answers, and it is unusably slow -- so the test is **time**, not success.
+ * It also exercises the part that cannot be unit-tested at all: that the encoder's outputs can be
+ * **held** in the worker and fed to the decoder without crossing back, which is what the whole
+ * protocol is shaped around.
  *
- * ## Why headless Chrome is a real measurement here
- *
- * `docs/canvas.md` warns that headless Chrome is SwiftShader, and for WebGL it is. **WebGPU on
- * macOS is not**: with the page on localhost the adapter comes back `apple/metal-3`, the real GPU.
- * Two things are load-bearing and both were found the hard way: the page must be on an http(s)
- * origin (on `about:blank` `navigator.gpu` is simply absent, which reads as "this Chrome has no
- * WebGPU"), and the adapter is reported so a run on a software adapter can never be mistaken for
- * a run on a GPU.
- *
- * Usage: `pnpm probe:affinity-runtime` with the converter's --out directory served, or
- * `--base <url>` against the hosted copy.
+ * Usage: `pnpm dev --port 5178` in another terminal, then
+ *   `pnpm probe:affinity-runtime -- --manifest <url> [--variant mixed] [--points 256]`
+ * Pass `--url` if the dev server is somewhere else. A busy port makes vite move silently, so
+ * check the port it actually printed.
  */
 
-import { spawn } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
-import { launchChrome } from './lib/browserProbe.mjs'
+import { APP_MODULE, launchChrome, probeArgs, probeReport } from './lib/browserProbe.mjs'
 
-const PORT = 8731
-const DEBUG_PORT = 9338
-const args = process.argv.slice(2)
-const flag = (name, fallback) => {
-  const i = args.indexOf(name)
-  return i === -1 ? fallback : args[i + 1]
-}
-const serveDir = flag('--serve', null)
-const base = flag('--base', serveDir ? `http://localhost:${PORT}` : null)
-const out = flag('--out', null)
-const variants = flag('--variants', 'nbits8,nbits4,fp16,int8').split(',')
-// N values to time the encoder at, and to price the N^2 decode from.
-const encoderSizes = flag('--points', '256,1024,2048').split(',').map(Number)
-const chunk = Number(flag('--chunk', '16384'))
-
-if (!base) {
-  console.error('pass --serve <dir> (served on localhost) or --base <url>')
+const args = probeArgs()
+const url = args.value('--url') ?? 'http://localhost:5178/'
+const manifestUrl = args.value('--manifest')
+const variant = args.value('--variant')
+const points = Number(args.value('--points') ?? 256)
+const chunk = Number(args.value('--chunk') ?? 16384)
+if (!manifestUrl) {
+  console.error('pass --manifest <url of a converted model manifest>')
   process.exit(2)
 }
 
-let server
-if (serveDir) {
-  server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', serveDir], {
-    stdio: 'ignore',
-  })
-  process.on('exit', () => server?.kill())
-  await new Promise((r) => setTimeout(r, 800))
-}
-
-const { evaluate, send, close } = await launchChrome({
-  port: DEBUG_PORT,
+const report = probeReport()
+const { evaluate, waitFor, send, close } = await launchChrome({
+  port: 9339,
   profile: '/tmp/coda-affinity-runtime-profile',
-  // Without these the adapter is software; without an http origin there is no adapter at all.
   args: ['--use-angle=metal', '--enable-gpu', '--enable-unsafe-webgpu'],
 })
-await send('Page.enable')
-await send('Page.navigate', { url: `http://localhost:${PORT}/` })
-await new Promise((r) => setTimeout(r, 2500))
+await send('Page.navigate', { url })
+await waitFor('Boolean(document.querySelector("#root"))', 'the app')
 
-const script = `(async () => {
-  const ort = window.ort
-  if (!ort) throw new Error('onnxruntime-web did not load')
-  ort.env.wasm.numThreads = 1
-  const adapter = await navigator.gpu?.requestAdapter()
-  if (!adapter) throw new Error('no WebGPU adapter: a timing here would be meaningless')
-  const report = {
-    adapter: { vendor: adapter.info?.vendor, architecture: adapter.info?.architecture },
-    variants: {},
+/**
+ * Run one open-and-infer cycle in the page.
+ *
+ * `cold` clears the weight cache first, so the download is measured; otherwise the cache answers
+ * and the open is the session build alone.
+ */
+const cycle = (cold) => `(async () => {
+  const load = ${APP_MODULE}
+  const [session, weights, support] = await Promise.all([
+    load('/src/ml/session.ts'),
+    load('/src/ml/weights.ts'),
+    load('/src/ml/support.ts'),
+  ])
+
+  const gpu = await support.gpuSupport()
+  if (gpu.refusal) throw new Error(gpu.refusal)
+  if (${cold}) await weights.clearWeights()
+
+  // Per part, then summed: progress reports bytes-so-far for the part being fetched, so a max
+  // over the stream reports the largest part rather than the transfer.
+  const perPart = new Map()
+  const t0 = performance.now()
+  const open = await session.openModel({
+    manifestUrl: ${JSON.stringify(manifestUrl)},
+    task: 'point-affinity',
+    ${variant ? `variant: ${JSON.stringify(variant)},` : '// no variant: preferredVariant picks'}
+    onProgress: (p) => { if (!p.cached) perPart.set(p.part, p.received) },
+  })
+  const openMs = Math.round(performance.now() - t0)
+
+  const m = open.loaded.manifest
+  const [pointsName, maskName] = m.signatures.encoder.inputs
+  const n = ${points}
+  const cloud = new Float32Array(n * 3)
+  for (let i = 0; i < cloud.length; i++) cloud[i] = Math.random() * 2 - 1
+
+  // Hold both encoder outputs: nothing comes back, which is the property under test.
+  const t1 = performance.now()
+  const returned = await open.run({
+    part: 'encoder',
+    feeds: [
+      { name: pointsName, type: 'float32', dims: [1, n, 3], data: cloud.buffer },
+      { name: maskName, type: 'bool', dims: [1, n], data: new Uint8Array(n).fill(1).buffer },
+    ],
+    hold: m.signatures.encoder.outputs,
+  })
+  const encodeMs = Math.round(performance.now() - t1)
+
+  // One decode chunk, fed from the held tensors by name.
+  const dec = m.signatures.decoder.inputs
+  const pairName = dec.find((name) => !m.signatures.encoder.outputs.includes(name))
+  const count = Math.min(${chunk}, n * n)
+  const idx = new BigInt64Array(count * 2)
+  for (let i = 0; i < count; i++) { idx[i * 2] = BigInt((i / n) | 0); idx[i * 2 + 1] = BigInt(i % n) }
+  const t2 = performance.now()
+  const out = await open.run({
+    part: 'decoder',
+    use: m.signatures.encoder.outputs,
+    feeds: [{ name: pairName, type: 'int64', dims: [1, count, 2], data: idx.buffer }],
+  })
+  const decodeMs = Math.round(performance.now() - t2)
+  const affinity = new Float32Array(out[0].data)
+
+  await open.release()
+  await open.close()
+
+  return {
+    adapter: gpu.vendor + '/' + gpu.architecture,
+    model: m.id,
+    openMs, encodeMs, decodeMs,
+    downloadedMegabytes: +([...perPart.values()].reduce((a, b) => a + b, 0) / 1e6).toFixed(1),
+    heldNothingReturned: returned.length === 0,
+    affinityCount: affinity.length,
+    affinityInRange: affinity.every((a) => a >= 0 && a <= 1),
+    pairsPerSecond: Math.round(count / (decodeMs / 1000)),
   }
-
-  const pairBlock = (n, start, count) => {
-    const data = new BigInt64Array(count * 2)
-    for (let i = 0; i < count; i++) {
-      const flat = start + i
-      data[i * 2] = BigInt(Math.floor(flat / n))
-      data[i * 2 + 1] = BigInt(flat % n)
-    }
-    return new ort.Tensor('int64', data, [1, count, 2])
-  }
-
-  for (const variant of ${JSON.stringify(variants)}) {
-    const v = { }
-    report.variants[variant] = v
-    try {
-      const t0 = performance.now()
-      const encBytes = new Uint8Array(await (await fetch(\`${base}/\${variant}/encoder.onnx\`)).arrayBuffer())
-      const decBytes = new Uint8Array(await (await fetch(\`${base}/\${variant}/decoder.onnx\`)).arrayBuffer())
-      v.megabytes = +((encBytes.length + decBytes.length) / 1e6).toFixed(1)
-      v.fetchSeconds = +((performance.now() - t0) / 1000).toFixed(2)
-
-      const t1 = performance.now()
-      const enc = await ort.InferenceSession.create(encBytes, { executionProviders: ['webgpu'] })
-      const dec = await ort.InferenceSession.create(decBytes, { executionProviders: ['webgpu'] })
-      v.sessionSeconds = +((performance.now() - t1) / 1000).toFixed(2)
-
-      const encode = async (n) => {
-        const points = new ort.Tensor('float32',
-          Float32Array.from({ length: n * 3 }, () => Math.random() * 2 - 1), [1, n, 3])
-        const mask = new ort.Tensor('bool', new Uint8Array(n).fill(1), [1, n])
-        const t = performance.now()
-        const r = await enc.run({ points, mask })
-        return { ms: Math.round(performance.now() - t), out: r }
-      }
-
-      await encode(256)  // warm the shader cache; the first run compiles every pipeline
-      v.encoderMs = {}
-      let encoded = null
-      for (const n of ${JSON.stringify(encoderSizes)}) {
-        const got = await encode(n)
-        v.encoderMs[n] = got.ms
-        encoded = { n, out: got.out }
-      }
-
-      // Decoder throughput: time one chunk, then price the full N^2 matrix from it. Running the
-      // whole matrix at N=2048 would be 4.2M pairs and minutes per variant.
-      const { n, out: enc_out } = encoded
-      const feeds = { latents: enc_out.latents, point_emb: enc_out.point_emb }
-      await dec.run({ ...feeds, pairs: pairBlock(n, 0, 1024) })
-      const t2 = performance.now()
-      const reps = 4
-      for (let i = 0; i < reps; i++) await dec.run({ ...feeds, pairs: pairBlock(n, 0, ${chunk}) })
-      const perChunk = (performance.now() - t2) / reps
-      v.decoderPairsPerSecond = Math.round(${chunk} / (perChunk / 1000))
-      v.decodeSecondsForFullMatrix = {}
-      for (const m of ${JSON.stringify(encoderSizes)}) {
-        v.decodeSecondsForFullMatrix[m] = +((m * m) / v.decoderPairsPerSecond).toFixed(1)
-      }
-      await enc.release(); await dec.release()
-    } catch (e) {
-      v.error = String(e).slice(0, 300)
-    }
-  }
-  return report
 })()`
 
-const report = await evaluate(script, 1800000)
-console.log(JSON.stringify(report, null, 2))
-if (out) {
-  writeFileSync(out, JSON.stringify(report, null, 2) + '\n')
-  console.log(`\nwrote ${out}`)
-}
+const cold = await evaluate(cycle(true), 1_800_000)
+console.log('cold  ', JSON.stringify(cold))
+const warm = await evaluate(cycle(false), 1_800_000)
+console.log('warm  ', JSON.stringify(warm))
+
+report.check(cold.heldNothingReturned, 'the encoder returned nothing: its outputs stayed held')
+report.check(cold.affinityCount > 0, 'the decoder answered from the held tensors')
+report.check(cold.affinityInRange, 'every affinity is in [0, 1]')
+report.check(cold.downloadedMegabytes > 0, 'the cold open downloaded the weights')
+report.check(warm.downloadedMegabytes === 0, 'the warm open downloaded nothing: the cache answered')
+report.check(warm.openMs < cold.openMs, `warm open (${warm.openMs}ms) beats cold (${cold.openMs}ms)`)
 await close()
-server?.kill()
+report.finish()

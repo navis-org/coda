@@ -381,6 +381,18 @@ lean on:
 | `packs/zapbench/neurons.test.ts`                  | ZapBench neurons: the request (members, integers, no population filter), order, batching, refusals   |
 | `packs/zapbench/traces.test.ts`                   | the ZapBench Traces card: order, repeats, scales, the cost sentence, `validate`'s matrix ceiling     |
 
+### Model runtime (`src/ml`)
+
+| File                    | Covers                                                                                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `ml/manifest.test.ts`   | resolving a file against the manifest's own URL, the schema and random-weights refusals, and that a model of a different shape (one graph, its own part names) loads at all — the property the seam exists for |
+| `ml/weights.test.ts`    | verify-before-keep, the length and hash refusals, the cache hit that is *not* re-hashed, one download shared between concurrent callers (`fake-indexeddb`) |
+
+No test can reach `session.ts` or `infer.worker.ts`: both need a real `Worker` and a WebGPU
+adapter. `pnpm probe:affinity-variants -- --exported <dir>` measures which quantisation a browser
+can run, on a real GPU; the probe that drives this runtime end to end arrives with the node that
+uses it ([ml.md](ml.md)).
+
 ### Biophysics solver (`src/biophys`)
 
 | File                           | Covers                                                                                               |

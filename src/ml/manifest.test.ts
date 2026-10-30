@@ -9,11 +9,7 @@ import {
   type ModelManifest,
 } from './manifest'
 
-function file(
-  variant: string,
-  part: 'encoder' | 'decoder',
-  over: Record<string, unknown> = {},
-) {
+function file(variant: string, part: string, over: Record<string, unknown> = {}) {
   return {
     variant,
     part,
@@ -30,26 +26,16 @@ function manifest(over: Partial<ModelManifest> = {}): ModelManifest {
   return {
     id: 'affinity-flywire',
     manifestSchema: MANIFEST_SCHEMA,
-    model: 'ae_d1024_m512',
-    depth: 24,
+    task: 'point-affinity',
+    parts: ['encoder', 'decoder'],
     datasets: ['flywire'],
     license: 'MIT',
     citation: 'Troidl et al.',
     source: 'https://example.invalid',
-    parameters: 380577793,
-    opset: 17,
     upstreamCommit: 'abc123',
     randomWeights: false,
-    preprocessing: {
-      units: 'um',
-      globalScale: 659.88367,
-      centre: 'centroid',
-      samplesPerNeuron: 1024,
-      jitter: 1,
-      translate: 20,
-      padValue: -1,
-    },
-    clustering: { linkage: 'average', threshold: 0.8, minClusterSize: 30 },
+    // Opaque to `src/ml`, which is the point: no assertion here reads inside it.
+    config: { model: 'ae_d1024_m512', depth: 24, clustering: { threshold: 0.8 } },
     signatures: {
       encoder: { inputs: ['points', 'mask'], outputs: ['latents', 'point_emb'], dynamic: {} },
       decoder: {
@@ -122,8 +108,29 @@ describe('checkManifest', () => {
 
   it('refuses a manifest with no usable variant', () => {
     expect(() => checkManifest(manifest({ files: [file('mixed', 'encoder')] }))).toThrow(
-      /no variant with both/,
+      /no variant carrying every part/,
     )
+  })
+
+  /**
+   * The property the seam exists for: a model that is not two graphs called encoder and decoder
+   * must cost a manifest entry, not a schema bump. The plan's own next model -- a one-graph
+   * DeepSet head on the encoder's latents -- is exactly this shape.
+   */
+  it('accepts a model of a different shape entirely', () => {
+    const oneGraph = manifest({
+      id: 'types-flywire',
+      task: 'neuron-type',
+      parts: ['embed'],
+      signatures: { embed: { inputs: ['latents'], outputs: ['embedding'], dynamic: {} } },
+      files: [file('fp16', 'embed')],
+    })
+    expect(checkManifest(oneGraph).parts).toEqual(['embed'])
+    expect(completeVariants(oneGraph)).toEqual(['fp16'])
+  })
+
+  it('refuses a manifest declaring no parts', () => {
+    expect(() => checkManifest(manifest({ parts: [] }))).toThrow(/declares no parts/)
   })
 
   /** Without the signatures the worker cannot name a single tensor, so this is not optional. */
