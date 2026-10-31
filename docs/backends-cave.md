@@ -1068,7 +1068,10 @@ object starting at its first byte.
 - **Connectivity types come from the index**, not from a second query. A connectivity table
   without them is readable by nothing, and by the time anyone runs Connectivity the index is
   already in hand. A partner outside the annotated set has no type, which is honest rather than
-  a gap.
+  a gap — and on a datastack with no neuron table and no chain, *nobody* has one, so `typeLookup`
+  answers the empty map rather than the index's refusal. That refusal is about enumeration, and
+  reaching it from a fetch handed its ids made it contradict its own last sentence; see
+  [annotations.md](annotations.md).
 - **There is no Base URL field**, unlike neuPrint's, and its absence is the finding: every CAVE
   service Coda calls answers a browser directly, **including on its 401s**, which is the part
   `reportAuthFailure` depends on. What the Connections tab does carry is a row per *global server*,

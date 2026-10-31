@@ -875,6 +875,11 @@ export class CaveSource implements DataSource {
      * Nothing to enumerate and nothing wired to enumerate it. Refused rather than answered with
      * an empty table, which would read as a datastack with no neurons in it — and the fix is a
      * wire rather than anything about the data, so it is worth naming.
+     *
+     * This pair — a chain, or a neuron table — is the whole of what an index can be built from,
+     * and `typeLookup` reads it from the other side: a *label* is not an enumeration, so where
+     * there is neither it answers the empty map rather than this. A third population learned
+     * here belongs there too, or types go silently blank.
      */
     const neurons = spec.neurons
     if (!neurons) {
@@ -2461,12 +2466,21 @@ export class CaveSource implements DataSource {
    * direction: `Hops: 3, Direction: both` is six calls in one Run, and Profile pays two per page
    * turn. Building a hundred thousand entries six times over to get the same answer is the
    * `searchIndexFor`/`statsFor` case exactly.
+   *
+   * **Where there is nothing to look up it answers nothing, rather than passing on a refusal
+   * belonging to a question nobody asked.** No neuron table and no chain means no types
+   * anywhere, and `neuronIndex`' refusal is about *enumeration* — wrong for every caller here,
+   * all of which arrive holding their ids. An absent type is already the answer for a partner
+   * outside the annotated set, so it is the answer here too. The condition is `buildIndex`'s
+   * own read the other way round, which is the thing to keep true; the incident is in
+   * `docs/annotations.md`.
    */
   private async typeLookup(req: {
     datasetId: string
     annotations?: DatasetAnnotations
     signal?: AbortSignal
   }): Promise<Map<string, string>> {
+    if (!req.annotations && !this.require(req.datasetId).spec.neurons) return new Map()
     const index = await this.neuronIndex({
       datasetId: req.datasetId,
       ...(req.annotations ? { annotations: req.annotations } : {}),

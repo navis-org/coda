@@ -172,6 +172,33 @@ enumeration: Find Neurons, Explore Dataset, and the type names `typesOf` puts on
 Hence the refusal names the wire to make rather than answering with an empty table, which would
 read as a datastack with no neurons in it.
 
+**That paragraph was true of the design and false of the code for a phase, and the gap is worth
+the record because the error message was the thing that hid it.** `Input IDs → Skeletons` on
+Aedes failed with "`wclee_aedes_brain` publishes no table listing its neurons, so Coda cannot
+enumerate them" — a sentence that ends "Queries using ids need no such table", in front of a
+query using ids. Nothing had asked for a neuron list. The skeletons were fetched for the ids
+given; what wanted the index was the one `type` column of their attribute table, through
+`CaveSource.morphologyTypes` → `typeLookup` → `neuronIndex`. Connectivity, Meshes and Synapses
+all reached it by the same line, so the whole id-driven half of this paragraph was unreachable on
+exactly the datastack the feature exists for.
+
+The fix is in `typeLookup`: with no chain and no neuron table there is nothing to look up, so it
+answers the **empty map** rather than passing on a refusal about enumeration. An absent type was
+already the answer for a partner outside the annotated set, which is what makes the empty map the
+honest answer rather than a swallowed error.
+
+**Where the refusal stays is the part worth stating precisely, because "a query using ids" is two
+different questions.** It stays on every path that needs the *list* rather than a label: Find
+Neurons, Explore Dataset, and — less obviously — `findNeurons` **handed ids**, which is `Input
+IDs` with a Dataset wired and `publishedNeurons` behind Connectivity's `Include fragments`. Those
+two look like the case this fix is about and are its opposite: `Input IDs` fetches rows precisely
+to say *which ids the dataset has never heard of*, and `Include fragments` asks which of a
+frontier are published neurons. Neither can be answered without the list, so both still refuse,
+and the remedy the message names is still the right one. What the fix separates is the label from
+the lookup, not ids from enumeration. Pinned by four cases in `cave.test.ts`' `a datastack with no
+neuron table`: skeletons and connectivity from ids, a chain still read for its types where one is
+wired, and `findNeurons` with ids still refusing.
+
 The node follows: `Neuron table` is no longer required, its help says any table with one row per
 neuron carrying a root id will do, and `validate` asks for **a table or a wire** rather than for
 the table. `registerCustomCaveSpec` registers the spec either way — withholding it for want of a

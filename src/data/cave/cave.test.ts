@@ -1947,6 +1947,76 @@ describe('a datastack with no neuron table', () => {
       /Annotations source/,
     )
   })
+
+  /*
+   * That refusal is about *enumeration*, and every node below arrives holding its ids. Reaching
+   * it from here answered a question nobody had asked — `Input IDs → Skeletons` on Aedes, which
+   * has the level-2 cache to draw them, failed with "Coda cannot enumerate them". See
+   * [annotations.md](../../../docs/annotations.md).
+   */
+  it('fetches skeletons for the ids it was given, with no index and no refusal', async () => {
+    installFetch({
+      '/l2cache/api/v1/table_mapping': L2_MAPPING,
+      '/lvl2_graph': CHAIN,
+      '/attributes': COORDS,
+    })
+    const value = await new CaveSource().fetchSkeletons!({
+      datasetId: DATASET_BARE,
+      neuronIds: ['720575940628857210'],
+    })
+    expect(value.items).toHaveLength(1)
+    // The attribute table is there, and its `type` is absent rather than the fetch being.
+    expect(value.attributes.data.neuronId).toEqual(['720575940628857210'])
+  })
+
+  it('answers connectivity for those ids too, with the types it has — none', async () => {
+    installFetch()
+    const table = await new CaveSource().fetchConnectivity({
+      datasetId: DATASET_BARE,
+      neuronIds: ['720575940628857210'],
+      direction: 'outputs',
+    })
+    // Spelled as the rows rather than `every(...)`, which is vacuously true where the answer is
+    // empty — and an empty answer is the failure closest to the one this pins.
+    expect(table.data.neuronType).toEqual([null, null, null])
+  })
+
+  /*
+   * The other side of the boundary, and it is the one that looks wrong. `findNeurons` handed ids
+   * is a *lookup against the list* — `Input IDs` with a Dataset wired fetches rows exactly to
+   * say which ids the dataset has never heard of, and `publishedNeurons` asks which of a
+   * frontier are published neurons. Neither can be answered without the table, so neither is
+   * covered by the empty map, and the refusal's remedy is still the right one.
+   */
+  it('still refuses a lookup by id, which needs the list the label did not', async () => {
+    installFetch()
+    await expect(
+      new CaveSource().findNeurons({
+        datasetId: DATASET_BARE,
+        neuronIds: ['720575940628857210'],
+      }),
+    ).rejects.toThrow(/Annotations source/)
+  })
+
+  it('still reads a wired chain for its types, which the empty map must not take away', async () => {
+    installFetch()
+    // A chain carrying a `type`, unlike the one above: the point is that the guard's
+    // `!req.annotations` half is load-bearing, and a chain with no types cannot show it.
+    const typed = {
+      key: 'seaTable:base=main&table=types',
+      table: makeTable(tableSchema(column('neuronId', 'str'), column('type', 'str')), {
+        neuronId: ['720575940628857210'],
+        type: ['LC4'],
+      }),
+    }
+    const table = await new CaveSource().fetchConnectivity({
+      datasetId: DATASET_BARE,
+      neuronIds: ['720575940628857210'],
+      direction: 'outputs',
+      annotations: typed,
+    })
+    expect(table.data.neuronType).toEqual(['LC4', 'LC4', 'LC4'])
+  })
 })
 
 // ---------------------------------------------------------------------------
