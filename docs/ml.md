@@ -166,16 +166,23 @@ difference does not reach a decision the affinities themselves made firmly; it r
 ones that were already on the line, which is the same population any rerun of the clustering at a
 slightly different threshold would move.
 
-**Why it does not reproduce is not settled, and the honest statement is narrow.** SEAM's fault is
-in the Fourier projection, where the coordinate × frequency `Einsum` loses phase before
-`sin`/`cos`. In the two-graph export that op is in the **encoder**, which `mixed` quantises
-weight-only, so its activations stay fp32 — and `point_emb` does come back bit-identical across
-backends. That shows the op SEAM blames never runs in fp16 here. It does **not** show that it
-would have broken if it had: an export, opset or ORT version that lowers those ops differently
-from SEAM's predicts the same observations. Settling it needs a run of this probe against a
-**full fp16 variant**, whose encoder would carry the op — and no such variant is exported, so it
-has not been run. Note also that the protection is per-part quantisation, which the split
-*enabled*; two fp16 graphs would be just as split and just as exposed.
+**Why it does not reproduce is not settled, and an earlier draft of this section got the reason
+wrong.** SEAM reports **two** fp16 failures, and they are different. A naive fp16 conversion
+flipped 13% of points *on the CPU*, and that one was traced to the Fourier projection, where the
+coordinate × frequency `Einsum` loses phase before `sin`/`cos`; keeping those ops in fp32 fixed
+it. **The file with that fix in it is still 34% wrong on WebGPU while being fine on WASM** — so
+the WebGPU failure is a second, undiagnosed fault in that backend's fp16 kernels, and it is not
+the phase loss.
+
+That matters for what our result can claim. The phase loss cannot occur here, because the Fourier
+op sits in the encoder, which `mixed` quantises weight-only (`point_emb` comes back bit-identical
+across backends). But the failure we were actually looking for is the *other* one, and the only
+honest statement is that our fp16 decoder does not hit it — not why. An export, opset or ORT
+version that lowers things differently from SEAM's predicts the same observation, and so does a
+decoder too shallow to accumulate the error. Settling it needs a run against a **full fp16
+variant**, which is not exported. Note too that what keeps the Fourier op out of fp16 is per-part
+quantisation, which the split *enabled*; two fp16 graphs would be just as split and just as
+exposed.
 
 **What the number is not.** It is a distance from WASM, not from fp32, so it cannot be added to
 the CPU figures above or read as a distance from full precision. Measuring that would need an
@@ -207,7 +214,7 @@ and nothing above should be read as cross-platform.
 
 ## Measuring
 
-**Four probes, answering different questions.**
+**Five probes, answering different questions.**
 
 **`pnpm probe:affinity-variants -- --exported <dir>`** drives ONNX Runtime directly to answer
 "which recipe do we ship" — a one-off conversion decision. It writes its own page and serves ORT
@@ -220,6 +227,14 @@ same thing on the backend it runs on": one set of files on two execution provide
 its result, and the reason it has two halves is written in that file — its first version minted
 uniform noise at ten times the real coordinate magnitude, and the crossing rate it reports is
 decided by the input.
+
+**`pnpm probe:seam-model -- --exported <dir>`** is the same question for a *SEAM* model — the
+checkpoint `seam:findMerges` will run — and it compares against **PyTorch's own logits**, carried
+in a `fixture.json` the exporter writes, rather than against another ORT build. On apple/metal-3,
+`A_d256_e80` fp32 agrees to **4e-6 on WebGPU** and 9e-6 on WASM with **no point changing the side
+PyTorch put it on**, and runs warm in 49 ms against WASM's 370 — which is also the only signal
+available that the graph ran on the GPU at all, since onnxruntime-web falls back per node in
+silence. So fp32 is sound there for a single graph with the Fourier projection inside it.
 
 **`pnpm probe:affinity-export`** is the Python one: every variant against fp32 PyTorch, on the
 CPU, which is where the fidelity table's numbers come from.
