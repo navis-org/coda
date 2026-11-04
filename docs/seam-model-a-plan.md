@@ -184,12 +184,41 @@ Stated so it is a decision rather than a default:
    `pnpm probe:affinity-backend`. Done; the result is in the section above and in
    [ml.md](ml.md#fidelity-on-webgpu-which-the-table-above-does-not-measure).
 
-**Phase B — export and verify Model A.** `A_d256_e80` to ONNX in fp32, through SEAM's own exporter
-so the tolerance check lives beside the training code (its invariant 12 already requires one), with
-both heads as outputs. A manifest entry carrying `scale_um` (50.2864), `n_points` (4,096), the
-window radius (15 µm), the sampling spacing (0.2 µm) and the calibration curve. Verify in the
-browser against PyTorch logits on a real window — `scripts/spike/web/` already does this for the
-spike models.
+**Phase B — export and verify Model A. Done, 2026-11-04.**
+
+`~/Github/SEAM/scripts/export_onnx.py` is the release exporter for the current model class: one
+**fp32** graph per checkpoint, both heads as outputs, the point count a dynamic axis, the manifest
+`src/ml` reads, and a `fixture.json` holding one window with PyTorch's logits for it. `A_d256_e80`
+comes out at **70.8 MB** and agrees with PyTorch to **7.6e-6** on the point logits on the CPU.
+
+`pnpm probe:seam-model -- --exported <dir>` is the other half, here rather than there because the
+backend that matters is the one Coda ships. It runs the exported file through onnxruntime-web
+against the fixture — PyTorch's own answer, not another ORT build's — on both providers:
+
+| | max logit error | points on the wrong side | window logit |
+| --- | --- | --- | --- |
+| WASM | 9e-6 | 0 of 4,096 | agrees, 0 |
+| **WebGPU** | **4e-6** | **0 of 4,096** | agrees, 1e-6 |
+
+**So fp32 is sound on WebGPU for the whole single graph, Fourier projection included** — which
+rules out those ops being broken on that backend at any precision. It does **not** explain SEAM's
+34% fp16 figure: that file already kept `Einsum`/`Sin`/`Cos` in fp32, so its failure was never the
+phase loss and remains undiagnosed. Warm, the run is 49 ms against WASM's 370, which is also the
+only check available that the graph ran on the GPU at all — onnxruntime-web falls back per node
+without saying so.
+
+**No calibration curve ships, and the node must not invent one.** Invariant 14 says a cutoff comes
+off a calibration curve, and there is no calibration run for this checkpoint — only test-fold
+scores, which are exactly what a cutoff may not be chosen on. `config.calibration` is `null`, so
+Phase D has to treat the cutoff as unset rather than defaulting it.
+
+**What is left of this phase:** the 70.8 MB file needs hosting, as the affinity weights were. And
+SEAM's audit asks for a parity criterion shaped for a *scorer* — rank deltas on a real candidate
+set — where this ships a score-delta bound and classification agreement on one synthetic window,
+so `docs/review-fixes.md` keeps that item open.
+
+Still unused from the plan above: `scale_um` 50.2864, `n_points` 4,096, window radius 15 µm,
+spacing 0.2 µm — all in the manifest's `config`, read in Phase C and D.
 
 **Phase C — the input path.** Vendor `canonical.py` and `scan.py` into `src/pyodide/` with their
 source commit recorded, and a `.ts` wrapper in the house style. A window needs a mesh crop, so this
