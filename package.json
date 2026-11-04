@@ -91,7 +91,9 @@
     "probe:affinity-runtime": "node scripts/probe-affinity-runtime.mjs",
     "probe:affinity-backend": "vite-node scripts/probe-affinity-cloud.ts /tmp/coda-affinity-cloud.json 1024 && node scripts/probe-affinity-backend.mjs",
     "probe:affinity-parity": "vite-node scripts/probe-affinity-parity.ts /tmp/coda-affinity-parity.json && python3 scripts/probe-affinity-parity.py /tmp/coda-affinity-parity.json",
-    "probe:seam-model": "node scripts/probe-seam-model.mjs"
+    "probe:seam-model": "node scripts/probe-seam-model.mjs",
+    "probe:seam-windows": "node scripts/probe-seam-windows.mjs",
+    "probe:seam-windows-py": "node scripts/probe-seam-windows-py.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

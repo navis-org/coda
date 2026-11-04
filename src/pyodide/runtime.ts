@@ -34,6 +34,9 @@ import LINKAGE_PY from './linkage.py?raw'
 import MATCHES_PY from './matches.py?raw'
 import MESHES_PY from './meshes.py?raw'
 import NBLAST_PY from './nblast.py?raw'
+import SEAM_CANONICAL_PY from './seam/canonical.py?raw'
+import SEAM_SCAN_PY from './seam/scan.py?raw'
+import SEAM_WINDOWS_PY from './seamWindows.py?raw'
 import SKELETONIZE_PY from './skeletonize.py?raw'
 import SKELETONS_PY from './skeletons.py?raw'
 import TOPOLOGY_PY from './topology.py?raw'
@@ -59,6 +62,15 @@ type Report = (fraction: number, note?: string) => void
  */
 interface PyModule {
   source: string
+  /**
+   * Other Python files this module installs itself, by name.
+   *
+   * For a module whose working code is **vendored unchanged** from another repository and
+   * imports across files, which the one-source-per-module bridge otherwise cannot express.
+   * Seeded into the module's globals as `__vendored__`; the module decides what to do with it,
+   * because how a package is assembled is its own business and not the runtime's.
+   */
+  vendored?: Record<string, string>
   /** Package names Pyodide resolves from its own lock, or an absolute wheel URL. */
   packages: string[]
   /**
@@ -110,6 +122,8 @@ const MODULES: Record<string, PyModule> = {
    * download that a first NBLAST pays is the download for all of them, and the table below
    * is seven identical rows because a capability that declared *fewer* packages would still
    * pay the same first-use cost the moment anything else in the graph needed the wheel.
+   * (`seamWindows` is the first that does declare fewer — numpy alone — and it is kept out of
+   * this run for that reason rather than folded into it.)
    *
    * They stay six rows rather than becoming one shared constant: `MODULES` is the place a
    * reader looks to find out what a given node downloads, and an indirection there would
@@ -141,6 +155,21 @@ const MODULES: Record<string, PyModule> = {
   },
   // skeletor's wavefront skeletonizer trimmed to the calls it makes into fastcore, so the same
   // two packages again rather than skeletor's own scipy, pandas, trimesh and igraph.
+  /*
+   * The windows a SEAM model takes, and **the first row that is not like the others** — numpy
+   * alone, no wheel. It sits down here rather than in the run above because that run's whole
+   * point is that every row declares the same two packages; this one declares fewer, which is
+   * the cheap exception rather than DotMotif's expensive one. Its two working files are
+   * byte-identical copies of SEAM's own (`seam/VENDORED.md`), because that project's invariants
+   * 3 and 11 put training and inference behind one numpy-only function precisely so this can be
+   * a copy rather than a port.
+   */
+  seamWindows: {
+    source: SEAM_WINDOWS_PY,
+    vendored: { 'seam.canonical': SEAM_CANONICAL_PY, 'seam.scan': SEAM_SCAN_PY },
+    packages: ['numpy'],
+    label: 'numpy · SEAM windows',
+  },
   skeletonize: {
     source: SKELETONIZE_PY,
     packages: ['numpy', sources.fastcoreWheel],
@@ -272,7 +301,10 @@ export async function callPython(
     const wheels = (spec.wheels ?? []).map((name) => new URL(`wheels/${name}`, siteRoot).href)
     await py.loadPackage([...spec.packages, ...wheels], { messageCallback: () => {} })
     // `__name__` seeded, as an import would, so a class or a traceback names its module.
-    namespace = py.toPy({ __name__: module }) as PyNamespace
+    namespace = py.toPy({
+      __name__: module,
+      ...(spec.vendored ? { __vendored__: spec.vendored } : {}),
+    }) as PyNamespace
     py.runPython(spec.source, { globals: namespace })
     namespaces.set(module, namespace)
   }

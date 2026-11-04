@@ -93,6 +93,13 @@ jobs:
       # neuron. The empty neuron in its fixture is there because the item count is an
       # invariant — the attribute table is index-aligned with it.
       - run: node scripts/probe-skeletons.mjs
+      # The SEAM windows capability, whose working code is two files **vendored unchanged** from
+      # another repository (`src/pyodide/seam/VENDORED.md`). What this checks above everything
+      # else is the thing nothing else can: that the two assemble into a real `seam` package in
+      # `sys.modules` — they do `from . import canonical`, and the bridge runs one source per
+      # module with no import machinery. If that breaks, every window is gone at once, and the
+      # only other thing that runs these files needs a CAVE token, a dev server and a browser.
+      - run: node scripts/probe-seam-windows-py.mjs
       # The mesh pipeline, whose equivalent silent failure is a face index that is no longer
       # local to its own mesh — a cloud of stray triangles between two neurons rather than an
       # error. Its fixture is one closed icosphere and one with a face cut out, which is the

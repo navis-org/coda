@@ -220,10 +220,23 @@ so `docs/review-fixes.md` keeps that item open.
 Still unused from the plan above: `scale_um` 50.2864, `n_points` 4,096, window radius 15 µm,
 spacing 0.2 µm — all in the manifest's `config`, read in Phase C and D.
 
-**Phase C — the input path.** Vendor `canonical.py` and `scan.py` into `src/pyodide/` with their
-source commit recorded, and a `.ts` wrapper in the house style. A window needs a mesh crop, so this
-is where **mesh fetch per window** gets measured; it is the item most likely to decide whether the
-node is pleasant to use, and nobody has measured it on either side.
+**Phase C — the input path. Done, 2026-11-04.**
+
+`canonical.py` and `scan.py` are vendored byte-identical into `src/pyodide/seam/`, assembled into
+a real `seam` package at runtime rather than ported, and wrapped by `seamWindows.ts`. **The
+measurement, the vendoring argument and the `__vendored__` convention are in
+[python-pyodide.md](python-pyodide.md#seam-windows-the-first-capability-whose-working-code-coda-did-not-write)**,
+which is where a fact about the runtime belongs; this is a plan.
+
+Two findings that change what Phase D builds:
+
+- **"Mesh fetch per window" was the wrong unit.** FlyWire public ignores a bbox on a mesh
+  request, so a neuron is fetched once and windows are local crops. There is nothing to measure
+  per window on the network, and the real cost is Pyodide.
+- **It is feasible and it needs rails.** A large neuron is ~1 minute end to end and 80 MB across
+  the bridge, so the node wants a `warnOverWait` priced over the set with a cap on windows as the
+  lever, and should run one neuron at a time rather than accumulate. Window building and
+  inference are the same order, so neither is the thing to optimise first.
 
 **Phase D — `seam:findMerges`.** The node: meshes in, a per-window table with scores out, a
 `Points` output carrying the per-point bipartition, and a layer marking sites. The cutoff param
