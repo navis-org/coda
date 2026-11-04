@@ -29,24 +29,9 @@
  * Usage: `pnpm probe:affinity-variants -- --exported <converter --out dir> [--out report.json]`
  */
 
-import { createServer } from 'node:http'
-import { createReadStream, readFileSync, writeFileSync } from 'node:fs'
-import { extname, join, resolve } from 'node:path'
+import { writeFileSync } from 'node:fs'
 import { launchChrome, probeArgs } from './lib/browserProbe.mjs'
-
-/**
- * ORT's own directory, served whole.
- *
- * Not just the entry module: it fetches `ort-wasm-simd-threaded.jsep.wasm` beside itself at
- * runtime, and serving only the `.mjs` fails as "no available backend found … both async and sync
- * fetching of the wasm failed" — which reads as a WebGPU problem rather than a missing file.
- */
-const ORT_DIST = 'node_modules/onnxruntime-web/dist'
-const PAGE = `<!doctype html><meta charset=utf-8><title>affinity variants</title><body>ready</body>
-<script type="module">
-import * as ort from './ort/ort.webgpu.bundle.min.mjs'
-window.ort = ort
-</script>`
+import { ORT_READY, readModelManifest, serveOrtPage } from './lib/ortPage.mjs'
 
 const args = probeArgs()
 const exported = args.value('--exported')
@@ -60,38 +45,13 @@ if (!exported) {
   process.exit(2)
 }
 
-const manifest = JSON.parse(readFileSync(join(exported, 'manifest.json'), 'utf8'))
+const manifest = readModelManifest(exported)
 /** Variants carrying every declared part, which is what `completeVariants` means in src/ml. */
 const variants = [
   ...new Set(manifest.files.map((f) => f.variant)),
 ].filter((v) => manifest.parts.every((p) => manifest.files.some((f) => f.variant === v && f.part === p)))
 
-const TYPES = { '.mjs': 'text/javascript', '.js': 'text/javascript', '.wasm': 'application/wasm', '.onnx': 'application/octet-stream', '.json': 'application/json', '.html': 'text/html' }
-
-/**
- * Serve the page, ORT and the converter's output from one origin.
- *
- * `node:http` rather than shelling out to `python3 -m http.server`, which this repo has no other
- * reason to require, and `listen(0)` rather than a fixed port, which a previous run or another
- * probe can be holding — invisibly, since the spawned server's output went nowhere.
- */
-const server = createServer((request, response) => {
-  const path = decodeURIComponent(new URL(request.url, 'http://x').pathname)
-  const headers = { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }
-  if (path === '/' || path === '/index.html') {
-    response.writeHead(200, { ...headers, 'Content-Type': 'text/html' })
-    return response.end(PAGE)
-  }
-  const file = path.startsWith('/ort/')
-    ? resolve(join(ORT_DIST, path.slice('/ort/'.length)))
-    : resolve(join(exported, path))
-  response.writeHead(200, { ...headers, 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream' })
-  createReadStream(file)
-    .on('error', () => response.destroy())
-    .pipe(response)
-})
-await new Promise((ready) => server.listen(0, ready))
-const base = `http://localhost:${server.address().port}`
+const { base, stop } = await serveOrtPage({ title: 'affinity variants', dirs: { '/': exported } })
 
 const { evaluate, waitFor, send, close } = await launchChrome({
   port: 9338,
@@ -100,7 +60,7 @@ const { evaluate, waitFor, send, close } = await launchChrome({
   args: ['--use-angle=metal', '--enable-gpu', '--enable-unsafe-webgpu'],
 })
 await send('Page.navigate', { url: base })
-await waitFor('Boolean(window.ort)', 'onnxruntime-web')
+await waitFor(ORT_READY, 'onnxruntime-web')
 
 const script = `(async () => {
   const CONFIG = ${JSON.stringify({ variants, sizes, chunk, manifest, repeats })}
@@ -204,4 +164,4 @@ if (reportTo) {
   console.log(`\nwrote ${reportTo}`)
 }
 await close()
-server.close()
+stop()

@@ -49,6 +49,11 @@ const NOT_ON_WEBGPU = ['MatMulInteger']
  * `docs/ml.md` was taken on. Publish one variant, or publish only ones you would be happy to get.
  *
  * What it *can* check is the op inventory, which is a measured fact the manifest carries.
+ *
+ * **It cannot check fidelity per backend**, and that is a second way "runnable" misleads: every
+ * fidelity figure a manifest carries was taken on the CPU, so a variant can be complete, fast and
+ * accepted here while being measurably less accurate on the backend that will run it. Measured,
+ * not supposed — see docs/ml.md, "Fidelity on WebGPU".
  */
 export function preferredVariant(manifest: ModelManifest): string | undefined {
   const refused = new Set<string>()
