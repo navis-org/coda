@@ -1,6 +1,12 @@
-# Proofreading pack — plan
+# The `seam` pack — plan
 
-A plan, not a record of what is built. Pack id **`proofread`**, label **Proofreading**: nodes that
+A plan, not a record of what is built.
+
+**This pack and its one node were renamed on 2026-11-04** — `proofread` → `seam`,
+`proofread:findMerges` → `seam:affinityClusters` — when SEAM's Model A arrived and the plain name
+went to the model that works. Nothing had shipped under the old ids, so there is no `formerTypes`
+entry and no migration. [seam-model-a-plan.md](seam-model-a-plan.md) is the plan for that.
+The identifiers below are the current ones. Pack id **`seam`**, label **SEAM**: nodes that
 look for segmentation errors in a reconstruction and hand the reader somewhere to fix them.
 
 The first node runs Troidl et al.'s **point affinity transformer**
@@ -115,13 +121,13 @@ src/ml/
   session.ts       run(graph, feeds) with a cancel signal; chunking is the caller's.
   support.ts       hasWebGPU(), adapter limits — what the node asks before offering to run.
   infer.worker.ts  the one worker; the main thread never holds a session.
-src/packs/proofread/
-  index.ts         the PackDefinition: id 'proofread', defaultOn: false
-  affinity.ts      the node — proofread:findMerges
+src/packs/seam/
+  index.ts         the PackDefinition: id 'seam', defaultOn: false
+  affinityClusters.ts the node
   affinityOps.ts   preprocessing, pair batching, agglomerative clustering, cluster→label
   pointCloud.ts    skeleton → sampled, centred, scaled point cloud (pure, testable)
   scene.ts         clusters → a neuroglancer local annotation layer + the deep link
-  glyphs.ts seeAlso.ts help/findMerges.md
+  glyphs.ts seeAlso.ts help/affinityClusters.md
 ```
 
 Two rules make this a seam rather than a folder:
@@ -141,7 +147,7 @@ headless, so the import must be behind the worker boundary and the knip baseline
 
 ### The node
 
-`proofread:findMerges`, **`expensive`** — invariant 6 is not negotiable here; a `cheap` node would
+`seam:affinityClusters`, **`expensive`** — invariant 6 is not negotiable here; a `cheap` node would
 fire a 381 MB download and a WebGPU run on every keystroke.
 
 - **In:** `Skeletons` (required). One item per run; a value holding several is iterated or refused —
@@ -163,7 +169,7 @@ fire a 381 MB download and a WebGPU run on every keystroke.
   list does not include this one but the reader chose it anyway; more than four clusters came back
   (out of distribution per the paper's own ablation, and biased to under-segmentation there).
 
-The reader's path: a `Skeletons` node → **Find Merges** → Neuroglancer. The card shows the segment
+The reader's path: a `Skeletons` node → **Affinity Clusters** → Neuroglancer. The card shows the segment
 with the predicted clusters as coloured point annotations over it, and the node's state bar carries
 the link into the dataset's own proofreading viewer.
 
@@ -194,10 +200,63 @@ is not a measurement — [canvas.md](canvas.md)'s rule) reporting cold-cache dow
 encoder time and decode time per N across a few GPUs. **The table above is replaced here.** The
 ceilings in [limits.md](limits.md) come out of this, derived, not picked.
 
-**Phase 2 — the node and the pack.** `proofread` registered, off by default, shortcut `/proofread`;
+**Phase 2 — the node and the pack.** `seam` registered, off by default, shortcut `/seam`;
 the node, the preprocessing, the clustering, the annotation layer and the deep link; glyph, See
 also, help. Help says plainly what Phase 0 and Phase 3 measured, including the training-distribution
 caveat. Pack and node tests join `packs.test.ts`'s sweeps.
+
+**The node, as decided.** `seam:affinityClusters`, `expensive`.
+
+- **In:** `Skeletons` (required), and an optional `Layers` so it chains like `Neuroglancer Source`.
+- **Out:** `Points` (the sampled cloud, cluster per point — what the model actually saw),
+  `Skeletons` (the input re-emitted with a `cluster` attribute, so `Split Neurons`, `Filter` and
+  the 3D View work on it with nothing new), `Table` (**one row per neuron**: clusters found,
+  background share, mean confidence and the weakest placed point), and `Layers` (the Neuroglancer
+  annotation layer). Confidence is the **mean affinity to a point's own cluster**, not to its
+  medoid as an earlier draft said: a medoid is one point's opinion, the mean is the cluster's. The per-point
+  table the earlier draft named is `Points`; shipping both would be two views of one thing.
+- **Several neurons:** each is run, with `ctx.progress` per neuron and Cancel between them, and a
+  warning past a measured ceiling. ~20 s each is the thing being bounded.
+- **The 406 MB download is opt-in.** A param gates it and the node refuses until it is set — but
+  only when the weights are not already cached, so the gate is a first-use question and not a
+  permanent mode. `weights.ts` grows a "do you already have this" so the node can tell.
+- **The model is a registry entry**, not a URL: `src/ml` holds the known manifests and the node's
+  `Model` param is an enum over the ones whose `task` it can read.
+
+**The three numeric params cannot take their defaults from the manifest, and the shape that
+works is decided now.** `Points`, `Threshold` and `Minimum cluster size` have authoritative values
+in the model's `config` — but `defaultParams` runs at insert and cannot fetch, and invariant 4
+forbids `ctx.params.x ?? literal`. So the param table carries **static literals** (1024 / 0.8 /
+30, the shipped checkpoint's), and the parsed config is used to **check** them: a model whose
+config disagrees with what the card is set to earns a `ctx.warn` naming both numbers. Discovering
+this while writing the param table costs the param table.
+
+**The manifest URL is not revision-pinned, and that is a known hole.** `models.ts` names
+`…/affinity-flywire-mixed/manifest.json`. Reconvert at that path and every cached result keeps its
+provenance key while the answer underneath changes — the weight *cache* is safe, since the sha is
+in its key, but the *scheduler* cache is not. Either the URL carries a revision or the row does
+and it goes in the key. Settle it before a graph saved by a reader bakes in the unpinned one.
+
+**Two modules the node needs**, named here so they were not improvised inside `evaluate`. Both
+exist now, with the shapes below unchanged:
+
+- **`affinityRun.ts`** — build the pair tensor, chunk it, call the runner, assemble the matrix,
+  report progress, check `ctx.signal`. Taking the runner as an argument makes all of that testable
+  with a fake that returns a known matrix, and it is the only place with a Cancel story: **Cancel
+  belongs per chunk** (~0.3 s), not per neuron (~12 s) — `limits.md`' distance row treats six
+  seconds as the thing that needed fixing.
+- **`checkAffinitySize.ts`** — the wait, priced over the set, through `warnOverWait`, plus a
+  refusal derived from `CRASH_FLOOR_BYTES` rather than a minted `MAX_POINTS`. Note the allocation
+  is **two** n² Float32Arrays, the matrix and the clustering's working copy.
+
+**Sampling is the model's, not `skeletonPoints.ts`'.** That module samples for *analysis* — equal
+spacing so a row count means something and `cable` sums exactly. The model's input distribution is
+whatever its training sampler produced: uniform node indices **with replacement**, sorted. Those
+are different jobs and only one of them is parity-checked against the checkpoint.
+
+**Units: nanometres, and `voxels` is refused** in `skeletonPoints.ts`' own words. The model's
+constants are in µm and a voxel skeleton cannot be converted without a voxel size, so there is
+nothing to do but say so.
 
 **And one parity probe, whose shape is decided now because discovering it late costs the phase.**
 Preprocessing and clustering will then exist three times: upstream's Python, `probe-affinity.py`'s
@@ -208,6 +267,45 @@ one seed, comparing the cloud point-for-point and the labels label-for-label. **
 file**, for the reason `scripts/probe-skeletonize.py` already gives: a fixture pins whatever the
 implementation happened to produce. The `t`-is-a-distance-threshold trap below is exactly what a
 second author re-reading `eval_affinity.py` gets wrong, and exactly what this catches.
+
+
+## Phase 2 findings — what the node turned out to need
+
+**Built**: `seam:affinityClusters` with `affinityRun.ts`, `checkAffinitySize.ts`,
+`affinityTables.ts`, `scene.ts`, `nodeValues.ts`, the pack manifest, the glyph, See also and
+`help/affinityClusters.md`. The pack is registered off by default behind `/seam`. Four things the
+plan did not have:
+
+- **The `cluster` answer has two forms, and the asymmetry is forced.** A per-node value is a
+  `Float32Array` (`SkeletonGeometry.nodeValues`), so the skeleton carries a *number*; a point's
+  cluster is categorical and a numeric column would be drawn on a continuous ramp, so the `Points`
+  table carries a *word*. `clusterName` is the one spelling of the word half.
+- **The per-neuron summary is published twice, from one pair.** It is folded into the `Skeletons`
+  output's attributes as well as being the `Table` output, because `Split Neurons` and `Filter
+  Table` read an attribute table — so "keep the neurons with more than one cluster" works with
+  nothing new only if the finding is a column there.
+- **A fifth rail**, `MAX_ANNOTATIONS`, on a tier `limits.md` already had and the plan had not
+  looked at: a local annotation layer is a **drawing**, and tens of thousands of points is a frame
+  a second. The tail is dropped and counted; the data outputs stay whole.
+- **An emitter excuse, in both exporters.** `coverage.test.ts` fails a registered type that is
+  neither emitted nor excused, and this one cannot be emitted: a cell would fetch the original
+  PyTorch weights and then reimplement the sampler and the cut — a fourth copy of what
+  `affinity_reference.py` declares, answering on the notebook's GPU rather than on the card's.
+
+**Open, and deliberately not fixed in Phase 2.** `validate` raises the "tick `Download the model`"
+issue whenever the box is off, while `evaluate` refuses only when the box is off **and** the
+weights are not already cached. So a reader who has downloaded once and left the box alone sees a
+warning on a node that runs perfectly well. `validate` is synchronous and the answer is in
+IndexedDB, so the honest fix is a **peek** — start the read you cannot answer, answer `undefined`
+meanwhile, re-run inference when it lands (`reportSourceLearned`; `neuronbridge/client.ts` is the
+precedent for a non-source using that channel). That is a module and a `peeks.test.ts` entry, which
+is a feature rather than a cleanup. Until it exists the symptom is cosmetic — the issue is
+`severity: 'warning'`, not a block — but it is a warning that means nothing, which is the thing
+this app's warnings are not supposed to be.
+
+**Still open from the plan**: the unpinned manifest URL (above), and `knip-baseline.txt` is down
+from ten findings to three — writing the node consumed most of what `src/ml` had sitting unused,
+which is the honest test of whether a seam was built too early.
 
 **Phase 3 — validation against reality.** Real merged segments from a dataset where ground truth
 exists (proofreading history gives before-and-after root ids), run through the node, scored the way
@@ -241,8 +339,13 @@ at all. [ml.md](ml.md) has the table and how it was measured on a noisy machine.
 
 Phase 0's FLOP arithmetic predicted 15–45 s at N=1024 against ~11.6 s measured, so the shape of
 that estimate held. **N=1024 is the default** — the training point count, and about ten seconds.
-The warn tier belongs just above it and the refusal well above; both go in [limits.md](limits.md)
-derived from this table rather than picked.
+
+**The guard rail is a wait, priced over the set.** `limits.md`'s tiers put a warning on time and a
+refusal only on an allocation, and the allocation here is nowhere near `CRASH_FLOOR_BYTES`: at
+N=1024 the affinity matrix is 4 MB and the clustering's working copy another 4 MB, so 512 MB is
+not reached until N≈8,000. What binds is N²/90,000 seconds **per neuron, times the neurons** —
+`MESH_WARN_SECONDS`' recorded lesson that a cost warning is priced over a set and never over the
+one you happen to measure alone. A refusal still exists above it so the tier is not empty.
 
 **Still to measure:** cold-cache download over a real network, peak GPU memory, and a second
 adapter. The ranking above is one GPU, files served from localhost.
@@ -266,7 +369,7 @@ adapter. The ranking above is one GPU, files served from localhost.
 **These are measurements, and this file is a plan.** CLAUDE.md is explicit that `docs/*-plan.md`
 are "plans and surveys, not records of what is built", so when this plan is retired after Phase 2
 the measurements below must move rather than go with it: the sizes and op inventory to
-`docs/proofread.md`, the derived ceilings to [limits.md](limits.md), the two conversion traps to
+`docs/seam.md`, the derived ceilings to [limits.md](limits.md), the two conversion traps to
 the converter's own docstring where the next person to run it reads them, and the weight-only
 generalisation to wherever `src/ml` is documented — it is about models in general, not this one.
 

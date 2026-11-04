@@ -2,7 +2,7 @@
 
 What `src/ml` is, what it refuses to know, and what was measured. Read this before adding a model
 or a second task. The point affinity transformer that drove it out is in
-[proofread-plan.md](proofread-plan.md) until the pack lands; the numbers below are facts about the
+[seam-plan.md](seam-plan.md) until the pack lands; the numbers below are facts about the
 runtime and belong here.
 
 `src/ml` runs an ONNX model in the browser on WebGPU. It is **one worker, one manifest and a

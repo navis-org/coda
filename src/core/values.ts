@@ -861,6 +861,18 @@ export interface LayersValue {
 }
 
 /**
+ * The layers arriving on a chaining input, or none.
+ *
+ * A node that adds a layer takes one on an input and passes everything through, because a port
+ * takes exactly one wire and several layers reach a scene by chaining nodes. Absent reads as an
+ * empty list — never a throw and never a dropped chain — and that convention is one line, so it
+ * is here rather than copied into every node that joins the chain.
+ */
+export function layersFrom(value: Value | undefined): LayersValue['items'] {
+  return value?.kind === 'layers' ? value.items : []
+}
+
+/**
  * A table held in a file rather than in memory — what `tableFile` sockets carry.
  *
  * **Plain data, deliberately**: where the bytes are, what they hold, and a fingerprint of them,

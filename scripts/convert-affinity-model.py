@@ -37,7 +37,7 @@ is a WebGPU question this script cannot answer, so it emits candidates and Phase
   nbits4   206 MB  MatMulNBits, 4-bit      weight-only, block 128
   nbits8   396 MB  MatMulNBits, 8-bit      weight-only, block 128
 
-Measured (docs/proofread-plan.md): **nbits8 is ~10x more accurate than fp16 at half the size.**
+Measured (docs/seam-plan.md): **nbits8 is ~10x more accurate than fp16 at half the size.**
 fp16 halves weights, activations and 24 layers of residual accumulation, and the error compounds;
 `MatMulNBits` quantises weights only and leaves the arithmetic in fp32. On a deep residual stack
 weight-only quantisation beats halving the arithmetic, which is worth remembering for whatever
@@ -62,7 +62,7 @@ try:
     import torch
     from torch import nn
 except ImportError:  # pragma: no cover - the converter is opt-in
-    sys.exit("torch is not installed; see docs/proofread-plan.md for the venv this needs")
+    sys.exit("torch is not installed; see docs/seam-plan.md for the venv this needs")
 
 # onnxconverter_common warns once per subnormal constant it rounds; on a 24-layer model that is
 # thousands of lines of noise over a conversion whose fidelity the probe measures anyway.
@@ -77,7 +77,7 @@ OPSET = 17
 PARTS = ("encoder", "decoder")
 
 # One recipe per *part*, because the parts genuinely want different ones: the decoder is 2% of
-# the bytes and ~95% of the runtime (measured, docs/proofread-plan.md), so quantising it to save
+# the bytes and ~95% of the runtime (measured, docs/seam-plan.md), so quantising it to save
 # space is the wrong trade while quantising the encoder is the right one. `mixed` is that, and it
 # is a row here rather than a rewrite of the loop.
 #
@@ -179,8 +179,11 @@ def describe(checkpoint_id: str) -> dict:
         if missing:
             raise SystemExit(f"{checkpoint_id}: {key} is missing {', '.join(missing)}")
     for key, fields in (
-        ("preprocessing", ("units", "globalScale", "centre", "samplesPerNeuron", "jitter",
-                           "translate", "padValue")),
+        # `sampler` is required here even though the pack defaults a missing one: the default
+        # exists for manifests written before the field, and a *new* card omitting it would make
+        # the pack's sampler refusal vacuous.
+        ("preprocessing", ("sampler", "units", "globalScale", "centre", "samplesPerNeuron",
+                           "jitter", "translate", "padValue")),
         ("clustering", ("linkage", "threshold", "minClusterSize")),
     ):
         missing = [f for f in fields if f not in card["config"][key]]

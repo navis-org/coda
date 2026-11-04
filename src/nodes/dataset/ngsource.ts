@@ -33,7 +33,8 @@
 
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
-import type { DatasetValue, LayersValue, Value } from '../../core/values'
+import type { DatasetValue, LayersValue } from '../../core/values'
+import { layersFrom } from '../../core/values'
 import { PRECOMPUTED, parseNgSource } from '../../data/neuroglancer/sourceUrl'
 import { peekPrecomputed } from '../../data/precomputed/probe'
 import { precomputedSourceFor } from '../../data/precomputed/registry'
@@ -284,13 +285,6 @@ registerNode({
     return { dataset, layers }
   },
 })
-
-/** Layers arriving on the chaining input, or none. */
-function layersFrom(
-  value: Value | undefined,
-): ReadonlyArray<Readonly<Record<string, unknown>>> {
-  return value?.kind === 'layers' ? value.items : []
-}
 
 /**
  * The settings blob as an object, or a **string saying what is wrong with it**.

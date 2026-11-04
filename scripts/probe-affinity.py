@@ -53,7 +53,7 @@ try:
     import onnxruntime as ort
     import torch
 except ImportError:  # pragma: no cover - the probe is opt-in
-    sys.exit("torch and onnxruntime are not installed; see docs/proofread-plan.md for the venv")
+    sys.exit("torch and onnxruntime are not installed; see docs/seam-plan.md for the venv")
 
 # `affinity_reference` sits beside this file. Added explicitly rather than relying on Python
 # putting the script's directory on the path, because `python -I` (isolated) implies `-P`, which

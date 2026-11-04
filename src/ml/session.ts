@@ -172,7 +172,10 @@ export async function openModel(options: OpenOptions): Promise<ModelSession> {
       // `async`, so this rejects rather than throwing synchronously out of a method whose own
       // signature promises a Promise. Named here rather than one layer down as "x/y is not
       // open", which describes the symptom instead of the mistake.
-      if (!loaded.manifest.parts.includes(part)) {
+      //
+      // Only checkable for *this* session's model: a worker may hold several, and the others'
+      // manifests live there rather than here, so the worker makes that call.
+      if (model === loaded.manifest.id && !loaded.manifest.parts.includes(part)) {
         throw new Error(`${loaded.manifest.id} has no part called ${part}`)
       }
       return send(

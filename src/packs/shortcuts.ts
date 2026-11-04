@@ -33,6 +33,8 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
   { id: 'biophys', packs: ['biophys'] },
   // Virtual Fly Brain for connectome neurons: their types, papers, driver lines and images.
   { id: 'vfb', packs: ['vfb'] },
+  // Running a model over a reconstruction to find segmentation errors; needs nothing else on.
+  { id: 'seam', packs: ['seam'] },
 ]
 
 export function shortcut(id: string): ShortcutDefinition | undefined {

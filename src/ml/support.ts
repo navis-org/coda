@@ -10,7 +10,7 @@
 
 /// <reference types="@webgpu/types" />
 
-import { completeVariants } from './manifest'
+import { completeVariants, variantBytes } from './manifest'
 import type { ModelManifest } from './manifest'
 
 export interface GpuSupport {
@@ -41,23 +41,29 @@ const NOT_ON_WEBGPU = ['MatMulInteger']
 /**
  * The variant to open: complete, runnable on WebGPU, and smallest of those.
  *
- * The manifest records each file's quantisation recipe, including the ops it emits, so this is a
- * question the data can answer rather than one each node has to remember.
+ * **"Smallest runnable" is only the right rule if the manifest publishes only variants fit to
+ * ship**, and that is a hosting rule, not something this function can check. A conversion
+ * directory carries every variant it built — including ones measured as worse — and against that
+ * set this would pick the smallest, which for the point affinity model is `nbits4`: runnable,
+ * 206 MB, and moving 2% of pair decisions against the `mixed` build every measurement in
+ * `docs/ml.md` was taken on. Publish one variant, or publish only ones you would be happy to get.
+ *
+ * What it *can* check is the op inventory, which is a measured fact the manifest carries.
  */
 export function preferredVariant(manifest: ModelManifest): string | undefined {
-  const sizes = new Map<string, number>()
   const refused = new Set<string>()
   for (const file of manifest.files) {
-    sizes.set(file.variant, (sizes.get(file.variant) ?? 0) + file.bytes)
     // An absent `emits` refuses: the gate's whole job is to stop a variant that runs on the
     // CPU without saying so, and "the manifest did not say" is not evidence that it is safe.
-    const emits = file.quantisation.emits
+    // `quantisation` itself is optional too -- `checkManifest` does not validate it, so a file
+    // entry without one must reach the refusal rather than a bare TypeError.
+    const emits = file.quantisation?.emits
     if (!emits?.length || emits.some((op) => NOT_ON_WEBGPU.includes(op)))
       refused.add(file.variant)
   }
   return completeVariants(manifest)
     .filter((variant) => !refused.has(variant))
-    .sort((a, b) => (sizes.get(a) ?? 0) - (sizes.get(b) ?? 0))[0]
+    .sort((a, b) => variantBytes(manifest, a) - variantBytes(manifest, b))[0]
 }
 
 /**

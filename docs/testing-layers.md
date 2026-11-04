@@ -374,6 +374,15 @@ lean on:
 | `packs/cortex/live.test.ts`                       | every declared MICrONS typing table read live, with `CAVE_TOKEN`                                     |
 | `packs/cortex/pointDepth.test.ts`                 | Cortical Depth: schema/value agreement, soma placement, typing synapse ends                          |
 | `packs/cortex/profileSelection.test.ts`           | Laminar Profile's stored selection: a depth range within one facet                                   |
+| `packs/seam/affinityClusters.test.ts`             | the Affinity Clusters card: outputs' schemas, the download gate, the defaults against the checkpoint |
+| `packs/seam/affinityConfig.test.ts`               | a model's declared preprocessing, and the substitutions it refuses rather than approximates         |
+| `packs/seam/affinityOps.test.ts`                  | average-linkage clustering of affinities: the distance-threshold reading, background, confidence    |
+| `packs/seam/affinityRun.test.ts`                  | the chunked decode against a fake session: every pair once, Cancel between chunks, latents released  |
+| `packs/seam/affinityTables.test.ts`               | the two schema/value pairs, including a sparse summary array filling as null                        |
+| `packs/seam/checkAffinitySize.test.ts`            | the wait priced over the set, and both matrices counted against the crash floor                     |
+| `packs/seam/labelSkeleton.test.ts`                | point labels folded onto skeleton nodes: majority per draw, nearest for the rest, background stays  |
+| `packs/seam/pointCloud.test.ts`                   | the model's own sampler: with replacement, sorted, centred, scaled; and the skip verdicts           |
+| `packs/seam/scene.test.ts`                        | the neuroglancer annotation layer: ids, the colour property, nanometres, the dropped tail           |
 | `packs/packs.test.ts`                             | the packs as a set: directories, type prefixes, drawings and See also kept in-pack, ZapBench's rename, shortcuts |
 | `packs/vfb/vfb.test.ts`                           | the VFB pack's nodes against a stubbed PDB: what they ask as well as return, schema halves           |
 | `packs/zapbench/cells.test.ts`                    | the ZapBench cell-id grammar: row labels, pasted lists, release bounds                               |

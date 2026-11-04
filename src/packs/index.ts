@@ -28,6 +28,7 @@ import { cave } from './cave'
 import { connectome } from './connectome'
 import { cortex } from './cortex'
 import { neuprint } from './neuprint'
+import { seam } from './seam'
 import { vfb } from './vfb'
 import { zapbench } from './zapbench'
 
@@ -43,6 +44,7 @@ export const PACKS: readonly PackDefinition[] = [
   biophys,
   annotation,
   vfb,
+  seam,
 ]
 
 for (const pack of PACKS) registerPack(pack)

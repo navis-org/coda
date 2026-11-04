@@ -28,7 +28,20 @@ import { unreachable } from '../data/fetchText'
 import type { LoadedManifest } from './manifest'
 import { fileUrl, modelFile } from './manifest'
 
-const WEIGHTS = database({ name: 'coda-models', version: 1, stores: ['weights'] })
+/**
+ * Two stores, for `uploads.ts`' reason.
+ *
+ * `weights` holds the bodies; `meta` holds `{ bytes }` under the same key. The meta record is
+ * what makes two things cheap that otherwise read 385 MB onto the main thread: asking whether a
+ * model is cached *and the right length*, and the Memory dialog's Storage tab, which can then
+ * skip the payload store entirely and take each model's size from its declaration.
+ */
+const WEIGHTS = database({ name: 'coda-models', version: 2, stores: ['weights', 'meta'] })
+
+/** What `meta` holds per key: enough to answer "is the whole thing here" without reading it. */
+interface WeightMeta {
+  readonly bytes: number
+}
 
 /** How far a download has got. `total` is the manifest's figure, so it is known before the body. */
 export interface WeightProgress {
@@ -57,6 +70,33 @@ export interface WeightOptions {
 export class WeightError extends Error {}
 
 const inflight = new Map<string, Promise<{ bytes: ArrayBuffer; cached: boolean }>>()
+/**
+ * Who is waiting on each in-flight download.
+ *
+ * The memoised body closes over the *first* caller's callback, so without this a second caller
+ * joining a share — two dashboard cells opening one model — sees no progress at all and its bar
+ * sits at zero for 400 MB.
+ *
+ * **An array of boxes, not a `Set` of callbacks.** A `Set` dedupes by function identity, so two
+ * callers that happen to pass the same reference collapse to one entry and the first to finish
+ * silences the other — which is the exact symptom this exists to fix, reintroduced one level
+ * down. Each caller gets its own box and removes that box.
+ */
+interface Listener {
+  readonly notify: (progress: WeightProgress) => void
+}
+const listeners = new Map<string, Listener[]>()
+
+/**
+ * Where one part's bytes live in the cache.
+ *
+ * **The hash is in the key**, so a reconverted model can never be served from the old one's
+ * entry. One spelling: a second copy of this format drifts silently, and the only symptom of a
+ * wrong one is a download that is never recognised as already done.
+ */
+function cacheKey(loaded: LoadedManifest, variant: string, part: string): string {
+  return `${loaded.manifest.id}/${variant}/${part}/${modelFile(loaded, variant, part).sha256}`
+}
 
 /** sha256 of a buffer, as lower-case hex. */
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -70,7 +110,7 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 const write = (body: (tx: IDBTransaction) => void) =>
   // `attempt`, not `commit`: these are writes nobody asked for. Failing to *remember* 385 MB is
   // not failing to fetch it, and a quota refusal is the common case rather than an exceptional one.
-  attempt(WEIGHTS, 'weights', 'readwrite', body, undefined)
+  attempt(WEIGHTS, ['weights', 'meta'], 'readwrite', body, undefined)
 
 /**
  * A cached body, trusted without re-hashing it.
@@ -84,6 +124,12 @@ const write = (body: (tx: IDBTransaction) => void) =>
 async function fromCache(key: string, bytes: number): Promise<ArrayBuffer | undefined> {
   const held = await readKey<ArrayBuffer, undefined>(WEIGHTS, 'weights', key, undefined)
   return held?.byteLength === bytes ? held : undefined
+}
+
+/** The length the cache believes it holds under this key, if it holds anything. */
+async function cachedBytes(key: string): Promise<number | undefined> {
+  const meta = await readKey<WeightMeta, undefined>(WEIGHTS, 'meta', key, undefined)
+  return meta?.bytes
 }
 
 /**
@@ -172,18 +218,24 @@ export function loadWeights(
 ): Promise<LoadedWeights> {
   const { manifest } = loaded
   const entry = modelFile(loaded, variant, part)
-  // The hash is in the key, so a reconverted model can never be served from the old one's entry.
-  const key = `${manifest.id}/${variant}/${part}/${entry.sha256}`
+  const key = cacheKey(loaded, variant, part)
 
-  const announce = (received: number, cached: boolean) =>
-    options.onProgress?.({
-      id: manifest.id,
-      variant,
-      part,
-      received,
-      total: entry.bytes,
-      cached,
-    })
+  const announce = (received: number, cached: boolean) => {
+    const progress = { id: manifest.id, variant, part, received, total: entry.bytes, cached }
+    for (const listener of [...(listeners.get(key) ?? [])]) {
+      // One caller's throwing callback must not reject a download the others are sharing. A
+      // progress report is not load-bearing, so it is dropped rather than propagated.
+      try {
+        listener.notify(progress)
+      } catch {
+        // Nothing to do: the bytes are still arriving.
+      }
+    }
+  }
+  const mine: Listener | undefined = options.onProgress
+    ? { notify: options.onProgress }
+    : undefined
+  if (mine) listeners.set(key, [...(listeners.get(key) ?? []), mine])
 
   const shared = memoPromise(
     inflight,
@@ -210,20 +262,85 @@ export function loadWeights(
     { keep: 'inflight' },
   )
 
-  return untilAborted(shared, options.signal).then(({ bytes, cached }) => ({
-    bytes,
-    // `attempt` swallows its own failures, so there is nothing here to catch. Two callers
-    // sharing one download both get a thunk; the second `put` writes identical bytes under one
-    // key, which is harmless.
-    remember: () => {
-      if (!cached) void write((tx) => tx.objectStore('weights').put(bytes, key))
+  const done = () => {
+    const held = listeners.get(key)
+    if (!held) return
+    const left = mine ? held.filter((listener) => listener !== mine) : held
+    if (left.length === 0) listeners.delete(key)
+    else listeners.set(key, left)
+  }
+
+  return untilAborted(shared, options.signal).then(
+    ({ bytes, cached }) => {
+      done()
+      return {
+        bytes,
+        // `attempt` swallows its own failures, so there is nothing to catch. Two callers sharing
+        // one download both get a thunk; the second `put` writes identical bytes under one key.
+        remember: () => {
+          const meta = { bytes: bytes.byteLength } satisfies WeightMeta
+          // **A cache hit still writes its meta record.** `database`'s upgrade only *adds* the
+          // stores it is missing, so a body cached before `meta` existed survives the version
+          // bump with no declaration beside it — and `weightsCached` compares the declared
+          // length, so it would answer false forever: the consent gate keeps refusing a model
+          // whose 406 MB are already on disk, the Storage tab reads 0, and nothing is wrong
+          // enough to notice. Backfilling here costs one small `put` per open and fixes the
+          // entry the first time it is read.
+          if (cached) {
+            void write((tx) => tx.objectStore('meta').put(meta, key))
+            return
+          }
+          // Body and meta together: a meta record without its body would make `weightsCached`
+          // promise bytes that are not there.
+          void write((tx) => {
+            tx.objectStore('weights').put(bytes, key)
+            tx.objectStore('meta').put(meta, key)
+          })
+        },
+      }
     },
-  }))
+    (error) => {
+      done()
+      throw error
+    },
+  )
+}
+
+/**
+ * Is every part of this variant already in the cache?
+ *
+ * For asking a reader to approve a download *once*: a node that gates on it can stop gating as
+ * soon as the bytes are here, rather than keeping a permanent mode. Answers false for anything it
+ * cannot determine, so the question is asked again rather than skipped on a broken cache.
+ */
+export async function weightsCached(loaded: LoadedManifest, variant: string): Promise<boolean> {
+  try {
+    const parts = await Promise.all(
+      loaded.manifest.parts.map(async (part) => {
+        // The meta record, not the body: the question is "is the whole thing here", and reading
+        // the body to answer it would pull a 385 MB structured clone onto the main thread.
+        //
+        // **The length matters, not just the key.** `fromCache` refuses a truncated entry, so a
+        // presence-only check here would answer "already downloaded", the consent gate would
+        // stand down, and the node would then silently fetch 406 MB that nobody approved.
+        const held = await cachedBytes(cacheKey(loaded, variant, part))
+        return held !== undefined && held === modelFile(loaded, variant, part).bytes
+      }),
+    )
+    return parts.every(Boolean)
+  } catch {
+    // `cacheKey` throws for a variant this manifest does not carry. Not cached is the honest
+    // answer, and the caller asks again rather than skipping the question.
+    return false
+  }
 }
 
 /** Forget every cached model. For the Storage tab, and for a probe measuring a cold fetch. */
 export async function clearWeights(): Promise<void> {
-  await write((tx) => tx.objectStore('weights').clear())
+  await write((tx) => {
+    tx.objectStore('weights').clear()
+    tx.objectStore('meta').clear()
+  })
 }
 
 /**
@@ -237,7 +354,13 @@ export async function clearWeights(): Promise<void> {
  * Not yet a row in `ui/storageReadout.ts`' `SHELVES`; it joins when a node opens a model.
  */
 export function weightsUsage(): Promise<StoredUsage | undefined> {
-  return usage(WEIGHTS, 'weights')
+  // Counted over `meta`, with the payload store skipped — `uploads.ts`' arrangement, and for the
+  // same reason: `usage` reads `cursor.value`, so walking `weights` would deserialise every
+  // cached model onto the main thread to read its length. The meta record declares it instead.
+  return usage(WEIGHTS, 'meta', {
+    skip: ['weights'],
+    bytes: (record) => (record as WeightMeta | undefined)?.bytes ?? 0,
+  })
 }
 
 /** Test seam, matching the other stores: drop the memoised connection. */

@@ -143,4 +143,18 @@ describe('checkManifest', () => {
       }),
     ).toThrow(/no decoder signature/)
   })
+
+  /**
+   * `bytes` is read by `variantBytes`, whose answer is the size a reader approves, the
+   * denominator of the download bar and `preferredVariant`'s sort key. An absent one makes all
+   * three `NaN` and nothing throws — so the gate is the only place it can be caught.
+   */
+  it('refuses a file that does not say how big it is', () => {
+    for (const bytes of [undefined, 'big', NaN, -1]) {
+      const broken = manifest({
+        files: [file('mixed', 'encoder', { bytes }), file('mixed', 'decoder')],
+      })
+      expect(() => checkManifest(broken), String(bytes)).toThrow(/no size/)
+    }
+  })
 })
