@@ -130,6 +130,63 @@ those say the decoder, 2% of the bytes and ~95% of the runtime, should not be qu
 That is what `mixed` is, and its fidelity is identical to nbits8 (ARI 1.0000 against fp32)
 because the error lives in the 24-layer encoder, not the 2-layer decoder.
 
+### Fidelity on WebGPU, which the table above does not measure
+
+**Every fidelity number in this file was taken on the CPU** — `probe:affinity-export` drives ONNX
+Runtime in Python — and the timings above are WebGPU. For a long time nothing checked that the two
+describe the same answers: `probe:affinity-runtime` asserts only that affinities land in [0, 1],
+which a badly wrong kernel satisfies as well as a right one.
+
+The reason to check was a sibling project. SEAM (`~/Github/SEAM`) exported the **same backbone
+family** and found fp16 **correct on WASM and wrong on WebGPU** from one file — 34% agreement,
+mean logit error 0.32 — and concluded "use fp32 for now". `mixed` has an fp16 decoder carrying
+~95% of the runtime.
+
+`pnpm probe:affinity-backend` settles it: one set of files, two execution providers, identical
+inputs, on apple/metal-3 at N = 1024.
+
+| | mean abs. error | worst pair | pair decisions moved |
+| --- | --- | --- | --- |
+| nbits8 encoder, WASM vs WebGPU | 4.5e-5 | 0.015 | — (no cut on latents) |
+| fp16 decoder, same latents | 0.0025 | 0.065 | **0.233%** |
+| the whole chain | 0.0025 | 0.063 | **0.233%** |
+
+**Two independent runs agree exactly** — the same 2,441 and 2,439 pairs, every figure identical —
+which is more than this file's usual "two runs agree" bar asks for and is itself a fact: the
+divergence is a deterministic property of the two backends' kernels, not GPU nondeterminism, so a
+rerun on this adapter will not wander. It says nothing about another adapter.
+
+**SEAM's failure does not reproduce.** 0.233% of pair decisions depend on which backend answered,
+against the 66% of points SEAM saw flip — three orders of magnitude apart. Read against the pairs
+that could move at all, 9.2% sit within 0.05 of the cut and **2.5% of those** change side.
+
+**Every pair that moved was one of those.** All 2,441 crossings had their CPU affinity within
+0.05 of the cut — not one pair the model was confident about changed side. So the backend
+difference does not reach a decision the affinities themselves made firmly; it redistributes the
+ones that were already on the line, which is the same population any rerun of the clustering at a
+slightly different threshold would move.
+
+**Why it does not reproduce is not settled, and the honest statement is narrow.** SEAM's fault is
+in the Fourier projection, where the coordinate × frequency `Einsum` loses phase before
+`sin`/`cos`. In the two-graph export that op is in the **encoder**, which `mixed` quantises
+weight-only, so its activations stay fp32 — and `point_emb` does come back bit-identical across
+backends. That shows the op SEAM blames never runs in fp16 here. It does **not** show that it
+would have broken if it had: an export, opset or ORT version that lowers those ops differently
+from SEAM's predicts the same observations. Settling it needs a run of this probe against a
+**full fp16 variant**, whose encoder would carry the op — and no such variant is exported, so it
+has not been run. Note also that the protection is per-part quantisation, which the split
+*enabled*; two fp16 graphs would be just as split and just as exposed.
+
+**What the number is not.** It is a distance from WASM, not from fp32, so it cannot be added to
+the CPU figures above or read as a distance from full precision. Measuring that would need an
+fp32 reference run on WebGPU, which this probe does not do.
+
+**`preferredVariant`'s rule is weaker than it reads.** "Smallest runnable" treats runnable as a
+property of the op inventory, and int8 already showed that a variant can run and be useless. This
+adds the other half: every fidelity figure a manifest carries was taken on the CPU, so a variant
+can be complete, fast and accepted while being measurably less accurate on the backend that will
+run it. Fidelity per backend is not in the manifest and must not be inferred from it.
+
 ### Trusting a timing on a noisy machine
 
 **Every timing is the best of five, and the probe publishes its spread.** A single-shot run of
@@ -150,12 +207,22 @@ and nothing above should be read as cross-platform.
 
 ## Measuring
 
-Two probes, answering different questions.
+**Four probes, answering different questions.**
 
 **`pnpm probe:affinity-variants -- --exported <dir>`** drives ONNX Runtime directly to answer
 "which recipe do we ship" — a one-off conversion decision. It writes its own page and serves ORT
 from `node_modules`, so a clean checkout reproduces the numbers, and it reads the variants, file
 paths and tensor names from the manifest.
+
+**`pnpm probe:affinity-backend -- --exported <dir>`** answers "does the shipped recipe mean the
+same thing on the backend it runs on": one set of files on two execution providers, on the cloud
+`scripts/probe-affinity-cloud.ts` builds with the pack's own `pointCloud()`. The section above is
+its result, and the reason it has two halves is written in that file — its first version minted
+uniform noise at ten times the real coordinate magnitude, and the crossing rate it reports is
+decided by the input.
+
+**`pnpm probe:affinity-export`** is the Python one: every variant against fp32 PyTorch, on the
+CPU, which is where the fidelity table's numbers come from.
 
 **`pnpm probe:affinity-runtime -- --manifest <url>`** drives *this code*: `openModel`, the weight
 cache, the worker protocol. It needs `pnpm dev --port 5178` and checks six things — that the

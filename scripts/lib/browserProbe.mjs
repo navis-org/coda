@@ -365,7 +365,15 @@ export function probeArgs(argv = process.argv.slice(2)) {
     keep: argv.includes('--keep'),
     value(flag) {
       const at = argv.indexOf(flag)
-      return at >= 0 ? argv[at + 1] : undefined
+      if (at >= 0) return argv[at + 1]
+      // `--flag=value` too. Only the space-separated form was read, so the joined one — which is
+      // the form half of us reach for first — was dropped in silence and the probe ran its
+      // default. Strictly additive: nothing that worked before changes.
+      const joined = argv.find((arg) => arg.startsWith(`${flag}=`))
+      // `|| undefined`, so a bare `--flag=` reads as absent. An empty string is not nullish, so
+      // it would sail past every caller's `?? default` and land as `Number('') === 0` or
+      // `readFileSync('')`.
+      return joined?.slice(flag.length + 1) || undefined
     },
   }
 }
