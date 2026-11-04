@@ -1,9 +1,3 @@
-dependencies	package.json	onnxruntime-web
 duplicates	src/ui/assistantChat.ts	clearChat = resetAssistantChat
 exports	src/data/edges/store.ts	releaseEdgeSet
-exports	src/ml/manifest.ts	loadManifest
-exports	src/ml/support.ts	gpuSupport
 exports	src/ml/weights.ts	weightsUsage
-file	src/ml/infer.worker.ts
-file	src/ml/protocol.ts
-file	src/ml/session.ts

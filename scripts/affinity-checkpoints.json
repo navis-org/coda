@@ -1,5 +1,5 @@
 {
-  "$comment": "Every value is a fact about how that checkpoint was TRAINED, read off upstream's own scripts/<dataset>/train_topology.sh -- never guessed, and never defaulted from another checkpoint. `translate` is the one that differs (20/60/70 um), and FlyWire's 20.0 is absent from its train script because it is train_affinity.py's default. Everything under `config` is the task's own and is copied into the manifest opaquely -- `src/ml` never reads it, only `src/packs/proofread` does. The incident behind this file is in docs/proofread-plan.md; the rule is in describe().",
+  "$comment": "Every value is a fact about how that checkpoint was TRAINED, read off upstream's own scripts/<dataset>/train_topology.sh -- never guessed, and never defaulted from another checkpoint. `translate` is the one that differs (20/60/70 um), and FlyWire's 20.0 is absent from its train script because it is train_affinity.py's default. Everything under `config` is the task's own and is copied into the manifest opaquely -- `src/ml` never reads it, only `src/packs/seam` does. The incident behind this file is in docs/seam-plan.md; the rule is in describe().",
   "checkpoints": {
     "affinity-flywire": {
       "task": "point-affinity",
@@ -13,6 +13,7 @@
         "model": "ae_d1024_m512",
         "depth": 24,
         "preprocessing": {
+          "sampler": "uniform-nodes-with-replacement",
           "units": "um",
           "globalScale": 659.88367,
           "centre": "centroid",
@@ -40,6 +41,7 @@
         "model": "ae_d1024_m512",
         "depth": 24,
         "preprocessing": {
+          "sampler": "uniform-nodes-with-replacement",
           "units": "um",
           "globalScale": 659.88367,
           "centre": "centroid",
@@ -67,6 +69,7 @@
         "model": "ae_d1024_m512",
         "depth": 24,
         "preprocessing": {
+          "sampler": "uniform-nodes-with-replacement",
           "units": "um",
           "globalScale": 659.88367,
           "centre": "centroid",

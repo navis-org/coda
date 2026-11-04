@@ -1,5 +1,5 @@
 """
-The reference semantics of the proofreading pack: how a point cloud is built, and how affinities
+The reference semantics of the SEAM pack: how a point cloud is built, and how affinities
 become labels.
 
 Shared by `probe-affinity.py` (fidelity of the ONNX conversion) and, from Phase 2, by
@@ -89,7 +89,7 @@ def merged_cloud(rng: np.random.Generator, neurons: int, per_neuron: int, pre: d
 
     Note what this is *not*: two neurons in their true relative positions touching at one place,
     which is what a real merge looks like. Reproduced because it is the distribution the
-    checkpoint was trained and evaluated on. See docs/proofread-plan.md -- whether the model
+    checkpoint was trained and evaluated on. See docs/seam-plan.md -- whether the model
     transfers to real merges is Phase 3's question and nothing here can answer it.
     """
     clouds, labels = [], []

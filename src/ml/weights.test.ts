@@ -10,9 +10,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { LoadedManifest, ModelManifest } from './manifest'
 import { MANIFEST_SCHEMA } from './manifest'
-import { clearWeights, loadWeights, resetWeightStore } from './weights'
+import { clearWeights, loadWeights, resetWeightStore, weightsCached } from './weights'
 
 const BODY = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
+
+/** Empty the `meta` store through a raw connection, leaving the bodies: a pre-`meta` cache. */
+function dropMeta(): Promise<void> {
+  return new Promise((settle, fail) => {
+    const open = indexedDB.open('coda-models')
+    open.onerror = () => fail(open.error)
+    open.onsuccess = () => {
+      const db = open.result
+      const tx = db.transaction('meta', 'readwrite')
+      tx.objectStore('meta').clear()
+      tx.oncomplete = () => {
+        db.close()
+        settle()
+      }
+      tx.onerror = () => fail(tx.error)
+    }
+  })
+}
 
 async function sha256Of(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
@@ -24,6 +42,7 @@ async function loaded(over: Record<string, unknown> = {}): Promise<LoadedManifes
     id: 'affinity-flywire',
     manifestSchema: MANIFEST_SCHEMA,
     randomWeights: false,
+    parts: ['encoder'],
     files: [
       {
         variant: 'mixed',
@@ -179,6 +198,95 @@ describe('loadWeights', () => {
     await expect(abandoned).rejects.toThrow()
     expect(new Uint8Array((await waiting).bytes)).toEqual(BODY)
     expect(fetched).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * Both callers of a shared download see it, not just the one that started it — otherwise a
+   * second dashboard cell's bar sits at zero for 400 MB.
+   */
+  it('reports progress to every caller sharing one download', async () => {
+    vi.stubGlobal('fetch', respondWith(BODY))
+    const at = await loaded()
+    const first: number[] = []
+    const second: number[] = []
+    const [a, b] = await Promise.all([
+      loadWeights(at, 'mixed', 'encoder', { onProgress: (p) => first.push(p.received) }),
+      loadWeights(at, 'mixed', 'encoder', { onProgress: (p) => second.push(p.received) }),
+    ])
+    expect(new Uint8Array(a.bytes)).toEqual(BODY)
+    expect(new Uint8Array(b.bytes)).toEqual(BODY)
+    expect(first).toEqual([4, 8])
+    expect(second).toEqual([4, 8])
+  })
+
+  /** A throwing callback is one caller's problem, not everyone's. */
+  it('survives a listener that throws', async () => {
+    vi.stubGlobal('fetch', respondWith(BODY))
+    const at = await loaded()
+    const seen: number[] = []
+    const [a, b] = await Promise.all([
+      loadWeights(at, 'mixed', 'encoder', {
+        onProgress: () => {
+          throw new Error('a bad listener')
+        },
+      }),
+      loadWeights(at, 'mixed', 'encoder', { onProgress: (p) => seen.push(p.received) }),
+    ])
+    expect(new Uint8Array(a.bytes)).toEqual(BODY)
+    expect(new Uint8Array(b.bytes)).toEqual(BODY)
+    expect(seen).toEqual([4, 8])
+  })
+
+  /** Two callers passing one function reference must still be two listeners. */
+  it('does not collapse two callers that share a callback', async () => {
+    vi.stubGlobal('fetch', respondWith(BODY))
+    const at = await loaded()
+    const seen: number[] = []
+    const shared = (p: { received: number }) => seen.push(p.received)
+    await Promise.all([
+      loadWeights(at, 'mixed', 'encoder', { onProgress: shared }),
+      loadWeights(at, 'mixed', 'encoder', { onProgress: shared }),
+    ])
+    expect(seen).toEqual([4, 4, 8, 8])
+  })
+
+  /**
+   * The consent gate stands down on this, so a presence-only answer would let the node fetch
+   * 406 MB nobody approved. A body whose length disagrees with the manifest is not cached.
+   */
+  it('does not report a truncated entry as cached', async () => {
+    vi.stubGlobal('fetch', respondWith(BODY))
+    const at = await loaded()
+    expect(await weightsCached(at, 'mixed')).toBe(false)
+    ;(await loadWeights(at, 'mixed', 'encoder', {})).remember()
+    await new Promise((settle) => setTimeout(settle, 10))
+    expect(await weightsCached(at, 'mixed')).toBe(true)
+  })
+
+  /**
+   * The migration this nearly shipped broken. `database`'s upgrade only *adds* the stores it is
+   * missing, so a body cached before the `meta` store existed survives the version bump with no
+   * declaration beside it — and since `remember()` used to return early on a cache hit, nothing
+   * ever wrote one. `weightsCached` would then answer false forever: the consent gate keeps
+   * refusing a model whose bytes are on disk, and the Storage tab reads zero.
+   */
+  it('backfills the meta record for a body cached before that store existed', async () => {
+    const fetched = respondWith(BODY)
+    vi.stubGlobal('fetch', fetched)
+    const at = await loaded()
+    ;(await loadWeights(at, 'mixed', 'encoder', {})).remember()
+    await new Promise((settle) => setTimeout(settle, 10))
+    expect(await weightsCached(at, 'mixed')).toBe(true)
+
+    // A version-1 entry: the body, and nothing declaring it.
+    await dropMeta()
+    expect(await weightsCached(at, 'mixed')).toBe(false)
+
+    // Reading it answers from the cache — and now says so for next time.
+    ;(await loadWeights(at, 'mixed', 'encoder', {})).remember()
+    await new Promise((settle) => setTimeout(settle, 10))
+    expect(fetched).toHaveBeenCalledTimes(1)
+    expect(await weightsCached(at, 'mixed')).toBe(true)
   })
 
   it('refetches after the cache is cleared', async () => {

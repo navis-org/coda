@@ -129,6 +129,20 @@ export function fileUrl(loaded: LoadedManifest, variant: string, part: string): 
   return entry.url ?? new URL(entry.file, loaded.url).toString()
 }
 
+/**
+ * What one variant weighs: the summed `bytes` of its files.
+ *
+ * One definition, because two numbers derived from it are read side by side — the sentence that
+ * asks a reader to approve a download, and the denominator its progress bar fills against. If
+ * the manifest ever grows a file kind one side counts and the other does not, the bar stalls
+ * short and the refusal quotes a size that is not what gets fetched, and neither throws.
+ */
+export function variantBytes(manifest: ModelManifest, variant: string): number {
+  return manifest.files
+    .filter((file) => file.variant === variant)
+    .reduce((total, file) => total + file.bytes, 0)
+}
+
 /** The variants carrying every part the manifest declares. */
 export function completeVariants(manifest: ModelManifest): string[] {
   const parts = new Map<string, Set<string>>()
@@ -173,6 +187,18 @@ export function checkManifest(manifest: ModelManifest): ModelManifest {
     const signature = manifest.signatures?.[part]
     if (!signature?.inputs?.length || !signature.outputs?.length) {
       throw new ManifestError(`${manifest.id} has no ${part} signature`)
+    }
+  }
+  // Every file's size, before anything sums them. `bytes` is read by `variantBytes` — whose
+  // answer is the figure a reader approves, the denominator of the download bar, and
+  // `preferredVariant`'s sort key — and an absent one makes all three `NaN`: a refusal quoting
+  // "NaN bytes", a bar that never moves, and a comparator that silently keeps the file order.
+  // Nothing throws, so the gate is the only place to catch it.
+  for (const file of manifest.files) {
+    if (typeof file?.bytes !== 'number' || !Number.isFinite(file.bytes) || file.bytes < 0) {
+      throw new ManifestError(
+        `${manifest.id} lists ${file?.variant ?? 'a file'}/${file?.part ?? '?'} with no size`,
+      )
     }
   }
   if (completeVariants(manifest).length === 0) {

@@ -229,6 +229,24 @@ the undo stack alongside it).
   `CRASH_FLOOR_CELLS`; it also understates, since a `ColumnData` slot is a tagged `CellValue`
   and not a float64.
 
+## The SEAM pack
+
+Its numbers, and why each is where it is. The pack is `src/packs/seam`; the measurements
+behind the waits are in [ml.md](ml.md).
+
+All of these are in code. The tier each belongs on was decided before `seam:affinityClusters` was
+written, and the rails arrived unchanged — which is what deciding a tier in advance is for.
+
+| Limit | Tier | Why |
+| --- | --- | --- |
+| `MIN_SKELETON_NODES` (50) | **Skip** | Neither warn nor refuse: a run holds several neurons and one unusable skeleton must not stop the others. The node collects skipped neurons and says so once, naming the count and the reason — `MeshDetail`'s shape for tolerated per-item failures. A skeleton in voxels is the same verdict for a different reason. |
+| `checkAffinitySize.ts`' wait | **Warn**, `warnOverWait` | `N² / 90,000` seconds **per neuron, times the neurons** — priced over the set, never over the one you happen to measure alone (`MESH_WARN_SECONDS`' recorded lesson). `Points` is the lever and the warning names it. |
+| `checkAffinitySize.ts`' `affinityBytes` | **Refuse**, from `CRASH_FLOOR_BYTES` | Two n² Float32Arrays — the matrix and the clustering's working copy — so `2 × 4 × N²`. Not reached until N≈8,000, far above where the wait fires, which is why the wait is the rail that matters. Derived, never a minted `MAX_POINTS`. |
+| `affinityRun.ts`' `DECODE_CHUNK_PAIRS` | **Silent**, but it is the Cancel latency | ~16,384 pairs ≈ 0.3 s. It bounds how long Cancel takes to be seen, which is the reason it is stated at all. |
+| `Download the model` | **Not a threshold** — a consent gate | Asked once, and only while the weights are not already cached. The figure shown is `variantBytes` over the manifest, never a hand-kept constant. |
+| `scene.ts`' `MAX_ANNOTATIONS` (10,000) | **Drawing** | Not in the [Drawings](#drawings) table, and the reason is that table's own columns: every rail there withholds the picture above a size and captions what is missing. This one **drops the tail and counts it** — a local annotation layer lives in memory and its buffer is re-uploaded on every change, so tens of thousands draws at a frame a second — and it says so through `ctx.warn` from a node rather than a caption from a viewer, because the layer is one of four outputs and the other three stay whole. |
+| `checkPointsSize` on the `Points` output | **Warn**, then **refuse** | Not this pack's rail: `nodes/lib/pointsSize.ts` is the shared guard every node building a points value goes through, and the node calls it so that it is one of them. At this node's scale it cannot fire first — a few dozen neurons at 1,024 points is ~41,000 points against a warning at five million — so it is here to say that the cloud *is* priced, by whom, and that the wait is still the rail that binds. |
+
 ## Numbers that are not guard rails
 
 Left alone deliberately, so a sweep like this one does not come back for them:
