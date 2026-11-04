@@ -533,13 +533,83 @@ that does both pays it once.
 
 **DotMotif is the eighth row and the exception** ([dotmotif.md](dotmotif.md)): networkx, lark,
 grandiso and dotmotif, all pure Python and none of them shared, so its first use pays its own
-download whatever else the graph has run.
+download whatever else the graph has run. **`seamWindows` is the ninth and the other kind of
+exception** — numpy alone, no wheel at all — which is why it sits outside that run in `MODULES`
+rather than inside it. See below.
 
 **Measured on this build.** The Pyodide worker chunk went 20.1 kB → 47.6 kB, carrying the three
 new `.py` files inlined. `main-*.js` still matches `jsdelivr` nowhere, and `np.frombuffer`,
 `navis_fastcore` and `resample_skeleton` appear in the worker chunk and in no other. The node
 definitions and their ops added 12.9 kB to `nodes-*.js` and the eight new emitters 11.7 kB
 across the two exporter chunks — neither of which is on the Python side of anything.
+
+## SEAM windows: the first capability whose working code Coda did not write
+
+`seamWindows` cuts a neuron's mesh into the 15 µm windows a SEAM model takes
+([seam-model-a-plan.md](seam-model-a-plan.md)). Its two working files, `seam/canonical.py` and
+`seam/scan.py`, are **byte-identical copies** of SEAM's own, hashes and commit in
+`src/pyodide/seam/VENDORED.md`.
+
+**They are copies rather than a port on purpose, and the reason is not laziness.** SEAM's
+invariant 3 is that training and inference build the model's input through *one* function, and
+its invariant 11 keeps that function numpy-only precisely so the same file can run in CPython for
+training and here for inference. A TypeScript reimplementation is the drift those rules exist to
+prevent, and it is undetectable from this side: a window built slightly differently still scores
+plausibly. SEAM verified the premise rather than assuming it — `canonical.py` gives bit-identical
+output under Pyodide and CPython for the same mesh and seed.
+
+**A fifth convention, for a module that needs more than one file.** `scan.py` does
+`from . import canonical`, and the bridge runs one source per module with no import machinery. So
+`PyModule.vendored` carries the extra sources, `runtime.ts` seeds them into the module's globals
+as `__vendored__`, and `seamWindows.py` assembles them into a real `seam` package in
+`sys.modules`. Transport in the runtime, policy in the module — the runtime does not learn a
+package name or a file order. Two consequences worth knowing: a module that reads `__vendored__`
+without declaring it fails at **call** time rather than load time, and the sources sit in the
+worker chunk rather than the app bundle, which is the whole reason they are not `?raw` imports in
+the wrapper.
+
+### What a window costs, measured
+
+Two real FlyWire v783 neurons — `720575940621522189` and `720575940628857210` — through
+`pnpm probe:seam-windows`, on an M-series laptop:
+
+| | faces | windows | fetch | tiling | per window | across the bridge |
+| --- | --- | --- | --- | --- | --- | --- |
+| a dense one | 359,564 | 32 | 1.2–4.1 s | 0.46 s | **118–122 ms** | 4.7 MB |
+| a large one | 1,170,692 | 543 | 1.2–2.1 s | 1.45 s | **43.5 ms** | 80 MB |
+
+**The per-window cost is not per window.** The two differ 2.7×, and the tiling is not why — that
+is 1.2–1.4 µs a face on both, timed separately in `seamWindows.py` for exactly this question.
+`FaceGrid.crop` reads the 27 cells around a centre, so a dense neuron with few windows pays more
+per window than a sprawling one with many. Taking faces-per-window as *total faces ÷ windows* —
+a proxy for the crop, not the crop itself — two points give roughly 26 ms of resampling plus
+8 µs per face in range. **That is a two-point solve of a two-parameter model, so it is a shape
+rather than a constant**; a third neuron, and summing `len(grid.near(centre))` instead of the
+proxy, would make it a measurement.
+
+**The fetch is per neuron, not per window.** FlyWire public ignores a bbox on a mesh request —
+SEAM's `geometry.window_mesh` filters fragments client-side by the boxes in their names — so the
+neuron is fetched once and the windows are local crops. `cave/meshes.ts` has the fetch measured
+over sets of 25: 132 fragments, 0.51 MB compressed, 1.59 s. Decoded, those two neurons are
+6.5 MB and 21.2 MB.
+
+**What it sets for whatever uses this.** A large neuron is about a minute end to end once
+inference is added (~49 ms a window, [ml.md](ml.md)), so a set is minutes: a `warnOverWait`
+priced over the set, with a cap on **windows** as the lever — which is why `runSeamWindows` takes
+`limit` and the node decides it. Window building and inference are the same order (25 s against
+27 s), so neither is the one to optimise. And 80 MB crossing the bridge for one neuron means a
+caller should run a neuron at a time rather than accumulate; a third of that is `sourceNm`, which
+is derivable from the points and the centres if it ever bites.
+
+### Two probes, because one of them cannot run in CI
+
+`pnpm probe:seam-windows` is the measurement above: real meshes, a CAVE token, a dev server and a
+browser. `pnpm probe:seam-windows-py` is the contract — an icosphere, no network, no credential —
+and it is the one in `pyodide.yml`. That split exists because the workflow fires on every change
+under `src/pyodide/**`, and for a while it fired on these three files while checking nothing in
+them. What the contract probe asserts above all else is that the vendored package *assembles*:
+if `from . import canonical` fails there is no partial answer, every window is gone, and nothing
+a type checker sees would have caught it.
 
 ### The one protocol change in five capabilities
 
