@@ -102,6 +102,12 @@ def coda_seam_windows(request, report=None):
     use_normals = bool(req["useNormals"])
     seed = int(req["seed"])
     limit = int(req["limit"])
+    # Which of a window's points come back for *drawing*. The model sees all `n_points` of them
+    # -- that is what `points`/`feats` carry -- but a neuron's worth of them at full density is
+    # 27 MB of coordinates nobody looks at individually. A stride rather than a count, so the
+    # caller can apply the same one to the per-point logits and get a matching pair without this
+    # file having to return an index array.
+    draw_every = max(1, int(req["drawEvery"]))
 
     # Timed in three parts, because they scale with different things and a single total hides
     # that: the grid and the tiling are paid once per *mesh* (and grow with its faces), the rest
@@ -115,7 +121,12 @@ def coda_seam_windows(request, report=None):
     tiled = len(sequence)
     wanted = min(tiled, limit) if limit > 0 else tiled
 
-    points, feats, source = [], [], []
+    # The grid the tiling is laid on: one centre per occupied cell, so a *cell* is a window and
+    # cells do not overlap even though the 15 um windows they centre do. A surface point is in
+    # exactly one cell, which is what lets a label be assigned without resolving the overlap.
+    cell_um = radius_um * scan.TILE_FRACTION
+    points, feats, source, own = [], [], [], []
+    centres = []
     empty = 0
     t1 = time.perf_counter()
     for i in range(wanted):
@@ -127,9 +138,21 @@ def coda_seam_windows(request, report=None):
             empty += 1
             continue
         window_points, window_feats, window_nm = built
+        centre = np.asarray(sequence.centres[i], dtype=np.float64)
+        drawn_nm = np.asarray(window_nm, dtype=np.float64)[::draw_every]
+        # Which of the drawn points belong to *this* window's own cell. A window's crop is a
+        # 15 um sphere, so most of its points sit in a neighbour's cell and are that window's
+        # context rather than its subject; taking them all would give one surface point a label
+        # from every window that can see it.
+        in_cell = np.all(
+            np.floor(drawn_nm / (cell_um * 1000.0)) == np.floor(centre / (cell_um * 1000.0)),
+            axis=1,
+        )
         points.append(np.asarray(window_points, dtype=np.float32).ravel())
         feats.append(np.asarray(window_feats, dtype=np.float32).ravel())
-        source.append(np.asarray(window_nm, dtype=np.float32).ravel())
+        source.append(drawn_nm.astype(np.float32).ravel())
+        own.append(in_cell.astype(np.uint8))
+        centres.append(centre.astype(np.float32))
         # `% 8 == 7 or the last`, which is the stride `skeletons.py`, `nblast.py` and
         # `skeletonize.py` all use. `% 8 == 0` reports windows 1, 9, 17 ... and never the last,
         # so the bar stops short of the count it is counting towards.
@@ -151,9 +174,18 @@ def coda_seam_windows(request, report=None):
         "points": flat(points),
         "feats": flat(feats),
         "sourceNm": flat(source),
+        "centresNm": flat(centres),
+        # uint8 rather than bool: `types.ts` carries typed arrays, and a Python bool array
+        # crosses as something the wrapper would have to unpack element by element.
+        "inOwnCell": (
+            np.concatenate(own) if own else np.zeros(0, np.uint8)
+        ).astype(np.uint8),
+        "cellUm": cell_um,
         "windows": built,
         "tiled": tiled,
         "empty": empty,
+        "drawEvery": draw_every,
+        "drawnPerWindow": len(range(0, n_points, draw_every)),
         "tileMs": round(tile_ms),
         "windowMs": round(window_ms),
     }

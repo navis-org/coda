@@ -13,7 +13,7 @@
 
 import { callPython } from './engine'
 import type { CallOptions } from './engine'
-import { float32From } from './types'
+import { float32From, uint8From } from './types'
 
 /* A `type`, not an `interface`: only an alias gets the implicit index signature `PyArg`
  * needs, which is why `CleanMeshesRequest` is one too. */
@@ -41,6 +41,15 @@ export type SeamWindowRequest = {
   /** Fixes the tiling and every window's resample. A fixed seed is what keeps invariant 4. */
   seed: number
   /**
+   * Keep every *n*th of a window's points in `sourceNm`, for drawing.
+   *
+   * The model still sees all `nPoints` — `points` and `feats` are its input and are never
+   * thinned. This is the output's density: a neuron's windows at full density are tens of
+   * megabytes of coordinates nobody inspects point by point. A stride rather than a count so
+   * the same one applies to the per-point logits, giving a matching pair with no index array.
+   */
+  drawEvery: number
+  /**
    * Stop after this many **centres**; `0` or less takes the whole tiling.
    *
    * Centres, not windows: a centre whose cells hold no surface yields none, so `limit: 50` gives
@@ -56,8 +65,21 @@ export interface SeamWindows {
   points: Float32Array
   /** The same shape: surface normals, or zeros where the model takes none. */
   feats: Float32Array
-  /** The same shape: where each sampled point actually is, in nanometres. */
+  /** `windows × drawnPerWindow × 3`: where the *drawn* points are, in nanometres. */
   sourceNm: Float32Array
+  /** `windows × 3`: the surface point each window is centred on, in nanometres. */
+  centresNm: Float32Array
+  /**
+   * `windows × drawnPerWindow`: 1 where a drawn point lies in **its own window's grid cell**.
+   *
+   * A window crops a 15 µm sphere but the tiling puts one centre per ~8 µm cell, so most of a
+   * window's points are in a neighbour's cell — they are that window's *context*, not its
+   * subject. Taking all of them would give one surface point a label from every window that can
+   * see it; taking only these gives it exactly one.
+   */
+  inOwnCell: Uint8Array
+  /** The grid's cell size in µm, which is `windowRadiusUm × TILE_FRACTION`. */
+  cellUm: number
   /** How many windows were built. */
   windows: number
   /** How many centres the tiling produced, which is `windows` plus `empty` plus whatever `limit` cut. */
@@ -68,6 +90,10 @@ export interface SeamWindows {
   tileMs: number
   /** Cropping and resampling every window: once per **window**. */
   windowMs: number
+  /** The stride actually applied, which is at least 1 whatever was asked for. */
+  drawEvery: number
+  /** How many points per window came back in `sourceNm`. */
+  drawnPerWindow: number
 }
 
 /**
@@ -103,24 +129,40 @@ export async function runSeamWindows(
   const points = float32From(result, 'points')
   const feats = float32From(result, 'feats')
   const sourceNm = float32From(result, 'sourceNm')
+  const centresNm = float32From(result, 'centresNm')
+  const inOwnCell = uint8From(result, 'inOwnCell')
   const windows = Number(result.windows)
 
   // Against `request.nPoints`, never against a value Python echoed back: an echo compares Python
   // with Python, where this compares the answer with what was asked for. Everything downstream
   // slices these by window index, so a short array hands window *i* the tail of window *i-1*
   // rather than failing.
+  const drawnPerWindow = Number(result.drawnPerWindow)
   const expected = windows * request.nPoints * 3
-  for (const [name, array] of [
-    ['points', points],
-    ['feats', feats],
-    ['sourceNm', sourceNm],
+  for (const [name, array, per] of [
+    ['points', points, request.nPoints],
+    ['feats', feats, request.nPoints],
+    // Thinned by `drawEvery`, so it is checked against its own width rather than the model's.
+    ['sourceNm', sourceNm, drawnPerWindow],
   ] as const) {
-    if (array.length !== expected) {
+    const want = name === 'sourceNm' ? windows * per * 3 : expected
+    if (array.length !== want) {
       throw new Error(
         `SEAM windows returned ${array.length} values for ${name}, not the ` +
-          `${expected} that ${windows} windows of ${request.nPoints} points need`,
+          `${want} that ${windows} windows of ${per} points need`,
       )
     }
+  }
+  if (centresNm.length !== windows * 3) {
+    throw new Error(
+      `SEAM windows returned ${centresNm.length} centre values for ${windows} windows`,
+    )
+  }
+  if (inOwnCell.length !== windows * drawnPerWindow) {
+    throw new Error(
+      `SEAM windows returned ${inOwnCell.length} cell flags, not the ` +
+        `${windows * drawnPerWindow} that ${windows} windows of ${drawnPerWindow} points need`,
+    )
   }
   return {
     points,
@@ -129,7 +171,12 @@ export async function runSeamWindows(
     windows,
     tiled: Number(result.tiled),
     empty: Number(result.empty),
+    centresNm,
+    inOwnCell,
+    cellUm: Number(result.cellUm),
     tileMs: Number(result.tileMs),
     windowMs: Number(result.windowMs),
+    drawEvery: Number(result.drawEvery),
+    drawnPerWindow,
   }
 }

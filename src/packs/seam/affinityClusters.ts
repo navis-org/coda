@@ -122,6 +122,17 @@ export const affinityClustersNode = packNode({
     'layers socket. The shipped checkpoint was trained on synthetic merges and scores at chance ' +
     'on real ones, so this shows you what a shape model sees rather than where a merge is.',
   cost: 'expensive',
+  /*
+   * **Retired, and kept registered.** Measured against the thing it is for, neither checkpoint
+   * in this pack earns a place in anybody's palette: the affinity transformer scores at chance
+   * on real FlyWire merges, and Model A's window head missed a merge a proofreader had already
+   * found while firing on eight other cells of the same neuron. Neither is a defect in the
+   * node — the input path, the window geometry and both heads were checked against PyTorch —
+   * so nothing here is deleted. `hidden` takes it out of the palette and leaves it loading,
+   * running and testable, which is what a retrained checkpoint would need on the day it lands.
+   * See `docs/seam-plan.md` for the measurements behind this.
+   */
+  hidden: true,
   inputs: [
     { id: 'in', label: 'Skeletons', type: T.skeletons() },
     // Chains like Neuroglancer Source, for the same reason: a port takes one wire, so several

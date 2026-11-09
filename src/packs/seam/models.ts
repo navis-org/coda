@@ -49,3 +49,35 @@ export const AFFINITY_MODELS: readonly AffinityModel[] = [
 export function affinityModel(id: string): AffinityModel | undefined {
   return AFFINITY_MODELS.find((model) => model.id === id)
 }
+
+/**
+ * Every merge-window model's `task`. A different task from the affinity one, and deliberately:
+ * the two answer different questions from different inputs, so a URL pointing at the wrong one
+ * is refused by `src/ml` with a sentence rather than cast to a config it is not.
+ */
+export const MERGE_WINDOW_TASK = 'merge-window'
+
+/**
+ * The models that score a window for a false merge.
+ *
+ * The same shape as `AffinityModel` and deliberately not the same list: a node's `Model` param
+ * offers the models whose task it can read, and mixing the two would put a checkpoint in a
+ * picker whose node cannot run it.
+ */
+export const MERGE_WINDOW_MODELS: readonly AffinityModel[] = [
+  {
+    id: 'A_d256_e80',
+    label: 'SEAM Model A (FlyWire)',
+    manifestUrl:
+      'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/models/seam-a-d256-e80/manifest.json',
+    detail:
+      'Trained on real FlyWire merges from the v783 edit history. Scores a 15 µm window of a ' +
+      'neuron’s surface for whether it contains a false merge, and says which points fall on ' +
+      'either side of it.',
+  },
+]
+
+/** One merge-window model by id, or undefined. */
+export function mergeWindowModel(id: string): AffinityModel | undefined {
+  return MERGE_WINDOW_MODELS.find((model) => model.id === id)
+}

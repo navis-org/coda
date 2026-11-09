@@ -4,6 +4,11 @@
  */
 
 const groups: readonly (readonly string[])[] = [
+  // Where the meshes come from, and where the suspected sites are looked at over the EM.
+  ['seam:findMerges', 'neuron.meshes'],
+  ['seam:findMerges', 'out.neuroglancer'],
+  // The two nodes in the pack, so a reader who finds one finds the other and the difference.
+  ['seam:findMerges', 'seam:affinityClusters'],
   // Where the clusters are looked at, over the EM, which is the point of the Layers output.
   ['seam:affinityClusters', 'out.neuroglancer'],
   // The other way to read the answer: the per-neuron table. The 3D View is left out on purpose

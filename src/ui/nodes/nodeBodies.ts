@@ -20,6 +20,7 @@
 
 import { AnnotateBody } from './AnnotateBody'
 import { GalleryBody } from '../cortex/GalleryBody'
+import { FindMergesBody } from '../seam/FindMergesBody'
 import type { ComponentType } from 'react'
 
 import type { GraphNode } from '../../core/graph'
@@ -113,6 +114,11 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
   },
   // The Cortex pack's; a card body lives here, `src/packs/**` being imported by the headless MCP build.
   'cortex:gallery': { Component: GalleryBody, expandable: true, resizable: true },
+  /*
+   * The SEAM pack's. `expandable`, because the histogram is the point and a card-sized one is
+   * twenty bars across a hundred pixels — enough to see the shape, not enough to place a line.
+   */
+  'seam:findMerges': { Component: FindMergesBody, expandable: true },
   /*
    * Not `expandable`: the readout is one line and the fields are three, so an overlay of it would
    * be whitespace, and its button would sit where a viewer's does.

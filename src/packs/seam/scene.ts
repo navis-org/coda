@@ -17,6 +17,7 @@
  * here and no conversion to get wrong.
  */
 
+import { cycleColor, sequentialColor } from '../../style/colors'
 import { clusterColor } from '../../style/encoding'
 import { clusterName } from './affinityTables'
 
@@ -133,6 +134,106 @@ export function clusterLayer(neurons: readonly ClusterPoints[], name: string): C
       // Without a shader every point draws in the layer's single colour: neuroglancer's default
       // annotation shader calls `defaultColor()` and never looks at the properties, so the whole
       // clustering would render as one uniform cloud with nothing wrong on screen to notice.
+      shader: 'void main() { setColor(prop_color()); setPointMarkerSize(6.0); }',
+      annotations,
+    },
+  }
+}
+
+/**
+ * A scored cell's points as a neuroglancer annotation layer — twice, in two colourings.
+ *
+ * `clusterLayer` draws a *partition* and this half draws both a partition and a *measurement*,
+ * so there are two layers rather than one two-mode layer: the score is continuous and takes the
+ * sequential ramp, the fragments are categories and take cycling hues, and
+ * `docs/viewers.md` is emphatic that drawing one in the other's palette reads as a claim about
+ * the data. Neuroglancer already has a control for "show me the other picture" — the layer's own
+ * checkbox — so handing it two layers costs a click where a mode would have cost a re-run.
+ *
+ * **Neither depends on `Score cutoff`.** Both are built from what the model returned, so moving
+ * the cutoff changes nothing a run produced and therefore invalidates nothing (invariant 4). The
+ * cutoff is a line the reader draws on the card's histogram; it is not a thing the model said.
+ */
+export interface ScoredPoints {
+  readonly neuronId: string
+  /** Which grid cell — the window's index in its neuron's tiling. */
+  readonly cell: number
+  /** xyz interleaved, nanometres — the points of this cell, and only this cell. */
+  readonly positions: Float32Array
+  /** The cell's score, in 0..1. Every point of it shares this. */
+  readonly score: number
+  /** One name per point, from `fragmentName`. */
+  readonly fragments: readonly string[]
+}
+
+/** How a layer colours one point, and what its caption says. */
+interface Colouring {
+  readonly colour: (window: ScoredPoints, fragment: string) => string
+  readonly describe: (window: ScoredPoints, fragment: string) => string
+}
+
+const BY_SCORE: Colouring = {
+  colour: (window) => sequentialColor(window.score, 'dark'),
+  describe: (window) => `${window.neuronId} · cell ${window.cell} · ${window.score.toFixed(3)}`,
+}
+
+const BY_FRAGMENT: Colouring = {
+  // Cycling, not folding: these are positions in a cell, not ranked categories, and `cycleColor`
+  // is the rule for a mark that keeps its own identity (CLAUDE.md, "Fold where the mark folds").
+  colour: (_window, fragment) => cycleColor(fragment.endsWith('b') ? 1 : 0, 'dark'),
+  describe: (window, fragment) =>
+    `${window.neuronId} · ${fragment} · ${window.score.toFixed(3)}`,
+}
+
+/** The confidence layer: every cell's points on the sequential ramp. */
+export function scoreLayer(windows: readonly ScoredPoints[], name: string): ClusterLayer {
+  return pointLayer(windows, name, BY_SCORE)
+}
+
+/** The partition layer: the two sides of each cell's own bipartition, in two hues. */
+export function fragmentLayer(windows: readonly ScoredPoints[], name: string): ClusterLayer {
+  return pointLayer(windows, name, BY_FRAGMENT)
+}
+
+function pointLayer(
+  windows: readonly ScoredPoints[],
+  name: string,
+  how: Colouring,
+): ClusterLayer {
+  const annotations: Record<string, unknown>[] = []
+  let dropped = 0
+  for (const window of windows) {
+    const count = window.positions.length / 3
+    for (let i = 0; i < count; i++) {
+      if (annotations.length >= MAX_ANNOTATIONS) {
+        dropped += count - i
+        break
+      }
+      const fragment = window.fragments[i] ?? `${window.cell}a`
+      annotations.push({
+        type: 'point',
+        id: `${window.neuronId}-${window.cell}-${i}`,
+        point: [
+          window.positions[i * 3]!,
+          window.positions[i * 3 + 1]!,
+          window.positions[i * 3 + 2]!,
+        ],
+        props: [how.colour(window, fragment)],
+        description: how.describe(window, fragment),
+      })
+    }
+  }
+  return {
+    dropped,
+    drawn: annotations.length,
+    layer: {
+      type: 'annotation',
+      name,
+      source: {
+        url: 'local://annotations',
+        transform: { outputDimensions: { x: [1e-9, 'm'], y: [1e-9, 'm'], z: [1e-9, 'm'] } },
+      },
+      annotationProperties: [{ id: 'color', type: 'rgb', default: '#ffffff' }],
       shader: 'void main() { setColor(prop_color()); setPointMarkerSize(6.0); }',
       annotations,
     },

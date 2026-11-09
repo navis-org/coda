@@ -25,6 +25,13 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
+  'seam:findMerges':
+    'Inference in the browser over a 71 MB ONNX model, on windows built by a vendored numpy ' +
+    'sampler running in Pyodide. A cell would have to fetch the weights, run onnxruntime, and ' +
+    'reproduce the tiling and the surface resample exactly — the \u2018one function for ' +
+    'training and inference\u2019 property the vendoring exists to keep. The answer would also ' +
+    'be the notebook\u2019s GPU\u2019s. What is worth emitting is the scored windows, which ' +
+    'the Table and Points outputs already are.',
   'seam:affinityClusters':
     'Inference in the browser, over a quantised ONNX conversion of a published PyTorch checkpoint. A cell would have to fetch the original weights, run upstream\u2019s model, and then reimplement the sampler and the average-linkage cut \u2014 a fourth copy of what `scripts/affinity_reference.py` declares and `pnpm probe:affinity-parity` checks two of. The answer would also be the notebook\u2019s GPU\u2019s, not the one on the card. Where it is worth emitting is the clusters as data, which the Points and Table outputs already are.',
   'annotation:editor':

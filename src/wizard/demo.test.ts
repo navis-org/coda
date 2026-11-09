@@ -123,7 +123,12 @@ describe('the graphs themselves', () => {
     const warnings = [...DEMOS.values()]
       .flatMap(issuesOf)
       .filter((issue) => issue.severity === 'warning' && issue.fix !== 'attachAnnotationChain')
-    expect(warnings.length).toBeLessThanOrEqual(40)
+    /*
+     * 41 rather than 40 since `seam:findMerges` landed: its consent gate warns until `Download
+     * the model` is ticked, which a demo graph never does. A ratchet to catch creep, so bumping
+     * it is a decision rather than a fix — the second such node, after `seam:affinityClusters`.
+     */
+    expect(warnings.length).toBeLessThanOrEqual(41)
   })
 
   it('wires every required input of the node being demonstrated', () => {
