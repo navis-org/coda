@@ -107,6 +107,7 @@ const call = (over = {}) =>
     useNormals: true,
     seed: 0,
     limit: 0,
+    drawEvery: 1,
     ...over,
   })
 

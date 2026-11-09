@@ -110,7 +110,7 @@ const script = `(async () => {
     positions: Float32Array.from([0, 0, 0, 1e4, 0, 0, 0, 1e4, 0, 0, 0, 1e4]),
     indices: Uint32Array.from([0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3]),
     radiusUm: pre.windowRadiusUm, spacingUm: pre.spacingUm, nPoints: pre.nPoints,
-    useNormals: pre.features === 'normals', units: 'nm', seed: 0, limit: 1,
+    useNormals: pre.features === 'normals', units: 'nm', seed: 0, limit: 1, drawEvery: 1,
   })
   const bootMs = Math.round(performance.now() - warm)
 
@@ -143,6 +143,7 @@ const script = `(async () => {
       useNormals: pre.features === 'normals',
       units: meshes.units,
       seed: 0,
+      drawEvery: 1,
       limit: ${limit},
     })
     const buildMs = Math.round(performance.now() - t1)

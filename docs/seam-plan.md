@@ -16,6 +16,11 @@ the browser, clusters the predicted affinities, and draws the clusters in the Ne
 the reader can see where one segment holds two neurons. Later nodes bring other models. The point
 of writing the seam down now is that the *second* model must cost a manifest entry, not a rewrite.
 
+> **Both nodes are retired as of 2026-11-09** — `hidden: true`, registered, nothing deleted. The
+> models are the reason, not the nodes; the measurements are in
+> [Why both nodes are retired](#why-both-nodes-are-retired) at the foot of this file. Everything
+> below is the plan as it stood, kept because a retrained checkpoint would walk the same path.
+
 ## What the model actually is
 
 Read off `src/models.py` and `src/datasets.py` in the repo at clone time, not from the paper's prose.
@@ -481,3 +486,62 @@ fp32 on how many objects each case holds — but nbits4 still moves 2% of pair d
 at ARI 0.884, meaning points change cluster even where the count does not. A card that presents
 cluster membership as a crisp finding would be overstating what the model produces. That is a
 design constraint on Phase 2, not just a caveat.
+
+## Why both nodes are retired
+
+Written on 2026-11-09, after the first end-to-end run of `seam:findMerges` on a neuron somebody
+had already proofread by hand. **Neither retirement is about the node.** The input path, the
+window geometry and both heads were checked against PyTorch and agree to 4e-6 on WebGPU
+(Phase B). What failed is the checkpoint, each in its own way, and that is why the code stays.
+
+### The affinity transformer (`seam:affinityClusters`)
+
+Already known and already in that node's help: trained on synthetic merges — two neurons each
+centred on the origin and then offset by about 20 µm — and scored **at chance** on real FlyWire
+merges by SEAM's own measurement. A real merge is two neurons in their true positions touching at
+one place, which is not the distribution it saw.
+
+### Model A (`seam:findMerges`)
+
+Measured with `pnpm probe:seam-merge`, which fetches a mesh through Coda's own `CaveSource`, tiles
+it, scores every cell and prints the scores against a coordinate the reader names. It is the
+end-to-end probe Phase D never had.
+
+**The test case.** `648518347586074143` in `wclee_aedes_brain`, a segment with a false merge the
+user had already found, at 597152, 333088, 131625 nm. 1,107,768 faces, 105 cells, scores
+0.003–0.98, median 0.28.
+
+| cell | distance from the merge | score | minority share |
+| ---- | ----------------------- | ----- | -------------- |
+| 98   | **1.06 µm**             | 0.28  | 0.21           |
+| 84   | 3.7 µm                  | 0.42  | 0.22           |
+| 64   | 6.0 µm                  | 0.20  | 0.06           |
+| 17   | 7.4 µm                  | 0.04  | 0              |
+
+The cell centred 1 µm from the merge scores 0.28. The three highest-scoring cells on that neuron —
+0.98, 0.95, 0.93 — are 18, 49 and 10 µm away from it. Eight of 105 cells score above 0.88 on a
+neuron with one known merge.
+
+**The control says the pipeline is sound.** Two FlyWire v783 neurons, in distribution for this
+checkpoint: 32 cells with median 0.69 and max 0.996, and 543 cells with median 0.093 and max 0.99.
+Both are plausible shapes. So the aedes numbers are the model's answer, not a bug in the tiling or
+the scaling.
+
+**The obvious confound, stated rather than resolved.** Model A was trained on FlyWire merges and
+aedes is a different volume, a different segmentation and a different animal. Nobody has run this
+probe on a FlyWire neuron with a *known* merge, which is the measurement that would separate "the
+checkpoint does not generalise" from "the checkpoint does not work". That is the first thing to do
+when this is picked up again.
+
+**The per-point head is a second signal and it was never tested.** Cell 98 scored 0.28 and still
+put 21% of its points on the minority side, so the two heads disagree where the merge is. `balance`
+exists in the window table for this reason. Whether it lands on the crossing neurites is unknown —
+it needs looking at in the scene, not more numbers.
+
+### What is kept, and what un-retiring costs
+
+Nothing was deleted. `windowRun.ts`, `windowConfig.ts`, `mergeTables.ts`, `mergeSummary.ts`,
+`scene.ts`, the vendored `src/pyodide/seam/` and `seamWindows.py`/`.ts`, both help documents and
+all four probes stay, registered and under test. A retrained checkpoint costs an entry in
+`models.ts` and the removal of two `hidden: true` lines — which is the thing this pack's seam was
+designed for, and the one part of it that was worth the work.

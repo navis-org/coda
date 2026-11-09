@@ -7,8 +7,15 @@
  * is here is the other way in: run a model in this tab, now.
  *
  * Off by default and reached by `/seam`. It is off for a stronger reason than the other
- * optional packs: its one node downloads a few hundred megabytes of model weights, so it should
- * not be in the palette of somebody who has not asked for it.
+ * optional packs: a node here downloads tens of megabytes of model weights, so it should not be
+ * in the palette of somebody who has not asked for it.
+ *
+ * **Both nodes are retired as of 2026-11-09 — `hidden: true`, and still listed here.** Listing
+ * them is what keeps them registered, which is what keeps old files loading and the whole input
+ * path under test; `hidden` is what keeps them out of the palette. The checkpoints are the
+ * reason, not the code — `docs/seam-plan.md`, "Why both nodes are retired", has the numbers. So
+ * the pack currently offers nothing, and the Plugins dialog still lists these two, which is a
+ * deliberate choice (2026-11-09) rather than an oversight.
  *
  * **Read-only, in every phase.** Coda draws what a model predicts and links into the dataset's own
  * proofreading viewer; nothing here writes to a live segmentation. That is the standing rule, and
@@ -21,12 +28,13 @@
 
 import type { PackDefinition } from '../../core/registry'
 import { affinityClustersNode } from './affinityClusters'
+import { findMergesNode } from './findMerges'
 
 export const seam: PackDefinition = {
   id: 'seam',
   label: 'SEAM',
   description: 'Nodes that run a model over a reconstruction to look for segmentation errors.',
   defaultOn: false,
-  glyph: 'seam:affinityClusters',
-  nodes: [affinityClustersNode],
+  glyph: 'seam:findMerges',
+  nodes: [findMergesNode, affinityClustersNode],
 }

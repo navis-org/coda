@@ -7,7 +7,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { clusterColor } from '../../style/encoding'
-import { MAX_ANNOTATIONS, clusterLayer, writeDrawnPositions } from './scene'
+import {
+  MAX_ANNOTATIONS,
+  clusterLayer,
+  fragmentLayer,
+  scoreLayer,
+  writeDrawnPositions,
+} from './scene'
 
 const neuron = (id: string, labels: number[]) => ({
   neuronId: id,
@@ -85,5 +91,57 @@ describe('writeDrawnPositions', () => {
     const into = new Float32Array(2 * 3)
     writeDrawnPositions(positions, Int32Array.from([1, 1]), into)
     expect([...into]).toEqual([4, 5, 6, 4, 5, 6])
+  })
+})
+
+/**
+ * The two layers Find Merges emits over one set of points.
+ *
+ * They are two rather than one two-mode layer because a mode would have been a param
+ * `evaluate` reads, and that is a re-run every time somebody wants the other picture. Being two
+ * also puts the choice where neuroglancer already has a control for it — the layer checkbox.
+ */
+describe('the scored layers', () => {
+  const cell = {
+    neuronId: 'a',
+    cell: 3,
+    positions: Float32Array.from([0, 0, 0, 10, 20, 30]),
+    score: 0.75,
+    fragments: ['3a', '3b'],
+  }
+
+  it('draws the same points in both, with the same ids', () => {
+    const byScore = scoreLayer([cell], 'merges')
+    const byFragment = fragmentLayer([cell], 'merges — fragments')
+    const ids = (built: ReturnType<typeof scoreLayer>) =>
+      (built.layer.annotations as { id: string }[]).map((a) => a.id)
+    expect(ids(byScore)).toEqual(['a-3-0', 'a-3-1'])
+    expect(ids(byFragment)).toEqual(ids(byScore))
+  })
+
+  /**
+   * A score is a measurement and a fragment is a category, so one takes the sequential ramp and
+   * the other cycling hues. The test that matters is that they disagree *within* a cell: the
+   * score layer paints both points alike because they share a score, and the fragment layer
+   * must not, or the bipartition is invisible in the picture that exists to show it.
+   */
+  it('gives a cell one colour by score and two by fragment', () => {
+    const colours = (built: ReturnType<typeof scoreLayer>) =>
+      (built.layer.annotations as { props: string[] }[]).map((a) => a.props[0])
+    const [scoreA, scoreB] = colours(scoreLayer([cell], 'merges'))
+    expect(scoreA).toBe(scoreB)
+    const [fragA, fragB] = colours(fragmentLayer([cell], 'fragments'))
+    expect(fragA).not.toBe(fragB)
+  })
+
+  it('caps each layer and says how much it left out', () => {
+    const many = {
+      ...cell,
+      positions: new Float32Array((MAX_ANNOTATIONS + 5) * 3),
+      fragments: Array.from({ length: MAX_ANNOTATIONS + 5 }, () => '3a'),
+    }
+    const built = scoreLayer([many], 'merges')
+    expect(built.drawn).toBe(MAX_ANNOTATIONS)
+    expect(built.dropped).toBe(5)
   })
 })

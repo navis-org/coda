@@ -10871,6 +10871,35 @@ details[open] > summary.tile__label {
 }
 
 /* ---------------------------------------------------------------------------
+ * Find Merges card
+ *
+ * `.list-body` for the fields and the foot, with the score histogram between them. The histogram
+ * fills the card's width and keeps a fixed height, which is why its `viewBox` is drawn with
+ * `preserveAspectRatio="none"`: the bars are a distribution, so stretching them horizontally
+ * changes nothing a reader reads off, while letting it scale uniformly would leave the card
+ * either a sliver or a square depending on how wide the node was dropped.
+ * ------------------------------------------------------------------------- */
+
+.merge-hist {
+  display: block;
+  width: 100%;
+  height: 46px;
+  cursor: crosshair;
+}
+
+/*
+ * The expanded-only sentence under the foot. Muted and wrapped, in the register of an aside:
+ * it explains a gesture somebody has already got away with discovering, and it is not on the
+ * card because a card-sized body has no room for three lines of prose.
+ */
+.list-body__note {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  max-width: 48em;
+}
+
+/* ---------------------------------------------------------------------------
  * Annotate card
  *
  * `.list-body` for the settings and the foot, with a table between them. The table scrolls inside
