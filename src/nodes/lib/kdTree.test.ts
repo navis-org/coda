@@ -243,3 +243,43 @@ describe('anyPairWithin', () => {
     expect(anyPairWithin(big, alsoBig, 1_000)).toBe(true)
   })
 })
+
+describe('nearestIndex', () => {
+  /**
+   * The same walk as `nearest`, so the property worth pinning is that the two never disagree:
+   * the index it names has to be at the distance the other reports, for every query, including
+   * the ones that find nothing.
+   */
+  it('names a point at the distance `nearest` reports', () => {
+    const points = new Float32Array(300)
+    for (let i = 0; i < points.length; i++) points[i] = Math.sin(i * 1.7) * 1000
+    const tree = buildKdTree(points)
+    for (let q = 0; q < 50; q++) {
+      const x = Math.cos(q) * 1200
+      const y = Math.sin(q * 2) * 1200
+      const z = Math.cos(q * 3) * 1200
+      const at = tree.nearestIndex(x, y, z)
+      expect(at).toBeGreaterThanOrEqual(0)
+      const dx = points[at * 3]! - x
+      const dy = points[at * 3 + 1]! - y
+      const dz = points[at * 3 + 2]! - z
+      expect(Math.hypot(dx, dy, dz)).toBeCloseTo(tree.nearest(x, y, z), 6)
+    }
+  })
+
+  it('is the brute-force answer', () => {
+    const points = Float32Array.from([0, 0, 0, 10, 0, 0, 0, 10, 0, 5, 5, 5])
+    const tree = buildKdTree(points)
+    expect(tree.nearestIndex(9, 1, 0)).toBe(1)
+    expect(tree.nearestIndex(0, 9, 0)).toBe(2)
+    expect(tree.nearestIndex(5, 5, 4)).toBe(3)
+  })
+
+  /** `-1`, not the nearest-anyway point: a bound that is ignored is a bound that does nothing. */
+  it('reports -1 where nothing is within the bound, and the bound is honoured', () => {
+    const tree = buildKdTree(Float32Array.from([0, 0, 0, 100, 0, 0]))
+    expect(tree.nearestIndex(50, 0, 0, 10)).toBe(-1)
+    expect(tree.nearestIndex(50, 0, 0, 60)).toBeGreaterThanOrEqual(0)
+    expect(buildKdTree(new Float32Array(0)).nearestIndex(0, 0, 0)).toBe(-1)
+  })
+})

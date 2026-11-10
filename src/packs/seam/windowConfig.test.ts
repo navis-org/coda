@@ -77,3 +77,31 @@ describe('parseWindowConfig', () => {
     expect(() => parseWindowConfig(null, 'm')).toThrow(/preprocessing block/)
   })
 })
+
+describe('the scan block', () => {
+  /**
+   * `e_tip` is the best *cell* within a micrometre, so the cell size is part of the question.
+   * Read from the manifest in SEAM's own spelling rather than defaulted, because a checkpoint
+   * that publishes none was not scored this way and 0.5 µm would be a number nobody fitted.
+   */
+  it('reads `reduce_um` where the manifest publishes one', () => {
+    const parsed = parseWindowConfig(
+      { ...config(), scan: { reduce_um: 0.5, tile_sample_um: 1 } },
+      'E_test',
+    )
+    expect(parsed.scan).toEqual({ reduceUm: 0.5 })
+  })
+
+  it('is absent where the checkpoint publishes no scan block', () => {
+    expect(parseWindowConfig(config(), 'A_test').scan).toBeUndefined()
+  })
+
+  /** A zero or a word is not a cell size; absent is the honest reading, and the node refuses. */
+  it('is absent rather than nonsense where the value is not a positive number', () => {
+    for (const reduce_um of [0, -1, 'half', null, Number.NaN]) {
+      expect(
+        parseWindowConfig({ ...config(), scan: { reduce_um } }, 'E_test').scan,
+      ).toBeUndefined()
+    }
+  })
+})

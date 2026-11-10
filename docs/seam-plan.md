@@ -16,6 +16,10 @@ the browser, clusters the predicted affinities, and draws the clusters in the Ne
 the reader can see where one segment holds two neurons. Later nodes bring other models. The point
 of writing the seam down now is that the *second* model must cost a manifest entry, not a rewrite.
 
+> **The pack's live work is now [seam-suggestions-plan.md](seam-suggestions-plan.md)** — SEAM's
+> merge candidates (false *splits*), `seam:suggestions` and `seam:review`. This file is about the
+> false-*merge* nodes, both of which are retired.
+>
 > **Both nodes are retired as of 2026-11-09** — `hidden: true`, registered, nothing deleted. The
 > models are the reason, not the nodes; the measurements are in
 > [Why both nodes are retired](#why-both-nodes-are-retired) at the foot of this file. Everything

@@ -81,3 +81,38 @@ export const MERGE_WINDOW_MODELS: readonly AffinityModel[] = [
 export function mergeWindowModel(id: string): AffinityModel | undefined {
   return MERGE_WINDOW_MODELS.find((model) => model.id === id)
 }
+
+/**
+ * Every open-end model's `task`, checked against the manifest's own on open.
+ *
+ * A third task, not a variant of the merge one. Model A and Model E are the *same* `SeamModel`
+ * class on the same inputs and differ only in what they were trained to answer — which is
+ * exactly why they need separate tasks: a manifest pointing at the other one would load, run and
+ * return perfectly shaped numbers about a different question. `src/ml` refuses the mismatch with
+ * a sentence; nothing downstream could.
+ */
+export const OPEN_END_TASK = 'open-ends'
+
+/**
+ * The models that score a surface for open ends — stage 3 of SEAM's merge-candidate pipeline.
+ *
+ * The pipeline reads **`point_logits`** from these and ignores `window_logit`, which is trained
+ * but unused: the open-end answer is per point, not per window.
+ */
+export const OPEN_END_MODELS: readonly AffinityModel[] = [
+  {
+    id: 'E_oe3_all_s0',
+    label: 'SEAM Model E (FlyWire)',
+    manifestUrl:
+      'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/models/seam-e-oe3-all-s0/manifest.json',
+    detail:
+      'Trained on real FlyWire open ends from the v783 edit history, and run zero-shot on other ' +
+      'datasets. Scores every point of a 15 µm window of a neuron’s surface for whether it sits ' +
+      'at a place the reconstruction stops short.',
+  },
+]
+
+/** One open-end model by id, or undefined. */
+export function openEndModel(id: string): AffinityModel | undefined {
+  return OPEN_END_MODELS.find((model) => model.id === id)
+}

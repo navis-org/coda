@@ -73,13 +73,24 @@ export const NODE_LEAF = 1
 export const NODE_BRANCH = 2
 export const NODE_SLAB = 3
 
-/** Distance from each node to its parent, in the skeleton's own units. `0` at a root. */
-export function parentDistances(skeleton: SkeletonGeometry): Float32Array {
+/**
+ * Distance from each node to its parent, in the skeleton's own units. `0` at a root.
+ *
+ * **An out-of-range parent is a root here too**, which is `skeletonTree`'s rule below and for
+ * exactly its reason — and the two used to disagree. Indexing past the end gives `undefined`,
+ * so the arithmetic yielded `NaN` for that node, and a `NaN` length does not announce itself: it
+ * fails every comparison it is put in, so a walk that accumulates one sails past the test meant
+ * to stop it. Every caller pairs this with `skeletonTree`, so the two answering differently
+ * about the same node was a trap waiting rather than a difference anybody wanted.
+ */
+export function parentDistances(
+  skeleton: Pick<SkeletonGeometry, 'positions' | 'parents'>,
+): Float32Array {
   const { positions, parents } = skeleton
   const out = new Float32Array(parents.length)
   for (let i = 0; i < parents.length; i++) {
     const parent = parents[i]!
-    if (parent < 0) continue
+    if (parent < 0 || parent >= parents.length) continue
     out[i] = Math.hypot(
       positions[i * 3]! - positions[parent * 3]!,
       positions[i * 3 + 1]! - positions[parent * 3 + 1]!,

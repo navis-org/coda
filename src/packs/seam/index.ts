@@ -31,6 +31,7 @@
 import type { PackDefinition } from '../../core/registry'
 import { affinityClustersNode } from './affinityClusters'
 import { findMergesNode } from './findMerges'
+import { openEndsNode } from './openEnds'
 import { reviewNode } from './review'
 import { suggestionsNode } from './suggestions'
 
@@ -40,5 +41,5 @@ export const seam: PackDefinition = {
   description: 'Nodes that run a model over a reconstruction to look for segmentation errors.',
   defaultOn: false,
   glyph: 'seam:suggestions',
-  nodes: [suggestionsNode, reviewNode, findMergesNode, affinityClustersNode],
+  nodes: [suggestionsNode, reviewNode, openEndsNode, findMergesNode, affinityClustersNode],
 }
