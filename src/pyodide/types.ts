@@ -40,6 +40,16 @@ export type PyArg =
   | Uint32Array
   // SWC compartment codes, one byte per skeleton node — a category, not a measurement.
   | Uint8Array
+  /*
+   * Segmentation and root ids, and the one member that is an **identity** rather than a
+   * quantity. Invariant 8: an 18-digit id does not survive a float64, and the two that collide
+   * are two different neurons — so a column of them crosses as 64-bit on both legs, becoming
+   * numpy's `uint64` on the far side rather than being narrowed anywhere in between.
+   * `ArrayBuffer.isView` already transfers it, so only the type had to widen.
+   */
+  | BigUint64Array
+  // A single id, for the same reason: `queryRoot` is one neuron, not a count of them.
+  | bigint
   | PyArg[]
   | { [key: string]: PyArg }
 
@@ -144,6 +154,26 @@ export function float64From(result: PyResult, key: string): Float64Array {
     throw new Error(
       `Python returned no flat float64 array called "${key}" ` +
         `(got ${Array.isArray(value) ? 'a nested Array — ravel it' : typeof value})`,
+    )
+  }
+  return value
+}
+
+/**
+ * Read a uint64 array a Python function promised.
+ *
+ * Segmentation and root ids, which is the whole reason it exists: an 18-digit id through a
+ * `Float64Array` is a *different object* and nothing downstream could tell (invariant 8). So a
+ * column of them crosses as `BigUint64Array` and is read as one, and the error below names the
+ * mistake rather than the type — a numpy column that was built rather than cast arrives as
+ * float64 and compares equal to nothing.
+ */
+export function uint64From(result: PyResult, key: string): BigUint64Array {
+  const value = result[key]
+  if (!(value instanceof BigUint64Array)) {
+    throw new Error(
+      `Python returned no flat uint64 array called "${key}" ` +
+        `(got ${value instanceof Float64Array ? 'float64 — an id does not survive one' : typeof value})`,
     )
   }
   return value

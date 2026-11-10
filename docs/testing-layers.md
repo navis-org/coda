@@ -179,6 +179,7 @@ lean on:
 | `data/precomputed/live.test.ts`                | precomputed against real buckets (male-CNS, hemibrain), skipped without `PRECOMPUTED_LIVE`           |
 | `data/precomputed/precomputed.test.ts`         | shard lookup, multi-LOD manifests, Draco, legacy fragments, CORS fallback, the two-phase progress split |
 | `data/precomputed/skeletons.test.ts`           | the precomputed skeleton format: edge list to rooted tree, radius/affine, `uint8` compartments       |
+| *(no unit test)* `src/pyodide/cutoutSummary.py` | vitest has no Pyodide: `pnpm probe:cutout-summary` runs the vendored `summarize_cutout` under CPython **and** wasm and compares, then runs Coda's bridge and checks the axis order survived it |
 | `data/cave/volumes.test.ts`                    | where a datastack's voxels are: the EM off `aligned_volume.image_source`, the supervoxels out of the chunkedgraph's own `data_dir` (not the graphene URL) |
 | `data/precomputed/compressedSegmentation.test.ts` | the label-chunk decoder against the reference encoder's own output; the ragged, zero-bit and asymmetric-block cases exist because a cubic block hides an axis swap |
 | `data/precomputed/volume.test.ts`              | voxel addressing: the grid anchored on `voxel_offset`, the last chunk named by where data ends, the box assembly and its sorted table; morton codes against cloudvolume's (whole path on a real store: `pnpm probe:volume`) |

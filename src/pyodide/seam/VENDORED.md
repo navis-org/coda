@@ -22,6 +22,32 @@ here that Coda wrote.
 Check them with `shasum -a 256 src/pyodide/seam/*.py`, against the same command in SEAM at the
 commit above. A copy that has drifted is the one failure neither repo's tests can see.
 
+## `cutout.py` is a **slice**, not a whole-file copy
+
+`summarize_cutout` and `_local_moments`, taken out of SEAM's `seam/negatives.py` **without
+editing a character of them**. It is not a whole-file copy because `negatives.py` cannot be one:
+it also imports `cave`, `paths` and `pre_edit`, which reach the network. The two functions Coda
+needs are numpy, scipy and pandas only, and sit in one contiguous run of that file.
+
+A sha256 cannot pin a slice the way it pins the copies above, because the bytes here are a
+*subset* of the bytes there. `scripts/vendor-seam-cutout.mjs` does that job instead — it re-cuts
+the run from `negatives.py` by the markers that bound it and byte-compares:
+
+```
+pnpm vendor:seam-cutout            # check this file against SEAM
+pnpm vendor:seam-cutout --write    # re-cut it
+```
+
+If SEAM moves these functions the script refuses by name rather than cutting the wrong run.
+
+**The better end state is for SEAM to extract them** into a numpy-only module of their own, as
+`canonical.py` and `scan.py` already are. Then the script goes and the file joins the table
+above. That ask is recorded in `docs/seam-suggestions-plan.md`.
+
+| file | sha256 (this slice, for reference only — the script is the check) |
+| --- | --- |
+| `cutout.py` | `2f00f0e63093b620a50e99941051d4076e6e93e964493c3289efdb35dd3cc800` |
+
 **Updating them:** re-copy both, update the commit above, and re-run
 `pnpm probe:seam-windows`. If SEAM changes the sampler, the model has to be re-exported
 too — the window a checkpoint was trained on is part of what it means.
