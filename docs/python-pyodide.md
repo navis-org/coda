@@ -249,10 +249,22 @@ There is no download budget at which that node could have been the eighth row of
 The road not taken is worth pricing, because it is the one somebody will reach for next.
 **scikit-learn is in the lock**, with t-SNE, PCA, MDS and spectral embedding, every one of them
 taking `metric='precomputed'` — for **scipy's 14.0 MB plus scikit-learn's 4.4 MB**, measured off
-the CDN. That is nearly twice the whole existing backend, and it is the first thing that would
-break the seven-identical-rows property above: every capability here declares numpy and one 1.1
-MB wheel, which is what makes the second through seventh nearly free. A capability declaring
-scipy would not be, and the row after it would inherit the cost.
+the CDN. That is nearly twice the whole existing backend, and it would break the
+seven-identical-rows property above: every capability in that run declares numpy and one 1.1 MB
+wheel, which is what makes the second through seventh nearly free.
+
+**A scipy row has since landed, and it did not cost the row after it.** `cutoutSummary` declares
+numpy, scipy and pandas — about 19 MB with the dependencies — because it vendors SEAM's
+`summarize_cutout`, whose exact distance transform is scipy's and whose return value is a
+DataFrame (see *Vendoring* below). The claim above that the *next* row would inherit the cost is
+the part that was wrong: `loadPackage` runs once per module on the first call that names it, so
+a graph that never searches for merge candidates never fetches any of it, and nothing else's
+first call changed. What remains true is the sentence's real point — a capability that wants
+scipy is not nearly free, and should say so on its own row rather than be folded into the run.
+
+So that is the test a scipy capability has to pass, and UMAP still fails it: scikit-learn buys a
+general-purpose embedder where `cutoutSummary` buys the one function a fitted ranker was
+calibrated on, which cannot be ported without the features drifting.
 
 So the second compute backend is `src/umap/`, in the same eslint boundary group as this one and
 for the same reason. What it costs in *fidelity* is recorded in [nodes-tables.md](nodes-tables.md): nothing
@@ -579,6 +591,52 @@ package name or a file order. Two consequences worth knowing: a module that read
 without declaring it fails at **call** time rather than load time, and the sources sit in the
 worker chunk rather than the app bundle, which is the whole reason they are not `?raw` imports in
 the wrapper.
+
+### A sixth convention: a slice, for code that cannot be copied whole
+
+`cutoutSummary` vendors SEAM's `summarize_cutout` — the function that says what is in a box of
+segmentation around an open end, and produces every column the candidate search's geometric
+ranker reads. It could not be a byte-identical whole-file copy like the two above:
+`negatives.py` also imports `cave`, `paths` and `pre_edit`, which reach the network.
+
+So it takes the two functions **verbatim but not whole**, and `pnpm vendor:seam-cutout` is what
+makes that claim checkable — it re-cuts the run from `negatives.py` by the markers that bound it
+and byte-compares, refusing by name if SEAM moves them. A sha256 cannot pin a subset of a file
+the way the table in `VENDORED.md` pins the copies; the script does that job instead, and in one
+respect does it better, since a hash detects a local edit where the script detects a local edit
+*and* upstream movement.
+
+**What the script does not catch**, and it is worth knowing before relying on it: a run that
+acquires a *new* module-level dependency upstream — another constant, a helper — is cut away
+silently and surfaces as a `NameError` in a browser. `pnpm probe:cutout-summary`'s CPython leg
+is what would see it, because it imports the cut file on its own.
+
+The right end state is for SEAM to put those functions in a numpy-only module of their own, as
+`canonical.py` and `scan.py` already are; then the slice becomes an ordinary hash-pinned copy
+and the script goes. That ask is recorded in
+[seam-suggestions-plan.md](seam-suggestions-plan.md).
+
+### What the cutout summary costs, measured
+
+Pyodide against CPython on the same 188×188×134 box (the real Aedes cutout, 14,424 supervoxels
+over 900 roots), `pnpm probe:cutout-summary`:
+
+| | CPython | Pyodide |
+| --- | --- | --- |
+| scipy's exact EDT, with `return_indices` | 166 ms | 190 ms |
+| the whole summary, warm | — | **~560 ms** |
+
+A first call in a fresh worker is roughly twice the warm figure, carrying scipy's and pandas'
+own warm-up — paid once per worker, not per open end, which is the correction worth carrying:
+a cold reading priced the feature step at 1.2 s and it is about half that.
+
+**The heap is the open question, not the clock.** `return_indices=True` returns a float64
+distance plus three int32 index planes — 95 MB for a box this size — and the ravel inside the
+vendored code allocates another 38 MB, so one call peaks near 180 MB. The probe reports 547 MB
+of wasm heap after four summaries, and wasm never returns heap to the OS. The dialog already
+reports this figure and **Stop** terminates the worker, which is the only reclaim
+([ui-shell.md](ui-shell.md)); what is not measured is the growth per call over a search of many
+ends.
 
 ### What a window costs, measured
 

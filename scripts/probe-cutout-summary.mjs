@@ -56,7 +56,7 @@ point = (lo + np.array(shape) // 2) * res
 
 const SUMMARISE = `
 frame = cutout.summarize_cutout(
-    uniq, np.ascontiguousarray(index), roots, query, res, lo,
+    uniq, index, roots, query, res, lo,
     centroids=True, point_nm=point, touch_um=0.5, moments_um=3.0,
 )
 out = {
@@ -85,23 +85,41 @@ print(json.dumps(out))
   writeFileSync(join(vendored, 'run.py'), script)
   try {
     reference = JSON.parse(
-      execFileSync('python3', ['-I', join(vendored, 'run.py')], { encoding: 'utf8' }),
+      execFileSync(process.env.CODA_PYTHON ?? 'python3', ['-I', join(vendored, 'run.py')], {
+        encoding: 'utf8',
+      }),
     )
     console.log(`CPython: ${reference.rows} rows, ${reference.columns.length} columns`)
   } catch (error) {
-    console.log(
-      `CPython comparison unavailable (needs numpy, scipy and pandas): ` +
-        `${String(error).split('\n')[0]}`,
-    )
+    const said = `${error.stdout ?? ''}${error.stderr ?? ''}` || String(error)
+    if (error.code === 'ENOENT') {
+      console.log('CPython comparison skipped: no `python3` on PATH.')
+    } else if (/ModuleNotFoundError|ImportError/.test(said)) {
+      console.log(
+        'CPython comparison skipped: this interpreter has no numpy/scipy/pandas. (The run uses ' +
+          '`-I`, so a `--user` install is not visible — set CODA_PYTHON to one that has them.)',
+      )
+    } else {
+      /*
+       * **Not a skip.** This leg is the only thing that imports the cut file on its own, so it
+       * is what notices a slice that left a module-level dependency behind upstream — which
+       * surfaces as a `NameError` and would otherwise reach a browser. Reporting every failure
+       * as "needs numpy" turned that into a green run with four checks quietly not made.
+       */
+      console.error(`\n  FAIL  the vendored slice does not run under CPython:\n${said}`)
+      process.exit(1)
+    }
   }
 }
 
 // ── Pyodide, through the vendored slice ─────────────────────────────────────────────────────
 const py = await bootPyodide()
-let at = performance.now()
-await py.loadPackage(['numpy', 'scipy', 'pandas'])
-const loadMs = Math.round(performance.now() - at)
-console.log(`numpy + scipy + pandas: ${loadMs} ms`)
+const startedLoad = performance.now()
+// Silenced, as `loadModule` does: Pyodide prints a line per wheel, which buries a probe's own
+// output. Not `loadModule` itself, because this probe installs its modules by hand to drive the
+// vendored file and the bridge separately.
+await py.loadPackage(['numpy', 'scipy', 'pandas'], { messageCallback: () => {} })
+console.log(`numpy + scipy + pandas: ${Math.round(performance.now() - startedLoad)} ms`)
 
 py.FS.mkdirTree('/vendored')
 py.FS.writeFile('/vendored/cutout.py', readRepoFile('src/pyodide/seam/cutout.py'))
@@ -117,7 +135,7 @@ ${SUMMARISE}
 out['ms'] = round((time.perf_counter() - t) * 1000)
 
 t = time.perf_counter()
-cutout.summarize_cutout(uniq, np.ascontiguousarray(index), roots, query, res, lo)
+cutout.summarize_cutout(uniq, index, roots, query, res, lo)
 out['edt_only_ms'] = round((time.perf_counter() - t) * 1000)
 json.dumps(out)
 `)
@@ -129,12 +147,12 @@ console.log(
     `${got.ms} ms (the EDT and reduction alone ${got.edt_only_ms} ms)`,
 )
 
-report.check(got.rows > 0, `${got.rows} roots summarised`)
+report.check(`${got.rows} roots summarised`, got.rows > 0)
 report.check(
+  'every column the geometric ranker reads is present',
   got.columns.includes('min_dist_um') &&
     got.columns.includes('caliber_um') &&
     got.columns.includes('contact_x_nm'),
-  'every column the geometric ranker reads is present',
 )
 /*
  * The ranker's eight features come out of these. `caliber_um` is NaN where a root has fewer
@@ -142,21 +160,21 @@ report.check(
  * one being NaN, which is what a moments pass handed the wrong axis order produces.
  */
 report.check(
-  got.caliber_um.some((one) => one !== null),
   'the local moments resolved for at least some roots',
+  got.caliber_um.some((one) => one !== null),
 )
 
 if (reference) {
   const same = (a, b) =>
     a.length === b.length &&
     a.every((one, i) => (one === null ? b[i] === null : Math.abs(one - b[i]) < 1e-6))
-  report.check(reference.rows === got.rows, `row counts agree (${got.rows})`)
-  report.check(same(reference.min_dist_um, got.min_dist_um), 'min_dist_um agrees with CPython')
+  report.check(`row counts agree (${got.rows})`, reference.rows === got.rows)
+  report.check('min_dist_um agrees with CPython', same(reference.min_dist_um, got.min_dist_um))
   report.check(
-    same(reference.contact_x_nm, got.contact_x_nm),
     'contact_x_nm agrees with CPython — the axis order survived the crossing',
+    same(reference.contact_x_nm, got.contact_x_nm),
   )
-  report.check(same(reference.caliber_um, got.caliber_um), 'caliber_um agrees with CPython')
+  report.check('caliber_um agrees with CPython', same(reference.caliber_um, got.caliber_um))
 }
 
 // ── The bridge Coda wrote, which is where the axis order is decided ─────────────────────────
@@ -167,60 +185,109 @@ if (reference) {
  * it indexes `inv.shape` as. Everything but the worker, which vitest cannot reach either.
  */
 py.FS.writeFile('/vendored/bridge.py', readRepoFile('src/pyodide/cutoutSummary.py'))
-const bridged = JSON.parse(
-  (
-    await py.runPythonAsync(`
-import json, types, sys
-module = types.ModuleType('bridge')
-module.__dict__['__vendored__'] = {'seam.cutout': open('/vendored/cutout.py').read()}
-exec(open('/vendored/bridge.py').read(), module.__dict__)
 
-# The same box, handed over the way the TypeScript wrapper hands it: flat, x fastest.
-result = module.coda_cutout_summary({
-    'labels': uniq,
-    'index': np.ascontiguousarray(index).ravel(),
-    'size': np.asarray(shape, dtype=np.int64),
-    'roots': roots,
-    'queryRoot': query,
-    'resolutionNm': res,
-    'loVoxels': lo.astype(np.float64),
-    'pointNm': point,
-    'touchUm': 0.5,
-    'momentsUm': 3.0,
-})
+/*
+ * **The request is built in JavaScript and handed over as a plain object**, which is the whole
+ * point of this leg. The worker posts one and Pyodide proxies it, so the module has to
+ * `request.to_py()` before it can read a key — and the first version of this probe built the
+ * request as a Python dict inside `runPythonAsync`, which reads perfectly well without that
+ * call. So the module shipped unable to read its own request, and the probe said nothing.
+ * `probe-seam-windows-py.mjs` passes a plain JS object for exactly this reason and says so.
+ */
+const fixture = (
+  await py.runPythonAsync(`
+import json
 json.dumps({
-    'rows': int(result['rows']),
-    'missingQuery': bool(result['missingQuery']),
-    'root_dtype': str(result['root'].dtype),
-    'first_roots': [str(int(v)) for v in result['root'][:4]],
-    'contact_x_nm': [round(float(v), 4) for v in result['contact_x_nm'][:8]],
-    'min_dist_um': [round(float(v), 6) for v in result['min_dist_um'][:8]],
-    'ms': int(result['ms']),
-    # Again, warm. The first call in a worker pays scipy's and pandas' own warm-up, which a
-    # search doing one cutout per open end pays once and not per end — so the second number is
-    # the one to price a search with.
-    'warm_ms': int(module.coda_cutout_summary({
-        'labels': uniq, 'index': np.ascontiguousarray(index).ravel(),
-        'size': np.asarray(shape, dtype=np.int64), 'roots': roots, 'queryRoot': query,
-        'resolutionNm': res, 'loVoxels': lo.astype(np.float64), 'pointNm': point,
-        'touchUm': 0.5, 'momentsUm': 3.0,
-    })['ms']),
+    'labels': [str(int(v)) for v in uniq],
+    'roots': [str(int(v)) for v in roots],
+    # order='F', and this is the whole point of the comparison below. readLabelBox writes
+    # index[x + y*sx + z*sx*sy] -- x fastest -- which for an array shaped (x, y, z) is a Fortran
+    # ravel, not a C one. A C ravel passes a box the bridge then un-transposes wrongly, and the
+    # summary comes back with the same roots, the same counts and every contact point somewhere
+    # else. The first version of this probe did exactly that and said nothing, because its
+    # assertions were inert.
+    'index': np.asfortranarray(index).ravel(order='F').tolist(),
+    'size': [int(v) for v in shape],
+    'queryRoot': str(int(query)),
+    'resolutionNm': [float(v) for v in res],
+    'loVoxels': [float(v) for v in lo],
+    'pointNm': [float(v) for v in point],
 })
 `)
-  ).toString(),
-)
+).toString()
+const built = JSON.parse(fixture)
 
-report.check(bridged.rows === got.rows, `the bridge returns the same ${bridged.rows} rows`)
-report.check(bridged.missingQuery === false, 'the query root was found in its own box')
+py.globals.set('__vendored__', py.toPy({ 'seam.cutout': readRepoFile('src/pyodide/seam/cutout.py') }))
+await py.runPythonAsync(`
+import types, sys
+module = types.ModuleType('bridge')
+module.__dict__['__vendored__'] = __vendored__
+exec(open('/vendored/bridge.py').read(), module.__dict__)
+sys.modules['bridge'] = module
+`)
+
+/**
+ * The request exactly as `runCutoutSummary` builds one: typed arrays for the two big columns,
+ * **plain arrays** for the small ones, a bigint for the query, and no Python anywhere. The small
+ * ones are plain because `callPython` transfers every view, and a three-element typed array
+ * would be detached on the caller's side for no saving — so sending them as typed arrays here
+ * would exercise a shape the app does not use.
+ */
+const request = {
+  labels: BigUint64Array.from(built.labels.map(BigInt)),
+  index: Uint32Array.from(built.index),
+  size: built.size,
+  roots: BigUint64Array.from(built.roots.map(BigInt)),
+  queryRoot: BigInt(built.queryRoot),
+  resolutionNm: built.resolutionNm,
+  loVoxels: built.loVoxels,
+  pointNm: built.pointNm,
+  touchUm: 0.5,
+  momentsUm: 3.0,
+}
+
+/*
+ * The result crosses back as **JavaScript**, not as JSON built inside Python. `root` and
+ * `rep_svid` are the first uint64 arrays any module on this bridge returns and `missingQuery`
+ * the first bool, so reading them through `json.dumps` would check Python's own values and say
+ * nothing about what `runCutoutSummary` will actually receive.
+ */
+const callBridge = async (one) => {
+  py.globals.set('__request__', one)
+  const proxy = await py.runPythonAsync(
+    `import sys; sys.modules['bridge'].coda_cutout_summary(__request__)`,
+  )
+  const result = proxy.toJs({ dict_converter: Object.fromEntries })
+  proxy.destroy()
+  return result
+}
+
+// Two calls: the module is already warm from the direct runs above, so both are warm numbers
+// and the difference between them is noise, not warm-up. Priced accordingly below.
+const bridged = await callBridge(request)
+const again = await callBridge({ ...request, index: Uint32Array.from(built.index) })
+bridged.warm_ms = again.ms
+
+report.check(`the bridge returns the same ${bridged.rows} rows`, bridged.rows === got.rows)
+
 /*
  * The id columns must still be 64-bit on the way out. A root through a float64 is a different
  * neuron and nothing downstream could tell (invariant 8), so this is checked on the dtype rather
  * than on a value that would look perfectly ordinary either way.
  */
-report.check(bridged.root_dtype === 'uint64', `root comes back as ${bridged.root_dtype}`)
 report.check(
-  bridged.first_roots.every((one) => /^\d+$/.test(one) && one !== '0'),
-  'the roots are whole ids, not rounded doubles',
+  `the id columns cross as ${bridged.root.constructor.name}`,
+  bridged.root instanceof BigUint64Array && bridged.rep_svid instanceof BigUint64Array,
+)
+report.check('missingQuery crosses as a boolean', bridged.missingQuery === false)
+/*
+ * The check that can actually fail. `rep_svid` holds the fixture's 18-digit supervoxel ids, so
+ * every value must be one of the ids that went in — a column that had been through a double
+ * comes back near-miss, which is a different supervoxel and nothing downstream could tell.
+ */
+report.check(
+  'every rep_svid is an id that went in, not a rounded near-miss',
+  [...bridged.rep_svid].every((one) => built.labels.includes(one.toString())),
 )
 /*
  * And the transpose. If the bridge handed the box over in the wrong axis order the summary
@@ -228,18 +295,19 @@ report.check(
  * point somewhere else. Comparing against the direct call is what catches it.
  */
 report.check(
-  bridged.contact_x_nm.every((one, i) => Math.abs(one - got.contact_x_nm[i]) < 1e-4),
   'the bridge put the box the right way round (contact points match the direct call)',
+  got.contact_x_nm.every((one, i) => Math.abs(bridged.contact_x_nm[i] - one) < 1e-4),
 )
 report.check(
-  bridged.min_dist_um.every((one, i) => Math.abs(one - got.min_dist_um[i]) < 1e-6),
   'min_dist_um matches the direct call',
+  got.min_dist_um.every((one, i) => Math.abs(bridged.min_dist_um[i] - one) < 1e-6),
 )
 
 console.log(
-  `\nOne cutout's features through the bridge: ${bridged.ms} ms cold, ` +
-    `**${bridged.warm_ms} ms warm** — the latter is what a search doing one cutout per open end ` +
-    `pays per end, on top of the ~1.2 s the cutout itself takes to fetch. ` +
-    `(The first call in this process, ${got.ms} ms, carries scipy's and pandas' warm-up.)`,
+  `\nOne cutout's features through the bridge: ${bridged.ms} and ${bridged.warm_ms} ms — both ` +
+    `warm, since the direct calls above already paid scipy's and pandas' warm-up, and that is ` +
+    `the number to price a search with (one cutout per open end, on top of the ~1.2 s the ` +
+    `cutout itself takes to fetch). The first call in this process took ${got.ms} ms, which is ` +
+    `the warm-up and is paid once per worker, not per end.`,
 )
 report.finish(py)
