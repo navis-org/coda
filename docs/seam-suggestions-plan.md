@@ -648,6 +648,38 @@ ranker's eight features come from the moments pass — and its centroids feed th
 - **Other datastacks.** FlyWire's store is sharded and may need a token. Nothing here assumes
   Aedes, but nothing here has been tried anywhere else either.
 
+### The search ranks, and it ranks SEAM's way (2026-11-10)
+
+Stages 4 and 5 run. `coda_candidate_search` is one crossing over three vendored steps — the
+cutout summary, `pool_features`' eight features, and `GeometricRanker`'s logistic score — and it
+was checked against SEAM's own answer for a real open end rather than against itself:
+
+| | |
+| --- | --- |
+| the end | `648518347622603652` at `250173, 313173, 276480` nm (`end_uid` 0) |
+| the box | 188×188×134, 8 chunks, **14,424 supervoxels**, roots at `snapshot − 1 ms` |
+| the result | **100 candidates, the top 20 in SEAM's exact order**, every `geo_score` to 1e-4 |
+| the cost | ~2.3 s in Pyodide for the whole search, beside ~1.2 s to fetch the box |
+
+**`geo_score` is a rank key — lower is better.** `seam/build.py` says so in passing and nothing
+else does; the first implementation here took the raw logit and sorted descending, which gives a
+list that is *exactly reversed* with every number plausible and every rank wrong. The probe's
+negative control is reversing that sort, and it fails at rank 1 — which is the only reason the
+mistake is now a sentence rather than a shipped feature.
+
+**The ranker's weights ride in the request**, from the suggestion set's own `fixture.json`, never
+from this repository. A ranker is fitted against one definition of the eight features; a copy
+here would be a second place for them to live, where being wrong still ranks.
+
+`candidates.py` is vendored for the same reason `negatives.py` is, and the slice script now
+carries both ([VENDORED.md](../src/pyodide/seam/VENDORED.md)).
+
+**What is left of Phase 6.** The own-tip rule — keep a candidate only if its contact is within
+`own_um` of the tip and no other tip of the neuron is nearer, then renumber `geo_rank` — which is
+a *per-neuron* pass rather than a per-end one, so it belongs with the node that walks the ranking
+rather than in the bridge. `candidates_all` is the search's top 100 **before** that rule, which is
+what the probe compares against; `candidates` is what survives it.
+
 ## What to ask SEAM for
 
 - **`belongs` / `not_belongs` as delimited strings**, not LIST columns, in a regenerated

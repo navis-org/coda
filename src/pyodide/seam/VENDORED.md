@@ -22,12 +22,23 @@ here that Coda wrote.
 Check them with `shasum -a 256 src/pyodide/seam/*.py`, against the same command in SEAM at the
 commit above. A copy that has drifted is the one failure neither repo's tests can see.
 
-## `cutout.py` is a **slice**, not a whole-file copy
+## `cutout.py` and `candidates.py` are **slices**, not whole-file copies
 
-`summarize_cutout` and `_local_moments`, taken out of SEAM's `seam/negatives.py` **without
-editing a character of them**. It is not a whole-file copy because `negatives.py` cannot be one:
-it also imports `cave`, `paths` and `pre_edit`, which reach the network. The two functions Coda
-needs are numpy, scipy and pandas only, and sit in one contiguous run of that file.
+Two runs taken **without editing a character of them**:
+
+| file | from | what |
+| --- | --- | --- |
+| `cutout.py` | `seam/negatives.py` | `summarize_cutout`, `_local_moments` — what is in a box |
+| `candidates.py` | `seam/candidates.py` | `pool_features`, `GeometricRanker` — the eight features and the score |
+
+Neither can be a whole-file copy: `negatives.py` imports `cave`, `paths` and `pre_edit`, and
+`candidates.py` imports `paths`. What Coda needs out of each is numpy, scipy and pandas only, and
+sits in one contiguous run.
+
+**The second slice drifts the same way the first does, and that is why it is vendored too.** A
+feature computed slightly differently still *ranks* — the list comes back with plausible scores
+in a plausible order, and nothing downstream can tell. `pnpm probe:candidate-search` is what
+would notice: it ranks one real open end and compares against SEAM's own `geo_rank` for it.
 
 Cut at SEAM commit `3cc180a167a67e6423393d62659405045dba3aca`. Recording it matters as much here as the hashes
 do above: without it a clean ✓ against a dirty or differently-branched checkout is
@@ -49,9 +60,8 @@ If SEAM moves these functions the script refuses by name rather than cutting the
 `canonical.py` and `scan.py` already are. Then the script goes and the file joins the table
 above. That ask is recorded in `docs/seam-suggestions-plan.md`.
 
-| file | sha256 (this slice, for reference only — the script is the check) |
-| --- | --- |
-| `cutout.py` | `2f00f0e63093b620a50e99941051d4076e6e93e964493c3289efdb35dd3cc800` |
+The script checks both; a sha256 here would pin only one state of a subset, and is left out
+deliberately so there is one check rather than two that can disagree.
 
 **Updating them:** re-copy both, update the commit above, and re-run
 `pnpm probe:seam-windows`. If SEAM changes the sampler, the model has to be re-exported

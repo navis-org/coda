@@ -26,14 +26,36 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const SEAM = process.env.SEAM_PATH ?? join(homedir(), 'Github/SEAM')
-const SOURCE = join(SEAM, 'seam/negatives.py')
-const TARGET = new URL('../src/pyodide/seam/cutout.py', import.meta.url)
-
-/** The run to take, named by the markers that bound it rather than by line number. */
-const FROM = '\ndef summarize_cutout('
-const UNTIL = '\ndef label_final('
-/** Constants the run reads from its module's top level, taken with it. */
-const CONSTANTS = ['MIN_LOCAL_VOXELS']
+/**
+ * The runs to take, each named by the markers that bound it rather than by line number.
+ *
+ * Two of them, and the second is why this is a table: `pool_features` and `GeometricRanker`
+ * turn a cutout summary into the eight features a fitted ranker scores, and they drift the same
+ * way `summarize_cutout` would — a feature computed slightly differently still *ranks*, which is
+ * the failure nothing downstream can see.
+ */
+const SLICES = [
+  {
+    file: 'cutout.py',
+    source: 'seam/negatives.py',
+    from: '\ndef summarize_cutout(',
+    until: '\ndef label_final(',
+    constants: ['MIN_LOCAL_VOXELS'],
+    imports: 'import numpy as np\nimport pandas as pd\n',
+    what: 'the two functions that summarise a supervoxel cutout',
+    needs: '`cave`, `paths` and `pre_edit`, which reach the network',
+  },
+  {
+    file: 'candidates.py',
+    source: 'seam/candidates.py',
+    from: '\nTIE_SEEDS',
+    until: '\ndef placement_tag(',
+    constants: [],
+    imports: 'import dataclasses\n\nimport numpy as np\nimport pandas as pd\n',
+    what: "the pool's features and the geometric ranker that scores them",
+    needs: '`paths`, which reaches the filesystem',
+  },
+]
 
 /**
  * Which SEAM the checkout is at, for the message.
@@ -47,80 +69,94 @@ function seamCommit() {
     const head = execFileSync('git', ['-C', SEAM, 'rev-parse', '--short', 'HEAD'], {
       encoding: 'utf8',
     }).trim()
-    const dirty = execFileSync('git', ['-C', SEAM, 'status', '--porcelain', '--', 'seam/negatives.py'], {
-      encoding: 'utf8',
-    }).trim()
-    return dirty ? `${head} (negatives.py modified)` : head
+    const dirty = execFileSync(
+      'git',
+      ['-C', SEAM, 'status', '--porcelain', '--', ...SLICES.map((one) => one.source)],
+      { encoding: 'utf8' },
+    ).trim()
+    return dirty ? `${head} (a vendored source is modified locally)` : head
   } catch {
     return 'unknown'
   }
 }
 
-const HEADER = `"""Vendored from SEAM: \`seam/negatives.py\`, the two functions that summarise a
-supervoxel cutout. **Not edited** — see \`VENDORED.md\` and
-\`scripts/vendor-seam-cutout.mjs\`, which re-cuts this file and byte-compares it.
+const header = (slice) => `"""Vendored from SEAM: \`${slice.source}\`, ${slice.what}.
+**Not edited** — see \`VENDORED.md\` and \`scripts/vendor-seam-cutout.mjs\`, which re-cuts
+this file and byte-compares.
 
-A slice rather than a whole-file copy because \`negatives.py\` also imports
-\`cave\`, \`paths\` and \`pre_edit\`, which reach the network. Everything below
-is numpy, scipy and pandas only.
+A slice rather than a whole-file copy because that module also imports
+${slice.needs}. Everything below is numpy, scipy and pandas only.
 """
 
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
-
+${slice.imports}
 `
 
-function cut() {
+function cut(slice) {
+  const path = join(SEAM, slice.source)
   let source
   try {
-    source = readFileSync(SOURCE, 'utf8')
+    source = readFileSync(path, 'utf8')
   } catch {
     console.error(`No SEAM at ${SEAM}. Set SEAM_PATH to a checkout of it.`)
     process.exit(2)
   }
-  const from = source.indexOf(FROM)
-  const until = source.indexOf(UNTIL, from)
+  const from = source.indexOf(slice.from)
+  const until = source.indexOf(slice.until, from)
   if (from < 0 || until < 0) {
     console.error(
-      `negatives.py no longer holds the run this takes (${FROM.trim()} … ${UNTIL.trim()}). ` +
-        'SEAM has moved these functions; re-read it before re-cutting.',
+      `${slice.source} no longer holds the run this takes (${slice.from.trim()} … ` +
+        `${slice.until.trim()}). SEAM has moved it; re-read it before re-cutting.`,
     )
     process.exit(2)
   }
   const lines = source.split('\n')
-  const taken = CONSTANTS.map((name) => {
+  const taken = slice.constants.map((name) => {
     const line = lines.find((one) => one.startsWith(`${name} =`))
     if (!line) {
-      console.error(`negatives.py no longer defines ${name}.`)
+      console.error(`${slice.source} no longer defines ${name}.`)
       process.exit(2)
     }
     return line
   })
-  return `${HEADER}${taken.join('\n')}\n\n${source.slice(from + 1, until)}`
+  const preamble = taken.length > 0 ? `${taken.join('\n')}\n\n` : ''
+  return `${header(slice)}${preamble}${source.slice(from + 1, until)}`
 }
 
-const wanted = cut()
-if (process.argv.includes('--write')) {
-  writeFileSync(TARGET, wanted)
-  console.log(
-    `Re-cut ${TARGET.pathname} from ${SOURCE} at SEAM ${seamCommit()} ` +
-      `(${wanted.split('\n').length} lines). Record that commit in VENDORED.md, and run ` +
-      '`pnpm probe:cutout-summary` — its CPython leg is what notices a run that has grown a ' +
-      'dependency the cut left behind.',
-  )
-} else {
-  const held = readFileSync(TARGET, 'utf8')
+const writing = process.argv.includes('--write')
+let differed = 0
+for (const slice of SLICES) {
+  const target = new URL(`../src/pyodide/seam/${slice.file}`, import.meta.url)
+  const wanted = cut(slice)
+  if (writing) {
+    writeFileSync(target, wanted)
+    console.log(`Re-cut src/pyodide/seam/${slice.file} (${wanted.split('\n').length} lines).`)
+    continue
+  }
+  let held = ''
+  try {
+    held = readFileSync(target, 'utf8')
+  } catch {
+    held = ''
+  }
   if (held === wanted) {
-    console.log(`✓ src/pyodide/seam/cutout.py is SEAM's own text, unedited (SEAM ${seamCommit()}).`)
+    console.log(`✓ src/pyodide/seam/${slice.file} is SEAM's own text, unedited.`)
   } else {
+    differed += 1
     console.error(
-      `✗ src/pyodide/seam/cutout.py differs from ${SOURCE}.\n` +
-        '  Either SEAM changed (re-cut with --write, and re-run the probes: a changed summary ' +
-        'means the ranker was fitted on different features), or this copy was edited, which it ' +
-        'must not be.',
+      `✗ src/pyodide/seam/${slice.file} differs from ${slice.source}.\n` +
+        '  Either SEAM changed (re-cut with --write), or this copy was edited, which it must ' +
+        'not be. Either way re-run `pnpm probe:candidate-search`: a changed feature or summary ' +
+        'means the ranker is scoring something it was not fitted on.',
     )
-    process.exit(1)
   }
 }
+console.log(`SEAM ${seamCommit()}`)
+if (writing) {
+  console.log(
+    'Record that commit in VENDORED.md, and run `pnpm probe:candidate-search` — its CPython leg ' +
+      'is what notices a run that has grown a dependency the cut left behind.',
+  )
+}
+if (differed > 0) process.exit(1)

@@ -19,8 +19,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { callPython } from './engine'
-import type { CutoutSummaryRequest } from './cutoutSummary'
-import { runCutoutSummary } from './cutoutSummary'
+import type { CandidateSearchRequest, CutoutSummaryRequest } from './cutoutSummary'
+import { runCandidateSearch, runCutoutSummary } from './cutoutSummary'
 import type { PyCall } from './types'
 
 vi.mock('./engine', () => ({ callPython: vi.fn() }))
@@ -133,5 +133,92 @@ describe('runCutoutSummary', () => {
   it('carries Python’s own timing through, for a caller pricing a search', async () => {
     mockedCall.mockResolvedValue(answered({ ms: 537 }))
     expect((await runCutoutSummary(REQUEST)).ms).toBe(537)
+  })
+})
+
+/**
+ * The search's wrapper. The ranking itself is SEAM's and is checked against SEAM's own answer
+ * for a real end by `pnpm probe:candidate-search`; what is testable here is the marshalling —
+ * and the one thing worth pinning is that the **ranker is carried, not held**.
+ */
+describe('runCandidateSearch', () => {
+  const SEARCH: CandidateSearchRequest = {
+    ...(REQUEST as unknown as CutoutSummaryRequest),
+    endNm: [64, 64, 90],
+    ranker: {
+      features: [
+        'min_dist_um',
+        'touching',
+        'log_vol',
+        'has_shape',
+        'align',
+        'caliber_ratio',
+        'elongation',
+        'ahead',
+      ],
+      mu: [0, 0, 0, 0, 0, 0, 0, 0],
+      sd: [1, 1, 1, 1, 1, 1, 1, 1],
+      w: [1, 0, 0, 0, 0, 0, 0, 0],
+      b: 0,
+    },
+    topK: 100,
+  }
+
+  const ranked = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    rows: 2,
+    missingQuery: false,
+    candRoot: BigUint64Array.from([864691128455770001n, 864691128455770002n]),
+    geo_score: Float64Array.from([-3.1489, -1.148]),
+    geo_rank: Float64Array.from([1, 2]),
+    min_dist_um: Float64Array.from([0.032, 0.032]),
+    ms: 2338,
+    ...overrides,
+  })
+
+  beforeEach(() => {
+    mockedCall.mockReset()
+  })
+
+  it('runs in the capability the vendored code lives in', async () => {
+    mockedCall.mockResolvedValue(ranked())
+    await runCandidateSearch(SEARCH)
+    const call = mockedCall.mock.calls[0]![0] as PyCall
+    expect(call.module).toBe('cutoutSummary')
+    expect(call.fn).toBe('coda_candidate_search')
+  })
+
+  /**
+   * The weights ride in the request from the suggestion set's own manifest, never from this
+   * repository — a ranker is fitted against one definition of the eight features, and a copy
+   * here would be a second place for them to live where being wrong still ranks.
+   */
+  it('carries the ranker through rather than holding one', async () => {
+    mockedCall.mockResolvedValue(ranked())
+    await runCandidateSearch(SEARCH)
+    const sent = (mockedCall.mock.calls[0]![0] as PyCall).args[0] as CandidateSearchRequest
+    expect(sent.ranker.w).toEqual(SEARCH.ranker.w)
+    expect(sent.endNm).toEqual([64, 64, 90])
+  })
+
+  it('names the columns SEAM names, and keeps the ids 64-bit', async () => {
+    mockedCall.mockResolvedValue(ranked())
+    const found = await runCandidateSearch(SEARCH)
+    expect(found.rows).toBe(2)
+    expect(found.candRoot).toBeInstanceOf(BigUint64Array)
+    expect(Object.keys(found.columns).sort()).toEqual(['geo_rank', 'geo_score', 'min_dist_um'])
+    // `geo_score` is a rank key: lower is better, so rank 1 holds the smallest.
+    expect(found.columns['geo_score']![0]).toBeLessThan(found.columns['geo_score']![1]!)
+  })
+
+  it('reports a query root missing from its own box without throwing', async () => {
+    mockedCall.mockResolvedValue({
+      rows: 0,
+      missingQuery: true,
+      candRoot: new BigUint64Array(0),
+      ms: 9,
+    })
+    const found = await runCandidateSearch(SEARCH)
+    expect(found.missingQuery).toBe(true)
+    expect(found.rows).toBe(0)
   })
 })

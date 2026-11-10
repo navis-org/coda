@@ -594,10 +594,11 @@ the wrapper.
 
 ### A sixth convention: a slice, for code that cannot be copied whole
 
-`cutoutSummary` vendors SEAM's `summarize_cutout` — the function that says what is in a box of
-segmentation around an open end, and produces every column the candidate search's geometric
-ranker reads. It could not be a byte-identical whole-file copy like the two above:
-`negatives.py` also imports `cave`, `paths` and `pre_edit`, which reach the network.
+`cutoutSummary` vendors **two** runs of SEAM: `summarize_cutout` (what is in a box of
+segmentation around an open end) from `negatives.py`, and `pool_features` plus `GeometricRanker`
+(the eight features, and the logistic score over them) from `candidates.py`. Neither could be a
+byte-identical whole-file copy like the two above — `negatives.py` imports `cave`, `paths` and
+`pre_edit`, and `candidates.py` imports `paths`.
 
 So it takes the two functions **verbatim but not whole**, and `pnpm vendor:seam-cutout` is what
 makes that claim checkable — it re-cuts the run from `negatives.py` by the markers that bound it
@@ -629,6 +630,18 @@ over 900 roots), `pnpm probe:cutout-summary`:
 A first call in a fresh worker is roughly twice the warm figure, carrying scipy's and pandas'
 own warm-up — paid once per worker, not per open end, which is the correction worth carrying:
 a cold reading priced the feature step at 1.2 s and it is about half that.
+
+**The search is one crossing, not three.** `coda_candidate_search` runs the summary, the
+features and the score together, because each step's output is the next one's input and none is
+useful alone — and because it keeps every step that has to match SEAM on the vendored side. The
+TypeScript carries the box over and names the columns back; it never computes a feature. Checked
+against SEAM's own ranking for a real open end (`pnpm probe:candidate-search`): the top twenty
+candidates in SEAM's exact order, every `geo_score` to 1e-4.
+
+**One thing that reversal would have hidden.** The published `geo_score` is a rank *key* —
+lower is better, `-score` — so taking the raw logit and sorting descending gives a list that is
+exactly reversed with every number plausible. The probe's negative control is reversing that
+sort, which fails it at rank 1.
 
 **The heap is the open question, not the clock.** `return_indices=True` returns a float64
 distance plus three int32 index planes — 95 MB for a box this size — and the ravel inside the

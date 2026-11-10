@@ -41,8 +41,8 @@ import types
 import numpy as np
 
 
-#: The vendored module, installed under this name so its own `from __future__` and imports work.
-VENDORED = ("seam.cutout",)
+#: The vendored modules, installed under these names so their own imports work.
+VENDORED = ("seam.cutout", "seam.candidates")
 
 
 def _install(name: str, source: str, parent):
@@ -62,10 +62,9 @@ def _install(name: str, source: str, parent):
 
 
 def _seam(vendored):
-    """`seam.cutout`, installed once per worker."""
-    installed = sys.modules.get("seam.cutout")
-    if installed is not None:
-        return installed
+    """The vendored `seam` package, installed once per worker."""
+    if sys.modules.get("seam.candidates") is not None:
+        return sys.modules
     package = sys.modules.get("seam")
     if package is None:
         package = types.ModuleType("seam")
@@ -73,7 +72,7 @@ def _seam(vendored):
         sys.modules["seam"] = package
     for name in VENDORED:
         _install(name, vendored[name], package)
-    return sys.modules["seam.cutout"]
+    return sys.modules
 
 
 def _number(value, fallback: float) -> float:
@@ -98,7 +97,7 @@ def coda_cutout_summary(request, report=None):
     neuron does not reach its own cutout is a tip somebody should look at, not a failed read.
     """
     started = time.perf_counter()
-    cutout = _seam(dict(__vendored__))  # noqa: F821 -- seeded by runtime.ts, see the header
+    cutout = _seam(dict(__vendored__))["seam.cutout"]  # noqa: F821 -- seeded by runtime.ts
     # The request crosses as a `JsProxy` of a plain object, which has neither `__getitem__` nor
     # `.get` — so subscripting one raises rather than reading the key. Every other entry point on
     # this bridge converts first for the same reason. Unconditional, not `hasattr`-guarded: a
@@ -185,6 +184,101 @@ def coda_cutout_summary(request, report=None):
         else:
             out[name] = np.ascontiguousarray(column, dtype=np.float64)
     out["ms"] = int((time.perf_counter() - started) * 1000)
+    if report is not None:
+        report(1.0)
+    return out
+
+
+def coda_candidate_search(request, report=None):
+    """One open end's candidates, ranked — stages 4 and 5 of SEAM's pipeline.
+
+    The box in, a ranked pool out. Three vendored steps with nothing of Coda's between them:
+    `summarize_cutout` says what objects are in the box and where each touches the query,
+    `pool_features` turns that into the eight features the ranker was fitted on, and
+    `GeometricRanker.score` is the logistic regression whose weights ride in the request from
+    the suggestion set's own manifest.
+
+    **Why it is one call and not three.** Each step's output is the next one's input and none of
+    them is useful on its own, so crossing between them would move a frame of several hundred
+    rows over the bridge twice for nothing. It also keeps every step that has to match SEAM on
+    the vendored side of the seam: the TypeScript orchestrates and never computes a feature.
+
+    `None` where the query root has no voxel in its own box, which `summarize_cutout` answers for
+    itself — a tip whose neuron does not reach its own cutout is one to look at, not a failure.
+    """
+    started = time.perf_counter()
+    seam = _seam(dict(__vendored__))  # noqa: F821 -- seeded by runtime.ts, see the header
+    cutout, candidates = seam["seam.cutout"], seam["seam.candidates"]
+    req = request.to_py()
+
+    end_nm = np.asarray(req["endNm"], dtype=np.float64)
+    size = np.asarray(req["size"], dtype=np.int64)
+    inv = np.asarray(req["index"], dtype=np.uint32).reshape(tuple(size[::-1]))
+    inv = np.ascontiguousarray(inv.transpose(2, 1, 0), dtype=np.int32)
+    query = int(req["queryRoot"])
+    if query == 0:
+        raise ValueError(
+            "candidate search: the query root is 0, which is the id for 'no object' — "
+            "the box has no neuron to measure from"
+        )
+
+    if report is not None:
+        report(0.1, "measuring the box")
+    # **`summary_args` rather than this file's own options.** SEAM states that contract in one
+    # place precisely so a caller cannot ask for a cutout summary the features were not fitted
+    # against — `touch_um` and `moments_um` are part of what the ranker means.
+    frame = cutout.summarize_cutout(
+        np.asarray(req["labels"], dtype=np.uint64),
+        inv,
+        np.asarray(req["roots"], dtype=np.uint64),
+        query,
+        np.asarray(req["resolutionNm"], dtype=np.float64),
+        np.asarray(req["loVoxels"], dtype=np.int64),
+        **candidates.summary_args(end_nm),
+    )
+    if frame is None:
+        if report is not None:
+            report(1.0)
+        return {
+            "rows": 0,
+            "missingQuery": True,
+            "candRoot": np.zeros(0, dtype=np.uint64),
+            "ms": int((time.perf_counter() - started) * 1000),
+        }
+
+    if report is not None:
+        report(0.7, "ranking the pool")
+    pool = candidates.pool_features(frame, query, end_nm)
+    ranker = candidates.GeometricRanker(
+        features=list(req["ranker"]["features"]),
+        mu=list(req["ranker"]["mu"]),
+        sd=list(req["ranker"]["sd"]),
+        w=list(req["ranker"]["w"]),
+        b=float(req["ranker"]["b"]),
+    )
+    # **`rank_key`, not `score`, and ascending.** The published `geo_score` column is the rank
+    # key — `-score`, where *lower is better* (`seam/build.py`: "geo_score (a rank key: lower is
+    # better)"). Taking the raw logit and sorting descending gives a list that is exactly
+    # reversed, with every number plausible and every rank wrong, which is what the fixture
+    # comparison in `probe:candidate-search` is really there to catch.
+    pool = pool.assign(geo_score=ranker.rank_key(pool))
+    pool = pool.sort_values("geo_score", ascending=True).head(int(req.get("topK", 100)))
+    # 1-based, as the fixture's is.
+    pool = pool.assign(geo_rank=np.arange(1, len(pool) + 1))
+
+    out = {
+        "rows": int(len(pool)),
+        "missingQuery": False,
+        "candRoot": np.ascontiguousarray(pool["root"].to_numpy(), dtype=np.uint64),
+        "ms": int((time.perf_counter() - started) * 1000),
+    }
+    for name in ("geo_score", "geo_rank", "min_dist_um", "vol_um3", *candidates.FEATURES):
+        if name in pool.columns and name not in out:
+            out[name] = np.ascontiguousarray(pool[name].to_numpy(), dtype=np.float64)
+    for axis in ("x", "y", "z"):
+        out[f"contact_{axis}_nm"] = np.ascontiguousarray(
+            pool[f"contact_{axis}_nm"].to_numpy(), dtype=np.float64
+        )
     if report is not None:
         report(1.0)
     return out

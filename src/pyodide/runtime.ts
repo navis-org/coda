@@ -36,6 +36,7 @@ import CUTOUT_SUMMARY_PY from './cutoutSummary.py?raw'
 import MESHES_PY from './meshes.py?raw'
 import NBLAST_PY from './nblast.py?raw'
 import SEAM_CANONICAL_PY from './seam/canonical.py?raw'
+import SEAM_CANDIDATES_PY from './seam/candidates.py?raw'
 import SEAM_CUTOUT_PY from './seam/cutout.py?raw'
 import SEAM_SCAN_PY from './seam/scan.py?raw'
 import SEAM_WINDOWS_PY from './seamWindows.py?raw'
@@ -186,9 +187,9 @@ const MODULES: Record<string, PyModule> = {
    */
   cutoutSummary: {
     source: CUTOUT_SUMMARY_PY,
-    vendored: { 'seam.cutout': SEAM_CUTOUT_PY },
+    vendored: { 'seam.cutout': SEAM_CUTOUT_PY, 'seam.candidates': SEAM_CANDIDATES_PY },
     packages: ['numpy', 'scipy', 'pandas'],
-    label: 'numpy · scipy · pandas · SEAM cutout summary',
+    label: 'numpy · scipy · pandas · SEAM cutout and ranker',
   },
   skeletonize: {
     source: SKELETONIZE_PY,
