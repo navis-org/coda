@@ -53,6 +53,13 @@ const EXPANDED_WIDTHS: Record<string, ExpandedWidth> = {
   'net.metrics': MEASURED_WIDTH,
   // A body, but a picture: a wall of neurons wants every pixel across, not a reading measure.
   'cortex:gallery': 'full',
+  /*
+   * A body, and half of it is a picture. The queue beside it has a measure and keeps to 340px
+   * whatever the panel is; every pixel past that goes to the EM, which is what somebody expanded
+   * this to look at. Capped, the viewer stops at about a thousand pixels on a screen with three
+   * thousand to give it.
+   */
+  'seam:review': 'full',
 }
 
 export function expandedWidth(nodeType: string): ExpandedWidth {

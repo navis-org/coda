@@ -21,6 +21,7 @@
 import { AnnotateBody } from './AnnotateBody'
 import { GalleryBody } from '../cortex/GalleryBody'
 import { FindMergesBody } from '../seam/FindMergesBody'
+import { ReviewBody } from '../seam/ReviewBody'
 import type { ComponentType } from 'react'
 
 import type { GraphNode } from '../../core/graph'
@@ -119,6 +120,11 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * twenty bars across a hundred pixels — enough to see the shape, not enough to place a line.
    */
   'seam:findMerges': { Component: FindMergesBody, expandable: true },
+  /*
+   * `expandable` and `resizable`: the card holds a viewer *and* a queue, and how much of each a
+   * reader wants is the whole question — a long list to triage, or a big frame to judge one site.
+   */
+  'seam:review': { Component: ReviewBody, expandable: true, resizable: true },
   /*
    * Not `expandable`: the readout is one line and the fields are three, so an overlay of it would
    * be whitespace, and its button would sit where a viewer's does.

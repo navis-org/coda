@@ -1,0 +1,25 @@
+{
+ "what": "A directory of SEAM merge-candidate suggestion sets, for Coda's tests.",
+ "sets": [
+  {
+   "id": "rv2",
+   "path": "fixture.json",
+   "label": "Aedes rv2",
+   "dataset": "aedes",
+   "datastack": "wclee_aedes_brain",
+   "snapshot": "2026-11-04 16:45:00+00:00",
+   "commit": "7b9de9dd159bfd1a4957b0e34a75a5c76a6cee29-dirty",
+   "neurons": 5,
+   "counts": { "tips": 25, "shown": 10, "candidates": 1141 }
+  },
+  {
+   "id": "rv2-mismatched",
+   "path": "mismatched.json",
+   "label": "Aedes rv2, with counts that disagree",
+   "datastack": "wclee_aedes_brain",
+   "snapshot": "2026-11-04 16:45:00+00:00",
+   "neurons": 5,
+   "counts": { "tips": 9999, "shown": 10, "candidates": 1141 }
+  }
+ ]
+}
