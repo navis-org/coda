@@ -78,6 +78,51 @@ function messageOf(data: unknown, type: string): Record<string, unknown> | undef
     : undefined
 }
 
+/**
+ * Card to frame: point the camera here, in the scene's own coordinate space.
+ *
+ * The counterpart of `FrameSegmentsMessage` for the other thing a card changes between items.
+ * It exists for the same reason: restoring a scene with a different `position` through the
+ * fragment tears every layer down and reloads the meshes, which is unusable when the camera
+ * moves once per click — a review queue, a list of sites, anything paged through.
+ *
+ * **No update number.** The echo on `FrameSegmentsMessage` exists so the frame's *reports* can
+ * be attributed to the scene the card is holding, and a camera move changes nothing a report
+ * carries. Sending one here would mean two numbers racing for the same slot.
+ *
+ * **`width` frames as well as points**, and without it the message is half useless. A scene that
+ * publishes no `projectionScale` — the Aedes datastack publishes `dimensions` and `layers` and
+ * nothing else — opens at neuroglancer's default zoom, which for a whole brain is hundreds of
+ * micrometres across. The camera then goes exactly where it is told and a half-micrometre piece
+ * sits in the middle of it, invisible. Pointing without framing is not showing somebody a site.
+ *
+ * Both are in the global coordinate space's units, not nanometres: whoever sends this has the
+ * scene's `dimensions` and does the conversion once, where the scale is known.
+ */
+export const FRAME_SET_VIEW_MESSAGE = 'coda:ng-set-view'
+
+export interface FrameSetViewMessage {
+  type: typeof FRAME_SET_VIEW_MESSAGE
+  position: readonly number[]
+  /** How much to frame, across. Omitted leaves the zoom exactly as the reader left it. */
+  width?: number
+}
+
+export function isFrameSetViewMessage(data: unknown): data is FrameSetViewMessage {
+  if (!data || typeof data !== 'object') return false
+  const message = data as Partial<FrameSetViewMessage>
+  return (
+    message.type === FRAME_SET_VIEW_MESSAGE &&
+    Array.isArray(message.position) &&
+    message.position.length > 0 &&
+    message.position.every((v) => typeof v === 'number' && Number.isFinite(v)) &&
+    (message.width === undefined ||
+      (typeof message.width === 'number' &&
+        Number.isFinite(message.width) &&
+        message.width > 0))
+  )
+}
+
 export const FRAME_VIEW_MESSAGE = 'coda:ng-view'
 
 /**

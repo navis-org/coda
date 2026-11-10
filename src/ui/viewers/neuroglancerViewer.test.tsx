@@ -1443,6 +1443,61 @@ describe('neurons changed inside the viewer', () => {
     view.rerender(viewer(url, selectionEdits, view.onSelectionEdits))
   }
 
+  /**
+   * The camera a card asked for, which travels **beside** the scene rather than in it.
+   *
+   * A scene's `position` is its *published* camera and is part of its identity: a scene whose
+   * position changed is one pointed somewhere else, and re-navigates — every layer torn down,
+   * every mesh refetched. "Point the camera here", from a card paging through a queue, is a
+   * different statement and must not cost that, so it is `focus` and a message.
+   */
+  it('posts a camera a caller asked for, without touching the scene', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    const before = frameSrc(view.container)
+    view.rerender(viewer(URL_A, [], view.onSelectionEdits, { focus: [10, 20, 30] }))
+    expect(posted).toHaveBeenCalledWith(
+      { type: 'coda:ng-set-view', position: [10, 20, 30] },
+      window.location.origin,
+    )
+    // No navigation: the frame is still on the document it was on.
+    expect(frameSrc(view.container)).toBe(before)
+  })
+
+  /**
+   * A navigation replaces the document and the camera goes with it — the restored scene carries
+   * whatever framing *it* names, which for a dataset publishing none is neuroglancer's default.
+   * So the camera has to be asked for again, or a caller that moved it once and then changed
+   * anything that navigates loses it for good while the effect sees a `focus` it already sent.
+   */
+  it('asks for the camera again after a navigation', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    view.rerender(viewer(URL_A, [], view.onSelectionEdits, { focus: [1, 2, 3] }))
+    // A different scene entirely: this navigates rather than setting a selection in place.
+    view.rerender(viewer(URL_OTHER, [], view.onSelectionEdits, { focus: [1, 2, 3] }))
+    frameLoaded(view.container)
+    report(view.container, sceneWith(['1']))
+    view.rerender(viewer(URL_OTHER, [], view.onSelectionEdits, { focus: [1, 2, 3] }))
+    const views = posted.mock.calls.filter(
+      ([message]) => (message as { type?: string }).type === 'coda:ng-set-view',
+    )
+    expect(views.length).toBeGreaterThan(1)
+  })
+
+  /** Re-rendering with the same camera is not a new instruction. */
+  it('does not post the same camera twice', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    for (let i = 0; i < 3; i++) {
+      view.rerender(viewer(URL_A, [], view.onSelectionEdits, { focus: [1, 2, 3] }))
+    }
+    const views = posted.mock.calls.filter(
+      ([message]) => (message as { type?: string }).type === 'coda:ng-set-view',
+    )
+    expect(views).toHaveLength(1)
+  })
+
   it('sets a changed selection in place, at once, with the pointer inside the frame', () => {
     // Restoring `layers` rebuilds every layer, which is why an update used to wait for the pointer
     // to leave; setting the segments in place rebuilds nothing.
