@@ -10900,6 +10900,214 @@ details[open] > summary.tile__label {
 }
 
 /* ---------------------------------------------------------------------------
+ * Review Suggestions card
+ *
+ * A viewer above a scrolling queue. The list carries `nowheel` so the wheel scrolls it rather
+ * than zooming the canvas, and the rows are buttons rather than clickable `li`s so the keyboard
+ * reaches them without anything bespoke.
+ *
+ * The row's own colour says the verdict and the left edge says which row is current. Both are
+ * borders rather than fills: a tinted row under a coloured confidence reads as two signals about
+ * the same thing, and only one of them is a measurement.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  /*
+   * How wide the queue stands beside the viewer when the card is expanded. Enough for an
+   * 18-digit id, the verdict buttons and the two arrows, and no more: the picture is what the
+   * extra pixels are for.
+   */
+  --review-queue: 340px;
+}
+
+.review-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  height: 100%;
+}
+
+/*
+ * Expanded **with a viewer beside it**, the two sit side by side: the viewer takes the width and
+ * the queue keeps to a width it can be read in. `0 0 var(--review-queue)` rather than
+ * `min-content`, because the rows hold 18-digit ids and ellipsised fact lines — content-sizing
+ * them gives a column that changes width as the list is filtered, which is the one thing a list
+ * beside a viewer must not do.
+ *
+ * **Without one the queue takes the panel.** That is the ordinary case: once `Current` drives a
+ * Neuroglancer node the card's own frame stands down, and a 340px column in a 3000px panel is a
+ * sliver in an empty room. `data-viewer` is what tells the two apart. The card has no viewer in
+ * either case, so it stays a column.
+ */
+.review-body[data-compact='no'] {
+  flex-direction: row;
+  gap: 8px;
+}
+
+.review-body__viewer {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.review-body__queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.review-body[data-compact='no'][data-viewer='yes'] .review-body__queue {
+  flex: 0 0 var(--review-queue);
+  max-width: var(--review-queue);
+}
+
+/* The disclosure in the card's foot. Quiet: it is chrome, and it is on every row of every card. */
+.review-body__fold {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.review-body__fold:hover {
+  color: var(--text-secondary);
+}
+
+/*
+ * The list takes whatever height is left and scrolls inside it — **no cap of its own**. One here
+ * was what stopped a resized card and an expanded panel filling: the surrounding box grows, the
+ * list stopped at 320px, and the rest was blank. The bounds belong to the surfaces that have
+ * them: an unsized card is held by `.coda-node__body`'s own max height, a resized one by what it
+ * was dragged to, and the overlay by the backdrop.
+ */
+.review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  border-top: 1px solid var(--border);
+}
+
+/*
+ * Two rows, and the confidence spans them.
+ *
+ * The row answers two questions at once and they are not the same size. "How likely is this?"
+ * is the number somebody scans the column for, so it is large, tabular and spans both rows —
+ * one column of scores to run an eye down. "What is it?" is the id and its measurements, which
+ * are read once the eye has stopped, so they stack beside it and the second line is muted.
+ *
+ * The acts sit top-right on the first row rather than centred across both: they belong to the
+ * id above them, and a verdict button floating beside the measurements reads as being about
+ * them.
+ */
+.review-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'score id    acts'
+    'score facts facts';
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 4px 4px 4px 6px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+}
+.review-row[data-current='yes'] {
+  border-left-color: var(--accent);
+  background: var(--surface-raised);
+}
+.review-row[data-verdict='accept'] {
+  border-left-color: var(--status-ok, #4caf50);
+}
+.review-row[data-verdict='reject'] {
+  border-left-color: var(--status-error, #e05252);
+}
+.review-row[data-verdict='unsure'] {
+  border-left-color: var(--status-stale);
+}
+
+/*
+ * The click target, as a layer rather than a wrapper — see the note in `ReviewBody.tsx`.
+ *
+ * Covering the row is what lets the measurements run the full width *under* the acts: a wrapper
+ * would be one grid column and its text could never pass where the buttons start, which is what
+ * truncated the line a third of the way across an otherwise empty row.
+ */
+.review-row__pick {
+  position: absolute;
+  inset: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.review-row__score,
+.review-row__id,
+.review-row__facts {
+  /* Above the layer, so the text is selectable and the row still reads as one thing. */
+  position: relative;
+  pointer-events: none;
+}
+.review-row__score {
+  grid-area: score;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  line-height: 1.1;
+}
+.review-row__id {
+  grid-area: id;
+  /* Up one step with the score: an 11px id under a 16px number reads as a caption on it. */
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-row__facts {
+  grid-area: facts;
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-row__acts {
+  grid-area: acts;
+  justify-self: end;
+  /* Over the click layer, or the buttons would be the row's own click target. */
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.review-row__page,
+.review-row__verdict {
+  font-size: 10px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.review-row__page:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.review-row__verdict[aria-pressed='true'] {
+  color: var(--text-primary);
+  border-color: currentColor;
+}
+
+/* ---------------------------------------------------------------------------
  * Annotate card
  *
  * `.list-body` for the settings and the foot, with a table between them. The table scrolls inside

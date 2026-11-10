@@ -432,6 +432,15 @@ describe('expanded width', () => {
     expect(expandedWidth('out.viewer3d')).toBe('full')
   })
 
+  /**
+   * The exception the table exists to carry: a body whose expanded surface is a *picture*. A
+   * reading measure around a neuroglancer frame wastes the pixels somebody expanded it for.
+   */
+  it('leaves a body that holds a viewer uncapped', () => {
+    expect(expandedWidth('cortex:gallery')).toBe('full')
+    expect(expandedWidth('seam:review')).toBe('full')
+  })
+
   it('caps a tile grid and a prose body', () => {
     // `.tiles` answers a wider panel with more columns, not bigger ones.
     expect(expandedWidth('out.profile')).toBe(MEASURED_WIDTH)

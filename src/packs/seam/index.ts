@@ -2,9 +2,11 @@
  * SEAM: nodes that look for segmentation errors in a reconstruction and hand the reader somewhere
  * to fix them.
  *
- * Named for the project the models come from (`~/Github/SEAM`), which also plans the service-side
- * half of this pack — `seam:suggestions` and `seam:review`, a queue somebody else computed. What
- * is here is the other way in: run a model in this tab, now.
+ * Named for the project the models come from (`~/Github/SEAM`). Two directions of error live
+ * here and they are easy to confuse: `seam:findMerges` and `seam:affinityClusters` look for false
+ * **merges**, and their fix is a split; `seam:suggestions` reads SEAM's merge candidates, which
+ * are false **splits**, and their fix is a merge, and `seam:review` is the queue a proofreader
+ * works through to make them.
  *
  * Off by default and reached by `/seam`. It is off for a stronger reason than the other
  * optional packs: a node here downloads tens of megabytes of model weights, so it should not be
@@ -29,12 +31,14 @@
 import type { PackDefinition } from '../../core/registry'
 import { affinityClustersNode } from './affinityClusters'
 import { findMergesNode } from './findMerges'
+import { reviewNode } from './review'
+import { suggestionsNode } from './suggestions'
 
 export const seam: PackDefinition = {
   id: 'seam',
   label: 'SEAM',
   description: 'Nodes that run a model over a reconstruction to look for segmentation errors.',
   defaultOn: false,
-  glyph: 'seam:findMerges',
-  nodes: [findMergesNode, affinityClustersNode],
+  glyph: 'seam:suggestions',
+  nodes: [suggestionsNode, reviewNode, findMergesNode, affinityClustersNode],
 }

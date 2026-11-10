@@ -824,6 +824,18 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M10.2 14.5h3.6' }],
   ],
   /*
+   * A table's rows becoming points: three ruled rows on the left, dots on the right. The rows
+   * are the table and the dots are the cloud, and the gap between them is the whole statement —
+   * this node changes what the rows *are*, not what they say.
+   */
+  'core.tablePoints': [
+    ['path', { d: 'M3 6.5h6M3 12h6M3 17.5h6' }],
+    ['circle', { cx: '15.5', cy: '6', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '20', cy: '10', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '14.5', cy: '13.5', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '19', cy: '18', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+  ],
+  /*
    * Clean Skeletons' arbour, drawn as the discs it becomes: the same branching stroke faint
    * underneath, and a point at the middle of each piece of it.
    */

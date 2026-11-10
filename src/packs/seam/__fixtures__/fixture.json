@@ -1,0 +1,229 @@
+{
+ "what": "A trimmed copy of SEAM's rv2 set, for Coda's tests. Not a suggestion set.",
+ "dataset": "aedes",
+ "datastack": "wclee_aedes_brain",
+ "snapshot": "2026-11-04 16:45:00+00:00",
+ "neurons": [
+  "648518347537011321",
+  "648518347558097460",
+  "648518347622603652",
+  "648518347669157986",
+  "648518347686959617"
+ ],
+ "test_neuron": "648518347669157986",
+ "pipeline": {
+  "skeleton": {
+   "tool": "navis mesh2skeleton(method='wavefront', shave=True), heal LEAFS max 1 um",
+   "navis": "2.0.0-rc.1 (27a93c4 shave)",
+   "mesh": "drop_internals (whole mesh if <10% kept)"
+  },
+  "tips": {
+   "prune_twigs_um": 1.0,
+   "kink_path_um": 1.0,
+   "kink_deg": 60,
+   "kink_nms_um": 2.0,
+   "snap": "nearest mesh vertex",
+   "soma_mask_um": 10.0
+  },
+  "model_e": {
+   "ckpt": "E_oe3_all_s0 (FlyWire, zero-shot on Aedes)",
+   "window_radius_um": 15.0,
+   "spacing_um": 0.2,
+   "cell_um": 0.5,
+   "e_tip": "best cell logit within 1 um of the tip",
+   "e_tip_floor": -2.6701560020446777
+  },
+  "search": {
+   "cutout_half_width_um": 3.0,
+   "cutout_xy_nm": 64,
+   "roots_at": "snapshot - 1 ms",
+   "pool_max_dist_um": 0.5,
+   "top_k": 100,
+   "geometric_ranker": {
+    "features": [
+     "min_dist_um",
+     "touching",
+     "log_vol",
+     "has_shape",
+     "align",
+     "caliber_ratio",
+     "elongation",
+     "ahead"
+    ],
+    "mu": [
+     0.14567099258729616,
+     0.5472776594843076,
+     -2.6359216833779753,
+     0.8619792132587065,
+     0.6247615586422532,
+     0.9944221863531417,
+     3.3490797294083836,
+     0.11208071190066254
+    ],
+    "sd": [
+     0.13581857293706814,
+     0.49775980543752774,
+     2.1352325701576,
+     0.3449218025269661,
+     0.2723977816043073,
+     0.702259670172166,
+     2.540812620074166,
+     0.7335877324767079
+    ],
+    "w": [
+     -1.6183468438141104,
+     0.22760412424593415,
+     -0.6414330713706328,
+     1.1860256111196246,
+     0.29886524758842675,
+     -0.16102234662460013,
+     -0.2192590060673975,
+     2.7099102385634057
+    ],
+    "b": -0.6808432649699454,
+    "fitted_on": "flywire_v783 oe1 val n=200 sample_seed=0 placement=contact seed=0: 124 merges"
+   }
+  },
+  "own_tip": {
+   "own_um": 2.0,
+   "rule": "keep a candidate only if its contact is within own_um of the tip and no other tip of the neuron is nearer; geo_rank renumbered in the kept list"
+  },
+  "assessor": {
+   "ckpt": "sa2_mask_s0, s1, s2 (32 nm mask, maleCNS flyCLR backbone)",
+   "patch": "129^3 at 32 nm (Aedes z 45 -> 32 nm), centred on the contact",
+   "inputs": "masks only: union Q+C, and side labels (+1 C, -1 Q); no EM",
+   "missing_patch": "the seed's lowest score over the kept candidates (filled)"
+  },
+  "ref": {
+   "design": "X = [-geo_rank, log(vol_um3), assessor score of seed k]; logit_k = ((X - mu) / sd) @ w; logit = mean over k",
+   "seeds": [
+    {
+     "k": 0,
+     "mu": [
+      -98.47155291261137,
+      -3.399308678908845,
+      -6.5360670030256856
+     ],
+     "sd": [
+      57.31284933927063,
+      2.4183713928165798,
+      6.072073843008404
+     ],
+     "w": [
+      1.1254315579489949,
+      0.5357325666623646,
+      4.263714353138968
+     ]
+    },
+    {
+     "k": 1,
+     "mu": [
+      -98.47155291261137,
+      -3.399308678908845,
+      -8.139415537385114
+     ],
+     "sd": [
+      57.31284933927063,
+      2.4183713928165798,
+      6.54432679354424
+     ],
+     "w": [
+      1.1132548252595464,
+      0.5948639361926231,
+      4.081659266288042
+     ]
+    },
+    {
+     "k": 2,
+     "mu": [
+      -98.47155291261137,
+      -3.399308678908845,
+      -5.73452460783285
+     ],
+     "sd": [
+      57.31284933927063,
+      2.4183713928165798,
+      5.54562538843099
+     ],
+     "w": [
+      1.0863535012054537,
+      0.4862419518011188,
+      3.8758768670602195
+     ]
+    }
+   ]
+  },
+  "p_cand": "softmax of logit within the tip's list",
+  "p_tip": {
+   "columns": [
+    "segclr",
+    "e_tip"
+   ],
+   "weights": [
+    -10.1493,
+    0.8174,
+    0.9592
+   ],
+   "segclr": "per seed the best logit in the list, averaged over seeds",
+   "segclr_floor": -5.961447907038125,
+   "form": "sigmoid(w0 + w1 segclr + w2 e_tip)"
+  },
+  "show": {
+   "q": "p_tip x p_cand of the first candidate",
+   "cutoff": 0.20844381820362515,
+   "rule": "show the first candidate when q >= cutoff (calibrated: held-out neuron 15 of 15)"
+  },
+  "r": {
+   "steps_q": [
+    0.000602,
+    0.001952,
+    0.004197,
+    0.007509,
+    0.054473,
+    0.067617,
+    0.154803,
+    0.183222,
+    0.213843,
+    0.330934,
+    0.402465,
+    0.913181
+   ],
+   "steps_r": [
+    0.0,
+    0.1667,
+    0.1765,
+    0.3333,
+    0.5275,
+    0.6364,
+    0.6974,
+    0.7,
+    0.7857,
+    0.8667,
+    0.8889,
+    1.0
+   ],
+   "clip": 0.02,
+   "rule": "r = the step whose upper q edge is the first at or above q; tips without a list r = 0",
+   "tested": false
+  }
+ },
+ "checks_largest_difference": {
+  "logit": 0.0,
+  "p_cand": 2.220446049250313e-16,
+  "conf": 0.0,
+  "segclr": 0.0,
+  "p_tip": 0.0,
+  "q": 0.0,
+  "r": 0.0
+ },
+ "counts": {
+  "tips": 25,
+  "shown": 10,
+  "candidates": 1141
+ },
+ "commit": "e0fdb1b16baed7544843930592ffe08a8280af56-dirty",
+ "checks_ids": {
+  "tips_with_a_list": 2691,
+  "judged_ids": 965
+ }
+}
