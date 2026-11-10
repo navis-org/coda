@@ -21,6 +21,13 @@ const NO_EMITTER: Record<string, string> = {
     'training and inference\u2019 property the vendoring exists to keep. The answer would also ' +
     'be the notebook\u2019s GPU\u2019s. What is worth emitting is the scored windows, which ' +
     'the Table and Points outputs already are.',
+  'seam:openEnds':
+    'The same inference as Find Merges, over the same vendored sampler, and with the same ' +
+    'answer: a cell would have to fetch the weights, run onnxruntime and reproduce the seeded ' +
+    'tiling exactly, and what came back would be the notebook\u2019s GPU\u2019s. The scores ' +
+    'themselves are worth emitting and the Tips output already is them. The skeleton half *is* ' +
+    'emittable \u2014 Skeletonize Meshes and Simplify Skeletons both emit \u2014 so a reader ' +
+    'wanting the tips without the scores can build them on the canvas and export that.',
   'seam:affinityClusters':
     'Inference in the browser, over a quantised ONNX conversion of a published PyTorch checkpoint. A cell would have to fetch the original weights, run upstream\u2019s model, and then reimplement the sampler and the average-linkage cut \u2014 a fourth copy of what `scripts/affinity_reference.py` declares and `pnpm probe:affinity-parity` checks two of. The answer would also be the notebook\u2019s GPU\u2019s, not the one on the card. Where it is worth emitting is the clusters as data, which the Points and Table outputs already are.',
   'annotation:editor':

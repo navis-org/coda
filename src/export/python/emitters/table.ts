@@ -68,6 +68,7 @@ import {
   samplePlan,
   selectPlan,
   sortPlan,
+  tablePointsPlan,
 } from '../../plans/table'
 
 /** `df['col']` where the name is safe, `df[...]` otherwise — both are one idiom in pandas. */
@@ -1257,4 +1258,46 @@ registerEmitter('core.reduceMatrix', (ctx) => {
     )
   }
   return lines
+})
+
+// ---------------------------------------------------------------------------
+// Table to Points
+// ---------------------------------------------------------------------------
+
+/**
+ * Three columns read as a position, which in a notebook is a frame with `x`, `y` and `z`.
+ *
+ * **That is the convention rather than an invention**: `coda_in_volumes` already reads a cloud
+ * as `df[['x', 'y', 'z']]`, so a points frame with those three columns is what the exported
+ * notebook already means by one, and this conforms to it. The rules worth reproducing exactly
+ * are the node's own: a row whose coordinates are not three numbers has no position and goes
+ * (`to_numeric(errors='coerce')` then `dropna`, the same test as the card's "a blank is not a
+ * row at the origin"), the scale is applied so the frame is nanometres, and the coordinate
+ * columns are not carried unless they were picked, since they are the geometry now.
+ *
+ * **Two things the frame does not carry**, both named here rather than left to be noticed: the
+ * minted `row` column, which exists on the canvas because a `PointsValue`'s length lives in its
+ * attribute table and a frame's does not; and anything that would say these are nanometres,
+ * which a `DataFrame` has nowhere to put.
+ */
+registerEmitter('core.tablePoints', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.require('pandas')
+  ctx.require('numpy')
+
+  const plan = tablePointsPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+
+  const out = ctx.output('out')
+  return [
+    `${out} = ${src}[${pyList(plan.carry)}].copy()`,
+    ...plan.axes.map(
+      ({ axis, column, scale }) =>
+        `${out}[${pyStr(axis)}] = pd.to_numeric(${src}[${pyStr(column)}], errors='coerce')` +
+        (scale === 1 ? '' : ` * ${scale}`),
+    ),
+    '# A row without three *finite* numbers has no position: it is left out rather than placed',
+    '# at 0. `dropna` alone would keep an infinity, which the card and the R document both drop.',
+    `${out} = ${out}[np.isfinite(${out}[['x', 'y', 'z']]).all(axis=1)].reset_index(drop=True)`,
+  ]
 })
