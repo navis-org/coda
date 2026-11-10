@@ -99,7 +99,9 @@
     "probe:seam-e-cells": "node scripts/probe-seam-e-cells.mjs",
     "probe:seam-open-ends": "node scripts/probe-seam-open-ends.mjs",
     "probe:seam-windows-py": "node scripts/probe-seam-windows-py.mjs",
-    "probe:volume": "node scripts/probe-volume.mjs"
+    "probe:volume": "node scripts/probe-volume.mjs",
+    "probe:cutout-summary": "node scripts/probe-cutout-summary.mjs",
+    "vendor:seam-cutout": "node scripts/vendor-seam-cutout.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

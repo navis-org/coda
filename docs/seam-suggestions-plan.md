@@ -590,10 +590,54 @@ timestamp on the root lookup, the vendored summariser, then the ranker and the o
 last two being a dot product and a nearest-tip test, checked against `candidates_all`'s
 `geo_score`/`geo_rank` and `candidates`.
 
+### The EDT in Pyodide, measured (2026-11-10)
+
+The one step of the search with no fallback, measured before anything was built around it.
+**SEAM uses `scipy.ndimage.distance_transform_edt`** with `sampling=res` and
+`return_indices=True` — the indices are what give the contact point, and they allocate three more
+full-size arrays.
+
+It works, and the margin is far better than feared. At a real cutout's size (188×188×134):
+
+| | CPython | Pyodide |
+| --- | --- | --- |
+| EDT with indices | 166 ms | **190 ms** (1.15×) |
+
+And the whole vendored `summarize_cutout`, run unmodified in Pyodide on a box with the real
+14,424 supervoxels over 900 roots, returning all 19 columns:
+
+| | |
+| --- | --- |
+| EDT and the per-root reduction | 314 ms |
+| + `point_dist_um` (the slice-by-slice pass) | 445 ms |
+| + local moments and centroids, **first call in the process** | 1,207 ms |
+| the same call **warm** (`pnpm probe:cutout-summary`) | **~560 ms** |
+
+The warm number is the one to price a search with, and it corrects a first reading of this: the
+1.2 s figure was a cold call carrying scipy's and pandas' own warm-up, which a search pays once
+and not per end. So the features cost about **half** what the cutout costs to fetch (~1.2 s),
+not the same again. The synthetic `inv` is uniformly random, which is the pessimistic case for the
+`point_dist` pass (a real query root is one connected neuron, so far fewer voxels are within
+`touch_um`); the moments loop is fixed geometry and costs the same either way.
+
+**The real price is the payload, not the time.** `scipy` is a **14 MB** wheel and
+`summarize_cutout` returns a DataFrame, so `pandas` (4.2 MB) and its two dependencies come with
+it — about **19 MB** on top of the numpy Coda already loads, fetched once and cached. For
+comparison, Model E's weights are 71 MB. It is a real cost and it belongs to the node that opts
+into it, the way `runtime.ts` already makes every capability declare its own packages.
+
+Not worth reconsidering: the EDT *could* be written in JavaScript (a separable exact transform is
+about forty lines), but the rest of `summarize_cutout` cannot, and porting it is exactly the
+drift SEAM's invariant 11 and `src/pyodide/seam/VENDORED.md` exist to prevent. Four of the
+ranker's eight features come from the moments pass, so the 1.2 s is not optional either.
+
 ### What is still unknown
 
-- **Whether `scipy.ndimage`'s EDT in Pyodide is fast enough on 4.7 M voxels.** Not measured. It is
-  the one step with no fallback — `min_dist_um` is the ranker's heaviest feature (`w` = −1.62).
+- **The Pyodide heap.** After two cutouts the probe reports **537 MB** of wasm heap, which the
+  runtime grows and does not give back — `return_indices=True` alone is 95 MB of arrays per
+  call (a float64 distance and three int32 index planes). Whether that is survivable over a
+  search of many ends, beside a 71 MB model and the meshes, is not measured against Coda's own
+  memory meter. This is now the open risk the EDT's speed was expected to be.
 - **Politeness.** SEAM keeps to 4 concurrent Aedes streams and batches the root lookup per box
   (0.6 s against 14 s per supervoxel). The 8-chunk fetch is a different server (GCS) from the root
   lookup (CAVE), so the two budgets are separate; invariant 8 says cache both.
@@ -617,9 +661,16 @@ last two being a dot product and a nearest-tip test, checked against `candidates
   rank and top-1 agreement on real lists — not raw error. SEAM already says this; it is repeated
   here because Model A's parity was checked at 4e-6 and that told us nothing about whether the
   model was right.
-- **Numpy-only, vendorable code** for the search's features and the patch masks, as `canonical.py`
-  and `scan.py` were for Model A (SEAM invariant 11). Already in `src/pyodide/seam/`, hash-pinned
-  in `VENDORED.md`, so there is a place for it to go.
+- **`summarize_cutout` and `_local_moments` in a module of their own.** They are already
+  numpy/scipy/pandas only, but they live in `negatives.py`, which imports `cave`, `paths` and
+  `pre_edit` — so Coda cannot take a whole-file copy the way it does `canonical.py` and
+  `scan.py`. It takes a **slice** instead, re-cut and byte-compared by
+  `pnpm vendor:seam-cutout`, which is a working arrangement and not the right one: the script
+  exists only because the module boundary is in the wrong place. Moving the two functions into
+  (say) `seam/cutout.py` upstream would let the slice become an ordinary hash-pinned copy and
+  the script go.
+- **Numpy-only, vendorable code** for the patch masks, as `canonical.py` and `scan.py` were for
+  Model A (SEAM invariant 11). Needed before Phase 7, not before.
 
 ## What this plan does not do
 

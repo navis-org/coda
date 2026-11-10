@@ -34,7 +34,9 @@ import LINKAGE_PY from './linkage.py?raw'
 import MATCHES_PY from './matches.py?raw'
 import MESHES_PY from './meshes.py?raw'
 import NBLAST_PY from './nblast.py?raw'
+import CUTOUT_SUMMARY_PY from './cutoutSummary.py?raw'
 import SEAM_CANONICAL_PY from './seam/canonical.py?raw'
+import SEAM_CUTOUT_PY from './seam/cutout.py?raw'
 import SEAM_SCAN_PY from './seam/scan.py?raw'
 import SEAM_WINDOWS_PY from './seamWindows.py?raw'
 import SKELETONIZE_PY from './skeletonize.py?raw'
@@ -169,6 +171,24 @@ const MODULES: Record<string, PyModule> = {
     vendored: { 'seam.canonical': SEAM_CANONICAL_PY, 'seam.scan': SEAM_SCAN_PY },
     packages: ['numpy'],
     label: 'numpy · SEAM windows',
+  },
+  /*
+   * **The expensive row**, and the only one that is not numpy-and-a-wheel. `summarize_cutout`
+   * needs scipy for its exact distance transform and pandas for the frame it returns, which is
+   * a 14 MB wheel and a 4.2 MB one on top of numpy — about 19 MB with their dependencies,
+   * fetched once and cached by the browser. For scale, Model E's weights are 71 MB.
+   *
+   * It is a row of its own rather than folded into the runs above for the reason the header
+   * gives: a capability declares what it downloads, so a graph that never searches for merge
+   * candidates never pays this. Neither package can be avoided without porting SEAM's feature
+   * code, which is the drift `seam/VENDORED.md` exists to prevent — and four of the geometric
+   * ranker's eight features come out of the moments pass alone.
+   */
+  cutoutSummary: {
+    source: CUTOUT_SUMMARY_PY,
+    vendored: { 'seam.cutout': SEAM_CUTOUT_PY },
+    packages: ['numpy', 'scipy', 'pandas'],
+    label: 'numpy · scipy · pandas · SEAM cutout summary',
   },
   skeletonize: {
     source: SKELETONIZE_PY,
