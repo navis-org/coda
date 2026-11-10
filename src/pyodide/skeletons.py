@@ -101,7 +101,7 @@ def _clean_one(coords, parents, radii, labels, opts, soma):
                 ids,
                 parents,
                 coords,
-                method="ALL",
+                method=opts["healMethod"],
                 max_dist=None if max_dist <= 0 else max_dist,
             ),
             dtype=np.int64,
@@ -199,6 +199,7 @@ def coda_clean_skeletons(request, report=None):
 
     opts = {
         "heal": bool(req["heal"]),
+        "healMethod": str(req["healMethod"]),
         "healMaxDist": float(req["healMaxDist"]),
         "smooth": float(req["smooth"]),
         "method": str(req["method"]),

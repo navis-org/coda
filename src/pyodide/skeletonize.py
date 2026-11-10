@@ -53,10 +53,13 @@ is what keeps the rest identical to skeletor run on the mesh without them.
 ## Tidying up after: a shave and the radii
 
 skeletor's answer is the wavefront's, and both navis and fafbseg clean it before handing it on.
-`shave` is one of three, nested rather than combined: `bristles` is navis' `mesh2skeleton`
-(remove every one-node twig hanging off a branch point), `thorough` is fafbseg's
+`shave` names one of four **published recipes**, composed in `_SHAVES`: `bristles` is navis'
+`mesh2skeleton(shave="bristles")` (remove every one-node twig hanging off a branch point),
+`twigs` is what navis' `shave=True` does since 27a93c47 (that pass, then every terminal twig
+shorter than twice the radius of the branch it joins), and `thorough` is fafbseg's
 `skeletonize_neuron` (remove short terminal segments, and ones holding an edge of `cutoff` or
-more, until none are left, then the same bristle pass). `fix_zero_radii` is navis' separate fix
+more, until none are left, then the same bristle pass). `twigs` and `thorough` extend `bristles`
+in two independent directions, so neither contains the other. `fix_zero_radii` is navis' separate fix
 for the radius-0 nodes the wavefront leaves, mostly at leaves. All of it is applied after the
 wavefront, so with `shave="off"`, the fix off and no soma the answer is still skeletor's. The
 `scripts/probe-skeletonize.py` parity checks hold each against navis' own operations.
@@ -80,6 +83,8 @@ settled in, a parent always before its children. Rows are renumbered in that ord
 is a row number — `SkeletonGeometry.parents` — and every root precedes its subtree, which is
 what SWC wants too.
 """
+
+import warnings
 
 import numpy as np
 import navis_fastcore as fc
@@ -506,9 +511,15 @@ def _widest_row(radii, min_radius):
 #: fafbseg's thorough shave leaves alone any terminal segment this many nodes long or longer.
 _SHAVE_MAX_NODES = 10
 
-#: The shaves the card offers. `bristles` is navis' `mesh2skeleton(shave=True)`; `thorough` is
-#: fafbseg's `skeletonize_neuron(shave_skeleton=True)`, which runs the same bristle pass last.
-_SHAVES = ("off", "bristles", "thorough")
+#: A terminal twig goes when it is shorter than this many times the radius of the branch it
+#: joins (navis' `_shave_variable`, `k`).
+_SHAVE_K = 2.0
+
+#: How many nodes rootwards of the branch point that radius is the median of (navis' `n_base`).
+#: A node count rather than a distance, so it needs no units.
+_SHAVE_BASE = 10
+
+#: The shaves the card offers are `_SHAVES`, below the passes they are composed of.
 
 
 def _node_kinds(parents):
@@ -534,7 +545,7 @@ def _keep_rows(keep, positions, radii, parents, *extra):
     return (positions[keep], radii[keep], kept_parents, *(e[keep] for e in extra))
 
 
-def _shave_bristles(positions, radii, parents):
+def _shave_bristles(positions, radii, parents, cutoff=None):
     """navis' shave: one pass removing every leaf whose parent is a branch point."""
     leaf, branch = _node_kinds(parents)
     bristle = leaf.copy()
@@ -542,6 +553,127 @@ def _shave_bristles(positions, radii, parents):
     if not bristle.any():
         return positions, radii, parents
     return _keep_rows(~bristle, positions, radii, parents)
+
+
+def _edge_steps(positions, parents):
+    """Each node's distance to its parent, `0` at a root — one pass, for the shaves that measure.
+
+    Both of the shaves below need it and neither needs it per step, so it is computed once over
+    the whole skeleton. Written here rather than taken from `fc.parent_dist` because it is three
+    numpy operations and this module's other geometry is in numpy too.
+    """
+    # Spelled out rather than `np.linalg.norm` over a boolean gather, `_cast_waves`' reason one
+    # screen up: roots are a handful of rows, so the mask copies the whole array four times over.
+    # 6.04 ms against 3.06 ms at 300k nodes, and two fewer `(n, 3)` buffers — 14 MB, in wasm.
+    delta = positions - positions[np.maximum(parents, 0)]
+    step = np.sqrt(np.einsum("ij,ij->i", delta, delta))
+    step[parents < 0] = 0
+    return step
+
+
+def _terminal_twigs(step, up, leaf, branch):
+    """Every terminal twig, as `(twig_of, ends, lengths)`.
+
+    A terminal twig runs from a leaf up to the first **branch point**; one that reaches a root
+    instead is a whole branch and is not a twig at all (navis' `small_segments` filtered to
+    `seg[0] in leafs and seg[-1] in bps`). `twig_of[i]` is the twig row `i` belongs to, or -1 —
+    the branch point itself belongs to none, since it is the rest of the neuron's. `lengths` is
+    the geodesic length including the step onto the branch point, as `segment_lengths` measures.
+
+    **Walked here rather than filtered out of `fc.break_segments`**, which is how navis gets the
+    same list, and the reason is the shape of the answer rather than the walk: that call hands
+    back a Python list of arrays, so the filtering and the length sums become a Python loop over
+    every segment in the skeleton. This walks every leaf at once, and touches only the twigs' own
+    nodes — a node lies on at most one terminal twig, every node below a branch point having
+    exactly one child. The live set is **compacted** each step rather than masked, so the cost is
+    the total length of the twigs and not the longest walk times the number of leaves: a few
+    leaves sitting on long unbranched runs would otherwise keep the loop going for thousands of
+    iterations, re-scanning every leaf each time.
+
+    `step` is `_edge_steps`' and `up` the sentinel-padded parent array, both from the caller. The
+    sentinel is what lets a walk that runs out of ancestors stop rather than read `parents[-1]`,
+    which numpy serves as the last node of the neuron.
+    """
+    n = len(step)
+    start = np.flatnonzero(leaf)
+    twig_of = np.full(n, -1, np.int64)
+    lengths = np.zeros(len(start), np.float64)
+    ends = np.full(len(start), -1, np.int64)
+    # The twig rows still walking, and where each has got to — two compact arrays in step.
+    at = np.arange(len(start), dtype=np.int64)
+    cur = start
+    # Padded alongside `up`, so the row above a root can be asked about like any other.
+    above = np.append(branch, False)
+    while len(at):
+        twig_of[cur] = at
+        parent = up[cur]
+        # `step` is 0 at a root, so a walk that ran off the top adds nothing on its last step.
+        lengths[at] += step[cur]
+        rooted = parent == n
+        stop = rooted | above[parent]
+        landed = stop & ~rooted
+        ends[at[landed]] = parent[landed]
+        at = at[~stop]
+        cur = parent[~stop]
+    # Twigs that ended at a root are not twigs; drop their claims. Through a gather rather than
+    # `np.isin`, which sorts both sides: an unclaimed node's -1 reads the appended False.
+    orphan = ends < 0
+    if orphan.any():
+        twig_of[np.append(orphan, False)[twig_of]] = -1
+    return twig_of, ends, lengths
+
+
+def _shave_variable(positions, radii, parents, cutoff=None, k=_SHAVE_K, n_base=_SHAVE_BASE):
+    """navis' `_shave_variable`: terminal twigs shorter than `k` radii of the branch they join.
+
+    A false tip on a thick process is typically a twig running from the axis of that process out
+    to its surface, so its length is about the radius of the branch it comes off — well under any
+    fixed prune, and obvious only relative to local thickness. The cut-off therefore scales with
+    that thickness rather than being a length.
+
+    The radius is the median over `n_base` nodes from the branch point rootwards. A branch point
+    whose window is all NaN, or whose radius is zero, has no scale to go by and is left alone —
+    `_fix_zero_radii` runs after the shaves, so a zero here is real.
+    """
+    # `k` and `n_base` are arguments to mirror navis' signature; `_SHAVES` calls neither.
+    leaf, branch = _node_kinds(parents)
+    if not leaf.any():
+        return positions, radii, parents
+
+    n = len(parents)
+    # The sentinel row both walks below step onto when they run out of ancestors: numpy would
+    # read a bare -1 as the last node, which is some unrelated part of the neuron.
+    up = np.append(parents, n)
+    up[up < 0] = n
+    twig_of, ends, lengths = _terminal_twigs(_edge_steps(positions, parents), up, leaf, branch)
+    rows = np.flatnonzero(ends >= 0)
+    if not len(rows):
+        return positions, radii, parents
+
+    # Each kept twig's branch point walked rootwards in lockstep, collecting radii. Only the kept
+    # ones: a leaf whose walk reached a root cannot be dropped whatever its base, and the
+    # `nanmedian` below is the expensive part of this pass.
+    padded = np.append(np.asarray(radii, np.float64), np.nan)
+    window = np.empty((len(rows), n_base), np.float64)
+    cur = ends[rows]
+    for i in range(n_base):
+        window[:, i] = padded[cur]
+        cur = up[cur]
+    # Zero where there is no twig at all, so `base > 0` below covers both that and a NaN window.
+    base = np.zeros(len(ends))
+    with warnings.catch_warnings():
+        # A branch point whose whole window is NaN simply has no scale to go by: the NaN comes
+        # back out of `nanmedian` and fails both tests below, NaN comparing false either way.
+        # navis silences the same warning in the same place.
+        warnings.simplefilter("ignore", RuntimeWarning)
+        base[rows] = np.nanmedian(window, axis=1)
+
+    drop = (base > 0) & (lengths < k * base)
+    if not drop.any():
+        return positions, radii, parents
+    # A node on no twig holds -1, which reads the appended False, so it is never cut.
+    cut = np.append(drop, False)[twig_of]
+    return _keep_rows(~cut, positions, radii, parents)
 
 
 def _shave_thorough(positions, radii, parents, cutoff, within=None):
@@ -562,12 +694,7 @@ def _shave_thorough(positions, radii, parents, cutoff, within=None):
     """
     if within is None:
         within = np.ones(len(parents), dtype=bool)
-    has_parent = parents >= 0
-    step = np.zeros(len(parents))
-    step[has_parent] = np.linalg.norm(
-        positions[has_parent] - positions[parents[has_parent]], axis=1
-    )
-    long = step >= cutoff
+    long = _edge_steps(positions, parents) >= cutoff
 
     while True:
         leaf, branch = _node_kinds(parents)
@@ -625,6 +752,38 @@ def _fix_zero_radii(radii, parents):
 _SOMA_SHAVE_REACH = 3.0
 
 
+#: The shaves the card offers, **as the passes each one runs**, in order.
+#:
+#: A composition rather than a list of names, because the two used to be separate and a name is
+#: the thing a card saves: a mode spelled in the allow-list but forgotten in the chain below ran
+#: the bristle pass and nothing else, which is a plausible neuron and no error. Here a name that
+#: composes nothing cannot be written, and the validation and the dispatch are one object.
+#:
+#: `bristles` is navis' `mesh2skeleton(shave="bristles")` — the single-node pass alone, which was
+#: all `shave=True` did until navis 27a93c47. `twigs` is what `shave=True` does now: that pass,
+#: then `_shave_variable`. `thorough` is fafbseg's `skeletonize_neuron(shave_skeleton=True)`,
+#: which runs the bristle pass last.
+#:
+#: Two of them extend `bristles` in **independent** directions rather than nesting: fafbseg's
+#: pass holds nothing of navis' radius-based one, so `thorough` keeps twigs `twigs` removes.
+#: `probe-skeletonize.py` holds each against the code it was taken from for that reason — there
+#: is no ordering between them to assert instead.
+#:
+#: Four names rather than changing what `bristles` means, because a saved graph holds this
+#: string: a card that quietly started shaving twigs would change every skeleton anybody had
+#: already made, under a word that used to mean something narrower.
+#:
+#: Every pass takes `(positions, radii, parents, cutoff)` so they compose; only fafbseg's reads
+#: the cutoff.
+_SHAVES = {
+    "off": (),
+    "bristles": (_shave_bristles,),
+    "twigs": (_shave_bristles, _shave_variable),
+    "thorough": (_shave_thorough, _shave_bristles),
+}
+
+
+
 def _tidy(
     positions, radii, parents, shave, cutoff, fix_zero_radii, soma=-1, soma_radius=0.0,
     collapsed=False,
@@ -643,10 +802,12 @@ def _tidy(
         reach = _SOMA_SHAVE_REACH * soma_radius
         near = ((positions - at) ** 2).sum(axis=1) <= reach * reach
         positions, radii, parents = _shave_thorough(positions, radii, parents, cutoff, near)
-    if shave == "thorough":
-        positions, radii, parents = _shave_thorough(positions, radii, parents, cutoff)
-    if shave in ("bristles", "thorough"):
-        positions, radii, parents = _shave_bristles(positions, radii, parents)
+    # In `_SHAVES`' order, which is each recipe's own — navis runs the bristle pass first and
+    # fafbseg runs it last, and for `twigs` the order is load-bearing: a one-node bristle is a
+    # twig of a single edge, so removing those first leaves `_shave_variable` measuring branch
+    # points that are still there.
+    for shave_pass in _SHAVES[shave]:
+        positions, radii, parents = shave_pass(positions, radii, parents, cutoff)
     if fix_zero_radii:
         radii = _fix_zero_radii(radii, parents)
     if at is not None:

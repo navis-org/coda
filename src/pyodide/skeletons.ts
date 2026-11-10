@@ -49,6 +49,8 @@ export type CleanSkeletonsRequest = {
 
   /** Reconnect the fragments a reconstruction arrived in. */
   heal: boolean
+  /** Which nodes a healing bridge may land on. */
+  healMethod: HealMethod
   /** Longest bridge to build while healing; `0` means no limit. */
   healMaxDist: number
   /** Gaussian kernel width along the neurite; `0` leaves the coordinates alone. */
@@ -59,6 +61,16 @@ export type CleanSkeletonsRequest = {
   /** Keep one node in every `factor`, for `downsample`. */
   factor: number
 }
+
+/**
+ * Which nodes a healing bridge is allowed to end on — fastcore's `heal_skeleton` `method`.
+ *
+ * `ALL` considers every node of both fragments and so finds the genuinely shortest bridge.
+ * `LEAFS` only lets a bridge start and end at a leaf or a root, which is both faster and a
+ * different claim about the data: a fragment that broke mid-neurite reattaches at its own end
+ * rather than sideways onto the middle of the piece it belongs to.
+ */
+export type HealMethod = 'ALL' | 'LEAFS'
 
 export interface CleanSkeletonsResult {
   points: Float32Array
