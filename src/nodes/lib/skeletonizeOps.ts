@@ -55,12 +55,21 @@ export const RADIUS_AGGS = [
 ] satisfies (EnumOption & { value: RadiusAgg })[]
 
 /**
- * The shaves, nested rather than combined: thorough runs the bristle pass last. The labels say what
- * goes, since "bristle" is a word from the code people reading the card have not met.
+ * The shaves: four **published pipelines**, named after where each one comes from, not four
+ * points on a severity ramp. `twigs` and `thorough` are two independent extensions of
+ * `bristles` — fafbseg's pass does not contain navis' radius-based one — so Thorough is not a
+ * superset of Twigs and keeps twigs that Twigs removes. The labels say what goes, since
+ * "bristle" is a word from the code people reading the card have not met.
+ *
+ * `twigs` is what navis' `shave=True` means since 27a93c47, and `bristles` is what it meant
+ * before. Both are offered rather than one replacing the other, because this string is saved in
+ * a graph: a card that quietly started shaving twigs would change every skeleton anybody had
+ * already made, under a word that used to mean something narrower.
  */
 export const SHAVES = [
   { value: 'off', label: 'Off — skeletor’s output as it is' },
-  { value: 'bristles', label: 'Bristles — one-node twigs (navis)' },
+  { value: 'bristles', label: 'Bristles — one-node twigs only' },
+  { value: 'twigs', label: 'Twigs — bristles, then twigs short for their branch (navis)' },
   { value: 'thorough', label: 'Thorough — short twigs, repeatedly (fafbseg)' },
 ] satisfies (EnumOption & { value: Shave })[]
 

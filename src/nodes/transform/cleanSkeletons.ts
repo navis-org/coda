@@ -90,6 +90,20 @@ registerNode({
       help: 'Join disconnected fragments with the shortest bridges. Off by default because some skeletons genuinely are several pieces.',
     },
     {
+      id: 'healMethod',
+      kind: 'enum',
+      label: 'Bridge from',
+      default: 'ALL',
+      // Added after the node shipped, and the stored absence means what the card used to do.
+      absentMeans: 'ALL',
+      options: [
+        { value: 'ALL', label: 'any node — the shortest bridge there is' },
+        { value: 'LEAFS', label: 'leaves and roots only — a fragment joins end to end' },
+      ],
+      visibleIf: (params) => params.heal === true,
+      help: 'Where a bridge may land. Any node finds the shortest join, which can attach a fragment sideways onto the middle of another. Leaves and roots only joins the loose ends to each other, which is usually what a broken neurite wants.',
+    },
+    {
       id: 'healMaxDist',
       kind: 'number',
       label: 'Longest bridge (µm)',

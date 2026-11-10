@@ -189,6 +189,18 @@ proxy it came from, while every proxy taken is still destroyed where it was take
   lands in 153 ms, and the next run re-boots in 1.4 s because the ten megabytes are cached by
   then. The same missing headers are why it is **single-threaded** — `get_num_threads()` is 1 —
   so fastcore's headline multi-core speed is not available here whatever the backend.
+
+  **What that costs, measured** (2026-11-10, `fc.drop_internals` on a 3.7 M-face Aedes neuron at
+  the card's defaults): 5.5 s natively on 14 cores, **46.6 s natively on one thread**, **98 s in
+  Pyodide**. So the headers are worth about 8.5x and wasm itself about 2x, and the first of those
+  is the one worth knowing: the gap is overwhelmingly threads, not the runtime. `os.cpu_count()`
+  is 1 inside Pyodide and passing `threads=4` changes nothing (94 s), so the wheel is not
+  secretly able to either — lifting this needs a threaded Pyodide build **and** a threaded wheel
+  **and** the headers, not just the headers.
+
+  The lever that is available is the work itself: at `n_rays=8` the same call is **43.6 s** and
+  keeps 3,076,278 faces against 3,106,753 — a 1% difference in the surface for 2.2x the speed —
+  and `iterations=2` is 66.8 s for a surface within 0.2%.
 - **Nothing is guarded that fastcore already handles.** Checked against the wheel rather than
   assumed: it clamps `k` to the point count, resamples a multi-rooted fragment with both roots
   surviving, and accepts a one-point neuron. So `dotpropSetFrom` drops nothing — a filtered set
@@ -697,6 +709,18 @@ Three things about them are worth knowing before changing either:
   scaled, so nothing round-trips through a second scale. `checkCleanUnits` refuses voxel
   coordinates, but **only where a distance is actually in play**: keeping every Nth node counts
   hops and means the same thing in either unit.
+- **A healing bridge's two ends are a decision, not a detail.** `Bridge from` is fastcore's
+  `heal_skeleton` `method`, crossing as the word it spells: `ALL` considers every node of both
+  fragments and so finds the genuinely shortest join, which can land in the *middle* of a
+  neurite; `LEAFS` lets a bridge start and end only on a leaf or a root, so a fragment that broke
+  mid-cable reattaches end to end. The difference is measured in `probe-skeletons.mjs` on a
+  T-shaped forest — `ALL` takes a 2 µm bridge onto the middle node, `LEAFS` 2.24 µm onto an end —
+  because the shared fixture's two fragments meet leaf to root and every method bridges the same
+  pair there. SEAM's tip pipeline heals with `LEAFS` and a 1 µm cap for exactly this reason: a
+  bridge landing mid-neurite invents a branch point where an open end should be, and two of
+  thirteen misses in its own review were a 3–4 µm healing edge sitting where the tip was. The
+  default stays `ALL`, with `absentMeans: 'ALL'` so a graph saved before the control existed keeps
+  what it did.
 
 **`detail` is dropped wherever the face count could have moved.** Not only because the triangle
 count would be stale — `detailNote` reads `decimated` as *"this source publishes one level of
@@ -814,7 +838,7 @@ the top of `skeletor.post`, which `import skeletor` imports. About 22 MB on top 
 then one package that cannot load. But with navis-fastcore installed, skeletor's wavefront path
 calls fastcore for every graph step — unique edges, components, the BFS, level-set components,
 vertex contraction, dotprops, the spanning tree, the orientation — and every one of those is in
-the 0.13.0 wheel Coda already pins. So the module is that path with trimesh and pandas cut out:
+the 0.13.2 wheel Coda already pins. So the module is that path with trimesh and pandas cut out:
 the same two packages as every other capability, **nothing to download** on a runtime that has
 run anything else.
 
@@ -848,13 +872,31 @@ groupby becomes `bincount` and `reduceat` — pandas' mean is Kahan-summed, so a
 in the last bit, and the quantiles interpolate linearly as pandas does.
 
 **Two of skeletor's callers clean its answer, and the node offers both.** navis'
-`mesh2skeleton(shave=True)` removes every one-node twig hanging off a branch point, and then —
+`mesh2skeleton` removes every one-node twig hanging off a branch point, and then —
 unconditionally — gives every radius-0 non-root node half its parent's radius. fafbseg's
 `skeletonize_neuron(shave_skeleton=True)` first removes, repeatedly, terminal segments of at most
 two nodes or holding an edge of 1 µm or more (never one of ten nodes or more), then runs the same
-bristle pass. So the card has `Shave` (`off`/`bristles`/`thorough`, nested rather than combined)
-and `Fix zero radii` as a separate toggle, a radius fix not being a shave; both default on, as in
-navis, and both off is skeletor's answer. The 1 µm is fafbseg's and tuned on fly, so it is an
+bristle pass. So the card has `Shave` and `Fix zero radii` as a separate toggle, a radius fix not
+being a shave; both default on, as in navis, and both off is skeletor's answer.
+
+**`Shave` is four published recipes, not a severity ramp.** navis' `shave` went three-valued in
+27a93c477: `"bristles"` is the one-node pass alone, which is all `shave=True` used to do, and
+`True` now runs that and then `_shave_variable` — every *terminal twig* (leaf up to the first
+branch point) shorter than twice the median radius of the ten nodes rootwards of that branch
+point. The reasoning is that a false tip on a thick process is a twig running from the axis out to
+the surface, so its length is about the radius of the branch it comes off: under any fixed prune,
+and visible only relative to local thickness. Coda's `twigs` is that pair and `bristles` the old
+behaviour, kept because the card's value is saved in a graph — a word that quietly started
+shaving twigs would change every skeleton anybody had already made. `twigs` and `thorough` are
+**two independent extensions of `bristles`**: fafbseg's pass holds nothing of navis' radius-based
+one, so Thorough keeps twigs Twigs removes, and there is no ordering between them for a test to
+assert. `probe-skeletonize.py` therefore drives both of its loops off `_SHAVES` — so a fifth mode
+cannot be added without a parity line — and holds each mode against the code it was taken from:
+on skeletor's example mesh, off 1,260 nodes, bristles 1,051, twigs 1,022, thorough 659, each
+matching navis or fafbseg node for node. The twig walk is hand-vectorised rather than
+`fc.break_segments` filtered the way navis does it, because that call hands back a Python list of
+arrays; the walk compacts its live set each step, so it costs the total twig length rather than
+the longest walk times the number of leaves. The 1 µm is fafbseg's and tuned on fly, so it is an
 advanced control (`Long edge`), shown wherever it is read — `thorough`, and `Clean up soma`'s
 shave around the soma — and, like the soma radius, refused on voxel coordinates by
 `checkCleanUnits` (`usesDistance`). Three things the parity probe found worth
@@ -864,7 +906,9 @@ test covers **the segment's end node too**, whose edge is not part of the segmen
 fafbseg's own 1 µm neither the long-edge rule nor the ten-node cap changes anything on skeletor's
 example mesh, so the probe also compares at 200 and 150 nm, where both do. Each is checked against
 navis' `mesh2skeleton` and fafbseg's shave loop run on a navis neuron as fafbseg writes it, and
-the notebook's `coda_tidy_skeleton` against the module.
+the notebook's `coda_tidy_skeleton` against the module — which is the check that matters most, the
+notebook's shave chain being a second implementation that fails *open*: a mode its `if` ladder did
+not know would have skipped the shave entirely and still produced a plausible neuron.
 
 **The soma: labelled from the source, cleaned up on request, detected as a last resort.**
 `MeshGeometry.soma` is the source's soma position in the mesh's frame — neuPrint's

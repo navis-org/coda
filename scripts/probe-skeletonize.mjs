@@ -202,7 +202,15 @@ const empty = { vertices: [], faces: [] }
   // trees with leaves to work on.
   const cross = joined(tube(), tube({ x0: 2000, length: 2000, rings: 20 }))
   const counts = {}
-  for (const shave of ['off', 'bristles', 'thorough']) {
+  // The names are restated rather than read off the module — the probe holds the module to what
+  // the card offers, the `radiusAgg` loop's rule — and then pinned to it, so a mode added to one
+  // and not the other is a failure here rather than a mode nothing in wasm ever runs.
+  const shaves = ['off', 'bristles', 'twigs', 'thorough']
+  check(
+    `the shaves this probe runs are the module's (${shaves.join(', ')})`,
+    String(py.runPython('list(_SHAVES)').toJs()) === String(shaves),
+  )
+  for (const shave of shaves) {
     const out = skeletonize(`shave ${shave}`, [cross], { shave, fixZeroRadii: true })
     if (!out) continue
     counts[shave] = out.parents.length
@@ -212,7 +220,17 @@ const empty = { vertices: [], faces: [] }
     }
     check(`shave ${shave}: no non-root node left at radius 0 (${zero})`, zero === 0)
   }
-  console.log(`shave counts         off ${counts.off}, bristles ${counts.bristles}, thorough ${counts.thorough}`)
+  console.log(
+    `shave counts         off ${counts.off}, bristles ${counts.bristles}, ` +
+      `twigs ${counts.twigs}, thorough ${counts.thorough}`,
+  )
+  // `twigs` is the bristle pass plus another, so it can only take more. `thorough` and `twigs`
+  // are *not* comparable — fafbseg's pass holds nothing of navis' radius-based one — so there is
+  // deliberately no check between them.
+  check(
+    `twigs removes at least as much as bristles (${counts.twigs} <= ${counts.bristles})`,
+    counts.twigs <= counts.bristles,
+  )
   check(`shaves only remove: off ${counts.off} ≥ bristles ${counts.bristles} ≥ thorough ${counts.thorough}`,
     counts.off >= counts.bristles && counts.bristles >= counts.thorough)
 }

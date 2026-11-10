@@ -113,6 +113,7 @@ function fixture() {
 
 const DEFAULTS = {
   heal: false,
+  healMethod: 'ALL',
   healMaxDist: 0,
   smooth: 0,
   method: 'none',
@@ -122,28 +123,40 @@ const DEFAULTS = {
 
 const run = py.globals.get('coda_clean_skeletons')
 
-function clean(label, overrides) {
-  const { points, parents, radii, compartments, offsets } = fixture()
-  const notes = []
+/**
+ * One call across the bridge: the request padded with the defaults, the proxy read and freed.
+ *
+ * Shared so that a field added to `CleanSkeletonsRequest` is added here once — `healMethod` was
+ * the field that found this, having to be written into two request literals in this file.
+ */
+function callClean(label, request, notes = []) {
   const proxy = attempt(`${label}: the call itself`, () =>
-    run(
-      {
-        points,
-        parents,
-        radii,
-        compartments,
-        offsets,
-        // No soma on any of them (`-1`), so a heal keeps the root fastcore picked.
-        somas: new Int32Array(offsets.length - 1).fill(-1),
-        ...DEFAULTS,
-        ...overrides,
-      },
-      (f, note) => notes.push(`${f.toFixed(2)} ${note ?? ''}`),
-    ),
+    run({ ...DEFAULTS, ...request }, (f, note) => notes.push(`${f.toFixed(2)} ${note ?? ''}`)),
   )
   if (!proxy) return undefined
   const out = proxy.toJs({ dict_converter: Object.fromEntries })
   proxy.destroy()
+  return out
+}
+
+function clean(label, overrides) {
+  const { points, parents, radii, compartments, offsets } = fixture()
+  const notes = []
+  const out = callClean(
+    label,
+    {
+      points,
+      parents,
+      radii,
+      compartments,
+      offsets,
+      // No soma on any of them (`-1`), so a heal keeps the root fastcore picked.
+      somas: new Int32Array(offsets.length - 1).fill(-1),
+      ...overrides,
+    },
+    notes,
+  )
+  if (!out) return undefined
 
   /*
    * The three lengths and the four parent arrays. Every one of these is a failure that would
@@ -199,6 +212,15 @@ function checkTopology(label, out) {
   check(`${label}: the empty neuron stayed empty`, out.offsets[4] === out.offsets[3])
 }
 
+/** Roots in one neuron's slice — what every healing case asks about. */
+function rootsIn(out, neuron) {
+  let roots = 0
+  for (let i = out.offsets[neuron]; i < out.offsets[neuron + 1]; i++) {
+    if (out.parents[i] === -1) roots += 1
+  }
+  return roots
+}
+
 /** Nodes per neuron, from the offsets. */
 const counts = (out) => Array.from(out.offsets).slice(1).map((v, i) => v - out.offsets[i])
 
@@ -217,9 +239,7 @@ const counts = (out) => Array.from(out.offsets).slice(1).map((v, i) => v - out.o
 {
   const out = clean('heal', { heal: true })
   if (out) {
-    let roots = 0
-    for (let i = out.offsets[2]; i < out.offsets[3]; i++) if (out.parents[i] === -1) roots += 1
-    check('heal: the forest came back as one rooted tree', roots === 1)
+    check('heal: the forest came back as one rooted tree', rootsIn(out, 2) === 1)
     check('heal: the node count is unchanged', String(counts(out)) === '10,6,4,0')
   }
 }
@@ -227,11 +247,66 @@ const counts = (out) => Array.from(out.offsets).slice(1).map((v, i) => v - out.o
 {
   const out = clean('heal, 1 µm limit', { heal: true, healMaxDist: 1 * UM })
   if (out) {
-    let roots = 0
-    for (let i = out.offsets[2]; i < out.offsets[3]; i++) if (out.parents[i] === -1) roots += 1
     // The gap is 9 µm. A limit that let this through would be a limit doing nothing.
-    check('heal, 1 µm limit: the 9 µm gap was left unbridged', roots === 2)
+    check('heal, 1 µm limit: the 9 µm gap was left unbridged', rootsIn(out, 2) === 2)
   }
+}
+
+/*
+ * `Bridge from`, which the shared fixture cannot show: its two fragments meet leaf to root, so
+ * every method bridges the same pair. This one is a T — the nearest node on the far fragment is
+ * an *internal* one — and that is the whole of the difference. SEAM heals its tip skeletons with
+ * `LEAFS` deliberately: a bridge landing mid-neurite invents a branch point where a tip should be.
+ *
+ * Fragment A is a chain along x; node 1 is its middle. Fragment B hangs 2 µm above node 1, so
+ * `ALL` reaches node 1 at 2 µm and `LEAFS`, which may only land on a leaf or a root, takes 2.24 µm
+ * to node 0 or node 2 instead.
+ */
+{
+  // Through `pack`, like every other shape here: a flat coordinate literal hides a miscount.
+  const T = pack([
+    {
+      xyz: [
+        [0, 0, 0], // fragment A: root
+        [UM, 0, 0], // its middle
+        [2 * UM, 0, 0], // its leaf
+        [UM, 2 * UM, 0], // fragment B, 2 µm above A's middle
+        [UM, 3 * UM, 0],
+      ],
+      parents: [-1, 0, 1, -1, 3],
+    },
+  ])
+  const bridgedTo = (healMethod) => {
+    const out = callClean(`bridge from ${healMethod}`, {
+      points: T.points,
+      parents: T.parents.slice(),
+      radii: new Float32Array(T.total).fill(50),
+      compartments: new Uint8Array(T.total),
+      offsets: T.offsets,
+      somas: Int32Array.from([-1]),
+      heal: true,
+      healMethod,
+    })
+    if (!out) return undefined
+    check(
+      `bridge from ${healMethod}: the two fragments came back as one tree`,
+      rootsIn(out, 0) === 1,
+    )
+    // The one edge that crosses between the fragments, named by the end it landed on in A.
+    const landed = []
+    for (let i = 0; i < 5; i++) {
+      const parent = out.parents[i]
+      if (i >= 3 && parent >= 0 && parent < 3) landed.push(parent)
+      if (i < 3 && parent >= 3) landed.push(i)
+    }
+    check(`bridge from ${healMethod}: exactly one bridge was built`, landed.length === 1)
+    return landed[0]
+  }
+
+  const all = bridgedTo('ALL')
+  const leafs = bridgedTo('LEAFS')
+  check('bridge from ALL: took the shortest bridge, onto the middle node', all === 1)
+  check('bridge from LEAFS: kept off the middle node', leafs === 0 || leafs === 2)
 }
 
 {

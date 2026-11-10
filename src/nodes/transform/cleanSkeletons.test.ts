@@ -34,6 +34,7 @@ import {
   cleanRequestFrom,
   emptiedItems,
   isNoOp,
+  skeletonCleanParamsFrom,
   skeletonsFromResult,
   usesDistance,
 } from '../lib/cleanOps'
@@ -49,6 +50,7 @@ const mockedRun = vi.mocked(runCleanSkeletons)
 
 const OFF: SkeletonCleanParams = {
   heal: false,
+  healMethod: 'ALL',
   healMaxDist: 0,
   smooth: 0,
   method: 'none',
@@ -171,6 +173,26 @@ describe('cleanOps — the flattening', () => {
     expect(request.smooth).toBe(2 * NM_PER_UM)
     expect(request.healMaxDist).toBe(10 * NM_PER_UM)
     expect(request.spacing).toBe(0.5 * NM_PER_UM)
+  })
+
+  /**
+   * `Bridge from` is a word fastcore reads, so it crosses as the word and not as a flag. The
+   * measured difference is in `probe-skeletons.mjs`: `ALL` lands a bridge on whatever node is
+   * nearest, `LEAFS` only on a leaf or a root. SEAM's tip pipeline needs the second, and a graph
+   * saved before this control existed must keep the first.
+   */
+  it('carries the healing method across as fastcore spells it', () => {
+    expect(cleanRequestFrom(skeletonsFixture(), { ...OFF, heal: true }).healMethod).toBe('ALL')
+    expect(
+      cleanRequestFrom(skeletonsFixture(), { ...OFF, heal: true, healMethod: 'LEAFS' })
+        .healMethod,
+    ).toBe('LEAFS')
+    expect(
+      skeletonCleanParamsFrom({
+        ...defaultParams(requireNodeDef('neuron.cleanSkeletons')),
+        heal: true,
+      }).healMethod,
+    ).toBe('ALL')
   })
 
   it('builds its own buffers rather than handing over the upstream ones', () => {

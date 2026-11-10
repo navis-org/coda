@@ -19,8 +19,10 @@
  * ## Tidying up after
  *
  * Both of skeletor's main callers clean its answer before handing it on, and the node offers the
- * same: `Shave` is navis' `mesh2skeleton` bristle pass or fafbseg's `skeletonize_neuron` thorough
- * one (which ends with the bristle pass, so the two nest), and `Fix zero radii` is navis' fix for
+ * same: `Shave` names one of four published recipes — navis' bristle pass, navis' current
+ * `shave=True` (that pass and then its radius-based twig pass), or fafbseg's `skeletonize_neuron`
+ * one, which ends with the bristle pass. The last two extend the first in independent
+ * directions, so neither contains the other. `Fix zero radii` is navis' fix for
  * the radius-0 nodes the wavefront leaves at tips. Both default on, as they do in navis; switched
  * off, with no soma from the source, the answer is skeletor's. The thorough shave's long-edge
  * cutoff and the soma radius are the card's distances, so either in use is refused on voxel
@@ -74,8 +76,8 @@ registerNode({
   category: 'transform',
   description: 'Turn neuron meshes into skeletons, using the wavefront method.',
   guide:
-    "Skeletonizes each mesh with skeletor's wavefront method, then shaves off the one-node " +
-    'twigs it leaves along the backbone, as navis does. Where the dataset knows where the soma ' +
+    "Skeletonizes each mesh with skeletor's wavefront method, then shaves off the short side " +
+    'twigs it leaves along the backbone — `Shave` picks which recipe. Where the dataset knows where the soma ' +
     'is, the soma is labelled and each skeleton rooted there; `Clean up soma` also clears the ' +
     'tangle the method leaves inside it. A mesh in several disconnected pieces becomes a ' +
     'skeleton with several roots; `Min fragment size` drops small pieces first, and Clean ' +
@@ -120,7 +122,7 @@ registerNode({
       label: 'Shave',
       default: 'bristles',
       options: SHAVES,
-      help: 'Remove the short side twigs the wavefront leaves along the backbone. Bristles removes one-node twigs, as navis does; Thorough also removes short twigs and ones with a long edge, repeating until none are left, as fafbseg does.',
+      help: 'Remove the short side twigs the wavefront leaves along the backbone. Each option is a published recipe rather than a stronger version of the one above it. Bristles removes one-node twigs. Twigs does that and then removes every terminal twig shorter than twice the radius of the branch it joins, which is what navis does today. Thorough instead removes short twigs and ones with a long edge, repeating until none are left, as fafbseg does — it is not a superset of Twigs.',
     },
     {
       id: 'shaveCutoff',

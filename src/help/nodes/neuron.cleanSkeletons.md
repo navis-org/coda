@@ -31,10 +31,12 @@ The work runs in the in-browser Python runtime (navis-fastcore), so the first ru
 Skeletons from a segmentation, and many from CATMAID, come in several pieces. Most measurements walk the tree from its root, so a fragment that isn't connected is simply missed. `Heal fragments` joins the pieces with the shortest possible bridges.
 
 ```coda-params
-neuron.cleanSkeletons: heal, healMaxDist
+neuron.cleanSkeletons: heal, healMethod, healMaxDist
 ```
 
 With `Longest bridge` at 0 you always get one tree, which can mean joining a fragment that belongs to a different neuron. Set a limit (e.g. 5 µm) to leave distant fragments alone.
+
+`Bridge from` says where a bridge is allowed to land. With `any node` you get the shortest join there is, which can attach a loose piece sideways onto the middle of another neurite. With `leaves and roots only` the loose ends are joined to each other — usually what you want for a neurite that broke in two, and the safer choice when the point of the exercise is to find open ends.
 
 If the skeleton has a soma, the healed tree is rooted there.
 

@@ -10,12 +10,15 @@ two should agree on every node: positions exactly, parents exactly, radii to the
 skeletor is imported, because Pyodide has none and skeletor otherwise merges vertices into nodes
 with its `unique` rather than numpy's.
 
-Run against skeletor 1.3.x / navis-fastcore 0.13.0, on skeletor's bundled example mesh.
+Run against skeletor 1.3.x / navis 2.0.0-rc.1 / navis-fastcore 0.13.2, on skeletor's bundled
+example mesh. navis' version is named because the shave modes are held against *its* passes,
+and `shave=True` changed meaning in 27a93c477.
 """
 
 import importlib.util
 import json
 import sys
+import warnings
 from types import SimpleNamespace
 
 import numpy as np
@@ -223,13 +226,14 @@ for threshold in (0, MIN_FRAGMENT):
 # cutoff where the thorough rules bite, and on the empty skeleton a mesh with nothing left gives.
 start = source.index("def coda_tidy_skeleton")
 end = source.index("\n\n\ndef ", source.index("def _coda_shave_thorough"))
-tidy_helpers = {"np": np, "pd": pd}
+tidy_helpers = {"np": np, "pd": pd, "warnings": warnings}
 exec(source[start:end], tidy_helpers)
 xyz, r, p, _ = coda._skeletonize_one(verts, faces, 1, 1, "mean")
 skeleton = pd.DataFrame(
     {"node_id": np.arange(len(p)), "parent_id": p, "x": xyz[:, 0], "y": xyz[:, 1], "z": xyz[:, 2], "radius": r}
 )
-for shave in ("off", "bristles", "thorough"):
+# Driven off the module's own list, so a shave mode cannot be added without a parity line.
+for shave in coda._SHAVES:
     out = tidy_helpers["coda_tidy_skeleton"](skeleton, shave=shave, cutoff=200.0, fix_zero_radii=True)
     want = coda._tidy(xyz, r, p, shave, 200.0, True)[:3]
     if (
@@ -272,7 +276,10 @@ def navis_set(neuron):
 
 
 mesh_neuron = navis.MeshNeuron((verts, faces), units="1 nm")
-for shave, label in ((False, "off"), (True, "bristles")):
+# navis' `shave` is three-valued since 27a93c477: `"bristles"` is the old pass alone and `True`
+# is that followed by the radius-based one, which is what Coda calls `twigs`. Both are checked,
+# since a mode named after navis that does not reproduce navis is the whole risk here.
+for shave, label in ((False, "off"), ("bristles", "bristles"), (True, "twigs")):
     # mesh2skeleton calls skeletor's wavefront, then its shave if asked, then always its radius fix.
     ref = navis_set(navis.conversion.mesh2skeleton(mesh_neuron, shave=shave))
     xyz, r, p, _ = coda._skeletonize_one(verts, faces, 1, 1, "mean")

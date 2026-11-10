@@ -14,8 +14,14 @@ import { float32From, int32From } from './types'
 /** How each ring's radius is aggregated from its vertices' distances to the ring's centre. */
 export type RadiusAgg = 'mean' | 'median' | 'min' | 'max' | 'percentile25' | 'percentile75'
 
-/** The clean-up after the wavefront: none, navis' bristle pass, or fafbseg's thorough shave. */
-export type Shave = 'off' | 'bristles' | 'thorough'
+/**
+ * The clean-up after the wavefront.
+ *
+ * `bristles` is navis' single-node pass, which was all its `shave=True` did until 27a93c47;
+ * `twigs` is what `shave=True` does now — that pass, then terminal twigs shorter than twice the
+ * radius of the branch they join. `thorough` is fafbseg's, which ends with the bristle pass.
+ */
+export type Shave = 'off' | 'bristles' | 'twigs' | 'thorough'
 
 export type SkeletonizeRequest = PackedMeshes & {
   /** Waves cast from different seeds and averaged. At least 1. */

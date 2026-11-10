@@ -51,6 +51,7 @@ import type {
 import type {
   CleanSkeletonsRequest,
   CleanSkeletonsResult,
+  HealMethod,
   ThinMethod,
 } from '../../pyodide/skeletons'
 import { NM_PER_UM } from '../../data/units'
@@ -115,6 +116,7 @@ export function micrometreMixup(label: string, value: number, unit = 'µm'): str
 /** Every distance control on the Clean Skeletons card, in micrometres. */
 export interface SkeletonCleanParams {
   heal: boolean
+  healMethod: HealMethod
   healMaxDist: number
   smooth: number
   method: ThinMethod
@@ -131,6 +133,7 @@ export interface SkeletonCleanParams {
  */
 export const HEAL_ONLY: SkeletonCleanParams = {
   heal: true,
+  healMethod: 'ALL',
   healMaxDist: 0,
   smooth: 0,
   method: 'none',
@@ -151,6 +154,7 @@ export const HEAL_ONLY: SkeletonCleanParams = {
 export function skeletonCleanParamsFrom(params: ParamValues): SkeletonCleanParams {
   return {
     heal: params.heal === true,
+    healMethod: String(params.healMethod) as HealMethod,
     healMaxDist: Number(params.healMaxDist),
     smooth: Number(params.smooth),
     method: String(params.method) as ThinMethod,
@@ -215,6 +219,7 @@ export function cleanRequestFrom(
     offsets,
     somas,
     heal: params.heal,
+    healMethod: params.healMethod,
     healMaxDist: params.healMaxDist * NM_PER_UM,
     smooth: params.smooth * NM_PER_UM,
     method: params.method,
