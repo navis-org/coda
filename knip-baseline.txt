@@ -1,3 +1,4 @@
 duplicates	src/ui/assistantChat.ts	clearChat = resetAssistantChat
 exports	src/data/edges/store.ts	releaseEdgeSet
+exports	src/data/precomputed/volume.ts	openVolume
 exports	src/ml/weights.ts	weightsUsage

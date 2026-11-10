@@ -112,6 +112,151 @@ same finding the preference order below records from the other direction. And **
 with no mesh directory is a real, common thing**, so "is a segmentation" and "has geometry" have
 to be separate questions or a Meshes node runs and fetches nothing.
 
+### Voxels
+
+`volume.ts` and `compressedSegmentation.ts`. Until these, Coda could find the *meshes* inside a
+volume and nothing else — `isVolumeInfo` existed only to route past a segmentation to the mesh
+directory it names. A caller now hands it a box of nanometres and gets the voxels covering it.
+Built for SEAM's candidate search, which needs a 6 µm cube of supervoxels around each open end,
+but it is a precomputed capability and knows nothing about SEAM or graphene: a `graphene://`
+source is resolved to its bucket by `cave/meshes.ts`' `openGrapheneMeshes` pattern, one layer up.
+
+**Labels and images are two functions, not one with a flag.** `readLabelBox` answers "which
+objects are here" and returns the box **factored** — distinct labels plus an index per voxel —
+because that is the shape `compressed_segmentation` already stores and the shape every consumer
+wants; a 4.7 M-voxel cutout is 38 MB expanded and 19 MB factored beside a few thousand labels.
+`readScalarBox` answers "what are the values here" and returns them plainly, because in an image
+every voxel is its own number and a lookup table would be larger than the data. Each refuses the
+other's encodings by name rather than decoding them into noise.
+
+#### Three things that are silent when wrong
+
+All three produce a perfectly ordinary-looking box, which is why each has a test whose fixture is
+chosen to break it rather than to pass.
+
+- **The grid is anchored on `voxel_offset`, not on zero.** Aedes' 32 nm scale starts at
+  `[1024, 1536, 0]`. Flooring absolute coordinates by the chunk size asks for chunks that are
+  offset by part of a chunk in x and y — every one of which exists and returns data, just not the
+  data under the point. Nothing 404s. The tests use Aedes' real offsets because a scale starting
+  at the origin, which is most test data, exercises none of it.
+- **A chunk's name states the clamped extent.** The last chunk of an axis is named for where the
+  volume ends (`…_7424-7482`), so always writing `start + chunkSize` 404s at exactly the three far
+  faces of the volume — where, in a brain, nothing interesting is.
+- **Voxels are x-fastest.** cloudvolume passes `order='F'` explicitly and the first decode written
+  here did not, which is how this was found: a transposed block of segmentation has the same
+  labels, the same voxel counts and the same histogram as the right one. The goldens are flattened
+  `order='F'` by the reference encoder, and the `ragged` and `asymmetric-block` cases exist because
+  a cubic block size hides an axis swap completely.
+
+#### Decoding only the box
+
+The format cuts a chunk into small blocks (`8×8×8` by convention, stated in the `info`), each with
+its own lookup table and its own bits-per-voxel — a block of one label costs zero bits. So the
+decoder takes the sub-box and visits only the blocks meeting it. That is not a micro-optimisation:
+a 188³ cutout sits inside chunks of 256×256×64, so a whole-chunk decode is about eight times the
+work and eight times the memory for the same answer. The *fetching* cannot be helped — a chunk is
+the unit the store serves.
+
+#### The table is a function of the data
+
+Chunks are fetched concurrently, so the order labels are first seen in is the order the responses
+landed. `readLabelBox` therefore sorts its table and remaps at the end, and drops any slot nothing
+used — label 0 holds slot 0 from the start so that an absent chunk needs no special case, and is
+removed again if no voxel turned out to be 0. Without the sort, two reads of one box return the
+same voxels under different indices and anything caching, hashing or comparing a cutout sees them
+differ for no reason; without the compaction, the table names an object the box does not hold.
+
+**An absent chunk reads as zero, and only a 404 counts as absent.** Segmentation volumes are
+sparse at their edges and an unwritten chunk is an ordinary answer. A CORS refusal or a 500 is not
+an answer about the data, and still throws — the same distinction the mesh readers make.
+
+#### Measured, against the live Aedes store (2026-11-10, `pnpm probe:volume`)
+
+| | |
+| --- | --- |
+| store | `storage.googleapis.com/fanc-fly_segmentation/wclee_aedes_brain` |
+| auth | **none — public, `access-control-allow-origin: *`** |
+| scale | `32_32_45`, `compressed_segmentation`, block `8×8×8`, unsharded, `uint64` |
+| one 6 µm cutout | `188×188×134` = 4.74 M voxels, **8 chunks**, 24.6 MB |
+| in the browser | **1,295 ms** (the `info` a further 209 ms) |
+| against the reference | 14,424 distinct labels and 4,608,675 non-zero voxels, **exactly** |
+
+The probe compares against `__fixtures__/aedesCutout.json`, decoded by the Python
+`compressed_segmentation` package at `order='F'`. It carries both counts **and forty named
+voxels**, and the named voxels are the point: a transposed or offset read matches both counts
+exactly, because a wrong-but-consistent read holds the same labels in the same proportions. Only
+asking what is at `177, 117, 91` tells them apart.
+
+#### What the reader refuses, and what it leaves to the caller
+
+**One allocation refusal:** a box no runtime can allocate (`refuseUnallocatable`, against
+`CRASH_FLOOR_BYTES`), because the box is sized by the caller and a mistaken centre or half-width
+otherwise arrives as `RangeError: Invalid array length`.
+
+**The rest are refusals of a question that cannot be answered**, and every one of them replaced
+an answer that looked fine:
+
+- **A box outside the scale**, or empty along an axis. Past the grid, `chunksCovering` mints a
+  name whose start is beyond its clamped end (`22784-22016`); that 404s, a 404 means "nothing is
+  written here", and the box came back with a band of zeros along the face — indistinguishable
+  from the real edge of a segmentation. On a *sharded* scale it is worse: the morton code of an
+  out-of-grid position can alias onto a key that exists, filling the box from somewhere else.
+  `boxAround` clamps, so the ordinary path never trips this.
+- **A label scale that is not `uint32` or `uint64`.** Anything else was decoded as `uint64`; on
+  `compressed_segmentation` there is no length to disagree with, so it returned plausible
+  18-digit labels assembled from pairs of 32-bit words.
+- **A multi-channel volume.** Both readers answer about channel 0 and neither can be asked for
+  another, so `num_channels` is read for this and nothing else.
+- **A sub-box reaching past its chunk** (in the decoder). The block loops clamped but the size
+  came from what was *asked for*, leaving the overhang as index 0.
+- **A block claiming a width that is not 0, 1, 2, 4, 8 or 16.** The packing puts whole values
+  into 32-bit words, so any other width decodes plausible garbage rather than being named corrupt.
+
+**A scale in an encoding this reader does not decode is left out, not refused** — a volume
+publishing a `jxl` mip beside readable ones is ordinary, and `scaleNear` would never pick it.
+Only a volume with nothing readable left refuses, naming what it found.
+
+**The wait is the caller's to price, and this is where to say so** before somebody adds a
+`MAX_VOXELS` here. One cutout is ~1.2 s and 24.6 MB; a reader doing one per open end is doing
+that N times, which is exactly the case `MESH_WARN_SECONDS` is on record for — the one you
+measure alone is a big one. `src/packs/seam/checkAffinitySize.ts` is the shape: the per-item
+allocation refuses from the floor, the *set*'s wait warns through a `Warner` the reader has and
+`src/data` does not. `chunksCovering(...).length` is public so a caller can price it before
+starting.
+
+#### Sharded volumes, and images — measured on the MaleCNS EM (2026-11-10)
+
+Both were built before anything exercised them, and one volume covers both:
+`gs://cns-full-clahe`, the MaleCNS image data, is `jpeg` **and** sharded, public and CORS-open.
+`pnpm probe:volume`'s second arm reads one chunk of it.
+
+A sharded scale keys its chunks on the **compressed Morton code** of the grid position — not on a
+segment id, so `readShardedObject` cannot be handed a chunk directly, though the read that
+follows the key *is* its. The code interleaves the three coordinates' bits low-to-high,
+*skipping an axis once its own grid is exhausted*, and that skip is the whole difficulty: a plain
+Morton code agrees with it exactly while all three axes are the same size, which is what every
+hand-written test uses. Pinned against cloudvolume's own `compressed_morton_code` over seven
+grids, four of them not cubes — and now against a real sharded store.
+
+`jpeg` and `png` go through `createImageBitmap` and a canvas rather than a bundled decoder: no
+bundle cost, and whatever the browser reads. The specification permits colour management on the
+way in, which would make the readback inexact; `colorSpaceConversion: 'none'` and
+`premultiplyAlpha: 'none'` prevent it, and **the probe measures that they do** — one EM chunk
+read this way is byte-identical to Pillow's decode of the same bytes, all thirty sampled voxels,
+with the mean and standard deviation agreeing to four decimals. The spec still only *permits*
+exactness, so a reader that cannot tolerate a browser disagreeing should use a `raw` scale.
+
+Note also that neuroglancer stores a 3-D chunk as a **tall 2-D image**, z sections stacked down
+the height (a 64³ chunk decodes to 64×4096). Reading it as one `chunkX × chunkY` image gets
+section 0 right and repeats it down the stack — whose mean and standard deviation are perfectly
+ordinary, which is why the probe compares two z sections directly.
+
+**Finding a chunk that exists is its own small lesson.** The first grid point tried — the middle
+of the volume — is not stored at all: a sharded store simply has no key for an empty region, and
+`readScalarBox` reads that as `missingChunks`, not as a failure. The golden's chunk was chosen
+for the highest variance among the largest blobs nearby, so that a transposed or mis-stacked read
+cannot match it.
+
 ### Skeletons
 
 `skeletons.ts`, and the format is four lines: `uint32 numVertices`, `uint32 numEdges`,
