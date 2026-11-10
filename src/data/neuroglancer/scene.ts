@@ -639,6 +639,31 @@ export function patchUrl(viewerBase: string | undefined, patch: NgScene): string
 }
 
 /**
+ * Nanometres per unit of a scene's global coordinate space, from its own `dimensions`.
+ *
+ * Undefined unless all three axes are present and in metres — the only unit these scenes use,
+ * and the one a guess would silently get wrong by a factor of a thousand.
+ *
+ * What it is for: neuroglancer's camera `position` is in the global space's units, and every
+ * caller who wants to point a camera has nanometres — a contact point, a window centre, a
+ * synapse. A scene that declares no dimensions converts nothing, because a camera at the wrong
+ * scale looks exactly like a camera at the right one somewhere else.
+ */
+export function sceneVoxelNm(scene: NgScene): [number, number, number] | undefined {
+  const dimensions = scene['dimensions']
+  if (!dimensions || typeof dimensions !== 'object') return undefined
+  const read = (axis: string): number | undefined => {
+    const entry = (dimensions as Record<string, unknown>)[axis]
+    if (!Array.isArray(entry) || entry.length !== 2) return undefined
+    const [size, unit] = entry as [unknown, unknown]
+    if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) return undefined
+    return unit === 'm' ? size * 1e9 : undefined
+  }
+  const [x, y, z] = [read('x'), read('y'), read('z')]
+  return x !== undefined && y !== undefined && z !== undefined ? [x, y, z] : undefined
+}
+
+/**
  * The part of a scene a patch cannot change, as a comparable string.
  *
  * Two scenes with the same identity describe the same *place* — same dataset, same published

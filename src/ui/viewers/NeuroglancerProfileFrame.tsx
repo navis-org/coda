@@ -61,7 +61,7 @@ const MAX_SEGMENTS = 25
  */
 const SEGMENT_COLOR: ColorSpec = { mode: 'constant', column: undefined, constant: '0' }
 
-type SceneState =
+export type SceneState =
   | { status: 'none' }
   | { status: 'loading' }
   | { status: 'ready'; scene: NgScene }
@@ -75,7 +75,7 @@ type SceneState =
  * Cached by the source itself — including the undefined — so this costs one small JSON per
  * dataset no matter how many profiles are open on it.
  */
-function usePublishedScene(
+export function usePublishedScene(
   sourceId: string | undefined,
   datasetId: string | undefined,
 ): SceneState {

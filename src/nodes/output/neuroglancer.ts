@@ -46,6 +46,7 @@ import { datasetCacheKey } from '../../data/neuronIndex'
 import { unmatchedIds } from '../lib/idList'
 import { errorMessage } from '../../core/errors'
 import { plural } from '../../style/format'
+import { cycleColor } from '../../style/colors'
 import {
   applySelectionEdits,
   decodeSelectionEdits,
@@ -185,6 +186,26 @@ registerNode({
      * without Coda having to know about any of them.
      */
     { id: 'layers', label: 'Extra layers', type: T.layers(), required: false },
+    /*
+     * A card that drives this one: the segments to look at *now*, and where to look.
+     *
+     * `seam:review` is the first, paging through a queue of merge suggestions. Its ids are added
+     * to the scene and its first row's `x`/`y`/`z` — in nanometres — point the camera, which is
+     * the half an ordinary wire cannot do: a camera lives in the scene's `position`, and a scene
+     * whose position changed is a scene pointed somewhere else, so it re-navigates and every
+     * layer is torn down. Moving a camera *without* that is `coda:ng-set-view`, a message, and
+     * a message needs the embedded viewer.
+     *
+     * **So the camera half works only in Coda's own frame.** The segments work anywhere. That is
+     * said on the port and on the card rather than left to be discovered, because a camera that
+     * quietly does not move looks exactly like a camera pointed at the right place.
+     */
+    {
+      id: 'control',
+      label: 'Control',
+      type: T.neurons(),
+      required: false,
+    },
   ],
   outputs: [
     { id: 'url', label: 'Link', type: T.string() },
@@ -465,13 +486,40 @@ registerNode({
       throw new Error('Extra layers input is not a layer set')
     }
 
+    /*
+     * The controller's segments, added after the rest and after the selection edits.
+     *
+     * Added rather than replacing, so a scene somebody built still stands and the thing being
+     * looked at arrives on top of it. Added *last* so it wins the colour: a controller is saying
+     * "this one now", and a row that was already in `Neurons` keeping its table colour would
+     * hide exactly that.
+     */
+    const control = ctx.input('control')
+    if (control !== undefined && !isTableValue(control)) {
+      throw new Error('Control input is not a table')
+    }
+    const driven = controlSegments(control)
+    const already = new Set(segments)
+    const shownSegments = [...segments, ...driven.ids.filter((id: string) => !already.has(id))]
+
     // Hidden neurons are listed `!id` only where they stay selected; otherwise hiding is removing.
     const hidden = keepsHidden(ctx.params) ? shownOnly(edits.hidden, segments) : undefined
+    const fields = ownColors ?? colorFields(spec, colors)
     const scene = buildScene(published, {
       datasetId: dataset.datasetId,
-      segments,
+      segments: shownSegments,
       ...(hidden ? { hiddenSegments: hidden } : {}),
-      ...(ownColors ?? colorFields(spec, colors)),
+      ...fields,
+      ...(driven.ids.length > 0
+        ? {
+            segmentColors: { ...(fields.segmentColors ?? {}), ...driven.colors },
+            // A per-segment map and a single default are alternatives in a scene; naming both
+            // leaves neuroglancer to choose, and the map is the one carrying the controller.
+            ...(fields.segmentDefaultColor === undefined
+              ? {}
+              : { segmentDefaultColor: undefined }),
+          }
+        : {}),
       ...(placed ? { placements: placed } : {}),
       layout: String(ctx.params.layout) as NgLayout,
       layers: String(ctx.params.layers) as NgLayerSet,
@@ -495,6 +543,68 @@ registerNode({
     }
   },
 })
+
+/**
+ * What a `Control` wire is asking for: ids to add, and a colour each.
+ *
+ * Two hues, by the table's `part` column where it has one — `seam:review` publishes `neuron` and
+ * `candidate`, and the whole question a reader is answering is whether the second belongs to the
+ * first, which they cannot see if the two are one colour. Without that column every id takes the
+ * first hue, which still says "these are the ones being looked at".
+ *
+ * Ids through `idText` and nothing else: these reach a scene as segments, and a float here is a
+ * different neuron (invariant 8).
+ */
+function controlSegments(table: TableValue | undefined): {
+  ids: string[]
+  colors: Record<string, string>
+} {
+  const ids: string[] = []
+  const colors: Record<string, string> = {}
+  if (!table) return { ids, colors }
+  const column = table.data[ID_COLUMN_NAME] ?? []
+  const parts = table.data['part'] ?? []
+  const seen = new Set<string>()
+  for (let i = 0; i < column.length; i++) {
+    const id = idText(column[i])
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+    colors[id] = cycleColor(parts[i] === 'candidate' ? 1 : 0, VIEWER_MODE)
+  }
+  return { ids, colors }
+}
+
+/**
+ * How much of the scene to frame around a controlled view, in **nanometres**.
+ *
+ * Fifteen micrometres across. Not tuned: it is the span of the thing being judged — SEAM's own
+ * window is a 15 µm radius, its own-tip rule reaches 2 µm, and a candidate is a fragment of a
+ * neurite — so a site and enough of its neighbourhood to tell what it is attached to. The
+ * alternative, framing by the candidate's own size, puts a 0.02 µm³ fragment under a microscope
+ * with nothing around it to judge it against.
+ */
+export const CONTROL_FRAME_NM = 15_000
+
+/**
+ * Where a `Control` wire is pointing the camera, in nanometres, or undefined where it says.
+ *
+ * The **first row**, because a controller is showing one thing: `seam:review` puts the neuron
+ * first and the candidate second, and the contact between them is on both. Read by the card
+ * rather than by `evaluate`, since a camera is not part of a scene's identity — see
+ * `NeuroglancerViewer`'s `focus`.
+ */
+export function controlFocusNm(
+  table: TableValue | undefined,
+): readonly [number, number, number] | undefined {
+  if (!table || table.length === 0) return undefined
+  const at = (name: string): number | undefined => {
+    const cell = table.data[name]?.[0]
+    return typeof cell === 'number' && Number.isFinite(cell) ? cell : undefined
+  }
+  const [x, y, z] = [at('x'), at('y'), at('z')]
+  return x !== undefined && y !== undefined && z !== undefined ? [x, y, z] : undefined
+}
 
 /** The hidden ids the scene still shows — a note about a neuron since removed means nothing. */
 function shownOnly(hidden: ReadonlySet<string>, segments: readonly string[]): Set<string> {

@@ -33,6 +33,7 @@ import {
   type FrameViewMessage,
   pickView,
   isFrameSegmentsMessage,
+  isFrameSetViewMessage,
   updateIn,
 } from '../data/neuroglancer/frameMessage'
 import type { LayerSelection } from '../data/neuroglancer/scene'
@@ -123,6 +124,10 @@ window.addEventListener('message', (event) => {
     claimAltDigits = event.data.altDigits
     return
   }
+  if (isFrameSetViewMessage(event.data)) {
+    setView(event.data.position, event.data.width)
+    return
+  }
   if (!isFrameSegmentsMessage(event.data)) return
   // Every layer, then the number: one that could not be set leaves the frame on the last update it
   // fully applied, so its reports are dropped rather than read against a scene it is not showing.
@@ -139,6 +144,65 @@ window.addEventListener('message', (event) => {
     )
   }
 })
+
+/**
+ * Point the camera and frame it, in the scene's own coordinate space.
+ *
+ * Read by shape, as the segmentation layer below is and for the same reason — the package ships
+ * no declarations for this path. `restoreState` is preferred because it is the same entry point
+ * the fragment uses, so a position set here and one restored from a URL cannot diverge; the
+ * `value` assignment is the fallback for a build that exposes only the trackable.
+ */
+function setView(position: readonly number[], width: number | undefined): void {
+  const ng = viewer as unknown as {
+    navigationState?: { position?: unknown }
+    projectionScale?: { value?: number }
+    crossSectionScale?: { value?: number }
+  }
+  const at = ng.navigationState?.position as
+    { restoreState?: (json: unknown) => void; value?: Float32Array } | undefined
+  if (at) {
+    if (typeof at.restoreState === 'function') at.restoreState([...position])
+    else if (at.value instanceof Float32Array) at.value = Float32Array.from(position)
+  }
+  if (width === undefined) return
+  /*
+   * The 3D camera's distance and the cross-sections' zoom, which are two trackables rather than
+   * one. `crossSectionScale` is units per *pixel*, so a span becomes a scale by dividing by a
+   * panel's worth of them — assumed rather than measured, because the panels are neuroglancer's
+   * to lay out and a frame that read their size would have to re-read it on every resize.
+   *
+   * The two panels answer different questions at the same site and want different amounts of
+   * room, so `width` — the span of the thing being looked at — is a reference rather than
+   * either answer. The 3D frames **twice** it: what a piece is attached to is the question
+   * there, and that is a fact about its surroundings. A section frames **half** it: whether a
+   * membrane runs through is read at the scale of the membrane.
+   */
+  /*
+   * Written only where they differ. A reviewer paging through a queue asks for the same framing
+   * every time and only the position moves, so an unconditional write is two state changes per
+   * click that say nothing — and every state change is a reason for the viewer to reconsider
+   * which chunks it wants. Measured: at a click every 300 ms the sections never get past the
+   * coarsest mip (`pnpm probe:ng-chunks`), so anything that invalidates for no reason is worth
+   * not doing.
+   */
+  set(ng.projectionScale, width * PROJECTION_SPAN)
+  set(ng.crossSectionScale, (width * CROSS_SECTION_SPAN) / CROSS_SECTION_PIXELS)
+}
+
+/** A trackable number, where it is one and the value is new. */
+function set(trackable: { value?: number } | undefined, value: number): void {
+  if (trackable && typeof trackable.value === 'number' && trackable.value !== value) {
+    trackable.value = value
+  }
+}
+
+/** A cross-section panel's assumed width in pixels, for turning a span into a scale. */
+const CROSS_SECTION_PIXELS = 500
+/** How much of the asked width the 3D panel frames. See `setView`. */
+const PROJECTION_SPAN = 2
+/** And how much of it a cross-section frames. */
+const CROSS_SECTION_SPAN = 0.5
 
 /**
  * The part of a segmentation layer this touches. Read by shape because the package ships no

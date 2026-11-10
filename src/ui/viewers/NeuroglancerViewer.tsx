@@ -92,9 +92,11 @@ import {
 } from '../../data/neuroglancer/scene'
 import type { FrameSegmentsMessage } from '../../data/neuroglancer/frameMessage'
 import type { FrameKeysMessage } from '../../data/neuroglancer/frameMessage'
+import type { FrameSetViewMessage } from '../../data/neuroglancer/frameMessage'
 import {
   FRAME_KEYS_MESSAGE,
   FRAME_SEGMENTS_MESSAGE,
+  FRAME_SET_VIEW_MESSAGE,
   isFrameKeyMessage,
   isFrameUnappliedMessage,
   decodeSavedView,
@@ -124,6 +126,32 @@ import { ViewerEmpty } from './ViewerEmpty'
 export interface NeuroglancerViewerProps {
   /** Built by the node; empty until it has run. */
   url: string
+  /**
+   * Point the camera here, in the **scene's own units** — not nanometres.
+   *
+   * A prop rather than a key of the scene, and the distinction is the whole of why this exists.
+   * A scene's `position` is its *published* camera, and it is part of `sceneIdentity` on purpose:
+   * a different published camera means the node is pointed at a different place, and keeping the
+   * old framing there would leave you looking at empty space beside the volume you asked for.
+   * "Move the camera to this site" is a different statement, made by a card paging through a
+   * queue, and folding it into the scene would make every such move a full navigation — every
+   * layer torn down, every mesh refetched, once per click.
+   *
+   * So it travels beside the scene and is sent as `coda:ng-set-view`, which needs **Coda's own
+   * frame**: a cross-origin viewer has no channel for it and keeps its framing. Converting from
+   * nanometres is the caller's, through `sceneVoxelNm`, because only the caller knows which
+   * scene's units these are.
+   */
+  focus?: readonly number[] | undefined
+  /**
+   * How much to frame around `focus`, across, in the same units.
+   *
+   * Without it the camera points and does not zoom, which on a scene that publishes no
+   * `projectionScale` — plenty do not — leaves a site correctly in the middle of a view hundreds
+   * of micrometres wide. Undefined keeps the zoom exactly as the reader left it, which is the
+   * right answer for a caller that only means "look over there".
+   */
+  focusWidth?: number | undefined
   /** The table the colours were resolved from. Only the legend needs it. */
   neurons?: TableValue | undefined
   color: ColorSpec
@@ -260,6 +288,8 @@ interface HeldFrame {
     | undefined
   /** Whether a document has finished loading in the frame, i.e. whether there is state to merge into. */
   loaded: boolean
+  /** The last camera this card asked the frame for, so an unchanged one is not re-sent. */
+  focused: string | undefined
   /** Where its live state is remembered once the frame is gone — the leasing surface's `viewerId`. */
   memoKey: string | undefined
   /**
@@ -285,6 +315,8 @@ interface HeldFrame {
 function forgetDocument(held: HeldFrame): void {
   held.loaded = false
   held.speaksFor = undefined
+  // A fresh document opens at the scene's own framing, so whatever we last asked for is gone.
+  held.focused = undefined
   held.claimsAltDigits = undefined
 }
 
@@ -298,6 +330,7 @@ function createFrame(): { host: HTMLElement; root: HeldFrame } {
     frame,
     applied: undefined,
     loaded: false,
+    focused: undefined,
     memoKey: undefined,
     speaksFor: undefined,
     sent: 0,
@@ -373,6 +406,8 @@ const VIEWER_MODE = 'dark' as const
 
 export function NeuroglancerViewer({
   url,
+  focus,
+  focusWidth,
   neurons,
   color,
   scale = 1,
@@ -669,6 +704,15 @@ export function NeuroglancerViewer({
       kept.frame.src = canMerge
         ? scenePatchUrl(frameBase, scene, kind, withUpdate(barChange, nextUpdate()))
         : sceneUrl(frameBase, withUpdate(withLayerPanel(scene, layerBar), nextUpdate()), kind)
+      /*
+       * A navigation replaces the document, and the camera goes with it: the scene it restores
+       * carries whatever framing *it* names, which for a dataset publishing none is
+       * neuroglancer's default. So whatever camera a card last asked for is no longer true, and
+       * must be asked for again — without this, a caller that moved the camera once and then
+       * changed anything that navigates (an annotation layer's contents, say) loses it for good,
+       * because the effect sees the same `focus` it already sent.
+       */
+      kept.focused = undefined
       kept.applied = {
         url,
         base: target,
@@ -764,6 +808,35 @@ export function NeuroglancerViewer({
   }, [claimAltDigits, claimRef, tellKeysRef])
 
   /*
+   * The camera a card asked for — see `focus` on the props.
+   *
+   * Its own effect rather than a line in the scene update, because the two are not the same
+   * question and do not change together: a queue can move the camera without touching the
+   * selection, and change the selection without moving the camera. Keyed on what was last sent
+   * so a re-render that changes nothing sends nothing, and gated on `speaksFor`, which is the
+   * frame saying it is Coda's own and can hear this at all.
+   */
+  const focusKey = focus ? `${focus.join(',')}@${focusWidth ?? ''}` : undefined
+  const focusRef = useLatest(focusKey)
+  const tellFocus = (kept: HeldFrame) => {
+    const wanted = focusRef.current
+    if (!wanted || kept.speaksFor === undefined || kept.focused === wanted) return
+    kept.focused = wanted
+    const [at, width] = wanted.split('@')
+    const message: FrameSetViewMessage = {
+      type: FRAME_SET_VIEW_MESSAGE,
+      position: at!.split(',').map(Number),
+      ...(width ? { width: Number(width) } : {}),
+    }
+    kept.frame.contentWindow?.postMessage(message, window.location.origin)
+  }
+  const tellFocusRef = useLatest(tellFocus)
+  useEffect(() => {
+    const kept = leaseRef.current?.root
+    if (kept) tellFocusRef.current(kept)
+  }, [focusKey, tellFocusRef])
+
+  /*
    * Bound whether or not this surface can write: a report is also how the frame says it is Coda's
    * own and can take a selection in place (`speaksFor`). Either report is used only if it is of
    * the latest update — an older one describes a scene, or a framing, the card no longer holds
@@ -790,6 +863,14 @@ export function NeuroglancerViewer({
         // navigation would vouch for a document that has not reported.
         kept.speaksFor = kept.applied?.base
         tellKeysRef.current(kept)
+        /*
+         * And the camera, for the same reason the keys are re-told here: a message sent before
+         * the frame's script was listening is lost, and a navigation replaces the document —
+         * taking the camera with it, since the restored scene carries its own framing or none.
+         * `kept.focused` was cleared when that navigation was applied, so this sends again only
+         * where there is a new document to send it to.
+         */
+        tellFocusRef.current(kept)
         handlers.current.foldScene(event.data.state)
       } else if (isFrameUnappliedMessage(event.data) && kept.applied) {
         // The frame could not set the selection in place: stop trying, and navigate instead.
@@ -800,7 +881,7 @@ export function NeuroglancerViewer({
     }
     window.addEventListener('message', listen)
     return () => window.removeEventListener('message', listen)
-  }, [handlers, tellKeysRef])
+  }, [handlers, tellKeysRef, tellFocusRef])
 
   const [pasting, setPasting] = useState(false)
   const readLink = (event: FormEvent<HTMLFormElement>) => {
