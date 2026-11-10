@@ -22,6 +22,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { addEdge, addNode, emptyGraph, topoSort } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { checkConnection, inferGraph } from '../../core/inference'
+import { defaultParams, findParam, makeInferContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { column, columnNames, tableSchema } from '../../core/types'
 import type { TableSchema } from '../../core/types'
@@ -840,5 +841,37 @@ describe('the Google Sheet node', () => {
     const table = produced(sched, 'sheet')
     expect(columnNames(table.schema)).toEqual(['neuronId', 'type', 'side'])
     expect(table.length).toBe(3)
+  })
+})
+
+describe('the position units a CAVE table is read at', () => {
+  const def = requireNodeDef('annotation.caveTable')
+
+  /**
+   * A card made from now on asks for nanometres; one saved before the field existed keeps what
+   * it got, which is CAVE's default — the table's own voxels, a factor away from everything
+   * Coda measures. **The two differ on purpose**, which is `viewer3d`'s rule for a setting added
+   * after a node shipped.
+   */
+  it('asks for nanometres on a new card, and leaves a saved one alone', () => {
+    expect(String(defaultParams(def).resolution)).toBe('1, 1, 1')
+    expect(findParam(def, 'resolution')?.absentMeans).toBe('')
+  })
+
+  /**
+   * And it has to *reach* the request. For one commit it did not: the card parsed the field,
+   * validated it, documented it, and then built its ref without it — so the setting did nothing
+   * and every test still passed. `caveTableRef` requires the field now, which is what makes that
+   * a compile error rather than something only a reader would notice.
+   */
+  it('refuses a value that is not three positive numbers, in words', () => {
+    const issues = def.validate!(
+      makeInferContext(
+        def,
+        { ...defaultParams(def), table: 'nuclei_v1', datastack: 'x:1', resolution: '1, 1' },
+        {},
+      ),
+    )
+    expect(issues.join(' ')).toContain('three positive numbers')
   })
 })

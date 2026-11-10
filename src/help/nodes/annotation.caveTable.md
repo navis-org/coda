@@ -31,3 +31,9 @@ Leave `Pivot on` empty if the table already has one row per neuron. In that case
 CAVE table has an `Annotations` input of its own, so you can chain it with [FlyTable](#annotation.flyTable), [SeaTable](#annotation.seaTable), [Google Sheet](#annotation.googleSheet) and other CAVE tables. Each node adds its columns to the ones arriving from upstream, matched on neuron id. A neuron that only one of the sources knows about keeps its labels. If two sources have a column of the same name, the later one in the chain wins, so the order of the chain matters.
 
 The output is an ordinary table of neurons, so you can put a Filter, Sort or any other table node in the chain before it reaches the Dataset.
+
+## Positions in nanometres
+
+CAVE stores a position as voxels of the table's own resolution, and answers with them unless asked otherwise — so a `pt_position_x` column arrives as a number that is a factor away from the nanometres Coda measures everything else in. Nothing fails if you take it as it comes: the table is consistent with itself, and a position used as geometry is simply in the wrong place.
+
+`Position units` is what to ask for instead. Put `1, 1, 1` to get nanometres. Any three positive numbers work — they are nanometres per unit, so `4, 4, 40` asks for 4x4x40 nm voxels. Left blank, you get the table's own, which is what this card has always done.

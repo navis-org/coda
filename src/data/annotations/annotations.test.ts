@@ -366,6 +366,7 @@ const nucleiConfig = (over: Partial<CaveTableConfig> = {}): CaveTableConfig => (
   pivotOn: '',
   valueColumn: '',
   columns: '',
+  resolution: '',
   ...over,
 })
 
@@ -473,6 +474,7 @@ describe('what a CAVE reference table needs', () => {
     pivotOn: '',
     valueColumn: '',
     columns: '',
+    resolution: '',
     ...over,
   })
 
