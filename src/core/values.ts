@@ -968,8 +968,18 @@ export function makeTable(
   schema: TableSchema,
   data: Record<string, ColumnData>,
   kind: 'table' | 'neurons' = 'table',
+  /**
+   * How many rows there are, where the columns cannot say.
+   *
+   * A table of **no columns** has a length the data cannot carry, and it is a real state: a
+   * point cloud's attribute table is where its row count lives (`PointsValue` holds
+   * `attributes.length * 3` coordinates), so a cloud carrying nothing would otherwise be length
+   * 0 with a full buffer of positions — and draw nothing at all. Stated rather than derived
+   * wherever the caller knows; every other caller leaves it out and the columns decide.
+   */
+  rows?: number,
 ): TableValue {
-  let length = 0
+  let length = rows ?? 0
   for (const col of schema.columns) {
     const arr = data[col.name]
     if (!arr)

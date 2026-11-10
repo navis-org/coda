@@ -127,8 +127,13 @@ describe('the graphs themselves', () => {
      * 41 rather than 40 since `seam:findMerges` landed: its consent gate warns until `Download
      * the model` is ticked, which a demo graph never does. A ratchet to catch creep, so bumping
      * it is a decision rather than a fix — the second such node, after `seam:affinityClusters`.
+     *
+     * 42 since `core.tablePoints`: its coordinate pickers are `optional` with no default, so a
+     * fresh card asks for them in words rather than resolving to the first numeric column it can
+     * find. It caught itself doing the latter — a demo was reading `size` as z — which is the
+     * failure the picker rules exist for, and one warning is the price of not having it.
      */
-    expect(warnings.length).toBeLessThanOrEqual(41)
+    expect(warnings.length).toBeLessThanOrEqual(42)
   })
 
   it('wires every required input of the node being demonstrated', () => {
