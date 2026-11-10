@@ -196,6 +196,14 @@ the undo stack alongside it).
   1.1 GB; the default, quarter scale, is 269 MB, and full scale fits every single condition but
   `dots`, `turning` and `open loop`. Its read also warns past `TRACE_BYTES_WARN`, which the default
   (about 144 MB) always does.
+- A **precomputed volume cutout** (`data/precomputed/volume.ts`, `refuseUnallocatable`) — the
+  index is 4 bytes a voxel for labels and `BYTES_PER_ELEMENT` for an image scale, and the box is
+  sized by its caller, so a mistaken centre or half-width otherwise reaches `new Uint32Array`
+  with a length that throws `RangeError` and nothing else. **The wait is deliberately not
+  refused and not warned here**: one cutout is about 1.2 s and 25 MB (measured — see
+  [backends-precomputed.md](backends-precomputed.md)), and a caller doing one per neuron tip
+  prices the *set*, the way `checkAffinitySize.ts` does. A `MAX_VOXELS` in the reader would be
+  the per-item floor restated in the wrong place.
 - `NBLAST_PAIRS_FLOOR` — the score matrix is one flat `Float64Array` of `rows * cols`.
 - `MAX_LINKAGE_OBSERVATIONS` (~11,585) — the condensed distance vector is `n(n-1)/2` float64s,
   so this is `sqrt(2 · CRASH_FLOOR_CELLS)` rather than a number anybody chose.

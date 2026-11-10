@@ -22,6 +22,12 @@ import { layerSourceUrl, nanometreDimensions } from './scene'
 import { PRECOMPUTED, parseNgSource } from './sourceUrl'
 
 /** What a volume's `info` says of its finest scale, which sets the frame. */
+/**
+ * The raw `info`, read leniently — **not** `precomputed/volume.ts`' parsed `VolumeInfo`, which
+ * is strict by design and throws on a scale missing a field an address is computed from. Here a
+ * malformed scale must leave the scene unframed rather than fail it, so the two stay apart. Two
+ * types of one name in `src/data`: nothing imports across, and this note is why.
+ */
 interface VolumeInfo extends InfoKind {
   scales?: readonly { resolution?: number[]; size?: number[]; voxel_offset?: number[] }[]
 }

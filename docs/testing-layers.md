@@ -179,6 +179,9 @@ lean on:
 | `data/precomputed/live.test.ts`                | precomputed against real buckets (male-CNS, hemibrain), skipped without `PRECOMPUTED_LIVE`           |
 | `data/precomputed/precomputed.test.ts`         | shard lookup, multi-LOD manifests, Draco, legacy fragments, CORS fallback, the two-phase progress split |
 | `data/precomputed/skeletons.test.ts`           | the precomputed skeleton format: edge list to rooted tree, radius/affine, `uint8` compartments       |
+| `data/cave/volumes.test.ts`                    | where a datastack's voxels are: the EM off `aligned_volume.image_source`, the supervoxels out of the chunkedgraph's own `data_dir` (not the graphene URL) |
+| `data/precomputed/compressedSegmentation.test.ts` | the label-chunk decoder against the reference encoder's own output; the ragged, zero-bit and asymmetric-block cases exist because a cubic block hides an axis swap |
+| `data/precomputed/volume.test.ts`              | voxel addressing: the grid anchored on `voxel_offset`, the last chunk named by where data ends, the box assembly and its sorted table; morton codes against cloudvolume's (whole path on a real store: `pnpm probe:volume`) |
 | `data/queries.test.ts`                         | the connectivity funnel: source vs attached edge set, and the refusal when the set is not in this browser |
 | `data/rawFileUrl.test.ts`                      | GitHub file links rewritten to a browser-readable raw URL                                            |
 | `data/share/fragment.test.ts`                  | the `#!` share grammar and packed codec, above all its refusals; demo links                          |
@@ -249,7 +252,7 @@ lean on:
 | `nodes/lib/tableEdits.test.ts`             | Edit Table's op: schema/value agreement, failure direction, `""` clearing a cell, rule order         |
 | `nodes/lib/tableFilter.test.ts`            | a header cell's filter grammar: dtype-following values, nulls, dropped clauses                       |
 | `nodes/lib/tableOps.test.ts`               | the table ops (join, coalesce, relabel, unpivot, rename, id bridge…), each with schema/value agreement — hand-written per op, no sweep |
-| `nodes/lib/topologyOps.test.ts`            | skeleton topology (Strahler, segments, morphometrics) against navis-fastcore 0.13.0's transcribed output |
+| `nodes/lib/topologyOps.test.ts`            | skeleton topology (Strahler, segments, morphometrics) against navis-fastcore 0.13.2's transcribed output |
 | `nodes/lib/transformOps.test.ts`           | moving geometry: reflection, mesh winding, bounds, the mirrored column's two halves, the real manifest |
 | `nodes/lib/typeMapping.test.ts`            | the cross-dataset cell-type mapper against cocoa's worked examples, label modes, `suspicious`, oversize warning |
 | `nodes/naming.test.ts`                     | every node that renames or mints columns names them in its `description`; annotation nodes saying `cell_type` arrives as `type` |
