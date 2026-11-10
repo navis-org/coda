@@ -501,7 +501,8 @@ being a column somebody shipped.
 **Phase 5 — Model E**, once SEAM exports it. Same `SeamModel` class as Model A, so Phase C's
 window code and `src/ml` apply. Checked as `e_tip` against the fixture.
 
-**Phase 6 — the search** (stages 4–5): the 6 µm cube, the roots at T − 1 ms, the eight geometric
+**Phase 6 — the search** (stages 4–5). **Built, bar the own-tip rule** — see the dated section
+below. Originally: the 6 µm cube, the roots at T − 1 ms, the eight geometric
 features, the logistic ranker, the own-tip rule. Checked against `candidates_all` and
 `candidates`. This is where CAVE politeness matters — SEAM keeps to 4 concurrent Aedes streams,
 and `get_leaves_many` per box rather than per supervoxel is a 0.6 s against 14 s difference.
@@ -549,7 +550,7 @@ live Aedes store:
 | grid | chunk `256×256×64`, `voxel_offset` `[1024, 1536, 0]` |
 | the box | `188×188×134` = **4.74 M voxels**, spanning **8 chunks** |
 | on the wire | **24.6 MB**, 7.5 s sequential (≈1 s at 8-way) |
-| decoded | **14,423 distinct supervoxels**, 97% of voxels non-zero |
+| decoded | **14,424 distinct supervoxels**, 97% of voxels non-zero |
 
 **The bucket being CORS-open is the finding that decides the phase.** A browser can read Aedes
 supervoxels directly, with no token and no proxy; had it been closed, Phase 6 would have needed a
@@ -659,13 +660,28 @@ was checked against SEAM's own answer for a real open end rather than against it
 | the end | `648518347622603652` at `250173, 313173, 276480` nm (`end_uid` 0) |
 | the box | 188×188×134, 8 chunks, **14,424 supervoxels**, roots at `snapshot − 1 ms` |
 | the result | **100 candidates, the top 20 in SEAM's exact order**, every `geo_score` to 1e-4 |
-| the cost | ~2.3 s in Pyodide for the whole search, beside ~1.2 s to fetch the box |
+| the cost | **~0.6 s warm** in Pyodide, beside ~1.2 s to fetch the box — so **~1.75 s an end** |
+| warm-up | ~1.8 s more on the first call in a worker: scipy's and pandas' first imports |
 
-**`geo_score` is a rank key — lower is better.** `seam/build.py` says so in passing and nothing
-else does; the first implementation here took the raw logit and sorted descending, which gives a
-list that is *exactly reversed* with every number plausible and every rank wrong. The probe's
-negative control is reversing that sort, and it fails at rank 1 — which is the only reason the
-mistake is now a sentence rather than a shipped feature.
+The warm figure is the one to design with, and it corrects a first reading. `started` is taken
+before the vendored modules are `exec`'d and before `summarize_cutout`'s own
+`from scipy import ndimage`, so the first call carries both inside its clock — ~2.4 s. That is
+paid once per worker, not per open end, which also says what a caller should do: **keep the
+worker alive across one neuron's ends** and every end after the first is the warm number.
+
+**`geo_score` is a rank key — lower is better**, which `seam/build.py` says in passing and
+nothing else does. There are two distinct ways to get it wrong and the probe's negative control
+corrected a first account of them:
+
+- **Publishing the raw logit and sorting *that* descending** — the mistake actually made here —
+  does **not** reverse anything. The two orderings are identical, so every rank comes out right
+  and every published `geo_score` carries the wrong sign. The score comparison catches it; the
+  order comparison cannot.
+- **Sorting the rank key the wrong way** reverses the list outright, every number still
+  plausible. The order comparison catches that one.
+
+The probe makes both comparisons and runs the second as an assertion rather than describing it,
+which is how the first bullet came to be stated correctly.
 
 **The ranker's weights ride in the request**, from the suggestion set's own `fixture.json`, never
 from this repository. A ranker is fitted against one definition of the eight features; a copy
@@ -673,6 +689,11 @@ here would be a second place for them to live, where being wrong still ranks.
 
 `candidates.py` is vendored for the same reason `negatives.py` is, and the slice script now
 carries both ([VENDORED.md](../src/pyodide/seam/VENDORED.md)).
+
+**The check for what comes next already exists.** `candidates.parquet` holds the own-tip rule's
+answer for this same end — 14 of the 100 kept, `geo_rank` renumbered, diverging from the
+pre-rule list at rank 5 — so the remaining work can be checked the same way the search was,
+against SEAM's own answer rather than against itself.
 
 **What is left of Phase 6.** The own-tip rule — keep a candidate only if its contact is within
 `own_um` of the tip and no other tip of the neuron is nearer, then renumber `geo_rank` — which is

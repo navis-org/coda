@@ -3,7 +3,7 @@
 this file and byte-compares.
 
 A slice rather than a whole-file copy because that module also imports
-`paths`, which reaches the filesystem. Everything below is numpy, scipy and pandas only.
+`paths`, which reaches the filesystem. Everything below is numpy and pandas only.
 """
 
 from __future__ import annotations

@@ -1,6 +1,13 @@
 /**
  * What is in a box of segmentation around a point: a typed wrapper over `cutoutSummary.py`.
  *
+ * It also holds the **search** — `runCandidateSearch`, which is the bigger of the two and the
+ * one a caller wants. The summary underneath is the lower-level question ("what is in this
+ * box"), kept because `pnpm probe:cutout-summary` is what checks the axis-order crossing both
+ * share. `touchUm` and `momentsUm` are not on the search's request on purpose: SEAM's
+ * `summary_args` decides them, so that a caller cannot ask for a summary the features were not
+ * fitted against.
+ *
  * The inputs are deliberately the shapes Coda already has. `labels` and `index` are a
  * `LabelBox` exactly as `readLabelBox` returns it — the distinct supervoxels and one index per
  * voxel, x fastest — and `roots` is what `cavePostBinary` answers for those supervoxels at a
@@ -99,6 +106,24 @@ export interface CutoutSummary {
  * `LabelBox` it means to keep must copy first. Nothing here copies on its behalf: a cutout is
  * 19 MB of index and the common case is a caller that is finished with it.
  */
+/**
+ * The measurement columns of a result, told apart by **dtype rather than by name**.
+ *
+ * Python casts the id columns to uint64 and every measurement to float64, so a list of which
+ * names are ids would be a cross-language pair with nothing testing either half — which the
+ * module header argues against. An id column added upstream arrives as a `BigUint64Array` and
+ * is simply not a measurement, rather than reaching `float64From`.
+ *
+ * Shared because both wrappers had this loop and the second copy had lost the reason.
+ */
+function float64Columns(result: Record<string, unknown>): Record<string, Float64Array> {
+  const columns: Record<string, Float64Array> = {}
+  for (const [key, value] of Object.entries(result)) {
+    if (value instanceof Float64Array) columns[key] = value
+  }
+  return columns
+}
+
 export async function runCutoutSummary(
   request: CutoutSummaryRequest,
   options: CallOptions = {},
@@ -107,21 +132,10 @@ export async function runCutoutSummary(
     { module: 'cutoutSummary', fn: 'coda_cutout_summary', args: [request] },
     options,
   )
-  /*
-   * The columns are told apart by **dtype, not by name**: Python casts the two id columns to
-   * uint64 and everything else to float64, so a second list of which names are ids — which this
-   * had, and which the module header argues against three paragraphs above — is a cross-language
-   * pair with nothing testing either half. A third id column upstream now simply arrives as a
-   * `BigUint64Array` and is left out of `columns`, rather than reaching `float64From`.
-   */
-  const columns: Record<string, Float64Array> = {}
-  for (const [key, value] of Object.entries(result)) {
-    if (value instanceof Float64Array) columns[key] = value
-  }
   return {
     rows: numberFrom(result, 'rows'),
     missingQuery: result['missingQuery'] === true,
-    columns,
+    columns: float64Columns(result),
     root: uint64From(result, 'root'),
     repSupervoxel: uint64From(result, 'rep_svid'),
     ms: numberFrom(result, 'ms'),
@@ -137,7 +151,10 @@ export type GeometricRanker = {
   b: number
 }
 
-export type CandidateSearchRequest = Omit<CutoutSummaryRequest, 'pointNm'> & {
+export type CandidateSearchRequest = Omit<
+  CutoutSummaryRequest,
+  'pointNm' | 'touchUm' | 'momentsUm'
+> & {
   /** The open end the search is about, in nanometres. Required here, unlike the summary. */
   endNm: readonly number[]
   /**
@@ -148,7 +165,14 @@ export type CandidateSearchRequest = Omit<CutoutSummaryRequest, 'pointNm'> & {
    * wrong weights still rank, just not the way the set that published them was calibrated.
    */
   ranker: GeometricRanker
-  /** How many to keep, highest score first. SEAM's search keeps 100. */
+  /**
+   * How many to keep — the **best** `topK` by `geo_score`, which is a rank key where *lower is
+   * better*. SEAM's search keeps 100.
+   *
+   * Spelled out because the opposite reading produces a plausible answer: taking the raw logit
+   * and keeping the highest gives a list exactly reversed, every number believable and every
+   * rank wrong.
+   */
   topK?: number
 }
 
@@ -179,15 +203,11 @@ export async function runCandidateSearch(
     { module: 'cutoutSummary', fn: 'coda_candidate_search', args: [request] },
     options,
   )
-  const columns: Record<string, Float64Array> = {}
-  for (const [key, value] of Object.entries(result)) {
-    if (value instanceof Float64Array) columns[key] = value
-  }
   return {
     rows: numberFrom(result, 'rows'),
     missingQuery: result['missingQuery'] === true,
     candRoot: uint64From(result, 'candRoot'),
-    columns,
+    columns: float64Columns(result),
     ms: numberFrom(result, 'ms'),
   }
 }

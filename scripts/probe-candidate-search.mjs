@@ -41,36 +41,28 @@ const BUCKET = 'https://storage.googleapis.com/fanc-fly_segmentation/wclee_aedes
 const CHUNKEDGRAPH =
   'https://cave.fanc-fly.com/segmentation/api/v1/table/wclee_aedes_brain/roots_binary'
 
-// ── The cutout, through the same addressing the volume reader uses ──────────────────────────
-const SCALE = { key: '32_32_45', res: [32, 32, 45], offset: [1024, 1536, 0], chunk: [256, 256, 64] }
-const HALF_WIDTH_NM = 3000
+/*
+ * **The box comes from `probe:volume`'s own golden, not from arithmetic here.**
+ *
+ * `aedesCutout.json` is the same end, the same half-width and the same scale, and its `lo`,
+ * `hi` and `chunk_names` were produced by `boxAround`/`chunksCovering` and are checked against
+ * them in a browser by `pnpm probe:volume`. A second copy of that arithmetic here drifted
+ * immediately — it wrote each chunk's end as `start + chunkSize` where the reader clamps to the
+ * volume's own end, which is interior-only and so invisible, and `volume.ts`'s header calls out
+ * as one of its three silent failures. Reading the golden makes `probe:volume` the one thing
+ * that keeps the addressing honest for both.
+ */
+const cutout = JSON.parse(readRepoFile('src/data/precomputed/__fixtures__/aedesCutout.json'))
+const SCALE = { key: cutout.scale, res: [32, 32, 45] }
+const { lo, hi } = cutout
 
-const lo = golden.endNm.map((nm, i) =>
-  Math.floor(nm / SCALE.res[i]) - Math.ceil(HALF_WIDTH_NM / SCALE.res[i]),
+report.check(
+  'the search golden and the cutout golden are the same end',
+  cutout.centre_nm.every((nm, i) => nm === golden.endNm[i]),
 )
-const hi = golden.endNm.map((nm, i) =>
-  Math.floor(nm / SCALE.res[i]) + Math.ceil(HALF_WIDTH_NM / SCALE.res[i]),
-)
-
-/** Every chunk the box touches, named as the store names them — `chunksCovering`'s arithmetic. */
-function chunkNames() {
-  const names = []
-  const first = lo.map((v, i) => Math.floor((v - SCALE.offset[i]) / SCALE.chunk[i]))
-  const last = hi.map((v, i) => Math.floor((v - 1 - SCALE.offset[i]) / SCALE.chunk[i]))
-  for (let z = first[2]; z <= last[2]; z++) {
-    for (let y = first[1]; y <= last[1]; y++) {
-      for (let x = first[0]; x <= last[0]; x++) {
-        const start = [x, y, z].map((g, i) => SCALE.offset[i] + g * SCALE.chunk[i])
-        const end = start.map((s, i) => s + SCALE.chunk[i])
-        names.push(`${start[0]}-${end[0]}_${start[1]}-${end[1]}_${start[2]}-${end[2]}`)
-      }
-    }
-  }
-  return names
-}
 
 async function fetchChunks() {
-  const names = chunkNames()
+  const names = cutout.chunk_names
   for (const name of names) {
     const at = join(WORK, `${name}.bin`)
     if (existsSync(at)) continue
@@ -114,9 +106,20 @@ json.dump({'labels': [str(int(v)) for v in uniq],
 }
 const box = JSON.parse(readFileSync(boxFile, 'utf8'))
 console.log(`box ${box.size.join('×')}, ${box.labels.length} distinct supervoxels`)
+/*
+ * Against the golden's own counts. If the segmentation is rebuilt this fails here, naming the
+ * box — rather than fifty lines later as a ranking that does not match, which reads as the
+ * ranker being wrong.
+ */
+report.check(
+  `${box.labels.length} supervoxels, against the cutout golden's ${cutout.distinct_labels}`,
+  box.labels.length === cutout.distinct_labels,
+)
 
 // ── Their roots at the snapshot, from the chunkedgraph ──────────────────────────────────────
-const rootsFile = join(WORK, 'roots.json')
+// Keyed on the instant: `AT_MS` comes from the fixture's snapshot, and a stale cache from
+// another moment would otherwise be reused in silence.
+const rootsFile = join(WORK, `roots-${AT_MS}.json`)
 if (!existsSync(rootsFile)) {
   const token = readCaveToken()
   if (!token) {
@@ -125,8 +128,12 @@ if (!existsSync(rootsFile)) {
   }
   /*
    * `roots_binary` — what `caveclient.chunkedgraph.get_roots` calls, and what `cavePostBinary`
-   * calls in the app. uint64 both ways, so no id is ever a double (invariant 8). One request for
-   * the whole box, at the snapshot's own instant.
+   * calls in the app. uint64 both ways, so no id is ever a double (invariant 8).
+   *
+   * **One request where the app sends two.** `rootIds.ts` batches at `CHUNK = 10_000` and this
+   * box holds ~14,400 supervoxels, so the app crosses a batch boundary here and this does not —
+   * the one place an ordering bug could enter the roots array is therefore untested. Said rather
+   * than papered over: batching here would test this script's own loop, not the app's.
    */
   const body = new BigUint64Array(box.labels.map(BigInt))
   const answer = await fetch(`${CHUNKEDGRAPH}?timestamp=${AT_MS / 1000}`, {
@@ -165,7 +172,8 @@ exec(open('/vendored/bridge.py').read(), module.__dict__)
 sys.modules['bridge'] = module
 `)
 
-py.globals.set('__request__', {
+/** The request as `runCandidateSearch` builds one. Rebuilt per call: the box is transferred. */
+const requestFor = () => ({
   labels: BigUint64Array.from(box.labels.map(BigInt)),
   index: Uint32Array.from(box.index),
   size: box.size,
@@ -177,13 +185,36 @@ py.globals.set('__request__', {
   ranker,
   topK: 100,
 })
-const proxy = await py.runPythonAsync(
-  `import sys; sys.modules['bridge'].coda_candidate_search(__request__)`,
-)
-const got = proxy.toJs({ dict_converter: Object.fromEntries })
-proxy.destroy()
 
-console.log(`\n${got.rows} candidates ranked in ${got.ms} ms.`)
+py.globals.set('__request__', requestFor())
+
+const search = async () => {
+  const proxy = await py.runPythonAsync(
+    `import sys; sys.modules['bridge'].coda_candidate_search(__request__)`,
+  )
+  const answer = proxy.toJs({ dict_converter: Object.fromEntries })
+  proxy.destroy()
+  return answer
+}
+
+const got = await search()
+/*
+ * **Twice, because the first call is not the price.** `started` is taken before `_seam`, which
+ * `exec`s both vendored sources, and `summarize_cutout`'s first statement is `from scipy import
+ * ndimage` — so scipy's and pandas' first imports are inside the measured `ms`. That is paid
+ * once per worker, not per open end, and reporting it as the per-end cost overstates it about
+ * fourfold. `probe:cutout-summary` is arranged the same way and says so.
+ *
+ * The second call transfers the box again, so the request is rebuilt: `callPython` and
+ * `py.globals.set` both hand the buffer to Python, and the first call's is spent.
+ */
+py.globals.set('__request__', requestFor())
+const warm = await search()
+
+console.log(
+  `\n${got.rows} candidates ranked: ${got.ms} ms cold, **${warm.ms} ms warm**. The warm figure ` +
+    `is the per-end price; the difference is scipy's and pandas' first imports, once per worker.`,
+)
 report.check(`${got.rows} candidates, against SEAM's ${golden.rows}`, got.rows === golden.rows)
 report.check('the ids cross as uint64', got.candRoot instanceof BigUint64Array)
 
@@ -202,7 +233,7 @@ report.check(
   firstWrong < 0,
 )
 
-const scores = got.geo_score ?? got.columns?.geo_score
+const scores = got.geo_score
 const off = golden.top.flatMap((one, at) =>
   Math.abs(scores[at] - one.geo_score) < 1e-4 ? [] : [{ ...one, got: scores[at] }],
 )
@@ -216,6 +247,51 @@ const dists = got.min_dist_um
 report.check(
   'min_dist_um matches SEAM’s for the top candidate',
   Math.abs(dists[0] - golden.top[0].min_dist_um) < 1e-5,
+)
+
+/*
+ * **The negative control, run rather than described** — and it corrected the story it was
+ * written to illustrate.
+ *
+ * `geo_score` is a rank key, `-score`, sorted ascending. The plausible mistake is to publish the
+ * raw logit and sort *that* descending — but those two orderings are **identical**, so that
+ * mistake does not reverse anything: it gets every rank right and publishes every score with the
+ * wrong sign. The `geo_score` comparison above is what catches it, not the order comparison.
+ *
+ * What genuinely reverses the list is sorting the rank key the *wrong* way, and that is what
+ * this runs: worst-first, every number still plausible. Both failures are real and they are
+ * caught by different checks, which is why the probe makes both comparisons.
+ */
+py.globals.set('__request__', requestFor())
+const reversed = JSON.parse(
+  (
+    await py.runPythonAsync(`
+import json, sys, numpy as np
+bridge = sys.modules['bridge']
+seam = bridge._seam(dict(bridge.__vendored__))
+cut, cand = seam['seam.cutout'], seam['seam.candidates']
+req = __request__.to_py()
+end = np.asarray(req['endNm'], dtype=np.float64)
+inv, query = bridge._box(req)
+frame = cut.summarize_cutout(
+    np.asarray(req['labels'], dtype=np.uint64), inv,
+    np.asarray(req['roots'], dtype=np.uint64), query,
+    np.asarray(req['resolutionNm'], dtype=np.float64),
+    np.asarray(req['loVoxels'], dtype=np.int64), **cand.summary_args(end))
+pool = cand.pool_features(frame, query, end)
+r = cand.GeometricRanker(features=list(req['ranker']['features']), mu=list(req['ranker']['mu']),
+                         sd=list(req['ranker']['sd']), w=list(req['ranker']['w']),
+                         b=float(req['ranker']['b']))
+# The rank key, sorted the wrong way: worst first. This is the reversal.
+wrong = pool.assign(s=r.rank_key(pool)).sort_values('s', ascending=False).head(100)
+json.dumps([str(int(v)) for v in wrong['root'].to_numpy()[:5]])
+`)
+  ).toString(),
+)
+report.check(
+  `sorting the rank key the wrong way puts ${reversed[0]} first, not SEAM's ${theirs[0]} — so ` +
+    'the order comparison above can fail',
+  reversed[0] !== theirs[0],
 )
 
 report.finish(py)
