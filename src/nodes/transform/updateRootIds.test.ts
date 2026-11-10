@@ -410,6 +410,121 @@ describe('live', () => {
 })
 
 /**
+ * A time the reader gives — the mode the node's header argues the *moving* instants must not be.
+ *
+ * The distinction worth pinning is the cache. A clock instant is a new moment every run and its
+ * answers are held by nobody; a stated one never changes, so its answers are kept the way a
+ * materialization's are — which is what lets a search ask about one snapshot across hundreds of
+ * open ends without re-asking the chunkedgraph for each.
+ *
+ * Both ways of getting it wrong produce a plausible run rather than a failure, so both are
+ * refused on the card: an unreadable time, and a future one (which the chunkedgraph answers with
+ * the present state, i.e. silently `live`).
+ */
+describe('a time you give', () => {
+  /** The card's own refusals, through the graph the way a reader would meet them. */
+  const validate = (params: Record<string, unknown>): string => {
+    const def = requireNodeDef('cave.updateRootIds')
+    const graph = addNode(emptyGraph('x'), {
+      id: 'upd',
+      type: 'cave.updateRootIds',
+      position: { x: 0, y: 0 },
+      params: { ...defaultParams(def), ...params } as GraphNode['params'],
+    })
+    // Joined, because an unwired `Table` is an issue too and would otherwise come first.
+    return (inferGraph(graph).nodes.upd?.issues ?? []).map((issue) => issue.message).join(' ')
+  }
+
+  const NOW = Date.parse('2026-10-07T12:00:00Z')
+  /** Well before the run and well after the materialization, so neither can be mistaken for it. */
+  const PINNED = Date.parse('2026-09-01T09:30:00Z')
+
+  clockAt(NOW)
+
+  it('asks both calls about the stated instant, not the run’s', async () => {
+    const calls = installFetch()
+    const out = (
+      await run(annotations(), {
+        updateTo: 'timestamp',
+        at: '2026-09-01T09:30:00Z',
+      })
+    ).out as TableValue
+    expect(out.data.neuronId).toEqual([NEW, KEPT])
+    expect(stampsOf(calls)).toEqual([String(PINNED / 1000), String(PINNED / 1000)])
+  })
+
+  /**
+   * Kept forever, like a materialization's. The entry is written under the instant, so a second
+   * run at the same moment asks nothing — this seeds one and checks the fetch never happens.
+   */
+  it('keeps its answers, and reads them back', async () => {
+    installFetch()
+    await run(annotations(), { updateTo: 'timestamp', at: '2026-09-01T09:30:00Z' })
+    const held = await cacheGet(`cave-roots:https://cg.example|flywire_public|${PINNED}`, {
+      fingerprint: 'v1',
+    })
+    expect(held).toBeDefined()
+  })
+
+  /**
+   * A pinned moment does not move, so there is no age to show and no ⟳ that could change it —
+   * the same silence a materialization keeps.
+   */
+  it('says nothing about an age', async () => {
+    installFetch()
+    const reported: number[] = []
+    await run(
+      annotations(),
+      { updateTo: 'timestamp', at: '2026-09-01T09:30:00Z' },
+      { reportFetched: (at) => reported.push(at) },
+    )
+    expect(reported).toEqual([])
+  })
+
+  /**
+   * The guard on the *cache*, not on the question: an instant seconds old is one the
+   * chunkedgraph may still be receiving edits for, and the permanent store has no eviction — so
+   * it is answered, and not written down. A reader pinning a snapshot is pinning something far
+   * older than this by construction, so nothing legitimate takes this branch.
+   */
+  it('answers a very recent instant but does not keep it forever', async () => {
+    installFetch()
+    const seconds = new Date(NOW - 10_000).toISOString()
+    const out = (await run(annotations(), { updateTo: 'timestamp', at: seconds }))
+      .out as TableValue
+    expect(out.data.neuronId).toEqual([NEW, KEPT])
+    expect(
+      await cacheGet(`cave-roots:https://cg.example|flywire_public|${NOW - 10_000}`, {
+        fingerprint: 'v1',
+      }),
+    ).toBeUndefined()
+  })
+
+  it('refuses a time it cannot read, and an empty one', () => {
+    expect(validate({ updateTo: 'timestamp', at: 'last tuesday' })).toMatch(/not a time/)
+    expect(validate({ updateTo: 'timestamp', at: '  ' })).toMatch(/Give a `Time`/)
+  })
+
+  /**
+   * The failure this refusal is really about: the chunkedgraph answers a future timestamp with
+   * the state right now, so a mistyped year would make this `live` — with its answers then kept
+   * forever as though they were settled history.
+   */
+  it('refuses a future time rather than quietly being live', () => {
+    expect(validate({ updateTo: 'timestamp', at: '2027-01-01T00:00:00Z' })).toMatch(
+      /in the future/,
+    )
+  })
+
+  /** A date with no time is UTC midnight, which is the reading "that day" means. */
+  it('reads a bare date as UTC midnight', async () => {
+    const calls = installFetch()
+    await run(annotations(), { updateTo: 'timestamp', at: '2026-09-01' })
+    expect(stampsOf(calls)[0]).toBe(String(Date.parse('2026-09-01T00:00:00Z') / 1000))
+  })
+})
+
+/**
  * The last full hour and the last half hour — live, snapped back to the schedule an annotation base
  * refreshes its own ids on (FlyTable's is every thirty minutes).
  *

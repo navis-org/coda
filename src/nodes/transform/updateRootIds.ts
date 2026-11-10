@@ -76,6 +76,9 @@ const CLOCK_MODES = [
   { value: 'live', label: 'live (as of the last run)', stepMs: 1 },
 ] as const
 
+/** `Update to`'s fourth mode: a moment the reader states, rather than one a clock picks. */
+const AT_TIMESTAMP = 'timestamp'
+
 /**
  * The column a majority vote adds: the winning root's share of the old root's sampled chunks.
  *
@@ -172,8 +175,9 @@ export const updateRootIdsNode = packNode({
       options: [
         { value: 'materialization', label: 'a materialization' },
         ...CLOCK_MODES.map(({ value, label }) => ({ value, label })),
+        { value: AT_TIMESTAMP, label: 'a time you give' },
       ],
-      help: '"live" asks for the newest root ids at the moment the node runs. "the last full hour" and "the last half hour" ask for the ids as they were at the last :00 (or :30) before the run, which matches annotation tables refreshed on that schedule, such as FlyTable’s. The ⟳ on the card runs it again. All three are newer than any materialization, so a Dataset pinned to one will not match the neurons edited since.',
+      help: '"live" asks for the newest root ids at the moment the node runs. "the last full hour" and "the last half hour" ask for the ids as they were at the last :00 (or :30) before the run, which matches annotation tables refreshed on that schedule, such as FlyTable’s. The ⟳ on the card runs it again, and all three are newer than any materialization, so a Dataset pinned to one will not match the neurons edited since. "a time you give" asks about one stated moment and keeps asking about it — the ids do not move between runs, and the answers are kept the way a materialization’s are.',
       // Inspector-only, like `Materialization` beside it: the two are one decision, and a card
       // showing half of it reads as though the version were not a choice at all.
       advanced: true,
@@ -189,6 +193,25 @@ export const updateRootIdsNode = packNode({
       // Hidden under every other mode, which also takes it out of the provenance key: a version
       // typed earlier and no longer read must not re-run anything when it is edited.
       visibleIf: (params) => toMaterialization(params),
+    },
+    {
+      id: 'at',
+      kind: 'string',
+      label: 'Time',
+      placeholder: '2026-10-20T14:11:49Z',
+      /*
+       * **This one is a param, where the clock modes' instant deliberately is not.** The header
+       * argues that a *moving* instant must not be one: it would make an update an edit, an undo
+       * step and a timestamp in the file somebody else opens, and the provenance key does not
+       * need it because only ⟳ or an upstream edit replaces the result. A **stated** instant is
+       * the opposite on every count. It is the reader's choice, it belongs in the file so the
+       * graph answers the same thing tomorrow, and it has to be in the key — two runs at two
+       * stated moments are two different answers.
+       */
+      default: '',
+      help: 'The moment to ask about, in ISO 8601 — for example 2026-10-20T14:11:49Z, which is what CAVE’s own snapshot timestamps look like. A date on its own is read as UTC midnight. It must be in the past: the chunkedgraph answers a future time with the present state, which would quietly make this "live".',
+      advanced: true,
+      visibleIf: (params) => atTimestamp(params),
     },
   ],
 
@@ -228,6 +251,31 @@ export const updateRootIdsNode = packNode({
     if (typed && !Number.isInteger(Number(typed))) {
       return [`"${typed}" is not a materialization number. CAVE numbers them, e.g. 783.`]
     }
+    /*
+     * Said on the card rather than left to `evaluate`, because both ways of getting this wrong
+     * produce a *plausible* run rather than a failure: an unparseable time falls back to no
+     * instant at all, and a future one would be answered with the present state — which is
+     * `live`, the mode this exists to be the opposite of.
+     */
+    if (atTimestamp(ctx.params)) {
+      const text = String(ctx.params.at ?? '').trim()
+      if (!text) {
+        return ['Give a `Time` to update to, in ISO 8601 — for example 2026-10-20T14:11:49Z.']
+      }
+      const at = Date.parse(text)
+      if (!Number.isFinite(at)) {
+        return [
+          `"${text}" is not a time this can read. Use ISO 8601 — for example ` +
+            '2026-10-20T14:11:49Z, which is the shape of CAVE’s own snapshot timestamps.',
+        ]
+      }
+      if (at > Date.now()) {
+        return [
+          `"${text}" is in the future. The chunkedgraph answers a future time with the state ` +
+            'right now, so this would quietly be “live” — pick a past moment, or use “live”.',
+        ]
+      }
+    }
     return []
   },
 
@@ -253,7 +301,14 @@ export const updateRootIdsNode = packNode({
     const { deployment, datastack } = target
     // What puts `cached 4m ago ⟳` on the card: the age is how old the ids' state is — since the
     // run for live, since the boundary for the clock modes.
-    if (!('version' in at)) ctx.reportFetched('instant' in at ? at.instant : at.boundary)
+    /*
+     * What puts `cached 4m ago ⟳` on the card: the age is how old the ids' state is — since the
+     * run for live, since the boundary for the clock modes. A version and a stated instant are
+     * both **pinned**, so neither reports: an age beside a moment the reader chose would invite
+     * a ⟳ that cannot move it.
+     */
+    if ('now' in at) ctx.reportFetched(at.now)
+    else if ('boundary' in at) ctx.reportFetched(at.boundary)
 
     const majority = byMajority(ctx.params)
     const idColumn = ctx.column('idColumn')
@@ -396,6 +451,31 @@ function clockMode(params: Params) {
   return CLOCK_MODES.find((mode) => mode.value === params.updateTo)
 }
 
+/** Whether the node updates to an instant the reader typed. */
+function atTimestamp(params: Params): boolean {
+  return params.updateTo === AT_TIMESTAMP
+}
+
+/**
+ * The typed instant as epoch ms, or undefined where the field does not name one.
+ *
+ * `Date.parse` rather than a grammar of our own: it takes ISO 8601, which is what CAVE's own
+ * timestamps are and what anyone copying one out of a snapshot will have. A date with no time is
+ * read as UTC midnight by the same rule, which is the reading a reader pinning "that day" means.
+ *
+ * **Undefined for a future instant as well as an unparseable one.** The chunkedgraph answers a
+ * future timestamp with the present state, so a mistyped year would quietly become *live* — the
+ * one mode this is meant to be the opposite of — and the answers would then be cached as though
+ * they were settled history.
+ */
+export function pinnedInstant(params: Params): number | undefined {
+  if (!atTimestamp(params)) return undefined
+  const text = String(params.at ?? '').trim()
+  if (!text) return undefined
+  const at = Date.parse(text)
+  return Number.isFinite(at) && at <= Date.now() ? at : undefined
+}
+
 /**
  * Whether the node updates to a materialization — the one spelling of that test.
  *
@@ -404,7 +484,7 @@ function clockMode(params: Params) {
  * `evaluate` cannot read it three ways.
  */
 function toMaterialization(params: Params): boolean {
-  return clockMode(params) === undefined
+  return clockMode(params) === undefined && !atTimestamp(params)
 }
 
 /** The materialization typed on this node, trimmed; empty when none is, or the mode reads none. */
@@ -424,7 +504,17 @@ function rootsAt(params: Params, pinned: number | undefined): RootsAt | undefine
   const mode = clockMode(params)
   if (mode) {
     const at = Math.floor(Date.now() / mode.stepMs) * mode.stepMs
-    return mode.value === 'live' ? { instant: at } : { boundary: at }
+    return mode.value === 'live' ? { now: at } : { boundary: at }
+  }
+  /*
+   * A stated instant is `pinned`, not `now`, and the difference is the cache: what a root was at
+   * a past moment never changes, so its answers are kept the way a materialization's are. A
+   * search asking about one snapshot across hundreds of ends would otherwise re-ask the
+   * chunkedgraph for every one of them.
+   */
+  if (atTimestamp(params)) {
+    const at = pinnedInstant(params)
+    return at === undefined ? undefined : { pinned: at }
   }
   const typed = typedVersion(params)
   const version = typed ? Number(typed) : pinned

@@ -43,7 +43,7 @@ Set `Update to` to `live` to get the newest root IDs instead of those at a mater
 
 To match an annotation table whose root IDs are refreshed on a schedule, use `the last half hour` or `the last full hour` instead. These update to the state at the last :30 or :00 before the node ran, so the IDs line up with a table such as FlyTable's, which is refreshed every 30 minutes. Times are in UTC, which only matters in time zones offset by a half hour.
 
-Live answers are not cached: every update asks CAVE again. Answers for the last half or full hour are remembered until the next boundary (for as long as the page stays open), so re-running after an upstream change costs nothing extra.
+Live answers are not cached: every update asks CAVE again. Answers for the last half or full hour are remembered until the next boundary (for as long as the page stays open), so re-running after an upstream change costs nothing extra. A time you give is remembered for good — see below.
 
 > [!WARNING] Live IDs and pinned datasets
 > A Dataset pinned to a materialization only knows the root IDs at that materialization. Feeding it
@@ -51,16 +51,31 @@ Live answers are not cached: every update asks CAVE again. Answers for the last 
 > neurons up in the live segmentation, such as Neuroglancer, meshes and skeletons, or for exporting
 > the table.
 
+## A time you choose
+
+Set `Update to` to `a time you give` and put the moment in `Time`, in ISO 8601 — for example `2026-10-20T14:11:49Z`, which is the shape of CAVE's own snapshot timestamps. A date on its own, `2026-09-01`, is read as UTC midnight.
+
+This is the one mode whose moment is part of the graph. Live and the two clock modes pick a moment when the node runs, so they move on their own and the card's ⟳ is how you move them; a time you give stays put, is saved in the file, and answers the same thing tomorrow. Use it when a result has to be reproducible, or when you are matching some other analysis pinned to a known snapshot.
+
+The card shows no age for it, for the same reason it shows none for a materialization: nothing about a stated moment is getting older, and a ⟳ could not change it.
+
+> [!NOTE]
+> **It must be in the past**
+> The chunkedgraph answers a future timestamp with the state right now — so a mistyped year would silently make this `live`, which is the one thing this mode is meant not to be. The card refuses it rather than running.
+
+Unlike live, these answers *are* remembered: what a root ID was at a past moment never changes, so asking about the same instant twice costs one request. That is what makes it usable for a job that walks a long list of neurons at one snapshot.
+
 ## Settings
 
 ```coda-params
-cave.updateRootIds: idColumn, method, supervoxelColumn, updateTo, version
+cave.updateRootIds: idColumn, method, supervoxelColumn, updateTo, version, at
 ```
 
 - `ID column` is the column of root IDs to update.
 - `Method` is `each row’s supervoxel` (the default) or `majority of the root’s chunks`; see above.
 - `Supervoxel ID column` is the supervoxel each row was annotated at, `supervoxel_id` by default. Only used with `each row’s supervoxel`.
-- `Update to` is `a materialization` (the default), `the last full hour`, `the last half hour` or `live`; see above.
+- `Update to` is `a materialization` (the default), `the last full hour`, `the last half hour`, `live` or `a time you give`; see above.
 - `Materialization` is the version to bring the IDs up to, when updating to a materialization. Leave it empty to use the one the wired Dataset is pinned to, which is almost always what you want.
+- `Time` is the moment to ask about, when updating to a time you give. ISO 8601, in the past.
 
 The `Dataset` input only tells the node which datastack to ask; it does not read any data from it. That is why you can wire the same Dataset that receives the annotations into it without creating a loop.
