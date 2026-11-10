@@ -59,11 +59,12 @@ import {
   caveIdColumn,
   caveDatastackIssues,
   caveDatastackParam,
+  caveTableParam,
   caveTableRef,
-  caveTableSuggestions,
   caveTargetOfType,
 } from '../lib/caveParams'
 import { peekReferenceTable, peekTableColumns } from '../../data/cave/tables'
+import { parseScale, scaleRefusal } from '../../data/units'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom } from '../lib/annotationParams'
 import { datasetRef } from '../../core/types'
 
@@ -136,16 +137,9 @@ export const caveAnnotationNode = packNode({
     caveDatastackParam(
       'Datastack and materialization holding the table, as `name:number`. Ignored when a Dataset is wired, which is how a table is read from a different datastack than the one being annotated.',
     ),
-    {
-      id: 'table',
-      kind: 'string',
-      label: 'Table',
-      placeholder: 'nuclei_v1',
-      help: 'Annotation table or view in this datastack. Listing them (marked t and v) needs a CAVE token; you can always type a name.',
-      default: '',
-      // Views too: the read asks the listing which a name is and takes the view route for one.
-      suggestions: caveTableSuggestions,
-    },
+    caveTableParam({
+      help: 'Annotation table or view in this datastack (listed ones are marked t and v).',
+    }),
     {
       id: 'columns',
       kind: 'string',
@@ -162,6 +156,22 @@ export const caveAnnotationNode = packNode({
         const id = caveIdColumn(ctx.params)
         return caveColumnSuggestions(ctx, 'own').filter((name) => name !== id)
       },
+    },
+    {
+      id: 'resolution',
+      kind: 'string',
+      label: 'Position units',
+      /*
+       * **The default and `absentMeans` differ on purpose**, `viewer3d`'s rule. A card made from
+       * now on asks for nanometres, which is what the rest of Coda measures in and what makes a
+       * position column usable as geometry; a card saved before this field existed keeps what it
+       * got, which is CAVE's default — the table's own voxels.
+       */
+      default: '1, 1, 1',
+      absentMeans: '',
+      placeholder: 'as stored',
+      advanced: true,
+      help: 'What to ask CAVE for position columns in, as `x, y, z` nanometres per unit — `1, 1, 1` gives nanometres. Left blank they come back in the table’s own voxels, which is CAVE’s default and a factor out of everything Coda measures in nanometres.',
     },
     {
       id: 'idColumn',
@@ -213,6 +223,13 @@ export const caveAnnotationNode = packNode({
     if (!String(ctx.params.table).trim())
       return ['Enter the name of an annotation table in `Table`.']
     if (pivotWithoutValue(ctx.params)) return [NO_VALUE_COLUMN]
+    const resolution = String(ctx.params.resolution ?? '').trim()
+    if (resolution && !parseScale(resolution)) {
+      // Said here rather than left to the server: a malformed `desired_resolution` comes back as
+      // a 400 naming nothing a reader would recognise, and the read drops it rather than sending
+      // something it cannot parse — so without this the card would quietly answer in voxels.
+      return [scaleRefusal('Position units', true)]
+    }
     return []
   },
 
@@ -290,6 +307,7 @@ function caveRef(
     pivotOn: String(params.pivotOn).trim(),
     valueColumn: String(params.valueColumn).trim(),
     columns: String(params.columns).trim(),
+    resolution: String(params.resolution ?? '').trim(),
   })
 }
 

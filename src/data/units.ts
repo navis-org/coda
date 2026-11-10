@@ -65,6 +65,40 @@ export function voxelScale(voxelSize: unknown, voxelUnits: unknown): VoxelScale 
 }
 
 /**
+ * A `VoxelScale` typed into a field, or undefined where the text is not one.
+ *
+ * Three positive numbers separated by commas or spaces, which is how every card in Coda asks for
+ * a scale. **Undefined rather than a partial answer**: two numbers, a stray letter or a zero are
+ * all "not a scale", and a card that guessed at one would be answering in units nobody named.
+ * Each caller says in its own words what it wanted — the field differs, the grammar does not.
+ */
+export function parseScale(text: string): VoxelScale | undefined {
+  const parts = text
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map(Number)
+  return parts.length === 3 && parts.every((value) => Number.isFinite(value) && value > 0)
+    ? [parts[0]!, parts[1]!, parts[2]!]
+    : undefined
+}
+
+/**
+ * The sentence for a field that should hold a scale and does not.
+ *
+ * One wording for three cards — `Voxel size` on Custom CAVE, `Position units` on CAVE table and
+ * `Nanometres per unit` on Table to Points — because the grammar is one rule and only the field
+ * name legitimately differs. `blankAllowed` is the one real variation: a CAVE table left blank
+ * means "the table's own units", where a scale a node has to multiply by cannot be absent.
+ */
+export function scaleRefusal(field: string, blankAllowed = false): string {
+  return (
+    `\`${field}\` must be three positive numbers, as \`x, y, z\` nanometres per unit — ` +
+    `\`1, 1, 1\` for nanometres, \`4, 4, 40\` for 4x4x40 nm voxels` +
+    (blankAllowed ? ', or blank for the units the data is stored in.' : '.')
+  )
+}
+
+/**
  * What coordinates scaled by this are in — the other half of `voxelScale`'s answer.
  *
  * Kept beside it rather than at the call sites, on the same reasoning as invariant 3: the two

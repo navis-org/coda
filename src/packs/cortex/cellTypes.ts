@@ -94,7 +94,7 @@ export function cellTypeRefs(
     ? [flags.dendrite, flags.axon, ...(flags.strategy ? [flags.strategy.column] : [])]
     : []
   const ref = (table: string, columns: string) =>
-    caveTableRef(datasetId, sourceId, { table, columns })
+    caveTableRef(datasetId, sourceId, { table, columns, resolution: '' })
   if (flags && typing?.table === flags.table) {
     // One table carrying both: one read, both sets of columns — a union, so the default reads
     // exactly what the dataset's annotation chain reads and the two share a cache entry. Every

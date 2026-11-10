@@ -64,8 +64,7 @@ import type { DatasetAnnotations, DatasetEdges, DatasetValue } from '../../core/
 import { isTableFileValue, isTableValue } from '../../core/values'
 import type { EdgeColumns } from '../../data/edges/encode'
 import type { SynapseColumns } from '../../data/custom/synapses'
-import type { VoxelScale } from '../../data/units'
-import { IDENTITY_SCALE } from '../../data/units'
+import { IDENTITY_SCALE, parseScale, scaleRefusal } from '../../data/units'
 import {
   carriedSchemas,
   pinSynapseTable,
@@ -214,17 +213,6 @@ const WHOLE_READ_WARN_ROWS = 10_000_000
 /** The voxel size a fresh card holds: coordinates already in nanometres. */
 const DEFAULT_VOXEL = IDENTITY_SCALE.join(', ')
 
-/** Three positive numbers, separated by commas or spaces — or undefined for anything else. */
-function parseVoxel(text: string): VoxelScale | undefined {
-  const parts = text
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .map(Number)
-  return parts.length === 3 && parts.every((v) => Number.isFinite(v) && v > 0)
-    ? [parts[0]!, parts[1]!, parts[2]!]
-    : undefined
-}
-
 /**
  * The synapse pickers' columns and voxel size, or what is wrong — `edgeColumnsOf`'s arrangement:
  * `validate` lists the problems, a run refuses on the first.
@@ -247,9 +235,8 @@ export function synapseColumnsOf(
       `Pick three columns in \`Synapse position\`: x, y and z, in that order.${looks}`,
     )
   }
-  const voxel = parseVoxel(String(ctx.params.voxelSize))
-  if (!voxel)
-    problems.push('`Voxel size` must be three positive numbers in nanometres, e.g. 4, 4, 40.')
+  const voxel = parseScale(String(ctx.params.voxelSize))
+  if (!voxel) problems.push(scaleRefusal('Voxel size'))
   const carry = ctx.columns('synCarry')
   const shadowed = shadowedColumns(carry)
   if (shadowed.length) {

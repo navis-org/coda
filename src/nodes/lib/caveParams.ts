@@ -89,6 +89,33 @@ export function caveDatastackParam(help: string): ParamDef {
 }
 
 /**
+ * A field naming a table in a CAVE datastack, for the three cards that have one.
+ *
+ * `caveDatastackParam`'s shape and its reason: the cards differ in what the table is *for* and
+ * in nothing else, and written out per node the caveat drifted — "listing them needs a CAVE
+ * token; you can always type a name" was already said three ways. The `suggestions` hook is the
+ * part that must not be forgotten, since a card without it silently offers nothing.
+ */
+export function caveTableParam(field: {
+  id?: string
+  label?: string
+  placeholder?: string
+  /** What this card reads the table for. The shared caveat is appended. */
+  help: string
+}): ParamDef {
+  return {
+    id: field.id ?? 'table',
+    kind: 'string',
+    label: field.label ?? 'Table',
+    placeholder: field.placeholder ?? 'nuclei_v1',
+    default: '',
+    help: `${field.help} Listing the tables needs a CAVE token; you can always type a name.`,
+    // Views too, where the card reads them: the read asks the listing which a name is.
+    suggestions: caveTableSuggestions,
+  }
+}
+
+/**
  * The deployment a `Custom CAVE` card names — normalised, so a pasted address bar and a bare host
  * resolve to the one source, the one token and the one set of memo keys. Here rather than on the
  * node so its exporter reads the same answer.
@@ -153,6 +180,13 @@ export function caveTableRef(
     idColumn?: string
     pivotOn?: string
     valueColumn?: string
+    /**
+     * `desired_resolution`, as the card's free text. **Required**, though empty is a perfectly
+     * ordinary value: it was optional for one commit and the card's own call site forgot it, so
+     * the whole setting was parsed, validated, documented and then dropped on the floor. A field
+     * every caller must name is a field no caller can forget.
+     */
+    resolution: string
   },
 ): AnnotationRef {
   const deployment = caveServerOfSource(sourceId) ?? DEFAULT_CAVE_SERVER
@@ -165,6 +199,7 @@ export function caveTableRef(
       pivotOn: fields.pivotOn ?? '',
       valueColumn: fields.valueColumn ?? '',
       columns: fields.columns,
+      resolution: fields.resolution,
       ...(deployment !== DEFAULT_CAVE_SERVER ? { deployment } : {}),
     },
   }
