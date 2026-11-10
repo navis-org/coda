@@ -1,10 +1,9 @@
-"""Vendored from SEAM: `seam/negatives.py`, the two functions that summarise a
-supervoxel cutout. **Not edited** — see `VENDORED.md` and
-`scripts/vendor-seam-cutout.mjs`, which re-cuts this file and byte-compares it.
+"""Vendored from SEAM: `seam/negatives.py`, the two functions that summarise a supervoxel cutout.
+**Not edited** — see `VENDORED.md` and `scripts/vendor-seam-cutout.mjs`, which re-cuts
+this file and byte-compares.
 
-A slice rather than a whole-file copy because `negatives.py` also imports
-`cave`, `paths` and `pre_edit`, which reach the network. Everything below
-is numpy, scipy and pandas only.
+A slice rather than a whole-file copy because that module also imports
+`cave`, `paths` and `pre_edit`, which reach the network. Everything below is numpy, scipy and pandas only.
 """
 
 from __future__ import annotations

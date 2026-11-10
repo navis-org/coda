@@ -127,3 +127,67 @@ export async function runCutoutSummary(
     ms: numberFrom(result, 'ms'),
   }
 }
+
+/** The geometric ranker's fit, as `fixture.json`'s `pipeline.search.geometric_ranker` ships it. */
+export type GeometricRanker = {
+  features: readonly string[]
+  mu: readonly number[]
+  sd: readonly number[]
+  w: readonly number[]
+  b: number
+}
+
+export type CandidateSearchRequest = Omit<CutoutSummaryRequest, 'pointNm'> & {
+  /** The open end the search is about, in nanometres. Required here, unlike the summary. */
+  endNm: readonly number[]
+  /**
+   * The fit to score with — **read from the suggestion set's own manifest**, never from here.
+   *
+   * A ranker is a set of weights fitted against one definition of the eight features. Shipping a
+   * copy in this repository would be a second place for them to live, and the failure is silent:
+   * wrong weights still rank, just not the way the set that published them was calibrated.
+   */
+  ranker: GeometricRanker
+  /** How many to keep, highest score first. SEAM's search keeps 100. */
+  topK?: number
+}
+
+/** One open end's ranked pool, as flat columns. */
+export interface CandidateSearch {
+  readonly rows: number
+  /** True where the query root has no voxel in its own box — see `CutoutSummary.missingQuery`. */
+  readonly missingQuery: boolean
+  /** The candidate object of each row, 64-bit. */
+  readonly candRoot: BigUint64Array
+  /** `geo_score`, `geo_rank`, the eight features, the contact point — by SEAM's own names. */
+  readonly columns: Readonly<Record<string, Float64Array>>
+  readonly ms: number
+}
+
+/**
+ * Rank one open end's candidates — stages 4 and 5, in one crossing.
+ *
+ * Everything that has to match SEAM happens on the far side of this call: the cutout summary,
+ * the eight features and the logistic score are three vendored steps with nothing of Coda's
+ * between them. What this file does is carry the box over and name the columns back.
+ */
+export async function runCandidateSearch(
+  request: CandidateSearchRequest,
+  options: CallOptions = {},
+): Promise<CandidateSearch> {
+  const result = await callPython(
+    { module: 'cutoutSummary', fn: 'coda_candidate_search', args: [request] },
+    options,
+  )
+  const columns: Record<string, Float64Array> = {}
+  for (const [key, value] of Object.entries(result)) {
+    if (value instanceof Float64Array) columns[key] = value
+  }
+  return {
+    rows: numberFrom(result, 'rows'),
+    missingQuery: result['missingQuery'] === true,
+    candRoot: uint64From(result, 'candRoot'),
+    columns,
+    ms: numberFrom(result, 'ms'),
+  }
+}

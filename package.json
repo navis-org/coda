@@ -101,7 +101,8 @@
     "probe:seam-windows-py": "node scripts/probe-seam-windows-py.mjs",
     "probe:volume": "node scripts/probe-volume.mjs",
     "probe:cutout-summary": "node scripts/probe-cutout-summary.mjs",
-    "vendor:seam-cutout": "node scripts/vendor-seam-cutout.mjs"
+    "vendor:seam-cutout": "node scripts/vendor-seam-cutout.mjs",
+    "probe:candidate-search": "node scripts/probe-candidate-search.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",
