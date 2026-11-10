@@ -4,6 +4,30 @@ CAVE: deployments and sign-in, the datastack listing, tables and the row cap, di
 properties. Meshes and skeletons are in [backends-cave-geometry.md](backends-cave-geometry.md).
 [backends.md](backends.md) holds what all of them share — the geometry cache and streaming.
 
+
+## Where a datastack's voxels are
+
+`cave/volumes.ts`, the one layer that knows both routes — `precomputed/volume.ts` reads a box and
+knows nothing about CAVE. A datastack names its two volumes in two different ways and neither is
+an address a browser can fetch:
+
+- **The EM is on the *aligned volume*, not on the datastack**: `aligned_volume.image_source`,
+  which is where `caveclient`'s `info.image_source()` reads it from too. It arrives as an
+  already-prefixed `precomputed://gs://…`, so the prefix comes off and the bucket is rewritten,
+  and then it is an ordinary precomputed volume. **No request** — the address is in the record
+  the datastack already fetched.
+- **The supervoxels are not at the graphene address.** `graphene://…/segmentation/table/<table>`
+  is the chunkedgraph; its own `info` names a `data_dir` bucket where the watershed voxels live.
+  So that is one authenticated request (the chunkedgraph is not public even where its bucket is)
+  and then an address anyone can read. Reading the graphene URL as a volume is the plausible
+  mistake and would 404 on every chunk — which the volume reader takes for empty space.
+
+**What comes back from the segmentation volume is supervoxels, not neurons.** A supervoxel id is
+not a root id and is not stable the way a neuron is; turning one into a neuron is a chunkedgraph
+lookup at a timestamp (`roots_binary` — what `caveclient.chunkedgraph.get_roots` calls, and what
+`cavePostBinary` already does). The resolver returns an address rather than a `DataSource` method
+for exactly that reason: the reader cannot make that step and should not look as though it can.
+
 ## CAVE
 
 `src/data/cave/`, and the second backend. FlyWire and everything else served by CAVE — the
