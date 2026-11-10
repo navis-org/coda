@@ -1,7 +1,7 @@
 /**
  * What the tree says about itself, checked against navis-fastcore rather than against intuition.
  *
- * Both trees below were run through `navis_fastcore` 0.13.0 — the exact wheel `sources.json`
+ * Both trees below were run through `navis_fastcore` 0.13.2 — the exact wheel `sources.json`
  * pins — and the expected arrays are its output transcribed. That matters most for Strahler: a
  * plausible implementation and the reference one disagree only at a converging branch where
  * *some* of the children share the maximum, which no bifurcating fixture can reach.
@@ -168,6 +168,16 @@ describe('parentDistances', () => {
   it('measures each node to its parent and leaves roots at zero', () => {
     const d = parentDistances(skeletonOf([-1, 0, 1]))
     expect([...d]).toEqual([0, 1000, 1000])
+  })
+
+  /**
+   * The rule `skeletonTree` follows, now followed here too. A `NaN` length is the dangerous
+   * answer rather than a visible one: it fails every comparison, so a loop that walks until it
+   * has accumulated some distance never decides it has, and the node is dropped by arithmetic
+   * instead of by whatever rule the caller thinks it is applying.
+   */
+  it('reads a parent past the end as a root, not as a NaN length', () => {
+    expect([...parentDistances(skeletonOf([-1, 0, 99]))]).toEqual([0, 1000, 0])
   })
 })
 

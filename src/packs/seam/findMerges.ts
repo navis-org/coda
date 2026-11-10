@@ -40,20 +40,16 @@
  * makes the edit with their own tools.
  */
 
-import { formatBytes, warnOverWait, WAIT_WARN_SECONDS } from '../../core/limits'
+import { warnOverWait, WAIT_WARN_SECONDS } from '../../core/limits'
 import type { Warner } from '../../core/limits'
 import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { LayersValue, MeshesValue, PointsValue } from '../../core/values'
 import { boundsOf, isMeshesValue, layersFrom } from '../../core/values'
-import { loadManifest, variantBytes } from '../../ml/manifest'
-import { openModel } from '../../ml/session'
-import { gpuSupport, preferredVariant } from '../../ml/support'
-import { weightsCached } from '../../ml/weights'
 import { runSeamWindows } from '../../pyodide/seamWindows'
 import { agree, plural } from '../../style/format'
 import type { WindowConfig } from './windowConfig'
-import { parseWindowConfig } from './windowConfig'
+import { windowFieldsFrom } from './windowConfig'
 import type { DrawnWindow, NeuronWindows, ScoredWindow } from './mergeTables'
 import {
   drawnPointsSchema,
@@ -67,6 +63,7 @@ import {
   windowTableSchema,
 } from './mergeTables'
 import { MERGE_WINDOW_MODELS, MERGE_WINDOW_TASK, mergeWindowModel } from './models'
+import { openWindowModel } from './openWindowModel'
 import type { ScoredPoints } from './scene'
 import { fragmentLayer, scoreLayer } from './scene'
 import { probability, scoreWindows } from './windowRun'
@@ -227,52 +224,15 @@ export const findMergesNode = packNode({
     const model = mergeWindowModel(id)
     if (!model) throw new Error(unknownModel(id))
 
-    // Asked before anything is fetched: a browser that cannot run the model should say so in one
-    // sentence rather than after 71 MB.
-    const gpu = await gpuSupport()
-    if (gpu.refusal) throw new Error(gpu.refusal)
-
-    ctx.progress(0, 'reading the model')
-    const loaded = await loadManifest(model.manifestUrl, ctx.signal)
-    if (loaded.manifest.task !== MERGE_WINDOW_TASK) {
-      throw new Error(
-        `${model.label} is a ${loaded.manifest.task} model, not a ${MERGE_WINDOW_TASK} one.`,
-      )
-    }
-    const config = parseWindowConfig(loaded.manifest.config, loaded.manifest.id)
-    warnOnCalibration(ctx, model.label, config)
-
-    const variant = preferredVariant(loaded.manifest)
-    if (!variant) {
-      throw new Error(
-        `None of ${model.label}'s builds can run on this browser's GPU. This is a property of ` +
-          `the published model, not of the neurons.`,
-      )
-    }
-    const bytes = variantBytes(loaded.manifest, variant)
-    if (!ctx.params.download && !(await weightsCached(loaded, variant))) {
-      throw new Error(
-        `${model.label} is a ${formatBytes(bytes)} download and \`Download the model\` is off. ` +
-          `Tick it to allow the download; it is fetched once and kept in this browser.`,
-      )
-    }
-
-    const received = new Map<string, number>()
-    const session = await openModel({
-      manifestUrl: model.manifestUrl,
-      variant,
+    const { session, config } = await openWindowModel({
+      model,
       task: MERGE_WINDOW_TASK,
+      download: ctx.params.download === true,
+      downloadShare: DOWNLOAD_SHARE,
       signal: ctx.signal,
-      onProgress: (progress) => {
-        received.set(progress.part, progress.received)
-        let held = 0
-        for (const part of received.values()) held += part
-        ctx.progress(
-          bytes > 0 ? (DOWNLOAD_SHARE * held) / bytes : 0,
-          progress.cached ? 'opening the model' : `fetching ${model.label}`,
-        )
-      },
+      progress: (fraction, note) => ctx.progress(fraction, note),
     })
+    warnOnCalibration(ctx, model.label, config)
 
     const items = meshes.items
     const rows: ScoredWindow[] = []
@@ -302,11 +262,7 @@ export const findMergesNode = packNode({
             positions: item.positions,
             indices: item.indices,
             units: meshes.units,
-            radiusUm: config.preprocessing.windowRadiusUm,
-            spacingUm: config.preprocessing.spacingUm,
-            nPoints: config.preprocessing.nPoints,
-            useNormals: config.preprocessing.features === 'normals',
-            seed: 0,
+            ...windowFieldsFrom(config.preprocessing),
             limit: maxWindows,
             drawEvery,
           },

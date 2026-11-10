@@ -29,8 +29,23 @@ export interface WindowPreprocessing {
   readonly minPerPart: number
 }
 
+/**
+ * The scan's own constants, where the manifest publishes them.
+ *
+ * Separate from `preprocessing` because they are about the *sweep* rather than about a window:
+ * how the surface is tiled and how per-point scores are pooled afterwards. **Optional**, since a
+ * checkpoint whose task has no sweep — Model A is scored window by window — publishes none, and
+ * a reader that needs one says so itself rather than being refused a model that is fine.
+ */
+export interface WindowScan {
+  /** Pooled scores keep their best point per cell of this size, in µm (`scan.REDUCE_UM`). */
+  readonly reduceUm: number
+}
+
 export interface WindowConfig {
   readonly preprocessing: WindowPreprocessing
+  /** Absent where the checkpoint's task does not sweep a whole neuron. See `WindowScan`. */
+  readonly scan?: WindowScan
   /** What each head answers, in the exporter's words. Shown, never parsed. */
   readonly heads: Readonly<Record<string, string>>
   /**
@@ -104,8 +119,22 @@ export function parseWindowConfig(config: unknown, modelId: string): WindowConfi
     )
   }
 
-  const raw = config as { heads?: unknown; calibration?: unknown; validation?: unknown }
+  const raw = config as {
+    heads?: unknown
+    calibration?: unknown
+    validation?: unknown
+    scan?: { reduce_um?: unknown }
+  }
+  // Read in SEAM's own spelling: the scan block is `seam/scan.py`'s `params()` written out, and
+  // renaming it here would be a second name for a constant whose whole value is being the one
+  // the model was scored with.
+  const reduceUm = raw.scan?.reduce_um
+  const scan =
+    typeof reduceUm === 'number' && Number.isFinite(reduceUm) && reduceUm > 0
+      ? { scan: { reduceUm } }
+      : {}
   return {
+    ...scan,
     preprocessing: {
       sampler,
       units,
@@ -119,5 +148,55 @@ export function parseWindowConfig(config: unknown, modelId: string): WindowConfi
     heads: (raw.heads ?? {}) as Readonly<Record<string, string>>,
     calibration: raw.calibration ?? null,
     validation: (raw.validation ?? null) as Readonly<Record<string, number>> | null,
+  }
+}
+
+/**
+ * The refusal for geometry that is not in nanometres.
+ *
+ * `scan.py` reaches nanometres by multiplying, so a voxel mesh tiles at the wrong physical scale
+ * and comes back with plausible windows, a plausible count and a wrong answer — and a voxel
+ * *skeleton* puts every tip somewhere the mesh is not, which arrives as "no surface within
+ * reach" and reads as two timepoints that disagree, which is why both inputs are asked.
+ *
+ * Returns the sentence, or undefined where there is nothing to say: absent units mean unknown,
+ * which `checkCleanUnits` and every other unit check in Coda let through.
+ *
+ * **Find Merges states its own**, deliberately, and should not be folded in here: it refuses an
+ * *absent* unit too, on the reasoning that there is nothing to convert an unknown with. That is
+ * a different decision about the same question, not two spellings of one.
+ */
+export function notNanometres(what: string, units: string | undefined): string | undefined {
+  if (units === undefined || units === 'nm') return undefined
+  return (
+    `These ${what} are in ${units}. SEAM's windows and tips are measured in nanometres, so this ` +
+    'would be scored at the wrong physical scale.'
+  )
+}
+
+/**
+ * A checkpoint's preprocessing as the request fields that carry it.
+ *
+ * **One mapping for both cards.** Find Merges and Find Open Ends each wrote these four out, from
+ * the same `config.preprocessing`, and the failure that invites is quiet in the way this whole
+ * seam is: a field added here reaches one card and not the other, and a model scored on
+ * differently-sampled windows returns perfectly ordinary numbers.
+ *
+ * `seed` is part of it. It is 0 for every SEAM run and it is what makes a window the same window
+ * between a tip's neighbourhood and the whole neuron — not a per-card choice.
+ */
+export function windowFieldsFrom(pre: WindowPreprocessing): {
+  radiusUm: number
+  spacingUm: number
+  nPoints: number
+  useNormals: boolean
+  seed: number
+} {
+  return {
+    radiusUm: pre.windowRadiusUm,
+    spacingUm: pre.spacingUm,
+    nPoints: pre.nPoints,
+    useNormals: pre.features === 'normals',
+    seed: 0,
   }
 }

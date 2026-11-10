@@ -101,6 +101,13 @@ export interface KdTree {
    */
   nearest(x: number, y: number, z: number, maxDist?: number): number
   /**
+   * The **index** of that nearest point, or `-1` where none is within `maxDist`.
+   *
+   * For a caller that wants the point rather than the distance — snapping a skeleton tip onto
+   * the mesh it was traced from, which is what SEAM's tip recipe does before Model E reads it.
+   */
+  nearestIndex(x: number, y: number, z: number, maxDist?: number): number
+  /**
    * Whether any point lies within `dist`. Early-exits on the first one.
    *
    * Separate from `nearest` rather than derived from it because *which* point is never asked —
@@ -170,56 +177,76 @@ export function buildKdTree(
   const stackNode = new Int32Array(STACK_DEPTH)
   const stackDist = new Float64Array(STACK_DEPTH)
 
+  /**
+   * The one traversal both nearest-point questions are answered by: it leaves the squared
+   * distance in `bestSq` and returns the point's index, or `-1` where nothing was within
+   * `maxDist`.
+   *
+   * Two methods over one walk rather than two walks. *Which* point and *how far* are the same
+   * descent, and a `nearestIndex` written out beside `nearest` would be forty lines that have to
+   * prune identically for the two ever to agree. The distance rides on a variable rather than in
+   * a returned pair because **nothing here allocates per query**, and this is asked once per tip
+   * against a mesh of a million-odd vertices.
+   */
+  let bestSq = Infinity
+  const search = (x: number, y: number, z: number, maxDist: number): number => {
+    bestSq = maxDist === Infinity ? Infinity : maxDist * maxDist
+    if (count === 0) return -1
+    let best = -1
+    let top = 1
+    stackNode[0] = 0
+    stackDist[0] = 0
+
+    while (top > 0) {
+      top--
+      if (stackDist[top]! >= bestSq) continue
+      let node = stackNode[top]!
+      // Descend towards the nearer child, parking the other one where its *box* could still
+      // hold something better. `left < 0` is the leaf marker.
+      let dead = false
+      while (right[node]! >= 0) {
+        const l = node + 1
+        const r = right[node]!
+        const dl = boxDistSq(l, x, y, z)
+        const dr = boxDistSq(r, x, y, z)
+        const nearer = dl <= dr
+        const nearSq = nearer ? dl : dr
+        const farSq = nearer ? dr : dl
+        if (nearSq >= bestSq) {
+          dead = true
+          break
+        }
+        if (farSq < bestSq && top < STACK_DEPTH) {
+          stackNode[top] = nearer ? r : l
+          stackDist[top] = farSq
+          top++
+        }
+        node = nearer ? l : r
+      }
+      if (dead) continue
+      for (let i = start[node]!; i < end[node]!; i++) {
+        const at = order[i]! * 3
+        const dx = positions[at]! - x
+        const dy = positions[at + 1]! - y
+        const dz = positions[at + 2]! - z
+        const distSq = dx * dx + dy * dy + dz * dz
+        if (distSq < bestSq) {
+          bestSq = distSq
+          best = order[i]!
+        }
+      }
+    }
+    return best
+  }
+
   const tree: KdTree = {
     count,
     nearest(x, y, z, maxDist = Infinity) {
-      if (count === 0) return Infinity
-      let bestSq = maxDist === Infinity ? Infinity : maxDist * maxDist
-      let found = false
-      let top = 1
-      stackNode[0] = 0
-      stackDist[0] = 0
+      return search(x, y, z, maxDist) < 0 ? Infinity : Math.sqrt(bestSq)
+    },
 
-      while (top > 0) {
-        top--
-        if (stackDist[top]! >= bestSq) continue
-        let node = stackNode[top]!
-        // Descend towards the nearer child, parking the other one where its *box* could still
-        // hold something better. `left < 0` is the leaf marker.
-        let dead = false
-        while (right[node]! >= 0) {
-          const l = node + 1
-          const r = right[node]!
-          const dl = boxDistSq(l, x, y, z)
-          const dr = boxDistSq(r, x, y, z)
-          const nearer = dl <= dr
-          const nearSq = nearer ? dl : dr
-          const farSq = nearer ? dr : dl
-          if (nearSq >= bestSq) {
-            dead = true
-            break
-          }
-          if (farSq < bestSq && top < STACK_DEPTH) {
-            stackNode[top] = nearer ? r : l
-            stackDist[top] = farSq
-            top++
-          }
-          node = nearer ? l : r
-        }
-        if (dead) continue
-        for (let i = start[node]!; i < end[node]!; i++) {
-          const at = order[i]! * 3
-          const dx = positions[at]! - x
-          const dy = positions[at + 1]! - y
-          const dz = positions[at + 2]! - z
-          const distSq = dx * dx + dy * dy + dz * dz
-          if (distSq < bestSq) {
-            bestSq = distSq
-            found = true
-          }
-        }
-      }
-      return found ? Math.sqrt(bestSq) : Infinity
+    nearestIndex(x, y, z, maxDist = Infinity) {
+      return search(x, y, z, maxDist)
     },
 
     hasWithin(x, y, z, dist) {

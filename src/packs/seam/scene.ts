@@ -239,3 +239,79 @@ function pointLayer(
     },
   }
 }
+
+/**
+ * One suggestion as neuroglancer sees it: where to look, and what to merge with what.
+ *
+ * Two points per suggestion rather than one. The **tip** is where the neuron stops, which is
+ * where a proofreader's eye goes; the **contact** is where the candidate touches it, which is
+ * where the merge is made. They can be micrometres apart, and a layer drawing only one of them
+ * makes the reader hunt for the other.
+ */
+export interface Suggestion {
+  readonly neuronId: string
+  /** SEAM's row key for the tip. Not an id — it names a row, not a neuron. */
+  readonly endUid: number
+  readonly tipNm: readonly [number, number, number]
+  readonly contactNm: readonly [number, number, number]
+  /** The piece SEAM proposes merging in. */
+  readonly candidateId: string
+  /** The calibrated chance the first candidate is right, in 0..1. */
+  readonly r: number
+}
+
+/**
+ * The suggestions as a point layer.
+ *
+ * **Coloured by `r`, on the sequential ramp**, because r is a measurement — the chance this
+ * suggestion is right — and the thing a reader wants at a glance is which of the points in front
+ * of them is worth opening first. The tip and the contact of one suggestion share that colour;
+ * what tells them apart is the caption, since a second hue would read as a second quantity.
+ *
+ * `r` is an estimate and SEAM says where it stops being one: it is untested below q 0.003, where
+ * its steps rest on eleven tips. The card says so; a colour cannot.
+ */
+export function suggestionLayer(
+  suggestions: readonly Suggestion[],
+  name: string,
+): ClusterLayer {
+  const annotations: Record<string, unknown>[] = []
+  let dropped = 0
+  for (const item of suggestions) {
+    if (annotations.length + 2 > MAX_ANNOTATIONS) {
+      dropped += 2
+      continue
+    }
+    const colour = sequentialColor(item.r, 'dark')
+    const said = `${item.neuronId} · tip ${item.endUid} · r ${item.r.toFixed(2)}`
+    annotations.push({
+      type: 'point',
+      id: `${item.neuronId}-${item.endUid}-tip`,
+      point: [...item.tipNm],
+      props: [colour],
+      description: `${said} · the tip`,
+    })
+    annotations.push({
+      type: 'point',
+      id: `${item.neuronId}-${item.endUid}-contact`,
+      point: [...item.contactNm],
+      props: [colour],
+      description: `${said} · merge with ${item.candidateId}`,
+    })
+  }
+  return {
+    dropped,
+    drawn: annotations.length,
+    layer: {
+      type: 'annotation',
+      name,
+      source: {
+        url: 'local://annotations',
+        transform: { outputDimensions: { x: [1e-9, 'm'], y: [1e-9, 'm'], z: [1e-9, 'm'] } },
+      },
+      annotationProperties: [{ id: 'color', type: 'rgb', default: '#ffffff' }],
+      shader: 'void main() { setColor(prop_color()); setPointMarkerSize(8.0); }',
+      annotations,
+    },
+  }
+}

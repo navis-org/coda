@@ -95,7 +95,10 @@
     "probe:seam-merge": "node scripts/probe-seam-merge.mjs",
     "probe:seam-suggestions": "node scripts/probe-seam-suggestions.mjs",
     "probe:seam-model": "node scripts/probe-seam-model.mjs",
-    "probe:seam-windows": "node scripts/probe-seam-windows.mjs"
+    "probe:seam-windows": "node scripts/probe-seam-windows.mjs",
+    "probe:seam-e-cells": "node scripts/probe-seam-e-cells.mjs",
+    "probe:seam-open-ends": "node scripts/probe-seam-open-ends.mjs",
+    "probe:seam-windows-py": "node scripts/probe-seam-windows-py.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",
