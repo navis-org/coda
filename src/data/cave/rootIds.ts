@@ -254,14 +254,23 @@ async function judge(
  * - `version`: a materialization's frozen instant. Its answers are good forever.
  * - `boundary`: a past instant the caller expects to ask about again — every run until the next
  *   one. Held for the session, newest only.
- * - `instant`: a moment asked about once. Held by nobody.
+ * - `now`: this run's own moment, a new one every time. Held by nobody.
+ * - `pinned`: a past instant the caller **stated**. Good forever, like a version's.
+ *
+ * **`now` and `pinned` are the same number with opposite cache rules**, which is why they are
+ * two arms rather than one with a flag. What a root was at a *past* instant never changes, so a
+ * stated one is as permanently cacheable as a materialization's — and a search asking about one
+ * snapshot across hundreds of open ends would otherwise re-ask the chunkedgraph every time, which
+ * is the hammering this file exists to avoid. A moment picked by the clock is the opposite: never
+ * asked about twice, so a permanent entry per moment is a store that only grows.
  *
  * The caller picks the moment rather than each request taking the server's "now", because a repair
  * is two calls — which ids moved, then where their supervoxels (or chunks) went — and both have to be about the
  * same instant, or an edit landing between them leaves a row repointed at a root that was itself
  * already retired.
  */
-export type RootsAt = { version: number } | { boundary: number } | { instant: number }
+export type RootsAt =
+  { version: number } | { boundary: number } | { now: number } | { pinned: number }
 
 /**
  * A resolved instant and where answers about it are kept.
@@ -288,12 +297,28 @@ function slotOf(key: string): string {
   return key.slice(0, key.lastIndexOf('|'))
 }
 
+/**
+ * How far in the past a stated instant must be before its answers are kept forever.
+ *
+ * A guard on the cache, not on the question. The permanent store has no eviction, so an entry
+ * may only go in where the answer cannot change — and an instant near *now* is one the
+ * chunkedgraph may still be receiving edits for. A minute is far more than the clock skew
+ * between a browser and CAVE, and a caller pinning a snapshot is pinning something older than
+ * that by construction.
+ */
+const PINNED_MIN_AGE_MS = 60_000
+
 async function askedAt(
   datastack: string,
   when: RootsAt,
   options: CaveRequestOptions,
 ): Promise<AskedAt | undefined> {
-  if ('instant' in when) return { at: when.instant, keep: 'never' }
+  if ('now' in when) return { at: when.now, keep: 'never' }
+  if ('pinned' in when) {
+    // Not past enough to be settled: answered, but not written to a store that never evicts.
+    const settled = when.pinned < Date.now() - PINNED_MIN_AGE_MS
+    return { at: when.pinned, keep: settled ? 'forever' : 'never' }
+  }
   if ('boundary' in when) return { at: when.boundary, keep: 'session' }
   const frozen = await frozenAt(datastack, when.version, options)
   return frozen === undefined ? undefined : { at: frozen, keep: 'forever' }
