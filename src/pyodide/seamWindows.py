@@ -1,6 +1,6 @@
 """A neuron's mesh cut into the windows a SEAM model takes.
 
-The sixth capability on the bridge, and the only one whose working code Coda did not write:
+The first capability on the bridge whose working code Coda did not write (`cutoutSummary` is the second):
 `seam/canonical.py` and `seam/scan.py` are **byte-identical copies** of SEAM's own files (see
 `seam/VENDORED.md`). SEAM's invariant 3 is that training and inference build the model's input
 through one function, and its invariant 11 keeps that function numpy-only so the same file runs

@@ -50,7 +50,12 @@ export type PyArg =
   | BigUint64Array
   // A single id, for the same reason: `queryRoot` is one neuron, not a count of them.
   | bigint
-  | PyArg[]
+  /*
+   * `readonly`, so a request may hold a small array a caller keeps — a resolution or a box
+   * extent. Only the big views are worth transferring, and transferring detaches; a three-number
+   * array handed over as a typed one comes back empty on the caller's side for no saving.
+   */
+  | readonly PyArg[]
   | { [key: string]: PyArg }
 
 /**

@@ -629,15 +629,19 @@ into it, the way `runtime.ts` already makes every capability declare its own pac
 Not worth reconsidering: the EDT *could* be written in JavaScript (a separable exact transform is
 about forty lines), but the rest of `summarize_cutout` cannot, and porting it is exactly the
 drift SEAM's invariant 11 and `src/pyodide/seam/VENDORED.md` exist to prevent. Four of the
-ranker's eight features come from the moments pass, so the 1.2 s is not optional either.
+ranker's eight features come from the moments pass — and its centroids feed the eighth,
+`ahead` — so none of the ~560 ms is optional either.
 
 ### What is still unknown
 
-- **The Pyodide heap.** After two cutouts the probe reports **537 MB** of wasm heap, which the
-  runtime grows and does not give back — `return_indices=True` alone is 95 MB of arrays per
-  call (a float64 distance and three int32 index planes). Whether that is survivable over a
-  search of many ends, beside a 71 MB model and the meshes, is not measured against Coda's own
-  memory meter. This is now the open risk the EDT's speed was expected to be.
+- **How fast the Pyodide heap grows per call.** The probe reports **547 MB** of wasm heap after
+  four summaries, and wasm never returns heap to the OS. One call peaks near 180 MB: 95 MB for
+  `return_indices=True` (a float64 distance and three int32 index planes) plus another 38 MB for
+  the ravel inside the vendored code. *Visibility and remedy are not the open part* — the memory
+  dialog already reports this figure and **Stop** terminates the worker, which is the only
+  reclaim ([ui-shell.md](ui-shell.md)). What is unmeasured is the growth per call over a search
+  of many ends, beside a 71 MB model and the meshes. This is now the open risk the EDT's speed
+  was expected to be.
 - **Politeness.** SEAM keeps to 4 concurrent Aedes streams and batches the root lookup per box
   (0.6 s against 14 s per supervoxel). The 8-chunk fetch is a different server (GCS) from the root
   lookup (CAVE), so the two budgets are separate; invariant 8 says cache both.

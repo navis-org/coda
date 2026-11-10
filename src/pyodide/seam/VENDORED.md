@@ -29,6 +29,11 @@ editing a character of them**. It is not a whole-file copy because `negatives.py
 it also imports `cave`, `paths` and `pre_edit`, which reach the network. The two functions Coda
 needs are numpy, scipy and pandas only, and sit in one contiguous run of that file.
 
+Cut at SEAM commit `3cc180a167a67e6423393d62659405045dba3aca`. Recording it matters as much here as the hashes
+do above: without it a clean ✓ against a dirty or differently-branched checkout is
+indistinguishable from a real one, and nobody can tell later which SEAM state the ranker's
+features were cut from.
+
 A sha256 cannot pin a slice the way it pins the copies above, because the bytes here are a
 *subset* of the bytes there. `scripts/vendor-seam-cutout.mjs` does that job instead — it re-cuts
 the run from `negatives.py` by the markers that bound it and byte-compares:

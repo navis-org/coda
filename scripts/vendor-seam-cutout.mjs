@@ -20,6 +20,7 @@
  * joins the sha256 table. That ask is recorded in `docs/seam-suggestions-plan.md`.
  */
 
+import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -33,6 +34,27 @@ const FROM = '\ndef summarize_cutout('
 const UNTIL = '\ndef label_final('
 /** Constants the run reads from its module's top level, taken with it. */
 const CONSTANTS = ['MIN_LOCAL_VOXELS']
+
+/**
+ * Which SEAM the checkout is at, for the message.
+ *
+ * Printed rather than enforced: the commit belongs in `VENDORED.md` beside the hashes, and a
+ * clean ✓ against a dirty or differently-branched checkout would otherwise be indistinguishable
+ * from a real one.
+ */
+function seamCommit() {
+  try {
+    const head = execFileSync('git', ['-C', SEAM, 'rev-parse', '--short', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim()
+    const dirty = execFileSync('git', ['-C', SEAM, 'status', '--porcelain', '--', 'seam/negatives.py'], {
+      encoding: 'utf8',
+    }).trim()
+    return dirty ? `${head} (negatives.py modified)` : head
+  } catch {
+    return 'unknown'
+  }
+}
 
 const HEADER = `"""Vendored from SEAM: \`seam/negatives.py\`, the two functions that summarise a
 supervoxel cutout. **Not edited** — see \`VENDORED.md\` and
@@ -67,26 +89,31 @@ function cut() {
     )
     process.exit(2)
   }
-  const taken = []
-  for (const name of CONSTANTS) {
-    const line = source.split('\n').find((one) => one.startsWith(`${name} =`))
+  const lines = source.split('\n')
+  const taken = CONSTANTS.map((name) => {
+    const line = lines.find((one) => one.startsWith(`${name} =`))
     if (!line) {
       console.error(`negatives.py no longer defines ${name}.`)
       process.exit(2)
     }
-    taken.push(line)
-  }
+    return line
+  })
   return `${HEADER}${taken.join('\n')}\n\n${source.slice(from + 1, until)}`
 }
 
 const wanted = cut()
 if (process.argv.includes('--write')) {
   writeFileSync(TARGET, wanted)
-  console.log(`Re-cut ${TARGET.pathname} from ${SOURCE} (${wanted.split('\n').length} lines).`)
+  console.log(
+    `Re-cut ${TARGET.pathname} from ${SOURCE} at SEAM ${seamCommit()} ` +
+      `(${wanted.split('\n').length} lines). Record that commit in VENDORED.md, and run ` +
+      '`pnpm probe:cutout-summary` — its CPython leg is what notices a run that has grown a ' +
+      'dependency the cut left behind.',
+  )
 } else {
   const held = readFileSync(TARGET, 'utf8')
   if (held === wanted) {
-    console.log(`✓ src/pyodide/seam/cutout.py is SEAM's own text, unedited.`)
+    console.log(`✓ src/pyodide/seam/cutout.py is SEAM's own text, unedited (SEAM ${seamCommit()}).`)
   } else {
     console.error(
       `✗ src/pyodide/seam/cutout.py differs from ${SOURCE}.\n` +

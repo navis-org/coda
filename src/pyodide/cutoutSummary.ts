@@ -8,12 +8,10 @@
  * authenticated chunkedgraph call, and keeping them out of the worker keeps the credential out
  * of it too.
  *
- * **Nothing calls this yet**, and it is in the knip baseline for that reason. The Python under
- * it is exercised — `pnpm probe:cutout-summary` runs the vendored function under CPython and
- * under wasm and compares, then runs `coda_cutout_summary` and checks the axis order survived
- * the crossing — but this wrapper and the worker hop are not, because vitest has neither
- * Pyodide nor a `Worker`. The first caller is the candidate search, and it should bring a probe
- * arm that goes through this file rather than around it.
+ * **Nothing calls this yet** — but it is tested, which is why it is not in the knip baseline: `cutoutSummary.test.ts` drives it against a mocked `callPython`, which is
+ * `warp.test.ts`' arrangement and exists there because a marshalling bug in a wrapper survived
+ * on the argument that vitest has no Worker. The Python under it is exercised separately by
+ * `pnpm probe:cutout-summary`.
  *
  * **The columns are SEAM's, not Coda's.** They are whatever `summarize_cutout` returns, which is
  * what the geometric ranker was fitted on; naming a subset here would be a second list to keep
@@ -22,7 +20,7 @@
 
 import { callPython } from './engine'
 import type { CallOptions } from './engine'
-import { float64From, numberFrom, uint64From } from './types'
+import { numberFrom, uint64From } from './types'
 
 /* A `type`, not an `interface`: only an alias gets the implicit index signature `PyArg` needs. */
 export type CutoutSummaryRequest = {
@@ -30,8 +28,15 @@ export type CutoutSummaryRequest = {
   labels: BigUint64Array
   /** One index into `labels` per voxel, x fastest — `LabelBox.index`. */
   index: Uint32Array
-  /** The box's extent in voxels, `[x, y, z]` — `LabelBox.size`. */
-  size: Int32Array
+  /**
+   * The box's extent in voxels, `[x, y, z]` — `LabelBox.size`.
+   *
+   * A plain array, not a typed one, and so are the three below it. `callPython` **transfers**
+   * every view in its arguments, so a three-element `Int32Array` would be detached on the
+   * caller's side for no saving at all — and a caller passing `scale.resolution` twice would
+   * find it empty the second time. Only the box itself is big enough to be worth transferring.
+   */
+  size: readonly number[]
   /**
    * The root each entry of `labels` belongs to, in the same order, `0` for none.
    *
@@ -40,22 +45,30 @@ export type CutoutSummaryRequest = {
    * last month's.
    */
   roots: BigUint64Array
-  /** The neuron the box is about — the root everything else is measured *to*. */
+  /**
+   * The neuron the box is about — the root everything else is measured *to*.
+   *
+   * **Never `0`.** That is the id for "no object" in `roots`, and the Python refuses it rather
+   * than measuring every candidate's distance to background voxels, which comes back as a full
+   * table of plausible rows. A zero reaches a caller from an unmapped supervoxel or a root
+   * lookup that soft-failed, so it is an input to check rather than a typo.
+   */
   queryRoot: bigint
   /** Nanometres per voxel of the scale the box was read at. */
-  resolutionNm: Float64Array
+  resolutionNm: readonly number[]
   /** The box's own corner in that scale's voxels — `VoxelBox.lo`. */
-  loVoxels: Float64Array
+  loVoxels: readonly number[]
   /**
    * The open end the search is about, in nanometres, or empty for the distance columns alone.
    *
    * With it come `point_dist_um` and the local moments, which four of the ranker's eight
-   * features read. Without it the call is about a third of the cost — see the `.py` header.
+   * features read — so a search always passes it, and omitting it is for a caller that wants
+   * only "what is near this box" rather than a ranking.
    */
-  pointNm?: Float64Array
-  /** `candidates.POOL_MAX_DIST_UM`'s companion: how near counts as touching the query. */
+  pointNm?: readonly number[]
+  /** How near counts as touching the query. SEAM's default is 0.5 µm. */
   touchUm?: number
-  /** The radius the local shape is measured over — `tip_candidates`' `MOMENTS_UM`. */
+  /** The radius the local shape is measured over. SEAM's default is 3 µm. */
   momentsUm?: number
 }
 
@@ -79,9 +92,6 @@ export interface CutoutSummary {
   readonly ms: number
 }
 
-/** The columns that are ids rather than measurements, and so must not become doubles. */
-const ID_COLUMNS = new Set(['root', 'rep_svid'])
-
 /**
  * Summarise one box of segmentation.
  *
@@ -97,26 +107,20 @@ export async function runCutoutSummary(
     { module: 'cutoutSummary', fn: 'coda_cutout_summary', args: [request] },
     options,
   )
-  const rows = numberFrom(result, 'rows')
-  if (result['missingQuery'] === true) {
-    return {
-      rows: 0,
-      missingQuery: true,
-      columns: {},
-      root: new BigUint64Array(0),
-      repSupervoxel: new BigUint64Array(0),
-      ms: numberFrom(result, 'ms'),
-    }
-  }
+  /*
+   * The columns are told apart by **dtype, not by name**: Python casts the two id columns to
+   * uint64 and everything else to float64, so a second list of which names are ids — which this
+   * had, and which the module header argues against three paragraphs above — is a cross-language
+   * pair with nothing testing either half. A third id column upstream now simply arrives as a
+   * `BigUint64Array` and is left out of `columns`, rather than reaching `float64From`.
+   */
   const columns: Record<string, Float64Array> = {}
-  for (const key of Object.keys(result)) {
-    if (key === 'rows' || key === 'ms' || key === 'missingQuery' || ID_COLUMNS.has(key))
-      continue
-    columns[key] = float64From(result, key)
+  for (const [key, value] of Object.entries(result)) {
+    if (value instanceof Float64Array) columns[key] = value
   }
   return {
-    rows,
-    missingQuery: false,
+    rows: numberFrom(result, 'rows'),
+    missingQuery: result['missingQuery'] === true,
     columns,
     root: uint64From(result, 'root'),
     repSupervoxel: uint64From(result, 'rep_svid'),
