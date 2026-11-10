@@ -74,11 +74,20 @@ let reference
 {
   const vendored = '/tmp/coda-cutout-vendored'
   mkdirSync(vendored, { recursive: true })
-  writeFileSync(join(vendored, 'cutout.py'), readRepoFile('src/pyodide/seam/cutout.py'))
+  /*
+   * **Both slices, and importing them is the point.** This leg is the only thing that imports
+   * the cut files on their own, so it is what notices a slice that left a module-level
+   * dependency behind upstream — which surfaces as a `NameError` and would otherwise reach a
+   * browser. `vendor-seam-cutout.mjs` names this probe for exactly that, so it has to cover
+   * every slice that script cuts, not just the first.
+   */
+  for (const name of ['cutout', 'candidates']) {
+    writeFileSync(join(vendored, `${name}.py`), readRepoFile(`src/pyodide/seam/${name}.py`))
+  }
   const script = `${BUILD}
 import sys, json
 sys.path.insert(0, ${JSON.stringify('/tmp/coda-cutout-vendored')})
-import cutout
+import cutout, candidates  # both, so a slice missing a dependency fails here and not in a browser
 ${SUMMARISE}
 print(json.dumps(out))
 `
@@ -217,7 +226,15 @@ json.dumps({
 ).toString()
 const built = JSON.parse(fixture)
 
-py.globals.set('__vendored__', py.toPy({ 'seam.cutout': readRepoFile('src/pyodide/seam/cutout.py') }))
+// Both slices: `_seam` installs the whole vendored package, so seeding one leaves the other's
+// source missing and the install raises on the first call.
+py.globals.set(
+  '__vendored__',
+  py.toPy({
+    'seam.cutout': readRepoFile('src/pyodide/seam/cutout.py'),
+    'seam.candidates': readRepoFile('src/pyodide/seam/candidates.py'),
+  }),
+)
 await py.runPythonAsync(`
 import types, sys
 module = types.ModuleType('bridge')

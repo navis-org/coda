@@ -179,7 +179,7 @@ lean on:
 | `data/precomputed/live.test.ts`                | precomputed against real buckets (male-CNS, hemibrain), skipped without `PRECOMPUTED_LIVE`           |
 | `data/precomputed/precomputed.test.ts`         | shard lookup, multi-LOD manifests, Draco, legacy fragments, CORS fallback, the two-phase progress split |
 | `data/precomputed/skeletons.test.ts`           | the precomputed skeleton format: edge list to rooted tree, radius/affine, `uint8` compartments       |
-| *(no unit test)* the search itself | `pnpm probe:candidate-search` ranks one real open end against SEAM's own `geo_rank` for it; its negative control is reversing the rank-key sort, which fails at rank 1 |
+| *(no unit test)* `src/pyodide/cutoutSummary.py`'s search | `pnpm probe:candidate-search` ranks one real open end against SEAM's own `geo_rank`, comparing the order **and** the scores — the two fail differently — with the reversed rank-key sort run as its negative control |
 | `pyodide/cutoutSummary.test.ts`                | the wrapper's marshalling against a mocked `callPython` — columns split by dtype, the id columns kept 64-bit, the missing-query state (`warp.test.ts`' arrangement) |
 | *(no unit test)* `src/pyodide/cutoutSummary.py` | vitest has no Pyodide: `pnpm probe:cutout-summary` runs the vendored `summarize_cutout` under CPython **and** wasm and compares, then runs Coda's bridge and checks the axis order survived it |
 | `data/cave/volumes.test.ts`                    | where a datastack's voxels are: the EM off `aligned_volume.image_source`, the supervoxels out of the chunkedgraph's own `data_dir` (not the graphene URL) |

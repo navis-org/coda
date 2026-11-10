@@ -1,8 +1,15 @@
-"""What is in a box of segmentation around a point, as SEAM's candidate search asks it.
+"""SEAM's candidate search, and the cutout summary underneath it.
 
-The seventh capability on the bridge, and the second whose working code Coda did not write:
-`seam/cutout.py` is `summarize_cutout` and `_local_moments` taken out of SEAM's `negatives.py`
-**without editing a character**, which `scripts/vendor-seam-cutout.mjs` re-cuts and byte-compares.
+Two entry points over one set of vendored code. `coda_candidate_search` is the one a caller
+wants — an open end in, a ranked pool of candidates out, stages 4 and 5 of SEAM's pipeline.
+`coda_cutout_summary` is the lower-level question it is built on ("what objects are in this
+box"), kept because `pnpm probe:cutout-summary` is what compares the vendored code under CPython
+against the same code under wasm, and what checks the axis-order crossing both share.
+
+The capability on the bridge whose working code Coda did not write, in its second form:
+`seam/cutout.py` and `seam/candidates.py` are runs taken out of SEAM's `negatives.py` and
+`candidates.py` **without editing a character**, which `scripts/vendor-seam-cutout.mjs` re-cuts
+and byte-compares.
 SEAM's invariant 11 keeps that code numpy-only precisely so the same text can run in CPython for
 the fit and here for the search; four of the geometric ranker's eight features come out of the
 moments pass alone, and a feature computed slightly differently still *ranks*, which is the
@@ -10,11 +17,12 @@ failure a port would produce and nothing downstream could see.
 
 ## What this file is for
 
-The vendored function wants `(uniq, inv, roots_u, res, lo)` — a cutout already factored into
+The vendored code wants `(uniq, inv, roots_u, res, lo)` — a cutout already factored into
 distinct supervoxels, an index per voxel, and the root each supervoxel belongs to. Coda's
-`precomputed/volume.ts` produces exactly the first two from a real store and
-`cavePostBinary` the third, so this is the marshalling between them and nothing else: flat
-arrays in, one flat array per column out.
+`precomputed/volume.ts` produces exactly the first two from a real store and `cavePostBinary`
+the third, so what this file adds is the marshalling: flat arrays in, one flat array per column
+out. **Nothing here computes a feature or a score** — those are the vendored files, because a
+feature computed slightly differently still ranks.
 
 **It does not fetch.** The cutout and the root lookup are the caller's, because one is a public
 bucket read and the other is an authenticated chunkedgraph call at a timestamp, and neither
@@ -23,10 +31,13 @@ belongs on this side of the worker.
 ## What it costs
 
 Measured in Pyodide on a 188x188x134 box (the real Aedes cutout) holding 14,424 supervoxels over
-900 roots: **about 560 ms warm** for everything the ranker reads, of which scipy's exact EDT is
-~190 ms (against 166 ms for the same call in CPython). A first call in a fresh worker is roughly
-twice that, carrying scipy's and pandas' own warm-up — paid once per worker, not per open end,
-so 560 ms is the number to price a search with.
+900 roots: **about 560 ms warm** for the summary and **about 600 ms** for the whole search, of
+which scipy's exact EDT is ~190 ms (against 166 ms for the same call in CPython).
+
+A first call in a fresh worker is roughly four times that, because `started` is taken before the
+vendored modules are `exec`'d and before `summarize_cutout`'s own `from scipy import ndimage` —
+so both first imports sit inside the measured `ms`. Paid **once per worker, not per open end**,
+which is also what a caller should do about it: keep one worker across a neuron's ends.
 scipy's exact EDT is 190 ms of that, against 166 ms for the same call in CPython.
 
 The EDT is also where the memory goes: `return_indices=True` returns a float64 distance and three
@@ -75,6 +86,49 @@ def _seam(vendored):
     return sys.modules
 
 
+def _box(req):
+    """The request's box, as the vendored code wants it, and the query root it is measured to.
+
+    One statement of the layout crossing, because it was two and the copy lost two rules — the
+    memory drop below, and every comment that makes the cast and the transpose load-bearing. The
+    entry points differ in what they ask `summarize_cutout` for, not in how the box gets there.
+
+    **`int32`, not `uint32`, and it has to stay that way.** Pyodide is wasm32, so `np.intp` is
+    four bytes and `np.bincount` casts its input to `intp` under numpy's `safe` rule, which a
+    `uint32` index does not satisfy. The vendored code bincounts this array, so a reader
+    "simplifying" the cast away finds out in a browser.
+
+    **`transpose(2, 1, 0)` is the layout crossing.** `readLabelBox` writes x fastest, which numpy
+    reads as the *last* axis, while the vendored code indexes `inv.shape` as (x, y, z)
+    throughout. A transposed cutout summarises perfectly happily and puts every contact point
+    somewhere else.
+
+    It arrives `uint32`, so asking for `int32` on the way in would be a full 19 MB copy before
+    the transpose makes a second one; `ascontiguousarray` takes the dtype, so the cast rides on
+    the copy that has to happen anyway.
+    """
+    size = np.asarray(req["size"], dtype=np.int64)
+    inv = np.asarray(req["index"], dtype=np.uint32).reshape(tuple(size[::-1]))
+    inv = np.ascontiguousarray(inv.transpose(2, 1, 0), dtype=np.int32)
+    # The box is in `inv` now, and the EDT below peaks near 180 MB. Dropping the request's own
+    # reference takes 19 MB off that high-water mark in a heap that never shrinks. Here rather
+    # than in each caller, because the caller that was copied from this one forgot it.
+    req["index"] = None
+
+    query = int(req["queryRoot"])
+    if query == 0:
+        # **Refused, because the answer would look fine.** `0` is the sentinel for "no object" in
+        # `roots`, so a zero query makes `q` the background voxels and every `min_dist_um` a
+        # distance to empty space — a full table of plausible candidates measured from nothing.
+        # A zero reaches here from an unmapped supervoxel or a root lookup that soft-failed, so
+        # it is a real input rather than a typo.
+        raise ValueError(
+            "cutout: the query root is 0, which is the id for 'no object' — the box has no "
+            "neuron to measure to"
+        )
+    return inv, query
+
+
 def _number(value, fallback: float) -> float:
     """A request number, defaulting on absent **and** on an explicit `undefined`.
 
@@ -105,44 +159,15 @@ def coda_cutout_summary(request, report=None):
     # that is exactly how this shipped unable to read its own request.
     req = request.to_py()
 
-    size = np.asarray(req["size"], dtype=np.int64)
     # The scalars first, so the box's own entry is the last reference to 19 MB.
     point = req.get("pointNm")
     has_point = point is not None and len(point) > 0
-
-    # The box, in one copy rather than two. It arrives `uint32`, so asking for `int32` here
-    # would be a full 19 MB copy before the transpose makes a second one; `ascontiguousarray`
-    # takes the dtype, so the cast rides on the copy that has to happen anyway. That matters
-    # less for the pass than for the allocation, in a heap that is never given back.
-    #
-    # **`int32`, not `uint32`, and it has to stay that way.** Pyodide is wasm32, so `np.intp` is
-    # four bytes and `np.bincount` casts its input to `intp` under numpy's `safe` rule, which a
-    # `uint32` index does not satisfy. The vendored code bincounts this array, so a reader
-    # "simplifying" the cast away finds out in a browser.
-    #
-    # `transpose(2, 1, 0)` is the layout crossing: `readLabelBox` writes x fastest, which numpy
-    # reads as the *last* axis, while the vendored code indexes `inv.shape` as (x, y, z)
-    # throughout. A transposed cutout summarises happily and puts every contact point elsewhere.
-    inv = np.asarray(req["index"], dtype=np.uint32).reshape(tuple(size[::-1]))
-    inv = np.ascontiguousarray(inv.transpose(2, 1, 0), dtype=np.int32)
+    inv, query = _box(req)
     uniq = np.asarray(req["labels"], dtype=np.uint64)
     roots = np.asarray(req["roots"], dtype=np.uint64)
     res = np.asarray(req["resolutionNm"], dtype=np.float64)
     lo = np.asarray(req["loVoxels"], dtype=np.int64)
-    # The box is in `inv` now, and the EDT below peaks around 180 MB. Dropping the request's own
-    # reference takes 19 MB off that high-water mark in a heap that never shrinks.
-    req["index"] = None
-    query = int(req["queryRoot"])
-    if query == 0:
-        # **Refused, because the answer would look fine.** `0` is the sentinel for "no object" in
-        # `roots`, so a zero query makes `q` the background voxels and every `min_dist_um` a
-        # distance to empty space — a full table of plausible candidates measured from nothing.
-        # A zero reaches here from an unmapped supervoxel or a root lookup that soft-failed, so
-        # it is a real input rather than a typo.
-        raise ValueError(
-            "cutout summary: the query root is 0, which is the id for 'no object' — "
-            "the box has no neuron to measure to"
-        )
+
     if report is not None:
         report(0.1, "measuring the box")
     frame = cutout.summarize_cutout(
@@ -212,15 +237,7 @@ def coda_candidate_search(request, report=None):
     req = request.to_py()
 
     end_nm = np.asarray(req["endNm"], dtype=np.float64)
-    size = np.asarray(req["size"], dtype=np.int64)
-    inv = np.asarray(req["index"], dtype=np.uint32).reshape(tuple(size[::-1]))
-    inv = np.ascontiguousarray(inv.transpose(2, 1, 0), dtype=np.int32)
-    query = int(req["queryRoot"])
-    if query == 0:
-        raise ValueError(
-            "candidate search: the query root is 0, which is the id for 'no object' — "
-            "the box has no neuron to measure from"
-        )
+    inv, query = _box(req)
 
     if report is not None:
         report(0.1, "measuring the box")
@@ -262,23 +279,33 @@ def coda_candidate_search(request, report=None):
     # reversed, with every number plausible and every rank wrong, which is what the fixture
     # comparison in `probe:candidate-search` is really there to catch.
     pool = pool.assign(geo_score=ranker.rank_key(pool))
-    pool = pool.sort_values("geo_score", ascending=True).head(int(req.get("topK", 100)))
+    # `_number`, not a bare `.get`: an optional TypeScript property that is spread rather than
+    # omitted arrives as `None`, and `int(None)` raises. The helper exists for exactly that.
+    pool = pool.sort_values("geo_score", ascending=True).head(int(_number(req.get("topK"), 100)))
     # 1-based, as the fixture's is.
     pool = pool.assign(geo_rank=np.arange(1, len(pool) + 1))
 
+    # Every column `pool_features` produced, by its own name — a pass-through rather than a
+    # list of the ones this file happens to know about. That is what `cutoutSummary.ts`' header
+    # argues for and what the summary above already does: naming a subset here would be a second
+    # list to keep in step with a file that is vendored precisely so it cannot drift, and a
+    # feature SEAM adds would arrive in the frame and silently never cross.
     out = {
         "rows": int(len(pool)),
         "missingQuery": False,
-        "candRoot": np.ascontiguousarray(pool["root"].to_numpy(), dtype=np.uint64),
         "ms": int((time.perf_counter() - started) * 1000),
     }
-    for name in ("geo_score", "geo_rank", "min_dist_um", "vol_um3", *candidates.FEATURES):
-        if name in pool.columns and name not in out:
-            out[name] = np.ascontiguousarray(pool[name].to_numpy(), dtype=np.float64)
-    for axis in ("x", "y", "z"):
-        out[f"contact_{axis}_nm"] = np.ascontiguousarray(
-            pool[f"contact_{axis}_nm"].to_numpy(), dtype=np.float64
-        )
+    for name in pool.columns:
+        column = pool[name].to_numpy()
+        # The ids stay 64-bit and unsigned: an 18-digit id through a float64 is a different
+        # object, which is the one error here that could not be seen. `root` is renamed on the
+        # way out because the wrapper calls it `candRoot` — the candidate, not the query.
+        if name in ("root", "rep_svid"):
+            out["candRoot" if name == "root" else name] = np.ascontiguousarray(
+                column, dtype=np.uint64
+            )
+        elif column.dtype.kind in "fiub":
+            out[name] = np.ascontiguousarray(column, dtype=np.float64)
     if report is not None:
         report(1.0)
     return out

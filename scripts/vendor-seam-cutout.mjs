@@ -1,23 +1,27 @@
 #!/usr/bin/env node
 /**
- * Cut `summarize_cutout` and its helper out of SEAM's `negatives.py`, byte for byte.
+ * Cut the runs Coda needs out of SEAM's own modules, byte for byte.
  *
- *   node scripts/vendor-seam-cutout.mjs           # check the vendored copy against SEAM
- *   node scripts/vendor-seam-cutout.mjs --write   # re-cut it after updating the commit
+ *   node scripts/vendor-seam-cutout.mjs           # check the vendored copies against SEAM
+ *   node scripts/vendor-seam-cutout.mjs --write   # re-cut them after updating the commit
  *
- * **Why a slice and not a whole-file copy.** `canonical.py` and `scan.py` are byte-identical
+ * **Why slices and not whole-file copies.** `canonical.py` and `scan.py` are byte-identical
  * copies of whole SEAM modules, which is what `VENDORED.md` argues for and what SEAM's
- * invariant 11 is designed to allow. `negatives.py` cannot be one: it imports `cave`, `paths`
- * and `pre_edit`, which reach the network. The two functions Coda needs out of it are numpy and
- * scipy only, and sit in one contiguous run of the file.
+ * invariant 11 is designed to allow. Neither of the two modules here can be one: `negatives.py`
+ * imports `cave`, `paths` and `pre_edit`, and `candidates.py` imports `paths`. What Coda needs
+ * out of each is numpy, scipy and pandas only, and sits in one contiguous run.
  *
- * So this takes that run **without editing a character of it**, and this script is what makes
- * that claim checkable — the same job the sha256 table in `VENDORED.md` does for a whole file.
+ * So this takes those runs **without editing a character of them**, and this script is what
+ * makes that claim checkable — the job the sha256 table in `VENDORED.md` does for a whole file.
  * A copy that has drifted is the one failure neither repository's tests can see.
  *
- * The right long-term answer is for SEAM to put these two functions in a numpy-only module of
- * their own, as `canonical.py` and `scan.py` already are; then this script goes and the file
- * joins the sha256 table. That ask is recorded in `docs/seam-suggestions-plan.md`.
+ * **What it does not catch:** a run that acquires a *new* module-level dependency upstream is
+ * cut away silently and surfaces as a `NameError` in a browser. `pnpm probe:cutout-summary`'s
+ * CPython leg is what notices, because it imports both cut files on their own.
+ *
+ * The right long-term answer is for SEAM to put each run in a numpy-only module of its own, as
+ * `canonical.py` and `scan.py` already are; then the slices become ordinary hash-pinned copies
+ * and this script goes. That ask is in `docs/seam-suggestions-plan.md`.
  */
 
 import { execFileSync } from 'node:child_process'
@@ -44,6 +48,7 @@ const SLICES = [
     imports: 'import numpy as np\nimport pandas as pd\n',
     what: 'the two functions that summarise a supervoxel cutout',
     needs: '`cave`, `paths` and `pre_edit`, which reach the network',
+    only: 'numpy, scipy and pandas only',
   },
   {
     file: 'candidates.py',
@@ -54,6 +59,7 @@ const SLICES = [
     imports: 'import dataclasses\n\nimport numpy as np\nimport pandas as pd\n',
     what: "the pool's features and the geometric ranker that scores them",
     needs: '`paths`, which reaches the filesystem',
+    only: 'numpy and pandas only',
   },
 ]
 
@@ -85,7 +91,7 @@ const header = (slice) => `"""Vendored from SEAM: \`${slice.source}\`, ${slice.w
 this file and byte-compares.
 
 A slice rather than a whole-file copy because that module also imports
-${slice.needs}. Everything below is numpy, scipy and pandas only.
+${slice.needs}. Everything below is ${slice.only}.
 """
 
 from __future__ import annotations
@@ -155,7 +161,7 @@ for (const slice of SLICES) {
 console.log(`SEAM ${seamCommit()}`)
 if (writing) {
   console.log(
-    'Record that commit in VENDORED.md, and run `pnpm probe:candidate-search` — its CPython leg ' +
+    'Record that commit in VENDORED.md, and run `pnpm probe:cutout-summary` — its CPython leg ' +
       'is what notices a run that has grown a dependency the cut left behind.',
   )
 }

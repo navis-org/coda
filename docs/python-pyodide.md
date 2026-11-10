@@ -617,7 +617,7 @@ The right end state is for SEAM to put those functions in a numpy-only module of
 and the script goes. That ask is recorded in
 [seam-suggestions-plan.md](seam-suggestions-plan.md).
 
-### What the cutout summary costs, measured
+### What the cutout summary and the search cost, measured
 
 Pyodide against CPython on the same 188×188×134 box (the real Aedes cutout, 14,424 supervoxels
 over 900 roots), `pnpm probe:cutout-summary`:
@@ -627,9 +627,19 @@ over 900 roots), `pnpm probe:cutout-summary`:
 | scipy's exact EDT, with `return_indices` | 166 ms | 190 ms |
 | the whole summary, warm | — | **~560 ms** |
 
-A first call in a fresh worker is roughly twice the warm figure, carrying scipy's and pandas'
-own warm-up — paid once per worker, not per open end, which is the correction worth carrying:
-a cold reading priced the feature step at 1.2 s and it is about half that.
+And the search over it, which is what a caller actually runs:
+
+| | |
+| --- | --- |
+| `coda_candidate_search`, warm | **~0.6 s** |
+| the same call, first in a worker | ~2.4 s |
+
+A first call carries scipy's and pandas' own imports inside its clock — `started` is taken
+before the vendored modules are `exec`'d — so it is **paid once per worker, not per open end**.
+That is the correction worth carrying twice over: a cold reading priced the feature step at
+1.2 s and the whole search at 2.3 s, and both are about a quarter of that warm. Fetching the box
+is the larger half of an end's real price (~1.2 s), so **an end costs about 1.75 s** and a
+caller should keep one worker across a neuron's ends.
 
 **The search is one crossing, not three.** `coda_candidate_search` runs the summary, the
 features and the score together, because each step's output is the next one's input and none is
@@ -638,10 +648,11 @@ TypeScript carries the box over and names the columns back; it never computes a 
 against SEAM's own ranking for a real open end (`pnpm probe:candidate-search`): the top twenty
 candidates in SEAM's exact order, every `geo_score` to 1e-4.
 
-**One thing that reversal would have hidden.** The published `geo_score` is a rank *key* —
-lower is better, `-score` — so taking the raw logit and sorting descending gives a list that is
-exactly reversed with every number plausible. The probe's negative control is reversing that
-sort, which fails it at rank 1.
+**Two ways to get the rank key wrong, and they fail differently.** The published `geo_score` is
+a rank *key* — lower is better, `-score`. Publishing the raw logit and sorting *that* descending
+is the same ordering, so it gets every rank right and every score's sign wrong; sorting the rank
+key the wrong way reverses the list outright. The probe compares both the order and the scores
+for that reason, and runs the reversal as an assertion rather than describing it.
 
 **The heap is the open question, not the clock.** `return_indices=True` returns a float64
 distance plus three int32 index planes — 95 MB for a box this size — and the ravel inside the
