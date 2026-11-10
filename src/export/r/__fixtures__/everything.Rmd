@@ -12,7 +12,7 @@ Every node type that emits, wired up once.
 *Exported from Coda.*
 
 ```{r setup}
-# install.packages(c("nat", "nat.nblast", "dplyr", "tidyr", "readr", "ggplot2", "igraph", "Matrix", "uwot", "nabor", "httr", "jsonlite", "stringi"))
+# install.packages(c("arrow", "nat", "nat.nblast", "dplyr", "tidyr", "readr", "ggplot2", "igraph", "Matrix", "uwot", "nabor", "httr", "jsonlite", "stringi"))
 # remotes::install_github("natverse/neuprintr")  # not on CRAN
 # remotes::install_github("schlegelp/nglscenes-r")  # not on CRAN
 # uwot >= 0.1.15, for `umap()`’s `seed` argument.
@@ -1808,6 +1808,68 @@ table_from_url <- read_csv("https://example.org/embedding.csv", show_col_types =
 table_from_url <- table_from_url |> mutate(across(all_of(c("layer")), as.character))
 ```
 
+```{r merge-suggestions}
+# ── Merge Suggestions ──
+# A directory of suggestion sets. The card pins one by id, so look that id up rather than
+# baking in the path it had when this was exported.
+merge_suggestions_base_sets <- jsonlite::fromJSON("https://example.org/seam/aedes/index.json", simplifyDataFrame = FALSE)$sets
+merge_suggestions_base <- sub("[^/]*$", "", "https://example.org/seam/aedes/index.json")
+merge_suggestions_base <- paste0(
+  merge_suggestions_base,
+  Filter(function(s) s$id == "rv2", merge_suggestions_base_sets)[[1]]$path
+)
+merge_suggestions_base <- sub("[^/]*$", "", merge_suggestions_base)
+
+merge_suggestions_tips_file <- tempfile(fileext = ".parquet")
+download.file(paste0(merge_suggestions_base, "tips.parquet"), merge_suggestions_tips_file, mode = "wb", quiet = TRUE)
+merge_suggestions_tips <- arrow::read_parquet(
+  merge_suggestions_tips_file,
+  col_select = dplyr::all_of(c("neuron", "end_uid", "kind", "x_nm", "y_nm", "z_nm", "e_tip", "segclr", "p_tip", "top_cand_root", "top_vol_um3", "top_geo_rank", "top_min_dist_um", "top_contact_x_nm", "top_contact_y_nm", "top_contact_z_nm", "p_top", "q", "shown", "r", "page", "tip_verdict", "belongs", "not_belongs", "first_right"))
+)
+names(merge_suggestions_tips) <- c("neuronId", "end_uid", "kind", "x", "y", "z", "e_tip", "segclr", "p_tip", "top_cand_root", "vol_um3", "geo_rank", "min_dist_um", "contact_x", "contact_y", "contact_z", "p_top", "q", "shown", "r", "seam_page", "seam_verdict", "seam_belongs", "seam_not_belongs", "seam_first_right")
+
+merge_suggestions_candidates_file <- tempfile(fileext = ".parquet")
+download.file(paste0(merge_suggestions_base, "candidates.parquet"), merge_suggestions_candidates_file, mode = "wb", quiet = TRUE)
+merge_suggestions_candidates <- arrow::read_parquet(
+  merge_suggestions_candidates_file,
+  col_select = dplyr::all_of(c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown"))
+)
+names(merge_suggestions_candidates) <- c("neuronId", "end_uid", "candidateId", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x", "contact_y", "contact_z", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown")
+
+# The first candidate's id, joined from the candidate lists rather than taken from the tips
+# file's own copy. The copy is a denormalised 18-digit id, and in the set as first published
+# it had been through a float64 and named a different segment on 2,661 of 2,691 rows. Fixed
+# upstream; joined here so it cannot come back.
+merge_suggestions_tips <- dplyr::left_join(
+  merge_suggestions_tips,
+  dplyr::select(dplyr::filter(merge_suggestions_candidates, rank == 1), end_uid, candidateId),
+  by = "end_uid"
+)
+
+# One row per neuron. r is the chance a shown first candidate is right, so its sum over the
+# shown rows is how many of them to expect to be real.
+#
+# The two sums are prepared before the grouping rather than written inside summarise(), and
+# that is not style. dplyr evaluates a summarise() argument list in order and each name it
+# binds shadows the column of that name, so an expectedRight written after shown = sum(shown)
+# reads the *scalar* count: ifelse() then takes a length-one condition and returns one
+# element, making the total the first row's r. It is a plausible number and it is wrong.
+merge_suggestions_neurons <- merge_suggestions_tips |>
+  dplyr::mutate(
+    .shown = as.integer(shown),
+    .right = ifelse(shown, r, 0)
+  ) |>
+  dplyr::group_by(`neuronId`) |>
+  dplyr::summarise(
+    tips = dplyr::n(),
+    shown = sum(.shown),
+    expectedRight = sum(.right)
+  )
+# NOTE: The Points and Layers outputs are the same tips drawn — a cloud and
+# a neuroglancer annotation layer. Their coordinates are the `x`, `y` and
+# `z` columns of the tips frame.
+```
+
 ## The transform chain
 
 Everything below runs locally.
@@ -2000,6 +2062,39 @@ embedding$annotation <- NA_character_
 # ── Rename Columns ──
 rename_columns <- table_from_url |>
   rename(any_of(c(`neuronId` = "root_id", `type` = "cell_type")))
+```
+
+```{r review-suggestions}
+# ── Review Suggestions ──
+# The verdicts recorded on the card. A record of what somebody decided, not a computation.
+review_suggestions_verdicts <- data.frame(
+  end_uid = c(0, 1),
+  candidateId = c("648518347608868926", "648518347368875056"),
+  verdict = c("accept", "reject"),
+  stringsAsFactors = FALSE
+)
+
+# Onto the tips, on the pair: a piece can be on two tips' lists, so the candidate alone
+# would carry one tip's judgement onto another tip's row.
+review_suggestions_tips <- dplyr::left_join(merge_suggestions_tips, review_suggestions_verdicts, by = c("end_uid", "candidateId"))
+# NOTE: The Current and Layers outputs are the card’s own: the pair being
+# looked at, and an annotation layer of it. There is nothing for a document
+# to look at.
+```
+
+```{r table-to-points}
+# ── Table to Points ──
+table_to_points <- merge_suggestions_tips |>
+  dplyr::mutate(
+    .coda_x = suppressWarnings(as.numeric(`x`)) * 4,
+    .coda_y = suppressWarnings(as.numeric(`y`)) * 4,
+    .coda_z = suppressWarnings(as.numeric(`z`)) * 40,
+  ) |>
+  dplyr::filter(is.finite(.coda_x), is.finite(.coda_y), is.finite(.coda_z)) |>
+  dplyr::select(
+    dplyr::all_of(c("neuronId", "e_tip")),
+    x = .coda_x, y = .coda_y, z = .coda_z,
+  )
 ```
 
 ```{r connectivity}

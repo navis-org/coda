@@ -63,6 +63,7 @@ import {
   selectPlan,
   sortPlan,
   tableFromUrlPlan,
+  tablePointsPlan,
 } from '../../plans/table'
 
 /** The short local name this file uses forty times over. The rule itself is `rCol`. */
@@ -1309,4 +1310,39 @@ registerEmitter('core.reduceMatrix', (ctx) => {
     )
   }
   return lines
+})
+
+// ---------------------------------------------------------------------------
+// Table to Points
+// ---------------------------------------------------------------------------
+
+/** `core.tablePoints`: the frame is the cloud — see the Python emitter for why. */
+registerEmitter('core.tablePoints', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const plan = tablePointsPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+
+  /*
+   * Written to `.coda_x` and renamed at the end rather than straight to `x`. `dplyr::mutate`
+   * assigns in sequence, so an axis whose source column is named `x`, `y` or `z` would read the
+   * value an earlier axis had just written — X from `z` and Z from `x` gives both the old `z`,
+   * silently, and only when the pickers happen to cross.
+   */
+  return [
+    `${out} <- ${src} |>`,
+    `  dplyr::mutate(`,
+    ...plan.axes.map(
+      ({ axis, column, scale }) =>
+        `    .coda_${axis} = suppressWarnings(as.numeric(${rCol(column)}))` +
+        (scale === 1 ? ',' : ` * ${scale},`),
+    ),
+    `  ) |>`,
+    // The same rule as the card: a row without three finite numbers has no position.
+    `  dplyr::filter(is.finite(.coda_x), is.finite(.coda_y), is.finite(.coda_z)) |>`,
+    `  dplyr::select(`,
+    ...(plan.carry.length > 0 ? [`    dplyr::all_of(${rVector(plan.carry)}),`] : []),
+    `    x = .coda_x, y = .coda_y, z = .coda_z,`,
+    `  )`,
+  ]
 })

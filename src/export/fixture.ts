@@ -1157,6 +1157,52 @@ export function everythingGraph(): CodaGraph {
       },
     },
     /*
+     * Table to Points on the suggestion set's Tips, which is the node's own case: a table with
+     * coordinates in it, read as geometry so the ends can be drawn. It carries `neuronId` and
+     * `e_tip`, so the emitted cell has to keep columns *and* build the three it mints.
+     *
+     * `4, 4, 40` rather than the truthful `1, 1, 1`: at the identity scale both emitters write
+     * no multiplication at all, so a golden taken there would pass with that half of them
+     * deleted. These tips are nanometres; the scale is here to exercise the emitted code.
+     */
+    {
+      id: 'tippoints',
+      type: 'core.tablePoints',
+      col: -1,
+      row: 9,
+      params: { x: 'x', y: 'y', z: 'z', carry: ['neuronId', 'e_tip'], scale: '4, 4, 40' },
+    },
+    /*
+     * A suggestion set, wired to nothing. It is a source — two parquet files at a URL — so there
+     * is nothing upstream of it. Pointed at a *directory* rather than at one manifest, because
+     * that is the production shape and it is the branch where the emitter has to resolve the
+     * chosen set's path for itself.
+     */
+    {
+      id: 'suggestions',
+      type: 'seam:suggestions',
+      col: -2,
+      row: 9,
+      // The *directory*, without its index file, which is what a reader pastes: the emitter has
+      // to fill that in exactly as the card does, or the notebook reads somewhere else.
+      params: { url: 'https://example.org/seam/aedes/', set: 'rv2' },
+    },
+    /*
+     * The review tap, wired to the suggestions above it. Carries two verdicts, because the
+     * emitter's two branches are "nothing judged" and "some judged" and only one of them
+     * exercises the join.
+     */
+    {
+      id: 'review',
+      type: 'seam:review',
+      col: -1,
+      row: 9,
+      params: {
+        verdicts: '0:648518347608868926=accept;1:648518347368875056=reject',
+        current: '0',
+      },
+    },
+    /*
      * The one annotation source that is not backend-specific, which is why it is here rather
      * than in `caveGraph`: it needs no client and no credential, so it emits in **both**
      * languages and a fixture that only reached it through the CAVE graph would leave R's
@@ -1934,6 +1980,9 @@ export function everythingGraph(): CodaGraph {
     ['url', 'out', 'rename', 'in'],
     ['find', 'neurons', 'edit', 'in'],
     ['upload', 'out', 'gsheet', 'annotations'],
+    ['suggestions', 'tips', 'review', 'tips'],
+    ['suggestions', 'tips', 'tippoints', 'in'],
+    ['suggestions', 'candidates', 'review', 'candidates'],
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
 

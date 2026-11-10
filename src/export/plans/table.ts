@@ -19,6 +19,14 @@ import type { DType } from '../../core/types'
 import { isNumericDType } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import { rawFileUrl } from '../../data/rawFileUrl'
+import { distinctStrings } from '../../core/collections'
+import { parseScale } from '../../data/units'
+import type { PointAxis } from '../../nodes/lib/tablePoints'
+import {
+  TABLE_POINTS_SCALE_REFUSAL,
+  POINT_AXES,
+  axesRefusal,
+} from '../../nodes/lib/tablePoints'
 import type { FilterOp } from '../../core/rowPredicate'
 import type { AggFn, JoinHow, NormalizeMode, SampleMode } from '../../nodes/lib/tableOps'
 import {
@@ -384,4 +392,56 @@ export function tableFromUrlPlan(params: ParamValues): TableFromUrlPlan {
   const typed = String(params.url).trim()
   if (!typed) return { refusal: 'This Table from URL node has no URL.' }
   return { typed, url: rawFileUrl(typed) }
+}
+
+// ---------------------------------------------------------------------------
+// Table to Points
+// ---------------------------------------------------------------------------
+
+/** The three coordinate columns, what rides along, and the scale that takes them to nanometres. */
+export type TablePointsPlan = Refusable<{
+  /** Each axis with the column it reads and the factor that takes it to nanometres. */
+  axes: { axis: PointAxis; column: string; scale: number }[]
+  carry: string[]
+}>
+
+/**
+ * `core.tablePoints` as both exporters need it — the decisions with no language in them.
+ *
+ * The refusals are the card's own words, from `nodes/lib/tablePoints.ts`, which is this
+ * module's whole reason: three spellings of "name the coordinate columns" is how a fix lands in
+ * the notebook and not in the R document.
+ */
+export function tablePointsPlan(ctx: TableContext): TablePointsPlan {
+  const columns = { x: ctx.column('x'), y: ctx.column('y'), z: ctx.column('z') }
+  const refusal = axesRefusal(columns)
+  if (refusal) return { refusal }
+  const scale = parseScale(String(ctx.params.scale))
+  if (!scale) return { refusal: TABLE_POINTS_SCALE_REFUSAL }
+  // `distinctStrings`, as `tablePointsSchema` does: a doubled pick is one column on the canvas,
+  // and `src[['lab', 'lab']]` is a two-column frame in pandas.
+  const carry = distinctStrings(ctx.columns('carry'))
+  /*
+   * A notebook's cloud *is* a frame with `x`, `y` and `z` in it, so a carried column of one of
+   * those names has nowhere to go: the coordinate would overwrite it in pandas and win the
+   * `select` in dplyr, silently. The canvas keeps both — the positions are a buffer there — so
+   * this is a difference between the two that only a refusal can state.
+   */
+  const clash = carry.filter((name) => (POINT_AXES as readonly string[]).includes(name))
+  if (clash.length > 0) {
+    return {
+      refusal:
+        `A carried column named ${clash.map((name) => `\`${name}\``).join(', ')} cannot be ` +
+        'exported: the cloud is a data frame here, and its own x, y and z columns would ' +
+        'overwrite it. Rename the column upstream, or stop carrying it.',
+    }
+  }
+  return {
+    axes: POINT_AXES.map((axis, at) => ({
+      axis,
+      column: columns[axis]!,
+      scale: scale[at]!,
+    })),
+    carry,
+  }
 }

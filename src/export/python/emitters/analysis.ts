@@ -1523,7 +1523,7 @@ registerEmitter('neuron.cleanSkeletons', (ctx) => {
   if (heal) {
     body.push(
       `    parents = fastcore.heal_skeleton(`,
-      `        ids, parents, coords, method='ALL',`,
+      `        ids, parents, coords, method=${pyStr(p.healMethod)},`,
       `        max_dist=${healMaxDist > 0 ? healMaxDist : 'None'},`,
       `    )`,
     )

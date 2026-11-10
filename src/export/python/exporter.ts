@@ -22,6 +22,8 @@ import './emitters/googleSheet'
 import './emitters/influence'
 import './emitters/profile'
 import './emitters/query'
+import './emitters/seam'
+import './emitters/seamReview'
 import './emitters/table'
 import './emitters/viewers'
 
