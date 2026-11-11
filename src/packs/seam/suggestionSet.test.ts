@@ -30,11 +30,19 @@ describe('a manifest', () => {
   })
 
   /**
-   * The cutoff is read, never written down. SEAM refits it whenever a stage changes, so a
-   * hard-coded 0.2084 would be right today and quietly wrong after the next run.
+   * The cutoff is read, never written down. SEAM refits it whenever a stage changes — and it
+   * did: adopting the split stage moved it from 0.2084 to 0.1532, which this test had as a
+   * literal and failed on, having warned against exactly that in this comment.
+   *
+   * So it pins the **path** now rather than the value: that `cutoff` is `pipeline.show.cutoff`
+   * and not one of the manifest's other numbers. A literal here only ever tested the fixture.
    */
   it('takes the cutoff from the file', () => {
-    expect(parse().cutoff).toBeCloseTo(0.20844381820362515, 12)
+    const show = (RAW['pipeline'] as { show: { cutoff: number } }).show
+    expect(parse().cutoff).toBe(show.cutoff)
+    // A real probability, so a parser that picked up an adjacent field would still be caught.
+    expect(show.cutoff).toBeGreaterThan(0)
+    expect(show.cutoff).toBeLessThan(1)
   })
 
   it('resolves the set’s files against its own address', () => {

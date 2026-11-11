@@ -10,8 +10,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { LoadedManifest } from '../../ml/manifest'
 import type { WireTensor } from '../../ml/protocol'
-import type { WindowRunner } from './windowRun'
-import { WINDOW_BATCH, probability, scoreWindows } from './windowRun'
+import type { GraphRunner } from '../../ml/session'
+import { WINDOW_BATCH, scoreWindows } from './windowRun'
 
 const SIGNATURE = {
   model: {
@@ -36,7 +36,7 @@ function loaded(signatures: unknown = SIGNATURE): LoadedManifest {
  */
 function fakeSession(nPoints: number, options: { signatures?: unknown } = {}) {
   const batches: number[] = []
-  const runner: WindowRunner = {
+  const runner: GraphRunner = {
     loaded: loaded(options.signatures ?? SIGNATURE),
     run: async ({ feeds = [] }) => {
       const points = new Float32Array(feeds[0]!.data)
@@ -107,7 +107,7 @@ describe('scoreWindows', () => {
   it('reads the two heads by name, not by position', async () => {
     const nPoints = 4
     const { runner } = fakeSession(nPoints)
-    const reversed: WindowRunner = {
+    const reversed: GraphRunner = {
       ...runner,
       run: async (request) => [...(await runner.run(request))].reverse(),
     }
@@ -145,13 +145,5 @@ describe('scoreWindows', () => {
     await expect(scoreWindows(runner, cloud(2, 4), cloud(2, 4), 3, 4)).rejects.toThrow(
       'need 36',
     )
-  })
-})
-
-describe('probability', () => {
-  it('is a half at zero and monotonic', () => {
-    expect(probability(0)).toBeCloseTo(0.5, 10)
-    expect(probability(2)).toBeGreaterThan(probability(1))
-    expect(probability(-2)).toBeLessThan(probability(-1))
   })
 })

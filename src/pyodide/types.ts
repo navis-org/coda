@@ -41,6 +41,14 @@ export type PyArg =
   // SWC compartment codes, one byte per skeleton node — a category, not a measurement.
   | Uint8Array
   /*
+   * A voxel's slot in a label table (`VoxelIndex`), and the only member here chosen for its
+   * **width** rather than its meaning. A box of segmentation is millions of voxels naming a few
+   * thousand objects, so the wide form is mostly zeroes — and what crosses this seam is copied
+   * into a wasm heap that is never given back, which makes a needless 12 MB permanent for the
+   * life of the worker. `readLabelBox` sends whichever width names its table.
+   */
+  | Uint16Array
+  /*
    * Segmentation and root ids, and the one member that is an **identity** rather than a
    * quantity. Invariant 8: an 18-digit id does not survive a float64, and the two that collide
    * are two different neurons — so a column of them crosses as 64-bit on both legs, becoming

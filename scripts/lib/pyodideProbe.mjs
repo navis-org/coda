@@ -139,3 +139,51 @@ export function probeReport() {
     },
   }
 }
+
+/**
+ * Install one of `src/pyodide`'s bridge modules with its vendored sources, and return the way
+ * to call it.
+ *
+ * The boot was written three times — `probe-cutout-summary`, `probe-candidate-search` and
+ * `probe-assessor-patch` — and each copy carries the same two rules in comments, which is this
+ * file's whole reason for existing ("the second probe was written by copying the first").
+ *
+ * **The rule that matters is how the request crosses.** `callPython` hands the module a
+ * `JsProxy` of a plain object, which has neither `__getitem__` nor `.get`, so a bridge that
+ * forgets `request.to_py()` works perfectly against a Python dict and raises the moment a
+ * browser calls it. `call` therefore sets a **plain JavaScript object** as the global, never
+ * `py.toPy(...)` — a probe that converts first is a probe that cannot see the one bug it is
+ * best placed to catch, which is exactly how `assessorPatches.py` shipped unable to read its
+ * own request.
+ *
+ * `vendored` maps module name to source, as `runtime.ts`' `PyModule.vendored` does; the bridge
+ * reads it from its own globals as `__vendored__`.
+ */
+export function installBridge(py, { bridge, vendored = {} }) {
+  py.FS.mkdirTree('/vendored')
+  py.FS.writeFile('/vendored/bridge.py', readRepoFile(bridge))
+  const sources = {}
+  for (const [name, path] of Object.entries(vendored)) sources[name] = readRepoFile(path)
+  py.globals.set('__vendored__', py.toPy(sources))
+  return py
+    .runPythonAsync(
+      `
+import types, sys
+module = types.ModuleType('bridge')
+module.__dict__['__vendored__'] = __vendored__
+exec(open('/vendored/bridge.py').read(), module.__dict__)
+sys.modules['bridge'] = module
+`,
+    )
+    .then(() => async (fn, request) => {
+      // A plain object, not `py.toPy`: see the header. The buffers in it are transferred by
+      // `globals.set`, so a caller running twice rebuilds the request.
+      py.globals.set('__request__', request)
+      const proxy = await py.runPythonAsync(
+        `import sys; sys.modules['bridge'].${fn}(__request__)`,
+      )
+      const answer = proxy.toJs({ dict_converter: Object.fromEntries })
+      proxy.destroy()
+      return answer
+    })
+}

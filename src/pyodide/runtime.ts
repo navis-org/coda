@@ -29,6 +29,7 @@
  * that moves the ABI needs a wheel built against it, which is why `sources.json` pins both.
  */
 
+import ASSESSOR_PATCHES_PY from './assessorPatches.py?raw'
 import DOTMOTIF_PY from './dotmotif.py?raw'
 import LINKAGE_PY from './linkage.py?raw'
 import MATCHES_PY from './matches.py?raw'
@@ -38,6 +39,7 @@ import NBLAST_PY from './nblast.py?raw'
 import SEAM_CANONICAL_PY from './seam/canonical.py?raw'
 import SEAM_CANDIDATES_PY from './seam/candidates.py?raw'
 import SEAM_CUTOUT_PY from './seam/cutout.py?raw'
+import SEAM_PATCHES_PY from './seam/patches.py?raw'
 import SEAM_SCAN_PY from './seam/scan.py?raw'
 import SEAM_WINDOWS_PY from './seamWindows.py?raw'
 import SKELETONIZE_PY from './skeletonize.py?raw'
@@ -190,6 +192,22 @@ const MODULES: Record<string, PyModule> = {
     vendored: { 'seam.cutout': SEAM_CUTOUT_PY, 'seam.candidates': SEAM_CANDIDATES_PY },
     packages: ['numpy', 'scipy', 'pandas'],
     label: 'numpy · scipy · pandas · SEAM cutout and ranker',
+  },
+  /*
+   * The assessor's patches — numpy alone, like `seamWindows` and unlike the row above it. The
+   * labelling and the cutting are `seam/patches.py`, a byte-identical copy of SEAM's own file
+   * (`seam/VENDORED.md`), and neither needs scipy or pandas: it is indexing and a lookup table.
+   *
+   * Which matters more than it looks. A caller scoring one tip pays this row and not
+   * `cutoutSummary`'s 19 MB of wheels, so the half of the pipeline that cuts patches can run in
+   * a session that never searched for a candidate — a graph reading a published suggestion set,
+   * for instance, where SEAM did the search months ago.
+   */
+  assessorPatches: {
+    source: ASSESSOR_PATCHES_PY,
+    vendored: { 'seam.patches': SEAM_PATCHES_PY },
+    packages: ['numpy'],
+    label: 'numpy · SEAM patches',
   },
   skeletonize: {
     source: SKELETONIZE_PY,

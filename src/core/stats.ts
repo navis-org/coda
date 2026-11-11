@@ -40,6 +40,17 @@ export function quantileSorted(sorted: ArrayLike<number>, p: number): number {
   return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (position - lower)
 }
 
+/**
+ * A logit as a probability: `1 / (1 + e^-x)`.
+ *
+ * Here rather than in the pack that needed it first, because two of them now do — SEAM's window
+ * scores and its tip pipeline — and the second one wrote the line again without noticing the
+ * first. One arithmetic identity does not want two names.
+ */
+export function logistic(logit: number): number {
+  return 1 / (1 + Math.exp(-logit))
+}
+
 /** The first index whose element is not below `target`. */
 export function lowerBound<T extends bigint | string | number>(
   sorted: ArrayLike<T>,

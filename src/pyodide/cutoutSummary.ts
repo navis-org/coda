@@ -15,7 +15,8 @@
  * authenticated chunkedgraph call, and keeping them out of the worker keeps the credential out
  * of it too.
  *
- * **Nothing calls this yet** — but it is tested, which is why it is not in the knip baseline: `cutoutSummary.test.ts` drives it against a mocked `callPython`, which is
+ * **Nothing calls this yet** — but it is tested, which is why it is not in the knip baseline:
+ * `cutoutSummary.test.ts` drives it against a mocked `callPython`, which is
  * `warp.test.ts`' arrangement and exists there because a marshalling bug in a wrapper survived
  * on the argument that vitest has no Worker. The Python under it is exercised separately by
  * `pnpm probe:cutout-summary`.
@@ -25,16 +26,39 @@
  * in step with a file that is vendored precisely so it cannot drift.
  */
 
+import type { VoxelIndex } from '../data/precomputed/volume'
 import { callPython } from './engine'
 import type { CallOptions } from './engine'
 import { numberFrom, uint64From } from './types'
 
-/* A `type`, not an `interface`: only an alias gets the implicit index signature `PyArg` needs. */
-export type CutoutSummaryRequest = {
+/**
+ * A box of segmentation with the root of every supervoxel in it — what three requests here all
+ * begin with, named once.
+ *
+ * It is the agreement with the Python side about a labelled box: what `size` is ordered as,
+ * which arrays are transferred, what `0` in `roots` means, and that `queryRoot` is never one.
+ * The summary adds a point to measure from, the search adds a ranker, the assessor adds
+ * candidates — so each of those says **what it takes**, rather than naming itself as the
+ * summary minus the summary's extras. That second form had already been written twice, and a
+ * fourth summary-only field would have to be subtracted in both: forgetting it compiles, and
+ * silently widens the other two. For a typed array that is worse than cosmetic, because
+ * `engine.ts` transfers every view in a request and would detach a buffer nothing reads.
+ *
+ * A `type`, not an `interface`: only an alias gets the implicit index signature `PyArg` needs.
+ */
+export type LabelBoxRequest = {
   /** The distinct supervoxels of the box — `LabelBox.labels`. */
   labels: BigUint64Array
-  /** One index into `labels` per voxel, x fastest — `LabelBox.index`. */
-  index: Uint32Array
+  /**
+   * One index into `labels` per voxel, x fastest — `LabelBox.index`.
+   *
+   * **Either width, and the Python reads the one that arrives.** `readLabelBox` sends sixteen
+   * bits wherever the box's table fits in them, which a real cutout's does: asking for
+   * `Uint32Array` here would make every caller widen a box back out before handing it over, and
+   * the copy would land in a wasm heap that never shrinks. The type is `VoxelIndex` itself
+   * rather than a spelling of it, so the two cannot come to mean different things.
+   */
+  index: VoxelIndex
   /**
    * The box's extent in voxels, `[x, y, z]` — `LabelBox.size`.
    *
@@ -65,6 +89,10 @@ export type CutoutSummaryRequest = {
   resolutionNm: readonly number[]
   /** The box's own corner in that scale's voxels — `VoxelBox.lo`. */
   loVoxels: readonly number[]
+}
+
+/** A labelled box, plus the point and radii `summarize_cutout` measures against. */
+export type CutoutSummaryRequest = LabelBoxRequest & {
   /**
    * The open end the search is about, in nanometres, or empty for the distance columns alone.
    *
@@ -100,13 +128,6 @@ export interface CutoutSummary {
 }
 
 /**
- * Summarise one box of segmentation.
- *
- * **The arrays are transferred, not copied** — `callPython`'s own rule — so a caller holding a
- * `LabelBox` it means to keep must copy first. Nothing here copies on its behalf: a cutout is
- * 19 MB of index and the common case is a caller that is finished with it.
- */
-/**
  * The measurement columns of a result, told apart by **dtype rather than by name**.
  *
  * Python casts the id columns to uint64 and every measurement to float64, so a list of which
@@ -124,6 +145,13 @@ function float64Columns(result: Record<string, unknown>): Record<string, Float64
   return columns
 }
 
+/**
+ * Summarise one box of segmentation.
+ *
+ * **The arrays are transferred, not copied** — `callPython`'s own rule — so a caller holding a
+ * `LabelBox` it means to keep must copy first. Nothing here copies on its behalf: a cutout is
+ * 19 MB of index and the common case is a caller that is finished with it.
+ */
 export async function runCutoutSummary(
   request: CutoutSummaryRequest,
   options: CallOptions = {},
@@ -151,10 +179,7 @@ export type GeometricRanker = {
   b: number
 }
 
-export type CandidateSearchRequest = Omit<
-  CutoutSummaryRequest,
-  'pointNm' | 'touchUm' | 'momentsUm'
-> & {
+export type CandidateSearchRequest = LabelBoxRequest & {
   /** The open end the search is about, in nanometres. Required here, unlike the summary. */
   endNm: readonly number[]
   /**

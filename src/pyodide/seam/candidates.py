@@ -1,5 +1,5 @@
 """Vendored from SEAM: `seam/candidates.py`, the pool's features and the geometric ranker that scores them.
-**Not edited** — see `VENDORED.md` and `scripts/vendor-seam-cutout.mjs`, which re-cuts
+**Not edited** — see `VENDORED.md` and `scripts/vendor-seam.mjs`, which re-cuts
 this file and byte-compares.
 
 A slice rather than a whole-file copy because that module also imports
@@ -22,7 +22,7 @@ MOMENTS_UM = 3.0  # local shape from each object's voxels this close to the cuto
 
 
 def touching(nb: pd.DataFrame) -> pd.Series:
-    """Objects in a cutout summary (negatives.summarize_cutout) that touch Q:
+    """Objects in a cutout summary (cutout.summarize_cutout) that touch Q:
     adjacent voxels, whatever the resolution or axis."""
     return nb["min_dist_um"] <= nb["voxel_diag_um"] + 1e-6
 

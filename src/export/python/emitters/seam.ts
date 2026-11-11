@@ -18,9 +18,11 @@
  * frame has their coordinates in three columns.
  *
  * **Checked by running it.** Both cells were executed against `packs/seam/__fixtures__` and give
- * the same `expectedRight` per neuron as the node — 1.8689, 1.8467, 1.7657, 1.8467, 1.6524 — and
+ * the same `expectedRight` per neuron as the node — 1.8199, 1.8199, 1.7648, 1.8199, 1.7648 — and
  * the same joined `candidateId`, which `suggestions.test.ts` pins. That check is not ceremony:
- * the R chunk disagreed on first writing.
+ * the R chunk disagreed on first writing, and both have been re-run on each recut of the
+ * fixtures (2026-11-10, and 2026-11-11 for SEAM's `za` refit) rather than the node's new answer
+ * being taken as all three.
  */
 
 import { ID_COLUMN_NAME } from '../../../core/ids'

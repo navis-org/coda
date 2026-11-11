@@ -80,17 +80,31 @@ await waitFor('Boolean(document.querySelector("#root"))', 'the app')
 
 const script = `(async () => {
   const load = ${APP_MODULE}
-  const [builtins, registry, windows, manifestMod, sessionMod, runMod, specMod, stackMod] =
-    await Promise.all([
-      load('/src/data/builtins.ts'),
-      load('/src/data/source.ts'),
-      load('/src/pyodide/seamWindows.ts'),
-      load('/src/ml/manifest.ts'),
-      load('/src/ml/session.ts'),
-      load('/src/packs/seam/windowRun.ts'),
-      load('/src/data/cave/spec.ts'),
-      load('/src/data/cave/datastack.ts'),
-    ])
+  const [
+    builtins,
+    registry,
+    windows,
+    manifestMod,
+    sessionMod,
+    runMod,
+    statsMod,
+    specMod,
+    stackMod,
+  ] = await Promise.all([
+    load('/src/data/builtins.ts'),
+    load('/src/data/source.ts'),
+    load('/src/pyodide/seamWindows.ts'),
+    load('/src/ml/manifest.ts'),
+    load('/src/ml/session.ts'),
+    load('/src/packs/seam/windowRun.ts'),
+    // logistic was windowRun.probability until 2026-11-11, when a second caller appeared and it
+    // moved to the one place that states it. This probe loads by path from inside a template
+    // literal, so neither typecheck nor lint sees the call -- only a run, after the download and
+    // the GPU work. (No backticks in here: they would end the literal. Project trap, twice now.)
+    load('/src/core/stats.ts'),
+    load('/src/data/cave/spec.ts'),
+    load('/src/data/cave/datastack.ts'),
+  ])
   builtins.registerBuiltinSources()
 
   const loaded = await manifestMod.loadManifest(${JSON.stringify(manifestUrl)})
@@ -160,7 +174,7 @@ const script = `(async () => {
         cells.push({
           cell: w,
           centre: centre.map((v) => Math.round(v)),
-          score: +runMod.probability(scored.windowLogits[w]).toFixed(4),
+          score: +statsMod.logistic(scored.windowLogits[w]).toFixed(4),
           logit: +scored.windowLogits[w].toFixed(3),
           ownPoints: own,
           // 0 = every point on one side (no split found), 0.5 = an even cut.

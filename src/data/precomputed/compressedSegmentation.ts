@@ -62,11 +62,44 @@ export interface CompressedSegmentationSpec {
 export interface LabelBox {
   /** The distinct labels, ascending. Index 0 is not special; `0` is an ordinary label (no object). */
   readonly labels: BigUint64Array
-  /** One index into `labels` per voxel, **x fastest**. */
-  readonly index: Uint32Array
+  /** One index into `labels` per voxel, **x fastest**. See `VoxelIndex` for the two widths. */
+  readonly index: VoxelIndex
   /** The region's extent in voxels, `[x, y, z]`. */
   readonly size: Triple
 }
+
+/**
+ * One slot of a box's label table per voxel, at the narrowest width that can name every slot.
+ *
+ * **A union because a box is mostly small tables and huge voxel counts.** A 6 M-voxel cutout of
+ * a real neuron holds some 14,000 distinct supervoxels, so every index fits in sixteen bits and
+ * the second half of a 32-bit array is zeroes — 12 MB of them. `readLabelBox` reads narrow and
+ * widens only if the table passes `NARROW_INDEX_LABELS`, so the common case never allocates the
+ * wide form at all.
+ *
+ * It matters most at the Pyodide seam, where the array is copied into a wasm heap that is never
+ * given back to the operating system (`docs/python-pyodide.md`): what crosses is what is paid,
+ * permanently, for the life of the worker.
+ *
+ * **Only `readLabelBox` narrows.** The two per-chunk decoders here always return the wide form,
+ * because a chunk's table is not known until it has been decoded and a chunk is small enough
+ * (about 1.5 MB transient on the measured box) that the dance is not worth it. So the union is
+ * what a `LabelBox` promises and narrowness is what the box reader delivers; anything handing a
+ * *decoded chunk* across the Pyodide seam would want the same treatment first.
+ *
+ * **Read it through `ArrayLike<number>` wherever the width does not matter** — which is almost
+ * everywhere, since both answer `[i]` with a number.
+ */
+export type VoxelIndex = Uint16Array | Uint32Array
+
+/**
+ * How many labels a 16-bit index can name: slots `0…65535`, so 65,536 of them.
+ *
+ * `labels.length <= NARROW_INDEX_LABELS`, never `< `: a table of exactly 65,536 entries has its
+ * last slot at 65,535, which is `Uint16Array`'s largest value. Off by one here is not a crash —
+ * it is every index above the cut wrapping to a different label, which draws a different neuron.
+ */
+export const NARROW_INDEX_LABELS = 65536
 
 /**
  * A label → slot folder over a caller's own table.
@@ -101,10 +134,17 @@ export function internInto(
  * Both the decoder and the box assembly ended with their own copy of this, and the two did not
  * agree about whether an unused slot could survive — so the property callers were promised
  * depended on which one they happened to call. One statement of it, used by both.
+ *
+ * **It rewrites in place and never changes the width**, which is safe for a reason worth stating
+ * exactly. Sorting does *not* only lower an index — a table of `[0, 10, 5]` sorts to `[0, 5, 10]`
+ * and raises slot 1 to index 2. What holds is the bound: an index after this is below
+ * `keep.length`, which is at most `labels.length`, which the width already had to name. Choosing
+ * the width is `readLabelBox`'s, where the array is allocated; doing it here as well would mean
+ * two rules for one property, and this one would have to allocate a second buffer to apply it.
  */
 export function canonicalLabels(
   labels: readonly bigint[],
-  index: Uint32Array,
+  index: VoxelIndex,
   size: Triple,
 ): LabelBox {
   const used = new Uint8Array(labels.length)

@@ -1,17 +1,19 @@
-"""Vendored from SEAM: `seam/negatives.py`, the two functions that summarise a supervoxel cutout.
-**Not edited** — see `VENDORED.md` and `scripts/vendor-seam-cutout.mjs`, which re-cuts
-this file and byte-compares.
+"""What is in a supervoxel cutout: per object, its size, distance and contact
+with the query object, and optionally its local shape near a point (moved out
+of seam.negatives, 2026-11-10, so the module is numpy, scipy and pandas only).
 
-A slice rather than a whole-file copy because that module also imports
-`cave`, `paths` and `pre_edit`, which reach the network. Everything below is numpy, scipy and pandas only.
+Coda's candidate search runs this file in its Pyodide worker as a whole-file,
+hash-pinned copy (invariant 11, as seam/canonical.py and seam/scan.py), so it
+imports nothing that reaches the network. Fetching the cutout stays in
+seam.negatives.neighbours.
 """
-
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 MIN_LOCAL_VOXELS = 20  # local shape needs at least this many voxels near the point
+
 
 def summarize_cutout(uniq, inv, roots_u, query_root: int, res, lo, centroids: bool = False,
                      point_nm=None, touch_um: float | None = 0.5, moments_um: float | None = None) -> pd.DataFrame | None:
@@ -128,4 +130,3 @@ def _local_moments(inv, sv_to_root, n_roots: int, res, lo, point_nm, radius_um: 
     # a handful the grid's anisotropy): undefined, not an artefact
     out.loc[n < MIN_LOCAL_VOXELS, ["axis_x", "axis_y", "axis_z", "caliber_um", "elongation"]] = np.nan
     return out
-

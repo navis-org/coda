@@ -208,6 +208,25 @@ export function checkManifest(manifest: ModelManifest): ModelManifest {
 }
 
 /**
+ * The one graph a single-part model declares, with the part's name beside its signature.
+ *
+ * Every SEAM-shaped checkpoint here is one graph — the affinity model's encoder/decoder split is
+ * the exception, not the rule — and each runner opened with `parts[0]`, looked the signature up,
+ * and threw the same sentence. Two copies of that had already gone character for character
+ * identical, which is what a third task would have made three.
+ *
+ * It returns the pair rather than the signature alone because the caller needs the **name** for
+ * `session.run({ part })` as well, and deriving it twice is how the two come to disagree about
+ * which graph is being described.
+ */
+export function soleGraph(manifest: ModelManifest): { part: string; signature: PartSignature } {
+  const part = manifest.parts[0]
+  const signature = part ? manifest.signatures[part] : undefined
+  if (!part || !signature) throw new ManifestError(`${manifest.id} declares no graph to run`)
+  return { part, signature }
+}
+
+/**
  * Fetch and check a manifest, keeping the URL it came from so its files can be resolved.
  *
  * Through `fetchText` rather than a bare `fetch`, which is the house rule for any credential-less

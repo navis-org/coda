@@ -8,7 +8,7 @@ against the same code under wasm, and what checks the axis-order crossing both s
 
 The capability on the bridge whose working code Coda did not write, in its second form:
 `seam/cutout.py` and `seam/candidates.py` are runs taken out of SEAM's `negatives.py` and
-`candidates.py` **without editing a character**, which `scripts/vendor-seam-cutout.mjs` re-cuts
+`candidates.py` **without editing a character**, which `scripts/vendor-seam.mjs` re-cuts
 and byte-compares.
 SEAM's invariant 11 keeps that code numpy-only precisely so the same text can run in CPython for
 the fit and here for the search; four of the geometric ranker's eight features come out of the
@@ -103,16 +103,29 @@ def _box(req):
     throughout. A transposed cutout summarises perfectly happily and puts every contact point
     somewhere else.
 
-    It arrives `uint32`, so asking for `int32` on the way in would be a full 19 MB copy before
-    the transpose makes a second one; `ascontiguousarray` takes the dtype, so the cast rides on
-    the copy that has to happen anyway.
+    It arrives as narrow as the box's own label table allowed -- `uint16` for a real cutout,
+    `uint32` only above 65,536 supervoxels -- so asking for `int32` on the way *in* would widen
+    it before the transpose made its own copy. `ascontiguousarray` takes the dtype, so the cast
+    rides on the copy that has to happen anyway and the arriving array is never widened in
+    place. **No dtype on the `asarray`**, for the same reason: naming one there undoes the
+    narrowing `readLabelBox` did.
     """
     size = np.asarray(req["size"], dtype=np.int64)
-    inv = np.asarray(req["index"], dtype=np.uint32).reshape(tuple(size[::-1]))
+    inv = np.asarray(req["index"]).reshape(tuple(size[::-1]))
+    # **The one check on the crossing**, and it is the same line `assessorPatches.py` carries.
+    # A table too big for the width it arrived in has already wrapped every index past that
+    # width onto a different supervoxel, which summarises into a full table of plausible rows
+    # about the wrong objects.
+    if inv.dtype.kind in "ui" and len(req["labels"]) > int(np.iinfo(inv.dtype).max) + 1:
+        raise ValueError(
+            f"cutout: {len(req['labels'])} supervoxels cannot be named by a {inv.dtype} index, "
+            f"which holds {int(np.iinfo(inv.dtype).max) + 1}"
+        )
     inv = np.ascontiguousarray(inv.transpose(2, 1, 0), dtype=np.int32)
     # The box is in `inv` now, and the EDT below peaks near 180 MB. Dropping the request's own
-    # reference takes 19 MB off that high-water mark in a heap that never shrinks. Here rather
-    # than in each caller, because the caller that was copied from this one forgot it.
+    # reference takes the arriving copy off that high-water mark in a heap that never shrinks --
+    # 9.5 MB where the box came narrow, 19 where it did not. Here rather than in each caller,
+    # because the caller that was copied from this one forgot it.
     req["index"] = None
 
     query = int(req["queryRoot"])

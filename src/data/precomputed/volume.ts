@@ -35,14 +35,15 @@ import type { FetchOptions } from './transport'
 import { fetchBytes, fetchInfo, isNotFound } from './transport'
 import type { ShardingSpec } from './sharded'
 import { readShardedObject } from './sharded'
-import type { LabelBox, Triple } from './compressedSegmentation'
+import type { LabelBox, Triple, VoxelIndex } from './compressedSegmentation'
 import {
+  NARROW_INDEX_LABELS,
   canonicalLabels,
   decodeCompressedSegmentation,
   internInto,
 } from './compressedSegmentation'
 
-export type { LabelBox, Triple }
+export type { LabelBox, Triple, VoxelIndex }
 
 /** The encodings a chunk may be in. `compresso` and `jxl` are not read; they refuse by name. */
 export const ENCODINGS = ['raw', 'compressed_segmentation', 'jpeg', 'png'] as const
@@ -341,27 +342,86 @@ export interface VoxelBox {
  * because that is a caller asking about somewhere this volume is not.
  */
 export function boxAround(scale: VolumeScale, centreNm: Triple, halfWidthNm: number): VoxelBox {
+  return boxAroundAll(scale, [centreNm], halfWidthNm)
+}
+
+/**
+ * The box covering a cube of that half-width around **every** centre given — one read for many.
+ *
+ * The same clamping and the same refusal as `boxAround`, which is a call to this with one
+ * centre. It is one function because the alternative is a caller unioning boxes itself, and the
+ * union of two *clamped* boxes is not the clamp of their union at the edge of a volume: a centre
+ * whose own box lies entirely outside would throw there and widen the answer here.
+ *
+ * The use it was written for is a tip's assessor patches — a few dozen cut points within a
+ * couple of micrometres of each other, where one read of their shared box is the difference
+ * between one request and forty.
+ */
+export function boxAroundAll(
+  scale: VolumeScale,
+  centresNm: readonly Triple[],
+  halfWidthNm: number,
+): VoxelBox {
+  const span = voxelSpan(scale, centresNm, halfWidthNm)
   const lo: number[] = []
   const hi: number[] = []
   for (let axis = 0; axis < 3; axis++) {
-    const res = scale.resolution[axis]!
-    const centre = Math.floor(centreNm[axis]! / res)
-    const reach = Math.ceil(halfWidthNm / res)
     const start = scale.voxelOffset[axis]!
     const end = start + scale.size[axis]!
-    const from = Math.max(start, centre - reach)
-    const to = Math.min(end, centre + reach)
+    const from = Math.max(start, span.lo[axis]!)
+    const to = Math.min(end, span.hi[axis]!)
     if (to <= from) {
-      // Both numbers in nanometres, which is the unit the caller asked in — a bound stated in
-      // voxels beside a centre stated in nanometres cannot be compared in one reading.
+      // In nanometres, which is the unit the caller asked in — a bound stated in voxels beside
+      // centres stated in nanometres cannot be compared in one reading. The *span* rather than
+      // a representative centre, because with many centres the one that happened to be first
+      // may be nowhere near the axis that failed.
+      const inNm = (at: readonly number[]) =>
+        at.map((v, i) => Math.round(v * scale.resolution[i]!)).join(', ')
       throw new Error(
-        `precomputed volume: a box around ${centreNm.join(', ')} nm lies outside scale ` +
-          `${scale.key}, which covers ${scale.voxelOffset.map((v, i) => v * scale.resolution[i]!).join(', ')}` +
-          ` to ${scale.voxelOffset.map((v, i) => (v + scale.size[i]!) * scale.resolution[i]!).join(', ')} nm`,
+        `precomputed volume: a box over ${inNm(span.lo)} to ${inNm(span.hi)} nm lies outside ` +
+          `scale ${scale.key}, which covers ${inNm(scale.voxelOffset)} to ` +
+          `${inNm(scale.voxelOffset.map((v, i) => v + scale.size[i]!))} nm`,
       )
     }
     lo.push(from)
     hi.push(to)
+  }
+  return { lo: [lo[0]!, lo[1]!, lo[2]!], hi: [hi[0]!, hi[1]!, hi[2]!] }
+}
+
+/**
+ * The box those centres ask for **before** it is clamped to the volume — the nm→voxel mapping
+ * on its own.
+ *
+ * Exported because two questions need the same mapping and must not answer it separately:
+ * `boxAroundAll` clamps this and reads it, and a caller asking "does the box I was given still
+ * hold the whole cube around this centre" compares against it. Stated once, those two cannot
+ * come to disagree about what a centre's cube is; stated twice — which is how this began — a
+ * `floor` quietly becoming a `round` on one side would keep both compiling.
+ */
+export function voxelSpan(
+  scale: VolumeScale,
+  centresNm: readonly Triple[],
+  halfWidthNm: number,
+): VoxelBox {
+  if (centresNm.length === 0) {
+    throw new Error('precomputed volume: a box needs at least one centre')
+  }
+  const lo: number[] = []
+  const hi: number[] = []
+  for (let axis = 0; axis < 3; axis++) {
+    const res = scale.resolution[axis]!
+    let first = Infinity
+    let last = -Infinity
+    for (const centre of centresNm) {
+      const at = Math.floor(centre[axis]! / res)
+      if (at < first) first = at
+      if (at > last) last = at
+    }
+    // The reach once, over the span, rather than per centre: it is the same number every time.
+    const reach = Math.ceil(halfWidthNm / res)
+    lo.push(first - reach)
+    hi.push(last + reach)
   }
   return { lo: [lo[0]!, lo[1]!, lo[2]!], hi: [hi[0]!, hi[1]!, hi[2]!] }
 }
@@ -609,9 +669,26 @@ export async function readLabelBox(
   refuseMultiChannel(options.info, scale.key)
   refuseOutsideScale(scale, box)
   const size = extentOf(box)
-  // Four bytes a voxel is the honest figure: the label table beside it is thousands of entries.
+  /*
+   * Four bytes a voxel, although the read below starts at two: this prices the form the box may
+   * still become, because nothing yet knows how many objects it holds. Refusing on the narrow
+   * figure would let a caller start a box it cannot finish. The widening itself is priced again
+   * where it happens, at six — both arrays are live while it copies.
+   */
   refuseUnallocatable(size, 4)
-  const index = new Uint32Array(size[0] * size[1] * size[2])
+  /*
+   * **Sixteen bits until the table outgrows them.** An index names a slot of this box's own
+   * label table, and a real cutout holds thousands of objects against millions of voxels — a
+   * 6 M-voxel neuron box measured 14,424 supervoxels — so the wide form is all but entirely
+   * zeroes. Starting narrow halves what the box costs for its whole life rather than only on
+   * the way to somewhere, which matters most at the Pyodide seam, where the copy lands in a
+   * heap that is never given back.
+   *
+   * It is a `let` because the per-chunk check below replaces it. Nothing outside this function
+   * sees the swap: a paste runs to completion before the next chunk is handled, so the array a
+   * paste writes into is the array that was current when it started.
+   */
+  let index: VoxelIndex = new Uint16Array(size[0] * size[1] * size[2])
   /*
    * Label 0 holds slot 0 from the start, so a chunk that is absent needs no special case: the
    * index array is already zero there, and `0` is what an unwritten region of a segmentation
@@ -636,6 +713,25 @@ export async function readLabelBox(
     // one chunk's — and so two chunks naming the same object share an index.
     const remap = new Uint32Array(decoded.labels.length)
     for (let i = 0; i < decoded.labels.length; i++) remap[i] = intern(decoded.labels[i]!)
+    /*
+     * The one place the box can outgrow sixteen bits, and it is asked **before** the paste that
+     * would write the slot that no longer fits. Once per chunk rather than per voxel: `intern`
+     * has just folded this chunk's whole table in, so `labels.length` is final for everything
+     * about to be written.
+     */
+    if (labels.length > NARROW_INDEX_LABELS && index instanceof Uint16Array) {
+      /*
+       * **Priced here, because this is where the box is widest.** Both arrays are live for the
+       * length of the copy — two bytes a voxel plus four — so a box that passed the four-byte
+       * check above can still be the one allocation that fails. Asked again rather than pricing
+       * six at the top: six would refuse boxes that never widen, which is nearly all of them,
+       * and the failure a reader meets should name the box rather than arrive from inside a
+       * chunk loop as an out-of-memory.
+       */
+      refuseUnallocatable(size, 6)
+      // Copies what is already pasted, which is why this is a swap and not a re-read.
+      index = new Uint32Array(index)
+    }
     // The decoded part starts at its own origin, so `fromLo` is zero and its size is the run.
     pasteBox(
       index,

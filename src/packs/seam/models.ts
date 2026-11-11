@@ -18,6 +18,19 @@
  * JSON; fetch it and sum the chosen variant.
  */
 
+/**
+ * One row of a list by its id, or undefined — a saved graph may name an id this build no longer
+ * carries, and that is an ordinary thing rather than an error.
+ *
+ * One function for four lists: each `*Model` lookup below was the same `find`, and a fifth task
+ * would have written it again. Module-private, so the four named lookups stay the only way in —
+ * a caller reaching for this would be choosing its own list, which is the thing those four
+ * exist to decide.
+ */
+function modelById(models: readonly AffinityModel[], id: string): AffinityModel | undefined {
+  return models.find((model) => model.id === id)
+}
+
 /** What a reader picks between, before any network. */
 export interface AffinityModel {
   readonly id: string
@@ -47,7 +60,7 @@ export const AFFINITY_MODELS: readonly AffinityModel[] = [
 
 /** One model by id, or undefined — a saved graph may name an id this build no longer carries. */
 export function affinityModel(id: string): AffinityModel | undefined {
-  return AFFINITY_MODELS.find((model) => model.id === id)
+  return modelById(AFFINITY_MODELS, id)
 }
 
 /**
@@ -79,7 +92,7 @@ export const MERGE_WINDOW_MODELS: readonly AffinityModel[] = [
 
 /** One merge-window model by id, or undefined. */
 export function mergeWindowModel(id: string): AffinityModel | undefined {
-  return MERGE_WINDOW_MODELS.find((model) => model.id === id)
+  return modelById(MERGE_WINDOW_MODELS, id)
 }
 
 /**
@@ -114,5 +127,40 @@ export const OPEN_END_MODELS: readonly AffinityModel[] = [
 
 /** One open-end model by id, or undefined. */
 export function openEndModel(id: string): AffinityModel | undefined {
-  return OPEN_END_MODELS.find((model) => model.id === id)
+  return modelById(OPEN_END_MODELS, id)
+}
+
+/**
+ * Every mask assessor's `task` — the fourth, and a fourth for the reason the third was one: a
+ * manifest pointing at another of them would load, run and hand back perfectly shaped numbers
+ * about a different question. `src/ml` refuses the mismatch with a sentence.
+ */
+export const MERGE_ASSESSOR_TASK = 'merge-assessor'
+
+/**
+ * The checkpoints that judge whether a candidate piece continues the neuron — stage 6 of SEAM's
+ * merge-candidate pipeline, one row per seed.
+ *
+ * **One row per seed, not one model with three parts.** `parts` means graphs that must all run,
+ * in order; the seeds are an ensemble, three independent answers to the same question. SEAM's
+ * published fits average them, so a single seed is not the pipeline SEAM calibrated — see
+ * `docs/seam-suggestions-plan.md`. Seed 0 alone is what this build offers, deliberately: a
+ * third of the work, for an answer the refit will say how to read.
+ */
+export const MERGE_ASSESSOR_MODELS: readonly AffinityModel[] = [
+  {
+    id: 'sa2_mask_s0',
+    label: 'SEAM mask assessor, seed 0 (Aedes)',
+    manifestUrl:
+      'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/models/seam-sa2-mask-s0/manifest.json',
+    detail:
+      'Judges whether a candidate piece continues the neuron, from a 4 µm window of the ' +
+      'segmentation around the place they touch. Trained on the Aedes reconstruction’s own ' +
+      'edit history.',
+  },
+]
+
+/** One assessor by id, or undefined. */
+export function mergeAssessorModel(id: string): AffinityModel | undefined {
+  return modelById(MERGE_ASSESSOR_MODELS, id)
 }

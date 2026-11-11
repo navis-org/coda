@@ -24,8 +24,8 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { bootPyodide, probeReport, readRepoFile } from './lib/pyodideProbe.mjs'
-import { readCaveToken } from './lib/browserProbe.mjs'
+import { bootPyodide, installBridge, probeReport, readRepoFile } from './lib/pyodideProbe.mjs'
+import { rootsAt } from './lib/browserProbe.mjs'
 
 const report = probeReport()
 const WORK = join(process.env.CODA_PROBE_DIR ?? '/tmp', 'coda-candidate-search')
@@ -38,8 +38,6 @@ const ranker = fixture.pipeline.search.geometric_ranker
 const AT_MS = Date.parse(fixture.snapshot.replace(' ', 'T')) - 1
 
 const BUCKET = 'https://storage.googleapis.com/fanc-fly_segmentation/wclee_aedes_brain'
-const CHUNKEDGRAPH =
-  'https://cave.fanc-fly.com/segmentation/api/v1/table/wclee_aedes_brain/roots_binary'
 
 /*
  * **The box comes from `probe:volume`'s own golden, not from arithmetic here.**
@@ -119,58 +117,26 @@ report.check(
 // ── Their roots at the snapshot, from the chunkedgraph ──────────────────────────────────────
 // Keyed on the instant: `AT_MS` comes from the fixture's snapshot, and a stale cache from
 // another moment would otherwise be reused in silence.
-const rootsFile = join(WORK, `roots-${AT_MS}.json`)
-if (!existsSync(rootsFile)) {
-  const token = readCaveToken()
-  if (!token) {
-    console.error('no CAVE token: set CAVE_TOKEN or put one in ~/.cloudvolume/secrets/cave-secret.json')
-    process.exit(2)
-  }
-  /*
-   * `roots_binary` — what `caveclient.chunkedgraph.get_roots` calls, and what `cavePostBinary`
-   * calls in the app. uint64 both ways, so no id is ever a double (invariant 8).
-   *
-   * **One request where the app sends two.** `rootIds.ts` batches at `CHUNK = 10_000` and this
-   * box holds ~14,400 supervoxels, so the app crosses a batch boundary here and this does not —
-   * the one place an ordering bug could enter the roots array is therefore untested. Said rather
-   * than papered over: batching here would test this script's own loop, not the app's.
-   */
-  const body = new BigUint64Array(box.labels.map(BigInt))
-  const answer = await fetch(`${CHUNKEDGRAPH}?timestamp=${AT_MS / 1000}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
-    body,
-  })
-  if (!answer.ok) throw new Error(`chunkedgraph: ${answer.status} ${await answer.text()}`)
-  const roots = new BigUint64Array(await answer.arrayBuffer())
-  writeFileSync(rootsFile, JSON.stringify([...roots].map(String)))
-}
-const roots = JSON.parse(readFileSync(rootsFile, 'utf8'))
+const roots = [
+  ...(await rootsAt(
+    BigUint64Array.from(box.labels.map(BigInt)),
+    AT_MS,
+    join(WORK, `roots-${AT_MS}.json`),
+  )),
+].map(String)
 report.check(`${roots.length} roots for ${box.labels.length} supervoxels`, roots.length === box.labels.length)
 report.check('the query root is in the box', roots.includes(golden.queryRoot))
 
 // ── The search, through the bridge ──────────────────────────────────────────────────────────
 const py = await bootPyodide()
 await py.loadPackage(['numpy', 'scipy', 'pandas'], { messageCallback: () => {} })
-py.FS.mkdirTree('/vendored')
-for (const name of ['cutout', 'candidates']) {
-  py.FS.writeFile(`/vendored/${name}.py`, readRepoFile(`src/pyodide/seam/${name}.py`))
-}
-py.FS.writeFile('/vendored/bridge.py', readRepoFile('src/pyodide/cutoutSummary.py'))
-py.globals.set(
-  '__vendored__',
-  py.toPy({
-    'seam.cutout': readRepoFile('src/pyodide/seam/cutout.py'),
-    'seam.candidates': readRepoFile('src/pyodide/seam/candidates.py'),
-  }),
-)
-await py.runPythonAsync(`
-import types, sys
-module = types.ModuleType('bridge')
-module.__dict__['__vendored__'] = __vendored__
-exec(open('/vendored/bridge.py').read(), module.__dict__)
-sys.modules['bridge'] = module
-`)
+const call = await installBridge(py, {
+  bridge: 'src/pyodide/cutoutSummary.py',
+  vendored: {
+    'seam.cutout': 'src/pyodide/seam/cutout.py',
+    'seam.candidates': 'src/pyodide/seam/candidates.py',
+  },
+})
 
 /** The request as `runCandidateSearch` builds one. Rebuilt per call: the box is transferred. */
 const requestFor = () => ({
@@ -186,16 +152,7 @@ const requestFor = () => ({
   topK: 100,
 })
 
-py.globals.set('__request__', requestFor())
-
-const search = async () => {
-  const proxy = await py.runPythonAsync(
-    `import sys; sys.modules['bridge'].coda_candidate_search(__request__)`,
-  )
-  const answer = proxy.toJs({ dict_converter: Object.fromEntries })
-  proxy.destroy()
-  return answer
-}
+const search = () => call('coda_candidate_search', requestFor())
 
 const got = await search()
 /*
@@ -208,7 +165,6 @@ const got = await search()
  * The second call transfers the box again, so the request is rebuilt: `callPython` and
  * `py.globals.set` both hand the buffer to Python, and the first call's is spent.
  */
-py.globals.set('__request__', requestFor())
 const warm = await search()
 
 console.log(
@@ -233,21 +189,54 @@ report.check(
   firstWrong < 0,
 )
 
-const scores = got.geo_score
-const off = golden.top.flatMap((one, at) =>
-  Math.abs(scores[at] - one.geo_score) < 1e-4 ? [] : [{ ...one, got: scores[at] }],
-)
-report.check(
-  off.length === 0
-    ? `every geo_score matches SEAM's to 1e-4 (top ${golden.top.length})`
-    : `${off.length} scores differ, e.g. rank ${off[0].geo_rank}: ${off[0].got} against ${off[0].geo_score}`,
-  off.length === 0,
-)
-const dists = got.min_dist_um
-report.check(
-  'min_dist_um matches SEAM’s for the top candidate',
-  Math.abs(dists[0] - golden.top[0].min_dist_um) < 1e-5,
-)
+/*
+ * One comparison, used by every column below.
+ *
+ * A helper rather than a fourth copy, because the second copy had already drifted: of the two
+ * comparisons here before this change, `geo_score` read all twenty rows and `min_dist_um` read
+ * **row 0**, so nineteen rows of it were never compared to anything. Each column still brings
+ * its own tolerance — a score, a distance in micrometres and a position in nanometres are not
+ * comparable at one number — but the walk, the count and the sentence are now in one place.
+ *
+ * The column is named once and read once: `got[name]`, so the name in the message cannot come
+ * to disagree with the array actually walked, which is the other way the copies could have lied.
+ */
+const sameColumn = (name, theirs, tol, unit = '') => {
+  const ours = got[name]
+  if (!ours) {
+    // The result passes SEAM's own column names through, so a rename upstream lands here. As a
+    // bare property access it would throw before `report.finish`, losing every other check's
+    // verdict and naming an index rather than the column that went missing.
+    report.check(`the result has no "${name}" column — SEAM renamed or dropped it`, false)
+    return
+  }
+  const off = golden.top.flatMap((one, at) =>
+    Math.abs(ours[at] - theirs(one)) <= tol
+      ? []
+      : [{ rank: one.geo_rank, ours: ours[at], theirs: theirs(one) }],
+  )
+  report.check(
+    off.length === 0
+      ? `every ${name} matches SEAM's to ${tol}${unit} (top ${golden.top.length})`
+      : `${off.length} ${name} differ, e.g. rank ${off[0].rank}: ${off[0].ours} against ${off[0].theirs}`,
+    off.length === 0,
+  )
+}
+
+sameColumn('geo_score', (one) => one.geo_score, 1e-4)
+sameColumn('min_dist_um', (one) => one.min_dist_um, 1e-5, ' µm')
+
+/*
+ * **The contact point, not just the distance** — because the own-tip rule is measured entirely
+ * from it (`src/packs/seam/ownTip.ts`), and it is the one output of the summary that a wrong
+ * axis order or a wrong voxel origin moves without moving any *distance*. A box read z-fastest
+ * and summarised happily puts every contact somewhere else in the volume while `min_dist_um`,
+ * `vol_um3` and the whole ranking stay exactly as they are — so it is checked per axis, which
+ * is also what makes a swap say which way round it went.
+ */
+for (const [axis, name] of ['x', 'y', 'z'].entries()) {
+  sameColumn(`contact_${name}_nm`, (one) => one.contact_nm[axis], 1e-6, ' nm')
+}
 
 /*
  * **The negative control, run rather than described** — and it corrected the story it was

@@ -525,3 +525,49 @@ export function handCaveToken(send, token) {
     token,
   )
 }
+
+/**
+ * The Aedes chunkedgraph, which two probes both read supervoxel roots from.
+ *
+ * Here beside `readCaveToken` for its reason: a credential and the address it opens are one
+ * fact, and a probe that spells either for itself is a probe that can drift from the app.
+ */
+export const AEDES_CHUNKEDGRAPH =
+  'https://cave.fanc-fly.com/segmentation/api/v1/table/wclee_aedes_brain/roots_binary'
+
+/**
+ * The root each supervoxel belonged to at one instant, cached on disk.
+ *
+ * `roots_binary` — what `caveclient.chunkedgraph.get_roots` calls, and what `cavePostBinary`
+ * calls in the app. **uint64 both ways**, so no id is ever a double (SEAM's invariant 1,
+ * Coda's 8); a root through a float64 is a different neuron, silently.
+ *
+ * **The cache file must be keyed on the instant**, which is the caller's job because only it
+ * knows which instant it means. A cache from another moment describes another agglomeration
+ * and would be reused without a word.
+ *
+ * **One request where the app sends two.** `rootIds.ts` batches at `CHUNK = 10_000` and these
+ * boxes hold more than that, so the app crosses a batch boundary here and this does not — the
+ * one place an ordering bug could enter the roots array is therefore untested. Said rather than
+ * papered over: batching here would test this helper's own loop, not the app's.
+ */
+export async function rootsAt(labels, atMs, cacheFile, url = AEDES_CHUNKEDGRAPH) {
+  if (!existsSync(cacheFile)) {
+    const token = readCaveToken()
+    if (!token) {
+      console.error(
+        'no CAVE token: set CAVE_TOKEN or put one in ~/.cloudvolume/secrets/cave-secret.json',
+      )
+      process.exit(2)
+    }
+    const answer = await fetch(`${url}?timestamp=${atMs / 1000}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
+      body: labels,
+    })
+    if (!answer.ok) throw new Error(`chunkedgraph: ${answer.status} ${await answer.text()}`)
+    const got = new BigUint64Array(await answer.arrayBuffer())
+    writeFileSync(cacheFile, JSON.stringify([...got].map(String)))
+  }
+  return BigUint64Array.from(JSON.parse(readFileSync(cacheFile, 'utf8')).map(BigInt))
+}

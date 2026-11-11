@@ -41,6 +41,7 @@
  */
 
 import { warnOverWait, WAIT_WARN_SECONDS } from '../../core/limits'
+import { logistic } from '../../core/stats'
 import type { Warner } from '../../core/limits'
 import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
@@ -66,7 +67,7 @@ import { MERGE_WINDOW_MODELS, MERGE_WINDOW_TASK, mergeWindowModel } from './mode
 import { openWindowModel } from './openWindowModel'
 import type { ScoredPoints } from './scene'
 import { fragmentLayer, scoreLayer } from './scene'
-import { probability, scoreWindows } from './windowRun'
+import { scoreWindows } from './windowRun'
 
 /**
  * How long one window costs end to end: ~43 ms to build plus ~49 ms to score, both measured
@@ -307,7 +308,7 @@ export const findMergesNode = packNode({
         const perNeuron: number[] = []
         for (let w = 0; w < built.windows; w++) {
           const logit = scored.windowLogits[w]!
-          const score = probability(logit)
+          const score = logistic(logit)
           perNeuron.push(score)
 
           /*

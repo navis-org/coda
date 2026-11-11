@@ -129,6 +129,22 @@ wants; a 4.7 M-voxel cutout is 38 MB expanded and 19 MB factored beside a few th
 every voxel is its own number and a lookup table would be larger than the data. Each refuses the
 other's encodings by name rather than decoding them into noise.
 
+**The index is as narrow as the box's own table** (`VoxelIndex`: `Uint16Array` or
+`Uint32Array`). A cutout names a few thousand objects with millions of voxels — a 6.0 M-voxel
+neuron box measured 20,243 supervoxels — so the wide form is mostly zeroes, and the box above is
+9.5 MB rather than 19. `readLabelBox` allocates narrow and widens on the first chunk that pushes
+the table past `NARROW_INDEX_LABELS` (65,536), carrying across what is already pasted; above
+that the wide form is the only correct one. The guard rail still prices four bytes a voxel,
+because nothing knows at the start how many objects a box holds, and refusing on the narrow
+figure would let a caller start a box it cannot finish.
+
+It matters most where the box is handed to Python. `callPython` copies it into a wasm heap that
+is **never given back to the operating system**, so what crosses is paid for the life of the
+worker: cutting the assessor's patches for one 66-candidate tip went from a 220 MB peak to
+201 MB, measured by `pnpm probe:assessor-patch -- --end 1014`. The Python reads whichever width
+arrives and refuses a table too big for it by name — an index past its width has already wrapped
+onto a different supervoxel, which is a full answer about the wrong objects.
+
 #### Three things that are silent when wrong
 
 All three produce a perfectly ordinary-looking box, which is why each has a test whose fixture is
