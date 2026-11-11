@@ -1534,3 +1534,167 @@ stating numbers nobody re-ran looks like after one cycle, and why this is writte
 `config.input.patch.z` still reads "labels by nearest section", which is the old rule's sentence
 — worth fixing at the next export, since the `config` blob is deliberately SEAM's own text and
 this pack copies it unread.
+
+## Phase 4, stages 7–9 — built and checked (2026-11-11)
+
+`stages.ts` and `parsePipelineFits`. A tip's candidates in, a ranked list and a decision out:
+`logit` per seed and their mean, `p_cand`, `rank`, `segclr`, `p_tip`, `p_top`, `p_split`,
+`conf`, `q_ref`, `q`, `shown` and `r`. No model, no fetch, no worker — a few multiplications a
+row on the path a card redraws from.
+
+**TypeScript, not vendored Python, and the reason is particular to this stage.** Everything else
+Coda borrows from SEAM is copied byte for byte because the drift is invisible: a window built
+slightly differently still scores. Here SEAM publishes the answers — `tips.parquet` and
+`candidates.parquet` carry every one of those quantities for every row — so the drift is visible,
+and `stages.test.ts` recomputes all of them from the stored inputs and compares. That is a
+stronger check than a byte comparison of source: it checks the numbers, on real data, at every
+stage. **Worst difference over 25 tips and 1,178 candidates: 3.6e-15**, on `conf_logit`, which
+sums fifteen fits; every other stage is at or below 9e-16, and `segclr` and `r` are exact. SEAM's
+own replay records 2.2e-16 (`checks_largest_difference`), so this is summation order and nothing
+else.
+
+### Every number is read, and one of them did not exist yet
+
+The fits, the floors, the cutoff and the isotonic steps all come from the set's own manifest.
+That is not fastidiousness: the cutoff moved 0.208 → 0.153 → 0.146 inside a week, and each time a
+constant in this file would have been right on the day it was written.
+
+Two the manifest states in ways a reader has to notice:
+
+- **`ref.score_clip` is optional, and this set has none.** SEAM added the clip (±20) after a raw
+  logit of 22,652 flattened a seed's weight, and the current `coda_fixture.py` writes the field —
+  but `rv2-0d62bc912a89` predates it and **its published logits are unclipped**, which was checked
+  rather than assumed: with the clip applied the recomputation misses `logit_s0` by 16.2. So the
+  clip is applied only where the set declares one.
+- **`q_ref` has no published cutoff.** `show.q_ref` says "its cutoff was 0.208" in prose, and prose
+  is not something to parse. So a tip that can only reach `q_ref` gets the number and **no
+  verdict** — `TipDecision.against` is `undefined`, drawn as "no decision", never as a rejection.
+  `r` is withheld with it, because the steps were fitted against `q`. One field (`show.cutoff_ref`)
+  would close this; it is in "What to ask SEAM for".
+
+### The two shapes, which are one shape
+
+`q` is `p_tip × p_split` and `p_split` comes from the EM-texture head, which SEAM publishes as
+data and not as a model. So:
+
+| | a tip from a published set | a tip searched live |
+| --- | --- | --- |
+| ref's half (`logit`, `p_cand`, `rank`, `p_top`, `segclr`, `p_tip`, `q_ref`) | yes | yes |
+| split's half (`conf_logit`, `p_conf`, `p_split`, `q`, `shown`, `r`) | yes | **no** |
+
+`scoreList` computes split's half when the head scores are there and leaves it `undefined` when
+they are not; `decideTip` names the quantity it decided on. A reader is never shown a number that
+looks like `q` and is not. The live arm is tested by handing the same list with `head: undefined`
+and requiring ref's half to come out **identical** — the head must not reach back into it.
+
+### What it refuses, and why each is silent otherwise
+
+- **A fold listed out of order.** A seed is addressed by position, so a manifest numbering them
+  `[1, 0, 2]` would score each seed against another seed's weights. Every logit stays a logit.
+- **A fit of the wrong width.** `((x − mu) / sd) · w` walks the row, so a short `w` drops the last
+  feature — ref without the assessor's own score, ranking on geometry and size alone.
+- **`p_tip` refitted on other columns.** The fit names its columns; applying three weights to two
+  features gives a probability for every tip and the right one for none.
+- **A list whose seeds do not match the set's fit**, which would be a mean over the wrong number
+  of scores.
+
+A set that fails any of these is still **readable**: the fits are parsed by `parsePipelineFits`
+when something recomputes, not by `parseSuggestionSet` when the set loads, because Phase 1 reads
+`q`, `shown` and `r` as columns and needs no fit at all.
+
+### What the review round changed (same day)
+
+Four cleanup agents over the new code. Beyond the ordinary tidying, five that were worth the
+pass:
+
+- **The design row was rebuilt per fit.** Ref asks three fits a candidate and split fifteen, and
+  each allocated a fresh array and took `Math.log(vol)` again — eighteen logarithms of every
+  volume, 1.8 M short-lived arrays for a published set. One reused row, same loop order:
+  **54.6 ms → 20.7 ms on the logits, worst difference between old and new exactly 0** (2,700
+  tips × 37 candidates, median of nine passes). The whole of `scoreList` over that set is
+  52.2 ms, which is 19 µs for the one list a live tip actually scores — so the remaining cost,
+  nearly all of it the comparator sort, was measured and left alone.
+- **A head column shorter than its list** read `undefined` into the fit, so every confidence came
+  back `NaN` rather than refusing. **A split fold with no seeds** divided by zero fits for the
+  same result; that check now lives inside `seedFits`, which both `ref` and every fold go
+  through.
+- **`r` was a number where `0` meant three things** — an empty list, a quantity the steps were
+  never fitted for, and a genuine measured zero. It moved onto `DecisionBasis`'s `q` arm, where
+  it cannot be read off a tip nothing decided.
+- **`shown` was a boolean under an optional**, so `against?.shown` was falsy for a withheld tip
+  *and* for an undecided one — the two states the shape exists to keep apart. It is now
+  `verdict: 'shown' | 'withheld'`.
+- **`e_tip_floor` was parsed, carried, documented and never applied.** `decideTip` now takes
+  `number | undefined` and substitutes it, the way `scoreList` already did for `segclrFloor`.
+
+And two gaps in the check itself: `shown` was compared as a **total** rather than per tip (two
+tips swapping sides leaves the count right), and the `score_clip` branch was exercised by
+nothing, since this set declares none. Both are closed — the clip by two arithmetic identities
+over the set that does exist, since no fixture can carry a field SEAM has not published yet.
+
+### A second review round, and what it declined
+
+Four more agents over the same files. Besides the ordinary tidying it found three things in the
+first round's own work: a **false sentence** in `stages.ts`' header (it claimed to meet SEAM's
+`checks_largest_difference` bar of 2e-16, but that record holds nine quantities and `conf_logit`
+— the one at 3.6e-15 — is not among them, so there is no published bar for it); a **half-measure**
+in the empty-seed fix (moving it into `seedFits` shares it with every fold, but a fold's seed
+*roster* is a property of the set and was still checked nowhere — a short fold reads another
+seed's column and weighs less than its neighbours in a flat average); and `REF_WIDTH`/`SPLIT_WIDTH`
+**stated twice**, as literals in the parser and constants in the stages, so widening one and not
+the other would drop a feature from every logit through the very check meant to prevent it.
+
+Also: `orderByScores` (`nodes/lib/matrixShape.ts`) replaced a hand-written comparator — it is the
+repo's one statement of "descending, stable, non-finite last", and the hand-written form put a
+`NaN` logit at rank 1, since `logit[b] − logit[a]` is `NaN` and `NaN || a − b` falls through to
+the index. `parsePipelineFits` now takes the `SuggestionSet` rather than a block and a URL, so a
+block cannot be paired with another set's file in a refusal. And the clip's own parse path got
+cases, since the derived ones in `stages.test.ts` patch a `PipelineFits` and never read
+`score_clip` out of a manifest at all.
+
+**Declined, with the measurement:** a gated insertion sort for small lists (a few ms over a whole
+set, at the price of two statements of the tie rule); narrowing `cutoutSummary.py`'s box to
+`uint16` rather than casting to `int32` (9.5 MB of a ~180 MB EDT peak, and it changes the dtype
+handed to vendored code on the strength of one box shape); and a row-wise `into.set(...)` in
+`pasteBox` (7.7 → 4.8 ms per box read, and immune to a megamorphic cliff this change's second
+element kind brings nearer — but a box read is three seconds of network, so it is 0.1%). The
+last two are worth revisiting if either file is opened again for its own reasons.
+
+### Two code-review rounds, and the three that were real
+
+The reviews after the cleanup found five findings each. Three were defects rather than tidying,
+and two of those were introduced by the cleanup itself:
+
+- **The held patch box had no identity.** `assessorPatches.py` holds one labelled box, and
+  nothing in a cut or a close said which — so two overlapping tips (a cancelled one whose close
+  has not landed, a caller that forgot to await) would have the second `open` replace the first's
+  labels, and the first's next cut would answer from it: patches of the right shape, for the
+  wrong neuron. `AssessorBox.id` is now carried on every later call and a stale one is refused by
+  name, which `probe:assessor-patch` drives, since the refusal is Python's. The same check
+  covers `close`, where a late one would otherwise drop the *live* tip's labels — and `box` is
+  required rather than checked-when-present, because an absent one would be served whatever is
+  open, which is the failure arriving through the check.
+- **`probe-seam-merge.mjs` called `windowRun.probability`,** which the cleanup had moved to
+  `core/stats.ts` as `logistic`. The probe loads modules by path from inside a template literal,
+  so neither typecheck nor lint sees the call — only a run, after the download and the GPU work.
+  (Writing the fix's comment then hit this repo's recorded backtick trap: a backtick inside that
+  literal ends it. Twice now, so the comment says so in place.)
+- **The widening was not priced where it allocates.** `readLabelBox` checks four bytes a voxel up
+  front, but during the 16→32-bit swap both arrays are live — six. A box just under the floor
+  would have failed inside the chunk loop with nothing naming it. It is now asked again at the
+  swap, at six, rather than pricing six at the top: that would refuse boxes that never widen,
+  which is nearly all of them.
+
+Two more were prose that had gone wrong: `canonicalLabels` claimed that "sorting can only lower
+an index", which is false (`[0, 10, 5]` raises slot 1 to index 2 — what actually holds is the
+`labels.length` bound), and the unbounded default group size, where "no `count` means the rest"
+contradicted the three-call design that exists because a whole list is 215 MB in one message.
+`count` is now required.
+
+### Not done here
+
+- **Nothing is wired to a node.** `stages.ts` is headless and driven only by its test, the way
+  `cutoutSummary.ts` was before the search.
+- **The node does not publish `head_s<k>`**, so recomputing split's half from the node's own
+  tables is not currently possible — only from the parquet. That is a column decision for whoever
+  builds the card, not a gap in the stages.
