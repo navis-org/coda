@@ -1,0 +1,104 @@
+{
+ "id": "sa2_mask_s0",
+ "manifestSchema": 2,
+ "task": "merge-assessor",
+ "parts": [
+  "assess"
+ ],
+ "datasets": [
+  "aedes_h1"
+ ],
+ "license": "MIT",
+ "citation": "SEAM, Drosophila Connectomics group; mask assessor trained on the Aedes reconstruction's edit history",
+ "source": "https://github.com/flyconnectome/SEAM",
+ "upstreamCommit": "dbfef4cb7a58db775692ae18dcd179cf250ec861-dirty",
+ "randomWeights": false,
+ "config": {
+  "seed": 0,
+  "kernels": "matmul",
+  "batch": 1,
+  "input": {
+   "name": "lab",
+   "dtype": "float32",
+   "shape": [
+    "n",
+    129,
+    129,
+    129
+   ],
+   "axes": "array index [n][x][y][z] (C order: z fastest)",
+   "values": {
+    "0": "neither",
+    "1": "Q (the neuron)",
+    "2": "C (the candidate)"
+   },
+   "made_by": "seam/segclr/patches.py: patch_box (the box) -> label_box (supervoxels labelled by each object's leaves) -> pair_sides (the patch)",
+   "patch": {
+    "voxels": 129,
+    "nm": 32.0,
+    "segmentation": "Aedes supervoxels at mip 1 (32 x 32 x 45 nm)",
+    "z": "resampled to 32 nm, labels by nearest section",
+    "centre": "the candidate's contact (contact_{x,y,z}_nm)",
+    "objects": "Q: the neuron's root, C: the candidate's root, both at the set's snapshot - 1 ms (Coda fixture: search.roots_at)"
+   }
+  },
+  "output": {
+   "name": "logit",
+   "dtype": "float32",
+   "shape": [
+    "n"
+   ]
+  },
+  "missingPatchScore": -58.721923828125,
+  "gflopPerPatch": 86.8,
+  "checkpoint": {
+   "auc": 0.9642094093111075,
+   "n": 16072,
+   "n_pos": 1489,
+   "auc_matched": 0.954717409148571,
+   "auc_no_break": 0.9776625811506604,
+   "auc_pool": 0.9620564802393595
+  },
+  "parity": {
+   "against": "PyTorch fp32 (lists.parquet torch_s<k>) on the fixture's lists",
+   "must": [
+    "the shown decision (q >= the cutoff; stages 7-9 with the Coda fixture's fits, its stored head scores and e_tip) is the same on every tip",
+    "ref's first candidate is the same on every list",
+    "q is within 0.01 on every tip",
+    "per seed, first place is the same on every list whose fp32 top two differ by more than 0.05",
+    "per seed, the rank correlation (Spearman) within each list of 5+ candidates is at least 0.99"
+   ],
+   "reported, not judged": "raw logit error (max, median)"
+  }
+ },
+ "signatures": {
+  "assess": {
+   "inputs": [
+    "lab"
+   ],
+   "outputs": [
+    "logit"
+   ],
+   "dynamic": {}
+  }
+ },
+ "files": [
+  {
+   "variant": "matmul",
+   "part": "assess",
+   "file": "sa2_mask_mm_s0.onnx",
+   "url": null,
+   "bytes": 133083679,
+   "sha256": "745e1462eef9340bf0d2ac4311d25914a698260b7693076bd804a4589c9a6959",
+   "quantisation": {
+    "kind": "none",
+    "io": "float32",
+    "quantises": [],
+    "emits": [
+     "Gemm",
+     "MatMul"
+    ]
+   }
+  }
+ ]
+}

@@ -600,7 +600,7 @@ segmentation around an open end) from `negatives.py`, and `pool_features` plus `
 byte-identical whole-file copy like the two above — `negatives.py` imports `cave`, `paths` and
 `pre_edit`, and `candidates.py` imports `paths`.
 
-So it takes the two functions **verbatim but not whole**, and `pnpm vendor:seam-cutout` is what
+So it takes the two functions **verbatim but not whole**, and `pnpm vendor:seam` is what
 makes that claim checkable — it re-cuts the run from `negatives.py` by the markers that bound it
 and byte-compares, refusing by name if SEAM moves them. A sha256 cannot pin a subset of a file
 the way the table in `VENDORED.md` pins the copies; the script does that job instead, and in one
@@ -716,6 +716,15 @@ types and a wrapper" changed.
 The reason it was needed rather than worked around: `MeshGeometry.indices` is a `Uint32Array`,
 and every face argument in fastcore's mesh module wants numpy's `uint32`. Narrowing to `Int32Array`
 on the way over would have bought a cast on both sides to deliver the same bits.
+
+**It gained `Uint16Array` on 2026-11-11, and that one is about memory rather than meaning.** A
+box of segmentation (`VoxelIndex`) is millions of voxels naming a few thousand objects, so its
+index fits in sixteen bits and the wide form is half zeroes. Here that is not a transient: the
+copy lands in a heap that is never given back, so a needless 12 MB is permanent for the life of
+the worker. `readLabelBox` sends whichever width names its table, the Python asks for no dtype
+on the way in — naming one would widen the array straight back out — and it refuses a table too
+big for the width that arrived, since every index past the width has already wrapped onto a
+different object. Cutting one 66-candidate tip's patches went from a 220 MB peak to 201 MB.
 
 ### syNBLAST: the same matrix, a different question
 

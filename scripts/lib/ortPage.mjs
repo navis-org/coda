@@ -17,11 +17,20 @@ import { createReadStream, readFileSync } from 'node:fs'
 import { extname, join, resolve } from 'node:path'
 
 /**
- * The schema `src/ml/manifest.ts` reads. Duplicated here because a `.mjs` cannot import the TS,
- * and checked against the manifest's own field so a mismatch is a sentence rather than a
- * `TypeError` three lines later — `src/ml` is the authority, this is a mirror.
+ * The schema `src/ml/manifest.ts` reads, taken **from** `src/ml/manifest.ts`.
+ *
+ * A `.mjs` cannot import the TypeScript, so this was a hand-kept `2` with a comment conceding
+ * that `src/ml` is the authority and this a mirror. A regex over the source is four lines and
+ * cannot go stale — the same bargain `scripts/make-assessor-manifest.py` makes, and the one
+ * `src/packs/seam/patchBox.ts` makes with the vendored Python. It is checked against the
+ * manifest's own field below, so a mismatch is a sentence rather than a `TypeError` three lines
+ * later.
  */
-const MANIFEST_SCHEMA = 2
+const MANIFEST_SCHEMA = Number(
+  /^export const MANIFEST_SCHEMA = (\d+)/m.exec(
+    readFileSync(new URL('../../src/ml/manifest.ts', import.meta.url), 'utf8'),
+  )?.[1],
+)
 
 /**
  * A converted model's manifest, or a sentence saying why this probe cannot read it.
@@ -73,14 +82,18 @@ const TYPES = {
  *
  * `dirs` maps a URL prefix to a directory; `/` is the model directory by convention. Returns the
  * origin to navigate to and the function that stops it.
+ *
+ * `bundle` picks which onnxruntime-web build the page imports. The default carries WASM and
+ * WebGPU, which is what every probe here has needed; `ort.all.bundle.min.mjs` adds the WebNN
+ * provider, which is the only route a browser has to the platform's own ML stack.
  */
-export async function serveOrtPage({ title, dirs }) {
+export async function serveOrtPage({ title, dirs, bundle = 'ort.webgpu.bundle.min.mjs' }) {
   // Stated rather than assumed: without it an unprefixed request throws a `node:path` TypeError
   // from inside the request handler, which kills the probe with a stack naming neither.
   if (!dirs?.['/']) throw new Error("serveOrtPage needs a '/' directory to serve the model from")
   const page = `<!doctype html><meta charset=utf-8><title>${title}</title><body>ready</body>
 <script type="module">
-import * as ort from './ort/ort.webgpu.bundle.min.mjs'
+import * as ort from './ort/${bundle}'
 window.ort = ort
 </script>`
   const server = createServer((request, response) => {

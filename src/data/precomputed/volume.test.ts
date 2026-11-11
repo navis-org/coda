@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest'
 
 import morton from './__fixtures__/mortonCodes.json'
+import { NARROW_INDEX_LABELS } from './compressedSegmentation'
 import {
   boxAround,
   chunksCovering,
@@ -574,6 +575,72 @@ describe('readLabelBox', () => {
       expect([...read.labels].every((v, i, all) => i === 0 || all[i - 1]! < v)).toBe(true)
       // Seeded for the absent-chunk case; no voxel here is 0, so it must not survive.
       expect(read.labels).not.toContain(0n)
+    } finally {
+      restore()
+    }
+  })
+
+  /**
+   * The width of the index is a memory decision, and the common case is the narrow one.
+   *
+   * A cutout names a few thousand objects with millions of voxels, so the wide form is mostly
+   * zeroes — and at the Pyodide seam those zeroes are copied into a heap that is never given
+   * back. Asserted on the type rather than on `BYTES_PER_ELEMENT` so that a reader sees which
+   * of the two `VoxelIndex` arms came back.
+   */
+  it('reads a box narrow when its table fits in sixteen bits', async () => {
+    const restore = stubFetch()
+    try {
+      const read = await readLabelBox('https://store/v', scale, {
+        lo: [0, 0, 0],
+        hi: [8, 4, 2],
+      })
+      expect(read.index).toBeInstanceOf(Uint16Array)
+    } finally {
+      restore()
+    }
+  })
+
+  /**
+   * **The widening, and the half of it that could go wrong in silence.**
+   *
+   * A box outgrows sixteen bits only above `NARROW_INDEX_LABELS` objects, which no ordinary
+   * cutout reaches — so this is the path nothing would exercise and everything would depend on.
+   * The fixture is built so that **neither chunk overflows alone**: each names 40,000 distinct
+   * labels, and only the pair passes 65,536. That is what makes the test about the swap rather
+   * than about the first allocation — whichever chunk is handled first has already been pasted
+   * into the narrow array when the second one widens it, so a widening that forgot to carry the
+   * voxels across would leave half the box reading label 0 and the other half correct.
+   */
+  it('widens the index when the box outgrows sixteen bits, keeping what was pasted', async () => {
+    const wide: VolumeScale = {
+      ...scale,
+      size: [128, 128, 8],
+      chunkSize: [128, 128, 4],
+    }
+    // 40,000 labels a chunk, from two disjoint runs: 80,000 in the box, 16,384 in a z plane.
+    const fill = (x: number, y: number, z: number) =>
+      BigInt((z < 4 ? 1 : 500_000) + ((x + y * 128 + z * 16_384) % 40_000))
+    const restore = serveChunks(fill, BigUint64Array)
+    try {
+      const read = await readLabelBox('https://store/v', wide, {
+        lo: [0, 0, 0],
+        hi: [128, 128, 8],
+      })
+      expect(read.labels.length).toBeGreaterThan(NARROW_INDEX_LABELS)
+      expect(read.index).toBeInstanceOf(Uint32Array)
+      // Every voxel, both sides of the swap: a corner of each chunk and the box's own ends.
+      for (const [x, y, z] of [
+        [0, 0, 0],
+        [127, 127, 3],
+        [0, 0, 4],
+        [127, 127, 7],
+        [63, 31, 2],
+        [63, 31, 6],
+      ] as Triple[]) {
+        const at = x + y * 128 + z * 128 * 128
+        expect(read.labels[read.index[at]!]).toBe(fill(x, y, z))
+      }
     } finally {
       restore()
     }

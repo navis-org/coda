@@ -425,8 +425,9 @@ anything narrower is a `Filter Table` downstream, where the cut is visible as so
 did. This is the lesson from `Score cutoff`: a cut baked into an expensive node is a re-run per
 look, and a cut hidden inside one is indistinguishable from a model's verdict.
 
-`candidates_all.parquet` (270,700 rows, the pre-own-tip-rule search output) is **not** read. It
-exists to check Phase 6 and nothing before then needs it.
+`candidates_all.parquet` (270,700 rows, the pre-own-tip-rule search output) is **not** read by
+the loader. It exists to check Phase 6, which is what `make_search.py` cuts the search's two
+goldens out of.
 
 ### `seam:review` — "Review Suggestions"
 
@@ -501,10 +502,10 @@ being a column somebody shipped.
 **Phase 5 — Model E**, once SEAM exports it. Same `SeamModel` class as Model A, so Phase C's
 window code and `src/ml` apply. Checked as `e_tip` against the fixture.
 
-**Phase 6 — the search** (stages 4–5). **Built, bar the own-tip rule** — see the dated section
-below. Originally: the 6 µm cube, the roots at T − 1 ms, the eight geometric
-features, the logistic ranker, the own-tip rule. Checked against `candidates_all` and
-`candidates`. This is where CAVE politeness matters — SEAM keeps to 4 concurrent Aedes streams,
+**Phase 6 — the search** (stages 4–5). **Built** — see the dated sections below. The 6 µm cube,
+the roots at T − 1 ms, the eight geometric features, the logistic ranker, the own-tip rule.
+Checked against `candidates_all` (the ranking) and `candidates` (the own-tip rule). This is
+where CAVE politeness matters — SEAM keeps to 4 concurrent Aedes streams,
 and `get_leaves_many` per box rather than per supervoxel is a 0.6 s against 14 s difference.
 
 **Phase 7 — the assessors**, once exported. 3D ResNet, 129³ at 32 nm, masks only. Two unknowns
@@ -695,11 +696,401 @@ answer for this same end — 14 of the 100 kept, `geo_rank` renumbered, divergin
 pre-rule list at rank 5 — so the remaining work can be checked the same way the search was,
 against SEAM's own answer rather than against itself.
 
-**What is left of Phase 6.** The own-tip rule — keep a candidate only if its contact is within
-`own_um` of the tip and no other tip of the neuron is nearer, then renumber `geo_rank` — which is
-a *per-neuron* pass rather than a per-end one, so it belongs with the node that walks the ranking
-rather than in the bridge. `candidates_all` is the search's top 100 **before** that rule, which is
-what the probe compares against; `candidates` is what survives it.
+## The own-tip rule (2026-11-10)
+
+`ownTip.ts`, which closes Phase 6. A candidate stays on a list only if its **contact** is within
+`own_um` (2.0) of the end the list belongs to *and* no other tip of the neuron is nearer that
+contact; `geo_rank` is then renumbered `1..n` in the search's own order. Without it a neurite
+lying between two ends of the same neuron is on both lists, and would be cut out, patched and
+assessed twice, with two scores for one piece and no rule saying which to believe.
+
+**It is a per-neuron pass, which is why it is in the pack and not in the bridge.** Everything
+else in stages 4 and 5 happens inside one cutout and is vendored into `src/pyodide/seam/`. This
+one reads *every* tip of the neuron — including ends no list was ever searched for. rv2 has one
+such end — 1967, on neuron 648518347669157986 — and it takes 42 candidates off three of its
+neighbours' lists, so a caller that passed only the searched ends would keep all 42 with nothing
+downstream able to tell. `ownTip.test.ts` asserts that difference rather than describing it,
+though on a constructed case: the fixture's neuron has no unsearched end of its own, so the test
+narrows it to the six tips its lists belong to and shows that more survives.
+
+**TypeScript rather than a third vendored slice**, which [VENDORED.md](../src/pyodide/seam/VENDORED.md)
+would otherwise argue for — the rule is fifteen lines of numpy in one contiguous run, so slicing
+it is possible. A slice would make the whole per-neuron pass a Pyodide crossing carrying every
+tip of the neuron, to run a nearest-neighbour query the editor already has an index for.
+`tips.ts` made the same call for the same reason. The cost of both is that a drift here is
+invisible to SEAM, which is what the golden below stands in for.
+
+**Checked against SEAM's own kept set**, not against a hand-written expectation, because every
+way of getting it slightly wrong leaves a plausible list: dropping the second test keeps a few
+extra candidates, measuring to the end's unsnapped position moves a handful across the limit,
+renumbering the other way gives the same set with the ranks shuffled. `ownTipNeuron.json` holds
+one neuron's 505 ends and six of its lists — the ones that make the rule do something, including
+two that keep nothing and one that gives nine tenths of what was near enough to a nearer end.
+Both of the first two mistakes were put into the code to confirm the test fails on them.
+
+**The kept set is read from `candidates.parquet`, not recomputed**, and that distinction was the
+second review pass's finding. The generator does run the rule in numpy — `tooFar` and
+`anothersTip` are counts SEAM publishes neither of — but writing *that* answer into the golden
+would have made it a second implementation written from the same reading as `ownTip.ts`, so a
+shared misreading would agree with itself. The two are required to agree and the generator
+refuses to write a golden if they do not. They did agree, on all six lists, which is why no
+golden value moved when this changed.
+
+**Two tips at one place is the one case that needed deciding.** The tip rule snaps every end
+onto the nearest mesh vertex, so a short spur's two ends can land on one. The k-d tree keeps the
+first strictly-nearer point its traversal meets, while SEAM asks `cKDTree.query`, which answers
+the lowest index — so left alone the two disagree, and quietly: one of the pair loses *every*
+candidate it shares with the other, which reads as an end with nothing near it. Coda decides it
+the same way SEAM does, with a map from each tip to the lowest-numbered tip at its position,
+built once per neuron rather than scanned per candidate. rv2 contains no such pair and none of
+its 141,980 near-enough contacts is equidistant from two tips, so the golden cannot exercise
+this; `ownTip.test.ts` builds the case, and needed seventeen tips to do it — over three the tree
+answers the lower index by luck and the first draft of that test passed whether the tie was
+handled or not.
+
+**The two reasons a candidate is dropped are counted apart** (`tooFar`, `anothersTip`), because
+they are two different sentences about an end: nothing near it at all, or plenty near it that
+belongs to a neighbour. A reader asking why a tip has no candidates wants to be told which.
+
+**`searchEnd.json` and `ownTipNeuron.json` are now generated**, by
+`src/packs/seam/__fixtures__/make_search.py`, from the **same published directory `make.py`
+takes** — `candidates_all.parquet` for the lists and `tips.parquet` for the ends. The two
+scripts are apart only in what they read: `make.py` trims the parquet files the loader reads,
+this one writes JSON goldens out of the one published file the loader never touches.
+
+That the published set is enough was not the first answer. The goldens were first cut from
+SEAM's own `builds/rv2/manifest.parquet` and `replay/rv2/open_ends.parquet` on the belief that
+neither was published, and an ask to publish them was written down here. It was wrong on both
+counts: `candidates_all.parquet` **is** `manifest.parquet` with `operation_id` renamed and the
+ids already cast to text, and `tips.parquet` carries every open end with positions agreeing to
+0.0 nm. Reading the published set instead regenerates both goldens to the same numbers, drops a
+float-id guard that only existed because the build file's ids are `int64`, lets `own_um` be
+read from the manifest rather than copied, and stamps both files with the set's own `version`.
+(To the same *numbers*: `searchEnd.json` also lost a six-decimal rounding and gained the contact
+point in the same change.)
+
+The stamp is worth a line. `version` is a content hash over the published files, so it carries;
+`commit` is `…-dirty` and names no tree. The pack's own `fixture.json` is from an *older* run of
+`make.py` and has no `version` at all — survivable only because the test compares `own_um`
+across both files rather than trusting either, so a refit upstream is caught wherever it lands
+first.
+
+## The fixtures were cut again (2026-11-10)
+
+`make.py` re-run against the current published set, which has SEAM's split stage in it. The
+pack's copy had been from before that stage and was quietly behind: the full set counts 120 tips
+shown and 298 at `r >= 0.5` where the old one counted 97 and 711.
+
+What moved, and what each cost:
+
+- **The `shown` cutoff, 0.2084 to 0.1532.** `suggestionSet.test.ts` had it as a literal, in a
+  test whose own comment warned that "a hard-coded 0.2084 would be right today and quietly wrong
+  after the next run". It now pins the **path** — that `cutoff` is `pipeline.show.cutoff` and
+  not one of the manifest's other numbers — which is what the test was for; the literal only
+  ever tested the fixture.
+- **`expectedRight` per neuron**, which three implementations compute (the node, the pandas
+  emitter, the R chunk). All three were re-run against the new files before the list was
+  changed, rather than the node's new answer being pasted over the old: pandas and R both give
+  `1.7464, 1.8409, 1.7464, 1.7464, 1.7464`. Four are identical because `r` is a step function
+  and only two of its steps (0.8732, 0.9677) appear among ten shown tips — small-fixture
+  coincidence, not a fold that stopped telling neurons apart.
+- **1,141 candidates to 1,219**, and `fixture.json` gained `version`, `files` and `made`.
+
+Nothing else in the suite moved, which is the useful part: 11,651 tests pass against a set that
+reaches the browser through the same reader.
+
+## Phase 7, measured before building (2026-11-10)
+
+**A handoff for SEAM is split out**: [seam-assessor-speed.md](seam-assessor-speed.md) holds the
+same findings written for whoever ports the convolution rewrite into `export_assessor.py`, with
+the dead ends and the upstream bug report. What follows is the narrative.
+
+SEAM exported the assessors the same day the own-tip rule landed, so the two unknowns it had
+named could be settled before any of Phase 7 was designed. Two probes, and the answers are not
+the ones the shape of the question suggested.
+
+**WebGPU runs the graph, all of it.** `pnpm probe:assessor-ops` runs SEAM's `probe.onnx` — the
+same network at widths 8-64 with random weights, every op, kernel, stride and 'SAME' pad of the
+real one on the same 129³ input, 2.2 MB instead of 133 MB. ORT's own placement log says **all 90
+nodes on `WebGpuExecutionProvider`**, and **46 `Conv3D` WGSL programs** are compiled, which is a
+3D convolution really becoming a GPU kernel. Both logits match PyTorch to 1.2e-7.
+
+**The trap that probe is built around** is that a node WebGPU cannot run falls back to the CPU,
+answers correctly, and says nothing — so a probe checking only the logits would pass on a graph
+running entirely on WASM and quote a "WebGPU" timing that is really a CPU one. Hence two
+detectors, and a **negative control**: the same two, pointed at the WASM session, must come back
+negative. They did not on the first run — a search for `CPUExecutionProvider` matches
+`TransposeOptimizer_CPUExecutionProvider`, which is a graph *transformer* that runs on every
+session whatever the backend, and `Node placements` is a bare header whose verdict is on the next
+line. Both were reporting the opposite of the truth.
+
+**The real model agrees with PyTorch better than onnxruntime's own CPU build does.**
+`pnpm probe:assessor-parity` runs `sa2_mask_s0.onnx` itself on real patches from SEAM's parity
+fixture: **2.7e-5** on three patches, **1.05e-4** on eighteen, against the 8e-4 onnxruntime CPU
+manages on the same lists. Candidates rank in PyTorch's order. Compared with `torch_s<k>`, never
+with `candidates.parquet`'s `score_s<k>` — those are the cluster's bf16 numbers and an exact
+browser misses them by about a logit while being right.
+
+**The cost is the problem, and it is not the one that was expected.** Per patch, warm, on an
+M3 Max:
+
+| | ms a patch | an average tip (114 patches) |
+|---|---|---|
+| WebGPU | 1,133-1,145 | ~130 s |
+| WASM | 1,973 | ~225 s |
+| onnxruntime native CPU, 14 threads | 200 | ~23 s |
+
+So WebGPU is only **1.7x** faster than WASM and **5.7x slower than the same machine's CPU
+natively** — on a graph where the op probe had WebGPU 10x ahead of WASM. Batch size does not
+move it (1,145 ms a patch at batch 18, 1,133 at batch 3), so it is a steady per-patch cost
+rather than an overhead. Widening the uint8 labels to float32 costs 1 ms a patch, outside the
+graph — which was this probe's own wrong first guess at where the time went, made while the
+cast sat inside the timed region.
+
+**fp16 is 1.6x faster and gives the wrong answer — and the fault is WebGPU's, not the
+conversion's.** The same converted file, two backends, one list of 18 real patches:
+
+| | ms a patch | error against PyTorch | ranks |
+|---|---|---|---|
+| fp32 WebGPU | 1,145 | 1.05e-4 | right |
+| fp32 WASM | 1,973 | 2.15e-5 | right |
+| fp16 WebGPU | **701** | **3.64** | **wrong** |
+| fp16 WASM | 2,176 | 1.96e-2 | right |
+
+An error of 3.64 logits is against a rule that cares about 0.05, and bf16's median 0.6-1.8
+already breaks it. That the *same file* is sound on WASM and broken on WebGPU places the fault
+in onnxruntime-web's **WebGPU fp16 kernels** rather than in the conversion — which is SEAM's own
+second fp16 finding, reproduced here on a different model and a different graph. So fp16 buys
+nothing today: broken where it is fast, and slower than fp32 where it is right.
+
+Worth recording for whoever tries again: use **`onnxruntime.transformers.float16`**, not
+`onnxconverter_common.float16`. The latter converts this graph in seconds without a block list
+and produces a model ORT refuses to load (the in-graph label encoding ends up with a `Conv`
+bound to two types); adding `op_block_list` to fix that makes it do per-node graph surgery with
+repeated shape inference, and it ran **47 minutes on the 133 MB model and over 10 on the 2.2 MB
+probe** without finishing — the cost is per node, so model size never was the problem.
+onnxruntime's own converter does the same job in **0.4 s**.
+
+**There is no parallelism left to take.** `pnpm probe:assessor-parity -- --shapes` asks the
+device whether it has room, two ways:
+
+| | ms a patch |
+|---|---|
+| one patch a run | 1,147 |
+| four a run | 1,149 |
+| eighteen a run | 1,143 |
+| two sessions at once | **ORT crashes** |
+
+The per-patch cost is **flat from a batch of one to a batch of eighteen** — so there is no
+per-submission overhead for a batch to amortise, and the GPU is already full while scoring a
+single patch. Batching is not a lever here; a caller is free to use it for convenience, and it
+buys nothing. Running two sessions of the same model concurrently does not merely fail to help:
+it fails, in ORT's own WebGPU buffer manager (`buffer_manager.cc:669`, "Failed to download data
+from buffer" on `map_async`). Worth reporting upstream, and worth knowing before anyone designs
+a worker pool around it.
+
+So the only levers on cost are less work — fewer candidates a tip, fewer seeds — or a faster
+kernel path. Neither is Coda's to pull.
+
+**It is the browser, not the laptop — by a factor of about 25.** The browser figure alone
+cannot tell "this machine is bad at 3D convolutions" from "onnxruntime-web's WebGPU kernels are
+slow", so both were measured on the same machine
+(`scripts/lib/seam_assessor.py native` and `conv`, run from SEAM's virtualenv):
+
+| | achieved | note |
+|---|---|---|
+| onnxruntime Python, CPU | 195 ms a patch = **0.45 TFLOP/s** | all 90 nodes on the CPU; error 1.0e-4 |
+| onnxruntime Python, CoreML | 331 ms a patch | **25 of 90 nodes** taken — a hybrid, slower than plain CPU |
+| PyTorch, CPU, one 3x3x3 conv | **0.93 TFLOP/s** | |
+| PyTorch, **Metal**, one 3x3x3 conv | **6.47 TFLOP/s** | a 7x speedup over its own CPU |
+| onnxruntime-web, WebGPU, whole graph | 1,145 ms a patch = **0.076 TFLOP/s** | |
+
+The CoreML number is the same fallback trap the browser probe is built around, caught the same
+way: it was reported as a GPU result until the placement was read, and ORT writes that log from
+C++ to **file descriptor 2**, so a Python-level `redirect_stderr` captures none of it.
+
+**The hardware is fine.** Metal does 6.47 TFLOP/s on the 3x3x3 convolution that is most of the
+graph. The stem is a different story — 64x2x7³ has two input channels, so it is memory-bound and
+gets *no* GPU speedup even in PyTorch (0.87 against 0.81) — and blending the two at SEAM's
+two-thirds split gives roughly 2 TFLOP/s as what a well-implemented backend should reach on this
+graph, or about **43 ms a patch, ~5 s a tip**. onnxruntime-web gets 0.076 TFLOP/s. That is ~25x
+off what this machine demonstrably does, and the gap is far too large for the stem to explain.
+
+So the ~10 s/tip target is not out of reach of the hardware; it is out of reach of this
+backend. Which is worth knowing before cutting corners on the pipeline to buy time the kernels
+are wasting — and worth re-measuring on each onnxruntime-web release, since nothing in Coda has
+to change for that number to move.
+
+**It is one kernel, and `pnpm probe:ort-kernels` is the proof.** Three one-node graphs, same
+GPU, same session, so a timing is a kernel's and nothing else's:
+
+| graph | TFLOP/s |
+|---|---|
+| `MatMul` 2048³ | **1.3-1.6** |
+| `Conv` 3x3x3, 64→64 on 65³ | 0.08 |
+| `Conv` 1x1x1, 64→64 on 65³ | 0.06 |
+
+The third row is the load-bearing one. A 1x1x1 convolution **is** a matrix multiply — no sliding
+window, no neighbourhood — and it is just as slow as the 3x3x3. So the cost is not the third
+dimension and not the kernel size: it is onnxruntime-web's `Conv` path over 5-D tensors,
+whatever is in it. The same arithmetic written as a `MatMul` node runs about 21x faster on the
+same device in the same session, and one isolated `Conv` reproduces the whole model's 0.076
+TFLOP/s exactly.
+
+**What that rules out.** `onnxsim` and `onnx-optimizer` look like the right tool and are not:
+ORT's own optimiser already folds this model from **444 nodes to 90** (every `Constant`,
+`Reshape`, `Slice` and `ConstantOfShape` gone, 16 convolutions fused), and a one-node graph with
+nothing left to remove still shows the whole gap. What survives its optimiser — 22 `Pad` and 16
+unfused `BatchNormalization` — is memory traffic worth a few per cent, not 20x. WebNN is closed
+too: Chrome exposes it (GPU, NPU and CPU contexts all open), but the spec has `conv2d` and no 3D
+convolution, so every `Conv` falls back and all three device types time identically at ~1,920 ms
+a patch. And Metal through Pyodide is not a thing — Pyodide is WebAssembly, and WebAssembly's
+only routes to a GPU are WebGPU and WebNN.
+
+**So the graph stops using that kernel — and that was built and measured, not estimated.**
+`scripts/lib/rewrite_assessor_convs.py` turns each stride-1 3x3x3 convolution into 27 shifted
+matrix multiplies: slice the (already padded) input at each of the 27 one-voxel offsets, flatten
+to (channels, voxels), multiply by that offset's (out, in) weight matrix, sum. Arithmetically
+identical.
+
+| | ms a patch | |
+|---|---|---|
+| `sa2_mask_s0` as exported | 1,131 | |
+| 13 stride-1 3x3x3 convolutions as MatMuls | 251 | 4.5x |
+| all 16, strided ones included (`Slice` takes a step) | 181 | 6.2x |
+| the 7x7x7 stem too, by grouped im2col | **136** | **8.3x** |
+
+**8.3x on the real model, with the same answer.** Over the whole 18-candidate list, every logit
+is within 1.7e-5 of the unmodified graph and the ranking is identical; against PyTorch both are
+1.01e-4, i.e. the rewrite is no further from PyTorch than the original is.
+
+**A tip falls from ~130 s to ~15.5 s at three seeds, ~5.2 s at one** — past the 10 s target
+from the browser side alone.
+
+**4.5x was the first stop, not the answer** — and 251 ms a patch is now within touching
+distance of this machine's native CPU (195). A tip falls from ~130 s to **~29 s**; at one seed
+instead of three it is **~9.6 s**, which is the target.
+
+Three things that had to be measured because guessing them would have gone the other way:
+
+- **Grouping the offsets is worse, not better.** The ungrouped 27 run at 6.8x the ORT kernel;
+  nine groups of three manage 5.6x and three groups of nine 4.8x. The `Concat` that builds each
+  group costs more than the passes it saves. The textbook single im2col is out of reach anyway —
+  its intermediate is gigabytes.
+- **A 1x1x1 convolution gains almost nothing** (1.3x), because at K=64 it is memory-bound, not
+  kernel-bound: ~140 MB of traffic for 2.25 GFLOP puts the floor near the 30 ms both forms hit.
+  Only the 3x3x3, with 27x the arithmetic for the same traffic, has room.
+- **The model-level gain is 4.5x, not the isolated 6.8x**, and the gap is accounted for: 13 of
+  the 16 convolutions qualify, and the 7x7x7 stem — 28% of a patch — keeps ORT's kernel. The
+  stem would not gain much anyway; with two input channels it is memory-bound, and PyTorch's
+  Metal backend gets only 0.87 TFLOP/s on it against 6.47 on a 3x3x3.
+
+**Three things the sweep settled, each the opposite of a reasonable guess.** Grouping taps for
+the 3x3x3 convolutions is *worse* than not grouping (6.8x ungrouped, 5.6x in nines, 4.8x in
+threes): the `Concat` that builds a group costs more than the passes it saves. Folding the 26
+accumulating `Add`s into the multiplies with `Gemm`'s `C` input is *worse* again (4.1x). And for
+the stem, where the 27-term form would be 343 terms at K=2 and slower than the kernel it
+replaces, grouped im2col is right — with a flat optimum at 49 taps a group (166 / 142 / **136** /
+141 / 165 ms at 7 / 21 / 49 / 98 / 343).
+
+**fp16 is now marginal and unproven.** On the rewritten graph it gives about 1.1x, with the
+logit 8.5e-3 from PyTorch — ordinary fp16 error, but against a parity rule that bounds q at 0.01
+it is not obviously safe, and it has had no parity check. So fp16 is not taken up, and the
+rewrite alone is the answer.
+
+**And the bug it looked like is not one.** On the *unmodified* graph fp16 was 3.64 logits out
+with the ranks scrambled, which was read here as a fault in the WebGPU `Conv` kernels
+specifically. Writing the minimal repro for the report is what undid it: two isolated fp16
+`Conv3D` graphs — a 4-channel 16³ 3x3x3, and the stem's own 2-channel 129³ 7x7x7 stride-2 shape
+— are both *correct* on WebGPU to about 1e-3. The whole-model gap has a benign reading that fits
+the timings: fp16 on WASM is **slower** than fp32 (2,176 ms against 1,973) while on WebGPU it is
+much faster (701 against 1,145), which is what it looks like when the WASM kernels upcast and
+WebGPU genuinely computes in fp16 — so the two are not the same arithmetic, and a few units of
+drift through 21 convolutions is ordinary. Nothing was filed. A model-level A/B localises
+nothing on its own; the claim stood for hours only because it was never reduced to one node.
+
+**Why the micro-benchmarks could not settle any of this.** Two attempts to measure the matmul
+shapes in isolation were both I/O-bound rather than compute-bound, in opposite directions: with
+the wide operand as a graph *input* it is re-uploaded from JavaScript every run (70-1,898 MB),
+and with it as an *initializer* the 70 MB output is downloaded to JavaScript every run, which
+pins every K at ~15 ms and looks like throughput rising with K. Only whole-model timings, whose
+output is one logit, mean anything here.
+
+**Where the earlier 253 ms sat.** Measured by isolating the piece that rewrite did not touch:
+
+| | ms a patch | GFLOP | TFLOP/s |
+|---|---|---|---|
+| the 7x7x7 stem, still on ORT's `Conv` | **108** | 24.1 | 0.22 |
+| everything else (13 rewritten convolutions, pads, norms) | 145 | 62.7 | 0.43 |
+| *for scale:* this backend's isolated `MatMul` | — | — | 1.5 |
+| *for scale:* PyTorch Metal on a 3x3x3 | — | — | 6.5 |
+
+So the stem is now the single biggest item — 43% of the time for 28% of the arithmetic — and
+the obvious next target. The honest ceiling for this backend is 86.8 GFLOP at its own MatMul
+rate, about **58 ms a patch**; the 13 ms Metal implies is not reachable from a browser.
+
+Both of those were then done, which is what took the model to 136 ms. What is left is the
+backend's own floor rather than anything in the graph.
+
+**Caveats, since this is a prototype.** It is verified on one seed and one list — 18 real
+candidates — against PyTorch and against the unmodified graph; SEAM's parity rule (shown
+decisions, ref's first candidate, q within 0.01) has **not** been run on it, and should be
+before it ships. It is batch-1 only, which costs nothing since batch size does not change
+throughput here, and the rewritten file carries the replaced weights, which is why it is larger
+than it needs to be. Both are easy to finish; neither affects the measurement.
+
+**All of that was settled the same day.** SEAM ported the rewrite into `export_assessor.py`
+(`export --kernels matmul`, SEAM `c9b9a08`) and published `sa2_mask_mm_s{0,1,2}.onnx` beside the
+originals — 17 convolutions rewritten, 4 left as `Conv`, the stem at 49 taps a group, the same
+numbers the sweep here landed on. **SEAM's parity rule passes on all three seeds**: 40 lists,
+1,387 candidates, the shown set the same on every tip, ref's first the same on every list,
+largest q difference 5.4e-6. And the real models in a browser, both run the same hour on the
+same machine, give **1,122 → 133 ms a patch, 8.4x** — against the 8.3x the hand rewrite
+predicted, so nothing was lost in the port. A tip is **15 s** at three seeds. The thing worth
+remembering: **the browser is now faster than this machine's native onnxruntime CPU build**
+(200 ms a patch), where as exported it was five and a half times slower.
+
+One shape this imposes on a caller: the matmul graph pins its batch axis to 1, as it must —
+flattening `(N,C,X,Y,Z)` to `(C, voxels)` is only the same tensor at N=1 — so scoring a tip is
+one `session.run` per patch per seed. `probe-assessor-parity.mjs` now asks
+`session.inputMetadata[0].shape[0]` instead of assuming a list goes in whole; a list fed whole
+is refused outright, which is at least a loud failure rather than a quiet one.
+
+**It belongs in SEAM's exporter, not here.** `scripts/lib/rewrite_assessor_convs.py` is a
+post-hoc pass over a published `.onnx` so that the idea could be measured; emitting the graph in
+this form from `export_assessor.py` would let it go through SEAM's own parity check like any
+other export, and would drop the traced-shapes step this needs because the pads are computed
+in-graph.
+
+The probe **asserts** the gap rather than describing it, so the onnxruntime-web release that
+fixes the kernel announces itself by failing this check.
+
+**Where the time goes, as far as this has been taken.** Per-node attribution is not reachable
+from here: `timestamp-query` *is* available behind `--enable-dawn-features=allow_unsafe_apis`,
+but ORT 1.31 moved WebGPU from JSEP to a native execution provider and the
+`ort.env.webgpu.profiling` hook no longer emits anything. What the two probes do say is that the
+op probe runs at **4.25 ms/GFLOP** and the real model at **13 ms/GFLOP** — so the wide layers are
+three times *less* efficient per unit of arithmetic than the narrow ones, which is backwards
+from the usual expectation and points at the kernel path rather than at the FLOP count.
+
+**What that leaves.** Two minutes a tip was on-demand-per-tip territory and nothing else: a
+neuron's ~20,000 candidates are ~5 PFLOP, and the rewrite does not change that — a whole neuron
+is still out of reach, and this stays a per-tip surface. What it does change is the per-tip cost:
+**15 s at three seeds, ~5 s at one**, so SEAM's two ways of cutting it further (fewer candidates
+per tip, or one seed instead of three, each needing a refit) are now improvements rather than
+requirements. The choice is the user's.
+
+**And 15 s is still only the graph.** Cutting the patches — the volume read, the CAVE leaves,
+`label_box`, `pair_sides` — has not been measured at all, so the end-to-end number for a tip is
+unknown and is certainly larger. That measurement is the next thing Phase 7 needs, and it is
+now the bigger half.
+
+~~**Still open, and SEAM's to decide:** every fit was made on bf16 scores, so an exact fp32
+browser will not reproduce rv2's shown set — 4 of 40 first candidates and 1 of 40 shown
+decisions differ.~~ **Done, 2026-11-11** (SEAM `84cb4d2`, the `za` refit): the calibration
+builds and rv2 were rescored in fp32 and every fit redone, so the cluster's own scores now pass
+SEAM's parity rule (`cluster_fp32`, q within 3.5e-4) where they used to miss it by about a
+logit. See "The `za` refit lands" below.
 
 ## What to ask SEAM for
 
@@ -708,26 +1099,52 @@ what the probe compares against; `candidates` is what survives it.
   drops nested columns and says so only in a `skipped` list nobody downstream reads. SEAM owns
   `scripts/pilots/coda_fixture.py`, so this is a one-line change there rather than a bespoke
   reader here.
-- **A version on the manifest.** `fixture.json` carries a `commit`; the node needs something it
-  can show beside a result and compare after a re-fetch, so a stale suggestion set is a sentence
-  rather than a silent mismatch. The footer fingerprint covers the parquet files; the manifest
-  itself is the gap, and it is the same hazard the affinity model's unpinned manifest URL has.
+- ~~**A version on the manifest.**~~ **Delivered** — found while repointing the fixture
+  generator. The published manifest carries a `"version"` — `rv2-0d62bc912a89` since the `za`
+  refit — a hash over the
+  file hashes and the manifest body, and the two goldens are now stamped with it. What is left
+  is Coda's half: the node still has to show it beside a result and compare it after a re-fetch,
+  so a stale suggestion set is a sentence rather than a silent mismatch. The pack's own
+  `fixture.json` predates it and has none.
 - **A fixed `filled` value.** A candidate whose patch failed takes its seed's lowest score *over
   the batch*; a browser scoring one tip at a time has no batch. Needed before Phase 7, not before.
+- **`ph_a5`, the EM-texture head, exported as a model** — or a decision that it stays data-only.
+  It is the single reason `stages.ts` has two shapes rather than one: `head_s<k>` is published as
+  a *column*, so a tip read from a set reaches `q` and `shown` while a tip searched live stops at
+  `q_ref` with no verdict at all. Everything else in the pipeline is either arithmetic Coda now
+  does or a model Coda can fetch. Analysed at length in "What stages 7–9 can reach without an EM
+  head" and never actually asked for, which is why it is here.
+- **`ref.columns` and `split.columns` as lists**, the way `p_tip.columns` already is. Coda checks
+  `p_tip`'s column list and refuses a refit on other features; ref's and split's column *order* is
+  read out of a prose `design` string. A refit that **reorders** rather than widens would pass
+  every width check, and every logit would still be a logit.
+- **Which design `ref.score_clip` applies to.** It is stated under `ref`, and Coda applies it to
+  split's third column too, since `split.design` names "assessor score of seed k". That is a
+  reading, and no published set can exercise it — `stages.test.ts` pins Coda's reading so the two
+  halves cannot drift, but only SEAM can say whether it is right.
+- **`show.cutoff_ref` as a number.** `show.q_ref` states `q_ref`'s cutoff in prose ("its cutoff
+  was 0.208"), and prose is not something to parse. A tip scored live in the browser cannot reach
+  `q` at all — split's head is published as data, not as a model — so `q_ref` is the only quantity
+  it has, and without a published cutoff for it Coda gives the number and withholds the verdict
+  (`stages.ts`). One field closes it. The isotonic steps for `r` are fitted against `q`, so those
+  would be a second ask and a larger one; the verdict matters more.
 - **Model E and the assessors exported**, with input/output fixtures and a parity rule stated as
   rank and top-1 agreement on real lists — not raw error. SEAM already says this; it is repeated
   here because Model A's parity was checked at 4e-6 and that told us nothing about whether the
   model was right.
-- **`summarize_cutout` and `_local_moments` in a module of their own.** They are already
-  numpy/scipy/pandas only, but they live in `negatives.py`, which imports `cave`, `paths` and
-  `pre_edit` — so Coda cannot take a whole-file copy the way it does `canonical.py` and
-  `scan.py`. It takes a **slice** instead, re-cut and byte-compared by
-  `pnpm vendor:seam-cutout`, which is a working arrangement and not the right one: the script
-  exists only because the module boundary is in the wrong place. Moving the two functions into
-  (say) `seam/cutout.py` upstream would let the slice become an ordinary hash-pinned copy and
-  the script go.
-- **Numpy-only, vendorable code** for the patch masks, as `canonical.py` and `scan.py` were for
-  Model A (SEAM invariant 11). Needed before Phase 7, not before.
+- ~~**`summarize_cutout` and `_local_moments` in a module of their own.**~~ **Delivered**
+  (2026-11-10, SEAM `seam/cutout.py`) — and found by the check rather than announced:
+  `pnpm vendor:seam` refused by name because the markers bounding the run had gone. It is now
+  an ordinary hash-pinned whole-file copy.
+  **The same still applies to `candidates.py`**, which `pool_features` and `GeometricRanker`
+  are cut out of for the same reason — it imports `paths`. One run left in the slice table, and
+  the script retires when it moves.
+- **A patch that does not depend on the box it was cut from.** `patches.patch_box` promises one
+  — *"any box that holds it gives the same patch"* — and `sample` does not keep it. See the
+  section below; this is the one ask that blocks exact parity.
+- ~~**Numpy-only, vendorable code** for the patch masks~~ **Delivered** —
+  `seam/segclr/patches.py`, numpy alone, and its docstring names Coda's copy from the other
+  side. Vendored whole at `c9b9a08`.
 
 ## What this plan does not do
 
@@ -849,3 +1266,271 @@ loading: neuroglancer fetches chunks in a **worker**, which that domain cannot s
 - **The cutoff and `r` are refitted whenever a stage changes.** Read them from the shipped fits.
   Hard-coding 0.2084 would be a number that is right today and silently wrong after SEAM's next
   run.
+
+## Phase 7, the patches — built and measured (2026-11-10)
+
+Stage 6, the half that happens before any model runs: for each candidate on a tip's list, the
+129³ window of labels the mask assessor reads — `1` where the query neuron is, `2` where that
+candidate is, `0` elsewhere.
+
+**The code is SEAM's, whole.** `seam/segclr/patches.py` is numpy alone and its docstring names
+this copy from the other side ("Coda's browser scorer vendors it whole"), so it is a
+hash-pinned byte-identical file rather than a slice or a port. `pnpm vendor:seam` — renamed
+from `vendor:seam-cutout`, because it now checks every vendored file and not just the two runs
+— byte-compares it, and the sha256 table in `VENDORED.md` is checked against the files on disk
+instead of by the `shasum` the doc used to prescribe and nobody ran.
+
+That check earned its keep on its first run: it refused `cutout.py` by name, because SEAM had
+moved `summarize_cutout` out of `negatives.py` into a module of its own **the same day** — the
+ask recorded above, delivered. Only docstrings changed, so the search is unaffected.
+
+### What Coda adds
+
+Marshalling, and the box. `assessorPatches.py` turns Coda's factored cutout into `label_box`'s
+leaf lists and hands the patches back; `patchBox.ts` says how big a box to read, before Pyodide
+is reached. Three things are worth stating:
+
+- **No leaf lookup is needed.** `label_box` wants each object's supervoxel ids. The caller
+  already holds the root of every supervoxel *in the box* at the snapshot, and a supervoxel
+  outside the box cannot label a voxel inside it — so the box's own roots **are** the leaves,
+  filtered. That is one chunkedgraph request a tip instead of one a candidate (invariant 8).
+- **The factorisation is handed over, not recomputed.** `label_box`'s default renumbering is
+  `np.unique` over every voxel; SEAM put a `renumber` hook there for exactly this, and Coda's
+  `labels`/`index` already satisfy its contract.
+- **One box for the list, not one per candidate.** The contacts sit within the own-tip rule's
+  2 µm of the tip, so they share a box — `boxAroundAll` in `precomputed/volume.ts`, which
+  `boxAround` is now a one-centre call to. Forty overlapping boxes would fetch the same chunks
+  forty times.
+
+### What a tip costs — the half that had never been measured
+
+`pnpm probe:assessor-patch --end 1014`, a real 66-candidate list against the live Aedes store:
+
+| | |
+| --- | --- |
+| the box | 172×214×164 voxels at 32 nm = **6.0 M voxels** |
+| reading it | **2.7 s** (20,243 distinct supervoxels) |
+| their roots at the snapshot | **2.3 s**, one request |
+| labelling the box | **77 ms** |
+| cutting 66 patches | **642 ms** — 10 ms each |
+| **a tip, patches only** | **~5.7 s** |
+
+So the whole of stage 6 is about **5.7 s a tip**, of which 88% is two network reads and 12% is
+arithmetic. With the assessor at 133 ms a patch (the matmul export, one seed), a 66-candidate
+tip is **~14.5 s** end to end and the average 38-candidate tip is **~10 s** — which is the
+target, reached, at one seed. Three seeds adds 8.8 s a tip and nothing else: the patches are cut
+once.
+
+The read and the roots are both per-tip and both cacheable, and the search reads a 6 µm box of
+the same volume at the same scale an instant earlier. **One read serving both is the obvious
+next economy** and is not done: the search's features are measured inside *its* box, so the
+boxes cannot simply be merged — what would work is one read with the search handed a sub-box.
+
+### The one that blocks exact parity: a patch is not independent of its box
+
+`pnpm probe:assessor-patch` compares against SEAM's **own published patches** —
+`patches/<end>.npz` beside the parity fixture, the exact arrays its scores were computed from.
+Byte for byte, which is the only honest test of a patch: a transposed box, a half-voxel offset
+or a swapped pair all produce a perfectly plausible window of somewhere else.
+
+58 of end 1014's 66 patches match exactly. The other 8 differ on **three planes of 129**, and
+the three are predictable from arithmetic alone.
+
+`sample` resamples z with `np.round(zf)` where `zf` is measured **from the box's own corner**.
+Where a plane lands exactly between two sections — which happens when the contact's z is a whole
+number of sections, about an eighth of real contacts — numpy's round-half-to-even resolves it by
+the parity of `lo[2]`. Shift the corner one voxel and those three planes come from the
+neighbouring section. Proved rather than inferred: re-cutting end 20's patches with `lo_z + 1`
+makes all three match SEAM **byte for byte**.
+
+`patch_box`'s docstring promises the opposite — *"A patch is cut from absolute voxels, so any
+box that holds it gives the same patch."* For x and y that is true. For z it is not.
+
+**And it is not cosmetic.** The eight patches, scored on `sa2_mask_s0`:
+
+| | |
+| --- | --- |
+| patches affected | 8 of 66 (12%) |
+| voxels differing | 70–153 of 2,146,689 |
+| logit shift, median | **0.17** |
+| logit shift, worst | **1.46** |
+
+SEAM's own parity rule calls 0.05 enough to decide first place and bounds q at 0.01. A median
+of 0.17 is three times the first and a worst case of 1.46 is thirty times the second.
+
+**What Coda does meanwhile.** Each patch is cut from the corner `patch_box` gives for *that
+centre alone* — the mode SEAM's docstring names for a browser ("one box per patch"), taken from
+the vendored function so there is no Coda-side convention to drift. Without it a candidate's
+patch would depend on **which other candidates shared its list**, since they move the shared
+corner, and the same candidate would score differently in two lists — with provenance keys
+(invariant 4) saying the two were the same work.
+
+That makes Coda deterministic. It does **not** reproduce SEAM's published patches, which came
+from shard-sized boxes whose corners are not published, and nothing can: the ambiguity has to
+be removed upstream. The fix is one line — round the absolute position and subtract the corner
+afterwards — and it makes the docstring's sentence true. It changes which section some tied
+planes come from, so it is a re-export and, for anything fitted on the old scores, a refit.
+
+The probe does not paper over this: it checks that every differing voxel lies on a plane the
+resample ties on, and fails on any that does not. So the difference is bounded and understood
+rather than tolerated, and the day `sample` is fixed the check tightens to byte-for-byte on its
+own. **It did, on 2026-11-11**, and the allowance is gone — see below.
+
+## Phase 7, the model — packaged, and what stages 7–9 can actually reach (2026-11-10)
+
+SEAM took the sampling report and fixed it the same day (`dbfef4c`): `sample` now places a label
+plane with `label_sections`, a **`floor` of the absolute position** — the section that *holds*
+the plane — rather than rounding a position measured from the box's corner. Better than the fix
+this repository proposed, because a floor has no tie to break at all.
+
+So the vendored copy moved to `dbfef4c` and **the per-candidate re-cornering came out of
+`assessorPatches.py`**: one shared box per tip is now correct by construction. That is recorded
+in the module header rather than only here, because going back to an older `patches.py` would
+make the shared box wrong again, silently, in three planes of 129.
+
+**SEAM's published fixture predated the fix** (`manifest.json` at `167477c`), so
+`pnpm probe:assessor-patch` allowed differences on tied planes for a day — and the set that
+differed was the *exact complement* of the set that had differed before, within the 18 tied
+candidates of end 1014. That is the two rules differing at ties and nowhere else, which is the
+cleanest confirmation available that nothing else moved. The allowance was dated and
+self-announcing, and it is now deleted (next section).
+
+### Packaging the checkpoint
+
+`scripts/make-assessor-manifest.py` turns SEAM's exported directory into a directory Coda
+uploads whole — the graph, copied byte for byte and hash-verified before it is copied, plus a
+manifest in `src/ml`'s schema. It converts nothing; SEAM's own manifest is the source of every
+number, and the `config` blob is SEAM's own text, so the patch contract a browser cuts against
+and the one the checkpoint was trained on cannot drift apart.
+
+Three choices it makes, each with a reason that is not obvious:
+
+- **One seed per manifest.** `parts` means graphs that must all run, in order; three seeds are
+  alternatives. A seed is a row in `models.ts`, as a second affinity checkpoint would be.
+- **The matmul form only.** `src/ml` is WebGPU or nothing, and there that form is 8.4x the
+  convolution one. On a CPU the ranking reverses — which is why SEAM exports both and why Coda
+  hosts one.
+- **No dynamic axes**, because the matmul graph pins its batch to 1 and that is the truth.
+
+`__fixtures__/assessorManifest.json` is the converter's **real output** with the 133 MB graph
+left behind, and `assessorModel.test.ts` runs `src/ml`'s own `checkManifest` over it. A
+converter and a parser on two sides of an upload are exactly the pair that drift, and neither
+side's other tests can see it.
+
+`openWindowModel` became `openSeamModel`, with the config parser as an argument — the file's own
+header already argued that a fourth copy of those forty lines is what drifts. The three window
+cards call an unchanged wrapper.
+
+### What stages 7–9 can reach without an EM head
+
+The decision was "all the way to q and shown, marked provisional". Checking what that needs:
+
+| stage | needs | reachable live |
+| --- | --- | --- |
+| `ref` logit | geo_rank, log vol, the assessor's score | **yes** (per-seed fits are published) |
+| `p_cand` | a softmax within the list | **yes** |
+| `segclr`, `p_tip` | the list's best logit, and `e_tip` | **yes** — Model E is hosted |
+| `q_ref` | `p_tip` × ref's share | **yes**, cutoff 0.208 |
+| `p_split`, `q`, `shown`, `r` | `head_s<k>` | **no** |
+
+`split` is the trained EM-texture head (`ph_a5`, on frozen a5-ft1 embeddings of each
+candidate's EM views), adopted 2026-11-09. Its scores reach the pipeline as
+`candidates.parquet`'s `head_s0..2` — **published as data, not as a model.** `data/onnx/` holds
+`A_d256_e80` and `sa2_mask` and nothing else, so a browser cannot compute a head score for a tip
+it just searched.
+
+So for a **live** tip the pipeline stops at `q_ref`, which is SEAM's own pre-split quantity with
+its own fitted cutoff — published "for the record" precisely because it is the pipeline without
+the confidence model. For a tip read out of a **published set**, the head scores are in the file
+and the full `q` and `shown` are computable from them.
+
+That is one shape, not two: the stages compute as far as their inputs allow, and say which
+cutoff the answer is against. It is also a third thing the refit should decide — a single-seed
+`q_ref` against a three-seed cutoff is provisional twice over.
+
+### Follow-ups the review pipeline recorded rather than did (2026-11-10)
+
+Four findings whose fix is right but reaches well outside the change under review. Written down
+so they are decisions rather than oversights.
+
+- **One `configFields.ts` for the pack.** `windowConfig.ts`, `affinityConfig.ts`,
+  `suggestionSet.ts` and `assessorModel.ts` each carry their own `block`/`number`/`text`, and
+  they have **already diverged**: only the assessor's refuses an *array*, which `typeof` calls
+  an object. Unifying them changes the sentences three working features refuse with, and those
+  sentences are pinned by their own tests. Whoever does it should keep the array check.
+- **`runtime.ts` should install vendored modules, and a Coda-owned `labelBox.py` should hold the
+  box.** `_install`/`_seam` is copied verbatim into `seamWindows.py`, `cutoutSummary.py` and
+  `assessorPatches.py`, and the three have drifted in ways nothing tests (one sets `__package__`,
+  the others `__name__`). `runtime.ts` already owns `spec.vendored` and seeds `__vendored__`;
+  generalising it to a `modules` record it installs itself — with `vendored` as the hash-pinned
+  subset `scripts/vendor-seam.mjs` checks — would delete the pair from all three and let each
+  bridge open with a plain import. `assessorPatches.py`'s `_labelled` likewise repeats
+  `cutoutSummary.py`'s `_box`, and **2026-11-11 added a third shared block to that pair**: the
+  dtype-width refusal, which is now written out twice. The right home is one `labelBox.py`
+  holding the `[::-1]` reshape, the width refusal, the transpose and the `req["index"] = None`
+  drop. Two notes for whoever does it: `installBridge` in `scripts/lib/pyodideProbe.mjs` mirrors
+  the `__vendored__` convention and has to move in the same change, and the refusal stays in
+  Python — `readLabelBox` makes it true by construction, but the probes hand-build the pair and
+  are exactly who it is for.
+- ~~**Narrow the voxel index on the JavaScript side.**~~ **Done, 2026-11-11.** `readLabelBox`
+  now allocates a `Uint16Array` and widens only if the table passes `NARROW_INDEX_LABELS`
+  (65,536), carrying across what is already pasted — so the saving is the whole read's, not just
+  the hand-off's, and the common box never allocates the wide form at all. `LabelBoxRequest.index`
+  is `VoxelIndex`, `PyArg` gained `Uint16Array`, and both Python entry points read the width that
+  arrives rather than asking for one. Measured on end 1014 (6.0 M voxels, 20,243 supervoxels):
+  the worker's peak fell from **220 MB to 201 MB**, and the patches are still byte for byte
+  SEAM's. One correction to what was written here: the transpose copies either way, so the
+  Python side is not "a pure view" — what is saved is the arriving copy, which is the half that
+  is permanent.
+- **`rewrite_assessor_convs.py`'s 27-term path is `im2col_conv` at one tap per group**, and
+  `make_kernel_graphs.py` repeats the same model tail four times. Both are finished measurement
+  tooling whose output SEAM has already ported, so the duplication has no future reader to
+  mislead; recorded only so a third copy is not written.
+
+## The `za` refit lands, and the probe tightens (2026-11-11)
+
+SEAM rebuilt its patch sets under `label_sections`, rescored them in fp32 and redid every fit
+(`84cb4d2`; the reply is §11 of [seam-patch-sampling.md](seam-patch-sampling.md)). Two numbers
+moved that this pack holds: the shown cutoff went from **0.153 to 0.146**, and rv2 now shows
+**127 tips rather than 120** — 116 of them the same ones. Precision where it is judged did not
+move (80/89 on the calibration neurons, the rv3 gate still 20/21), which is the point: the fix
+was to the input, not to the model, and the models saw both versions of every tied plane during
+training because the training boxes' corners fell either way at random.
+
+**`patches.py` did not change.** The vendored copy is byte-identical at `dbfef4c`, `84cb4d2` and
+`ef7f030`; the refit moved the data, not the sampler. So re-vendoring was a check that passed,
+not a copy.
+
+**What was regenerated here**, all of it from SEAM's own files rather than edited:
+
+- `__fixtures__/tips.parquet`, `candidates.parquet`, `fixture.json` and `damaged/`
+  (`make.py`), now set `rv2-0d62bc912a89`;
+- `__fixtures__/searchEnd.json` and `ownTipNeuron.json` (`make_search.py`);
+- `__fixtures__/assessorManifest.json` (`make-assessor-manifest.py` over SEAM's new export).
+  Two fields moved: the upstream commit, and `missingPatchScore` from **−62.336 to −58.722**,
+  which is the fp32 rescoring of seed 0's floor and nothing else — the ONNX graphs are
+  unchanged, sha256 for sha256.
+
+**The tied-plane allowance is deleted.** `pnpm probe:assessor-patch` now demands a patch be
+SEAM's byte for byte, and it is: end 20 (3 candidates) and end 1014 (66) both pass with nothing
+tolerated. End 1014 is the one that carried 456 differing voxels on exactly 3 of 129 planes, so
+the check that found the defect is the check that now finds nothing.
+
+**`index.json` and `mismatched.json` are generated too, as of this round.** They were
+hand-kept, and the recut caught them stale — the index still said 1,141 candidates where the
+trimmed set has 1,178. `make.py` now derives both from the real manifest, with the mismatched
+one's single deliberate disagreement (`tips: 9999`) spelled out in the script. A fixture whose
+whole job is to disagree in one stated way cannot be a hand-written copy of a file that moves.
+
+**The three implementations of the per-neuron fold were re-run, not re-pinned.** The expected
+`r` sum moved to 1.8199, 1.8199, 1.7648, 1.8199, 1.7648; the pandas cell and the R chunk were
+both executed against the new fixtures over a local server and agree with the node to four
+decimals, with the same joined `candidateId`. The R emitter's header had been left behind by
+the 2026-11-10 recut and was still quoting the numbers before that — which is what a header
+stating numbers nobody re-ran looks like after one cycle, and why this is written down.
+
+**Still open upstream** (SEAM's §11.7): `pool_features` and `GeometricRanker` remain inside
+`candidates.py`, so `scripts/vendor-seam.mjs` still keeps one slice. And the exported manifest's
+`config.input.patch.z` still reads "labels by nearest section", which is the old rule's sentence
+— worth fixing at the next export, since the `config` blob is deliberately SEAM's own text and
+this pack copies it unread.

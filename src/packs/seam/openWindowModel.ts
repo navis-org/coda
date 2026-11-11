@@ -33,11 +33,24 @@ import type { AffinityModel } from './models'
 import { parseWindowConfig } from './windowConfig'
 import type { WindowConfig } from './windowConfig'
 
-export interface OpenWindowModelOptions {
+export interface OpenSeamModelOptions<C> {
   /** The chosen entry of the caller's own model list. */
   readonly model: AffinityModel
   /** The task this caller can read the manifest's `config` as. */
   readonly task: string
+  /**
+   * How to read this task's `config` blob — the one thing that is genuinely per task.
+   *
+   * An argument rather than a `switch`, because `src/ml` hands `config` over opaque on purpose
+   * (`docs/ml.md`): a table of parsers here would be this file knowing every task's vocabulary,
+   * which is the seam that split was drawn to prevent. It runs **before** the weights are
+   * fetched, so a config this build cannot read costs nothing.
+   *
+   * It takes the **blob and the model's id**, not the whole manifest, because `config` is
+   * precisely what `docs/ml.md` says is pack-owned — everything else in a manifest is
+   * `src/ml`'s. The id is there only so a refusal can name what it refused.
+   */
+  readonly parse: (config: unknown, modelId: string) => C
   /** `ctx.params.download` — whether the reader has agreed to the fetch. */
   readonly download: boolean
   /** How much of the progress bar the download gets before the node's own work starts. */
@@ -52,17 +65,17 @@ export interface OpenWindowModelOptions {
    * of megabytes downloaded and a GPU session opened for a model that is about to be refused —
    * and a throw between `openModel` and the caller's own `try` leaks that session.
    */
-  readonly check?: (config: WindowConfig) => string | undefined
+  readonly check?: (config: C) => string | undefined
 }
 
-export interface OpenedWindowModel {
+export interface OpenedSeamModel<C> {
   readonly session: ModelSession
-  readonly config: WindowConfig
+  readonly config: C
 }
 
-export async function openWindowModel(
-  options: OpenWindowModelOptions,
-): Promise<OpenedWindowModel> {
+export async function openSeamModel<C>(
+  options: OpenSeamModelOptions<C>,
+): Promise<OpenedSeamModel<C>> {
   const { model, task, downloadShare } = options
   const gpu = await gpuSupport()
   if (gpu.refusal) throw new Error(gpu.refusal)
@@ -72,7 +85,7 @@ export async function openWindowModel(
   if (loaded.manifest.task !== task) {
     throw new Error(`${model.label} is a ${loaded.manifest.task} model, not a ${task} one.`)
   }
-  const config = parseWindowConfig(loaded.manifest.config, loaded.manifest.id)
+  const config = options.parse(loaded.manifest.config, loaded.manifest.id)
   const refusal = options.check?.(config)
   if (refusal) throw new Error(refusal)
 
@@ -113,4 +126,20 @@ export async function openWindowModel(
     },
   })
   return { session, config }
+}
+
+/**
+ * The window models' own call — Model A and Model E, for the three cards that run them.
+ *
+ * A thin wrapper rather than a second copy: the sequence above is the same for every SEAM
+ * checkpoint, and the only thing the window task adds is how to read its `config`. Kept as a
+ * named function so the three callers say what they are opening rather than passing a parser.
+ */
+export type OpenWindowModelOptions = Omit<OpenSeamModelOptions<WindowConfig>, 'parse'>
+export type OpenedWindowModel = OpenedSeamModel<WindowConfig>
+
+export function openWindowModel(options: OpenWindowModelOptions): Promise<OpenedWindowModel> {
+  // `parseWindowConfig` by name, with no lambda: its signature already *is* the hook's, which
+  // is the sign the hook is drawn at the right seam.
+  return openSeamModel({ ...options, parse: parseWindowConfig })
 }

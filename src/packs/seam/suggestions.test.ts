@@ -233,11 +233,20 @@ describe('reading a set', () => {
    * first row's `r`. A plausible number, and wrong. These values are what all three produce
    * against `__fixtures__`, so a change to any one of them is checked by running its cell
    * against the same files and comparing this list.
+   *
+   * **They moved on 2026-11-10** when the fixtures were cut from a set with SEAM's split stage
+   * in it, and again on **2026-11-11** for the `za` refit — patches cut the browser's way and
+   * every fit redone in fp32, which moved the cutoff from 0.153 to 0.146 and so which tips are
+   * shown at all. Each time all three were re-run against the new files before this list was
+   * changed, rather than the node's new answer being pasted over the old one. Three of the five
+   * match because `r` is a step function and only two of its steps (0.8824, 0.9375) appear
+   * among ten shown tips — a coincidence of a small fixture, not a fold that stopped
+   * distinguishing neurons.
    */
   it('sums r over the shown rows, to the number both exporters produce', () => {
     expect(
       (built.neurons.data['expectedRight'] as number[]).map((v) => Number(v.toFixed(4))),
-    ).toEqual([1.8689, 1.8467, 1.7657, 1.8467, 1.6524])
+    ).toEqual([1.8199, 1.8199, 1.7648, 1.8199, 1.7648])
   })
 
   /** `r` is the chance a *shown* first is right, so the expectation sums over the shown rows. */

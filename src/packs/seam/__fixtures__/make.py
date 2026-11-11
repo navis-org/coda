@@ -77,6 +77,46 @@ damagedManifest = dict(manifest)
 damagedManifest["what"] = "The trimmed set with the 2026-11-09 rounded-ID incident put back."
 (rounded / "fixture.json").write_text(json.dumps(damagedManifest, indent=1) + "\n")
 
+# A manifest whose counts disagree with the files beside it -- the one warning the loader
+# gives that nothing else can produce. Derived from the real manifest rather than kept by
+# hand, with exactly one number moved: a hand-written copy goes stale the first time the set
+# is recut, and then it disagrees in ways nobody meant as well as the one way they did.
+WRONG_TIPS = 9999
+mismatched = dict(manifest)
+mismatched["what"] = "A manifest whose counts disagree with the files beside it, for Coda's tests."
+mismatched["counts"] = {**manifest["counts"], "tips": WRONG_TIPS}
+(out / "mismatched.json").write_text(json.dumps(mismatched, indent=1) + "\n")
+
+# The directory a card can point at instead of one manifest. Same reason it is written here:
+# its per-set counts are what the picker shows before anything is read, so a stale copy sends
+# a reader looking for a set that has the number they saw.
+index = {
+    "what": "A directory of SEAM merge-candidate suggestion sets, for Coda's tests.",
+    "sets": [
+        {
+            "id": "rv2",
+            "path": "fixture.json",
+            "label": "Aedes rv2",
+            "dataset": manifest["dataset"],
+            "datastack": manifest["datastack"],
+            "snapshot": manifest["snapshot"],
+            "commit": manifest["commit"],
+            "neurons": len(manifest["neurons"]),
+            "counts": manifest["counts"],
+        },
+        {
+            "id": "rv2-mismatched",
+            "path": "mismatched.json",
+            "label": "Aedes rv2, with counts that disagree",
+            "datastack": manifest["datastack"],
+            "snapshot": manifest["snapshot"],
+            "neurons": len(manifest["neurons"]),
+            "counts": mismatched["counts"],
+        },
+    ],
+}
+(out / "index.json").write_text(json.dumps(index, indent=1) + "\n")
+
 hurtRows = int((hurt.top_cand_root != kept.top_cand_root).sum())
 print(f"{len(kept)} tips ({int(kept.shown.sum())} shown), {len(keptCands)} candidates, "
       f"{len(manifest['neurons'])} neurons; damaged/ has {hurtRows} rounded first-candidate ids")

@@ -8,7 +8,7 @@
  *
  * **What the comparison actually compares.** It runs the *vendored slice* under CPython and
  * under Pyodide. That looks weaker than running SEAM's own file on one side, and is in fact the
- * stronger chain: `pnpm vendor:seam-cutout` already byte-compares the slice against
+ * stronger chain: `pnpm vendor:seam` already byte-compares the slice against
  * `negatives.py`, so slice == SEAM, and this says slice-in-CPython == slice-in-wasm. Together
  * they give what is wanted, without importing SEAM's package — whose `__init__` pulls in a
  * dependency chain that has nothing to do with these two functions.
@@ -78,7 +78,7 @@ let reference
    * **Both slices, and importing them is the point.** This leg is the only thing that imports
    * the cut files on their own, so it is what notices a slice that left a module-level
    * dependency behind upstream — which surfaces as a `NameError` and would otherwise reach a
-   * browser. `vendor-seam-cutout.mjs` names this probe for exactly that, so it has to cover
+   * browser. `vendor-seam.mjs` names this probe for exactly that, so it has to cover
    * every slice that script cuts, not just the first.
    */
   for (const name of ['cutout', 'candidates']) {
@@ -252,7 +252,13 @@ sys.modules['bridge'] = module
  */
 const request = {
   labels: BigUint64Array.from(built.labels.map(BigInt)),
-  index: Uint32Array.from(built.index),
+  /*
+   * **`Uint16Array`, because that is what `readLabelBox` now sends.** A box's index is as narrow
+   * as its own label table allows (`VoxelIndex`), and this box names a few hundred supervoxels.
+   * The wide arm is exercised by the second call below, so one run crosses both widths — the
+   * Python reads whichever arrives and must agree with itself about them.
+   */
+  index: Uint16Array.from(built.index),
   size: built.size,
   roots: BigUint64Array.from(built.roots.map(BigInt)),
   queryRoot: BigInt(built.queryRoot),
@@ -281,11 +287,45 @@ const callBridge = async (one) => {
 
 // Two calls: the module is already warm from the direct runs above, so both are warm numbers
 // and the difference between them is noise, not warm-up. Priced accordingly below.
+//
+// The second is also the **wide** index, so the two widths a `VoxelIndex` can arrive in are
+// both driven here. They must give the same answer: the width is a memory decision and nothing
+// more, and a dtype rule that read one of them differently would do it in silence.
 const bridged = await callBridge(request)
 const again = await callBridge({ ...request, index: Uint32Array.from(built.index) })
 bridged.warm_ms = again.ms
 
 report.check(`the bridge returns the same ${bridged.rows} rows`, bridged.rows === got.rows)
+report.check(
+  `a 32-bit index gives the same ${again.rows} rows as a 16-bit one`,
+  again.rows === bridged.rows,
+)
+
+/*
+ * **A table too big for the width it arrived in is refused, not summarised.**
+ *
+ * The sender chooses the width from the table, so this fires only when the two have come apart
+ * — and that failure is invisible downstream: every index past the width has already wrapped
+ * onto a different supervoxel, and the summary is a full table of plausible rows about the
+ * wrong objects. Driven with a table the index cannot name rather than with a real box, because
+ * a real one that reaches this state is exactly what cannot be built on purpose.
+ */
+const tooMany = 70_000
+let refused = ''
+try {
+  await callBridge({
+    ...request,
+    index: Uint16Array.from(built.index),
+    labels: BigUint64Array.from({ length: tooMany }, (_, i) => BigInt(i + 1)),
+    roots: BigUint64Array.from({ length: tooMany }, (_, i) => BigInt(i + 1)),
+  })
+} catch (error) {
+  refused = String(error)
+}
+report.check(
+  `${tooMany} supervoxels under a 16-bit index is refused by name`,
+  /cannot be named by a uint16 index/.test(refused),
+)
 
 /*
  * The id columns must still be 64-bit on the way out. A root through a float64 is a different

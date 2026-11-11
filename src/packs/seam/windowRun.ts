@@ -26,13 +26,11 @@
  */
 
 import { throwIfAborted } from '../../core/slice'
-import type { ModelSession } from '../../ml/session'
+import { soleGraph } from '../../ml/manifest'
+import type { GraphRunner } from '../../ml/session'
 
 /** Windows per call. The Cancel latency, and the size of one tensor. See the header. */
 export const WINDOW_BATCH = 8
-
-/** What this needs of a session, so a test can hand it scores it already knows. */
-export type WindowRunner = Pick<ModelSession, 'loaded' | 'run'>
 
 export interface WindowRunOptions {
   readonly signal?: AbortSignal
@@ -53,17 +51,15 @@ export interface WindowScores {
  * `points` and `feats` are `windows × nPoints × 3`, flat, as `runSeamWindows` returns them.
  */
 export async function scoreWindows(
-  session: WindowRunner,
+  session: GraphRunner,
   points: Float32Array,
   feats: Float32Array,
   windows: number,
   nPoints: number,
   options: WindowRunOptions = {},
 ): Promise<WindowScores> {
-  const { signatures, parts, id } = session.loaded.manifest
-  const part = parts[0]
-  const signature = part ? signatures[part] : undefined
-  if (!part || !signature) throw new Error(`${id} declares no graph to run`)
+  const { id } = session.loaded.manifest
+  const { part, signature } = soleGraph(session.loaded.manifest)
   const [pointsInput, featsInput] = signature.inputs
   const [pointOutput, windowOutput] = signature.outputs
   if (!pointsInput || !featsInput || !pointOutput || !windowOutput) {
@@ -121,9 +117,4 @@ export async function scoreWindows(
     options.onProgress?.((from + count) / windows)
   }
   return { windowLogits, pointLogits }
-}
-
-/** A logit as the probability a reader cuts on. */
-export function probability(logit: number): number {
-  return 1 / (1 + Math.exp(-logit))
 }

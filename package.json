@@ -101,8 +101,12 @@
     "probe:seam-windows-py": "node scripts/probe-seam-windows-py.mjs",
     "probe:volume": "node scripts/probe-volume.mjs",
     "probe:cutout-summary": "node scripts/probe-cutout-summary.mjs",
-    "vendor:seam-cutout": "node scripts/vendor-seam-cutout.mjs",
-    "probe:candidate-search": "node scripts/probe-candidate-search.mjs"
+    "vendor:seam": "node scripts/vendor-seam.mjs",
+    "probe:candidate-search": "node scripts/probe-candidate-search.mjs",
+    "probe:assessor-ops": "node scripts/probe-assessor-ops.mjs",
+    "probe:assessor-patch": "vite-node scripts/probe-assessor-patch.ts",
+    "probe:assessor-parity": "node scripts/probe-assessor-parity.mjs",
+    "probe:ort-kernels": "node scripts/probe-ort-kernels.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

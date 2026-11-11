@@ -64,6 +64,16 @@ export interface RunRequest {
   readonly outputs?: readonly string[]
 }
 
+/**
+ * The half of a session a scoring loop needs: the manifest to read names from, and `run`.
+ *
+ * Narrower than `ModelSession` on purpose — a caller that cannot `close` cannot close somebody
+ * else's session — and it is what lets a test hand a loop the logits it already knows without
+ * standing up a worker. Named here rather than in each pack, because two of them wrote the same
+ * `Pick` under two names.
+ */
+export type GraphRunner = Pick<ModelSession, 'loaded' | 'run'>
+
 export interface ModelSession {
   /** The checked manifest, fetched once by the worker. Read tensor names from its signatures. */
   readonly loaded: LoadedManifest
