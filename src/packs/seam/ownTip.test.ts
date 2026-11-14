@@ -119,30 +119,70 @@ describe('the own-tip rule, against SEAM', () => {
    * The silent half of the rule, and the reason the function takes the tips rather than deriving
    * them from the lists: a contact may be nearest to an end whose own list is not in hand.
    *
-   * **Constructed, not SEAM's own instance.** This neuron's 505 ends were all searched, so the
-   * case is made by narrowing the fixture to the six tips its lists belong to and showing that
-   * more survives. SEAM's real instance is end 1967 on another neuron — the one open end of
-   * 2,708 with no list — which takes 42 candidates off three of its neighbours. Covering that
-   * would mean a second neuron's lists in the fixture, which is a lot of file for one case the
-   * narrowing already exercises the same way round.
+   * **The fixture no longer contains an instance, and that is the assertion.** Until the tree
+   * ranker (2026-11-14) this neuron's lists held candidates whose nearest end had no list of its
+   * own, and the case was made by narrowing to the six searched tips and showing more survived.
+   * The new search lists a tighter pool — a median of 39 candidates an end against 100 — and now
+   * every one of the 115 sits on its own tip, so the narrowing rescues nothing and the old
+   * comparison asserted `115 > 115`.
+   *
+   * Pinning "nothing is dropped" is worth more than the narrowing was: it says this golden's
+   * agreement with SEAM is not reached *through* the rule discarding rows, so a bug in the rule
+   * cannot hide behind it. The drop itself is exercised below, where it can be built to order.
    */
-  it('drops candidates that belong to a tip with no list of its own', () => {
-    const searched = new Set(lists.map((one) => one.tip))
-    const onlySearched = new Float32Array(searched.size * 3)
-    const renumbered = new Map<number, number>()
-    for (const tip of searched) {
-      const at = renumbered.size
-      renumbered.set(tip, at)
-      onlySearched.set(tipsNm.subarray(tip * 3, tip * 3 + 3), at * 3)
-    }
-    const narrowed = ownTipRule(
-      onlySearched,
-      lists.map((one) => ({ ...one, tip: renumbered.get(one.tip)! })),
-      neuron.own_um,
-    )
-    const kept = (all: readonly { kept: Int32Array }[]) =>
-      all.reduce((total, one) => total + one.kept.length, 0)
-    expect(kept(narrowed)).toBeGreaterThan(kept(answers))
+  it('accounts for every candidate row, kept or dropped', () => {
+    /*
+     * The accounting identity, which holds on **any** set: it says the golden's agreement with
+     * SEAM is not reached through rows quietly vanishing. The two zeroes below are this cut's
+     * fact and will move the first time a recut produces one stray contact; this line will not.
+     */
+    expect(
+      answers.reduce((sum, one) => sum + one.kept.length + one.anothersTip + one.tooFar, 0),
+    ).toBe(lists.reduce((sum, one) => sum + one.rows, 0))
+  })
+
+  /** This cut's own fact, kept separately because it is the one that goes stale. */
+  it('drops nothing at all on this fixture', () => {
+    // Listed rather than counted, so a failure names the tip instead of saying "false".
+    expect(answers.filter((one) => one.anothersTip > 0 || one.tooFar > 0)).toEqual([])
+  })
+})
+
+/**
+ * A candidate whose nearest end has no list of its own, which rv2 no longer contains.
+ *
+ * SEAM's real instance is end 1967 — the one open end of 2,708 with no list — which takes 42
+ * candidates off three of its neighbours. The fixture's own neuron used to show the same shape
+ * and stopped when the search was re-ranked, so this builds it rather than waiting for a set
+ * that happens to have one. The failure it guards is the rule quietly keeping a candidate that
+ * belongs to somebody else: a suggestion drawn at the wrong end of the neuron.
+ */
+describe('a tip with no list of its own', () => {
+  /*
+   * A micron apart, so **both** contacts below are inside the own-tip distance and the only
+   * thing that can separate them is which tip is nearer. A first draft put the tips 3 µm apart
+   * and the far contact was dropped as `tooFar` instead — the right answer by the wrong rule,
+   * and `anothersTip` of 0 is what said so.
+   */
+  const tips = Float32Array.from([0, 0, 0, 1000, 0, 0])
+
+  it('drops a candidate that snaps to it, and counts it as another tip’s', () => {
+    const [only] = ownTipRule(tips, [
+      {
+        tip: 0,
+        rows: 2,
+        columns: {
+          // 100 nm from tip 0, and 600 nm — which is nearer tip 1, whose list is not in hand.
+          contact_x_nm: Float64Array.from([100, 600]),
+          contact_y_nm: Float64Array.from([0, 0]),
+          contact_z_nm: Float64Array.from([0, 0]),
+          geo_rank: Float64Array.from([1, 2]),
+        },
+      },
+    ])
+    expect([...only!.kept]).toEqual([0])
+    expect(only!.anothersTip).toBe(1)
+    expect(only!.tooFar).toBe(0)
   })
 })
 
@@ -227,8 +267,10 @@ describe('refusals', () => {
 
   it('refuses a column that is not as long as the list says', () => {
     const columns = { ...lists[0]!.columns, geo_rank: new Float64Array(3) }
+    // The count comes from the fixture: it was 100 and the tree ranker made it 9, and a literal
+    // here fails on a recut for a reason that has nothing to do with the refusal being tested.
     expect(() => ownTipRule(tipsNm, [{ ...lists[0]!, columns }])).toThrow(
-      /says 100 rows and its "geo_rank" column has 3/,
+      new RegExp(`says ${lists[0]!.rows} rows and its "geo_rank" column has 3`),
     )
   })
 

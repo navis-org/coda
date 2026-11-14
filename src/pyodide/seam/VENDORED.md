@@ -34,9 +34,9 @@ disk, so the hashes cannot go stale — they are for a reader with no SEAM check
 | `canonical.py` | `1555371a8150caf7f862d48cc8152370f4d92d9db9926d01e9b36c9ba791d7c3` |
 | `scan.py` | `e65c4d423c3f7e42b06232f0fd1291b13c4e8a0d76e18fbbae598caefa2c5f5d` |
 | `cutout.py` | `5839b36359eed58d4a2c7aea0e1affc136eab05865ed2330f37b8418f499526a` |
-| `patches.py` | `4a96fc79f320380bb9c6c045c7bd1ec9c2931fc134cf901996ac7c83d37e965e` |
+| `patches.py` | `6e5afa7ac45671f1a1877633786671dba1be79c0db54ff05b55b84f6f6eaf94e` |
 
-Copied at SEAM commit `84cb4d2`. Recording it matters as much
+Copied at SEAM commit `0374517`. Recording it matters as much
 as the hashes: without it a clean ✓ against a dirty or differently-branched checkout is
 indistinguishable from a real one, and nobody can tell later which SEAM state a feature or a
 patch was copied from.

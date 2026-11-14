@@ -36,6 +36,18 @@ FEATURES = ["min_dist_um", "touching", "log_vol", "has_shape", "align", "caliber
 NEUTRAL = {"align": 0.5, "caliber_ratio": 1.0, "elongation": 1.0}  # undefined local shape (too few voxels)
 
 
+def size_features(c: pd.DataFrame, l2_chunks) -> pd.DataFrame:
+    """The pool with whole-object sizes (user, 2026-11-11): `l2c`, log10 of the candidate's L2 chunk count, and
+    `l2x` = l2c * log10(Q's count) / 5 (two really large objects should rarely be one). `l2_chunks`: {root: count}
+    for every candidate and Q (sizes.fetch); L2 chunks are this dataset's, so a ranker on them is the dataset's own."""
+    lookup = pd.Series(l2_chunks)
+    cnt, q = c["root"].map(lookup), c["q_root"].map(lookup)
+    if cnt.isna().any() or q.isna().any():
+        raise ValueError(f"{int(cnt.isna().sum() + q.isna().sum())} pool rows without an L2 count")
+    l2c = np.log10(cnt.to_numpy(float).clip(min=1))
+    return c.assign(l2c=l2c, l2x=l2c * np.log10(q.to_numpy(float).clip(min=1)) / 5)
+
+
 def summary_args(end_nm) -> dict:
     """The negatives.neighbours options a cutout around an open end needs for
     pool_features (one place for that contract)."""

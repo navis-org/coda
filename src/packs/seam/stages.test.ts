@@ -10,10 +10,14 @@
  * data, at every stage.
  *
  * The bar is SEAM's own and it is in the manifest: `checks_largest_difference` records what the
- * pipeline's own replay moved each quantity by, around 2e-16. **Measured here, the worst
- * difference over all 25 tips and 1,178 candidates is 3.6e-15**, on `conf_logit` — which sums
- * fifteen fits, so it is summation order and nothing else; every other stage is at or below
- * 9e-16, and `segclr` and `r` are exact.
+ * pipeline's own replay moved each quantity by, around 2e-16. **Measured here on the tree-ranker
+ * set of 2026-11-14, the worst difference over all 25 tips and every candidate row is 5.3e-15**,
+ * on `conf_logit` — which sums fifteen fits, so it is summation order and nothing else; the ref
+ * half is at 8.9e-16, `conf` at 2.8e-16, and `segclr`, `p_tip`, `q` and `r` at 6.1e-16 or better.
+ *
+ * It was 3.6e-15 on the `za` set. These are re-measured on each recut rather than carried: the
+ * number is the evidence for the claim above it, and a stale one is a claim about a fixture that
+ * no longer exists.
  *
  * `TOLERANCE` sits far above that, because a different engine's `Math.exp` may land a bit or two
  * elsewhere, and far below anything that could hide a wrong feature: every mistake available here
@@ -111,7 +115,7 @@ const ENDS = tips.end_uid!
 /**
  * Every tip scored once, for the six cases that walk the whole set.
  *
- * `listFor` scans all 1,178 candidate rows per tip, so doing it per case is the same work six
+ * `listFor` scans all 1,063 candidate rows per tip, so doing it per case is the same work six
  * times over. Nothing mutates what is held here, so the cases stay independent; the ones that
  * need a *modified* list, or modified fits, call `listFor` themselves.
  */
@@ -135,9 +139,15 @@ describe('stages 7–9, against the set’s own columns', () => {
     expect(FITS.ref).toHaveLength(3)
     expect(FITS.split).toHaveLength(5)
     expect(FITS.cutoff).toBe(SET.cutoff)
-    // This set predates `score_clip`, and its published numbers are unclipped. Asserted so that
-    // a set which gains one does not silently reuse this test's expectations.
-    expect(FITS.scoreClip).toBeUndefined()
+    /*
+     * **This set clips, and the agreement tests below are what make that mean something.** The
+     * previous fixture predated `score_clip` and this line asserted its absence, so that a set
+     * which gained one could not silently reuse the expectations around it. One did (nest 3,
+     * 2026-11-11), the line fired, and the reproductions below then passed *with* the clip
+     * applied — which is the first time that arm was checked against real published columns
+     * rather than against a synthetic fit.
+     */
+    expect(FITS.scoreClip).toBe(20)
     expect(FITS.cutoffRef).toBeUndefined()
   })
 
@@ -225,20 +235,34 @@ describe('stages 7–9, against the set’s own columns', () => {
 })
 
 /**
- * **The one branch the fixture cannot reach.** This set predates `score_clip`, so without these
- * two cases a one-sided clamp, a sign slip or a clip applied to the wrong design column would
- * pass the whole file. No fixture can help — the clip is a property of a set nobody has published
- * yet — so both cases are arithmetic identities over the set that does exist.
+ * **What the clip does, as arithmetic, which the agreement tests above cannot say.**
+ *
+ * Those reproduce SEAM's published columns with the set's own clip of 20 applied, so they prove
+ * the reading is right. They cannot isolate the clip's *effect*: a one-sided clamp, a sign slip
+ * or a clip reaching the wrong design column would move the published columns too, and be
+ * reproduced along with them. These two cases vary the clip against a fixed baseline instead.
+ *
+ * Written when no published set carried one at all, which is why the baseline below is an
+ * explicitly unclipped fit rather than the set's own.
  */
 describe('the score clip', () => {
   const widest = Math.max(
     ...SEEDS.flatMap((k) => candidates[`score_s${k}`]!.map((one) => Math.abs(one))),
   )
+  /*
+   * **The baseline is an explicitly unclipped fit, not `SCORED`.** `SCORED` is scored with the
+   * set's own fits, which now carry a clip of 20 — so comparing against it would measure the
+   * difference between two clips rather than the effect of clipping at all, and these two tests
+   * failed exactly that way when the fixture gained one. Stated here so the next set to change
+   * its clip does not need them rewritten again.
+   */
+  const unclipped: PipelineFits = { ...FITS, scoreClip: undefined }
+  const BASE = SCORED.map(({ list }) => scoreList(list, unclipped))
 
   it('changes nothing when it is wider than every score', () => {
     const loose: PipelineFits = { ...FITS, scoreClip: widest + 1 }
-    for (const { list, scores } of SCORED) {
-      expect([...scoreList(list, loose).logit]).toEqual([...scores.logit])
+    for (const [at, { list }] of SCORED.entries()) {
+      expect([...scoreList(list, loose).logit]).toEqual([...BASE[at]!.logit])
     }
   })
 
@@ -250,7 +274,9 @@ describe('the score clip', () => {
     const clip = 2
     const tight: PipelineFits = { ...FITS, scoreClip: clip }
     let worst = 0
-    for (const { list, rows, scores } of SCORED) {
+    for (const [which, { list, rows }] of SCORED.entries()) {
+      // Not `at`: the inner loop below already binds one, and the shadow read as a bug.
+      const scores = BASE[which]!
       const got = scoreList(list, tight)
       for (const [i, at] of rows.entries()) {
         let shift = 0
@@ -265,8 +291,9 @@ describe('the score clip', () => {
           /*
            * The same `delta` must reach **split's** column 2 as well. `score_clip` is stated
            * under `ref` and `split.design` names "assessor score of seed k", so clipping it the
-           * same way is a reading — pinned here rather than left in a comment, since no set
-           * carries a clip yet and nothing else would notice if the two came apart.
+           * same way was a *reading* when this was written and no published set carried a clip.
+           * Nest 3 does, and the confidence model's reproduction above passes with it applied —
+           * so SEAM's own `conf_logit` column now confirms the reading, and this pins the shape.
            */
           for (const fold of FITS.split!) {
             shift += (fold[k]!.w[2]! * delta) / fold[k]!.sd[2]!

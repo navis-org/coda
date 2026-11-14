@@ -596,9 +596,23 @@ the wrapper.
 
 `cutoutSummary` vendors **two** runs of SEAM: `summarize_cutout` (what is in a box of
 segmentation around an open end) from `negatives.py`, and `pool_features` plus `GeometricRanker`
-(the eight features, and the logistic score over them) from `candidates.py`. Neither could be a
+(the features, and the logistic score over them) from `candidates.py`. Neither could be a
 byte-identical whole-file copy like the two above — `negatives.py` imports `cave`, `paths` and
 `pre_edit`, and `candidates.py` imports `paths`.
+
+**The score no longer crosses with the features, and that is this repository's one deliberate
+break with invariant 11.** SEAM's production ranker became a LightGBM forest on 2026-11-11, and
+LightGBM is a compiled extension with no Pyodide build — so the eleven features are still built
+here by SEAM's own `pool_features`, and the forest is walked in TypeScript by
+`src/packs/seam/treeRanker.ts`. `GeometricRanker` stays vendored and stays the thing the logistic
+sets are scored with; it is simply no longer what production uses.
+
+The break is real and is not pretended away: a traversal written twice can drift, and nothing
+like `pnpm vendor:seam` covers the TypeScript half. What stands in for it is that the format is
+declarative and the scorer is checked against **LightGBM's own predictions** on 991 vectors,
+including every split threshold. The end state is upstream — a numpy-vectorised traversal in
+`candidates.py` over the forest as arrays, which the vendor check would then cover like anything
+else — and that ask is in `docs/seam-suggestions-plan.md`.
 
 So it takes the two functions **verbatim but not whole**, and `pnpm vendor:seam` is what
 makes that claim checkable — it re-cuts the run from `negatives.py` by the markers that bound it

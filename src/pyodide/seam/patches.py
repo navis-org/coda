@@ -60,16 +60,17 @@ def sample(em, lab, lo, res, center_nm, size: int = PATCH):
     return sub[:, :, z0] * (1 - w) + sub[:, :, z0 + 1] * w, labs
 
 
-def pair_patch(em, lab, lo, res, center_nm, kq, kc):
+def pair_patch(em, lab, lo, res, center_nm, kq, kc, em_raw: bool = False):
     """The assessor's input for objects kq (Q) and kc (C) of `lab`: EM
-    masked by Q ∪ C (uint8) and labels 1 = Q, 2 = C, 0 = neither (uint8);
-    None if the patch leaves the box."""
+    masked by Q ∪ C (uint8; `em_raw`: the whole patch's, unmasked, user 2026-11-12) and labels 1 = Q, 2 = C,
+    0 = neither (uint8); None if the patch leaves the box. A raw patch masked by its labels (mask_by) is the
+    masked one exactly."""
     got = sample(em, lab, lo, res, center_nm)
     if got is None:
         return None
     e, labs = got
     two = side_labels(labs, kq, [kc])
-    return masked_em(e, two), two
+    return stored_em(e, two, em_raw), two
 
 
 def pair_sides(lab, lo, res, center_nm, kq, kc):
@@ -146,17 +147,42 @@ def side_labels(lab, q: int, cands):
     return side_table(q, cands)[lab]
 
 
+def em_uint8(e):
+    """The resampled EM `e` (float) as uint8 (rounded): the one conversion masked and raw windows share."""
+    return np.round(e).astype(np.uint8)
+
+
 def masked_em(e, labels):
     """The resampled EM `e` (float) as uint8, zeroed where `labels` is 0 (outside the objects shown)."""
-    return np.where(labels > 0, np.round(e), 0).astype(np.uint8)
+    return mask_by(em_uint8(e), labels)
 
 
-def scene_window(em, lab, lo, res, center_nm, size: int):
-    """A scene window (big-ideas §2, the one-pass scene scorer): the EM masked to every labelled object (uint8)
-    and the labels themselves (uint8: 1 = Q, then one value per candidate), each (size, size, size) around
-    `center_nm`, from box arrays as for sample(); None if the window leaves the box."""
+def stored_em(e, labels, em_raw: bool):
+    """The resampled EM `e` (float) as a build stores it: uint8, masked by `labels` (masked_em), or whole with
+    `em_raw`. Pair patches and scene windows alike."""
+    return em_uint8(e) if em_raw else masked_em(e, labels)
+
+
+def mask_by(em_u8, labels):
+    """uint8 EM zeroed where `labels` is 0: a raw build's patch read as a masked one (masked_em's rule)."""
+    return np.where(labels > 0, em_u8, np.uint8(0))
+
+
+def em_record(info: dict) -> str:
+    """How a build (its build.json) stores its EM: "raw" (the whole patch or window, unmasked) or "masked" (older
+    builds record nothing: masked). A scene build's is "scene_em", a pair build's "pair_em"."""
+    return info.get("scene_em" if info.get("scene") else "pair_em") or "masked"
+
+
+def scene_window(em, lab, lo, res, center_nm, size: int, em_raw: bool = False):
+    """A scene window (big-ideas §2, the one-pass scene scorer): the EM masked to every labelled object (uint8;
+    `em_raw`: unmasked, the whole window's EM, user 2026-11-11) and the labels themselves (uint8: 1 = Q, then one
+    value per candidate), each (size, size, size) around `center_nm`, from box arrays as for sample(); None if the
+    window leaves the box."""
     got = sample(em, lab, lo, res, center_nm, size)
-    return None if got is None else (masked_em(got[0], got[1]), got[1])
+    if got is None:
+        return None
+    return stored_em(got[0], got[1], em_raw), got[1]
 
 
 def window_voxel(points_nm, center_nm, res, size: int):

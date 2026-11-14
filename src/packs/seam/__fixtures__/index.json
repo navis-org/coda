@@ -8,12 +8,12 @@
    "dataset": "aedes",
    "datastack": "wclee_aedes_brain",
    "snapshot": "2026-11-04 16:45:00+00:00",
-   "commit": "dbfef4cb7a58db775692ae18dcd179cf250ec861-dirty",
+   "commit": "037451701c076ff7a509a649727ccb9b6ca1384b-dirty",
    "neurons": 5,
    "counts": {
     "tips": 25,
     "shown": 10,
-    "candidates": 1178
+    "candidates": 1063
    }
   },
   {
@@ -26,7 +26,7 @@
    "counts": {
     "tips": 9999,
     "shown": 10,
-    "candidates": 1178
+    "candidates": 1063
    }
   }
  ]
