@@ -13,8 +13,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetCache } from '../cache'
 import { resetCredentials, setToken } from './credentials'
-import { parseCaveTimestamp, resetDatastackRecords } from './datastack'
-import { peekRootCheck, resetRootChecks, startRootCheck, subscribeRootCheck } from './rootIds'
+import { parseCaveTimestamp } from './datastack'
+import {
+  l2ChunkCounts,
+  peekRootCheck,
+  resetRootChecks,
+  startRootCheck,
+  subscribeRootCheck,
+} from './rootIds'
+import { resetCaveState } from './tables'
 import { DEFAULT_CAVE_SERVER } from './deployments'
 
 const DATASTACK = 'flywire_fafb_public'
@@ -92,8 +99,12 @@ async function until(ok: () => boolean): Promise<void> {
 
 beforeEach(() => {
   resetCache()
-  resetRootChecks()
-  resetDatastackRecords()
+  /*
+   * `resetCaveState`, not the two memos this file happens to use. It is the fan-out that exists
+   * because suites hand-copied their own lists and the one that missed a memo got cross-test
+   * bleed reading as a routing bug — and this suite was one of the hand-written copies.
+   */
+  resetCaveState()
   resetCredentials()
   setToken(DEFAULT_CAVE_SERVER, 'token')
 })
@@ -374,5 +385,105 @@ describe('what keeps it cheap', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(calls.filter((c) => c.url.includes('is_latest_roots'))).toHaveLength(0)
     expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)).toBeUndefined()
+  })
+})
+
+/** The level-2 chunk counts SEAM's tree ranker reads as `l2c`/`l2x`. See `l2ChunkCounts`. */
+describe('level-2 chunk counts', () => {
+  const graphene = {
+    server: 'https://cave.example.org',
+    table: 'test_table',
+    base: 'https://cave.example.org/segmentation/table/test_table',
+  }
+  /** The deployment is required so a request cannot be signed with another account's token. */
+  const OPTIONS = { deployment: DEFAULT_CAVE_SERVER }
+  /** `leaves_many` answers `{"<root>": [chunk ids]}`, and an id it does not know is absent. */
+  const serve = (lists: Record<string, number[]>) => {
+    const calls: { url: string; nodes: string[] }[] = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { node_ids?: (string | number)[] }
+      calls.push({ url: String(url), nodes: (body.node_ids ?? []).map(String) })
+      const out: Record<string, number[]> = {}
+      for (const id of body.node_ids ?? [])
+        if (lists[String(id)]) out[String(id)] = lists[String(id)]!
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify(out)),
+      } as Response)
+    })
+    return calls
+  }
+
+  it('counts each root’s chunks, and asks the graph at level 2', async () => {
+    const calls = serve({ '100': [1, 2, 3, 4], '200': [7] })
+    const got = await l2ChunkCounts(graphene, ['100', '200'], OPTIONS)
+    expect(got.get('100')).toBe(4)
+    expect(got.get('200')).toBe(1)
+    expect(new URL(calls[0]!.url).searchParams.get('stop_layer')).toBe('2')
+  })
+
+  /* Why this exists: `leavesMany`'s "Whole lists, not a sample". */
+  it('does not cap a large object at the vote’s sample size', async () => {
+    serve({ '100': Array.from({ length: 1234 }, (_, i) => i) })
+    const got = await l2ChunkCounts(graphene, ['100'], OPTIONS)
+    expect(got.get('100')).toBe(1234)
+  })
+
+  /* Why this exists: `l2ChunkCounts`' "absent, not zero". */
+  it('leaves a root the graph does not know out of the answer', async () => {
+    serve({ '100': [1, 2] })
+    const got = await l2ChunkCounts(graphene, ['100', '999'], OPTIONS)
+    expect(got.get('100')).toBe(2)
+    expect(got.has('999')).toBe(false)
+  })
+
+  /* A root id names one fixed state of the graph, so a count read once is right forever. */
+  it('asks the graph once for a root it has already counted', async () => {
+    const calls = serve({ '100': [1, 2], '200': [3] })
+    await l2ChunkCounts(graphene, ['100'], OPTIONS)
+    expect(calls).toHaveLength(1)
+    await l2ChunkCounts(graphene, ['100'], OPTIONS)
+    expect(calls).toHaveLength(1)
+    // A root it has not seen is still asked, and the batch holds only that one.
+    await l2ChunkCounts(graphene, ['100', '200'], OPTIONS)
+    expect(calls).toHaveLength(2)
+    expect(calls[1]!.nodes).toEqual(['200'])
+  })
+
+  it('asks for a repeated root once within a single call', async () => {
+    const calls = serve({ '100': [1] })
+    await l2ChunkCounts(graphene, ['100', '100', '100'], OPTIONS)
+    expect(calls[0]!.nodes).toEqual(['100'])
+  })
+
+  /**
+   * **A count belongs to one segmentation.** A chunkedgraph id is unique within its own table,
+   * not across tables, and reviewing against a production chunkedgraph while a dataset node sits
+   * on the public snapshot is two tables in one session. Keyed on the bare root, the second
+   * table's root is served the first table's count — a believable number, nothing to notice it.
+   */
+  it('does not serve one table’s count for another table’s root', async () => {
+    const other = { ...graphene, table: 'other_table' }
+    serve({ '100': [1, 2, 3] })
+    expect((await l2ChunkCounts(graphene, ['100'], OPTIONS)).get('100')).toBe(3)
+    const calls = serve({ '100': [1] })
+    expect((await l2ChunkCounts(other, ['100'], OPTIONS)).get('100')).toBe(1)
+    expect(calls).toHaveLength(1)
+  })
+
+  /**
+   * **Absence is remembered too.** A root the graph does not list will not start appearing, so
+   * re-asking is a round trip that can only answer "still absent" — and the search's premise is
+   * that roots recur across neighbouring tips, which makes it one unremovable request per open
+   * end. It stays out of the *answer*; it does not stay out of the memo.
+   */
+  it('asks once about a root the graph does not know, not once per call', async () => {
+    const calls = serve({ '100': [1] })
+    await l2ChunkCounts(graphene, ['100', '999'], OPTIONS)
+    expect(calls).toHaveLength(1)
+    const got = await l2ChunkCounts(graphene, ['999'], OPTIONS)
+    expect(calls).toHaveLength(1)
+    expect(got.has('999')).toBe(false)
   })
 })

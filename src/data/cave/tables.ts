@@ -49,6 +49,7 @@
 
 import { memoPromise } from '../memoPromise'
 import { reportSourceLearned } from '../source'
+import { resetL2ChunkCounts, resetRootChecks } from './rootIds'
 import type { TableMetadata, ViewInfo } from './api'
 import {
   annotationCount,
@@ -211,6 +212,11 @@ export function resetCaveTables(): void {
  * The fan-out `resetCaveTables` names above, as far as a test teardown needs it. Four suites had
  * hand-copied the same two calls into their own `beforeEach`, so every new memo meant editing
  * four blocks and the file that missed one got cross-test bleed reading as a routing bug.
+ *
+ * `rootIds.ts`' two were outside it until 2026-11-14 and one suite had duly hand-written its own
+ * `beforeEach`, which is that incident starting again. A request memo's bleed is the silent
+ * direction: a request that does **not** fire, which reads as "the node never asked" rather than
+ * "the memo was warm".
  */
 export function resetCaveState(): void {
   resetCaveTables()
@@ -218,6 +224,8 @@ export function resetCaveState(): void {
   resetFlatSources()
   resetSkeletonServices()
   resetNuclei()
+  resetL2ChunkCounts()
+  resetRootChecks()
 }
 
 /**
