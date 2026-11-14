@@ -12,11 +12,11 @@
  * boring route that works, and the binary mode is load-bearing on Windows.
  *
  * **Checked by running it.** Both cells were executed against `packs/seam/__fixtures__` and give
- * the same `expectedRight` per neuron as the node — 1.8199, 1.8199, 1.7648, 1.8199, 1.7648 — and
+ * the same `expectedRight` per neuron as the node — 1.8604, 1.8604, 1.7128, 1.7925, 1.7427 — and
  * the same joined `candidateId`, which `suggestions.test.ts` pins. That check is not ceremony:
  * the R chunk disagreed on first writing, and this list is re-measured on each recut of the
- * fixtures: it was left behind by the 2026-11-10 one, which is how a header stating numbers
- * nobody re-ran reads for months.
+ * fixtures (2026-11-10, 2026-11-11, 2026-11-14): it was left behind by the 2026-11-10 one, which
+ * is how a header stating numbers nobody re-ran reads for months.
  */
 
 import { ID_COLUMN_NAME } from '../../../core/ids'

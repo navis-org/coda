@@ -1918,3 +1918,74 @@ read in fewer and larger pieces.
 - **Nothing about arm B's *model* is settled by this.** There is still no ONNX export of
   `SceneModel`, its batch norms run in training mode by design, and the checkpoint moves again
   when SEAM retrains it on tree-ranked lists.
+
+## The tree ranker, and the division it forces (2026-11-14)
+
+SEAM's production ranker became a **LightGBM forest** on 2026-11-11 — 191 trees over eleven
+features, the old eight plus two whole-object size terms (`l2c`, `l2x`) and the distance from the
+detected tip (`end_dist_um`) — and the set of 2026-11-14 publishes it as
+`pipeline.search.ranker`, model file included. `pipeline.search.geometric_ranker` is gone.
+
+**Coda's search had been quietly ranking with a retired fit.** Nothing failed, because the only
+end-to-end check of that phase is `pnpm probe:candidate-search`, which is not in CI and cannot
+run in this environment anyway (Pyodide is not a declared dependency). It now refuses by name
+rather than reading `undefined` out of a manifest block that no longer exists.
+
+### Built: the scorer
+
+`src/packs/seam/treeRanker.ts` parses LightGBM's model text and walks it. It is checked against
+**LightGBM's own predictions** on 991 vectors — every split threshold and its neighbour one float
+step above, values outside every range the model saw, and missing values — because every mistake
+available in a traversal produces a *number*, and 191 trees average a wrong boundary into
+something that still ranks plausibly.
+
+Two bugs were found by mutating the finished code to see whether the tests could fail, and only
+one of three classic errors was caught on the first try:
+
+- `<` for `<=` passed, because no sampled row had ever landed exactly on a threshold although the
+  test said they had.
+- Missing values were scored by the default-left flag. **`decision_type = 2` means
+  `missing_type = None`, under which LightGBM turns a missing value into zero and never reads
+  that flag.** It passed anyway: the golden carried JSON `null`, and `null <= threshold` coerces
+  to `0 <= threshold` — the right answer by a third route that is neither LightGBM's nor Coda's.
+  A real `undefined` from a column would have gone the other way. Proof of the rule: LightGBM
+  scores an all-missing row at exactly the all-zero row's score.
+
+A third was found later, by the review chain: the `average_output` guard read from the key/value
+map, and LightGBM writes that flag as a **bare line** — a guard that could never fire.
+
+Cost, measured: **157 ms for one neuron's ~20,000 candidates**, with an 8 ms parse that is
+memoised by model address, since a caller parsing per tip would spend four seconds against that
+157 ms. Specialising the walk for `missing_type = None` is worth 12.6%, measured by interleaved
+A/B — run as two separate loops the same comparison gave 2%, and a subagent's harness reported
+36%, which is why it is interleaved.
+
+### What this forces on the search, and it is not small
+
+`coda_candidate_search` is deliberately **one** crossing of the bridge: a box in, a ranked, cut,
+1-based-numbered pool out. Scoring in TypeScript moves the sort, the `head(top_k)` and the
+`geo_rank` numbering out of the worker, so the bridge has to return the *whole* pool with its
+feature columns — the crossing that design exists to avoid.
+
+And two of the eleven features cannot be computed in that crossing at all. `size_features` needs
+an L2 chunk count **per candidate root and for Q**, and the pool's roots are only known after
+`pool_features`. So the honest shape is three parts, not two:
+
+1. across the bridge → the unranked pool with its geometric features;
+2. a **batched** L2 chunk-count read from CAVE, keyed by root (a root names a fixed state, so a
+   count never goes stale and is cacheable forever) — at most 4 concurrent Aedes streams, which
+   is SEAM's invariant 8 and the reason this is a step rather than a detail;
+3. back across with the counts for `size_features`, then score, sort and number in TypeScript.
+
+`end_dist_um` is the cheap one: the detected tip is already in hand.
+
+### Asks this raises for SEAM
+
+- **A numpy-vectorised `score_trees(forest, X)` in `candidates.py`**, with the forest exported as
+  arrays rather than LightGBM text. It is about thirty lines of level-by-level traversal, and it
+  would put the whole ranker back inside invariant 11 — `pnpm vendor:seam` would cover drift the
+  way it already covers `pool_features`, and Coda would carry no model format at all. This is the
+  one worth asking for before the wiring hardens around a TypeScript traversal.
+- **The organelle columns in a regenerated fixture.** The handoff describes `organelle_score`,
+  `organelle` and `top_organelle`, and the published set now carries them — this is noted as
+  delivered, and the UI switch it is for is still to build.

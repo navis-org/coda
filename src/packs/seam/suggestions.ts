@@ -39,7 +39,7 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import { T } from '../../core/types'
 import type { CellValue, LayersValue, PointsValue, TableValue } from '../../core/values'
 import { boundsOf, layersFrom } from '../../core/values'
-import { plural } from '../../style/format'
+import { agree, plural } from '../../style/format'
 import type { Suggestion } from './scene'
 import { suggestionLayer } from './scene'
 import { fetchText } from '../../data/fetchText'
@@ -185,19 +185,25 @@ export const suggestionsNode = packNode({
       },
     )
     warnOnCounts(ctx, set, built)
-    if (built.damaged > 0 || built.stray > 0) {
+    if (built.damaged > 0) {
       ctx.warn(
-        `This set's ids do not check out, which has one known cause: an id that has been through ` +
-          `a 64-bit float names a different segment, and does so silently. ` +
-          (built.damaged > 0
-            ? `${built.damaged.toLocaleString()} tips disagree with their own candidate list about ` +
-              `the first candidate — \`candidateId\` is the sound one, joined from the lists. `
-            : '') +
-          (built.stray > 0
-            ? `${built.stray.toLocaleString()} judged ids name nothing among their neuron's ` +
-              `candidates. `
-            : '') +
-          `Ask whoever published the set to regenerate it.`,
+        `${plural(built.damaged, 'tip')} ${agree(built.damaged, 'disagrees', 'disagree')} with ` +
+          `${agree(built.damaged, 'its', 'their')} own candidate list about the first candidate. That has one known cause: an id ` +
+          `that has been through a 64-bit float names a different segment, and does so silently. ` +
+          `\`candidateId\` is the sound one, joined from the lists. Ask whoever published the ` +
+          `set to regenerate it.`,
+      )
+    }
+    if (built.stray > 0) {
+      /*
+       * Deliberately no cause and no demand. These are usually verdicts collected before a
+       * re-ranking, naming candidates the current search no longer lists — see `strayVerdicts`.
+       */
+      ctx.warn(
+        `${plural(built.stray, 'judged id')} ${agree(built.stray, 'names', 'name')} nothing ` +
+          `among ${agree(built.stray, 'its', 'their')} neuron's candidates. That is usual where the verdicts were collected ` +
+          `against an earlier ranking: the candidate was judged and the search has since stopped ` +
+          `listing it. Those verdicts are carried as they were and are not joined to a candidate.`,
       )
     }
 
@@ -413,7 +419,15 @@ export async function readSuggestions(
  * two tips being neighbours on one neuron. That is a reviewer using their eyes rather than a
  * corrupted id, and a warning about it would be noise.
  *
- * A *rounded* id, by contrast, names nothing anywhere — which is exactly what this catches.
+ * **What it catches is not one thing, and saying so cost us a false accusation.** When this was
+ * written a judged id naming nothing anywhere had one known cause — an id that had been through
+ * a 64-bit float — so the warning said so. SEAM's set of 2026-11-14 has 51 such ids out of 1,033
+ * and **none of them is damaged**: only 2 even survive a float round trip unchanged, and none
+ * appears anywhere else in the set. They are candidates the verdicts name that the *re-ranked*
+ * search no longer lists, the verdicts having been collected against the older ranking. That is
+ * ordinary and the publisher has nothing to fix, so the count is reported without a cause
+ * attached. `damaged` is the one that still carries the float diagnosis, because a tip
+ * disagreeing with its own list about its first candidate really is that signature.
  */
 function strayVerdicts(
   tips: Readonly<Record<string, CellValue[]>>,

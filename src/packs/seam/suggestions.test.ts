@@ -172,15 +172,26 @@ describe('reading a set', () => {
   })
 
   /**
-   * The set as published checks out, which is the state to notice a change from.
+   * No **damaged** id in the set as published, which is the state to notice a change from.
    *
-   * SEAM's exporter now runs both of these before writing (their `bccb484`); the loader runs
-   * them again because this is the only place a *reader* can see the failure, and the next set
-   * will come from a pipeline nobody here runs.
+   * SEAM's exporter runs this before writing (their `bccb484`); the loader runs it again because
+   * this is the only place a *reader* can see the failure, and the next set will come from a
+   * pipeline nobody here runs.
+   *
+   * `stray` is **not** asserted to be zero, and that is the finding rather than a relaxation.
+   * The tree-ranker set of 2026-11-14 has four here and fifty-one across the full set, none of
+   * them damaged — they are candidates the verdicts name that the re-ranked search no longer
+   * lists. Pinning zero would mean re-pinning it after every re-rank, and it would go on reading
+   * as corruption, which is what the warning used to call it.
    */
-  it('finds nothing wrong with the ids of a sound set', () => {
+  it('finds no damaged id in the set as published', () => {
     expect(built.damaged).toBe(0)
-    expect(built.stray).toBe(0)
+  })
+
+  /** A judged id outside its neuron's current lists is ordinary; it must not be miscounted. */
+  it('counts the judged ids a re-ranking left outside the lists, without calling them damaged', () => {
+    expect(built.stray).toBeGreaterThan(0)
+    expect(built.damaged).toBe(0)
   })
 
   /** The joined id is the rank-1 row's, for the tip it belongs to — not merely some candidate. */
@@ -234,19 +245,22 @@ describe('reading a set', () => {
    * against `__fixtures__`, so a change to any one of them is checked by running its cell
    * against the same files and comparing this list.
    *
-   * **They moved on 2026-11-10** when the fixtures were cut from a set with SEAM's split stage
-   * in it, and again on **2026-11-11** for the `za` refit — patches cut the browser's way and
-   * every fit redone in fp32, which moved the cutoff from 0.153 to 0.146 and so which tips are
-   * shown at all. Each time all three were re-run against the new files before this list was
-   * changed, rather than the node's new answer being pasted over the old one. Three of the five
-   * match because `r` is a step function and only two of its steps (0.8824, 0.9375) appear
-   * among ten shown tips — a coincidence of a small fixture, not a fold that stopped
+   * **They have moved three times**: on 2026-11-10 when the fixtures were cut from a set with
+   * SEAM's split stage in it; on 2026-11-11 for the `za` refit; and on **2026-11-14** for nest 3 and
+   * then the tree ranker, which moved the cutoff to 0.136, refitted `r`'s steps and changed
+   * which candidates the search lists at all. Each time all
+   * three were re-run against the new files before this list was changed, rather than the node's
+   * new answer being pasted over the old one.
+   *
+   * The number of distinct values moves with `r`'s steps and with which tips clear the cutoff,
+   * which is why it is two here and was three before: `r` is a step function over a ten-tip
+   * sample, so repeats are the small fixture's coincidence rather than a fold that has stopped
    * distinguishing neurons.
    */
   it('sums r over the shown rows, to the number both exporters produce', () => {
     expect(
       (built.neurons.data['expectedRight'] as number[]).map((v) => Number(v.toFixed(4))),
-    ).toEqual([1.8199, 1.8199, 1.7648, 1.8199, 1.7648])
+    ).toEqual([1.8604, 1.8604, 1.7128, 1.7925, 1.7427])
   })
 
   /** `r` is the chance a *shown* first is right, so the expectation sums over the shown rows. */
@@ -431,8 +445,14 @@ describe('the node, end to end over HTTP', () => {
     const layers = out['layers'] as LayersValue
     const annotations = (layers.items[0] as { annotations: unknown[] }).annotations
     expect(annotations.length).toBe(SET.counts.shown * 2)
-    // A sound set that matches its own manifest says nothing at all.
-    expect(said).toEqual([])
+    /*
+     * One note, and only the one: the judged ids a re-ranking left outside the current lists.
+     * The set matches its own manifest and holds no damaged id, so nothing else is said — and
+     * what is said must not read as corruption, which is what this asserts the shape of.
+     */
+    expect(said).toHaveLength(1)
+    expect(said[0]).toMatch(/judged ids name nothing/)
+    expect(said[0]).not.toMatch(/64-bit float|regenerate/)
   })
 
   /**

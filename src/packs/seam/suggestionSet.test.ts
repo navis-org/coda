@@ -212,15 +212,20 @@ describe('the pipeline fits', () => {
   })
 
   /**
-   * **The clip's own path.** This set declares none, and `stages.test.ts` derives its clip cases
+   * **The clip's own path.** The fixture declares one, and `stages.test.ts` derives its clip cases
    * from a patched `PipelineFits` — so without these two nothing would read `score_clip` out of
    * a manifest at all, and the first set to carry one would be the test.
    */
-  it('reads a score clip where the set declares one, and refuses a bad one', () => {
-    expect(fits(block()).scoreClip).toBeUndefined()
+  it('reads a score clip where the set declares one, refuses a bad one, and takes none', () => {
+    // The fixture is nest 3, which clips at 20; a set that declares none is the other arm, and
+    // both are real — every set before 2026-11-11 published no clip at all.
+    expect(fits(block()).scoreClip).toBe(20)
+    const none = block()
+    delete none.ref.score_clip
+    expect(fits(none).scoreClip).toBeUndefined()
     const one = block()
-    one.ref.score_clip = 20
-    expect(fits(one).scoreClip).toBe(20)
+    one.ref.score_clip = 7
+    expect(fits(one).scoreClip).toBe(7)
     const bad = block()
     bad.ref.score_clip = '20'
     expect(() => fits(bad)).toThrow(/score_clip/)
