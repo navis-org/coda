@@ -495,7 +495,8 @@ export async function rootsByMajority(
   const unknown = distinctStrings(roots).filter((root) => !out.has(root))
   for (let i = 0; i < unknown.length; i += LEAVES_CHUNK) {
     // Sequential, like every other pass here against a shared production chunkedgraph.
-    const samples = await leavesMany(graphene, unknown.slice(i, i + LEAVES_CHUNK), options)
+    const lists = await leavesMany(graphene, unknown.slice(i, i + LEAVES_CHUNK), options)
+    const samples = new Map([...lists].map(([root, ids]) => [root, strided(ids)]))
     // Distinct: a stale root and its stale descendant in one batch share chunks.
     const chunks = distinctStrings([...samples.values()].flat())
     const placed = await placeNodes(graphene, chunks, asked.at, options)
@@ -541,15 +542,20 @@ function majorityOf(placed: readonly (string | undefined)[]): MajorityRoot | und
 }
 
 /**
- * `VOTE_SAMPLE` ids evenly strided over the sorted list, or all of them where there are fewer —
- * sorting in place, the caller handing over a fresh array.
+ * `VOTE_SAMPLE` ids evenly strided over the sorted list, or all of them where there are fewer.
  *
  * **Strided, not random**: a provenance key promises the same answer for the same input
  * (invariant 4), and a chunk id's high bits are its position in the volume, so sorted order
  * spreads the stride across the neuron rather than bunching it in one arbour.
+ *
+ * **It copies before sorting**, and the copy is not ceremony. This used to sort in place and
+ * say so — "the caller handing over a fresh array" — which held while the only call site was
+ * `strided(listed.map(String))` on the next line. `leavesMany` now returns arrays its other
+ * caller counts, and this runs a module away, where that precondition would hold only because
+ * the vote happens to discard them.
  */
-function strided(ids: string[]): string[] {
-  const sorted = ids.sort(compareIds)
+function strided(ids: readonly string[]): string[] {
+  const sorted = [...ids].sort(compareIds)
   if (sorted.length <= VOTE_SAMPLE) return sorted
   return Array.from(
     { length: VOTE_SAMPLE },
@@ -558,8 +564,11 @@ function strided(ids: string[]): string[] {
 }
 
 /**
- * A sample of each root's level-2 chunks, from `leaves_many`. Only roots with chunks listed are in
- * the answer.
+ * Each root's level-2 chunks, from `leaves_many`. Only roots with chunks listed are in the answer.
+ *
+ * **Whole lists, not a sample.** The majority vote wants `VOTE_SAMPLE` strided ids and applies
+ * `strided` itself; `l2ChunkCounts` wants the length, which a sample of a fixed size has thrown
+ * away. Striding here served one caller and silently answered the other with 100.
  *
  * `caveclient.chunkedgraph.get_leaves_many`: `POST …/node/leaves_many?stop_layer=2` with
  * `{"node_ids": [...]}`, answering `{"<root>": [chunk ids]}`. The body is spliced as text, as
@@ -583,9 +592,15 @@ async function leavesMany(
     options,
   ).catch((error: unknown) => {
     if (error instanceof CaveError && error.status === 404) {
+      /*
+       * The fact, not one caller's remedy. This used to end "Use each row's supervoxel instead",
+       * which is the majority vote's way out and means nothing to `l2ChunkCounts` — a reader of
+       * a wrong size feature would have been sent to a fix that does not exist on their path,
+       * and away from the cause.
+       */
       throw new CaveError(
-        `${graphene.server} has no \`leaves_many\` endpoint, so this datastack cannot be updated ` +
-          `by a majority of chunks. Use each row’s supervoxel instead.`,
+        `${graphene.server} has no \`leaves_many\` endpoint, so this datastack cannot be asked ` +
+          `which level-2 chunks a root holds.`,
         404,
       )
     }
@@ -594,7 +609,7 @@ async function leavesMany(
   const out = new Map<string, string[]>()
   for (const root of roots) {
     const listed = answer[root]
-    if (listed?.length) out.set(root, strided(listed.map(String)))
+    if (listed?.length) out.set(root, listed.map(String))
   }
   return out
 }
@@ -630,4 +645,85 @@ async function isLatestRoots(
   const body = `{"node_ids":[${ids.join(',')}]}`
   const answer = await cavePostRaw<{ is_latest: boolean[] }>(url, body, options)
   return answer.is_latest ?? []
+}
+
+/**
+ * Counts read so far, keyed by segmentation and root.
+ *
+ * **Keyed like every other cache in this file** (`cave-sv-roots:${server}|${table}|…`,
+ * `cave-votes:…`): a chunkedgraph id is unique within its own table, not across tables, and a
+ * review against a production chunkedgraph beside a dataset node on the public snapshot is two
+ * tables in one session. The first table's count served for the second's root is a believable
+ * number with nothing to notice it.
+ *
+ * **Session-lifetime, not the permanent store, and the reason is eviction rather than staleness.**
+ * A count really is right forever — a root id names one fixed state of the graph — so `keep`'s
+ * `forever` slot would be sound on correctness. What rules it out is that the slot has no
+ * eviction (`AskedAt`), and this is per *candidate*: a search touches thousands of roots a
+ * neuron. SEAM can hold the same thing forever because its cache is a parquet file per dataset;
+ * a browser's is not that. So the session is the boundary, and a reload re-asks.
+ */
+const l2Counts = new Map<string, number>()
+
+/** A root the graph does not list. Distinct from 0, which is a count nobody took. */
+const ABSENT = -1
+
+/** Test-only: forget the counts so a suite can re-observe the requests. */
+export function resetL2ChunkCounts(): void {
+  l2Counts.clear()
+}
+
+/**
+ * How many level-2 chunks each root holds — SEAM's `l2c`/`l2x` features, in one batched pass.
+ *
+ * SEAM's `l2c`/`l2x`, fetched the way `seam.sizes` does — `get_leaves_many(stop_layer=2)`, the
+ * length of each answer. A count is a cheap proxy for an object's total size, which the geometric
+ * features cannot see because they are measured inside a 6 µm box around the open end; the rest
+ * is in `docs/seam-suggestions-plan.md`.
+ *
+ * Batched and sequential against a shared public chunkedgraph (SEAM's invariant 8), which is what
+ * keeps a pool to a request per fifty roots rather than one per candidate.
+ *
+ * **A root the graph does not list comes back absent, not zero** — zero is the smallest possible
+ * size and would read as a speck. Note that nothing here *refuses* a short answer: SEAM's own
+ * fetching layer does, by name (`sizes.fetch` raises on a root `get_leaves_many` left out),
+ * because at that layer an absent root means the request was wrong rather than that there is no
+ * data. Coda's `size_features` twin does not exist yet, and it owes that refusal.
+ *
+ * **The memo fills on completion, so two concurrent calls over the same roots both fetch.**
+ * Deliberate, for now: the search runs one open end at a time, and the obvious fix — a promise
+ * per root, as `memoPromise` gives — would key per root and so destroy the fifty-root batching
+ * that is the point of this function. Sharing in flight means sharing a *batch*, which is worth
+ * writing only once something calls this concurrently.
+ */
+export async function l2ChunkCounts(
+  graphene: GrapheneSource,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+): Promise<Map<string, number>> {
+  const at = (root: string) => `${graphene.server}|${graphene.table}|${root}`
+  const distinct = distinctStrings(roots)
+  const wanted = distinct.filter((root) => !l2Counts.has(at(root)))
+  for (let i = 0; i < wanted.length; i += LEAVES_CHUNK) {
+    // Sequential, as the comment in `rootsByMajority` says of its own loop.
+    const lists = await leavesMany(graphene, wanted.slice(i, i + LEAVES_CHUNK), options)
+    for (const root of wanted.slice(i, i + LEAVES_CHUNK)) {
+      /*
+       * **Absence is remembered too, as its own state.** A root the graph does not list is not
+       * going to start appearing — a chunkedgraph id either exists or never did — so leaving it
+       * out of the memo means every later pool holding it pays another round trip that can only
+       * answer "still absent". The search's premise is that roots recur across neighbouring
+       * tips, so that is one unremovable request per open end.
+       *
+       * `ABSENT` rather than 0: zero is a count this never took, and the smallest possible one.
+       */
+      l2Counts.set(at(root), lists.get(root)?.length ?? ABSENT)
+    }
+  }
+  const out = new Map<string, number>()
+  for (const root of distinct) {
+    const held = l2Counts.get(at(root))
+    if (held !== undefined && held !== ABSENT) out.set(root, held)
+  }
+  return out
 }

@@ -124,7 +124,7 @@ lean on:
 | `data/cave/live.test.ts`                       | CAVE against real services (skipped without `CAVE_TOKEN`): endpoint shapes, BANC row caps, flat/graphene/L2/skeleton-service routes, auth_info |
 | `data/cave/nuclei.test.ts`                     | a neuron's nucleus: position in nm, merge vs absence, a materialization asked only about new ids     |
 | `data/cave/oauth.test.ts`                      | CAVE sign-in minus the window: the login prefix read off `auth_info`, refusals, terms-of-service arm, identity lookup |
-| `data/cave/rootIds.test.ts`                    | the root-id drift check: wire format, UTC instant, when it re-asks, late landers                     |
+| `data/cave/rootIds.test.ts`                    | the root-id drift check: wire format, UTC instant, when it re-asks, late landers; and the level-2 chunk counts SEAM's ranker reads as sizes |
 | `data/csv.test.ts`                             | reading a foreign CSV: quoting, delimiter, header bias, name suffixes, values never widened          |
 | `data/custom/neurons.test.ts`                  | the custom neuron table's schema half vs the table built at run time, for every id-column shape      |
 | `data/datasetCache.test.ts`                    | "everything cached for this dataset" as a key question: version prefixes, oldest entry, pre-sidecar entries |
