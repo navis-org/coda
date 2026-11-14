@@ -31,10 +31,11 @@
  */
 
 import { refuseIfOverCrashFloor } from '../../core/limits'
+import { inFlight } from '../concurrency'
 import type { FetchOptions } from './transport'
 import { fetchBytes, fetchInfo, isNotFound } from './transport'
 import type { ShardingSpec } from './sharded'
-import { readShardedObject } from './sharded'
+import { readShardedObjects } from './sharded'
 import type { LabelBox, Triple, VoxelIndex } from './compressedSegmentation'
 import {
   NARROW_INDEX_LABELS,
@@ -519,27 +520,6 @@ export function gridShapeOf(scale: VolumeScale): Triple {
 }
 
 /**
- * Fetch one chunk's bytes, by whichever route the scale is published through.
- *
- * A sharded scale's chunk is **absent rather than missing** where no object exists: an unwritten
- * region of a sharded volume simply has no key, where an unsharded one 404s. Both mean "no data
- * here", and both come back as `undefined` so the caller fills the region with zero.
- */
-async function fetchChunk(
-  base: string,
-  scale: VolumeScale,
-  chunk: ChunkRef,
-  options: FetchOptions,
-): Promise<ArrayBuffer | undefined> {
-  if (!scale.sharding) {
-    return fetchBytes(`${base}/${scale.key}/${chunk.name}`, options)
-  }
-  const key = compressedMortonCode(chunk.grid, gridShapeOf(scale))
-  const found = await readShardedObject(`${base}/${scale.key}`, key, scale.sharding, options)
-  return found?.buffer
-}
-
-/**
  * The part of `chunk` that `box` wants, in both coordinate systems at once.
  *
  * Written once because it was written three times — chunk-local in `readLabelBox`, box-local a
@@ -601,7 +581,33 @@ export interface CutoutOptions extends FetchOptions {
   readonly info?: Pick<VolumeInfo, 'numChannels'>
 }
 
-const DEFAULT_CONCURRENCY = 8
+/**
+ * How many chunk requests a cutout keeps in flight.
+ *
+ * **Measured, where the 8 this replaced was not.** On a 324-chunk read of the Aedes EM (three
+ * reads each, median, in Chrome):
+ *
+ *   | in flight | 4      | 8      | 16     | 32     | 64     | 100    |
+ *   |-----------|--------|--------|--------|--------|--------|--------|
+ *   | median    | 5736ms | 3662ms | 2511ms | 2288ms | 2189ms | 2246ms |
+ *
+ * Steep to 16, modest to 32, flat thereafter: 8 → 32 is **1.6×**, and 32 → 100 adds about 2%,
+ * inside the spread of the repeats.
+ *
+ * **So why not 100, which the mesh and skeleton readers use on these same buckets?** Because
+ * what it spends is the HTTP/2 stream budget on `storage.googleapis.com` — about 100 for the
+ * whole origin, shared with those readers, with CAVE's fragment reads and with Explore's
+ * thumbnails (`index.ts`'s `BUCKET_CONCURRENCY` says so from the other side). A cutout claiming
+ * the entire budget would starve a mesh fetch running beside it, and the measurement says it
+ * would buy nothing for doing so. 32 takes essentially all of the gain and leaves the rest of
+ * the origin room to work.
+ *
+ * **It matters less than it used to.** Since `overChunks` coalesces a sharded scale's chunks
+ * into runs, one SEAM scene window is about 12 requests — fewer than this limit, so the limit
+ * does not bind at all there. This is for the reads that are still many requests: large boxes,
+ * and unsharded scales, which get one request per chunk however they are read.
+ */
+const DEFAULT_CONCURRENCY = 32
 
 /**
  * Fetch every chunk the box touches and hand each to `paste`, at most `concurrency` at a time.
@@ -611,6 +617,13 @@ const DEFAULT_CONCURRENCY = 8
  * here" and anything else is not an answer about the data**. That rule was stated in two places
  * and had already drifted into two spellings of the overlap arithmetic beside it. A fix applied
  * to one copy passes every test while the other stays wrong.
+ *
+ * **A sharded scale is read as runs, not as chunks.** Its objects are packed into a few big
+ * files in morton order, so a box's chunks are usually neighbours *in the file* — and a request
+ * costs a round trip whatever its size (0.21 s of time-to-first-byte against the Aedes EM,
+ * measured flat from 139 KB to 13.9 MB). Asking per chunk pays that per chunk: one scene
+ * window's 100 chunks took 14.2 s that way and 2.0 s coalesced. `readShardedObjects` owns the
+ * merging rule and the measurement behind it.
  */
 async function overChunks(
   base: string,
@@ -620,17 +633,63 @@ async function overChunks(
   paste: (part: ChunkOverlap, buffer: ArrayBuffer) => void | Promise<void>,
 ): Promise<void> {
   const chunks = chunksCovering(scale, box)
+  const concurrency = options.concurrency ?? DEFAULT_CONCURRENCY
   let done = 0
-  await inFlight(chunks, options.concurrency ?? DEFAULT_CONCURRENCY, async (chunk) => {
-    const buffer = await fetchChunk(base, scale, chunk, options).catch((error: unknown) => {
-      // Absent, not failed: an unwritten chunk is ordinary at the edge of a volume. A CORS
-      // refusal or a 500 is not an answer about the data, and still throws.
-      if (isNotFound(error)) return undefined
-      throw error
-    })
+  /*
+   * Progress is counted against the chunks rather than the requests, because that is what the
+   * caller's bar is about and what it was counting before: coalescing changes how many requests
+   * carry them, not how many there are. Every chunk passes through here exactly once, whether
+   * its bytes arrived or not.
+   */
+  const landed = async (chunk: ChunkRef, buffer: ArrayBuffer | undefined) => {
     done += 1
     options.onProgress?.(done, chunks.length)
     if (buffer) await paste(overlapOf(chunk, box), buffer)
+  }
+
+  if (scale.sharding) {
+    const shape = gridShapeOf(scale)
+    // Also the record of what is still outstanding: a chunk is deleted as its bytes arrive, so
+    // whatever remains at the end never did.
+    const byKey = new Map<bigint, ChunkRef>()
+    for (const chunk of chunks) byKey.set(compressedMortonCode(chunk.grid, shape), chunk)
+    /*
+     * Pasted as each object arrives, not after the last one. That keeps the decode overlapping
+     * the network — `decodeImageChunk` is a `createImageBitmap`, which the browser runs off the
+     * main thread, so several genuinely proceed at once — and keeps the progress callback
+     * ticking. Collecting the runs first and pasting afterwards made both strictly serial.
+     */
+    await readShardedObjects(
+      `${base}/${scale.key}`,
+      [...byKey.keys()],
+      scale.sharding,
+      (key, buffer) => {
+        const chunk = byKey.get(key)!
+        byKey.delete(key)
+        return landed(chunk, buffer)
+      },
+      { ...options, concurrency },
+    )
+    /*
+     * Whatever is left never arrived — an unwritten region, or a shard file that is not there.
+     * Absent means zero for a cutout, and the caller's denominator counts chunks, so these still
+     * have to land.
+     */
+    for (const chunk of byKey.values()) await landed(chunk, undefined)
+    return
+  }
+
+  await inFlight(chunks, concurrency, async (chunk) => {
+    // One object per chunk, named by its box. Absent, not failed: an unwritten chunk is ordinary
+    // at the edge of a volume. A CORS refusal or a 500 is not an answer about the data, and
+    // still throws.
+    const buffer = await fetchBytes(`${base}/${scale.key}/${chunk.name}`, options).catch(
+      (error: unknown) => {
+        if (isNotFound(error)) return undefined
+        throw error
+      },
+    )
+    await landed(chunk, buffer)
   })
 }
 
@@ -804,42 +863,6 @@ function decodeRawLabels(
     }
   }
   return { labels: BigUint64Array.from(labels), index, size }
-}
-
-/**
- * Run `work` over `items`, at most `limit` at a time.
- *
- * A pool rather than `Promise.all`: eight chunks is 25 MB and a browser will happily open all of
- * them at once, but a caller reading a hundred boxes would then have eight hundred requests in
- * flight at a shared public bucket. The limit is the politeness, and it is the caller's to set.
- *
- * **Deliberately not `mapWithConcurrency`** (`src/data/concurrency.ts`), which is the house pool
- * and would otherwise be the obvious call. It forgives a failed item — `undefined` in its place,
- * throwing only if every item failed — and that rule is exactly wrong here: one 500 would become
- * a silently zero-filled eighth of the box, which is the ordinary-looking-but-wrong answer this
- * module is written against. Here the first failure fails the read, though its siblings still
- * run to completion before the rejection surfaces.
- */
-async function inFlight<T>(
-  items: readonly T[],
-  limit: number,
-  work: (item: T) => Promise<void>,
-): Promise<void> {
-  let next = 0
-  const runners = Array.from(
-    { length: Math.max(1, Math.min(limit, items.length)) },
-    async () => {
-      for (;;) {
-        const at = next
-        next += 1
-        // `at >= length` rather than `items[at] === undefined`, so an array holding an `undefined`
-        // does not end the work early — a trap for the next caller rather than a bug today.
-        if (at >= items.length) return
-        await work(items[at]!)
-      }
-    },
-  )
-  await Promise.all(runners)
 }
 
 /** A box of scalar values — an image volume, or a `raw` scale a caller wants unfactored. */

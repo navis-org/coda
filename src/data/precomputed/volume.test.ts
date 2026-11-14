@@ -9,10 +9,11 @@
  * whose offset is zero, which is most test data, exercises none of it.
  */
 
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import morton from './__fixtures__/mortonCodes.json'
 import { NARROW_INDEX_LABELS } from './compressedSegmentation'
+import { resetShardCache } from './sharded'
 import {
   boxAround,
   chunksCovering,
@@ -757,5 +758,161 @@ describe('readScalarBox', () => {
         { lo: [0, 0, 0], hi: [4, 4, 2] },
       ),
     ).rejects.toThrow(/decodes to 8-bit/)
+  })
+})
+
+/**
+ * A whole sharded store in one buffer: the shard index, the objects, then the minishard index.
+ *
+ * `neuroglancer_uint64_sharded_v1` as `sharded.ts` reads it — one minishard, `identity` hashing,
+ * so every key lands in `0.shard`. The minishard index is three parallel uint64 arrays, and both
+ * the keys and the offsets are **delta-encoded**, which is the part worth building by hand: a
+ * reader that treats either as absolute still parses and still returns bytes, just the wrong
+ * ones.
+ */
+function buildShard(objects: readonly { key: bigint; body: Uint8Array }[]): ArrayBuffer {
+  const dataStart = 16 // (1 << minishard_bits) * 16, with minishard_bits 0
+  const bodies = objects.reduce((total, one) => total + one.body.byteLength, 0)
+  const file = new Uint8Array(dataStart + bodies + objects.length * 24)
+  const view = new DataView(file.buffer)
+
+  let at = dataStart
+  const offsets: number[] = []
+  for (const one of objects) {
+    offsets.push(at - dataStart)
+    file.set(one.body, at)
+    at += one.body.byteLength
+  }
+
+  // The shard index entry: where this minishard's index lives, relative to `dataStart`.
+  const indexStart = at - dataStart
+  view.setBigUint64(0, BigInt(indexStart), true)
+  view.setBigUint64(8, BigInt(indexStart + objects.length * 24), true)
+
+  const n = objects.length
+  let lastKey = 0n
+  let cursor = 0
+  for (const [i, one] of objects.entries()) {
+    view.setBigUint64(at + i * 8, one.key - lastKey, true) // keys, delta-encoded
+    lastKey = one.key
+    view.setBigUint64(at + (n + i) * 8, BigInt(offsets[i]! - cursor), true) // offsets, delta
+    view.setBigUint64(at + (n * 2 + i) * 8, BigInt(one.body.byteLength), true) // lengths
+    cursor = offsets[i]! + one.body.byteLength
+  }
+  return file.buffer as ArrayBuffer
+}
+
+/** Serve one shard file, honouring `Range` — which `serveBytes` does not, and this needs. */
+function serveShard(url: string, file: ArrayBuffer): { asked: string[]; restore: () => void } {
+  const original = globalThis.fetch
+  const asked: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) !== url) return new Response('no', { status: 404 })
+    const range = new Headers(init?.headers).get('range')
+    asked.push(range ?? 'whole')
+    if (!range) return new Response(file, { status: 200 })
+    const [from, to] = /bytes=(\d+)-(\d+)/.exec(range)!.slice(1).map(Number) as number[]
+    return new Response(file.slice(from!, to! + 1), { status: 206 })
+  }) as typeof fetch
+  return {
+    asked,
+    restore: () => {
+      globalThis.fetch = original
+    },
+  }
+}
+
+/**
+ * The sharded arm of `overChunks`, end to end.
+ *
+ * **This is the path with the silent failure.** A box's chunks are turned into morton keys here
+ * and looked up in a shard there, and a disagreement anywhere along that round trip — the grid
+ * shape, the key, the offset arithmetic — hands back a box of **zeros** with no error at all,
+ * which for an image is black and for a segmentation is "no object". Every other test in this
+ * file drives the unsharded arm, where a chunk is named by its box and a wrong name 404s loudly.
+ */
+describe('a sharded scale', () => {
+  const base = 'https://example.org/em'
+  const scale: VolumeScale = {
+    key: '1_1_1',
+    resolution: [1, 1, 1],
+    size: [16, 1, 1],
+    voxelOffset: [0, 0, 0],
+    chunkSize: [8, 1, 1],
+    encoding: 'raw',
+    dataType: 'uint8',
+    sharding: {
+      '@type': 'neuroglancer_uint64_sharded_v1',
+      hash: 'identity',
+      preshift_bits: 0,
+      minishard_bits: 0,
+      shard_bits: 0,
+    },
+  }
+  /* Two chunks side by side in x, so their morton codes are 0 and 1 and their order is visible. */
+  const first = Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8])
+  const second = Uint8Array.from([11, 12, 13, 14, 15, 16, 17, 18])
+
+  /*
+   * **The minishard cache is module state and outlives a test.** Without this, the third case
+   * below read the *previous* case's index — which names a key its own shard does not hold — and
+   * came back with bytes from the wrong place and `missingChunks` of 0. No error, no failed
+   * request: exactly the silent wrongness this block exists to catch, arriving by way of the
+   * test setup rather than the code.
+   */
+  beforeEach(() => {
+    resetShardCache()
+  })
+
+  it('reads both chunks out of one shard, in the right order', async () => {
+    const store = serveShard(
+      `${base}/1_1_1/0.shard`,
+      buildShard([
+        { key: 0n, body: first },
+        { key: 1n, body: second },
+      ]),
+    )
+    try {
+      const got = await readScalarBox(base, scale, { lo: [0, 0, 0], hi: [16, 1, 1] })
+      expect([...got.values]).toEqual([...first, ...second])
+      expect(got.missingChunks).toBe(0)
+    } finally {
+      store.restore()
+    }
+  })
+
+  /*
+   * The whole point of coalescing: two objects that touch are one request. Counted on the
+   * ranges actually asked for, because "it returned the right bytes" is true of the slow path
+   * too — this is the only assertion that can tell them apart.
+   */
+  it('fetches two touching objects as one ranged request', async () => {
+    const store = serveShard(
+      `${base}/1_1_1/0.shard`,
+      buildShard([
+        { key: 0n, body: first },
+        { key: 1n, body: second },
+      ]),
+    )
+    try {
+      await readScalarBox(base, scale, { lo: [0, 0, 0], hi: [16, 1, 1] })
+      // One for the shard index, one for the minishard index, one for both objects together.
+      const data = store.asked.filter((one) => one === 'bytes=16-31')
+      expect(data).toHaveLength(1)
+      expect(store.asked).toHaveLength(3)
+    } finally {
+      store.restore()
+    }
+  })
+
+  it('reads a key the store does not hold as an absence, not an error', async () => {
+    const store = serveShard(`${base}/1_1_1/0.shard`, buildShard([{ key: 0n, body: first }]))
+    try {
+      const got = await readScalarBox(base, scale, { lo: [0, 0, 0], hi: [16, 1, 1] })
+      expect([...got.values]).toEqual([...first, ...new Uint8Array(8)])
+      expect(got.missingChunks).toBe(1)
+    } finally {
+      store.restore()
+    }
   })
 })
