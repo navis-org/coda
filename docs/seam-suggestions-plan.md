@@ -1108,6 +1108,12 @@ logit. See "The `za` refit lands" below.
   `fixture.json` predates it and has none.
 - **A fixed `filled` value.** A candidate whose patch failed takes its seed's lowest score *over
   the batch*; a browser scoring one tip at a time has no batch. Needed before Phase 7, not before.
+- **CORS on the EM bucket** — `zetta_lee_mosquito_001_alignment_central`, the datastack's own
+  `aligned_volume.image_source`, sends no `Access-Control-Allow-Origin` at all, where the
+  segmentation bucket sends `*`. A browser can still read it, by the `gcs-api` route Coda keeps
+  for exactly this case. Worth asking for as tidiness — it costs Coda one refused request per
+  bucket per session — but **not for speed**: the same object by both endpoints reads at the same
+  rate, which is measured below. An earlier version of this entry claimed otherwise.
 - **`ph_a5`, the EM-texture head, exported as a model** — or a decision that it stays data-only.
   It is the single reason `stages.ts` has two shapes rather than one: `head_s<k>` is published as
   a *column*, so a tip read from a set reaches `q` and `shown` while a tip searched live stops at
@@ -1698,3 +1704,217 @@ contradicted the three-call design that exists because a whole list is 215 MB in
 - **The node does not publish `head_s<k>`**, so recomputing split's half from the node's own
   tables is not currently possible — only from the parquet. That is a column decision for whoever
   builds the card, not a gap in the stages.
+
+## Arm B, and what one scene window costs to read (2026-11-14, `pnpm probe:scene-em`)
+
+SEAM's **arm B** scores a whole tip from one 256³ window at 32 nm instead of one 129³ patch per
+candidate: the backbone runs once, each candidate reads the stride-8/16/32 maps over its own
+voxels within 1 µm of its contact and over Q's voxels there, and a small head turns that plus
+`[-geo_rank, log vol]` into a logit per candidate and a **"none of these"** logit. Its case is
+cost, not accuracy — production still ranks better (first place tiny 0.670 against 0.607,
+ordinary 0.816 against 0.726) — and SEAM measured the saving on 2026-11-14: steps 5–8 on one
+~500-tip neuron go from 69 minutes to 20 on a laptop, 6.8 to 3.1 on a cluster node, almost all of
+it GPU.
+
+Every one of those numbers was taken with the EM on a local disk or a fast bucket link. **The
+question for Coda is what the window costs to *read* in a browser**, which nothing had measured,
+and it is the question that decides whether arm B is cheaper here at all.
+
+### Measured, at a real open end (`searchEnd.json`'s, the one `probe:candidate-search` ranks)
+
+| window | box read | EM chunks | EM read | again | segmentation |
+|---|---|---|---|---|---|
+| 129³ | 129×129×94 | 18 | 3.7 s | 2.6 s | 1.3 s |
+| 192³ | 192×192×138 | 64 | 11.3 s | 10.5 s | 1.2 s |
+| **256³** | **256×256×183** | **100** | **14.0 s** | **17.2 s** | **0.5 s** |
+
+**The byte and MB/s columns this table used to carry have been removed, because they were
+wrong** — the probe drained its CDP traffic counter once per window size, after the cold read,
+the second read *and* the segmentation read, so "EM MB" was two reads over one read's time, about
+2× overstated. The times were always of one read and stand. The independent layout measurement
+below puts the 256³ window's own chunks at **13.7 MB**. The probe now gives each read its own
+`evaluate` with the counter drained between.
+
+Three runs of the probe put the 256³ EM read between 14 and 21 s. **A window is about 14 MB and
+14 seconds of network per tip**, against about 1.8 s of GPU per tip that SEAM's laptop timing
+saves. So on this link arm B's read costs several times what its scoring saves, and the whole
+cost argument has to be re-made for a browser rather than carried over.
+
+**The box is not the window.** A 256³ window is 256 planes at the *xy* spacing, resampled from
+45 nm sections, so the box to read is 256 × 256 × **183 sections**. A check asserting a cube
+fails against a perfectly correct read — it did, first time.
+
+### Three explanations tried, and only the third survived
+
+- **Not the decode.** Timed stage by stage on twelve real chunks: `createImageBitmap` 3.7 ms,
+  `drawImage` 0.3, `getImageData` 0.5, the RGBA → grey loop 0.6 — **5.1 ms a chunk**, so about
+  510 ms for all hundred. Rewriting the decoder would buy 3% of the read.
+- **Not queueing, and not concurrency.** The same window at 8 / 16 / 32 / 64 requests in flight:
+  13.5 / 16.2 / 11.7 / 10.7 s. Isolated from the decode and the index reads — 100 × 139 KB ranges
+  of one shard, in Chrome — it is flat: **0.76 / 0.83 / 0.76 MB/s at 8 / 32 / 100 in flight**.
+  Concurrency buys nothing at all.
+- **Not the route either, and this was my first wrong answer.** The same object and the same
+  range by both endpoints is identical: 139 KB in 0.43–0.51 s, ~290 KB/s, by the XML endpoint and
+  by `gcs-api` alike (`curl`, which ignores CORS, so both are reachable). The 2.0 against
+  16.1 MB/s comparison that suggested otherwise was two different objects in two encodings, and
+  it was wrong.
+- **The size of each request.** TTFB is a flat **0.21 s** whatever the range; throughput ramps
+  with it — 139 KB at 0.32 MB/s, 1.4 MB at 1.6, 13.9 MB at **10.6**. A sharded chunk read is a
+  small ranged read, so a window pays ~100 round trips where it could pay one.
+
+### The reason it is on that route: the EM bucket sends no CORS headers
+
+`zetta_lee_mosquito_001_alignment_central` — the datastack's own `aligned_volume.image_source` —
+answers with no `Access-Control-Allow-Origin` at all, where the segmentation bucket
+(`fanc-fly_segmentation`) answers `*`. So a direct read is refused and `transport.ts` falls to
+**`gcs-api`**, Google's JSON API, which answers CORS for any bucket: verified against this bucket
+at 200 with `access-control-allow-origin`, and 206 with `Content-Range` under a `Range` request,
+which is what the sharded reader needs.
+
+**The embedded neuroglancer is unaffected, and not because it is luckier.** Its GCS driver sends
+*every* bucket to that same JSON API — `kvstore/gcs/index.js` builds
+`storage/v1/b/<bucket>/o/<key>?alt=media` for everything but one hardcoded Seung-lab path — so it
+never asks the endpoint that refuses, whatever the bucket's policy. `caveScene` passes
+`precomputed://gs://…` through unchanged, which is what reaches that driver. Coda's own reader is
+the one that tries direct first, because `imageVolumeOf` rewrites `gs://` to the XML endpoint.
+So the missing policy costs Coda a refusal per bucket per session and costs the viewer nothing —
+and the two endpoints are the same speed, so it costs no throughput either.
+
+**The viewer is on the same endpoint and reads the same way, so it pays the same per-chunk
+price.** Its one difference is concurrency: `data_management_context.js` sets a download item
+limit of **100**, against this reader's default of 8. That turns out not to help — the isolated
+measurement below is flat from 8 to 100 in flight — because a browser pools an origin onto one
+HTTP/2 connection. With *separate* connections the server scales nearly linearly (`curl` at 1 / 8
+/ 16 in parallel: 0.26 / 2.06 / 3.81 MB/s), so this is the browser's connection model rather than
+a limit at either end. It is also why a cancelled fine-mip request in the review card is a pure
+loss: nothing was cached, and neuroglancer's `&neuroglancer=<random hex>` means the URL would
+never have been reused anyway.
+
+That is the route that makes this possible at all, and it was built for exactly this case
+(male-CNS). It works in a static deploy, where the `proxy` behind it does not. But it is a
+different endpoint with its own latency, and on this measurement it is where the cost is.
+
+**A measurement that does not say which route it took is not a measurement**, so the probe resets
+`transportModes()` and reports the route per bucket before timing anything. The first version did
+not, and read its own numbers as a decode cost.
+
+**Also corrected in the probe, because it would have misled the next reader:** the second read is
+not "warm", and no part of the gap between the two reads is a decode.
+
+**Measured, since the first explanation of that was a guess.** The chunk responses *are*
+cacheable — `public, max-age=3600, must-revalidate` on every 206 — and **0 of 19 were served
+from the disk cache** on a second read of the same box. The reason is the sharded layout, not
+the route and not CORS: a scale's chunks live inside one ~1 GB `.shard` object, and each is a
+`Range` into it at a different offset, which a browser will not serve from a cache of a resource
+it has never held whole. So every read of an EM window is a fresh download, every time, for any
+reader. (Only `info` is genuinely uncacheable, `no-store`; the data is not.)
+
+### What this means for the phase
+
+- **The EM read path itself needs nothing built.** `readScalarBox` already reads sharded jpeg,
+  already picks the `gcs-api` route, and `probe:volume` already showed its decode exact against
+  Pillow. This is a cost problem, not a capability gap.
+- **Coalescing the ranges is the whole lever, and it is worth 4×.** `sharded.ts` reads one chunk
+  per request today. A window's 100 chunks sit in **2 shard files and form 30 touching runs**, so
+  they can be fetched as 30 ranges with **no wasted bytes at all**. Measured on the real window's
+  own offsets, through Coda's own `fetchBytes`:
+
+  | fetched | requests | MB | wall |
+  |---|---|---|---|
+  | one request a chunk (today) | 100 | 13.7 | 14.2 s |
+  | coalesced, touching only | 30 | 13.7 | **3.4 s** |
+  | coalesced, bridging gaps up to 1 MB | 10 | 17.9 | **2.0 s** |
+
+  **Not the 12× an earlier draft of this section claimed** — that was the one-range ceiling
+  (13.9 MB in a single range runs at ~10 MB/s), which the layout does not permit. 4× at zero
+  waste is what the chunks actually allow, 7× if a 31% over-read is acceptable. The gap
+  distribution is bimodal: 64 KB of tolerance still gives 30 runs, and only a megabyte reaches 10.
+
+  On these numbers a 256³ window's EM goes from ~14 s to about 3.5, which is what decides whether
+  arm B is cheaper than the pair route in a browser rather than merely cheaper on a cluster.
+
+### Built (2026-11-14): `readShardedObjects`, and what it actually bought
+
+`sharded.ts` now reads many keys at once — locate, share the memoised minishard indices, sort by
+offset, merge runs within `MAX_COALESCE_GAP`, one request each, slice the objects back out —
+and `overChunks` takes that path for any sharded scale. `coalesceRuns` is exported for its test,
+because its failure is silent: a run that forgets an object, or claims bytes outside what it
+fetched, returns a cutout holding the wrong picture rather than an error.
+
+**The review chain (2× `/simplify`, 2× `/code-review medium`) found three real defects in the
+first cut of this**, all of the same kind — wrong answers that look like ordinary ones. A 404 was
+caught on the *batch* rather than the run, so one missing shard file would have zeroed a whole
+box where before it cost one chunk; then, once that moved inward, it was caught on the data read
+only, where a missing shard file 404s at its **index** read one step earlier. And the results
+came back as a `Map`, which held every object's bytes until the last run landed, serialised the
+decode after the network, and made progress jump from nothing to done. The sharded arm of
+`overChunks` had no unit coverage at all; it now has three cases built on a hand-made shard file,
+and writing them turned up a fourth instance of the same shape — the module's minishard cache
+outlives a test, so one case read the previous case's index and returned bytes from the wrong
+place with `missingChunks` of 0.
+
+Measured by re-running `probe:scene-em` on the same window, same link:
+
+| | before | after |
+|---|---|---|
+| requests for the EM | ~105 | **11–14** |
+| bytes | 13.7 MB | 17.9 MB (the over-read, as chosen) |
+| cold read, median of the in-flight sweep | 12.6 s | **~1.7 s** |
+| whole window, EM + segmentation | ~14 s | **~4 s** |
+
+**3.2× on like-for-like**, against the 7× the isolated range test suggested. The gap is the rest
+of the read — the minishard indices, ~0.6 s of decode, and assembling the box — which coalescing
+does not touch. The headline for arm B is that a tip's window now costs about 4 seconds of EM
+rather than about 14.
+
+### The throttle, opened (user, 2026-11-14): `DEFAULT_CONCURRENCY` 8 → 32
+
+The reader's chunk concurrency was a bare `8` with no rationale, while the mesh and skeleton
+readers have run at **100** on these same buckets all along, with the stream-budget argument
+written out. So the volume reader was the outlier.
+
+**The first sweep could not answer it, and nearly read as if it could.** After coalescing, a
+window is about **12 requests** — so every setting at or above 12 means "all of them at once",
+and the 64 and 100 rows that came out slower were network noise, not a concurrency effect. The
+measurement needs a read whose request count far exceeds the pool. On a 324-chunk box, three
+reads each, median:
+
+| in flight | 4 | 8 | 16 | 32 | 64 | 100 |
+|---|---|---|---|---|---|---|
+| median | 5736 ms | 3662 ms | 2511 ms | **2288 ms** | 2189 ms | 2246 ms |
+
+Steep to 16, modest to 32, flat thereafter. **8 → 32 is 1.6×; 32 → 100 adds about 2%**, inside
+the spread of the repeats.
+
+**32, not 100**, because what it spends is the HTTP/2 stream budget on `storage.googleapis.com` —
+about 100 for the whole origin, shared with the mesh reader, CAVE's fragment reads and Explore's
+thumbnails. A cutout claiming all of it would starve a mesh fetch beside it and, by this
+measurement, gain nothing for doing so.
+
+### Where the window ended up
+
+| | at the start | coalesced | and at 32 in flight |
+|---|---|---|---|
+| EM requests | ~105 | 11–14 | 11–14 |
+| EM read | 14.0 s | ~4.0 s | **1.7–2.8 s** |
+| bytes | 13.7 MB | 17.9 MB | 17.9 MB |
+| throughput | ~1.0 MB/s | — | **6.4 MB/s** |
+| whole window, EM + segmentation | ~14 s | ~4.4 s | **~4 s** |
+
+The spread on the read is network noise run to run; the sweep's medians (three reads each) are
+the steadier figure. Every count here excludes the two `info` fetches, which an earlier version
+of the probe counted inside the read's window.
+
+**About 4× on the EM, and a tip's window now costs ~5 s rather than ~16.** `probe:volume` still
+passes every check including the thirty named voxels against Pillow, so this is the same data,
+read in fewer and larger pieces.
+- **CORS on the EM bucket is worth much less than I first said.** The endpoints are the same
+  speed, so the missing policy costs one refused request per bucket per session and nothing else.
+  Still worth asking for, but it is tidiness, not performance.
+- **A 192³ window is not the saving it looks like.** SEAM carries it as a cost arm (it covers
+  tips but not merge lists), and on a route where cost tracks round trips rather than bytes a
+  third less data buys proportionally less than it appears to: measured after coalescing, 9.3 MB
+  against the 256³'s 17.9 MB, for a third less context and about the same number of requests.
+- **Nothing about arm B's *model* is settled by this.** There is still no ONNX export of
+  `SceneModel`, its batch norms run in training mode by design, and the checkpoint moves again
+  when SEAM retrains it on tree-ranked lists.

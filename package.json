@@ -100,6 +100,7 @@
     "probe:seam-open-ends": "node scripts/probe-seam-open-ends.mjs",
     "probe:seam-windows-py": "node scripts/probe-seam-windows-py.mjs",
     "probe:volume": "node scripts/probe-volume.mjs",
+    "probe:scene-em": "node scripts/probe-scene-em.mjs",
     "probe:cutout-summary": "node scripts/probe-cutout-summary.mjs",
     "vendor:seam": "node scripts/vendor-seam.mjs",
     "probe:candidate-search": "node scripts/probe-candidate-search.mjs",

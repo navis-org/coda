@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import fragmentFixture from './__fixtures__/dracoFragment.json'
 import manifestFixture from './__fixtures__/hemibrainManifest.json'
 import type { RestoreFetch } from '../../test/precomputedStubs'
-import { serveDracoWasmFromDisk } from '../../test/precomputedStubs'
+import { serveBytes, serveDracoWasmFromDisk } from '../../test/precomputedStubs'
 import type { MeshSource } from './index'
 import {
   FINE_TRIANGLE_BUDGET,
@@ -32,8 +32,8 @@ import { concatMeshes } from '../meshParts'
 import type { MultiResInfo } from './multires'
 import { chooseLod, fragmentOffset, fragmentTransform, parseMultiResManifest } from './multires'
 import { hashUint64, murmurHash3x86_128 } from './murmur'
-import type { ShardingSpec } from './sharded'
-import { locate } from './sharded'
+import type { MinishardEntry, ShardingSpec } from './sharded'
+import { coalesceRuns, locate, readShardedObjects } from './sharded'
 import {
   OVERSIZE,
   PrecomputedFetchError,
@@ -131,6 +131,133 @@ describe('shard location', () => {
     }
     // 0x123 -> minishard 0x3, shard 0x2.
     expect(locate(base, 0x123n, identity)).toMatchObject({ shard: 2, minishard: 3 })
+  })
+})
+
+/**
+ * Coalescing, which exists because a request costs a round trip whatever its size.
+ *
+ * The measurement is in `MAX_COALESCE_GAP`: one SEAM scene window's 100 EM chunks took 14.2 s
+ * as 100 requests and 2.0 s as 10. What is checked here is the arithmetic, because its failure
+ * mode is **silent** — a run that forgets an object, or that claims bytes outside what it
+ * fetched, hands back a cutout holding the wrong picture rather than an error.
+ */
+describe('coalescing sharded reads', () => {
+  const url = 'https://example.org/em/32_32_45/0.shard'
+  const at = (key: number, offset: number, length: number, where = url) => ({
+    key: BigInt(key),
+    url: where,
+    entry: { key: BigInt(key), offset, length } satisfies MinishardEntry,
+  })
+  /** Every key a set of runs claims, in order. A numeric sort: `.sort()` is lexicographic. */
+  const keysOf = (runs: ReturnType<typeof coalesceRuns>) =>
+    runs
+      .flatMap((run) => run.wanted)
+      .map((one) => Number(one.key))
+      .sort((a, b) => a - b)
+  /** Every object a run claims must lie inside the bytes that run actually asks for. */
+  const covered = (runs: ReturnType<typeof coalesceRuns>) =>
+    runs.every((run) =>
+      run.wanted.every(
+        ({ entry }) => entry.offset >= run.start && entry.offset + entry.length <= run.end,
+      ),
+    )
+
+  it('merges objects that touch into one request, with no wasted bytes', () => {
+    const runs = coalesceRuns([at(1, 1000, 100), at(2, 1100, 100), at(3, 1200, 100)])
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ url, start: 1000, end: 1300 })
+    expect(runs[0]!.end - runs[0]!.start).toBe(300) // exactly the three objects
+    expect(covered(runs)).toBe(true)
+  })
+
+  it('bridges a gap within the tolerance and splits on one past it', () => {
+    const runs = coalesceRuns([at(1, 0, 100), at(2, 1000, 100), at(3, 50_000, 100)], 5000)
+    expect(runs).toHaveLength(2)
+    expect(runs[0]).toMatchObject({ start: 0, end: 1100 })
+    expect(runs[1]).toMatchObject({ start: 50_000, end: 50_100 })
+    expect(covered(runs)).toBe(true)
+  })
+
+  /*
+   * Offsets arrive in whatever order the chunks were listed in — morton order, not file order —
+   * and a merge rule that assumed ascending input would start a fresh run at every step back,
+   * which still fetches every byte and so passes a "did I get my data" check.
+   */
+  it('sorts by offset before merging, whatever order the objects arrive in', () => {
+    const runs = coalesceRuns([at(3, 1200, 100), at(1, 1000, 100), at(2, 1100, 100)])
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.wanted.map((one) => Number(one.key))).toEqual([1, 2, 3])
+  })
+
+  it('never merges across shard files', () => {
+    const other = 'https://example.org/em/32_32_45/1.shard'
+    // Adjacent offsets, so only the differing shard file can be what splits them.
+    const runs = coalesceRuns([at(1, 1000, 100), at(2, 1100, 100, other)])
+    expect(runs).toHaveLength(2)
+    expect(new Set(runs.map((one) => one.url))).toEqual(new Set([url, other]))
+  })
+
+  /* `MAX_RUN_BYTES`: without it, a hundred objects a megabyte apart become one vast read. */
+  it('splits a run that would grow past the cap, rather than holding it whole', () => {
+    const runs = coalesceRuns([at(1, 0, 100), at(2, 500, 100), at(3, 1000, 100)], 1000, 600)
+    expect(runs.length).toBeGreaterThan(1)
+    expect(runs.every((run) => run.end - run.start <= 700)).toBe(true)
+    expect(keysOf(runs)).toEqual([1, 2, 3])
+    expect(covered(runs)).toBe(true)
+  })
+
+  /*
+   * A shorter object inside a longer one must not shorten the run — `end` takes the maximum.
+   * Nesting is not expected in a well-formed shard, and a reader that assumes it away truncates
+   * the enclosing object's bytes if it ever happens.
+   */
+  it('keeps the run long enough for an object nested inside another', () => {
+    const runs = coalesceRuns([at(1, 1000, 500), at(2, 1100, 50)])
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.end).toBe(1500)
+    expect(covered(runs)).toBe(true)
+  })
+
+  it('loses nothing: every object lands in exactly one run', () => {
+    const many = Array.from({ length: 60 }, (_, i) => at(i, i * 1000 + (i % 7) * 50, 200))
+    const runs = coalesceRuns(many, 1 << 20)
+    expect(keysOf(runs)).toEqual(many.map((one) => Number(one.key)).sort((a, b) => a - b))
+    expect(covered(runs)).toBe(true)
+  })
+
+  it('answers nothing for nothing', () => {
+    expect(coalesceRuns([])).toEqual([])
+  })
+
+  /*
+   * **A shard file that is not there is an absence, not a failure** — an unwritten region of a
+   * sharded volume, which `overChunks` fills with zero exactly as it does an unsharded 404.
+   *
+   * This is here because the first version of the coalesced reader tolerated the 404 only on the
+   * *data* read, and a missing shard file 404s at its **index** read, one step earlier — so the
+   * commonest half of the case failed the whole cutout instead. Nothing caught it: the arithmetic
+   * tests above all pass, and a real volume with no holes in it never takes the path.
+   */
+  it('reads a shard file that is not there as an absence, not an error', async () => {
+    const { restore, urls } = serveBytes({})
+    try {
+      const got: bigint[] = []
+      await expect(
+        readShardedObjects(
+          'https://example.org/em/32_32_45',
+          [1n, 2n, 3n],
+          HEMIBRAIN_SHARDING,
+          (key) => void got.push(key),
+          { concurrency: 4 },
+        ),
+      ).resolves.toBeUndefined()
+      expect(got).toEqual([])
+      // It really did try — a reader that never asked would also hand over nothing.
+      expect(urls.length).toBeGreaterThan(0)
+    } finally {
+      restore()
+    }
   })
 })
 
