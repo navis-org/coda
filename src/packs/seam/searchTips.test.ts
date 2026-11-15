@@ -14,15 +14,18 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
-import type { SearchedEnd } from './searchRun'
 import {
+  ASSESSED_CANDIDATE_FIELDS,
+  ASSESSED_TIP_FIELDS,
   SEARCH_TIP_FIELDS,
   candidatesTable,
+  searchOnly,
   tipsByNeuron,
   tipsFromTable,
   tipsSchema,
   tipsWithFirsts,
 } from './searchTips'
+import type { PublishedEnd } from './searchTips'
 import { OPEN_END_FIELDS } from './openEndsOps'
 import { published, schemaOf } from './suggestionTables'
 
@@ -47,8 +50,8 @@ function tipsTable(rows: readonly Partial<Record<string, CellValue>>[]): TableVa
   return makeTable(schema, data, 'table', rows.length)
 }
 
-function end(at: number, candidates: readonly { root: string; dist: number }[]): SearchedEnd {
-  return {
+function end(at: number, candidates: readonly { root: string; dist: number }[]): PublishedEnd {
+  return searchOnly({
     tip: at,
     rows: candidates.length,
     candRoot: BigUint64Array.from(candidates, (c) => BigInt(c.root)),
@@ -64,7 +67,7 @@ function end(at: number, candidates: readonly { root: string; dist: number }[]):
     pooled: candidates.length,
     tooFar: 0,
     anothersTip: 0,
-  }
+  })
 }
 
 describe('reading a Tips table', () => {
@@ -153,6 +156,7 @@ describe('the Candidates table', () => {
         end(1, [{ root: '200', dist: 0.3 }]),
       ],
       rows,
+      false,
     )
     expect(table.data[ID_COLUMN_NAME]).toEqual(['720', '720', '721'])
     // `end_uid` repeats across neurons on purpose here: it is only unique within one.
@@ -173,14 +177,14 @@ describe('the Candidates table', () => {
     const { rows } = tipsFromTable(
       tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0 }]),
     )
-    const table = candidatesTable([end(0, [{ root: '100', dist: 0.1 }])], rows)
+    const table = candidatesTable([end(0, [{ root: '100', dist: 0.1 }])], rows, false)
     for (const name of ['p_cand', 'conf', 'logit', 'score_s0', 'filled', 'shown']) {
       expect(table.data[name], name).toBeUndefined()
     }
   })
 
   it('is empty, and still the published shape, when nothing was searched', () => {
-    const table = candidatesTable([], [])
+    const table = candidatesTable([], [], false)
     expect(table.data[ID_COLUMN_NAME]).toEqual([])
     expect(table.schema.columns.map((c) => c.name)).toEqual([
       ID_COLUMN_NAME,
@@ -210,7 +214,7 @@ describe('the first candidate on the tip row', () => {
       { [ID_COLUMN_NAME]: '720', end_uid: 2, x: 0, y: 0, z: 0 },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(1, [{ root: '999', dist: 0.4 }])], rows)
+    const out = tipsWithFirsts(table, [end(1, [{ root: '999', dist: 0.4 }])], rows, false)
     expect(out.data['candidateId']).toEqual([null, null, '999'])
     expect(out.data['min_dist_um']).toEqual([null, null, 0.4])
   })
@@ -221,7 +225,7 @@ describe('the first candidate on the tip row', () => {
       { [ID_COLUMN_NAME]: '900', end_uid: 4, x: 0, y: 0, z: 0 },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(1, [{ root: '55', dist: 0.2 }])], rows)
+    const out = tipsWithFirsts(table, [end(1, [{ root: '55', dist: 0.2 }])], rows, false)
     expect(out.data['candidateId']).toEqual([null, '55'])
   })
 
@@ -230,7 +234,7 @@ describe('the first candidate on the tip row', () => {
       { [ID_COLUMN_NAME]: '800', end_uid: 0, x: 0, y: 0, z: 0, e_tip: 0.8 },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [], rows)
+    const out = tipsWithFirsts(table, [], rows, false)
     expect(out.data['e_tip']).toEqual([0.8])
   })
 
@@ -253,7 +257,7 @@ describe('the first candidate on the tip row', () => {
       },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(0, [])], rows)
+    const out = tipsWithFirsts(table, [end(0, [])], rows, false)
     expect(out.data['candidateId']).toEqual([null])
     expect(out.data['min_dist_um']).toEqual([null])
   })
@@ -276,7 +280,7 @@ describe('the first candidate on the tip row', () => {
       },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(0, [{ root: '55', dist: 0.2 }])], rows)
+    const out = tipsWithFirsts(table, [end(0, [{ root: '55', dist: 0.2 }])], rows, false)
     expect(out.data['candidateId']).toEqual(['55'])
     expect(out.data['p_top']).toEqual([null])
   })
@@ -302,7 +306,7 @@ describe('the first candidate on the tip row', () => {
       },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(0, [{ root: '55', dist: 0.2 }])], rows)
+    const out = tipsWithFirsts(table, [end(0, [{ root: '55', dist: 0.2 }])], rows, false)
     expect(out.data['candidateId']).toEqual(['55'])
     for (const name of ['p_top', 'q', 'r', 'shown']) {
       expect(out.data[name], name).toEqual([null])
@@ -312,7 +316,7 @@ describe('the first candidate on the tip row', () => {
   it('writes the contact under the tip’s own column names', () => {
     const table = tipsTable([{ [ID_COLUMN_NAME]: '800', end_uid: 0, x: 0, y: 0, z: 0 }])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(0, [{ root: '1', dist: 0.1 }])], rows)
+    const out = tipsWithFirsts(table, [end(0, [{ root: '1', dist: 0.1 }])], rows, false)
     expect(out.data['contact_x']).toEqual([100])
     expect(out.data['contact_y']).toEqual([200])
     expect(out.data['contact_z']).toEqual([300])
@@ -327,7 +331,7 @@ describe('the published tips schema', () => {
       column('mine', 'f64'),
       column('end_uid', 'i64'),
     )
-    const schema = tipsSchema(incoming)
+    const schema = tipsSchema(incoming, false)
     expect(schema.columns.map((c) => c.name).slice(0, 3)).toEqual([
       ID_COLUMN_NAME,
       'mine',
@@ -337,6 +341,170 @@ describe('the published tips schema', () => {
   })
 
   it('is the columns it folds on, when nothing is wired', () => {
-    expect(tipsSchema(undefined)).toEqual(schemaOf(SEARCH_TIP_FIELDS))
+    expect(tipsSchema(undefined, false)).toEqual(schemaOf(SEARCH_TIP_FIELDS))
+  })
+})
+
+/**
+ * The two tables when an assessor ran.
+ *
+ * The shape, not the arithmetic — `singleSeed.test.ts` holds that against SEAM's own numbers.
+ * What can go wrong here is a column promised and not written, a row published in the search's
+ * order under a `rank` that is the assessor's, or a tip left looking unsearched.
+ */
+describe('an assessed run', () => {
+  const scored = (one: PublishedEnd, order: readonly number[]): PublishedEnd => ({
+    ...one,
+    order: Int32Array.from(order),
+    scores: {
+      columns: {
+        score_s0: Float64Array.from(order, (_, i) => i),
+        logit: Float64Array.from(order, (_, i) => i),
+        p_cand: Float64Array.from(order, () => 0.5),
+        conf: Float64Array.from(order, () => 0.25),
+      },
+      filled: order.map(() => '' as const),
+      tip: { segclr: 1.5, p_tip: 0.4, p_top: 0.9, q: 0.36, r: 0.8, shown: true },
+    },
+  })
+
+  it('publishes the stage-6 columns beside the search’s, and only when asked', () => {
+    const { rows } = tipsFromTable(
+      tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0 }]),
+    )
+    const one = scored(
+      end(0, [
+        { root: '100', dist: 0.1 },
+        { root: '101', dist: 0.2 },
+      ]),
+      [1, 0],
+    )
+    const assessed = candidatesTable([one], rows, true)
+    // `[1, 0]`, because the rows go out in `order` and `score_s0` is in the list's own order —
+    // the one place the two orders have to be kept apart, which is why it is checked here.
+    expect(assessed.data['score_s0']).toEqual([1, 0])
+    expect(assessed.data['conf']).toEqual([0.25, 0.25])
+    expect(assessed.data['filled']).toEqual(['', ''])
+    expect(candidatesTable([one], rows, false).data['p_cand']).toBeUndefined()
+  })
+
+  /**
+   * **The row order is `order`'s and `rank` counts along it, while `geo_rank` stays the
+   * forest's.** A `rank` that counted the list's own index would number the published rows
+   * 2, 1 — believable, and read by `seam:review` as the queue's order.
+   */
+  it('numbers the rows by the order it publishes them in', () => {
+    const { rows } = tipsFromTable(
+      tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0 }]),
+    )
+    const table = candidatesTable(
+      [
+        scored(
+          end(0, [
+            { root: '100', dist: 0.1 },
+            { root: '101', dist: 0.2 },
+          ]),
+          [1, 0],
+        ),
+      ],
+      rows,
+      true,
+    )
+    expect(table.data['candidateId']).toEqual(['101', '100'])
+    expect(table.data['rank']).toEqual([1, 2])
+    expect(table.data['geo_rank']).toEqual([2, 1])
+  })
+
+  it('folds the tip’s own numbers onto its row, under SEAM’s names', () => {
+    const table = tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0 }])
+    const { rows } = tipsFromTable(table)
+    const out = tipsWithFirsts(
+      table,
+      [scored(end(0, [{ root: '55', dist: 0.2 }]), [0])],
+      rows,
+      true,
+    )
+    expect(out.data['p_tip']).toEqual([0.4])
+    expect(out.data['q']).toEqual([0.36])
+    expect(out.data['r']).toEqual([0.8])
+    expect(out.data['shown']).toEqual([true])
+    expect(out.data['candidateId']).toEqual(['55'])
+  })
+
+  /**
+   * A tip with no candidates still has a `segclr`, a `p_tip` and a verdict — SEAM publishes
+   * one, and a row left null would read as a tip nobody searched. Its *candidate* columns stay
+   * empty, which is the half that really is missing.
+   */
+  it('writes a searched tip’s own numbers even where its list is empty', () => {
+    const table = tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0 }])
+    const { rows } = tipsFromTable(table)
+    const out = tipsWithFirsts(table, [scored(end(0, []), [])], rows, true)
+    expect(out.data['p_tip']).toEqual([0.4])
+    expect(out.data['candidateId']).toEqual([null])
+    expect(out.data['min_dist_um']).toEqual([null])
+  })
+
+  /**
+   * **Invariant 3, inside one feature.** `scoreEnds.ts` writes the stage-6 values and
+   * `searchTips.ts` declares their columns, in two files — so this holds the two lists equal.
+   *
+   * It is what the typed `AssessedTip` and `EndScores.columns` are for, and this is the half a
+   * type cannot do: a name declared on a `Field` list and never written arrives as an all-null
+   * column under a perfectly good schema, which is a picker offered `p_cand` and given nulls.
+   */
+  it('declares exactly the stage-6 columns a scored end carries', () => {
+    const one = scored(end(0, [{ root: '55', dist: 0.2 }]), [0])
+    expect(Object.keys(one.scores!.tip).sort()).toEqual(
+      ASSESSED_TIP_FIELDS.map((field) => field.name).sort(),
+    )
+    expect([...Object.keys(one.scores!.columns), 'filled'].sort()).toEqual(
+      ASSESSED_CANDIDATE_FIELDS.map((field) => field.name).sort(),
+    )
+  })
+
+  it('offers the stage-6 columns in the schema, so a picker below sees them', () => {
+    const named = tipsSchema(undefined, true).columns.map((one) => one.name)
+    for (const name of ['segclr', 'p_tip', 'p_top', 'q', 'r', 'shown']) {
+      expect(named, name).toContain(name)
+    }
+    expect(tipsSchema(undefined, false).columns.map((one) => one.name)).not.toContain('q')
+  })
+})
+
+describe('the columns a run requires', () => {
+  /**
+   * Not a per-row question: a tip Model E found no cell near has a null `e_tip` and takes the
+   * fit's floor, which is designed. A missing **column** floors every tip, and `p_tip`'s weight
+   * on `e_tip` is about its weight on `segclr` — the whole run comes out underconfident and
+   * shows a fraction of what it should, with nothing saying why.
+   *
+   * **Asked by the reader, not beside it.** There were two doors into this for a round and
+   * nothing made a caller open both; one list computed from one flag is what closed that.
+   */
+  it('refuses an assessed run a Tips table with no e_tip column', () => {
+    // Built bare rather than through `tipsTable`, whose schema is Find Open Ends' and always
+    // carries `e_tip` — which is the point: this is about a table that came from somewhere else.
+    const bare = makeTable(
+      tableSchema(
+        column(ID_COLUMN_NAME, 'str'),
+        column('end_uid', 'i64'),
+        column('x', 'f64'),
+        column('y', 'f64'),
+        column('z', 'f64'),
+      ),
+      { [ID_COLUMN_NAME]: ['720'], end_uid: [0], x: [0], y: [0], z: [0] },
+    )
+    expect(() => tipsFromTable(bare, true)).toThrow(/nothing to score a tip with/)
+    // And the same table is perfectly good for a geometry-only run, which never reads it.
+    expect(() => tipsFromTable(bare, false)).not.toThrow()
+  })
+
+  it('takes a table whose e_tip is there but null', () => {
+    const table = tipsTable([
+      { [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0, e_tip: null },
+    ])
+    expect(() => tipsFromTable(table, true)).not.toThrow()
+    expect(tipsFromTable(table, true).rows[0]!.eTip).toBeUndefined()
   })
 })

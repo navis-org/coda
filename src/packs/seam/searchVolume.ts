@@ -57,9 +57,9 @@ import { supervoxelVolumeOf } from '../../data/cave/volumes'
 import type { CaveRequestOptions } from '../../data/cave/client'
 import type { RootsAt } from '../../data/cave/rootIds'
 import { instantOf, rootsAtInstant } from '../../data/cave/rootIds'
-import type { VolumeInfo, VolumeScale } from '../../data/precomputed/volume'
+import type { VolumeInfo, VolumeScale, VoxelBox } from '../../data/precomputed/volume'
 import { boxAround, openVolume, readLabelBox, scaleNear } from '../../data/precomputed/volume'
-import type { CandidatePoolRequest } from '../../pyodide/cutoutSummary'
+import type { CandidatePoolRequest, LabelBoxRequest } from '../../pyodide/cutoutSummary'
 import type { EndToSearch } from './searchRun'
 import type { TipRow } from './searchTips'
 
@@ -201,25 +201,44 @@ async function readPool(
   options: CaveRequestOptions,
 ): Promise<CandidatePoolRequest> {
   const box = boxAround(volume.scale, [...tip.nm], halfWidthNm)
-  const read = await readLabelBox(volume.base, volume.scale, box, {
-    ...options,
-    info: volume.info,
-  })
+  const read = await labelledBox(volume, volume.scale, box, queryRoot, options)
+  return { ...read, endNm: [...tip.nm] }
+}
+
+/**
+ * A box of supervoxels with the root of each, at the run's instant.
+ *
+ * Shared by the search's 6 µm box and the assessor's patch box, which is the **only** reason it
+ * is a function: the two read different scales around different points for different stages, and
+ * what they have in common is the supervoxel map. A second copy of this loop would look up the
+ * same supervoxels twice — and neighbouring boxes of one neuron overlap heavily, which is the
+ * whole premise `SearchVolume.roots` is built on. One map, written by one reader.
+ *
+ * `scale` is a parameter rather than `volume.scale` for the same reason: a patch is cut at
+ * `PATCH_NM` and the search box at whatever the ranker's manifest asked for, and on a dataset
+ * with a real pyramid those are two different scales of one volume.
+ */
+export async function labelledBox(
+  volume: SearchVolume,
+  scale: VolumeScale,
+  box: VoxelBox,
+  queryRoot: bigint,
+  options: CaveRequestOptions,
+): Promise<LabelBoxRequest> {
+  const read = await readLabelBox(volume.base, scale, box, { ...options, info: volume.info })
   const unknown = new BigUint64Array([...read.labels].filter((id) => !volume.roots.has(id)))
   if (unknown.length > 0) {
     const found = await rootsAtInstant(volume.graphene, volume.at, unknown, options)
     // Absence is written too: see the header on why re-asking is the cost that matters.
     for (let i = 0; i < unknown.length; i++) volume.roots.set(unknown[i]!, found[i]!)
   }
-  const roots = BigUint64Array.from(read.labels, (id) => volume.roots.get(id)!)
   return {
     labels: read.labels,
     index: read.index,
     size: read.size,
-    roots,
+    roots: BigUint64Array.from(read.labels, (id) => volume.roots.get(id)!),
     queryRoot,
-    resolutionNm: volume.scale.resolution,
+    resolutionNm: scale.resolution,
     loVoxels: box.lo,
-    endNm: [...tip.nm],
   }
 }

@@ -139,24 +139,36 @@ export const MERGE_ASSESSOR_TASK = 'merge-assessor'
 
 /**
  * The checkpoints that judge whether a candidate piece continues the neuron — stage 6 of SEAM's
- * merge-candidate pipeline, one row per seed.
+ * merge-candidate pipeline, one row per configuration.
  *
  * **One row per seed, not one model with three parts.** `parts` means graphs that must all run,
- * in order; the seeds are an ensemble, three independent answers to the same question. SEAM's
- * published fits average them, so a single seed is not the pipeline SEAM calibrated — see
- * `docs/seam-suggestions-plan.md`. Seed 0 alone is what this build offers, deliberately: a
- * third of the work, for an answer the refit will say how to read.
+ * in order; the seeds are an ensemble, three independent answers to the same question.
+ *
+ * **And a seed alone is a configuration, not a cheaper production.** Production averages the
+ * three and then applies a confidence model whose head reads EM; ref's weights, `p_tip`'s, the
+ * cutoff and the `r` staircase were all fitted against that. SEAM refitted every one of them for
+ * the single-seed, masks-only route (2026-11-15) and they ride in this manifest's `config`
+ * (`assessorModel.ts`), so the weights and the numbers they are read with are one version. What
+ * it costs against production, on SEAM's own calibration lists: first place unchanged (tiny 0.661
+ * against 0.670, ordinary 0.816 against 0.816), about 15% fewer suggestions clearing the cutoff,
+ * and precision where a proofreader judged unchanged. Two thirds of that loss is dropping split,
+ * a third the single seed.
+ *
+ * Dropping split is also why this route reads **segmentation only**, which is what makes it the
+ * cheap one in a browser: `probe:scene-em` measured a window's EM at ~14 MB and 14 s against a
+ * fraction of a second for the segmentation of the same window.
  */
 export const MERGE_ASSESSOR_MODELS: readonly AffinityModel[] = [
   {
-    id: 'sa2_mask_s0',
-    label: 'SEAM mask assessor, seed 0 (Aedes)',
+    id: 'n3_mal_mask_s0',
+    label: 'SEAM mask assessor, one seed (Aedes)',
     manifestUrl:
-      'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/models/seam-sa2-mask-s0/manifest.json',
+      'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/models/seam-n3-mal-mask-s0/manifest.json',
     detail:
       'Judges whether a candidate piece continues the neuron, from a 4 µm window of the ' +
-      'segmentation around the place they touch. Trained on the Aedes reconstruction’s own ' +
-      'edit history.',
+      'segmentation around the place they touch. One of SEAM’s three checkpoints, with the ' +
+      'stages after it refitted for running alone — the cheapest configuration that reaches a ' +
+      'calibrated answer.',
   },
 ]
 
@@ -164,6 +176,15 @@ export const MERGE_ASSESSOR_MODELS: readonly AffinityModel[] = [
 export function mergeAssessorModel(id: string): AffinityModel | undefined {
   return modelById(MERGE_ASSESSOR_MODELS, id)
 }
+
+/**
+ * The `Assessor` value that runs none.
+ *
+ * Here rather than on the node because it is the one string that must never be a model id, and
+ * this is the file that decides what the ids are. A row called `none` would otherwise be
+ * unreachable, and nothing on the node could see why.
+ */
+export const NO_ASSESSOR = 'none'
 
 /** The forest that ranks a candidate list — stage 5 of the merge-candidate pipeline. */
 export const MERGE_RANKER_TASK = 'merge-ranker'

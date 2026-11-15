@@ -26,8 +26,8 @@
  * voxel, so a generous margin is paid twice per tip.
  */
 
-import type { Triple, VolumeScale, VoxelBox } from '../../data/precomputed/volume'
-import { boxAroundAll, voxelSpan } from '../../data/precomputed/volume'
+import type { Triple, VolumeInfo, VolumeScale, VoxelBox } from '../../data/precomputed/volume'
+import { boxAroundAll, scaleNear, voxelSpan } from '../../data/precomputed/volume'
 
 /**
  * A patch's extent in voxels — `patches.PATCH`.
@@ -73,6 +73,33 @@ export const PATCH_REACH_NM = (PATCH_VOXELS * PATCH_NM) / 2 + PATCH_MARGIN_NM
  * forty overlapping 4 µm boxes fetch the same chunks forty times.
  */
 export function patchBoxFor(scale: VolumeScale, centresNm: readonly Triple[]): VoxelBox {
+  refusePatchScale(scale)
+  return boxAroundAll(scale, centresNm, PATCH_REACH_NM)
+}
+
+/**
+ * The scale of a volume that patches are cut from — **or a refusal**, which is the point.
+ *
+ * A run asks this once, before its first end, so a dataset publishing no 32 nm scale is one
+ * sentence rather than a failure on every end of every neuron. And it refuses *itself* rather
+ * than leaving the caller to pair it with a check: a picker that can hand back an unusable scale
+ * makes "a scale fit to cut a patch from" a thing no type holds, and the next caller gets the
+ * same obligation. `patchBoxFor` asks again per box, cheaply, because that is the one place that
+ * must not proceed on a wrong scale.
+ *
+ * It lives here rather than beside the volume because `PATCH_NM` is this file's — it is the
+ * resolution the network was trained at, with the paragraph above saying why "at least this
+ * fine" is not the same question. `scaleNear` is what `caveclient` does: ask for a resolution
+ * and take the volume's nearest.
+ */
+export function patchScaleFrom(info: VolumeInfo): VolumeScale {
+  const scale = scaleNear(info, PATCH_NM)
+  refusePatchScale(scale)
+  return scale
+}
+
+/** What 32 nm with square xy means, stated once for the two callers above. */
+function refusePatchScale(scale: VolumeScale): void {
   if (
     Math.abs(scale.resolution[0]! - PATCH_NM) > 1e-9 ||
     scale.resolution[0] !== scale.resolution[1]
@@ -83,7 +110,6 @@ export function patchBoxFor(scale: VolumeScale, centresNm: readonly Triple[]): V
         'volume from the one the network was trained on.',
     )
   }
-  return boxAroundAll(scale, centresNm, PATCH_REACH_NM)
 }
 
 /**

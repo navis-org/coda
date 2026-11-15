@@ -48,6 +48,13 @@ const NOT_ON_WEBGPU = ['MatMulInteger']
  * 206 MB, and moving 2% of pair decisions against the `mixed` build every measurement in
  * `docs/ml.md` was taken on. Publish one variant, or publish only ones you would be happy to get.
  *
+ * **And only variants fit for the same runtime.** SEAM's mask assessor breaks that half: it
+ * publishes a plain graph for Coda's own WGSL implementation of the architecture and a rewrite
+ * of the same weights for ONNX Runtime, 0.2 MB apart — so this would hand ONNX Runtime the one
+ * it is eight times slower on, runnable and wrong. A model whose variants are different *graphs*
+ * rather than different *quantisations* names its build at the opening site and never reaches
+ * here; `OpenSeamModelOptions.runtime` is how.
+ *
  * What it *can* check is the op inventory, which is a measured fact the manifest carries.
  *
  * **It cannot check fidelity per backend**, and that is a second way "runnable" misleads: every

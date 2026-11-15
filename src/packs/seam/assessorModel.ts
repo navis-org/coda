@@ -23,23 +23,49 @@
  * plausible logit.
  */
 
+import { GPU_ASSESSOR_VARIANT, openGpuAssessor } from './gpuAssessor/open'
+import type { SeamRuntime } from './openWindowModel'
 import { PATCH_NM, PATCH_VOXELS } from './patchBox'
+import type { PipelineFits } from './pipelineFits'
+import { pipelineFitsFrom } from './pipelineFits'
 
 /**
- * The graph, and the one form of it worth fetching.
+ * The graph, and the two builds of it — one per runtime, not one per quantisation.
  *
- * `assess` is the only part — one network, one input, one output. The variant is `matmul`
- * because `src/ml` is WebGPU or nothing and that form is **8.4x** the convolution one there
- * (1,122 ms a patch against 133, `docs/seam-assessor-speed.md`). On a CPU the ranking reverses,
- * which is why SEAM exports both; it is not why Coda hosts both, and it does not.
+ * `assess` is the only part: one network, one input, one output. What the manifest carries twice
+ * is the *same weights* in two shapes, because two runtimes read them differently:
  *
- * `ASSESSOR_VARIANT` is a **fixture pin, not a runtime choice**: production picks with
- * `preferredVariant` (`src/ml/support.ts`), which asks the browser what it can run. It is here
- * so the manifest test can name the variant it expects to find, and naming it twice at runtime
- * would be a second answer to "which build do we run".
+ * - **`conv`**, the plain export, is what Coda runs. `gpuAssessor/` implements the architecture
+ *   in WGSL and reads this file: **26.5 ms a patch** (`docs/seam-assessor-speed.md` §14).
+ * - **`matmul`** is the same weights cut into per-offset pieces so ONNX Runtime can avoid its
+ *   own 3D `Conv`, whose WebGPU backend is a per-element shader. 136 ms a patch, and
+ *   `segclrPlan.ts` refuses it rather than reassemble it. **It is not a fallback** — nothing in
+ *   `src/` opens it, and a run whose WGSL path refuses says so rather than quietly taking five
+ *   times as long. It is published because `pnpm probe:gpu-assessor` measures the pair, and
+ *   because a reader comparing against SEAM's own numbers needs the graph SEAM timed.
+ *
+ * **Neither is chosen by `preferredVariant`**, and that is the trap worth naming: it takes the
+ * smallest runnable variant, the two files are 0.2 MB apart, so left to it ONNX Runtime would
+ * silently move to the graph it is eight times slower on. Every opening site names its build.
+ * `ORT_ASSESSOR_VARIANT` is read only by the manifest test, which holds each build's `emits` to
+ * the runtime that reads it — the one place the two files are told apart before 133 MB is
+ * fetched. The one Coda opens with is `GPU_ASSESSOR_VARIANT`, beside the runtime that reads it.
  */
 export const ASSESSOR_PART = 'assess'
-export const ASSESSOR_VARIANT = 'matmul'
+export const ORT_ASSESSOR_VARIANT = 'matmul'
+
+/**
+ * The runtime Coda opens the assessor with, and the build it reads — **one object**.
+ *
+ * Paired here rather than named twice at the call site, because the two halves have to agree:
+ * `openSeamModel` prices the variant for the download-consent sentence and the opener fetches
+ * it, so two fields side by side could ask a reader to approve one 133 MB file and then fetch
+ * the other.
+ */
+export const ASSESSOR_RUNTIME: SeamRuntime = {
+  variant: GPU_ASSESSOR_VARIANT,
+  open: openGpuAssessor,
+}
 
 /** What the pack reads out of a `merge-assessor` manifest's `config`. */
 export interface AssessorConfig {
@@ -61,6 +87,21 @@ export interface AssessorConfig {
   readonly missingPatchScore: number
   /** What one patch costs the GPU, for a caller pricing a tip before it starts. */
   readonly gflopPerPatch: number
+  /**
+   * The stages after this one, as the configuration this checkpoint belongs to fitted them.
+   *
+   * **Carried with the weights, for the reason the ranker's constants are** (`rankerConfig.ts`):
+   * ref's three weights, `p_tip`'s three, the cutoff and the `r` staircase were refitted *for*
+   * one assessor in one configuration — one seed, masks only, no split — and SEAM says so in as
+   * many words ("These weights are new… This cutoff is new too"). A build that scored this
+   * checkpoint against production's three-seed fits would publish a probability for every tip and
+   * the right one for none.
+   *
+   * It is also what makes the search node self-contained. The numbers used to come from whichever
+   * published suggestion set the reader happened to point at, which made Coda's pipeline a
+   * property of somebody else's run.
+   */
+  readonly fits: PipelineFits
 }
 
 export class AssessorConfigError extends Error {}
@@ -158,5 +199,48 @@ export function parseAssessorConfig(blob: unknown, modelId: string): AssessorCon
       'what a candidate scores when its patch cannot be cut',
     ),
     gflopPerPatch: numberAt(config, 'gflopPerPatch', 'what a patch costs'),
+    fits: assessorFits(config, modelId),
   }
+}
+
+/**
+ * The configuration's own stages 7–9, and the two things that would otherwise run anyway.
+ *
+ * `pipelineFitsFrom` reads the block — the same reader a published set goes through, because it
+ * is the same block (`pipelineFits.ts`). What is asked **here** is whether this build can run
+ * what it describes, and both refusals are for shapes that would otherwise produce numbers:
+ *
+ * - **More than one seed.** An ensemble is several checkpoints, and a manifest is one. Fed one
+ *   score column, `scoreList` refuses — but only after the box has been read and the patches cut,
+ *   which is a tip's whole cost paid to learn something the manifest said on the first line.
+ * - **A split block.** Split's head reads EM, which this route never fetches: `probe:scene-em`
+ *   measured a window's EM at 14 MB and 14 seconds against a fraction of a second for the
+ *   segmentation, and dropping it is most of why this configuration is the cheap one. A tip
+ *   scored against a split configuration reaches `q_ref` and gets no verdict, so the review queue
+ *   would show nothing at all and say nothing about why.
+ */
+function assessorFits(config: Record<string, unknown>, modelId: string): PipelineFits {
+  if (config.pipeline === undefined) {
+    throw new AssessorConfigError(
+      `${modelId} carries no \`config.pipeline\`, so there is nothing to turn its logits into ` +
+        'a ranking or a probability. Repackage it with `pnpm make:assessor-manifest`, which ' +
+        'takes the block from the fixture of the configuration the checkpoint was fitted in.',
+    )
+  }
+  const fits = pipelineFitsFrom(config.pipeline, modelId)
+  if (fits.ref.length !== 1) {
+    throw new AssessorConfigError(
+      `${modelId}'s pipeline fits ${fits.ref.length} assessor seeds, and a manifest is one ` +
+        'checkpoint. An ensemble is several models, so its fits belong to whichever of them a ' +
+        'build can run all of — not to this one.',
+    )
+  }
+  if (fits.split) {
+    throw new AssessorConfigError(
+      `${modelId}'s pipeline states a \`split\` block, whose head scores a window of EM. This ` +
+        'route reads segmentation only, so every tip would reach `q_ref` and none would get a ' +
+        'verdict. It needs the fits of a configuration without split.',
+    )
+  }
+  return fits
 }

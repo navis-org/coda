@@ -20,10 +20,12 @@
  *
  * ## One patch per run, and why that is not a batching oversight
  *
- * The matmul export pins its batch axis to 1 — flattening `(N,C,X,Y,Z)` to `(C, voxels)` is
- * only the same tensor at N=1 — so the loop runs the graph once per candidate. It costs
- * nothing: batch size does not change throughput on this backend (measured,
- * `docs/seam-assessor-speed.md`), and at 133 ms a patch the per-call overhead is noise.
+ * The loop runs the graph once per candidate. It costs nothing: batch size does not change
+ * throughput on this backend (measured, `docs/seam-assessor-speed.md`), and PyTorch on the same
+ * GPU is no faster fed 1, 4 or 8 at a time either. Coda's own runtime runs **26.5 ms** a patch
+ * and ONNX Runtime's matmul export 136; against either, the per-call overhead is noise. (The
+ * matmul export also *cannot* batch — flattening `(N,C,X,Y,Z)` to `(C, voxels)` is only the same
+ * tensor at N=1 — which is why `parseAssessorConfig` refuses a batch above one.)
  *
  * What the group size does control is the Pyodide crossing and the Cancel latency, which is why
  * patches are asked for in groups rather than one at a time or all at once.
@@ -36,10 +38,21 @@ import type { AssessorPatches, OpenAssessorBox } from '../../pyodide/assessorPat
 import type { AssessorConfig } from './assessorModel'
 
 /**
+ * The two numbers scoring a patch actually needs.
+ *
+ * A narrowing of `AssessorConfig` rather than the whole of it, and it earns its line: the config
+ * also carries the configuration's stages 7-9 (`fits`), which belong to the *list* — the softmax
+ * within a tip, the tip's own probability, the cutoff — and not to running a graph over one
+ * patch. Taking the whole config here would let a later edit reach for a fit from inside the
+ * loop, which is where the one-patch-at-a-time reasoning below stops holding.
+ */
+export type ScoringConfig = Pick<AssessorConfig, 'patchVoxels' | 'missingPatchScore'>
+
+/**
  * How many patches to ask Pyodide for at a time.
  *
  * **Not a Cancel bound.** The signal is looked at between every patch, so a Cancel waits one
- * inference — about 133 ms — whatever this is; and the cut is off the critical path, because
+ * inference — about 26.5 ms on Coda's own runtime — whatever this is; and the cut is off the critical path, because
  * the next group is asked for before this one is scored. What the number actually trades is
  * crossings against bytes held in JavaScript: 25 crossings for a hundred-candidate tip, against
  * 8.4 MB of patches live, doubled while a prefetch is outstanding.
@@ -81,7 +94,7 @@ export interface AssessorScores {
  */
 export async function scoreCandidates(
   session: GraphRunner,
-  config: AssessorConfig,
+  config: ScoringConfig,
   open: OpenAssessorBox,
   options: AssessorRunOptions = {},
 ): Promise<AssessorScores> {
@@ -125,8 +138,11 @@ export async function scoreCandidates(
 
   /*
    * **The next group is asked for before this one is scored.** The cut happens in the Pyodide
-   * worker and the run on the GPU, so sequencing them leaves one idle throughout: ~40 ms a
-   * group against ~530 ms, which over a hundred-candidate tip is a second of GPU idle. One deep
+   * worker and the run on the GPU, so sequencing them leaves one idle throughout: ~40 ms a group
+   * against the ~106 ms of GPU a group of four now costs, which over a hundred-candidate tip is
+   * a second of GPU idle. **The margin used to be 40 against ~530** — the hand-written runtime
+   * took a patch from 136 ms to 26.5, so the cut now fills nearly 40% of the window it hides in
+   * rather than 8%. Still hidden, and worth knowing if either number moves again. One deep
    * is the whole win — the groups never coexist in the Python heap, because the previous
    * result's proxy is destroyed once it has been copied out.
    */
@@ -137,7 +153,7 @@ export async function scoreCandidates(
      * **The handler goes on here, where the promise is made, not where it is abandoned.** A
      * prefetch nobody awaits is an unhandled rejection — "Uncaught (in promise)" in a browser,
      * a failed run under vitest — and the window opens the instant a Cancel fires, which is
-     * typically while the loop is parked on a 133 ms inference and cannot yet react. Guarding
+     * typically while the loop is parked on an inference and cannot yet react. Guarding
      * at the unwind would be too late by exactly that long. A handler on this branch does not
      * swallow the one the loop awaits: that copy still rejects normally.
      */
@@ -158,7 +174,7 @@ export async function scoreCandidates(
       /*
        * A copy, and it has to be: `WireTensor.data` is **transferred** to the worker, so a
        * subarray view would hand over the whole group's buffer and detach the patches after
-       * it. The copy is 2.1 MB against a 133 MB model and a 133 ms run.
+       * it. The copy is 2.1 MB against a 133 MB model.
        */
       const patch = Float32Array.from(group.patches.subarray(k * voxels, (k + 1) * voxels))
       const answered = await session.run({

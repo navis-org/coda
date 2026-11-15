@@ -2266,3 +2266,243 @@ A filtered run therefore keeps a few candidates a whole-neuron run would drop �
 answer, never a different ranking of the same list. Ends the node drops itself stay competitors
 for exactly this reason; rows a filter removed are not there to keep. The node's header and its
 guide both say so, and a reader comparing against a published set should search the whole neuron.
+
+## The single-seed assessor on `seam:suggestMerges` (2026-11-15, user)
+
+Stage 6 arrives as a **param on the search node**, not as a node after it, and in SEAM's cheap
+configuration: one mask assessor seed, no split head, segmentation only. SEAM refitted everything
+after the scorer for it and handed the numbers over in
+`docs/handoffs/coda-single-seed.md` (fixture `rv2-a8c45ca49660`).
+
+### The three decisions, and what each turned on
+
+**Where it runs — a param on Suggest Merges (user).** The alternative was a fourth node reading
+`Tips` + `Candidates`, which this plan had already argued for: the published `Candidates` table
+carries `candidateId` and the contact triple, which is the whole of what a patch needs, so it is
+as complete an interface for stage 6 as `Tips` was for stage 4. What won is the streaming. The
+candidate roots, the contacts and the own-tip rule's answer are already in memory when an end
+finishes, and a published end would otherwise be **reordered under the reader** a minute later —
+the assessor ranks by `logit` and the search by `geo_rank`. One node publishes an end once, whole.
+Arm B will have to find room here too; it reads a 256³ EM window rather than a patch per
+candidate, so it is a second row of `Assessor`, not a second node.
+
+**Which fits — the ones SEAM refitted, carried in the model manifest.** Production's ref weights,
+`p_tip`, cutoff and `r` staircase all average three seeds and then apply a split head; SEAM says
+so in as many words ("These weights are new… This cutoff is new too"). So the configuration's
+`pipeline` block rides in the assessor manifest's `config`, exactly as the ranker's constants do,
+and for the reason recorded there: the weights and the numbers they are read with are one version
+or they are two. `pnpm make:assessor-manifest <export dir> <fixture.json> <out>` copies the block
+rather than transcribing it, and refuses a fixture naming another checkpoint.
+
+**How much — `Assess top`, defaulting to all (user).** See below; the measurement is the point.
+
+### What the configuration costs, measured rather than argued
+
+SEAM's own calibration lists, against production: **first place unchanged** (tiny 0.661 against
+0.670, ordinary 0.816 against 0.816), about **15% fewer** suggestions clearing the cutoff
+(145 shown instead of 171 on the rv2 tips), precision where a proofreader judged **unchanged**.
+Two thirds of the loss is dropping split, a third the single seed.
+
+Dropping split is what makes it the cheap one in a browser, and that is Coda's measurement rather
+than SEAM's: `probe:scene-em` put a window's EM at ~14 MB and 14 s against a fraction of a second
+for the segmentation of the same window. This route reads **no EM at all**.
+
+### The cap, and the half of it nobody would predict
+
+`Assess top` floors everything past it at the checkpoint's `missing_patch_score` — which is
+SEAM's own `filled`, so it is a state the pipeline already has a name and a number for, not a
+hole. Recomputing SEAM's whole 2,708-tip fixture capped and uncapped:
+
+| cap | patches cut | of 144 shown tips, unchanged | no longer shown | **newly shown** |
+|---|---|---|---|---|
+| 10 | 25% | 132 | 12 | 9 |
+| 20 | 47% | 139 | 3 | 4 |
+| 25 | 57% | 141 | 1 | 4 |
+
+**A cap does not only lose suggestions, it invents a few.** Flooring the tail concentrates the
+softmax on the first candidate, which raises `p_top` and so `q`, and a few tips cross the cutoff
+that would not have. That is why the default is no cap and why the node says so in its help.
+
+What the cap barely touches is the *ranking*: the assessor's term dominates ref's design, so a
+floored candidate sits some nineteen logits below the field and contributes nothing. That is why
+the middle column holds up so much better than the raw count of tips whose first candidate moves
+— 959 of 2,708 at a cap of 10, almost all of them far below the cutoff and nobody's business.
+
+### `q` without a split stage, and the arm that had to be added
+
+`decideTip` computed `q` only from `p_split`, so a configuration with no split block reached
+`q_ref` and stopped — and this configuration's `show.cutoff` and `r` staircase are fitted against
+`p_tip × p_top`, which SEAM calls `q` because there is no other. Read the old way, **every one of
+2,708 tips would have come back undecided**, and the only symptom would have been a review queue
+that never showed anything.
+
+The fix is two lines and derived rather than declared: *a set with no `split` block has no split
+quantity, so its own cutoff is about the ref one.* The arm below it stays for the case it does not
+cover — a **split** configuration whose tip was scored live, where the set's cutoff belongs to a
+quantity that tip did not reach and `cutoff_ref` or nothing is the honest answer.
+
+### `pipelineFits.ts`, because SEAM writes the block twice
+
+The fits parser came out of `suggestionSet.ts`, where it read as a property of a published run.
+It is not: it is a property of the **configuration**, and a configuration can be published as a
+set of answers (`seam:suggestions`) or as a model to run (`seam:suggestMerges`). One parser, so
+the design's column order, the seed order and the staircase's direction are stated once.
+
+It grew one shape: production writes `ref.seeds` as a list, and the single-seed configuration
+writes `ref.mu`/`sd`/`w` directly, because with one seed there is no average to take. Both become
+a list, so everything downstream addresses a seed by position. A block stating **both** is
+refused — two answers to "what scores a candidate", and nothing can say which.
+
+### The checkpoint changed under us
+
+`MERGE_ASSESSOR_MODELS` named `sa2_mask_s0`, and the single-seed fits are for **`n3_mal_mask_s0`**
+— a later export whose `missing_patch_score` is −258.4 against sa2's −58.7. The two manifests are
+structurally identical, so the pair would have loaded, run, ranked and shown. The generator now
+takes the export directory's own family name and **checks it against the fixture's
+`pipeline.assessor.ckpt`**, which is the one place the two halves are named together.
+
+### The WebGPU assessor swapped in (2026-11-15, after `6476184`)
+
+`src/packs/seam/gpuAssessor/` landed in parallel: SegCLR's 3D ResNet-18 written out in WGSL,
+reading the plain `conv` export, **26.5 ms a patch against ONNX Runtime's 136** — and within
+3.8e-4 of PyTorch, with the ranking identical on every list. `seam:suggestMerges` opens it.
+
+Three things the swap needed, from `docs/seam-assessor-speed.md` §14:
+
+- **Both builds in one manifest.** `conv` is the plain export that `segclrPlan.ts` reads;
+  `matmul` is the same weights cut into per-offset pieces for ONNX Runtime. They are 0.2 MB
+  apart, so `preferredVariant`'s "smallest runnable" would have handed ORT the graph it is eight
+  times slower on **in silence** — every opening site names its build now, and
+  `assessorModel.test.ts` holds each file's `emits` to the runtime that reads it, which is the
+  one place a swap of the two is visible before 133 MB is fetched.
+- **An `open` hook on `openSeamModel`**, so the four refusals a reader meets — no GPU, wrong
+  task, no runnable build, no consent — stay in one place while the runtime behind them changes.
+  `openGpuAssessor` returns the same `ModelSession`, so nothing downstream knows.
+- **`knip-baseline.txt`'s eight `gpuAssessor` lines**, which went when the files became reachable.
+
+**It moved where an end's time goes, which is the part worth reading.** At 26.5 ms a patch a
+typical list is ~1.1 s of GPU, against ~4.1 s for the whole assessed end — so the scoring is
+about **a quarter** of it and the two box reads (~1.4 s of search-box network plus ~1 s of patch
+box) are about **three fifths**, with the Pyodide measure making up the rest. `Assess top` therefore buys perhaps a tenth of a run where it used to buy a quarter,
+while costing exactly what it always did in answers. The lever is still honest and still there;
+the node's help now says it is no longer the one worth reaching for, and narrowing the *ends* is.
+
+That also promotes the two deferred reads below from "worth doing" to "the main cost left".
+
+### Two measured costs, recorded rather than fixed
+
+The review chain priced the run at ~9 s an assessed end (search box 1.4 s network + 0.56 s
+Pyodide, patch box ~1 s, 40 patches × 0.17 s GPU), so ~75 minutes for a 500-end neuron. Two
+things in that budget are avoidable and neither was changed under a cleanup pass:
+
+- **The next end's search box is fetched with the GPU idle** — ~1.4 s of every ~9 s, ~15%.
+  `searchRun.ts`' header records a reason not to prefetch: two `readPool`s in flight both see
+  the supervoxels their ends share as unknown and ask the chunkedgraph for them twice. The
+  assessor arguably creates a window where that does not apply — end *i*'s patch box resolves
+  before its GPU loop starts, so firing end *i+1*'s box there would still leave exactly one
+  `readPool` outstanding. It needs `endToSearch`'s `box()` memoised to be idempotent and a
+  fire-and-forget with a `catch`, and it is a performance change with a subtle invariant, not a
+  tidy-up. Worth doing deliberately, on the assessed arm only.
+- **The patch box re-fetches chunks the search box fetched seconds earlier.** Both go through
+  `readLabelBox`, which has no chunk cache, and on Aedes both are at 32 nm: the search box is
+  ±3 µm around the tip and the patch box is the contacts' bounding box (already within
+  `own_um` = 2 µm of it) grown by `PATCH_REACH_NM`, so it typically sits inside the box just
+  read. That is ~8–19 MB and ~0.5–1 s per end, several GB a neuron. **Measure before fixing**:
+  these are public-bucket GETs and the browser cache may absorb part of it — but the sharded
+  path uses Range requests, which browsers cache unreliably. DevTools "from disk cache" on an
+  end's second read answers it in one run.
+
+### What the two cleanup passes changed
+
+Thirty-odd fixes over two `/simplify` rounds. Three are worth recording because they were
+invisible to the tests already written:
+
+**A run-killing throw on the commonest recoverable failure.** `searchRun.ts`' `emptyEnd` yields
+`{ rows: 0, columns: {} }` — no arrays at all — which is what a tip whose query root has no voxel
+in its own box gives, and therefore what *every* end of a run pointed at the wrong materialization
+gives. Both `contactsOf` and `columnOf` asked for a column before checking the row count, so the
+first such end would have ended the whole run. The tests missed it because their fixture builds
+empty-but-*present* columns; `scoreEnds.test.ts` now builds the real shape.
+
+**Every successful assessed run ended with a warning.** The run's tally was an unconditional
+`ctx.warn`, which `docs/limits.md` argues against twice in its own words ("attributing on every
+run instead is a line people learn to skip"; "a warning raised over half a minute teaches a reader
+to dismiss the next one") — and it sat *below* two sentences that are genuinely about something
+being wrong, so it was training readers to skip those. The tally is now a column, and the only
+sentence left is the ambiguous case: a run that assessed real candidates and showed **none**,
+which looks identical from the outside to one pointed at the wrong materialization. It also
+counted `shown` as `=== true`, folding "withheld" together with "no verdict published"; the three
+states are counted as three.
+
+**Two doors into "does this table have what the run needs".** `e_tip` was checked by a separate
+exported refusal the node had to remember to call, three statements after `tipsFromTable` had
+already checked the search's own columns. Nothing made a caller open both. It is one list
+computed from one flag now (`needed(assessing)`), so the node cannot call half of it.
+
+Also: the reporters moved to `scoreEnds.ts` and take a `Warner` rather than an `EvalContext`,
+which is what makes them reachable from a test at all — `evaluate` needs a token, a volume and a
+GPU, so counting code left inside it is counting code nothing checks.
+
+### What the two review passes found
+
+Eight findings over two `/code-review medium` passes, none severe, all in the places where a
+mistake is a plausible number rather than an error. The four worth recording:
+
+- **A warning that said the opposite of what happened.** The partial patch-box refusal read
+  "3 of the 10 searched ends *could* have a patch box read around them". The all-refused branch
+  was right, which is how it survived: two sentences sharing a shape and not a statement. Both
+  branches carry their whole clause now, and both are tested.
+- **The cap blamed for a failure of the volume.** An end whose patch box refused kept
+  `filled: 'capped'` on everything past `Assess top`, so the run's tally reported "N past
+  `Assess top`" about an end where the cap changed nothing. Every candidate of a refused end is
+  `'no patch'` — the reason really is the same for all of them.
+- **`config.batch` published for a build nobody checked.** The batch guard was narrowed to the
+  `matmul` export while the published `config.batch` describes both, so a `conv` export at
+  another batch would have shipped under a manifest claiming 1. Every build is checked now, and
+  the check is "accepts one patch" — a *free* axis passes, which the conv export has and
+  `parseAssessorConfig` already allowed; only a pin above one is refused.
+- **A spliced `e_tip_floor` nobody checked.** `--model-e` lifts `pipeline.model_e` out of
+  another fixture, and nothing held the two to the same Model E — while the same function
+  already did exactly that for the assessor's own checkpoint. A stale floor is a plausible
+  `p_tip` for every tip Model E found no cell near, and silent.
+
+Also: the generator copied 266 MB before building the manifest dict, so a later failure left a
+directory that looks uploadable and is not; and `pipelineFits.ts`' single-seed path refused with
+`pipeline.ref[0].w`, indexing a block that is not a list.
+
+### What is still open
+
+- **`pipeline.model_e.e_tip_floor` is not in the single-seed fixture.** Model E is unchanged in
+  this configuration, so SEAM omitted the block — but the floor is what `p_tip` is given for a tip
+  Model E found no cell near, and nothing may guess it. `make-assessor-manifest.py` refuses
+  without it and takes `--model-e <production fixture.json>` meanwhile. Worth asking SEAM to emit
+  the block in `single_seed.py`.
+- **`organelle_score` / `organelle`.** SEAM publishes them per candidate and the handoff lists
+  them as stage 7; Coda's search computes neither, so the view filter they are for is not here.
+- **The pack hand-rolls "this build no longer carries that model" five times, in four wordings**
+  (`affinityClusters.ts`, `findMerges.ts`, `openEnds.ts`, and twice in `suggestMerges.ts` until
+  this round). `models.ts`' `modelById` already took this step one level down — "One function for
+  four lists… a fifth task would have written it again" — and the same argument applies to the
+  refusal beside the lookup. `suggestMerges.ts`' own two are unified (`chosenRanker`,
+  `chosenAssessor`, one `unknownModel` sentence); doing the other three is a change to three
+  working nodes, so it is recorded rather than done.
+- **The run loop is still inside the node file.** `searchAndScore` and `published` are not
+  reachable from a test, which is the reason `openEndRun.ts`, `windowRun.ts`, `affinityRun.ts`
+  and `searchRun.ts` all exist. A `suggestRun.ts` is the shape; the reporters were moved out as
+  the cheap half of it.
+- **Still no probe through the node.** `pnpm probe:candidate-search` drives `searchEnds`; nothing
+  yet drives a patch box and a session over a real volume from inside `evaluate`. That needs a
+  CAVE token and a browser.
+- **`r` for a tip with no list.** SEAM writes 0; Coda carries no `r` at all, because there is no
+  first candidate to be right about. Both agree the tip is withheld, and `singleSeed.test.ts`
+  records the difference rather than papering over it.
+
+### The one tip that disagrees, and why it is kept
+
+SEAM's cutoff is picked at an **observed** operating point, so it is one of the tips' own `q`
+values to every bit. That tip therefore sits exactly on its own cutoff: SEAM's `>=` shows it, and
+Coda's `q` lands one unit in the last place lower because the two sum the same products in
+different orders. `singleSeed.test.ts` asserts the verdicts agree except within four ULP of the
+cutoff, and that **exactly one** tip of 2,708 is there. A tolerance inside `decideTip` would have
+been the wrong fix: it moves the cutoff for every tip to rescue a tie that only exists because the
+cutoff was read off this one.

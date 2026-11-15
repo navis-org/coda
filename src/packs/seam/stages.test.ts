@@ -36,8 +36,9 @@ import { blobBytes } from '../../data/files/bytes'
 import { openTableFile } from '../../data/files/read'
 import type { Field } from './suggestionTables'
 import { readFields } from './suggestionRead'
-import { parsePipelineFits, parseSuggestionSet } from './suggestionSet'
-import type { PipelineFits } from './suggestionSet'
+import { parseSuggestionSet } from './suggestionSet'
+import { pipelineFitsFrom } from './pipelineFits'
+import type { PipelineFits } from './pipelineFits'
 import { decideTip, scoreList } from './stages'
 import type { CandidateList } from './stages'
 
@@ -48,7 +49,7 @@ const URL_ = 'https://example.invalid/coda_rv2/fixture.json'
 const TOLERANCE = 1e-12
 
 const SET = parseSuggestionSet(JSON.parse(readFileSync(`${DIR}/fixture.json`, 'utf8')), URL_)
-const FITS = parsePipelineFits(SET)
+const FITS = pipelineFitsFrom(SET.pipeline, SET.manifestUrl)
 
 /** A column, by its name in SEAM's file. The published name is irrelevant here. */
 const f = (from: string, dtype: Field['dtype'] = 'f64'): Field => ({ from, name: from, dtype })
@@ -390,16 +391,41 @@ describe('what a live tip can reach', () => {
   })
 
   /**
-   * The other way round: head scores in hand, but a set made before the confidence model. The
-   * fits decide, not the columns — scoring against a `split` the set does not state would be a
-   * confidence model of this build's own invention.
+   * The other way round: head scores in hand, but a configuration that states no split fits. The
+   * **fits** decide, not the columns — scoring against a `split` the manifest does not state
+   * would be a confidence model of this build's own invention, so `pConf` stays undefined.
+   *
+   * What the tip still gets is a verdict, and that is the part worth pinning. A configuration
+   * with no split has no second quantity for its cutoff to be about: SEAM's single-seed fixture
+   * fits `show.cutoff` and the `r` staircase against `p_tip × p_top` and calls that number `q`.
+   * Reading them as belonging to a quantity the configuration cannot compute would leave every
+   * one of its tips undecided, with nothing to see but a review queue that never shows anything.
    */
-  it('gives no q where the set states no split fits, head scores or not', () => {
+  it('decides on q_ref, under the name q, where the fits state no split', () => {
     const { list } = listFor(ENDS[0]!)
     const old: PipelineFits = { ...FITS, split: undefined }
     const scores = scoreList(list, old)
     expect(scores.pConf).toBeUndefined()
-    expect(decideTip(scores, tips.e_tip![0]!, old).q).toBeUndefined()
+    const tip = decideTip(scores, tips.e_tip![0]!, old)
+    expect(tip.q).toBe(tip.qRef)
+    expect(tip.against?.quantity).toBe('q')
+    expect(tip.against?.cutoff).toBe(old.cutoff)
+    // And `r` comes with it: the staircase was fitted against the quantity just decided on.
+    expect(tip.against?.r).toBeGreaterThan(0)
+  })
+
+  /**
+   * The case the ref arm is still for: a **split** configuration whose tip was scored live, so
+   * the head's EM was never read. The set's cutoff belongs to a quantity this tip did not reach,
+   * and carrying it over would decide a different question with the same confidence.
+   */
+  it('leaves a split configuration’s live tip with a number and no verdict', () => {
+    const { list } = listFor(ENDS[0]!)
+    const scores = scoreList({ ...list, head: undefined }, FITS)
+    const tip = decideTip(scores, tips.e_tip![0]!, FITS)
+    expect(tip.q).toBeUndefined()
+    expect(tip.qRef).toBeGreaterThan(0)
+    expect(tip.against).toBeUndefined()
   })
 
   /**
@@ -419,7 +445,7 @@ describe('what a live tip can reach', () => {
 })
 
 /**
- * The two a *list* can be wrong about. The refusals of `parsePipelineFits` live beside the
+ * The two a *list* can be wrong about. The refusals of `pipelineFitsFrom` live beside the
  * parser, in `suggestionSet.test.ts` — a refusal tested away from the thing that refuses is one
  * nobody finds when they change it (`docs/testing-layers.md`).
  */
