@@ -73,6 +73,10 @@ for k, name in ((3, "conv3.onnx"), (1, "conv1.onnx")):
 
 print(f"wrote matmul.onnx, conv3.onnx, conv1.onnx to {out}")
 
+# The 3x3x3 weights raw, (Cout, Cin, 3, 3, 3) float32, for `probe-conv3d-kernel.mjs`, whose
+# hand-written shader must use exactly the weights `conv3.onnx` carries to be compared with it.
+WEIGHTS[3].tofile(out / "conv3_w.bin")
+
 
 # ── The rewrite: the same convolutions expressed as MatMul ──────────────────────────────────
 #

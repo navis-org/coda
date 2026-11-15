@@ -1,3 +1,11 @@
 duplicates	src/ui/assistantChat.ts	clearChat = resetAssistantChat
 exports	src/data/edges/store.ts	releaseEdgeSet
 exports	src/ml/weights.ts	weightsUsage
+exports	src/packs/seam/gpuAssessor/shaders.ts	convShader
+exports	src/packs/seam/gpuAssessor/shaders.ts	encodeShader
+exports	src/packs/seam/gpuAssessor/shaders.ts	headShader
+exports	src/packs/seam/gpuAssessor/shaders.ts	maxPoolShader
+exports	src/packs/seam/gpuAssessor/shaders.ts	reduceShader
+file	src/packs/seam/gpuAssessor/network.ts
+file	src/packs/seam/gpuAssessor/open.ts
+file	src/packs/seam/gpuAssessor/worker.ts

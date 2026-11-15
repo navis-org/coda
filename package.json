@@ -108,7 +108,9 @@
     "probe:assessor-ops": "node scripts/probe-assessor-ops.mjs",
     "probe:assessor-patch": "vite-node scripts/probe-assessor-patch.ts",
     "probe:assessor-parity": "node scripts/probe-assessor-parity.mjs",
-    "probe:ort-kernels": "node scripts/probe-ort-kernels.mjs"
+    "probe:ort-kernels": "node scripts/probe-ort-kernels.mjs",
+    "probe:conv3d-kernel": "node scripts/probe-conv3d-kernel.mjs",
+    "probe:gpu-assessor": "node scripts/probe-gpu-assessor.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

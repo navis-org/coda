@@ -222,6 +222,8 @@ may become unnecessary, and the assessor cost should be re-measured before anyon
 | `scripts/probe-ort-kernels.mjs` | the kernel comparison, which asserts the gap |
 | `scripts/probe-assessor-ops.mjs` | does WebGPU run the graph at all, and where did the nodes go |
 | `scripts/probe-assessor-parity.mjs` | the real model against `lists.parquet`'s `torch_s<k>` |
+| `scripts/probe-conv3d-kernel.mjs` | a hand-written WebGPU 3x3x3 kernel against ORT's, §13 |
+| `scripts/probe-gpu-assessor.mjs` | the whole hand-written assessor against ORT and PyTorch, §14 |
 | `scripts/lib/seam_assessor.py` | the numpy half: fixtures, the native comparison, the Metal benchmark |
 
 Longer-form narrative, including the measurements that led here, is in
@@ -457,3 +459,96 @@ The matmul graph **pins its batch axis to 1**, which it must — flattening `(N,
 and feeds patches in whatever the graph takes, rather than assuming a whole list fits. A caller
 scoring a tip should expect one `session.run` per patch per seed.
 
+
+---
+
+## 13. A hand-written kernel beats the rewrite 5x (2026-11-15)
+
+§5 put the remaining gap "behind the kernel, not the graph". `pnpm probe:conv3d-kernel` measures
+how far a kernel of our own gets: the 3x3x3, 64→64 convolution on 65³ written in WGSL as an
+implicit matrix multiply. The (Cin·27 × voxels) matrix is never built; each tile is read from
+the input at its offset straight into workgroup memory, so the 27 `Slice` copies disappear. Plain
+f32, no subgroup features, nothing tuned beyond a sweep of five tile shapes.
+
+Same machine, Chrome 157, onnxruntime-web 1.31.1. Every contestant reads one GPU-resident input
+on ORT's own device and ORT writes to a GPU buffer, so no row includes the 70 MB upload or
+download (§5's trap). This is why the rewrite reads 79 ms here against ~106 in
+`probe:ort-kernels`.
+
+| 3x3x3 Conv, 60.7 GFLOP | best ms | TFLOP/s |
+|---|---|---|
+| ORT `Conv` (`Conv3DNaive`) | 696 | 0.09 |
+| ORT, 27 `MatMul`s (our rewrite) | 78.7 | 0.77 |
+| **own kernel, 64 voxels × 64 channels a workgroup, 8×4 a thread** | **14.8** | **4.10** |
+| the other four tile shapes | 15.3–16.0 | 3.8–4.0 |
+| PyTorch, Metal (§2) | — | 6.47 |
+
+- **Correct:** whole output within 2.3e-6 of ORT's `Conv`, 64 points within 7e-7 of a JavaScript
+  reference computed from the definition.
+- **The clock is real:** 20 dispatches take 4.00x as long as 5. The medians of five interleaved
+  rounds are within 1% of the best.
+- **The tile shape hardly matters** (3.8–4.1), so the speed comes from the structure rather
+  than from tuning.
+
+So an ordinary tiled kernel reaches **63% of Metal's speed**, against the rewrite's 12%, and is
+already well past ORT's own `MatMul` (1.05–1.5). What this does *not* yet show: the model's other
+convolutions (the stride-2 ones, the 7x7x7 stem, other channel counts) and whether the gain
+survives a whole forward pass. Only the 3x3x3 shape that is most of the arithmetic was timed.
+
+---
+
+## 14. The whole assessor, hand-written: 5.1x ONNX Runtime (2026-11-15)
+
+`src/packs/seam/gpuAssessor/` runs `n3_mal_mask_s0` without ONNX Runtime: the plain `Conv` export
+read by a small ONNX reader of its own (`onnxProto.ts`), SegCLR's architecture written out with
+every weight checked by name and shape (`segclrPlan.ts`), and §13's kernel generalised to the
+whole network (`shaders.ts`): stride 2, the 7³ stem's two input channels, the reduction split
+across workgroups where a stage is small in space and long in the sum, and bias, ReLU, the
+blocks' batch norm and the residual add folded into each convolution's last step. One submit and
+a 4-byte read back a patch.
+
+**It sits beside the ONNX Runtime path and replaces nothing yet.** Its worker speaks
+`src/ml/protocol.ts`, so `openGpuAssessor` returns the same `ModelSession` as `openModel` and
+`scoreCandidates` cannot tell them apart.
+
+`pnpm probe:gpu-assessor`, ends 20, 1475 and 2282 (24 real patches), both through
+`openModel`'s worker one patch a run, warm, same machine as above:
+
+| | ms a patch, median | a 114-patch tip | worst vs PyTorch |
+|---|---|---|---|
+| ONNX Runtime, `matmul` | 135.7 | 15.5 s | 4.2e-4 |
+| **hand-written** | **26.5** | **3.0 s** | **3.8e-4** |
+
+For scale, **PyTorch itself on this GPU** (MPS, fp32, SEAM's own `Assessor` loaded from
+`ckpt/n3_mal_mask_s0/best.pth`, the same 24 patches, warm, torch 2.14.1): **52 ms a patch**,
+whether fed 1, 4 or 8 at a time, within 5e-4 of `torch_s0`. So the browser now runs this network
+twice as fast as PyTorch on Metal — 1.7 TFLOP/s over the whole model, against the 6.47 it reaches
+on one isolated 64→64 convolution (§2). Measured once, not interleaved with the browser runs; why
+the whole model falls so far below one convolution was not looked into.
+
+Ranking identical to PyTorch on every list, both runtimes; they differ from each other by at
+most 4.6e-5. The network runs at 3.3 TFLOP/s overall. After two review passes, opening takes
+330–440 ms against ONNX Runtime's 1,060–1,490 in the same runs, and the network holds 243 MB of
+GPU memory (intermediates share buffers once dead; weights are written straight into mapped
+buffers).
+
+Where the time goes (each step timed alone, which adds ~0.2 ms of submit to each): the stem is
+the largest single step at 21% — it is 24 of the 86.8 GFLOP, 343 taps on two channels, and runs
+at ~3.3 TFLOP/s — then stage 0's four 3³ convolutions at ~7% each. The late stages run at
+~2 TFLOP/s. How far the late stages split their sum does not matter: every target from 160 to
+1,280 workgroups is within 0.4 ms of 26 ms. What is left is the kernel's own speed (f32, no
+subgroup features), not the plan.
+
+### To swap
+
+1. **Host the plain export beside the `matmul` one** and list it in the manifest as variant
+   `conv` (`n3_mal_mask_s0.onnx`, 132.9 MB). The `matmul` file holds the same weights cut into
+   per-offset pieces, and `segclrPlan.ts` refuses it rather than reassemble them.
+2. **Pin the ONNX Runtime path to `variant: 'matmul'` before step 1 lands**, if it is kept at
+   all: `preferredVariant` takes the smallest runnable variant, the `conv` file is 0.2 MB
+   smaller, and that path would move to the 8x slower graph in silence.
+3. Open with `openGpuAssessor({ manifestUrl, task })` where `openModel` is called today.
+4. Then `knip-baseline.txt`'s eight `gpuAssessor` lines go, since the files become reachable.
+
+Not yet measured: another GPU vendor. Every number here is one M3 Max, and §10's #33856 is the
+reminder that a kernel fast on one GPU can be slow on another.
