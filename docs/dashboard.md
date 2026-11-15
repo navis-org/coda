@@ -369,12 +369,13 @@ dearer. A twelve-cell dashboard on a sixty-node graph during a mesh stream (4 pu
 spends about 66 µs per second on it.
 
 One thing not to *undo* while here: `previewVersion` is subscribed ungated, where `CodaNodeView`
-gates it on `isViewer`. Porting that gate would be wrong. `canHaveCell` refuses only annotations, so
+gates it on `isViewer` or the body's own `drawsInputs`. Porting that gate would be wrong. `canHaveCell` refuses only annotations, so
 a **non-viewer** node can hold a cell, and this component draws such a node as a full-size
 `ValuePreview` of its own output — which for the nodes that publish previews, Skeletons and Meshes,
 is the streaming value itself. `onPreview` bumps `previewVersion` alone and never `runVersion`, so
 the gate would freeze exactly that cell mid-stream. On the canvas it is safe because a non-viewer
-card shows a one-line summary.
+card shows a one-line summary, unless its body draws from `inputValues` — which is what
+`drawsInputs` is for, and what `seam:review` sets.
 
 **What this does not reach**, and it is a bound worth knowing rather than a loose end here: a
 viewer only refreshes on a render something else schedules, and `runNode` on an *upstream* card

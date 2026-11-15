@@ -56,7 +56,7 @@ lean on:
 | `core/recipes.test.ts`          | recipes: a slot per outside node, file round trip, renamed/gone ports, all-or-nothing attach, the wire-drop sockets |
 | `core/reference.test.ts`        | reference edges: the round trip sorting, identity without a schema, evaluate not waiting, real cycles unchanged |
 | `core/registry.test.ts`         | what `registerNode`/`registerPack` refuse: the type-id grammar, reserved ids, changes after freezing, ambiguous `formerTypes` |
-| `core/scheduler.test.ts`        | the Scheduler: hybrid eval, caching, invalidation, `ctx.publish`/`ctx.warn`, run progress (via `onStateChange`), loops, in-flight evaluations |
+| `core/scheduler.test.ts`        | the Scheduler: hybrid eval, caching, invalidation, `ctx.publish`/`ctx.warn`, previews derived through cheap nodes, run progress (via `onStateChange`), loops, in-flight evaluations |
 | `core/slice.test.ts`            | `sliced`, the shared yielding loop: adaptive clock stride, progress, cancel — pinned here rather than in a calling node |
 | `core/sockets.test.ts`          | `PortDef.kinds`: declared sets, overlap, tiers, refused spellings, and the registry sweep over every `any` port |
 | `core/splice.test.ts`           | dropping a node on a wire: the downstream check, isolation, one link left on the port                |
@@ -514,6 +514,7 @@ uses it ([ml.md](ml.md)).
 | `ui/nodes/skeletonSource.test.tsx`      | the Skeletons card's `Source` dropdown and route footer                                              |
 | `ui/nodes/socketAgreement.test.tsx`     | a wire and its sockets drawn as one type, over a graph built to *contain* `any` ports (the demo alone passes either way) |
 | `ui/nodes/splitNeuronsBody.test.tsx`    | the Split Neurons card: the attribute-table field list, the foot line                                |
+| `ui/nodes/streamingBody.test.tsx`       | a card body filling in from an upstream `ctx.publish` while that node still runs (`drawsInputs`)     |
 | `ui/nodes/uploadBody.test.tsx`          | the Upload card's states and size ceiling                                                            |
 | `ui/nodes/uploadMeshBody.test.tsx`      | the Upload Mesh card                                                                                 |
 

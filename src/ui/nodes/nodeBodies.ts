@@ -100,6 +100,21 @@ export interface NodeBodyEntry {
    */
   resizable?: boolean
   /**
+   * Whether this body draws from `inputValues`, so it has to repaint while an upstream node is
+   * still publishing.
+   *
+   * **The one thing on a card that can move without anything the card selects moving.** A
+   * publish bumps `previewVersion` and nothing else — not the node's own output, not its state —
+   * so without this the body renders once against whatever had arrived and then sits still until
+   * the run ends or the reader clicks something. See `CodaNodeView`'s note on `previewVersion`,
+   * which has the measurement behind keeping it off by default.
+   *
+   * A viewer never sets it: `isViewer` already subscribes, that being what a viewer is for. This
+   * is for the bodies that are not viewers and draw data anyway — `seam:review` is the first,
+   * whose queue fills from `seam:suggestMerges` one end at a time.
+   */
+  drawsInputs?: boolean
+  /**
    * What this body's screen map labels, if it has one — a header button on every full-size
    * surface drawing it. See `NodeMap.tsx`. Only for a body with enough controls that "what is all
    * of this" is a real question; a map of two fields is a tooltip with a scrim.
@@ -123,8 +138,16 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
   /*
    * `expandable` and `resizable`: the card holds a viewer *and* a queue, and how much of each a
    * reader wants is the whole question — a long list to triage, or a big frame to judge one site.
+   *
+   * `drawsInputs`, because the queue is `seam:suggestMerges`' published partial: an end lands
+   * about every four seconds and the point of publishing it is that somebody can start on it.
    */
-  'seam:review': { Component: ReviewBody, expandable: true, resizable: true },
+  'seam:review': {
+    Component: ReviewBody,
+    expandable: true,
+    resizable: true,
+    drawsInputs: true,
+  },
   /*
    * Not `expandable`: the readout is one line and the fields are three, so an overlay of it would
    * be whitespace, and its button would sit where a viewer's does.

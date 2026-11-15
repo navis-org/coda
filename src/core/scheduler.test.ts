@@ -718,6 +718,226 @@ describe('publishing a partial result', () => {
 })
 
 /**
+ * A partial crossing a node boundary.
+ *
+ * `ctx.publish` was built for a viewer drawing its own *inputs*, where the value on the upstream
+ * wire **is** the scene and nothing downstream has to run. Review Suggestions broke that
+ * premise: its queue is the partial, but the picture a reader judges a merge in is a
+ * Neuroglancer node one further along, fed from outputs only Review's `evaluate` produces. So
+ * the queue filled while the viewer beside it stayed on the previous run.
+ *
+ * `derivePreviews` recomputes the `cheap` nodes below a partial from it and keeps their answers
+ * as previews of their own. What has to stay true is everything that makes a preview not a
+ * result: nothing derived is cached, nothing derived survives the partial it came from, and a
+ * derived run reports none of the things a real run reports.
+ */
+describe('a partial below a node boundary', () => {
+  const ROW = tableSchema(column('x', 'i64'))
+  const rows = (n: number) =>
+    tableFromRows(
+      ROW,
+      Array.from({ length: n }, (_, x) => ({ x })),
+    )
+  const rowCount = (value: Value | undefined) => (isTableValue(value) ? value.length : -1)
+  /** A macrotask, which flushes the microtasks a derive is made of. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  let scheduler: Scheduler
+  /** What `out` held on each downstream node, sampled from inside the publisher. */
+  let seen: Record<string, number[]>
+  /** Lets `slowFollower`'s parked first evaluate finish. */
+  let releaseDerive: () => void
+
+  /**
+   * Publishes `steps` growing tables, sampling the whole chain after each.
+   *
+   * `steps` matters to one test and is worth a word: a second publish queues a second derive
+   * (`deriveAgain`), and that derive's own sweep cleans up after the first. A publisher that
+   * publishes **once** is the honest case for anything about a derive that outlives its
+   * partial, because nothing comes along afterwards to tidy up.
+   */
+  function publisher(type: string, watch: readonly string[], fail = false, steps = 2) {
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: async (ctx) => {
+        for (let n = 1; n <= steps; n++) {
+          ctx.publish({ out: rows(n) })
+          await settle()
+          for (const id of watch) (seen[id] ??= []).push(rowCount(scheduler.output(id, 'out')))
+        }
+        if (fail) throw new Error('nope')
+        return { out: rows(9) }
+      },
+    })
+  }
+
+  /**
+   * A follower whose **first** evaluate parks on a gate the test opens by hand.
+   *
+   * The first call is the derive's; every call after it is the real walk's. That is what lets a
+   * test put the two in the order that used to break — a derive still awaiting an `evaluate`
+   * when the partial under it has already gone.
+   */
+  function slowFollower(type: string) {
+    let calls = 0
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [{ id: 'in', label: 'In', type: T.table() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: async (ctx) => {
+        const given = ctx.input('in')
+        const out = rows((isTableValue(given) ? given.length : 0) + 1)
+        if (++calls === 1) await new Promise<void>((resolve) => (releaseDerive = resolve))
+        return { out }
+      },
+    })
+  }
+
+  /** Passes its input through with one row added, so what reached it is readable off the count. */
+  function follower(type: string, cost: 'cheap' | 'expensive') {
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost,
+      inputs: [{ id: 'in', label: 'In', type: T.table() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: (ctx) => {
+        const given = ctx.input('in')
+        return { out: rows((isTableValue(given) ? given.length : 0) + 1) }
+      },
+    })
+  }
+
+  function chain(head: string, rest: readonly string[]): CodaGraph {
+    let g = addNode(emptyGraph('derive-test'), {
+      id: 'head',
+      type: head,
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    let from = 'head'
+    rest.forEach((type, i) => {
+      const id = `down${i}`
+      g = addNode(g, { id, type, position: { x: 200 * (i + 1), y: 0 }, params: {} })
+      g = addEdge(g, { source: from, sourceHandle: 'out', target: id, targetHandle: 'in' })
+      from = id
+    })
+    return g
+  }
+
+  beforeEach(() => {
+    scheduler = makeScheduler()
+    seen = {}
+    releaseDerive = () => {}
+  })
+
+  /**
+   * The case the whole mechanism is for. Sampled from *inside* the publisher, which is the only
+   * moment a derived value is the visible one.
+   */
+  it('recomputes a cheap node below it, before the node above has finished', async () => {
+    publisher('test.derive.one', ['down0'])
+    follower('test.derive.one.next', 'cheap')
+    await scheduler.run(chain('test.derive.one', ['test.derive.one.next']), { mode: 'full' })
+    // One row published then two, each with the follower's own row added.
+    expect(seen['down0']).toEqual([2, 3])
+  })
+
+  /** Review → Neuroglancer is two nodes along, so one hop would not have fixed anything. */
+  it('carries down a chain, not just to the first node', async () => {
+    publisher('test.derive.deep', ['down0', 'down1'])
+    follower('test.derive.deep.next', 'cheap')
+    await scheduler.run(
+      chain('test.derive.deep', ['test.derive.deep.next', 'test.derive.deep.next']),
+      { mode: 'full' },
+    )
+    expect(seen['down0']).toEqual([2, 3])
+    expect(seen['down1']).toEqual([3, 4])
+  })
+
+  /**
+   * **`cheap` is the gate, and it is one that already exists.** A node that may not run four
+   * times a second has said so by being `expensive` (invariant 6); a derive that ignored that
+   * would fire a request per publish at a shared server.
+   */
+  it('leaves an expensive node below it alone', async () => {
+    publisher('test.derive.costly', ['down0'])
+    follower('test.derive.costly.next', 'expensive')
+    await scheduler.run(chain('test.derive.costly', ['test.derive.costly.next']), {
+      mode: 'full',
+    })
+    // -1 is "nothing on that port at all", which is what a node that never ran holds.
+    expect(seen['down0']).toEqual([-1, -1])
+  })
+
+  /**
+   * The rule that makes the whole thing safe to state simply: a derived answer is computed from
+   * half an input, so it is the answer for no provenance key at all (invariant 4). Cached, it
+   * would be a complete-looking result that no later run would be scheduled to replace.
+   */
+  it('caches nothing it derived, so a failed run leaves no answer behind', async () => {
+    publisher('test.derive.fails', ['down0'], true)
+    follower('test.derive.fails.next', 'cheap')
+    await scheduler.run(chain('test.derive.fails', ['test.derive.fails.next']), {
+      mode: 'full',
+    })
+    expect(scheduler.info('head').state).toBe('error')
+    // Both gone: the partial, and the answer computed from it.
+    expect(scheduler.output('head', 'out')).toBeUndefined()
+    expect(scheduler.output('down0', 'out')).toBeUndefined()
+  })
+
+  /**
+   * **A derive is parked on an `evaluate` while the walk carries on**, so between the await and
+   * the write the partial it was computed from can be gone. The write has to be refused.
+   *
+   * Left to land it was the worst failure this mechanism can have, and an unrecoverable one:
+   * `outputs()` prefers a preview to the cache, so a value computed from one row of input
+   * shadowed the node's real result for the rest of the session — and with no publisher left
+   * there was never another derive to sweep it away. It is not a race that needs luck, either;
+   * a node settles the moment its last publish is out.
+   */
+  it('refuses a derived answer that finishes after the partial under it has gone', async () => {
+    // One publish, so no second derive comes along to sweep up after this one.
+    publisher('test.derive.late', [], false, 1)
+    slowFollower('test.derive.late.next')
+    await scheduler.run(chain('test.derive.late', ['test.derive.late.next']), { mode: 'full' })
+    // The run is over and the real answer is cached: nine rows published, plus the follower's.
+    expect(rowCount(scheduler.output('down0', 'out'))).toBe(10)
+
+    // Now let the derive's own call return, long after what it was computing from went away.
+    releaseDerive()
+    await settle()
+    expect(rowCount(scheduler.output('down0', 'out'))).toBe(10)
+    expect(scheduler.info('down0').state).toBe('ok')
+  })
+
+  /** On the way out the real walk reaches the same node, and its answer is the whole one. */
+  it('hands over to the real result once the node above settles', async () => {
+    publisher('test.derive.settles', ['down0'])
+    follower('test.derive.settles.next', 'cheap')
+    await scheduler.run(chain('test.derive.settles', ['test.derive.settles.next']), {
+      mode: 'full',
+    })
+    // Nine rows returned, not the two the last publish carried.
+    expect(rowCount(scheduler.output('down0', 'out'))).toBe(10)
+    expect(scheduler.info('down0').state).toBe('ok')
+  })
+})
+
+/**
  * The warning channel: `ctx.warn`, and where what it says lives afterwards.
  *
  * The behaviour worth pinning is not that a string comes back — it is *when*. A guard rail's

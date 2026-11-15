@@ -489,6 +489,11 @@ rule belongs to one area, its record is in that area's doc.
   its provenance key, a key-moving edit **retires** it (`retireMoved`), only Cancel stops all.
   `refreshStates` leaves a live `running` badge alone; a cheap pass during a Run goes through
   `runFull` (`requestedFull`). Loops are excluded on purpose.
+- **A published partial crosses `cheap` node boundaries, and nothing derived is ever cached**
+  (`derivePreviews`): an answer computed from half an input answers no provenance key. `cheap` is
+  the only gate, a node already `ok` stops the walk, loops are excluded, and a derived run reports
+  no progress, warning or `fetchedAt`. **Dropping a derived chain aborts the derive in flight** —
+  a late write lands in `previews`, which `outputs()` prefers to the cache, and nothing sweeps it.
 - **A `reference` that resolved to nothing is refused by the scheduler, not the node** — the node
   sees one `undefined` for two states. `gatherInputs` builds `GatheredInputs.refusal` from the
   referenced node's inference issues, after `blocked` and the auto-pass deferral.

@@ -147,15 +147,21 @@ function CodaNodeViewImpl({
    * moves while an upstream fetch fills in: its own output and its own state are both unchanged,
    * so every selector above returns exactly what it returned before and zustand skips the render.
    *
-   * **Constant for everything that is not a viewer**, which is what keeps the cost proportional
+   * **Constant for everything that draws neither**, which is what keeps the cost proportional
    * to the scene rather than to the graph. A publish is four times a second and re-rendering a
    * card also costs two `nodeInputs` walks (a `find` over the nodes plus an `edgeInto` scan per
    * port), so on a sixty-node graph the ungated version was tens of thousands of array scans a
-   * second to repaint the two cards that could have changed. `def` is stable per node and the
-   * selector still returns a primitive — invariant 7 holds either way.
+   * second to repaint the two cards that could have changed. Both lookups are stable per node
+   * and the selector still returns a primitive — invariant 7 holds either way.
+   *
+   * Two ways in, because a viewer is not the only thing that draws arriving data: a body saying
+   * `drawsInputs` does too (`nodeBodies.ts`), `seam:review`'s queue filling end by end from
+   * `seam:suggestMerges` being the case that is neither a viewer nor still.
    */
   const previewable = getNodeDef(node.type)
-  const drawsPreviews = previewable !== undefined && isViewer(previewable)
+  const drawsPreviews =
+    (previewable !== undefined && isViewer(previewable)) ||
+    nodeBody(node.type)?.drawsInputs === true
   void useGraphStore((s) => (drawsPreviews ? s.previewVersion : 0))
   // A number or undefined, so the snapshot is a primitive — invariant 7.
   const fetchedAt = useGraphStore((s) => s.nodeFetchedAt(id))

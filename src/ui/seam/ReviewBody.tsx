@@ -42,6 +42,7 @@ import {
   currentOfQueue,
   decodeVerdicts,
   encodeVerdicts,
+  stillToSearch,
   verdictFor,
   withVerdict,
   VERDICTS,
@@ -102,6 +103,18 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const driving = useGraphStore((s) =>
     s.graph.edges.some((edge) => edge.source === node.id && edge.sourceHandle === 'current'),
   )
+  /*
+   * Is the queue still filling? What arrives here while Suggest Merges runs is a published
+   * partial, which the scheduler recomputes this card's own outputs from (`derivePreviews`), so
+   * the list is real and so is every verdict made on it — but it is the ends searched *so far*,
+   * and a reader filtering the top of a queue that is a third full is sorting a third of the
+   * neuron without being told. One line in the foot is what that costs to say.
+   *
+   * Asked of the *inputs* rather than of the node two wires up, which is the reading that
+   * survives somebody putting a `Filter Table` in between: that node is never itself running,
+   * but it does hold a partial derived from one.
+   */
+  const filling = useGraphStore((s) => s.nodeInputsFilling(node.id))
   const fold = (next: boolean) => {
     setFolded(next)
     try {
@@ -136,6 +149,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     () => arrangeRows(queue, { minConfidence, minVolumeUm3, shownOnly, sortBy, mode }),
     [queue, minConfidence, minVolumeUm3, shownOnly, sortBy, mode],
   )
+  /*
+   * How many tips are still to come. From the table rather than from the queue's own length: a
+   * tip the run will never reach — its box outside the volume — is published as `searched:
+   * false`, so this count reaches zero where "rows with nothing on them" would stall above it
+   * and read as a run that stopped early.
+   */
+  const toSearch = stillToSearch(isTableValue(tips) ? tips : undefined)
   const verdicts = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
   const here = currentOfQueue(queue, String(node.params.current), Number(node.params.rank))
 
@@ -243,7 +263,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
         {listed.length === 0 ? (
           <div className="list-body__foot list-body__foot--empty">
             {queue.length === 0
-              ? 'Nothing to review yet — wire in Merge Suggestions and run it.'
+              ? filling
+                ? 'Searching — the first tips will appear here as they are scored.'
+                : 'Nothing to review yet — wire in Merge Suggestions and run it.'
               : `No tip passes the filters. ${formatNumber(queue.length)} in the queue.`}
           </div>
         ) : (
@@ -376,6 +398,21 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           <span title="Tips listed, of the whole queue">
             {formatNumber(Math.min(listed.length, MAX_ROWS))} of {plural(queue.length, 'tip')}
           </span>
+          {filling && (
+            <span
+              className="review-body__filling"
+              title="Suggest Merges is still searching. These are the tips scored so far, and more are still to come — a filter or a sort reaches only this much of the neuron."
+            >
+              {/*
+               * The count where the table says, the bare caption where it cannot. A
+               * `seam:suggestions` set carries no `searched` column, being complete by
+               * definition, and "0 to search" on one would be a number nobody can act on.
+               */}
+              {toSearch === undefined
+                ? 'still searching'
+                : `still searching — ${formatNumber(toSearch)} to go`}
+            </span>
+          )}
           <span title="Verdicts recorded so far, across every candidate">
             {formatNumber(verdicts.size)} judged
           </span>

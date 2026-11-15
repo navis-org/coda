@@ -208,9 +208,32 @@ export function candidateFields(assessed: boolean): readonly Field[] {
     : SEARCH_CANDIDATE_FIELDS
 }
 
+/**
+ * Whether this run searched this tip — **the one tip column that is about the run** rather than
+ * about a candidate, and the only one with three states.
+ *
+ * - `true`: searched. Its candidates are in `Candidates`, and an empty list there is an answer.
+ * - `false`: this run will not search it. Its box lies outside the segmentation volume, or its
+ *   row carries no position, no `end_uid` or a neuron that is not a chunkedgraph id. The node
+ *   warns about both, and the column is where a reader finds *which* rows it meant.
+ * - `null`: not yet. Only ever seen on a partial, which is exactly what makes it worth
+ *   publishing — `seam:review` counts the nulls to say how many tips are still to come, and that
+ *   count reaches zero because the rows that will never be searched are `false` rather than
+ *   left empty.
+ *
+ * Without it the two ends of that distinction are written identically: a searched tip whose box
+ * held no candidate gets no row in `Candidates`, and on a geometry-only run no tip-level score
+ * either, so it is indistinguishable from a tip the run has not reached. `tipsWithFirsts`'
+ * header already says that clearing the first-candidate columns is what makes such a tip "say
+ * so" — this is what it says it with.
+ */
+export const SEARCHED_FIELD: Field = field('searched', 'searched', 'bool')
+
 /** The tip columns a run publishes. The first candidate's, plus the tip's own where scored. */
 export function tipFields(assessed: boolean): readonly Field[] {
-  return assessed ? [...SEARCH_TIP_FIELDS, ...ASSESSED_TIP_FIELDS] : SEARCH_TIP_FIELDS
+  return assessed
+    ? [...SEARCH_TIP_FIELDS, ...ASSESSED_TIP_FIELDS, SEARCHED_FIELD]
+    : [...SEARCH_TIP_FIELDS, SEARCHED_FIELD]
 }
 
 /**
@@ -480,6 +503,15 @@ export function tipsWithFirsts(
   ends: readonly PublishedEnd[],
   tips: readonly TipRow[],
   assessed: boolean,
+  /**
+   * The **rows this run will attempt**, by their index in `table` — not the rows it has reached.
+   *
+   * Required rather than optional, because the honest default is the one nobody would pick: a
+   * caller that said nothing would publish every row as `false`, claiming about a tip still in
+   * the queue that this run is not going to search it. Stated, it is a set the node already
+   * holds (`fits`), and every row outside it is a row the node has already warned about.
+   */
+  attempting: ReadonlySet<number>,
 ): TableValue {
   const data: Record<string, CellValue[]> = {}
   const schema = tipsSchema(table.schema, assessed)
@@ -488,10 +520,21 @@ export function tipsWithFirsts(
     const held = table.data[column.name]
     data[column.name] = held ? [...held] : new Array<CellValue>(length).fill(null)
   }
+  /*
+   * **Written from this run's own answer, never carried through.** An incoming `Tips` table may
+   * already hold a `searched` column — a `seam:suggestions` set, or this node's own output fed
+   * back round — and that one is another run's statement about another box and another filter.
+   * Left in place it would say "searched" about rows this run is still queueing, which is the
+   * one cell in the table a reader is counting on.
+   */
+  const searched = data[SEARCHED_FIELD.name]!
+  searched.fill(false)
+  for (const row of attempting) if (row < length) searched[row] = null
   for (const { end, order, scores } of ends) {
     const tip = tips[end.tip]
     if (!tip || tip.row >= length) continue
     const at = tip.row
+    searched[at] = true
     /*
      * **Cleared first, so a searched tip with no candidates says so.** The incoming table may
      * already carry a first candidate — a `Tips` table from `seam:suggestions` does — and that
