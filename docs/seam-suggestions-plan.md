@@ -1960,12 +1960,12 @@ memoised by model address, since a caller parsing per tip would spend four secon
 A/B — run as two separate loops the same comparison gave 2%, and a subagent's harness reported
 36%, which is why it is interleaved.
 
-### What this forces on the search, and it is not small
+### What this forces on the search, and it is not small — built 2026-11-14
 
-`coda_candidate_search` is deliberately **one** crossing of the bridge: a box in, a ranked, cut,
-1-based-numbered pool out. Scoring in TypeScript moves the sort, the `head(top_k)` and the
+`coda_candidate_search` **was** deliberately one crossing of the bridge: a box in, a ranked, cut,
+1-based-numbered pool out. Scoring in TypeScript moved the sort, the `head(top_k)` and the
 `geo_rank` numbering out of the worker, so the bridge has to return the *whole* pool with its
-feature columns — the crossing that design exists to avoid.
+feature columns — the crossing that design existed to avoid.
 
 And two of the eleven features cannot be computed in that crossing at all. `size_features` needs
 an L2 chunk count **per candidate root and for Q**, and the pool's roots are only known after
@@ -1977,7 +1977,39 @@ an L2 chunk count **per candidate root and for Q**, and the pool's roots are onl
    is SEAM's invariant 8 and the reason this is a step rather than a detail;
 3. back across with the counts for `size_features`, then score, sort and number in TypeScript.
 
-`end_dist_um` is the cheap one: the detected tip is already in hand.
+`end_dist_um` is the cheap one: `pool_features` already computes it and `coda_candidate_pool`
+passes through every float column it produces, so it needed no work at all.
+
+**This is now what the code does**, and `docs/python-pyodide.md` is the record of it — the
+entry points, the measurements and the agreement with SEAM's published ranks live there, since
+this file is a plan rather than a record of what is built. In outline: `coda_candidate_search`
+became `coda_candidate_pool` plus `coda_pool_sizes`, `l2ChunkCounts` is the middle part,
+`packs/seam/rankPool.ts` scores, sorts, cuts and numbers, and `packs/seam/searchRun.ts` holds the
+order of all of it — written before the node that will call it, as `assessorRun.ts` was, because
+every way of getting that order wrong produces a plausible list.
+
+### SEAM moved the own-tip rule upstream, and nothing said so
+
+Found while wiring the probe. `candidates_all.parquet` used to hold each end's **pre**-own-tip top
+100; it now holds the list **after** the rule. The evidence is unambiguous:
+
+- end 0 of neuron 648518347622603652 went from 100 rows to 9 between `rv2-0d62bc912a89` and
+  `rv2-20483049f936`, with the same snapshot, the same `pool_max_dist_um`, the same `top_k`, the
+  same end position and the same query root;
+- across the new set's 2,705 ends **no list reaches 100** — the longest is 94 — where the previous
+  set capped at exactly 100;
+- re-running the rule over the new lists removes nothing: every list in `ownTipNeuron.json` comes
+  back `tooFar: 0`, `anothersTip: 0`, where end 0 alone used to lose 86 (54 too far, 32 another
+  tip's);
+- and Coda's own reconstruction closes it: pool 538 → cut 100 → the rule drops 91 (65 too far, 26
+  nearer another tip) → **9**, which is SEAM's published list exactly.
+
+Two consequences. Coda's search has to apply `ownTipRule` itself before it is looking at the same
+list, which the probe now does. And `ownTipNeuron.json` can no longer show the rule *firing*, so
+`ownTip.test.ts` asserts "nothing is dropped" as this cut's fact and exercises the drop on cases
+it builds itself — the note there had first blamed a tighter pool, which the 538 figure disproves.
+
+Worth confirming upstream that the move was deliberate; if it was not, the goldens move back.
 
 ### Asks this raises for SEAM
 

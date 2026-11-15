@@ -1,12 +1,20 @@
 /**
  * What is in a box of segmentation around a point: a typed wrapper over `cutoutSummary.py`.
  *
- * It also holds the **search** — `runCandidateSearch`, which is the bigger of the two and the
- * one a caller wants. The summary underneath is the lower-level question ("what is in this
- * box"), kept because `pnpm probe:cutout-summary` is what checks the axis-order crossing both
- * share. `touchUm` and `momentsUm` are not on the search's request on purpose: SEAM's
- * `summary_args` decides them, so that a caller cannot ask for a summary the features were not
- * fitted against.
+ * It also holds the **pool** — `runCandidatePool`, the big one, and `runPoolSizes`, the short
+ * second call that finishes its feature set. The summary underneath is the lower-level question ("what is in this box"), kept because
+ * `pnpm probe:cutout-summary` is what checks the axis-order crossing both share. `touchUm` and
+ * `momentsUm` are not on the pool's request on purpose: SEAM's `summary_args` decides them, so
+ * that a caller cannot ask for a summary the features were not fitted against.
+ *
+ * **A candidate search is three calls, not one, and that is forced.** Two of the eleven features
+ * SEAM's forest ranks on are log counts of level-2 chunks, which come from an authenticated
+ * chunkedgraph read — and the roots to ask about are not known until the pool has been measured.
+ * So: `runCandidatePool`, then `l2ChunkCounts` (`data/cave/rootIds.ts`), then `runPoolSizes`,
+ * with the forest in `packs/seam/treeRanker.ts`, the sort, cut and numbering in
+ * `packs/seam/rankPool.ts`, and **the order of all of it in `packs/seam/searchRun.ts`**, which
+ * is what a caller actually calls. `coda_candidate_pool`'s docstring carries the reasoning; the
+ * ask that would collapse it back to one call is in `docs/seam-suggestions-plan.md`.
  *
  * The inputs are deliberately the shapes Coda already has. `labels` and `index` are a
  * `LabelBox` exactly as `readLabelBox` returns it — the distinct supervoxels and one index per
@@ -29,7 +37,7 @@
 import type { VoxelIndex } from '../data/precomputed/volume'
 import { callPython } from './engine'
 import type { CallOptions } from './engine'
-import { numberFrom, uint64From } from './types'
+import { float64Columns, float64From, numberFrom, uint64From } from './types'
 
 /**
  * A box of segmentation with the root of every supervoxel in it — what three requests here all
@@ -37,7 +45,7 @@ import { numberFrom, uint64From } from './types'
  *
  * It is the agreement with the Python side about a labelled box: what `size` is ordered as,
  * which arrays are transferred, what `0` in `roots` means, and that `queryRoot` is never one.
- * The summary adds a point to measure from, the search adds a ranker, the assessor adds
+ * The summary adds a point to measure from, the pool adds the open end, the assessor adds
  * candidates — so each of those says **what it takes**, rather than naming itself as the
  * summary minus the summary's extras. That second form had already been written twice, and a
  * fourth summary-only field would have to be subtracted in both: forgetting it compiles, and
@@ -128,24 +136,6 @@ export interface CutoutSummary {
 }
 
 /**
- * The measurement columns of a result, told apart by **dtype rather than by name**.
- *
- * Python casts the id columns to uint64 and every measurement to float64, so a list of which
- * names are ids would be a cross-language pair with nothing testing either half — which the
- * module header argues against. An id column added upstream arrives as a `BigUint64Array` and
- * is simply not a measurement, rather than reaching `float64From`.
- *
- * Shared because both wrappers had this loop and the second copy had lost the reason.
- */
-function float64Columns(result: Record<string, unknown>): Record<string, Float64Array> {
-  const columns: Record<string, Float64Array> = {}
-  for (const [key, value] of Object.entries(result)) {
-    if (value instanceof Float64Array) columns[key] = value
-  }
-  return columns
-}
-
-/**
  * Summarise one box of segmentation.
  *
  * **The arrays are transferred, not copied** — `callPython`'s own rule — so a caller holding a
@@ -170,62 +160,45 @@ export async function runCutoutSummary(
   }
 }
 
-/** The geometric ranker's fit, as `fixture.json`'s `pipeline.search.geometric_ranker` ships it. */
-export type GeometricRanker = {
-  features: readonly string[]
-  mu: readonly number[]
-  sd: readonly number[]
-  w: readonly number[]
-  b: number
-}
-
-export type CandidateSearchRequest = LabelBoxRequest & {
+export type CandidatePoolRequest = LabelBoxRequest & {
   /** The open end the search is about, in nanometres. Required here, unlike the summary. */
   endNm: readonly number[]
-  /**
-   * The fit to score with — **read from the suggestion set's own manifest**, never from here.
-   *
-   * A ranker is a set of weights fitted against one definition of the eight features. Shipping a
-   * copy in this repository would be a second place for them to live, and the failure is silent:
-   * wrong weights still rank, just not the way the set that published them was calibrated.
-   */
-  ranker: GeometricRanker
-  /**
-   * How many to keep — the **best** `topK` by `geo_score`, which is a rank key where *lower is
-   * better*. SEAM's search keeps 100.
-   *
-   * Spelled out because the opposite reading produces a plausible answer: taking the raw logit
-   * and keeping the highest gives a list exactly reversed, every number believable and every
-   * rank wrong.
-   */
-  topK?: number
 }
 
-/** One open end's ranked pool, as flat columns. */
-export interface CandidateSearch {
+/** One open end's pool, unranked, as flat columns. */
+export interface CandidatePool {
   readonly rows: number
   /** True where the query root has no voxel in its own box — see `CutoutSummary.missingQuery`. */
   readonly missingQuery: boolean
   /** The candidate object of each row, 64-bit. */
   readonly candRoot: BigUint64Array
-  /** `geo_score`, `geo_rank`, the eight features, the contact point — by SEAM's own names. */
+  /**
+   * Every float column `pool_features` produced, by SEAM's own names — the eight geometric
+   * features, `end_dist_um`, and the contact point. **Not `l2c`/`l2x`**: those need a count this
+   * side of the bridge has to fetch, and they come back from `runPoolSizes`.
+   *
+   * **Not sorted, not cut and not numbered.** The whole pool crosses; `packs/seam/rankPool.ts`
+   * scores, sorts, cuts and numbers it, because the score is a forest in TypeScript now.
+   */
   readonly columns: Readonly<Record<string, Float64Array>>
   readonly ms: number
 }
 
 /**
- * Rank one open end's candidates — stages 4 and 5, in one crossing.
+ * Measure one open end's candidates — stage 4 and the measuring half of 5.
  *
- * Everything that has to match SEAM happens on the far side of this call: the cutout summary,
- * the eight features and the logistic score are three vendored steps with nothing of Coda's
- * between them. What this file does is carry the box over and name the columns back.
+ * Everything that has to match SEAM happens on the far side of this call: the cutout summary
+ * and the features are two vendored steps with nothing of Coda's between them. What this file
+ * does is carry the box over and name the columns back.
+ *
+ * **The arrays are transferred, not copied.** See `runCutoutSummary`.
  */
-export async function runCandidateSearch(
-  request: CandidateSearchRequest,
+export async function runCandidatePool(
+  request: CandidatePoolRequest,
   options: CallOptions = {},
-): Promise<CandidateSearch> {
+): Promise<CandidatePool> {
   const result = await callPython(
-    { module: 'cutoutSummary', fn: 'coda_candidate_search', args: [request] },
+    { module: 'cutoutSummary', fn: 'coda_candidate_pool', args: [request] },
     options,
   )
   return {
@@ -235,4 +208,60 @@ export async function runCandidateSearch(
     columns: float64Columns(result),
     ms: numberFrom(result, 'ms'),
   }
+}
+
+/**
+ * A measured pool and its level-2 chunk counts, for the two size features.
+ *
+ * The counts travel **by position**, one per pool row in the pool's own order, with the query's
+ * as a scalar. The first draft sent them keyed by root, which made Python re-join what this side
+ * had already aligned — and `coda_pool_sizes`' docstring records what that join cost.
+ */
+export type PoolSizesRequest = {
+  /** The pool's candidates, as `CandidatePool.candRoot` came back. */
+  candRoot: BigUint64Array
+  /** Each candidate's level-2 chunk count, in the same order. */
+  candCount: Float64Array
+  /** The neuron the pool was measured to — `LabelBoxRequest.queryRoot`. */
+  queryRoot: bigint
+  /** The query's own count, which every row's `l2x` reads. */
+  queryCount: number
+}
+
+/** `l2c` and `l2x`, one per pool row, in the pool's own order. */
+export interface PoolSizes {
+  readonly l2c: Float64Array
+  readonly l2x: Float64Array
+}
+
+/**
+ * Add SEAM's two whole-object size features to a measured pool.
+ *
+ * A second crossing for two expressions, deliberately: `candidates.size_features` is a vendored
+ * feature and computing it here instead would be exactly the drift SEAM's invariant 11 exists to
+ * prevent — a feature computed slightly differently still ranks, and nothing downstream can see
+ * that it ranks differently. Coda has broken that invariant once, for the forest, and "only
+ * where there was no choice" has to stay literally true.
+ *
+ * **The short count is refused before this**, by `countsInPoolOrder` in `packs/seam/searchRun.ts`
+ * — where a `Map` missing a root becomes a hole in a positional array, which is the moment the
+ * root's name still exists. By the time this function sees the array, "absent" is a `NaN` and
+ * naming it means re-deriving from a sentinel what the caller had in hand a line earlier. What
+ * stays here is the length check, which is a marshalling fact and nothing else's business.
+ */
+export async function runPoolSizes(
+  request: PoolSizesRequest,
+  options: CallOptions = {},
+): Promise<PoolSizes> {
+  if (request.candCount.length !== request.candRoot.length) {
+    throw new Error(
+      `seam pool sizes: ${request.candRoot.length} candidates and ` +
+        `${request.candCount.length} counts`,
+    )
+  }
+  const result = await callPython(
+    { module: 'cutoutSummary', fn: 'coda_pool_sizes', args: [request] },
+    options,
+  )
+  return { l2c: float64From(result, 'l2c'), l2x: float64From(result, 'l2x') }
 }

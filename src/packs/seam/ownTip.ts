@@ -34,7 +34,7 @@
 import { NM_PER_UM } from '../../data/units'
 import type { KdTree } from '../../nodes/lib/kdTree'
 import { buildKdTree } from '../../nodes/lib/kdTree'
-import type { CandidateSearch } from '../../pyodide/cutoutSummary'
+import type { CandidatePool } from '../../pyodide/cutoutSummary'
 
 /**
  * How far a contact may be from its own tip, in micrometres — `tip_show.OWN_TIP_UM`.
@@ -64,8 +64,15 @@ export const OWN_TIP_UM = 2.0
 const NEEDED = ['contact_x_nm', 'contact_y_nm', 'contact_z_nm', 'geo_rank'] as const
 
 /**
- * One open end's ranked candidates — the shape `runCandidateSearch` hands back, plus which end
- * it was searched at.
+ * One open end's ranked candidates — the shape `runCandidatePool` hands back once the caller has
+ * ranked it, plus which end it was searched at.
+ *
+ * **Ranked**, not as the pool crossed the bridge: `NEEDED` includes `geo_rank`, which the pool
+ * no longer carries. Since SEAM moved to a forest ranker the sort, the cut to `top_k` and the
+ * numbering happen in TypeScript (`rankPool.ts`; `treeRanker.ts` only scores), so `geo_rank` is
+ * a column the caller adds — and `searchRun.ts` is that caller, which is also where the order
+ * of this rule against the cut is written down. The check at the top of `ownTipRule` catches a
+ * caller that forgot.
  *
  * **`columns` is passed through rather than re-spelled**, and that is the point. The search's
  * result names SEAM's own columns (`cutoutSummary.ts` argues for that: a subset named on this
@@ -74,7 +81,7 @@ const NEEDED = ['contact_x_nm', 'contact_y_nm', 'contact_z_nm', 'geo_rank'] as c
  * call site — and a swapped axis in one of those is silent, which is exactly what the contact
  * check in `pnpm probe:candidate-search` exists to catch one layer down.
  */
-export type EndCandidates = Pick<CandidateSearch, 'rows' | 'columns'> & {
+export type EndCandidates = Pick<CandidatePool, 'rows' | 'columns'> & {
   /**
    * Which tip of the neuron this list was searched at — an **index into `tipsNm`**.
    *

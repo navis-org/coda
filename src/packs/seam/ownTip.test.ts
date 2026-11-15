@@ -122,9 +122,14 @@ describe('the own-tip rule, against SEAM', () => {
    * **The fixture no longer contains an instance, and that is the assertion.** Until the tree
    * ranker (2026-11-14) this neuron's lists held candidates whose nearest end had no list of its
    * own, and the case was made by narrowing to the six searched tips and showing more survived.
-   * The new search lists a tighter pool — a median of 39 candidates an end against 100 — and now
-   * every one of the 115 sits on its own tip, so the narrowing rescues nothing and the old
+   * Now every one of the 115 sits on its own tip, so the narrowing rescues nothing and the old
    * comparison asserted `115 > 115`.
+   *
+   * **The pool did not get smaller; SEAM moved the rule.** `candidates_all.parquet` used to hold
+   * each end's pre-rule top 100 and now holds the list *after* the rule, so its lists are short
+   * for the same reason this one has nothing left to drop. `docs/seam-suggestions-plan.md` holds
+   * the evidence and the measurements; what matters here is that a reader must not take the
+   * shorter lists for a change in what the search considers.
    *
    * Pinning "nothing is dropped" is worth more than the narrowing was: it says this golden's
    * agreement with SEAM is not reached *through* the rule discarding rows, so a bug in the rule

@@ -158,6 +158,27 @@ export function uint8From(result: PyResult, key: string): Uint8Array {
   return value
 }
 
+/**
+ * The measurement columns of a result, told apart by **dtype rather than by name**.
+ *
+ * Python casts the id columns to uint64 and every measurement to float64, so a list of which
+ * names are ids would be a cross-language pair with nothing testing either half. An id column
+ * added upstream arrives as a `BigUint64Array` and is simply not a measurement, rather than
+ * reaching `float64From`.
+ *
+ * Here rather than in one capability's wrapper because the rule is the bridge's, not any one
+ * call's: it lived in `cutoutSummary.ts`, two wrappers had the loop and the second copy had
+ * lost the reason, and when `probe:candidate-search` came to want it a third inline copy went
+ * in — without the dtype rule, which is the whole content.
+ */
+export function float64Columns(result: PyResult): Record<string, Float64Array> {
+  const columns: Record<string, Float64Array> = {}
+  for (const [key, value] of Object.entries(result)) {
+    if (value instanceof Float64Array) columns[key] = value
+  }
+  return columns
+}
+
 /** Read a float64 array a Python function promised. */
 export function float64From(result: PyResult, key: string): Float64Array {
   const value = result[key]

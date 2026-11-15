@@ -39,7 +39,7 @@ import {
   launchChrome,
   probeArgs,
   probeReport,
-  readCaveToken,
+  requireCaveToken,
 } from './lib/browserProbe.mjs'
 
 const args = probeArgs()
@@ -95,11 +95,7 @@ try {
 
 /** Its own, and deleted on the way out: `handCaveToken` persists into this profile. */
 const PROFILE = '/tmp/coda-seam-open-ends-profile'
-const token = readCaveToken()
-if (!token) {
-  console.error('no CAVE token: set CAVE_TOKEN or put one in ~/.cloudvolume/secrets/cave-secret.json')
-  process.exit(2)
-}
+const token = requireCaveToken()
 
 const report = probeReport()
 const { evaluate, waitFor, send, close } = await launchChrome({ port: 9357, profile: PROFILE })
