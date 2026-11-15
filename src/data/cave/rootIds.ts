@@ -413,6 +413,59 @@ export async function rootsForSupervoxels(
 }
 
 /**
+ * The instant a `RootsAt` names, or `undefined` where the datastack does not name one.
+ *
+ * Exported for a caller that asks about **many** sets of ids at one moment and so must resolve it
+ * once: `rootsAtInstant` below takes the number, not the `RootsAt`, precisely so that a
+ * materialization CAVE does not list is a refusal the caller can make *before* its first request
+ * rather than an empty answer repeated per call. `staleRoots` takes the same decision in prose
+ * forty lines above, for the same reason.
+ */
+export async function instantOf(
+  datastack: string,
+  when: RootsAt,
+  options: CaveRequestOptions,
+): Promise<number | undefined> {
+  return (await askedAt(datastack, when, options))?.at
+}
+
+/**
+ * The root of each supervoxel at an instant, **64-bit throughout and without the shared store.**
+ *
+ * `rootsForSupervoxels` above keeps one entry per `(server, table, instant)` and grows it: every
+ * call rebuilds the whole accumulated map and writes it back. That is right for the repair paths,
+ * which ask once per run about the handles of one table. It is quadratic for a caller that asks
+ * **per box** — SEAM's candidate search reads a ~14,000-supervoxel cutout per open end and a
+ * neuron is hundreds of them, so by the last end each call would rebuild and re-persist a table
+ * of millions before asking about anything. The store also has no eviction (`AskedAt`'s note),
+ * and a run's supervoxels are not a set worth keeping forever.
+ *
+ * So this is the batched, rate-limited fetch with the caching left to the caller, and the caller
+ * is expected to do it: `packs/seam/searchVolume.ts` holds one map for the run, which is what
+ * makes the overlap between neighbouring ends free.
+ *
+ * **Parallel to its input, `0n` where the graph lists none** — the same "0 = no object" the
+ * vendored `summarize_cutout` reads, so a caller writing the answer into a cutout needs no second
+ * sentinel. Ids never become text on this path: a decimal string per supervoxel is what the
+ * caller would then have to retain, and at a run's scale that is the larger half of its memory.
+ */
+export async function rootsAtInstant(
+  graphene: GrapheneSource,
+  at: number,
+  supervoxels: BigUint64Array,
+  options: CaveRequestOptions,
+): Promise<BigUint64Array> {
+  const out = new BigUint64Array(supervoxels.length)
+  for (let i = 0; i < supervoxels.length; i += CHUNK) {
+    // Sequential, like every other loop in this file: a shared public chunkedgraph.
+    const batch = supervoxels.subarray(i, i + CHUNK)
+    const answer = await getRoots(graphene, Array.from(batch, String), at, options)
+    for (let k = 0; k < batch.length; k++) out[i + k] = answer[k] ?? 0n
+  }
+  return out
+}
+
+/**
  * The root each node id belonged to at an instant, uncached — `roots_binary` takes a node at any
  * layer, a supervoxel or a level-2 chunk alike. A `0` ("no such node here") is left out.
  */

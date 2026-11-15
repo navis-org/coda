@@ -19,8 +19,10 @@
  */
 
 import { NM_PER_UM } from '../../data/units'
-import type { CellValue, TableValue } from '../../core/values'
-import { TIP_FIELDS, published, tableOf } from './suggestionTables'
+import type { TableValue } from '../../core/values'
+import { ID_COLUMN_NAME } from '../../core/ids'
+import type { Field } from './suggestionTables'
+import { field, tableOf } from './suggestionTables'
 import type { TipKind } from './tips'
 
 /** `calib_tips.E_TIP_UM`: how far from a tip a Model E cell may be and still be its `e_tip`. */
@@ -225,19 +227,35 @@ export interface OpenEnd {
 }
 
 /**
- * The open ends as the fixture's `Tips` table.
+ * The columns this node publishes — **what it measured, and nothing else.**
  *
- * **Built from `TIP_FIELDS`**, which is the same list `seam:suggestions` publishes from — so the
- * two nodes cannot drift and `seam:review` takes either without knowing which made it. Every
- * column a later stage will fill is present and **null**, not absent: a reader's column picker is
- * offered the same choices whichever node is upstream, and a null is honestly "not computed yet"
- * where a missing column would be a different table.
+ * It used to publish `TIP_FIELDS`, the full shape `seam:suggestions` reads out of a published
+ * set, with every column a later stage would fill present and null. That was right while the
+ * plan was one node running all nine stages: the shape would not change as the stages landed.
+ * It is wrong now that the search is `seam:suggestMerges` downstream — a null column is a
+ * picker offered a choice that answers nothing, on a node that has no way ever to fill it.
  *
- * `e_tip` is the one column this stage actually knows. `p_tip` needs `segclr`, which is the
- * assessors' work; `q`, `shown` and `r` follow from it.
+ * So this is the identity, the position, which kind of end it is, and the one measurement.
+ * `seam:suggestMerges` folds its own columns onto this (`searchTips.ts`), which is how the two
+ * meet without either declaring the other's list.
+ *
+ * Built through `suggestionTables.ts`' `Field` machinery, which is shared on purpose — one
+ * derivation of the schema half and the value half from one list is invariant 3's whole point.
+ * What is no longer shared is the *list*.
  */
+export const OPEN_END_FIELDS: readonly Field[] = [
+  field('neuron', ID_COLUMN_NAME, 'str'),
+  field('end_uid', 'end_uid', 'i64'),
+  field('kind', 'kind', 'str'),
+  field('x_nm', 'x', 'f64', 'nm'),
+  field('y_nm', 'y', 'f64', 'nm'),
+  field('z_nm', 'z', 'f64', 'nm'),
+  field('e_tip', 'e_tip', 'f64'),
+]
+
+/** The open ends as a table. */
 export function openEndsTable(ends: readonly OpenEnd[]): TableValue {
-  const known: Record<string, CellValue[]> = {
+  return tableOf(OPEN_END_FIELDS, {
     neuron: ends.map((end) => end.neuronId),
     end_uid: ends.map((end) => end.endUid),
     kind: ends.map((end) => end.kind),
@@ -245,12 +263,5 @@ export function openEndsTable(ends: readonly OpenEnd[]): TableValue {
     y_nm: ends.map((end) => end.y),
     z_nm: ends.map((end) => end.z),
     e_tip: ends.map((end) => end.eTip),
-  }
-  const read: Record<string, CellValue[]> = {}
-  for (const field of published(TIP_FIELDS)) {
-    // Keyed by the file name, which is what `tableOf` reads — `ID_COLUMN_NAME` is the published
-    // name of `neuron` and is not a key here.
-    read[field.from] = known[field.from] ?? ends.map(() => null)
-  }
-  return tableOf(TIP_FIELDS, read)
+  })
 }

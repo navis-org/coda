@@ -20,7 +20,8 @@ import type { CodaType, TableSchema } from '../../core/types'
 import '../../nodes'
 import { OPEN_END_MODELS, OPEN_END_TASK } from './models'
 import { SEAM_TIP_RULE } from './tips'
-import { TIP_FIELDS, schemaOf } from './suggestionTables'
+import { OPEN_END_FIELDS } from './openEndsOps'
+import { schemaOf } from './suggestionTables'
 
 const def = requireNodeDef('seam:openEnds')
 
@@ -63,21 +64,23 @@ describe('the card', () => {
    * node empty until then.
    */
   it('promises its columns before it runs', () => {
-    expect(infer().tips!.schema).toEqual(schemaOf(TIP_FIELDS))
+    expect(infer().tips!.schema).toEqual(schemaOf(OPEN_END_FIELDS))
   })
 
   /**
-   * The property that lets `seam:review` take either node's table without knowing which made it.
-   * Both read `TIP_FIELDS`, so this cannot drift — which is the point of asserting it.
+   * **Not `seam:suggestions`' shape any more**, and that is the change rather than a regression.
+   * This node used to publish `TIP_FIELDS` with every later stage's column null, so the two
+   * tables matched column for column. The search is `seam:suggestMerges` downstream now, and
+   * `seam:suggestions` is modelled on an earlier SEAM pipeline whose output is going to move —
+   * so the coupling was dropped (2026-11-15, user). What holds instead is that this node
+   * publishes nothing it cannot fill.
    */
-  it('publishes the same Tips table as Merge Suggestions', () => {
-    const suggestions = requireNodeDef('seam:suggestions')
-    const theirs = (
-      suggestions.inferOutputs!(
-        makeInferContext(suggestions, defaultParams(suggestions), {}),
-      ) as Record<string, { schema?: TableSchema }>
-    ).tips!.schema
-    expect(columnNames(infer().tips!.schema!)).toEqual(columnNames(theirs!))
+  it('publishes no column it has no way to answer', () => {
+    const names = columnNames(infer().tips!.schema!)
+    for (const absent of ['p_tip', 'segclr', 'q', 'shown', 'r', 'candidateId', 'p_top']) {
+      expect(names, absent).not.toContain(absent)
+    }
+    expect(names).toEqual(['neuronId', 'end_uid', 'kind', 'x', 'y', 'z', 'e_tip'])
   })
 })
 

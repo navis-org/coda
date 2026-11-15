@@ -65,6 +65,7 @@ import {
 } from './mergeTables'
 import { MERGE_WINDOW_MODELS, MERGE_WINDOW_TASK, mergeWindowModel } from './models'
 import { openWindowModel } from './openWindowModel'
+import { afterShare } from './progress'
 import type { ScoredPoints } from './scene'
 import { fragmentLayer, scoreLayer } from './scene'
 import { scoreWindows } from './windowRun'
@@ -249,8 +250,7 @@ export const findMergesNode = packNode({
     try {
       for (let i = 0; i < items.length; i++) {
         const item = items[i]!
-        const share = (done: number) =>
-          DOWNLOAD_SHARE + ((1 - DOWNLOAD_SHARE) * (i + done)) / items.length
+        const share = (done: number) => afterShare(DOWNLOAD_SHARE, (i + done) / items.length)
         if (item.indices.length === 0) {
           // A mesh with no faces tiles into nothing. Counted rather than warned per neuron.
           skipped += 1

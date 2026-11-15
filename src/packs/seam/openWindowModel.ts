@@ -1,5 +1,10 @@
 /**
- * Opening a SEAM window model: the gate, the download consent and the progress bar.
+ * Opening a SEAM model: the gate, the download consent and the progress bar.
+ *
+ * Two exports are not about *window* models at all. `loadSeamManifest` is the manifest, task and
+ * `config` head, shared with `rankerConfig.ts`' `openTreeRanker` — which deliberately takes none
+ * of the tail, a forest being scored in TypeScript. `openSeamModel` below is the window path:
+ * the gate, the consent and an ONNX session.
  *
  * Three cards in this pack run a checkpoint over a neuron's surface — Find Merges, Find Open Ends
  * and Affinity Clusters — and the forty lines in front of each run were the same forty lines,
@@ -24,6 +29,7 @@
  */
 
 import { formatBytes } from '../../core/limits'
+import type { LoadedManifest } from '../../ml/manifest'
 import { loadManifest, variantBytes } from '../../ml/manifest'
 import type { ModelSession } from '../../ml/session'
 import { openModel } from '../../ml/session'
@@ -32,6 +38,34 @@ import { weightsCached } from '../../ml/weights'
 import type { AffinityModel } from './models'
 import { parseWindowConfig } from './windowConfig'
 import type { WindowConfig } from './windowConfig'
+
+/**
+ * The manifest, checked against the task the caller can read it as, and its `config` parsed.
+ *
+ * Shared by `openSeamModel` below and by `rankerConfig.ts`' `openTreeRanker`, which wants this
+ * head and none of the tail: a LightGBM forest is scored in TypeScript, so the WebGPU gate does
+ * not apply to it, and 1.3 MB fetched once and kept is not a download to ask consent for.
+ *
+ * It is here rather than copied for the reason `caveParams.ts`' header records about its own
+ * refusals: the sentence below shipped from two places for one round, and the *wording* is what
+ * drifts. Model A and Model E are the same network differing only in what they were trained to
+ * answer, so a URL pointing at the wrong one loads, runs and returns perfectly shaped numbers
+ * about a different question — this sentence is the only thing between a reader and that.
+ */
+export async function loadSeamManifest<C>(options: {
+  readonly model: AffinityModel
+  readonly task: string
+  readonly parse: (config: unknown, modelId: string) => C
+  readonly signal?: AbortSignal
+}): Promise<{ loaded: LoadedManifest; config: C }> {
+  const loaded = await loadManifest(options.model.manifestUrl, options.signal)
+  if (loaded.manifest.task !== options.task) {
+    throw new Error(
+      `${options.model.label} is a ${loaded.manifest.task} model, not a ${options.task} one.`,
+    )
+  }
+  return { loaded, config: options.parse(loaded.manifest.config, loaded.manifest.id) }
+}
 
 export interface OpenSeamModelOptions<C> {
   /** The chosen entry of the caller's own model list. */
@@ -81,11 +115,7 @@ export async function openSeamModel<C>(
   if (gpu.refusal) throw new Error(gpu.refusal)
 
   options.progress(0, 'reading the model')
-  const loaded = await loadManifest(model.manifestUrl, options.signal)
-  if (loaded.manifest.task !== task) {
-    throw new Error(`${model.label} is a ${loaded.manifest.task} model, not a ${task} one.`)
-  }
-  const config = options.parse(loaded.manifest.config, loaded.manifest.id)
+  const { loaded, config } = await loadSeamManifest(options)
   const refusal = options.check?.(config)
   if (refusal) throw new Error(refusal)
 

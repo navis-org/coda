@@ -14,6 +14,7 @@ import { columnNames } from '../../core/types'
 import {
   CROP_SLOP_UM,
   E_TIP_UM,
+  OPEN_END_FIELDS,
   addCells,
   bestWithin,
   emptyCellPool,
@@ -23,7 +24,7 @@ import {
   reachNm,
   settledBy,
 } from './openEndsOps'
-import { TIP_FIELDS, published, schemaOf } from './suggestionTables'
+import { published, schemaOf } from './suggestionTables'
 
 describe('reachNm', () => {
   /** The line the streaming argument rests on: the crop radius plus how far a tip reads. */
@@ -193,34 +194,41 @@ describe('openEndsTable', () => {
   ]
 
   /**
-   * The reuse that is the point of this function: the same field list `seam:suggestions`
-   * publishes from, so `seam:review` takes either node's table without knowing which made it.
+   * Its **own** list, and the data has exactly it. The shared one `seam:suggestions` publishes
+   * from was dropped this round (`OPEN_END_FIELDS`), so what holds now is that the schema half
+   * and the value half come from one declaration — invariant 3's point, applied per node.
    */
-  it('publishes the suggestion set’s own Tips schema, column for column', () => {
+  it('publishes its own columns, and the data has exactly them', () => {
     const table = openEndsTable(ends)
-    expect(table.schema).toEqual(schemaOf(TIP_FIELDS))
+    expect(table.schema).toEqual(schemaOf(OPEN_END_FIELDS))
     expect(Object.keys(table.data).sort()).toEqual(columnNames(table.schema).sort())
     expect(table.length).toBe(2)
   })
 
-  /** Null, not absent: the picker downstream is offered the same columns either way. */
-  it('leaves every column a later stage will fill present and null', () => {
+  /**
+   * **What it measured, and nothing else.** It used to carry every column a later stage would
+   * fill, present and null, which was right while one node was to run all nine stages. With the
+   * search in `seam:suggestMerges` downstream, a null here is a picker offered a choice this
+   * node can never answer — see `OPEN_END_FIELDS`.
+   */
+  it('carries no column it cannot fill', () => {
     const table = openEndsTable(ends)
-    expect(table.data['p_tip']).toEqual([null, null])
-    expect(table.data['q']).toEqual([null, null])
-    expect(table.data['candidateId']).toEqual([null, null])
+    for (const name of ['p_tip', 'q', 'shown', 'r', 'segclr', 'candidateId', 'p_top']) {
+      expect(table.data[name], name).toBeUndefined()
+    }
     expect(table.data['e_tip']).toEqual([-0.25, null])
+    expect(table.data['kind']).toEqual(['tip', 'tip'])
   })
 
   it('carries the id as text, under the column the rest of Coda recognises', () => {
     const table = openEndsTable(ends)
-    const ids = table.data[published(TIP_FIELDS)[0]!.name]
+    const ids = table.data[published(OPEN_END_FIELDS)[0]!.name]
     expect(ids).toEqual(['648518347558097460', '648518347558097460'])
   })
 
   it('an empty run is an empty table with the same schema', () => {
     const table = openEndsTable([])
     expect(table.length).toBe(0)
-    expect(table.schema).toEqual(schemaOf(TIP_FIELDS))
+    expect(table.schema).toEqual(schemaOf(OPEN_END_FIELDS))
   })
 })

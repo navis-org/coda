@@ -61,6 +61,22 @@ const glyphs: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '5', cy: '5.5', r: '2' }],
     ['circle', { cx: '19', cy: '7.5', r: '2' }],
   ],
+  /*
+   * The same open end Find Open Ends rings, with the pieces the search found around it and an
+   * arrow to the one the forest put first. Deliberately *between* the other two drawings: Find
+   * Open Ends has the ring and no piece, Merge Suggestions has the piece and no ring, and this
+   * is the stage that turns one into the other. The two unmarked strokes are the rest of the
+   * pool — without them it is Merge Suggestions again, and the ranking is the whole point.
+   */
+  'seam:suggestMerges': [
+    ['path', { d: 'M4 20.5V12M4 16l-2-2.5M4 14l2.5-3' }],
+    ['path', { d: 'M4 12V8.5' }],
+    ['circle', { cx: '4', cy: '6.5', r: '1.8' }],
+    ['path', { d: 'M12 4.5v5' }],
+    ['path', { d: 'M17 9.5v5' }],
+    ['path', { d: 'M19.5 2.5v4' }],
+    ['path', { d: 'M7 6.5h3.5M9.5 5l1.5 1.5-1.5 1.5' }],
+  ],
   'seam:affinityClusters': [
     ['path', { d: 'M7 20V9M7 14 3.5 10M7 12.5l3-3.5M7 9 5 5.5' }],
     ['path', { d: 'M17 20V9M17 14l3.5-4M17 12.5 14 9M17 9l2-3.5' }],

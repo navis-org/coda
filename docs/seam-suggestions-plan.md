@@ -2021,3 +2021,248 @@ Worth confirming upstream that the move was deliberate; if it was not, the golde
 - **The organelle columns in a regenerated fixture.** The handoff describes `organelle_score`,
   `organelle` and `top_organelle`, and the published set now carries them — this is noted as
   delivered, and the UI switch it is for is still to build.
+
+## `seam:suggestMerges` — "Suggest Merges", built 2026-11-15
+
+The node that calls the search. It takes `seam:openEnds`' `Tips` table and a CAVE Dataset and
+publishes `Tips` and `Candidates`, the same two `seam:suggestions` does, so `seam:review` takes
+either. The code is in `src/packs/seam/suggestMerges.ts` with its headless halves beside it;
+what belongs in the plan is the shape decisions, which are the ones that could have gone the
+other way.
+
+### A node after Find Open Ends, not Find Open Ends growing
+
+The 2026-11-09 decision was one node running all nine stages, streaming: score the tips, pick one
+by score, run full inference on it, repeat. `seam:openEnds`' own header still said so. **Reversed
+2026-11-15 (user).** Three things had accumulated against it:
+
+- **A search param nudge would re-run Model E.** Params are in the provenance key, nothing
+  memoises the scan across runs, and a whole Aedes neuron is 417 windows and about a minute of
+  scanning. Separate nodes make the scan a cache hit while the search is re-keyed.
+- **The CAVE boundary becomes a wiring decision.** Somebody who wants open ends does not silently
+  get chunkedgraph traffic, and does not need a param inside one node to stop it.
+- **Arm B wants to be a third node anyway.** Its head reads `neg_geo_rank`, so it *consumes* this
+  search and replaces stage 6 rather than sitting beside stages 4–5. The one-node design would
+  have had to absorb that too.
+
+What was given up is the interleave, and it was worth less than it looked: the ends to search
+cannot be ranked until the sweep is done, so "pick one by score" was greedy-best-so-far either
+way.
+
+**The fact that made it safe** is that the published `Tips` table is already a complete interface.
+The search needs the tip's position in nanometres and the neuron's root id, and nothing else —
+`align` and `ahead` are computed from the cutout (`pool_features`: "end minus Q's centroid in the
+box"), not from a skeleton direction, and `ownTipRule` reads the other tips' positions, which are
+rows in the same table. So no hidden coupling forced one node.
+
+### It publishes the shape and fills ten of the twenty-one columns
+
+> **Superseded the same day** — see "Two schemas narrowed" at the foot of this file. The shared
+> shape was dropped, those columns are absent rather than null, and `parseSearchPlan` no longer
+> exists: the pipeline comes from the model manifest. The reasoning below is kept because the
+> *measurement* in it — which ten columns stages 4 and 5 can fill — did not change.
+
+`geo_rank`, `rank`, `candidateId`, `vol_um3`, `min_dist_um`, the contact triple, the neuron and
+the `end_uid`. Null: `logit`, `p_cand`, `conf`, `score_s0..2`, `logit_s0..2`, `filled`, `shown` —
+stage 6 and later, which needs the three assessors. On a tip, `segclr`, `p_tip`, `q`, `shown` and
+`r` stay as they arrived.
+
+Null rather than absent, for the reason `seam:openEnds` already publishes them that way: the
+shape a reader wires up does not change when the stage behind it lands. Null rather than zero or
+`false`, because zero is a measurement and `shown: false` would say SEAM's cutoff had been applied
+and had excluded the row.
+
+`seam:review` tolerates every one of them — `reviewQueue.ts` reads them through an accessor that
+answers `undefined` either way — but two of the card's three filters (`Min confidence`, `Shown
+only`) then have nothing to read, and the queue's order is geometric. The node's `guide` says so;
+a reader should not have to infer it from a column of nulls.
+
+### No cutoff on the node
+
+A whole neuron is hundreds of ends at a ~19 MB cutout each, so something has to narrow them, and
+it is not this node — `seam:findMerges`' `Score cutoff` is the recorded lesson (every nudge
+re-ran the node, and a discarded answer looked like a verdict). Narrowing is a `Filter Table` on
+`e_tip` above it. What the node has instead is `warnOverWait` at `SECONDS_PER_END`, which is
+`docs/limits.md`' rule: a guard rail warns, states a wait rather than a count, and runs anyway.
+
+### One instant for the whole run
+
+Boxes are turned into roots at the **dataset's materialization**, not at the clock. That is what
+`RootsAt`'s cacheable arms exist for — the supervoxels two neighbouring ends share are asked about
+once, and `{ version }`'s answers are kept forever — and it makes a re-run give the same answer,
+which `{ now }` would not. The cost is that a materialization older than the ends were found in
+leaves the query root naming nothing in its own box; every end comes back `missingQuery`, and the
+node says that in one sentence naming the likely cause rather than hundreds naming none.
+
+### Where the pipeline's numbers come from
+
+`parseSearchPlan` (beside `parsePipelineFits`, same manifest, different question): the box size,
+the pool radius, `top_k`, `own_um`, the model file and **the feature order**. Nothing has a
+default, because every one of them would still produce a ranking if guessed. `cutout_xy_nm` is
+asked for rather than pinned — on Aedes the manifest says 64 and the volume's only scale is 32,
+which is not a disagreement: `scaleNear` is what `caveclient` does too.
+
+### Not done here
+
+- No card body, so the node draws generic param rows. A sparkline of a tip's ranked list would
+  want `conf`, which is null here.
+- No `Points` or `Layers` output. `seam:suggestions` has both; this node's answer reaches
+  neuroglancer through `seam:review`, which is the surface that knows which pair is current.
+- No probe through the node itself. `pnpm probe:candidate-search` drives `searchEnds` directly,
+  which is the layer where parity with SEAM is checked; what the node adds above it is tables,
+  and `searchTips.test.ts` covers those.
+
+### What the review chain changed (2026-11-15, same day)
+
+Two `/simplify` passes and two `/code-review medium` passes. Fourteen findings applied; the ones
+worth keeping are the ones that were invisible to the tests already written.
+
+**The one that would have made the node unusable.** `rootsForSupervoxels` keeps **one accumulating
+entry** per `(server, table, instant)` and rebuilds it on every call — right for the repair paths,
+which ask once per run, and quadratic for a search that asks per box. At ~14,000 supervoxels a box
+and hundreds of boxes, the last end would rebuild and re-persist a table of millions before asking
+about anything: minutes of bookkeeping on a run budgeted at 2 s/end, getting slower as it went.
+`rootsAtInstant` is the arm without the shared store, 64-bit throughout, and the run holds its own
+map (`SearchVolume.roots`), cleared between neurons because overlap is a fact about one neuron's
+own ends. `instantOf` resolves the moment once, so a materialization CAVE does not list is a
+refusal before the first byte rather than every supervoxel silently resolving to `0n`.
+
+**Four that were wrong in a way that still produces an answer:**
+
+- **`String(cell)` where `idText` belongs**, and then `idText` where `isSegmentId` belongs. A
+  neuron *name* is a sound id — `LC4` is one in a neuPrint table — and the search needs a
+  chunkedgraph root. Both now apply, and the row is dropped and counted with everything else.
+- **`end_uid` fell back to the row index.** It is a tip's identity downstream — `reviewQueue`
+  merges a tip with its candidate list on `(neuron, end_uid)` alone — so a stand-in can collide
+  with another row's real one and merge two tips' lists. A missing one drops the row.
+- **A searched tip with no candidates kept whatever arrived.** From a `seam:suggestions` tips
+  table that is another run's `candidateId` and `p_top`, published beside this run's `Candidates`
+  with no matching row. Every first-candidate column is cleared before any is written.
+- **An end outside the volume aborted the run.** `boxAroundAll` throws for a box that clamps to
+  nothing, and one such end would have killed a search of several hundred after the expensive ones
+  were paid for. They are filtered and counted — but they stay in the own-tip rule's competitor
+  set, because an unsearchable end is still a *tip*, and dropping it would publish a candidate
+  that belongs to it as another end's first.
+
+**And the duplication the node could least afford.** *(Superseded the same day — see "The
+pipeline moves into Coda" below. `Suggestions`/`Set` left this node for a `Ranker` dropdown, so
+there was one caller again and `suggestionParams.ts` was folded back into `suggestions.ts`
+before either was committed. The file never existed in git; the fold-back's reason is recorded
+in `suggestions.ts` beside what it holds.)* The `url`/`set` controls and their five
+refusal sentences had been written out twice, on the one node whose premise is not drifting from
+`seam:suggestions`. `suggestionParams.ts` owns them now — the shape `caveParams.ts` exists for,
+and its header already records what the second copy costs. `chosenManifest` moved there too and
+grew the empty-address refusal that only one of its two callers had.
+
+Deferred, with the reason recorded in the file: moving `openSearchVolume` into
+`src/data/cave/volumes.ts` (one caller; a `DataSource` method is refused by that file's own
+header), and any ceiling on the run's supervoxel map until somebody measures real overlap across a
+whole neuron.
+
+## The pipeline moves into Coda, and the search streams (2026-11-15, user)
+
+Two changes to `seam:suggestMerges`, decided together.
+
+### `Suggestions`/`Set` out, `Ranker` in
+
+The node read the forest, the box size, the pool radius, `top_k`, `own_um` and the feature order
+out of whichever published suggestion set it was pointed at. That made Coda's pipeline a property
+of somebody else's run, and tied a node that *computes* an answer to one that *reads* one.
+
+It is a model row now (`MERGE_RANKER_MODELS`, task `merge-ranker`), opened through the same
+manifest and verified weight cache as the other four SEAM checkpoints — but **without the WebGPU
+gate or the download consent**: a LightGBM forest is scored in TypeScript, and 1.3 MB fetched once
+and kept is not a thing to stop and ask about.
+
+**Every number rides in the manifest's `config`**, which is the half `docs/ml.md` says is the
+pack's. The reason is the feature order and it is not a style preference: `parseTreeRanker` refuses
+a forest whose feature *count* is not the list's, which catches a refit that appends a column —
+SEAM appended three on 2026-11-11 — but **nothing can check the order**, because LightGBM wrote
+the model's own names as `Column_0 … Column_10`. A list declared in Coda would be a hand-kept copy
+that a reordering refit silently invalidates, with every candidate scored against the wrong eleven
+numbers and still ranked. Carried with the weights, the two versions move together or not at all.
+
+`pnpm make:ranker-manifest <model.txt> <fixture.json> [out]` writes the pair to upload, taking the
+hashes, the sizes and the feature order rather than having them typed, and refusing a `model.txt`
+whose `max_feature_idx` disagrees with the list. `__fixtures__/rankerManifest.json` is its output
+for the published Aedes forest, and `rankerConfig.test.ts` reads it back through `src/ml`'s own
+gate — which is what keeps the generator and the reader in step.
+
+### One end at a time, published as it lands
+
+`searchEnds` is an async generator. Each end is measured, counted, sized, ranked, own-tip-ruled
+and yielded on its own, and the node `ctx.publish`es after each — `ReviewBody` draws its queue
+from `inputValues`, so the review card fills while the rest of the neuron is still being measured,
+with nothing downstream re-running.
+
+**A published end is final**, which is what makes this honest rather than a progress animation:
+the own-tip rule reads the tip *positions*, which are known before any box is read, so an end
+ranked now cannot be changed by an end measured later. A draft that moved under the reader would
+be worse than no streaming at all.
+
+What it cost is the batched counts call. The first draft measured the whole neuron, asked
+`l2ChunkCounts` once for every root, then ranked — so nothing was reviewable until every box in
+the neuron had been read, which for a 500-tip neuron is the whole run. Per end the roots are asked
+for per end, and that is cheaper than it looks: `l2ChunkCounts` memoises by root, so the overlap
+between neighbouring ends is still free and only the request *count* rises, at the margin where a
+batch of fifty is not full. No throttle on the publish: an end costs ~560 ms warm and a 19 MB box
+before that, so the gap is already far above the `PUBLISH_INTERVAL_MS` a geometry channel needs.
+
+`seam:openEnds` keeps its own streaming unchanged. A downstream node only starts once its upstream
+settles and published partials are dropped at that moment, so the two never overlap.
+
+### Two schemas narrowed
+
+**`seam:openEnds` publishes what it measured** (`OPEN_END_FIELDS`: the neuron, `end_uid`, `kind`,
+the position, `e_tip`). It used to carry every column a later stage would fill, present and null,
+which was right while one node was to run all nine stages — the shape would not change as they
+landed. With the search downstream those became pickers offered a choice that node can never
+answer.
+
+**`seam:suggestMerges` declares its own two lists** rather than `seam:suggestions`'. That node is
+modelled on an earlier SEAM pipeline and its output is going to change (user), so pinning this
+node's columns to it would pin them to something about to move. The eleven stage-6 columns are now
+**absent rather than null**. `seam:review` takes either, because it reads every column by name
+through an accessor that answers `undefined` for one that is not there.
+
+What the three still share is `suggestionTables.ts`' `Field`/`schemaOf`/`tableOf` machinery — one
+derivation of the schema half and the value half from one list, which is invariant 3's point. What
+is no longer shared is the list.
+
+### What the review chain found (2026-11-15)
+
+Two `/simplify` and two `/code-review medium` passes over the streaming node and the model
+manifest. The findings worth keeping are the ones about the seam between this node and
+`seam:review`, because every one of them was silent.
+
+**Absent is not false, and null is not false either.** `seam:review` read `shown` as `=== true`,
+so a `Tips` table from `seam:suggestMerges` — which publishes no `shown` at all, its ranking
+being geometric — made every row hidden: an empty annotation layer and an empty `Shown only`
+filter, without a word. `wasShown` says what the column means instead. The second half arrived
+with the first fix: `tipsWithFirsts` clears every first-candidate column when it searches a tip,
+so a `seam:suggestions` table fed through this node keeps its `shown` *column* and holds `null`
+in it. Only an explicit `false` hides a row now.
+
+**Clearing has to cover everything the first candidate implied.** `p_top`, `q`, `r` and `shown`
+are all the previous run's reading of the previous run's first candidate, and left beside this
+run's `candidateId` they are what `seam:review` sorts and filters on.
+
+**A substitute on another scale is worse than no ordering.** Without `r` the `confidence` sort
+scored every row the same and fell through to its `end_uid` tie-break. The first attempt at a fix
+put `e_tip` in its place — which is a logit, not a chance, so it would have sorted a mixed queue
+by two scales at once, filtered a `Min confidence` validated on 0..1 against values below −2, and
+printed the result under a "confidence" heading. Reverted. The sentinel for "no such number" was
+`-1`, inside the range being compared, so an unmeasured row outranked a measured negative one;
+that is `-Infinity` now.
+
+**One end's failure is not the run's.** A root the chunkedgraph does not list made
+`countsInPoolOrder` throw, and one such root aborted a whole multi-neuron run after hundreds of
+ends had been paid for. It comes back as `SearchedEnd.refusal` now and the node says how many,
+quoting one.
+
+**Recorded rather than fixed:** narrowing the ends with a `Filter Table` also narrows what the
+own-tip rule can compare against, since the only tips it can measure are the rows it was given.
+A filtered run therefore keeps a few candidates a whole-neuron run would drop — a more generous
+answer, never a different ranking of the same list. Ends the node drops itself stay competitors
+for exactly this reason; rows a filter removed are not there to keep. The node's header and its
+guide both say so, and a reader comparing against a published set should search the whole neuron.

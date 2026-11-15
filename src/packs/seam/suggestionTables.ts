@@ -57,7 +57,14 @@ export interface Field {
   readonly check?: true
 }
 
-const f = (from: string, name: string, dtype: DType, unit?: string): Field =>
+/**
+ * One published column, declared.
+ *
+ * Exported because four lists now declare columns this way — this file's two,
+ * `openEndsOps.ts`' and `searchTips.ts`' — and what they share is the *machinery*, not the
+ * list.
+ */
+export const field = (from: string, name: string, dtype: DType, unit?: string): Field =>
   unit === undefined ? { from, name, dtype } : { from, name, dtype, unit }
 
 /** A column read only so the loader can check it. Never reaches a published table. */
@@ -85,15 +92,15 @@ export const FIRST_CANDIDATE = '(first candidate)'
  * keeping, since 2,331 of the 2,708 tips were never looked at.
  */
 export const TIP_FIELDS: readonly Field[] = [
-  f('neuron', ID_COLUMN_NAME, 'str'),
-  f('end_uid', 'end_uid', 'i64'),
-  f('kind', 'kind', 'str'),
-  f('x_nm', 'x', 'f64', 'nm'),
-  f('y_nm', 'y', 'f64', 'nm'),
-  f('z_nm', 'z', 'f64', 'nm'),
-  f('e_tip', 'e_tip', 'f64'),
-  f('segclr', 'segclr', 'f64'),
-  f('p_tip', 'p_tip', 'f64'),
+  field('neuron', ID_COLUMN_NAME, 'str'),
+  field('end_uid', 'end_uid', 'i64'),
+  field('kind', 'kind', 'str'),
+  field('x_nm', 'x', 'f64', 'nm'),
+  field('y_nm', 'y', 'f64', 'nm'),
+  field('z_nm', 'z', 'f64', 'nm'),
+  field('e_tip', 'e_tip', 'f64'),
+  field('segclr', 'segclr', 'f64'),
+  field('p_tip', 'p_tip', 'f64'),
   /*
    * **Read and checked, never published.** `tips.parquet` carries its own copy of the first
    * candidate's root id, and in the set as first published that copy had been through a float64:
@@ -107,23 +114,23 @@ export const TIP_FIELDS: readonly Field[] = [
    * (invariant 8).
    */
   check('top_cand_root', 'str'),
-  f('top_vol_um3', 'vol_um3', 'f64', 'µm³'),
-  f('top_geo_rank', 'geo_rank', 'f64'),
-  f('top_min_dist_um', 'min_dist_um', 'f64', 'µm'),
-  f('top_contact_x_nm', 'contact_x', 'f64', 'nm'),
-  f('top_contact_y_nm', 'contact_y', 'f64', 'nm'),
-  f('top_contact_z_nm', 'contact_z', 'f64', 'nm'),
-  f('p_top', 'p_top', 'f64'),
+  field('top_vol_um3', 'vol_um3', 'f64', 'µm³'),
+  field('top_geo_rank', 'geo_rank', 'f64'),
+  field('top_min_dist_um', 'min_dist_um', 'f64', 'µm'),
+  field('top_contact_x_nm', 'contact_x', 'f64', 'nm'),
+  field('top_contact_y_nm', 'contact_y', 'f64', 'nm'),
+  field('top_contact_z_nm', 'contact_z', 'f64', 'nm'),
+  field('p_top', 'p_top', 'f64'),
   // Filled from the candidates file's rank-1 row, not from the column above. See `TIP_FIELDS`.
-  f(FIRST_CANDIDATE, 'candidateId', 'str'),
-  f('q', 'q', 'f64'),
-  f('shown', 'shown', 'bool'),
-  f('r', 'r', 'f64'),
-  f('page', 'seam_page', 'str'),
-  f('tip_verdict', 'seam_verdict', 'str'),
-  f('belongs', 'seam_belongs', 'str'),
-  f('not_belongs', 'seam_not_belongs', 'str'),
-  f('first_right', 'seam_first_right', 'f64'),
+  field(FIRST_CANDIDATE, 'candidateId', 'str'),
+  field('q', 'q', 'f64'),
+  field('shown', 'shown', 'bool'),
+  field('r', 'r', 'f64'),
+  field('page', 'seam_page', 'str'),
+  field('tip_verdict', 'seam_verdict', 'str'),
+  field('belongs', 'seam_belongs', 'str'),
+  field('not_belongs', 'seam_not_belongs', 'str'),
+  field('first_right', 'seam_first_right', 'f64'),
 ]
 
 /**
@@ -139,27 +146,27 @@ export const TIP_FIELDS: readonly Field[] = [
  * kept beside it.
  */
 export const CANDIDATE_FIELDS: readonly Field[] = [
-  f('neuron', ID_COLUMN_NAME, 'str'),
-  f('end_uid', 'end_uid', 'i64'),
-  f('cand_root', 'candidateId', 'str'),
-  f('rank', 'rank', 'i64'),
-  f('geo_rank', 'geo_rank', 'i64'),
-  f('vol_um3', 'vol_um3', 'f64', 'µm³'),
-  f('min_dist_um', 'min_dist_um', 'f64', 'µm'),
-  f('contact_x_nm', 'contact_x', 'f64', 'nm'),
-  f('contact_y_nm', 'contact_y', 'f64', 'nm'),
-  f('contact_z_nm', 'contact_z', 'f64', 'nm'),
-  f('logit', 'logit', 'f64'),
-  f('p_cand', 'p_cand', 'f64'),
-  f('conf', 'conf', 'f64'),
-  f('score_s0', 'score_s0', 'f64'),
-  f('score_s1', 'score_s1', 'f64'),
-  f('score_s2', 'score_s2', 'f64'),
-  f('logit_s0', 'logit_s0', 'f64'),
-  f('logit_s1', 'logit_s1', 'f64'),
-  f('logit_s2', 'logit_s2', 'f64'),
-  f('filled', 'filled', 'bool'),
-  f('shown', 'shown', 'bool'),
+  field('neuron', ID_COLUMN_NAME, 'str'),
+  field('end_uid', 'end_uid', 'i64'),
+  field('cand_root', 'candidateId', 'str'),
+  field('rank', 'rank', 'i64'),
+  field('geo_rank', 'geo_rank', 'i64'),
+  field('vol_um3', 'vol_um3', 'f64', 'µm³'),
+  field('min_dist_um', 'min_dist_um', 'f64', 'µm'),
+  field('contact_x_nm', 'contact_x', 'f64', 'nm'),
+  field('contact_y_nm', 'contact_y', 'f64', 'nm'),
+  field('contact_z_nm', 'contact_z', 'f64', 'nm'),
+  field('logit', 'logit', 'f64'),
+  field('p_cand', 'p_cand', 'f64'),
+  field('conf', 'conf', 'f64'),
+  field('score_s0', 'score_s0', 'f64'),
+  field('score_s1', 'score_s1', 'f64'),
+  field('score_s2', 'score_s2', 'f64'),
+  field('logit_s0', 'logit_s0', 'f64'),
+  field('logit_s1', 'logit_s1', 'f64'),
+  field('logit_s2', 'logit_s2', 'f64'),
+  field('filled', 'filled', 'bool'),
+  field('shown', 'shown', 'bool'),
 ]
 
 /** The schema half, from a field list. */
@@ -187,7 +194,7 @@ export function tableOf(
   const data: Record<string, CellValue[]> = {}
   for (const field of published(fields)) {
     const cells = read[field.from]
-    if (!cells) throw new Error(`The suggestion set's file has no \`${field.from}\` column.`)
+    if (!cells) throw new Error(`There is no \`${field.from}\` column to publish.`)
     data[field.name] = cells
   }
   return makeTable(schemaOf(fields), data, kind)
@@ -240,4 +247,18 @@ export function neuronsTable(
     { [ID_COLUMN_NAME]: ids, tips, shown, expectedRight: expected },
     'neurons',
   )
+}
+
+/**
+ * A finite number out of a table cell, or `undefined`.
+ *
+ * Here because it was written three times — in `suggestions.ts` as `numberAt`, in
+ * `reviewQueue.ts` as `num` and in `searchTips.ts` as `number` — with identical bodies, in three
+ * modules that all already import this one. The rule it states is one rule: a cell that is not a
+ * number, or is `NaN` or infinite, is **absent** rather than zero, because every caller is
+ * reading a measurement that may not have been made.
+ */
+export function numberAt(table: TableValue, name: string, row: number): number | undefined {
+  const cell: CellValue | undefined = table.data[name]?.[row]
+  return typeof cell === 'number' && Number.isFinite(cell) ? cell : undefined
 }

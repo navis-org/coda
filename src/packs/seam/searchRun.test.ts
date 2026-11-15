@@ -17,6 +17,7 @@ import type {
   PoolSizesRequest,
 } from '../../pyodide/cutoutSummary'
 import { countsInPoolOrder, searchEnds } from './searchRun'
+import type { SearchedEnd } from './searchRun'
 import type { SearchSteps } from './searchRun'
 import { parseTreeRanker } from './treeRanker'
 
@@ -96,6 +97,13 @@ const stepsFor = (
   counts: vi.fn(async () => counts),
 })
 
+/** Everything the generator yields, in order — what the old array-returning form handed back. */
+async function collect(ends: AsyncIterable<SearchedEnd>): Promise<SearchedEnd[]> {
+  const out: SearchedEnd[] = []
+  for await (const end of ends) out.push(end)
+  return out
+}
+
 /** Every root in both pools, plus the two query roots. */
 const countsFor = (pools: readonly CandidatePool[]): Map<string, number> => {
   const out = new Map<string, number>()
@@ -112,11 +120,8 @@ describe('searchEnds', () => {
   it('ranks, cuts and then applies the own-tip rule — in that order', async () => {
     const pool = poolOf([1, 50, 2], [near, near, near])
     const steps = stepsFor([pool], countsFor([pool]))
-    const [one] = await searchEnds(
-      TIPS,
-      [endAt(0, 1n)],
-      { ranker: RANKER, topK: 2, ownUm: 2 },
-      steps,
+    const [one] = await collect(
+      searchEnds(TIPS, [endAt(0, 1n)], { ranker: RANKER, topK: 2, ownUm: 2 }, steps),
     )
     // Cut to two of three by rank, and the rule keeps both. 50 is above the split so it ranks
     // first; 1 and 2 tie on the key and hold the pool's own order.
@@ -134,11 +139,8 @@ describe('searchEnds', () => {
   it('cuts before the rule, so a cut-away candidate cannot be rescued by it', async () => {
     const pool = poolOf([50, 60, 1], [far, far, near])
     const steps = stepsFor([pool], countsFor([pool]))
-    const [one] = await searchEnds(
-      TIPS,
-      [endAt(0, 1n)],
-      { ranker: RANKER, topK: 2, ownUm: 2 },
-      steps,
+    const [one] = await collect(
+      searchEnds(TIPS, [endAt(0, 1n)], { ranker: RANKER, topK: 2, ownUm: 2 }, steps),
     )
     expect(one!.rows).toBe(0)
     expect(one!.tooFar).toBe(2)
@@ -147,11 +149,8 @@ describe('searchEnds', () => {
   it('renumbers geo_rank from one over what the rule kept', async () => {
     const pool = poolOf([1, 2, 3], [far, near, near])
     const steps = stepsFor([pool], countsFor([pool]))
-    const [one] = await searchEnds(
-      TIPS,
-      [endAt(0, 1n)],
-      { ranker: RANKER, topK: 100, ownUm: 2 },
-      steps,
+    const [one] = await collect(
+      searchEnds(TIPS, [endAt(0, 1n)], { ranker: RANKER, topK: 100, ownUm: 2 }, steps),
     )
     // Rank 1 was dropped, so what is left is renumbered rather than keeping 2 and 3.
     expect([...one!.columns['geo_rank']!]).toEqual([1, 2])
@@ -168,11 +167,13 @@ describe('searchEnds', () => {
     const theirs = poolOf([1], [near])
     const pools = [mine, theirs]
     const steps = stepsFor(pools, countsFor(pools))
-    const [, second] = await searchEnds(
-      TIPS,
-      [endAt(0, 1n), endAt(1, 2n)],
-      { ranker: RANKER, topK: 100, ownUm: 20 },
-      steps,
+    const [, second] = await collect(
+      searchEnds(
+        TIPS,
+        [endAt(0, 1n), endAt(1, 2n)],
+        { ranker: RANKER, topK: 100, ownUm: 20 },
+        steps,
+      ),
     )
     // Tip 1 sits 10 µm away, so its own candidate's contact at the origin is tip 0's.
     expect(second!.rows).toBe(0)
@@ -180,31 +181,55 @@ describe('searchEnds', () => {
   })
 
   /**
-   * One call for the neuron, not one per end. Neighbouring tips see much the same objects and
-   * `l2ChunkCounts` batches fifty roots a request, so asking per end spends most of each batch
-   * on roots the previous end already bought.
+   * One call per end, asking only about that end — which is what streaming costs. The batching
+   * that was lost is not the saving it looks like: `l2ChunkCounts` memoises by root on the
+   * node's side, so a root a neighbouring end already bought is not fetched again, and only the
+   * request count rises at the margin where a batch of fifty is not full.
    */
-  it('asks for every end’s counts in one call', async () => {
+  it('asks for each end’s counts as that end is reached, and for its query', async () => {
     const pools = [poolOf([1], [near]), poolOf([2], [near])]
     const steps = stepsFor(pools, countsFor(pools))
-    await searchEnds(
+    await collect(
+      searchEnds(
+        TIPS,
+        [endAt(0, 1n), endAt(1, 2n)],
+        { ranker: RANKER, topK: 100, ownUm: 2 },
+        steps,
+      ),
+    )
+    expect(steps.counts).toHaveBeenCalledTimes(2)
+    // Each call carries its own end's query root and not the other end's.
+    const first = [...vi.mocked(steps.counts).mock.calls[0]![0]]
+    const second = [...vi.mocked(steps.counts).mock.calls[1]![0]]
+    expect(first).toContain('1')
+    expect(first).not.toContain('2')
+    expect(second).toContain('2')
+    expect(second).not.toContain('1')
+  })
+
+  /**
+   * The property that makes streaming honest: an end is yielded only once it is final. The rule
+   * reads the *tip positions*, which are known before any box is read, so a later end cannot
+   * change an earlier one — a draft that moved under the reader would be worse than no
+   * streaming at all.
+   */
+  it('yields each end finished, before the next is measured', async () => {
+    const pools = [poolOf([1], [near]), poolOf([2], [near])]
+    const steps = stepsFor(pools, countsFor(pools))
+    const seen: number[] = []
+    for await (const end of searchEnds(
       TIPS,
       [endAt(0, 1n), endAt(1, 2n)],
       { ranker: RANKER, topK: 100, ownUm: 2 },
       steps,
-    )
-    expect(steps.counts).toHaveBeenCalledTimes(1)
-    const asked = vi.mocked(steps.counts).mock.calls[0]![0]
-    expect(asked).toContain('1')
-    expect(asked).toContain('2')
+    )) {
+      seen.push(end.tip)
+      // Only this end's box has been asked for: the next is measured after this one is yielded.
+      expect(steps.measure).toHaveBeenCalledTimes(seen.length)
+    }
+    expect(seen).toEqual([0, 1])
   })
 
-  /**
-   * **`callPython` transfers every view in a request**, so a step that posts one detaches the
-   * caller's array. Handing `pool.candRoot` straight to `sizes` therefore emptied the very array
-   * the next two lines read — and nothing caught it, because the fake above posts nothing and
-   * the probe's in-process bridge does not transfer either. So this fake detaches for real.
-   */
   it('survives a step that transfers the ids it was given', async () => {
     const pool = poolOf([1, 2], [near, near])
     const steps = stepsFor([pool], countsFor([pool]))
@@ -219,11 +244,8 @@ describe('searchEnds', () => {
         }
       },
     }
-    const [one] = await searchEnds(
-      TIPS,
-      [endAt(0, 1n)],
-      { ranker: RANKER, topK: 100, ownUm: 2 },
-      transferring,
+    const [one] = await collect(
+      searchEnds(TIPS, [endAt(0, 1n)], { ranker: RANKER, topK: 100, ownUm: 2 }, transferring),
     )
     expect(one!.rows).toBe(2)
     expect([...one!.candRoot]).toHaveLength(2)
@@ -239,11 +261,8 @@ describe('searchEnds', () => {
       ms: 1,
     }
     const steps = stepsFor([empty], new Map([['1', 9000]]))
-    const [one] = await searchEnds(
-      TIPS,
-      [endAt(0, 1n)],
-      { ranker: RANKER, topK: 100, ownUm: 2 },
-      steps,
+    const [one] = await collect(
+      searchEnds(TIPS, [endAt(0, 1n)], { ranker: RANKER, topK: 100, ownUm: 2 }, steps),
     )
     expect(one!.missingQuery).toBe(true)
     expect(one!.rows).toBe(0)
@@ -270,5 +289,40 @@ describe('countsInPoolOrder', () => {
    */
   it('refuses a root with no count, by name', () => {
     expect(() => countsInPoolOrder(roots, new Map([['11', 1]]))).toThrow(/22, 33/)
+  })
+})
+
+describe('an end that cannot be sized', () => {
+  // Each end's candidate sits by its own tip, so the own-tip rule keeps both.
+  const near = [0, 0, 0]
+  const far = [9000, 0, 0]
+
+  /**
+   * A root the chunkedgraph does not list is a fact about one object beside one open end. The
+   * refusal belongs where the hole is created (`countsInPoolOrder`), and surviving it belongs
+   * here: a neuron is hundreds of ends and the expensive half is already spent by the time this
+   * is known, so a throw would cost the whole run to say something about one of them.
+   */
+  it('comes back refused, by name, and the run goes on', async () => {
+    const pools = [poolOf([1], [near]), poolOf([2], [far])]
+    const counts = countsFor(pools)
+    // The first end's own query root has no count; the second end's is untouched. (The two
+    // fakes share a candidate root, so dropping that would refuse both and prove nothing.)
+    counts.delete('1')
+    const ends = await collect(
+      searchEnds(
+        TIPS,
+        [endAt(0, 1n), endAt(1, 2n)],
+        { ranker: RANKER, topK: 100, ownUm: 2 },
+        stepsFor(pools, counts),
+      ),
+    )
+    expect(ends).toHaveLength(2)
+    expect(ends[0]!.rows).toBe(0)
+    expect(ends[0]!.refusal).toMatch(/query root 1 has no level-2 chunk count/)
+    // Not a missing query: that is a different state and the node says so differently.
+    expect(ends[0]!.missingQuery).toBe(false)
+    expect(ends[1]!.rows).toBeGreaterThan(0)
+    expect(ends[1]!.refusal).toBeUndefined()
   })
 })

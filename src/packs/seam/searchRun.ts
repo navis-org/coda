@@ -10,10 +10,39 @@
  *   own figures for one end are 538 in the pool, 100 after the cut, 9 after the rule;
  * - the counts are joined to the pool **by position**, so a root the chunkedgraph left out has
  *   to be refused by name here rather than arriving as a hole;
- * - `top_k` and `own_um` come from the set's own manifest, never from a default, because the
- *   stages after this were fitted against the lists they produce;
- * - and the rule is a **per-neuron** pass over every tip, including ends no list was searched
- *   for, which still take candidates away from their neighbours.
+ * - `top_k` and `own_um` come from the **model's** manifest, never from a default, because the
+ *   forest and the stages after it were fitted against the lists they produce
+ *   (`rankerConfig.ts`);
+ * - and the rule is measured against **every tip of the neuron**, including ends no list was
+ *   searched for, which still take candidates away from their neighbours.
+ *
+ * ## One end at a time, finished before the next is begun
+ *
+ * This yields each end as it is done, because the node publishes them: a reader starts working
+ * through the queue while the rest of the neuron is still being measured
+ * (`docs/seam-suggestions-plan.md`). What makes that honest is that **a yielded end is final** —
+ * the own-tip rule reads the *tip positions*, which are known before any box is read, so an end
+ * ranked and ruled now cannot be changed by an end measured later. A draft that moved under the
+ * reader would be worse than no streaming at all.
+ *
+ * It cost the batched counts call. The first draft measured the whole neuron, asked
+ * `l2ChunkCounts` once for every root, and ranked — which meant nothing was reviewable until
+ * every box in the neuron had been read. Per end the roots are asked for per end, and that is
+ * cheaper than it looks: `l2ChunkCounts` memoises by root, so the overlap between neighbouring
+ * ends is still free and the bound on what was lost is **one partially-filled batch of fifty per
+ * end** — about 200 ms against an end's two seconds, and nothing at all for an end that
+ * introduces no new root.
+ *
+ * ## The prefetch that looks free and is not
+ *
+ * Roughly 1.4 s of an end's 2 s is network with the worker idle — the box, then two
+ * `roots_binary` requests — so a one-deep lookahead on `ends[i + 1].box()` would hide most of it
+ * (the measures stay serial; `callPython` has one worker). It is **not** a free win: two
+ * `readPool`s in flight both see the supervoxels their ends share as unknown and ask the
+ * chunkedgraph for them twice, and neighbouring ends are exactly where that overlap is —
+ * `SearchVolume.roots` exists to make it free. Doing it properly means an in-flight promise per
+ * batch. Recorded rather than done, because the next reader will think of the prefetch and not
+ * of the double lookup.
  *
  * So the sequence lives here, taking its steps as functions — which is `openEndRun.ts`' own
  * argument in this pack ("the sequence is where the failures live, and all of them are quiet…
@@ -60,13 +89,19 @@ export interface EndToSearch {
   box(): Promise<CandidatePoolRequest>
 }
 
-/** What the set's manifest decides, never this file. */
+/**
+ * What the **model's** manifest decides, never this file.
+ *
+ * All three travel with the weights (`rankerConfig.ts`), because the forest was fitted against
+ * the lists these produce: a cut at another `top_k`, or a rule at another radius, is a different
+ * question asked of the same trees.
+ */
 export interface SearchRules {
-  /** The forest, from `pipeline.search.ranker` — `treeRankerFor`. */
+  /** The forest, from the manifest's one `ranker` part — `openTreeRanker`. */
   readonly ranker: TreeRanker
-  /** `pipeline.search.top_k`. SEAM keeps 100. */
+  /** `config.top_k`. SEAM keeps 100. */
   readonly topK: number
-  /** `pipeline.own_tip.own_um`. SEAM's is 2.0. */
+  /** `config.own_um`. SEAM's is 2.0. */
   readonly ownUm: number
 }
 
@@ -83,19 +118,32 @@ export interface SearchSteps {
   counts(roots: readonly string[]): Promise<Map<string, number>>
 }
 
-/** Cancel and progress, as `assessorRun.ts` takes them. */
+/**
+ * Cancel, and nothing else.
+ *
+ * There was an `onProgress` here while this returned an array. A generator has no use for one:
+ * the **yield is the tick**, and it is the caller that knows the denominator — the node counts
+ * ends across every neuron, where this one only ever sees one neuron's. A second progress
+ * channel beside `ctx.progress` would report a different fraction from the same run.
+ *
+ * **The signal is not a Cancel bound.** It is looked at between ends, so a Cancel waits out the
+ * measure in flight — ~0.6 s — rather than stopping inside the worker.
+ */
 export interface SearchOptions {
-  /**
-   * **Not a Cancel bound.** The signal is looked at between ends, so a Cancel waits out the
-   * measure in flight — ~0.6 s — rather than stopping inside the worker.
-   */
   readonly signal?: AbortSignal
-  /** Ends measured, as a fraction. The counts and the rule are not weighed separately. */
-  readonly onProgress?: (fraction: number) => void
 }
 
 /** One end's answer: the list SEAM would publish for it. */
 export interface SearchedEnd extends RankedPool {
+  /**
+   * Why this end has no list, where it has none — `undefined` when it has one.
+   *
+   * An end can fail on its own without the run being wrong: its query root may have no voxel in
+   * its own box, or the chunkedgraph may not list one of the objects beside it. Carried per end
+   * so the node can count them and say so once, rather than a throw taking down a run of several
+   * hundred after the expensive ones have been paid for.
+   */
+  readonly refusal?: string
   /** Which tip it was searched at — an index into `tipsNm`, carried through. */
   readonly tip: number
   /** True where the query root has no voxel in its own box, and then there are no rows. */
@@ -139,20 +187,21 @@ export function countsInPoolOrder(
  * its index into that array. An end whose query root has no voxel in its own box comes back
  * empty rather than missing, because that is a tip worth looking at rather than a failed read.
  */
-export async function searchEnds(
+export async function* searchEnds(
   tipsNm: Float32Array,
   ends: readonly EndToSearch[],
   rules: SearchRules,
   steps: SearchSteps,
   options: SearchOptions = {},
-): Promise<SearchedEnd[]> {
+): AsyncGenerator<SearchedEnd> {
   const { ranker, topK, ownUm } = rules
   /*
    * **Checked before anything is measured**, which is `ownTipRule`'s own discipline — it refuses
    * a bad tip before building its tree, because the caller would otherwise pay for the tree
-   * first. Here the bill is far larger: `ownTipRule` runs last, so without this a neuron's worth
-   * of boxes, bridge calls and chunkedgraph requests is spent before a tip out of range or a
-   * second list at one tip is noticed.
+   * first. Here the bill is far larger: without this a neuron's worth of boxes, bridge calls and
+   * chunkedgraph requests is spent before a tip out of range or a second list at one tip is
+   * noticed. It is a property of the *call* — tips and ends together — so it cannot move into
+   * the loop below.
    */
   const tips = Math.floor(tipsNm.length / 3)
   const at = new Set<number>()
@@ -163,50 +212,42 @@ export async function searchEnds(
     if (at.has(end.tip)) refuse(`two ends at tip ${end.tip}; the rule takes one list per end`)
     at.add(end.tip)
   }
-  /*
-   * Measured first, all of them, because the roots to ask the chunkedgraph about are not known
-   * until `pool_features` has run — which is the whole reason a search is three crossings and
-   * not one. `cutoutSummary.ts`' header argues it.
-   *
-   * **One at a time, not `Promise.all`.** Each request carries a labelled box — ~10 MB for a
-   * real cutout — and `callPython` posts it to the worker, which handles one call at a time. A
-   * neuron is ~500 tips, so starting them together queues every box in the worker's message
-   * port before the first answer comes back, for no parallelism at all: the gain of measuring
-   * ahead is that the counts can be asked for in one batch, not that the boxes overlap.
-   */
-  const pools: CandidatePool[] = []
-  for (const [i, end] of ends.entries()) {
+
+  for (const end of ends) {
     throwIfAborted(options.signal)
-    pools.push(await steps.measure(await end.box()))
-    options.onProgress?.((i + 1) / ends.length)
-  }
-  if (ends.length === 0) options.onProgress?.(1)
-
-  /*
-   * One counts call for the neuron, not one per end. Neighbouring tips see much the same
-   * objects, and `l2ChunkCounts` batches fifty roots to a request — so asking per end would
-   * spend most of each batch on roots the last end already bought.
-   */
-  const roots = new Set<string>()
-  for (const [i, pool] of pools.entries()) {
-    for (const root of pool.candRoot) roots.add(String(root))
-    roots.add(String(ends[i]!.queryRoot))
-  }
-  throwIfAborted(options.signal)
-  const counts = await steps.counts([...roots])
-
-  const ranked: RankedPool[] = []
-  for (const [at, pool] of pools.entries()) {
-    const end = ends[at]!
+    const pool = await steps.measure(await end.box())
     if (pool.missingQuery) {
-      ranked.push({ rows: 0, candRoot: new BigUint64Array(0), columns: {} })
+      yield emptyEnd(end.tip)
       continue
     }
+
+    /*
+     * This end's roots, its query among them. `l2ChunkCounts` is memoised by root on the node's
+     * side, so a root a neighbouring end already bought costs nothing here.
+     */
+    const roots = new Set<string>([String(end.queryRoot)])
+    for (const root of pool.candRoot) roots.add(String(root))
     throwIfAborted(options.signal)
+    const counts = await steps.counts([...roots])
+    /*
+     * **This end's failure, not the run's.** A root the chunkedgraph does not list is a fact
+     * about one object beside one open end; `countsInPoolOrder` refuses by name because that is
+     * where the hole is created, and here is where it is survivable. A neuron is hundreds of
+     * ends and the expensive half is already spent by the time this is known, so a throw would
+     * cost the whole run to say something about one of them.
+     */
+    let candCount: Float64Array
     const queryCount = counts.get(String(end.queryRoot))
-    if (queryCount === undefined) {
-      refuse(`the query root ${end.queryRoot} has no level-2 chunk count`)
+    try {
+      if (queryCount === undefined) {
+        refuse(`the query root ${end.queryRoot} has no level-2 chunk count`)
+      }
+      candCount = countsInPoolOrder(pool.candRoot, counts)
+    } catch (error) {
+      yield { ...emptyEnd(end.tip), missingQuery: false, refusal: messageOf(error) }
+      continue
     }
+
     /*
      * **A copy, because `callPython` transfers.** Every view in a request is handed to the
      * worker and detached on this side, so sending `pool.candRoot` itself would empty the array
@@ -216,9 +257,9 @@ export async function searchEnds(
      */
     const sizes = await steps.sizes({
       candRoot: BigUint64Array.from(pool.candRoot),
-      candCount: countsInPoolOrder(pool.candRoot, counts),
+      candCount,
       queryRoot: end.queryRoot,
-      queryCount,
+      queryCount: queryCount!,
     })
     const measured: MeasuredPool = {
       rows: pool.rows,
@@ -227,46 +268,36 @@ export async function searchEnds(
       // by a second route. `rankPool` is deliberately feature-agnostic and must not learn it.
       columns: { ...pool.columns, l2c: sizes.l2c, l2x: sizes.l2x },
     }
-    ranked.push(rankPool(ranker, measured, topK))
+    const ranking = rankPool(ranker, measured, topK)
+
+    /*
+     * **The rule, after the cut, against every tip of the neuron.** One list per call: the lists
+     * are independent — each is tested against the same tip positions — so this answers exactly
+     * what the whole-neuron call answered, one end sooner. It rebuilds the k-d tree per end,
+     * which over a few hundred points is microseconds against this end's 560 ms of measuring.
+     */
+    const list: EndCandidates = { rows: ranking.rows, columns: ranking.columns, tip: end.tip }
+    yield gather(ranking, ownTipRule(tipsNm, [list], ownUm)[0]!, pool)
   }
+}
 
-  /*
-   * **After the cut, and over the whole neuron at once.** The rule asks whether some *other*
-   * tip lies nearer a candidate's contact, so it needs every tip — including ends no list was
-   * searched for — and it answers all the lists together.
-   */
-  /*
-   * An end with no list at all is **left out of the call, not passed as an empty one**. The rule
-   * reads a contact column per row and refuses a list that has none — and a missing query gives
-   * a pool with no columns, so handing it over throws on exactly the state this is meant to
-   * carry through. Leaving it out costs nothing: `tipsNm` still holds its tip, which is what
-   * makes the end take candidates away from its neighbours, and `ownTipRule`'s own doc says an
-   * end no list was searched for still does that.
-   */
-  const searched = pools.flatMap((pool, at) => (pool.missingQuery ? [] : [at]))
-  const lists: EndCandidates[] = searched.map((at) => ({
-    rows: ranked[at]!.rows,
-    columns: ranked[at]!.columns,
-    tip: ends[at]!.tip,
-  }))
-  const kept = ownTipRule(tipsNm, lists, ownUm)
-  const keptAt = new Map(searched.map((at, i) => [at, kept[i]!]))
+/** A refusal's sentence, whatever was thrown. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
-  return ranked.map((ranking, at) => {
-    const rule = keptAt.get(at)
-    return rule === undefined
-      ? {
-          tip: ends[at]!.tip,
-          rows: 0,
-          candRoot: new BigUint64Array(0),
-          columns: {},
-          missingQuery: true,
-          pooled: 0,
-          tooFar: 0,
-          anothersTip: 0,
-        }
-      : gather(ranking, rule, pools[at]!)
-  })
+/** An end with no list: a missing query root, which is a tip worth looking at, not a failure. */
+function emptyEnd(tip: number): SearchedEnd {
+  return {
+    tip,
+    rows: 0,
+    candRoot: new BigUint64Array(0),
+    columns: {},
+    missingQuery: true,
+    pooled: 0,
+    tooFar: 0,
+    anothersTip: 0,
+  }
 }
 
 /** One list cut down to what the rule kept, with `geo_rank` renumbered from one. */

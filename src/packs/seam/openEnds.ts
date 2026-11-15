@@ -1,13 +1,20 @@
 /**
  * Find Open Ends: where a reconstruction stops short, scored by SEAM's Model E.
  *
- * **Stage 3 of the merge-candidate pipeline, in the node that will eventually run all nine.**
- * `seam:suggestions` reads a run somebody else did on a server; this does the work in the
- * browser, on demand, for the neuron on the wire. The stages that find a *candidate* for each
- * open end — the 6 µm search, the geometric ranker, the three assessors — are not here yet, and
- * the output already has their columns, null. They fill in behind the same shape rather than
- * changing it, which is why this is one node arriving in pieces rather than a node per stage
- * that would have to be retired when the next one lands.
+ * **Stage 3 of the merge-candidate pipeline.** `seam:suggestions` reads a run somebody else did
+ * on a server; this does the work in the browser, on demand, for the neuron on the wire.
+ *
+ * The stages that find a *candidate* for each open end are `seam:suggestMerges`, downstream of
+ * this one — a reversal of the 2026-11-09 plan, which had them growing into this node
+ * (`docs/seam-suggestions-plan.md`, "A node after Find Open Ends"). What made the split safe is
+ * that the `Tips` table published here is a complete interface: the search needs a tip's
+ * position in nanometres and its neuron's root id and nothing else.
+ *
+ * **It publishes what it measured and nothing else** (`OPEN_END_FIELDS`). It used to carry every
+ * column a later stage would fill, present and null, which was right while one node was to run
+ * all nine stages — the shape would not change as they landed. With the search downstream those
+ * nulls became pickers offered a choice this node can never answer, so they are gone;
+ * `seam:suggestMerges` folds its own columns on.
  *
  * ## What it answers, and what it does not
  *
@@ -78,17 +85,18 @@ import {
   caveTargetOfValue,
 } from '../../nodes/lib/caveParams'
 import { runOpenEnds } from './openEndRun'
-import { TIP_FIELDS, schemaOf } from './suggestionTables'
+import { schemaOf } from './suggestionTables'
 import { notNanometres, windowFieldsFrom } from './windowConfig'
 import { scoreWindows } from './windowRun'
 import { OPEN_END_MODELS, OPEN_END_TASK, openEndModel } from './models'
 import { openWindowModel } from './openWindowModel'
+import { afterShare } from './progress'
 import { warnSkeletonizeWait } from '../../nodes/lib/skeletonizeOps'
 import type { TipRule } from './tips'
 import { SEAM_TIP_RULE, tipsOf } from './tips'
 import { SEAM_SKELETONIZE, tipSkeletons } from './tipSkeleton'
 import type { OpenEnd } from './openEndsOps'
-import { E_TIP_UM, openEndsTable, reachNm } from './openEndsOps'
+import { E_TIP_UM, OPEN_END_FIELDS, openEndsTable, reachNm } from './openEndsOps'
 
 /** Of the progress bar, before a window is built. The model is 71 MB on a cold browser. */
 const DOWNLOAD_SHARE = 0.15
@@ -200,7 +208,7 @@ export const openEndsNode = packNode({
    * anything runs**. Invariant 2's reason: inference may not fetch, and a schema that only
    * appeared after a minute of scanning would leave every picker below it empty until then.
    */
-  inferOutputs: () => ({ tips: T.table(schemaOf(TIP_FIELDS)) }),
+  inferOutputs: () => ({ tips: T.table(schemaOf(OPEN_END_FIELDS)) }),
 
   validate(ctx) {
     const issues: string[] = []
@@ -300,8 +308,7 @@ export const openEndsNode = packNode({
       for (let i = 0; i < items.length; i++) {
         const item = items[i]!
         const neuronId = String(item.id)
-        const share = (done: number) =>
-          DOWNLOAD_SHARE + ((1 - DOWNLOAD_SHARE) * (i + done)) / items.length
+        const share = (done: number) => afterShare(DOWNLOAD_SHARE, (i + done) / items.length)
         if (item.indices.length === 0) {
           skipped += 1
           continue
