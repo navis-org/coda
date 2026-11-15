@@ -5,6 +5,7 @@
  * "which of these can I let go of". So the measurement (Chrome's, where there is one) comes first,
  * and below it the estimate broken down by workflow and by kind of result, each workflow with a
  * button that frees its results and the two caches that outlive them with one each.
+ * (The Storage tab has its own pair, for the download caches on disk.)
  *
  * The numbers, where each comes from, and the three actions are `ui/memoryReadout.ts`; the
  * estimate is `core/valueBytes.ts`.
@@ -31,7 +32,12 @@ import {
 } from '../memoryReadout'
 import { Modal, ModalHeader } from '../Modal'
 import type { StorageReading } from '../storageReadout'
-import { clearDownloadedData, localTotal, measureStorage } from '../storageReadout'
+import {
+  clearDownloadedData,
+  clearDownloadedModels,
+  localTotal,
+  measureStorage,
+} from '../storageReadout'
 
 /** Mounted once, in `App`, and opened by a store request — `PrivacyDialog`'s idiom exactly. */
 export function MemoryDialog() {
@@ -315,7 +321,9 @@ function stored(usage: StoredUsage | undefined): string {
 /**
  * What Coda keeps in this browser between sessions, read the first time the tab opens.
  *
- * One button only, on the data cache — see `ui/storageReadout.ts` for why the rest only report.
+ * Buttons only on the two download caches, data and models — see `ui/storageReadout.ts` for why
+ * the rest only report. One clear at a time: each re-reads only what it moved and keeps the rest
+ * of the reading it started from, so two at once would each put back the other's old figure.
  * Each row that is somebody's work names where it is managed instead, since a list a reader can
  * see but not act on is the moment they ask where to go.
  */
@@ -388,6 +396,24 @@ function StorageTab({
             onAction={() => {
               setClearing(true)
               void clearDownloadedData(reading)
+                .then(onReading)
+                .finally(() => setClearing(false))
+            }}
+          />
+          <Row
+            name="Downloaded models"
+            detail={counted(
+              reading.models,
+              'model file',
+              'Kept so steps that run a model in the browser do not download it again. After a clear, a large model asks again before it downloads.',
+            )}
+            figure={stored(reading.models)}
+            action="Clear"
+            disabled={!reading.models?.entries || clearing}
+            title="Delete these. A model already open keeps working."
+            onAction={() => {
+              setClearing(true)
+              void clearDownloadedModels(reading)
                 .then(onReading)
                 .finally(() => setClearing(false))
             }}

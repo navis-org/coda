@@ -53,8 +53,11 @@ and ONNX Runtime refuses a mangled graph anyway.
 
 **Never fatal, and its own database.** A cache that cannot be opened, written or read looks exactly
 like a miss — `src/data/cache.ts`' rule. The store is `coda-models`, separate so a quota refusal on
-400 MB of weights cannot evict the dataset cache, and it declares `SizedBy` so the Memory dialog's
-Storage tab can add it up without deserialising a single 385 MB record.
+400 MB of weights cannot evict the dataset cache. A `meta` store beside the bodies holds each
+entry's length, so the Memory dialog's Storage tab adds it up (`weightsUsage`, skipping the bodies)
+without deserialising a single 385 MB record, and offers a Clear (`clearWeights`). A cache hit's
+meta backfill checks for the body in the same transaction, so a Clear landing between the read and
+`remember()` cannot leave a meta record that tells the consent gate the model is already here.
 
 **One download per key** (`memoPromise`, `keep: 'inflight'`): two cells opening one model are one
 fetch. Only while in flight — a resolved entry would pin 385 MB for the tab's life. The write is

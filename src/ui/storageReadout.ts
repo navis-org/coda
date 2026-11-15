@@ -20,8 +20,11 @@
  *
  * ## What can be cleared here
  *
- * Only the data cache. It is the one store with no bound (a cached value is never evicted), and
- * the only one whose contents Coda can always fetch again. Everything else is either somebody's
+ * The two download caches: the data cache and the model weights (`ml/weights.ts`). They are the
+ * stores with no bound — nothing evicts a cached value or a cached model — and the only ones whose
+ * contents Coda can always fetch again. The models are also, by far, the largest thing kept: one
+ * encoder is 385 MB. Each has its own button, since clearing a few MB of neuron tables should not
+ * cost a reader a model download, nor the other way round. Everything else is either somebody's
  * work — saved workflows, recipes, uploads, edge sets, sign-ins, each managed where it is made — or
  * bounded and cleaned up on its own (the crash net: `MAX_SESSIONS`, `MAX_SLOTS`). The crash net
  * stays without a button for a second reason: a session belongs to a tab, and nothing here can
@@ -34,6 +37,7 @@ import { fileLinksUsage } from '../data/files/store'
 import type { StoredUsage } from '../data/idb'
 import { SIGN_INS, isSignInKey } from '../data/signIns'
 import { uploadsUsage } from '../data/uploads'
+import { clearWeights, weightsUsage } from '../ml/weights'
 import { libraryUsage } from '../store/library'
 import { isAutosaveKey, isCodaKey } from '../store/persistence'
 import { recipesUsage } from '../store/recipes'
@@ -148,8 +152,10 @@ export interface StorageReading {
   site: { usage: number; quota: number } | undefined
   /** Whether the browser has promised not to clear this site's data. Undefined where unknown. */
   persisted: boolean | undefined
-  /** The data cache, the one store the tab clears. */
+  /** The data cache, one of the two stores the tab clears. */
   cache: StoredUsage | undefined
+  /** Downloaded model weights, the other. */
+  models: StoredUsage | undefined
   /** The crash net's IndexedDB half; the autosave is its `localStorage` half, in `local`. */
   session: StoredUsage | undefined
   shelves: ShelfUse[]
@@ -181,16 +187,26 @@ async function sitePersisted(): Promise<boolean | undefined> {
  * deserialising and sizing still take turns on the main thread.
  */
 export async function measureStorage(): Promise<StorageReading> {
-  const [site, persisted, cache, session, shelves] = await Promise.all([
+  const [site, persisted, cache, models, session, shelves] = await Promise.all([
     siteUse(),
     sitePersisted(),
     cacheUsage(),
+    weightsUsage(),
     sessionUsage(),
     Promise.all(
       SHELVES.map(async ({ measure, ...shelf }) => ({ ...shelf, usage: await measure() })),
     ),
   ])
-  return { site, persisted, cache, session, shelves, local: readLocalUse(), tab: readTabUse() }
+  return {
+    site,
+    persisted,
+    cache,
+    models,
+    session,
+    shelves,
+    local: readLocalUse(),
+    tab: readTabUse(),
+  }
 }
 
 /** Clear the data cache, and re-read only what that moved: the cache and the site total. */
@@ -198,4 +214,11 @@ export async function clearDownloadedData(reading: StorageReading): Promise<Stor
   await cacheClear()
   const [site, cache] = await Promise.all([siteUse(), cacheUsage()])
   return { ...reading, site, cache }
+}
+
+/** Clear the downloaded models, and re-read only what that moved: the models and the site total. */
+export async function clearDownloadedModels(reading: StorageReading): Promise<StorageReading> {
+  await clearWeights()
+  const [site, models] = await Promise.all([siteUse(), weightsUsage()])
+  return { ...reading, site, models }
 }
