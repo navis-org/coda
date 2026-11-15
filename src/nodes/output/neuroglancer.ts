@@ -545,12 +545,25 @@ registerNode({
 })
 
 /**
- * What a `Control` wire is asking for: ids to add, and a colour each.
+ * The hue a `Control` row takes, by its `part`.
  *
- * Two hues, by the table's `part` column where it has one — `seam:review` publishes `neuron` and
- * `candidate`, and the whole question a reader is answering is whether the second belongs to the
- * first, which they cannot see if the two are one colour. Without that column every id takes the
- * first hue, which still says "these are the ones being looked at".
+ * Three, from the first three slots of the categorical palette, which were validated as adjacent
+ * pairs rather than picked: `neuron` blue, `candidate` orange, `accepted` green. The question a
+ * reader is answering is whether a candidate belongs to the neuron, which they cannot see if the
+ * two are one colour; `accepted` is a piece they already said does, so the scene shows the neuron
+ * as it will look once the merges are made. Anything else, or no `part` at all, takes the first.
+ *
+ * Exported for `seam:review`'s own fallback viewer, so the two surfaces cannot disagree.
+ */
+export function controlPartColor(part: unknown): string {
+  const slot = part === 'candidate' ? 1 : part === 'accepted' ? 2 : 0
+  return cycleColor(slot, VIEWER_MODE)
+}
+
+/**
+ * What a `Control` wire is asking for: ids to add, and a colour each (`controlPartColor`).
+ *
+ * The first row naming an id decides its colour; a later row repeating it is ignored.
  *
  * Ids through `idText` and nothing else: these reach a scene as segments, and a float here is a
  * different neuron (invariant 8).
@@ -570,7 +583,7 @@ function controlSegments(table: TableValue | undefined): {
     if (!id || seen.has(id)) continue
     seen.add(id)
     ids.push(id)
-    colors[id] = cycleColor(parts[i] === 'candidate' ? 1 : 0, VIEWER_MODE)
+    colors[id] = controlPartColor(parts[i])
   }
   return { ids, colors }
 }

@@ -95,7 +95,42 @@ beforeAll(() => {
 beforeEach(clearStorage)
 afterEach(cleanup)
 
-function draw(params: ParamValues = {}, compact = true, candidates: TableValue = CANDIDATES) {
+/**
+ * Two neurons, **interleaved**, with the second neuron's tip the most confident of all — so a
+ * card listing every neuron, or sorting before narrowing, puts tip 33 on top.
+ */
+const OTHER = '720575940630442210'
+const TWO_TIPS: TableValue = makeTable(TIPS.schema, {
+  [ID_COLUMN_NAME]: ['720575940621522189', OTHER, '720575940621522189'],
+  end_uid: [11, 33, 22],
+  kind: ['tip', 'tip', 'kink'],
+  x: [1, 7, 4],
+  y: [2, 8, 5],
+  z: [3, 9, 6],
+  r: [0.91, 0.99, 0.42],
+  shown: [true, true, false],
+})
+const TWO_CANDIDATES: TableValue = makeTable(CANDIDATES.schema, {
+  ...CANDIDATES.data,
+  [ID_COLUMN_NAME]: [...CANDIDATES.data[ID_COLUMN_NAME]!, OTHER],
+  end_uid: [...CANDIDATES.data['end_uid']!, 33],
+  candidateId: [...CANDIDATES.data['candidateId']!, '648518346300000001'],
+  rank: [...CANDIDATES.data['rank']!, 1],
+  vol_um3: [...CANDIDATES.data['vol_um3']!, 1],
+  n_l2: [...CANDIDATES.data['n_l2']!, 5],
+  conf: [...CANDIDATES.data['conf']!, 0.8],
+  contact_x: [...CANDIDATES.data['contact_x']!, 13],
+  contact_y: [...CANDIDATES.data['contact_y']!, 23],
+  contact_z: [...CANDIDATES.data['contact_z']!, 33],
+  shown: [...CANDIDATES.data['shown']!, true],
+})
+
+function draw(
+  params: ParamValues = {},
+  compact = true,
+  candidates: TableValue = CANDIDATES,
+  tips: TableValue = TIPS,
+) {
   const def = requireNodeDef(TYPE)
   const graph = addNode(emptyGraph(), {
     id: 'r1',
@@ -106,7 +141,7 @@ function draw(params: ParamValues = {}, compact = true, candidates: TableValue =
   useGraphStore.setState({ graph } as never)
   const node = { ...graph.nodes[0]!, params: { ...defaultParams(def), ...params } }
   const written: Record<string, ParamValue> = {}
-  const inputValues: Record<string, Value | undefined> = { tips: TIPS, candidates }
+  const inputValues: Record<string, Value | undefined> = { tips, candidates }
   render(
     <ReviewBody
       node={node}
@@ -135,6 +170,7 @@ describe('the review card', () => {
         'Min size',
         'Only SEAM’s shown set',
         'Sort by',
+        'Show accepted',
       ]),
     )
   })
@@ -314,5 +350,96 @@ describe('the review card', () => {
     draw({ minConfidence: '0.99' })
     expect(rows()).toHaveLength(0)
     expect(screen.getByText(/No tip passes the filters/)).toBeTruthy()
+  })
+
+  /** The neuron the whole card is about, named even when there is nothing to choose between. */
+  it('names its one neuron in a disabled list', () => {
+    draw({ verdicts: '11:648518346368395605=accept' })
+    const select = screen.getByRole('combobox', { name: 'Neuron' }) as HTMLSelectElement
+    expect(select.disabled).toBe(true)
+    expect(select.selectedOptions[0]!.textContent).toBe(
+      '720575940621522189 · 2 tips · 1 judged',
+    )
+  })
+
+  /** Two neurons in, one listed: the first in the table, whatever the other's confidence. */
+  it('lists only the first neuron’s tips until another is picked', () => {
+    draw({}, true, TWO_CANDIDATES, TWO_TIPS)
+    const select = screen.getByRole('combobox', { name: 'Neuron' }) as HTMLSelectElement
+    expect(select.disabled).toBe(false)
+    expect(select.value).toBe('720575940621522189')
+    expect(rows()).toHaveLength(2)
+    expect(
+      rows()
+        .map((row) => row.textContent)
+        .join(),
+    ).not.toContain('648518346300000001')
+    expect(screen.getByText(/^2 tips$/)).toBeTruthy()
+  })
+
+  it('lists the picked neuron’s tips, and only those', () => {
+    draw({ neuron: OTHER }, true, TWO_CANDIDATES, TWO_TIPS)
+    expect(rows()).toHaveLength(1)
+    expect(rows()[0]!.textContent).toContain('648518346300000001')
+    expect(screen.getByText(/^1 tip$/)).toBeTruthy()
+  })
+
+  /** The other neuron's verdicts are kept, but they are not this neuron's count. */
+  it('counts only the picked neuron’s verdicts in the foot', () => {
+    draw(
+      { neuron: OTHER, verdicts: '11:648518346368395605=accept;33:648518346300000001=reject' },
+      true,
+      TWO_CANDIDATES,
+      TWO_TIPS,
+    )
+    expect(screen.getByText('1 judged')).toBeTruthy()
+  })
+
+  /**
+   * The switch lands on the new neuron's top row, so the viewer moves with it — and it is **one**
+   * edit, so a single undo puts the reader back where they were.
+   */
+  it('switches neuron and lands on its top row, in one step', () => {
+    draw({ current: '22', rank: 1 }, true, TWO_CANDIDATES, TWO_TIPS)
+    const before = useGraphStore.getState().past.length
+    fireEvent.change(screen.getByRole('combobox', { name: 'Neuron' }), {
+      target: { value: OTHER },
+    })
+    const node = useGraphStore.getState().graph.nodes[0]!
+    expect(node.params).toMatchObject({ neuron: OTHER, current: '33', rank: 1 })
+    expect(useGraphStore.getState().past.length).toBe(before + 1)
+  })
+
+  /**
+   * Every row is reachable, and only those in view are drawn — the old card stopped at 300 and
+   * told a reader with no filters set to narrow them.
+   */
+  it('lists a whole neuron, drawing only the rows in view', () => {
+    const n = 600
+    const many = makeTable(TIPS.schema, {
+      [ID_COLUMN_NAME]: Array.from({ length: n }, () => '720575940621522189'),
+      end_uid: Array.from({ length: n }, (_, i) => 1000 + i),
+      kind: Array.from({ length: n }, () => 'tip'),
+      x: Array.from({ length: n }, () => 1),
+      y: Array.from({ length: n }, () => 2),
+      z: Array.from({ length: n }, () => 3),
+      r: Array.from({ length: n }, (_, i) => 1 - i / n),
+      shown: Array.from({ length: n }, () => false),
+    })
+    draw({}, true, CANDIDATES, many)
+    expect(screen.getByText(/^600 tips$/)).toBeTruthy()
+    expect(screen.queryByText(/not listed/)).toBeNull()
+    // A screenful and a margin, not 600 rows of buttons.
+    expect(rows().length).toBeGreaterThan(0)
+    expect(rows().length).toBeLessThan(60)
+    // The spacer below stands in for the rest, so the scrollbar is the whole list's.
+    expect(document.querySelector('.review-list__spacer')).toBeTruthy()
+    expect(rows()[0]!.getAttribute('aria-setsize')).toBe('600')
+  })
+
+  /** Per candidate a row is a candidate, so the foot counts candidates — never "3 of 2 tips". */
+  it('counts candidates in the foot when a row is one', () => {
+    draw({ mode: 'candidate' })
+    expect(screen.getByText(/^3 candidates$/)).toBeTruthy()
   })
 })

@@ -25,7 +25,7 @@ import type { DataSource } from '../../data/source'
 import { CANONICAL_SCHEMAS, registerSource, requireSource } from '../../data/source'
 import { resolveColor } from '../../style/encoding'
 import { readColorSpec } from '../lib/encodingParams'
-import { controlFocusNm, frameTarget } from './neuroglancer'
+import { controlFocusNm, controlPartColor, frameTarget } from './neuroglancer'
 import '../index'
 
 const NEURON_SCHEMA = tableSchema(
@@ -1010,6 +1010,22 @@ describe('a card driving the scene', () => {
     expect(colors['10001']).toBeTruthy()
     expect(colors['20002']).toBeTruthy()
     expect(colors['10001']).not.toBe(colors['20002'])
+  })
+
+  /** A piece already accepted is a third thing, and takes a third hue. */
+  it('colours an accepted piece apart from the neuron and the candidate', async () => {
+    const { scene } = await sceneFrom({}, undefined, stubSource(), [], {
+      control: control([
+        { id: '10001', part: 'neuron' },
+        { id: '20002', part: 'candidate' },
+        { id: '30003', part: 'accepted' },
+      ]),
+    })
+    const colors = layersOf(scene)
+      .map((l) => l['segmentColors'] as Record<string, string> | undefined)
+      .find(Boolean)!
+    expect(new Set([colors['10001'], colors['20002'], colors['30003']]).size).toBe(3)
+    expect(colors['30003']).toBe(controlPartColor('accepted'))
   })
 
   /** The camera reads the first row, so sorting the table cannot move it somewhere else. */

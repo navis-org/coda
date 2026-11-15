@@ -439,6 +439,21 @@ Its card body holds the queue, the current item, and the verdict buttons. The un
 **a tip with its first candidate**, as the user's own review pages had it — the rest of the list
 is context, not further suggestions, because the cutoff was calibrated on firsts only.
 
+**One neuron at a time** (user, 2026-11-15). A `Neuron` dropdown at the top of the card, drawn
+by the body because its choices are rows of `Tips`; stored as the `neuron` param, empty meaning
+the first neuron in table order (the search's own order). It narrows the list, the foot's
+counts, `Current` and `Layers` — so it is data, not presentational — and leaves `Tips` and
+`Verdicts` whole. A root id no longer in `Tips` falls back to the first, quietly: unlike a
+missing column, a missing neuron has not "not arrived yet", since every producer publishes all
+its tip rows at once. A switch lands on the new neuron's top row, in one `setParams`.
+
+**`Show accepted`** (user, 2026-11-15, default on). Every piece accepted on the picked neuron
+rides on `Current` with `part: 'accepted'`, which `out.neuroglancer` draws in the palette's third
+slot (green) through `controlPartColor` — shared with the card's fallback viewer. Accepted is a
+fact about the *piece*, so the one under the cursor turns green too; with no cursor the neuron
+leads and `x`/`y`/`z` are null, so the camera stays put. Colours are part of a layer's
+selection, so a verdict updates the frame in place (`selectionChanges`) rather than navigating.
+
 The verdict vocabulary is SEAM's, so the output can feed the next calibration without a
 translation nobody checks: per candidate *belongs* / *not it*; per tip *nothing missing here*,
 *piece not listed*, *unsure*.

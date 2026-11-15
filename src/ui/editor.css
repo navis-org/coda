@@ -11032,6 +11032,20 @@ details[open] > summary.tile__label {
   padding: 4px 4px 4px 6px;
   border-bottom: 1px solid var(--border);
   border-left: 3px solid transparent;
+  /*
+   * **One height for every row**, because the list draws only the rows in view and places them
+   * by `index × height` (`useRowWindow`). Measured in Chrome: a row with its buttons is 47px, a
+   * tip with no candidate — no buttons — 42px. Fixed at the taller, with the shorter centred, so
+   * a scrollbar over thousands of rows is not off by five pixels a row. The code reads this off
+   * a drawn row, so it is the one place the number lives.
+   */
+  height: 47px;
+  align-content: center;
+}
+/* What stands in for the rows not drawn, above and below the ones in view. */
+.review-list__spacer {
+  padding: 0;
+  border: 0;
 }
 .review-row[data-current='yes'] {
   border-left-color: var(--accent);

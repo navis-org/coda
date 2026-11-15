@@ -20,6 +20,14 @@ review:layers -> ng:layers
 
 Wire **both** of Merge Suggestions' tables in: `Tips` is the queue and `Candidates` is what the arrows page through. The `Dataset` input is what the card's viewer needs to be a scene.
 
+## One neuron at a time
+
+The card reviews one neuron at a time. The `Neuron` list at the top of the card picks which one, and each entry gives the root ID, how many tips it has and how many of its candidates you have judged. Until you pick, the card is on the first neuron in `Tips`. That is also the first one Merge Suggestions searches, so it is the first one ready.
+
+Switching neuron jumps to the top row of the new neuron's list. The list, the counts in the footer and the `Layers` annotation layer all cover the picked neuron only. `Tips` and `Verdicts` still carry every neuron, so no verdict is lost when you switch.
+
+If the picked root ID is no longer in `Tips` (the neuron was edited, or the table upstream changed), the card goes back to the first neuron. Your choice is kept, and it comes back if that root ID does.
+
 ## Working through it
 
 **Wire `Current` into a [Neuroglancer](#out.neuroglancer) node's `Control` socket.** Then clicking a row shows that pair in the full-size viewer, in two colours, with the camera on the point where they touch — in the scene you already had up, rather than a second one. The card itself shows the list alone.
@@ -28,7 +36,7 @@ Wire **both** of Merge Suggestions' tables in: `Tips` is the queue and `Candidat
 
 Merge Suggestions publishes each end as it is scored, and the queue fills from that — so you can work through the first tips while the rest of the neuron is still being measured, and the Neuroglancer node follows your clicks exactly as it does afterwards. The foot says **still searching — N to go** while that is happening.
 
-The N is tips, not candidates, and it reaches zero: an end the search can never read — its box lies outside the segmentation volume — is counted as done rather than as waiting, and Merge Suggestions warns separately about how many those were.
+The N is the picked neuron's tips, not candidates, and it reaches zero: an end the search can never read — its box lies outside the segmentation volume — is counted as done rather than as waiting, and Merge Suggestions warns separately about how many those were.
 
 > [!IMPORTANT]
 > **A filter or a sort reaches only what has arrived**
@@ -44,9 +52,15 @@ With nothing wired to `Current`, expanding the card (⤢) gives it a small viewe
 | ------- | -------------- |
 | a row   | shows that tip's candidate and points the camera at their contact |
 | `‹` `›` | the candidate ranked above or below this one, within the same tip |
-| Merge / Not a merge / Unsure | records a verdict on the pair you are looking at |
+| Accept / Reject / Unsure | records a verdict on the pair you are looking at |
 
 Pressing the same verdict again clears it, so a misclick costs one click.
+
+### Seeing what you accepted
+
+With `Show accepted` on (the default), every candidate you have accepted on this neuron is shown in the viewer in green, wherever the cursor is. The scene is then the neuron as it will look once you make the merges, and a piece that does not fit stands out. Accepting the candidate you are looking at turns it from orange to green straight away.
+
+With no row selected, the viewer shows the neuron and its accepted pieces, and the camera stays where it is. Only `Accept` counts; `Reject` and `Unsure` are not drawn.
 
 The number on the left is `r` — the chance this tip's **first** candidate is right. The line under the id is the candidate itself: its size, its rank within the tip's list, its own confidence, the search's own rank, and how far the two pieces are apart.
 
@@ -86,13 +100,13 @@ Every filter reads a tip's **first** candidate, so paging through a tip's other 
 | ---------- | ----------------------------------------------------------------------------- |
 | `Tips`     | the tips passed through, with a `verdict` column for each one's first candidate |
 | `Verdicts` | one row per judgement — neuron, tip, candidate, rank and verdict              |
-| `Current`  | the two ids being looked at, with a `part` column saying which is which        |
-| `Layers`   | an annotation layer of **every** shown suggestion — a map of where the work is |
+| `Current`  | the ids to show — the neuron, the candidate being looked at and, with `Show accepted` on, every accepted piece — with a `part` column saying which is which |
+| `Layers`   | an annotation layer of **every** shown suggestion on the picked neuron — a map of where the work is |
 
-`Layers` holds every shown suggestion rather than just the one you are on, and that is deliberate: an annotation layer's contents are not part of a scene's *selection*, so a layer that changed on every click would make every click rebuild the whole viewer — and reset the camera with it. Which suggestion is current travels on `Current`, where it costs nothing.
+`Layers` holds every shown suggestion on the neuron rather than just the one you are on, and that is deliberate: an annotation layer's contents are not part of a scene's *selection*, so a layer that changed on every click would make every click rebuild the whole viewer — and reset the camera with it. Which suggestion is current travels on `Current`, where it costs nothing.
 
 `Verdicts` is the one to keep. It carries every judgement, including those on candidates other than the first, which the folded `verdict` column on `Tips` cannot — a tip is one row.
 
 ```coda-params
-seam:review: mode, minConfidence, minSize, shownOnly, sortBy
+seam:review: mode, minConfidence, minSize, shownOnly, sortBy, showAccepted
 ```

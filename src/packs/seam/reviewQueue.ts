@@ -25,6 +25,7 @@
  * which is the failure that would have a reader judge the row above the one they were looking at.
  */
 
+import { ID_COLUMN_NAME } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
 import { numberAt } from './suggestionTables'
 
@@ -93,7 +94,7 @@ export function buildQueue(
     if (endUid === undefined) continue
     out.push({
       endUid,
-      neuronId: text(tips, 'neuronId', i) ?? '',
+      neuronId: text(tips, ID_COLUMN_NAME, i) ?? '',
       kind: text(tips, 'kind', i) ?? 'tip',
       tipNm: [
         numberAt(tips, 'x', i) ?? 0,
@@ -108,6 +109,62 @@ export function buildQueue(
     })
   }
   return out
+}
+
+/** One neuron in the queue, as the card's picker lists it. */
+export interface QueueNeuron {
+  readonly neuronId: string
+  readonly tips: number
+  /**
+   * Pairs with a verdict among this neuron's tips — counted over the candidates the queue holds,
+   * so it agrees with the rows the `Verdicts` output publishes for this neuron.
+   */
+  readonly judged: number
+}
+
+/**
+ * Every neuron in the queue, in the order `Tips` first lists it.
+ *
+ * Table order rather than any ranking because it is the order the search runs in —
+ * `seam:suggestMerges` takes a table sorted by neuron in the order a reader sees it — so the first
+ * neuron is the first one ready.
+ */
+export function neuronsOf(queue: readonly QueueTip[], verdicts: Verdicts): QueueNeuron[] {
+  const counts = new Map<string, { tips: number; judged: number }>()
+  for (const tip of queue) {
+    let held = counts.get(tip.neuronId)
+    if (!held) counts.set(tip.neuronId, (held = { tips: 0, judged: 0 }))
+    held.tips += 1
+    for (const candidate of tip.candidates) {
+      if (verdictFor(verdicts, tip.endUid, candidate.candidateId)) held.judged += 1
+    }
+  }
+  return [...counts].map(([neuronId, held]) => ({ neuronId, ...held }))
+}
+
+/**
+ * The neuron the node is on: the stored root id where the queue holds it, else the first.
+ *
+ * **Never "every neuron"** — the node reviews one neuron at a time, and an empty choice means the
+ * first rather than all of them.
+ *
+ * **A stored id the queue does not hold falls back to the first, quietly** (user, 2026-11-15),
+ * which is the opposite of what a column picker does, for a reason that does not apply to a
+ * column picker. A picker keeps a missing column because the schema has usually not *arrived*
+ * yet. Here the neurons are rows of `Tips`, and every producer publishes all of them at once —
+ * `seam:suggestMerges` lists every tip from its first partial, with `searched` null until it is
+ * reached — so a root id that is absent is gone (edited, or a different set upstream), not late.
+ * Nothing is written by the fallback, so the stored id comes back if the neuron does.
+ */
+export function pickedNeuron(queue: readonly QueueTip[], stored: string): string | undefined {
+  const want = stored.trim()
+  if (want && queue.some((tip) => tip.neuronId === want)) return want
+  return queue[0]?.neuronId
+}
+
+/** The picked neuron's tips, in queue order. Empty where nothing is picked. */
+export function tipsOf(queue: readonly QueueTip[], neuronId: string | undefined): QueueTip[] {
+  return neuronId === undefined ? [] : queue.filter((tip) => tip.neuronId === neuronId)
 }
 
 /** Every tip's candidates, in rank order. */
@@ -153,12 +210,20 @@ function candidateLists(table: TableValue | undefined): Map<number, Candidate[]>
  * **Absent means finished**, which is why this is `undefined` rather than 0: a `seam:suggestions`
  * table is a published set, complete by definition, and it carries no such column. Reported as a
  * number, a set with nothing left to search and a table that cannot say would print the same.
+ *
+ * `neuronId` counts that neuron's tips only, read the way `buildQueue` reads it.
  */
-export function stillToSearch(tips: TableValue | undefined): number | undefined {
+export function stillToSearch(
+  tips: TableValue | undefined,
+  neuronId?: string,
+): number | undefined {
   const column = tips?.data['searched']
-  if (!column) return undefined
+  if (!tips || !column) return undefined
   let waiting = 0
-  for (const cell of column) if (cell === null || cell === undefined) waiting += 1
+  for (let i = 0; i < column.length; i++) {
+    if (neuronId !== undefined && (text(tips, ID_COLUMN_NAME, i) ?? '') !== neuronId) continue
+    if (column[i] === null || column[i] === undefined) waiting += 1
+  }
   return waiting
 }
 
@@ -346,6 +411,68 @@ export function currentOfQueue(
   if (!tip || tip.candidates.length === 0) return undefined
   const candidate = tip.candidates.find((item) => item.rank === rank) ?? tip.candidates[0]
   return candidate ? { tip, candidate } : undefined
+}
+
+/**
+ * What a piece in the scene is, which decides its colour (`controlPartColor` downstream).
+ *
+ * `neuron` and `candidate` are the pair under the cursor; `accepted` is a piece the reader already
+ * said belongs, shown so the scene is the neuron as it will look once the merges are made.
+ */
+export type ScenePart = 'neuron' | 'candidate' | 'accepted'
+
+export interface ScenePiece {
+  readonly id: string
+  readonly part: ScenePart
+}
+
+/**
+ * The segments to show, in order: the pair under the cursor, then every accepted piece.
+ *
+ * **Accepted is a fact about the piece, not the pair.** A piece accepted on any of the neuron's
+ * tips is going to be merged, so it is green wherever it appears — including as the candidate
+ * under the cursor, which is what makes pressing Accept visibly land.
+ *
+ * With no cursor and `showAccepted` on, the neuron still leads: accepted pieces mean nothing
+ * floating on their own. With no cursor and it off, there is nothing to show, as before.
+ *
+ * Every id once, the first row deciding — which is also how the Neuroglancer node reads it.
+ * `tips` is the picked neuron's, so nothing here can reach another neuron's pieces.
+ */
+export function scenePieces(
+  tips: readonly QueueTip[],
+  neuronId: string | undefined,
+  here: CurrentItem | undefined,
+  verdicts: Verdicts,
+  showAccepted: boolean,
+): ScenePiece[] {
+  const accepted: string[] = []
+  if (showAccepted) {
+    for (const tip of tips) {
+      for (const candidate of tip.candidates) {
+        if (verdictFor(verdicts, tip.endUid, candidate.candidateId) === 'accept') {
+          accepted.push(candidate.candidateId)
+        }
+      }
+    }
+  }
+  const isAccepted = new Set(accepted)
+  const out: ScenePiece[] = []
+  const seen = new Set<string>()
+  const add = (id: string | undefined, part: ScenePart) => {
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    out.push({ id, part })
+  }
+  if (here) {
+    add(here.tip.neuronId, 'neuron')
+    const id = here.candidate.candidateId
+    add(id, isAccepted.has(id) ? 'accepted' : 'candidate')
+  } else if (showAccepted) {
+    add(neuronId, 'neuron')
+  }
+  for (const id of accepted) add(id, 'accepted')
+  return out
 }
 
 /**

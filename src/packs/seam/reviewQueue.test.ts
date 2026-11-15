@@ -21,8 +21,12 @@ import {
   currentOfQueue,
   decodeVerdicts,
   encodeVerdicts,
+  neuronsOf,
+  pickedNeuron,
+  scenePieces,
   sizeOf,
   stillToSearch,
+  tipsOf,
   verdictFor,
   withVerdict,
 } from './reviewQueue'
@@ -524,5 +528,112 @@ describe('a queue with no calibration at all', () => {
     const queue = buildQueue(tipsTable([{ end: 1 }, { end: 2, r: -0.5 }]), candidatesTable([]))
     const rows = arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'confidence' })
     expect(rows.map((row) => row.tip.endUid)).toEqual([2, 1])
+  })
+})
+
+/**
+ * One neuron at a time. The tables carry several neurons when Find Open Ends was given several,
+ * and a list mixing them is a reader judging one neuron's tip next to another's without a word.
+ *
+ * The neurons are **interleaved** in the fixture, so a test that passed by taking the first rows
+ * of a table sorted by neuron cannot pass here.
+ */
+describe('one neuron at a time', () => {
+  const queue = buildQueue(
+    tipsTable([
+      { end: 1, neuron: 'n1', r: 0.2 },
+      { end: 2, neuron: 'n2', r: 0.9 },
+      { end: 3, neuron: 'n1', r: 0.5 },
+      { end: 4, neuron: 'n3', r: 0.7 },
+    ]),
+    candidatesTable([
+      { end: 1, id: 'a', rank: 1 },
+      { end: 1, id: 'b', rank: 2 },
+      { end: 2, id: 'c', rank: 1 },
+      { end: 3, id: 'd', rank: 1 },
+    ]),
+  )
+
+  /** Table order, which is the order the search runs in: the first neuron is the first ready. */
+  it('lists each neuron once, in the order the table first names it', () => {
+    expect(neuronsOf(queue, new Map()).map((n) => n.neuronId)).toEqual(['n1', 'n2', 'n3'])
+  })
+
+  /** Counted over pairs, so a verdict on a rank 2 counts towards its own neuron and no other. */
+  it('counts each neuron’s tips and its judged pairs apart', () => {
+    let verdicts = withVerdict(new Map(), 1, 'a', 'accept')
+    verdicts = withVerdict(verdicts, 1, 'b', 'reject')
+    verdicts = withVerdict(verdicts, 2, 'c', 'unsure')
+    expect(neuronsOf(queue, verdicts)).toEqual([
+      { neuronId: 'n1', tips: 2, judged: 2 },
+      { neuronId: 'n2', tips: 1, judged: 1 },
+      { neuronId: 'n3', tips: 1, judged: 0 },
+    ])
+  })
+
+  it('is on the first neuron until one is picked', () => {
+    expect(pickedNeuron(queue, '')).toBe('n1')
+    expect(pickedNeuron(queue, '  ')).toBe('n1')
+  })
+
+  it('is on the picked neuron where the queue holds it', () => {
+    expect(pickedNeuron(queue, 'n3')).toBe('n3')
+  })
+
+  /**
+   * The user's decision (2026-11-15): a root id no longer in the table — edited, or a different
+   * set upstream — falls back to the first rather than leaving an empty card.
+   */
+  it('falls back to the first neuron for a root id the queue no longer holds', () => {
+    expect(pickedNeuron(queue, 'n9')).toBe('n1')
+  })
+
+  it('is on nothing when there is no queue', () => {
+    expect(pickedNeuron([], 'n1')).toBeUndefined()
+    expect(tipsOf([], undefined)).toEqual([])
+  })
+
+  it('keeps only the picked neuron’s tips, in queue order', () => {
+    expect(tipsOf(queue, 'n1').map((t) => t.endUid)).toEqual([1, 3])
+  })
+
+  /** A cursor on another neuron's tip resolves to nothing, never to that neuron's pair. */
+  it('does not resolve a cursor left on another neuron', () => {
+    expect(currentOfQueue(tipsOf(queue, 'n1'), '2', 1)).toBeUndefined()
+    expect(currentOfQueue(tipsOf(queue, 'n2'), '2', 1)?.candidate.candidateId).toBe('c')
+  })
+
+  it('counts only the picked neuron’s tips still to search', () => {
+    const tips = makeTable(
+      tableSchema(column(ID_COLUMN_NAME, 'str'), column('searched', 'bool')),
+      {
+        [ID_COLUMN_NAME]: ['n1', 'n2', 'n1', 'n2', 'n2'],
+        searched: [true, null, null, null, false],
+      },
+      'table',
+      5,
+    )
+    expect(stillToSearch(tips, 'n1')).toBe(1)
+    expect(stillToSearch(tips, 'n2')).toBe(2)
+    expect(stillToSearch(tips)).toBe(3)
+  })
+})
+
+/** A piece can touch the neuron at two tips; accepted at both, it is still one segment. */
+describe('the pieces sent to the scene', () => {
+  it('lists a piece accepted on two tips once', () => {
+    const queue = buildQueue(
+      tipsTable([{ end: 1 }, { end: 2 }]),
+      candidatesTable([
+        { end: 1, id: 'p', rank: 1 },
+        { end: 2, id: 'p', rank: 1 },
+      ]),
+    )
+    let verdicts = withVerdict(new Map(), 1, 'p', 'accept')
+    verdicts = withVerdict(verdicts, 2, 'p', 'accept')
+    expect(scenePieces(queue, 'n1', undefined, verdicts, true)).toEqual([
+      { id: 'n1', part: 'neuron' },
+      { id: 'p', part: 'accepted' },
+    ])
   })
 })
