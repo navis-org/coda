@@ -334,7 +334,17 @@ export function caveGetOr404<T>(url: string, none: T, options: CaveRequestOption
  * otherwise be every caller's, and a memo above it may keep the failure.
  */
 export function sharedRequestOptions(options: CaveRequestOptions): CaveRequestOptions {
-  return { deployment: options.deployment, ...(options.quiet ? { quiet: true } : {}) }
+  return {
+    deployment: options.deployment,
+    /*
+     * **The token is carried; only the signal is dropped.** A credential is not a lifetime —
+     * every joiner needs the request to be signed, and dropping it was invisible in a browser,
+     * where `request` falls back to the credentials store, and fatal in Node, where a caller
+     * that passes `token` explicitly is the only way a probe or a script authenticates at all.
+     */
+    ...(options.token ? { token: options.token } : {}),
+    ...(options.quiet ? { quiet: true } : {}),
+  }
 }
 
 export function cavePost<T>(

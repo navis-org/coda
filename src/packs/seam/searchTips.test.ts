@@ -193,6 +193,7 @@ describe('the Candidates table', () => {
       'rank',
       'geo_rank',
       'vol_um3',
+      'n_l2',
       'min_dist_um',
       'contact_x',
       'contact_y',

@@ -151,13 +151,21 @@ export const reviewNode = packNode({
       help: 'List only tips whose `r` — the chance their first candidate is right — is at least this. A reading aid: it changes nothing this node publishes.',
     },
     {
-      id: 'minVolume',
+      /*
+       * **A new id rather than `formerId` on the old one**, which is the opposite of the usual
+       * rule and for the usual rule's reason. `formerId` exists so a rename keeps a reader's
+       * saved value; here the value's *units* changed — `Min size` was µm³ inside the search
+       * box and is now the candidate's level-2 chunk count — so carrying `0.25` across would
+       * turn "a quarter of a cubic micrometre" into "a quarter of a chunk", which filters
+       * nothing and says nothing about having changed. Dropped, it returns to its default.
+       */
+      id: 'minSize',
       kind: 'string',
       label: 'Min size',
       default: '',
       presentational: true,
       placeholder: '(any)',
-      help: 'List only tips whose first candidate is at least this many µm³. Small pieces are often fragments rather than continuations.',
+      help: 'List only tips whose first candidate is at least this big. Size is the candidate’s **level-2 chunk count** — the chunkedgraph’s own decomposition of the whole object, wherever it reaches — which is the best proxy there is for whether a piece is a fragment or part of a neuron. It is coarse: anything small is one chunk, and the number only separates pieces further up. A published set from Merge Suggestions carries no chunk count, and there this falls back to µm³ of the candidate *inside the search box*; every row says which of the two it is showing.',
     },
     {
       id: 'shownOnly',
@@ -220,7 +228,14 @@ export const reviewNode = packNode({
     const issues: string[] = []
     for (const [id, what] of [
       ['minConfidence', '`Min confidence` is a chance, so it is between 0 and 1'],
-      ['minVolume', '`Min size` is a volume in µm³, so it is not negative'],
+      /*
+       * **No unit in the sentence**, because the unit is the table's and not this param's.
+       * A `seam:suggestMerges` run publishes `n_l2` and the size is a count of level-2 chunks;
+       * a published `seam:suggestions` set carries `vol_um3` and it is a volume. Naming either
+       * here is a sentence that is wrong half the time, and the check does not need it — what
+       * is being refused is a negative size, which is impossible in both units.
+       */
+      ['minSize', '`Min size` is a size, so it is not negative'],
     ] as const) {
       const text = String(ctx.params[id]).trim()
       if (!text) continue

@@ -72,6 +72,21 @@ export const PATCH_REACH_NM = (PATCH_VOXELS * PATCH_NM) / 2 + PATCH_MARGIN_NM
  * One box for the list, rather than one per candidate, because the read is the expensive part:
  * forty overlapping 4 µm boxes fetch the same chunks forty times.
  */
+/**
+ * How far the **widest** patch box an end can produce reaches, in nanometres.
+ *
+ * A patch is centred on a contact and the own-tip rule keeps every contact within `ownUm` of the
+ * tip, so a box drawn from the tip must cover that reach plus a patch's own. Here rather than at
+ * the call site because `PATCH_REACH_NM` is this file's and the sum was being written out three
+ * times — once where a run plans its chunk reads and twice in the probe that checks the plan
+ * covers them, which means the one check on a silent under-cover was computing the bound
+ * independently of the code it checks. Under-covering is silent and in the bad direction: the
+ * cache drops chunks that are still wanted, and nothing reports it but a worse hit rate.
+ */
+export function widestPatchReach(ownUm: number): number {
+  return ownUm * 1000 + PATCH_REACH_NM
+}
+
 export function patchBoxFor(scale: VolumeScale, centresNm: readonly Triple[]): VoxelBox {
   refusePatchScale(scale)
   return boxAroundAll(scale, centresNm, PATCH_REACH_NM)

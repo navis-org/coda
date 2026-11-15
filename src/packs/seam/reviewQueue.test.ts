@@ -21,10 +21,12 @@ import {
   currentOfQueue,
   decodeVerdicts,
   encodeVerdicts,
+  sizeOf,
   stillToSearch,
   verdictFor,
   withVerdict,
 } from './reviewQueue'
+import type { Candidate } from './reviewQueue'
 
 const tipsTable = (
   rows: { end: number; neuron?: string; r?: number; shown?: boolean | null; kind?: string }[],
@@ -54,7 +56,7 @@ const tipsTable = (
   )
 
 const candidatesTable = (
-  rows: { end: number; id: string; rank: number; vol?: number }[],
+  rows: { end: number; id: string; rank: number; vol?: number; l2?: number }[],
 ): TableValue =>
   makeTable(
     tableSchema(
@@ -63,6 +65,7 @@ const candidatesTable = (
       column('candidateId', 'str'),
       column('rank', 'i64'),
       column('vol_um3', 'f64'),
+      column('n_l2', 'i64'),
       column('contact_x', 'f64'),
       column('contact_y', 'f64'),
       column('contact_z', 'f64'),
@@ -75,6 +78,7 @@ const candidatesTable = (
       candidateId: rows.map((r) => r.id),
       rank: rows.map((r) => r.rank),
       vol_um3: rows.map((r) => r.vol ?? 1),
+      n_l2: rows.map((r) => r.l2 ?? null),
       contact_x: rows.map(() => 10),
       contact_y: rows.map(() => 20),
       contact_z: rows.map(() => 30),
@@ -115,6 +119,73 @@ describe('building the queue', () => {
  * why: a tip the run will never reach is published `false`, so a count of empty rows would stall
  * above zero at the end of a run and read as a search that stopped early.
  */
+/**
+ * What "size" means in the queue, which is two quantities with one control.
+ *
+ * `vol_um3` is the candidate's voxels inside the search box — how much of the piece is near
+ * the tip. The level-2 chunk count is of the **object**, wherever it reaches, which is the better
+ * proxy for "fragment or neuron" and so what the card sorts and filters on. A published set
+ * carries no chunk count, and the fallback is what keeps the control working there.
+ */
+describe("a candidate's size", () => {
+  const candidate = (over: Partial<Candidate>): Candidate =>
+    ({ candidateId: 'c', rank: 1, contactNm: [0, 0, 0], ...over }) as Candidate
+
+  /**
+   * One pair of candidates for both of the tests below, because the point of the fixture is the
+   * disagreement between the two quantities: tip 1's piece is the larger *object* and the
+   * smaller presence in the box, so a sort or a filter that fell back to the volume would put
+   * them the other way round. Built twice, a change to it could quietly stop testing that.
+   */
+  const bigAndSmall = () =>
+    buildQueue(
+      tipsTable([{ end: 1 }, { end: 2 }]),
+      candidatesTable([
+        { end: 1, id: 'big', rank: 1, vol: 0.1, l2: 40 },
+        { end: 2, id: 'small', rank: 1, vol: 9, l2: 2 },
+      ]),
+    )
+
+  it('is what `Sort by: size` orders on, in preference to the volume', () => {
+    const rows = arrangeRows(bigAndSmall(), { ...DEFAULT_FILTERS, sortBy: 'size' })
+    expect(rows.map((r) => r.candidate?.candidateId)).toEqual(['big', 'small'])
+  })
+
+  it('is what `Min size` counts, so a count filters a count', () => {
+    const rows = arrangeRows(bigAndSmall(), { ...DEFAULT_FILTERS, minSize: 10 })
+    expect(rows.map((r) => r.candidate?.candidateId)).toEqual(['big'])
+  })
+
+  it('is the chunk count where the table carries one', () => {
+    expect(sizeOf(candidate({ l2Chunks: 14, volumeUm3: 0.25 }))).toEqual({
+      value: 14,
+      of: 'chunks',
+    })
+  })
+
+  /** A `seam:suggestions` set: SEAM's own parquet publishes no chunk count. */
+  it('falls back to the in-box volume where it does not', () => {
+    expect(sizeOf(candidate({ volumeUm3: 0.25 }))).toEqual({ value: 0.25, of: 'um3' })
+  })
+
+  it('is nothing at all for a candidate measured neither way, or for no candidate', () => {
+    expect(sizeOf(candidate({}))).toBeUndefined()
+    expect(sizeOf(undefined)).toBeUndefined()
+  })
+
+  /**
+   * **A zero chunk count is a size, not an absence.** `??` on the number rather than a check on
+   * its presence would read it as "no chunk count" and fall through to the volume, which is a
+   * different quantity — and the chunkedgraph does list roots with no level-2 chunks.
+   */
+  it('reads a chunk count of zero as a size', () => {
+    expect(sizeOf(candidate({ l2Chunks: 0, volumeUm3: 0.25 }))).toEqual({
+      value: 0,
+      of: 'chunks',
+    })
+  })
+})
+
 describe('how many tips are still to search', () => {
   const searchedTips = (states: readonly (boolean | null)[]): TableValue =>
     makeTable(
@@ -175,7 +246,7 @@ describe('arranging the queue', () => {
       arrangeRows(queue, { ...DEFAULT_FILTERS, minConfidence: 0.5 }).map((r) => r.tip.endUid),
     ).toEqual([1, 3])
     expect(
-      arrangeRows(queue, { ...DEFAULT_FILTERS, minVolumeUm3: 0.4 }).map((r) => r.tip.endUid),
+      arrangeRows(queue, { ...DEFAULT_FILTERS, minSize: 0.4 }).map((r) => r.tip.endUid),
     ).toEqual([3, 2])
   })
 

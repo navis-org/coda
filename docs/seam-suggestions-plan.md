@@ -2506,3 +2506,390 @@ different orders. `singleSeed.test.ts` asserts the verdicts agree except within 
 cutoff, and that **exactly one** tip of 2,708 is there. A tolerance inside `decideTip` would have
 been the wrong fix: it moves the cutoff for every tip to rescue a tie that only exists because the
 cutoff was read off this one.
+
+## Where a tip's seconds actually go — measured in the browser (2026-11-15)
+
+The first real split, from a reader's own run: 50 ends of one Aedes neuron in table order, with
+the chunk cache in and `Assess top` at 0.
+
+| stage | share | per end |
+|---|---|---|
+| cutting and scoring patches | 63% | 5.7 s |
+| reading the search box | 18% | 1.6 s |
+| measuring the pool | 7% | 0.6 s |
+| reading the patch box | 7% | 0.6 s |
+| chunk counts | 5% | 0.5 s |
+
+**9.0 s an end, and the cost model said 4.1.** Every figure in this pack's headers was taken on
+one laptop against one bucket; this is the first one taken anywhere else, and the two disagree
+in a specific place — stage 6 was priced at 40 patches x 26.5 ms = 1.06 s and is five times
+that.
+
+The reading is now the small half, which is what the chunk cache did: the duplicate fetch it
+removed was 8 of a tip's 24 chunks (a third of the bytes), the reader measured 10 s before it
+and 7-8 after, and a fully cached box still costs its decode — 88 ms for a search box, 247 ms
+for a patch box, about 18 ms per million voxels.
+
+### It is the assessor loop, and the 64 ms a patch it loses is ours
+
+Splitting that stage three ways settled it, and against the stated suspicion. Handing the box to
+Pyodide folded away under 5%, and cutting measured 5%. The same 50 ends, uncapped and then with
+`Assess top 10`:
+
+| | uncapped | capped at 10 |
+|---|---|---|
+| per end | 11.0 s | 4.5 s |
+| running the network | 46% (5.06 s) | 20% (0.90 s) |
+| reading the search box | 18% | 49% |
+| chunk counts | 16% | under 5% |
+| reading the patch box | 8% | 11% |
+| measuring the pool | 7% | 15% |
+| cutting patches | 5% | under 5% |
+
+2,767 candidates over 50 ends is **55 an end**, not the 40 the model assumed. Dividing the
+network's time by the patches it ran gives **91 ms** uncapped and **90 ms** capped — two
+independent measurements of the same quantity, agreeing to a millisecond, against the **26.5 ms**
+`docs/seam-assessor-speed.md` §14 reports.
+
+**And §14 was measured on the same laptop and the same GPU.** The first reading of this was that
+the reader's machine was 3.4x slower than the one the runtime was written on; it was written
+down here in those words, and it was wrong. There is one machine. So **64 ms a patch is lost
+between the probe and the run** — which was then read as a defect in this loop, and was not one
+either. What it actually was is three subsections down; everything between here and there is the
+elimination, which is worth keeping because four of the five suspects are the ones anybody would
+reach for again.
+
+What makes it worth stating carefully: `probe-gpu-assessor.mjs` times the same call this node
+does — `runner.run` with one float32 feed of the same shape, wall clock either side — and
+`session.run` already transfers its feed buffers rather than cloning them. So the gap is not
+what is measured and not the copy. It is either **per-call overhead** that the probe's tighter
+loop avoids, or **contention**: the run cuts the next group of patches in the Pyodide worker
+while the GPU works, which the probe does not, and a main thread busy deserialising 8 MB of
+patches cannot resolve the worker's reply.
+
+`runClock` reports the shape of the network's calls, and the measurement came back flat: over 25
+ends, **98 ms a patch, best 44, median 97, first fifth 98 and last 97**. That rules out almost
+everything on its own. No trend across the run, so not heat and not anything that accumulates. A
+median on top of the mean, so not something periodic stealing time from some calls — which is
+what a prefetch or a garbage collection would look like. Nearly every call costs the same, and
+that cost is four times the probe's.
+
+Three suspects were eliminated by measurement rather than argument. The patches come back from
+Pyodide **transferred** (`worker.ts` posts its reply with `transferable(result)`), so the main
+thread is not deserialising 8.6 MB during a run. The per-patch conversion to float32 measures
+**1.2 ms**, against a hoped-for difference of twenty. And the shape itself excludes the prefetch,
+since contention from a cut that occupies a tenth of the loop would be bimodal.
+
+A steady competitor for the GPU was the next suspect — `probe-gpu-assessor.mjs`' header names
+that signature in as many words, "other work on the GPU shows as a median well above the best",
+and the run had an `out.neuroglancer` card pinned into the dashboard with `layout: "3d"`,
+redrawing continuously. **It is not that either**: the same 25 ends with the node deleted came
+back at 98 ms a patch, best 59, median 98, first fifth 98 and last 98.
+
+So four explanations have been tested and four have gone, and the mechanism is now known to be
+identical rather than assumed: the probe opens through the same `openGpuAssessor`, gets the same
+`ModelSession` over the same worker, transfers the same feed and times the same round trip.
+
+What has **not** been held constant is time, and — it turned out — not the browser either.
+
+`pnpm probe:gpu-assessor`, re-run on the machine that produced the 98, came back at **best 26.0,
+median 26.3**. So §14 was not stale and the graph was still fast: the difference was in the run,
+not in the network. That put the remaining suspects in two piles — how this node drives the call,
+and the environment it drives it in — and both piles were too big to guess at, five guesses
+having already been spent.
+
+### The ladder
+
+`pnpm probe:assessor-gap` was written to take them apart. It runs the same loop at every rung in
+one browser and changes one thing between them, so the rungs compare against each other rather
+than against a figure in a document. The ingredients are the things a run has and the probe does
+not: a Pyodide worker holding a labelled box of the run's own size, that box being cut from one
+group ahead, `Chunk cache`'s 512 MB held and touched, a main thread blocked half the time, and a
+page repainting every frame. Beside every rung a second loop pings the worker with
+`session.release()`, which it answers immediately — the worker's `onmessage` is `async` and parks
+on `network.score`, so a ping is answered *while* the GPU works. That pair splits the answer:
+runs slowing while pings do not puts the cost inside `network.score`, and both slowing together
+puts it on the main thread.
+
+The box is synthetic and so are the patches, which is the one liberty taken: a convolution's cost
+does not depend on what is in the voxels, and a real box would drag a CAVE token and an hour of
+waiting into a measurement about scheduling. Its *size* is real — `PATCH_REACH_NM` around a four
+micrometre spread of contacts, which is the 13.5 M voxels a measured run reads.
+
+On Chrome, at 55 candidates an end:
+
+| rung | best | median | first fifth | last | ping |
+|---|---|---|---|---|---|
+| bare | 26.2 | 26.6 | 26.7 | 26.7 | 0.1 |
+| bare + memory | 25.9 | 26.6 | 26.4 | 26.7 | 0.0 |
+| bare + busy main thread | 31.3 | 32.9 | 32.9 | 32.7 | 1.1 |
+| bare + painting page | 26.5 | 27.3 | 27.3 | 27.3 | 0.1 |
+| bare + a held box | 26.4 | 26.7 | 26.6 | 26.9 | 0.1 |
+| **the run's loop** | **26.0** | **26.7** | 26.6 | 26.8 | 0.1 |
+| … + memory | 26.3 | 26.7 | 26.6 | 26.7 | 0.1 |
+| … + busy main thread | 30.9 | 32.9 | 32.6 | 32.7 | 1.1 |
+| … + painting page | 26.6 | 27.6 | 27.1 | 27.5 | 0.1 |
+| … + all three | 27.7 | 32.4 | 32.5 | 33.8 | 1.2 |
+| bare, in bursts | 25.9 | 26.6 | 29.0 | 37.0 | 0.1 |
+| the run's rhythm | 25.9 | 26.8 | 27.0 | 40.0 | 0.1 |
+| 240 s without stopping | 25.8 | 29.7 | 31.6 | 29.5 | 0.1 |
+
+`the run's loop` is `scoreCandidates` itself. **Nothing software reproduced the loss.** Dropping
+`--enable-unsafe-webgpu --use-angle=metal`, which the probe's Chrome passes and a reader's does
+not, changed nothing either (26.6). Two rungs did move, and they are worth keeping: a GPU left
+idle five seconds between bursts comes back slower (last fifth 37-40 against a 26 best), and four
+minutes of unbroken work sits near 30. That is clock ramp and heat, worth about 10 ms.
+
+### It was the browser
+
+Every reading that produced the 91 and the 98 was taken in **Firefox**. The same workflow in
+Chrome, 25 ends:
+
+> 25 ends took 6.2 s each: chunk counts 33%, running the network 25% (27 ms a patch, best 26,
+> median 26, first fifth 27 and last 26), reading the search box 21%, measuring the pool 10%,
+> reading the patch box 8%.
+
+**27 ms a patch, best 26, median 26** — the probe's figure exactly, in a full run of the node
+with the cut, the cache and the scheduler all going. One laptop, one GPU, one WGSL
+implementation: 27 ms in Chrome and 98 in Firefox, 6.2 s an end against 11.0.
+
+So the 72 ms was never in this pack. It is what Firefox's WebGPU spends submitting and
+synchronising a dispatch, and the probe can see the shape of it from the other side: timing one
+network a step at a time forces a synchronisation per dispatch and turns 26 ms into 358, so ~10
+ms a sync, and 72 is about seven of them.
+
+`src/ml/support.ts`' `slowGpuDispatch` is where the measurement lives, and `Suggest Merges` draws
+a reader hint from it — derived from the browser, never written into the document, so it cannot
+ride a share link to somebody for whom it is false. It names the lever as well as the fact,
+because which browser this is decides which knob is worth reaching for.
+
+### What that corrects
+
+- **`SECONDS_PER_PATCH` is 0.027**, Chrome's. It had been raised to 0.091 on this file's rule
+  that a guard rail which under-states a wait is the one that fails — a good rule applied to a
+  number that was not what it was taken for. Pricing the slower browser would hand every other
+  reader a warning 3.6x too long; the hint and the node's own `ms a patch` carry the other case.
+- **`Assess top` is a weak lever in Chrome and the strongest one there is in Firefox**, which is
+  what the help text now says. It had said "on one GPU … on another", which was wrong about what
+  differed.
+- **A test asserting the cap saves more than a third of a run** was the second wrong test in the
+  same place: the first pinned a quarter from the Chrome reading, the second a third from the
+  Firefox one. It now pins the shape — a real saving, not most of a run, and never the reads —
+  because pinning either figure is what produced both failures.
+- **The five eliminated suspects stand**, and so does the method. The clock is what made this
+  findable: a reader could report what their machine did in the one unit that compares against
+  anything, without this file knowing which browser they were in.
+- **Chunk counts collapsed between two Firefox runs** — 16% of 11.0 s to under 5% of 4.5 —
+  because `l2ChunkCounts` memoises by root across runs in a session. So the first figure is a
+  cold cache and the second a warm one, and neither is the cost of the call. The 33% below is a
+  cold session.
+
+## Where an end's time goes once the browser is right, and what overlaps
+
+The Chrome profile is a different shape from every reading before it, and it is the one to plan
+against. 25 ends, 6.2 s each — this is the profile **before** the change below, kept because it
+is what motivated it:
+
+| stage | share | resource |
+|---|---|---|
+| chunk counts | 33% | network (chunkedgraph) |
+| running the network | 25% | GPU |
+| reading the search box | 21% | network (bucket) |
+| measuring the pool | 10% | Pyodide |
+| reading the patch box | 8% | network (bucket) |
+
+Three resources, and only one pair of them ever overlaps: the Pyodide cut runs a group ahead of
+the GPU inside `scoreCandidates`. Everything else is strictly serial, which is the whole of the
+opportunity.
+
+### Done: the counts four at a time
+
+`l2ChunkCounts` batched fifty roots to a request and ran the batches **one after another**. A
+candidate pool is about 500 roots, so a fresh open end was ten round trips in a row at a shared
+server — and that is now the largest stage in a run, larger than the GPU. It runs
+`LEAVES_STREAMS` (four) in flight.
+
+**Measured: 2.5x on the stage and 21% off the whole run.** The same 25 ends, a cold session, in
+Chrome:
+
+| stage | before, 6.2 s an end | after, 4.9 s |
+|---|---|---|
+| chunk counts | 2.05 s (33%) | **0.83 s (17%)** |
+| running the network | 1.55 s (25%) | 1.57 s (32%) |
+| reading the search box | 1.30 s (21%) | 1.27 s (26%) |
+| measuring the pool | 0.62 s (10%) | 0.64 s (13%) |
+| reading the patch box | 0.50 s (8%) | 0.44 s (9%) |
+
+Every other stage is unchanged inside noise, so the 1.3 s an end is this and nothing else — which
+is the attribution a one-change measurement is worth taking.
+
+**2.5x from four streams, not 4x**, and that is the useful part of the reading. On Amdahl's
+arithmetic a fourfold pool returning 2.5 leaves about a fifth of the stage serial, which is the
+bandwidth the open question below is about: the replies really are megabytes and four of them do
+not arrive in the time of one. It also says what more streams would buy, which is little, against
+politeness at a shared server that is not ours.
+
+Four rather than unbounded because SEAM's invariant 8 is about a shared public chunkedgraph, and
+four is what this pack is already allowed elsewhere (`MESH_CONCURRENCY` is three,
+`fragmentConcurrencyFor` divides a budget). `inFlight` rather than `mapWithConcurrency`, because
+the batches are pieces of one answer: a forgiven batch returns as roots missing from the map,
+and `countsInPoolOrder` would refuse them as a hole in the pool — a request failure reported as
+a fact about the data. The batches within one call are disjoint slices of what the memo was
+missing, so no two can ask for the same root however they interleave.
+
+`rootIds.test.ts` pins both ends — a peak of one is the sequential loop coming back, a peak of
+ten is the politeness gone — and the peak test needs a server that answers on a macrotask, since
+a synchronous fake settles each batch before the next is asked for and would pass either way.
+
+### Done: pipelining the assessor behind the next search
+
+The arithmetic got better when the counts shrank, because the stage that shrank was on the
+search side. At 4.9 s an end the search half is 56% (search box 26, pool 13, counts 17) and the
+assess half is 41% (patch box 9, network 32), so overlapping them should make an end
+`max(56%, 41%)` rather than the sum: **4.9 s to about 2.8**.
+
+**Measured: 4.9 s to 3.3 — a third off, against the 43% that arithmetic predicted.** The same 25
+ends in Chrome:
+
+> 25 ends took 3.3 s each. The stages this node times come to 5.6 s of work an end, 41% of it
+> alongside something else: running the network 28% (27 ms a patch, best 26, median 26, first
+> fifth 27 and last 27), reading the search box 26%, chunk counts 15%, measuring the pool 12%,
+> reading the patch box 11%, cutting patches 7%.
+
+**The shortfall is not contention on the network, which is what this first said.** The work sum
+rose from 4.75 s an end to 5.6 — so two stages really did take longer in wall terms — but the
+reason is that **the two halves of the pipeline share one Pyodide worker**.
+`src/pyodide/engine.ts` holds a single module-level `Worker` for the tab, and both halves call
+it: the search measures its pool, the body hands over its patch box and cuts. That work queues.
+`cutting patches` surfacing at 0.39 s is not a stage that got slower; it is a stage that started
+waiting.
+
+Priced by resource over the 3.3 s end, the picture is plain:
+
+| resource | stages | an end |
+|---|---|---|
+| network | search box 1.46, chunk counts 0.84, patch box 0.62 | **2.92 s** |
+| GPU | running the network | 1.57 s |
+| Pyodide (one worker, serialised) | pool 0.67, cutting 0.39, handing over | ~1.1 s |
+
+The network is the binding resource at 2.92 s against a 3.3 s end, so the overlap is already
+close to what this arrangement can give — and the next win is not more concurrency but less
+reading. That makes the two open items below the live ones: the duplicate chunk fetches the
+overlap itself introduced, and the chunk-id rewrite on the counts path.
+
+So the model for the next one of these is **`max` over resources, not over halves** — and the
+halves have to be decomposed into resources first, which is the step the prediction skipped. The
+2.8 s figure came from `max(search, assess)`, which silently assumed the two halves shared
+nothing. Written down because the prediction was made here in good faith, was out by a seventh,
+and the reason was knowable from `engine.ts` without running anything.
+
+`suggestMerges.ts` consumes `searchEnds` with `for await`, so the generator is suspended for the
+whole of `assessEnd`: end *i+1*'s box read, pool measure and counts wait on end *i*'s patch box,
+cut and score. Pulling the next end from the generator before awaiting the assess is a six-line
+change in the loop.
+
+Three things had to be true that were not, and the loop change itself is the smallest of the
+four. It is `oneAhead` in `searchRun.ts`, wrapped around `searchEnds`: a generator that asks its
+source for the next value *before* handing the current one to the body. `for await` does the
+opposite by definition, which is right when the body and the source share a resource and wrong
+when they do not — searching an end is the network, scoring one is the GPU with a little Pyodide.
+
+Extracted rather than written inline because **none of it is visible in the answer**: the same
+ends come out in the same order with the same contents, so the only thing that can hold the
+scheduling in place is a test that watches when the source is asked. `searchRun.test.ts` pins
+that, that it runs one ahead and no further, and that a body which gives up mid-stream leaves no
+unhandled rejection — the last being `assessorRun.ts`' rule, earned there for its own prefetch
+and widest exactly where it matters, on a Cancel while the body is parked on the assessor.
+
+#### The three things underneath
+
+Two reads are then in flight against the same volume, and `labelledBox` resolved supervoxels
+through `volume.roots`, which fills on *completion* — so end *i*'s patch box and end *i+1*'s
+search box would both have seen the supervoxels they share as unknown and asked the chunkedgraph
+for all of them twice, which is exactly where neighbouring ends overlap. `SearchVolume.asking`
+now holds a promise per supervoxel pointing at the lookup that covers it, so a second read asks
+only for what nobody is asking for yet and waits on the rest. One entry per supervoxel, all
+pointing at a handful of shared promises: a promise per *request* would have destroyed the
+batching `rootsAtInstant` exists for, which is the same trap `l2ChunkCounts` records about
+`memoPromise`.
+
+The load-bearing part is that the partition and the registration are **one synchronous block**.
+Nothing may yield between reading `roots`/`asking` and writing `asking`, or a second caller runs
+in the gap, finds the same supervoxels in neither map, and asks again — invisibly, since the
+answers agree and the only sign is twice the requests. `searchVolume.test.ts` pins it by starting
+two reads before releasing the first's lookup; without the sharing it fails with
+`[[1n,2n,3n],[2n,3n,4n]]` against `[[1n,2n,3n],[4n]]`.
+
+Waiting is not a serialisation: a joiner is answered no later than if it had asked itself, its
+request having gone to the same server behind the same one. What it saves is the bytes and the
+server's work.
+
+**The eviction plan needed nothing**, which is worth recording because it was expected to.
+`chunkPlanFor` gives both boxes of one end *one* position — "one entry per end, not per box" —
+and `endSearched` runs after the assessor, so with two ends in flight the plan sits at *p* while
+the reads belong to *p* (the patch box) and *p+1* (the search box). Neither is the furthest next
+use, so nothing is dropped while it is still being read. The earlier note here said it would sit
+a position behind; that was wrong, and checking beat fixing.
+
+**`runClock` did need something.** Its report added the stages up and called the answer the
+wait, which was right while everything was serial and is a plain over-statement once two stages
+run together. It now measures wall clock from its own construction — the node makes it where the
+search begins, so a 133 MB model download is not charged to the ends — and states the two
+separately: what an end took, and what the stages come to. The gap between them is the useful
+part, because it says how much of a stage is already hidden behind another and therefore whether
+attacking it would buy anything. Said only above a twentieth, since the timed stages are most of
+a run and never all of it, so a serial run's sum sits a little *under* the wait and the sentence
+stays quiet. The threshold for reporting at all moved to the wait for the same reason: under
+overlap the sum is the larger, and gating on it would let a run speak about half a minute it
+never spent.
+
+**What it costs** is a second box alive — end *i+1*'s search box read while end *i*'s patch box
+is still being cut from. At a 6 µm and an 8 µm box that is tens of megabytes, against a chunk
+cache measured in hundreds.
+
+### Open: what the overlap itself costs at the bucket
+
+Two reads in flight against one volume were made safe for *correctness* (`SearchVolume.asking`
+shares the supervoxel lookup) and were not made cheap:
+
+- **A chunk neither read holds yet is fetched twice.** `ChunkCache` answers from `held` and
+  fills on completion, so end *i*'s patch box and end *i+1*'s search box — neighbouring tips, the
+  same scale on Aedes — both miss and both fetch, at 3.0 MB a chunk. The fix is the shape
+  `asking` already is: a `Map<key, Promise<ArrayBuffer | undefined>>` consulted on `get` and
+  cleared in a `finally`, with `memoPromise`'s rule that a failure must leave nothing to join.
+  Worth noting the cache's headline measurement — 8,438 fetches to 945 distinct — was taken
+  **serially** and predates the overlap it now runs under.
+- **At a small budget the overlap can thrash.** `nextUse` answers the nearest end at or after
+  the plan's cursor, which sits at *p* while the reads belong to *p* and *p+1* — so a chunk only
+  end *p+1* wants scores `p+1`, the largest finite score there is unless something held is wanted
+  further ahead. Neither read is ever dropped ahead of a dead chunk, which is the property that
+  matters, but where the budget cannot hold both ends' working sets the cache can evict what the
+  read in flight has just fetched. At the default that is 28 chunks against 170 held, so it does
+  not arise; a reader who sets `Chunk cache` low is in that régime. Advancing the cursor on the
+  *yield* rather than after the assessor would fix it and would break the "both boxes of one end
+  are one position" rule that keeps the patch box from being evicted mid-end, so it is not an
+  obvious trade.
+- **The stream budget is claimed twice.** `DEFAULT_CONCURRENCY` is 32 per `overChunks` call and
+  its own paragraph argues for 32 rather than 100 because the origin budget is shared with
+  meshes, CAVE fragments and Explore's thumbnails. Two concurrent box reads is 64. The measured
+  curve says 32 → 100 buys about 2%, so this is politeness rather than wall clock, and the fix
+  is to hand both reads one pool rather than to lower the constant.
+
+Neither is measured yet. The cheap way to price the first needs no network: `probe:seam-tip-boxes`
+already enumerates each box's keys before reading, so intersecting end *i*'s patch-box keys with
+end *i+1*'s search-box keys and subtracting what the cache holds is the exact duplicate count.
+
+### Open: whether `leaves_many` is the right call at all
+
+`leavesMany` fetches every level-2 chunk id of every root in order to take `.length` — the
+comment beside `LEAVES_CHUNK` prices a reply at "a few MB" for fifty roots, so a fresh end is
+tens of megabytes to produce 500 integers, against 13 MB of segmentation for the same end.
+
+The concurrency above gives the first evidence either way, and it is mixed: four streams
+returned 2.5x, so most of the stage was latency the caller was standing in — but the fifth that
+did not parallelise is the bandwidth, and it is a floor nothing about scheduling will move. At
+0.83 s an end the stage is no longer the one to attack, so this is worth measuring when it is
+next the largest thing on the list rather than now. What it would settle: bytes per reply, how
+many roots are genuinely new per end as a walk goes along a neuron, and whether the chunkedgraph
+offers any route to a size that is not the whole list.
+

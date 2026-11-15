@@ -50,6 +50,12 @@ Pressing the same verdict again clears it, so a misclick costs one click.
 
 The number on the left is `r` — the chance this tip's **first** candidate is right. The line under the id is the candidate itself: its size, its rank within the tip's list, its own confidence, the search's own rank, and how far the two pieces are apart.
 
+**Size is the candidate's level-2 chunk count** — the chunkedgraph's own decomposition of the whole object, wherever it reaches. That is what `Sort by: size` orders on and what `Min size` counts, because it is the best proxy there is for whether a piece is a loose fragment or part of a neuron. It is coarse by construction: anything small is one chunk, and the number only starts separating pieces further up.
+
+> [!NOTE]
+> **Not the same as `vol_um3`**
+> The table also carries `vol_um3`, which is the candidate's voxels *inside the 6 µm search box* — how much of the piece is near the tip rather than how big the piece is. A long neurite passing through counts only for the part in view. A set from [Merge Suggestions](#seam:suggestions) carries no chunk count, and there the rows fall back to µm³ and say so; the two differ by orders of magnitude, so a number that worked in `Min size` on one will not mean the same on the other.
+
 `conf` there is the candidate's own score, `p_tip × p_cand`: how likely something belongs at this tip at all, times how much of that belongs to *this* piece. For a first candidate it is exactly the `q` SEAM's cutoff is applied to.
 
 > [!NOTE]
@@ -88,5 +94,5 @@ Every filter reads a tip's **first** candidate, so paging through a tip's other 
 `Verdicts` is the one to keep. It carries every judgement, including those on candidates other than the first, which the folded `verdict` column on `Tips` cannot — a tip is one row.
 
 ```coda-params
-seam:review: mode, minConfidence, minVolume, shownOnly, sortBy
+seam:review: mode, minConfidence, minSize, shownOnly, sortBy
 ```

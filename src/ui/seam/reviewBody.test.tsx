@@ -24,6 +24,7 @@ import { defaultParams, makeInferContext } from '../../core/node'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { requireNodeDef } from '../../core/registry'
 import { column, tableSchema } from '../../core/types'
+import { selectTable } from '../../nodes/lib/tableOps'
 import { makeTable } from '../../core/values'
 import type { TableValue, Value } from '../../core/values'
 import { useGraphStore } from '../../store/graphStore'
@@ -63,6 +64,7 @@ const CANDIDATES: TableValue = makeTable(
     column('candidateId', 'str'),
     column('rank', 'i64'),
     column('vol_um3', 'f64'),
+    column('n_l2', 'i64'),
     column('conf', 'f64'),
     column('contact_x', 'f64'),
     column('contact_y', 'f64'),
@@ -75,6 +77,8 @@ const CANDIDATES: TableValue = makeTable(
     candidateId: ['648518346368395605', '648518346356867476', '648518347608868926'],
     rank: [1, 2, 1],
     vol_um3: [0.25, 0.1, 3],
+    // The chunk count of the whole object, which is what the card calls size.
+    n_l2: [14, 2, 61],
     conf: [0.4, 0.12, 0.05],
     contact_x: [10, 11, 12],
     contact_y: [20, 21, 22],
@@ -91,7 +95,7 @@ beforeAll(() => {
 beforeEach(clearStorage)
 afterEach(cleanup)
 
-function draw(params: ParamValues = {}, compact = true) {
+function draw(params: ParamValues = {}, compact = true, candidates: TableValue = CANDIDATES) {
   const def = requireNodeDef(TYPE)
   const graph = addNode(emptyGraph(), {
     id: 'r1',
@@ -102,7 +106,7 @@ function draw(params: ParamValues = {}, compact = true) {
   useGraphStore.setState({ graph } as never)
   const node = { ...graph.nodes[0]!, params: { ...defaultParams(def), ...params } }
   const written: Record<string, ParamValue> = {}
-  const inputValues: Record<string, Value | undefined> = { tips: TIPS, candidates: CANDIDATES }
+  const inputValues: Record<string, Value | undefined> = { tips: TIPS, candidates }
   render(
     <ReviewBody
       node={node}
@@ -188,6 +192,21 @@ describe('the review card', () => {
     expect(rows()[0]!.textContent).toContain('648518346368395605')
   })
 
+  /**
+   * **A published set carries no chunk count**, so the card falls back to the in-box volume —
+   * and says so, because the two differ by orders of magnitude and a bare number would be the
+   * one place a reader could carry one across to the other's `Min size`.
+   */
+  it('prints µm³ where the table has no chunk count', () => {
+    const noChunks = selectTable(
+      CANDIDATES,
+      CANDIDATES.schema.columns.map((c) => c.name).filter((name) => name !== 'n_l2'),
+    )
+    draw({}, true, noChunks)
+    expect(rows()[0]!.textContent).toContain('µm³')
+    expect(rows()[0]!.textContent).not.toContain('L2 chunk')
+  })
+
   /** Per candidate the row names its own rank, so clicking opens on that one rather than the first. */
   it('selects the clicked candidate’s rank, not the tip’s first', () => {
     const written = draw({ mode: 'candidate' })
@@ -219,7 +238,9 @@ describe('the review card', () => {
     expect(rows()[0]!.textContent).toContain('0.910')
     expect(rows()[0]!.textContent).toContain('648518346368395605')
     // The candidate's own facts, which are what a reader judges size and reach by.
-    expect(rows()[0]!.textContent).toContain('µm³')
+    // The size the queue sorts and filters on, with its unit: a chunk count is of the whole
+    // object where `vol_um3` is only the part inside the search box.
+    expect(rows()[0]!.textContent).toContain('14 L2 chunks')
     expect(rows()[0]!.textContent).toContain('rank 1/2')
   })
 

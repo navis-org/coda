@@ -55,9 +55,15 @@ import { parseGrapheneSource } from '../../data/cave/graphene'
 import { datastackRecord } from '../../data/cave/datastack'
 import { supervoxelVolumeOf } from '../../data/cave/volumes'
 import type { CaveRequestOptions } from '../../data/cave/client'
+import { sharedRequestOptions } from '../../data/cave/client'
+import { untilAborted } from '../../data/memoPromise'
 import type { RootsAt } from '../../data/cave/rootIds'
 import { instantOf, rootsAtInstant } from '../../data/cave/rootIds'
-import type { VolumeInfo, VolumeScale, VoxelBox } from '../../data/precomputed/volume'
+import type { ChunkCache } from '../../data/precomputed/chunkCache'
+import { chunkCache } from '../../data/precomputed/chunkCache'
+import type { ChunkPlan, ChunkPlanBoxes } from './chunkPlan'
+import { chunkPlanFor } from './chunkPlan'
+import type { Triple, VolumeInfo, VolumeScale, VoxelBox } from '../../data/precomputed/volume'
 import { boxAround, openVolume, readLabelBox, scaleNear } from '../../data/precomputed/volume'
 import type { CandidatePoolRequest, LabelBoxRequest } from '../../pyodide/cutoutSummary'
 import type { EndToSearch } from './searchRun'
@@ -87,7 +93,85 @@ export interface SearchVolume {
    * absence needs no second sentinel.
    */
   readonly roots: Map<bigint, bigint>
+  /**
+   * Supervoxels whose root is **being looked up right now**, each mapped to the lookup that
+   * will answer it.
+   *
+   * `roots` fills on completion, which is enough while one box is read at a time and wrong the
+   * moment two are. Neighbouring boxes of one neuron are mostly the same supervoxels — that is
+   * the premise `roots` is built on — so two reads in flight would each find the shared ones
+   * missing from `roots` and ask the chunkedgraph for all of them twice. The duplicate answers
+   * the same thing, so nothing downstream could notice: it is paid in requests at a shared
+   * public server (SEAM's invariant 8) and in wall clock.
+   *
+   * **One entry per supervoxel, all pointing at a handful of shared promises.** A promise per
+   * supervoxel *request* would destroy the batching that `rootsAtInstant` exists for — the same
+   * trap `l2ChunkCounts` records about `memoPromise`. This keys by supervoxel, which is what a
+   * caller can ask about, and the value is the whole lookup that covers it.
+   *
+   * An entry removes itself when its lookup settles, so this is empty whenever nothing is in
+   * flight. That is why `forgetRoots` does not clear it: a non-empty map there would mean a
+   * lookup whose writes are still coming, and dropping its entries would let the next caller
+   * start a second one for the same supervoxels.
+   */
+  readonly asking: Map<bigint, Promise<void>>
+  /**
+   * Chunks this run has already fetched, shared by every box it reads.
+   *
+   * **The run's single biggest saving, and it is not a small one.** A chunk of this segmentation
+   * is 8.2 x 8.2 x 2.9 µm where a search box is 6 µm and a patch box a little over 8, so the two
+   * boxes of one end are largely the same chunks and so are the boxes of neighbouring ends.
+   * Measured on one neuron's 505 ends (`pnpm probe:seam-tip-boxes`): 8,438 chunk fetches, 25.4
+   * GB, against 945 distinct chunks and 2.8 GB. Nine fetches in ten were bytes the run already
+   * had.
+   *
+   * It sits beside `roots` because it is the same kind of thing — what this run has learned,
+   * held for as long as the run and no longer — and for the same reason it is per run rather
+   * than global: the working set belongs to the neuron being searched, and keeping it for the
+   * session would hold a hundred megabytes nobody is going to ask for again.
+   *
+   * Unlike `roots` it is **not** forgotten between neurons: a budget evicts what is no longer
+   * wanted on its own, and two neurons near each other in the volume share chunks that
+   * `forgetRoots` has no equivalent reason to drop.
+   */
+  readonly chunks: ChunkCache
+  /**
+   * Tell the cache which ends are coming, **in the order they will be searched**.
+   *
+   * Every end's two boxes are functions of its tip position, which is in the table before
+   * anything is read — so the cache need not guess what to evict, and `chunkPlan.ts` says what
+   * that is worth. Called per neuron, because a neuron's ends are what overlap.
+   *
+   * It is a method on the volume rather than a field the run assigns because the plan and the
+   * cache have to be the same object's: the cache was built holding a reference to whatever the
+   * current plan is, and a run that set one without the other would get a policy quietly
+   * answering about last neuron's ends.
+   */
+  planEnds(tipsNm: readonly Triple[], reach: EndReach): void
+  /** One end searched. Moves the plan on, so what it has passed stops being worth keeping. */
+  endSearched(): void
 }
+
+/**
+ * How far each of an end's two boxes reaches, which is all the plan needs beyond the positions.
+ *
+ * **Derived from `ChunkPlanBoxes`, not restated.** The volume supplies `base` and `scale`
+ * itself, so a caller gives the rest — and spelling those three fields out again here was a
+ * second declaration that type-checks whichever copy is stale: `planEnds` spreads
+ * `{ base, scale, ...reach }`, and a spread is not excess-property-checked, so a field added to
+ * one and not the other is dropped in silence. That is the failure `chunkPlan.ts` calls "quietly
+ * useless rather than loudly wrong", arriving through the type system instead of the keys.
+ */
+export type EndReach = Omit<ChunkPlanBoxes, 'base' | 'scale'>
+
+/**
+ * The volume narrowed to its root memo — what `resolveRoots` and `forgetRoots` take.
+ *
+ * Exported so the test does not declare a second copy of the same `Pick`: a copy drifts in one
+ * direction silently, since adding a field breaks the stub but removing one leaves a stub that
+ * over-supplies.
+ */
+export type RootLookup = Pick<SearchVolume, 'roots' | 'asking' | 'graphene' | 'at'>
 
 /**
  * Open a datastack's supervoxel volume at the resolution the pipeline asks for.
@@ -101,6 +185,14 @@ export async function openSearchVolume(
   xyNm: number,
   when: RootsAt,
   options: CaveRequestOptions,
+  /**
+   * How much the run may spend holding chunks it has fetched, in bytes.
+   *
+   * A parameter rather than a constant read here, because the budget is a reader's decision —
+   * `seam:suggestMerges` exposes it — and because a probe measuring what a cache is worth has to
+   * be able to turn it off. Absent is `chunkCache`'s own default.
+   */
+  budget: { chunkBytes?: number } = {},
 ): Promise<SearchVolume> {
   const record = await datastackRecord(datastack, options)
   const graphene = parseGrapheneSource(record.segmentation_source)
@@ -133,7 +225,34 @@ export async function openSearchVolume(
     )
   }
   const info = await openVolume(base, options)
-  return { base, scale: scaleNear(info, xyNm), info, graphene, at, roots: new Map() }
+  const scale = scaleNear(info, xyNm)
+  /*
+   * The plan and the cache are made together, the cache reading whichever plan is current
+   * through the `let` below — captured by reference, since the eviction callback, `planEnds`
+   * and `endSearched` are all in this scope. A run replaces the plan per neuron; until it does
+   * there is none, and the cache is plain least-recently-used, which is the right answer for a
+   * caller that has not said what is coming.
+   */
+  let plan: ChunkPlan | undefined
+  const chunks = chunkCache(budget.chunkBytes, (key) => plan?.nextUse(key) ?? Infinity)
+  return {
+    base,
+    scale,
+    info,
+    graphene,
+    at,
+    roots: new Map(),
+    asking: new Map(),
+    chunks,
+    planEnds(tipsNm, reach) {
+      // Nothing to plan for a cache that holds nothing, and the plan is tens of thousands of
+      // key builds per neuron — free to skip for a reader who set `Chunk cache` to 0.
+      plan = chunks.budget > 0 ? chunkPlanFor(tipsNm, { base, scale, ...reach }) : undefined
+    },
+    endSearched() {
+      plan?.advance()
+    },
+  }
 }
 
 /**
@@ -164,8 +283,12 @@ export function boxFits(volume: SearchVolume, tip: TipRow, halfWidthNm: number):
  * neuron's own ends — the tips of two different neurons are nowhere near each other, so carrying
  * the map across them keeps millions of entries that will never be asked for again. Nothing here
  * is a cache in the usual sense: `rootsAtInstant` keeps nothing of its own, by design.
+ *
+ * **`asking` is deliberately not cleared**, and the field says why in full. The fact that is
+ * local to here: this is called between neurons, where the run has finished every end of the
+ * last one, so nothing is in flight to be orphaned.
  */
-export function forgetRoots(volume: SearchVolume): void {
+export function forgetRoots(volume: Pick<RootLookup, 'roots'>): void {
   volume.roots.clear()
 }
 
@@ -212,7 +335,19 @@ async function readPool(
  * is a function: the two read different scales around different points for different stages, and
  * what they have in common is the supervoxel map. A second copy of this loop would look up the
  * same supervoxels twice — and neighbouring boxes of one neuron overlap heavily, which is the
- * whole premise `SearchVolume.roots` is built on. One map, written by one reader.
+ * whole premise `SearchVolume.roots` is built on. One map, and one place that writes it.
+ *
+ * **Safe to have two of these in flight.** `resolveRoots` shares a lookup between callers rather
+ * than letting each ask, so pipelining an end's patch box against the next end's search box does
+ * not double the chunkedgraph's work. Reading the voxels is already safe: `ChunkCache.set` is
+ * idempotent on a key it already holds, so a chunk fetched twice is wasted bytes rather than a
+ * wrong box.
+ *
+ * **Two things that costs, both open and both recorded in `docs/seam-suggestions-plan.md`.** A
+ * chunk neither read holds yet is fetched by both, since the cache has no in-flight map — the
+ * shape `asking` is for supervoxels, one layer up. And `overChunks` bounds its own concurrency
+ * per call (`DEFAULT_CONCURRENCY`), so two reads in flight claim twice the streams that
+ * constant was measured to take as its share of a bucket shared with meshes and thumbnails.
  *
  * `scale` is a parameter rather than `volume.scale` for the same reason: a patch is cut at
  * `PATCH_NM` and the search box at whatever the ranker's manifest asked for, and on a dataset
@@ -225,13 +360,12 @@ export async function labelledBox(
   queryRoot: bigint,
   options: CaveRequestOptions,
 ): Promise<LabelBoxRequest> {
-  const read = await readLabelBox(volume.base, scale, box, { ...options, info: volume.info })
-  const unknown = new BigUint64Array([...read.labels].filter((id) => !volume.roots.has(id)))
-  if (unknown.length > 0) {
-    const found = await rootsAtInstant(volume.graphene, volume.at, unknown, options)
-    // Absence is written too: see the header on why re-asking is the cost that matters.
-    for (let i = 0; i < unknown.length; i++) volume.roots.set(unknown[i]!, found[i]!)
-  }
+  const read = await readLabelBox(volume.base, scale, box, {
+    ...options,
+    info: volume.info,
+    chunks: volume.chunks,
+  })
+  await resolveRoots(volume, read.labels, options)
   return {
     labels: read.labels,
     index: read.index,
@@ -241,4 +375,99 @@ export async function labelledBox(
     resolutionNm: scale.resolution,
     loVoxels: box.lo,
   }
+}
+
+/**
+ * Make sure every one of these supervoxels has a root in `volume.roots`, asking for the ones
+ * nobody is asking for yet and waiting on the lookups that already cover the rest.
+ *
+ * ## The partition and the registration are one synchronous block, and that is the whole thing
+ *
+ * Nothing may yield between reading `roots`/`asking` and writing `asking`. JavaScript is single
+ * threaded, so a block with no `await` in it cannot be interleaved — and the moment one is added
+ * between the two, a second caller runs in the gap, sees the same supervoxels in neither map,
+ * and asks for them again. That failure is invisible: the answers agree, the run is correct, and
+ * the only sign is twice the requests at a server that is not ours.
+ *
+ * So the loop below is deliberately dull, and the `await` is deliberately last.
+ *
+ * Exported for `searchVolume.test.ts`, which is the one thing here worth a test of its own: the
+ * invariant is about *interleaving*, so it cannot be checked by reading the call site and it
+ * cannot be reached through `labelledBox` without standing up a volume server to read voxels
+ * this has no opinion about.
+ *
+ * ## Waiting is not a serialisation
+ *
+ * A caller that joins somebody else's lookup is answered no later than if it had asked itself —
+ * its own request would have gone to the same server, behind the same one, and this run keeps
+ * to four streams. What it saves is the bytes and the server's work, and the shared supervoxels
+ * are the majority: neighbouring boxes of one neuron overlap heavily.
+ */
+export async function resolveRoots(
+  /*
+   * **The four fields it reads, not the whole volume.** A parameter wider than its use is what
+   * made `searchVolume.test.ts` cast a four-field literal through `unknown` to call this — the
+   * type system pointing out that the box, the chunk cache and the eviction plan have nothing
+   * to do with resolving a supervoxel. Narrowed rather than split into its own object: there is
+   * one caller, and `Pick` says the same thing for a line.
+   */
+  volume: RootLookup,
+  labels: BigUint64Array,
+  options: CaveRequestOptions,
+): Promise<void> {
+  const mine: bigint[] = []
+  const waits = new Set<Promise<void>>()
+  // No `await` in this loop, or in anything between it and the registration below.
+  for (const id of labels) {
+    if (volume.roots.has(id)) continue
+    const already = volume.asking.get(id)
+    if (already) waits.add(already)
+    else mine.push(id)
+  }
+  if (mine.length > 0) {
+    const unknown = BigUint64Array.from(mine)
+    /*
+     * One promise, and the `finally` is inside it: a `finally` on the async body completes
+     * before the promise it returns settles, so no awaiter can resume and find its supervoxel
+     * still listed as being asked about. A second `turn.finally(...)` promise wrapped around a
+     * first bought exactly that same guarantee and a paragraph explaining itself.
+     *
+     * **`sharedRequestOptions`, never the caller's own.** This is a request other callers join,
+     * and a joiner must not be cancelled by whoever happened to start it — `src/data/cave`'s
+     * rule, kept by `l2.ts` and `skeletonService.ts`' own shared lookups. Benign while both
+     * joiners are one run with one signal, which is exactly when a rule stops being greppable.
+     */
+    const shared = sharedRequestOptions(options)
+    const fill = async () => {
+      const found = await rootsAtInstant(volume.graphene, volume.at, unknown, shared)
+      // Absence is written too: see the header on why re-asking is the cost that matters.
+      for (let i = 0; i < unknown.length; i++) volume.roots.set(unknown[i]!, found[i]!)
+    }
+    /*
+     * The `finally` runs before any awaiter resumes, so nobody can be handed back a supervoxel
+     * that is still listed as being asked about. Removed **only where this lookup is still the
+     * registered one**: a failed lookup must leave nothing for a retry to join, and a retry that
+     * has already registered its own must not be unregistered by its predecessor's unwind.
+     * `memoPromise`'s `forget` records the same rule for the one-promise-per-key case, which
+     * this cannot use — many keys, one promise.
+     *
+     * (A `try`/`finally` inside an async IIFE would be one promise instead of two, and is what
+     * this wants to be; TypeScript refuses the self-reference in a `const` initialiser.)
+     */
+    const settled: Promise<void> = fill().finally(() => {
+      for (const id of mine) if (volume.asking.get(id) === settled) volume.asking.delete(id)
+    })
+    for (const id of mine) volume.asking.set(id, settled)
+    waits.add(settled)
+  }
+  /*
+   * **Waited with the caller's own signal, not the request's.** The lookup is shared, so a
+   * Cancel must not abort it out from under the other reader — `sharedRequestOptions` is what
+   * keeps the signal off the wire. What a cancelled caller does instead is stop waiting, which
+   * is `untilAborted`'s whole job and the rule `memoPromise` states for every shared read here.
+   */
+  await untilAborted(
+    Promise.all(waits).then(() => undefined),
+    options.signal,
+  )
 }

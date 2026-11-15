@@ -32,6 +32,7 @@
  */
 
 import type { NodeHint } from '../../core/graph'
+import { NO_HINTS } from '../../core/graph'
 import { idText, ID_COLUMN_NAME } from '../../core/ids'
 import type { ParamValues } from '../../core/node'
 import { refreshParam } from '../../core/node'
@@ -304,7 +305,6 @@ const FORGETS_FOLDERS: readonly NodeHint[] = [
       'again. Chrome and Edge remember it, and a URL works in every browser.',
   },
 ]
-const NO_HINTS: readonly NodeHint[] = []
 
 export const projectNode = packNode({
   type: 'annotation:bigclust',

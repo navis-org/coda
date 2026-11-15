@@ -18,6 +18,7 @@
  */
 
 import { cacheGet, cacheSet } from '../cache'
+import { inFlight } from '../concurrency'
 import type { CaveRequestOptions } from './client'
 import { CaveError, cavePostBinary, cavePostRaw } from './client'
 import { datastackRecord, materializationsFor, versionFrozenAt } from './datastack'
@@ -457,7 +458,14 @@ export async function rootsAtInstant(
 ): Promise<BigUint64Array> {
   const out = new BigUint64Array(supervoxels.length)
   for (let i = 0; i < supervoxels.length; i += CHUNK) {
-    // Sequential, like every other loop in this file: a shared public chunkedgraph.
+    /*
+     * Sequential, and **not** because the file has a house style — `l2ChunkCounts` below runs
+     * `LEAVES_STREAMS` at a time. It is because there is usually nothing here to overlap:
+     * `CHUNK` is ten thousand ids a request and the caller passes only the supervoxels it has
+     * not already placed (`searchVolume.ts`' `resolveRoots`), so a box is one request and often
+     * the loop runs once. A pool over one batch buys nothing, and `roots_binary` is a binary
+     * body and a binary reply, so it pays none of the JSON cost the counts path does.
+     */
     const batch = supervoxels.subarray(i, i + CHUNK)
     const answer = await getRoots(graphene, Array.from(batch, String), at, options)
     for (let k = 0; k < batch.length; k++) out[i + k] = answer[k] ?? 0n
@@ -500,6 +508,29 @@ export const VOTE_SAMPLE = 100
 
 /** Roots per `leaves_many` request: a few thousand chunk ids each, so a few MB a reply. */
 const LEAVES_CHUNK = 50
+
+/**
+ * How many `leaves_many` requests are in flight at once.
+ *
+ * **Four, because this became the largest stage in a run and the batches are a queue.** A
+ * candidate pool is about 500 roots, so a fresh open end is ten of these one after another, and
+ * `Suggest Merges` measured the stage at **33% of a 6.2 s end** — more than the GPU, the search
+ * box or the patch box. Ten sequential round trips at a shared server is latency the caller is
+ * simply standing in.
+ *
+ * **It is a rate limit, not the absence of one**, which is the half of SEAM's invariant 8 this
+ * has to keep: the servers are shared and public. SEAM's own fetching holds four streams at
+ * Aedes, `MESH_CONCURRENCY` is three and `fragmentConcurrencyFor` divides a budget rather than
+ * removing it. Four matches the number this pack is already allowed elsewhere, and a reply here
+ * is a few megabytes, so four in flight is about twenty megabytes buffered rather than an
+ * unbounded fan-out.
+ *
+ * `inFlight` rather than `mapWithConcurrency`: the batches are **pieces of one answer**, and
+ * `src/data/concurrency.ts`' header is about exactly that difference. A forgiven batch here
+ * would come back as roots missing from the map, which `countsInPoolOrder` would then refuse as
+ * a hole in the pool — a request failure reported as a fact about the data.
+ */
+const LEAVES_STREAMS = 4
 
 /** The chunkedgraph layer a vote samples. Level 2 is a neuron's chunks; level 1 its supervoxels. */
 const VOTE_LAYER = 2
@@ -547,7 +578,11 @@ export async function rootsByMajority(
   }
   const unknown = distinctStrings(roots).filter((root) => !out.has(root))
   for (let i = 0; i < unknown.length; i += LEAVES_CHUNK) {
-    // Sequential, like every other pass here against a shared production chunkedgraph.
+    /*
+     * Sequential on purpose. This is the advisory repair, not a path anybody is waiting on —
+     * `l2ChunkCounts` is the one loop here that goes concurrent, because it is a third of the
+     * wait in an interactive run and this is not.
+     */
     const lists = await leavesMany(graphene, unknown.slice(i, i + LEAVES_CHUNK), options)
     const samples = new Map([...lists].map(([root, ids]) => [root, strided(ids)]))
     // Distinct: a stale root and its stale descendant in one batch share chunks.
@@ -734,8 +769,9 @@ export function resetL2ChunkCounts(): void {
  * features cannot see because they are measured inside a 6 µm box around the open end; the rest
  * is in `docs/seam-suggestions-plan.md`.
  *
- * Batched and sequential against a shared public chunkedgraph (SEAM's invariant 8), which is what
- * keeps a pool to a request per fifty roots rather than one per candidate.
+ * Batched fifty to a request against a shared public chunkedgraph (SEAM's invariant 8), which is
+ * what keeps a pool to a request per fifty roots rather than one per candidate, and
+ * `LEAVES_STREAMS` of those in flight at a time.
  *
  * **A root the graph does not list comes back absent, not zero** — zero is the smallest possible
  * size and would read as a speck. Note that nothing here *refuses* a short answer: SEAM's own
@@ -743,11 +779,24 @@ export function resetL2ChunkCounts(): void {
  * because at that layer an absent root means the request was wrong rather than that there is no
  * data. `countsInPoolOrder` in `packs/seam/searchRun.ts` pays that debt: it is where a count missing from this answer becomes a hole in a positional array, and it refuses there, by name.
  *
- * **The memo fills on completion, so two concurrent calls over the same roots both fetch.**
- * Deliberate, for now: the search runs one open end at a time, and the obvious fix — a promise
- * per root, as `memoPromise` gives — would key per root and so destroy the fifty-root batching
- * that is the point of this function. Sharing in flight means sharing a *batch*, which is worth
- * writing only once something calls this concurrently.
+ * **The memo fills per batch, as each lands.** Within one call that is all it needs to be: the
+ * batches are disjoint slices of the roots this call found missing, so no two of them can ask
+ * for the same root however they interleave, and a call that fails partway still keeps what the
+ * batches that landed bought.
+ *
+ * Across *calls* it is still "both fetch": two concurrent callers over the same roots each find
+ * the memo empty and each ask. Deliberate, for now — the search runs one open end at a time, and
+ * the obvious fix, a promise per root as `memoPromise` gives, would key per root and so destroy
+ * the fifty-root batching that is the point of this function. Sharing in flight means sharing a
+ * *batch*, which is worth writing only once something calls this concurrently.
+ *
+ * **Pipelining the search behind the assessor has since landed and is not that caller**, which
+ * is worth saying because it looks like one. `oneAhead` overlaps an end's *search* with the
+ * previous end's *assessor*, and the counts are asked for only inside `searchEnds`, which runs
+ * strictly one end at a time; the assessor never asks for counts. So there is still exactly one
+ * caller of this in flight at a time. What would change that is a second generator, or counts
+ * moving into the assessed half — and the mechanism then exists one file along, as
+ * `searchVolume.ts`' `resolveRoots`, rather than needing to be invented.
  */
 export async function l2ChunkCounts(
   graphene: GrapheneSource,
@@ -757,10 +806,12 @@ export async function l2ChunkCounts(
   const at = (root: string) => `${graphene.server}|${graphene.table}|${root}`
   const distinct = distinctStrings(roots)
   const wanted = distinct.filter((root) => !l2Counts.has(at(root)))
-  for (let i = 0; i < wanted.length; i += LEAVES_CHUNK) {
-    // Sequential, as the comment in `rootsByMajority` says of its own loop.
-    const lists = await leavesMany(graphene, wanted.slice(i, i + LEAVES_CHUNK), options)
-    for (const root of wanted.slice(i, i + LEAVES_CHUNK)) {
+  const batches = Array.from({ length: Math.ceil(wanted.length / LEAVES_CHUNK) }, (_, i) =>
+    wanted.slice(i * LEAVES_CHUNK, (i + 1) * LEAVES_CHUNK),
+  )
+  await inFlight(batches, LEAVES_STREAMS, async (batch) => {
+    const lists = await leavesMany(graphene, batch, options)
+    for (const root of batch) {
       /*
        * **Absence is remembered too, as its own state.** A root the graph does not list is not
        * going to start appearing — a chunkedgraph id either exists or never did — so leaving it
@@ -772,7 +823,7 @@ export async function l2ChunkCounts(
        */
       l2Counts.set(at(root), lists.get(root)?.length ?? ABSENT)
     }
-  }
+  })
   const out = new Map<string, number>()
   for (const root of distinct) {
     const held = l2Counts.get(at(root))

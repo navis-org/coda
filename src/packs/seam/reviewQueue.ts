@@ -41,6 +41,19 @@ export interface Candidate {
   /** The search's own order, kept beside the rank the scoring produced. */
   readonly geoRank: number | undefined
   readonly volumeUm3: number | undefined
+  /**
+   * How many level-2 chunks the candidate object occupies — **the size `seam:review` means.**
+   *
+   * `volumeUm3` is the candidate's voxels inside the search box, so it measures how much of
+   * the piece is near the tip; two candidates with the same number can be a whole fragment and
+   * the tail of something large. This is the chunkedgraph's own decomposition of the *object*,
+   * wherever it reaches, which is the better proxy for the question a reader triaging a queue is
+   * asking. Coarse by construction: a chunk is a fixed box of the volume, so small things are
+   * one chunk and the number only separates them further up.
+   *
+   * Absent on a `seam:suggestions` table, whose parquet carries no chunk count — see `sizeOf`.
+   */
+  readonly l2Chunks: number | undefined
   readonly minDistUm: number | undefined
   readonly contactNm: readonly [number, number, number]
   /** Its share of its tip's list — the model's "and it is this one". */
@@ -111,6 +124,7 @@ function candidateLists(table: TableValue | undefined): Map<number, Candidate[]>
       rank: numberAt(table, 'rank', i) ?? held.length + 1,
       geoRank: numberAt(table, 'geo_rank', i),
       volumeUm3: numberAt(table, 'vol_um3', i),
+      l2Chunks: numberAt(table, 'n_l2', i),
       minDistUm: numberAt(table, 'min_dist_um', i),
       contactNm: [
         numberAt(table, 'contact_x', i) ?? 0,
@@ -148,6 +162,34 @@ export function stillToSearch(tips: TableValue | undefined): number | undefined 
   return waiting
 }
 
+/** A candidate's size, and which quantity it is — the two have different units. */
+export interface CandidateSize {
+  readonly value: number
+  /** `chunks` is the object's level-2 chunk count; `um3` its volume inside the search box. */
+  readonly of: 'chunks' | 'um3'
+}
+
+/**
+ * How big this candidate is, by the best measure the table carries.
+ *
+ * **Two quantities, and the card says which it is showing**, because they are not comparable: a
+ * chunk count is of the whole object and a volume is of the part inside the search box, and the
+ * numbers differ by orders of magnitude. `seam:suggestMerges` publishes `n_l2` and that is what
+ * "size" means; a `seam:suggestions` set carries no chunk count — SEAM's own
+ * `candidates.parquet` does not publish one — and falls back to the volume rather than losing
+ * the control entirely.
+ *
+ * One table is one producer, so within a queue every row answers in the same unit and a sort is
+ * never comparing the two. What a *reader* must not do is carry a number from one to the other,
+ * which is why every row prints its unit.
+ */
+export function sizeOf(candidate: Candidate | undefined): CandidateSize | undefined {
+  if (!candidate) return undefined
+  if (candidate.l2Chunks !== undefined) return { value: candidate.l2Chunks, of: 'chunks' }
+  if (candidate.volumeUm3 !== undefined) return { value: candidate.volumeUm3, of: 'um3' }
+  return undefined
+}
+
 export type SortBy = 'confidence' | 'size' | 'tip'
 
 /**
@@ -177,8 +219,11 @@ export interface QueueRow {
 export interface QueueFilters {
   /** Keep tips whose `r` is at or above this. Undefined keeps every tip. */
   readonly minConfidence: number | undefined
-  /** Keep tips whose **first** candidate is at least this many µm³. */
-  readonly minVolumeUm3: number | undefined
+  /**
+   * Keep tips whose **first** candidate is at least this big, in whatever `sizeOf` answers in —
+   * level-2 chunks where the table carries them, µm³ on a published set that does not.
+   */
+  readonly minSize: number | undefined
   /** Keep only the tips SEAM shows — its own absolute cutoff, never one invented here. */
   readonly shownOnly: boolean
   readonly sortBy: SortBy
@@ -187,7 +232,7 @@ export interface QueueFilters {
 
 export const DEFAULT_FILTERS: QueueFilters = {
   minConfidence: undefined,
-  minVolumeUm3: undefined,
+  minSize: undefined,
   shownOnly: false,
   sortBy: 'confidence',
   mode: 'tip',
@@ -239,9 +284,9 @@ export function arrangeRows(queue: readonly QueueTip[], filters: QueueFilters): 
     if (filters.minConfidence !== undefined && (row.score ?? 0) < filters.minConfidence) {
       return false
     }
-    if (filters.minVolumeUm3 !== undefined) {
-      const volume = row.candidate?.volumeUm3
-      if (volume === undefined || volume < filters.minVolumeUm3) return false
+    if (filters.minSize !== undefined) {
+      const size = sizeOf(row.candidate)
+      if (size === undefined || size.value < filters.minSize) return false
     }
     return true
   })
@@ -259,7 +304,8 @@ export function arrangeRows(queue: readonly QueueTip[], filters: QueueFilters): 
    * were.
    */
   const by = (row: QueueRow): number => {
-    if (filters.sortBy === 'size') return row.candidate?.volumeUm3 ?? Number.NEGATIVE_INFINITY
+    if (filters.sortBy === 'size')
+      return sizeOf(row.candidate)?.value ?? Number.NEGATIVE_INFINITY
     if (filters.sortBy === 'tip') return -row.tip.endUid
     return row.score ?? Number.NEGATIVE_INFINITY
   }

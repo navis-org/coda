@@ -270,4 +270,63 @@ describe('reportOnRun', () => {
     expect(said.join(' ')).toMatch(/1 past `Assess top`/)
     expect(said.join(' ')).toMatch(/1 with no patch to cut/)
   })
+
+  /**
+   * The chunk cache's own tally. The run is bandwidth-bound and a chunk is wider than either box
+   * an end reads, so a poor hit rate is not a fact about the data — it is a budget too small to
+   * hold one end's working set, or ends arriving in an order that defeats one. Both are the
+   * reader's to fix, and this is the only place either is visible.
+   */
+  describe('what it says about the reading', () => {
+    const MB = 1024 * 1024
+    /** A cache that was switched on, unless the test says otherwise. */
+    const reads = (asked: number, hits: number, budget = 512 * MB) => ({ asked, hits, budget })
+
+    it('says nothing about a cache that is doing its job', () => {
+      const { said, warner } = warnings()
+      reportOnRun(warner, [tip(true)], reads(200, 150))
+      expect(said).toEqual([])
+    })
+
+    it('names the share and both ways to fix it when most reads miss', () => {
+      const { said, warner } = warnings()
+      reportOnRun(warner, [tip(true)], reads(200, 40))
+      const text = said.join(' ')
+      expect(text).toMatch(/160 chunks of segmentation were fetched/)
+      expect(text).toMatch(/20% of its reads/)
+      expect(text).toMatch(/`Chunk cache`/)
+      expect(text).toMatch(/`Sort` above this node/)
+    })
+
+    /**
+     * **A reader who set `Chunk cache` to 0 made a decision.** At that budget every `set` is
+     * refused and every `get` misses, so the counters are indistinguishable from a cache doing
+     * badly — and advice to raise a number they chose, perhaps because the machine has no
+     * memory to spare, is the sentence `docs/limits.md` says teaches a reader to dismiss the
+     * next one.
+     */
+    it('says nothing to a reader who turned the cache off', () => {
+      const { said, warner } = warnings()
+      reportOnRun(warner, [tip(true)], reads(200, 0, 0))
+      expect(said).toEqual([])
+    })
+
+    /**
+     * A run of two ends is about 48 reads and its first box can hit nothing, so a short run is
+     * *expected* to look bad. Reporting there would teach a reader to dismiss the sentence,
+     * which `docs/limits.md` records as the way a warning stops working.
+     */
+    it('stays quiet on a run too short for the share to mean anything', () => {
+      const { said, warner } = warnings()
+      reportOnRun(warner, [tip(true)], reads(24, 0))
+      expect(said).toEqual([])
+    })
+
+    /** A run with no cache at all — a probe, a test — reports nothing rather than 0%. */
+    it('says nothing where no cache was passed', () => {
+      const { said, warner } = warnings()
+      reportOnRun(warner, [tip(true)])
+      expect(said).toEqual([])
+    })
+  })
 })

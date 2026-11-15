@@ -106,11 +106,13 @@
     "make:assessor-manifest": "python3 -I scripts/make-assessor-manifest.py",
     "make:ranker-manifest": "node scripts/make-ranker-manifest.mjs",
     "probe:candidate-search": "vite-node scripts/probe-candidate-search.mjs",
+    "probe:seam-tip-boxes": "vite-node scripts/probe-seam-tip-boxes.mjs",
     "probe:assessor-ops": "node scripts/probe-assessor-ops.mjs",
     "probe:assessor-patch": "vite-node scripts/probe-assessor-patch.ts",
     "probe:assessor-parity": "node scripts/probe-assessor-parity.mjs",
     "probe:ort-kernels": "node scripts/probe-ort-kernels.mjs",
     "probe:conv3d-kernel": "node scripts/probe-conv3d-kernel.mjs",
+    "probe:assessor-gap": "node scripts/probe-assessor-gap.mjs",
     "probe:gpu-assessor": "node scripts/probe-gpu-assessor.mjs"
   },
   "dependencies": {

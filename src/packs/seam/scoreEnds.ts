@@ -23,6 +23,7 @@
 
 import type { Warner } from '../../core/limits'
 import { agree, plural } from '../../style/format'
+import type { ChunkCache } from '../../data/precomputed/chunkCache'
 import type { Triple } from '../../data/precomputed/volume'
 import type { PipelineFits } from './pipelineFits'
 import type { SearchedEnd } from './searchRun'
@@ -143,6 +144,9 @@ export function contactsOf(end: SearchedEnd): Triple[] {
   return out
 }
 
+/** What the warnings need of a cache: its counters and whether it was switched on at all. */
+type ChunkReads = Pick<ChunkCache, 'asked' | 'hits' | 'budget'>
+
 /**
  * What the run found, as warnings a reader can act on.
  *
@@ -157,10 +161,69 @@ export function contactsOf(end: SearchedEnd): Triple[] {
  * to dismiss the next one". A run that went well says nothing here; what it found is in the
  * table, and `seam:review` is the surface that counts it.
  */
-export function reportOnRun(warner: Warner, ends: readonly PublishedEnd[]): void {
+export function reportOnRun(
+  warner: Warner,
+  ends: readonly PublishedEnd[],
+  chunks?: ChunkReads,
+): void {
   reportOnSearch(warner, ends)
   reportOnScores(warner, ends)
+  reportOnReads(warner, chunks)
 }
+
+/**
+ * How much of the segmentation this run fetched twice — the one number that decides whether to
+ * spend more memory, said only where there is something to spend it on.
+ *
+ * The run is bandwidth-bound: a chunk of the Aedes segmentation is wider than either box an end
+ * reads, so a cache that holds a neighbourhood turns most of the reading into a map lookup (a
+ * search box measured 89 ms held against ~1300 ms over the wire). Which means a *poor* hit rate
+ * is not a fact about the data but a thing the reader can fix, in one of two ways — and this is
+ * the only place either is visible.
+ *
+ * Conditional twice over, which is this file's rule: nothing is said about a run too short for
+ * the answer to be stable, and nothing about one whose cache was already doing its job.
+ */
+function reportOnReads(warner: Warner, chunks?: ChunkReads): void {
+  if (!chunks || chunks.asked < READS_WORTH_REPORTING) return
+  /*
+   * **Nothing to say to a reader who turned the cache off.** At a budget of zero every `set` is
+   * refused and every `get` misses, so the share is 0 and this would fire on every run over
+   * forty reads — advice to raise a number they set deliberately, perhaps because the machine
+   * has no memory to spare. `docs/limits.md` records what a channel that speaks when there is
+   * nothing to do teaches a reader to do with the next one.
+   */
+  if (chunks.budget === 0) return
+  const share = chunks.hits / chunks.asked
+  if (share >= POOR_HIT_SHARE) return
+  const missed = chunks.asked - chunks.hits
+  warner.warn(
+    `${plural(missed, 'chunk')} of segmentation ${agree(missed, 'was', 'were')} fetched that ` +
+      `\`Chunk cache\` did not hold — ${Math.round(100 * share)}% of its reads were answered ` +
+      'from memory. Raising it is the direct fix; the other is the order the ends arrive in, ' +
+      'since a `Sort` above this node scatters ends that lie beside each other in the volume ' +
+      'and a cache cannot make a scattered walk local.',
+  )
+}
+
+/**
+ * How many chunk reads a run needs before its hit rate is worth reporting.
+ *
+ * One end's two boxes are about 24 reads and the first of them can hit nothing, so a run of a
+ * couple of ends is *expected* to look bad. Forty is a few ends in, by which point the number
+ * says something about the walk rather than about its start.
+ */
+const READS_WORTH_REPORTING = 40
+
+/**
+ * The share below which the cache is worth a sentence.
+ *
+ * Half, because the guaranteed part is already more than that: an end's patch box is drawn
+ * inside the search box it follows, so a cache holding one end answers those reads whatever the
+ * walk does next. Under a half means it is not even managing that — the budget is too small to
+ * hold one end's working set, or the ends are arriving in an order that defeats it.
+ */
+const POOR_HIT_SHARE = 0.5
 
 /**
  * The search's own two failures.

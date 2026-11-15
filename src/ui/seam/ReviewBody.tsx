@@ -42,6 +42,7 @@ import {
   currentOfQueue,
   decodeVerdicts,
   encodeVerdicts,
+  sizeOf,
   stillToSearch,
   verdictFor,
   withVerdict,
@@ -49,6 +50,7 @@ import {
 } from '../../packs/seam/reviewQueue'
 import type {
   Candidate,
+  CandidateSize,
   QueueMode,
   QueueRow,
   QueueTip,
@@ -138,7 +140,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   )
 
   const minConfidence = numberOr(node.params.minConfidence)
-  const minVolumeUm3 = numberOr(node.params.minVolume)
+  const minSize = numberOr(node.params.minSize)
   const shownOnly = node.params.shownOnly === true
   const sortBy = String(node.params.sortBy ?? 'confidence') as SortBy
   const mode = String(node.params.mode ?? 'tip') as QueueMode
@@ -146,8 +148,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // and this memo is over the whole queue, which is thousands of rows — a hundred thousand of
   // them per candidate.
   const listed = useMemo(
-    () => arrangeRows(queue, { minConfidence, minVolumeUm3, shownOnly, sortBy, mode }),
-    [queue, minConfidence, minVolumeUm3, shownOnly, sortBy, mode],
+    () => arrangeRows(queue, { minConfidence, minSize, shownOnly, sortBy, mode }),
+    [queue, minConfidence, minSize, shownOnly, sortBy, mode],
   )
   /*
    * How many tips are still to come. From the table rather than from the queue's own length: a
@@ -322,7 +324,10 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   <span className="review-row__facts">
                     {candidate
                       ? [
-                          `${formatNumber(candidate.volumeUm3 ?? 0)} µm³`,
+                          // The size the queue sorts and filters on, **with its unit**: a
+                          // chunk count is of the whole object and a volume is of the part
+                          // inside the search box, so a bare number would be two things.
+                          sizeLabel(sizeOf(candidate)),
                           `rank ${candidate.rank}/${tip.candidates.length}`,
                           // Its own confidence, p_tip x p_cand — the number `candidate` mode
                           // leads with, carried here so the two modes show the same facts.
@@ -425,6 +430,22 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       </div>
     </div>
   )
+}
+
+/**
+ * A candidate's size as a row prints it, unit and all.
+ *
+ * **Never a bare number.** `seam:suggestMerges` publishes a level-2 chunk count, which is of the
+ * whole object; a published set carries only `vol_um3`, which is the part inside the search box.
+ * The two differ by orders of magnitude and answer different questions, so a row that printed
+ * `14` would be the one place a reader could confuse them — including when typing a number into
+ * `Min size`, which reads whichever the table has.
+ */
+function sizeLabel(size: CandidateSize | undefined): string {
+  if (!size) return ''
+  return size.of === 'chunks'
+    ? plural(size.value, 'L2 chunk')
+    : `${formatNumber(size.value)} µm³`
 }
 
 const VERDICT_LABEL: Record<Verdict, string> = {

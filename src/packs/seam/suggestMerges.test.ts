@@ -11,7 +11,9 @@
  * `seam:review` take either. It cannot be checked by reading one file.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+import * as support from '../../ml/support'
 
 import { defaultParams, findParam, makeInferContext } from '../../core/node'
 import type { ParamValues } from '../../core/node'
@@ -226,20 +228,56 @@ describe('the wait it prices', () => {
   })
 
   /**
-   * **What the cap can be worth at all**, which is the half of the measurement that moved.
+   * **What the cap is worth is a property of the browser, and the model prices one of them.**
    *
-   * Three of an assessed end's four seconds are the two box reads, and no cap touches them — so
-   * the *ceiling* on what any cap can save is about a quarter of a run, and a cap of 10 saves a
-   * fifth. Through ONNX Runtime at 136 ms a patch the same cap saved about half. The cap costs
-   * exactly what it always did in answers, so what changed is only what it buys.
+   * This test has now been wrong in both directions, which is the part worth keeping. It first
+   * asserted that no cap could save more than a quarter of a run, on the reasoning that three of
+   * an assessed end's four seconds were box reads. Then a reader's 50 ends put the network at
+   * 46% of 11.0 s each — 91 ms a patch — and capping at 10 took them to 4.5 s, so the bound was
+   * raised to a third on the belief that the first machine's 26.5 ms had been a defect in this
+   * loop. It was neither a defect nor a second machine: the two readings are **Chrome and
+   * Firefox on the same laptop**, 27 ms a patch against 98, and `slowGpuDispatch` is where that
+   * measurement now lives.
    *
-   * The bound below is therefore a bound on the **runtime**, not on the cap: it fails only if a
-   * patch regresses past 50 ms, which is 1.9x the measured 26.5 and which ONNX Runtime misses
-   * comfortably. That is the thing worth catching.
+   * So the number this asserts is a fact about one browser and would be wrong on the other, and
+   * pinning either figure is what produced two wrong tests. What is pinned instead is the
+   * **shape**: the cap saves real time, it does not save most of a run, and it never promises
+   * back the reads, which no cap touches. A model that priced patches as free would fail the
+   * first; one that priced an end as nothing but patches would fail the other two.
    */
-  it('does not let the cap promise more than a fraction of a run', () => {
+  /**
+   * **The browser is the biggest single factor in this sum, and the node already knows it.**
+   * 27 ms a patch in Chrome against 98 in Firefox on one GPU. Priced at the fast rate for
+   * everyone, the warning under-stated a long Firefox run by well over half — the one direction
+   * `docs/limits.md` says a guard rail must not fail in.
+   */
+  it('prices an assessed end by the reader\u2019s own browser', () => {
+    const chrome = secondsPerEnd(true, 0)
+    const geometryOnly = secondsPerEnd(false, 0)
+    try {
+      vi.spyOn(support, 'slowGpuDispatch').mockReturnValue(true)
+      const firefox = secondsPerEnd(true, 0)
+      expect(firefox).toBeGreaterThan(chrome)
+      // The patches are the whole of the difference: a box read does not care which browser.
+      expect(secondsPerEnd(false, 0)).toBe(geometryOnly)
+      // And the cap bites harder there, which is what the `Assess top` help promises.
+      expect(firefox - secondsPerEnd(true, 10)).toBeGreaterThan(
+        chrome - secondsPerEnd(true, 10),
+      )
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('prices the cap as a real saving that is not the whole run, and never the reads', () => {
     const saved = 1 - secondsPerEnd(true, 10) / secondsPerEnd(true, 0)
-    expect(saved).toBeGreaterThan(0)
-    expect(saved).toBeLessThan(0.3)
+    // Real: a model that called a cap of 10 noise would be advertising a control that does
+    // nothing. On the measured Chrome run this is 23%.
+    expect(saved).toBeGreaterThan(0.1)
+    // And not the run: most of an assessed end is the two boxes it reads, on the browser this
+    // is priced for. A model drifting past this is one pricing an end as patches alone.
+    expect(saved).toBeLessThan(0.5)
+    // The two boxes and the pool survive any cap, so a run can never be cut to nothing.
+    expect(secondsPerEnd(true, 10)).toBeGreaterThan(SECONDS_PER_END)
   })
 })

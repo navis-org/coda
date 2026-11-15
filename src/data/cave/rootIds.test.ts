@@ -451,6 +451,110 @@ describe('level-2 chunk counts', () => {
     expect(calls[1]!.nodes).toEqual(['200'])
   })
 
+  /**
+   * A `leaves_many` server that answers on a macrotask, recording how many were open at once.
+   *
+   * The delay is the whole instrument: a fake that resolves synchronously settles each batch
+   * before the next is asked for, so a sequential loop and a pool of four would both show a peak
+   * of one and the test would pass either way.
+   */
+  const servePeak = (lists: Record<string, number[]>) => {
+    const calls: string[][] = []
+    let open = 0
+    let peak = 0
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { node_ids?: (string | number)[] }
+      const nodes = (body.node_ids ?? []).map(String)
+      calls.push(nodes)
+      open += 1
+      peak = Math.max(peak, open)
+      return new Promise<Response>((resolve) =>
+        setTimeout(() => {
+          open -= 1
+          const out: Record<string, number[]> = {}
+          for (const id of nodes) if (lists[id]) out[id] = lists[id]!
+          resolve({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve(JSON.stringify(out)),
+          } as Response)
+        }, 0),
+      )
+    })
+    return { calls, peak: () => peak }
+  }
+
+  const manyRoots = (n: number) => Array.from({ length: n }, (_, i) => String(1_000 + i))
+  const oneChunkEach = (roots: readonly string[]) =>
+    Object.fromEntries(roots.map((root) => [root, [1]]))
+
+  /**
+   * **The stage this was changed for.** A candidate pool is about 500 roots, so an open end is
+   * ten of these — and `Suggest Merges` measured them at 33% of a 6.2 s end, more than the GPU.
+   * Ten round trips in a row is latency the caller is standing in rather than work.
+   *
+   * Both ends are pinned on purpose. A peak of one is the sequential loop coming back, which is
+   * the regression a later edit would make silently; a peak of ten is the politeness gone, at a
+   * shared public chunkedgraph that SEAM's invariant 8 is about.
+   */
+  it('asks four batches at once — not one at a time, and not all of them', async () => {
+    const roots = manyRoots(500)
+    const server = servePeak(oneChunkEach(roots))
+    const got = await l2ChunkCounts(graphene, roots, OPTIONS)
+    expect(got.size).toBe(500)
+    expect(server.calls).toHaveLength(10)
+    expect(server.peak()).toBe(4)
+  })
+
+  /** Disjoint slices of what this call found missing, so no two batches can ask for one root. */
+  it('splits the roots across the batches rather than overlapping them', async () => {
+    const roots = manyRoots(120)
+    const server = servePeak(oneChunkEach(roots))
+    await l2ChunkCounts(graphene, roots, OPTIONS)
+    expect(server.calls.flat()).toHaveLength(120)
+    expect(new Set(server.calls.flat()).size).toBe(120)
+  })
+
+  /**
+   * **A failed batch fails the read**, which is `src/data/concurrency.ts`' `inFlight` rather than
+   * `mapWithConcurrency` and is the reason that choice is not interchangeable here. A forgiven
+   * batch comes back as roots missing from the map, and `countsInPoolOrder` then refuses them as
+   * a hole in the pool — a request failure reported as a fact about the data.
+   */
+  it('fails the whole read when a batch fails, and keeps what the others bought', async () => {
+    const roots = manyRoots(100)
+    const lists = oneChunkEach(roots)
+    let refuseFrom: string | undefined = roots[50]
+    const calls: string[][] = []
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { node_ids?: (string | number)[] }
+      const nodes = (body.node_ids ?? []).map(String)
+      calls.push(nodes)
+      if (refuseFrom !== undefined && nodes.includes(refuseFrom)) {
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          text: () => Promise.resolve('busy'),
+        } as Response)
+      }
+      const out: Record<string, number[]> = {}
+      for (const id of nodes) if (lists[id]) out[id] = lists[id]!
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify(out)),
+      } as Response)
+    })
+    await expect(l2ChunkCounts(graphene, roots, OPTIONS)).rejects.toThrow()
+    // The batch that landed is remembered, so the retry asks only for the one that did not.
+    calls.length = 0
+    refuseFrom = undefined
+    const got = await l2ChunkCounts(graphene, roots, OPTIONS)
+    expect(got.size).toBe(100)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toHaveLength(50)
+  })
+
   it('asks for a repeated root once within a single call', async () => {
     const calls = serve({ '100': [1] })
     await l2ChunkCounts(graphene, ['100', '100', '100'], OPTIONS)
