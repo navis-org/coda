@@ -289,6 +289,24 @@ describe('loadWeights', () => {
     expect(await weightsCached(at, 'mixed')).toBe(true)
   })
 
+  /**
+   * The Storage tab's Clear can land between a cache hit and its `remember()`, which waits for the
+   * session to be built. Written blind, the backfilled meta record would then stand alone, and
+   * `weightsCached` would let the next open download without asking.
+   */
+  it('does not backfill a meta record for a body cleared after it was read', async () => {
+    vi.stubGlobal('fetch', respondWith(BODY))
+    const at = await loaded()
+    ;(await loadWeights(at, 'mixed', 'encoder', {})).remember()
+    await new Promise((settle) => setTimeout(settle, 10))
+
+    const hit = await loadWeights(at, 'mixed', 'encoder', {})
+    await clearWeights()
+    hit.remember()
+    await new Promise((settle) => setTimeout(settle, 10))
+    expect(await weightsCached(at, 'mixed')).toBe(false)
+  })
+
   it('refetches after the cache is cleared', async () => {
     const fetched = respondWith(BODY)
     vi.stubGlobal('fetch', fetched)

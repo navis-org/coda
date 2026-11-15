@@ -286,8 +286,19 @@ export function loadWeights(
           // whose 406 MB are already on disk, the Storage tab reads 0, and nothing is wrong
           // enough to notice. Backfilling here costs one small `put` per open and fixes the
           // entry the first time it is read.
+          //
+          // **Only if the body is still there, asked in the same transaction.** `remember` runs
+          // after the session is built — seconds after the read — and the Storage tab's Clear
+          // can land in between. A meta record written blind would then stand alone, and
+          // `weightsCached` would wave through a download nobody approved. Clear takes the same
+          // two stores read-write, so the check and the `put` cannot straddle it.
           if (cached) {
-            void write((tx) => tx.objectStore('meta').put(meta, key))
+            void write((tx) => {
+              const held = tx.objectStore('weights').count(key)
+              held.onsuccess = () => {
+                if (held.result > 0) tx.objectStore('meta').put(meta, key)
+              }
+            })
             return
           }
           // Body and meta together: a meta record without its body would make `weightsCached`
@@ -335,7 +346,13 @@ export async function weightsCached(loaded: LoadedManifest, variant: string): Pr
   }
 }
 
-/** Forget every cached model. For the Storage tab, and for a probe measuring a cold fetch. */
+/**
+ * Forget every cached model. For the Storage tab's Clear, and for a probe measuring a cold fetch.
+ *
+ * A model already open keeps working — its session holds its own copy — and a download in flight
+ * still lands in the cache when it finishes. Clearing also brings back the download question:
+ * `weightsCached` reads the meta store, which goes with the bodies.
+ */
 export async function clearWeights(): Promise<void> {
   await write((tx) => {
     tx.objectStore('weights').clear()
@@ -351,7 +368,8 @@ export async function clearWeights(): Promise<void> {
  * `storedBytes(cursor.value)`, which prices an `ArrayBuffer` at its `byteLength`, so declaring one
  * as well reported a 385 MB cache as 770 MB.
  *
- * Not yet a row in `ui/storageReadout.ts`' `SHELVES`; it joins when a node opens a model.
+ * A row of its own in the tab, not one of `ui/storageReadout.ts`' `SHELVES`: those are somebody's
+ * work and only report, and models can always be downloaded again, so this row has a Clear.
  */
 export function weightsUsage(): Promise<StoredUsage | undefined> {
   // Counted over `meta`, with the payload store skipped — `uploads.ts`' arrangement, and for the

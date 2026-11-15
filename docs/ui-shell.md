@@ -942,8 +942,17 @@ leave an empty database behind for every feature somebody never used. `usage` co
 the module's own `database()` spec, which is wasteful and never wrong. A database that will not open
 reads as unknown (`—`), not zero.
 
-**One button, on the data cache.** It is the only store with no bound — nothing evicts a cached
-value — and the only one whose contents can always be fetched again. Everything else is either
+**Two buttons, on the two download caches: data and models.** They are the only stores with no
+bound — nothing evicts a cached value or a cached model — and the only ones whose contents can
+always be fetched again. The models (`coda-models`, `ml/weights.ts`) are a row of their own rather
+than one of `SHELVES`, which only report, and are by far the largest thing kept: one encoder is
+385 MB. Each cache has its own button so clearing a few MB of neuron tables never costs a model
+download. One clear runs at a time, because each re-reads only what it moved and keeps the rest of
+the reading it started from. Clearing models has one trap, closed in `remember()`: a cache hit
+backfills its meta record seconds later, after the session is built, and a blind write landing
+after a Clear would leave a meta record with no body — `weightsCached` would then say "already
+downloaded" and the next open would fetch hundreds of MB nobody approved. The backfill checks for
+the body in the same transaction. Everything else is either
 somebody's work (saved workflows, recipes, uploads, edge sets, sign-ins), which the row reports and
 points at where it is managed, or the crash net (`coda-session` plus the autosave slots), which is
 bounded by `MAX_SESSIONS` and `MAX_SLOTS` and cleans itself up. The crash net stays without a
