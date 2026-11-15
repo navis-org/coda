@@ -282,7 +282,12 @@ if (tipOf < 0) {
   report.finish(py)
 }
 
-const [found] = await searchEnds(
+/*
+ * `searchEnds` yields one end at a time now, so the node can publish each as it lands — the
+ * generator is the shape, not an array. One end here, so one `for await`.
+ */
+let found
+for await (const end of searchEnds(
   tipsNm,
   [{ tip: tipOf, queryRoot: BigInt(golden.queryRoot), box: async () => requestFor() }],
   { ranker, topK: TOP_K, ownUm: OWN_UM },
@@ -296,7 +301,13 @@ const [found] = await searchEnds(
     sizes: (request) => call('coda_pool_sizes', request),
     counts,
   },
-)
+)) {
+  found = end
+}
+if (!found) {
+  report.check('the search answered for the end', false)
+  report.finish(py)
+}
 
 console.log(
   `${found.pooled} in the pool, cut at ${TOP_K}, and the own-tip rule keeps ${found.rows} ` +

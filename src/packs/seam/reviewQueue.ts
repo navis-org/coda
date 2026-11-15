@@ -26,6 +26,7 @@
  */
 
 import type { CellValue, TableValue } from '../../core/values'
+import { numberAt } from './suggestionTables'
 
 /** What a reader can say about one (tip, candidate) pair. SEAM's vocabulary, in their words. */
 export type Verdict = 'accept' | 'reject' | 'unsure'
@@ -75,17 +76,21 @@ export function buildQueue(
   const lists = candidateLists(candidates)
   const out: QueueTip[] = []
   for (let i = 0; i < tips.length; i++) {
-    const endUid = num(tips, 'end_uid', i)
+    const endUid = numberAt(tips, 'end_uid', i)
     if (endUid === undefined) continue
     out.push({
       endUid,
       neuronId: text(tips, 'neuronId', i) ?? '',
       kind: text(tips, 'kind', i) ?? 'tip',
-      tipNm: [num(tips, 'x', i) ?? 0, num(tips, 'y', i) ?? 0, num(tips, 'z', i) ?? 0],
-      r: num(tips, 'r', i),
-      q: num(tips, 'q', i),
-      pTip: num(tips, 'p_tip', i),
-      shown: tips.data['shown']?.[i] === true,
+      tipNm: [
+        numberAt(tips, 'x', i) ?? 0,
+        numberAt(tips, 'y', i) ?? 0,
+        numberAt(tips, 'z', i) ?? 0,
+      ],
+      r: numberAt(tips, 'r', i),
+      q: numberAt(tips, 'q', i),
+      pTip: numberAt(tips, 'p_tip', i),
+      shown: wasShown(tips, i),
       candidates: lists.get(endUid) ?? [],
     })
   }
@@ -97,24 +102,24 @@ function candidateLists(table: TableValue | undefined): Map<number, Candidate[]>
   const lists = new Map<number, Candidate[]>()
   if (!table) return lists
   for (let i = 0; i < table.length; i++) {
-    const endUid = num(table, 'end_uid', i)
+    const endUid = numberAt(table, 'end_uid', i)
     const candidateId = text(table, 'candidateId', i)
     if (endUid === undefined || !candidateId) continue
     const held = lists.get(endUid) ?? []
     held.push({
       candidateId,
-      rank: num(table, 'rank', i) ?? held.length + 1,
-      geoRank: num(table, 'geo_rank', i),
-      volumeUm3: num(table, 'vol_um3', i),
-      minDistUm: num(table, 'min_dist_um', i),
+      rank: numberAt(table, 'rank', i) ?? held.length + 1,
+      geoRank: numberAt(table, 'geo_rank', i),
+      volumeUm3: numberAt(table, 'vol_um3', i),
+      minDistUm: numberAt(table, 'min_dist_um', i),
       contactNm: [
-        num(table, 'contact_x', i) ?? 0,
-        num(table, 'contact_y', i) ?? 0,
-        num(table, 'contact_z', i) ?? 0,
+        numberAt(table, 'contact_x', i) ?? 0,
+        numberAt(table, 'contact_y', i) ?? 0,
+        numberAt(table, 'contact_z', i) ?? 0,
       ],
-      pCand: num(table, 'p_cand', i),
-      conf: num(table, 'conf', i),
-      shown: table.data['shown']?.[i] === true,
+      pCand: numberAt(table, 'p_cand', i),
+      conf: numberAt(table, 'conf', i),
+      shown: wasShown(table, i),
     })
     lists.set(endUid, held)
   }
@@ -179,6 +184,27 @@ export const DEFAULT_FILTERS: QueueFilters = {
  * rv2's tips have an empty list, and "the model found nothing here" is an answer worth seeing.
  * It has no rows at all in `candidate` mode, where a row *is* a candidate.
  */
+/**
+ * Whether SEAM's cutoff kept this row — and **`true` where no cutoff was applied at all.**
+ *
+ * An absent `shown` column is not a row the cutoff excluded; it is a table nobody applied a
+ * cutoff to. `seam:suggestMerges` publishes one: its ranking is geometric, and the calibration
+ * `shown` comes from is a stage Coda cannot run yet. Read as `=== true`, every one of its rows
+ * was hidden — the annotation layer in `seam:review` drew nothing, and `Shown only` emptied the
+ * queue, both without a word.
+ *
+ * **A null cell means it too**, and that is not the same rule arriving twice. `tipsWithFirsts`
+ * clears every first-candidate column when it searches a tip, so a `seam:suggestions` table fed
+ * through `seam:suggestMerges` keeps its `shown` *column* and holds `null` in it — the old run's
+ * verdict about a candidate this run replaced. Read as `=== true` those rows were hidden again,
+ * which is the first fix walking into the second.
+ *
+ * Only an explicit `false` hides a row, so a set that was cut keeps being cut.
+ */
+function wasShown(table: TableValue, row: number): boolean {
+  return table.data['shown']?.[row] !== false
+}
+
 export function arrangeRows(queue: readonly QueueTip[], filters: QueueFilters): QueueRow[] {
   const rows: QueueRow[] =
     filters.mode === 'candidate'
@@ -200,10 +226,22 @@ export function arrangeRows(queue: readonly QueueTip[], filters: QueueFilters): 
     return true
   })
 
+  /*
+   * **`-Infinity`, not `-1`.** The sentinel for "this row has no such number" has to sort below
+   * every real one, and `-1` is inside the range of things being compared — a volume cannot be
+   * negative but a confidence fit can, so an unmeasured row was sorting above a measured one.
+   *
+   * A table with no `r` at all — `seam:suggestMerges` publishes one, its ranking being
+   * geometric — scores every row the same and falls through to the `end_uid` tie-break below,
+   * which is the table's own order. That is the honest answer rather than a defect to patch
+   * here: there is no confidence to sort by, and substituting a number on another scale (the
+   * open-end score is a logit, not a chance) would sort, filter and *print* as though there
+   * were.
+   */
   const by = (row: QueueRow): number => {
-    if (filters.sortBy === 'size') return row.candidate?.volumeUm3 ?? -1
+    if (filters.sortBy === 'size') return row.candidate?.volumeUm3 ?? Number.NEGATIVE_INFINITY
     if (filters.sortBy === 'tip') return -row.tip.endUid
-    return row.score ?? -1
+    return row.score ?? Number.NEGATIVE_INFINITY
   }
   /*
    * Descending, with the tip and then the rank breaking ties, so the order is the same on every
@@ -304,11 +342,6 @@ export function withVerdict(
   if (out.get(key) === verdict) out.delete(key)
   else out.set(key, verdict)
   return out
-}
-
-function num(table: TableValue, name: string, row: number): number | undefined {
-  const cell: CellValue | undefined = table.data[name]?.[row]
-  return typeof cell === 'number' && Number.isFinite(cell) ? cell : undefined
 }
 
 function text(table: TableValue, name: string, row: number): string | undefined {

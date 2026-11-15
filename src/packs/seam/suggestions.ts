@@ -35,13 +35,7 @@
  */
 
 import { packNode } from '../../core/registry'
-import { ID_COLUMN_NAME } from '../../core/ids'
-import { T } from '../../core/types'
-import type { CellValue, LayersValue, PointsValue, TableValue } from '../../core/values'
-import { boundsOf, layersFrom } from '../../core/values'
-import { agree, plural } from '../../style/format'
-import type { Suggestion } from './scene'
-import { suggestionLayer } from './scene'
+import { afterShare } from './progress'
 import { fetchText } from '../../data/fetchText'
 import {
   entryById,
@@ -50,6 +44,13 @@ import {
   peekSuggestions,
   suggestionsAddress,
 } from './suggestionIndex'
+import { ID_COLUMN_NAME } from '../../core/ids'
+import { T } from '../../core/types'
+import type { CellValue, LayersValue, PointsValue, TableValue } from '../../core/values'
+import { boundsOf, layersFrom } from '../../core/values'
+import { agree, plural } from '../../style/format'
+import type { Suggestion } from './scene'
+import { suggestionLayer } from './scene'
 import { CANDIDATES_FILE, TIPS_FILE, fileUrl, loadSuggestionSet } from './suggestionSet'
 import type { SuggestionSet } from './suggestionSet'
 import { openOverHttp, readFields } from './suggestionRead'
@@ -61,12 +62,122 @@ import {
   TIP_FIELDS,
   neuronsSchema,
   neuronsTable,
+  numberAt,
   schemaOf,
   tableOf,
 } from './suggestionTables'
 
 /** Where the tips land on the progress bar; the candidate file is thirty times larger. */
 const TIPS_SHARE = 0.25
+
+// ---------------------------------------------------------------------------
+// Which suggestion set this card is pointed at: the two controls, and what they resolve to
+// ---------------------------------------------------------------------------
+//
+// Briefly their own module, extracted so `seam:suggestMerges` could share them. That node reads
+// its pipeline from a model manifest now (2026-11-15, user), so there is one caller again and
+// the extraction's stated reason had gone with it — the shape `nodes/lib/caveParams.ts` records
+// is for a question *several* nodes ask, and this is no longer one. The two param literals went
+// back into `params:` with it; what stays here is what has two *surfaces*, `validate` and
+// `evaluate`, which is still true of all three.
+
+/** The address a reader pastes when they have nothing else — the hosted Aedes directory. */
+const PLACEHOLDER =
+  'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/suggestions/aedes/index.json'
+
+/**
+ * What is wrong with the pair, as sentences for the card.
+ *
+ * A `pending` peek says nothing: a card that has not finished looking is not a card with a
+ * problem. Every other state has one sentence, and both nodes say it.
+ */
+function suggestionSetIssues(params: Record<string, unknown>): string[] {
+  const url = String(params.url ?? '').trim()
+  if (!url) {
+    return ['Paste the address of a directory of suggestion sets, or of one set’s manifest.']
+  }
+  if (!/^https?:\/\//i.test(url)) return ['`Suggestions` must be an http or https address.']
+  const chosen = String(params.set ?? '').trim()
+  const peek = peekSuggestions(url)
+  if (peek.state === 'failed') return [`That address could not be read: ${peek.why}`]
+  if (peek.state === 'single') {
+    return chosen
+      ? ['That address is one set’s manifest, so `Set` has nothing to choose from. Clear it.']
+      : []
+  }
+  if (peek.state !== 'index') return []
+  if (!chosen) return [pickOneSet(peek.index.sets)]
+  return entryById(peek.index, chosen)
+    ? []
+    : [`That directory has no set called “${chosen}”. ${pickOneSet(peek.index.sets)}`]
+}
+
+/** The one sentence both surfaces say when a directory needs a set chosen out of it. */
+function pickOneSet(sets: readonly { id: string }[]): string {
+  if (sets.length === 0) return 'That directory lists no suggestion sets.'
+  return `Choose one of its sets in \`Set\`: ${sets.map((s) => s.id).join(', ')}.`
+}
+
+/**
+ * The manifest the two controls name: the address itself, or the set chosen out of its index.
+ *
+ * `evaluate` may fetch, so this does not go through the edit-time peek — it reads the address
+ * afresh. That is not a second implementation of the peek's decision: both ask the same question
+ * of the same document (`sets` or `pipeline`), and a run that disagreed with the card would be
+ * reading a directory that had changed under it, which is exactly the thing worth finding out
+ * from the run rather than from a memo.
+ *
+ * **It refuses an empty address itself**, because `validate` is advice: the scheduler's `blocked`
+ * is about required inputs, so nothing stops a run with the field cleared. Both nodes used to be
+ * expected to guard first and only one did — the other reached `fetchText('')`, which refetches
+ * the app's own page and fails on `JSON.parse` naming that URL.
+ *
+ * Normalised through `suggestionsAddress`, which is idempotent — three callers had each forgotten
+ * it and each got the host's `403` for a directory, read as the set being unreachable.
+ */
+async function chosenManifest(
+  raw: string,
+  set: string,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  const chosen = set.trim()
+  const url = suggestionsAddress(raw)
+  if (!url) {
+    throw new Error('No suggestions. Paste the address of a directory of sets, or of one set.')
+  }
+  const text = await fetchText(url, { signal })
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch {
+    throw new Error(`${url} is not JSON.`)
+  }
+  const root = (json ?? {}) as { sets?: unknown; pipeline?: unknown }
+  // A single set's manifest: read where it is, and say so if a set was named as well, since a
+  // card quietly ignoring one of its own controls is worse than one that refuses.
+  if (!Array.isArray(root.sets)) {
+    if (!root.pipeline) {
+      throw new Error(
+        `${url} is neither a suggestion set's manifest (which has \`pipeline\`) nor a ` +
+          `directory index (which has \`sets\`).`,
+      )
+    }
+    if (chosen) {
+      throw new Error(
+        `${url} is one set's manifest, so there is nothing for \`Set\` to choose. Clear it, or ` +
+          `point \`Suggestions\` at a directory's index.`,
+      )
+    }
+    return url
+  }
+  const index = parseSuggestionIndex(json, url)
+  if (!chosen) throw new Error(pickOneSet(index.sets))
+  const entry = entryById(index, chosen)
+  if (!entry) {
+    throw new Error(`That directory has no set called “${chosen}”. ${pickOneSet(index.sets)}`)
+  }
+  return new URL(entry.path, url).toString()
+}
 
 export const suggestionsNode = packNode({
   type: 'seam:suggestions',
@@ -95,9 +206,8 @@ export const suggestionsNode = packNode({
       kind: 'string',
       label: 'Suggestions',
       default: '',
-      placeholder:
-        'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/suggestions/aedes/index.json',
-      help: 'The address of a directory of suggestion sets, or of one set’s manifest directly. A directory is read through its `index.json`, which is filled in for you if you paste the directory itself. Pick which of its sets to read in `Set`.',
+      placeholder: PLACEHOLDER,
+      help: 'The address of a directory of suggestion sets, or of one set\u2019s manifest directly. A directory is read through its `index.json`, which is filled in for you if you paste the directory itself. Pick which of its sets to read in `Set`.',
     },
     {
       /*
@@ -120,7 +230,7 @@ export const suggestionsNode = packNode({
         if (peek.state !== 'index') return []
         return peek.index.sets.map((entry) => ({ value: entry.id, label: entryLabel(entry) }))
       },
-      help: 'Which of the directory’s sets to read. A card holds the set it was pointed at, so a newer one appearing in the directory changes nothing until you pick it — and a run months later reads the same files. Leave empty when `Suggestions` is one set’s manifest.',
+      help: 'Which of the directory\u2019s sets to read. A card holds the set it was pointed at, so a newer one appearing in the directory changes nothing until you pick it \u2014 and a run months later reads the same files. Leave empty when `Suggestions` is one set\u2019s manifest.',
     },
     {
       id: 'layerName',
@@ -141,39 +251,12 @@ export const suggestionsNode = packNode({
     layers: T.layers(),
   }),
 
-  validate: (ctx) => {
-    const url = String(ctx.params.url).trim()
-    if (!url) {
-      return ['Paste the address of a directory of suggestion sets, or of one set’s manifest.']
-    }
-    if (!/^https?:\/\//i.test(url)) return ['`Suggestions` must be an http or https address.']
-    const chosen = String(ctx.params.set).trim()
-    const peek = peekSuggestions(url)
-    // `pending` says nothing: a card that has not finished looking is not a card with a problem.
-    if (peek.state === 'failed') return [`That address could not be read: ${peek.why}`]
-    if (peek.state === 'single') {
-      return chosen
-        ? ['That address is one set’s manifest, so `Set` has nothing to choose from. Clear it.']
-        : []
-    }
-    if (peek.state !== 'index') return []
-    if (!chosen) return [pickOne(peek.index.sets)]
-    return entryById(peek.index, chosen)
-      ? []
-      : [`That directory has no set called “${chosen}”. ${pickOne(peek.index.sets)}`]
-  },
+  validate: (ctx) => suggestionSetIssues(ctx.params),
 
   evaluate: async (ctx) => {
-    const url = String(ctx.params.url).trim()
-    if (!url) {
-      throw new Error(
-        'No suggestions. Paste the address of a directory of sets, or of one set.',
-      )
-    }
-
     ctx.progress(0, 'reading the suggestion set')
     const set = await loadSuggestionSet(
-      await chosenManifest(url, String(ctx.params.set), ctx.signal),
+      await chosenManifest(String(ctx.params.url), String(ctx.params.set), ctx.signal),
       ctx.signal,
     )
     const built = await readSuggestions(
@@ -229,62 +312,6 @@ export const suggestionsNode = packNode({
   },
 })
 
-/**
- * Which manifest this card means, resolving the directory where its address is one.
- *
- * `evaluate` may fetch, so this does not go through the edit-time peek — it reads the address
- * afresh. That is not a second implementation of the peek's decision: both ask the same question
- * of the same document (`sets` or `pipeline`), and a run that disagreed with the card would be
- * reading a directory that had changed under it, which is exactly the thing worth finding out
- * from the run rather than from a memo.
- */
-async function chosenManifest(
-  raw: string,
-  set: string,
-  signal: AbortSignal | undefined,
-): Promise<string> {
-  const chosen = set.trim()
-  const url = suggestionsAddress(raw)
-  const text = await fetchText(url, { signal })
-  let json: unknown
-  try {
-    json = JSON.parse(text)
-  } catch {
-    throw new Error(`${url} is not JSON.`)
-  }
-  const root = (json ?? {}) as { sets?: unknown; pipeline?: unknown }
-  // A single set's manifest: read where it is, and say so if a set was named as well, since a
-  // card quietly ignoring one of its own controls is worse than one that refuses.
-  if (!Array.isArray(root.sets)) {
-    if (!root.pipeline) {
-      throw new Error(
-        `${url} is neither a suggestion set's manifest (which has \`pipeline\`) nor a ` +
-          `directory index (which has \`sets\`).`,
-      )
-    }
-    if (chosen) {
-      throw new Error(
-        `${url} is one set's manifest, so there is nothing for \`Set\` to choose. Clear it, or ` +
-          `point \`Suggestions\` at a directory's index.`,
-      )
-    }
-    return url
-  }
-  const index = parseSuggestionIndex(json, url)
-  if (!chosen) throw new Error(pickOne(index.sets))
-  const entry = entryById(index, chosen)
-  if (!entry) {
-    throw new Error(`That directory has no set called “${chosen}”. ${pickOne(index.sets)}`)
-  }
-  return new URL(entry.path, url).toString()
-}
-
-/** The one sentence both surfaces say when a directory needs a set chosen out of it. */
-function pickOne(sets: readonly { id: string }[]): string {
-  if (sets.length === 0) return 'That directory lists no suggestion sets.'
-  return `Choose one of its sets in \`Set\`: ${sets.map((s) => s.id).join(', ')}.`
-}
-
 export interface BuiltSuggestions {
   readonly tips: TableValue
   readonly candidates: TableValue
@@ -329,7 +356,7 @@ export async function readSuggestions(
     {
       ...(signal ? { signal } : {}),
       onProgress: (f) =>
-        options.onProgress?.(TIPS_SHARE + f * (1 - TIPS_SHARE), 'reading the candidate lists'),
+        options.onProgress?.(afterShare(TIPS_SHARE, f), 'reading the candidate lists'),
     },
   )
   const candidates = tableOf(CANDIDATE_FIELDS, candidateRead.data)
@@ -498,11 +525,6 @@ function fillFirstCandidate(
   }
   read[FIRST_CANDIDATE] = out
   return damaged
-}
-
-function numberAt(table: TableValue, name: string, row: number): number | undefined {
-  const cell = table.data[name]?.[row]
-  return typeof cell === 'number' && Number.isFinite(cell) ? cell : undefined
 }
 
 function triple(

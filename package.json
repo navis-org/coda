@@ -103,6 +103,7 @@
     "probe:scene-em": "node scripts/probe-scene-em.mjs",
     "probe:cutout-summary": "node scripts/probe-cutout-summary.mjs",
     "vendor:seam": "node scripts/vendor-seam.mjs",
+    "make:ranker-manifest": "node scripts/make-ranker-manifest.mjs",
     "probe:candidate-search": "vite-node scripts/probe-candidate-search.mjs",
     "probe:assessor-ops": "node scripts/probe-assessor-ops.mjs",
     "probe:assessor-patch": "vite-node scripts/probe-assessor-patch.ts",

@@ -26,7 +26,7 @@ import {
 } from './reviewQueue'
 
 const tipsTable = (
-  rows: { end: number; neuron?: string; r?: number; shown?: boolean; kind?: string }[],
+  rows: { end: number; neuron?: string; r?: number; shown?: boolean | null; kind?: string }[],
 ): TableValue =>
   makeTable(
     tableSchema(
@@ -47,7 +47,8 @@ const tipsTable = (
       y: rows.map(() => 2),
       z: rows.map(() => 3),
       r: rows.map((r) => r.r ?? null),
-      shown: rows.map((r) => r.shown ?? false),
+      // `?? false` would swallow an explicit null, which is the case under test.
+      shown: rows.map((r) => (r.shown === undefined ? false : r.shown)),
     },
   )
 
@@ -300,5 +301,117 @@ describe('one row per candidate', () => {
     const bare = buildQueue(tipsTable([{ end: 5 }]), candidatesTable([]))
     expect(arrangeRows(bare, { ...DEFAULT_FILTERS, mode: 'tip' })).toHaveLength(1)
     expect(arrangeRows(bare, { ...DEFAULT_FILTERS, mode: 'candidate' })).toHaveLength(0)
+  })
+})
+
+/**
+ * A `Tips`/`Candidates` pair from `seam:suggestMerges`: ranked by geometry, with none of the
+ * calibrated columns, because the stage that produces them cannot run in a browser yet.
+ */
+const geometryOnly = () => ({
+  tips: makeTable(
+    tableSchema(
+      column(ID_COLUMN_NAME, 'str'),
+      column('end_uid', 'i64'),
+      column('kind', 'str'),
+      column('x', 'f64'),
+      column('y', 'f64'),
+      column('z', 'f64'),
+      column('e_tip', 'f64'),
+      column('candidateId', 'str'),
+      column('geo_rank', 'i64'),
+    ),
+    {
+      [ID_COLUMN_NAME]: ['n1', 'n1'],
+      end_uid: [7, 8],
+      kind: ['tip', 'tip'],
+      x: [1, 1],
+      y: [2, 2],
+      z: [3, 3],
+      // The second end looks far more like a cut-off neurite than the first.
+      e_tip: [-0.9, 0.8],
+      candidateId: ['100', '200'],
+      geo_rank: [1, 1],
+    },
+  ),
+  candidates: makeTable(
+    tableSchema(
+      column(ID_COLUMN_NAME, 'str'),
+      column('end_uid', 'i64'),
+      column('candidateId', 'str'),
+      column('rank', 'i64'),
+      column('geo_rank', 'i64'),
+      column('vol_um3', 'f64'),
+      column('min_dist_um', 'f64'),
+      column('contact_x', 'f64'),
+      column('contact_y', 'f64'),
+      column('contact_z', 'f64'),
+    ),
+    {
+      [ID_COLUMN_NAME]: ['n1', 'n1'],
+      end_uid: [7, 8],
+      candidateId: ['100', '200'],
+      rank: [1, 1],
+      geo_rank: [1, 1],
+      vol_um3: [0.5, 0.5],
+      min_dist_um: [0.1, 0.1],
+      contact_x: [10, 10],
+      contact_y: [20, 20],
+      contact_z: [30, 30],
+    },
+  ),
+})
+
+describe('a queue with no calibration at all', () => {
+  /**
+   * **Absent is not excluded.** `shown` is SEAM's cutoff applied, and a table that has no such
+   * column is one nobody applied a cutoff to. Read as `=== true` every row was hidden, which
+   * emptied `seam:review`'s annotation layer and its `Shown only` filter without a word.
+   */
+  it('treats a missing `shown` column as nothing having been cut', () => {
+    const { tips, candidates } = geometryOnly()
+    expect(buildQueue(tips, candidates).every((tip) => tip.shown)).toBe(true)
+  })
+
+  /** A set that *was* cut keeps being cut — the column's value is still the answer. */
+  it('still honours a `shown` column that is there', () => {
+    const queue = buildQueue(tipsTable([{ end: 1, shown: false }]), candidatesTable([]))
+    expect(queue[0]!.shown).toBe(false)
+  })
+
+  /**
+   * **A cleared `shown` is not a hidden row.** `tipsWithFirsts` nulls every first-candidate
+   * column when it searches a tip, so a `seam:suggestions` table fed through
+   * `seam:suggestMerges` keeps the *column* and holds `null` in it — the old run's verdict about
+   * a candidate this run replaced.
+   */
+  it('treats a cleared `shown` cell the same as a missing column', () => {
+    const queue = buildQueue(tipsTable([{ end: 1, shown: null }]), candidatesTable([]))
+    expect(queue[0]!.shown).toBe(true)
+  })
+
+  /**
+   * There is no confidence to sort by, so the order falls through to the `end_uid` tie-break —
+   * the table's own order. Deliberately not patched by substituting the open-end score: that is
+   * a logit, not a chance, and it would sort, filter and *print* under a heading that means
+   * something else.
+   */
+  it('keeps the table’s order when nothing has a confidence', () => {
+    const { tips, candidates } = geometryOnly()
+    const rows = arrangeRows(buildQueue(tips, candidates), {
+      ...DEFAULT_FILTERS,
+      sortBy: 'confidence',
+    })
+    expect(rows.map((row) => row.tip.endUid)).toEqual([7, 8])
+  })
+
+  /**
+   * The sentinel for "no such number" has to sort below every real one. `-1` was inside the
+   * range being compared, so an unmeasured row outranked a measured negative.
+   */
+  it('sorts a row with no confidence below one with a negative confidence', () => {
+    const queue = buildQueue(tipsTable([{ end: 1 }, { end: 2, r: -0.5 }]), candidatesTable([]))
+    const rows = arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'confidence' })
+    expect(rows.map((row) => row.tip.endUid)).toEqual([2, 1])
   })
 })

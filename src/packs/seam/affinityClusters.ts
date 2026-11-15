@@ -71,6 +71,7 @@ import {
 import { checkAffinitySize } from './checkAffinitySize'
 import { labelSkeleton } from './labelSkeleton'
 import { AFFINITY_MODELS, AFFINITY_TASK, affinityModel } from './models'
+import { afterShare } from './progress'
 import { CLUSTER_NODE_VALUE } from './nodeValues'
 import { DEFAULT_SEED, pointCloud, skipReason } from './pointCloud'
 import type { ClusterPoints } from './scene'
@@ -343,7 +344,7 @@ export const affinityClustersNode = packNode({
           signal: ctx.signal,
           onProgress: (fraction) =>
             ctx.progress(
-              DOWNLOAD_SHARE + ((1 - DOWNLOAD_SHARE) * (runIndex + fraction)) / running,
+              afterShare(DOWNLOAD_SHARE, (runIndex + fraction) / running),
               `${item.id} (${runIndex + 1} of ${running})`,
             ),
         })

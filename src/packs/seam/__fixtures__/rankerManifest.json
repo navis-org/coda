@@ -1,0 +1,63 @@
+{
+ "id": "trees_sizes_tip",
+ "manifestSchema": 2,
+ "task": "merge-ranker",
+ "parts": [
+  "ranker"
+ ],
+ "datasets": [
+  "aedes"
+ ],
+ "license": "MIT",
+ "citation": "SEAM, Drosophila Connectomics group; geometric candidate ranker fitted on the Aedes reconstruction's edit history",
+ "source": "https://github.com/flyconnectome/SEAM",
+ "upstreamCommit": "037451701c076ff7a509a649727ccb9b6ca1384b-dirty",
+ "randomWeights": false,
+ "config": {
+  "features": [
+   "min_dist_um",
+   "touching",
+   "log_vol",
+   "has_shape",
+   "align",
+   "caliber_ratio",
+   "elongation",
+   "ahead",
+   "l2c",
+   "l2x",
+   "end_dist_um"
+  ],
+  "cutout_half_width_um": 3,
+  "cutout_xy_nm": 64,
+  "pool_max_dist_um": 0.5,
+  "top_k": 100,
+  "own_um": 2,
+  "fitted_on": "aedes_h1 m1 block A, m1 10k (ranker_m1.py, seed 0), whole pools with sizes and end_dist_um; LightGBM lambdarank (gbm_worker.PARAMS), stopped on a 10% hold-out; ranker_tip A+"
+ },
+ "signatures": {
+  "ranker": {
+   "inputs": [
+    "features"
+   ],
+   "outputs": [
+    "geo_score"
+   ]
+  }
+ },
+ "files": [
+  {
+   "variant": "text",
+   "part": "ranker",
+   "file": "rankerModel.txt",
+   "url": null,
+   "bytes": 1340982,
+   "sha256": "f00e62f80bcf067608b9cc3732f81f3445841d4784d82861b3701f9f2d141047",
+   "quantisation": {
+    "kind": "none",
+    "io": "float64",
+    "quantises": [],
+    "emits": []
+   }
+  }
+ ]
+}

@@ -21,6 +21,15 @@ const groups: readonly (readonly string[])[] = [
   ['seam:openEnds', 'neuron.skeletonize'],
   ['seam:openEnds', 'seam:suggestions'],
   ['seam:openEnds', 'out.neuroglancer'],
+  // The chain: open ends found, then searched, then worked through.
+  ['seam:openEnds', 'seam:suggestMerges'],
+  ['seam:suggestMerges', 'seam:review'],
+  // The other node that publishes this shape -- one computes the lists, the other reads them.
+  ['seam:suggestMerges', 'seam:suggestions'],
+  // Which ends to search is a cut somebody makes, above this node and not inside it.
+  ['seam:suggestMerges', 'core.filterTable'],
+  // Which datastack's segmentation the boxes are read out of.
+  ['seam:suggestMerges', 'dataset.cave'],
   ['seam:findMerges', 'neuron.meshes'],
   ['seam:findMerges', 'out.neuroglancer'],
   // The two nodes in the pack, so a reader who finds one finds the other and the difference.

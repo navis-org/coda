@@ -164,3 +164,38 @@ export const MERGE_ASSESSOR_MODELS: readonly AffinityModel[] = [
 export function mergeAssessorModel(id: string): AffinityModel | undefined {
   return modelById(MERGE_ASSESSOR_MODELS, id)
 }
+
+/** The forest that ranks a candidate list — stage 5 of the merge-candidate pipeline. */
+export const MERGE_RANKER_TASK = 'merge-ranker'
+
+/**
+ * The rankers that order an open end's candidate pool.
+ *
+ * **A model row rather than a suggestion set's manifest.** The node used to read the forest, the
+ * box size, the pool radius and the feature order out of whichever published set it was pointed
+ * at, which made the pipeline a property of somebody else's run. It is Coda's now: a row here
+ * names a manifest, and the manifest carries the weights **and** the constants they were fitted
+ * with (`rankerConfig.ts`), so the two can never be taken from different versions.
+ *
+ * It is not a GPU model and not tens of megabytes — a LightGBM forest is about 1.3 MB of text,
+ * scored in TypeScript (`treeRanker.ts`). So it is opened by `openTreeRanker`, which shares the
+ * manifest and the verified weight cache with the other four tasks but neither the WebGPU gate
+ * nor the download consent: a megabyte fetched once and kept is not a thing to ask about.
+ */
+export const MERGE_RANKER_MODELS: readonly AffinityModel[] = [
+  {
+    id: 'trees_sizes_tip',
+    label: 'SEAM geometric ranker (Aedes)',
+    manifestUrl:
+      'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/models/seam-ranker-trees-sizes-tip/manifest.json',
+    detail:
+      'Orders the pieces of segmentation near an open end by how likely each is to be its ' +
+      'continuation, from eleven geometric and size features. A LightGBM ranking forest ' +
+      'fitted on the Aedes reconstruction’s own edit history.',
+  },
+]
+
+/** One ranker by id, or undefined. */
+export function mergeRankerModel(id: string): AffinityModel | undefined {
+  return modelById(MERGE_RANKER_MODELS, id)
+}
