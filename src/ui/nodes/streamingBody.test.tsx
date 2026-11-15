@@ -266,11 +266,12 @@ describe('a card body drawing from a still-running input', () => {
     act(() => publishNow())
     await waitFor(() => expect(rows()).toHaveLength(2))
 
-    // Nothing picked yet, so the pair is empty — the node ran, on a cursor pointing nowhere.
+    // Nothing picked yet, so no candidate — only the neuron, which `Show accepted` (on by
+    // default) keeps in view with no cursor. The node ran, on a cursor pointing nowhere.
     await waitFor(() => {
       const pair = useGraphStore.getState().nodeOutput('review', 'current')
       if (!isTableValue(pair)) throw new Error('Review has published no Current')
-      expect(pair.length).toBe(0)
+      expect(pair.data['part']).toEqual(['neuron'])
     })
 
     // A reader clicking the row, which is an edit to this node's params made mid-run.

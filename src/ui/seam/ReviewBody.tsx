@@ -32,7 +32,7 @@
  * per-viewer convenience that must never become an edit.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { getNodeDef } from '../../core/registry'
 import { isTableValue } from '../../core/values'
@@ -42,8 +42,12 @@ import {
   currentOfQueue,
   decodeVerdicts,
   encodeVerdicts,
+  neuronsOf,
+  pickedNeuron,
+  scenePieces,
   sizeOf,
   stillToSearch,
+  tipsOf,
   verdictFor,
   withVerdict,
   VERDICTS,
@@ -52,6 +56,7 @@ import type {
   Candidate,
   CandidateSize,
   QueueMode,
+  QueueNeuron,
   QueueRow,
   QueueTip,
   SortBy,
@@ -74,13 +79,8 @@ import { useGraphStore } from '../../store/graphStore'
 import { useDatasetInput } from '../useDatasetInput'
 import { usePublishedScene } from '../viewers/NeuroglancerProfileFrame'
 import { NeuroglancerViewer } from '../viewers/NeuroglancerViewer'
-
-/** How many rows the card lists. The queue can be thousands; a list nobody scrolls is not one. */
-const MAX_ROWS = 300
-
-/** The neuron and the candidate, in two hues a reader can tell apart at a glance. */
-const NEURON_COLOR = cycleColor(0, 'dark')
-const CANDIDATE_COLOR = cycleColor(1, 'dark')
+import { useRowWindow } from '../useRowWindow'
+import { controlPartColor } from '../../nodes/output/neuroglancer'
 
 /** Where the card remembers whether its filters are folded. Per node, per browser. */
 const FILTERS_KEY = 'coda.seam.review.filters'
@@ -138,6 +138,15 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       ),
     [tips, candidates],
   )
+  const verdicts = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
+  /*
+   * One neuron at a time. Everything below — the list, the cursor, the counts in the foot — reads
+   * `mine`, never `queue`, so no surface of the card can show a second neuron's tips.
+   */
+  const neurons = useMemo(() => neuronsOf(queue, verdicts), [queue, verdicts])
+  const neuron = pickedNeuron(queue, String(node.params.neuron ?? ''))
+  const mine = useMemo(() => tipsOf(queue, neuron), [queue, neuron])
+  const onNeuron = neurons.find((entry) => entry.neuronId === neuron)
 
   const minConfidence = numberOr(node.params.minConfidence)
   const minSize = numberOr(node.params.minSize)
@@ -148,18 +157,52 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // and this memo is over the whole queue, which is thousands of rows — a hundred thousand of
   // them per candidate.
   const listed = useMemo(
-    () => arrangeRows(queue, { minConfidence, minSize, shownOnly, sortBy, mode }),
-    [queue, minConfidence, minSize, shownOnly, sortBy, mode],
+    () => arrangeRows(mine, { minConfidence, minSize, shownOnly, sortBy, mode }),
+    [mine, minConfidence, minSize, shownOnly, sortBy, mode],
   )
   /*
-   * How many tips are still to come. From the table rather than from the queue's own length: a
-   * tip the run will never reach — its box outside the volume — is published as `searched:
-   * false`, so this count reaches zero where "rows with nothing on them" would stall above it
-   * and read as a run that stopped early.
+   * How many of this neuron's tips are still to come. From the table rather than from the
+   * queue's own length: a tip the run will never reach — its box outside the volume — is
+   * published as `searched: false`, so this count reaches zero where "rows with nothing on them"
+   * would stall above it and read as a run that stopped early.
    */
-  const toSearch = stillToSearch(isTableValue(tips) ? tips : undefined)
-  const verdicts = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
-  const here = currentOfQueue(queue, String(node.params.current), Number(node.params.rank))
+  const toSearch =
+    neuron === undefined
+      ? undefined
+      : stillToSearch(isTableValue(tips) ? tips : undefined, neuron)
+  const here = currentOfQueue(mine, String(node.params.current), Number(node.params.rank))
+
+  const windowed = useRowWindow(listed.length)
+  // A different neuron is a different list: start it at the top, where the switch put the cursor.
+  const { toTop } = windowed
+  useEffect(() => toTop(), [neuron, toTop])
+
+  const unit = mode === 'candidate' ? 'candidate' : 'tip'
+  const total =
+    mode === 'candidate'
+      ? mine.reduce((sum, tip) => sum + tip.candidates.length, 0)
+      : mine.length
+
+  /*
+   * Switching neuron lands on the new neuron's top row, as the list is sorted and filtered now,
+   * so the viewer moves with the switch rather than holding a pair the card no longer lists.
+   * One `setParams`, so the switch is one undo step rather than three.
+   */
+  const setParams = useGraphStore((s) => s.setParams)
+  const switchTo = (neuronId: string) => {
+    const top = arrangeRows(tipsOf(queue, neuronId), {
+      minConfidence,
+      minSize,
+      shownOnly,
+      sortBy,
+      mode,
+    })[0]
+    setParams(node.id, {
+      neuron: neuronId,
+      current: top ? String(top.tip.endUid) : '',
+      rank: mode === 'candidate' ? (top?.candidate?.rank ?? 1) : 1,
+    })
+  }
 
   const pick = (tip: QueueTip, candidate: Candidate | undefined) => {
     setParam('current', String(tip.endUid))
@@ -179,15 +222,19 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     )
   }
 
+  /*
+   * The same pieces `Current` publishes, in the same colours the Neuroglancer node gives them —
+   * one function each, so this fallback and the full-size viewer cannot disagree.
+   */
+  const pieces = scenePieces(mine, neuron, here, verdicts, node.params.showAccepted !== false)
   const scene =
-    published.status === 'ready' && here
+    published.status === 'ready' && pieces.length > 0
       ? buildScene(published.scene, {
           datasetId: dataset.datasetId ?? '',
-          segments: [here.tip.neuronId, here.candidate.candidateId],
-          segmentColors: {
-            [here.tip.neuronId]: NEURON_COLOR,
-            [here.candidate.candidateId]: CANDIDATE_COLOR,
-          },
+          segments: pieces.map((piece) => piece.id),
+          segmentColors: Object.fromEntries(
+            pieces.map((piece) => [piece.id, controlPartColor(piece.part)]),
+          ),
           layout: '3d',
           layers: 'all',
         })
@@ -214,29 +261,6 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       data-viewer={!compact && !driving && scene && dataset.datasetId ? 'yes' : 'no'}
     >
       {/*
-       * The fields, on the card only. Expanded, these same params are the overlay's rail — drawn
-       * a few pixels above this body — and drawing them here too was the same four controls
-       * twice.
-       */}
-      {compact && !folded && (
-        <div className="list-body__fields">
-          {fields.map((param) => (
-            <label key={param.id} className="list-body__field">
-              <span className="param__label" title={param.help ?? param.label}>
-                {param.label}
-              </span>
-              <ParamField
-                param={param}
-                value={node.params[param.id]}
-                ctx={ctx}
-                onChange={(value) => setParam(param.id, value)}
-              />
-            </label>
-          ))}
-        </div>
-      )}
-
-      {/*
        * The viewer, expanded only. A frame on the card would be a WebGL application a couple of
        * hundred pixels tall, next to the list it is competing with for the space; the card's job
        * is the queue, and the ⤢ button is one click from the picture.
@@ -262,17 +286,81 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       )}
 
       <div className="review-body__queue">
+        {/*
+         * The neuron, on both surfaces and never folded: it says which neuron every row below is
+         * about. Drawn here rather than as a param field because its choices are rows of `Tips`.
+         * With one neuron it stays, disabled, as the label naming it.
+         */}
+        <label className="list-body__field review-body__neuron">
+          <span
+            className="param__label"
+            title="The neuron being reviewed. The list, the viewer and the counts below are all about this one."
+          >
+            Neuron
+          </span>
+          <select
+            className="field nodrag"
+            aria-label="Neuron"
+            value={neuron ?? ''}
+            disabled={neurons.length <= 1}
+            onChange={(event) => switchTo(event.target.value)}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {neurons.length === 0 && <option value="">—</option>}
+            {neurons.map((entry) => (
+              <option key={entry.neuronId} value={entry.neuronId}>
+                {neuronLabel(entry)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/*
+         * The fields, on the card only. Expanded, these same params are the overlay's rail — drawn
+         * a few pixels above this body — and drawing them here too was the same four controls
+         * twice.
+         */}
+        {compact && !folded && (
+          <div className="list-body__fields">
+            {fields.map((param) => (
+              <label key={param.id} className="list-body__field">
+                <span className="param__label" title={param.help ?? param.label}>
+                  {param.label}
+                </span>
+                <ParamField
+                  param={param}
+                  value={node.params[param.id]}
+                  ctx={ctx}
+                  onChange={(value) => setParam(param.id, value)}
+                />
+              </label>
+            ))}
+          </div>
+        )}
+
         {listed.length === 0 ? (
           <div className="list-body__foot list-body__foot--empty">
             {queue.length === 0
               ? filling
                 ? 'Searching — the first tips will appear here as they are scored.'
                 : 'Nothing to review yet — wire in Merge Suggestions and run it.'
-              : `No tip passes the filters. ${formatNumber(queue.length)} in the queue.`}
+              : `No tip passes the filters. ${formatNumber(mine.length)} in this neuron’s queue.`}
           </div>
         ) : (
-          <ol className="review-list nowheel">
-            {listed.slice(0, MAX_ROWS).map((row) => {
+          <ol className="review-list nowheel" ref={windowed.ref} onScroll={windowed.onScroll}>
+            {/*
+             * Every row is reachable by scrolling, and only those in view are drawn: a neuron is
+             * hundreds of tips and, per candidate, tens of thousands of rows of six buttons each.
+             * The spacers stand in for the rest so the scrollbar is the whole list's.
+             */}
+            {windowed.rows.before > 0 && (
+              <li
+                className="review-list__spacer"
+                aria-hidden="true"
+                style={{ height: windowed.rows.before }}
+              />
+            )}
+            {listed.slice(windowed.rows.start, windowed.rows.end).map((row, offset) => {
               const tip = row.tip
               /*
                * Per tip, the row follows the cursor: the tip being reviewed shows whichever
@@ -292,6 +380,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                 <li
                   key={`${tip.endUid}:${mode === 'candidate' ? (candidate?.candidateId ?? '') : ''}`}
                   className="review-row"
+                  data-row
+                  aria-setsize={listed.length}
+                  aria-posinset={windowed.rows.start + offset + 1}
                   data-current={on ? 'yes' : 'no'}
                   data-verdict={said ?? 'none'}
                 >
@@ -385,6 +476,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                 </li>
               )
             })}
+            {windowed.rows.after > 0 && (
+              <li
+                className="review-list__spacer"
+                aria-hidden="true"
+                style={{ height: windowed.rows.after }}
+              />
+            )}
           </ol>
         )}
 
@@ -400,13 +498,20 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               {folded ? 'Filters ▸' : 'Filters ▾'}
             </button>
           )}
-          <span title="Tips listed, of the whole queue">
-            {formatNumber(Math.min(listed.length, MAX_ROWS))} of {plural(queue.length, 'tip')}
+          {/*
+           * Every row is listed, so the count is the list's, and "of" appears only where a
+           * filter has narrowed it. Counted in what a row *is*: per candidate the list is
+           * candidates, and "3 of 2 tips" was the old line's answer there.
+           */}
+          <span title={`${unit}s listed, of this neuron’s queue`}>
+            {listed.length === total
+              ? plural(total, unit)
+              : `${formatNumber(listed.length)} of ${plural(total, unit)}`}
           </span>
           {filling && (
             <span
               className="review-body__filling"
-              title="Suggest Merges is still searching. These are the tips scored so far, and more are still to come — a filter or a sort reaches only this much of the neuron."
+              title="Suggest Merges is still searching. These are this neuron’s tips scored so far, and more are still to come — a filter or a sort reaches only this much of the neuron."
             >
               {/*
                * The count where the table says, the bare caption where it cannot. A
@@ -418,14 +523,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                 : `still searching — ${formatNumber(toSearch)} to go`}
             </span>
           )}
-          <span title="Verdicts recorded so far, across every candidate">
-            {formatNumber(verdicts.size)} judged
+          <span title="Verdicts recorded on this neuron so far, across every candidate">
+            {formatNumber(onNeuron?.judged ?? 0)} judged
           </span>
-          {listed.length > MAX_ROWS && (
-            <span title="Narrow the filters to reach the rest">
-              ⚠ {formatNumber(listed.length - MAX_ROWS)} more not listed
-            </span>
-          )}
         </div>
       </div>
     </div>
@@ -448,9 +548,21 @@ function sizeLabel(size: CandidateSize | undefined): string {
     : `${formatNumber(size.value)} µm³`
 }
 
+/**
+ * A neuron as the dropdown lists it: the full root id, then how much there is and how much is
+ * done, so a reader choosing the next neuron can see which are finished.
+ */
+function neuronLabel(entry: QueueNeuron): string {
+  return [
+    entry.neuronId || 'no root ID',
+    plural(entry.tips, 'tip'),
+    `${formatNumber(entry.judged)} judged`,
+  ].join(' · ')
+}
+
 const VERDICT_LABEL: Record<Verdict, string> = {
-  accept: 'Merge',
-  reject: 'Not a merge',
+  accept: 'Accept',
+  reject: 'Reject',
   unsure: 'Unsure',
 }
 

@@ -32,8 +32,16 @@ import type { CellValue, LayersValue, TableValue } from '../../core/values'
 import { isTableValue, layersFrom, makeTable } from '../../core/values'
 import { foldColumns } from '../../nodes/lib/tableOps'
 import { suggestionLayer } from './scene'
-import type { CurrentItem, QueueTip, Verdict } from './reviewQueue'
-import { buildQueue, currentOfQueue, decodeVerdicts, verdictFor } from './reviewQueue'
+import type { CurrentItem, QueueTip, ScenePiece, Verdict } from './reviewQueue'
+import {
+  buildQueue,
+  currentOfQueue,
+  decodeVerdicts,
+  pickedNeuron,
+  scenePieces,
+  tipsOf,
+  verdictFor,
+} from './reviewQueue'
 
 /** The column the verdicts are folded onto the tips under. */
 const VERDICT_COLUMN = 'verdict'
@@ -53,7 +61,7 @@ export function verdictsSchema(): TableSchema {
  * The pair being looked at, and where to look.
  *
  * Shaped for `out.neuroglancer`'s `Control` port: ids to show, `part` to colour them apart, and
- * the contact in nanometres on **both** rows, since the camera reads the first and a reader
+ * the contact in nanometres on **every** row, since the camera reads the first and a reader
  * sorting or filtering this table should not be able to change where it points.
  */
 export function currentSchema(): TableSchema {
@@ -77,13 +85,12 @@ export const reviewNode = packNode({
   category: 'utility',
   cardWidth: 560,
   description:
-    'Works through SEAM’s merge suggestions one tip at a time, showing each tip’s candidate in neuroglancer and recording whether it belongs.',
+    'Works through SEAM’s merge suggestions for one neuron, one tip at a time, showing each tip’s candidate in neuroglancer and recording whether it belongs.',
   guide:
-    'A queue of merge suggestions. Each row is a tip and one of its candidates; clicking a row ' +
-    'shows that candidate beside its neuron and points the camera at where they touch. Accept, ' +
-    'reject or mark unsure, and page through a tip’s other candidates with the arrows. The ' +
-    'verdicts are saved with the workflow and come out as a table. Nothing is written to the ' +
-    'segmentation — the merge is yours to make.',
+    'A queue of merge suggestions for one neuron, picked at the top of the card. Each row is a ' +
+    'tip and one of its candidates; clicking a row shows that candidate beside its neuron. ' +
+    'Accept, reject or mark unsure, and page through a tip’s other candidates with the arrows. ' +
+    'The verdicts are saved with the workflow. Nothing is written to the segmentation.',
   cost: 'cheap',
 
   inputs: [
@@ -104,6 +111,24 @@ export const reviewNode = packNode({
     { id: 'layers', label: 'Layers', type: T.layers() },
   ],
   params: [
+    /*
+     * One neuron at a time, set by the dropdown at the top of the card — which the card draws
+     * itself, because the choices are root ids in the rows of `Tips` and an enum's options can
+     * only be asked of a schema. Hence `advanced` and `internal`, like the cursor below.
+     *
+     * **Data, not presentational**, because it narrows `Layers`: the annotation layer is the map
+     * of the work on *this* neuron, and points on the others would be a second neuron in the
+     * viewer. `Tips` and `Verdicts` stay whole, so switching neuron loses no verdict downstream.
+     */
+    {
+      id: 'neuron',
+      advanced: true,
+      kind: 'string',
+      label: 'Neuron',
+      default: '',
+      internal: true,
+      help: 'The root ID being reviewed. Empty, or an ID no longer in `Tips`, means the first neuron in `Tips`. Set by the dropdown at the top of the card.',
+    },
     /*
      * The cursor, the candidate and the verdicts are **`advanced` and `internal`**, which are
      * not the same flag and both apply. `advanced` keeps them off the card, where the body sets
@@ -140,6 +165,17 @@ export const reviewNode = packNode({
       default: '',
       internal: true,
       help: 'The verdicts recorded so far, saved with the workflow.',
+    },
+    /*
+     * **Data, not presentational**: it adds rows to `Current`, which is what the Neuroglancer
+     * node draws. On by default — until something is accepted it adds nothing but the neuron.
+     */
+    {
+      id: 'showAccepted',
+      kind: 'boolean',
+      label: 'Show accepted',
+      default: true,
+      help: 'Also show every candidate you accepted on this neuron in the viewer, in green, wherever the cursor is — the neuron as it will look once you make the merges. With no row selected, the neuron and its accepted pieces are shown and the camera stays where it is.',
     },
     {
       id: 'minConfidence',
@@ -262,7 +298,13 @@ export const reviewNode = packNode({
     }
     const queue = buildQueue(tips, candidates)
     const verdicts = decodeVerdicts(ctx.params.verdicts)
-    const here = currentOfQueue(queue, String(ctx.params.current), Number(ctx.params.rank))
+    // The cursor resolves within the picked neuron only, so a cursor left on another neuron's
+    // tip — after the fallback to the first, or a hand edit — shows nothing rather than a pair
+    // from a neuron the card is not on.
+    const neuron = pickedNeuron(queue, String(ctx.params.neuron))
+    const mine = tipsOf(queue, neuron)
+    const here = currentOfQueue(mine, String(ctx.params.current), Number(ctx.params.rank))
+    const pieces = scenePieces(mine, neuron, here, verdicts, ctx.params.showAccepted === true)
 
     /*
      * **The whole shown set, not the current item**, and that is a correctness decision rather
@@ -274,11 +316,12 @@ export const reviewNode = packNode({
      * the dataset publishes, which for Aedes is none. Which item is current travels on
      * `Current` instead, where it is a selection and costs nothing.
      *
-     * So this layer is a map of where the work is, stable while a reader moves through it.
+     * So this layer is a map of where the work is on the picked neuron, stable while a reader
+     * moves through it. Switching neuron does change it, and that one navigation is wanted.
      */
     const name = String(ctx.params.layerName).trim() || 'merge suggestions'
     const layer = suggestionLayer(
-      queue.flatMap((tip) => {
+      mine.flatMap((tip) => {
         const first = tip.candidates[0]
         if (!tip.shown || !first) return []
         return [
@@ -298,7 +341,7 @@ export const reviewNode = packNode({
     return {
       tips: withVerdicts(tips, queue, verdicts),
       verdicts: verdictsTable(queue, verdicts),
-      current: currentPair(here),
+      current: currentPieces(pieces, here),
       layers: {
         kind: 'layers',
         items: [...layersFrom(ctx.input('layers')), layer.layer],
@@ -308,30 +351,35 @@ export const reviewNode = packNode({
 })
 
 /**
- * The pair being looked at, as a two-row neuron table.
+ * What the viewer should show, as a neuron table: the pair being looked at, then every accepted
+ * piece where `Show accepted` is on.
  *
  * `part` says which is which, so a downstream Neuroglancer node can colour them apart — the
- * neuron in one hue and the piece proposed for it in another, which is the whole picture a
- * reader is judging.
+ * neuron in one hue, the piece proposed for it in another, and the pieces already accepted in a
+ * third.
+ *
+ * **`x`/`y`/`z` are where to look, not where each row is**: the cursor's contact, on every row,
+ * so sorting or filtering this table cannot move the camera. With no cursor they are null and the
+ * camera stays where it is.
  */
-function currentPair(here: CurrentItem | undefined): TableValue {
-  const ids: CellValue[] = []
-  const part: CellValue[] = []
-  const x: CellValue[] = []
-  const y: CellValue[] = []
-  const z: CellValue[] = []
-  if (here) {
-    ids.push(here.tip.neuronId, here.candidate.candidateId)
-    part.push('neuron', 'candidate')
-    // The contact, not the tip: a merge is judged at the place the two pieces touch, which can
-    // be a micrometre or two from where the neuron stops.
-    for (const _ of ids) {
-      x.push(here.candidate.contactNm[0])
-      y.push(here.candidate.contactNm[1])
-      z.push(here.candidate.contactNm[2])
-    }
-  }
-  return makeTable(currentSchema(), { [ID_COLUMN_NAME]: ids, part, x, y, z }, 'neurons')
+function currentPieces(
+  pieces: readonly ScenePiece[],
+  here: CurrentItem | undefined,
+): TableValue {
+  // The contact, not the tip: a merge is judged at the place the two pieces touch, which can be
+  // a micrometre or two from where the neuron stops.
+  const at = here?.candidate.contactNm
+  return makeTable(
+    currentSchema(),
+    {
+      [ID_COLUMN_NAME]: pieces.map((piece) => piece.id),
+      part: pieces.map((piece) => piece.part),
+      x: pieces.map(() => at?.[0] ?? null),
+      y: pieces.map(() => at?.[1] ?? null),
+      z: pieces.map(() => at?.[2] ?? null),
+    },
+    'neurons',
+  )
 }
 
 /** The tips, with each one's verdict on its **first** candidate folded on. */
