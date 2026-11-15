@@ -688,7 +688,7 @@ export function resetL2ChunkCounts(): void {
  * size and would read as a speck. Note that nothing here *refuses* a short answer: SEAM's own
  * fetching layer does, by name (`sizes.fetch` raises on a root `get_leaves_many` left out),
  * because at that layer an absent root means the request was wrong rather than that there is no
- * data. Coda's `size_features` twin does not exist yet, and it owes that refusal.
+ * data. `countsInPoolOrder` in `packs/seam/searchRun.ts` pays that debt: it is where a count missing from this answer becomes a hole in a positional array, and it refuses there, by name.
  *
  * **The memo fills on completion, so two concurrent calls over the same roots both fetch.**
  * Deliberate, for now: the search runs one open end at a time, and the obvious fix — a promise

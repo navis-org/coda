@@ -179,7 +179,7 @@ lean on:
 | `data/precomputed/live.test.ts`                | precomputed against real buckets (male-CNS, hemibrain), skipped without `PRECOMPUTED_LIVE`           |
 | `data/precomputed/precomputed.test.ts`         | shard lookup, multi-LOD manifests, Draco, legacy fragments, CORS fallback, the two-phase progress split |
 | `data/precomputed/skeletons.test.ts`           | the precomputed skeleton format: edge list to rooted tree, radius/affine, `uint8` compartments       |
-| *(no unit test)* `src/pyodide/cutoutSummary.py`'s search | `pnpm probe:candidate-search` ranks one real open end against SEAM's own `geo_rank`, comparing the order **and** the scores — the two fail differently — with the reversed rank-key sort run as its negative control |
+| *(no unit test)* `src/pyodide/cutoutSummary.py`'s search | `pnpm probe:candidate-search` drives all three crossings of a search — the pool, the level-2 counts, the size features — and the forest that ranks them, on one real open end against SEAM's own `geo_rank`, comparing the order **and** the scores (the two fail differently), applying the own-tip rule SEAM now publishes behind, with the reversed rank-key sort as its negative control. Needs a CAVE token and Pyodide |
 | `pyodide/cutoutSummary.test.ts`                | the wrapper's marshalling against a mocked `callPython` — columns split by dtype, the id columns kept 64-bit, the missing-query state (`warp.test.ts`' arrangement) |
 | *(no unit test)* `src/pyodide/cutoutSummary.py` | vitest has no Pyodide: `pnpm probe:cutout-summary` runs the vendored `summarize_cutout` under CPython **and** wasm and compares, then runs Coda's bridge and checks the axis order survived it |
 | `data/cave/volumes.test.ts`                    | where a datastack's voxels are: the EM off `aligned_volume.image_source`, the supervoxels out of the chunkedgraph's own `data_dir` (not the graphene URL) |
@@ -388,7 +388,10 @@ lean on:
 | `packs/seam/checkAffinitySize.test.ts`            | the wait priced over the set, and both matrices counted against the crash floor                     |
 | `packs/seam/labelSkeleton.test.ts`                | point labels folded onto skeleton nodes: majority per draw, nearest for the rest, background stays  |
 | `packs/seam/pointCloud.test.ts`                   | the model's own sampler: with replacement, sorted, centred, scaled; and the skip verdicts           |
+| `packs/seam/rankPool.test.ts`                     | the order around the score: lower-is-better, the cut at `top_k`, 1-based `geo_rank`, every column gathered, and the refusal of a pool already ranked |
 | `packs/seam/scene.test.ts`                        | the neuroglancer annotation layer: ids, the colour property, nanometres, the dropped tail           |
+| `packs/seam/searchRun.test.ts`                    | the sequence of a search over fakes: that the cut comes before the own-tip rule, `geo_rank` renumbered over what the rule kept, one counts call for the neuron, and a missing query carried through |
+| `packs/seam/treeRanker.test.ts`                   | the LightGBM forest read and walked, against **LightGBM's own predictions** on 991 vectors — the missing rules, the `<=` boundary, and every format it refuses by name |
 | `packs/packs.test.ts`                             | the packs as a set: directories, type prefixes, drawings and See also kept in-pack, ZapBench's rename, shortcuts |
 | `packs/vfb/vfb.test.ts`                           | the VFB pack's nodes against a stubbed PDB: what they ask as well as return, schema halves           |
 | `packs/zapbench/cells.test.ts`                    | the ZapBench cell-id grammar: row labels, pasted lists, release bounds                               |

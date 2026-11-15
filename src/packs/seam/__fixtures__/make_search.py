@@ -53,14 +53,18 @@ CONTACT = ["contact_x_nm", "contact_y_nm", "contact_z_nm"]
 SEARCH_END = 0  # the end probe:candidate-search drives; its neuron is the own-tip one
 TOP = 20  # how much of the ranked list searchEnd.json pins
 
-# end_uid -> why it is here. Everything the rule can do to a list, on real data.
+# end_uid -> why it is here. These six were chosen when candidates_all held the PRE-own-tip
+# lists, so between them they covered everything the rule can do. It now holds the post-rule
+# lists, so the rule drops nothing from any of them -- which ownTip.test.ts asserts rather than
+# works around, and it exercises the dropping on cases it builds itself. What still distinguishes
+# the six is list length, so that is what they say.
 ENDS = {
-    SEARCH_END: "half the list too far and a third of the rest another end's; 14 of 100 kept",
-    43: "nine tenths of what was near enough belongs to a nearer end",
-    99: "nothing within own_um at all -- an empty list, not a failed one",
-    377: "the few that were near enough are every one of them nearer another end",
-    422: "keeps 87 -- nothing lost to another end",
-    263: "most of the list near enough, and 70 of it another end's",
+    SEARCH_END: "the end probe:candidate-search drives; nine rows",
+    43: "fourteen",
+    99: "eleven",
+    377: "one -- the shortest list that is not empty",
+    422: "seventy-four, the longest of the six",
+    263: "six",
 }
 
 src = Path(sys.argv[1])
@@ -115,11 +119,16 @@ search = {
     "endNm": [float(v) for v in positions[row_of[SEARCH_END]]],
     "queryRoot": one.q_root.iloc[0],
     "rows": int(len(one)),
-    "how": "SEAM searched this end at the rv2 snapshot and kept its top 100 before the own-tip "
-    "rule. geo_score is a rank key -- lower is better -- so geo_rank ascends with it. Pinned to "
-    "this segmentation and this snapshot: if either is rebuilt the ranks move together and every "
-    "check in probe-candidate-search fails at once, which is the signal that this file is stale "
-    "rather than the search wrong. Written by make_search.py, which cuts it out of the set.",
+    "how": "SEAM searched this end at the rv2 snapshot, ranked the pool, cut it to top_k and "
+    "applied the own-tip rule -- candidates_all.parquet is the list AFTER that rule, which is "
+    "where it moved on 2026-11-14 (no list in the set reaches top_k; the longest is 94). So a "
+    "reader reconstructing the pool from the box sees the pre-rule population and has to run the "
+    "rule itself to be looking at this list: probe-candidate-search measures 538 objects in the "
+    "pool here, cuts to 100 and keeps 9. geo_score is a rank key -- lower is better -- so "
+    "geo_rank ascends with it. Pinned to this segmentation and this snapshot: if either is "
+    "rebuilt the ranks move together and every check in probe-candidate-search fails at once, "
+    "which is the signal that this file is stale rather than the search wrong. Written by "
+    "make_search.py, which cuts it out of the set.",
     "top": [
         {
             "cand_root": r.cand_root,

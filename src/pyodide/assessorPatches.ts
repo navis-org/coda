@@ -61,7 +61,7 @@ export type AssessorBoxRequest = LabelBoxRequest & {
    * Each candidate's contact point in nanometres, `3 × candRoots.length`, in the same order.
    *
    * The **contact**, not the candidate's centre: SEAM centres the patch where the two objects
-   * come nearest, which is what the network was trained to look at. `runCandidateSearch`
+   * come nearest, which is what the network was trained to look at. `runCandidatePool`
    * publishes it as `contact_x_nm` and friends.
    */
   centresNm: Float64Array

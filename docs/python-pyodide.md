@@ -645,8 +645,9 @@ And the search over it, which is what a caller actually runs:
 
 | | |
 | --- | --- |
-| `coda_candidate_search`, warm | **~0.6 s** |
-| the same call, first in a worker | ~2.4 s |
+| `coda_candidate_pool`, warm | **~0.56 s** |
+| the same call, first in a worker | ~2.5 s |
+| `coda_pool_sizes` | two expressions; does not register |
 
 A first call carries scipy's and pandas' own imports inside its clock — `started` is taken
 before the vendored modules are `exec`'d — so it is **paid once per worker, not per open end**.
@@ -655,15 +656,35 @@ That is the correction worth carrying twice over: a cold reading priced the feat
 is the larger half of an end's real price (~1.2 s), so **an end costs about 1.75 s** and a
 caller should keep one worker across a neuron's ends.
 
-**The search is one crossing, not three.** `coda_candidate_search` runs the summary, the
-features and the score together, because each step's output is the next one's input and none is
-useful alone — and because it keeps every step that has to match SEAM on the vendored side. The
-TypeScript carries the box over and names the columns back; it never computes a feature. Checked
-against SEAM's own ranking for a real open end (`pnpm probe:candidate-search`): the top twenty
-candidates in SEAM's exact order, every `geo_score` to 1e-4.
+**The search was one crossing, and is now three** (2026-11-14). It used to be
+`coda_candidate_search`: the summary, the features and the score together, because each step's
+output is the next one's input and none is useful alone. SEAM then replaced its logistic fit with
+a LightGBM forest on eleven features, and two of the eleven — `l2c` and `l2x` — are log counts of
+level-2 chunks that come from an authenticated chunkedgraph read. **The roots to ask about are
+not known until the features have been computed**, so no ordering of the work gets the counts
+first, and the pool has to cross unranked whatever else is decided. LightGBM has no Pyodide build
+either, so the scoring went with it.
+
+So: `coda_candidate_pool` (box in, the whole unranked pool out), `l2ChunkCounts`
+(`data/cave/rootIds.ts`), then `coda_pool_sizes` (the counts in by **position**, `l2c`/`l2x` out
+through the vendored `size_features`), with the forest, the sort, the cut and the `geo_rank`
+numbering in `packs/seam/treeRanker.ts` and `packs/seam/rankPool.ts`. The TypeScript still
+computes no feature — `coda_pool_sizes` exists precisely so that the two `log10` expressions stay
+vendored, since a feature computed slightly differently still ranks.
+
+Checked against SEAM's own ranking for a real open end (`pnpm probe:candidate-search`): SEAM's
+exact order, every `geo_score` to 1e-4, `min_dist_um` to 1e-5 µm and the contact point per axis
+to 1e-6 nm. **Note the published list is post-own-tip** — SEAM moved that rule upstream in the
+same set — so the probe ranks, cuts at `top_k` and then applies `ownTipRule`: 538 in the pool,
+100 after the cut, 9 after the rule, which is SEAM's list exactly.
+
+The end state is an upstream numpy `score_trees`, which would put the whole ranker back inside
+invariant 11; `docs/seam-suggestions-plan.md` records the ask.
 
 **Two ways to get the rank key wrong, and they fail differently.** The published `geo_score` is
-a rank *key* — lower is better, `-score`. Publishing the raw logit and sorting *that* descending
+a rank *key* — lower is better, `-score`, and still so under the forest, which the set's own
+numbers say even though its manifest line reads "the booster's raw score". Publishing the raw
+score and sorting *that* descending
 is the same ordering, so it gets every rank right and every score's sign wrong; sorting the rank
 key the wrong way reverses the list outright. The probe compares both the order and the scores
 for that reason, and runs the reversal as an assertion rather than describing it.

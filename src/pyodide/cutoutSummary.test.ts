@@ -19,8 +19,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { callPython } from './engine'
-import type { CandidateSearchRequest, CutoutSummaryRequest } from './cutoutSummary'
-import { runCandidateSearch, runCutoutSummary } from './cutoutSummary'
+import type {
+  CandidatePoolRequest,
+  CutoutSummaryRequest,
+  PoolSizesRequest,
+} from './cutoutSummary'
+import { runCandidatePool, runCutoutSummary, runPoolSizes } from './cutoutSummary'
 import type { PyCall } from './types'
 
 vi.mock('./engine', () => ({ callPython: vi.fn() }))
@@ -55,11 +59,11 @@ function answered(overrides: Record<string, unknown> = {}): Record<string, unkno
   }
 }
 
-describe('runCutoutSummary', () => {
-  beforeEach(() => {
-    mockedCall.mockReset()
-  })
+beforeEach(() => {
+  mockedCall.mockReset()
+})
 
+describe('runCutoutSummary', () => {
   it('calls the capability its Python lives in, passing the request through', async () => {
     mockedCall.mockResolvedValue(answered())
     await runCutoutSummary(REQUEST)
@@ -137,77 +141,50 @@ describe('runCutoutSummary', () => {
 })
 
 /**
- * The search's wrapper. The ranking itself is SEAM's and is checked against SEAM's own answer
- * for a real end by `pnpm probe:candidate-search`; what is testable here is the marshalling —
- * and the one thing worth pinning is that the **ranker is carried, not held**.
+ * The pool's wrapper. The measuring itself is SEAM's and is checked against SEAM's own answer
+ * for a real end by `pnpm probe:candidate-search`; what is testable here is the marshalling.
  */
-describe('runCandidateSearch', () => {
-  const SEARCH: CandidateSearchRequest = {
+describe('runCandidatePool', () => {
+  const POOL: CandidatePoolRequest = {
     ...(REQUEST as unknown as CutoutSummaryRequest),
     endNm: [64, 64, 90],
-    ranker: {
-      features: [
-        'min_dist_um',
-        'touching',
-        'log_vol',
-        'has_shape',
-        'align',
-        'caliber_ratio',
-        'elongation',
-        'ahead',
-      ],
-      mu: [0, 0, 0, 0, 0, 0, 0, 0],
-      sd: [1, 1, 1, 1, 1, 1, 1, 1],
-      w: [1, 0, 0, 0, 0, 0, 0, 0],
-      b: 0,
-    },
-    topK: 100,
   }
 
-  const ranked = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  const measured = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
     rows: 2,
     missingQuery: false,
     candRoot: BigUint64Array.from([864691128455770001n, 864691128455770002n]),
-    geo_score: Float64Array.from([-3.1489, -1.148]),
-    geo_rank: Float64Array.from([1, 2]),
     min_dist_um: Float64Array.from([0.032, 0.032]),
+    end_dist_um: Float64Array.from([0.41, 1.07]),
     ms: 2338,
     ...overrides,
   })
 
-  beforeEach(() => {
-    mockedCall.mockReset()
-  })
-
   it('runs in the capability the vendored code lives in', async () => {
-    mockedCall.mockResolvedValue(ranked())
-    await runCandidateSearch(SEARCH)
+    mockedCall.mockResolvedValue(measured())
+    await runCandidatePool(POOL)
     const call = mockedCall.mock.calls[0]![0] as PyCall
     expect(call.module).toBe('cutoutSummary')
-    expect(call.fn).toBe('coda_candidate_search')
-  })
-
-  /**
-   * The weights ride in the request from the suggestion set's own manifest, never from this
-   * repository — a ranker is fitted against one definition of the eight features, and a copy
-   * here would be a second place for them to live where being wrong still ranks.
-   */
-  it('carries the ranker through rather than holding one', async () => {
-    mockedCall.mockResolvedValue(ranked())
-    await runCandidateSearch(SEARCH)
-    const sent = (mockedCall.mock.calls[0]![0] as PyCall).args[0] as CandidateSearchRequest
-    expect(sent.ranker.w).toEqual(SEARCH.ranker.w)
-    expect(sent.endNm).toEqual([64, 64, 90])
+    expect(call.fn).toBe('coda_candidate_pool')
   })
 
   it('names the columns SEAM names, and keeps the ids 64-bit', async () => {
-    mockedCall.mockResolvedValue(ranked())
-    const found = await runCandidateSearch(SEARCH)
+    mockedCall.mockResolvedValue(measured())
+    const found = await runCandidatePool(POOL)
     expect(found.rows).toBe(2)
     expect(found.candRoot).toBeInstanceOf(BigUint64Array)
-    expect(Object.keys(found.columns).sort()).toEqual(['geo_rank', 'geo_score', 'min_dist_um'])
-    // `geo_score` is a rank key: lower is better, so rank 1 holds the smallest.
-    expect(found.columns['geo_score']![0]).toBeLessThan(found.columns['geo_score']![1]!)
+    expect(Object.keys(found.columns).sort()).toEqual(['end_dist_um', 'min_dist_um'])
+  })
+
+  /**
+   * The open end is this request's one addition over the summary's, and `summary_args` decides
+   * everything else — so a caller cannot ask for a cutout the features were not fitted against.
+   */
+  it('hands the open end over, which the summary does not require', async () => {
+    mockedCall.mockResolvedValue(measured())
+    await runCandidatePool(POOL)
+    const sent = (mockedCall.mock.calls[0]![0] as PyCall).args[0] as CandidatePoolRequest
+    expect(sent.endNm).toEqual([64, 64, 90])
   })
 
   it('reports a query root missing from its own box without throwing', async () => {
@@ -217,8 +194,39 @@ describe('runCandidateSearch', () => {
       candRoot: new BigUint64Array(0),
       ms: 9,
     })
-    const found = await runCandidateSearch(SEARCH)
+    const found = await runCandidatePool(POOL)
     expect(found.missingQuery).toBe(true)
     expect(found.rows).toBe(0)
+  })
+})
+
+/**
+ * The second crossing. The arithmetic is SEAM's; what is testable here is that the counts travel
+ * **by position** — the id-keyed form made Python re-join an alignment this side already had —
+ * and that a root the chunkedgraph answered short is refused **by name**, before the bridge.
+ */
+describe('runPoolSizes', () => {
+  const SIZES: PoolSizesRequest = {
+    candRoot: BigUint64Array.from([864691128455770001n, 864691128455770002n]),
+    candCount: Float64Array.from([12, 4310]),
+    queryRoot: 864691128455770003n,
+    queryCount: 90210,
+  }
+
+  it('unpacks the two columns from the capability’s own function', async () => {
+    mockedCall.mockResolvedValue({
+      l2c: Float64Array.from([1.0792, 3.6345]),
+      l2x: Float64Array.from([1.0718, 3.6096]),
+    })
+    const found = await runPoolSizes(SIZES)
+    expect((mockedCall.mock.calls[0]![0] as PyCall).fn).toBe('coda_pool_sizes')
+    expect(found.l2c).toHaveLength(2)
+    expect(found.l2x[1]).toBeCloseTo(3.6096, 4)
+  })
+
+  it('refuses counts that do not line up with the candidates', async () => {
+    await expect(
+      runPoolSizes({ ...SIZES, candCount: Float64Array.from([12]) }),
+    ).rejects.toThrow(/2 candidates and 1 counts/)
   })
 })

@@ -511,6 +511,24 @@ export function readCaveToken() {
   }
 }
 
+/**
+ * The token, or a message and exit 2 — what every probe that reads CAVE wants.
+ *
+ * Beside `readCaveToken` because the sentence belongs with the credential it is about: the same
+ * four lines had been written out in six probes, so re-wording the remedy — when the secret's
+ * path moves, say — meant six edits and five of them being missed.
+ */
+export function requireCaveToken() {
+  const token = readCaveToken()
+  if (!token) {
+    console.error(
+      'no CAVE token: set CAVE_TOKEN or put one in ~/.cloudvolume/secrets/cave-secret.json',
+    )
+    process.exit(2)
+  }
+  return token
+}
+
 /** Hand the token to the page's CAVE credentials for the default deployment. Answers whether it took. */
 export function handCaveToken(send, token) {
   return handToken(
@@ -531,9 +549,33 @@ export function handCaveToken(send, token) {
  *
  * Here beside `readCaveToken` for its reason: a credential and the address it opens are one
  * fact, and a probe that spells either for itself is a probe that can drift from the app.
+ *
+ * **In the `graphene://` form, which is the one the app parses**, not the REST base. A probe
+ * that wants to call `src/data/cave`'s own functions hands this to `parseGrapheneSource`, and
+ * the REST base is derived below rather than written out — pointing that parser at the REST
+ * base makes it read `v1` as the table name and the server answers `400 Invalid table_id`.
  */
-export const AEDES_CHUNKEDGRAPH =
-  'https://cave.fanc-fly.com/segmentation/api/v1/table/wclee_aedes_brain/roots_binary'
+export const AEDES_SEGMENTATION =
+  'graphene://https://cave.fanc-fly.com/segmentation/table/wclee_aedes_brain'
+
+/**
+ * The **deployment**, which `CaveRequestOptions` requires and the URL genuinely cannot say.
+ *
+ * `global.daf-apis.com`, not `cave.fanc-fly.com`. A deployment is the global server that issued
+ * the token, and `src/data/cave/deployments.ts` names `cave.fanc-fly.com` as one of the hosts
+ * that *take* the `global.daf-apis.com` token rather than being a deployment itself — the first
+ * version of this constant conflated the datastack's own host with its deployment, which is
+ * invisible while a caller passes an explicit token and wrong the moment one does not.
+ *
+ * Spelled out rather than imported because this file is loaded by plain `node` for the other
+ * probes and cannot reach `DEFAULT_CAVE_SERVER`, which is its source.
+ */
+export const AEDES_DEPLOYMENT = 'https://global.daf-apis.com'
+
+/** The datastack's own host — not its deployment. */
+const AEDES_HOST = 'https://cave.fanc-fly.com'
+
+export const AEDES_CHUNKEDGRAPH = `${AEDES_HOST}/segmentation/api/v1/table/wclee_aedes_brain/roots_binary`
 
 /**
  * The root each supervoxel belonged to at one instant, cached on disk.
@@ -553,13 +595,7 @@ export const AEDES_CHUNKEDGRAPH =
  */
 export async function rootsAt(labels, atMs, cacheFile, url = AEDES_CHUNKEDGRAPH) {
   if (!existsSync(cacheFile)) {
-    const token = readCaveToken()
-    if (!token) {
-      console.error(
-        'no CAVE token: set CAVE_TOKEN or put one in ~/.cloudvolume/secrets/cave-secret.json',
-      )
-      process.exit(2)
-    }
+    const token = requireCaveToken()
     const answer = await fetch(`${url}?timestamp=${atMs / 1000}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },

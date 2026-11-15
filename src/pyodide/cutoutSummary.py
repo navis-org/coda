@@ -1,10 +1,14 @@
 """SEAM's candidate search, and the cutout summary underneath it.
 
-Two entry points over one set of vendored code. `coda_candidate_search` is the one a caller
-wants — an open end in, a ranked pool of candidates out, stages 4 and 5 of SEAM's pipeline.
-`coda_cutout_summary` is the lower-level question it is built on ("what objects are in this
-box"), kept because `pnpm probe:cutout-summary` is what compares the vendored code under CPython
-against the same code under wasm, and what checks the axis-order crossing both share.
+Three entry points over one set of vendored code. `coda_candidate_pool` is the one a caller
+wants — an open end in, the pool of candidates out with its features measured, stage 4 and the
+measuring half of stage 5. `coda_pool_sizes` is the short second call that adds `l2c` and `l2x`
+once the caller has fetched the level-2 chunk counts those two read, which only it can do; the
+ranking itself is `packs/seam/treeRanker.ts`, and `coda_candidate_pool`'s own docstring says why
+it is no longer here. `coda_cutout_summary` is the lower-level question the pool is built on
+("what objects are in this box"), kept because `pnpm probe:cutout-summary` is what compares the
+vendored code under CPython against the same code under wasm, and what checks the axis-order
+crossing both share.
 
 The capability on the bridge whose working code Coda did not write, in its second form:
 `seam/cutout.py` and `seam/candidates.py` are runs taken out of SEAM's `negatives.py` and
@@ -31,14 +35,14 @@ belongs on this side of the worker.
 ## What it costs
 
 Measured in Pyodide on a 188x188x134 box (the real Aedes cutout) holding 14,424 supervoxels over
-900 roots: **about 560 ms warm** for the summary and **about 600 ms** for the whole search, of
-which scipy's exact EDT is ~190 ms (against 166 ms for the same call in CPython).
+900 roots: **about 560 ms warm** for both the summary and the pool, of which scipy's exact EDT is
+~190 ms (against 166 ms for the same call in CPython). `coda_pool_sizes` is 0.7 ms, four fifths of
+it inside the vendored `size_features`, and does not register against those.
 
 A first call in a fresh worker is roughly four times that, because `started` is taken before the
 vendored modules are `exec`'d and before `summarize_cutout`'s own `from scipy import ndimage` —
 so both first imports sit inside the measured `ms`. Paid **once per worker, not per open end**,
 which is also what a caller should do about it: keep one worker across a neuron's ends.
-scipy's exact EDT is 190 ms of that, against 166 ms for the same call in CPython.
 
 The EDT is also where the memory goes: `return_indices=True` returns a float64 distance and three
 int32 index planes, 95 MB for a box this size, and the vendored code's own ravel adds 38 MB — so
@@ -227,19 +231,28 @@ def coda_cutout_summary(request, report=None):
     return out
 
 
-def coda_candidate_search(request, report=None):
-    """One open end's candidates, ranked — stages 4 and 5 of SEAM's pipeline.
+def coda_candidate_pool(request, report=None):
+    """One open end's candidates, unranked — stage 4 and the measuring half of stage 5.
 
-    The box in, a ranked pool out. Three vendored steps with nothing of Coda's between them:
-    `summarize_cutout` says what objects are in the box and where each touches the query,
-    `pool_features` turns that into the eight features the ranker was fitted on, and
-    `GeometricRanker.score` is the logistic regression whose weights ride in the request from
-    the suggestion set's own manifest.
+    The box in, the **whole** pool out with every feature `pool_features` computes on it. Two
+    vendored steps with nothing of Coda's between them: `summarize_cutout` says what objects are
+    in the box and where each touches the query, and `pool_features` turns that into the eight
+    geometric features the ranker reads, plus `end_dist_um`, which is a ninth.
 
-    **Why it is one call and not three.** Each step's output is the next one's input and none of
-    them is useful on its own, so crossing between them would move a frame of several hundred
-    rows over the bridge twice for nothing. It also keeps every step that has to match SEAM on
-    the vendored side of the seam: the TypeScript orchestrates and never computes a feature.
+    **Why the ranking left this file** (2026-11-14). It used to be here, and the pool crossed
+    already sorted, cut to `top_k` and numbered — one call, because each step's output was the
+    next one's input and none was useful alone. SEAM replaced the logistic fit with a LightGBM
+    forest on eleven features, and two of the eleven are `l2c` and `l2x`: log counts of how many
+    level-2 chunks the candidate and the query hold. Those counts come from an authenticated
+    chunkedgraph call, and **the roots to ask about are not known until `pool_features` has
+    run**. No ordering of this file's work gets them before the pool exists, so the pool has to
+    cross unranked whatever else is decided. The scoring followed it over, into
+    `packs/seam/treeRanker.ts`.
+
+    So a search is now three parts: this call, a batched `l2ChunkCounts` read, then
+    `coda_pool_sizes` for the two size columns and the forest in TypeScript. The cost of the
+    extra crossings is a frame of a few hundred rows and two columns; the alternative is a model
+    format and a tree walk inside the worker, which is the ask recorded for SEAM.
 
     `None` where the query root has no voxel in its own box, which `summarize_cutout` answers for
     itself — a tip whose neuron does not reach its own cutout is one to look at, not a failure.
@@ -277,26 +290,8 @@ def coda_candidate_search(request, report=None):
         }
 
     if report is not None:
-        report(0.7, "ranking the pool")
+        report(0.7, "measuring the pool")
     pool = candidates.pool_features(frame, query, end_nm)
-    ranker = candidates.GeometricRanker(
-        features=list(req["ranker"]["features"]),
-        mu=list(req["ranker"]["mu"]),
-        sd=list(req["ranker"]["sd"]),
-        w=list(req["ranker"]["w"]),
-        b=float(req["ranker"]["b"]),
-    )
-    # **`rank_key`, not `score`, and ascending.** The published `geo_score` column is the rank
-    # key — `-score`, where *lower is better* (`seam/build.py`: "geo_score (a rank key: lower is
-    # better)"). Taking the raw logit and sorting descending gives a list that is exactly
-    # reversed, with every number plausible and every rank wrong, which is what the fixture
-    # comparison in `probe:candidate-search` is really there to catch.
-    pool = pool.assign(geo_score=ranker.rank_key(pool))
-    # `_number`, not a bare `.get`: an optional TypeScript property that is spread rather than
-    # omitted arrives as `None`, and `int(None)` raises. The helper exists for exactly that.
-    pool = pool.sort_values("geo_score", ascending=True).head(int(_number(req.get("topK"), 100)))
-    # 1-based, as the fixture's is.
-    pool = pool.assign(geo_rank=np.arange(1, len(pool) + 1))
 
     # Every column `pool_features` produced, by its own name — a pass-through rather than a
     # list of the ones this file happens to know about. That is what `cutoutSummary.ts`' header
@@ -322,3 +317,52 @@ def coda_candidate_search(request, report=None):
     if report is not None:
         report(1.0)
     return out
+
+
+def coda_pool_sizes(request, report=None):
+    """`l2c` and `l2x` for a pool whose level-2 chunk counts have been fetched.
+
+    The second crossing of a candidate search, and it exists because `candidates.size_features`
+    is a vendored feature and must stay one. The arithmetic is two expressions, and writing them
+    in TypeScript is exactly the drift SEAM's invariant 11 is for: dropping the `clip(min=1)`, or
+    the `/5`, or reading `log` for `log10` still ranks, and nothing downstream can see that it
+    ranks differently. So the counts come back here and the vendored function does the work.
+
+    **The counts arrive by position, not by id**, as `candCount` alongside `candRoot` with the
+    query's own as a scalar: TypeScript already holds them in the pool's order, so keying them
+    only made this side re-join what had just been taken apart. The dict and the frame are now
+    built from one array, so nothing here can pair a count with the wrong root.
+
+    The gap that *can* still happen — the chunkedgraph answering short — is refused one layer up,
+    by `countsInPoolOrder` in `packs/seam/searchRun.ts`, where the absent root still has a name.
+    (`size_features` keeps its own `pd.Series(l2_chunks)` over python int keys, so a root at or
+    above 2**63 would be indexed as a negative one and find nothing — but that surfaces as its
+    own `ValueError`, loudly, rather than as a wrong count.)
+    """
+    seam = _seam(dict(__vendored__))  # noqa: F821 -- seeded by runtime.ts, see the header
+    candidates = seam["seam.candidates"]
+    # Imported here, not at module scope: `coda_cutout_summary` has no use for pandas, and the
+    # vendored modules pull it in for themselves when they are installed.
+    import pandas as pd
+
+    req = request.to_py()
+    roots = np.asarray(req["candRoot"], dtype=np.uint64)
+    counts = np.asarray(req["candCount"], dtype=np.float64)
+    query = np.uint64(int(req["queryRoot"]))
+    if len(counts) != len(roots):
+        raise ValueError(f"{len(roots)} candidates and {len(counts)} counts")
+
+    frame = pd.DataFrame(
+        {"root": roots, "q_root": np.full(len(roots), query, dtype=np.uint64)}
+    )
+    # One dict from the same arrays the frame is built from. The query root is its own entry:
+    # `size_features` looks both columns up in the one mapping.
+    l2_chunks = dict(zip(roots.tolist(), counts.tolist()))
+    l2_chunks[int(query)] = float(req["queryCount"])
+    sized = candidates.size_features(frame, l2_chunks)
+    if report is not None:
+        report(1.0)
+    return {
+        "l2c": np.ascontiguousarray(sized["l2c"].to_numpy(), dtype=np.float64),
+        "l2x": np.ascontiguousarray(sized["l2x"].to_numpy(), dtype=np.float64),
+    }
