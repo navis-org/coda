@@ -108,3 +108,31 @@ export async function gpuSupport(): Promise<GpuSupport> {
   const info = adapter.info as { vendor?: string; architecture?: string } | undefined
   return { refusal: undefined, vendor: info?.vendor, architecture: info?.architecture }
 }
+
+/**
+ * Whether this browser spends far more on *submitting* a WebGPU dispatch than on running it.
+ *
+ * **Measured, and the spread is wider than anything else around the call.** SEAM's mask
+ * assessor is 86.8 GFLOP a patch in one submit, and the same 25 open ends on the same laptop,
+ * the same GPU and the same WGSL took 27 ms a patch in Chrome and 98 in Firefox — 6.2 s an end
+ * against 11.0. A ladder of nine controlled rungs (`pnpm probe:assessor-gap`) cleared every
+ * other candidate in Chrome: the scoring loop, the Pyodide cut running beside it, half a
+ * gigabyte of held buffers, a blocked main thread, a page repainting every frame and Chrome's
+ * own GPU flags come to under 7 ms between them. What is left is the browser's own path from
+ * `submit` to the answer, which the probe can see directly: timing one network a step at a time
+ * forces a synchronisation per dispatch and turns 26 ms into 358.
+ *
+ * **Asked by name, which nothing else in this file does.** Every other question here is a
+ * capability — is there an adapter, does the backend implement this op — and the browser answers
+ * it. This one has no feature to ask about: the API is present and correct, the shaders compile,
+ * the answers are identical to the last bit, and only the clock is different. The alternative is
+ * to run the network and time it, which costs a 133 MB download before anything can be said.
+ *
+ * It names only Firefox because Firefox is what was measured. Safari's WebGPU may well be in the
+ * same position and is deliberately not claimed here — `docs/ml.md`'s rule is that a figure in
+ * this repo was taken rather than reasoned forward.
+ */
+export function slowGpuDispatch(): boolean {
+  const agent = (globalThis.navigator as Navigator | undefined)?.userAgent
+  return typeof agent === 'string' && agent.includes('Firefox/')
+}

@@ -32,6 +32,7 @@
 
 import { refuseIfOverCrashFloor } from '../../core/limits'
 import { inFlight } from '../concurrency'
+import type { ChunkCache } from './chunkCache'
 import type { FetchOptions } from './transport'
 import { fetchBytes, fetchInfo, isNotFound } from './transport'
 import type { ShardingSpec } from './sharded'
@@ -510,6 +511,25 @@ export function compressedMortonCode(grid: Triple, gridShape: Triple): bigint {
   return code
 }
 
+/**
+ * What a chunk is called in a `ChunkCache` — **one spelling, because two readers depend on it.**
+ *
+ * `overChunks` writes under it and anything planning ahead (`seam:suggestMerges` works out which
+ * chunks each open end will want before it fetches any) reads under it. Written out twice the
+ * two would drift, and the failure is silent in the worst way: a planner whose keys no longer
+ * match finds nothing, reports no error, and quietly turns the eviction policy back into
+ * guesswork.
+ *
+ * A sharded scale keys on the object's Morton code rather than the chunk's name, which is the
+ * one real difference between the two stores and the reason this is a function rather than a
+ * template string at each site.
+ */
+export function chunkKeyOf(base: string, scale: VolumeScale, chunk: ChunkRef): string {
+  return scale.sharding
+    ? `${base}/${scale.key}#${compressedMortonCode(chunk.grid, gridShapeOf(scale))}`
+    : `${base}/${scale.key}/${chunk.name}`
+}
+
 /** How many chunks the scale's grid holds in each axis. */
 export function gridShapeOf(scale: VolumeScale): Triple {
   return [
@@ -579,6 +599,17 @@ export interface CutoutOptions extends FetchOptions {
    * hand should not have to invent a volume to read it.
    */
   readonly info?: Pick<VolumeInfo, 'numChannels'>
+  /**
+   * Chunks this caller already has, and where to put the ones it is about to fetch.
+   *
+   * **The caller's, never a module global** — see `chunkCache.ts` for why, and for the
+   * measurement behind it: a chunk is wider than most boxes that read one, so a reader working
+   * through nearby boxes asks for the same bytes over and over. On one neuron's 505 open ends
+   * that was 25.4 GB fetched against 2.8 GB of distinct chunks.
+   *
+   * Absent means every read fetches its own, which is the right default for a one-off box.
+   */
+  readonly chunks?: ChunkCache
 }
 
 /**
@@ -654,6 +685,20 @@ async function overChunks(
     const byKey = new Map<bigint, ChunkRef>()
     for (const chunk of chunks) byKey.set(compressedMortonCode(chunk.grid, shape), chunk)
     /*
+     * **Held chunks are taken out of the ask, not out of the answer**, which is what makes a
+     * cache worth anything on a sharded scale: the objects are coalesced into runs of adjacent
+     * keys, so a key left in the list drags its neighbours' bytes over the wire with it. Keyed
+     * by the object's own address, which is what a shard read fetches — the same identity the
+     * unsharded path uses, one naming scheme along.
+     */
+    // Deleting the current entry while iterating a `Map` is well defined, so no copy.
+    for (const [key, chunk] of byKey) {
+      const held = options.chunks?.get(chunkKeyOf(base, scale, chunk))
+      if (!held) continue
+      byKey.delete(key)
+      await landed(chunk, held)
+    }
+    /*
      * Pasted as each object arrives, not after the last one. That keeps the decode overlapping
      * the network — `decodeImageChunk` is a `createImageBitmap`, which the browser runs off the
      * main thread, so several genuinely proceed at once — and keeps the progress callback
@@ -666,6 +711,7 @@ async function overChunks(
       (key, buffer) => {
         const chunk = byKey.get(key)!
         byKey.delete(key)
+        if (buffer) options.chunks?.set(chunkKeyOf(base, scale, chunk), buffer)
         return landed(chunk, buffer)
       },
       { ...options, concurrency },
@@ -680,15 +726,31 @@ async function overChunks(
   }
 
   await inFlight(chunks, concurrency, async (chunk) => {
+    /*
+     * The cache key **and**, on an unsharded scale, the address to fetch — true by construction
+     * on this branch and not in general: a sharded key is a Morton code that was never fetched.
+     * `chunkKeyOf` names that hazard; here the two coincide.
+     */
+    const key = chunkKeyOf(base, scale, chunk)
+    /*
+     * **Held bytes are pasted, not re-fetched.** `paste` reads the buffer and keeps nothing of
+     * it — the decode writes into the box's own index — so one buffer can serve any number of
+     * boxes. An absent chunk is deliberately not remembered as absent: that is a 404 per read
+     * rather than megabytes, and a volume that gains a chunk should not have to be reopened.
+     */
+    const held = options.chunks?.get(key)
+    if (held) {
+      await landed(chunk, held)
+      return
+    }
     // One object per chunk, named by its box. Absent, not failed: an unwritten chunk is ordinary
     // at the edge of a volume. A CORS refusal or a 500 is not an answer about the data, and
     // still throws.
-    const buffer = await fetchBytes(`${base}/${scale.key}/${chunk.name}`, options).catch(
-      (error: unknown) => {
-        if (isNotFound(error)) return undefined
-        throw error
-      },
-    )
+    const buffer = await fetchBytes(key, options).catch((error: unknown) => {
+      if (isNotFound(error)) return undefined
+      throw error
+    })
+    if (buffer) options.chunks?.set(key, buffer)
     await landed(chunk, buffer)
   })
 }

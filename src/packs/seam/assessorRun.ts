@@ -174,9 +174,16 @@ export async function scoreCandidates(
       /*
        * A copy, and it has to be: `WireTensor.data` is **transferred** to the worker, so a
        * subarray view would hand over the whole group's buffer and detach the patches after
-       * it. The copy is 2.1 MB against a 133 MB model.
+       * it. It reads 2.1 MB of mask and writes 8.4 MB of float, against a 133 MB model.
+       *
+       * The constructor rather than `Float32Array.from`, which is the faster path on paper —
+       * but **measured at 1.2 ms against 1.4 for exactly this shape** (2.1 M voxels, Node 26),
+       * so it is tidiness and not a saving. Recorded because the copy was a suspect while the
+       * assessor's per-call cost was being chased, and a millisecond is not where 20 of them
+       * are going: what this loop spends between two awaits is the cut, at about 40 ms a group
+       * of four, and not this.
        */
-      const patch = Float32Array.from(group.patches.subarray(k * voxels, (k + 1) * voxels))
+      const patch = new Float32Array(group.patches.subarray(k * voxels, (k + 1) * voxels))
       const answered = await session.run({
         part,
         feeds: [

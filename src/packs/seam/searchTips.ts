@@ -87,6 +87,23 @@ export const SEARCH_CANDIDATE_FIELDS: readonly Field[] = [
   field('rank', 'rank', 'i64'),
   field('geo_rank', 'geo_rank', 'i64'),
   field('vol_um3', 'vol_um3', 'f64', 'µm³'),
+  /*
+   * **How big the whole piece is, where `vol_um3` is how much of it is near the tip.**
+   *
+   * `vol_um3` is the candidate's voxels *inside the search box* — the 6 µm cube around the end —
+   * so a long neurite passing through counts only for the part in view, and two candidates with
+   * the same number can be a whole fragment and the tail of something large. The level-2 chunk
+   * count is of the **object**, wherever it reaches: it is the chunkedgraph's own decomposition,
+   * so it is coarse (a chunk is a fixed box of the volume) and it does not stop at the box.
+   * That makes it the better proxy for "is this a fragment or a piece of a neuron", which is
+   * the question a reader triaging a queue is actually asking — `seam:review` sorts and filters
+   * on it.
+   *
+   * It is already fetched: the search asks `l2ChunkCounts` for every root in the pool because
+   * two of the ranker's eleven features read it. `l2c` is `log10` of this and is the feature;
+   * this is the number.
+   */
+  field('n_l2', 'n_l2', 'i64'),
   field('min_dist_um', 'min_dist_um', 'f64', 'µm'),
   field('contact_x_nm', 'contact_x', 'f64', 'nm'),
   field('contact_y_nm', 'contact_y', 'f64', 'nm'),

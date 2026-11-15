@@ -163,6 +163,17 @@ export interface NodeHint {
   side?: HintSide
 }
 
+/**
+ * No hints — the answer most `readerHints` give most of the time.
+ *
+ * Here rather than four times over, which is what it had become (`ui/hints.ts`,
+ * `nodes/table/linkTable.ts`, `packs/annotation/bigclust.ts`, `packs/seam/suggestMerges.ts`).
+ * A shared constant rather than a fresh `[]` per call because the card asks on every render to
+ * decide whether to mount its hint stack at all, and `NodeDefinition.readerHints` asks for a
+ * module-level constant in as many words.
+ */
+export const NO_HINTS: readonly NodeHint[] = []
+
 export interface GraphEdge {
   id: string
   source: string

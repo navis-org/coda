@@ -16,7 +16,7 @@ import type {
   PoolSizes,
   PoolSizesRequest,
 } from '../../pyodide/cutoutSummary'
-import { countsInPoolOrder, searchEnds } from './searchRun'
+import { countsInPoolOrder, oneAhead, searchEnds } from './searchRun'
 import type { SearchedEnd } from './searchRun'
 import type { SearchSteps } from './searchRun'
 import { parseTreeRanker } from './treeRanker'
@@ -90,10 +90,22 @@ const stepsFor = (
     const at = Number(request.queryRoot - 1n)
     return pools[at]!
   }),
-  sizes: vi.fn(async (request: PoolSizesRequest): Promise<PoolSizes> => ({
-    l2c: Float64Array.from(request.candCount, (c) => Math.log10(Math.max(c, 1))),
-    l2x: Float64Array.from(request.candCount, () => 1),
-  })),
+  /*
+   * **It detaches everything it was given, because the real one does.** `callPython` transfers
+   * every typed-array view in a request, so a caller that reads one again afterwards finds it
+   * empty — and nothing in a test notices unless the fake does it too. A bespoke test used to
+   * hold that rule for `candRoot` alone, which was exactly as much as the code happened to copy:
+   * publishing the counts as `n_l2` made `candCount` a second array read after the call, and
+   * every test still passed while the app failed on its first end.
+   */
+  sizes: vi.fn(async (request: PoolSizesRequest): Promise<PoolSizes> => {
+    const l2c = Float64Array.from(request.candCount, (c) => Math.log10(Math.max(c, 1)))
+    const l2x = Float64Array.from(request.candCount, () => 1)
+    for (const view of [request.candRoot, request.candCount]) {
+      structuredClone(view, { transfer: [view.buffer] })
+    }
+    return { l2c, l2x }
+  }),
   counts: vi.fn(async () => counts),
 })
 
@@ -230,25 +242,25 @@ describe('searchEnds', () => {
     expect(seen).toEqual([0, 1])
   })
 
-  it('survives a step that transfers the ids it was given', async () => {
+  /**
+   * **Every array this file sends is detached by the step it is sent to**, and every array it
+   * reads afterwards therefore has to be a copy. `stepsFor` detaches, so this is a check on the
+   * sequence rather than on one bespoke fake — and it covers both of the arrays at once, which
+   * is the shape of the bug it is here for: `candRoot` was copied from the beginning and
+   * `candCount` was not, and that was invisible for as long as nothing read `candCount` twice.
+   */
+  it('keeps what it sends to a step that transfers, ids and counts alike', async () => {
     const pool = poolOf([1, 2], [near, near])
     const steps = stepsFor([pool], countsFor([pool]))
-    const transferring: SearchSteps = {
-      ...steps,
-      sizes: async (request) => {
-        // What the worker does to the buffer it is posted.
-        structuredClone(request.candRoot, { transfer: [request.candRoot.buffer] })
-        return {
-          l2c: Float64Array.from({ length: 2 }, () => 1),
-          l2x: Float64Array.from({ length: 2 }, () => 1),
-        }
-      },
-    }
     const [one] = await collect(
-      searchEnds(TIPS, [endAt(0, 1n)], { ranker: RANKER, topK: 100, ownUm: 2 }, transferring),
+      searchEnds(TIPS, [endAt(0, 1n)], { ranker: RANKER, topK: 100, ownUm: 2 }, steps),
     )
     expect(one!.rows).toBe(2)
     expect([...one!.candRoot]).toHaveLength(2)
+    // The counts survive into the published column, which is what reads them after the call.
+    // 40 is what `countsFor` gives a candidate; 9,000 is the query's own, which is not here.
+    expect(one!.columns['n_l2']).toHaveLength(2)
+    expect([...one!.columns['n_l2']!]).toEqual([40, 40])
   })
 
   /** Not an error: a tip whose neuron does not reach its own cutout is one to look at. */
@@ -324,5 +336,162 @@ describe('an end that cannot be sized', () => {
     expect(ends[0]!.missingQuery).toBe(false)
     expect(ends[1]!.rows).toBeGreaterThan(0)
     expect(ends[1]!.refusal).toBeUndefined()
+  })
+})
+
+/**
+ * Running the source one value ahead of the body.
+ *
+ * The node's whole reason for it is that searching an end is the network and scoring one is the
+ * GPU, so serial they cost the sum and overlapped they cost the larger. **None of that is
+ * visible in the answer** — the same ends come out in the same order with the same contents —
+ * so the only thing that can hold the scheduling in place is a test that watches when the source
+ * is asked.
+ */
+describe('one ahead', () => {
+  /** A source that records when each value was asked for, and is released by hand. */
+  function gated(values: readonly number[]) {
+    const asked: number[] = []
+    const gates: Array<() => void> = []
+    async function* source() {
+      for (const value of values) {
+        asked.push(value)
+        await new Promise<void>((open) => gates.push(open))
+        yield value
+      }
+    }
+    return {
+      asked,
+      stream: source(),
+      /** Let the next value through. */
+      release: () => gates.shift()?.(),
+    }
+  }
+
+  const settle = () => new Promise((done) => setTimeout(done, 0))
+
+  it('yields every value, in order, exactly once', async () => {
+    async function* three() {
+      yield 1
+      yield 2
+      yield 3
+    }
+    const got: number[] = []
+    for await (const value of oneAhead(three())) got.push(value)
+    expect(got).toEqual([1, 2, 3])
+  })
+
+  /** **The property.** The source is already working on the next value inside the body. */
+  it('asks the source for the next value before the body has finished with this one', async () => {
+    const { asked, stream, release } = gated([1, 2, 3])
+    const seen: number[] = []
+    const run = (async () => {
+      for await (const value of oneAhead(stream)) {
+        seen.push(value)
+        // Inside the body for value 1, the source has already been asked for value 2.
+        await settle()
+        release()
+      }
+    })()
+    release()
+    await settle()
+    expect(seen).toEqual([1])
+    /*
+     * **One ahead and no further**, both halves in one assertion: value 2 has been asked for
+     * while the body still holds value 1, and the exact equality rules out 3 — a deeper queue
+     * would cost memory and buy nothing at a resource that is already busy.
+     */
+    expect(asked).toEqual([1, 2])
+    release()
+    await run
+    expect(seen).toEqual([1, 2, 3])
+  })
+
+  /**
+   * **The source is closed when the consumer gives up.** Without it the source stays suspended
+   * and its outstanding `next()` runs on into a run being discarded — for a search that is a
+   * whole end's reading. `for await` closes `oneAhead` on a `break` or a throw; this pins that
+   * `oneAhead` passes the closing on.
+   */
+  it('closes the source when the body breaks out early', async () => {
+    let closed = false
+    async function* three() {
+      try {
+        yield 1
+        yield 2
+        yield 3
+      } finally {
+        closed = true
+      }
+    }
+    for await (const value of oneAhead(three())) {
+      if (value === 1) break
+    }
+    // The `return()` is not awaited, so let the microtask that runs it land.
+    await settle()
+    expect(closed).toBe(true)
+  })
+
+  it('closes the source when the body throws', async () => {
+    let closed = false
+    async function* two() {
+      try {
+        yield 1
+        yield 2
+      } finally {
+        closed = true
+      }
+    }
+    await expect(
+      (async () => {
+        for await (const _ of oneAhead(two())) throw new Error('the assessor gave up')
+      })(),
+    ).rejects.toThrow('the assessor gave up')
+    await settle()
+    expect(closed).toBe(true)
+  })
+
+  it('passes on a failure of the source', async () => {
+    async function* breaks() {
+      yield 1
+      throw new Error('the box could not be read')
+    }
+    const got: number[] = []
+    await expect(
+      (async () => {
+        for await (const value of oneAhead(breaks())) got.push(value)
+      })(),
+    ).rejects.toThrow('the box could not be read')
+    expect(got).toEqual([1])
+  })
+
+  /**
+   * **A body that throws leaves a `next()` in flight**, and without a handler on it where it is
+   * made that is an unhandled rejection — a failed run under vitest, "Uncaught (in promise)" in
+   * a browser. The window is widest exactly where it matters: a Cancel while the body is parked
+   * on the assessor. `assessorRun.ts` earned this one for its own prefetch.
+   */
+  it('does not leave an unhandled rejection when the body gives up mid-stream', async () => {
+    const caught: unknown[] = []
+    const onUnhandled = (reason: unknown) => caught.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      async function* breaksLater() {
+        yield 1
+        throw new Error('the next end failed while the body was busy')
+      }
+      await expect(
+        (async () => {
+          for await (const _ of oneAhead(breaksLater())) {
+            throw new Error('the assessor gave up')
+          }
+        })(),
+      ).rejects.toThrow('the assessor gave up')
+      // Long enough for an unhandled rejection to have been reported, had there been one.
+      await new Promise((done) => setTimeout(done, 10))
+      expect(caught).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })

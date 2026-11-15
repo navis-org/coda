@@ -39,9 +39,14 @@
  * against the cutoff this configuration was fitted with. `singleSeed.test.ts` holds all of it to
  * SEAM's own published numbers.
  *
- * **It costs about two seconds an end on top of the search**, and the checkpoint is a 133 MB
- * download. The network is Coda's own WGSL implementation rather than ONNX Runtime — 26.5 ms a
- * patch against 136 — so most of an assessed end is now the two boxes it reads.
+ * **What it costs on top of the search is a quarter of an end, and that is browser-dependent.**
+ * A measured run of 25 ends in Chrome took 6.2 s each with the network at 25% — 27 ms a patch,
+ * the figure a bare probe gets on the same GPU. The same run in Firefox took 11.0 s an end with
+ * the network at half of it, because a WebGPU dispatch costs that browser far more to submit and
+ * synchronise; `SECONDS_PER_PATCH` has the measurement and `SLOW_WEBGPU` is what says so on the
+ * card. The checkpoint is a 133 MB download. The network is Coda's own WGSL implementation
+ * rather than ONNX Runtime — 27 ms a patch against 136 — so most of an assessed end is the two
+ * boxes it reads.
  *
  * `Assess top` caps the patches per end; what the cap costs in answers is measured on SEAM's own
  * set, in `assessEnds.ts`' header, and the part worth knowing is that it does not only lose
@@ -73,12 +78,15 @@
  * token — SEAM's invariant 7, which holds in every phase of this pack.
  */
 
+import type { NodeHint } from '../../core/graph'
+import { NO_HINTS } from '../../core/graph'
 import type { EvalContext, ParamValues } from '../../core/node'
 import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { warnOverWait } from '../../core/limits'
 import type { TableValue } from '../../core/values'
 import { isTableValue } from '../../core/values'
+import { slowGpuDispatch } from '../../ml/support'
 import { agree, plural } from '../../style/format'
 import {
   CAVE_DATASET_INPUT,
@@ -110,12 +118,13 @@ import {
 } from './models'
 import { openSeamModel } from './openWindowModel'
 import type { OpenedSeamModel } from './openWindowModel'
-import { patchBoxFor, patchScaleFrom } from './patchBox'
+import { patchBoxFor, patchScaleFrom, widestPatchReach } from './patchBox'
 import { afterShare } from './progress'
 import { openTreeRanker } from './rankerConfig'
 import type { RankerConfig } from './rankerConfig'
 import { contactsOf, publishedEnd, reportOnRun } from './scoreEnds'
-import { searchEnds } from './searchRun'
+import type { EndToSearch } from './searchRun'
+import { oneAhead, searchEnds } from './searchRun'
 import type { SearchedEnd } from './searchRun'
 import type { PublishedEnd, TipRow } from './searchTips'
 import {
@@ -137,10 +146,37 @@ import {
   openSearchVolume,
 } from './searchVolume'
 import type { SearchVolume } from './searchVolume'
+import { runClock } from './runClock'
+import type { RunClock } from './runClock'
+import type { GraphRunner, RunRequest } from '../../ml/session'
+import type { Triple, VolumeScale } from '../../data/precomputed/volume'
 import type { CaveRequestOptions } from '../../data/cave/client'
+import { formatBytes } from '../../core/limits'
+import { DEFAULT_CHUNK_BUDGET } from '../../data/precomputed/chunkCache'
 
 /** How much of the progress bar the ranker gets before the search starts. It is 1.3 MB. */
 const MODEL_SHARE = 0.02
+
+/**
+ * The `Chunk cache` param's default, in the megabytes a reader sets it in.
+ *
+ * Derived from `DEFAULT_CHUNK_BUDGET` rather than typed out beside it: the measurement and the
+ * reasoning behind the number live in `chunkCache.ts`, and a second literal here is how a
+ * default comes to disagree with the documentation of itself.
+ */
+const DEFAULT_CHUNK_MB = DEFAULT_CHUNK_BUDGET / (1024 * 1024)
+
+/**
+ * Where `Chunk cache` stops being an ordinary number and starts being a decision about a
+ * machine, in the megabytes the param is set in.
+ *
+ * Twice the default, and the threshold is a round number rather than a measured one on purpose:
+ * what it guards is how much memory *this* computer has free, which nothing here can read. The
+ * measurement that does exist says the other side — a neuron's whole working set was 2.8 GB, and
+ * a cache that holds it reads a tenth of what no cache does — so the warning is written to be
+ * acted on in either direction.
+ */
+const BIG_CHUNK_CACHE_MB = 1024
 
 /**
  * And the assessor's share, where one is picked. It is 133 MB.
@@ -156,26 +192,62 @@ const MODEL_SHARE = 0.02
 const ASSESSOR_SHARE = 0.1
 
 /**
- * What one open end costs, in seconds, measured on Aedes.
+ * What one open end costs before any patch, in seconds, measured on Aedes.
  *
- * The box is ~19 MB over the network and the pool is 560 ms of Pyodide warm; the chunkedgraph
- * calls ride on top and are shared between neighbouring ends, so they are not in the figure.
- * Two seconds is the whole-end number the probe reports on a warm worker with the box cached,
- * rounded up — a cold first end is some four seconds more and is not worth modelling.
+ * The search box, the pool measured from it, and the chunk counts of every root in that pool —
+ * everything an end pays whether or not an assessor is picked. From a 25-end run in Chrome, a
+ * cold session: **1.27 s of search box, 0.64 s of pool, 0.83 s of counts**, which is 2.74 and is
+ * rounded down to 2.7 rather than up, the patch figures below being measured on the same run.
+ *
+ * **The counts used to be left out of this entirely**, on the reasoning that they are shared
+ * between neighbouring ends and so ride on top. They are shared, and they were still a third of
+ * an end: `l2ChunkCounts` memoises by root, but a pool is about 500 roots and a walk along a
+ * neuron keeps meeting new ones, so what is shared is a fraction and not the cost. Pricing it at
+ * zero made this model under-state a wait by about a fifth, which is the one direction
+ * `docs/limits.md` says a guard rail must not fail in.
+ *
+ * **It is the cold figure, and the warm one is lower.** The memo lasts the session, so a second
+ * run over ends near the first pays far less — two Firefox runs put the same stage at 16% and
+ * then under 5%. The conservative one is the one to price with, for the same reason.
+ *
+ * `pnpm probe:seam-tip-boxes` holds the reading half up on real ends: 1.3 s of voxels for a
+ * search box that has to fetch its chunks, 0.6 s of root lookups beside it, and 89 ms where
+ * `Chunk cache` already holds them — so the box figure is right for an end moving into new
+ * segmentation, which on a walk along a neuron is most of them.
  *
  * **A rate, not a limit.** `WAIT_WARN_SECONDS` decides when the number is worth saying; this only
  * turns a count of ends into it, which is `docs/limits.md`' rule about stating a limit in the
  * units of what it protects.
  */
-export const SECONDS_PER_END = 2
+export const SECONDS_PER_END = 2.7
 
 /**
  * What one assessed candidate costs, in seconds: a 129³ patch cut and run.
  *
- * **26.5 ms**, measured on real patches through Coda's own WGSL implementation of the network
- * (`docs/seam-assessor-speed.md` §14, M3 Max / Chrome 157). The cut is about 40 ms a group of
- * four and is prefetched one group deep, so it hides behind the ~106 ms of GPU that group costs
- * and does not appear here.
+ * **27 ms, measured in a run rather than in a probe.** 25 open ends of an Aedes neuron through
+ * Coda's own WGSL implementation, best 26 and median 26 — the same figure
+ * `pnpm probe:gpu-assessor` gets on a bare page (`docs/seam-assessor-speed.md` §14), so the loop
+ * around the network costs nothing worth a constant. The cut is about 40 ms a group of four and
+ * is prefetched one group deep, so it hides behind the GPU that group costs and does not appear
+ * here.
+ *
+ * **It is a rate for one browser, and the spread between browsers is larger than anything else
+ * on this page.** The same 25 ends on the same laptop and the same GPU measured **98 ms a
+ * patch** in Firefox against 27 in Chrome — 11.0 s an end against 6.2 — because the cost is in
+ * how a browser's WebGPU submits and synchronises a dispatch, not in the arithmetic. A ladder
+ * of nine controlled rungs (`pnpm probe:assessor-gap`) cleared everything else: the loop, the
+ * Pyodide cut beside it, `Chunk cache`'s bytes, a blocked main thread, a repainting page and
+ * Chrome's own GPU flags are all worth under 7 ms between them.
+ *
+ * **This is the fast figure and there is a second constant for the other**, rather than an
+ * average of the two, which would be a number no reader experiences. `secondsPerEnd` asks
+ * `slowGpuDispatch` which of them applies; `SLOW_SECONDS_PER_PATCH` carries the Firefox
+ * measurement and the reason.
+ *
+ * The consequence is not only a number in a warning. At 27 ms the scoring is a quarter of an end
+ * and `Assess top` is a weak lever; at 98 it is half the run and the cap is the biggest one
+ * there is. Which is why the node reports the rate, and the fastest call beside it, after a run
+ * rather than this file claiming to know (`runClock.ts`).
  *
  * **The ONNX Runtime path was 136 ms** for the same network and the same answer — its WebGPU
  * backend runs 3D `Conv` through a per-element shader — so this is 5.1x cheaper. That is not
@@ -183,23 +255,72 @@ export const SECONDS_PER_END = 2
  * promises much. `secondsPerEnd` is the sum.
  *
  * (A draft of this constant said 0.17, which was a review chain's *budget* for 133 ms of GPU
- * plus some of the cut, never a measurement of anything. It never shipped, and prose contrasting
- * against it was comparing a measurement with an estimate. The two real numbers are 136 and
- * 26.5, both from §14 on the same patches.)
+ * plus some of the cut, never a measurement of anything. A later one said 0.091, which was the
+ * Firefox figure taken for a defect in this loop before anybody asked which browser it came
+ * from. Both are recorded because prose contrasting against either was comparing a measurement
+ * with something that was not one.)
  */
-const SECONDS_PER_PATCH = 0.0265
+const SECONDS_PER_PATCH = 0.027
+
+/**
+ * What a patch costs where the browser's WebGPU dispatch is the slow kind — `slowGpuDispatch`.
+ *
+ * **98 ms, the measured figure, not a safety margin.** The same 25 ends on one laptop and one
+ * GPU: 27 ms a patch in Chrome and 98 in Firefox, 6.2 s an end against 11.0. Pricing every
+ * reader at the fast rate left `warnOverWait` under-stating a 500-end Firefox run as about
+ * thirty-five minutes where the measurement says ninety — and under-stating is the one direction
+ * `docs/limits.md` says a guard rail must not fail in. `SECONDS_PER_END` records being caught by
+ * exactly that once already.
+ *
+ * It costs nothing to ask: the browser fact is already on hand for the card's hint, and
+ * `slowGpuDispatch` answers `false` where there is no `navigator` at all (the MCP server, a
+ * build-time render), which is the Chrome figure and the right default for a machine nobody is
+ * waiting at.
+ */
+const SLOW_SECONDS_PER_PATCH = 0.098
+
+/**
+ * What a reader on a browser with a costly WebGPU dispatch should know before a long run.
+ *
+ * Derived from the browser rather than written into the document (`NodeDefinition.readerHints`),
+ * which is the whole reason it can be stated at all: it is false for most readers, and a
+ * sentence saved by a Firefox user would ride a share link to a Chrome one.
+ *
+ * **Two sentences, with the measurement left out.** A draft quoted the figures — 98 ms a patch
+ * against 27 — and named `Assess top` as the fallback. Both belong somewhere, and a hint box on
+ * a card is not it: `docs/help.md` has the rule, and a reader who wants the number gets it from
+ * the node's own report after a run. What a hint owes them is the one thing they cannot work out
+ * for themselves, which is that the browser is the cause.
+ */
+const SLOW_WEBGPU: readonly NodeHint[] = [
+  {
+    text:
+      'This assessor runs significantly slower in Firefox than in Chrome. If speed is a ' +
+      'problem, try running it in Chrome.',
+  },
+]
 
 /**
  * The patch box an end's whole list shares: a little over 8 µm of segmentation, read once.
  *
- * **The top of a measured range, deliberately.** It was put at 0.5–1 s per end by the review
- * that found this box re-reads chunks the search box fetched seconds earlier
- * (`docs/seam-suggestions-plan.md`), and that measurement was explicitly flagged as wanting a
- * browser to confirm it — the sharded path uses Range requests, which browsers cache unreliably.
- * A guard rail that under-states a wait is the one that fails, so this takes the high end until
- * somebody measures it properly. At 0.5 s the headline "two seconds on top" would be 1.6.
+ * **Measured now, where this was a range taken at its top.** `pnpm probe:seam-tip-boxes` reads
+ * real consecutive ends of one Aedes neuron, and the thing it found is that this box is mostly
+ * the chunks the search box in front of it has just fetched — a chunk here is 8.2 x 8.2 x 2.9 µm
+ * and 3.0 MB, wider than either box. So with `Chunk cache` holding them, a box read drops from
+ * ~1300 ms to **89 ms**: cold, the wire is everything. (Warm, what is left *is* the decode —
+ * `chunkCache.ts` weighs that trade.)
+ *
+ * 0.4 s is that, plus the part of this box which genuinely lies outside the search box — it
+ * reaches 8.5 µm against the search's 6 — averaged over a walk. At the default budget a tip
+ * reads 13 MB against the 72 MB it read before the cache, and the two boxes together come to
+ * about 1.3 s rather than 3.
+ *
+ * **It is a rate for the default configuration**, and the two things that move it are the
+ * reader's: a smaller `Chunk cache`, and a `Sort` above this node scattering ends that lie
+ * beside each other. `reportOnReads` is what says so after a run where it went badly, since no
+ * constant here can know either.
  */
-const SECONDS_PER_PATCH_BOX = 1
+const SECONDS_PER_PATCH_BOX = 0.4
 
 /**
  * How many candidates an end's list holds once the own-tip rule has run, for pricing a wait.
@@ -266,7 +387,10 @@ function unknownModel(what: string, id: string, param: string): string {
 export function secondsPerEnd(assessed: boolean, top: number): number {
   if (!assessed) return SECONDS_PER_END
   const patches = top > 0 ? Math.min(top, CANDIDATES_PER_END) : CANDIDATES_PER_END
-  return SECONDS_PER_END + SECONDS_PER_PATCH_BOX + patches * SECONDS_PER_PATCH
+  // The reader's own browser, because that is the largest single factor in this sum and the
+  // node already knows it — see `SLOW_SECONDS_PER_PATCH`.
+  const perPatch = slowGpuDispatch() ? SLOW_SECONDS_PER_PATCH : SECONDS_PER_PATCH
+  return SECONDS_PER_END + SECONDS_PER_PATCH_BOX + patches * perPatch
 }
 
 export const suggestMergesNode = packNode({
@@ -333,12 +457,37 @@ export const suggestMergesNode = packNode({
       step: 5,
       absentMeans: 0,
       visibleIf: (params) => params.assessor !== NO_ASSESSOR,
-      help: 'How many of each end’s ranked candidates to put through the assessor, counting from the forest’s first. 0 is all of them, which is what SEAM does. Since the assessor runs at 26.5 ms a patch, most of an assessed end is now the two boxes it reads rather than the scoring — so a cap of 25 cuts the patches by 43% but the run by only about a tenth, and it does not only lose suggestions, it invents a few: flooring the rest of the list concentrates the first candidate’s share and so raises `q`. It changes the verdict on 5 tips of SEAM’s own 2,708. Narrowing the ends with a Filter Table above this node is the better lever.',
+      help: 'How many of each end’s ranked candidates to put through the assessor, counting from the forest’s first. 0 is all of them, which is what SEAM does. **What it saves depends on your browser, by a lot**: the same 25 ends on the same laptop and the same GPU measured 27 ms a patch in Chrome, where the network was a quarter of the run, and 98 ms in Firefox, where it was half — 6.2 s an end against 11.0. On the Firefox run, capping at 10 took an end from 11.0 s to 4.5. Run once uncapped and read the `ms a patch` in the timing the node reports: under about 30 ms the cap buys little and a Filter Table above this node is the better lever, and well above it the cap is the biggest lever there is. What it costs is answers, and not only lost ones: flooring the rest of the list concentrates the first candidate’s share and so raises `q`, so a cap invents a few suggestions as well as losing a few. Against SEAM’s own 2,708 tips a cap of 25 changes the verdict on 5, and a cap of 10 on 21.',
+    },
+    {
+      id: 'chunkCacheMb',
+      kind: 'int',
+      label: 'Chunk cache (MB)',
+      default: DEFAULT_CHUNK_MB,
+      min: 0,
+      step: 128,
+      advanced: true,
+      absentMeans: DEFAULT_CHUNK_MB,
+      /*
+       * **Presentational, and that is not a slip.** Invariant 4's rule is that a param is
+       * presentational only where it cannot change what `evaluate` returns, and this one cannot:
+       * the same chunks are read either way, and a cache decides whether they arrive over the
+       * wire or out of a map. Keyed, every change to it would invalidate a run that would come
+       * back byte-for-byte identical, which on a node of this cost is the expensive kind of
+       * wrong.
+       */
+      presentational: true,
+      help: 'How much memory to spend holding segmentation this run has already fetched. A chunk of the Aedes segmentation is 8.2 × 8.2 × 2.9 µm and 3 MB — wider than either box an end reads — so an end’s patch box is largely the chunks its own search box just pulled, and so is its neighbour’s: one neuron’s 505 ends fetched 25.4 GB for 2.8 GB of distinct chunks. On that neuron a tip read 72 MB with no cache, 13 MB at this default, and 7 MB at 1.5 GB. Raising it pays most where a Sort above this node has scattered the ends, since a cache the size of the neuron’s working set does not care what order they arrive in. It is held until the run ends, outside the JavaScript heap where nothing refuses it — so a budget past what the machine has loses the run rather than slowing it. 0 holds nothing.',
     },
     caveDatastackParam(
       'Which datastack’s segmentation to search, as `datastack:materialization`. Wire a Dataset instead and this follows it. The materialization decides *when* the supervoxels are read as belonging to a neuron, so it should be the one the open ends were found in.',
     ),
   ],
+
+  // Only where an assessor is picked: with none, nothing runs on the GPU and the sentence is
+  // about a cost this run does not pay.
+  readerHints: (params) =>
+    params.assessor !== NO_ASSESSOR && slowGpuDispatch() ? SLOW_WEBGPU : NO_HINTS,
 
   /*
    * The full published shape, before anything runs — invariant 2's reason. A column picker on a
@@ -363,6 +512,23 @@ export const suggestMergesNode = packNode({
       if (chosen.issue) issues.push(chosen.issue)
     }
     issues.push(...caveDatastackIssues(ctx.inputs.dataset, ctx.params))
+    /*
+     * **A guard rail warns; it does not refuse** (`docs/limits.md`), and it says its number in
+     * the units of the thing it protects. A chunk cache is held outside the JavaScript heap,
+     * where neither `CRASH_FLOOR_BYTES` nor the browser itself refuses it, so the first sign of
+     * a budget past what the machine has is the tab going down and taking several hundred ends
+     * of work with it. Which number is too large is a fact about a machine this node cannot
+     * read, so the sentence says what it costs rather than naming a ceiling.
+     */
+    if (Number(ctx.params.chunkCacheMb) > BIG_CHUNK_CACHE_MB) {
+      issues.push(
+        `\`Chunk cache\` is ${formatBytes(Number(ctx.params.chunkCacheMb) * 1024 * 1024)}, ` +
+          'held for the whole run and outside the memory the browser will refuse. It is worth ' +
+          'it on a machine with the room to spare — a cache the size of a neuron’s working ' +
+          'set makes the search read about a tenth of what it otherwise would — but a tab that ' +
+          'runs out of memory loses the run rather than slowing it.',
+      )
+    }
     return issues
   },
 
@@ -477,7 +643,7 @@ export const suggestMergesNode = packNode({
           progress: (fraction, note) => ctx.progress(MODEL_SHARE + fraction, note),
           /*
            * **Coda's own WGSL, not ONNX Runtime.** `ASSESSOR_RUNTIME` hands back the same
-           * `ModelSession`, so nothing below this line knows the difference — but it is 26.5 ms
+           * `ModelSession`, so nothing below this line knows the difference — but it is 27 ms
            * a patch against 136, because ORT's WebGPU backend runs 3D `Conv` through a
            * per-element shader (`docs/seam-assessor-speed.md` §14).
            */
@@ -495,7 +661,11 @@ export const suggestMergesNode = packNode({
         plan,
         assessor,
         top,
-        volume: await openSearchVolume(target.datastack, plan.xyNm, when, options),
+        volume: await openSearchVolume(target.datastack, plan.xyNm, when, options, {
+          // Megabytes at the param, bytes inside: a reader thinks in the first and a budget is
+          // spent in the second.
+          chunkBytes: Math.max(0, Number(ctx.params.chunkCacheMb)) * 1024 * 1024,
+        }),
         options,
       })
     } finally {
@@ -534,11 +704,25 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   const { table, rows, head, ranker, plan, assessor, top, volume, options } = run
   const assessing = assessor !== undefined
 
+  /*
+   * **Timed at the seam the sequences already have.** Every expensive step is injected — which
+   * is what makes `searchRun.ts` and `assessEnds.ts` drivable without a token or a GPU — so
+   * wrapping each one here charges the stage it belongs to and nothing inside those files knows
+   * a clock exists. `runClock.ts` says why a run of this cost has to be able to answer "where
+   * did the time go" on the reader's machine rather than on the one the headers were measured
+   * on.
+   */
+  const clock = runClock()
   const steps = {
-    measure: (request: CandidatePoolRequest) =>
+    measure: clock.around('measuring the pool', (request: CandidatePoolRequest) =>
       runCandidatePool(request, { signal: ctx.signal }),
-    sizes: (request: PoolSizesRequest) => runPoolSizes(request, { signal: ctx.signal }),
-    counts: (roots: readonly string[]) => l2ChunkCounts(volume.graphene, roots, options),
+    ),
+    sizes: clock.around('pool sizes', (request: PoolSizesRequest) =>
+      runPoolSizes(request, { signal: ctx.signal }),
+    ),
+    counts: clock.around('chunk counts', (roots: readonly string[]) =>
+      l2ChunkCounts(volume.graphene, roots, options),
+    ),
   }
   const halfWidthNm = plan.halfWidthUm * NM_PER_UM
 
@@ -574,15 +758,34 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
    * last end of a neuron.
    */
   /*
-   * **Before the loop**, which is what makes a dataset with no 32 nm scale one sentence rather
-   * than a refusal on every end of every neuron: `patchSteps` asks `patchScaleFrom` once, here.
-   * Why the two steps are built per run rather than per end is on `patchSteps` itself.
+   * **Asked once, before the loop**, which is what makes a dataset with no 32 nm scale one
+   * sentence rather than a refusal on every end of every neuron — and only where an assessor
+   * runs, since a geometry-only search reads no patch box and must not be refused for the want
+   * of a scale it never reads. Why the two steps are built per run rather than per end is on
+   * `patchSteps` itself.
    */
-  const assess = assessor && {
-    steps: patchSteps(assessor, volume, options, ctx.signal),
-    floor: assessor.config.missingPatchScore,
-    fits: assessor.config.fits,
-  }
+  const patchScale = assessor && patchScaleFrom(volume.info)
+  /*
+   * **One record, not an `assess` and an `assessSteps` beside it.** Built apart they were two
+   * optionals that are always both set or both unset, which the type system cannot know — so
+   * the construction needed `assessor!` and the call site `assessSteps!`, two assertions
+   * standing in for one condition.
+   *
+   * `patchSteps` is handed the clock and charges its own stages from inside; `box` is the one
+   * it cannot, being the caller's to name.
+   */
+  const assess =
+    assessor && patchScale
+      ? {
+          scale: patchScale,
+          floor: assessor.config.missingPatchScore,
+          fits: assessor.config.fits,
+          steps: ((made) => ({
+            ...made,
+            box: clock.around('reading the patch box', made.box),
+          }))(patchSteps(assessor, patchScale, volume, options, ctx.signal, clock)),
+        }
+      : undefined
 
   const ends: PublishedEnd[] = []
   /*
@@ -599,18 +802,83 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     const mine = at.map((i) => rows[i]!)
     // One neuron's ends overlap; two neurons' do not. See `forgetRoots`.
     forgetRoots(volume)
-    // `tip` indexes every one of this neuron's tips, which is what the own-tip rule compares
-    // against; only the ones with a readable box become an end to search.
-    const toSearch = mine.flatMap((tip, i) =>
-      fits.has(tip) ? [endToSearch(volume, tip, i, halfWidthNm, options)] : [],
-    )
+    /*
+     * `tip` indexes every one of this neuron's tips, which is what the own-tip rule compares
+     * against; only the ones with a readable box become an end to search.
+     *
+     * **One pass, because two would put the plan's order in a comment.** This used to `filter`
+     * for the plan and `flatMap` for the ends, running the same `fits.has` twice — and the plan
+     * is built in the order the ends are searched, so if the two predicates ever drifted the
+     * cache would evict confidently against the wrong future. Nothing but prose stopped it.
+     * Derived from one list, the ordering holds structurally.
+     */
+    const toSearch: EndToSearch[] = []
+    for (const [i, tip] of mine.entries()) {
+      if (!fits.has(tip)) continue
+      const end = endToSearch(volume, tip, i, halfWidthNm, options)
+      toSearch.push({ ...end, box: clock.around('reading the search box', end.box) })
+    }
     if (toSearch.length === 0) continue
-    for await (const searched of searchEnds(
-      tipPositions(mine),
-      toSearch,
-      { ranker, topK: plan.topK, ownUm: plan.ownUm },
-      steps,
-      { signal: ctx.signal },
+    /*
+     * **What this neuron is about to read, before it reads any of it.** Both of an end's boxes
+     * are functions of its tip position, so the whole sequence is knowable — and with it the
+     * cache evicts what is wanted furthest away rather than what was read longest ago, which on
+     * one neuron at the default budget is 9.3 MB a tip against 13.7. `chunkPlan.ts` holds the
+     * measurement and why the patch box is bounded rather than predicted.
+     *
+     * In `toSearch`'s order, which is the order `searchEnds` yields in — the positions come
+     * from the same list, so the two cannot disagree.
+     */
+    volume.planEnds(
+      toSearch.map((end) => [...mine[end.tip]!.nm] as Triple),
+      {
+        halfWidthNm,
+        // No assessor, no patch box — so the plan is the search boxes alone.
+        ...(assess
+          ? {
+              patchScale: assess.scale,
+              patchReachNm: widestPatchReach(plan.ownUm),
+            }
+          : {}),
+      },
+    )
+    /*
+     * **The next end is searched while this one is scored.** `oneAhead` is the whole of it, and
+     * `searchRun.ts` holds the reasoning and the one thing it does not buy: both halves call
+     * Pyodide, and there is one worker for the tab, so that part queues rather than overlapping.
+     * What genuinely runs alongside the network is the GPU. The two things it rests on are settled elsewhere rather than here — a yielded end
+     * is final (`searchRun.ts`), and two box reads in flight share one supervoxel lookup
+     * (`SearchVolume.asking`).
+     *
+     * **The eviction plan is still sound, with one caveat that is this file's to record.**
+     * `chunkPlanFor` gives both boxes of one end *one* position and `endSearched` runs below,
+     * after the assessor — so with two ends in flight the plan sits at *p* while the reads
+     * belong to *p* (the patch box) and *p+1* (the search box). Neither scores `Infinity`, so
+     * neither is ever dropped ahead of a chunk nothing wants again, which is the property that
+     * matters: nothing is evicted while it is still being read in preference to dead bytes.
+     *
+     * What is **not** true, and an earlier draft of this comment claimed, is that neither can be
+     * the furthest *finite* next use. `nextUse` answers the nearest end at or after the cursor,
+     * so a chunk only end *p+1* wants scores `p+1` — the largest finite score there is, unless
+     * something held is wanted further ahead still. At a budget too small to hold both ends'
+     * working sets the cache can therefore evict what the read in flight has just fetched, and
+     * the patch box then re-reads what the search box had in hand. It is wasted bytes rather
+     * than a wrong box, and at the default budget the two ends are about 28 chunks against 170
+     * held — but a reader who sets `Chunk cache` low enough is in that régime, which is one
+     * more reason `reportOnReads` exists.
+     *
+     * What it costs is a second box alive: end *i+1*'s search box is read while end *i*'s patch
+     * box is still being cut from. At a 6 µm and an 8 µm box that is tens of megabytes, against
+     * a chunk cache measured in hundreds.
+     */
+    for await (const searched of oneAhead(
+      searchEnds(
+        tipPositions(mine),
+        toSearch,
+        { ranker, topK: plan.topK, ownUm: plan.ownUm },
+        steps,
+        { signal: ctx.signal },
+      ),
     )) {
       // Back to the whole table's numbering: `searchEnds` indexes this neuron's tips alone.
       const end: SearchedEnd = { ...searched, tip: at[searched.tip]! }
@@ -631,6 +899,8 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
         ends.push(searchOnly(end))
       }
       done += 1
+      // One end off the plan, so the chunks only it wanted stop being worth keeping.
+      volume.endSearched()
       /*
        * **Published only once the end is wholly finished**, assessor and all, which is what
        * keeps the streaming honest now that there is a second stage: a reader must never see a
@@ -642,12 +912,29 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
         afterShare(head, done / fits.size),
         `${assessing ? 'scoring' : 'searching'} ${neuron}`,
       )
+      /*
+       * Charged directly rather than through a wrapper: it is the one expensive thing the run
+       * does that is not behind an injected step, and it grows with the run — every publish
+       * rebuilds both tables from every end so far.
+       */
+      const builtAt = performance.now()
       answer = published(table, ends, rows, assessing, attempting)
+      clock.spend('rebuilding the published tables', performance.now() - builtAt)
       ctx.publish(answer)
     }
   }
 
-  reportOnRun(ctx, ends)
+  reportOnRun(ctx, ends, volume.chunks)
+  /*
+   * Patches actually put through the network — `''` in `filled` is a candidate that really was
+   * scored, which is the same vocabulary the run's tally counts. The rate it buys is the one
+   * number in the report that compares against another machine.
+   */
+  let patches = 0
+  for (const end of ends)
+    for (const why of end.scores?.filled ?? []) if (why === '') patches += 1
+  const timing = clock.report({ ends: ends.length, patches })
+  if (timing) ctx.warn(timing)
   return answer
 }
 
@@ -664,11 +951,32 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
  */
 function patchSteps(
   assessor: OpenedSeamModel<AssessorConfig>,
+  /**
+   * The scale a patch is cut at, resolved by the caller.
+   *
+   * **Handed over rather than asked for here**, because the run needs the same answer one step
+   * earlier: it tells the chunk cache which boxes are coming, and a patch box is at this scale.
+   * Two `patchScaleFrom` calls would be two chances for a run to plan one scale and read
+   * another, which is the quiet kind of wrong — the plan would simply never match a key.
+   */
+  scale: VolumeScale,
   volume: SearchVolume,
   options: CaveRequestOptions,
   signal: AbortSignal | undefined,
+  clock: RunClock,
 ): AssessSteps {
-  const scale = patchScaleFrom(volume.info)
+  /*
+   * The session with its one expensive call timed. A wrapper rather than a timer inside
+   * `scoreCandidates`, which takes a `GraphRunner` precisely so it can be driven by something
+   * that is not a GPU — `assessorRun.test.ts` hands it a fake, and a clock in there would be a
+   * second thing that fake has to satisfy.
+   */
+  const timed: GraphRunner = {
+    loaded: assessor.session.loaded,
+    run: clock.around('running the network', (request: RunRequest) =>
+      assessor.session.run(request),
+    ),
+  }
   return {
     box: async (cut) => {
       const box = patchBoxFor(scale, cut.centresNm)
@@ -685,13 +993,30 @@ function patchSteps(
      * an end that throws or is cancelled with its box still open leaves 11 MB held in a heap
      * that never shrinks — and the next end's `open` would replace its labels, so a late close
      * would drop the wrong tip's.
+     *
+     * **Timed as three stages**, because that is how many different things it is and how many
+     * different controls they answer to — see `STAGES`. The open is the time before the
+     * callback's first line, since that is what `useAssessorBox` does in between; the network
+     * is a wrapper on `session.run`; and the cutting is what is left of the loop once the
+     * network's share is taken out of it, which is why the clock can be read as well as
+     * written.
      */
-    score: (request) =>
-      useAssessorBox(
+    score: async (request) => {
+      const askedAt = performance.now()
+      return useAssessorBox(
         request,
-        (open) => scoreCandidates(assessor.session, assessor.config, open, { signal }),
+        async (open) => {
+          clock.spend('handing the patch box to Python', performance.now() - askedAt)
+          const ranBefore = clock.spent('running the network')
+          const loopAt = performance.now()
+          const answer = await scoreCandidates(timed, assessor.config, open, { signal })
+          const ran = clock.spent('running the network') - ranBefore
+          clock.spend('cutting patches', performance.now() - loopAt - ran)
+          return answer
+        },
         { signal },
-      ),
+      )
+    },
   }
 }
 

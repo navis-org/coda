@@ -33,16 +33,16 @@
  * end** — about 200 ms against an end's two seconds, and nothing at all for an end that
  * introduces no new root.
  *
- * ## The prefetch that looks free and is not
+ * ## The prefetch that looked free and was not
  *
- * Roughly 1.4 s of an end's 2 s is network with the worker idle — the box, then two
- * `roots_binary` requests — so a one-deep lookahead on `ends[i + 1].box()` would hide most of it
- * (the measures stay serial; `callPython` has one worker). It is **not** a free win: two
- * `readPool`s in flight both see the supervoxels their ends share as unknown and ask the
- * chunkedgraph for them twice, and neighbouring ends are exactly where that overlap is —
- * `SearchVolume.roots` exists to make it free. Doing it properly means an in-flight promise per
- * batch. Recorded rather than done, because the next reader will think of the prefetch and not
- * of the double lookup.
+ * Most of an end is network with the worker idle — the box, then the supervoxel lookups, then
+ * the chunk counts — so running the next end's search alongside this one's scoring hides it.
+ * That was recorded here as **not** a free win, because two box reads in flight both saw the
+ * supervoxels their ends share as unknown and asked the chunkedgraph for them twice, and
+ * neighbouring ends are exactly where that overlap is.
+ *
+ * `SearchVolume.asking` is what made it free: one lookup, shared between the reads that want
+ * it. `oneAhead` below is the other half, and the node wraps this generator in it.
  *
  * So the sequence lives here, taking its steps as functions — which is `openEndRun.ts`' own
  * argument in this pack ("the sequence is where the failures live, and all of them are quiet…
@@ -249,24 +249,38 @@ export async function* searchEnds(
     }
 
     /*
-     * **A copy, because `callPython` transfers.** Every view in a request is handed to the
-     * worker and detached on this side, so sending `pool.candRoot` itself would empty the array
-     * that `measured` and then `rankPool` read on the next two lines — surfacing as "the pool
-     * says 538 rows and its candidate ids number 0" on the first end, and *only* in the app:
-     * the unit test's fake and the probe's in-process bridge both post nothing.
+     * **Copies, because `callPython` transfers.** Every view in a request is handed to the
+     * worker and detached on this side, so sending either of these as they are would empty the
+     * array that `measured` and then `rankPool` read on the next two lines — surfacing as "the
+     * pool says 538 rows and its candidate ids number 0" on the first end, and *only* in the
+     * app: the unit test's fake and the probe's in-process bridge both post nothing.
+     *
+     * **It is per array read afterwards, not per array sent**, which is the part that caught
+     * this twice. `candRoot` was copied here from the beginning and `candCount` was not, and
+     * that was right for exactly as long as nothing read `candCount` again — publishing it as
+     * `n_l2` two lines down made it wrong, with the same sentence and a different column name.
+     * A `searchRun.test.ts` fake that detaches what it is given is what now holds the rule.
      */
     const sizes = await steps.sizes({
       candRoot: BigUint64Array.from(pool.candRoot),
-      candCount,
+      candCount: Float64Array.from(candCount),
       queryRoot: end.queryRoot,
       queryCount: queryCount!,
     })
     const measured: MeasuredPool = {
       rows: pool.rows,
       candRoot: pool.candRoot,
-      // The two size features join the rest here, which is the one place that knows they came
-      // by a second route. `rankPool` is deliberately feature-agnostic and must not learn it.
-      columns: { ...pool.columns, l2c: sizes.l2c, l2x: sizes.l2x },
+      /*
+       * The two size features join the rest here, which is the one place that knows they came
+       * by a second route. `rankPool` is deliberately feature-agnostic and must not learn it.
+       *
+       * **`n_l2` is the count itself, carried beside them and used by neither.** The ranker
+       * reads `l2c`, which is `log10` of it, and the published column has to be the raw number:
+       * a reader sorting a review queue by how big a piece is wants the quantity, and
+       * reconstructing it from a log in the card would be this pack holding a feature's
+       * definition in two places. It costs one `Float64Array` already in hand.
+       */
+      columns: { ...pool.columns, l2c: sizes.l2c, l2x: sizes.l2x, n_l2: candCount },
     }
     const ranking = rankPool(ranker, measured, topK)
 
@@ -278,6 +292,86 @@ export async function* searchEnds(
      */
     const list: EndCandidates = { rows: ranking.rows, columns: ranking.columns, tip: end.tip }
     yield gather(ranking, ownTipRule(tipsNm, [list], ownUm)[0]!, pool)
+  }
+}
+
+/**
+ * Each value of `stream`, with the **next one already being computed** while the body runs.
+ *
+ * `for await` asks a generator for its next value only once the body has finished with the last
+ * one, which is right when the two share a resource and wrong when they do not. Here they mostly
+ * do not: searching an end is nearly all network, and the expensive half of what the node does
+ * with a yielded end is the GPU. Serial, an end cost the sum; one ahead, it costs the largest
+ * resource.
+ *
+ * **They are not disjoint, and the measurement says where.** Both halves also call Pyodide —
+ * the search measures its pool, the body cuts its patches — and `src/pyodide/engine.ts` holds
+ * **one worker for the tab**, so that work queues rather than overlapping. The first run after
+ * this landed went 4.9 s an end to 3.3 against a predicted 2.8, and the stage that appeared to
+ * get slower (`cutting patches`, surfacing at 0.39 s) had not: it had started waiting for the
+ * worker. Anyone widening the overlap should move the Pyodide work, not the order of the ends.
+ *
+ * **One ahead, never more.** Two would mean three ends' boxes alive and a second one queued
+ * behind a resource that is already busy, buying nothing for the memory — `assessorRun.ts`
+ * reached the same depth for the same reason, one file along.
+ *
+ * ## The two things a caller must know
+ *
+ * **The source runs ahead of the body, so a value must be final when it is yielded.** That is
+ * `searchEnds`' own property and the reason this is safe here: the own-tip rule reads tip
+ * positions, which are known before any box is read, so nothing a later end learns can change
+ * an earlier one. A generator whose values settle only once the next is drawn would be
+ * published half-made.
+ *
+ * **Whatever the source does while running ahead must be safe to do twice over.** For a search
+ * that means two box reads in flight against one volume, which is what `SearchVolume.asking`
+ * is for.
+ *
+ * Generic because the shape is, and here rather than in `src/core` because the two paragraphs
+ * above are what make it correct and they are facts about this sequence.
+ */
+export async function* oneAhead<T>(stream: AsyncGenerator<T>): AsyncGenerator<T> {
+  /*
+   * **The handler goes on where the promise is made, not where it is abandoned.** A pending
+   * `next()` nobody awaits is an unhandled rejection — "Uncaught (in promise)" in a browser, a
+   * failed run under vitest — and the window opens the instant the consumer's body throws or a
+   * Cancel fires, which is typically while it is parked on something long and cannot yet react.
+   * `assessorRun.ts` earned this one. It does not swallow the rejection the loop awaits: that
+   * copy still rejects normally. In one place, because the comment is the load-bearing part and
+   * a second copy is a second thing to keep true.
+   */
+  const ask = () => {
+    const next = stream.next()
+    void next.catch(() => {})
+    return next
+  }
+  let coming = ask()
+  try {
+    for (;;) {
+      const got = await coming
+      if (got.done) return
+      // Before the body sees the value, which is the whole point.
+      coming = ask()
+      yield got.value
+    }
+  } finally {
+    /*
+     * **Close the source when the consumer gives up.** `for await` closes *this* generator on a
+     * break or a throw, which resumes it here — but without this the source is left suspended
+     * and its outstanding `next()` runs to completion into a run that is being discarded. For a
+     * search that is a whole end: a 19 MB box read, a chunkedgraph lookup and a Pyodide measure,
+     * all written into a volume nobody will read. The box read and the bridge call carry the
+     * run's signal, so a Cancel stops most of it; the supervoxel lookup deliberately does not
+     * (it is shared, so one caller's Cancel must not be every caller's — `resolveRoots`), and
+     * on every other exit, the assessor throwing or a bridge call failing, nothing stops any of
+     * it. This does.
+     *
+     * **`void`, not `await`.** `return()` queues behind the pending `next()`, so awaiting it
+     * would make the failing path wait out the very prefetch it is trying to abandon. Not
+     * awaited, it still stops the source going on to a second value and lets it run its own
+     * `finally` if it ever grows one.
+     */
+    void stream.return?.(undefined)
   }
 }
 

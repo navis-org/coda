@@ -24,6 +24,7 @@
  */
 
 import type { NodeHint } from '../../core/graph'
+import { NO_HINTS } from '../../core/graph'
 import { registerNode } from '../../core/registry'
 import type { ParamValues } from '../../core/node'
 import { refreshParam } from '../../core/node'
@@ -62,7 +63,6 @@ const FORGETS_LOCAL_FILES: readonly NodeHint[] = [
       'again. Chrome and Edge remember it, and a URL works in every browser.',
   },
 ]
-const NO_HINTS: readonly NodeHint[] = []
 
 /**
  * Where the node's file is and what is known of its footer, synchronously — the one peek every

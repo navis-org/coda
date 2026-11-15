@@ -240,6 +240,84 @@ allocation refuses from the floor, the *set*'s wait warns through a `Warner` the
 `src/data` does not. `chunksCovering(...).length` is public so a caller can price it before
 starting.
 
+#### Holding chunks, because the chunk is wider than the box — measured on Aedes (2026-11-15)
+
+`CutoutOptions.chunks` is an optional `ChunkCache` the **caller** owns: bytes as fetched, keyed by
+the URL they came from, bounded in bytes and least-recently-used. Absent, every read fetches its
+own chunks, which is right for a one-off box.
+
+The reason it exists is a ratio nobody looks at until they measure. The Aedes segmentation stores
+**256 × 256 × 64 voxels to a chunk — 8.2 × 8.2 × 2.9 µm, 3.01 MB on the wire** — and the boxes
+that read it are smaller than that: `seam:suggestMerges` reads a 6 µm box per open end for its
+search and a little over 8 µm for the assessor's patches. So the two boxes of one end are largely
+the same chunks, and so are the boxes of the end next to it. `pnpm probe:seam-tip-boxes` walks
+real consecutive ends of one 505-end neuron:
+
+| | chunk fetches | bytes |
+|---|---|---|
+| each read fetching its own | 8,438 | 25.4 GB |
+| distinct chunks the neuron touches | 945 | 2.8 GB |
+
+Nine fetches in ten were bytes the run had already had. Live, with the cache in place, a search
+box that hits it reads in **89 ms** against ~1300 ms cold. Cold, that settles what the time was —
+the wire, not the decode — so the cache holds the **compressed** form and gets three times as
+much volume per megabyte as a decoded one would.
+
+**Warm, the decode is the whole of a hit**, which is the other half of the same measurement and
+only became visible once the cache existed: 89 ms for a search box and 247 for a patch box, about
+0.33 s an end, because what is held sits one layer below `decodeCompressedSegmentation`. Two
+boxes of one end also decode the chunks they share. Three times the reach still looks like the
+better side of that at a budget whose curve does not flatten, but a decoded tier is what is left
+on the table and it should be weighed against these figures rather than assumed away.
+
+What a budget buys is a bet on locality, and the curve does not flatten — per tip, on that
+neuron:
+
+| budget | chunks | ends in table order | ends sorted by score |
+|---|---|---|---|
+| none | 0 | 72 MB | 72 MB |
+| 192 MB | 64 | 17.6 MB | 43.3 MB |
+| 512 MB | 170 | 13.4 MB | 31.6 MB |
+| 1.5 GB | 512 | 7.4 MB | 12.4 MB |
+| 2.8 GB | 945 | 5.6 MB | 5.6 MB |
+
+The working set is bounded by the *neuron*, so a cache that holds it stops caring what order the
+ends arrive in — which is why the two columns meet at the bottom. Below it, a `Sort` above the
+node costs real minutes, and no cache can make a scattered walk local.
+
+**Least-recently-used is a guess, and this reader does not have to guess.** Every open end's
+position is in the table before anything is fetched, and both of an end's boxes are functions of
+that position — so the whole sequence of chunk reads is knowable, and the best possible policy is
+Bélády's: evict whatever is wanted furthest away. `ChunkCache` takes an optional `nextUse`, and
+`seam/chunkPlan.ts` builds one per neuron. Simulated over the same 505 ends at 512 MB, a tip
+reads 13.7 MB under LRU and 9.3 MB under this — 32.0 against 17.8 with the ends sorted by score.
+Live, at a budget small enough to evict (12 ends, 24 MB), the two policies answered 62 and 73 of
+140 reads.
+
+Three things make it safe rather than clever. The patch box is **bounded, not predicted** — its
+real extent depends on contacts the search has not found yet, so the plan uses the widest box
+those contacts could produce and keeps a few chunks slightly too long, which is the safe
+direction. A key the plan does not recognise answers `Infinity`, so a planner that has drifted
+from the reader evicts arbitrarily rather than wrongly — and `chunkKeyOf` is the single spelling
+of a cache key that stops the drift in the first place. And "drop it once its last end has
+passed" arrives as a consequence rather than as a second mechanism: a chunk with no next use
+sorts last and goes first, including the one just stored, whose read has already pasted it.
+
+The plan is per **neuron**, not per run: a run can be hundreds of neurons and a quarter of a
+million ends, and two neurons share no chunks worth indexing for.
+
+`DEFAULT_CHUNK_BUDGET` is 512 MB and `seam:suggestMerges` exposes it as `Chunk cache`, because
+past that it is a decision about a particular machine. The failure it is bounded against is not a
+slow tab but a dead one: `ArrayBuffer` bytes sit outside V8's JS heap, so `jsHeapSizeLimit` does
+not bind, `CRASH_FLOOR_BYTES` never sees them, and nothing refuses before the process does. The
+node warns above 1 GB and says what it costs rather than naming a ceiling — a guard rail warns.
+
+**What it is not yet in:** the memory meter. That reads `heldOutputs()` — the scheduler's cache
+and its previews — and a chunk cache is neither, so during a run the meter under-reports by up to
+the budget. It is freed when the run ends and the volume goes, so nothing leaks; but a reader who
+sets this to a gigabyte and then looks at the meter will not find it there. Reporting it means a
+channel from a pack's run into the meter, which is the piece of work this note stands in for.
+
 #### Sharded volumes, and images — measured on the MaleCNS EM (2026-11-10)
 
 Both were built before anything exercised them, and one volume covers both:
