@@ -21,10 +21,10 @@ import type { CodaType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import '../../nodes'
 import { seam } from './index'
-import { MERGE_RANKER_MODELS } from './models'
+import { MERGE_ASSESSOR_MODELS, MERGE_RANKER_MODELS, NO_ASSESSOR } from './models'
 import { SEARCH_CANDIDATE_FIELDS } from './searchTips'
 import { schemaOf } from './suggestionTables'
-import { SECONDS_PER_END } from './suggestMerges'
+import { SECONDS_PER_END, secondsPerEnd } from './suggestMerges'
 import { WAIT_WARN_SECONDS } from '../../core/limits'
 
 const def = requireNodeDef('seam:suggestMerges')
@@ -59,7 +59,7 @@ describe('the card', () => {
    * answers `undefined` for one that is not there, so it takes either.
    */
   it('publishes only the columns the search fills', () => {
-    const out = infer({}, {})
+    const out = infer({ assessor: NO_ASSESSOR }, {})
     expect(columnNames(out.candidates!.schema!)).toEqual(
       columnNames(schemaOf(SEARCH_CANDIDATE_FIELDS)),
     )
@@ -116,14 +116,130 @@ describe('the ranker param', () => {
   })
 })
 
+describe('the assessor param', () => {
+  /**
+   * **Off by default**, which is the whole shape of the decision: the search alone is two
+   * seconds an end, and the assessor is a 133 MB download and several seconds more. A node that
+   * reached for both the moment it was dropped on a canvas would be answering a question nobody
+   * had asked yet.
+   */
+  it('runs no assessor unless one is picked', () => {
+    const param = findParam(def, 'assessor')
+    expect(param?.default).toBe(NO_ASSESSOR)
+    const options = param?.kind === 'enum' ? param.options : undefined
+    const values = (typeof options === 'function' ? [] : (options ?? [])).map(
+      (one) => one.value,
+    )
+    expect(values[0]).toBe(NO_ASSESSOR)
+    expect(values.slice(1)).toEqual(MERGE_ASSESSOR_MODELS.map((model) => model.id))
+  })
+
+  /**
+   * `NO_ASSESSOR` is the one string that must never be a model id, and its docstring in
+   * `models.ts` says so — a row called `none` would be unreachable and nothing on the node could
+   * see why. This is what makes that claim true rather than merely stated.
+   */
+  it('reserves the none value, so no row can ever shadow it', () => {
+    for (const list of [MERGE_ASSESSOR_MODELS, MERGE_RANKER_MODELS]) {
+      expect(list.map((model) => model.id)).not.toContain(NO_ASSESSOR)
+    }
+  })
+
+  /** Both controls are about a model, so neither is drawn where there is none to run. */
+  it('hides the download tick and the cap while no assessor is picked', () => {
+    for (const id of ['download', 'assessTop']) {
+      const param = findParam(def, id)
+      expect(
+        param?.visibleIf?.({ ...defaultParams(def), assessor: NO_ASSESSOR } as ParamValues),
+      ).toBe(false)
+      expect(
+        param?.visibleIf?.({
+          ...defaultParams(def),
+          assessor: MERGE_ASSESSOR_MODELS[0]!.id,
+        } as ParamValues),
+      ).toBe(true)
+    }
+  })
+
+  /**
+   * A saved graph naming an assessor this build no longer carries keeps its value, so the card
+   * says which is missing rather than falling back to the first row — which would score with a
+   * different checkpoint under a different set of fits.
+   */
+  it('names an assessor this build does not have', () => {
+    const issues = validate({ assessor: 'gone', datastack: 'wclee_aedes_brain:1' })
+    expect(issues.join(' ')).toMatch(/does not have an assessor called `gone`/)
+  })
+
+  /**
+   * **The eleven columns appear before anything runs** — invariant 2's reason. A column picker
+   * on a Filter Table below cannot wait for a neuron's worth of boxes, and the choice that
+   * decides them is a param rather than a measurement.
+   */
+  it('promises the stage-6 columns as soon as an assessor is picked', () => {
+    const out = infer({ assessor: MERGE_ASSESSOR_MODELS[0]!.id }, {})
+    for (const name of ['score_s0', 'logit', 'p_cand', 'conf', 'filled']) {
+      expect(columnNames(out.candidates!.schema!), name).toContain(name)
+    }
+    for (const name of ['segclr', 'p_tip', 'p_top', 'q', 'r', 'shown']) {
+      expect(columnNames(out.tips!.schema!), name).toContain(name)
+    }
+  })
+})
+
 describe('the wait it prices', () => {
+  /** How many ends of each kind it takes to cross the wait the node may stay silent about. */
+  const endsBeforeWarning = (assessed: boolean, top = 0) =>
+    WAIT_WARN_SECONDS / secondsPerEnd(assessed, top)
+
   /**
    * A guard rail warns and runs anyway (`docs/limits.md`), so what matters is *when*. One end is
    * a box over the network and a Pyodide measure; a handful should pass in silence and a whole
    * neuron's worth should not.
    */
   it('says nothing about a handful of ends and does about a neuron’s worth', () => {
-    expect(20 * SECONDS_PER_END).toBeLessThan(WAIT_WARN_SECONDS)
-    expect(500 * SECONDS_PER_END).toBeGreaterThan(WAIT_WARN_SECONDS)
+    expect(20 * secondsPerEnd(false, 0)).toBeLessThan(WAIT_WARN_SECONDS)
+    expect(500 * secondsPerEnd(false, 0)).toBeGreaterThan(WAIT_WARN_SECONDS)
+  })
+
+  /**
+   * **The relationship, not the ratio.** An assessed end reads a second box and runs a network
+   * over every candidate, so it must cost meaningfully more and must therefore warn sooner —
+   * but *how much* more is a measurement that has already moved once: the hand-written WebGPU
+   * runtime took a patch from 136 ms to 26.5, which dropped an assessed end from about 4x a
+   * searched one to about 2x. Pinning the ratio would have made that a test failure to be
+   * edited past rather than a fact to be read.
+   */
+  it('prices an assessed end above a searched one, and warns sooner for it', () => {
+    expect(secondsPerEnd(true, 0)).toBeGreaterThan(secondsPerEnd(false, 0))
+    expect(endsBeforeWarning(true)).toBeLessThan(endsBeforeWarning(false) / 1.5)
+    // And a neuron is hundreds of ends, so an assessed whole neuron is always worth a word.
+    expect(endsBeforeWarning(true)).toBeLessThan(500)
+  })
+
+  /** The cap is a lever on the price, so it has to move it — and only downwards. */
+  it('prices a capped run below an uncapped one, and never below the search itself', () => {
+    expect(secondsPerEnd(true, 10)).toBeLessThan(secondsPerEnd(true, 0))
+    expect(secondsPerEnd(true, 10)).toBeGreaterThan(SECONDS_PER_END)
+    // A cap longer than a list costs what no cap costs: there is nothing left to leave out.
+    expect(secondsPerEnd(true, 1000)).toBe(secondsPerEnd(true, 0))
+  })
+
+  /**
+   * **What the cap can be worth at all**, which is the half of the measurement that moved.
+   *
+   * Three of an assessed end's four seconds are the two box reads, and no cap touches them — so
+   * the *ceiling* on what any cap can save is about a quarter of a run, and a cap of 10 saves a
+   * fifth. Through ONNX Runtime at 136 ms a patch the same cap saved about half. The cap costs
+   * exactly what it always did in answers, so what changed is only what it buys.
+   *
+   * The bound below is therefore a bound on the **runtime**, not on the cap: it fails only if a
+   * patch regresses past 50 ms, which is 1.9x the measured 26.5 and which ONNX Runtime misses
+   * comfortably. That is the thing worth catching.
+   */
+  it('does not let the cap promise more than a fraction of a run', () => {
+    const saved = 1 - secondsPerEnd(true, 10) / secondsPerEnd(true, 0)
+    expect(saved).toBeGreaterThan(0)
+    expect(saved).toBeLessThan(0.3)
   })
 })

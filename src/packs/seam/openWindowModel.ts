@@ -23,15 +23,16 @@
  *    were trained to answer, so a URL pointing at the other one would load, run and return
  *    perfectly shaped numbers about a different question.
  * 3. **No runnable build.** A property of the published model, not of the neurons, and worth
- *    saying that way round.
+ *    saying that way round. A caller whose runtime reads one particular build names it
+ *    (`variant`) rather than letting `preferredVariant` choose — see that option.
  * 4. **Consent.** The weights are tens of megabytes. They are fetched once and kept, but never
  *    without being asked for — a graph that opens on its own must not reach for them.
  */
 
 import { formatBytes } from '../../core/limits'
 import type { LoadedManifest } from '../../ml/manifest'
-import { loadManifest, variantBytes } from '../../ml/manifest'
-import type { ModelSession } from '../../ml/session'
+import { completeVariants, loadManifest, variantBytes } from '../../ml/manifest'
+import type { ModelSession, OpenOptions } from '../../ml/session'
 import { openModel } from '../../ml/session'
 import { gpuSupport, preferredVariant } from '../../ml/support'
 import { weightsCached } from '../../ml/weights'
@@ -67,6 +68,32 @@ export async function loadSeamManifest<C>(options: {
   return { loaded, config: options.parse(loaded.manifest.config, loaded.manifest.id) }
 }
 
+/**
+ * A runtime and the build it reads, together.
+ *
+ * `preferredVariant` answers "the smallest build this browser can run", which is the right rule
+ * for a model published in several **quantisations** of one graph. It is the wrong one for a
+ * model whose variants are different **graphs for different runtimes**: the assessor publishes a
+ * plain `conv` export and a `matmul` rewrite of the same weights 0.2 MB apart, so the
+ * smallest-runnable rule would hand ONNX Runtime the graph it is eight times slower on without
+ * a word. A runtime therefore names its own build.
+ */
+export interface SeamRuntime {
+  /** The variant this runtime reads. Priced for consent and fetched, from this one field. */
+  readonly variant: string
+  /**
+   * How to open it. Returns the same `ModelSession` as `openModel`, so nothing downstream knows.
+   *
+   * The shape is `openModel`'s own, minus the two an opener owns for itself — the worker it
+   * builds and the variant it reads. A hand-written copy of the four fields was a second
+   * spelling of `src/ml`'s convention that could drift from it; `parse: parseWindowConfig`
+   * below makes the same argument ("its signature already *is* the hook's").
+   */
+  readonly open: (
+    options: Omit<OpenOptions, 'createWorker' | 'variant'>,
+  ) => Promise<ModelSession>
+}
+
 export interface OpenSeamModelOptions<C> {
   /** The chosen entry of the caller's own model list. */
   readonly model: AffinityModel
@@ -100,6 +127,16 @@ export interface OpenSeamModelOptions<C> {
    * and a throw between `openModel` and the caller's own `try` leaks that session.
    */
   readonly check?: (config: C) => string | undefined
+  /**
+   * The runtime to open with, where `openModel` on the preferred build is not it.
+   *
+   * **One field, not two, and that is the whole of why it is an object.** It was `variant` and
+   * `open` side by side for a round, and they could disagree: the consent sentence priced one
+   * build while the opener fetched the other, which is precisely the failure
+   * `GPU_ASSESSOR_VARIANT` was exported to prevent — a convention held by one call site rather
+   * than by the API. Paired, the build that is priced is the build that is read.
+   */
+  readonly runtime?: SeamRuntime
 }
 
 export interface OpenedSeamModel<C> {
@@ -119,11 +156,27 @@ export async function openSeamModel<C>(
   const refusal = options.check?.(config)
   if (refusal) throw new Error(refusal)
 
-  const variant = preferredVariant(loaded.manifest)
+  /*
+   * **A pinned build is checked against the manifest, not trusted.** Pinning used to skip this
+   * refusal entirely — `variant` was unconditionally truthy, so `if (!variant)` could not fire —
+   * and the failure that let through was quiet rather than loud: `variantBytes` of a variant the
+   * manifest does not carry filters to an empty list and sums to **0**, so a reader with
+   * `Download the model` off was told the model "is a 0 kB download". Refusal #3 is a property
+   * of the published model and has to hold for both paths.
+   */
+  const complete = completeVariants(loaded.manifest)
+  const variant = options.runtime?.variant ?? preferredVariant(loaded.manifest)
   if (!variant) {
     throw new Error(
       `None of ${model.label}'s builds can run on this browser's GPU. This is a property of ` +
         `the published model, not of the neurons.`,
+    )
+  }
+  if (!complete.includes(variant)) {
+    throw new Error(
+      `${model.label}'s manifest carries no \`${variant}\` build — it lists ` +
+        `\`${complete.join('`, `')}\`. This build reads that one and cannot read the others, ` +
+        'so the model needs repackaging rather than a different graph.',
     )
   }
   const bytes = variantBytes(loaded.manifest, variant)
@@ -140,9 +193,9 @@ export async function openSeamModel<C>(
    * every time a part starts — which reads as a stalled download.
    */
   const received = new Map<string, number>()
-  const session = await openModel({
+  const openWith = options.runtime?.open ?? ((one) => openModel({ ...one, variant }))
+  const session = await openWith({
     manifestUrl: model.manifestUrl,
-    variant,
     task,
     signal: options.signal,
     onProgress: (progress) => {

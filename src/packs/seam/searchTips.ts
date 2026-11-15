@@ -5,14 +5,17 @@
  * one place that reads SEAM's published column names out of a value and writes them back. Keeping
  * it apart is what lets `searchRun.test.ts` fake the three bridge steps with plain arrays.
  *
- * ## It publishes what the search measured, and nothing else
+ * ## It publishes what the run measured, and nothing else
  *
  * Stages 4 and 5 answer **where** a candidate is and **how the forest ranks it**. They say
- * nothing about how likely the merge is to be right: `p_cand`, `conf`, `logit`, the three
- * assessor scores, `filled` and `shown` are stage 6 and later, which needs models Coda cannot
- * run yet.
+ * nothing about how likely the merge is to be right: `p_cand`, `conf`, `logit`, `filled`, `q`
+ * and `shown` are stage 6 and later, and they are published only where an `Assessor` actually
+ * ran — `candidateFields` and `tipFields` are the two lists, and the node's `assessed` flag
+ * picks between them in `inferOutputs` as well as in `evaluate`, so a column picker below sees
+ * the choice before anything is measured.
  *
- * Those columns are **absent, not null**. An earlier draft published the full shape
+ * On a geometry-only run those columns are **absent, not null**. An earlier draft published the
+ * full shape
  * `seam:suggestions` reads, with eleven nulls, so the two nodes' tables matched column for
  * column. That coupling is gone deliberately (2026-11-15, user): `seam:suggestions` is modelled
  * on an earlier SEAM pipeline and its output is going to change, so pinning this node's shape to
@@ -48,6 +51,16 @@ export interface TipRow {
   /** Where the end is, in nanometres. */
   readonly nm: readonly [number, number, number]
   /**
+   * Model E's score near the end, where the table carries one — stage 3's `e_tip`.
+   *
+   * Nothing in the search reads it: it is `p_tip`'s second feature, so it only matters to a run
+   * with an assessor, and `undefined` there means "no cell was found near this tip", for which
+   * `decideTip` substitutes the fit's own floor. The **column** being absent is a different
+   * thing: the column is required of an assessed run's table and refused by name, rather
+   * than every tip being quietly floored — see `needed`.
+   */
+  readonly eTip: number | undefined
+  /**
    * Which row of the table it was read from.
    *
    * Carried rather than looked up again. `tipsFromTable` drops rows it could not read, so a
@@ -81,6 +94,126 @@ export const SEARCH_CANDIDATE_FIELDS: readonly Field[] = [
 ]
 
 /**
+ * What stage 6 adds to a candidate row, where an assessor ran.
+ *
+ * SEAM's own names, from `candidates.parquet` of the configuration these come from. Three of them
+ * are the same number read at three widths and all three are published, because that is what the
+ * review card and a reader plotting the list each reach for: `score_s0` is the checkpoint's raw
+ * logit, `logit` is ref's fit of it together with `-geo_rank` and `log vol`, and `p_cand` is that
+ * logit's share of the tip's list. `conf` is `p_tip × p_cand` — the candidate's own chance,
+ * rather than its share among its rivals.
+ *
+ * **A second list rather than nullable columns on the first.** The node publishes one or the
+ * other whole: with no assessor picked these columns are absent, which is the decision
+ * `seam:openEnds` took the same day and for the same reason — a picker offered `p_cand` on a run
+ * that can never fill it is worse than not being offered it.
+ */
+export const ASSESSED_CANDIDATE_FIELDS: readonly Field[] = [
+  field('score_s0', 'score_s0', 'f64'),
+  field('logit', 'logit', 'f64'),
+  field('p_cand', 'p_cand', 'f64'),
+  field('conf', 'conf', 'f64'),
+  /*
+   * **Why this candidate carries the floor, not whether it does.** SEAM's `filled` is a boolean
+   * over one cause — no patch could be cut — and a run here has a second, the reader's own cap.
+   * A boolean would put the two under one word and a reader comparing against a published set
+   * would find more of them with nothing to say why.
+   */
+  field('filled', 'filled', 'str'),
+]
+
+/**
+ * What stage 6 and the stages after it add to a **tip** row.
+ *
+ * `q` and `shown` are the decision: in this configuration there is no split stage, so SEAM's `q`
+ * is `p_tip × p_top` and its cutoff was fitted against that number (`stages.ts`' `decideTip`
+ * reads the absence of a split block and says so). `r` is the isotonic staircase — the share of
+ * shown firsts that are right at this score — and SEAM states it is untested on held-out tips.
+ */
+export const ASSESSED_TIP_FIELDS: readonly Field[] = [
+  field('segclr', 'segclr', 'f64'),
+  field('p_tip', 'p_tip', 'f64'),
+  field('p_top', 'p_top', 'f64'),
+  field('q', 'q', 'f64'),
+  field('r', 'r', 'f64'),
+  field('shown', 'shown', 'bool'),
+]
+
+/**
+ * Why a candidate carries the checkpoint's floor instead of a score — SEAM's `filled`, told apart.
+ *
+ * **The published words, not codes mapped to words later.** They are what the `filled` column
+ * holds and what the run's tally counts, and the first draft had them as three numbers converted
+ * to text one layer up: rewording the text then silently zeroed the tally, because the counter
+ * was string-matching the display form. A union type is the whole fix — both readers are checked
+ * against the same three words.
+ *
+ * `''` is a candidate that really was scored. SEAM's own `filled` is a boolean over one cause;
+ * a run here has two, fixed by different things (a param somebody set, against the segmentation
+ * near the contact), so the cause is published rather than the fact.
+ */
+export type WhyFilled = '' | 'capped' | 'no patch'
+
+/** What one end's candidates scored. */
+export interface AssessedEnd {
+  /**
+   * The assessor's logit per candidate of the **whole** list, in the list's own order.
+   *
+   * A raw logit, not a probability, and not yet ref's: `scoreList` is what turns it into one,
+   * with the fits the checkpoint's own manifest carries. Every unscored candidate holds
+   * `missingPatchScore`.
+   */
+  readonly score: Float64Array
+  /** Per candidate, why it carries the floor, or `''` where it was scored. */
+  readonly filled: readonly WhyFilled[]
+  /**
+   * Why this end has no scores at all, where it has none — `undefined` when it was assessed.
+   *
+   * An end can fail on its own without the run being wrong: its contacts may lie at the edge of
+   * the volume, where no box can be cut. Carried per end so the node counts them and says so
+   * once, rather than a throw taking down a run of several hundred after the expensive ends have
+   * been paid for. `SearchedEnd.refusal` is the same decision one stage earlier.
+   */
+  readonly refusal?: string
+}
+
+/**
+ * The tip's own half of an assessed run, **by the names `ASSESSED_TIP_FIELDS` publishes**.
+ *
+ * Declared here rather than beside the code that computes it (`scoreEnds.ts`) because this is
+ * where the columns are declared, and the two halves of one table have to sit together —
+ * invariant 3, applied inside one feature. It was a list of `[name, value]` pairs for one round,
+ * which meant six names written out in a second file with nothing checking them against these
+ * six: a name only one side changed was an all-null column with a perfectly good schema, or a
+ * `TypeError` in the middle of a run. `assessedFieldsAgree` in the tests holds the two lists
+ * equal, and the compiler holds every writer to this shape.
+ *
+ * `null` where SEAM has no answer rather than a number: `q` and `r` on a tip with no first
+ * candidate, and `shown` where the configuration published no cutoff for the quantity this tip
+ * could reach — which `seam:review` draws as "no verdict" rather than as a rejection.
+ */
+export interface AssessedTip {
+  readonly segclr: number
+  readonly p_tip: number
+  readonly p_top: number
+  readonly q: number | null
+  readonly r: number | null
+  readonly shown: boolean | null
+}
+
+/** The candidate columns a run publishes, with or without an assessor. */
+export function candidateFields(assessed: boolean): readonly Field[] {
+  return assessed
+    ? [...SEARCH_CANDIDATE_FIELDS, ...ASSESSED_CANDIDATE_FIELDS]
+    : SEARCH_CANDIDATE_FIELDS
+}
+
+/** The tip columns a run publishes. The first candidate's, plus the tip's own where scored. */
+export function tipFields(assessed: boolean): readonly Field[] {
+  return assessed ? [...SEARCH_TIP_FIELDS, ...ASSESSED_TIP_FIELDS] : SEARCH_TIP_FIELDS
+}
+
+/**
  * What this node folds onto a tip row: its **first** candidate.
  *
  * The queue a reader works through is one row per tip, so the first candidate's measurements ride
@@ -97,8 +230,26 @@ export const SEARCH_TIP_FIELDS: readonly Field[] = SEARCH_CANDIDATE_FIELDS.filte
   (one) => !['neuron', 'end_uid', 'rank'].includes(one.from),
 )
 
-/** The columns a `Tips` table must have before anything can be searched. */
-const NEEDED = [ID_COLUMN_NAME, 'end_uid', 'x', 'y', 'z'] as const
+/**
+ * The columns a `Tips` table must have, for the run it is about to feed.
+ *
+ * **One list, computed from one flag**, because there were two doors into this question for a
+ * round and nothing made a caller open both: the search's columns were checked inside the
+ * reader, and `e_tip` by a separate exported refusal the node had to remember to call three
+ * statements later. A third requirement — arm B reads EM around the tip and may want something
+ * the search does not — would have written a third.
+ *
+ * `e_tip` is needed **only where an assessor runs**, and then it really is needed: `p_tip` is
+ * fitted on it, with about the weight it puts on `segclr`. A tip Model E found no cell near has
+ * a null `e_tip` and takes the fit's own floor, which is designed; a missing *column* floors
+ * every tip, so the whole run comes out underconfident and shows a fraction of what it should,
+ * with nothing anywhere saying why.
+ */
+function needed(assessing: boolean): readonly string[] {
+  return assessing
+    ? [ID_COLUMN_NAME, 'end_uid', 'x', 'y', 'z', 'e_tip']
+    : [ID_COLUMN_NAME, 'end_uid', 'x', 'y', 'z']
+}
 
 /**
  * Read a `Tips` table into the rows the search works from.
@@ -112,12 +263,16 @@ const NEEDED = [ID_COLUMN_NAME, 'end_uid', 'x', 'y', 'z'] as const
  * ordinary row in a table somebody filtered or joined, and the count comes back so the node can
  * say so.
  */
-export function tipsFromTable(table: TableValue): { rows: TipRow[]; dropped: number } {
-  const missing = NEEDED.filter((name) => !table.data[name])
+export function tipsFromTable(
+  table: TableValue,
+  assessing = false,
+): { rows: TipRow[]; dropped: number } {
+  const missing = needed(assessing).filter((name) => !table.data[name])
   if (missing.length > 0) {
     throw new Error(
       `The Tips table has no \`${missing.join('`, `')}\` column, so there is no open end to ` +
-        'search. Wire this to Find Open Ends or Merge Suggestions.',
+        `search${missing.includes('e_tip') ? ' and nothing to score a tip with' : ''}. ` +
+        'Wire this to Find Open Ends or Merge Suggestions.',
     )
   }
   const rows: TipRow[] = []
@@ -159,7 +314,7 @@ export function tipsFromTable(table: TableValue): { rows: TipRow[]; dropped: num
       dropped += 1
       continue
     }
-    rows.push({ neuronId, endUid, nm: [x, y, z], row: i })
+    rows.push({ neuronId, endUid, nm: [x, y, z], eTip: numberAt(table, 'e_tip', i), row: i })
   }
   return { rows, dropped }
 }
@@ -204,31 +359,102 @@ export function tipPositions(tips: readonly TipRow[]): Float32Array {
 }
 
 /**
+ * One end as it is published: the search's answer, and stage 6's where an assessor ran.
+ *
+ * **Three fields rather than more columns on `SearchedEnd`**, because the two halves are made by
+ * different things at different times and only the first is always there. The search yields its
+ * end finished; the assessor is a separate read, a separate model and a reader's separate choice.
+ *
+ * `order` is what makes the pair one table. SEAM ranks a published list by `logit`, which is the
+ * assessor's answer, while `geo_rank` keeps the forest's — so the row order of the table and the
+ * order the search produced are the same list read two ways, and the node states which rather
+ * than either half assuming.
+ */
+export interface PublishedEnd {
+  readonly end: SearchedEnd
+  /**
+   * Which row of the end's list to publish first, second…: indices into `end.columns`.
+   *
+   * The search's own order (`0, 1, 2…`) where no assessor ran, and the assessor's ranking where
+   * one did. Also the **length** of the published list, which is why a tip with no candidates is
+   * an empty array rather than a flag.
+   */
+  readonly order: Int32Array
+  /** Stage 6 and after, where they ran. */
+  readonly scores?: EndScores
+}
+
+/** What stage 6 and the stages after it measured for one end. */
+export interface EndScores {
+  /** The assessed candidate columns by SEAM's own names, in the **list's** order, not `order`'s. */
+  readonly columns: Readonly<Record<string, Float64Array>>
+  /** Why each candidate carries the floor, or `''` where it does not. Same order. */
+  readonly filled: readonly WhyFilled[]
+  /** The tip's own numbers. Written even for an empty list — see `tipsWithFirsts`. */
+  readonly tip: AssessedTip
+  /**
+   * Why **the assessor** could not score this end, where it could not — `undefined` when it did.
+   *
+   * A second refusal channel beside `SearchedEnd.refusal` because they are two stages failing at
+   * two different things: the search's is a root the chunkedgraph does not list, this one is a
+   * patch box that clamps to nothing at the edge of the volume. An end can have either, both or
+   * neither, and a run that reported them as one would tell a reader to look in the wrong place.
+   * Every candidate of such an end carries the checkpoint's floor, which is a published answer
+   * and not a hole.
+   */
+  readonly refusal?: string
+}
+
+/**
+ * An end published exactly as the search left it: the forest's order, and no stage 6.
+ *
+ * The shape of every row of a geometry-only run, and the base an assessed one is built on — so
+ * "which order is the list in" has one answer in one place rather than a `?? at + 1` at each of
+ * the two table writers.
+ */
+export function searchOnly(end: SearchedEnd): PublishedEnd {
+  return { end, order: Int32Array.from({ length: end.rows }, (_, at) => at) }
+}
+
+/**
  * The ranked lists of every searched end, as one `Candidates` table.
  *
  * `ends` are `searchEnds`' answers and `tips` the rows they were built from, **in the same
  * order** — `SearchedEnd.tip` indexes `tips`, as `ownTipRule` means it.
  */
 export function candidatesTable(
-  ends: readonly SearchedEnd[],
+  ends: readonly PublishedEnd[],
   tips: readonly TipRow[],
+  assessed: boolean,
 ): TableValue {
+  const fields = candidateFields(assessed)
   const read: Record<string, CellValue[]> = {}
-  for (const one of published(SEARCH_CANDIDATE_FIELDS)) read[one.from] = []
-  for (const end of ends) {
+  for (const one of published(fields)) read[one.from] = []
+  for (const { end, order, scores } of ends) {
     const tip = tips[end.tip]
     if (!tip) continue
-    for (let at = 0; at < end.rows; at++) {
+    for (let place = 0; place < order.length; place++) {
+      const at = order[place]!
       read['neuron']!.push(tip.neuronId)
       read['end_uid']!.push(tip.endUid)
       read['cand_root']!.push(String(end.candRoot[at]!))
-      read['rank']!.push(at + 1)
+      // **The place in `order`, not the row's index.** With an assessor the two differ — the
+      // list is published in the assessor's ranking and `geo_rank` keeps the forest's.
+      read['rank']!.push(place + 1)
       read['geo_rank']!.push(cell(end.columns['geo_rank'], at) ?? at + 1)
       for (const from of FROM_SEARCH) read[from]!.push(cell(end.columns[from], at))
+      if (!assessed) continue
+      for (const from of FROM_ASSESSOR) read[from]!.push(cell(scores?.columns[from], at))
+      read['filled']!.push(scores?.filled[at] ?? null)
     }
   }
-  return tableOf(SEARCH_CANDIDATE_FIELDS, read)
+  return tableOf(fields, read)
 }
+
+/** The assessed candidate columns carried straight through, by their name in SEAM's files. */
+const FROM_ASSESSOR: readonly string[] = ASSESSED_CANDIDATE_FIELDS.filter(
+  (one) => one.from !== 'filled',
+).map((one) => one.from)
 
 function cell(column: Float64Array | undefined, at: number): number | null {
   const value = column?.[at]
@@ -251,17 +477,18 @@ function cell(column: Float64Array | undefined, at: number): number | null {
  */
 export function tipsWithFirsts(
   table: TableValue,
-  ends: readonly SearchedEnd[],
+  ends: readonly PublishedEnd[],
   tips: readonly TipRow[],
+  assessed: boolean,
 ): TableValue {
   const data: Record<string, CellValue[]> = {}
-  const schema = tipsSchema(table.schema)
+  const schema = tipsSchema(table.schema, assessed)
   const length = table.data[ID_COLUMN_NAME]?.length ?? 0
   for (const column of schema.columns) {
     const held = table.data[column.name]
     data[column.name] = held ? [...held] : new Array<CellValue>(length).fill(null)
   }
-  for (const end of ends) {
+  for (const { end, order, scores } of ends) {
     const tip = tips[end.tip]
     if (!tip || tip.row >= length) continue
     const at = tip.row
@@ -274,11 +501,19 @@ export function tipsWithFirsts(
      */
     // Guarded, because `p_top` is only there when the incoming table brought it.
     for (const name of FIRST_CANDIDATE_COLUMNS) if (data[name]) data[name]![at] = null
-    if (end.rows === 0) continue
-    data['candidateId']![at] = String(end.candRoot[0]!)
-    data['geo_rank']![at] = cell(end.columns['geo_rank'], 0) ?? 1
+    /*
+     * **The tip's own numbers are written even where its list is empty**, and the candidate's are
+     * not. That is SEAM's shape rather than a convenience: a tip with no candidates still has a
+     * `segclr` (its floor), a `p_tip`, a `q` of zero and a verdict of withheld — it is a real
+     * answer about a real tip, and dropping it would leave the row looking unsearched.
+     */
+    if (scores) for (const [name, value] of Object.entries(scores.tip)) data[name]![at] = value
+    if (order.length === 0) continue
+    const first = order[0]!
+    data['candidateId']![at] = String(end.candRoot[first]!)
+    data['geo_rank']![at] = cell(end.columns['geo_rank'], first) ?? 1
     for (const [name, column] of FIRST_ON_TIP) {
-      data[name]![at] = cell(end.columns[column], 0)
+      data[name]![at] = cell(end.columns[column], first)
     }
   }
   return makeTable(schema, data, table.kind, length)
@@ -301,9 +536,9 @@ const FIRST_ON_TIP: readonly (readonly [string, string])[] = SEARCH_TIP_FIELDS.f
  * Every tip column that describes the **first candidate**, and so is this node's to rewrite.
  *
  * Cleared wholesale before any of it is written, which is what makes a searched tip with no
- * candidates say so. Derived from the field list where it can be, and `p_top` named: it is the
- * first candidate's calibrated confidence, which this node cannot compute (stage 6), so leaving
- * an incoming one would put another run's probability beside this run's `candidateId`.
+ * candidates say so. **Derived from the two field lists**, so it covers whatever this node can
+ * publish and whatever an incoming table may be carrying from another run — the search's first
+ * candidate and, where an assessor ran, the calibrated columns beside it.
  *
  * SEAM's own verdict columns (`seam_*`) are deliberately **not** here. They are a review of the
  * tip rather than a measurement of its first candidate, and `suggestionTables.ts` carries them
@@ -312,18 +547,21 @@ const FIRST_ON_TIP: readonly (readonly [string, string])[] = SEARCH_TIP_FIELDS.f
 const FIRST_CANDIDATE_COLUMNS: readonly string[] = [
   'candidateId',
   'geo_rank',
-  /*
-   * None of these four is published by this node, and all four are cleared: a `Tips` table from
-   * `seam:suggestions` carries them, and every one of them is *that* run's reading of *that*
-   * run's first candidate — `p_top` its confidence, `q` and `r` the calibrated chance it is
-   * right, `shown` whether it cleared SEAM's cutoff. Beside this node's own `candidateId` they
-   * would all read as describing it, and `seam:review` would sort and filter on them.
-   */
-  'p_top',
-  'q',
-  'r',
-  'shown',
   ...FIRST_ON_TIP.map(([name]) => name),
+  /*
+   * **Every stage-6 column, derived rather than listed.** A geometry-only run publishes none of
+   * these and an assessed one publishes all of them — and in both cases an incoming `Tips` table
+   * from `seam:suggestions` may already carry them from *another* run over *another* candidate
+   * list. `p_top`, `q`, `r` and `shown` are that run's reading of that run's first candidate;
+   * `segclr` and `p_tip` are its reading of that run's whole list, which this node has just
+   * replaced. Left in place beside this run's `candidateId` every one of them reads as
+   * describing it, and `seam:review` sorts and filters on three of them.
+   *
+   * Hand-listing four of the six was the version before this: the two it left out were the two
+   * that are about the list rather than its first row, which is exactly the distinction a reader
+   * of a cleared row cannot make.
+   */
+  ...ASSESSED_TIP_FIELDS.map((one) => one.name),
 ]
 
 /**
@@ -334,7 +572,7 @@ const FIRST_CANDIDATE_COLUMNS: readonly string[] = [
  * spelling of it. The position rule is the one that bites: a reader who folded a column of their
  * own onto the tips would otherwise watch it move to the end every time this node ran.
  */
-export function tipsSchema(incoming: TableSchema | undefined): TableSchema {
-  const wanted = schemaOf(SEARCH_TIP_FIELDS)
+export function tipsSchema(incoming: TableSchema | undefined, assessed: boolean): TableSchema {
+  const wanted = schemaOf(tipFields(assessed))
   return incoming ? foldColumns(incoming, wanted.columns) : wanted
 }

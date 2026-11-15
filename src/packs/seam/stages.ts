@@ -31,28 +31,35 @@
  * ## Every number comes from the set
  *
  * Nothing here is a constant. The fits, the floors, the cutoff and the isotonic steps are read
- * from the set's own manifest (`parsePipelineFits`), because SEAM refits them whenever a stage
+ * from whichever manifest carries the configuration — a published set's (`suggestionSet.ts`) or
+ * an assessor model's `config` (`assessorModel.ts`), through one parser either way
+ * (`pipelineFits.ts`) — because SEAM refits them whenever a stage
  * changes — the cutoff moved from 0.208 to 0.153 when the split stage was adopted and again to
  * 0.146 in the `za` refit, inside a week. A number written here would be right on the day it was
  * written and quietly wrong afterwards, and "quietly" is the whole difficulty: every one of
  * these produces a plausible probability either way.
  *
- * ## What a live tip can and cannot reach
+ * ## Which `q` a tip can reach, and it is three cases rather than two
  *
- * `q` is `p_tip × p_split`, and `p_split` comes from the **EM-texture head**, which SEAM
- * publishes as data (`candidates.parquet`'s `head_s<k>`) and not as a model. So a tip read out
- * of a published set reaches `q` and `shown`; a tip searched and scored live in the browser
- * reaches `q_ref` — SEAM's own pre-split quantity — and stops.
+ * In a **split** configuration `q` is `p_tip × p_split`, and `p_split` comes from the EM-texture
+ * head, which SEAM publishes as data (`candidates.parquet`'s `head_s<k>`) and not as a model. So
+ * a tip read out of such a set reaches `q` and `shown`; the same tip scored live in a browser,
+ * where no EM was read, reaches `q_ref` and gets **no verdict** — that configuration's cutoff
+ * belongs to a quantity this tip did not compute.
  *
- * That is one shape and not two: `scoreList` computes split's half only when the head scores are
- * there, and `decideTip` says **which quantity it decided on** (`against`). A reader is never
- * shown a number that looks like `q` and is not.
+ * In a configuration with **no split block at all** — SEAM's single-seed, masks-only one — there
+ * is no second quantity, and `show.cutoff` and the `r` staircase were fitted against
+ * `p_tip × p_top` under the name `q`. Such a tip decides, live or not.
+ *
+ * The three are one shape: `scoreList` computes split's half only where the head scores and the
+ * fold fits are both there, and `decideTip` says **which quantity it decided on** (`against`).
+ * A reader is never shown a number that looks like `q` and is not.
  */
 
 import { logistic, lowerBound } from '../../core/stats'
 import { orderByScores } from '../../nodes/lib/matrixShape'
-import { REF_WIDTH, SPLIT_WIDTH } from './suggestionSet'
-import type { DisplaySteps, PipelineFits, SeedFit } from './suggestionSet'
+import { REF_WIDTH, SPLIT_WIDTH } from './pipelineFits'
+import type { DisplaySteps, PipelineFits, SeedFit } from './pipelineFits'
 
 /**
  * One tip's candidates, by column rather than by row.
@@ -63,7 +70,7 @@ import type { DisplaySteps, PipelineFits, SeedFit } from './suggestionSet'
  *
  * `assessor[k][i]` is seed `k`'s logit for candidate `i`. Seed-major, so that one seed's column
  * arrives as one array from a file and from a model run alike. **A seed is its position** here
- * and in every fit the manifest carries, which `parsePipelineFits` checks rather than assumes:
+ * and in every fit the manifest carries, which `pipelineFitsFrom` checks rather than assumes:
  * a fold listed out of order would otherwise score each seed against another seed's weights, and
  * every logit would still be a logit.
  */
@@ -91,6 +98,15 @@ export interface ListScores {
   readonly pCand: Float64Array
   /** 1-based, by `logit` descending, ties by list order — SEAM's `rank`. */
   readonly rank: Int32Array
+  /**
+   * `rank`'s inverse: the candidates in the order a published list puts them, best first.
+   *
+   * Carried rather than left for a caller to invert, because it is the array `rank` and `first`
+   * were both derived from — `orderByScores`' answer, with its one statement of the tie rule.
+   * A caller that rebuilt it would be a third spelling of one fact, and the one most likely to
+   * disagree is the one that decides which row a reader sees at the top.
+   */
+  readonly order: Int32Array
   /** Where ref's first candidate is, or `-1` for an empty list. */
   readonly first: number
   /** `pCand[first]`, ref's own confidence in its first candidate — SEAM's `p_top`. */
@@ -362,6 +378,7 @@ export function scoreList(list: CandidateList, fits: PipelineFits): ListScores {
     logit,
     pCand,
     rank,
+    order,
     first,
     pTop: first < 0 ? 0 : pCand[first]!,
     segclr,
@@ -388,7 +405,27 @@ export function decideTip(
   const e = eTip ?? fits.eTipFloor
   const pTip = logistic(fits.pTip[0]! + fits.pTip[1]! * scores.segclr + fits.pTip[2]! * e)
   const qRef = pTip * scores.pTop
-  const q = scores.pSplit === undefined ? undefined : pTip * scores.pSplit
+
+  /*
+   * **A configuration with no split block has no split quantity, so its `q` *is* `q_ref`.**
+   *
+   * That is not a substitution, which is the thing this file refuses to do elsewhere: it is what
+   * the block says. SEAM's single-seed fixture states `show.q` as "p_tip x p_cand of the first
+   * candidate (no split)" and fits its cutoff and its `r` staircase against that number, under
+   * the name `q`. Reading those as belonging to a quantity the configuration cannot compute
+   * would leave every one of its tips with no verdict, and the only sign would be a review queue
+   * where nothing is ever shown.
+   *
+   * The arm below it stays for the case this does **not** cover: a *split* configuration whose
+   * tip was scored live, so the head's EM was never read. There the set's cutoff belongs to a
+   * quantity this tip did not reach, and `cutoffRef` or nothing is the honest answer.
+   */
+  const q =
+    scores.pSplit !== undefined
+      ? pTip * scores.pSplit
+      : fits.split === undefined
+        ? qRef
+        : undefined
 
   /*
    * The decision is made on `q` where the head reached it and on `q_ref` otherwise, and only

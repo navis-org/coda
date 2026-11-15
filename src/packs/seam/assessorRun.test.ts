@@ -15,7 +15,7 @@ import type {
   AssessorPatches,
   OpenAssessorBox,
 } from '../../pyodide/assessorPatches'
-import type { AssessorConfig } from './assessorModel'
+import type { ScoringConfig } from './assessorRun'
 import { PATCH_GROUP, scoreCandidates } from './assessorRun'
 
 /** The bridge's cutter, bound to one open box — what `useAssessorBox` hands a body. */
@@ -25,14 +25,12 @@ type CutPatches = OpenAssessorBox['cut']
 const SIDE = 2
 const VOXELS = SIDE ** 3
 
-const CONFIG: AssessorConfig = {
-  seed: 0,
-  patchVoxels: SIDE,
-  patchNm: 32,
-  batch: 1,
-  missingPatchScore: -58.722,
-  gflopPerPatch: 86.8,
-}
+/**
+ * Two numbers, because scoring a patch reads two. The config a manifest carries holds the
+ * configuration's stages 7-9 as well, and those belong to the *list* rather than to one patch —
+ * `ScoringConfig` is `assessorRun.ts` saying so, and this is what that buys here.
+ */
+const CONFIG: ScoringConfig = { patchVoxels: SIDE, missingPatchScore: -58.722 }
 
 /**
  * The floor as it comes back out.

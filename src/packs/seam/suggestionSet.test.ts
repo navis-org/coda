@@ -10,12 +10,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-import {
-  fileUrl,
-  loadSuggestionSet,
-  parsePipelineFits,
-  parseSuggestionSet,
-} from './suggestionSet'
+import { pipelineFitsFrom } from './pipelineFits'
+import { fileUrl, loadSuggestionSet, parseSuggestionSet } from './suggestionSet'
 
 const URL_ = 'https://example.invalid/coda_rv2/fixture.json'
 const RAW = JSON.parse(
@@ -126,7 +122,8 @@ describe('the pipeline fits', () => {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- malformed on purpose
   const block = (): any => JSON.parse(JSON.stringify(RAW.pipeline))
-  const fits = (one: unknown) => parsePipelineFits(parse({ pipeline: one }))
+  // Through the shared parser, which is what reads the block for a set and for a model alike.
+  const fits = (one: unknown) => pipelineFitsFrom(parse({ pipeline: one }).pipeline, URL_)
 
   it('reads SEAM’s own fits, and agrees with the set about the cutoff', () => {
     const read = fits(block())
@@ -141,6 +138,38 @@ describe('the pipeline fits', () => {
    * each seed's own column against another seed's weights — and every logit would still be a
    * logit.
    */
+  /**
+   * **The one-seed shape**, which SEAM writes for the single-seed configuration: with one seed
+   * there is no average to take, so it states `mu`/`sd`/`w` on `ref` itself rather than a list
+   * of one. Read as a list of one here, so everything downstream addresses a seed by position
+   * and has one shape to handle — `singleSeed.test.ts` runs the real thing end to end.
+   */
+  it('reads a ref block that states its fit directly as one seed', () => {
+    const one = block()
+    const seed = one.ref.seeds[0]
+    one.ref = { score_clip: one.ref.score_clip, mu: seed.mu, sd: seed.sd, w: seed.w }
+    delete one.split
+    const read = fits(one)
+    expect(read.ref).toHaveLength(1)
+    expect(read.ref[0]!.w).toEqual(seed.w)
+  })
+
+  /**
+   * Both shapes at once is two answers to "what scores a candidate", and nothing here can say
+   * which. Taking the list quietly would ignore numbers somebody put there on purpose.
+   */
+  it('refuses a ref block that states a seed list and its own fit', () => {
+    const one = block()
+    one.ref.mu = one.ref.seeds[0].mu
+    expect(() => fits(one)).toThrow(/nothing here can say which/)
+  })
+
+  it('refuses a ref block that states neither', () => {
+    const one = block()
+    one.ref = { score_clip: 20 }
+    expect(() => fits(one)).toThrow(/no fit to turn an assessor score into a logit/)
+  })
+
   it('refuses a fit whose seeds are listed out of order', () => {
     const one = block()
     const seeds = one.ref.seeds
