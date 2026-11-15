@@ -254,8 +254,20 @@ card subscribes to it through its *own* node's state; a preview changes what is 
 else's card. `void s.runVersion` inside a selector subscribes to nothing on its own — zustand
 compares what the selector *returns* — so the 3D View card, whose own output and state are both
 unchanged while its upstream fills in, would never re-render. `previewVersion` is selected
-directly, as the primitive invariant 7 requires — and returned as a constant for anything that is
-not a viewer, so the repaint cost tracks the scene rather than the size of the graph.
+directly, as the primitive invariant 7 requires — and returned as a constant for anything that
+draws no arriving data, so the repaint cost tracks the scene rather than the size of the graph.
+
+There are two ways in, because a viewer is not the only thing that draws a partial. A node of
+`category: 'visualisation'` subscribes because that is what a viewer is for; any other card does
+so by its **body** declaring `drawsInputs` (`ui/nodes/nodeBodies.ts`). `seam:review` is the case
+that needed the second: its queue is `seam:suggestMerges`' published partial, an end landing
+every few seconds, and the body reads `inputValues` exactly as the 3D viewer does — but the card
+is a `utility` one, so it had selected nothing that a publish moves and sat on an empty list
+until the run ended. The flag is off by default for the measured reason above: a publish is four
+times a second and re-rendering a card costs two `nodeInputs` walks, so on a sixty-node graph an
+ungated version was tens of thousands of array scans a second to repaint the two cards that could
+have changed. `ui/nodes/streamingBody.test.tsx` pins it, by holding a producer open at a gate and
+asserting the card lists the published end while that node is still `running`.
 
 **The viewer branch sits above `ValuePreview`'s `!value` guard**, on `out.rois`' terms. This
 node's own output is the selection table, empty until it evaluates — one whole scheduler step
@@ -268,6 +280,71 @@ is not local: every publish repaints every viewer card, and a skeleton channel r
 merged vertex buffer each time. Leading edge only and no timer — the complete answer is the
 trailing edge. It is per fetch rather than global, which is only safe because the scheduler runs
 nodes one at a time; two morphology nodes in a graph do not publish concurrently.
+
+### A partial that has to cross a node boundary
+
+The paragraph above rests on one premise: the viewer draws its **inputs**, so the value on the
+upstream wire *is* the picture. Review Suggestions is the case where that stops being true. Its
+card draws the arriving queue, but the viewer a reader judges a merge in is a **Neuroglancer node
+downstream of it**, wired from `Current` and `Layers` — outputs only Review's own `evaluate`
+produces. So the queue filled end by end while the picture beside it stayed on the previous run,
+and clicking a row did nothing at all until the whole search settled. On a neuron of several
+hundred ends that is the opposite of reviewing while the inference is in flight.
+
+`derivePreviews` runs the `cheap` nodes below a partial against it and keeps their answers as
+previews of their own. Four things make that safe to state as simply as the precedence rule
+above:
+
+- **Nothing derived is cached.** An answer computed from half an input is the answer for no
+  provenance key at all (invariant 4). Cached it would be a complete-looking result that no later
+  run would even be scheduled to replace — the same failure a published partial in the cache
+  would be, one node further along. It goes in `previews`, which `output` already prefers.
+- **`cheap` is the whole gate, and it is one that already exists.** `cheap` means the node
+  re-runs on every edit (invariant 6), so a node that must not run four times a second has
+  already said so by being `expensive`. No new flag, which is also why a chain survives somebody
+  dropping a `Filter Table` into the middle of it — the drift a hand-kept list of participating
+  node types would have had.
+- **A node already `ok` is left alone**, and the walk stops there: its cached result answers its
+  current key, so it is final, and a partial below it would be a lesser answer rather than a
+  newer one.
+- **A derived run reports nothing** — no `progress` (which would put a `running` badge on a node
+  that is not running), no `warn` (kept, and copied onto the node's eventual cache entry), no
+  `reportFetched` (dating data this run did not fetch), no `publish`. Each of those channels says
+  "this node ran", and it did not: something was recomputed on its behalf from an input that is
+  still arriving.
+
+Two triggers, because there are two ways a derived answer goes out of date: `ctx.publish`, and
+`refreshStates` — which is every graph mutation, **including the ones made while a run is in
+flight**. That second one is the click: a reader picking a row in a card sets a param on a node
+whose upstream is still fetching, and the old behaviour parked that edit's cheap pass above the
+running node until it finished. The asks coalesce, since a publish is up to four a second and a
+derive walks the graph's keys.
+
+The whole derived chain is dropped when the partial under it goes — on success the real walk is
+already on its way to those nodes with the real inputs, and on a cancel there is nothing left for
+them to be a preview *of*.
+
+**Dropping it has to stop the derive, not just forget it**, and that is the one thing here that
+failed silently and could not be recovered from. A derive is parked on an `evaluate` while the
+walk carries on, so between the await and the write the partial it was computed from can be gone
+— a node settles the moment its last publish is out. Left to land, that write put a value
+computed from one row of input into `previews`, where `outputs()` prefers it to the cache: it
+shadowed the node's real result for the rest of the session, and with no publisher left there was
+never another derive to sweep it away. So `dropDerived` aborts the in-flight derive first, the
+walk checks the signal before each node as well as after each `evaluate`, and `cancel()` drops
+the chain too — a node that ignores its own signal never unwinds, so its `finally` cannot be
+relied on to do it.
+
+Two smaller rules come from the same reading. The sweep for orphaned entries runs **when there
+are no publishers left**, rather than returning early — that state is reached whenever the last
+partial settles between one ask and the next, and a bare `return` there was what made the stale
+write permanent. And the drop in a node's `finally` is gated on that node having held a partial,
+since the `finally` runs for every node.
+
+`scheduler.test.ts`' "a partial below a node boundary" pins all of it, the late write included —
+that one needs a publisher that publishes **once**, since a second publish queues a second derive
+whose own sweep tidies up after the first. `ui/nodes/streamingBody.test.tsx` drives the whole
+thing through the editor, Review card included.
 
 **Re-assembling a partial has to be cheap, or the feature pays for itself twice.** Every publish
 rebuilds the whole value from every body that has arrived, so anything derived per body was being

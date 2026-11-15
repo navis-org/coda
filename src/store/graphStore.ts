@@ -1328,6 +1328,20 @@ export interface GraphState {
    * it; the values themselves are the cached ones, by reference (invariant 7).
    */
   nodeInputs(nodeId: string): Record<string, Value | undefined>
+  /**
+   * Whether this node is drawing from something still being produced — a partial on one of its
+   * input ports, or a node still running above it.
+   *
+   * For a body that draws its inputs while an upstream node streams: the list is real and so is
+   * any judgement made on it, but it is what has arrived so far, and a reader filtering the top
+   * of a third-full queue should be told which third they are in.
+   *
+   * A boolean, built per call like `nodeInputs`, so a selector returning it is stable by
+   * identity (invariant 7). It asks about **partials first**, because that is the question that
+   * survives an intermediate node: a `Filter Table` wired between a streaming node and a card is
+   * never itself `running`, but it does hold a derived partial.
+   */
+  nodeInputsFilling(nodeId: string): boolean
   setNotice(notice: string | undefined): void
 }
 
@@ -3533,6 +3547,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
         out[port.id] = edge ? sched().output(edge.source, edge.sourceHandle) : undefined
       }
       return out
+    },
+    nodeInputsFilling: (nodeId) => {
+      const graph = get().graph
+      const node = graph.nodes.find((n) => n.id === nodeId)
+      for (const port of node ? nodePorts(node, 'input') : []) {
+        const edge = edgeInto(graph, nodeId, port.id)
+        if (!edge) continue
+        if (sched().hasPartial(edge.source)) return true
+        if (sched().info(edge.source).state === 'running') return true
+      }
+      return false
     },
     nodeOutput: (nodeId, portId) => sched().output(nodeId, portId),
     nodeFetchedAt: (nodeId) => sched().fetchedAt(nodeId),

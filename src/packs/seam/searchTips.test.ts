@@ -17,12 +17,12 @@ import { makeTable } from '../../core/values'
 import {
   ASSESSED_CANDIDATE_FIELDS,
   ASSESSED_TIP_FIELDS,
-  SEARCH_TIP_FIELDS,
   candidatesTable,
   searchOnly,
   tipsByNeuron,
   tipsFromTable,
   tipsSchema,
+  tipFields,
   tipsWithFirsts,
 } from './searchTips'
 import type { PublishedEnd } from './searchTips'
@@ -201,6 +201,14 @@ describe('the Candidates table', () => {
   })
 })
 
+/**
+ * "Every row this run means to search", which is what a test that is not about the `searched`
+ * column wants to say. The column's own three states have their own cases below.
+ */
+function attempted(rows: readonly { row: number }[]): ReadonlySet<number> {
+  return new Set(rows.map((one) => one.row))
+}
+
 describe('the first candidate on the tip row', () => {
   it('writes onto the row the tip came from, not the row at its index', () => {
     /*
@@ -214,7 +222,13 @@ describe('the first candidate on the tip row', () => {
       { [ID_COLUMN_NAME]: '720', end_uid: 2, x: 0, y: 0, z: 0 },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(1, [{ root: '999', dist: 0.4 }])], rows, false)
+    const out = tipsWithFirsts(
+      table,
+      [end(1, [{ root: '999', dist: 0.4 }])],
+      rows,
+      false,
+      attempted(rows),
+    )
     expect(out.data['candidateId']).toEqual([null, null, '999'])
     expect(out.data['min_dist_um']).toEqual([null, null, 0.4])
   })
@@ -225,7 +239,13 @@ describe('the first candidate on the tip row', () => {
       { [ID_COLUMN_NAME]: '900', end_uid: 4, x: 0, y: 0, z: 0 },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(1, [{ root: '55', dist: 0.2 }])], rows, false)
+    const out = tipsWithFirsts(
+      table,
+      [end(1, [{ root: '55', dist: 0.2 }])],
+      rows,
+      false,
+      attempted(rows),
+    )
     expect(out.data['candidateId']).toEqual([null, '55'])
   })
 
@@ -234,7 +254,7 @@ describe('the first candidate on the tip row', () => {
       { [ID_COLUMN_NAME]: '800', end_uid: 0, x: 0, y: 0, z: 0, e_tip: 0.8 },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [], rows, false)
+    const out = tipsWithFirsts(table, [], rows, false, attempted(rows))
     expect(out.data['e_tip']).toEqual([0.8])
   })
 
@@ -257,7 +277,7 @@ describe('the first candidate on the tip row', () => {
       },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(0, [])], rows, false)
+    const out = tipsWithFirsts(table, [end(0, [])], rows, false, attempted(rows))
     expect(out.data['candidateId']).toEqual([null])
     expect(out.data['min_dist_um']).toEqual([null])
   })
@@ -280,7 +300,13 @@ describe('the first candidate on the tip row', () => {
       },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(0, [{ root: '55', dist: 0.2 }])], rows, false)
+    const out = tipsWithFirsts(
+      table,
+      [end(0, [{ root: '55', dist: 0.2 }])],
+      rows,
+      false,
+      attempted(rows),
+    )
     expect(out.data['candidateId']).toEqual(['55'])
     expect(out.data['p_top']).toEqual([null])
   })
@@ -306,7 +332,13 @@ describe('the first candidate on the tip row', () => {
       },
     ])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(0, [{ root: '55', dist: 0.2 }])], rows, false)
+    const out = tipsWithFirsts(
+      table,
+      [end(0, [{ root: '55', dist: 0.2 }])],
+      rows,
+      false,
+      attempted(rows),
+    )
     expect(out.data['candidateId']).toEqual(['55'])
     for (const name of ['p_top', 'q', 'r', 'shown']) {
       expect(out.data[name], name).toEqual([null])
@@ -316,7 +348,13 @@ describe('the first candidate on the tip row', () => {
   it('writes the contact under the tip’s own column names', () => {
     const table = tipsTable([{ [ID_COLUMN_NAME]: '800', end_uid: 0, x: 0, y: 0, z: 0 }])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [end(0, [{ root: '1', dist: 0.1 }])], rows, false)
+    const out = tipsWithFirsts(
+      table,
+      [end(0, [{ root: '1', dist: 0.1 }])],
+      rows,
+      false,
+      attempted(rows),
+    )
     expect(out.data['contact_x']).toEqual([100])
     expect(out.data['contact_y']).toEqual([200])
     expect(out.data['contact_z']).toEqual([300])
@@ -341,7 +379,9 @@ describe('the published tips schema', () => {
   })
 
   it('is the columns it folds on, when nothing is wired', () => {
-    expect(tipsSchema(undefined, false)).toEqual(schemaOf(SEARCH_TIP_FIELDS))
+    // `tipFields`, not `SEARCH_TIP_FIELDS`: the published shape is the candidate's columns plus
+    // `searched`, which is about the run rather than about any candidate.
+    expect(tipsSchema(undefined, false)).toEqual(schemaOf(tipFields(false)))
   })
 })
 
@@ -423,12 +463,59 @@ describe('an assessed run', () => {
       [scored(end(0, [{ root: '55', dist: 0.2 }]), [0])],
       rows,
       true,
+      attempted(rows),
     )
     expect(out.data['p_tip']).toEqual([0.4])
     expect(out.data['q']).toEqual([0.36])
     expect(out.data['r']).toEqual([0.8])
     expect(out.data['shown']).toEqual([true])
     expect(out.data['candidateId']).toEqual(['55'])
+  })
+
+  /**
+   * The three states of `searched`, which is the one tip column about the **run** rather than
+   * about a candidate — and the one `seam:review` counts to say how many tips are still coming.
+   *
+   * The middle row is the whole point. It was searched and its box held nothing, so it has no
+   * row in `Candidates` and, on a geometry-only run, no tip score either: without this column it
+   * is written exactly like the row below it, which the run has not reached.
+   */
+  it('tells a searched tip, an unreachable one and one still queued apart', () => {
+    const table = tipsTable([
+      { [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0 },
+      { [ID_COLUMN_NAME]: '720', end_uid: 1, x: 0, y: 0, z: 0 },
+      { [ID_COLUMN_NAME]: '720', end_uid: 2, x: 0, y: 0, z: 0 },
+      { [ID_COLUMN_NAME]: '720', end_uid: 3, x: 0, y: 0, z: 0 },
+    ])
+    const { rows } = tipsFromTable(table)
+    // Row 2 is outside the volume, so this run will never attempt it.
+    const attempting = new Set([0, 1, 3])
+    const out = tipsWithFirsts(
+      table,
+      [end(0, [{ root: '55', dist: 0.2 }]), end(1, [])],
+      rows,
+      false,
+      attempting,
+    )
+    expect(out.data['searched']).toEqual([true, true, false, null])
+    // And the searched-but-empty row carries no candidate, which is the half that is missing.
+    expect(out.data['candidateId']).toEqual(['55', null, null, null])
+  })
+
+  /**
+   * **This run's statement, never the incoming table's.** A `Tips` table can arrive already
+   * carrying `searched` — from `seam:suggestions`, or from this node's own output fed back
+   * round — and that one is about another box and another filter. Carried through, it would say
+   * "searched" about rows this run has not begun, which is the one cell a reader is counting.
+   */
+  it('overwrites a `searched` column the incoming table already had', () => {
+    const table = tipsTable([
+      { [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0, searched: true },
+      { [ID_COLUMN_NAME]: '720', end_uid: 1, x: 0, y: 0, z: 0, searched: true },
+    ])
+    const { rows } = tipsFromTable(table)
+    const out = tipsWithFirsts(table, [], rows, false, new Set([0, 1]))
+    expect(out.data['searched']).toEqual([null, null])
   })
 
   /**
@@ -439,7 +526,7 @@ describe('an assessed run', () => {
   it('writes a searched tip’s own numbers even where its list is empty', () => {
     const table = tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0 }])
     const { rows } = tipsFromTable(table)
-    const out = tipsWithFirsts(table, [scored(end(0, []), [])], rows, true)
+    const out = tipsWithFirsts(table, [scored(end(0, []), [])], rows, true, attempted(rows))
     expect(out.data['p_tip']).toEqual([0.4])
     expect(out.data['candidateId']).toEqual([null])
     expect(out.data['min_dist_um']).toEqual([null])

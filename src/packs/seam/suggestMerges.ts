@@ -279,7 +279,9 @@ export const suggestMergesNode = packNode({
     'Takes a table of open ends and, for each, reads a 6 µm box of segmentation around it, ' +
     'measures every object that comes near the neuron there, and ranks them with the forest ' +
     'picked in Ranker. Each end is published as it finishes, so Review Suggestions fills while ' +
-    'the rest of the neuron is still being measured. Without an Assessor the ranking is ' +
+    'the rest of the neuron is still being measured — the `searched` column says which tips ' +
+    'it has reached, and false where it never will, the end lying outside the volume. ' +
+    'Without an Assessor the ranking is ' +
     'geometric — no probability and no cutoff, and those columns are absent rather than empty. ' +
     'Pick one and every candidate also goes through SEAM’s own network, which gives the list a ' +
     'calibrated probability and each tip a shown-or-withheld verdict, for about two seconds ' +
@@ -405,7 +407,9 @@ export const suggestMergesNode = packNode({
      */
     if (rows.length === 0) {
       return {
-        tips: tipsWithFirsts(table, [], [], assessing),
+        // Nothing attempted, so every row of the incoming table is a row this run will not
+        // search — which is what the warning just above says in prose.
+        tips: tipsWithFirsts(table, [], [], assessing, new Set<number>()),
         candidates: candidatesTable([], [], assessing),
       }
     }
@@ -581,8 +585,15 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   }
 
   const ends: PublishedEnd[] = []
+  /*
+   * The rows this run will attempt, by their index in the incoming table — built once here
+   * rather than per publish, since `fits` cannot change inside the loop. It is what the
+   * published `searched` column reads: every row outside it is one of the two the node has
+   * already warned about, and `seam:review` counts the rows still waiting from the difference.
+   */
+  const attempting = new Set([...fits].map((tip) => tip.row))
   // The last thing published *is* the answer, so the final return does not build it again.
-  let answer = published(table, ends, rows, assessing)
+  let answer = published(table, ends, rows, assessing, attempting)
   let done = 0
   for (const [neuron, at] of tipsByNeuron(rows)) {
     const mine = at.map((i) => rows[i]!)
@@ -631,7 +642,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
         afterShare(head, done / fits.size),
         `${assessing ? 'scoring' : 'searching'} ${neuron}`,
       )
-      answer = published(table, ends, rows, assessing)
+      answer = published(table, ends, rows, assessing, attempting)
       ctx.publish(answer)
     }
   }
@@ -697,9 +708,10 @@ function published(
   ends: readonly PublishedEnd[],
   tips: readonly TipRow[],
   assessed: boolean,
+  attempting: ReadonlySet<number>,
 ) {
   return {
-    tips: tipsWithFirsts(table, ends, tips, assessed),
+    tips: tipsWithFirsts(table, ends, tips, assessed, attempting),
     candidates: candidatesTable(ends, tips, assessed),
   }
 }

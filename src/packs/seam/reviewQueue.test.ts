@@ -21,6 +21,7 @@ import {
   currentOfQueue,
   decodeVerdicts,
   encodeVerdicts,
+  stillToSearch,
   verdictFor,
   withVerdict,
 } from './reviewQueue'
@@ -104,6 +105,45 @@ describe('building the queue', () => {
     const queue = buildQueue(tipsTable([{ end: 1 }]), candidatesTable([]))
     expect(queue).toHaveLength(1)
     expect(queue[0]!.candidates).toEqual([])
+  })
+})
+
+/**
+ * How many tips are still to come, which the foot of the card reports while a run streams.
+ *
+ * Read off `searched` rather than counted as "rows with nothing on them", and the middle case is
+ * why: a tip the run will never reach is published `false`, so a count of empty rows would stall
+ * above zero at the end of a run and read as a search that stopped early.
+ */
+describe('how many tips are still to search', () => {
+  const searchedTips = (states: readonly (boolean | null)[]): TableValue =>
+    makeTable(
+      tableSchema(column(ID_COLUMN_NAME, 'str'), column('searched', 'bool')),
+      {
+        [ID_COLUMN_NAME]: states.map(() => 'n1'),
+        searched: [...states],
+      },
+      'table',
+      states.length,
+    )
+
+  it('counts the tips not yet reached', () => {
+    expect(stillToSearch(searchedTips([true, true, null, null, null]))).toBe(3)
+  })
+
+  /** The run is over: the rows it could not reach are `false`, not waiting. */
+  it('reaches zero even where some tips were never searchable', () => {
+    expect(stillToSearch(searchedTips([true, false, true, false]))).toBe(0)
+  })
+
+  /**
+   * **Absent is not zero.** A `seam:suggestions` table is a published set, complete by
+   * definition and carrying no such column; reported as 0 it would print the same as a run that
+   * has just finished, which is a number about a run that never happened.
+   */
+  it('says nothing at all about a table without the column', () => {
+    expect(stillToSearch(tipsTable([{ end: 1 }]))).toBeUndefined()
+    expect(stillToSearch(undefined)).toBeUndefined()
   })
 })
 

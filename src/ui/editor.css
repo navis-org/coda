@@ -10978,6 +10978,19 @@ details[open] > summary.tile__label {
 }
 
 /*
+ * "still searching" in the card's foot, while Suggest Merges is mid-run.
+ *
+ * A caveat on the two counts beside it rather than an alarm — the queue is real and so is every
+ * verdict made on it, it is simply not all of the neuron yet — so it takes the warning ink and
+ * none of the weight: no badge, no background, no animation. The run's own progress is on the
+ * Suggest Merges card, which is where a bar belongs.
+ */
+.review-body__filling {
+  /* `--status-warn` is the per-mode prose warning colour — 5.41:1 light, 9.78:1 dark. */
+  color: var(--status-warn);
+}
+
+/*
  * The list takes whatever height is left and scrolls inside it — **no cap of its own**. One here
  * was what stopped a resized card and an expanded panel filling: the surrounding box grows, the
  * list stopped at 320px, and the rest was blank. The bounds belong to the surfaces that have

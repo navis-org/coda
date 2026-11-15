@@ -459,6 +459,9 @@ describe('every store action is on one side of the lock', () => {
     // How far the run in flight has got. A read, like its four neighbours here.
     'runProgress',
     'nodeInputs',
+    // Whether what arrives on a node's inputs is still being produced. A read, like its
+    // neighbours — a card draws a caption from it and nothing about the graph moves.
+    'nodeInputsFilling',
     'nodeOutput',
     'nodeFetchedAt',
     'nodeWarning',

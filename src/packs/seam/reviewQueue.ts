@@ -128,6 +128,26 @@ function candidateLists(table: TableValue | undefined): Map<number, Candidate[]>
   return lists
 }
 
+/**
+ * How many tips the run still has to search, or `undefined` where the table does not say.
+ *
+ * Counts the nulls in `searched`, which is `seam:suggestMerges`' three-state statement about its
+ * own run (`searchTips.ts`): `true` searched, `false` never going to be, `null` not yet. So the
+ * number is exact and reaches zero — a count of "rows with no answer" would stall at whatever
+ * the node could not reach and read as a run that stopped early.
+ *
+ * **Absent means finished**, which is why this is `undefined` rather than 0: a `seam:suggestions`
+ * table is a published set, complete by definition, and it carries no such column. Reported as a
+ * number, a set with nothing left to search and a table that cannot say would print the same.
+ */
+export function stillToSearch(tips: TableValue | undefined): number | undefined {
+  const column = tips?.data['searched']
+  if (!column) return undefined
+  let waiting = 0
+  for (const cell of column) if (cell === null || cell === undefined) waiting += 1
+  return waiting
+}
+
 export type SortBy = 'confidence' | 'size' | 'tip'
 
 /**

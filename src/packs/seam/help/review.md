@@ -24,6 +24,16 @@ Wire **both** of Merge Suggestions' tables in: `Tips` is the queue and `Candidat
 
 **Wire `Current` into a [Neuroglancer](#out.neuroglancer) node's `Control` socket.** Then clicking a row shows that pair in the full-size viewer, in two colours, with the camera on the point where they touch — in the scene you already had up, rather than a second one. The card itself shows the list alone.
 
+### Start before the search finishes
+
+Merge Suggestions publishes each end as it is scored, and the queue fills from that — so you can work through the first tips while the rest of the neuron is still being measured, and the Neuroglancer node follows your clicks exactly as it does afterwards. The foot says **still searching — N to go** while that is happening.
+
+The N is tips, not candidates, and it reaches zero: an end the search can never read — its box lies outside the segmentation volume — is counted as done rather than as waiting, and Merge Suggestions warns separately about how many those were.
+
+> [!IMPORTANT]
+> **A filter or a sort reaches only what has arrived**
+> `Min confidence`, `Min size` and `Sort by` narrow the tips published so far. On a third-full queue that is a third of the neuron, which is what the caption in the foot is there to say. Nothing is lost — a verdict recorded now is kept — but the top of the list will move as more ends land.
+
 With nothing wired to `Current`, expanding the card (⤢) gives it a small viewer of its own so it is usable by itself. That is a fallback: it is a second WebGL context showing two segments, and it stands down the moment something else is driving.
 
 > [!IMPORTANT]
