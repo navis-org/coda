@@ -3631,40 +3631,49 @@ export const useGraphStore = create<GraphState>((set, get) => {
     setNotice: (notice) => set({ notice }),
 
     holdForWrite: (docId, nodeId) => {
+      const onScreen = () =>
+        docId === activeDoc && get().graph.nodes.some((node) => node.id === nodeId)
       if (writing !== undefined) throw new Error('Another card is already writing to a server.')
-      if (docId !== activeDoc || !get().graph.nodes.some((node) => node.id === nodeId)) {
+      if (!onScreen())
         throw new Error('The card that opened this Submit is no longer on screen.')
-      }
       writing = nodeId
       let held = true
+      /*
+       * Saved now rather than on the autosave's debounce: the record's entries are the note of
+       * writes the server made, and a crash or a closed tab inside the debounce must not lose one.
+       */
+      const saveNow = () => {
+        if (!autosaveTimer) return
+        clearTimeout(autosaveTimer)
+        autosaveTimer = undefined
+        persistActive()
+      }
       return {
         update: (paramId, change) => {
           if (!held) throw new Error('This hold has been released.')
+          /*
+           * Refused out loud rather than skipped: the guards above make it unreachable, and if a
+           * path round them ever appears, an entry that vanished in silence is a merge the server
+           * made that the workflow has no note of. The batch turns this throw into a stop.
+           */
+          if (!onScreen()) {
+            throw new Error('The card is no longer on screen, so this could not be recorded.')
+          }
           // Read and written in one step, so the param is this card's as it stands now.
           commit(
             (graph) => {
-              const node = graph.nodes.find((n) => n.id === nodeId)
-              return node
-                ? setNodeParam(graph, nodeId, paramId, change(node.params[paramId]))
-                : graph
+              const node = graph.nodes.find((n) => n.id === nodeId)!
+              return setNodeParam(graph, nodeId, paramId, change(node.params[paramId]))
             },
             { history: false },
           )
+          saveNow()
         },
         release: () => {
           if (!held) return
           held = false
           if (writing === nodeId) writing = undefined
-          /*
-           * Saved now rather than on the autosave's debounce: the last entries of the record are
-           * the note of writes the server made, and a reader closing the tab the moment the batch
-           * ends — when nothing asks first any more — must not lose them.
-           */
-          if (autosaveTimer) {
-            clearTimeout(autosaveTimer)
-            autosaveTimer = undefined
-            persistActive()
-          }
+          saveNow()
         },
       }
     },

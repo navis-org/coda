@@ -30,6 +30,7 @@ let touring = false
 vi.mock('../tour/tourState', () => ({ isTourActive: () => touring }))
 
 const {
+  STILL_OUT_MS,
   closeSubmit,
   confirmSubmit,
   currentSubmit,
@@ -37,6 +38,7 @@ const {
   recheckSubmit,
   resetSubmit,
   stopSubmit,
+  submitStateOf,
 } = await import('./mergeSession')
 
 const store = () => useGraphStore.getState()
@@ -234,6 +236,96 @@ describe('Submit', () => {
     answer(PLAN)
     await vi.waitFor(() => expect(currentSubmit()).toBeUndefined())
     expect(store().notice).toMatch(/no longer on screen/)
+  })
+
+  /**
+   * A merge the batch stopped waiting for is still with the server: a plan made meanwhile finds
+   * its roots unmoved and would send the same pair again (audit of 77c0625, 2026-11-16).
+   */
+  describe('a merge still out', () => {
+    /** Run a batch whose merge times out, and hand back the answer to give it later. */
+    async function timedOut() {
+      await opened()
+      const batch = heldBatch()
+      confirmSubmit([MERGE])
+      let answer: (entry: MergeRecordEntry | undefined) => void = () => {}
+      batch.on().record(entry('unknown'))
+      batch.on().stillOut(new Promise((resolve) => (answer = resolve)))
+      batch.finish({ state: 'failed', currentRoot: '100', message: 'The reply was lost.' })
+      await vi.waitFor(() => expect(currentSubmit()).toMatchObject({ running: false }))
+      closeSubmit()
+      return (entry: MergeRecordEntry | undefined) => answer(entry)
+    }
+
+    /** Closing the tab meanwhile would lose the answer: the browser asks first, until it comes. */
+    it('asks before the tab closes while it waits', async () => {
+      const added = vi.spyOn(window, 'addEventListener')
+      const removed = vi.spyOn(window, 'removeEventListener')
+      const answer = await timedOut()
+      const asks = () =>
+        added.mock.calls.filter(([type]) => type === 'beforeunload').length -
+        removed.mock.calls.filter(([type]) => type === 'beforeunload').length
+      expect(asks()).toBe(1)
+      answer(undefined)
+      await vi.waitFor(() => expect(asks()).toBe(0))
+      added.mockRestore()
+      removed.mockRestore()
+    })
+
+    it('holds every Submit until it answers, then records the answer', async () => {
+      const answer = await timedOut()
+      expect(submitStateOf(REQUEST.docId, 'review')).toBe('waiting')
+      expect(submitStateOf(REQUEST.docId, 'another-card')).toBe('waiting')
+      openSubmit(REQUEST)
+      expect(currentSubmit()).toBeUndefined()
+      expect(store().notice).toMatch(/has not answered yet/)
+
+      answer({ ...entry('merged', '201'), operationId: '4217' } as MergeRecordEntry)
+      await vi.waitFor(() => expect(submitStateOf(REQUEST.docId, 'review')).toBe('none'))
+      expect(record().map((e) => e.outcome)).toEqual(['unknown', 'merged'])
+      expect(record()[1]).toMatchObject({ newRoot: '201', operationId: '4217' })
+      expect(store().notice).toMatch(/answered: merged/)
+    })
+
+    /** An answer landing while the batch still holds the card is recorded once it lets go. */
+    it('records an answer that lands before the batch has let go of the card', async () => {
+      await opened()
+      const batch = heldBatch()
+      confirmSubmit([MERGE])
+      batch.on().record(entry('unknown'))
+      batch.on().stillOut(Promise.resolve({ ...entry('merged', '201') } as MergeRecordEntry))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(record().map((e) => e.outcome)).toEqual(['unknown'])
+      batch.finish({ state: 'failed', currentRoot: '100', message: 'The reply was lost.' })
+      await vi.waitFor(() =>
+        expect(record().map((e) => e.outcome)).toEqual(['unknown', 'merged']),
+      )
+    })
+
+    it('lets go, recording nothing, where the answer says nothing either way', async () => {
+      const answer = await timedOut()
+      answer(undefined)
+      await vi.waitFor(() => expect(submitStateOf(REQUEST.docId, 'review')).toBe('none'))
+      expect(record().map((e) => e.outcome)).toEqual(['unknown'])
+    })
+
+    /** Past the limit a later batch may have moved the neuron on: an old root is not appended. */
+    it('lets go after STILL_OUT_MS, and drops an answer that comes after it', async () => {
+      // Only the session's own timer is faked: `vi.waitFor` keeps the real clock.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        const answer = await timedOut()
+        expect(submitStateOf(REQUEST.docId, 'review')).toBe('waiting')
+        vi.advanceTimersByTime(STILL_OUT_MS)
+        expect(submitStateOf(REQUEST.docId, 'review')).toBe('none')
+        expect(store().notice).toMatch(/has not answered in 10 minutes/)
+        answer(entry('merged', '201'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(record().map((e) => e.outcome)).toEqual(['unknown'])
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   it('confirms once', async () => {

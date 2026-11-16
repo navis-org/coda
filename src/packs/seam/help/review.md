@@ -52,9 +52,11 @@ With nothing wired to `Current`, expanding the card (⤢) gives it a small viewe
 | ------- | -------------- |
 | a row   | shows that tip's candidate and points the camera at their contact |
 | `‹` `›` | the candidate ranked above or below this one, within the same tip |
-| Accept / Reject / Unsure | records a verdict on the pair you are looking at (greyed out once the piece is merged) |
+| Accept / Reject / Unsure | records a verdict on the piece you are looking at, for this neuron (greyed out once the piece is merged) |
 
 Pressing the same verdict again clears it, so a misclick costs one click.
+
+A verdict is about the piece and the neuron, not about the tip: a piece listed at two tips shows the same verdict on both rows. Verdicts survive running the suggestions again, as long as neither the neuron nor the piece has been edited in between. Verdicts saved before 16 November 2026 were tied to a tip number that changes between runs, and are no longer read.
 
 ### Seeing what you accepted
 
@@ -120,13 +122,13 @@ Then, just before each merge, both supervoxels are looked up again on the server
 
 ### While it runs
 
-Merges are sent one at a time, in the order listed, and each row shows how it went. `Stop after this merge` stops before the next one. The first failure stops the batch, and nothing is ever retried. If a reply is lost — the network drops, or the server takes more than two minutes — the merge is recorded as **unknown**: the roots are asked what happened, and the next Submit on that neuron sorts it out before planning anything.
+Merges are sent one at a time, in the order listed, and each row shows how it went. `Stop after this merge` stops before the next one. The first failure stops the batch, and nothing is ever retried. If a reply is lost — the network drops, or the server takes more than two minutes — the merge is recorded as **unknown**, and the next Submit on that neuron reads the roots to find out what happened before planning anything. A merge that is merely slow is still waited for: Submit stays greyed out, and the browser asks before you close the tab, until the server answers (for up to ten minutes); the answer is then added to `Merges`.
 
 While merges are being sent, the card and its workflow stay put: deleting the card, undoing it away, loading another workflow or switching tabs are refused until the batch ends, and the browser asks before you close the tab.
 
 ### Afterwards
 
-The card follows the neuron to its new root, in its own viewer and on `Current`. A merged piece's row says **✓ merged** and its verdict can no longer be changed. Each merge is recorded with the workflow, and the `Merges` output lists them. Undo does not remove the record, so a merge is never sent twice.
+The card follows the neuron to its new root, in its own viewer and on `Current`. A merged piece's row says **✓ merged** and its verdict can no longer be changed. Each merge is recorded with the workflow, and the `Merges` output lists them. Undo does not remove the record. The record is read for the datastack each merge was made on: wire the card to another datastack — say, from the sandbox to production — and it starts afresh there.
 
 ### Outdated neurons and pieces
 
@@ -139,10 +141,10 @@ This is common with a published set, which is a snapshot: on Aedes, a neuron fro
 | Output     | Contents                                                                    |
 | ---------- | ----------------------------------------------------------------------------- |
 | `Tips`     | the tips passed through, with a `verdict` column for each one's first candidate |
-| `Verdicts` | one row per judgement — neuron, tip, candidate, rank and verdict              |
+| `Verdicts` | one row per judgement — neuron, candidate, verdict, and the tip and rank where the piece is first listed |
 | `Current`  | the ids to show — the neuron at its root now, the candidate being looked at and, with `Show accepted` on, every accepted piece not yet merged — with a `part` column saying which is which |
 | `Layers`   | an annotation layer of **every** shown suggestion on the picked neuron — a map of where the work is |
-| `Merges`   | one row per merge Submit made or tried, on every neuron — the outcome, the new root, the operation ID, both supervoxels and their positions, and the time |
+| `Merges`   | one row per merge Submit made or tried, on every neuron — the datastack, the outcome, the new root, the operation ID, both supervoxels and their positions, and the time |
 
 `Layers` holds every shown suggestion on the neuron rather than just the one you are on, and that is deliberate: an annotation layer's contents are not part of a scene's *selection*, so a layer that changed on every click would make every click rebuild the whole viewer — and reset the camera with it. Which suggestion is current travels on `Current`, where it costs nothing.
 

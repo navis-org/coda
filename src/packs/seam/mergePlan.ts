@@ -35,6 +35,8 @@ import type { CaveRequestOptions } from '../../data/cave/client'
 import { datastackRecord } from '../../data/cave/datastack'
 import type { GrapheneSource } from '../../data/cave/graphene'
 import { parseGrapheneSource } from '../../data/cave/graphene'
+import type { GraphLayout } from '../../data/cave/graphLayout'
+import { isNodeId } from '../../data/cave/graphLayout'
 import type { MergeEnd } from '../../data/cave/merge'
 import type { EditPermission } from '../../data/cave/permissions'
 import { editPermission } from '../../data/cave/permissions'
@@ -100,6 +102,11 @@ export type MergePlan =
        */
       readonly settled?:
         { readonly entry: MergeRecordEntry; readonly newRoot: string } | undefined
+      /**
+       * The chunkedgraph's id layout, from the anchor volume: what `prepareMerges` checks every
+       * end is a supervoxel with. Present whenever `merges` is not empty.
+       */
+      readonly layout?: GraphLayout | undefined
       /** In the order the reader met them in the queue. */
       readonly merges: readonly PlannedMerge[]
       /** In the same order. */
@@ -110,6 +117,7 @@ export type MergePlan =
 export type ReadyPlan = Extract<MergePlan, { ok: true }>
 
 export interface PlanRequest {
+  /** With the options' deployment, where it is planned and which record entries count. */
   readonly datastack: string
   /** The whole queue: the plan takes the reviewed neuron's tips from it, and no other's. */
   readonly queue: readonly QueueTip[]
@@ -188,6 +196,7 @@ async function plan(
   services: PlanServices,
 ): Promise<MergePlan> {
   const { datastack, reviewedRoot } = request
+  const { deployment } = options
   const pieces = acceptedPieces(tipsOf(request.queue, reviewedRoot), request.verdicts)
   const rejected: RejectedMerge[] = []
   const reject = (candidateRoot: string, reason: PlanRefusal, message: string) =>
@@ -202,7 +211,7 @@ async function plan(
   }
 
   // This workflow's own merges: what is done, the neuron's root now, and other neurons' pieces.
-  const own = mergedSoFar(request.record, reviewedRoot)
+  const own = mergedSoFar(request.record, reviewedRoot, { deployment, datastack })
   /*
    * Merges whose reply was lost and that nothing has settled: if one landed, the neuron is at a
    * root the record does not name, and the currency check below would refuse it on every Submit.
@@ -230,6 +239,9 @@ async function plan(
         'merged-elsewhere',
         'Merged into another neuron under review already, by this workflow.',
       )
+    } else if (!isNodeId(candidateRoot)) {
+      // Before any request: one cell that is no id would fail the whole currency read.
+      reject(candidateRoot, 'bad-id', `Not a segment id: ${candidateRoot}.`)
     } else {
       return true
     }
@@ -238,13 +250,14 @@ async function plan(
 
   /** The plan as it stands, refusals in the order the reader met their pieces, as merges are. */
   const order = new Map([...pieces.keys()].map((candidateRoot, i) => [candidateRoot, i]))
-  const planned = (merges: PlannedMerge[]): MergePlan => ({
+  const planned = (merges: PlannedMerge[], layout?: GraphLayout): MergePlan => ({
     ok: true,
     datastack,
     graphene,
     reviewedRoot,
     currentRoot,
     ...(settled ? { settled } : {}),
+    ...(layout ? { layout } : {}),
     merges,
     rejected: [...rejected].sort(
       (a, b) => order.get(a.candidateRoot)! - order.get(b.candidateRoot)!,
@@ -252,6 +265,9 @@ async function plan(
   })
   // Nothing left to send: every piece's reason is already known, and no server is needed for it.
   if (open.length === 0) return planned([])
+  if (!isNodeId(currentRoot)) {
+    return { ok: false, message: `The neuron's id is not a segment id: ${currentRoot}.` }
+  }
 
   /*
    * Permission first, then currency: one round trip slower than asking both at once, and worth
@@ -313,7 +329,7 @@ async function plan(
       reject(candidateRoot, anchors.reason, anchors.message)
     }
   }
-  return planned(merges)
+  return planned(merges, volume.layout)
 
   /**
    * The first lost reply that the roots show was **this merge and nothing after it**:

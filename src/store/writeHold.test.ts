@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 /**
  * The store's hold for a card writing to a server (`holdForWrite`, `docs/seam-merge-plan.md`
  * phase 6): while merges are sent, nothing takes the card off the graph or its document off the
@@ -11,9 +13,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { addNode, emptyGraph } from '../core/graph'
 import '../nodes'
 import { node } from '../test/graph'
-import { clearStorage } from '../test/jsdomStubs'
+import { clearStorage, installStorageStub } from '../test/jsdomStubs'
 import type { WriteHold } from './graphStore'
 import { useGraphStore } from './graphStore'
+import { loadAutosave } from './persistence'
 
 const store = () => useGraphStore.getState()
 const has = (id: string) => store().graph.nodes.some((n) => n.id === id)
@@ -22,6 +25,8 @@ const holdOn = (id: string) => store().holdForWrite(store().activeTabId, id)
 let hold: WriteHold | undefined
 
 beforeEach(() => {
+  // Node 26 shadows jsdom's `localStorage`; the immediate save is read back from it.
+  installStorageStub()
   clearStorage()
   store().newGraph()
   store().loadGraph(
@@ -96,6 +101,24 @@ describe('holding a card while it writes', () => {
     expect(store().past).toHaveLength(past)
     hold.release()
     expect(() => hold!.update('merges', () => 'late')).toThrow(/released/)
+  })
+
+  /** A crash inside the autosave's debounce must not lose the note of a merge the server made. */
+  it('saves each record write at once, not on the autosave’s delay', () => {
+    hold = holdOn('review')
+    hold.update('merges', () => 'entry')
+    const saved = loadAutosave()!.graph.nodes.find((n) => n.id === 'review')!
+    expect(saved.params['merges']).toBe('entry')
+  })
+
+  /**
+   * Unreachable through the guards above — so if a path round them ever appears, the write is
+   * refused out loud rather than skipped, and the batch stops on it (audit of 77c0625).
+   */
+  it('throws, rather than skipping, where the card has gone from under it', () => {
+    hold = holdOn('review')
+    useGraphStore.setState({ graph: emptyGraph('elsewhere') })
+    expect(() => hold!.update('merges', () => 'entry')).toThrow(/could not be recorded/)
   })
 
   it('is refused for a card not on screen, and while another is held', () => {

@@ -111,6 +111,14 @@ describe('rootCurrency', () => {
     expect(asked).toHaveLength(2)
   })
 
+  it('never asks about a cell that is no id, which would fail its whole batch', async () => {
+    const { services, asked } = servers()
+    const currency = createRootCurrency(services)
+    currency.ask(AT, ['7', 'abc', '0'])
+    await settle()
+    expect(asked).toEqual([['7']])
+  })
+
   it('keeps one datastack’s answers apart from another’s', async () => {
     const { services } = servers(['7'])
     const currency = createRootCurrency(services)

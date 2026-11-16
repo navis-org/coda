@@ -14,8 +14,12 @@
  * rank 1. The rest of the list is context a reader can page through, not further suggestions.
  *
  * A *piece* can still appear on two tips' lists, because a piece can touch the neuron in more
- * than one place. That is why a verdict is keyed on the **pair**: "belongs" on one tip and "not
- * it" on another is not a contradiction, it is two contacts.
+ * than one place. A verdict is about the piece and the neuron — **keyed on the two root ids**
+ * (`verdictKey`), never on the tip — so it shows on every row the piece is on. The tip number
+ * `end_uid` is a counter of one run: a re-run renumbers it, and an old verdict keyed on it would
+ * attach to whichever tip took the number, on another neuron as likely as not (audit of 77c0625,
+ * 2026-11-16). Keyed on the roots, a verdict survives a re-run while neither is edited and is
+ * gone once either is — and an edited piece needs looking at again anyway.
  *
  * ## Filters are the reader's, and they never move the cursor
  *
@@ -31,7 +35,7 @@ import { formatNumber, plural } from '../../style/format'
 import type { MergedSoFar } from './mergeRecord'
 import { numberAt, pointAt } from './suggestionTables'
 
-/** What a reader can say about one (tip, candidate) pair. SEAM's vocabulary, in their words. */
+/** What a reader can say about a piece for a neuron. SEAM's vocabulary, in their words. */
 export type Verdict = 'accept' | 'reject' | 'unsure'
 
 export const VERDICTS: readonly Verdict[] = ['accept', 'reject', 'unsure']
@@ -99,9 +103,10 @@ export function buildQueue(
   for (let i = 0; i < tips.length; i++) {
     const endUid = numberAt(tips, 'end_uid', i)
     if (endUid === undefined) continue
+    const neuronId = text(tips, ID_COLUMN_NAME, i) ?? ''
     out.push({
       endUid,
-      neuronId: text(tips, ID_COLUMN_NAME, i) ?? '',
+      neuronId,
       kind: text(tips, 'kind', i) ?? 'tip',
       tipNm: [
         numberAt(tips, 'x', i) ?? 0,
@@ -112,7 +117,7 @@ export function buildQueue(
       q: numberAt(tips, 'q', i),
       pTip: numberAt(tips, 'p_tip', i),
       shown: wasShown(tips, i),
-      candidates: lists.get(endUid) ?? [],
+      candidates: lists.get(tipKey(neuronId, endUid)) ?? [],
     })
   }
   return out
@@ -123,8 +128,8 @@ export interface QueueNeuron {
   readonly neuronId: string
   readonly tips: number
   /**
-   * Pairs with a verdict among this neuron's tips — counted over the candidates the queue holds,
-   * so it agrees with the rows the `Verdicts` output publishes for this neuron.
+   * Pieces with a verdict among this neuron's tips, each once — counted over the candidates the
+   * queue holds, so it agrees with the rows the `Verdicts` output publishes for this neuron.
    */
   readonly judged: number
 }
@@ -137,16 +142,24 @@ export interface QueueNeuron {
  * neuron is the first one ready.
  */
 export function neuronsOf(queue: readonly QueueTip[], verdicts: Verdicts): QueueNeuron[] {
-  const counts = new Map<string, { tips: number; judged: number }>()
+  const counts = new Map<string, { tips: number; judged: Set<string> }>()
+  const judged = piecesByNeuron(verdicts, () => true)
   for (const tip of queue) {
     let held = counts.get(tip.neuronId)
-    if (!held) counts.set(tip.neuronId, (held = { tips: 0, judged: 0 }))
+    if (!held) counts.set(tip.neuronId, (held = { tips: 0, judged: new Set() }))
     held.tips += 1
+    const said = judged.get(tip.neuronId)
+    if (!said) continue
+    // A piece once however many of the neuron's tips list it: one verdict, one judgement.
     for (const candidate of tip.candidates) {
-      if (verdictFor(verdicts, tip.endUid, candidate.candidateId)) held.judged += 1
+      if (said.has(candidate.candidateId)) held.judged.add(candidate.candidateId)
     }
   }
-  return [...counts].map(([neuronId, held]) => ({ neuronId, ...held }))
+  return [...counts].map(([neuronId, held]) => ({
+    neuronId,
+    tips: held.tips,
+    judged: held.judged.size,
+  }))
 }
 
 /**
@@ -174,15 +187,20 @@ export function tipsOf(queue: readonly QueueTip[], neuronId: string | undefined)
   return neuronId === undefined ? [] : queue.filter((tip) => tip.neuronId === neuronId)
 }
 
-/** Every tip's candidates, in rank order. */
-function candidateLists(table: TableValue | undefined): Map<number, Candidate[]> {
-  const lists = new Map<number, Candidate[]>()
+/** A tip's identity: `end_uid` is a run's counter, so two runs stacked into one table share one. */
+export const tipKey = (neuronId: string, endUid: number) => `${neuronId}|${endUid}`
+
+/** Every tip's candidates, in rank order, by `tipKey`: a row naming no neuron is no tip's. */
+function candidateLists(table: TableValue | undefined): Map<string, Candidate[]> {
+  const lists = new Map<string, Candidate[]>()
   if (!table) return lists
   for (let i = 0; i < table.length; i++) {
     const endUid = numberAt(table, 'end_uid', i)
+    const neuronId = text(table, ID_COLUMN_NAME, i)
     const candidateId = text(table, 'candidateId', i)
-    if (endUid === undefined || !candidateId) continue
-    const held = lists.get(endUid) ?? []
+    if (endUid === undefined || !neuronId || !candidateId) continue
+    const key = tipKey(neuronId, endUid)
+    const held = lists.get(key) ?? []
     held.push({
       candidateId,
       rank: numberAt(table, 'rank', i) ?? held.length + 1,
@@ -195,7 +213,7 @@ function candidateLists(table: TableValue | undefined): Map<number, Candidate[]>
       conf: numberAt(table, 'conf', i),
       shown: wasShown(table, i),
     })
-    lists.set(endUid, held)
+    lists.set(key, held)
   }
   // Rank order, because the file's row order is nobody's promise and rank 1 is the suggestion.
   for (const list of lists.values()) list.sort((a, b) => a.rank - b.rank)
@@ -509,10 +527,10 @@ export interface AcceptedRow {
  * Every accepted piece among these tips, one per candidate root, in the order the reader met them;
  * each with its rows nearest gap first (an unmeasured gap last), then by rank.
  *
- * **The one rule for "accepted"**: a piece accepted at any tip is accepted, whatever another tip
- * said. The scene's green pieces (`scenePieces`) and Submit's plan (`mergePlan.ts`) both read it
- * here, so the neuron shown "as it will look once you make the merges" is the one the merges
- * make. `tips` is the picked neuron's (`tipsOf`).
+ * **The one rule for "accepted"**: the piece's verdict for the tip's own neuron (`verdictKey`) —
+ * one per pair, so every row of the piece says the same. The scene's green pieces (`scenePieces`)
+ * and Submit's plan (`mergePlan.ts`) both read it here, so the neuron shown "as it will look once
+ * you make the merges" is the one the merges make. `tips` is the picked neuron's (`tipsOf`).
  */
 export function acceptedPieces(
   tips: readonly QueueTip[],
@@ -520,18 +538,17 @@ export function acceptedPieces(
 ): Map<string, AcceptedRow[]> {
   const pieces = new Map<string, AcceptedRow[]>()
   /*
-   * Only the tips holding an accept are walked: a neuron is thousands of tips of ten candidates,
-   * a reader accepts a handful, and this runs on every render of the card (25× faster at 3,000
-   * tips, measured 2026-11-16). The key is `${endUid}:${candidateId}` (`verdictKey`).
+   * The accepted pieces by neuron first, so a tip of a neuron with none is skipped whole and a
+   * candidate is a set lookup, with no key built: a neuron is thousands of tips of ten candidates,
+   * a reader accepts a handful, and this runs on every render of the card (0.3 ms against 2.7 ms
+   * for a key per candidate at 3,000 tips, measured 2026-11-16).
    */
-  const accepting = new Set<number>()
-  for (const [key, verdict] of verdicts) {
-    if (verdict === 'accept') accepting.add(Number(key.slice(0, key.indexOf(':'))))
-  }
+  const accepted = piecesByNeuron(verdicts, (verdict) => verdict === 'accept')
   for (const tip of tips) {
-    if (!accepting.has(tip.endUid)) continue
+    const mine = accepted.get(tip.neuronId)
+    if (!mine) continue
     for (const candidate of tip.candidates) {
-      if (verdictFor(verdicts, tip.endUid, candidate.candidateId) !== 'accept') continue
+      if (!mine.has(candidate.candidateId)) continue
       const rows = pieces.get(candidate.candidateId) ?? []
       rows.push({ endUid: tip.endUid, candidate })
       pieces.set(candidate.candidateId, rows)
@@ -566,17 +583,30 @@ export function mergedAs(
 }
 
 /**
- * A verdict, keyed on the pair.
+ * A verdict, keyed on the neuron and the piece (the header says why not the tip).
  *
  * Text rather than a nested object because this is a param: it is saved with the workflow, it is
  * in the provenance key, and a flat string is something a reader can see in the inspector and a
- * diff can show. `end_uid` is an integer and a candidate id is digits, so neither can hold the
- * separators.
+ * diff can show. Both ids are digits, so neither can hold the separators.
+ *
+ * **A key of the old shape, `${endUid}:${candidateId}`, is kept and never read** (user,
+ * 2026-11-16): it stays in the param, so nothing a reader said is deleted, but its tip number may
+ * name another tip by now, so it is no verdict on anything. `/` rather than `:` so no old key can
+ * be read as a new one.
  */
 export type Verdicts = ReadonlyMap<string, Verdict>
 
-export const verdictKey = (endUid: number, candidateId: string): string =>
-  `${endUid}:${candidateId}`
+export const verdictKey = (neuronId: string, candidateId: string): string =>
+  `${neuronId}/${candidateId}`
+
+/** A key's two ids, or undefined for one of the old shape (or a hand edit). */
+export function verdictPair(
+  key: string,
+): { neuronId: string; candidateId: string } | undefined {
+  const at = key.indexOf('/')
+  if (at <= 0 || at === key.length - 1) return undefined
+  return { neuronId: key.slice(0, at), candidateId: key.slice(at + 1) }
+}
 
 export function decodeVerdicts(raw: unknown): Map<string, Verdict> {
   const out = new Map<string, Verdict>()
@@ -604,24 +634,40 @@ export function encodeVerdicts(verdicts: Verdicts): string {
     .join(';')
 }
 
+/** The pieces with a verdict `keep` takes, by neuron; a key of the old shape is none. */
+function piecesByNeuron(
+  verdicts: Verdicts,
+  keep: (verdict: Verdict) => boolean,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>()
+  for (const [key, verdict] of verdicts) {
+    const pair = keep(verdict) ? verdictPair(key) : undefined
+    if (!pair) continue
+    let held = out.get(pair.neuronId)
+    if (!held) out.set(pair.neuronId, (held = new Set()))
+    held.add(pair.candidateId)
+  }
+  return out
+}
+
 /** The verdict on one pair, where there is one. */
 export function verdictFor(
   verdicts: Verdicts,
-  endUid: number,
+  neuronId: string,
   candidateId: string,
 ): Verdict | undefined {
-  return verdicts.get(verdictKey(endUid, candidateId))
+  return verdicts.get(verdictKey(neuronId, candidateId))
 }
 
 /** Set or clear one pair's verdict, returning a new map. Setting the same one again clears it. */
 export function withVerdict(
   verdicts: Verdicts,
-  endUid: number,
+  neuronId: string,
   candidateId: string,
   verdict: Verdict,
 ): Map<string, Verdict> {
   const out = new Map(verdicts)
-  const key = verdictKey(endUid, candidateId)
+  const key = verdictKey(neuronId, candidateId)
   if (out.get(key) === verdict) out.delete(key)
   else out.set(key, verdict)
   return out

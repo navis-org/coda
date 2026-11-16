@@ -395,7 +395,8 @@ be found, so neither level can pass for nothing. The overlay shows progress thro
 which lives in the record module so the overlay never names a module that writes.
 
 - **`prepareMerges(plan, merges, options)` is synchronous and is the only place a batch is refused
-  before it starts**: a merge not in the plan, one listed twice, anything `confirmMerge` refuses.
+  before it starts**: a merge not in the plan, one listed twice, an end that is not a supervoxel
+  (layer 1 of the plan's `layout`; the audit below), anything `confirmMerge` refuses.
   So the overlay's "Not started" (a throw from `onConfirm`) can only mean nothing was sent; the
   returned `Batch.run(callbacks)` runs once and reports every later failure as a result.
 - **Before each merge, both supervoxels' roots at the server's now** (`rootsAtInstant`, `'server'`).
@@ -404,19 +405,22 @@ which lives in the record module so the overlay never names a module that writes
   sent, and the batch goes on; under any root but its reviewed one it is `not-sent` (edited since
   the plan), and the batch goes on.
 - **After a merge the server answered**, the same read must find both supervoxels under the new
-  root (a read-only graph answers success without keeping it). If it does not, the merge is still
-  recorded as made (on the server's word, with what the roots said) and the batch stops.
-- **A lost reply (`unknown`)** is read off the roots: both supervoxels under one new root (a real
-  id, never 0) is `merged` (no operation id). **Anything else stays `unknown`, roots that have not
-  moved included** — a reply lost to a proxy's timeout can come back while the server is still
-  writing, so only the server's own refusal is `failed`. A writer that throws is read the same
-  way, never as "not sent". Every one stops the batch.
+  root (a read-only graph answers success without keeping it). Where both read fine and still
+  under their old roots, it is `unknown` (the operation id in its sentence); where they moved
+  elsewhere or could not be read, it is recorded as made on the server's word. Either stops the
+  batch.
+- **A lost reply is always `unknown`**, whatever the roots show (the audit below; it used to adopt
+  both ends under one new root as `merged`, which cannot tell this merge from somebody else's edit
+  landing in the same seconds). A reply lost to a proxy's timeout can come back while the server
+  is still writing, so only the server's own refusal is `failed`. A writer that throws is read the
+  same way, never as "not sent". Every one stops the batch. A merge that simply has not answered
+  within `SEND_TIMEOUT_MS` is handed to the session still out (`BatchCallbacks.stillOut`).
 - **The next plan settles an `unknown`** — every `unknown` entry of the neuron since its last
   `merged` one (`mergedSoFar`'s `unsettled`), since a lost merge can land even after a later
   batch's check. Without it, a lost reply that did merge leaves the recorded root outdated and the
   neuron refused on every Submit. The plan settles one only where the roots show **this merge
   and nothing after it**: both supervoxels under one new root at the server's now
-  (`sharedNewRoot`, the one rule the batch uses too), **and**, just before that root was made
+  (`sharedNewRoot`), **and**, just before that root was made
   (`rootTimestamps`, `POST …/root_timestamps`, read off pychunkedgraph v2.20.0), under exactly the
   neuron's root and the piece's. The second test is what keeps somebody else's later edit from
   being adopted as ours — that neuron is refused (`neuron-outdated`), as the rule says. A settled
@@ -438,12 +442,14 @@ which lives in the record module so the overlay never names a module that writes
   next merge's check. Merges not reached are shown `not-sent` and not recorded.
 - **The record is the `seam:review` param `merges`** — `unrecorded` (no undo step), and data, in
   the key, since `Merges` and `Current` read it. JSON, appended to, ids as text. One entry per
-  decision the batch made about a confirmed merge: reviewed root, candidate root, `end_uid`, the
+  decision the batch made about a confirmed merge: the deployment and datastack it was made on,
+  reviewed root, candidate root, `end_uid`, the
   neuron's root it was checked against, both supervoxels and positions, time, outcome
   (`merged` + new root and operation id, `already-merged`, `failed` + status, `not-sent`,
   `unknown`), and a sentence. A malformed entry is dropped on reading, never guessed at.
-- **`mergedSoFar(record, reviewedRoot)`** is the one reading: the neuron's root now, every root it
-  has had, the pieces in it. The plan (phase 3, which took a stand-in `RecordedMerge` until now),
+- **`mergedSoFar(record, reviewedRoot, scope)`** is the one reading: the neuron's root now, every
+  root it has had, the pieces in it — from the entries made on `scope`'s chunkedgraph alone (the
+  card's wired Dataset; the audit below). The plan (phase 3, which took a stand-in `RecordedMerge` until now),
   the node and the card read it. Only `merged` and `already-merged` put a piece in the neuron;
   only `merged` moves the root.
 - **The record is not what stops a double send** — the server is. A piece merged already maps to
@@ -536,8 +542,9 @@ review; nothing accepted; everything accepted merged — and another card's Subm
   retired root, and the leave prompt missing `returnValue`. The second found:
   - **A request that never answers held everything for good.** Root reads now give up after a
     minute (`READ_TIMEOUT_MS`; a read changes nothing). A merge unanswered after two minutes
-    (`SEND_TIMEOUT_MS`) is read as `unknown` — the request is left to finish, the roots are
-    asked, and it is never sent again.
+    (`SEND_TIMEOUT_MS`) is read as `unknown` — the request is left to finish, and the
+    confirmation is never sent again. (The *pair* could be, by a Submit planned before it
+    answered; the audit below closed that.)
   - **The last entries could miss the autosave** if the tab closed right as the batch ended (the
     prompt is gone by then); releasing the hold saves at once.
   - A refused delete or cut still cleared the selection and copied the card; an assistant plan
@@ -661,6 +668,52 @@ The user's notes, all fixed:
 - [backends-cave.md](backends-cave.md): "Writing to a chunkedgraph" — the writer, the three import
   levels and what a change near it must keep, pointing here for the record.
 - CLAUDE.md, under Backends and data: the one-module rule, pointing at both.
+
+## The audit of 77c0625 (2026-11-16)
+
+An independent read of the committed pipeline asked one question: can this send a merge that
+should not be sent? It found the write path sound, and the weak point one step earlier, in what
+counts as accepted. All ten findings fixed the same day; the user chose the verdict key and what
+an old one means.
+
+| # | Found | Now |
+| --- | --- | --- |
+| 1 | A verdict was keyed `${end_uid}:${candidate}`, and `end_uid` is a counter of one run: after a re-run an old accept attached to whichever tip took the number, **on another neuron** as likely as not, and Submit planned it ticked. `candidateLists` joined tips to lists on `end_uid` alone, so two runs stacked shared lists | **Keyed `${neuron}/${candidate}`** (user): one verdict per pair, on every row of the piece, kept across a re-run while neither root is edited. An old key is kept in the param and never read (user) — `/` so none can parse as new. Lists join on (neuron, `end_uid`); so does `Tips`' folded verdict, and the exporters join on (neuron, candidate) |
+| 2 | The record named no chunkedgraph: wired from the sandbox to production, a sandbox merge moved the neuron's root and took its pieces there too (the tables share ids) | Each entry names its deployment and datastack; `mergedSoFar` reads only the scope it is given — the wired Dataset (`recordScopeOf`), the plan's own. An entry naming none is kept and listed, and read for none |
+| 3 | Nothing near the writer checked an end was a supervoxel; the server maps a root to itself, retired or not, so the per-merge check would pass one | The plan carries the anchor volume's `layout`; `prepareMerges` refuses any end not at layer 1, and a plan with merges but no layout |
+| 4 | The batch adopted a lost reply's shared new root as `merged` without the plan's second test | Always `unknown`; the plan's `settle` is the one place it is decided |
+| 5 | A merge that timed out could be planned and sent again while its request was still out (the server's same-object refusal was the only guard) | The session holds every Submit (`waiting`) until it answers, for up to `STILL_OUT_MS` (10 min) |
+| 6 | Root ids from the table went into the currency request unchecked; one bad cell failed the whole check | Refused `bad-id` before any request; the neuron's id too |
+| 7 | `hold.update` did nothing, silently, for a card that was gone | Throws; the batch turns a throwing `record` into a stop |
+| 8 | Record entries reached storage on the autosave's delay | Saved at once on every `update` |
+| 9 | A timed-out merge's late answer was thrown away | The session appends it (`merged` with its operation id, or `failed`) through a short hold; past `STILL_OUT_MS` it is dropped, since a later batch may have moved the neuron on |
+| 10 | `done` with both ends unmoved (a read-only graph) was recorded `merged` | `unknown`, the operation id in its sentence |
+
+**Review:** /simplify (accepted pieces found through one by-neuron index again, 0.3 ms against
+2.7 ms at 3,000 tips; the wait for a merge still out holding the card's two ids, never the queue;
+one notice from `STILL_OUT_MS`; Submit's scope from `recordScopeOf`; `rootCurrency` skipping a
+cell that is no id), then /code-review medium. It found: a late answer landing while the batch
+still held the card was refused a second hold and lost — it is now waited for once the batch lets
+go; `stillOut` is handed over before anything that can throw; a late refusal now settles the
+`unknown` it answers (it held `unsettled` open for good, and with it the "edited" line);
+`unknown` keeps the server's operation id, which a settlement carries on; `Verdicts` is one row
+per judgement again, at the tip that first lists the piece. A second round (the first's were
+write-path holes) found: the tab could close unasked during the wait (the leave prompt now spans
+it); the limit ran out in silence (a notice now); a piece listed at three tips counted three
+judged; a settlement said "the reply was lost" of a merge the server had answered. The per-entry
+save was left: one per merge, beside a network round trip each. Left as they are, both safe:
+
+- **A late `done` is recorded `merged` on the server's word**, unchecked against the roots, as the
+  batch's own `done` is where the ends moved elsewhere. On a read-only graph the next plan then
+  refuses the neuron as edited.
+- **Entries from before 2026-11-16 name no chunkedgraph and are read for none**, so the first Aedes
+  merge's workflow shows its piece as unmerged and the neuron as outdated until the suggestions
+  are run again on its new root. Nothing can be sent from it meanwhile.
+
+Left to decide: a warning above some number of merges in one Submit (each goes into the shared
+`priority` remesh queue), and flagging a piece bigger than the neuron it joins. From the
+/simplify pass: holding the card (not only Submit) until a merge still out answers, putting the
+layer-1 check in `confirmMerge` itself, so the sandbox probe gets it too.
 
 ## Settled questions (user, 2026-11-15)
 
