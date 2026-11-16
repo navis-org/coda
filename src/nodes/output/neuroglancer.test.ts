@@ -388,6 +388,8 @@ describe('guard rails', () => {
         // deliberately — and neither is a segment id. That gap is why `isSegmentId` exists.
         { neuronId: '-1', type: 'A' },
         { neuronId: '007', type: 'A' },
+        // One past 2⁶⁴ − 1: the grammar passes it, and neuroglancer's `parseUint64` still throws.
+        { neuronId: '18446744073709551616', type: 'A' },
         { neuronId: '  ', type: 'A' },
         { neuronId: '10002', type: 'A' },
       ],
@@ -397,7 +399,7 @@ describe('guard rails', () => {
     const { scene } = await sceneFrom({}, messy, stubSource(), said)
 
     expect(layersOf(scene)[1]!['segments']).toEqual(['10001', '10002'])
-    expect(said.join(' ')).toMatch(/4 of 6 rows/)
+    expect(said.join(' ')).toMatch(/5 of 7 rows/)
     expect(said.join(' ')).toMatch(/only accepts ids that are plain whole numbers/)
   })
 

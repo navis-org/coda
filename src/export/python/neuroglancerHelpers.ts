@@ -55,7 +55,7 @@ registerHelper({
     '        if _coda_blank(value):',
     '            continue',
     '        text = str(value).strip()',
-    "        if re.fullmatch(r'0|[1-9][0-9]*', text):",
+    "        if re.fullmatch(r'0|[1-9][0-9]*', text) and int(text) < 2 ** 64:",
     '            kept.setdefault(text, None)',
     '        else:',
     '            unreadable += 1',
