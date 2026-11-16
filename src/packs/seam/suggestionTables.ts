@@ -262,3 +262,18 @@ export function numberAt(table: TableValue, name: string, row: number): number |
   const cell: CellValue | undefined = table.data[name]?.[row]
   return typeof cell === 'number' && Number.isFinite(cell) ? cell : undefined
 }
+
+/**
+ * Three numeric cells as a point, or undefined if any is missing — never a zero standing in for
+ * one, since `[0, 0, 0]` is a real place: a contact read as the origin draws a suggestion there,
+ * and a merge looked for there would be a merge somewhere else. The one reader of a point column
+ * for both `seam:suggestions` and the review queue.
+ */
+export function pointAt(
+  table: TableValue,
+  [x, y, z]: readonly [string, string, string],
+  row: number,
+): readonly [number, number, number] | undefined {
+  const at = [numberAt(table, x, row), numberAt(table, y, row), numberAt(table, z, row)]
+  return at.every((v) => v !== undefined) ? (at as [number, number, number]) : undefined
+}

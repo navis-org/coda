@@ -264,8 +264,14 @@ function authRefusal(url: string, status: number, body: string): string {
     )
   }
   if (parsed.error === 'missing_permission') {
+    // `edit` on a merge, `view` on a read (`middle_auth_client`'s `auth_requires_permission`); a
+    // fixed "read" misnamed a refused edit, so a body without it gets no verb at all.
+    const lacks =
+      typeof data.required_permission === 'string'
+        ? `not permitted to ${data.required_permission}`
+        : 'missing a permission on'
     return (
-      `Your CAVE account is not permitted to read ${dataset} (${status} at ` +
+      `Your CAVE account is ${lacks} ${dataset} (${status} at ` +
       `${new URL(url).origin}). Your token is fine; this is a permission on the dataset, so ` +
       `signing in again will not help.`
     )
@@ -356,15 +362,6 @@ export function cavePost<T>(
 }
 
 /**
- * A POST whose body the caller has already written.
- *
- * For the one thing `JSON.stringify` cannot express: a list of **unquoted** integers too wide for
- * a double. `is_latest_roots` takes `node_ids` as integers, and a root id through
- * `JSON.stringify` of a `number` is a different neuron (invariant 8) — where quoting them is a
- * type the endpoint was not promised to accept. So the digits are spliced in as text, the same
- * answer `idList` gives for Cypher and `pyLongIntList` for the notebook.
- */
-/**
  * A POST whose body and reply are both raw `uint64` arrays.
  *
  * `roots_binary` — what `caveclient.chunkedgraph.get_roots` calls — takes
@@ -391,7 +388,11 @@ export async function cavePostBinary(
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/octet-stream',
       },
-      body: body.buffer as ArrayBuffer,
+      /*
+       * The array itself, not `body.buffer`: a view's buffer is the whole allocation it was cut
+       * from, so a `subarray` would send every id after it too. `fetch` sends a view's own bytes.
+       */
+      body: body as BufferSource,
       ...(options.signal ? { signal: options.signal } : {}),
     })
   } catch (error) {
@@ -452,10 +453,35 @@ export async function caveGetBytes(
   return response.arrayBuffer()
 }
 
+/**
+ * A POST whose body the caller has already written.
+ *
+ * For the one thing `JSON.stringify` cannot express: a list of **unquoted** integers too wide for
+ * a double. `is_latest_roots` takes `node_ids` as integers, and a root id through
+ * `JSON.stringify` of a `number` is a different neuron (invariant 8) — where quoting them is a
+ * type the endpoint was not promised to accept. So the digits are spliced in as text, the same
+ * answer `idList` gives for Cypher and `pyLongIntList` for the notebook.
+ */
 export function cavePostRaw<T>(
   url: string,
   body: string,
   options: CaveRequestOptions,
 ): Promise<T> {
   return request<T>(url, { method: 'POST', body }, options)
+}
+
+/**
+ * A POST that changes something on the server: `cavePostRaw`, refusing to follow a redirect.
+ *
+ * `fetch` follows a 307 or 308 by sending the same body again to wherever it points, and turns a
+ * 301–303 into a GET — so a write would land on a host nobody confirmed, or come back as some
+ * page's 200. With `redirect: 'error'` the fetch fails instead, which the writer (`edits.ts`)
+ * reads as "not known" and answers by re-reading the roots.
+ */
+export function cavePostWrite<T>(
+  url: string,
+  body: string,
+  options: CaveRequestOptions,
+): Promise<T> {
+  return request<T>(url, { method: 'POST', body, redirect: 'error' }, options)
 }

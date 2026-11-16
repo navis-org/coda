@@ -15,11 +15,15 @@ import { resetCache } from '../cache'
 import { resetCredentials, setToken } from './credentials'
 import { parseCaveTimestamp } from './datastack'
 import {
+  isLatestRoots,
   l2ChunkCounts,
   peekRootCheck,
   resetRootChecks,
+  rootTimestamps,
+  rootsAtInstant,
   startRootCheck,
   subscribeRootCheck,
+  supervoxelRoots,
 } from './rootIds'
 import { resetCaveState } from './tables'
 import { DEFAULT_CAVE_SERVER } from './deployments'
@@ -388,15 +392,17 @@ describe('what keeps it cheap', () => {
   })
 })
 
+/** The chunkedgraph the direct lookups below ask, and the options they ask with. */
+const graphene = {
+  server: 'https://cave.example.org',
+  table: 'test_table',
+  base: 'https://cave.example.org/segmentation/table/test_table',
+}
+/** The deployment is required so a request cannot be signed with another account's token. */
+const OPTIONS = { deployment: DEFAULT_CAVE_SERVER }
+
 /** The level-2 chunk counts SEAM's tree ranker reads as `l2c`/`l2x`. See `l2ChunkCounts`. */
 describe('level-2 chunk counts', () => {
-  const graphene = {
-    server: 'https://cave.example.org',
-    table: 'test_table',
-    base: 'https://cave.example.org/segmentation/table/test_table',
-  }
-  /** The deployment is required so a request cannot be signed with another account's token. */
-  const OPTIONS = { deployment: DEFAULT_CAVE_SERVER }
   /** `leaves_many` answers `{"<root>": [chunk ids]}`, and an id it does not know is absent. */
   const serve = (lists: Record<string, number[]>) => {
     const calls: { url: string; nodes: string[] }[] = []
@@ -589,5 +595,170 @@ describe('level-2 chunk counts', () => {
     const got = await l2ChunkCounts(graphene, ['999'], OPTIONS)
     expect(calls).toHaveLength(1)
     expect(got.has('999')).toBe(false)
+  })
+})
+
+/**
+ * Label 0 is a segmentation's background, never a supervoxel. It is answered as root 0 without
+ * being sent, so every caller can test the root alone — and the answer must still line up with the
+ * ids asked, since a root shifted by one position is a different neuron's.
+ */
+describe('the root of label 0', () => {
+  it('is 0, without asking, and the rest keep their places', async () => {
+    const sent: bigint[][] = []
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      const ids = new BigUint64Array(init!.body as ArrayBuffer)
+      sent.push([...ids])
+      // Every supervoxel's root is itself plus a thousand.
+      return new Response(BigUint64Array.from(ids, (id) => id + 1000n).buffer, { status: 200 })
+    })
+    const got = await rootsAtInstant(
+      graphene,
+      1_700_000_000_000,
+      BigUint64Array.from([0n, 5n, 0n, 7n]),
+      OPTIONS,
+    )
+    expect(sent).toEqual([[5n, 7n]])
+    expect([...got]).toEqual([0n, 1005n, 0n, 1007n])
+  })
+
+  /**
+   * A view's buffer is the whole allocation it was cut from. Ids handed over as a view of a larger
+   * array must go as exactly those ids, or every id after the view goes too (`cavePostBinary`).
+   */
+  it('sends only the ids asked, even when they are a view of a larger array', async () => {
+    const sent: bigint[][] = []
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      // Read the bytes fetch would send: a view's own range, whatever it is a view of.
+      const body = init!.body as ArrayBufferView
+      const ids = new BigUint64Array(body.buffer, body.byteOffset, body.byteLength / 8)
+      sent.push([...ids])
+      return new Response(BigUint64Array.from(ids, (id) => id + 1000n).buffer, { status: 200 })
+    })
+    const whole = BigUint64Array.from([5n, 6n, 7n, 8n])
+    const got = await rootsAtInstant(graphene, 1_700_000_000_000, whole.subarray(1, 3), OPTIONS)
+    expect(sent).toEqual([[6n, 7n]])
+    expect([...got]).toEqual([1006n, 1007n])
+  })
+
+  /** A short reply filled with zeros would read as "no object" for every id past its end. */
+  it('refuses a reply that does not answer every id', async () => {
+    vi.stubGlobal(
+      'fetch',
+      async () => new Response(BigUint64Array.from([1005n]).buffer, { status: 200 }),
+    )
+    await expect(
+      rootsAtInstant(graphene, 1_700_000_000_000, BigUint64Array.from([5n, 7n]), OPTIONS),
+    ).rejects.toThrow(/answered 1 roots for 2 supervoxels/)
+  })
+
+  it('asks nothing at all for a box of background', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const got = await rootsAtInstant(
+      graphene,
+      1_700_000_000_000,
+      BigUint64Array.from([0n]),
+      OPTIONS,
+    )
+    expect(fetch).not.toHaveBeenCalled()
+    expect([...got]).toEqual([0n])
+  })
+})
+
+/**
+ * After our own write, a client clock behind the server's would ask about a moment before it and
+ * see the old roots — so `'server'` sends no timestamp, and the server answers at its own now.
+ */
+describe("the server's now", () => {
+  const urls = (reply: () => Response) => {
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      asked.push(url)
+      return reply()
+    })
+    return asked
+  }
+
+  it('asks roots_binary with no timestamp, and a chosen moment with one', async () => {
+    const asked = urls(() => new Response(BigUint64Array.from([9n]).buffer, { status: 200 }))
+    await rootsAtInstant(graphene, 'server', BigUint64Array.from([5n]), OPTIONS)
+    await rootsAtInstant(graphene, 1_700_000_000_000, BigUint64Array.from([5n]), OPTIONS)
+    expect(asked).toEqual([
+      'https://cave.example.org/segmentation/api/v1/table/test_table/roots_binary',
+      'https://cave.example.org/segmentation/api/v1/table/test_table/roots_binary?timestamp=1700000000',
+    ])
+  })
+
+  it('asks is_latest_roots with no timestamp, the ids as integers', async () => {
+    const sent: string[] = []
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      sent.push(url, String(init?.body))
+      return new Response('{"is_latest":[true,false]}', { status: 200 })
+    })
+    const got = await isLatestRoots(graphene, ['720575940621039145', '7'], 'server', OPTIONS)
+    expect(got).toEqual([true, false])
+    expect(sent).toEqual([
+      'https://cave.example.org/segmentation/api/v1/table/test_table/is_latest_roots',
+      '{"node_ids":[720575940621039145,7]}',
+    ])
+  })
+
+  /** An empty list passes `every(Boolean)`; a short one leaves the rest `undefined`. */
+  it.each([
+    ['no list', '{}'],
+    ['a short list', '{"is_latest":[true]}'],
+    ['a list of something else', '{"is_latest":[1,0]}'],
+  ])('refuses an answer with %s', async (_, body) => {
+    vi.stubGlobal('fetch', async () => new Response(body, { status: 200 }))
+    await expect(isLatestRoots(graphene, ['1', '2'], 'server', OPTIONS)).rejects.toThrow(
+      /one true\/false for each of the 2 roots/,
+    )
+  })
+
+  /** A merge's two ends, as text: past 2⁵³ both ways, where a number would name another object. */
+  it('reads two supervoxels’ roots as text, at the server’s now', async () => {
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      asked.push(url)
+      return new Response(BigUint64Array.from([720575940621039145n, 2n ** 64n - 1n]).buffer, {
+        status: 200,
+      })
+    })
+    const roots = await supervoxelRoots(
+      graphene,
+      ['73747834149376537', '73747834149376538'],
+      'server',
+      OPTIONS,
+    )
+    expect(roots).toEqual(['720575940621039145', '18446744073709551615'])
+    expect(asked).toEqual([
+      'https://cave.example.org/segmentation/api/v1/table/test_table/roots_binary',
+    ])
+  })
+
+  it('asks when roots were made, the ids as integers, and answers in ms', async () => {
+    const sent: string[] = []
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      sent.push(url, String(init?.body))
+      return new Response('{"timestamp":[1700000000.123456]}', { status: 200 })
+    })
+    const made = await rootTimestamps(graphene, ['720575940621039145'], OPTIONS)
+    expect(made[0]).toBeCloseTo(1_700_000_000_123.456, 3)
+    expect(sent).toEqual([
+      'https://cave.example.org/segmentation/api/v1/table/test_table/root_timestamps',
+      '{"node_ids":[720575940621039145]}',
+    ])
+  })
+
+  it.each([
+    ['no list', '{}'],
+    ['a short list', '{"timestamp":[]}'],
+    ['a list of something else', '{"timestamp":["soon"]}'],
+  ])('refuses a root-timestamps answer with %s', async (_, body) => {
+    vi.stubGlobal('fetch', async () => new Response(body, { status: 200 }))
+    await expect(rootTimestamps(graphene, ['1'], OPTIONS)).rejects.toThrow(
+      /one time for each of the 1 roots/,
+    )
   })
 })

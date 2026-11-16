@@ -468,6 +468,9 @@ describe('every store action is on one side of the lock', () => {
     // What each workflow's results hold, for the memory readout. A read.
     'workflowMemory',
     'setNotice',
+    // A card writing to a server holds its node and document; it edits nothing, and a locked
+    // canvas does not stop merges the reader confirmed (`writeHold.test.ts`).
+    'holdForWrite',
     'copySelection',
     /*
      * The workflow switcher, all on this side. The lock freezes edits landing on *this* graph;

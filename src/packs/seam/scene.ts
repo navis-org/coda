@@ -116,27 +116,7 @@ export function clusterLayer(neurons: readonly ClusterPoints[], name: string): C
   return {
     dropped,
     drawn: annotations.length,
-    layer: {
-      type: 'annotation',
-      name,
-      source: {
-        url: 'local://annotations',
-        transform: {
-          // Written out rather than through `data/neuroglancer/scene.ts`' `nanometreDimensions`,
-          // which takes a voxel-size triple and answers `undefined` for anything not finite and
-          // positive — so reaching it from here costs a `!` on a call that cannot fail. The float
-          // trap that helper exists for (`45 * 1e-9` serialising as 4.5000000000000006e-8) cannot
-          // bite at a scale of exactly 1 nm.
-          outputDimensions: { x: [1e-9, 'm'], y: [1e-9, 'm'], z: [1e-9, 'm'] },
-        },
-      },
-      annotationProperties: [{ id: 'color', type: 'rgb', default: '#ffffff' }],
-      // Without a shader every point draws in the layer's single colour: neuroglancer's default
-      // annotation shader calls `defaultColor()` and never looks at the properties, so the whole
-      // clustering would render as one uniform cloud with nothing wrong on screen to notice.
-      shader: 'void main() { setColor(prop_color()); setPointMarkerSize(6.0); }',
-      annotations,
-    },
+    layer: localAnnotationLayer(name, 'setPointMarkerSize(6.0);', annotations),
   }
 }
 
@@ -226,17 +206,7 @@ function pointLayer(
   return {
     dropped,
     drawn: annotations.length,
-    layer: {
-      type: 'annotation',
-      name,
-      source: {
-        url: 'local://annotations',
-        transform: { outputDimensions: { x: [1e-9, 'm'], y: [1e-9, 'm'], z: [1e-9, 'm'] } },
-      },
-      annotationProperties: [{ id: 'color', type: 'rgb', default: '#ffffff' }],
-      shader: 'void main() { setColor(prop_color()); setPointMarkerSize(6.0); }',
-      annotations,
-    },
+    layer: localAnnotationLayer(name, 'setPointMarkerSize(6.0);', annotations),
   }
 }
 
@@ -302,16 +272,87 @@ export function suggestionLayer(
   return {
     dropped,
     drawn: annotations.length,
-    layer: {
-      type: 'annotation',
-      name,
-      source: {
-        url: 'local://annotations',
-        transform: { outputDimensions: { x: [1e-9, 'm'], y: [1e-9, 'm'], z: [1e-9, 'm'] } },
-      },
-      annotationProperties: [{ id: 'color', type: 'rgb', default: '#ffffff' }],
-      shader: 'void main() { setColor(prop_color()); setPointMarkerSize(8.0); }',
-      annotations,
+    layer: localAnnotationLayer(name, 'setPointMarkerSize(8.0);', annotations),
+  }
+}
+
+/** One line to draw: a merge's two points, in nanometres, and the piece it belongs to. */
+export interface MergeLine {
+  readonly id: string
+  /** The segment the line is drawn with: shown while it is, hidden while it is not. */
+  readonly segment: string
+  readonly fromNm: readonly number[]
+  readonly toNm: readonly number[]
+  readonly color: string
+  readonly description: string
+}
+
+/**
+ * Each merge as a line from the neuron's point to the candidate's — the two places the merge is
+ * made — so the reader confirming it sees where, not only which pieces. Local and in nanometres,
+ * like `suggestionLayer`; a Submit is one neuron's merges, far below `MAX_ANNOTATIONS`.
+ *
+ * **Each line is linked to its piece** (`segments`, `linkedSegmentationLayer` naming the layer the
+ * pieces are in, `filterBySegmentation`), so neuroglancer draws a line only while its piece is
+ * shown. Unticking a piece — or hiding it in the viewer — hides its line with no change to this
+ * layer, and only a changed segment list is something the viewer sets in place
+ * (`selectionChanges`); a changed layer is a re-navigation that rebuilds every layer and re-centres
+ * the camera.
+ */
+export function mergeLineLayer(
+  lines: readonly MergeLine[],
+  name: string,
+  /** The layer the pieces are in; without one the lines are drawn unlinked, every one shown. */
+  segmentationLayer: string | undefined,
+): Readonly<Record<string, unknown>> {
+  const layer = localAnnotationLayer(
+    name,
+    'setLineWidth(3.0); setEndpointMarkerSize(6.0);',
+    lines.map((line) => ({
+      type: 'line',
+      id: line.id,
+      pointA: [...line.fromNm],
+      pointB: [...line.toNm],
+      segments: [line.segment],
+      props: [line.color],
+      description: line.description,
+    })),
+  )
+  return segmentationLayer === undefined
+    ? layer
+    : {
+        ...layer,
+        linkedSegmentationLayer: { segments: segmentationLayer },
+        filterBySegmentation: ['segments'],
+      }
+}
+
+/**
+ * A local annotation layer in nanometres, each annotation coloured by its own `color` property —
+ * the one wrapper every layer here shares; only the marker and the annotations differ.
+ *
+ * The scale is written out rather than through `data/neuroglancer/scene.ts`' `nanometreDimensions`,
+ * which takes a voxel-size triple and answers `undefined` for anything not finite and positive —
+ * so reaching it from here costs a `!` on a call that cannot fail. The float trap that helper
+ * exists for (`45 * 1e-9` serialising as 4.5000000000000006e-8) cannot bite at exactly 1 nm.
+ *
+ * The shader is not optional: neuroglancer's default calls `defaultColor()` and never looks at the
+ * properties, so every annotation would draw in one colour with nothing on screen to notice.
+ */
+function localAnnotationLayer(
+  name: string,
+  marker: string,
+  annotations: readonly unknown[],
+): Readonly<Record<string, unknown>> {
+  return {
+    type: 'annotation',
+    name,
+    source: {
+      url: 'local://annotations',
+      transform: { outputDimensions: { x: [1e-9, 'm'], y: [1e-9, 'm'], z: [1e-9, 'm'] } },
     },
+    annotationProperties: [{ id: 'color', type: 'rgb', default: '#ffffff' }],
+    shader: `void main() { setColor(prop_color()); ${marker} }`,
+    annotations,
   }
 }

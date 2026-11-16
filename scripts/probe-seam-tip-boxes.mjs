@@ -61,7 +61,8 @@ const HALF_WIDTH_UM = 3
  *
  * `openSearchVolume` passes this to `scaleNear`, so a width here picks the coarsest scale in the
  * pyramid and every chunk and byte figure below is then about a volume the node never reads.
- * Aedes publishes one scale so the mistake was invisible on it; the numbers that size
+ * On Aedes the mistake is invisible: its scales are 16 and 32 nm, and the coarsest is the 32 the
+ * node reads anyway. It would not be on a deeper pyramid, and the numbers that size
  * `DEFAULT_CHUNK_BUDGET` came from this script, so it is worth being exact.
  */
 const XY_NM = 32

@@ -193,6 +193,11 @@ const AUTO_RUN_DELAY_MS = 180
  */
 const AUTO_FULL_RUN_DELAY_MS = 700
 const AUTOSAVE_DELAY_MS = 800
+
+/** What a refused delete, undo, load or switch says while a card's writes are in flight. */
+const WRITING_NOTICE =
+  'Merges are being sent to the segmentation. This card and this workflow stay as they are ' +
+  'until they finish.'
 /** Param edits closer together than this collapse into one undo step. */
 const HISTORY_COALESCE_MS = 700
 const HISTORY_LIMIT = 100
@@ -349,6 +354,14 @@ interface DocRecord {
   viewport: CanvasViewport | undefined
   /** Set aside while another document is active; `undefined` for the one on screen. */
   stash: DocStash | undefined
+}
+
+/** A card's hold on its document while it writes to a server — see `holdForWrite`. */
+export interface WriteHold {
+  /** Replace one of the held node's params with `change(value now)`, unrecorded. */
+  update(paramId: string, change: (now: ParamValue | undefined) => ParamValue): void
+  /** Let go. Safe to call twice; `update` throws afterwards. */
+  release(): void
 }
 
 export interface GraphState {
@@ -975,6 +988,14 @@ export interface GraphState {
    * unsaved one really does lose it; a prototype-stage gap, noted rather than hidden.
    */
   closeDocument(id: string): void
+  /**
+   * Hold the on-screen document and one of its nodes while that node's card writes to a server
+   * (`seam:review`'s merge batch): until `release`, nothing removes the node or changes the
+   * document — a delete, an undo, a load, a switch or a close is refused with a notice. Throws
+   * unless `docId` is on screen and holds the node, and while another hold is up. `update` is the
+   * one way the card's record is written: read and replaced in one step, with no undo step.
+   */
+  holdForWrite(docId: string, nodeId: string): WriteHold
   /**
    * What every open workflow's results hold, in the switcher's order, charged to `ledger`.
    *
@@ -1765,6 +1786,38 @@ export const useGraphStore = create<GraphState>((set, get) => {
    */
   const frozen = () => get().locked
 
+  /*
+   * A card writing to a server (`seam:review`'s merge batch): the document and the node its record
+   * is written to, while the writes are in flight. Nothing may take that node off the graph or
+   * that document off the screen until it is released — the record of a write the server made
+   * would have nowhere to go, or would land in another document that shares the node's id.
+   * Checked where a graph is replaced or a document changes; ordinary edits go on.
+   */
+  let writing: string | undefined
+  /** Whether `graph` would lose the held node, said on the status bar where it would. */
+  const dropsHeld = (graph: CodaGraph): boolean => {
+    if (writing === undefined) return false
+    const held = writing
+    if (graph.nodes.some((node) => node.id === held)) return false
+    set({ notice: WRITING_NOTICE })
+    return true
+  }
+  /**
+   * Whether `ids` include the held node, said on the status bar where they do — asked before an
+   * action does anything else, so a refused delete or cut leaves the selection and views alone.
+   */
+  const holdsAny = (ids: readonly string[]): boolean => {
+    if (writing === undefined || !ids.includes(writing)) return false
+    set({ notice: WRITING_NOTICE })
+    return true
+  }
+  /** Whether the document may not change now, said on the status bar where it may not. */
+  const documentHeld = (): boolean => {
+    if (writing === undefined) return false
+    set({ notice: WRITING_NOTICE })
+    return true
+  }
+
   /** Apply a graph mutation, recording history unless told otherwise. */
   function commit(
     mutate: (graph: CodaGraph) => CodaGraph,
@@ -1778,7 +1831,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
   ): void {
     const before = get().graph
     const after = mutate(before)
-    if (after === before) return
+    if (after === before || dropsHeld(after)) return
 
     let undoTo = before
     if (options.gesture) {
@@ -2654,7 +2707,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     switchDocument: (id) => {
-      if (id === get().activeTabId) return
+      if (id === get().activeTabId || documentHeld()) return
       const rec = docs.get(id)
       if (!rec) return
       stashActive()
@@ -2664,7 +2717,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     closeDocument: (id) => {
       const rec = docs.get(id)
-      if (!rec) return
+      if (!rec || documentHeld()) return
       const wasActive = id === get().activeTabId
       // Where it sat, so the neighbour that takes its place is the one under the cursor.
       const order = [...docs.keys()]
@@ -2725,6 +2778,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     openDocument: (graph, warnings = []) => {
+      if (documentHeld()) return
       beginDocument()
       // Through `loadGraph`, so the history reset, the load warnings, the auto-layout stand-down
       // and the fit-on-load request are the ones every other open has always got.
@@ -2733,7 +2787,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     duplicateDocument: (id) => {
       const source = docs.get(id)
-      if (!source) return
+      if (!source || documentHeld()) return
       // Stashed first, so the source is read one way whether or not it was the one on screen.
       stashActive()
       cancelActiveWork()
@@ -2823,6 +2877,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     newGraph: () => {
+      if (documentHeld()) return
       const graph = emptyGraph('Untitled')
       // A new graph has no dashboard, so this opens on the canvas whatever the last graph was
       // seen through.
@@ -2832,6 +2887,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     loadGraph: (graph, warnings = []) => {
+      if (documentHeld()) return
       /*
        * Opening a graph turns auto-layout off, on the same reasoning as a drag: the positions in
        * a file are somebody's decision, and a mode that re-arranged them on open would mean a
@@ -3154,8 +3210,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
         return
       }
       // No undo step, and none of the snapshots history holds is touched: undo and redo lay the
-      // live value over whatever they restore (`withLiveUnrecorded`).
-      commit((g) => setNodeParam(g, nodeId, paramId, value), { history: false, autoRun: false })
+      // live value over whatever they restore (`withLiveUnrecorded`). A run only where the value
+      // can change a result: a camera cannot, a merge record (`seam:review`) can.
+      commit((g) => setNodeParam(g, nodeId, paramId, value), {
+        history: false,
+        autoRun: param.presentational !== true,
+      })
     },
 
     setParams: (nodeId, values) => {
@@ -3258,7 +3318,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     cutSelection: () => {
       // Silent under the lock, like every other refusal here: the sentence a reader sees is the
       // UI's (`LOCKED_NOTICE`), and the store's own refusal strings are addressed to a model.
-      if (frozen()) return undefined
+      if (frozen() || holdsAny(get().selection)) return undefined
       const text = get().copySelection()
       if (!text) return undefined
       get().deleteNodes([...get().selection])
@@ -3344,7 +3404,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     deleteNodes: (nodeIds) => {
-      if (frozen() || nodeIds.length === 0) return
+      if (frozen() || nodeIds.length === 0 || holdsAny(nodeIds)) return
       commit((g) => removeNodes(g, nodeIds))
       set((s) => ({
         selection: s.selection.filter((id) => !nodeIds.includes(id)),
@@ -3423,6 +3483,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       }
       const result = applyPlan(get().graph, plan)
       if (!result.ok) return result
+      // A plan that would take away a card writing to a server is refused, and says so.
+      if (result.graph !== get().graph && dropsHeld(result.graph)) {
+        return { ok: false, errors: [WRITING_NOTICE] }
+      }
 
       /*
        * `commit` compares by identity and does nothing when the graph did not change, which is
@@ -3461,6 +3525,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const entry = past.at(-1)
       if (!entry) return
       const restored = withLiveUnrecorded(entry.graph, graph)
+      if (dropsHeld(restored)) return
       set({
         graph: restored,
         past: past.slice(0, -1),
@@ -3475,6 +3540,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const entry = future.at(-1)
       if (!entry) return
       const restored = withLiveUnrecorded(entry.graph, graph)
+      if (dropsHeld(restored)) return
       set({
         graph: restored,
         future: future.slice(0, -1),
@@ -3563,6 +3629,45 @@ export const useGraphStore = create<GraphState>((set, get) => {
     nodeFetchedAt: (nodeId) => sched().fetchedAt(nodeId),
     nodeWarning: (nodeId) => sched().warning(nodeId),
     setNotice: (notice) => set({ notice }),
+
+    holdForWrite: (docId, nodeId) => {
+      if (writing !== undefined) throw new Error('Another card is already writing to a server.')
+      if (docId !== activeDoc || !get().graph.nodes.some((node) => node.id === nodeId)) {
+        throw new Error('The card that opened this Submit is no longer on screen.')
+      }
+      writing = nodeId
+      let held = true
+      return {
+        update: (paramId, change) => {
+          if (!held) throw new Error('This hold has been released.')
+          // Read and written in one step, so the param is this card's as it stands now.
+          commit(
+            (graph) => {
+              const node = graph.nodes.find((n) => n.id === nodeId)
+              return node
+                ? setNodeParam(graph, nodeId, paramId, change(node.params[paramId]))
+                : graph
+            },
+            { history: false },
+          )
+        },
+        release: () => {
+          if (!held) return
+          held = false
+          if (writing === nodeId) writing = undefined
+          /*
+           * Saved now rather than on the autosave's debounce: the last entries of the record are
+           * the note of writes the server made, and a reader closing the tab the moment the batch
+           * ends — when nothing asks first any more — must not lose them.
+           */
+          if (autosaveTimer) {
+            clearTimeout(autosaveTimer)
+            autosaveTimer = undefined
+            persistActive()
+          }
+        },
+      }
+    },
   }
 })
 

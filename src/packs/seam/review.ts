@@ -18,10 +18,12 @@
  * The filters and the sort are **presentational**: they narrow what the card lists and change no
  * output at all. A reader hunting for the right threshold should not be re-keying anything.
  *
- * ## Read-only
+ * ## Nothing here writes to a chunkedgraph
  *
- * Nothing here writes to a chunkedgraph. A verdict is a note in the workflow; the merge is the
- * proofreader's own, made with their own token in the viewer.
+ * A verdict is a note in the workflow. The merges are made by the card's Submit, through
+ * `mergeBatch.ts`, which this module does not import (`importGraph.test.ts`). What this node
+ * reads of them is the record the batch keeps in `merges` (`mergeRecord.ts`): the `Merges` table,
+ * and the neuron's root now for `Current`.
  */
 
 import { ID_COLUMN_NAME } from '../../core/ids'
@@ -31,6 +33,7 @@ import type { TableSchema } from '../../core/types'
 import type { CellValue, LayersValue, TableValue } from '../../core/values'
 import { isTableValue, layersFrom, makeTable } from '../../core/values'
 import { foldColumns } from '../../nodes/lib/tableOps'
+import { decodeRecord, mergedSoFar, mergesSchema, mergesTable } from './mergeRecord'
 import { suggestionLayer } from './scene'
 import type { CurrentItem, QueueTip, ScenePiece, Verdict } from './reviewQueue'
 import {
@@ -90,7 +93,8 @@ export const reviewNode = packNode({
     'A queue of merge suggestions for one neuron, picked at the top of the card. Each row is a ' +
     'tip and one of its candidates; clicking a row shows that candidate beside its neuron. ' +
     'Accept, reject or mark unsure, and page through a tip’s other candidates with the arrows. ' +
-    'The verdicts are saved with the workflow. Nothing is written to the segmentation.',
+    'The verdicts are saved with the workflow. Submit checks the accepted pieces and, once you ' +
+    'confirm, merges them into the neuron.',
   cost: 'cheap',
 
   inputs: [
@@ -109,6 +113,8 @@ export const reviewNode = packNode({
      */
     { id: 'current', label: 'Current', type: T.neurons() },
     { id: 'layers', label: 'Layers', type: T.layers() },
+    // Every merge Submit has made or tried from this card, one row each.
+    { id: 'merges', label: 'Merges', type: T.table() },
   ],
   params: [
     /*
@@ -165,6 +171,21 @@ export const reviewNode = packNode({
       default: '',
       internal: true,
       help: 'The verdicts recorded so far, saved with the workflow.',
+    },
+    /*
+     * What Submit did (`mergeRecord.ts`). Written only by the batch, never by `evaluate` or a
+     * gesture. **Unrecorded**, so no Ctrl+Z can erase the note of a merge the server still holds;
+     * **data**, since `Merges` and `Current` read it.
+     */
+    {
+      id: 'merges',
+      advanced: true,
+      kind: 'string',
+      label: 'Merge record',
+      default: '',
+      internal: true,
+      unrecorded: true,
+      help: 'Every merge Submit has made or tried from this card, saved with the workflow. Written only by Submit, and not an undo step: undoing cannot erase a merge the server still holds.',
     },
     /*
      * **Data, not presentational**: it adds rows to `Current`, which is what the Neuroglancer
@@ -258,6 +279,7 @@ export const reviewNode = packNode({
     verdicts: T.table(verdictsSchema()),
     current: T.neurons(currentSchema()),
     layers: T.layers(),
+    merges: T.table(mergesSchema()),
   }),
 
   validate: (ctx) => {
@@ -304,7 +326,15 @@ export const reviewNode = packNode({
     const neuron = pickedNeuron(queue, String(ctx.params.neuron))
     const mine = tipsOf(queue, neuron)
     const here = currentOfQueue(mine, String(ctx.params.current), Number(ctx.params.rank))
-    const pieces = scenePieces(mine, neuron, here, verdicts, ctx.params.showAccepted === true)
+    const record = decodeRecord(ctx.params.merges)
+    const pieces = scenePieces(
+      mine,
+      neuron,
+      here,
+      verdicts,
+      ctx.params.showAccepted === true,
+      neuron === undefined ? undefined : mergedSoFar(record, neuron),
+    )
 
     /*
      * **The whole shown set, not the current item**, and that is a correctness decision rather
@@ -323,13 +353,15 @@ export const reviewNode = packNode({
     const layer = suggestionLayer(
       mine.flatMap((tip) => {
         const first = tip.candidates[0]
-        if (!tip.shown || !first) return []
+        // No contact, no point to draw: a row without one is left off the map, not put at 0,0,0.
+        const contactNm = first?.contactNm
+        if (!tip.shown || !first || !contactNm) return []
         return [
           {
             neuronId: tip.neuronId,
             endUid: tip.endUid,
             tipNm: tip.tipNm,
-            contactNm: first.contactNm,
+            contactNm,
             candidateId: first.candidateId,
             r: tip.r ?? 0,
           },
@@ -346,6 +378,7 @@ export const reviewNode = packNode({
         kind: 'layers',
         items: [...layersFrom(ctx.input('layers')), layer.layer],
       } satisfies LayersValue,
+      merges: mergesTable(record),
     }
   },
 })

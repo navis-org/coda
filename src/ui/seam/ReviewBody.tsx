@@ -30,22 +30,35 @@
  * this body draws none — and a param for it would appear in that rail as a control that does
  * nothing. So it is `localStorage`, which is what `NodeHint`'s dismissal already uses for a
  * per-viewer convenience that must never become an edit.
+ *
+ * ## Submit
+ *
+ * The foot's Submit opens a session (`mergeSession.ts`) that plans, shows the overlay and runs the
+ * merges. The card holds none of it — the session outlives the card's surface — and only reads
+ * which state it is in, for the button and to pause its own viewer while the overlay has one.
+ * What Submit has merged comes back through the record (`mergedSoFar`): such a row says so, and
+ * its verdict can no longer be changed.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import { getNodeDef } from '../../core/registry'
 import { isTableValue } from '../../core/values'
 import {
+  acceptedPieces,
   buildQueue,
   arrangeRows,
   currentOfQueue,
   decodeVerdicts,
   encodeVerdicts,
+  mergedAs,
+  gapLabel,
   neuronsOf,
   pickedNeuron,
   scenePieces,
+  sizeLabel,
   sizeOf,
+  stillToMerge,
   stillToSearch,
   tipsOf,
   verdictFor,
@@ -54,7 +67,6 @@ import {
 } from '../../packs/seam/reviewQueue'
 import type {
   Candidate,
-  CandidateSize,
   QueueMode,
   QueueNeuron,
   QueueRow,
@@ -70,6 +82,13 @@ import {
   viewerBaseFor,
 } from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
+import { decodeRecord, mergedSoFar } from '../../packs/seam/mergeRecord'
+import { caveServerLabel, caveServerOfSource } from '../../data/cave/deployments'
+import { getToken, subscribeTokens } from '../../data/cave/credentials'
+import { caveTarget } from '../../nodes/lib/caveParams'
+import { rootCurrency } from '../../packs/seam/rootCurrency'
+import type { SubmitRequest, SubmitState } from './mergeSession'
+import { closeSubmit, openSubmit, useSubmitState } from './mergeSession'
 import { formatNumber, plural } from '../../style/format'
 import { cycleColor } from '../../style/colors'
 import { ParamField } from '../params/ParamField'
@@ -226,7 +245,89 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * The same pieces `Current` publishes, in the same colours the Neuroglancer node gives them —
    * one function each, so this fallback and the full-size viewer cannot disagree.
    */
-  const pieces = scenePieces(mine, neuron, here, verdicts, node.params.showAccepted !== false)
+  const record = useMemo(() => decodeRecord(node.params.merges), [node.params.merges])
+  /*
+   * What Submit has done on this neuron (`mergedSoFar`, the one reading of the record): pieces in
+   * it, pieces this workflow put in another reviewed neuron, and whether this neuron is itself one.
+   */
+  const merged = useMemo(
+    () => (neuron === undefined ? undefined : mergedSoFar(record, neuron)),
+    [record, neuron],
+  )
+  const accepted = useMemo(() => acceptedPieces(mine, verdicts), [mine, verdicts])
+  const toSubmit = useMemo(() => stillToMerge(accepted, merged).length, [accepted, merged])
+  const absorbed = merged?.absorbedInto !== undefined
+  // This card's Submit, named by document and node: two documents can share a node id.
+  const docId = useGraphStore((s) => s.activeTabId)
+  const submitting = useSubmitState(docId, node.id)
+  const deployment = caveServerOfSource(dataset.sourceId)
+  // Followed, so a sign-in in the Sources panel lifts the reason at once.
+  const signedIn = useSyncExternalStore(
+    subscribeTokens,
+    () => deployment !== undefined && getToken(deployment) !== undefined,
+  )
+  /*
+   * Whether the neuron and its candidates are still current (`rootCurrency`, reads only): the
+   * neuron at its root now, and every candidate not already merged. Asked as the queue grows — a
+   * Suggest Merges run streams its candidates in — and only of roots not yet known.
+   */
+  const target = useMemo(() => {
+    const at =
+      deployment && dataset.datasetId
+        ? caveTarget({ sourceId: dataset.sourceId, datasetId: dataset.datasetId }, {})
+        : undefined
+    return at ? { deployment: at.deployment, datastack: at.datastack } : undefined
+  }, [deployment, dataset.sourceId, dataset.datasetId])
+  const neuronNow = merged?.currentRoot
+  const askAbout = useMemo(() => {
+    const ids = new Set<string>(neuronNow ? [neuronNow] : [])
+    for (const tip of mine) {
+      for (const candidate of tip.candidates) {
+        if (mergedAs(merged, candidate.candidateId) === undefined)
+          ids.add(candidate.candidateId)
+      }
+    }
+    return [...ids]
+  }, [mine, merged, neuronNow])
+  useEffect(() => {
+    // Gated on a sign-in: the read needs the reader's token, and without one it would be refused.
+    if (target && signedIn) rootCurrency.ask(target, askAbout)
+  }, [target, signedIn, askAbout])
+  useSyncExternalStore(rootCurrency.subscribe, rootCurrency.version)
+  const edited = (id: string) =>
+    target !== undefined && rootCurrency.current(target, id) === false
+  /*
+   * The query neuron edited since its suggestions were made — by somebody else: this workflow's
+   * own merges are `currentRoot` already, and a lost reply still unsettled is the plan's to settle,
+   * so neither is said here.
+   */
+  const neuronEdited =
+    neuronNow !== undefined && !absorbed && merged?.unsettled.length === 0 && edited(neuronNow)
+  const press = submitPress({
+    docId,
+    nodeId: node.id,
+    sourceId: dataset.sourceId,
+    datasetId: dataset.datasetId,
+    signedIn,
+    queue,
+    neuron,
+    filling,
+    absorbed,
+    neuronEdited,
+    accepted: accepted.size,
+    count: toSubmit,
+    submitting,
+  })
+  const showAccepted = node.params.showAccepted !== false
+  // Memoised on what the scene depends on, not on `here` (a new object each render): a scroll
+  // of the list re-renders the card and must not rebuild the pieces.
+  const hereTip = here?.tip.endUid
+  const hereCandidate = here?.candidate.candidateId
+  const pieces = useMemo(
+    () => scenePieces(mine, neuron, here, verdicts, showAccepted, merged, accepted),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `here` is named by its two ids.
+    [mine, neuron, hereTip, hereCandidate, verdicts, showAccepted, merged, accepted],
+  )
   const scene =
     published.status === 'ready' && pieces.length > 0
       ? buildScene(published.scene, {
@@ -241,12 +342,19 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       : undefined
   // Nanometres to the scene's own units, which is the only conversion `focus` does not do.
   const voxel = published.status === 'ready' ? sceneVoxelNm(published.scene) : undefined
+  const contact = here?.candidate.contactNm
   const focus =
-    here && voxel
-      ? ([0, 1, 2] as const).map((i) => here.candidate.contactNm[i]! / voxel[i]!)
-      : undefined
+    contact && voxel ? ([0, 1, 2] as const).map((i) => contact[i] / voxel[i]!) : undefined
 
   const fields = cardParams(def, node.params)
+  /*
+   * Paused while a Submit overlay is up — this card's or another's: the overlay has a viewer of
+   * its own and covers this one, and two Neuroglancer frames would compete for one GPU. Not while
+   * the check runs, which draws nothing, so a cancelled or refused check costs the view nothing.
+   */
+  const overlayUp = submitting === 'open' || submitting === 'running' || submitting === 'other'
+  const showViewer =
+    !compact && !driving && scene !== undefined && !!dataset.datasetId && !overlayUp
 
   return (
     <div
@@ -258,14 +366,14 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
        * ordinary case once `Current` drives a Neuroglancer node — the queue *is* the panel, and
        * holding it to 340px leaves a column in an empty room.
        */
-      data-viewer={!compact && !driving && scene && dataset.datasetId ? 'yes' : 'no'}
+      data-viewer={showViewer ? 'yes' : 'no'}
     >
       {/*
        * The viewer, expanded only. A frame on the card would be a WebGL application a couple of
        * hundred pixels tall, next to the list it is competing with for the space; the card's job
        * is the queue, and the ⤢ button is one click from the picture.
        */}
-      {!compact && !driving && scene && dataset.datasetId && (
+      {showViewer && dataset.datasetId && (
         <div className="review-body__viewer">
           <NeuroglancerViewer
             url={sceneUrl(
@@ -376,6 +484,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                 onTip &&
                 (mode === 'tip' || here?.candidate.candidateId === candidate?.candidateId)
               const said = candidate && verdictFor(verdicts, tip.endUid, candidate.candidateId)
+              // Merged by Submit: a verdict on it changes nothing now, so it cannot be changed.
+              const done = candidate && mergedAs(merged, candidate.candidateId)
               return (
                 <li
                   key={`${tip.endUid}:${mode === 'candidate' ? (candidate?.candidateId ?? '') : ''}`}
@@ -385,6 +495,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   aria-posinset={windowed.rows.start + offset + 1}
                   data-current={on ? 'yes' : 'no'}
                   data-verdict={said ?? 'none'}
+                  data-merged={done ?? 'no'}
                 >
                   {/*
                    * An empty button covering the whole row, with the content as its siblings
@@ -411,6 +522,24 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   </span>
                   <span className="review-row__id">
                     {candidate?.candidateId ?? 'no candidate'}
+                    {/*
+                     * Its own chip, not one more muted fact: a merged piece must stand apart
+                     * from the ones still to merge at a glance (user, 2026-11-16).
+                     */}
+                    {done && (
+                      <span className="review-row__merged">
+                        {done === 'merged' ? '✓ merged' : '✓ merged into another neuron'}
+                      </span>
+                    )}
+                    {/* Edited since the suggestion: Submit would refuse it. */}
+                    {!done && candidate && edited(candidate.candidateId) && (
+                      <span
+                        className="review-row__outdated"
+                        title="This piece has been edited since it was suggested, so it cannot be merged as it is."
+                      >
+                        outdated
+                      </span>
+                    )}
                   </span>
                   <span className="review-row__facts">
                     {candidate
@@ -426,9 +555,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                             ? ''
                             : `conf ${candidate.conf.toFixed(3)}`,
                           candidate.geoRank === undefined ? '' : `geo ${candidate.geoRank}`,
-                          candidate.minDistUm === undefined
-                            ? ''
-                            : `${candidate.minDistUm.toFixed(3)} µm apart`,
+                          gapLabel(candidate.minDistUm),
                           tip.kind === 'kink' ? 'kink' : '',
                           tip.shown ? 'shown' : '',
                         ]
@@ -465,8 +592,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                           className="review-row__verdict"
                           data-verdict={verdict}
                           aria-pressed={said === verdict}
+                          disabled={done !== undefined}
                           onClick={() => judge(tip, candidate, verdict)}
-                          title={VERDICT_HELP[verdict]}
+                          title={done ? 'Merged by Submit.' : VERDICT_HELP[verdict]}
                         >
                           {VERDICT_LABEL[verdict]}
                         </button>
@@ -526,26 +654,43 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           <span title="Verdicts recorded on this neuron so far, across every candidate">
             {formatNumber(onNeuron?.judged ?? 0)} judged
           </span>
+          {neuronEdited && (
+            <span className="review-body__edited">
+              query neuron edited since these suggestions were generated
+            </span>
+          )}
+          {absorbed && (
+            <span className="review-body__absorbed">
+              merged into another neuron under review
+            </span>
+          )}
+          {/*
+           * Submit: the accepted pieces of this neuron not yet merged, checked and listed in an
+           * overlay before anything is sent. Disabled with the reason as its title.
+           */}
+          <button
+            type="button"
+            className="btn btn--primary review-body__submit"
+            // While the check runs, nothing else is drawn for it: the button is its Cancel.
+            disabled={submitting !== 'planning' && 'blocked' in press}
+            title={
+              submitting === 'planning'
+                ? 'Stop checking, and open nothing.'
+                : 'blocked' in press
+                  ? press.blocked
+                  : SUBMIT_HELP
+            }
+            onClick={() => {
+              if (submitting === 'planning') closeSubmit()
+              else if ('request' in press) openSubmit(press.request)
+            }}
+          >
+            {SUBMIT_LABEL[submitting] ?? `Submit (${formatNumber(toSubmit)})`}
+          </button>
         </div>
       </div>
     </div>
   )
-}
-
-/**
- * A candidate's size as a row prints it, unit and all.
- *
- * **Never a bare number.** `seam:suggestMerges` publishes a level-2 chunk count, which is of the
- * whole object; a published set carries only `vol_um3`, which is the part inside the search box.
- * The two differ by orders of magnitude and answer different questions, so a row that printed
- * `14` would be the one place a reader could confuse them — including when typing a number into
- * `Min size`, which reads whichever the table has.
- */
-function sizeLabel(size: CandidateSize | undefined): string {
-  if (!size) return ''
-  return size.of === 'chunks'
-    ? plural(size.value, 'L2 chunk')
-    : `${formatNumber(size.value)} µm³`
 }
 
 /**
@@ -567,9 +712,97 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 }
 
 const VERDICT_HELP: Record<Verdict, string> = {
-  accept: 'This piece belongs to the neuron. Nothing is merged — the edit is yours to make.',
+  accept: 'This piece belongs to the neuron. Submit merges the accepted pieces.',
   reject: 'This piece does not belong.',
   unsure: 'Cannot tell. Left out of any calibration, rather than counted as wrong.',
+}
+
+const SUBMIT_HELP =
+  'Merge the accepted pieces of this neuron into it. Everything is checked and listed, with the ' +
+  'neuron as the merges will make it, before anything is sent.'
+
+/** The button's text while this card's Submit is under way; otherwise it is the count. */
+const SUBMIT_LABEL: Partial<Record<SubmitState, string>> = {
+  planning: 'Checking… (cancel)',
+  open: 'Submit open',
+  running: 'Merging…',
+}
+
+/**
+ * What pressing Submit would do: open a session with this request, or nothing, for the reason
+ * given. This card's own Submit first — it is what the button is showing — then in the order a
+ * reader would fix them, and another card's Submit last. One function, so the button's reason and
+ * the request it sends cannot disagree.
+ */
+export function submitPress(at: {
+  docId: string
+  nodeId: string
+  sourceId: string | undefined
+  datasetId: string | undefined
+  /** Whether a token is held for the dataset's deployment (`getToken`, followed). */
+  signedIn: boolean
+  queue: readonly QueueTip[]
+  neuron: string | undefined
+  filling: boolean
+  absorbed: boolean
+  /** The query neuron edited since its suggestions were made (`rootCurrency`). */
+  neuronEdited: boolean
+  /** Pieces accepted on this neuron, and of those the ones not yet merged. */
+  accepted: number
+  count: number
+  submitting: SubmitState
+}): { blocked: string } | { request: SubmitRequest } {
+  const blocked = (reason: string) => ({ blocked: reason })
+  if (at.submitting === 'planning' || at.submitting === 'open') {
+    return blocked('Submit is open.')
+  }
+  if (at.submitting === 'running') return blocked('Merges are being sent.')
+  if (!at.sourceId || !at.datasetId) {
+    return blocked('Wire a CAVE Dataset into `Dataset` to submit merges.')
+  }
+  // Is it CAVE at all: `caveTarget` would fall back to the default server for any source.
+  const deployment = caveServerOfSource(at.sourceId)
+  const target =
+    deployment && caveTarget({ sourceId: at.sourceId, datasetId: at.datasetId }, {})
+  if (!deployment || !target) {
+    return blocked('Only a CAVE dataset’s segmentation can be merged into.')
+  }
+  if (!at.signedIn) {
+    return blocked(`Sign in to ${caveServerLabel(deployment)} (Sources) to submit merges.`)
+  }
+  if (at.filling) {
+    return blocked(
+      'The search is still running. Submit once every tip is scored, so no piece is missed.',
+    )
+  }
+  if (at.absorbed) {
+    return blocked(
+      'This neuron has been merged into another one under review. Submit from that one.',
+    )
+  }
+  if (at.neuronEdited) {
+    return blocked(
+      'The query neuron has been edited since these suggestions were generated. Run them ' +
+        'again on its new root.',
+    )
+  }
+  if (at.accepted === 0 || at.neuron === undefined)
+    return blocked('Accept a piece to submit it.')
+  if (at.count === 0) return blocked('Every accepted piece is merged.')
+  if (at.submitting === 'other')
+    return blocked('Another card’s Submit is open. Close it first.')
+  return {
+    request: {
+      docId: at.docId,
+      nodeId: at.nodeId,
+      deployment: target.deployment,
+      datastack: target.datastack,
+      sourceId: at.sourceId,
+      datasetId: at.datasetId,
+      queue: at.queue,
+      reviewedRoot: at.neuron,
+    },
+  }
 }
 
 /**

@@ -15,8 +15,8 @@
  * card has no published scene to build one from. The queue is what this file is about.
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addNode, emptyGraph } from '../../core/graph'
 import type { ParamValue, ParamValues } from '../../core/node'
@@ -30,7 +30,31 @@ import type { TableValue, Value } from '../../core/values'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import '../../nodes'
-import { ReviewBody } from './ReviewBody'
+import { resetCredentials, setToken } from '../../data/cave/credentials'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
+import type { SubmitState } from './mergeSession'
+import { ReviewBody, submitPress } from './ReviewBody'
+
+/** Submit's session, faked: the card only reads its state and opens it. */
+const openSubmit = vi.fn()
+const closeSubmit = vi.fn()
+let submitState: SubmitState = 'none'
+/** The currency check, faked: roots in `edited` are outdated, and what was asked is kept. */
+const edited = new Set<string>()
+const askedCurrency: string[][] = []
+vi.mock('../../packs/seam/rootCurrency', () => ({
+  rootCurrency: {
+    ask: (_: unknown, roots: readonly string[]) => askedCurrency.push([...roots]),
+    current: (_: unknown, root: string) => !edited.has(root),
+    subscribe: () => () => {},
+    version: () => 0,
+  },
+}))
+vi.mock('./mergeSession', () => ({
+  openSubmit: (...args: unknown[]) => openSubmit(...args),
+  closeSubmit: () => closeSubmit(),
+  useSubmitState: () => submitState,
+}))
 
 const TYPE = 'seam:review'
 
@@ -130,6 +154,7 @@ function draw(
   compact = true,
   candidates: TableValue = CANDIDATES,
   tips: TableValue = TIPS,
+  dataset?: Value,
 ) {
   const def = requireNodeDef(TYPE)
   const graph = addNode(emptyGraph(), {
@@ -141,7 +166,7 @@ function draw(
   useGraphStore.setState({ graph } as never)
   const node = { ...graph.nodes[0]!, params: { ...defaultParams(def), ...params } }
   const written: Record<string, ParamValue> = {}
-  const inputValues: Record<string, Value | undefined> = { tips, candidates }
+  const inputValues: Record<string, Value | undefined> = { tips, candidates, dataset }
   render(
     <ReviewBody
       node={node}
@@ -441,5 +466,269 @@ describe('the review card', () => {
   it('counts candidates in the foot when a row is one', () => {
     draw({ mode: 'candidate' })
     expect(screen.getByText(/^3 candidates$/)).toBeTruthy()
+  })
+})
+
+/**
+ * Submit (phase 6 of `docs/seam-merge-plan.md`): the accepted pieces not yet merged, disabled with
+ * its reason as the title, and the rows Submit has merged said so, their verdicts fixed.
+ */
+describe('Submit on the review card', () => {
+  const FIRST = '648518346368395605'
+  const SECOND = '648518347608868926'
+  const ACCEPTED = { verdicts: `11:${FIRST}=accept;22:${SECOND}=accept` }
+  const CAVE_DATASET: Value = {
+    kind: 'dataset',
+    sourceId: 'cave',
+    datasetId: 'test_stack:1',
+    label: 'test',
+  }
+  const button = () => document.querySelector<HTMLButtonElement>('.review-body__submit')!
+  /** One merge into the neuron, as the batch records it. */
+  const MERGED = JSON.stringify([
+    {
+      reviewedRoot: '720575940621522189',
+      candidateRoot: FIRST,
+      endUid: 11,
+      neuronRoot: '720575940621522189',
+      neuron: { supervoxel: '11', positionNm: [1, 2, 3] },
+      candidate: { supervoxel: '12', positionNm: [1, 2, 3] },
+      at: '2026-11-16T10:00:00.000Z',
+      outcome: 'merged',
+      newRoot: '720575940700000001',
+    },
+  ])
+
+  afterEach(() => {
+    resetCredentials()
+    openSubmit.mockReset()
+    closeSubmit.mockReset()
+    submitState = 'none'
+    edited.clear()
+    askedCurrency.length = 0
+  })
+
+  it('counts the accepted pieces, and says why it is off with nothing wired', () => {
+    draw(ACCEPTED)
+    expect(button().textContent).toBe('Submit (2)')
+    expect(button().disabled).toBe(true)
+    expect(button().title).toMatch(/Wire a CAVE Dataset/)
+  })
+
+  it('asks for a sign-in on a CAVE dataset, and opens the session once signed in', () => {
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(button().title).toMatch(/Sign in to/)
+    cleanup()
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(button().disabled).toBe(false)
+    fireEvent.click(button())
+    expect(openSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        docId: useGraphStore.getState().activeTabId,
+        nodeId: 'r1',
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        reviewedRoot: '720575940621522189',
+      }),
+    )
+  })
+
+  it.each<[SubmitState, string, RegExp]>([
+    ['open', 'Submit open', /Submit is open/],
+    ['running', 'Merging…', /being sent/],
+    ['other', 'Submit (2)', /Another card/],
+  ])('says where its Submit has got to: %s', (state, label, reason) => {
+    submitState = state
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(button().textContent).toBe(label)
+    expect(button().disabled).toBe(true)
+    expect(button().title).toMatch(reason)
+  })
+
+  /** Nothing else is drawn while the check runs, so the button is how to stop it. */
+  it('is the check’s Cancel while it runs', () => {
+    submitState = 'planning'
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(button().textContent).toBe('Checking… (cancel)')
+    expect(button().disabled).toBe(false)
+    fireEvent.click(button())
+    expect(closeSubmit).toHaveBeenCalled()
+    expect(openSubmit).not.toHaveBeenCalled()
+  })
+
+  /** A sign-in in the Sources panel lifts the reason without anything else changing. */
+  it('follows a sign-in', () => {
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(button().disabled).toBe(true)
+    act(() => setToken(DEFAULT_CAVE_SERVER, 'test-token'))
+    expect(button().disabled).toBe(false)
+  })
+
+  it('leaves a merged piece out of the count, says so on its row and fixes its verdict', () => {
+    draw({ ...ACCEPTED, merges: MERGED, mode: 'candidate' })
+    expect(button().textContent).toBe('Submit (1)')
+    const row = rows().find((r) => r.textContent?.includes(FIRST))!
+    expect(row.getAttribute('data-merged')).toBe('merged')
+    expect(row.querySelector('.review-row__merged')?.textContent).toBe('✓ merged')
+    const verdicts = [...row.querySelectorAll<HTMLButtonElement>('.review-row__verdict')]
+    expect(verdicts.every((b) => b.disabled)).toBe(true)
+    const other = rows().find((r) => r.textContent?.includes(SECOND))!
+    expect(other.querySelector<HTMLButtonElement>('.review-row__verdict')!.disabled).toBe(false)
+  })
+})
+
+/**
+ * Whether the neuron and its candidates are still current (`rootCurrency`): asked once a CAVE
+ * dataset and a sign-in are there, of the neuron's root now and every candidate not merged; an
+ * edited candidate is tagged, an edited neuron said in the foot and Submit kept off.
+ */
+describe('currency on the review card', () => {
+  const FIRST = '648518346368395605'
+  const NEURON = '720575940621522189'
+  const CAVE_DATASET: Value = {
+    kind: 'dataset',
+    sourceId: 'cave',
+    datasetId: 'test_stack:1',
+    label: 'test',
+  }
+  const ACCEPTED = { verdicts: `11:${FIRST}=accept`, mode: 'candidate' }
+  const submit = () => document.querySelector<HTMLButtonElement>('.review-body__submit')!
+
+  beforeEach(() => setToken(DEFAULT_CAVE_SERVER, 'test-token'))
+  afterEach(() => {
+    resetCredentials()
+    edited.clear()
+    askedCurrency.length = 0
+  })
+
+  it('asks about the neuron and every candidate, and only once signed in', () => {
+    resetCredentials()
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(askedCurrency).toEqual([])
+    cleanup()
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(askedCurrency.at(-1)).toEqual([
+      NEURON,
+      '648518346368395605',
+      '648518346356867476',
+      '648518347608868926',
+    ])
+  })
+
+  it('tags an edited candidate outdated', () => {
+    edited.add(FIRST)
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    const row = rows().find((r) => r.textContent?.includes(FIRST))!
+    expect(row.querySelector('.review-row__outdated')?.textContent).toBe('outdated')
+    const other = rows().find((r) => r.textContent?.includes('648518347608868926'))!
+    expect(other.querySelector('.review-row__outdated')).toBeNull()
+  })
+
+  it('says an edited neuron in the foot, and keeps Submit off', () => {
+    edited.add(NEURON)
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(document.querySelector('.review-body__edited')?.textContent).toMatch(
+      /query neuron edited since these suggestions were generated/,
+    )
+    expect(submit().disabled).toBe(true)
+    expect(submit().title).toMatch(/edited since these suggestions were generated/)
+  })
+
+  /** A piece Submit merged is retired by that merge: "merged", never "outdated", and not asked. */
+  it('neither asks about nor tags a merged piece, and follows the neuron to its root now', () => {
+    const merges = JSON.stringify([
+      {
+        reviewedRoot: NEURON,
+        candidateRoot: FIRST,
+        endUid: 11,
+        neuronRoot: NEURON,
+        neuron: { supervoxel: '11', positionNm: [1, 2, 3] },
+        candidate: { supervoxel: '12', positionNm: [1, 2, 3] },
+        at: '2026-11-16T10:00:00.000Z',
+        outcome: 'merged',
+        newRoot: '720575940700000001',
+      },
+    ])
+    edited.add(FIRST)
+    edited.add(NEURON)
+    draw({ ...ACCEPTED, merges }, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(askedCurrency.at(-1)).toEqual([
+      '720575940700000001',
+      '648518346356867476',
+      '648518347608868926',
+    ])
+    expect(document.querySelector('.review-row__outdated')).toBeNull()
+    expect(document.querySelector('.review-body__edited')).toBeNull()
+  })
+})
+
+describe('submitPress', () => {
+  const ready = {
+    docId: 'doc',
+    nodeId: 'r1',
+    sourceId: 'cave',
+    datasetId: 'test_stack:1',
+    queue: [],
+    neuron: '720575940621522189',
+    signedIn: true,
+    filling: false,
+    absorbed: false,
+    neuronEdited: false,
+    accepted: 3,
+    count: 3,
+    submitting: 'none' as SubmitState,
+  }
+
+  it('hands over the request only where nothing stands in the way', () => {
+    expect(submitPress(ready)).toEqual({
+      request: {
+        docId: 'doc',
+        nodeId: 'r1',
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        sourceId: 'cave',
+        datasetId: 'test_stack:1',
+        queue: [],
+        reviewedRoot: '720575940621522189',
+      },
+    })
+  })
+
+  it.each([
+    ['nothing wired', { datasetId: undefined }, /Wire a CAVE Dataset/],
+    ['a dataset that is not CAVE', { sourceId: 'neuprint' }, /Only a CAVE dataset/],
+    ['a dataset id that is no datastack', { datasetId: 'nope' }, /Only a CAVE dataset/],
+    ['a search still running', { filling: true }, /still running/],
+    ['a neuron merged into another', { absorbed: true }, /merged into another/],
+    ['a neuron edited since', { neuronEdited: true }, /edited since these suggestions/],
+    ['nothing accepted', { accepted: 0, count: 0 }, /Accept a piece/],
+    ['every accepted piece merged', { count: 0 }, /Every accepted piece is merged/],
+    ['its own Submit open', { submitting: 'open' }, /Submit is open/],
+    ['merges being sent', { submitting: 'running' }, /being sent/],
+    ['another card’s Submit open', { submitting: 'other' }, /Another card/],
+  ])('says why not with %s', (_, change, reason) => {
+    expect(submitPress({ ...ready, ...change } as typeof ready)).toEqual({
+      blocked: expect.stringMatching(reason),
+    })
+  })
+
+  it('asks for a sign-in to the dataset’s own deployment', () => {
+    expect(submitPress({ ...ready, signedIn: false })).toEqual({
+      blocked: expect.stringMatching(/Sign in to global/),
+    })
+  })
+
+  /** This card's own Submit is what the button shows; another card's comes after every fix. */
+  it('puts this card’s Submit first and another card’s last', () => {
+    expect(submitPress({ ...ready, submitting: 'open', sourceId: 'neuprint' })).toEqual({
+      blocked: 'Submit is open.',
+    })
+    expect(submitPress({ ...ready, submitting: 'other', sourceId: 'neuprint' })).toEqual({
+      blocked: expect.stringMatching(/Only a CAVE dataset/),
+    })
   })
 })

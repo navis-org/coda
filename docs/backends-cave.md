@@ -1,7 +1,7 @@
 # Backends: CAVE
 
 CAVE: deployments and sign-in, the datastack listing, tables and the row cap, discovery and segment
-properties. Meshes and skeletons are in [backends-cave-geometry.md](backends-cave-geometry.md).
+properties, and the one place Coda writes to a chunkedgraph. Meshes and skeletons are in [backends-cave-geometry.md](backends-cave-geometry.md).
 [backends.md](backends.md) holds what all of them share — the geometry cache and streaming.
 
 
@@ -1112,6 +1112,36 @@ object starting at its first byte.
   document that runs and answers nothing. The loops and `canExportNotebook` both read
   `DatasetFamily.notebook`; see [export.md](export.md#the-softer-half-warning-that-an-export-will-have-gaps-in-it)
   for why that is one field rather than a test repeated at each site.
+
+### Writing to a chunkedgraph: merges, and only from Review Suggestions
+
+Everything above reads. **One module writes**: `src/data/cave/edits.ts`, which sends a merge (and,
+for the sandbox probe only, an undo of a merge it made itself). The full record — what was read off
+pychunkedgraph 2.20.0, every decision with the user, the sandbox test and the first Aedes merge —
+is [seam-merge-plan.md](seam-merge-plan.md). What a change near this code must keep:
+
+- **Three import levels, one test.** The writer is imported only by `packs/seam/mergeBatch.ts`
+  (`MAY_WRITE`), the batch only by `ui/seam/mergeSession.ts` (`MAY_SUBMIT`), the session only by
+  the review card and its overlay (`MAY_OPEN`) — walked by `importGraph.test.ts` and backed by a
+  string search that also refuses a type import. Adding a line there is adding a way to write.
+- **A merge is a confirmation, spent once.** `mergeSupervoxels` takes only a frozen
+  `ConfirmedMerge` from `confirmMerge`, registered in a `WeakSet` and spent by sending. Never
+  retried; no `signal` (aborting a sent POST does not stop the server); redirects refused
+  (`cavePostWrite`).
+- **Outcomes are read off the server's code, not guessed.** Only 400/401/403/404 are `refused`;
+  every other status, an unreachable host and an unreadable success are `unknown`, and an unknown
+  merge is settled by reading the roots — never by sending again.
+- **Supervoxels, not root ids**, and **every root read after a write asks at the server's now**
+  (`Instant` `'server'`): the server does not check that a root is current, and a client clock
+  behind the server's sees the roots from before our own merge.
+- **The guarantee is the per-merge check** (`mergeBatch.ts`): both ends' roots, read just before
+  each merge, must be the neuron's root as the batch last made it and the piece's reviewed root.
+  The pre-flight (`mergePlan.ts`) and the card's currency chips (`rootCurrency.ts`) are advice.
+- **The record is an `unrecorded` param**, written only through the store's write hold
+  (`holdForWrite`), which keeps the card and its document on screen until the batch ends.
+- **Tests never write.** `src/test/writeGuard.ts` fails any test that reaches an edit endpoint
+  without a stubbed `fetch`; a live write goes to `fanc_sandbox` (`mar2021_test`) only, through
+  `src/test/sandboxWrites.ts`' fence, and is asked of the user every time.
 
 ### What is not done
 

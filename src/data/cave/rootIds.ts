@@ -442,7 +442,7 @@ export async function instantOf(
  * and a run's supervoxels are not a set worth keeping forever.
  *
  * So this is the batched, rate-limited fetch with the caching left to the caller, and the caller
- * is expected to do it: `packs/seam/searchVolume.ts` holds one map for the run, which is what
+ * is expected to do it: a `BoxReader` (`packs/seam/rootedBox.ts`) holds one map per reader, which is what
  * makes the overlap between neighbouring ends free.
  *
  * **Parallel to its input, `0n` where the graph lists none** — the same "0 = no object" the
@@ -452,23 +452,56 @@ export async function instantOf(
  */
 export async function rootsAtInstant(
   graphene: GrapheneSource,
-  at: number,
+  at: Instant,
   supervoxels: BigUint64Array,
   options: CaveRequestOptions,
 ): Promise<BigUint64Array> {
-  const out = new BigUint64Array(supervoxels.length)
-  for (let i = 0; i < supervoxels.length; i += CHUNK) {
+  /*
+   * **Label 0 is answered here, as root 0, and never sent.** It is "no object" in every
+   * segmentation — the background of a box, not a supervoxel — and this function's contract is
+   * already `0n` for "no object". Answering it here is what lets every caller test the root alone
+   * (`summarize_cutout` reads only the root; `mergeAnchors.ts` the same) instead of each guarding
+   * the label too, and it keeps the background out of every box's request.
+   *
+   * Filtered only when there is one: after a reader's first box its memo holds `0n`, so label 0
+   * almost never reaches here, and an unconditional `filter` copied every box's ids to remove
+   * nothing (0.36 ms per 14,000 ids, against 0.015 ms to look; measured 2026-11-16).
+   */
+  const asked =
+    supervoxels.indexOf(0n) < 0 ? supervoxels : supervoxels.filter((id) => id !== 0n)
+  const answered = new BigUint64Array(asked.length)
+  for (let i = 0; i < asked.length; i += CHUNK) {
     /*
      * Sequential, and **not** because the file has a house style — `l2ChunkCounts` below runs
      * `LEAVES_STREAMS` at a time. It is because there is usually nothing here to overlap:
      * `CHUNK` is ten thousand ids a request and the caller passes only the supervoxels it has
-     * not already placed (`searchVolume.ts`' `resolveRoots`), so a box is one request and often
+     * not already placed (`rootedBox.ts`' `resolveRoots`), so a box is one request and often
      * the loop runs once. A pool over one batch buys nothing, and `roots_binary` is a binary
      * body and a binary reply, so it pays none of the JSON cost the counts path does.
      */
-    const batch = supervoxels.subarray(i, i + CHUNK)
-    const answer = await getRoots(graphene, Array.from(batch, String), at, options)
-    for (let k = 0; k < batch.length; k++) out[i + k] = answer[k] ?? 0n
+    /*
+     * The ids go as they are, never through text, which cost four times the filter above on
+     * every box (1.5 ms per 14,000 ids). A view is fine: `cavePostBinary` sends its own bytes.
+     */
+    const batch = asked.subarray(i, i + CHUNK)
+    const answer = await rootsBinary(graphene, batch, at, options)
+    /*
+     * One root per id, or it is not an answer. Filled with `0n`, a short reply would read as
+     * "no object" for every id past its end — remembered by a reader's memo, and reported by the
+     * merge anchors as a neuron edited away. A server or proxy fault is said as one.
+     */
+    if (answer.length !== batch.length) {
+      throw new CaveError(
+        `The chunkedgraph answered ${answer.length} roots for ${batch.length} supervoxels, so ` +
+          'which answer belongs to which is unknown. Try again; if it persists, the server is at fault.',
+      )
+    }
+    answered.set(answer, i)
+  }
+  if (asked.length === supervoxels.length) return answered
+  const out = new BigUint64Array(supervoxels.length)
+  for (let i = 0, next = 0; i < supervoxels.length; i++) {
+    if (supervoxels[i] !== 0n) out[i] = answered[next++]!
   }
   return out
 }
@@ -708,11 +741,39 @@ async function getRoots(
   at: number,
   options: CaveRequestOptions,
 ): Promise<BigUint64Array> {
-  const url = tableUrl(graphene, `roots_binary?timestamp=${at / 1000}`)
   // `BigInt` from a decimal string is exact where `Number` is not — the conversion
   // `precomputed/index.ts` already relies on for the same reason.
-  const body = BigUint64Array.from(supervoxels, (id) => BigInt(id))
-  return cavePostBinary(url, body, options)
+  return rootsBinary(
+    graphene,
+    BigUint64Array.from(supervoxels, (id) => BigInt(id)),
+    at,
+    options,
+  )
+}
+
+/**
+ * A moment to ask a chunkedgraph about: epoch ms, or `'server'` — **the server's own now**, sent
+ * as no timestamp at all.
+ *
+ * `'server'` is for the one question a client clock cannot ask: what is true **after our own
+ * write**. The merge's timestamp is the server's; a browser clock even a second behind it asks
+ * about a moment before the merge and sees the old roots, which reads as a merge that did not
+ * happen. Everything else picks its moment (`RootsAt`) and keeps it.
+ */
+export type Instant = number | 'server'
+
+function timestampQuery(at: Instant): string {
+  return at === 'server' ? '' : `?timestamp=${at / 1000}`
+}
+
+/** One `roots_binary` call. */
+function rootsBinary(
+  graphene: GrapheneSource,
+  ids: BigUint64Array,
+  at: Instant,
+  options: CaveRequestOptions,
+): Promise<BigUint64Array> {
+  return cavePostBinary(tableUrl(graphene, `roots_binary${timestampQuery(at)}`), ids, options)
 }
 
 /**
@@ -722,17 +783,83 @@ async function getRoots(
  * integers on the wire, and an eighteen-digit root id through `JSON.stringify` of a `number` is a
  * different neuron (invariant 8). The same splice `idList` performs for Cypher and
  * `pyLongIntList` for the notebook.
+ *
+ * Exported for a check at `'server'` (`Instant`): one call, no batching, no cache — `staleRoots`
+ * is the batched and cached question at a chosen moment.
  */
-async function isLatestRoots(
+export async function isLatestRoots(
   graphene: GrapheneSource,
   ids: readonly string[],
-  at: number,
+  at: Instant,
   options: CaveRequestOptions,
 ): Promise<boolean[]> {
-  const url = tableUrl(graphene, `is_latest_roots?timestamp=${at / 1000}`)
+  const url = tableUrl(graphene, `is_latest_roots${timestampQuery(at)}`)
   const body = `{"node_ids":[${ids.join(',')}]}`
-  const answer = await cavePostRaw<{ is_latest: boolean[] }>(url, body, options)
-  return answer.is_latest ?? []
+  const answer = await cavePostRaw<{ is_latest?: unknown }>(url, body, options)
+  /*
+   * One verdict per id, or it is not an answer. Read short, every id past the end came back
+   * `undefined` — which `staleRoots` counted as current and kept, and which a pre-flight's
+   * `every(Boolean)` passed outright on an empty list.
+   */
+  const verdicts = answer.is_latest
+  if (
+    !Array.isArray(verdicts) ||
+    verdicts.length !== ids.length ||
+    !verdicts.every((v) => typeof v === 'boolean')
+  ) {
+    throw new CaveError(
+      `The chunkedgraph's is_latest_roots answer does not hold one true/false for each of the ` +
+        `${ids.length} roots asked, so whether they are current is unknown.`,
+    )
+  }
+  return verdicts
+}
+
+/**
+ * Each supervoxel's root at `at`, as text — `rootsAtInstant` for a handful of ids that are already
+ * text (a merge's two ends), one per id or a throw. For the merge path (`mergeBatch.ts`,
+ * `mergePlan.ts`), which reads both ends at the server's now before and after every write.
+ */
+export async function supervoxelRoots(
+  graphene: GrapheneSource,
+  supervoxels: readonly string[],
+  at: Instant,
+  options: CaveRequestOptions,
+): Promise<string[]> {
+  // `BigInt` from decimal text is exact where `Number` is not (invariant 8).
+  const ids = BigUint64Array.from(supervoxels, (id) => BigInt(id))
+  return [...(await rootsAtInstant(graphene, at, ids, options))].map(String)
+}
+
+/**
+ * When each root was made, epoch ms: `POST …/root_timestamps` with `{"node_ids": […]}`, answered
+ * `{"timestamp": [epoch seconds]}` — the time of the root's own `Child` column, i.e. of the edit
+ * that made it (pychunkedgraph v2.20.0 `handle_root_timestamps`, `get_node_timestamps`). The ids
+ * are spliced in as text, as `isLatestRoots` does. One finite time per root, or a throw.
+ */
+export async function rootTimestamps(
+  graphene: GrapheneSource,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+): Promise<number[]> {
+  const url = tableUrl(graphene, 'root_timestamps')
+  const answer = await cavePostRaw<{ timestamp?: unknown }>(
+    url,
+    `{"node_ids":[${roots.join(',')}]}`,
+    options,
+  )
+  const seconds = answer.timestamp
+  if (
+    !Array.isArray(seconds) ||
+    seconds.length !== roots.length ||
+    !seconds.every((t) => typeof t === 'number' && Number.isFinite(t))
+  ) {
+    throw new CaveError(
+      `The chunkedgraph's root_timestamps answer does not hold one time for each of the ` +
+        `${roots.length} roots asked.`,
+    )
+  }
+  return seconds.map((t: number) => t * 1000)
 }
 
 /**
