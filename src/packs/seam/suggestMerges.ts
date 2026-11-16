@@ -138,13 +138,8 @@ import {
   tipsWithFirsts,
 } from './searchTips'
 import { schemaOf } from './suggestionTables'
-import {
-  boxFits,
-  endToSearch,
-  forgetRoots,
-  labelledBox,
-  openSearchVolume,
-} from './searchVolume'
+import { boxFits, endToSearch, openSearchVolume } from './searchVolume'
+import { forgetRoots, labelledBox } from './rootedBox'
 import type { SearchVolume } from './searchVolume'
 import { runClock } from './runClock'
 import type { RunClock } from './runClock'
@@ -980,9 +975,10 @@ function patchSteps(
   return {
     box: async (cut) => {
       const box = patchBoxFor(scale, cut.centresNm)
-      const read = await labelledBox(volume, scale, box, cut.queryRoot, options)
+      const read = await labelledBox(volume, scale, box, options)
       return {
         ...read,
+        queryRoot: cut.queryRoot,
         candRoots: cut.candRoots,
         // Flat and freshly built, because `callPython` transfers whatever it is given.
         centresNm: Float64Array.from(cut.centresNm.flat()),

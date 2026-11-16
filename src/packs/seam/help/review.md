@@ -2,7 +2,7 @@
 
 A queue of SEAM's merge suggestions, one row per tip. Each row is a tip and one of its candidates — the piece SEAM would merge into the neuron there. Click a row and the card's viewer shows the neuron and that candidate in two colours, with the camera on the point where they touch. Accept it, reject it, or mark it unsure, and move on.
 
-Nothing is written to the segmentation. A verdict is a note saved with the workflow; the merge is yours to make, with your own token, in the viewer.
+A verdict is a note saved with the workflow. Nothing is written to the segmentation until you press **Submit** and confirm the merges — see "Submitting merges" below.
 
 ```coda-graph
 caption: Suggestions read, worked through, and shown in the viewer.
@@ -52,7 +52,7 @@ With nothing wired to `Current`, expanding the card (⤢) gives it a small viewe
 | ------- | -------------- |
 | a row   | shows that tip's candidate and points the camera at their contact |
 | `‹` `›` | the candidate ranked above or below this one, within the same tip |
-| Accept / Reject / Unsure | records a verdict on the pair you are looking at |
+| Accept / Reject / Unsure | records a verdict on the pair you are looking at (greyed out once the piece is merged) |
 
 Pressing the same verdict again clears it, so a misclick costs one click.
 
@@ -94,14 +94,55 @@ On the card they fold away behind `Filters` in the footer, for when the list is 
 
 Every filter reads a tip's **first** candidate, so paging through a tip's other candidates never makes its row jump or disappear.
 
+## Submitting merges
+
+Once you have accepted pieces on a neuron, **Submit** at the foot of the card merges them into it, with your own CAVE token. The number on the button is how many accepted pieces are not merged yet.
+
+You need a CAVE Dataset wired into `Dataset`, and to be signed in to its server (Sources). If Submit is greyed out, hover over it to see why — for example, the search is still running, or nothing is accepted.
+
+> [!WARNING]
+> **These are real edits**
+> Submit changes the shared segmentation, and everybody working on that datastack sees the result. There is no Undo button in Coda: to reverse a merge, take its operation ID from the `Merges` table and undo it with your usual tool, e.g. caveclient's `client.chunkedgraph.undo_operation(...)`.
+
+Pressing Submit sends nothing yet. Coda first checks the accepted pieces and then opens an overlay with the list on the left and the neuron as the merges will make it on the right: the neuron see-through, each piece in green and a line across each gap where the merge is made. Untick anything you are not sure about, then press **Merge 3 pieces into 720575940… on wclee_aedes_brain**. Only a click or Space presses it, never Enter.
+
+### What is checked
+
+Before the overlay opens:
+
+- that your account may edit the datastack;
+- that the neuron and every piece are still current. If the neuron has been edited since the suggestions were made, none of its pieces is merged; an edited piece is left out on its own;
+- where to merge: for each piece, the supervoxel on either side nearest the suggestion's contact point. Merges are sent as supervoxels and positions, the way Spelunker sends them, not as root IDs.
+
+Pieces that cannot be merged are listed under **N not merged**, each with its reason. `Re-check` asks again, e.g. after somebody else's edit.
+
+Then, just before each merge, both supervoxels are looked up again on the server. If somebody else has edited the neuron in the meantime, the batch stops there. A piece that is already part of the neuron is skipped.
+
+### While it runs
+
+Merges are sent one at a time, in the order listed, and each row shows how it went. `Stop after this merge` stops before the next one. The first failure stops the batch, and nothing is ever retried. If a reply is lost — the network drops, or the server takes more than two minutes — the merge is recorded as **unknown**: the roots are asked what happened, and the next Submit on that neuron sorts it out before planning anything.
+
+While merges are being sent, the card and its workflow stay put: deleting the card, undoing it away, loading another workflow or switching tabs are refused until the batch ends, and the browser asks before you close the tab.
+
+### Afterwards
+
+The card follows the neuron to its new root, in its own viewer and on `Current`. A merged piece's row says **✓ merged** and its verdict can no longer be changed. Each merge is recorded with the workflow, and the `Merges` output lists them. Undo does not remove the record, so a merge is never sent twice.
+
+### Outdated neurons and pieces
+
+With a CAVE dataset wired and you signed in, the card also checks whether the neuron and its candidates are still current, as they arrive. A candidate edited since it was suggested gets a red **outdated** tag. If the neuron itself has been edited — by somebody else, not by your own Submit — the foot says so and Submit is greyed out. Run the suggestions again on the neuron's new root to carry on.
+
+This is common with a published set, which is a snapshot: on Aedes, a neuron from a set a few weeks old has often been edited since.
+
 ## Outputs
 
 | Output     | Contents                                                                    |
 | ---------- | ----------------------------------------------------------------------------- |
 | `Tips`     | the tips passed through, with a `verdict` column for each one's first candidate |
 | `Verdicts` | one row per judgement — neuron, tip, candidate, rank and verdict              |
-| `Current`  | the ids to show — the neuron, the candidate being looked at and, with `Show accepted` on, every accepted piece — with a `part` column saying which is which |
+| `Current`  | the ids to show — the neuron at its root now, the candidate being looked at and, with `Show accepted` on, every accepted piece not yet merged — with a `part` column saying which is which |
 | `Layers`   | an annotation layer of **every** shown suggestion on the picked neuron — a map of where the work is |
+| `Merges`   | one row per merge Submit made or tried, on every neuron — the outcome, the new root, the operation ID, both supervoxels and their positions, and the time |
 
 `Layers` holds every shown suggestion on the neuron rather than just the one you are on, and that is deliberate: an annotation layer's contents are not part of a scene's *selection*, so a layer that changed on every click would make every click rebuild the whole viewer — and reset the camera with it. Which suggestion is current travels on `Current`, where it costs nothing.
 

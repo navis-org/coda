@@ -17,8 +17,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type * as RootIds from '../../data/cave/rootIds'
 import type { CaveRequestOptions } from '../../data/cave/client'
-import type { RootLookup } from './searchVolume'
-import { forgetRoots, resolveRoots } from './searchVolume'
+import type { RootLookup } from './rootedBox'
+import { forgetRoots, resolveRoots } from './rootedBox'
 
 const rootsAtInstant = vi.hoisted(() => vi.fn())
 vi.mock('../../data/cave/rootIds', async (importActual) => ({

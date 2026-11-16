@@ -2114,8 +2114,9 @@ node says that in one sentence naming the likely cause rather than hundreds nami
 `parseSearchPlan` (beside `parsePipelineFits`, same manifest, different question): the box size,
 the pool radius, `top_k`, `own_um`, the model file and **the feature order**. Nothing has a
 default, because every one of them would still produce a ranking if guessed. `cutout_xy_nm` is
-asked for rather than pinned — on Aedes the manifest says 64 and the volume's only scale is 32,
-which is not a disagreement: `scaleNear` is what `caveclient` does too.
+asked for rather than pinned — on Aedes the manifest says 64 and the volume's scales are 16 and
+32 (corrected 2026-11-16; this said "only 32"), so `scaleNear` takes 32. That is not a
+disagreement: `scaleNear` is what `caveclient` does too.
 
 ### Not done here
 
@@ -2831,7 +2832,7 @@ batching `rootsAtInstant` exists for, which is the same trap `l2ChunkCounts` rec
 The load-bearing part is that the partition and the registration are **one synchronous block**.
 Nothing may yield between reading `roots`/`asking` and writing `asking`, or a second caller runs
 in the gap, finds the same supervoxels in neither map, and asks again — invisibly, since the
-answers agree and the only sign is twice the requests. `searchVolume.test.ts` pins it by starting
+answers agree and the only sign is twice the requests. `rootedBox.test.ts` (was `searchVolume.test.ts`) pins it by starting
 two reads before releasing the first's lookup; without the sharing it fails with
 `[[1n,2n,3n],[2n,3n,4n]]` against `[[1n,2n,3n],[4n]]`.
 

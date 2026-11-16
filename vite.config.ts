@@ -403,7 +403,8 @@ export default defineConfig({
      * parses. Nothing else in `vite/` has a test yet; this is what lets one exist.
      */
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'vite/**/*.test.ts'],
-    // Module-level caches that outlive a test but not a file — see the file's own header.
+    // Module-level caches that outlive a test but not a file, and the guard that fails any test
+    // reaching a chunkedgraph edit endpoint — see the file's own header.
     setupFiles: ['src/test/setup.ts'],
   },
 })

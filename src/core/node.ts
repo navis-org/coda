@@ -395,11 +395,12 @@ interface ParamBase {
    */
   internal?: boolean
   /**
-   * Written without an undo step and without an auto-run — a viewer recording where somebody is
-   * looking, many times a gesture, which Ctrl+Z should not have to rewind through first. Saved in
-   * the document like any param. `setParam` reads it, so a writer cannot forget it. Undo and redo
-   * step around it: the write is carried into every history snapshot, so no step restores an old
-   * value.
+   * Written without an undo step — a viewer recording where somebody is looking, many times a
+   * gesture, which Ctrl+Z should not have to rewind through first; or a record of writes made to a
+   * server, which Ctrl+Z must not be able to erase (`seam:review`'s `merges`). Saved in the
+   * document like any param. `setParam` reads it, so a writer cannot forget it. Undo and redo step
+   * around it: the write is carried into every history snapshot, so no step restores an old value.
+   * It auto-runs only where it is not `presentational`, i.e. where it can change a result.
    */
   unrecorded?: boolean
   /** Conditional visibility, evaluated against the node's current params. */

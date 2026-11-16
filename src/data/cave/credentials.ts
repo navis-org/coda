@@ -61,6 +61,8 @@ export interface CaveCredential {
 let rows: CaveCredential[] | undefined
 
 const authFailure = channel<string>()
+/** Raised when a token is saved or cleared, so a surface gated on a sign-in can follow it. */
+const tokensChanged = channel()
 
 function load(): CaveCredential[] {
   if (rows) return rows
@@ -170,6 +172,7 @@ export function setToken(
   }
   rows = next
   persist(next)
+  tokensChanged.notify()
 }
 
 /** The sign-in behind a deployment's token, or undefined where it was pasted or there is none. */
@@ -185,12 +188,15 @@ export function listCredentials(): CaveCredential[] {
 /** Raised by the client on 401/403 so the UI can offer the fix instead of a bare error. */
 export const reportAuthFailure = authFailure.notify
 export const subscribeAuthFailure = authFailure.subscribe
+/** A token was saved or cleared here (`setToken`); read the new state with `getToken`. */
+export const subscribeTokens = tokensChanged.subscribe
 
 /** Test seam: drop everything held in memory and in storage, the legacy layout included. */
 export function resetCredentials(): void {
   rows = undefined
   writeStorage(CREDENTIALS_KEY, undefined)
   removeLegacy()
+  tokensChanged.notify()
 }
 
 /** The Storage tab's entry: the current key and the legacy ones a migration may not have reached. */

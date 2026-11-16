@@ -10989,6 +10989,176 @@ details[open] > summary.tile__label {
   /* `--status-warn` is the per-mode prose warning colour — 5.41:1 light, 9.78:1 dark. */
   color: var(--status-warn);
 }
+.review-body__absorbed {
+  color: var(--status-warn);
+}
+/* Submit, at the foot's end: the one button there that does more than show. */
+.review-body__submit {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 10px;
+}
+
+/*
+ * Submit's confirm overlay (`MergeConfirm.tsx`): the plan beside the neuron as the merges will make
+ * it, over most of the screen (user, 2026-11-16), so the end product is in front of the reader.
+ */
+.overlay__panel.merge-confirm {
+  width: 76vw;
+  height: 78vh;
+  max-width: none;
+}
+.merge-confirm__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.merge-confirm__plan {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 min(440px, 38%);
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+.merge-confirm__head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.merge-confirm__head h2 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.merge-confirm__head p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-muted);
+}
+.merge-confirm__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+}
+.merge-confirm__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 4px 14px;
+}
+.merge-confirm__row[data-ticked='no'] {
+  color: var(--text-muted);
+}
+.merge-confirm__row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.merge-confirm__row[data-ticked='no'] .legend__swatch {
+  opacity: 0.3;
+}
+.merge-confirm__id {
+  font-variant-numeric: tabular-nums;
+}
+.merge-confirm__facts {
+  color: var(--text-muted);
+}
+.merge-confirm__joins,
+.merge-confirm__progress {
+  /* Under the row's id, past its tick box and swatch. */
+  flex-basis: 100%;
+  padding-left: 38px;
+}
+.merge-confirm__joins {
+  color: var(--status-warn);
+}
+.merge-confirm__progress[data-state='merged'],
+.merge-confirm__progress[data-state='already-merged'] {
+  color: var(--status-ok);
+}
+.merge-confirm__progress[data-state='refused'],
+.merge-confirm__progress[data-state='unknown'] {
+  color: var(--status-error);
+}
+.merge-confirm__refused {
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  max-height: 30%;
+  overflow-y: auto;
+}
+.merge-confirm__refused ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.merge-confirm__refused li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 2px 0;
+}
+.merge-confirm__reason {
+  color: var(--status-warn);
+}
+.merge-confirm__why {
+  flex-basis: 100%;
+  color: var(--text-muted);
+}
+.merge-confirm__empty {
+  padding: 10px 14px;
+  color: var(--text-muted);
+}
+.merge-confirm__foot {
+  /* Stacked, the merge button on top: its label names the root and the datastack, and is long. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.merge-confirm__failed {
+  margin: 0;
+  color: var(--status-error);
+}
+.merge-confirm__go {
+  /* `.btn` keeps to one line; this label names a root id and a datastack, and must wrap. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.merge-confirm__viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+/* The viewer sizes to its content unless something stretches it: here, the whole column. */
+.merge-confirm__viewer > .viewer {
+  flex: 1 1 auto;
+}
+/* Narrow: the plan above the viewer, never a row wider than the screen. */
+@media (max-width: 860px) {
+  .overlay__panel.merge-confirm {
+    width: 100%;
+    height: 100%;
+  }
+  .merge-confirm__body {
+    flex-direction: column;
+  }
+  .merge-confirm__plan {
+    flex: 1 1 50%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
 
 /*
  * The list takes whatever height is left and scrolls inside it — **no cap of its own**. One here
@@ -11097,6 +11267,36 @@ details[open] > summary.tile__label {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/*
+ * A piece Submit has merged: a chip in full-strength text, bold and outlined, so it stands apart
+ * from the muted facts by shape and weight — no hue of its own, since `--status-ok` is measured
+ * as a fill, not as text.
+ */
+.review-row__merged {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--text-primary);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+/*
+ * A piece edited since it was suggested: the merged chip's shape, in `--status-refused` — the red
+ * measured per mode for text — since Submit would refuse it.
+ */
+.review-row__outdated {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--status-refused);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--status-refused);
+}
+.review-body__edited {
+  color: var(--status-refused);
+}
 .review-row__facts {
   grid-area: facts;
   font-size: 10px;
@@ -11125,7 +11325,9 @@ details[open] > summary.tile__label {
   color: var(--text-secondary);
   cursor: pointer;
 }
-.review-row__page:disabled {
+/* Off — an arrow at the end of the list, or the verdicts of a piece Submit has merged. */
+.review-row__page:disabled,
+.review-row__verdict:disabled {
   opacity: 0.35;
   cursor: default;
 }

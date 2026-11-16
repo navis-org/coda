@@ -16,6 +16,7 @@ import { makeTable } from '../../core/values'
 import type { TableValue } from '../../core/values'
 import {
   DEFAULT_FILTERS,
+  acceptedPieces,
   arrangeRows,
   buildQueue,
   currentOfQueue,
@@ -60,7 +61,7 @@ const tipsTable = (
   )
 
 const candidatesTable = (
-  rows: { end: number; id: string; rank: number; vol?: number; l2?: number }[],
+  rows: { end: number; id: string; rank: number; vol?: number; l2?: number; gap?: number }[],
 ): TableValue =>
   makeTable(
     tableSchema(
@@ -70,6 +71,7 @@ const candidatesTable = (
       column('rank', 'i64'),
       column('vol_um3', 'f64'),
       column('n_l2', 'i64'),
+      column('min_dist_um', 'f64'),
       column('contact_x', 'f64'),
       column('contact_y', 'f64'),
       column('contact_z', 'f64'),
@@ -83,6 +85,7 @@ const candidatesTable = (
       rank: rows.map((r) => r.rank),
       vol_um3: rows.map((r) => r.vol ?? 1),
       n_l2: rows.map((r) => r.l2 ?? null),
+      min_dist_um: rows.map((r) => r.gap ?? null),
       contact_x: rows.map(() => 10),
       contact_y: rows.map(() => 20),
       contact_z: rows.map(() => 30),
@@ -106,6 +109,19 @@ describe('building the queue', () => {
     expect(queue.map((t) => t.endUid)).toEqual([7, 8])
     expect(queue[0]!.candidates.map((c) => c.candidateId)).toEqual(['a', 'b'])
     expect(queue[0]!.candidates[0]!.contactNm).toEqual([10, 20, 30])
+  })
+
+  /** A zero is a real place; a merge looked for there would be a merge somewhere else. */
+  it('leaves a missing contact undefined, never at the origin', () => {
+    const table = candidatesTable([{ end: 7, id: 'a', rank: 1 }])
+    const without = makeTable(
+      table.schema,
+      { ...table.data, contact_x: [null] },
+      table.kind,
+      table.length,
+    )
+    const queue = buildQueue(tipsTable([{ end: 7 }]), without)
+    expect(queue[0]!.candidates[0]!.contactNm).toBeUndefined()
   })
 
   /** Seventeen of rv2's tips have no list, and "nothing found here" is an answer. */
@@ -635,5 +651,90 @@ describe('the pieces sent to the scene', () => {
       { id: 'n1', part: 'neuron' },
       { id: 'p', part: 'accepted' },
     ])
+  })
+})
+
+/** After Submit: the neuron at its root now, and a neuron merged into another drawn as that one. */
+describe('the scene after merges', () => {
+  const queue = buildQueue(
+    tipsTable([{ end: 1 }]),
+    candidatesTable([
+      { end: 1, id: 'p', rank: 1 },
+      { end: 1, id: 'q', rank: 2 },
+    ]),
+  )
+  let verdicts = withVerdict(new Map(), 1, 'p', 'accept')
+  verdicts = withVerdict(verdicts, 1, 'q', 'accept')
+  const merged = {
+    currentRoot: 'n1b',
+    roots: ['n1', 'n1b'],
+    pieces: new Set(['p']),
+    otherRoots: new Set<string>(),
+    elsewhere: new Set<string>(),
+    unsettled: [],
+    absorbedInto: undefined,
+  }
+
+  it('shows the neuron at its new root, and only the pieces still to merge', () => {
+    expect(scenePieces(queue, 'n1', undefined, verdicts, true, merged)).toEqual([
+      { id: 'n1b', part: 'neuron' },
+      { id: 'q', part: 'accepted' },
+    ])
+  })
+
+  it('draws a neuron merged into another as that one', () => {
+    const absorbed = { ...merged, absorbedInto: 'm9' }
+    expect(scenePieces(queue, 'n1', undefined, verdicts, true, absorbed)[0]).toEqual({
+      id: 'm9',
+      part: 'neuron',
+    })
+  })
+})
+
+/**
+ * The one rule for "accepted", read by the scene's green pieces and by Submit's plan alike: a
+ * piece accepted at any tip is accepted, once, with every row it was accepted on.
+ */
+describe('the accepted pieces', () => {
+  const queue = buildQueue(
+    tipsTable([{ end: 1 }, { end: 2 }, { end: 3 }]),
+    candidatesTable([
+      { end: 1, id: 'p', rank: 1, gap: 0.5 },
+      { end: 1, id: 'q', rank: 2 },
+      { end: 2, id: 'p', rank: 3, gap: 0.1 },
+      { end: 2, id: 'r', rank: 1 },
+      { end: 3, id: 'p', rank: 1 },
+      { end: 3, id: 'q', rank: 2, gap: 2 },
+    ]),
+  )
+  let verdicts = withVerdict(new Map(), 1, 'p', 'accept')
+  verdicts = withVerdict(verdicts, 2, 'p', 'accept')
+  verdicts = withVerdict(verdicts, 3, 'p', 'accept')
+  verdicts = withVerdict(verdicts, 1, 'q', 'reject')
+  verdicts = withVerdict(verdicts, 3, 'q', 'accept')
+  verdicts = withVerdict(verdicts, 2, 'r', 'unsure')
+
+  it('lists each piece once, in the order the reader met it, rejected elsewhere or not', () => {
+    expect([...acceptedPieces(queue, verdicts).keys()]).toEqual(['p', 'q'])
+  })
+
+  it('keeps every row a piece was accepted on, nearest gap first and an unmeasured one last', () => {
+    expect(
+      acceptedPieces(queue, verdicts)
+        .get('p')!
+        .map((row) => row.endUid),
+    ).toEqual([2, 1, 3])
+    expect(
+      acceptedPieces(queue, verdicts)
+        .get('q')!
+        .map((row) => row.endUid),
+    ).toEqual([3])
+  })
+
+  it('is what the scene shows in green', () => {
+    const green = scenePieces(queue, 'n1', undefined, verdicts, true)
+      .filter((piece) => piece.part === 'accepted')
+      .map((piece) => piece.id)
+    expect(green).toEqual([...acceptedPieces(queue, verdicts).keys()])
   })
 })

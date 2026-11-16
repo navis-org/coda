@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DatastackInfo } from './api'
 import { resetCredentials, setToken } from './credentials'
 import { DEFAULT_CAVE_SERVER } from './deployments'
+import { parseGrapheneSource } from './graphene'
 import { imageVolumeOf, supervoxelVolumeOf } from './volumes'
 
 const AEDES: DatastackInfo = {
@@ -83,9 +84,12 @@ describe('supervoxelVolumeOf', () => {
       )
     }) as typeof fetch
     try {
-      await expect(
-        supervoxelVolumeOf(AEDES, { deployment: DEFAULT_CAVE_SERVER }),
-      ).resolves.toBe('https://storage.googleapis.com/fanc-fly_segmentation/wclee_aedes_brain')
+      const graphene = parseGrapheneSource(AEDES.segmentation_source)!
+      const source = await supervoxelVolumeOf(graphene, { deployment: DEFAULT_CAVE_SERVER })
+      expect(source?.base).toBe(
+        'https://storage.googleapis.com/fanc-fly_segmentation/wclee_aedes_brain',
+      )
+      expect(source?.graphene.table).toBe('wclee_aedes_brain')
       // The chunkedgraph's own info, not the bucket and not the datastack record.
       expect(asked).toEqual([
         'https://cave.fanc-fly.com/segmentation/table/wclee_aedes_brain/info',
@@ -95,9 +99,21 @@ describe('supervoxelVolumeOf', () => {
     }
   })
 
-  it('is undefined where the datastack names no segmentation', async () => {
-    await expect(
-      supervoxelVolumeOf({ local_server: 'x' }, { deployment: DEFAULT_CAVE_SERVER }),
-    ).resolves.toBeUndefined()
+  /** A bucket address this cannot read is no bucket: refused by name above, not 404s per chunk. */
+  it('is undefined where the graph names no bucket it can read', async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ data_dir: 'weird://somewhere' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch
+    try {
+      const graphene = parseGrapheneSource(AEDES.segmentation_source)!
+      await expect(
+        supervoxelVolumeOf(graphene, { deployment: DEFAULT_CAVE_SERVER }),
+      ).resolves.toBeUndefined()
+    } finally {
+      globalThis.fetch = original
+    }
   })
 })

@@ -59,9 +59,11 @@ const CANDIDATES: TableValue = makeTable(
   },
 )
 
-async function run(params: ParamValues): Promise<Record<string, Value>> {
+async function run(
+  params: ParamValues,
+  inputs: Record<string, Value | undefined> = { tips: TIPS, candidates: CANDIDATES },
+): Promise<Record<string, Value>> {
   const def = requireNodeDef('seam:review')
-  const inputs: Record<string, Value | undefined> = { tips: TIPS, candidates: CANDIDATES }
   const ctx = {
     params: { ...defaultParams(def), ...params },
     input: (portId: string) => inputs[portId],
@@ -149,5 +151,62 @@ describe('showing accepted pieces', () => {
   it('ignores verdicts other than accept', async () => {
     const table = await current({ verdicts: '3:c=reject;1:a=unsure' })
     expect(rows(table)).toEqual(['n1:neuron'])
+  })
+})
+
+/**
+ * After Submit: the record (`merges`) is published as `Merges`, and `Current` shows the neuron at
+ * the root its merges made, with the merged pieces part of it rather than drawn as themselves.
+ */
+describe('after merges', () => {
+  // Real ids this time: the record keeps only entries whose ids are ids.
+  const N = '720575940621039145'
+  const renamed = (table: TableValue): TableValue =>
+    makeTable(table.schema, {
+      ...table.data,
+      [ID_COLUMN_NAME]: table.data[ID_COLUMN_NAME]!.map((id) => (id === 'n1' ? N : id)),
+      ...(table.data['candidateId']
+        ? { candidateId: table.data['candidateId'].map((id) => `9${String(id).charCodeAt(0)}`) }
+        : {}),
+    })
+  const inputs = { tips: renamed(TIPS), candidates: renamed(CANDIDATES) }
+  // Candidates `a` and `c` are now 997 and 999.
+  const record = JSON.stringify([
+    {
+      reviewedRoot: N,
+      candidateRoot: '997',
+      endUid: 1,
+      neuronRoot: N,
+      neuron: { supervoxel: '11', positionNm: [1, 2, 3] },
+      candidate: { supervoxel: '12', positionNm: [1, 2, 3] },
+      at: '2026-11-16T10:00:00.000Z',
+      outcome: 'merged',
+      newRoot: '720575940700000001',
+      operationId: '4217',
+    },
+  ])
+  const rows = (table: TableValue) =>
+    (table.data[ID_COLUMN_NAME] ?? []).map((id, i) => `${id}:${table.data['part']![i]}`)
+
+  it('publishes the record, one row per entry', async () => {
+    const merges = (await run({ merges: record }, inputs))['merges'] as TableValue
+    expect(merges.data[ID_COLUMN_NAME]).toEqual([N])
+    expect(merges.data['new_root']).toEqual(['720575940700000001'])
+    expect(((await run({}, inputs))['merges'] as TableValue).length).toBe(0)
+  })
+
+  it('shows the neuron at its root now, and a merged piece as part of it', async () => {
+    const verdicts = '1:997=accept;3:999=accept'
+    const out = await run({ merges: record, verdicts, current: '1' }, inputs)
+    expect(rows(out['current'] as TableValue)).toEqual([
+      '720575940700000001:neuron',
+      '999:accepted',
+    ])
+    const before = await run({ verdicts, current: '1' }, inputs)
+    expect(rows(before['current'] as TableValue)).toEqual([
+      `${N}:neuron`,
+      '997:accepted',
+      '999:accepted',
+    ])
   })
 })

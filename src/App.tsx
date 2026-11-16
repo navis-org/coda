@@ -18,6 +18,7 @@ import { SharedLinkGate } from './ui/panels/SharedLinkGate'
 import { GuidesDialog } from './ui/panels/GuidesDialog'
 import { WizardDialog } from './ui/panels/WizardDialog'
 import { WhatsNew } from './ui/panels/WhatsNew'
+import { MergeSubmitHost } from './ui/seam/MergeSubmitHost'
 import { StartPage } from './ui/panels/StartPage'
 import { SmallScreenGate } from './ui/panels/SmallScreenGate'
 import { ZooGate } from './ui/panels/ZooGate'
@@ -178,6 +179,12 @@ export function App() {
          * never competes with the one modal that already asks for attention on load.
          */}
         <FeedbackNudge />
+        {/*
+         * Submit's merge overlay, here rather than in the review card that opens it: a batch
+         * writing to a segmentation must outlive the card's surface (the dashboard unmounts the
+         * canvas). Portalled, so its place here decides nothing but that it is always mounted.
+         */}
+        <MergeSubmitHost />
         {/*
          * The same corner as the nudge, which stands down while this is up. Waits for the launch
          * sequence by itself; see `ui/whatsNew.ts` for who is shown it at all.

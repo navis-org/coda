@@ -27,7 +27,9 @@
 
 import { ID_COLUMN_NAME } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
-import { numberAt } from './suggestionTables'
+import { formatNumber, plural } from '../../style/format'
+import type { MergedSoFar } from './mergeRecord'
+import { numberAt, pointAt } from './suggestionTables'
 
 /** What a reader can say about one (tip, candidate) pair. SEAM's vocabulary, in their words. */
 export type Verdict = 'accept' | 'reject' | 'unsure'
@@ -56,7 +58,12 @@ export interface Candidate {
    */
   readonly l2Chunks: number | undefined
   readonly minDistUm: number | undefined
-  readonly contactNm: readonly [number, number, number]
+  /**
+   * Where the two pieces meet, absolute nm — **undefined where the row does not say**, never
+   * `[0, 0, 0]`: a zero is a real place, and a merge looked for there would be a merge somewhere
+   * else (`mergeAnchors.ts` refuses it instead).
+   */
+  readonly contactNm: readonly [number, number, number] | undefined
   /** Its share of its tip's list — the model's "and it is this one". */
   readonly pCand: number | undefined
   /** `p_tip × p_cand`, which is what the cutoff is applied to. */
@@ -183,11 +190,7 @@ function candidateLists(table: TableValue | undefined): Map<number, Candidate[]>
       volumeUm3: numberAt(table, 'vol_um3', i),
       l2Chunks: numberAt(table, 'n_l2', i),
       minDistUm: numberAt(table, 'min_dist_um', i),
-      contactNm: [
-        numberAt(table, 'contact_x', i) ?? 0,
-        numberAt(table, 'contact_y', i) ?? 0,
-        numberAt(table, 'contact_z', i) ?? 0,
-      ],
+      contactNm: pointAt(table, ['contact_x', 'contact_y', 'contact_z'], i),
       pCand: numberAt(table, 'p_cand', i),
       conf: numberAt(table, 'conf', i),
       shown: wasShown(table, i),
@@ -253,6 +256,28 @@ export function sizeOf(candidate: Candidate | undefined): CandidateSize | undefi
   if (candidate.l2Chunks !== undefined) return { value: candidate.l2Chunks, of: 'chunks' }
   if (candidate.volumeUm3 !== undefined) return { value: candidate.volumeUm3, of: 'um3' }
   return undefined
+}
+
+/**
+ * A candidate's size as a row prints it, unit and all — the card's queue and Submit's overlay
+ * alike, so one candidate never reads two ways.
+ *
+ * **Never a bare number.** `seam:suggestMerges` publishes a level-2 chunk count, which is of the
+ * whole object; a published set carries only `vol_um3`, which is the part inside the search box.
+ * The two differ by orders of magnitude and answer different questions, so a row that printed
+ * `14` would be the one place a reader could confuse them — including when typing a number into
+ * `Min size`, which reads whichever the table has.
+ */
+export function sizeLabel(size: CandidateSize | undefined): string {
+  if (!size) return ''
+  return size.of === 'chunks'
+    ? plural(size.value, 'L2 chunk')
+    : `${formatNumber(size.value)} µm³`
+}
+
+/** How far apart the search measured the two pieces, as a row prints it; empty where unmeasured. */
+export function gapLabel(minDistUm: number | undefined): string {
+  return minDistUm === undefined ? '' : `${minDistUm.toFixed(3)} µm apart`
 }
 
 export type SortBy = 'confidence' | 'size' | 'tip'
@@ -438,6 +463,10 @@ export interface ScenePiece {
  *
  * Every id once, the first row deciding — which is also how the Neuroglancer node reads it.
  * `tips` is the picked neuron's, so nothing here can reach another neuron's pieces.
+ *
+ * **Once Submit has merged into the neuron** (`merged`, `mergedSoFar` over the record), the neuron
+ * is shown at its root now, and a piece merged — into it, or into another reviewed neuron — is not
+ * shown as itself: it is part of that neuron's root (`stillToMerge`).
  */
 export function scenePieces(
   tips: readonly QueueTip[],
@@ -445,18 +474,11 @@ export function scenePieces(
   here: CurrentItem | undefined,
   verdicts: Verdicts,
   showAccepted: boolean,
+  merged?: MergedSoFar,
+  accepted: ReadonlyMap<string, readonly AcceptedRow[]> = acceptedPieces(tips, verdicts),
 ): ScenePiece[] {
-  const accepted: string[] = []
-  if (showAccepted) {
-    for (const tip of tips) {
-      for (const candidate of tip.candidates) {
-        if (verdictFor(verdicts, tip.endUid, candidate.candidateId) === 'accept') {
-          accepted.push(candidate.candidateId)
-        }
-      }
-    }
-  }
-  const isAccepted = new Set(accepted)
+  const toMerge = showAccepted ? stillToMerge(accepted, merged) : []
+  const isAccepted = new Set(toMerge)
   const out: ScenePiece[] = []
   const seen = new Set<string>()
   const add = (id: string | undefined, part: ScenePart) => {
@@ -464,15 +486,83 @@ export function scenePieces(
     seen.add(id)
     out.push({ id, part })
   }
-  if (here) {
-    add(here.tip.neuronId, 'neuron')
-    const id = here.candidate.candidateId
-    add(id, isAccepted.has(id) ? 'accepted' : 'candidate')
-  } else if (showAccepted) {
-    add(neuronId, 'neuron')
+  // `here` is one of `tips`, all of them `neuronId`'s, so the neuron is the same either way.
+  // A neuron this workflow merged into another is drawn as that one: its own root is retired.
+  if (here || showAccepted) {
+    add(merged?.absorbedInto ?? merged?.currentRoot ?? neuronId, 'neuron')
   }
-  for (const id of accepted) add(id, 'accepted')
+  const id = here?.candidate.candidateId
+  if (id !== undefined && mergedAs(merged, id) === undefined) {
+    add(id, isAccepted.has(id) ? 'accepted' : 'candidate')
+  }
+  for (const id of toMerge) add(id, 'accepted')
   return out
+}
+
+/** One accepted row: the tip the piece was accepted at, and the piece as the queue holds it. */
+export interface AcceptedRow {
+  readonly endUid: number
+  readonly candidate: Candidate
+}
+
+/**
+ * Every accepted piece among these tips, one per candidate root, in the order the reader met them;
+ * each with its rows nearest gap first (an unmeasured gap last), then by rank.
+ *
+ * **The one rule for "accepted"**: a piece accepted at any tip is accepted, whatever another tip
+ * said. The scene's green pieces (`scenePieces`) and Submit's plan (`mergePlan.ts`) both read it
+ * here, so the neuron shown "as it will look once you make the merges" is the one the merges
+ * make. `tips` is the picked neuron's (`tipsOf`).
+ */
+export function acceptedPieces(
+  tips: readonly QueueTip[],
+  verdicts: Verdicts,
+): Map<string, AcceptedRow[]> {
+  const pieces = new Map<string, AcceptedRow[]>()
+  /*
+   * Only the tips holding an accept are walked: a neuron is thousands of tips of ten candidates,
+   * a reader accepts a handful, and this runs on every render of the card (25× faster at 3,000
+   * tips, measured 2026-11-16). The key is `${endUid}:${candidateId}` (`verdictKey`).
+   */
+  const accepting = new Set<number>()
+  for (const [key, verdict] of verdicts) {
+    if (verdict === 'accept') accepting.add(Number(key.slice(0, key.indexOf(':'))))
+  }
+  for (const tip of tips) {
+    if (!accepting.has(tip.endUid)) continue
+    for (const candidate of tip.candidates) {
+      if (verdictFor(verdicts, tip.endUid, candidate.candidateId) !== 'accept') continue
+      const rows = pieces.get(candidate.candidateId) ?? []
+      rows.push({ endUid: tip.endUid, candidate })
+      pieces.set(candidate.candidateId, rows)
+    }
+  }
+  const gap = (row: AcceptedRow) => row.candidate.minDistUm ?? Number.POSITIVE_INFINITY
+  for (const rows of pieces.values()) {
+    rows.sort((a, b) => gap(a) - gap(b) || a.candidate.rank - b.candidate.rank)
+  }
+  return pieces
+}
+
+/**
+ * The accepted pieces Submit has still to merge, in the reader's order: those not already in the
+ * neuron or in another reviewed neuron by this workflow's record. **The one rule** for the green
+ * pieces, the card's Submit count and its rows.
+ */
+export function stillToMerge(
+  accepted: ReadonlyMap<string, readonly AcceptedRow[]>,
+  merged: MergedSoFar | undefined,
+): string[] {
+  return [...accepted.keys()].filter((id) => mergedAs(merged, id) === undefined)
+}
+
+/** Where Submit has put a piece, by the record: into the neuron, into another one, or nowhere. */
+export function mergedAs(
+  merged: MergedSoFar | undefined,
+  id: string,
+): 'merged' | 'elsewhere' | undefined {
+  if (merged?.pieces.has(id)) return 'merged'
+  return merged?.elsewhere.has(id) ? 'elsewhere' : undefined
 }
 
 /**

@@ -63,6 +63,7 @@ import {
   neuronsSchema,
   neuronsTable,
   numberAt,
+  pointAt,
   schemaOf,
   tableOf,
 } from './suggestionTables'
@@ -388,7 +389,10 @@ export async function readSuggestions(
   let shown = 0
   for (let i = 0; i < tips.length; i++) {
     const id = String(ids[i] ?? '')
-    const tip = triple(tips, 'x', 'y', 'z', i)
+    // The cloud's positions are a typed array and cannot hold "missing"; a tip with no position
+    // sits at the origin there, as it always has. The suggestion layer below skips it instead.
+    const tipAt = pointAt(tips, ['x', 'y', 'z'], i)
+    const tip = tipAt ?? [0, 0, 0]
     positions[i * 3] = tip[0]
     positions[i * 3 + 1] = tip[1]
     positions[i * 3 + 2] = tip[2]
@@ -407,11 +411,13 @@ export async function readSuggestions(
     if (!isShown) continue
     shown += 1
     const candidateId = String(tips.data['candidateId']?.[i] ?? '')
-    const contact = triple(tips, 'contact_x', 'contact_y', 'contact_z', i)
+    const contact = pointAt(tips, ['contact_x', 'contact_y', 'contact_z'], i)
+    // No point to draw it at: left off the layer, not put at the origin (`pointAt`).
+    if (!tipAt || !contact) continue
     suggestions.push({
       neuronId: id,
       endUid: numberAt(tips, 'end_uid', i) ?? -1,
-      tipNm: tip,
+      tipNm: tipAt,
       contactNm: contact,
       candidateId,
       r,
@@ -525,20 +531,6 @@ function fillFirstCandidate(
   }
   read[FIRST_CANDIDATE] = out
   return damaged
-}
-
-function triple(
-  table: TableValue,
-  x: string,
-  y: string,
-  z: string,
-  row: number,
-): [number, number, number] {
-  return [
-    numberAt(table, x, row) ?? 0,
-    numberAt(table, y, row) ?? 0,
-    numberAt(table, z, row) ?? 0,
-  ]
 }
 
 /**

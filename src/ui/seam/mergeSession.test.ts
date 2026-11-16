@@ -1,0 +1,246 @@
+// @vitest-environment jsdom
+
+/**
+ * Submit's session (`mergeSession.ts`), with the plan and the batch faked — nothing here reaches a
+ * server (`src/test/writeGuard.ts` would fail it). What is pinned is the phase-6 wiring: the plan
+ * opens the overlay or says why not on the status bar, a settled lost reply is recorded at once,
+ * the record is appended live with no undo step, the card is held while the batch runs, and the
+ * overlay cannot close until it ends.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { addNode, emptyGraph } from '../../core/graph'
+import '../../nodes'
+import type { BatchCallbacks, BatchResult } from '../../packs/seam/mergeBatch'
+import type { MergePlan, PlannedMerge, ReadyPlan } from '../../packs/seam/mergePlan'
+import type { MergeRecordEntry } from '../../packs/seam/mergeRecord'
+import { decodeRecord } from '../../packs/seam/mergeRecord'
+import { useGraphStore } from '../../store/graphStore'
+import { node } from '../../test/graph'
+import { clearStorage } from '../../test/jsdomStubs'
+
+const planMerges = vi.fn<() => Promise<MergePlan>>()
+const prepareMerges = vi.fn()
+vi.mock('../../packs/seam/mergePlan', () => ({ planMerges: () => planMerges() }))
+vi.mock('../../packs/seam/mergeBatch', () => ({
+  prepareMerges: (...args: unknown[]) => prepareMerges(...args),
+}))
+let touring = false
+vi.mock('../tour/tourState', () => ({ isTourActive: () => touring }))
+
+const {
+  closeSubmit,
+  confirmSubmit,
+  currentSubmit,
+  openSubmit,
+  recheckSubmit,
+  resetSubmit,
+  stopSubmit,
+} = await import('./mergeSession')
+
+const store = () => useGraphStore.getState()
+const record = () =>
+  decodeRecord(store().graph.nodes.find((n) => n.id === 'review')!.params['merges'])
+
+/** The press, in the document on screen: filled in once the store has one (`beforeEach`). */
+let REQUEST = {
+  docId: '',
+  nodeId: 'review',
+  deployment: 'https://global.example.org',
+  datastack: 'test',
+  sourceId: 'cave',
+  datasetId: 'test:1',
+  queue: [],
+  reviewedRoot: '100',
+}
+
+const MERGE = { candidateRoot: '7' } as PlannedMerge
+const PLAN: ReadyPlan = {
+  ok: true,
+  datastack: 'test',
+  graphene: { server: 'https://cave.example.org', table: 't', base: '' },
+  reviewedRoot: '100',
+  currentRoot: '100',
+  merges: [MERGE],
+  rejected: [],
+}
+
+function entry(outcome: 'merged' | 'unknown', newRoot = '201'): MergeRecordEntry {
+  const base = {
+    reviewedRoot: '100',
+    candidateRoot: '7',
+    endUid: 1,
+    neuronRoot: '100',
+    neuron: { supervoxel: '71', positionNm: [1, 2, 3] as const },
+    candidate: { supervoxel: '72', positionNm: [4, 5, 6] as const },
+    at: '2026-11-16T10:00:00.000Z',
+  }
+  return outcome === 'merged' ? { ...base, outcome, newRoot } : { ...base, outcome }
+}
+
+/** A batch the test drives: `run` hands back its callbacks and resolves when told. */
+function heldBatch() {
+  let finish: (result: BatchResult) => void = () => {}
+  let on: BatchCallbacks | undefined
+  prepareMerges.mockImplementation(() => ({
+    run: (callbacks: BatchCallbacks) => {
+      on = callbacks
+      return new Promise<BatchResult>((resolve) => (finish = resolve))
+    },
+  }))
+  return { on: () => on!, finish: (result: BatchResult) => finish(result) }
+}
+
+/** Open a Submit and wait for its plan. */
+async function opened(plan: MergePlan = PLAN) {
+  planMerges.mockResolvedValueOnce(plan)
+  openSubmit(REQUEST)
+  await vi.waitFor(() => expect(currentSubmit()?.phase).not.toBe('planning'))
+}
+
+beforeEach(() => {
+  clearStorage()
+  resetSubmit()
+  store().newGraph()
+  store().loadGraph(addNode(emptyGraph('submit'), node('review', 'seam:review')))
+  store().setNotice(undefined)
+  REQUEST = { ...REQUEST, docId: store().activeTabId }
+  planMerges.mockReset()
+  prepareMerges.mockReset()
+})
+
+afterEach(() => {
+  resetSubmit()
+})
+
+describe('Submit', () => {
+  it('says on the status bar, and opens nothing, during a tour', () => {
+    touring = true
+    openSubmit(REQUEST)
+    touring = false
+    expect(currentSubmit()).toBeUndefined()
+    expect(store().notice).toMatch(/tour/)
+    expect(planMerges).not.toHaveBeenCalled()
+  })
+
+  it('opens the overlay with the plan, or says why not', async () => {
+    await opened()
+    expect(currentSubmit()).toMatchObject({ phase: 'ready', plan: PLAN, running: false })
+    closeSubmit()
+    await opened({ ok: false, message: 'Your CAVE account may not edit test.' })
+    expect(currentSubmit()).toBeUndefined()
+    expect(store().notice).toBe('Your CAVE account may not edit test.')
+  })
+
+  it('records a settled lost reply as soon as the plan arrives', async () => {
+    const lost = entry('unknown')
+    await opened({ ...PLAN, currentRoot: '150', settled: { entry: lost, newRoot: '150' } })
+    expect(record()).toEqual([
+      expect.objectContaining({ outcome: 'merged', newRoot: '150', candidateRoot: '7' }),
+    ])
+  })
+
+  it('holds the card, appends the record live, and lets go when the batch ends', async () => {
+    await opened()
+    const batch = heldBatch()
+    const past = store().past.length
+    confirmSubmit([MERGE])
+    expect(prepareMerges).toHaveBeenCalledWith(PLAN, [MERGE], {
+      deployment: REQUEST.deployment,
+    })
+    expect(currentSubmit()).toMatchObject({ running: true })
+
+    // Held: the card cannot be deleted, and the overlay cannot be closed.
+    store().deleteNodes(['review'])
+    expect(store().graph.nodes).toHaveLength(1)
+    closeSubmit()
+    expect(currentSubmit()).toBeDefined()
+
+    // Each entry lands on the param as it is now, with no undo step; the neuron follows.
+    batch.on().progress('7', { state: 'sending' })
+    batch.on().record(entry('merged', '201'))
+    store().setParam('review', 'verdicts', '1:7=accept') // an edit in between is kept
+    batch.on().record(entry('merged', '202'))
+    expect(record().map((e) => (e.outcome === 'merged' ? e.newRoot : ''))).toEqual([
+      '201',
+      '202',
+    ])
+    expect(store().past).toHaveLength(past + 1)
+    expect(currentSubmit()).toMatchObject({ neuronRoot: '202' })
+
+    stopSubmit()
+    expect(batch.on().stopRequested()).toBe(true)
+    batch.finish({
+      state: 'stopped',
+      currentRoot: '202',
+      message: 'Stopped before this merge.',
+    })
+    await vi.waitFor(() => expect(currentSubmit()).toMatchObject({ running: false }))
+    expect(store().notice).toBe('Stopped before this merge.')
+    store().deleteNodes(['review'])
+    expect(store().graph.nodes).toHaveLength(0)
+    closeSubmit()
+    expect(currentSubmit()).toBeUndefined()
+  })
+
+  it('starts nothing, and holds nothing, where the batch cannot be prepared', async () => {
+    await opened()
+    prepareMerges.mockImplementation(() => {
+      throw new Error('Both sides of the merge are supervoxel 5.')
+    })
+    expect(() => confirmSubmit([MERGE])).toThrow(/supervoxel 5/)
+    expect(currentSubmit()).toMatchObject({ running: false, progress: undefined })
+    store().deleteNodes(['review'])
+    expect(store().graph.nodes).toHaveLength(0)
+  })
+
+  /** Two documents from one file share node ids: the press names its document too. */
+  it('checks nothing for a card not in the document on screen', async () => {
+    REQUEST = { ...REQUEST, docId: 'another-document' }
+    openSubmit(REQUEST)
+    await vi.waitFor(() => expect(currentSubmit()).toBeUndefined())
+    expect(planMerges).not.toHaveBeenCalled()
+    expect(store().notice).toMatch(/no longer on screen/)
+  })
+
+  /** And Merge holds the card through the store, which asks the same. */
+  it('starts no batch on a card gone from the document', async () => {
+    await opened()
+    store().loadGraph(emptyGraph('elsewhere'))
+    expect(() => confirmSubmit([MERGE])).toThrow(/no longer on screen/)
+    expect(prepareMerges).not.toHaveBeenCalled()
+  })
+
+  /** A Re-check still out when Merge is pressed must not land a fresh plan over the batch. */
+  it('drops a Re-check overtaken by Merge', async () => {
+    await opened()
+    let answer: (plan: MergePlan) => void = () => {}
+    planMerges.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+    recheckSubmit()
+    heldBatch()
+    confirmSubmit([MERGE])
+    answer({ ...PLAN, currentRoot: '999' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(currentSubmit()).toMatchObject({ running: true, neuronRoot: '100' })
+  })
+
+  /** The plan was made from the pressed document's card; another on screen is not that one. */
+  it('closes, and says why, where the document changed during the check', async () => {
+    let answer: (plan: MergePlan) => void = () => {}
+    planMerges.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+    openSubmit(REQUEST)
+    store().newWorkflow()
+    answer(PLAN)
+    await vi.waitFor(() => expect(currentSubmit()).toBeUndefined())
+    expect(store().notice).toMatch(/no longer on screen/)
+  })
+
+  it('confirms once', async () => {
+    await opened()
+    heldBatch()
+    confirmSubmit([MERGE])
+    expect(() => confirmSubmit([MERGE])).toThrow(/already been sent/)
+    expect(prepareMerges).toHaveBeenCalledTimes(1)
+  })
+})
