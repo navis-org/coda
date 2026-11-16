@@ -23,6 +23,17 @@
  *
  * Every entry is appended through the hold's `update`: the param read and replaced in one store
  * step, unrecorded — never a value read once at the start, never `setParams`.
+ *
+ * ## A merge still out holds every Submit
+ *
+ * A merge the batch stopped waiting for is recorded `unknown` and its request is still with the
+ * server (`BatchCallbacks.stillOut`). Until it answers — or `STILL_OUT_MS` has passed — no Submit
+ * opens, on any card: a plan made meanwhile finds the roots unmoved and would send the same pair
+ * again (audit of 77c0625, 2026-11-16). The server would refuse the second ("Supervoxels must
+ * belong to different objects"), but that is the server's guard, not ours. The answer, when it
+ * comes, is appended to the record through a short hold, with its operation id; past the limit it
+ * is dropped, since a later batch may have moved the neuron on and an old root appended after it
+ * would move it back. The next plan settles it from the roots instead.
  */
 
 import { useSyncExternalStore } from 'react'
@@ -39,6 +50,14 @@ import { decodeVerdicts } from '../../packs/seam/reviewQueue'
 import type { WriteHold } from '../../store/graphStore'
 import { useGraphStore } from '../../store/graphStore'
 import { isTourActive } from '../tour/tourState'
+
+/** How long a merge still out holds Submit; after it, the answer is no longer recorded. */
+export const STILL_OUT_MS = 10 * 60_000
+
+/** Why Submit is held meanwhile: the status bar's and the card's button's one sentence. */
+export const STILL_OUT_NOTICE =
+  'A merge sent earlier has not answered yet. Submit waits for it, for up to ' +
+  `${STILL_OUT_MS / 60_000} minutes.`
 
 /** What Submit was pressed on: the card, its dataset and the queue it was showing. */
 export interface SubmitRequest {
@@ -75,6 +94,8 @@ let session: SubmitSession | undefined
 let planning: AbortController | undefined
 /** The batch being sent: the store's hold, and whether Stop was pressed. */
 let inFlight: { readonly hold: WriteHold; stop: boolean } | undefined
+/** A merge the batch stopped waiting for, still out (the header): its limit's timer. */
+let stillOut: ReturnType<typeof setTimeout> | undefined
 const changed = channel()
 
 function publish(next: SubmitSession | undefined): void {
@@ -91,18 +112,23 @@ export function useSubmitSession(): SubmitSession | undefined {
   return useSyncExternalStore(changed.subscribe, currentSubmit)
 }
 
-/** Where a card's Submit has got to, as the card's button reads it. */
-export type SubmitState = 'none' | 'other' | 'planning' | 'open' | 'running'
+/**
+ * Where a card's Submit has got to, as the card's button reads it. `waiting`: a merge sent earlier
+ * is still out, and no Submit opens until it answers.
+ */
+export type SubmitState = 'none' | 'other' | 'planning' | 'open' | 'running' | 'waiting'
 
 export function submitStateOf(docId: string, nodeId: string): SubmitState {
-  if (!session) return 'none'
-  const { request } = session
-  if (request.docId !== docId || request.nodeId !== nodeId) {
-    // Another card's: an overlay up over everything, or a check nothing is drawn for yet.
-    return session.phase === 'ready' ? 'other' : 'none'
+  if (session) {
+    const { request } = session
+    if (request.docId === docId && request.nodeId === nodeId) {
+      if (session.phase === 'planning') return 'planning'
+      return session.running ? 'running' : 'open'
+    }
+    // Another card's: an overlay up over everything (a check nothing is drawn for yet is not).
+    if (session.phase === 'ready') return 'other'
   }
-  if (session.phase === 'planning') return 'planning'
-  return session.running ? 'running' : 'open'
+  return stillOut ? 'waiting' : 'none'
 }
 
 /** A card's Submit state, as a primitive (invariant 7). */
@@ -122,6 +148,10 @@ export function openSubmit(request: SubmitRequest): void {
   }
   if (session) {
     store.setNotice('A Submit is already open. Close it first.')
+    return
+  }
+  if (stillOut) {
+    store.setNotice(STILL_OUT_NOTICE)
     return
   }
   publish({ request, phase: 'planning' })
@@ -178,18 +208,8 @@ async function plan(request: SubmitRequest): Promise<void> {
    */
   if (made.settled) {
     const { entry, newRoot } = made.settled
-    try {
-      const hold = useGraphStore.getState().holdForWrite(request.docId, request.nodeId)
-      try {
-        hold.update('merges', (now) =>
-          appendEntry(now, settledEntry(entry, newRoot, new Date().toISOString())),
-        )
-      } finally {
-        hold.release()
-      }
-    } catch (error) {
-      return endWith(`Submit was not opened: ${errorMessage(error)}`)
-    }
+    const refused = appendHeld(request, settledEntry(entry, newRoot, new Date().toISOString()))
+    if (refused) return endWith(`Submit was not opened: ${refused}`)
   }
   publish({
     request,
@@ -204,6 +224,82 @@ async function plan(request: SubmitRequest): Promise<void> {
 
 const MOVED =
   'Submit was closed: the workflow it was pressed in is no longer on screen. Press it again there.'
+
+/** A card, as its document and node: all a write to its record needs of a press. */
+type Card = Pick<SubmitRequest, 'docId' | 'nodeId'>
+
+/**
+ * Append one entry to the card's record through a short hold, which refuses unless the card is on
+ * screen in the document it was pressed in and no batch is holding one. Why not, or undefined.
+ */
+function appendHeld(card: Card, entry: MergeRecordEntry): string | undefined {
+  try {
+    const hold = useGraphStore.getState().holdForWrite(card.docId, card.nodeId)
+    try {
+      hold.update('merges', (now) => appendEntry(now, entry))
+    } finally {
+      hold.release()
+    }
+    return undefined
+  } catch (error) {
+    return errorMessage(error)
+  }
+}
+
+/** Let Submit go again; `timer` is the wait being ended, or any. */
+function endWait(timer = stillOut): boolean {
+  if (stillOut === undefined || stillOut !== timer) return false
+  clearTimeout(stillOut)
+  stillOut = undefined
+  window.removeEventListener('beforeunload', warnLeaving)
+  changed.notify()
+  return true
+}
+
+/**
+ * The browser's "leave this page?", while closing the tab would lose the record of a merge the
+ * server made or may make: a batch running, or a merge still out.
+ */
+function warnLeaving(event: BeforeUnloadEvent): void {
+  event.preventDefault()
+  // Still what some browsers need before they ask.
+  event.returnValue = ''
+}
+
+/**
+ * Hold every Submit until `answer` settles, and record what it says (the header). Only the card's
+ * two ids are kept for it, never the press with its queue: the request may never answer.
+ */
+function waitFor(card: Card, answer: Promise<MergeRecordEntry | undefined>): void {
+  endWait()
+  const timer = setTimeout(() => {
+    if (!endWait(timer)) return
+    useGraphStore
+      .getState()
+      .setNotice(
+        `A merge sent earlier has not answered in ${STILL_OUT_MS / 60_000} minutes. Submit is ` +
+          'open again; a later answer will not be recorded, and the next Submit reads the roots.',
+      )
+  }, STILL_OUT_MS)
+  stillOut = timer
+  window.addEventListener('beforeunload', warnLeaving)
+  changed.notify()
+  void answer.then((entry) => {
+    // Past the limit, or forgotten (`resetSubmit`): a later batch may have moved the neuron on.
+    if (!endWait(timer) || !entry) return
+    const refused = appendHeld(card, entry)
+    useGraphStore
+      .getState()
+      .setNotice(
+        refused
+          ? `A merge sent earlier answered (${entry.outcome}), and could not be recorded: ${refused} ` +
+              (entry.outcome === 'merged'
+                ? 'The next Submit reads it off the roots.'
+                : 'Nothing was merged; the next Submit may send it again.')
+          : `A merge sent earlier answered: ${entry.outcome}. Recorded in Merges.`,
+      )
+  })
+}
 
 /** Close the session and say why on the status bar. */
 function endWith(message: string): void {
@@ -234,12 +330,7 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
   }
   const sending = (inFlight = { hold, stop: false })
   // Closing the tab mid-batch would lose the record of merges the server has made.
-  const warn = (event: BeforeUnloadEvent) => {
-    event.preventDefault()
-    // Still what some browsers need before they ask.
-    event.returnValue = ''
-  }
-  window.addEventListener('beforeunload', warn)
+  window.addEventListener('beforeunload', warnLeaving)
 
   // This session as it moves on; nothing is published once it has been closed or replaced.
   let live: ReadySession = { ...session, running: true, progress: new Map() }
@@ -250,6 +341,12 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
   }
   publish(live)
 
+  /*
+   * A merge handed on still out: waited for once the batch has let go of the card, never before —
+   * its answer can land while the batch still holds it, and a second hold would be refused. No
+   * Submit can open in between: the overlay is up until `running` goes false, after this.
+   */
+  let stillOutAnswer: Promise<MergeRecordEntry | undefined> | undefined
   void batch
     .run({
       progress: (candidateRoot, state) =>
@@ -259,6 +356,7 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
         if (entry.outcome === 'merged') show({ neuronRoot: entry.newRoot })
       },
       stopRequested: () => sending.stop,
+      stillOut: (answer) => (stillOutAnswer = answer),
     })
     .then(
       (result) => result.message,
@@ -267,7 +365,10 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
     .then((message) => {
       hold.release()
       if (inFlight === sending) inFlight = undefined
-      window.removeEventListener('beforeunload', warn)
+      // Before the wait adds the same listener back, which a later removal would take with it.
+      window.removeEventListener('beforeunload', warnLeaving)
+      if (stillOutAnswer)
+        waitFor({ docId: request.docId, nodeId: request.nodeId }, stillOutAnswer)
       show({ running: false })
       if (message) useGraphStore.getState().setNotice(message)
     })
@@ -290,6 +391,7 @@ export function closeSubmit(): void {
 export function resetSubmit(): void {
   inFlight?.hold.release()
   inFlight = undefined
+  endWait()
   planning?.abort()
   planning = undefined
   publish(undefined)

@@ -19,9 +19,13 @@
  * root: a graph flagged read-only answers success without keeping anything (phase 2).
  *
  * **The first failure stops the batch** (user, 2026-11-15): a refusal, a read that fails, a reply
- * that was lost. A lost reply may still have merged, so the roots are read once more to say which,
- * and an answer that does not settle it is recorded as `unknown`. Nothing is sent after a failure
- * until the reader presses Submit again, which plans afresh.
+ * that was lost. A lost reply may still have merged; it is recorded as `unknown`, whatever the
+ * roots read straight after show, and the next plan settles it (`mergePlan.ts`' `settle`) — one
+ * rule in one place, which also tells this merge from somebody else's edit landing in the same
+ * seconds (audit of 77c0625, 2026-11-16). A send that is merely slow is handed to the caller
+ * still out (`BatchCallbacks.stillOut`): its answer, when it comes, is recorded, and Submit waits
+ * for it. Nothing is sent after a failure until the reader presses Submit again, which plans
+ * afresh.
  *
  * What the per-merge check does not close: the moment between it and the server taking its lock.
  * No client closes that; Spelunker's check is the same.
@@ -31,10 +35,16 @@ import { errorMessage } from '../../core/errors'
 import type { ConfirmedMerge, EditOutcome, WriteOptions } from '../../data/cave/edits'
 import { confirmMerge, mergeSupervoxels, requestOptionsOf } from '../../data/cave/edits'
 import type { GrapheneSource } from '../../data/cave/graphene'
+import { isNodeId, layerOf } from '../../data/cave/graphLayout'
 import { supervoxelRoots } from '../../data/cave/rootIds'
 import type { PlannedMerge, ReadyPlan } from './mergePlan'
-import type { EntryOutcome, MergeProgress, MergeRecordEntry } from './mergeRecord'
-import { sharedNewRoot } from './mergeRecord'
+import type {
+  EntryBase,
+  EntryOutcome,
+  MergeProgress,
+  MergeRecordEntry,
+  RecordScope,
+} from './mergeRecord'
 
 /** How a batch ended. */
 export interface BatchResult {
@@ -53,6 +63,14 @@ export interface BatchCallbacks {
   record(entry: MergeRecordEntry): void
   /** Asked before each merge: true stops the batch there, before anything more is sent. */
   stopRequested(): boolean
+  /**
+   * A merge the batch stopped waiting for (`SEND_TIMEOUT_MS`), recorded `unknown` already, whose
+   * request is still out. `answer` is the entry to append once the server answers — `merged` or
+   * `failed` — or undefined where the answer says nothing either. Called once, as soon as the
+   * send is given up on, before anything that could throw: Submit must be held even where the
+   * batch then fails.
+   */
+  stillOut(answer: Promise<MergeRecordEntry | undefined>): void
 }
 
 /** What the batch asks of the servers, apart so the logic can be tested without one. */
@@ -72,8 +90,9 @@ export const READ_TIMEOUT_MS = 60_000
 
 /**
  * How long a merge may go unanswered before the batch stops waiting. **The request is not
- * cancelled** — that would only throw away the answer — and the merge is read as `unknown`: the
- * roots are asked, and it is never sent again. Long, since a merge with its remesh is slow.
+ * cancelled** — that would only throw away the answer — and the merge is read as `unknown`; the
+ * caller is handed the request (`stillOut`) and holds Submit until it answers, so the same pair is
+ * not planned and sent again meanwhile. Long, since a merge with its remesh is slow.
  */
 export const SEND_TIMEOUT_MS = 120_000
 
@@ -102,8 +121,14 @@ export interface Batch {
 /**
  * Confirm the reader's merges: the step the Merge button takes. **Synchronous, and the only
  * place a batch can be refused before it starts** — merges that are not this plan's, one listed
- * twice, anything `confirmMerge` refuses — so a throw here means nothing was sent, and nothing
- * after it can be mistaken for that.
+ * twice, an end that is not a supervoxel, anything `confirmMerge` refuses — so a throw here means
+ * nothing was sent, and nothing after it can be mistaken for that.
+ *
+ * **Every end must be a supervoxel** (layer 1 of the plan's `layout`), checked here, beside the
+ * writer, rather than trusted to the anchors two modules away. The per-merge check — "this
+ * supervoxel is under this root now" — only means something for one: the server maps an id
+ * already at the root layer to itself, retired or not, and looks a higher layer's supervoxel up
+ * at that id's creation time (pychunkedgraph 2.20.0), which merges an outdated root silently.
  */
 export function prepareMerges(
   plan: ReadyPlan,
@@ -113,7 +138,21 @@ export function prepareMerges(
 ): Batch {
   const planned = new Set(plan.merges)
   const seen = new Set<string>()
+  const { layout } = plan
+  if (merges.length > 0 && !layout) {
+    throw new Error(
+      'The plan carries no id layout, so its ends cannot be checked as supervoxels.',
+    )
+  }
   for (const merge of merges) {
+    for (const { supervoxel } of [merge.neuron, merge.candidate]) {
+      const layer = isNodeId(supervoxel) ? layerOf(layout!, BigInt(supervoxel)) : undefined
+      if (layer !== 1) {
+        throw new Error(
+          `${supervoxel} is not a supervoxel${layer === undefined ? '' : ` (layer ${layer})`}.`,
+        )
+      }
+    }
     if (!planned.has(merge)) {
       throw new Error(`The merge of ${merge.candidateRoot} is not one this plan made.`)
     }
@@ -132,16 +171,24 @@ export function prepareMerges(
     endUid: merge.used.endUid,
     sending: confirmMerge(plan.graphene, merge.neuron, merge.candidate),
   }))
-  const { reviewedRoot, currentRoot } = plan
+  const about: About = {
+    deployment: options.deployment,
+    datastack: plan.datastack,
+    reviewedRoot: plan.reviewedRoot,
+  }
+  const { currentRoot } = plan
   let ran = false
   return {
     run: (on) => {
       if (ran) return Promise.reject(new Error('A batch runs once.'))
       ran = true
-      return runMerges(reviewedRoot, currentRoot, steps, on, services)
+      return runMerges(about, currentRoot, steps, on, services)
     },
   }
 }
+
+/** What every entry of one batch says alike: where it was made, and about which neuron. */
+type About = RecordScope & { readonly reviewedRoot: string }
 
 /** One merge as the run reads it: nothing in it is the caller's. */
 interface Step {
@@ -151,7 +198,7 @@ interface Step {
 }
 
 async function runMerges(
-  reviewedRoot: string,
+  about: About,
   currentRoot: string,
   steps: readonly Step[],
   on: BatchCallbacks,
@@ -174,17 +221,16 @@ async function runMerges(
     const ends = [sending.neuron.supervoxel, sending.candidate.supervoxel]
     // The root this merge is checked against and made into; `expected` moves on once it is made.
     const neuronRoot = expected
+    const base: Base = {
+      ...about,
+      candidateRoot: id,
+      endUid,
+      neuronRoot,
+      neuron: sending.neuron,
+      candidate: sending.candidate,
+    }
     const keep = (decided: Decided) => {
-      const entry: MergeRecordEntry = {
-        reviewedRoot,
-        candidateRoot: id,
-        endUid,
-        neuronRoot,
-        neuron: sending.neuron,
-        candidate: sending.candidate,
-        at: new Date().toISOString(),
-        ...decided,
-      }
+      const entry = entryAt(base, decided)
       on.record(entry)
       on.progress(id, { state: entry.outcome, message: entry.message })
     }
@@ -219,7 +265,12 @@ async function runMerges(
     }
 
     on.progress(id, { state: 'sending', message: 'Merging' })
-    const outcome = await sendOnce(services, sending, services.sendTimeoutMs ?? SEND_TIMEOUT_MS)
+    const { outcome, late } = await sendOnce(
+      services,
+      sending,
+      services.sendTimeoutMs ?? SEND_TIMEOUT_MS,
+    )
+    if (late) on.stillOut(lateEntry(base, late))
 
     if (outcome.kind === 'refused') {
       return failWith({
@@ -231,49 +282,91 @@ async function runMerges(
 
     const after = await rootsOrError(services, graphene, ends)
 
+    const unmoved = Array.isArray(after) && after[0] === neuronRoot && after[1] === id
+
     if (outcome.kind === 'done') {
       const newRoot = outcome.newRootIds[0]!
-      // Made on the server's word: the neuron's root is the new one, whatever the check finds.
-      expected = newRoot
-      const made = { outcome: 'merged', newRoot, operationId: outcome.operationId } as const
+      const said = `The server answered merged (operation ${outcome.operationId}, root ${newRoot})`
       if (Array.isArray(after) && after[0] === newRoot && after[1] === newRoot) {
-        keep(made)
+        expected = newRoot
+        keep({ outcome: 'merged', newRoot, operationId: outcome.operationId })
         continue
       }
+      /*
+       * Both ends read fine and still under their old roots: what a graph flagged read-only does
+       * (it answers success and keeps nothing), so the server's word is not taken — `unknown`,
+       * for the next plan to settle from the roots.
+       */
+      if (unmoved) {
+        return failWith({
+          outcome: 'unknown',
+          operationId: outcome.operationId,
+          message: `${said}, but both supervoxels are still under their old roots.`,
+        })
+      }
+      // Otherwise made on the server's word: the neuron's root is the new one.
+      expected = newRoot
       return failWith({
-        ...made,
-        message:
-          `The server answered merged (operation ${outcome.operationId}, root ${newRoot}), ` +
-          `but ${rootsSaid(after)}`,
+        outcome: 'merged',
+        newRoot,
+        operationId: outcome.operationId,
+        message: `${said}, but ${rootsSaid(after)}`,
       })
     }
 
     /*
-     * No answer that says what happened: the roots say what they can. Both under one new root is
-     * a merge. **Anything else stays `unknown`** — roots that have not moved included: a reply lost
-     * to a proxy's timeout can come back while the server is still writing, and the merge lands
-     * after this read. Only the server's own refusal is `failed`. The next plan settles it
-     * (`mergePlan.ts`), asking the roots again.
+     * No answer that says what happened. **Always `unknown`**, whatever the roots show: both ends
+     * under one new root may be this merge, or somebody else's edit landing in the same seconds,
+     * and only the next plan's `settle` tells the two apart (`mergePlan.ts`). Roots that have not
+     * moved say nothing either: a reply lost to a proxy's timeout can come back while the server
+     * is still writing. Only the server's own refusal is `failed`.
      */
     const lost = `The reply was lost (${outcome.message})`
-    const made = Array.isArray(after) ? sharedNewRoot(after, neuronRoot) : undefined
-    if (made !== undefined) {
-      expected = made
-      return failWith({
-        outcome: 'merged',
-        newRoot: made,
-        message: `${lost}; the roots show the merge was made.`,
-      })
-    }
-    const unmoved = Array.isArray(after) && after[0] === neuronRoot && after[1] === id
     return failWith({
       outcome: 'unknown',
       message: unmoved
         ? `${lost}; the roots had not moved when read, but a merge can land after its reply is lost.`
-        : `${lost}, and ${rootsSaid(after)}`,
+        : `${lost}, and ${rootsSaid(after)} The next Submit checks whether that was this merge.`,
     })
   }
   return { state: 'done', currentRoot: expected }
+}
+
+/** An entry's merge, apart from when it was decided and what became of it. */
+type Base = Omit<EntryBase, 'at' | 'message'>
+
+function entryAt(base: Base, decided: Decided): MergeRecordEntry {
+  return { ...base, at: new Date().toISOString(), ...decided }
+}
+
+/**
+ * The entry a late answer makes — `merged` with its operation id, `failed` with its status — or
+ * undefined for one that says nothing either way. Out here, so what waits on the request keeps
+ * `base` alone alive, never the batch's scope: the request may never answer.
+ */
+function lateEntry(
+  base: Base,
+  late: Promise<EditOutcome>,
+): Promise<MergeRecordEntry | undefined> {
+  const after = ' — answered after the batch had stopped waiting.'
+  return late.then((answer) => {
+    if (answer.kind === 'done') {
+      return entryAt(base, {
+        outcome: 'merged',
+        newRoot: answer.newRootIds[0]!,
+        operationId: answer.operationId,
+        message: `Merged${after}`,
+      })
+    }
+    if (answer.kind === 'refused') {
+      return entryAt(base, {
+        outcome: 'failed',
+        status: answer.status,
+        message: `Refused (${answer.status}): ${answer.message}${after}`,
+      })
+    }
+    return undefined
+  })
 }
 
 /** What a read after a send found, as the end of a sentence. */
@@ -287,28 +380,32 @@ function rootsSaid(after: string[] | string): string {
  * Send one merge. A throw is read as `unknown`, never as "not sent": the writer throws only before
  * sending, but a caller cannot tell that from outside, and the safe reading is the one that
  * re-reads the roots. So is no answer within `waitMs` (`SEND_TIMEOUT_MS`): the batch stops
- * waiting, and the request is left to finish or fail on its own.
+ * waiting, and the request — left to finish or fail on its own — comes back as `late`.
  */
 async function sendOnce(
   services: BatchServices,
   merge: ConfirmedMerge,
   waitMs: number,
-): Promise<EditOutcome> {
+): Promise<{ outcome: EditOutcome; late?: Promise<EditOutcome> }> {
+  // In an async function, so a send that throws before returning is a rejection like any other.
+  const sent = (async () => services.send(merge))().catch((error: unknown): EditOutcome => ({
+    kind: 'unknown',
+    message: errorMessage(error),
+  }))
   let timer: ReturnType<typeof setTimeout> | undefined
-  const unanswered = new Promise<EditOutcome>((resolve) => {
-    timer = setTimeout(
-      () =>
-        resolve({
-          kind: 'unknown',
-          message: `no answer after ${Math.round(waitMs / 1000)} s; it may still be made`,
-        }),
-      waitMs,
-    )
+  const unanswered = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), waitMs)
   })
   try {
-    return await Promise.race([services.send(merge), unanswered])
-  } catch (error) {
-    return { kind: 'unknown', message: errorMessage(error) }
+    const outcome = await Promise.race([sent, unanswered])
+    if (outcome) return { outcome }
+    return {
+      outcome: {
+        kind: 'unknown',
+        message: `no answer after ${Math.round(waitMs / 1000)} s; it may still be made`,
+      },
+      late: sent,
+    }
   } finally {
     clearTimeout(timer)
   }

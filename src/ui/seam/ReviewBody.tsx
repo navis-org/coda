@@ -82,13 +82,12 @@ import {
   viewerBaseFor,
 } from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
-import { decodeRecord, mergedSoFar } from '../../packs/seam/mergeRecord'
-import { caveServerLabel, caveServerOfSource } from '../../data/cave/deployments'
+import { decodeRecord, mergedSoFar, recordScopeOf } from '../../packs/seam/mergeRecord'
+import { caveServerLabel } from '../../data/cave/deployments'
 import { getToken, subscribeTokens } from '../../data/cave/credentials'
-import { caveTarget } from '../../nodes/lib/caveParams'
 import { rootCurrency } from '../../packs/seam/rootCurrency'
 import type { SubmitRequest, SubmitState } from './mergeSession'
-import { closeSubmit, openSubmit, useSubmitState } from './mergeSession'
+import { STILL_OUT_NOTICE, closeSubmit, openSubmit, useSubmitState } from './mergeSession'
 import { formatNumber, plural } from '../../style/format'
 import { cycleColor } from '../../style/colors'
 import { ParamField } from '../params/ParamField'
@@ -237,7 +236,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const judge = (tip: QueueTip, candidate: Candidate, verdict: Verdict) => {
     setParam(
       'verdicts',
-      encodeVerdicts(withVerdict(verdicts, tip.endUid, candidate.candidateId, verdict)),
+      encodeVerdicts(withVerdict(verdicts, tip.neuronId, candidate.candidateId, verdict)),
     )
   }
 
@@ -247,12 +246,20 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const record = useMemo(() => decodeRecord(node.params.merges), [node.params.merges])
   /*
+   * The wired CAVE dataset's deployment and datastack: the chunkedgraph the record is read for,
+   * and the currency check asks.
+   */
+  const target = useMemo(
+    () => recordScopeOf({ sourceId: dataset.sourceId, datasetId: dataset.datasetId }),
+    [dataset.sourceId, dataset.datasetId],
+  )
+  /*
    * What Submit has done on this neuron (`mergedSoFar`, the one reading of the record): pieces in
    * it, pieces this workflow put in another reviewed neuron, and whether this neuron is itself one.
    */
   const merged = useMemo(
-    () => (neuron === undefined ? undefined : mergedSoFar(record, neuron)),
-    [record, neuron],
+    () => (neuron === undefined ? undefined : mergedSoFar(record, neuron, target)),
+    [record, neuron, target],
   )
   const accepted = useMemo(() => acceptedPieces(mine, verdicts), [mine, verdicts])
   const toSubmit = useMemo(() => stillToMerge(accepted, merged).length, [accepted, merged])
@@ -260,7 +267,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // This card's Submit, named by document and node: two documents can share a node id.
   const docId = useGraphStore((s) => s.activeTabId)
   const submitting = useSubmitState(docId, node.id)
-  const deployment = caveServerOfSource(dataset.sourceId)
+  const deployment = target?.deployment
   // Followed, so a sign-in in the Sources panel lifts the reason at once.
   const signedIn = useSyncExternalStore(
     subscribeTokens,
@@ -271,13 +278,6 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * neuron at its root now, and every candidate not already merged. Asked as the queue grows — a
    * Suggest Merges run streams its candidates in — and only of roots not yet known.
    */
-  const target = useMemo(() => {
-    const at =
-      deployment && dataset.datasetId
-        ? caveTarget({ sourceId: dataset.sourceId, datasetId: dataset.datasetId }, {})
-        : undefined
-    return at ? { deployment: at.deployment, datastack: at.datastack } : undefined
-  }, [deployment, dataset.sourceId, dataset.datasetId])
   const neuronNow = merged?.currentRoot
   const askAbout = useMemo(() => {
     const ids = new Set<string>(neuronNow ? [neuronNow] : [])
@@ -483,7 +483,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               const on =
                 onTip &&
                 (mode === 'tip' || here?.candidate.candidateId === candidate?.candidateId)
-              const said = candidate && verdictFor(verdicts, tip.endUid, candidate.candidateId)
+              const said =
+                candidate && verdictFor(verdicts, tip.neuronId, candidate.candidateId)
               // Merged by Submit: a verdict on it changes nothing now, so it cannot be changed.
               const done = candidate && mergedAs(merged, candidate.candidateId)
               return (
@@ -757,18 +758,17 @@ export function submitPress(at: {
     return blocked('Submit is open.')
   }
   if (at.submitting === 'running') return blocked('Merges are being sent.')
+  if (at.submitting === 'waiting') return blocked(STILL_OUT_NOTICE)
   if (!at.sourceId || !at.datasetId) {
     return blocked('Wire a CAVE Dataset into `Dataset` to submit merges.')
   }
-  // Is it CAVE at all: `caveTarget` would fall back to the default server for any source.
-  const deployment = caveServerOfSource(at.sourceId)
-  const target =
-    deployment && caveTarget({ sourceId: at.sourceId, datasetId: at.datasetId }, {})
-  if (!deployment || !target) {
-    return blocked('Only a CAVE dataset’s segmentation can be merged into.')
-  }
+  // The scope the record is read for, so the card's count and Submit's plan read the same one.
+  const target = recordScopeOf({ sourceId: at.sourceId, datasetId: at.datasetId })
+  if (!target) return blocked('Only a CAVE dataset’s segmentation can be merged into.')
   if (!at.signedIn) {
-    return blocked(`Sign in to ${caveServerLabel(deployment)} (Sources) to submit merges.`)
+    return blocked(
+      `Sign in to ${caveServerLabel(target.deployment)} (Sources) to submit merges.`,
+    )
   }
   if (at.filling) {
     return blocked(

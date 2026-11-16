@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { GrapheneSource } from '../../data/cave/graphene'
+import type { GraphLayout } from '../../data/cave/graphLayout'
 import type { AnchorPair, AnchorRefusal, AnchorVolume } from './mergeAnchors'
 import type { PlanRequest, PlanServices } from './mergePlan'
 import { planMerges } from './mergePlan'
@@ -21,6 +22,8 @@ const GRAPHENE: GrapheneSource = {
   base: 'https://cave.example.org/segmentation/table/test_table',
 }
 const OPTIONS = { deployment: 'https://global.example.org' }
+/** What the anchor volume carries; the plan passes it on for the batch's supervoxel check. */
+const LAYOUT = { layerBits: 8 } as GraphLayout
 const NEURON = '100'
 
 /** A candidate whose contact's x is its rank, so a fake can tell its rows apart. */
@@ -92,7 +95,7 @@ function services(
     created: async (_, roots) => roots.map(() => 1000),
     openVolume: async () => {
       asked.opened++
-      return { graphene: GRAPHENE } as AnchorVolume
+      return { graphene: GRAPHENE, layout: LAYOUT } as unknown as AnchorVolume
     },
     anchor: async (_, pair) => {
       asked.anchored.push(pair)
@@ -117,6 +120,8 @@ function entry(
   newRoot = '',
 ): MergeRecordEntry {
   const base = {
+    deployment: OPTIONS.deployment,
+    datastack: 'test',
     reviewedRoot,
     candidateRoot,
     endUid: 1,
@@ -134,13 +139,13 @@ const made = (reviewedRoot: string, candidateRoot: string, newRoot: string) =>
 
 const request = (
   queue: QueueTip[],
-  judged: [number, string, Verdict][],
+  judged: [string, Verdict][],
   record: MergeRecordEntry[] = [],
 ): PlanRequest => ({
   datastack: 'test',
   queue,
   reviewedRoot: NEURON,
-  verdicts: new Map(judged.map(([endUid, id, v]) => [verdictKey(endUid, id), v])),
+  verdicts: new Map(judged.map(([id, v]) => [verdictKey(NEURON, id), v])),
   record,
 })
 
@@ -159,10 +164,10 @@ describe('planMerges', () => {
     tip(1, [candidate('7', 1, 0.1), candidate('8', 2, 0.2)]),
     tip(2, [candidate('9', 1, 0.3)]),
   ]
-  const all: [number, string, Verdict][] = [
-    [1, '7', 'accept'],
-    [1, '8', 'accept'],
-    [2, '9', 'accept'],
+  const all: [string, Verdict][] = [
+    ['7', 'accept'],
+    ['8', 'accept'],
+    ['9', 'accept'],
   ]
 
   it('plans every current, anchored piece in the order the reader met them', async () => {
@@ -339,8 +344,8 @@ describe('planMerges', () => {
     })
     const plan = await planned(
       request(twice, [
-        [1, '7', 'accept'],
-        [2, '7', 'accept'],
+        ['7', 'accept'],
+        ['7', 'accept'],
       ]),
       fake,
     )
@@ -406,9 +411,9 @@ describe('planMerges', () => {
       request(
         selfish,
         [
-          [1, NEURON, 'accept'],
-          [1, '101', 'accept'],
-          [2, '9', 'accept'],
+          [NEURON, 'accept'],
+          ['101', 'accept'],
+          ['9', 'accept'],
         ],
         record,
       ),
@@ -433,9 +438,9 @@ describe('planMerges', () => {
       request(
         two,
         [
-          [1, '200', 'accept'],
-          [1, '201', 'accept'],
-          [1, '9', 'accept'],
+          ['200', 'accept'],
+          ['201', 'accept'],
+          ['9', 'accept'],
         ],
         record,
       ),
@@ -496,6 +501,33 @@ describe('planMerges', () => {
       'already-merged',
       'already-merged',
     ])
+  })
+
+  /** Before any request: one cell that is no id would fail the currency read for every piece. */
+  it('refuses a piece whose id is not one before asking the server about it', async () => {
+    const odd = [tip(1, [candidate('abc', 1, 0.1), candidate('7', 2, 0.2)])]
+    const { fake, asked } = services()
+    const plan = await planned(
+      request(odd, [
+        ['abc', 'accept'],
+        ['7', 'accept'],
+      ]),
+      fake,
+    )
+    expect(refusals(plan)).toEqual([['abc', 'bad-id']])
+    expect(asked.latest).toEqual([[NEURON, '7']])
+  })
+
+  it('carries the id layout with the merges, for the batch to check the ends by', async () => {
+    expect((await planned(request(queue, all), services().fake)).layout).toBe(LAYOUT)
+  })
+
+  /** The audit of 77c0625: a sandbox merge is no merge on production, whose ids it shares. */
+  it('reads only the record entries made on its own chunkedgraph', async () => {
+    const sandbox = { ...made(NEURON, '7', '101'), datastack: 'test_sandbox' }
+    const plan = await planned(request(queue, all, [sandbox]), services().fake)
+    expect(plan.currentRoot).toBe(NEURON)
+    expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['7', '8', '9'])
   })
 
   it('names a piece this workflow merged into another reviewed neuron', async () => {

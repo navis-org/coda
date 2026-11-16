@@ -1198,7 +1198,10 @@ export function everythingGraph(): CodaGraph {
       col: -1,
       row: 9,
       params: {
-        verdicts: '0:648518347608868926=accept;1:648518347368875056=reject',
+        // Keyed on neuron and piece; the third, of the old `end_uid:` shape, is left out.
+        verdicts:
+          '648518346341397760/648518347608868926=accept;' +
+          '648518346341397760/648518347368875056=reject;0:648518347000000000=accept',
         current: '0',
       },
     },

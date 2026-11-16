@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ID_COLUMN_NAME } from '../../core/ids'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import type { EvalContext, ParamValues } from '../../core/node'
 import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
@@ -102,9 +103,21 @@ describe('one neuron at a time', () => {
 
   /** Switching neuron loses nothing downstream: the tables still carry every neuron. */
   it('passes every neuron’s tips and verdicts through', async () => {
-    const out = await run({ neuron: 'n1', verdicts: '2:b=accept;3:c=reject' })
+    const out = await run({ neuron: 'n1', verdicts: 'n2/b=accept;n1/c=reject' })
     expect((out['tips'] as TableValue).length).toBe(3)
     expect((out['verdicts'] as TableValue).data['candidateId']).toEqual(['b', 'c'])
+  })
+
+  /** A verdict is about a piece and a neuron: listed at two tips, it is still one judgement. */
+  it('lists a verdict once, at the tip where the piece is first listed', async () => {
+    const twice = makeTable(CANDIDATES.schema, {
+      ...CANDIDATES.data,
+      candidateId: ['a', 'b', 'a'],
+    })
+    const out = await run({ verdicts: 'n1/a=accept' }, { tips: TIPS, candidates: twice })
+    const table = out['verdicts'] as TableValue
+    expect(table.data['candidateId']).toEqual(['a'])
+    expect(table.data['end_uid']).toEqual([1])
   })
 })
 
@@ -118,38 +131,38 @@ describe('showing accepted pieces', () => {
     (table.data[ID_COLUMN_NAME] ?? []).map((id, i) => `${id}:${table.data['part']![i]}`)
 
   it('adds the picked neuron’s accepted pieces after the pair under the cursor', async () => {
-    const table = await current({ current: '1', verdicts: '3:c=accept;2:b=accept' })
+    const table = await current({ current: '1', verdicts: 'n1/c=accept;n2/b=accept' })
     // `b` is accepted on n2, which is not the neuron on screen.
     expect(rows(table)).toEqual(['n1:neuron', 'a:candidate', 'c:accepted'])
   })
 
   /** Every row says where to look, so sorting the table cannot move the camera. */
   it('carries the cursor’s contact on every row', async () => {
-    const table = await current({ current: '1', verdicts: '3:c=accept' })
+    const table = await current({ current: '1', verdicts: 'n1/c=accept' })
     expect(table.data['x']).toEqual([10, 10, 10])
   })
 
   /** Pressing Accept on the piece under the cursor turns it green at once. */
   it('colours the piece under the cursor as accepted once it is', async () => {
-    const table = await current({ current: '1', verdicts: '1:a=accept' })
+    const table = await current({ current: '1', verdicts: 'n1/a=accept' })
     expect(rows(table)).toEqual(['n1:neuron', 'a:accepted'])
   })
 
   /** Accepted pieces mean nothing on their own, so the neuron leads; the camera stays put. */
   it('shows the neuron and its accepted pieces with no row selected', async () => {
-    const table = await current({ verdicts: '3:c=accept' })
+    const table = await current({ verdicts: 'n1/c=accept' })
     expect(rows(table)).toEqual(['n1:neuron', 'c:accepted'])
     expect(table.data['x']).toEqual([null, null])
   })
 
   it('shows only the pair when switched off', async () => {
-    const table = await current({ current: '1', verdicts: '3:c=accept', showAccepted: false })
+    const table = await current({ current: '1', verdicts: 'n1/c=accept', showAccepted: false })
     expect(rows(table)).toEqual(['n1:neuron', 'a:candidate'])
   })
 
   /** A rejected or unsure piece is not going to be merged, so it is not drawn as if it were. */
   it('ignores verdicts other than accept', async () => {
-    const table = await current({ verdicts: '3:c=reject;1:a=unsure' })
+    const table = await current({ verdicts: 'n1/c=reject;n1/a=unsure' })
     expect(rows(table)).toEqual(['n1:neuron'])
   })
 })
@@ -169,10 +182,19 @@ describe('after merges', () => {
         ? { candidateId: table.data['candidateId'].map((id) => `9${String(id).charCodeAt(0)}`) }
         : {}),
     })
-  const inputs = { tips: renamed(TIPS), candidates: renamed(CANDIDATES) }
+  // The record is read for the wired Dataset's chunkedgraph, and for none with nothing wired.
+  const dataset: Value = {
+    kind: 'dataset',
+    sourceId: 'cave',
+    datasetId: 'test:1',
+    label: 'test',
+  }
+  const inputs = { tips: renamed(TIPS), candidates: renamed(CANDIDATES), dataset }
   // Candidates `a` and `c` are now 997 and 999.
   const record = JSON.stringify([
     {
+      deployment: DEFAULT_CAVE_SERVER,
+      datastack: 'test',
       reviewedRoot: N,
       candidateRoot: '997',
       endUid: 1,
@@ -196,7 +218,7 @@ describe('after merges', () => {
   })
 
   it('shows the neuron at its root now, and a merged piece as part of it', async () => {
-    const verdicts = '1:997=accept;3:999=accept'
+    const verdicts = `${N}/997=accept;${N}/999=accept`
     const out = await run({ merges: record, verdicts, current: '1' }, inputs)
     expect(rows(out['current'] as TableValue)).toEqual([
       '720575940700000001:neuron',
@@ -208,5 +230,13 @@ describe('after merges', () => {
       '997:accepted',
       '999:accepted',
     ])
+    // With no Dataset wired, the record is read for no chunkedgraph: no merge here.
+    const unwired = await run(
+      { merges: record, verdicts, current: '1' },
+      { ...inputs, dataset: undefined },
+    )
+    expect(rows(unwired['current'] as TableValue)).toEqual(
+      rows(before['current'] as TableValue),
+    )
   })
 })

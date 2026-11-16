@@ -3,7 +3,7 @@
  *
  * Three of them are worth more than the rest, because each would be invisible on screen:
  * the cursor is a tip's identity rather than a position in the list, so a filter cannot move it;
- * a verdict is keyed on the (tip, candidate) **pair**, because a piece can be on two tips' lists;
+ * a verdict is keyed on the neuron and the piece, never on the tip, whose number a re-run reuses;
  * and the verdicts encode in a stable order, because that string is a param and so is in the
  * provenance key.
  */
@@ -61,7 +61,15 @@ const tipsTable = (
   )
 
 const candidatesTable = (
-  rows: { end: number; id: string; rank: number; vol?: number; l2?: number; gap?: number }[],
+  rows: {
+    end: number
+    id: string
+    rank: number
+    neuron?: string
+    vol?: number
+    l2?: number
+    gap?: number
+  }[],
 ): TableValue =>
   makeTable(
     tableSchema(
@@ -79,7 +87,7 @@ const candidatesTable = (
       column('shown', 'bool'),
     ),
     {
-      [ID_COLUMN_NAME]: rows.map(() => 'n1'),
+      [ID_COLUMN_NAME]: rows.map((r) => r.neuron ?? 'n1'),
       end_uid: rows.map((r) => r.end),
       candidateId: rows.map((r) => r.id),
       rank: rows.map((r) => r.rank),
@@ -122,6 +130,21 @@ describe('building the queue', () => {
     )
     const queue = buildQueue(tipsTable([{ end: 7 }]), without)
     expect(queue[0]!.candidates[0]!.contactNm).toBeUndefined()
+  })
+
+  /** Two runs stacked into one table, each numbering its tips from 0: a list is its own neuron's. */
+  it('joins a tip to its list on the neuron as well as the tip number', () => {
+    const queue = buildQueue(
+      tipsTable([
+        { end: 0, neuron: 'n1' },
+        { end: 0, neuron: 'n2' },
+      ]),
+      candidatesTable([
+        { end: 0, id: 'a', rank: 1, neuron: 'n1' },
+        { end: 0, id: 'b', rank: 1, neuron: 'n2' },
+      ]),
+    )
+    expect(queue.map((tip) => tip.candidates.map((c) => c.candidateId))).toEqual([['a'], ['b']])
   })
 
   /** Seventeen of rv2's tips have no list, and "nothing found here" is an answer. */
@@ -337,21 +360,59 @@ describe('the cursor', () => {
 })
 
 describe('verdicts', () => {
-  /**
-   * The pair, not the candidate. A piece can sit on two tips' lists — it can touch the neuron in
-   * two places — so "belongs" on one and "not it" on the other is two answers, not a conflict.
-   */
-  it('keys on the tip and the candidate together', () => {
-    let said = withVerdict(new Map(), 1, 'x', 'accept')
-    said = withVerdict(said, 2, 'x', 'reject')
-    expect(verdictFor(said, 1, 'x')).toBe('accept')
-    expect(verdictFor(said, 2, 'x')).toBe('reject')
+  /** The neuron and the piece: the same piece is a separate question for another neuron. */
+  it('keys on the neuron and the candidate together', () => {
+    let said = withVerdict(new Map(), 'n1', 'x', 'accept')
+    said = withVerdict(said, 'n2', 'x', 'reject')
+    expect(verdictFor(said, 'n1', 'x')).toBe('accept')
+    expect(verdictFor(said, 'n2', 'x')).toBe('reject')
   })
 
   it('clears when the same verdict is given twice', () => {
-    const once = withVerdict(new Map(), 1, 'x', 'accept')
-    expect(verdictFor(withVerdict(once, 1, 'x', 'accept'), 1, 'x')).toBeUndefined()
-    expect(verdictFor(withVerdict(once, 1, 'x', 'reject'), 1, 'x')).toBe('reject')
+    const once = withVerdict(new Map(), 'n1', 'x', 'accept')
+    expect(verdictFor(withVerdict(once, 'n1', 'x', 'accept'), 'n1', 'x')).toBeUndefined()
+    expect(verdictFor(withVerdict(once, 'n1', 'x', 'reject'), 'n1', 'x')).toBe('reject')
+  })
+
+  /**
+   * The audit of 77c0625 (2026-11-16): `end_uid` counts one run's tips, so a re-run reuses it. A
+   * verdict keyed on it attached to whichever tip took the number — on another neuron, whose tip
+   * listed the same piece, it was an accept nobody gave, planned by Submit.
+   */
+  it('does not carry an accept to another neuron’s tip of the same number', () => {
+    const run2 = buildQueue(
+      tipsTable([{ end: 5, neuron: '200' }]),
+      candidatesTable([{ end: 5, id: '900', rank: 1, neuron: '200' }]),
+    )
+    const said = withVerdict(new Map(), '100', '900', 'accept')
+    expect(acceptedPieces(run2, said).size).toBe(0)
+    expect(verdictFor(said, '200', '900')).toBeUndefined()
+  })
+
+  /** One verdict, one judgement: a piece listed at two tips is counted once. */
+  it('counts a piece judged once, however many tips list it', () => {
+    const queue = buildQueue(
+      tipsTable([{ end: 1 }, { end: 2 }]),
+      candidatesTable([
+        { end: 1, id: 'p', rank: 1 },
+        { end: 2, id: 'p', rank: 1 },
+      ]),
+    )
+    const said = withVerdict(new Map(), 'n1', 'p', 'accept')
+    expect(neuronsOf(queue, said)).toEqual([{ neuronId: 'n1', tips: 2, judged: 1 }])
+  })
+
+  /** Kept in the param, so nothing is deleted, and read as no verdict on anything (user). */
+  it('keeps a key of the old tip shape, and never reads it', () => {
+    const queue = buildQueue(
+      tipsTable([{ end: 5 }]),
+      candidatesTable([{ end: 5, id: '900', rank: 1 }]),
+    )
+    const old = decodeVerdicts('5:900=accept')
+    expect(acceptedPieces(queue, old).size).toBe(0)
+    expect(neuronsOf(queue, old)[0]!.judged).toBe(0)
+    const kept = encodeVerdicts(withVerdict(old, 'n1', '901', 'reject'))
+    expect(kept).toBe('5:900=accept;n1/901=reject')
   })
 
   /**
@@ -361,21 +422,21 @@ describe('verdicts', () => {
   it('encodes in a stable order, whatever order the verdicts were made in', () => {
     const a = encodeVerdicts(
       new Map([
-        ['2:b', 'reject'],
-        ['1:a', 'accept'],
+        ['n2/b', 'reject'],
+        ['n1/a', 'accept'],
       ] as const),
     )
     const b = encodeVerdicts(
       new Map([
-        ['1:a', 'accept'],
-        ['2:b', 'reject'],
+        ['n1/a', 'accept'],
+        ['n2/b', 'reject'],
       ] as const),
     )
     expect(a).toBe(b)
   })
 
   it('round-trips, and ignores anything hand-edited into nonsense', () => {
-    const said = withVerdict(withVerdict(new Map(), 1, 'x', 'unsure'), 2, 'y', 'accept')
+    const said = withVerdict(withVerdict(new Map(), 'n1', 'x', 'unsure'), 'n2', 'y', 'accept')
     expect(decodeVerdicts(encodeVerdicts(said))).toEqual(said)
     expect(decodeVerdicts('1:x=maybe;rubbish;=accept').size).toBe(0)
   })
@@ -565,7 +626,7 @@ describe('one neuron at a time', () => {
     candidatesTable([
       { end: 1, id: 'a', rank: 1 },
       { end: 1, id: 'b', rank: 2 },
-      { end: 2, id: 'c', rank: 1 },
+      { end: 2, id: 'c', rank: 1, neuron: 'n2' },
       { end: 3, id: 'd', rank: 1 },
     ]),
   )
@@ -577,9 +638,11 @@ describe('one neuron at a time', () => {
 
   /** Counted over pairs, so a verdict on a rank 2 counts towards its own neuron and no other. */
   it('counts each neuron’s tips and its judged pairs apart', () => {
-    let verdicts = withVerdict(new Map(), 1, 'a', 'accept')
-    verdicts = withVerdict(verdicts, 1, 'b', 'reject')
-    verdicts = withVerdict(verdicts, 2, 'c', 'unsure')
+    let verdicts = withVerdict(new Map(), 'n1', 'a', 'accept')
+    verdicts = withVerdict(verdicts, 'n1', 'b', 'reject')
+    verdicts = withVerdict(verdicts, 'n2', 'c', 'unsure')
+    // The piece of n1's, judged for n2: a question about n2, counted there and not on n1.
+    verdicts = withVerdict(verdicts, 'n2', 'a', 'reject')
     expect(neuronsOf(queue, verdicts)).toEqual([
       { neuronId: 'n1', tips: 2, judged: 2 },
       { neuronId: 'n2', tips: 1, judged: 1 },
@@ -645,8 +708,7 @@ describe('the pieces sent to the scene', () => {
         { end: 2, id: 'p', rank: 1 },
       ]),
     )
-    let verdicts = withVerdict(new Map(), 1, 'p', 'accept')
-    verdicts = withVerdict(verdicts, 2, 'p', 'accept')
+    const verdicts = withVerdict(new Map(), 'n1', 'p', 'accept')
     expect(scenePieces(queue, 'n1', undefined, verdicts, true)).toEqual([
       { id: 'n1', part: 'neuron' },
       { id: 'p', part: 'accepted' },
@@ -663,8 +725,8 @@ describe('the scene after merges', () => {
       { end: 1, id: 'q', rank: 2 },
     ]),
   )
-  let verdicts = withVerdict(new Map(), 1, 'p', 'accept')
-  verdicts = withVerdict(verdicts, 1, 'q', 'accept')
+  let verdicts = withVerdict(new Map(), 'n1', 'p', 'accept')
+  verdicts = withVerdict(verdicts, 'n1', 'q', 'accept')
   const merged = {
     currentRoot: 'n1b',
     roots: ['n1', 'n1b'],
@@ -693,7 +755,7 @@ describe('the scene after merges', () => {
 
 /**
  * The one rule for "accepted", read by the scene's green pieces and by Submit's plan alike: a
- * piece accepted at any tip is accepted, once, with every row it was accepted on.
+ * piece accepted for the neuron is accepted, once, with every row it is listed on.
  */
 describe('the accepted pieces', () => {
   const queue = buildQueue(
@@ -707,18 +769,21 @@ describe('the accepted pieces', () => {
       { end: 3, id: 'q', rank: 2, gap: 2 },
     ]),
   )
-  let verdicts = withVerdict(new Map(), 1, 'p', 'accept')
-  verdicts = withVerdict(verdicts, 2, 'p', 'accept')
-  verdicts = withVerdict(verdicts, 3, 'p', 'accept')
-  verdicts = withVerdict(verdicts, 1, 'q', 'reject')
-  verdicts = withVerdict(verdicts, 3, 'q', 'accept')
-  verdicts = withVerdict(verdicts, 2, 'r', 'unsure')
+  let verdicts = withVerdict(new Map(), 'n1', 'p', 'accept')
+  verdicts = withVerdict(verdicts, 'n1', 'q', 'accept')
+  verdicts = withVerdict(verdicts, 'n1', 'r', 'unsure')
 
-  it('lists each piece once, in the order the reader met it, rejected elsewhere or not', () => {
+  it('lists each piece once, in the order the reader met it', () => {
     expect([...acceptedPieces(queue, verdicts).keys()]).toEqual(['p', 'q'])
   })
 
-  it('keeps every row a piece was accepted on, nearest gap first and an unmeasured one last', () => {
+  /** One verdict per pair: a later reject is the reader's word, on every row of the piece. */
+  it('drops a piece once it is rejected, on whichever row', () => {
+    const rejected = withVerdict(verdicts, 'n1', 'q', 'reject')
+    expect([...acceptedPieces(queue, rejected).keys()]).toEqual(['p'])
+  })
+
+  it('keeps every row a piece is listed on, nearest gap first and an unmeasured one last', () => {
     expect(
       acceptedPieces(queue, verdicts)
         .get('p')!
@@ -728,7 +793,7 @@ describe('the accepted pieces', () => {
       acceptedPieces(queue, verdicts)
         .get('q')!
         .map((row) => row.endUid),
-    ).toEqual([3])
+    ).toEqual([3, 1])
   })
 
   it('is what the scene shows in green', () => {

@@ -51,6 +51,7 @@ vi.mock('../../packs/seam/rootCurrency', () => ({
   },
 }))
 vi.mock('./mergeSession', () => ({
+  STILL_OUT_NOTICE: 'A merge sent earlier has not answered yet.',
   openSubmit: (...args: unknown[]) => openSubmit(...args),
   closeSubmit: () => closeSubmit(),
   useSubmitState: () => submitState,
@@ -356,11 +357,15 @@ describe('the review card', () => {
   it('records a verdict against the candidate being shown', () => {
     const written = draw({ current: '11', rank: 2 })
     fireEvent.click(rows()[0]!.querySelectorAll('.review-row__verdict')[1]!)
-    expect(written['verdicts']).toBe('11:648518346356867476=reject')
+    expect(written['verdicts']).toBe('720575940621522189/648518346356867476=reject')
   })
 
   it('clears a verdict when the same one is pressed again', () => {
-    const written = draw({ current: '11', rank: 1, verdicts: '11:648518346368395605=accept' })
+    const written = draw({
+      current: '11',
+      rank: 1,
+      verdicts: '720575940621522189/648518346368395605=accept',
+    })
     fireEvent.click(rows()[0]!.querySelectorAll('.review-row__verdict')[0]!)
     expect(written['verdicts']).toBe('')
   })
@@ -379,7 +384,7 @@ describe('the review card', () => {
 
   /** The neuron the whole card is about, named even when there is nothing to choose between. */
   it('names its one neuron in a disabled list', () => {
-    draw({ verdicts: '11:648518346368395605=accept' })
+    draw({ verdicts: '720575940621522189/648518346368395605=accept' })
     const select = screen.getByRole('combobox', { name: 'Neuron' }) as HTMLSelectElement
     expect(select.disabled).toBe(true)
     expect(select.selectedOptions[0]!.textContent).toBe(
@@ -412,7 +417,10 @@ describe('the review card', () => {
   /** The other neuron's verdicts are kept, but they are not this neuron's count. */
   it('counts only the picked neuron’s verdicts in the foot', () => {
     draw(
-      { neuron: OTHER, verdicts: '11:648518346368395605=accept;33:648518346300000001=reject' },
+      {
+        neuron: OTHER,
+        verdicts: `720575940621522189/648518346368395605=accept;${OTHER}/648518346300000001=reject`,
+      },
       true,
       TWO_CANDIDATES,
       TWO_TIPS,
@@ -476,7 +484,9 @@ describe('the review card', () => {
 describe('Submit on the review card', () => {
   const FIRST = '648518346368395605'
   const SECOND = '648518347608868926'
-  const ACCEPTED = { verdicts: `11:${FIRST}=accept;22:${SECOND}=accept` }
+  const ACCEPTED = {
+    verdicts: `720575940621522189/${FIRST}=accept;720575940621522189/${SECOND}=accept`,
+  }
   const CAVE_DATASET: Value = {
     kind: 'dataset',
     sourceId: 'cave',
@@ -487,6 +497,8 @@ describe('Submit on the review card', () => {
   /** One merge into the neuron, as the batch records it. */
   const MERGED = JSON.stringify([
     {
+      deployment: DEFAULT_CAVE_SERVER,
+      datastack: 'test_stack',
       reviewedRoot: '720575940621522189',
       candidateRoot: FIRST,
       endUid: 11,
@@ -568,7 +580,13 @@ describe('Submit on the review card', () => {
   })
 
   it('leaves a merged piece out of the count, says so on its row and fixes its verdict', () => {
-    draw({ ...ACCEPTED, merges: MERGED, mode: 'candidate' })
+    draw(
+      { ...ACCEPTED, merges: MERGED, mode: 'candidate' },
+      true,
+      CANDIDATES,
+      TIPS,
+      CAVE_DATASET,
+    )
     expect(button().textContent).toBe('Submit (1)')
     const row = rows().find((r) => r.textContent?.includes(FIRST))!
     expect(row.getAttribute('data-merged')).toBe('merged')
@@ -594,7 +612,7 @@ describe('currency on the review card', () => {
     datasetId: 'test_stack:1',
     label: 'test',
   }
-  const ACCEPTED = { verdicts: `11:${FIRST}=accept`, mode: 'candidate' }
+  const ACCEPTED = { verdicts: `${NEURON}/${FIRST}=accept`, mode: 'candidate' }
   const submit = () => document.querySelector<HTMLButtonElement>('.review-body__submit')!
 
   beforeEach(() => setToken(DEFAULT_CAVE_SERVER, 'test-token'))
@@ -642,6 +660,8 @@ describe('currency on the review card', () => {
   it('neither asks about nor tags a merged piece, and follows the neuron to its root now', () => {
     const merges = JSON.stringify([
       {
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
         reviewedRoot: NEURON,
         candidateRoot: FIRST,
         endUid: 11,
@@ -709,6 +729,7 @@ describe('submitPress', () => {
     ['every accepted piece merged', { count: 0 }, /Every accepted piece is merged/],
     ['its own Submit open', { submitting: 'open' }, /Submit is open/],
     ['merges being sent', { submitting: 'running' }, /being sent/],
+    ['a merge sent earlier still out', { submitting: 'waiting' }, /has not answered yet/],
     ['another card’s Submit open', { submitting: 'other' }, /Another card/],
   ])('says why not with %s', (_, change, reason) => {
     expect(submitPress({ ...ready, ...change } as typeof ready)).toEqual({

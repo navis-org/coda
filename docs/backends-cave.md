@@ -1131,14 +1131,22 @@ is [seam-merge-plan.md](seam-merge-plan.md). What a change near this code must k
 - **Outcomes are read off the server's code, not guessed.** Only 400/401/403/404 are `refused`;
   every other status, an unreachable host and an unreadable success are `unknown`, and an unknown
   merge is settled by reading the roots — never by sending again.
-- **Supervoxels, not root ids**, and **every root read after a write asks at the server's now**
-  (`Instant` `'server'`): the server does not check that a root is current, and a client clock
+- **Supervoxels, not root ids** — checked at layer 1 in `prepareMerges`, beside the writer — and
+  **every root read after a write asks at the server's now** (`Instant` `'server'`): the server
+  does not check that a root is current, maps a root to itself retired or not, and a client clock
   behind the server's sees the roots from before our own merge.
+- **A lost reply is `unknown` in the batch, always**; only the next plan's `settle` (two reads)
+  decides it was this merge. A merge still out after `SEND_TIMEOUT_MS` holds every Submit until it
+  answers (`mergeSession.ts`), so the pair is not planned again meanwhile.
 - **The guarantee is the per-merge check** (`mergeBatch.ts`): both ends' roots, read just before
   each merge, must be the neuron's root as the batch last made it and the piece's reviewed root.
   The pre-flight (`mergePlan.ts`) and the card's currency chips (`rootCurrency.ts`) are advice.
 - **The record is an `unrecorded` param**, written only through the store's write hold
-  (`holdForWrite`), which keeps the card and its document on screen until the batch ends.
+  (`holdForWrite`), which keeps the card and its document on screen until the batch ends, saves
+  each entry at once, and throws rather than skip one. Every entry names its deployment and
+  datastack, and is read for that chunkedgraph only: a sandbox shares ids with production.
+- **A verdict is keyed on neuron and piece** (`verdictKey`), never on `end_uid`, which a re-run
+  renumbers.
 - **Tests never write.** `src/test/writeGuard.ts` fails any test that reaches an edit endpoint
   without a stubbed `fetch`; a live write goes to `fanc_sandbox` (`mar2021_test`) only, through
   `src/test/sandboxWrites.ts`' fence, and is asked of the user every time.

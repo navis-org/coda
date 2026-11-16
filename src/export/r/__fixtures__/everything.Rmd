@@ -2070,15 +2070,15 @@ rename_columns <- table_from_url |>
 # ── Review Suggestions ──
 # The verdicts recorded on the card. A record of what somebody decided, not a computation.
 review_suggestions_verdicts <- data.frame(
-  end_uid = c(0, 1),
-  candidateId = c("648518347608868926", "648518347368875056"),
-  verdict = c("accept", "reject"),
+  neuronId = c("648518346341397760", "648518346341397760"),
+  candidateId = c("648518347368875056", "648518347608868926"),
+  verdict = c("reject", "accept"),
   stringsAsFactors = FALSE
 )
 
-# Onto the tips, on the pair: a piece can be on two tips' lists, so the candidate alone
-# would carry one tip's judgement onto another tip's row.
-review_suggestions_tips <- dplyr::left_join(merge_suggestions_tips, review_suggestions_verdicts, by = c("end_uid", "candidateId"))
+# Onto the tips, on the pair: a verdict is about this piece and this neuron, so the
+# candidate alone would carry one neuron's judgement onto another neuron's tip.
+review_suggestions_tips <- dplyr::left_join(merge_suggestions_tips, review_suggestions_verdicts, by = c("neuronId", "candidateId"))
 # NOTE: The Current and Layers outputs are the card’s own: the pair being
 # looked at, and an annotation layer of it. There is nothing for a document
 # to look at.

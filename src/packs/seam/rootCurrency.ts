@@ -24,6 +24,7 @@ import type { CaveRequestOptions } from '../../data/cave/client'
 import { datastackRecord } from '../../data/cave/datastack'
 import type { GrapheneSource } from '../../data/cave/graphene'
 import { parseGrapheneSource } from '../../data/cave/graphene'
+import { isNodeId } from '../../data/cave/graphLayout'
 import { isLatestRoots } from '../../data/cave/rootIds'
 
 /** How long a stream's arrivals are gathered before one ask goes out. */
@@ -147,6 +148,8 @@ export function createRootCurrency(services: CurrencyServices = LIVE): RootCurre
     ask(target, roots) {
       const table = tableOf(target)
       for (const root of roots) {
+        // A cell that is no id is never asked: it would fail the whole batch it went in.
+        if (!isNodeId(root)) continue
         const key = keyOf(table, root)
         if (!due(key)) continue
         asking.add(key)

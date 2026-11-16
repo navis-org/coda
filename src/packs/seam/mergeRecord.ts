@@ -18,9 +18,20 @@
  * Sent or not: a merge the per-merge check refused is recorded too (`not-sent`), so `Merges` reads
  * as the log of every Submit. A merge the reader stopped before, or that a failed read never let
  * the batch decide about, is not.
+ *
+ * ## Read for one chunkedgraph
+ *
+ * Every entry names the deployment and datastack it was made on, and the record is read for one
+ * (`RecordScope`), the card's wired Dataset. A sandbox table is a copy of a production one, so the
+ * same root ids are current in both until one side is edited, and testing on the sandbox before
+ * pointing the card at production is the natural order of work: read for every chunkedgraph, a
+ * sandbox merge would move the neuron's root, and take its pieces, on production too (audit of
+ * 77c0625, 2026-11-16). An entry naming none — written before entries did — is kept and shown in
+ * `Merges`, and read for no chunkedgraph.
  */
 
 import { ID_COLUMN_NAME } from '../../core/ids'
+import { caveServerOfSource } from '../../data/cave/deployments'
 import { column, tableSchema } from '../../core/types'
 import type { TableSchema } from '../../core/types'
 import type { CellValue, TableValue } from '../../core/values'
@@ -28,6 +39,29 @@ import { makeTable } from '../../core/values'
 import { isNodeId } from '../../data/cave/graphLayout'
 import type { MergeEnd } from '../../data/cave/merge'
 import { isMergeEnd } from '../../data/cave/merge'
+import { splitDatasetId } from '../../data/cave/spec'
+import type { DatasetIdentity } from '../../nodes/lib/caveParams'
+
+/** Which chunkedgraph an entry was made on, and the record is read for. */
+export interface RecordScope {
+  readonly deployment: string
+  readonly datastack: string
+}
+
+/**
+ * The scope of a wired Dataset: a CAVE one's deployment and datastack, or undefined for anything
+ * else — never `caveTarget`'s fallback to the default deployment, which takes any source.
+ */
+export function recordScopeOf(dataset: DatasetIdentity | undefined): RecordScope | undefined {
+  const deployment = caveServerOfSource(dataset?.sourceId)
+  const parsed = dataset?.datasetId ? splitDatasetId(dataset.datasetId) : undefined
+  return deployment && parsed ? { deployment, datastack: parsed.datastack } : undefined
+}
+
+const inScope = (entry: MergeRecordEntry, scope: RecordScope | undefined): boolean =>
+  scope !== undefined &&
+  entry.deployment === scope.deployment &&
+  entry.datastack === scope.datastack
 
 /** What became of one confirmed merge. */
 export type RecordOutcome =
@@ -55,7 +89,11 @@ export interface MergeProgress {
   readonly message?: string | undefined
 }
 
-interface EntryBase {
+/** What every entry says, whatever became of its merge. */
+export interface EntryBase {
+  /** The chunkedgraph it was made on (`RecordScope`); absent on entries from before 2026-11-16. */
+  readonly deployment?: string | undefined
+  readonly datastack?: string | undefined
   /** The neuron as the queue names it — the record is read per reviewed neuron. */
   readonly reviewedRoot: string
   readonly candidateRoot: string
@@ -80,7 +118,12 @@ export type EntryOutcome =
       /** Absent where the reply was lost and the roots showed the merge. */
       readonly operationId?: string | undefined
     }
-  | { readonly outcome: 'already-merged' | 'not-sent' | 'unknown' }
+  | { readonly outcome: 'already-merged' | 'not-sent' }
+  | {
+      readonly outcome: 'unknown'
+      /** Where the server answered with one but the roots did not show the merge. */
+      readonly operationId?: string | undefined
+    }
   | { readonly outcome: 'failed'; readonly status?: number | undefined }
 
 export type MergeRecordEntry = EntryBase & EntryOutcome
@@ -119,9 +162,14 @@ export interface MergedSoFar {
  * One reviewed neuron's state, read off the record — **the one reading of it**: the plan, the
  * batch's caller, the scene and the card's count all ask this, so none of them can disagree about
  * which root is current or which pieces are taken. Only `merged` moves a root; `merged` and
- * `already-merged` put a piece in a neuron.
+ * `already-merged` put a piece in a neuron. Only entries made on `scope` are read (the header);
+ * with none, nothing is.
  */
-export function mergedSoFar(record: MergeRecord, reviewedRoot: string): MergedSoFar {
+export function mergedSoFar(
+  record: MergeRecord,
+  reviewedRoot: string,
+  scope: RecordScope | undefined,
+): MergedSoFar {
   const roots = [reviewedRoot]
   const pieces = new Set<string>()
   const otherRoots = new Set<string>()
@@ -131,12 +179,21 @@ export function mergedSoFar(record: MergeRecord, reviewedRoot: string): MergedSo
   const latest = new Map<string, string>()
   const takenBy = new Map<string, string>()
   for (const entry of record) {
+    if (!inScope(entry, scope)) continue
     if (entry.outcome === 'merged') latest.set(entry.reviewedRoot, entry.newRoot)
     if (inNeuron(entry)) takenBy.set(entry.candidateRoot, entry.reviewedRoot)
     const mine = entry.reviewedRoot === reviewedRoot
     if (!mine) otherRoots.add(entry.reviewedRoot)
     else if (entry.outcome === 'unknown') unsettled.push(entry)
     else if (entry.outcome === 'merged') unsettled = []
+    else if (entry.outcome === 'failed') {
+      // The server's refusal of the same pair at the same root: nothing was written, so a late
+      // answer to a merge recorded `unknown` settles it as not made.
+      unsettled = unsettled.filter(
+        (open) =>
+          open.candidateRoot !== entry.candidateRoot || open.neuronRoot !== entry.neuronRoot,
+      )
+    }
     if (!inNeuron(entry)) continue
     ;(mine ? pieces : elsewhere).add(entry.candidateRoot)
     if (entry.outcome !== 'merged') continue
@@ -166,8 +223,8 @@ export function mergedSoFar(record: MergeRecord, reviewedRoot: string): MergedSo
 
 /**
  * The root a merge made, read off its two ends' roots afterwards: both under one root that is a
- * real object and not the neuron's root before it. **The one rule** for a write whose reply was
- * lost, read by the batch straight after and by the plan later; anything else is no evidence.
+ * real object and not the neuron's root before it. The first half of the plan's rule for a write
+ * whose reply was lost (`settle`); on its own it is no evidence the merge was this one.
  */
 export function sharedNewRoot(
   roots: readonly (string | undefined)[],
@@ -189,6 +246,8 @@ export function settledEntry(
   at: string,
 ): MergeRecordEntry {
   return {
+    deployment: entry.deployment,
+    datastack: entry.datastack,
     reviewedRoot: entry.reviewedRoot,
     candidateRoot: entry.candidateRoot,
     endUid: entry.endUid,
@@ -198,7 +257,15 @@ export function settledEntry(
     at,
     outcome: 'merged',
     newRoot,
-    message: 'The reply was lost; the roots, read again, show the merge was made.',
+    // The server's own id, where it answered with one: the settlement keeps the audit trail.
+    ...(entry.outcome === 'unknown' && entry.operationId
+      ? { operationId: entry.operationId }
+      : {}),
+    message:
+      entry.outcome === 'unknown' && entry.operationId
+        ? `The server answered merged (operation ${entry.operationId}) before the roots showed ` +
+          'it; read again, they show the merge was made.'
+        : 'The reply was lost; the roots, read again, show the merge was made.',
   }
 }
 
@@ -252,6 +319,8 @@ function isEntry(value: unknown): value is MergeRecordEntry {
   const absentOr = (key: string, ok: (value: unknown) => boolean) =>
     entry[key] === undefined || ok(entry[key])
   if (!absentOr('message', (v) => typeof v === 'string')) return false
+  if (!absentOr('deployment', (v) => typeof v === 'string')) return false
+  if (!absentOr('datastack', (v) => typeof v === 'string')) return false
   // An operation id is a counter from 1 — the writer's own `isOperationId`, which is `isNodeId`'s.
   if (!absentOr('operationId', (v) => typeof v === 'string' && isNodeId(v))) return false
   if (!absentOr('status', Number.isSafeInteger)) return false
@@ -263,6 +332,8 @@ export function mergesSchema(): TableSchema {
   return tableSchema(
     column(ID_COLUMN_NAME, 'str'),
     column('candidateId', 'str'),
+    column('datastack', 'str'),
+    column('deployment', 'str'),
     column('end_uid', 'i64'),
     column('outcome', 'str'),
     column('neuron_root', 'str'),
@@ -287,11 +358,15 @@ export function mergesTable(record: MergeRecord): TableValue {
   return makeTable(mergesSchema(), {
     [ID_COLUMN_NAME]: cells((e) => e.reviewedRoot),
     candidateId: cells((e) => e.candidateRoot),
+    datastack: cells((e) => e.datastack ?? null),
+    deployment: cells((e) => e.deployment ?? null),
     end_uid: cells((e) => e.endUid),
     outcome: cells((e) => e.outcome),
     neuron_root: cells((e) => e.neuronRoot),
     new_root: cells((e) => (e.outcome === 'merged' ? e.newRoot : null)),
-    operation_id: cells((e) => (e.outcome === 'merged' ? (e.operationId ?? null) : null)),
+    operation_id: cells((e) =>
+      e.outcome === 'merged' || e.outcome === 'unknown' ? (e.operationId ?? null) : null,
+    ),
     neuron_supervoxel: cells((e) => e.neuron.supervoxel),
     candidate_supervoxel: cells((e) => e.candidate.supervoxel),
     neuron_x: cells((e) => e.neuron.positionNm[0]),

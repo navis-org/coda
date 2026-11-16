@@ -31,9 +31,15 @@ import { packNode } from '../../core/registry'
 import { T, column, tableSchema } from '../../core/types'
 import type { TableSchema } from '../../core/types'
 import type { CellValue, LayersValue, TableValue } from '../../core/values'
-import { isTableValue, layersFrom, makeTable } from '../../core/values'
+import { isDatasetValue, isTableValue, layersFrom, makeTable } from '../../core/values'
 import { foldColumns } from '../../nodes/lib/tableOps'
-import { decodeRecord, mergedSoFar, mergesSchema, mergesTable } from './mergeRecord'
+import {
+  decodeRecord,
+  mergedSoFar,
+  mergesSchema,
+  mergesTable,
+  recordScopeOf,
+} from './mergeRecord'
 import { suggestionLayer } from './scene'
 import type { CurrentItem, QueueTip, ScenePiece, Verdict } from './reviewQueue'
 import {
@@ -42,8 +48,10 @@ import {
   decodeVerdicts,
   pickedNeuron,
   scenePieces,
+  tipKey,
   tipsOf,
   verdictFor,
+  verdictKey,
 } from './reviewQueue'
 
 /** The column the verdicts are folded onto the tips under. */
@@ -327,13 +335,16 @@ export const reviewNode = packNode({
     const mine = tipsOf(queue, neuron)
     const here = currentOfQueue(mine, String(ctx.params.current), Number(ctx.params.rank))
     const record = decodeRecord(ctx.params.merges)
+    // Read for the wired dataset's chunkedgraph only, as the card and the plan read it.
+    const dataset = ctx.input('dataset')
+    const scope = recordScopeOf(isDatasetValue(dataset) ? dataset : undefined)
     const pieces = scenePieces(
       mine,
       neuron,
       here,
       verdicts,
       ctx.params.showAccepted === true,
-      neuron === undefined ? undefined : mergedSoFar(record, neuron),
+      neuron === undefined ? undefined : mergedSoFar(record, neuron, scope),
     )
 
     /*
@@ -421,14 +432,17 @@ function withVerdicts(
   queue: readonly QueueTip[],
   verdicts: ReadonlyMap<string, Verdict>,
 ): TableValue {
-  const byEnd = new Map(queue.map((tip) => [tip.endUid, tip]))
+  // By `tipKey`: two runs stacked into one table share tip numbers.
+  const byTip = new Map(queue.map((tip) => [tipKey(tip.neuronId, tip.endUid), tip]))
   const cells: CellValue[] = []
   const ends = tips.data['end_uid'] ?? []
+  const neurons = tips.data[ID_COLUMN_NAME] ?? []
   for (let i = 0; i < tips.length; i++) {
-    const tip = typeof ends[i] === 'number' ? byEnd.get(ends[i] as number) : undefined
+    const end = ends[i]
+    const tip = typeof end === 'number' ? byTip.get(tipKey(String(neurons[i]), end)) : undefined
     const first = tip?.candidates[0]
     cells.push(
-      tip && first ? (verdictFor(verdicts, tip.endUid, first.candidateId) ?? null) : null,
+      tip && first ? (verdictFor(verdicts, tip.neuronId, first.candidateId) ?? null) : null,
     )
   }
   return makeTable(
@@ -443,7 +457,8 @@ function withVerdicts(
  *
  * The folded column on `Tips` can only answer about first candidates, since a tip is one row.
  * A reader who paged to rank 4 and said "this one" has made a judgement worth keeping, and this
- * is where it survives.
+ * is where it survives. A verdict is about a piece and a neuron (`verdictKey`), so a piece listed
+ * at three tips is one row, not three: at the tip, and rank, where the queue first lists it.
  */
 function verdictsTable(
   queue: readonly QueueTip[],
@@ -454,10 +469,13 @@ function verdictsTable(
   const candidateIds: CellValue[] = []
   const ranks: CellValue[] = []
   const said: CellValue[] = []
+  const listed = new Set<string>()
   for (const tip of queue) {
     for (const candidate of tip.candidates) {
-      const verdict = verdictFor(verdicts, tip.endUid, candidate.candidateId)
-      if (!verdict) continue
+      const verdict = verdictFor(verdicts, tip.neuronId, candidate.candidateId)
+      const key = verdictKey(tip.neuronId, candidate.candidateId)
+      if (!verdict || listed.has(key)) continue
+      listed.add(key)
       ids.push(tip.neuronId)
       ends.push(tip.endUid)
       candidateIds.push(candidate.candidateId)

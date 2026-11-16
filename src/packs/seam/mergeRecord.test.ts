@@ -7,20 +7,31 @@
 import { describe, expect, it } from 'vitest'
 
 import { ID_COLUMN_NAME } from '../../core/ids'
-import type { MergeRecordEntry } from './mergeRecord'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
+import type { MergeRecordEntry, RecordScope } from './mergeRecord'
 import {
   decodeRecord,
   appendEntry,
-  mergedSoFar,
+  mergedSoFar as readFor,
   mergesSchema,
   mergesTable,
+  recordScopeOf,
   settledEntry,
 } from './mergeRecord'
 
 /** Past 2⁵³, where an id that went through a number would come back different. */
 const NEURON = '720575940621039145'
 
+/** The chunkedgraph every entry here was made on. */
+const SCOPE: RecordScope = {
+  deployment: 'https://global.example.org',
+  datastack: 'fanc_sandbox',
+}
+const mergedSoFar = (record: readonly MergeRecordEntry[], root: string) =>
+  readFor(record, root, SCOPE)
+
 const base = {
+  ...SCOPE,
   reviewedRoot: NEURON,
   endUid: 3,
   neuronRoot: NEURON,
@@ -106,6 +117,7 @@ describe('the merge record', () => {
     ['a message that is not text', { message: 42 }],
     ['an operation id that is not one', { operationId: { x: 1 } }],
     ['a status that is not a number', { status: '400' }],
+    ['a datastack that is not text', { datastack: 7 }],
   ])('drops an entry with %s and keeps the rest', (_, change) => {
     const bad = { ...RECORD[0], ...change }
     const text = JSON.stringify([bad, RECORD[1]])
@@ -114,6 +126,39 @@ describe('the merge record', () => {
 })
 
 describe('mergedSoFar', () => {
+  /**
+   * The audit of 77c0625 (2026-11-16): a sandbox table is a copy of a production one, so read for
+   * every chunkedgraph a sandbox merge moved the neuron's root, and took its pieces, on production.
+   */
+  it('reads only the entries made on the chunkedgraph it is asked about', () => {
+    const production = { ...SCOPE, datastack: 'fanc_production' }
+    expect(readFor(RECORD, NEURON, production).currentRoot).toBe(NEURON)
+    expect(readFor(RECORD, NEURON, production).pieces.size).toBe(0)
+    const elsewhere = { ...SCOPE, deployment: 'https://other.example.org' }
+    expect(readFor(RECORD, NEURON, elsewhere).roots).toEqual([NEURON])
+    expect(readFor(RECORD, NEURON, undefined).roots).toEqual([NEURON])
+  })
+
+  /** Written before entries named one: kept in the param and in Merges, read for none. */
+  it('reads an entry that names no chunkedgraph for none', () => {
+    const { deployment: _d, datastack: _s, ...old } = RECORD[0]!
+    const raw = JSON.stringify([old])
+    expect(decodeRecord(raw)).toEqual([old])
+    expect(mergedSoFar(decodeRecord(raw), NEURON).roots).toEqual([NEURON])
+    expect(mergesTable(decodeRecord(raw)).data['datastack']).toEqual([null])
+  })
+
+  it('takes its scope from a wired CAVE Dataset, and none from anything else', () => {
+    expect(recordScopeOf({ sourceId: 'cave', datasetId: 'fanc_sandbox:1' })).toEqual({
+      deployment: DEFAULT_CAVE_SERVER,
+      datastack: 'fanc_sandbox',
+    })
+    expect(
+      recordScopeOf({ sourceId: 'neuprint:x', datasetId: 'fanc_sandbox:1' }),
+    ).toBeUndefined()
+    expect(recordScopeOf({ sourceId: 'cave', datasetId: undefined })).toBeUndefined()
+  })
+
   it('follows the neuron through its merges, and counts only what is in it', () => {
     expect(mergedSoFar(RECORD, NEURON)).toEqual({
       currentRoot: '720575940700000002',
@@ -147,6 +192,7 @@ describe('settling a lost reply', () => {
     const lost = RECORD[4]!
     const settled = settledEntry(lost, '720575940700000009', '2026-11-16T11:00:00.000Z')
     expect(settled).toMatchObject({
+      ...SCOPE,
       reviewedRoot: lost.reviewedRoot,
       candidateRoot: lost.candidateRoot,
       neuronRoot: lost.neuronRoot,
@@ -160,6 +206,28 @@ describe('settling a lost reply', () => {
       currentRoot: '720575940700000009',
       unsettled: [],
     })
+  })
+})
+
+describe('a late answer to a lost reply', () => {
+  const lost = RECORD[4]!
+  /** A refusal of the same pair at the same root: nothing was written, so nothing to settle. */
+  it('is settled as not made by the server’s refusal of the same pair', () => {
+    const refused: MergeRecordEntry = { ...lost, outcome: 'failed', status: 400 }
+    expect(mergedSoFar([lost, refused], lost.reviewedRoot).unsettled).toEqual([])
+    const other: MergeRecordEntry = { ...refused, candidateRoot: '720575940000000008' }
+    expect(mergedSoFar([lost, other], lost.reviewedRoot).unsettled).toEqual([lost])
+  })
+
+  /** `done` that the roots did not show: its operation id survives the settlement. */
+  it('keeps the server’s operation id through the settlement', () => {
+    const answered: MergeRecordEntry = { ...lost, outcome: 'unknown', operationId: '4217' }
+    expect(decodeRecord(JSON.stringify([answered]))).toEqual([answered])
+    expect(mergesTable([answered]).data['operation_id']).toEqual(['4217'])
+    const settled = settledEntry(answered, '720575940700000009', '2026-11-16T11:00:00.000Z')
+    expect(settled).toMatchObject({ outcome: 'merged', operationId: '4217' })
+    // The reply was not lost: the server answered, and the roots were slow to show it.
+    expect(settled.message).toMatch(/answered merged \(operation 4217\)/)
   })
 })
 
@@ -225,5 +293,6 @@ describe('the Merges table', () => {
     expect(table.data['operation_id']).toEqual(['4217', null, null, null, null])
     expect(table.data['candidate_z']![0]).toBe(517.5)
     expect(table.data['message']![2]).toBe('Refused (400): no')
+    expect(table.data['datastack']![0]).toBe('fanc_sandbox')
   })
 })
