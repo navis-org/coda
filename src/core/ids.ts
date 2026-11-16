@@ -170,8 +170,12 @@ export function isTypedId(value: string): value is NeuronId {
  */
 const SEGMENT_ID_GRAMMAR = /^(?:0|[1-9][0-9]*)$/
 
+/** Neuroglancer's `UINT64_MAX`: `parseUint64` refuses past it, after its grammar has passed. */
+const MAX_SEGMENT_ID = (1n << 64n) - 1n
+
 export function isSegmentId(text: string): boolean {
-  return SEGMENT_ID_GRAMMAR.test(text)
+  // Under twenty digits nothing can pass 2⁶⁴ − 1, so the BigInt is only built for the long ones.
+  return SEGMENT_ID_GRAMMAR.test(text) && (text.length < 20 || BigInt(text) <= MAX_SEGMENT_ID)
 }
 
 /**
