@@ -12,6 +12,20 @@
  *     piece is refused on its own.
  *  4. **Anchors** for each current piece (`mergeAnchors.ts`), trying its rows in turn.
  *
+ * ## A neuron grown piece by piece is merged from the neuron outwards
+ *
+ * A piece can be accepted on a tip of another accepted piece (`docs/seam-extend-plan.md`), and
+ * none of it is merged before Submit. So the plan is a tree, and three things follow:
+ *
+ *  - **Parents first.** `merges` lists a piece after every piece between it and the neuron.
+ *  - **A merge's neuron end may be on a piece that is not in the neuron yet.** The search measured
+ *    the contact to the neuron and the pieces between read as one object, so the anchor is looked
+ *    for on any of them (`AnchorPair.alsoNeuron`), and `needs` names the piece it landed on. By
+ *    the time the batch reaches the merge that piece is in the neuron — it went first — and the
+ *    batch's own check ("the neuron end is under the root this batch last made") holds unchanged.
+ *  - **A piece is refused where a piece on its way to the neuron is** (`parent-refused`): it has
+ *    nothing to be merged onto.
+ *
  * ## Why step 3 needs no lineage lookup
  *
  * A piece that is not current is `outdated`, never "already merged by someone else": a merge
@@ -47,6 +61,7 @@ import { anchorMerge, openAnchorVolume } from './mergeAnchors'
 import type { AcceptedRow, QueueTip, Verdicts } from './reviewQueue'
 import type { MergeRecord, MergeRecordEntry } from './mergeRecord'
 import { mergedSoFar, sharedNewRoot } from './mergeRecord'
+import { piecesOf } from './pieces'
 import { acceptedPieces, tipsOf } from './reviewQueue'
 
 /** Why an accepted piece is not in the plan. Every one is a reason not to send. */
@@ -59,6 +74,8 @@ export type PlanRefusal =
   | 'outdated'
   /** The neuron's root is not current, so none of its merges is made (user, 2026-11-15). */
   | 'neuron-outdated'
+  /** A piece between it and the neuron cannot be merged, so it has nothing to be merged onto. */
+  | 'parent-refused'
   | AnchorRefusal
 
 export interface PlannedMerge {
@@ -75,6 +92,22 @@ export interface PlannedMerge {
    * the dialog to show before the reader confirms (user, 2026-11-16).
    */
   readonly joinsNeuron: boolean
+  /**
+   * The piece it hangs on, where that is a piece this plan merges — `undefined` where it hangs
+   * on the neuron itself, or on a piece already in it. What the dialog's ticks follow: unticked,
+   * everything beyond it is unticked with it.
+   */
+  readonly parent?: string | undefined
+  /**
+   * The piece of this plan the neuron end is on, where it is not on the neuron as it stands.
+   * Always earlier in `merges` — usually `parent`, not always: the candidate touches whichever
+   * piece is there.
+   *
+   * **A merge waits for both** (`mergeBatch.ts`): `needs`, without which its end is not in the
+   * neuron, and `parent`, without which the reader's reason for it is gone — it was accepted as
+   * a continuation of that piece.
+   */
+  readonly needs?: string | undefined
 }
 
 export interface RejectedMerge {
@@ -107,7 +140,7 @@ export type MergePlan =
        * end is a supervoxel with. Present whenever `merges` is not empty.
        */
       readonly layout?: GraphLayout | undefined
-      /** In the order the reader met them in the queue. */
+      /** From the neuron outwards: a piece after every piece between it and the neuron. */
       readonly merges: readonly PlannedMerge[]
       /** In the same order. */
       readonly rejected: readonly RejectedMerge[]
@@ -197,11 +230,6 @@ async function plan(
 ): Promise<MergePlan> {
   const { datastack, reviewedRoot } = request
   const { deployment } = options
-  const pieces = acceptedPieces(tipsOf(request.queue, reviewedRoot), request.verdicts)
-  const rejected: RejectedMerge[] = []
-  const reject = (candidateRoot: string, reason: PlanRefusal, message: string) =>
-    rejected.push({ candidateRoot, rows: pieces.get(candidateRoot)!, reason, message })
-
   const graphene = await services.chunkedgraph(datastack, options)
   if (!graphene) {
     return {
@@ -220,9 +248,23 @@ async function plan(
   const currentRoot = settled?.newRoot ?? own.currentRoot
   const inNeuron = new Set(own.pieces)
   if (settled) inNeuron.add(settled.entry.candidateRoot)
+  /*
+   * The tree grows from the neuron **as it stands**: the reviewed root and every piece this
+   * workflow has merged into it already. A piece accepted on one of those is one step out,
+   * whatever became of the accept that first brought that piece in, and is placed there rather
+   * than under a piece that is still its own root.
+   */
+  const { pieces, pathOf } = acceptedTree(
+    acceptedPieces(tipsOf(request.queue, reviewedRoot), request.verdicts),
+    [reviewedRoot, ...inNeuron],
+  )
+  const rejected: RejectedMerge[] = []
+  const reject = (candidateRoot: string, reason: PlanRefusal, message: string) =>
+    rejected.push({ candidateRoot, rows: pieces.get(candidateRoot)!, reason, message })
   // Every root this neuron has had, and every root another reviewed neuron has or has had.
   const ownRoots = new Set([...own.roots, currentRoot])
-  const otherNeurons = new Set([...request.queue.map((tip) => tip.neuronId), ...own.otherRoots])
+  // By `seed`: a piece this neuron or another is extended with is not a neuron under review.
+  const otherNeurons = new Set([...request.queue.map((tip) => tip.seed), ...own.otherRoots])
   for (const root of ownRoots) otherNeurons.delete(root)
   const open = [...pieces.keys()].filter((candidateRoot) => {
     if (inNeuron.has(candidateRoot)) {
@@ -248,7 +290,7 @@ async function plan(
     return false
   })
 
-  /** The plan as it stands, refusals in the order the reader met their pieces, as merges are. */
+  /** The plan as it stands, refusals in the order of their pieces, as merges are. */
   const order = new Map([...pieces.keys()].map((candidateRoot, i) => [candidateRoot, i]))
   const planned = (merges: PlannedMerge[], layout?: GraphLayout): MergePlan => ({
     ok: true,
@@ -313,10 +355,53 @@ async function plan(
   // once a current piece needs it.
   const volume = await services.openVolume(datastack, options)
   const merges: PlannedMerge[] = []
+  /** The pieces this plan merges so far: what a piece further out may be merged onto. */
+  const joining = new Set<string>()
+  // In tree order, so every piece between a piece and the neuron is decided before it.
   for (const candidateRoot of current) {
     const rows = pieces.get(candidateRoot)!
-    const { row, anchors } = await anchorRows(volume, currentRoot, candidateRoot, rows)
+    const path = pathOf.get(candidateRoot)
+    if (path === undefined) {
+      reject(
+        candidateRoot,
+        'parent-refused',
+        'It has no way back to the neuron through the accepted pieces, so there is nothing to merge it onto.',
+      )
+      continue
+    }
+    /*
+     * The pieces on the way that are still their own roots, nearest first. **The way stops at
+     * the first piece that is in the neuron already**: from there inwards it is the neuron as it
+     * stands, whatever became of the pieces beyond — one that was edited and never merged does
+     * not hold up a piece whose own parent is in.
+     */
+    const merged = path.findIndex((id) => inNeuron.has(id))
+    const unmerged = merged < 0 ? path : path.slice(0, merged)
+    const missing = unmerged.find((id) => !joining.has(id))
+    if (missing !== undefined) {
+      reject(
+        candidateRoot,
+        'parent-refused',
+        `${missing}, which lies between it and the neuron, cannot be merged, so this piece has nothing to be merged onto.`,
+      )
+      continue
+    }
+    /*
+     * The neuron's side is **the neuron and the pieces on this piece's own way to it** — what
+     * the reader accepted it as a continuation of. Not every piece planned so far: two pieces
+     * accepted on neighbouring tips of the neuron would then be merged onto each other, an edge
+     * nobody accepted, and each would wait for the other. Whatever the anchor lands on is merged
+     * before this (`needs`), and the batch checks the end is under its root at that moment.
+     */
+    const { row, anchors } = await anchorRows(
+      volume,
+      currentRoot,
+      unmerged,
+      candidateRoot,
+      rows,
+    )
     if (anchors.ok) {
+      const on = anchors.onRoot
       merges.push({
         candidateRoot,
         rows,
@@ -324,7 +409,10 @@ async function plan(
         neuron: anchors.neuron,
         candidate: anchors.candidate,
         joinsNeuron: otherNeurons.has(candidateRoot),
+        parent: unmerged[0],
+        needs: on !== undefined && on !== currentRoot ? on : undefined,
       })
+      joining.add(candidateRoot)
     } else {
       reject(candidateRoot, anchors.reason, anchors.message)
     }
@@ -359,10 +447,18 @@ async function plan(
     return undefined
   }
 
-  /** The first of a piece's rows that anchors, else the nearest row's refusal. */
+  /**
+   * The first of a piece's rows that anchors, else the nearest row's refusal.
+   *
+   * **An anchor counts only where the root its neuron end is under is known to be the neuron's
+   * side**: an end on any other root — or on one nobody named, where there is more than the
+   * neuron to tell apart — cannot be confirmed, since nothing says it is part of the neuron
+   * when the merge is sent. That row is refused and the next one tried.
+   */
   async function anchorRows(
     on: AnchorVolume,
     neuronRoot: string,
+    alsoNeuron: readonly string[],
     candidateRoot: string,
     rows: readonly AcceptedRow[],
   ): Promise<{ row: AcceptedRow; anchors: Anchors }> {
@@ -371,12 +467,130 @@ async function plan(
       const { contactNm, minDistUm } = row.candidate
       const anchors = await services.anchor(
         on,
-        { neuronRoot, candidateRoot, contactNm, minDistUm },
+        { neuronRoot, alsoNeuron, candidateRoot, contactNm, minDistUm },
         options,
       )
-      if (anchors.ok) return { row, anchors }
-      nearest ??= { row, anchors }
+      const under = anchors.ok ? anchors.onRoot : undefined
+      const known =
+        under === undefined
+          ? alsoNeuron.length === 0
+          : under === neuronRoot || alsoNeuron.includes(under)
+      if (anchors.ok && known) return { row, anchors }
+      nearest ??= {
+        row,
+        anchors: anchors.ok
+          ? {
+              ok: false,
+              reason: 'neuron-absent',
+              message: `The merge point found is on ${under ?? 'a root that was not named'}, which is neither the neuron nor a piece between it and this one.`,
+            }
+          : anchors,
+      }
     }
     return nearest!
   }
+}
+
+/**
+ * The accepted pieces as a tree from the neuron outwards.
+ *
+ * **By `piecesOf`, the rule the search and the review card place a piece by** (`pieces.ts`): over
+ * every root a piece was accepted on, it is put at the fewest steps from the neuron, then on the
+ * lower parent id — so a piece accepted both on the neuron and on a piece of it is merged
+ * straight onto the neuron, and two pieces accepted on each other cannot hold each other up. The
+ * plan cannot be handed the card's own tree: that one holds the *extended* pieces only, and a
+ * piece accepted on a piece's tip and never extended has to be placed too.
+ *
+ * - **Each piece on one root**, with only its rows there: it is merged once, onto one thing.
+ * - **`pathOf`**: the pieces between it and the neuron, nearest first — empty for a piece
+ *   accepted on the neuron itself, and **absent** for one with no way back to the neuron through
+ *   the accepted pieces, which the plan refuses.
+ * - **In tree order**: a piece after every piece on its path, and otherwise as the reader met
+ *   them.
+ */
+export function acceptedTree(
+  accepted: ReadonlyMap<string, readonly AcceptedRow[]>,
+  seeds: readonly string[],
+): { pieces: Map<string, AcceptedRow[]>; pathOf: Map<string, string[]> } {
+  const pairs = [...accepted].flatMap(([piece, rows]) =>
+    [...new Set(rows.map((row) => row.neuronId))].map((parent) => ({ parent, piece })),
+  )
+  const rowsOf = new Map<string, AcceptedRow[]>()
+  const pathOf = new Map<string, string[]>()
+  for (const placed of piecesOf(pairs, seeds)) {
+    rowsOf.set(
+      placed.id,
+      accepted.get(placed.id)!.filter((row) => row.neuronId === placed.parent),
+    )
+    // `path` runs from the neuron to the piece; what lies between, nearest first.
+    pathOf.set(placed.id, placed.path.slice(1, -1).reverse())
+  }
+  /*
+   * By how far out, then as the reader met them — a piece after every piece on its path, and
+   * otherwise in the order of the list they were accepted in. One with no way back keeps the
+   * place it was met at: it is refused whatever its place, and its refusal is listed there.
+   */
+  const depth = (id: string) => pathOf.get(id)?.length ?? 0
+  const pieces = new Map(
+    [...accepted.keys()]
+      .map((id, met) => ({ id, met }))
+      .sort((a, b) => depth(a.id) - depth(b.id) || a.met - b.met)
+      .map(({ id }) => [id, rowsOf.get(id) ?? [...accepted.get(id)!]]),
+  )
+  return { pieces, pathOf }
+}
+
+/**
+ * The ticks of the confirm dialog after one is changed, kept to what can be sent.
+ *
+ * A piece accepted on a piece is merged onto it, so: **unticking a piece unticks every piece
+ * that waits for it, and ticking a piece ticks every piece it waits for** (`PlannedMerge.parent`
+ * and `needs`). The batch refuses a selection that breaks this (`prepareMerges`); here it
+ * cannot be made.
+ */
+/**
+ * The pieces of the plan a merge waits for: the one its neuron end is on, and the one it was
+ * accepted as a continuation of. Each once. **The one spelling**, read by the dialog's ticks
+ * and by the batch, so the ticks cannot make a list the batch refuses.
+ */
+export function waitsFor(merge: PlannedMerge): string[] {
+  return [...new Set([merge.needs, merge.parent])].filter((id) => id !== undefined)
+}
+
+export function tickedWith(
+  merges: readonly PlannedMerge[],
+  ticked: ReadonlySet<string>,
+  candidateRoot: string,
+  on: boolean,
+): Set<string> {
+  const next = new Set(ticked)
+  if (on) {
+    // It, and everything it waits for, and everything those wait for.
+    const byRoot = new Map(merges.map((merge) => [merge.candidateRoot, merge]))
+    const todo = [candidateRoot]
+    for (let at = todo.pop(); at !== undefined; at = todo.pop()) {
+      const merge = byRoot.get(at)
+      if (!merge || next.has(at)) continue
+      next.add(at)
+      todo.push(...waitsFor(merge))
+    }
+    return next
+  }
+  next.delete(candidateRoot)
+  return withoutOrphans(merges, next)
+}
+
+/** `ticked` less every piece whose way to the neuron passes through an unticked one. */
+export function withoutOrphans(
+  merges: readonly PlannedMerge[],
+  ticked: ReadonlySet<string>,
+): Set<string> {
+  const next = new Set<string>()
+  // Parents come first in `merges`, so one pass decides each piece after its parent.
+  for (const merge of merges) {
+    if (!ticked.has(merge.candidateRoot)) continue
+    const held = waitsFor(merge).some((id) => !next.has(id))
+    if (!held) next.add(merge.candidateRoot)
+  }
+  return next
 }

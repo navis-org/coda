@@ -507,6 +507,27 @@ rule belongs to one area, its record is in that area's doc.
 - **A loop is one number in a hash** (`Scheduler.loopIndex` in the begin node's key), so the region
   is derived from the wires. It runs at the region's **last** node; a `Collect` never takes a cache
   hit mid-pass; per-pass files go through the awaited `SchedulerHost.onIteration`.
+- **A reference to a node that is not a dataset reads that node's params alone**
+  (`NodeDefinition.asReference`), so it may point *upstream* — drawn dotted, never a cycle. Its key
+  is the hash of what it returns, so return only what the reader acts on, or every click re-keys it.
+- **`ctx.rerunInput` runs the chain above an input again on a private `Scheduler`**
+  (`core/variantRun.ts`), for an `expensive` node declaring `rerunsInputs` only. It refuses a chain
+  with no neuron wire, two neuron sources or a loop, in a sentence; a node the chain only *names*
+  is kept without its inputs, or the caller re-runs itself without end.
+
+### The SEAM pack — [docs/seam-extend-plan.md](docs/seam-extend-plan.md), [docs/seam-merge-plan.md](docs/seam-merge-plan.md)
+
+- **Where an accepted piece sits is one derivation, `piecesOf`** (fewest steps from the neuron, then
+  the lower parent id, breadth first), read by the search, the review card and the merge plan —
+  never the order of clicks, or a reload publishes other tables. `ID` stays the piece's own root;
+  the neuron is `seed`, and the card's cursor is `root|end_uid`.
+- **Suggest Merges publishes in the plain order whatever order it worked in** (`runBook.ts`: one
+  record per root, tables assembled on publish). What follows from a root's ends — its join, what
+  is still wanted — is asked of the book, never cached beside it. A piece's boxes are read with
+  `aliasOf(piece)`, a required argument: left out, the neuron comes back as its own candidate.
+- **A merge onto a piece waits for `waitsFor` — the piece its end is on *and* the piece it was
+  accepted on** — one spelling for the batch and the dialog's ticks. The neuron's side is the
+  neuron and the piece's *own* path, never a sibling; an end on any other root refuses that row.
 
 ### The wizard, the pages and the help — [docs/wizard.md](docs/wizard.md), [docs/pages.md](docs/pages.md), [docs/help.md](docs/help.md)
 

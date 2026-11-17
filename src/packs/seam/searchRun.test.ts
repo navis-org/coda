@@ -16,7 +16,7 @@ import type {
   PoolSizes,
   PoolSizesRequest,
 } from '../../pyodide/cutoutSummary'
-import { countsInPoolOrder, oneAhead, searchEnds } from './searchRun'
+import { countsInPoolOrder, oneAhead, queryCountOf, searchEnds } from './searchRun'
 import type { SearchedEnd } from './searchRun'
 import type { SearchSteps } from './searchRun'
 import { parseTreeRanker } from './treeRanker'
@@ -279,6 +279,77 @@ describe('searchEnds', () => {
     expect(one!.missingQuery).toBe(true)
     expect(one!.rows).toBe(0)
     expect(steps.sizes).not.toHaveBeenCalled()
+  })
+})
+
+describe('how big the query is', () => {
+  it('is the one root’s count for a neuron’s own end', () => {
+    expect(queryCountOf(new Map([['1', 9000]]), ['1'])).toBe(9000)
+  })
+
+  it('is the sum over every root that is the query, for an accepted piece’s end', () => {
+    // The neuron and the pieces between it and this one: what the neuron will be once merged.
+    const counts = new Map([
+      ['1', 2000],
+      ['801', 15],
+      ['803', 4],
+      ['900', 7],
+    ])
+    expect(queryCountOf(counts, ['1', '801', '803'])).toBe(2019)
+  })
+
+  it('is nothing where the chunkedgraph does not list one of them — all, or none', () => {
+    // A sum over the ones that happened to be listed is a neuron a fraction of its size, ranked
+    // on without a word and — carrying no refusal — remembered as the end's answer.
+    expect(queryCountOf(new Map([['1', 2000]]), ['1', '801'])).toBeUndefined()
+    expect(queryCountOf(new Map([['801', 15]]), ['1', '801'])).toBeUndefined()
+    expect(queryCountOf(new Map([['900', 7]]), ['1', '801'])).toBeUndefined()
+    expect(queryCountOf(new Map(), [])).toBeUndefined()
+  })
+
+  it('refuses the end, naming the root that has no count, rather than size the neuron short', async () => {
+    const pool = poolOf([0.9], [[0, 0, 0]])
+    // The neuron itself is listed; the piece on its path is not.
+    const steps = stepsFor([pool], countsFor([pool]))
+    const [one] = await collect(
+      searchEnds(
+        TIPS,
+        [{ tip: 0, queryRoot: 1n, alsoQuery: [801n], box: async () => boxFor(1n) }],
+        { ranker: RANKER, topK: 2, ownUm: 2 },
+        steps,
+      ),
+    )
+    expect(one!.refusal).toMatch(/801 has no level-2 chunk count/)
+    expect(one!.rows).toBe(0)
+  })
+
+  it('asks for the counts of every root that is the query, and sizes the pool by their sum', async () => {
+    const pool = poolOf(
+      [0.9, 0.1],
+      [
+        [0, 0, 0],
+        [0, 0, 0],
+      ],
+    )
+    const counts = countsFor([pool])
+    counts.set('801', 15)
+    const steps = stepsFor([pool], counts)
+    await collect(
+      searchEnds(
+        TIPS,
+        [{ tip: 0, queryRoot: 1n, alsoQuery: [801n], box: async () => boxFor(1n) }],
+        { ranker: RANKER, topK: 2, ownUm: 2 },
+        steps,
+      ),
+    )
+    // The box names only the query — the path's other roots were written as it — so they have to
+    // be asked for here, or the neuron is sized as the seed alone.
+    const asked = (steps.counts as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string[]
+    expect(asked).toContain('801')
+    const sized = (steps.sizes as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as PoolSizesRequest
+    expect(sized.queryCount).toBe(9015)
+    expect(sized.queryRoot).toBe(1n)
   })
 })
 

@@ -1220,7 +1220,7 @@ export function everythingGraph(): CodaGraph {
         verdicts:
           '648518346341397760/648518347608868926=accept;' +
           '648518346341397760/648518347368875056=reject;0:648518347000000000=accept',
-        current: '0',
+        current: '648518346341397760|0',
       },
     },
     /*

@@ -17,6 +17,7 @@ import * as support from '../../ml/support'
 
 import { defaultParams, findParam, makeInferContext } from '../../core/node'
 import type { ParamValues } from '../../core/node'
+import { inputPorts } from '../../core/ports'
 import { requireNodeDef } from '../../core/registry'
 import { T, columnNames } from '../../core/types'
 import type { CodaType, TableSchema } from '../../core/types'
@@ -24,7 +25,7 @@ import { column, tableSchema } from '../../core/types'
 import '../../nodes'
 import { seam } from './index'
 import { MERGE_ASSESSOR_MODELS, MERGE_RANKER_MODELS, NO_ASSESSOR } from './models'
-import { SEARCH_CANDIDATE_FIELDS } from './searchTips'
+import { LINEAGE_FIELDS, SEARCH_CANDIDATE_FIELDS } from './searchTips'
 import { schemaOf } from './suggestionTables'
 import { SECONDS_PER_END, secondsPerEnd } from './suggestMerges'
 import { WAIT_WARN_SECONDS } from '../../core/limits'
@@ -82,6 +83,28 @@ describe('the card', () => {
     )
     const out = infer({}, { tips: T.table(incoming) })
     expect(columnNames(out.tips!.schema!)).toContain('mine')
+  })
+})
+
+describe('extending a neuron', () => {
+  it('takes what to extend by reference, so it waits for nothing below it', () => {
+    // Review Suggestions sits below this node. An ordinary input from it would be a cycle.
+    const port = inputPorts(def, defaultParams(def)).find((one) => one.id === 'review')
+    expect(port?.reference).toBe(true)
+    expect(port?.required).toBe(false)
+  })
+
+  it('may run the chain above Tips again, which only an expensive node may', () => {
+    expect(def.rerunsInputs).toBe(true)
+  })
+
+  it('promises the lineage columns before anything has run', () => {
+    // With the port unwired too: the shape does not depend on whether anything is extended.
+    const out = infer({}, { tips: T.table(tableSchema(column('neuronId', 'str'))) })
+    for (const name of LINEAGE_FIELDS.map((one) => one.name)) {
+      expect(columnNames(out['tips']!.schema!)).toContain(name)
+    }
+    expect(columnNames(out['candidates']!.schema!)).toContain('seed')
   })
 })
 

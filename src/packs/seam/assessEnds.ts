@@ -68,6 +68,11 @@ export interface EndToAssess {
    * into triples in this file, and put back together in the node — three shapes for one fact.
    */
   readonly contactsNm: readonly Triple[]
+  /**
+   * An accepted piece's path, read as the query's in the patch box — `labelledBox`' `alias`.
+   * Stated on every end, `undefined` for a neuron's own: it has to match what the search read.
+   */
+  readonly alias: ReadonlyMap<bigint, bigint> | undefined
 }
 
 /** Which patches to cut, and for which candidates: one end's capped list, ready for the bridge. */
@@ -83,6 +88,8 @@ export interface PatchCut {
    */
   readonly candRoots: BigUint64Array
   readonly queryRoot: bigint
+  /** Passed through from the end: the box is read with these roots written as the query's. */
+  readonly alias: ReadonlyMap<bigint, bigint> | undefined
 }
 
 /**
@@ -152,6 +159,7 @@ export async function assessEnd(
       centresNm: end.contactsNm.slice(0, top),
       candRoots: BigUint64Array.from(end.candRoot.subarray(0, top)),
       queryRoot: end.queryRoot,
+      alias: end.alias,
     })
   } catch (error) {
     /*

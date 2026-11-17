@@ -11212,14 +11212,45 @@ details[open] > summary.tile__label {
   height: 47px;
   align-content: center;
 }
+/*
+ * A tip of a piece the neuron was extended with: beneath the row the piece was accepted on, a
+ * step in for every piece between it and the neuron, behind an arrow. The margin is the row's
+ * own, so its verdict edge moves in with it and the arrow has somewhere to stand. Same height
+ * as every other row — the list places rows by `index × height`.
+ */
+.review-row:not([data-depth='0']) {
+  margin-left: calc(var(--depth, 1) * 14px);
+}
+.review-row:not([data-depth='0'])::before {
+  content: '↳';
+  position: absolute;
+  left: -14px;
+  top: 6px;
+  width: 12px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+}
 /* What stands in for the rows not drawn, above and below the ones in view. */
 .review-list__spacer {
   padding: 0;
   border: 0;
 }
+/*
+ * The row being looked at: a ring all the way round, in the accent, and the raised surface.
+ *
+ * **Not the left edge alone**, which is the verdict's (below): a selected row that was then
+ * accepted turned green there and nothing was left to say which row was selected (user,
+ * 2026-11-16). The ring is inside the border, so the verdict's edge stays its own colour and
+ * the two are read apart. Not yellow, which is `Unsure`'s. A selected row with no verdict keeps
+ * its accent edge, so the ring closes on that side.
+ */
 .review-row[data-current='yes'] {
   border-left-color: var(--accent);
   background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 .review-row[data-verdict='accept'] {
   border-left-color: var(--status-ok, #4caf50);
@@ -11316,7 +11347,8 @@ details[open] > summary.tile__label {
   gap: 2px;
 }
 .review-row__page,
-.review-row__verdict {
+.review-row__verdict,
+.review-row__extend {
   font-size: 10px;
   padding: 3px 6px;
   border: 1px solid var(--border);
@@ -11325,15 +11357,30 @@ details[open] > summary.tile__label {
   color: var(--text-secondary);
   cursor: pointer;
 }
-/* Off — an arrow at the end of the list, or the verdicts of a piece Submit has merged. */
+/*
+ * Off — an arrow at the end of the list, the verdicts of a piece Submit has merged or that is in
+ * the neuron already, or a piece that cannot be extended.
+ */
 .review-row__page:disabled,
-.review-row__verdict:disabled {
+.review-row__verdict:disabled,
+.review-row__extend:disabled {
   opacity: 0.35;
   cursor: default;
 }
-.review-row__verdict[aria-pressed='true'] {
+.review-row__verdict[aria-pressed='true'],
+.review-row__extend[aria-pressed='true'] {
   color: var(--text-primary);
   border-color: currentColor;
+}
+/*
+ * Extend stands a little apart from the verdicts: it is not a fourth verdict but what to do
+ * about one. Pressed, its text is how far the search has got, in tabular figures so a count
+ * going up does not shift the buttons beside it.
+ */
+.review-row__extend {
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------

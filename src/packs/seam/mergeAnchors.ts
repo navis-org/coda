@@ -108,6 +108,11 @@ export type Anchors =
       readonly candidate: MergeEnd
       /** The two supervoxels' Chebyshev distance in chunks — at most `MAX_MERGE_CHUNKS`. */
       readonly chunks: number
+      /**
+       * The root the neuron-side supervoxel is under, as the chunkedgraph has it: the neuron's,
+       * or one of `AnchorPair.alsoNeuron`. Set by `anchorMerge`; `anchorsInBox` reads one root.
+       */
+      readonly onRoot?: string
     }
   | { readonly ok: false; readonly reason: AnchorRefusal; readonly message: string }
 
@@ -119,6 +124,14 @@ export type Anchors =
 export type AnchorPair = Pick<Candidate, 'contactNm' | 'minDistUm'> & {
   readonly neuronRoot: string
   readonly candidateRoot: string
+  /**
+   * Further roots that count as the neuron's side: the accepted pieces between the neuron and
+   * this one that are **not merged yet**, where a neuron is being grown piece by piece
+   * (`docs/seam-extend-plan.md`). The search measured the contact to the neuron *and* those
+   * pieces read as one object, so the voxel the candidate touches is on whichever of them is
+   * there — usually the piece it was accepted on. `Anchors.onRoot` says which.
+   */
+  readonly alsoNeuron?: readonly string[]
 }
 
 /**
@@ -300,15 +313,16 @@ export async function anchorMerge(
   options: CaveRequestOptions,
 ): Promise<Anchors> {
   const { neuronRoot, candidateRoot, contactNm } = pair
-  for (const id of [neuronRoot, candidateRoot]) {
+  const also = (pair.alsoNeuron ?? []).filter((id) => id !== neuronRoot)
+  for (const id of [neuronRoot, candidateRoot, ...also]) {
     if (!isNodeId(id)) {
       return refuse('bad-id', `Not a segment id: ${id}.`)
     }
   }
-  if (neuronRoot === candidateRoot) {
+  if (neuronRoot === candidateRoot || also.includes(candidateRoot)) {
     return refuse(
       'same-root',
-      `The neuron and the candidate are the same segment, ${neuronRoot}.`,
+      `The candidate, ${candidateRoot}, is itself the neuron or a piece being merged into it.`,
     )
   }
   if (!contactNm || !contactNm.every(Number.isFinite)) {
@@ -332,8 +346,15 @@ export async function anchorMerge(
   } catch {
     return refuse('outside-volume', 'The contact lies outside the segmentation volume.')
   }
-  const read = await labelledBox(volume, volume.scale, box, options)
-  return anchorsInBox(
+  /*
+   * The neuron's side read as one root, where it is several (`alsoNeuron`): the alias is for
+   * *finding* the nearest voxel only. The anchor is a real supervoxel either way, and the root
+   * it is under — as the chunkedgraph has it now, with no alias — is read back below.
+   */
+  const alias =
+    also.length > 0 ? new Map(also.map((id) => [BigInt(id), BigInt(neuronRoot)])) : undefined
+  const read = await labelledBox(volume, volume.scale, box, options, alias)
+  const found = anchorsInBox(
     read,
     BigInt(neuronRoot),
     BigInt(candidateRoot),
@@ -341,4 +362,13 @@ export async function anchorMerge(
     reachNm,
     volume.layout,
   )
+  if (!found.ok) return found
+  const under = volume.roots.get(BigInt(found.neuron.supervoxel))
+  if (under === undefined) {
+    throw new Error(
+      `seam merge anchors: no root was read for supervoxel ${found.neuron.supervoxel}, so which ` +
+        'piece the merge point is on is unknown.',
+    )
+  }
+  return { ...found, onRoot: String(under) }
 }

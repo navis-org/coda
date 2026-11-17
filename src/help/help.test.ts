@@ -262,6 +262,46 @@ describe('building a figure', () => {
     expect(figure.wires.every((w) => w.path.startsWith('M '))).toBe(true)
   })
 
+  it('draws a backwards reference wire dotted, under the cards and out of the layering', () => {
+    const figure = buildFigure(
+      'coda-graph',
+      [
+        'seam:suggestMerges as search',
+        'seam:review as review',
+        'search:tips -> review:tips',
+        'search:candidates -> review:candidates',
+        'review:extended -> search:review',
+      ].join('\n'),
+    )
+    expect(figure.problems).toEqual([])
+    if (figure.kind !== 'graph') return
+    const [search, review] = figure.cards
+    // Layered by the wires that carry something: the card that searches stays upstream.
+    expect(search!.x).toBeLessThan(review!.x)
+    const back = figure.wires.find((w) => w.toPort === 'review')!
+    expect(back.reference).toBe(true)
+    expect(figure.wires.filter((w) => w.reference)).toHaveLength(1)
+    // Under both cards, and the figure is grown to hold it.
+    const below = Math.max(search!.y + search!.height, review!.y + review!.height)
+    expect(back.path).toContain(` L `)
+    expect(figure.height).toBeGreaterThan(below)
+    expect(figure.width).toBeGreaterThan(review!.x + review!.width)
+    // Into a card in the first column: every card is moved over, so the turn is not clipped.
+    expect(search!.x).toBeGreaterThan(0)
+  })
+
+  it('layers a forward reference wire as any other', () => {
+    const figure = buildFigure(
+      'coda-graph',
+      ['dataset.cave as ds', 'seam:suggestMerges as search', 'ds -> search:dataset'].join('\n'),
+    )
+    expect(figure.problems).toEqual([])
+    if (figure.kind !== 'graph') return
+    expect(figure.wires[0]!.reference).toBe(true)
+    expect(figure.cards[0]!.x).toBeLessThan(figure.cards[1]!.x)
+    expect(figure.wires[0]!.path).not.toContain(' L ')
+  })
+
   it('is deterministic, so a figure is the same on every render', () => {
     expect(buildFigure('coda-graph', NBLAST_CHAIN)).toEqual(
       buildFigure('coda-graph', NBLAST_CHAIN),

@@ -98,6 +98,12 @@ export interface FigureWire {
   family: SocketFamily
   /** An SVG path in the figure's own coordinate space. */
   path: string
+  /**
+   * Into a `reference` input: a wire that names a node rather than carrying its output, drawn
+   * dotted as on the canvas. One that runs backwards — from a card to one upstream of it — is
+   * left out of the layering (`closesLoop`), or it would push the two apart for good.
+   */
+  reference?: true
 }
 
 export interface FigureGraph {
@@ -209,6 +215,10 @@ function wirePath(x1: number, y1: number, x2: number, y2: number): string {
   const d = Math.max(28, Math.abs(x2 - x1) * 0.5)
   return `M ${r(x1)} ${r(y1)} C ${r(x1 + d)} ${r(y1)}, ${r(x2 - d)} ${r(y2)}, ${r(x2)} ${r(y2)}`
 }
+
+/** How far below the cards a backwards reference wire runs, and how wide it turns, px. */
+const BACK_WIRE_GAP = 14
+const BACK_WIRE_TURN = 36
 
 /** Two decimals. A path full of `104.99999999999999` is a diff nobody can read. */
 function r(n: number): number {
@@ -395,8 +405,11 @@ export function buildFigure(
 
   const byAlias = new Map(cards.map((c) => [c.alias, c]))
   const wires = resolveWires(src.wires, byAlias, defs, problems)
-  const { width, height } = layout(cards, wires)
-  attachPaths(wires, byAlias)
+  const laid = layout(
+    cards,
+    wires.filter((wire) => !closesLoop(wire, wires)),
+  )
+  const { width, height } = attachPaths(wires, byAlias, laid)
 
   return {
     kind: 'graph',
@@ -542,6 +555,7 @@ function resolveWires(
       toPort: into.id,
       family: portStyle(out).family,
       path: '',
+      ...(into.reference ? { reference: true as const } : {}),
     })
   }
 
@@ -644,20 +658,84 @@ function layout(
   }
 }
 
-function attachPaths(wires: FigureWire[], cards: ReadonlyMap<string, FigureCard>): void {
+/**
+ * Whether a reference wire runs from a card back to one upstream of it: its source is reached
+ * from its target along the other wires. Only such a wire is kept out of the layering — a
+ * dataset named by the card it also feeds is layered as it always was.
+ */
+function closesLoop(wire: FigureWire, wires: readonly FigureWire[]): boolean {
+  if (!wire.reference) return false
+  const seen = new Set([wire.to])
+  const todo = [wire.to]
+  for (let at = todo.pop(); at !== undefined; at = todo.pop()) {
+    for (const next of wires) {
+      if (next === wire || next.from !== at || seen.has(next.to)) continue
+      if (next.to === wire.from) return true
+      seen.add(next.to)
+      todo.push(next.to)
+    }
+  }
+  return false
+}
+
+function attachPaths(
+  wires: FigureWire[],
+  cards: ReadonlyMap<string, FigureCard>,
+  size: { width: number; height: number },
+): { width: number; height: number } {
+  let { width, height } = size
+  /*
+   * Room on the left for a backwards wire into a card in the first column: its turn reaches
+   * past the card's edge, and the figure's box clips there. Every card moves over by the same
+   * amount, before any path is drawn.
+   */
+  const reach = BACK_WIRE_TURN * 0.75 + 2
+  let short = 0
+  for (const wire of wires) {
+    const from = cards.get(wire.from)
+    const to = cards.get(wire.to)
+    if (!wire.reference || !from || !to || to.x > from.x + from.width) continue
+    short = Math.max(short, reach - to.x)
+  }
+  if (short > 0) {
+    for (const card of cards.values()) card.x += short
+    width += short
+  }
   for (const wire of wires) {
     const from = cards.get(wire.from)
     const to = cards.get(wire.to)
     if (!from || !to) continue
     const out = from.outputs.find((p) => p.id === wire.fromPort)
     const into = to.inputs.find((p) => p.id === wire.toPort)
-    wire.path = wirePath(
-      from.x + from.width,
-      from.y + (out?.y ?? from.height / 2),
-      to.x,
-      to.y + (into?.y ?? to.height / 2),
-    )
+    const x1 = from.x + from.width
+    const y1 = from.y + (out?.y ?? from.height / 2)
+    const x2 = to.x
+    const y2 = to.y + (into?.y ?? to.height / 2)
+    if (!wire.reference || x2 > x1) {
+      wire.path = wirePath(x1, y1, x2, y2)
+      continue
+    }
+    /*
+     * A reference wire running backwards goes **under the cards between its ends**: the canvas'
+     * own curve would pass behind them here, where the cards are drawn over the wires, and
+     * bulge half the distance past either end. The figure grows to hold it.
+     */
+    let below = 0
+    for (const card of cards.values()) {
+      if (card.x + card.width >= x2 && card.x <= x1) {
+        below = Math.max(below, card.y + card.height)
+      }
+    }
+    const y = below + BACK_WIRE_GAP
+    const turn = BACK_WIRE_TURN
+    wire.path =
+      `M ${r(x1)} ${r(y1)} C ${r(x1 + turn)} ${r(y1)}, ${r(x1 + turn)} ${r(y)}, ${r(x1 - turn / 2)} ${r(y)} ` +
+      `L ${r(x2 + turn / 2)} ${r(y)} C ${r(x2 - turn)} ${r(y)}, ${r(x2 - turn)} ${r(y2)}, ${r(x2)} ${r(y2)}`
+    // A cubic reaches three quarters of the way to control points that share an x (`reach`).
+    width = Math.max(width, x1 + reach)
+    height = Math.max(height, y + 2)
   }
+  return { width, height }
 }
 
 // ---------------------------------------------------------------------------

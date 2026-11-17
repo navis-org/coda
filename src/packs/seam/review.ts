@@ -18,6 +18,15 @@
  * The filters and the sort are **presentational**: they narrow what the card lists and change no
  * output at all. A reader hunting for the right threshold should not be re-keying anything.
  *
+ * ## A neuron is extended from here, and searched somewhere else
+ *
+ * `docs/seam-extend-plan.md`. Which accepted pieces are to be extended is a param, `extend`, and
+ * it leaves by `Extended` — a table of `parent`/`piece` pairs that Suggest Merges reads through a
+ * **reference** wire. A reference to this node is answered from its params (`asReference`), so
+ * the search knows what to extend before this node has run, and the wire closes no loop: this
+ * node still takes its tips from that one. The card's Extend button writes the param and runs
+ * the search; `evaluate` starts nothing.
+ *
  * ## Nothing here writes to a chunkedgraph
  *
  * A verdict is a note in the workflow. The merges are made by the card's Submit, through
@@ -40,12 +49,17 @@ import {
   mergesTable,
   recordScopeOf,
 } from './mergeRecord'
+import { EXTENDED_PORT, extendedSchema, extendedTable } from './pieces'
 import { suggestionLayer } from './scene'
 import type { CurrentItem, QueueTip, ScenePiece, Verdict } from './reviewQueue'
 import {
   buildQueue,
   currentOfQueue,
   decodeVerdicts,
+  extendedPairs,
+  LARGE_PIECE_CHUNKS,
+  liveQueue,
+  liveTree,
   pickedNeuron,
   scenePieces,
   tipKey,
@@ -123,6 +137,11 @@ export const reviewNode = packNode({
     { id: 'layers', label: 'Layers', type: T.layers() },
     // Every merge Submit has made or tried from this card, one row each.
     { id: 'merges', label: 'Merges', type: T.table() },
+    /*
+     * The accepted pieces to extend, as `parent`/`piece` pairs. Made for Suggest Merges' `Review`
+     * port, which reads it by reference — from the params, through `asReference` below.
+     */
+    { id: EXTENDED_PORT, label: 'Extended', type: T.table() },
   ],
   params: [
     /*
@@ -159,7 +178,7 @@ export const reviewNode = packNode({
       label: 'Current tip',
       default: '',
       internal: true,
-      help: 'The tip being reviewed, by its `end_uid`. Set by clicking a row.',
+      help: 'The tip being reviewed, as `root|end_uid` — the root the tip is on, since a neuron and each piece it was extended with number their tips from the same start. Set by clicking a row.',
     },
     {
       id: 'rank',
@@ -179,6 +198,21 @@ export const reviewNode = packNode({
       default: '',
       internal: true,
       help: 'The verdicts recorded so far, saved with the workflow.',
+    },
+    /*
+     * Which accepted pieces are extended: verdict keys, `parent/piece`. Written by the card's
+     * Extend button, read with the verdicts by `extendedPairs` — a pair counts only while its
+     * verdict is `accept`. **Data** (it decides which rows there are to review, and what
+     * `Extended` says) and an ordinary undo step.
+     */
+    {
+      id: 'extend',
+      advanced: true,
+      kind: 'string',
+      label: 'Extended pieces',
+      default: '',
+      internal: true,
+      help: 'The accepted pieces whose own open ends are searched, as `parent/piece` pairs. Set by the Extend button on an accepted row.',
     },
     /*
      * What Submit did (`mergeRecord.ts`). Written only by the batch, never by `evaluate` or a
@@ -205,6 +239,19 @@ export const reviewNode = packNode({
       label: 'Show accepted',
       default: true,
       help: 'Also show every candidate you accepted on this neuron in the viewer, in green, wherever the cursor is — the neuron as it will look once you make the merges. With no row selected, the neuron and its accepted pieces are shown and the camera stays where it is.',
+    },
+    /*
+     * **Presentational**: `evaluate` never reads it. It changes what a press on Accept writes,
+     * and what is written — `extend` — is the data. Off by default: the search is started by
+     * hand unless the reader asks otherwise (user, 2026-11-16).
+     */
+    {
+      id: 'autoExtend',
+      kind: 'boolean',
+      label: 'Auto-extend',
+      default: false,
+      presentational: true,
+      help: `Extend each piece as you accept it, without pressing Extend: its own open ends are searched and listed beneath it. A large piece — ${LARGE_PIECE_CHUNKS} level-2 chunks or more — is left to its Extend button, since searching one can take minutes. Switching this on starts nothing: pieces accepted earlier keep their Extend button.`,
     },
     {
       id: 'minConfidence',
@@ -288,7 +335,18 @@ export const reviewNode = packNode({
     current: T.neurons(currentSchema()),
     layers: T.layers(),
     merges: T.table(mergesSchema()),
+    [EXTENDED_PORT]: T.table(extendedSchema()),
   }),
+
+  /*
+   * What a reference wire from `Extended` is handed, and keyed on: the pairs, from the params
+   * alone. One function with `evaluate`'s own answer for that output, so the search and anything
+   * wired to the output by an ordinary wire read the same table.
+   */
+  asReference: (params, output) =>
+    output === EXTENDED_PORT
+      ? extendedTable(extendedPairs(params.extend, decodeVerdicts(params.verdicts)))
+      : undefined,
 
   validate: (ctx) => {
     const issues: string[] = []
@@ -326,8 +384,12 @@ export const reviewNode = packNode({
           'through, so the node needs both of Merge Suggestions’ tables.',
       )
     }
-    const queue = buildQueue(tips, candidates)
+    const all = buildQueue(tips, candidates)
     const verdicts = decodeVerdicts(ctx.params.verdicts)
+    const pairs = extendedPairs(ctx.params.extend, verdicts)
+    // What there is to review: each neuron's tips and those of the pieces in its tree — as the
+    // params say the tree is now, whatever rows the search has yet to drop.
+    const queue = liveQueue(all, liveTree(all, pairs))
     // The cursor resolves within the picked neuron only, so a cursor left on another neuron's
     // tip — after the fallback to the first, or a hand edit — shows nothing rather than a pair
     // from a neuron the card is not on.
@@ -382,6 +444,8 @@ export const reviewNode = packNode({
     )
 
     return {
+      // Every row that came in passes through, a hidden piece's among them — but a verdict is
+      // folded on only where it is read: on a row that is listed, as `Verdicts` has it.
       tips: withVerdicts(tips, queue, verdicts),
       verdicts: verdictsTable(queue, verdicts),
       current: currentPieces(pieces, here),
@@ -390,6 +454,7 @@ export const reviewNode = packNode({
         items: [...layersFrom(ctx.input('layers')), layer.layer],
       } satisfies LayersValue,
       merges: mergesTable(record),
+      [EXTENDED_PORT]: extendedTable(pairs),
     }
   },
 })

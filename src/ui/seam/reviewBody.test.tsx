@@ -59,6 +59,10 @@ vi.mock('./mergeSession', () => ({
 
 const TYPE = 'seam:review'
 
+const NEURON = '720575940621522189'
+/** The cursor on one of the neuron's own tips, as `current` holds it. */
+const at = (endUid: number) => `${NEURON}|${endUid}`
+
 const TIPS: TableValue = makeTable(
   tableSchema(
     column(ID_COLUMN_NAME, 'str'),
@@ -150,6 +154,9 @@ const TWO_CANDIDATES: TableValue = makeTable(CANDIDATES.schema, {
   shown: [...CANDIDATES.data['shown']!, true],
 })
 
+/** Whether `draw` wires the card's `Extended` back into a Suggest Merges node. */
+let wiredBack = false
+
 function draw(
   params: ParamValues = {},
   compact = true,
@@ -164,8 +171,33 @@ function draw(
     position: { x: 0, y: 0 },
     params: defaultParams(def),
   })
-  useGraphStore.setState({ graph } as never)
+  /*
+   * With the dotted wire back to a Suggest Merges node where a test asks for it. The node the
+   * card is drawn from carries the params, in the store too: Extend writes through the store.
+   */
   const node = { ...graph.nodes[0]!, params: { ...defaultParams(def), ...params } }
+  useGraphStore.setState({
+    graph: {
+      ...graph,
+      nodes: [
+        node,
+        ...(wiredBack
+          ? [{ id: 's1', type: 'seam:suggestMerges', position: { x: 0, y: 0 }, params: {} }]
+          : []),
+      ],
+      edges: wiredBack
+        ? [
+            {
+              id: 'back',
+              source: 'r1',
+              sourceHandle: 'extended',
+              target: 's1',
+              targetHandle: 'review',
+            },
+          ]
+        : [],
+    },
+  } as never)
   const written: Record<string, ParamValue> = {}
   const inputValues: Record<string, Value | undefined> = { tips, candidates, dataset }
   render(
@@ -215,7 +247,7 @@ describe('the review card', () => {
 
   /** The queue is the card's job; the picture is one ⤢ away. */
   it('draws no viewer on the card', () => {
-    draw({ current: '11' })
+    draw({ current: at(11) })
     expect(document.querySelector('.review-body__viewer')).toBeNull()
     expect(document.querySelector('.review-list')).toBeTruthy()
   })
@@ -274,7 +306,7 @@ describe('the review card', () => {
     const written = draw({ mode: 'candidate' })
     // 0.12 is tip 11's rank 2 — the second row once sorted by confidence.
     fireEvent.click(rows()[1]!.querySelector('.review-row__pick')!)
-    expect(written).toEqual({ current: '11', rank: 2 })
+    expect(written).toEqual({ current: at(11), rank: 2 })
   })
 
   /** The per-candidate number is in the facts in both modes, so the two show the same things. */
@@ -327,13 +359,13 @@ describe('the review card', () => {
 
   /** Clicking is what moves the viewer, and it always opens on the suggestion. */
   it('selects a tip and resets to its first candidate', () => {
-    const written = draw({ current: '22', rank: 1 })
+    const written = draw({ current: at(22), rank: 1 })
     fireEvent.click(rows()[0]!.querySelector('.review-row__pick')!)
-    expect(written).toEqual({ current: '11', rank: 1 })
+    expect(written).toEqual({ current: at(11), rank: 1 })
   })
 
   it('pages through the current tip’s candidates, and stops at the ends', () => {
-    const written = draw({ current: '11', rank: 1 })
+    const written = draw({ current: at(11), rank: 1 })
     const row = rows()[0]!
     const [back, forward] = [...row.querySelectorAll('.review-row__page')]
     // Rank 1 of 2: back is dead, forward moves.
@@ -343,7 +375,7 @@ describe('the review card', () => {
   })
 
   it('offers the arrows only on the row being looked at', () => {
-    draw({ current: '11', rank: 1 })
+    draw({ current: at(11), rank: 1 })
     const other = rows()[1]!
     for (const button of other.querySelectorAll('.review-row__page')) {
       expect((button as HTMLButtonElement).disabled).toBe(true)
@@ -355,14 +387,14 @@ describe('the review card', () => {
    * said "not a merge" means that one, not the tip's first.
    */
   it('records a verdict against the candidate being shown', () => {
-    const written = draw({ current: '11', rank: 2 })
+    const written = draw({ current: at(11), rank: 2 })
     fireEvent.click(rows()[0]!.querySelectorAll('.review-row__verdict')[1]!)
     expect(written['verdicts']).toBe('720575940621522189/648518346356867476=reject')
   })
 
   it('clears a verdict when the same one is pressed again', () => {
     const written = draw({
-      current: '11',
+      current: at(11),
       rank: 1,
       verdicts: '720575940621522189/648518346368395605=accept',
     })
@@ -433,13 +465,13 @@ describe('the review card', () => {
    * edit, so a single undo puts the reader back where they were.
    */
   it('switches neuron and lands on its top row, in one step', () => {
-    draw({ current: '22', rank: 1 }, true, TWO_CANDIDATES, TWO_TIPS)
+    draw({ current: at(22), rank: 1 }, true, TWO_CANDIDATES, TWO_TIPS)
     const before = useGraphStore.getState().past.length
     fireEvent.change(screen.getByRole('combobox', { name: 'Neuron' }), {
       target: { value: OTHER },
     })
     const node = useGraphStore.getState().graph.nodes[0]!
-    expect(node.params).toMatchObject({ neuron: OTHER, current: '33', rank: 1 })
+    expect(node.params).toMatchObject({ neuron: OTHER, current: `${OTHER}|33`, rank: 1 })
     expect(useGraphStore.getState().past.length).toBe(before + 1)
   })
 
@@ -751,5 +783,344 @@ describe('submitPress', () => {
     expect(submitPress({ ...ready, submitting: 'other', sourceId: 'neuprint' })).toEqual({
       blocked: expect.stringMatching(/Only a CAVE dataset/),
     })
+  })
+})
+
+/**
+ * Extending a neuron from the card (`docs/seam-extend-plan.md`, phase 5).
+ *
+ * The tables are what Suggest Merges publishes once a piece is extended: the piece's tips beneath
+ * the neuron's, `ID` the piece and `seed` the neuron — and the piece's open end is **tip 11, the
+ * same number as one of the neuron's**, so anything that reads a tip by its number alone shows
+ * up here as two rows lit, or the wrong one written.
+ */
+describe('extending a neuron from the review card', () => {
+  const PIECE = '648518346368395605'
+  const SECOND = '648518347608868926'
+  const NEXT = '648518346300000009'
+  const grownTips = (searched: boolean | null): TableValue =>
+    makeTable(
+      tableSchema(
+        ...TIPS.schema.columns,
+        column('seed', 'str'),
+        column('steps', 'i64'),
+        column('junction', 'bool'),
+        column('searched', 'bool'),
+      ),
+      {
+        [ID_COLUMN_NAME]: [NEURON, NEURON, PIECE, PIECE],
+        end_uid: [11, 22, 0, 11],
+        kind: ['tip', 'kink', 'tip', 'tip'],
+        x: [1, 4, 7, 8],
+        y: [2, 5, 7, 8],
+        z: [3, 6, 7, 8],
+        r: [0.91, 0.42, null, 0.3],
+        shown: [true, false, null, true],
+        seed: [NEURON, NEURON, NEURON, NEURON],
+        steps: [0, 0, 1, 1],
+        junction: [false, false, true, false],
+        searched: [true, true, false, searched],
+      },
+    )
+  /** The piece's end lists `candidateId`: a new piece by default. */
+  const grownCandidates = (candidateId = NEXT): TableValue =>
+    makeTable(CANDIDATES.schema, {
+      ...CANDIDATES.data,
+      [ID_COLUMN_NAME]: [...CANDIDATES.data[ID_COLUMN_NAME]!, PIECE],
+      end_uid: [...CANDIDATES.data['end_uid']!, 11],
+      candidateId: [...CANDIDATES.data['candidateId']!, candidateId],
+      rank: [...CANDIDATES.data['rank']!, 1],
+      vol_um3: [...CANDIDATES.data['vol_um3']!, 1],
+      n_l2: [...CANDIDATES.data['n_l2']!, 3],
+      conf: [...CANDIDATES.data['conf']!, 0.2],
+      contact_x: [...CANDIDATES.data['contact_x']!, 14],
+      contact_y: [...CANDIDATES.data['contact_y']!, 24],
+      contact_z: [...CANDIDATES.data['contact_z']!, 34],
+      shown: [...CANDIDATES.data['shown']!, true],
+    })
+  const ACCEPTED = `${NEURON}/${PIECE}=accept`
+  const EXTENDED = { verdicts: ACCEPTED, extend: `${NEURON}/${PIECE}` }
+  const runNode = vi.fn(async () => {})
+  /** The search node's state as the card reads it. */
+  let searchState = 'idle'
+  const extendButtons = () => [
+    ...document.querySelectorAll<HTMLButtonElement>('.review-row__extend'),
+  ]
+  const stored = () => useGraphStore.getState().graph.nodes[0]!.params
+  const real = useGraphStore.getState()
+
+  beforeEach(() => {
+    wiredBack = true
+    searchState = 'idle'
+    runNode.mockClear()
+    useGraphStore.setState({
+      runNode,
+      nodeInfo: (id: string) => (id === 's1' ? { state: searchState } : real.nodeInfo(id)),
+    } as never)
+  })
+  afterEach(() => {
+    wiredBack = false
+    useGraphStore.setState({ runNode: real.runNode, nodeInfo: real.nodeInfo } as never)
+  })
+
+  it('offers Extend on an accepted row, and nowhere else', () => {
+    draw({ verdicts: `${ACCEPTED};${NEURON}/${SECOND}=reject` })
+    expect(rows()).toHaveLength(2)
+    expect(rows()[0]!.querySelector('.review-row__extend')?.textContent).toBe('Extend')
+    expect(rows()[1]!.querySelector('.review-row__extend')).toBeNull()
+  })
+
+  /** An accept starts nothing, and neither does drawing the card. */
+  it('starts nothing until it is pressed', () => {
+    draw({ verdicts: ACCEPTED })
+    expect(runNode).not.toHaveBeenCalled()
+    expect(stored()['extend']).toBe('')
+  })
+
+  it('writes the pair and runs the search it is wired back to, in one step', () => {
+    draw({ verdicts: ACCEPTED })
+    const before = useGraphStore.getState().past.length
+    fireEvent.click(extendButtons()[0]!)
+    expect(stored()['extend']).toBe(`${NEURON}/${PIECE}`)
+    expect(useGraphStore.getState().past.length).toBe(before + 1)
+    expect(runNode).toHaveBeenCalledTimes(1)
+    expect(runNode).toHaveBeenCalledWith('s1')
+  })
+
+  it('is off, with the reason, where nothing is wired back', () => {
+    wiredBack = false
+    draw({ verdicts: ACCEPTED })
+    const button = extendButtons()[0]!
+    expect(button.disabled).toBe(true)
+    expect(button.title).toMatch(/Wire this card’s `Extended` output/)
+    expect(button.title).toMatch(/published set cannot be extended/)
+  })
+
+  describe('with Auto-extend on', () => {
+    const accept = (row: Element) =>
+      row.querySelector<HTMLButtonElement>('.review-row__verdict[data-verdict="accept"]')!
+
+    it('is a field on the card, off unless asked for', () => {
+      draw()
+      const labels = [...document.querySelectorAll('.param__label')].map((n) => n.textContent)
+      expect(labels).toContain('Auto-extend')
+      expect(stored()['autoExtend']).toBe(false)
+    })
+
+    it('extends a piece as it is accepted: one edit, and the search is run', () => {
+      draw({ autoExtend: true })
+      const before = useGraphStore.getState().past.length
+      fireEvent.click(accept(rows()[0]!))
+      expect(stored()['verdicts']).toBe(ACCEPTED)
+      expect(stored()['extend']).toBe(`${NEURON}/${PIECE}`)
+      expect(useGraphStore.getState().past.length).toBe(before + 1)
+      expect(runNode).toHaveBeenCalledTimes(1)
+      expect(runNode).toHaveBeenCalledWith('s1')
+    })
+
+    /** Switching it on is not a press on Accept. */
+    it('starts nothing for a piece accepted earlier, which keeps its button', () => {
+      draw({ autoExtend: true, verdicts: ACCEPTED })
+      expect(runNode).not.toHaveBeenCalled()
+      expect(stored()['extend']).toBe('')
+      expect(extendButtons()[0]!.textContent).toBe('Extend')
+    })
+
+    /** 61 chunks: accepted, and left to its button, which says why. */
+    it('leaves a large piece to its button', () => {
+      const written = draw({ autoExtend: true })
+      fireEvent.click(accept(rows()[1]!))
+      expect(written['verdicts']).toBe(`${NEURON}/${SECOND}=accept`)
+      expect(stored()['extend']).toBe('')
+      expect(runNode).not.toHaveBeenCalled()
+      cleanup()
+      draw({ autoExtend: true, verdicts: `${NEURON}/${SECOND}=accept` })
+      expect(extendButtons()[0]!.textContent).toBe('Extend (large)')
+      expect(extendButtons()[0]!.title).toMatch(
+        /Auto-extend leaves a piece this size to this button/,
+      )
+    })
+
+    it('extends nothing where nothing is wired back', () => {
+      wiredBack = false
+      const written = draw({ autoExtend: true })
+      fireEvent.click(accept(rows()[0]!))
+      expect(written['verdicts']).toBe(ACCEPTED)
+      expect(stored()['extend']).toBe('')
+      expect(runNode).not.toHaveBeenCalled()
+    })
+  })
+
+  /**
+   * By confidence the piece's end (0.30) sorts below both of the neuron's tips (0.91, 0.42). It
+   * is drawn straight under the row its piece was accepted on, a step in.
+   */
+  it('lists the piece’s open end beneath the row the piece was accepted on, a step in', () => {
+    draw(EXTENDED, true, grownCandidates(), grownTips(true))
+    // The neuron's two tips and the piece's one open end; the end it joins by is not listed.
+    expect(rows()).toHaveLength(3)
+    expect(rows().map((row) => row.getAttribute('data-depth'))).toEqual(['0', '1', '0'])
+    expect(rows()[0]!.textContent).toContain(PIECE)
+    const piece = rows()[1]!
+    expect(piece.textContent).toContain(NEXT)
+    expect((piece as HTMLElement).style.getPropertyValue('--depth')).toBe('1')
+    // Where it sits says which piece it is on; the row's name still says it in words.
+    expect(piece.querySelector('.review-row__facts')?.textContent).not.toContain('on piece')
+    expect(piece.querySelector('.review-row__pick')?.getAttribute('aria-label')).toBe(
+      `Show tip 11 of piece ${PIECE} and candidate ${NEXT}`,
+    )
+    expect(screen.getByText('1 piece extended')).toBeTruthy()
+    expect(screen.getByText('3 tips')).toBeTruthy()
+  })
+
+  /**
+   * Accepted at rank 2 and extended: with the cursor elsewhere a tip's row shows its first
+   * candidate — except here, where the rows beneath it would otherwise be about a piece the row
+   * above them does not name.
+   */
+  it('shows the extended piece on the row its ends hang beneath, and opens on it', () => {
+    const LOWER = '648518346356867476'
+    const tips = grownTips(true)
+    const lower: TableValue = makeTable(tips.schema, {
+      ...tips.data,
+      [ID_COLUMN_NAME]: [NEURON, NEURON, LOWER, LOWER],
+    })
+    const candidates = grownCandidates()
+    const written = draw(
+      { verdicts: `${NEURON}/${LOWER}=accept`, extend: `${NEURON}/${LOWER}` },
+      true,
+      makeTable(candidates.schema, {
+        ...candidates.data,
+        [ID_COLUMN_NAME]: [NEURON, NEURON, NEURON, LOWER],
+      }),
+      lower,
+    )
+    expect(rows().map((row) => row.getAttribute('data-depth'))).toEqual(['0', '1', '0'])
+    expect(rows()[0]!.querySelector('.review-row__id')?.textContent).toContain(LOWER)
+    expect(rows()[0]!.querySelector('.review-row__extend')?.textContent).toBe('1 end searched')
+    fireEvent.click(rows()[0]!.querySelector('.review-row__pick')!)
+    expect(written).toEqual({ current: at(11), rank: 2 })
+  })
+
+  /** Both roots have a tip 11. The cursor is on one of them. */
+  it('lights the one row the cursor is on, and writes the root with the number', () => {
+    const written = draw(
+      { ...EXTENDED, current: `${PIECE}|11` },
+      true,
+      grownCandidates(),
+      grownTips(true),
+    )
+    const lit = rows().filter((row) => row.getAttribute('data-current') === 'yes')
+    expect(lit).toHaveLength(1)
+    expect(lit[0]!.textContent).toContain(NEXT)
+    fireEvent.click(lit[0]!.querySelector('.review-row__pick')!)
+    expect(written).toEqual({ current: `${PIECE}|11`, rank: 1 })
+    // And a verdict there is about the piece and its candidate, not the neuron and it.
+    fireEvent.click(lit[0]!.querySelector('.review-row__verdict')!)
+    // (The piece's id sorts before the neuron's, and the param is written sorted.)
+    expect(written['verdicts']).toBe(`${PIECE}/${NEXT}=accept;${NEURON}/${PIECE}=accept`)
+  })
+
+  /**
+   * The card's own part: the search node's state and the rows that have arrived. The wording of
+   * every state is `extendLabel`'s, held in `reviewQueue.test.ts`.
+   */
+  it.each<[string, string, TableValue | undefined, string]>([
+    ['its tips not in yet', 'running', undefined, 'waiting…'],
+    ['a search stopped part way', 'idle', grownTips(null), '0 of 1 end searched'],
+    ['every end searched', 'ok', grownTips(true), '1 end searched'],
+  ])('says how far the search has got, with %s', (_, state, tips, label) => {
+    searchState = state
+    draw(EXTENDED, true, grownCandidates(), tips ?? TIPS)
+    const button = extendButtons()[0]!
+    expect(button.getAttribute('aria-pressed')).toBe('true')
+    expect(button.textContent).toBe(label)
+  })
+
+  it('stops extending on a second press, running nothing, and the rows go at once', () => {
+    draw(EXTENDED, true, grownCandidates(), grownTips(true))
+    const button = extendButtons()[0]!
+    expect(button.title).toMatch(
+      /Press to stop extending it, which takes its ends off the list/,
+    )
+    fireEvent.click(button)
+    expect(stored()['extend']).toBe('')
+    expect(runNode).not.toHaveBeenCalled()
+    cleanup()
+    // The same tables, the search not having run again: the piece's rows are not listed.
+    draw({ verdicts: ACCEPTED }, true, grownCandidates(), grownTips(true))
+    expect(rows()).toHaveLength(2)
+    expect(document.body.textContent).not.toContain(NEXT)
+  })
+
+  it('takes a piece out of the extended ones when it is un-accepted, and says so first', () => {
+    draw(
+      {
+        ...EXTENDED,
+        verdicts: `${ACCEPTED};${PIECE}/${NEXT}=accept`,
+        extend: `${NEURON}/${PIECE};${PIECE}/${NEXT}`,
+      },
+      true,
+      grownCandidates(),
+      grownTips(true),
+    )
+    const row = rows().find(
+      (r) => r.textContent?.includes(PIECE) && !r.textContent.includes(NEXT),
+    )!
+    const reject = row.querySelectorAll<HTMLButtonElement>('.review-row__verdict')[1]!
+    expect(reject.title).toMatch(
+      /changing its verdict takes its ends, and those of the 1 piece extended beyond it, off the list/,
+    )
+    const before = useGraphStore.getState().past.length
+    fireEvent.click(reject)
+    expect(stored()['verdicts']).toBe(`${PIECE}/${NEXT}=accept;${NEURON}/${PIECE}=reject`)
+    // The piece beyond keeps its entry, unreachable until this one is extended again.
+    expect(stored()['extend']).toBe(`${PIECE}/${NEXT}`)
+    expect(useGraphStore.getState().past.length).toBe(before + 1)
+    expect(runNode).not.toHaveBeenCalled()
+  })
+
+  /** A second accept of one piece would be a second merge of it. */
+  it('marks a candidate that is in the neuron already, and fixes its verdict', () => {
+    draw(
+      { ...EXTENDED, verdicts: `${ACCEPTED};${NEURON}/${SECOND}=accept` },
+      true,
+      // The piece's end lists the piece already accepted on the neuron's tip 22.
+      grownCandidates(SECOND),
+      grownTips(true),
+    )
+    const row = rows().find((r) => r.getAttribute('data-depth') === '1')!
+    expect(row.querySelector('.review-row__merged')?.textContent).toBe('in this neuron')
+    const verdicts = [...row.querySelectorAll<HTMLButtonElement>('.review-row__verdict')]
+    expect(verdicts.every((button) => button.disabled)).toBe(true)
+    expect(row.querySelector('.review-row__extend')).toBeNull()
+    // Where it was accepted, it is an ordinary accepted row.
+    const own = rows().find((r) => r.textContent?.includes('kink'))!
+    expect(own.querySelector('.review-row__merged')).toBeNull()
+    expect(own.querySelector<HTMLButtonElement>('.review-row__verdict')!.disabled).toBe(false)
+  })
+
+  /** Submit takes a neuron grown piece by piece as it takes any other: the plan is a tree. */
+  it('offers Submit for a neuron with extended pieces', () => {
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    const dataset: Value = {
+      kind: 'dataset',
+      sourceId: 'cave',
+      datasetId: 'test_stack:1',
+      label: 'test',
+    }
+    draw(EXTENDED, true, grownCandidates(), grownTips(true), dataset)
+    const submit = document.querySelector<HTMLButtonElement>('.review-body__submit')!
+    expect(submit.disabled).toBe(false)
+    fireEvent.click(submit)
+    // The whole live queue goes with it: the piece's tips are part of this neuron's.
+    const request = openSubmit.mock.calls.at(-1)![0] as {
+      reviewedRoot: string
+      queue: unknown[]
+    }
+    expect(request.reviewedRoot).toBe(NEURON)
+    expect(request.queue).toHaveLength(3)
+    resetCredentials()
+    openSubmit.mockReset()
   })
 })

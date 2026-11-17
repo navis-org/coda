@@ -443,6 +443,10 @@ describe('a node’s cache lifetime', () => {
   let downstream = 0
   /** When the stored copy was made — what a run that does not refresh reports. */
   let storedAt = 0
+  /** How long the source's own `evaluate` takes, on the faked clock. */
+  let takes = 0
+  /** The lifetime each execution was handed. */
+  let handed: Array<number | undefined> = []
 
   registerNode({
     type: 'test.lifetime.source',
@@ -455,8 +459,10 @@ describe('a node’s cache lifetime', () => {
     inferOutputs: () => ({ out: T.table() }),
     evaluate: (ctx) => {
       refreshes.push(ctx.refresh)
+      handed.push(ctx.maxAgeMs)
       if (ctx.refresh) storedAt = Date.now()
       ctx.reportFetched(storedAt)
+      if (takes > 0) vi.setSystemTime(Date.now() + takes)
       return { out: tableFromRows(tableSchema(column('x', 'i64')), [{ x: 1 }]) }
     },
   })
@@ -499,6 +505,8 @@ describe('a node’s cache lifetime', () => {
     refreshes = []
     downstream = 0
     storedAt = Date.now()
+    takes = 0
+    handed = []
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -515,6 +523,29 @@ describe('a node’s cache lifetime', () => {
     const summary = await sched.run(graph, { mode: 'full' })
     expect(summary.executed).toEqual([])
     expect(refreshes).toEqual([false])
+  })
+
+  it('hands the node its lifetime, and none where nobody chose one', async () => {
+    await makeScheduler().run(chain(HOUR), { mode: 'full' })
+    await makeScheduler().run(chain(undefined), { mode: 'full' })
+    // So a node with a cache of its own can leave out what is too old the first time.
+    expect(handed).toEqual([HOUR, undefined])
+  })
+
+  it('does not run a node twice for having taken long', async () => {
+    // A copy 50 minutes old under a one-hour lifetime, read by a node that takes 20 minutes. It
+    // was inside its lifetime when it was read; asked of the moment the node *finished*, the
+    // backstop would run the whole twenty minutes again.
+    storedAt = Date.now() - 50 * 60 * 1000
+    takes = 20 * 60 * 1000
+    await makeScheduler().run(chain(HOUR), { mode: 'full' })
+    expect(refreshes).toEqual([false])
+  })
+
+  it('still reads the server again for a copy that was too old when the node started', async () => {
+    storedAt = Date.now() - 2 * HOUR
+    await makeScheduler().run(chain(HOUR), { mode: 'full' })
+    expect(refreshes).toEqual([false, true])
   })
 
   it('lapses past it: stale downstream too, outputs kept, and the re-run reads the server', async () => {

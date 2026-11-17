@@ -196,6 +196,24 @@ export async function labelledBox(
   scale: VolumeScale,
   box: VoxelBox,
   options: CaveRequestOptions,
+  /**
+   * Roots to write as another root in this box — an accepted piece's path read as the neuron it
+   * is being extended into (`pieces.ts`), so everything that measures the box sees one object
+   * where the segmentation has several.
+   *
+   * **Per call, and that is the decision.** It was a field on the reader for a round, set before
+   * a piece's ends and cleared after, and sound only for as long as nothing read a box for the
+   * next root while the last one was still being scored — which is exactly what the search's
+   * one-ahead does within a root, and what a prefetch across pieces would do between them. A box
+   * read under the wrong alias is a full, believable pool. Never written into `volume.roots`:
+   * that map stays what the chunkedgraph said, shared by every box at this instant.
+   *
+   * **Required, though usually `undefined`**, so that every caller says which it means. Optional,
+   * it was left off the assessor's patch box when the field became this parameter: the search
+   * read a piece as part of its neuron and the patches did not, which scored one piece's end
+   * against a box the neuron was barely in and failed the next for want of any voxel of it.
+   */
+  alias: ReadonlyMap<bigint, bigint> | undefined,
 ): Promise<RootedBox> {
   const read = await readLabelBox(volume.base, scale, box, {
     ...options,
@@ -203,18 +221,35 @@ export async function labelledBox(
     chunks: volume.chunks,
   })
   await resolveRoots(volume, read.labels, options)
-  // A plain loop: a typed array's `from` with a map function takes the iterator path, about twice
-  // the cost per label on the search's hot path (measured 2026-11-16, 14,000 labels).
-  const roots = new BigUint64Array(read.labels.length)
-  for (let i = 0; i < roots.length; i++) roots[i] = volume.roots.get(read.labels[i]!)!
   return {
     labels: read.labels,
     index: read.index,
     size: read.size,
-    roots,
+    roots: rootsOf(read.labels, volume.roots, alias),
     resolutionNm: scale.resolution,
     loVoxels: box.lo,
   }
+}
+
+/**
+ * Each supervoxel's root, in the order given, with `alias` applied — `labelledBox` says what for.
+ *
+ * Its own function so the one rule in it can be tested without a volume to read voxels from.
+ */
+export function rootsOf(
+  labels: BigUint64Array,
+  known: ReadonlyMap<bigint, bigint>,
+  alias: ReadonlyMap<bigint, bigint> | undefined,
+): BigUint64Array {
+  // A plain loop: a typed array's `from` with a map function takes the iterator path, about twice
+  // the cost per label on the search's hot path (measured 2026-11-16, 14,000 labels).
+  const roots = new BigUint64Array(labels.length)
+  const renamed = alias !== undefined && alias.size > 0
+  for (let i = 0; i < roots.length; i++) {
+    const root = known.get(labels[i]!)!
+    roots[i] = renamed ? (alias.get(root) ?? root) : root
+  }
+  return roots
 }
 
 /**

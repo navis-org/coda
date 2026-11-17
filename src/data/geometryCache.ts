@@ -78,7 +78,7 @@ const BUDGET_BYTES = 256 * 1024 * 1024
  * 250 ms is four repaints a second, which reads as continuous fill and leaves a 300-body sweep
  * publishing a dozen times rather than three hundred.
  */
-const PUBLISH_INTERVAL_MS = 250
+export const PUBLISH_INTERVAL_MS = 250
 
 interface Entry {
   value: unknown

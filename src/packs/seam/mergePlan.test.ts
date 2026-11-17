@@ -10,8 +10,8 @@ import { describe, expect, it } from 'vitest'
 import type { GrapheneSource } from '../../data/cave/graphene'
 import type { GraphLayout } from '../../data/cave/graphLayout'
 import type { AnchorPair, AnchorRefusal, AnchorVolume } from './mergeAnchors'
-import type { PlanRequest, PlanServices } from './mergePlan'
-import { planMerges } from './mergePlan'
+import type { PlannedMerge, PlanRequest, PlanServices } from './mergePlan'
+import { acceptedTree, planMerges, tickedWith, withoutOrphans } from './mergePlan'
 import type { MergeRecordEntry, RecordOutcome } from './mergeRecord'
 import type { Candidate, QueueTip, Verdict } from './reviewQueue'
 import { verdictKey } from './reviewQueue'
@@ -42,10 +42,18 @@ function candidate(id: string, rank: number, minDistUm?: number): Candidate {
   }
 }
 
-function tip(endUid: number, candidates: Candidate[], neuronId = NEURON): QueueTip {
+function tip(
+  endUid: number,
+  candidates: Candidate[],
+  neuronId = NEURON,
+  seed = neuronId,
+): QueueTip {
   return {
     endUid,
     neuronId,
+    seed,
+    junction: false,
+    search: 'done',
     kind: 'tip',
     tipNm: [0, 0, 0],
     r: undefined,
@@ -64,6 +72,8 @@ function services(
     termsPending?: boolean
     chunkedgraph?: boolean
     refuse?: (pair: AnchorPair) => AnchorRefusal | undefined
+    /** Which root the neuron-side anchor is found on; the neuron's own where this says nothing. */
+    onRoot?: (pair: AnchorPair) => string | undefined
     /** Supervoxel → root at the server's now; an unlisted one is under root 0. */
     rootOf?: Record<string, string>
     /** Supervoxel → root at any earlier moment (every root here was made at 1000 ms). */
@@ -101,9 +111,11 @@ function services(
       asked.anchored.push(pair)
       const reason = over.refuse?.(pair)
       if (reason) return { ok: false, reason, message: reason }
+      const onRoot = over.onRoot?.(pair) ?? pair.neuronRoot
       return {
         ok: true,
-        neuron: { supervoxel: `${pair.neuronRoot}1`, positionNm: [0, 0, 0] },
+        onRoot,
+        neuron: { supervoxel: `${onRoot}1`, positionNm: [0, 0, 0] },
         candidate: { supervoxel: `${pair.candidateRoot}1`, positionNm: pair.contactNm! },
         chunks: 0,
       }
@@ -536,5 +548,329 @@ describe('planMerges', () => {
     const plan = await planned(request(two, all, record), services().fake)
     expect(refusals(plan)).toEqual([['8', 'merged-elsewhere']])
     expect(plan.rejected[0]!.message).toMatch(/Merged into another neuron/)
+  })
+})
+
+/**
+ * A neuron grown piece by piece (`docs/seam-extend-plan.md`): a piece accepted on a tip of
+ * another accepted piece, none of it merged before Submit. The plan is a tree from the neuron
+ * outwards.
+ *
+ * The fixture: on the neuron (100), pieces 7 and 8; on 7's tip, piece 9; on 9's tip, piece 11.
+ * **The queue lists the pieces' tips before the neuron's**, so "as the reader met them" would put
+ * a piece ahead of what it is merged onto.
+ */
+describe('planning a neuron grown piece by piece', () => {
+  const queue = [
+    tip(1, [candidate('11', 1, 0.1)], '9', NEURON),
+    tip(1, [candidate('9', 1, 0.1)], '7', NEURON),
+    tip(1, [candidate('7', 1, 0.1), candidate('8', 2, 0.2)]),
+  ]
+  const verdicts = new Map<string, Verdict>([
+    [verdictKey(NEURON, '7'), 'accept'],
+    [verdictKey(NEURON, '8'), 'accept'],
+    [verdictKey('7', '9'), 'accept'],
+    [verdictKey('9', '11'), 'accept'],
+  ])
+  const grown = (record: MergeRecordEntry[] = []): PlanRequest => ({
+    datastack: 'test',
+    queue,
+    reviewedRoot: NEURON,
+    verdicts,
+    record,
+  })
+  /**
+   * The anchor lands on the piece the candidate was accepted on, where that is still its own
+   * root — one of the roots read as the neuron's side — and on the neuron itself otherwise.
+   */
+  const ACCEPTED_ON: Record<string, string> = { '9': '7', '11': '9' }
+  const onParent = (pair: AnchorPair) => {
+    const on = ACCEPTED_ON[pair.candidateRoot]
+    return on !== undefined && pair.alsoNeuron?.includes(on) ? on : undefined
+  }
+
+  it('merges from the neuron outwards, whatever order the queue lists the tips in', async () => {
+    const plan = await planned(grown(), services({ onRoot: onParent }).fake)
+    expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['7', '8', '9', '11'])
+    expect(plan.rejected).toEqual([])
+  })
+
+  it('looks for the neuron end on the pieces between, and says which it landed on', async () => {
+    const { fake, asked } = services({ onRoot: onParent })
+    const plan = await planned(grown(), fake)
+    // The neuron's side: the neuron as it stands, and the pieces on this piece's own way to
+    // it, nearest first — never a piece beside it (8 is no part of 9's side).
+    expect(asked.anchored.map((p) => [p.candidateRoot, p.neuronRoot, p.alsoNeuron])).toEqual([
+      ['7', NEURON, []],
+      ['8', NEURON, []],
+      ['9', NEURON, ['7']],
+      ['11', NEURON, ['9', '7']],
+    ])
+    expect(plan.merges.map((m) => [m.candidateRoot, m.parent, m.needs])).toEqual([
+      ['7', undefined, undefined],
+      ['8', undefined, undefined],
+      ['9', '7', '7'],
+      ['11', '9', '9'],
+    ])
+    // The neuron end is a supervoxel of the piece it landed on.
+    expect(plan.merges[2]!.neuron.supervoxel).toBe('71')
+  })
+
+  /** The candidate touches whichever piece is there: not always the one it was accepted on. */
+  it('needs the piece the anchor landed on, which need not be its parent', async () => {
+    const { fake } = services({
+      onRoot: (pair) =>
+        pair.candidateRoot === '11' ? '7' : pair.candidateRoot === '9' ? NEURON : undefined,
+    })
+    const plan = await planned(grown(), fake)
+    expect(plan.merges.map((m) => [m.candidateRoot, m.parent, m.needs])).toEqual([
+      ['7', undefined, undefined],
+      ['8', undefined, undefined],
+      // On the neuron itself: nothing has to land first, though the ticks still follow 7.
+      ['9', '7', undefined],
+      ['11', '9', '7'],
+    ])
+  })
+
+  /**
+   * A merge point on a piece beside it, or on a root nobody named: nothing the reader accepted
+   * joins the two, and nothing says that end will be part of the neuron when the merge is sent.
+   * That piece is refused — and what hangs on it — and the rest of the plan stands.
+   */
+  it.each(['8', '555'])(
+    'refuses a piece whose merge point is on %s, a root that is not on its way to the neuron',
+    async (elsewhere) => {
+      const { fake } = services({
+        onRoot: (pair) => (pair.candidateRoot === '9' ? elsewhere : onParent(pair)),
+      })
+      const plan = await planned(grown(), fake)
+      expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['7', '8'])
+      expect(refusals(plan)).toEqual([
+        ['9', 'neuron-absent'],
+        ['11', 'parent-refused'],
+      ])
+      expect(plan.rejected[0]!.message).toMatch(
+        new RegExp(`is on ${elsewhere}, which is neither the neuron nor a piece between`),
+      )
+    },
+  )
+
+  it('refuses everything beyond a piece that cannot be merged, and nothing beside it', async () => {
+    const { fake, asked } = services({
+      onRoot: onParent,
+      refuse: (p) => (p.candidateRoot === '7' ? 'too-far' : undefined),
+    })
+    const plan = await planned(grown(), fake)
+    expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['8'])
+    expect(refusals(plan)).toEqual([
+      ['7', 'too-far'],
+      ['9', 'parent-refused'],
+      ['11', 'parent-refused'],
+    ])
+    expect(plan.rejected[1]!.message).toMatch(/^7, which lies between it and the neuron/)
+    // No box is read for a piece with nothing to be merged onto.
+    expect(asked.anchored.map((p) => p.candidateRoot)).toEqual(['7', '8'])
+  })
+
+  it('refuses what hangs on an outdated piece', async () => {
+    const plan = await planned(grown(), services({ onRoot: onParent, stale: ['9'] }).fake)
+    expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['7', '8'])
+    expect(refusals(plan)).toEqual([
+      ['9', 'outdated'],
+      ['11', 'parent-refused'],
+    ])
+  })
+
+  /** A piece this workflow merged already is part of the neuron's root: nothing to wait for. */
+  it('anchors on the neuron as it stands where the piece before is merged already', async () => {
+    const { fake, asked } = services({ onRoot: onParent })
+    const plan = await planned(grown([made(NEURON, '7', '201')]), fake)
+    expect(plan.currentRoot).toBe('201')
+    expect(plan.merges.map((m) => [m.candidateRoot, m.parent, m.needs])).toEqual([
+      // 9 hangs on a piece that is in the neuron: one step out, like 8, and met before it.
+      ['9', undefined, undefined],
+      ['8', undefined, undefined],
+      ['11', '9', '9'],
+    ])
+    expect(asked.anchored.map((p) => [p.candidateRoot, p.neuronRoot, p.alsoNeuron])).toEqual([
+      ['9', '201', []],
+      ['8', '201', []],
+      ['11', '201', ['9']],
+    ])
+    expect(refusals(plan)).toEqual([['7', 'already-merged']])
+  })
+
+  /**
+   * 9 is in the neuron already (its merge point was on the neuron), 7 was never merged and is
+   * outdated now. 11 hangs on 9: what became of 7, further in, does not hold it up.
+   */
+  it('stops a piece’s way at the first piece that is in the neuron already', async () => {
+    const { fake, asked } = services({ onRoot: onParent, stale: ['7'] })
+    const plan = await planned(grown([made(NEURON, '9', '201')]), fake)
+    expect(plan.merges.map((m) => [m.candidateRoot, m.parent, m.needs])).toEqual([
+      ['11', undefined, undefined],
+      ['8', undefined, undefined],
+    ])
+    expect(asked.anchored.find((p) => p.candidateRoot === '11')!.alsoNeuron).toEqual([])
+    expect(refusals(plan)).toEqual([
+      ['9', 'already-merged'],
+      ['7', 'outdated'],
+    ])
+  })
+
+  /** A piece's root heads tips in the queue; that does not make it a neuron under review. */
+  it('does not take a piece of this neuron for another neuron under review', async () => {
+    const plan = await planned(grown(), services({ onRoot: onParent }).fake)
+    expect(plan.merges.map((m) => m.joinsNeuron)).toEqual([false, false, false, false])
+  })
+
+  describe('the accepted pieces as a tree', () => {
+    const row = (neuronId: string, endUid: number, id: string, gap: number) => ({
+      neuronId,
+      endUid,
+      candidate: candidate(id, 1, gap),
+    })
+
+    /** A piece merged already is the neuron: what was accepted on it is one step out. */
+    it('grows from the pieces that are in the neuron already, as from the neuron', () => {
+      const accepted = new Map([
+        ['8', [row(NEURON, 1, '8', 0.1)]],
+        // On 7, merged in an earlier batch, and on 8, which is still its own root.
+        ['12', [row('8', 2, '12', 0.1), row('7', 3, '12', 0.2)]],
+      ])
+      const { pieces, pathOf } = acceptedTree(accepted, [NEURON, '7'])
+      expect(pathOf.get('12')).toEqual([])
+      expect(pieces.get('12')!.map((r) => r.neuronId)).toEqual(['7'])
+    })
+
+    /** The search's and the card's rule (`piecesOf`): the fewest steps from the neuron. */
+    it('puts a piece accepted on the neuron and on a piece of it straight onto the neuron', () => {
+      // 9 is listed on piece 7 (nearer, twice) and on the neuron itself.
+      const accepted = new Map([
+        ['7', [row(NEURON, 1, '7', 0.1)]],
+        ['9', [row('7', 3, '9', 0.05), row(NEURON, 2, '9', 0.2), row('7', 4, '9', 0.3)]],
+      ])
+      const { pieces, pathOf } = acceptedTree(accepted, [NEURON])
+      // Only its row on the neuron: it is merged once, onto one thing.
+      expect(pieces.get('9')!.map((one) => [one.neuronId, one.endUid])).toEqual([[NEURON, 2]])
+      expect(pathOf.get('9')).toEqual([])
+      expect(pathOf.get('7')).toEqual([])
+    })
+
+    it('puts a piece accepted only on a piece onto that piece, with its rows there', () => {
+      const accepted = new Map([
+        ['7', [row(NEURON, 1, '7', 0.1)]],
+        ['9', [row('7', 3, '9', 0.05), row('7', 4, '9', 0.3)]],
+        ['11', [row('9', 1, '11', 0.1)]],
+      ])
+      const { pieces, pathOf } = acceptedTree(accepted, [NEURON])
+      expect(pieces.get('9')!.map((one) => [one.neuronId, one.endUid])).toEqual([
+        ['7', 3],
+        ['7', 4],
+      ])
+      expect(pathOf.get('9')).toEqual(['7'])
+      // Nearest first.
+      expect(pathOf.get('11')).toEqual(['9', '7'])
+    })
+
+    /** Two pieces accepted on the neuron and on each other cannot hold each other up. */
+    it('is not stopped by two pieces accepted on each other as well as on the neuron', () => {
+      const accepted = new Map([
+        ['7', [row('8', 5, '7', 0.01), row(NEURON, 1, '7', 0.2)]],
+        ['8', [row('7', 6, '8', 0.01), row(NEURON, 2, '8', 0.2)]],
+      ])
+      const { pathOf } = acceptedTree(accepted, [NEURON])
+      expect(pathOf.get('7')).toEqual([])
+      expect(pathOf.get('8')).toEqual([])
+    })
+
+    it('has no way back for a piece accepted on what is no accepted piece, or in a loop', () => {
+      const accepted = new Map([
+        ['9', [row('7', 1, '9', 0.1)]],
+        ['20', [row('21', 1, '20', 0.1)]],
+        ['21', [row('20', 1, '21', 0.1)]],
+      ])
+      const { pieces, pathOf } = acceptedTree(accepted, [NEURON])
+      expect([...pathOf.keys()]).toEqual([])
+      expect([...pieces.keys()]).toEqual(['9', '20', '21'])
+    })
+
+    it('says so in the plan, and reads no box for it', async () => {
+      const stray = [tip(1, [candidate('9', 1, 0.1)], '7', NEURON)]
+      const { fake, asked } = services()
+      const plan = await planned(
+        { ...grown(), queue: stray, verdicts: new Map([[verdictKey('7', '9'), 'accept']]) },
+        fake,
+      )
+      expect(refusals(plan)).toEqual([['9', 'parent-refused']])
+      expect(plan.rejected[0]!.message).toMatch(
+        /no way back to the neuron through the accepted pieces/,
+      )
+      expect(asked.anchored).toEqual([])
+    })
+  })
+
+  /** The dialog's ticks: what is ticked can always be sent. */
+  describe('the ticks', () => {
+    const merges = [
+      { candidateRoot: '7' },
+      { candidateRoot: '8' },
+      { candidateRoot: '9', parent: '7' },
+      { candidateRoot: '11', parent: '9' },
+    ] as PlannedMerge[]
+    const all = new Set(['7', '8', '9', '11'])
+
+    it('unticks everything accepted beyond a piece with it', () => {
+      expect([...tickedWith(merges, all, '7', false)]).toEqual(['8'])
+      expect([...tickedWith(merges, all, '9', false)]).toEqual(['7', '8'])
+      expect([...tickedWith(merges, all, '8', false)]).toEqual(['7', '9', '11'])
+    })
+
+    it('ticks what a piece’s merge point is on with it, and what that waits for', () => {
+      const cross = [
+        { candidateRoot: '7' },
+        { candidateRoot: '8', parent: '7' },
+        { candidateRoot: '9' },
+        { candidateRoot: '11', parent: '9', needs: '8' },
+      ] as PlannedMerge[]
+      expect([...tickedWith(cross, new Set(), '11', true)].sort()).toEqual([
+        '11',
+        '7',
+        '8',
+        '9',
+      ])
+      // And unticking the piece its merge point is on takes it along.
+      expect([...tickedWith(cross, new Set(['7', '8', '9', '11']), '8', false)]).toEqual([
+        '7',
+        '9',
+      ])
+    })
+
+    it('ticks the pieces between a piece and the neuron with it', () => {
+      expect([...tickedWith(merges, new Set(['8']), '11', true)].sort()).toEqual([
+        '11',
+        '7',
+        '8',
+        '9',
+      ])
+      expect([...tickedWith(merges, new Set(), '8', true)]).toEqual(['8'])
+    })
+
+    /** The merge point can be on a piece further in than the one it hangs on: that one counts too. */
+    it('drops a piece whose merge point is on an unticked piece', () => {
+      const deep = [
+        { candidateRoot: '7' },
+        { candidateRoot: '9', parent: '7' },
+        { candidateRoot: '11', parent: '9', needs: '7' },
+      ] as PlannedMerge[]
+      expect([...withoutOrphans(deep, new Set(['9', '11']))]).toEqual([])
+      expect([...withoutOrphans(deep, new Set(['7', '9', '11']))]).toEqual(['7', '9', '11'])
+    })
+
+    it('drops a piece whose way to the neuron passes through an unticked one', () => {
+      expect([...withoutOrphans(merges, new Set(['8', '9', '11']))]).toEqual(['8'])
+      expect([...withoutOrphans(merges, new Set(['7', '11']))]).toEqual(['7'])
+      expect([...withoutOrphans(merges, all)]).toEqual(['7', '8', '9', '11'])
+    })
   })
 })

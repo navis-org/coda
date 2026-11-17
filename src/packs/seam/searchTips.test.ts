@@ -18,16 +18,20 @@ import {
   ASSESSED_CANDIDATE_FIELDS,
   ASSESSED_TIP_FIELDS,
   candidatesTable,
+  LINEAGE_FIELDS,
   searchOnly,
+  tipFields,
   tipsByNeuron,
   tipsFromTable,
   tipsSchema,
-  tipFields,
   tipsWithFirsts,
 } from './searchTips'
 import type { PublishedEnd } from './searchTips'
 import { OPEN_END_FIELDS } from './openEndsOps'
 import { published, schemaOf } from './suggestionTables'
+import type { Piece } from './pieces'
+import { pieceLineage } from './pieces'
+import { concatBatches } from '../../nodes/lib/tableOps'
 
 /**
  * A tips table as `seam:openEnds` publishes one, plus any column a case names.
@@ -188,6 +192,7 @@ describe('the Candidates table', () => {
     expect(table.data[ID_COLUMN_NAME]).toEqual([])
     expect(table.schema.columns.map((c) => c.name)).toEqual([
       ID_COLUMN_NAME,
+      'seed',
       'end_uid',
       'candidateId',
       'rank',
@@ -381,8 +386,163 @@ describe('the published tips schema', () => {
 
   it('is the columns it folds on, when nothing is wired', () => {
     // `tipFields`, not `SEARCH_TIP_FIELDS`: the published shape is the candidate's columns plus
-    // `searched`, which is about the run rather than about any candidate.
-    expect(tipsSchema(undefined, false)).toEqual(schemaOf(tipFields(false)))
+    // `searched`, which is about the run rather than about any candidate — and then the lineage,
+    // which says where a tip sits in a neuron being extended.
+    expect(tipsSchema(undefined, false)).toEqual(
+      schemaOf([...tipFields(false), ...LINEAGE_FIELDS]),
+    )
+  })
+
+  it('does not take `seed` for a measurement of the first candidate', () => {
+    // It is on the candidate row and on the tip row, and it is the tip's own on both. Derived
+    // into the first-candidate columns it would be cleared on every searched tip.
+    const table = tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 1, y: 2, z: 3 }])
+    const out = tipsWithFirsts(
+      table,
+      [end(0, [{ root: '900', dist: 0.1 }])],
+      tipsFromTable(table).rows,
+      false,
+      new Set([0]),
+    )
+    expect(out.data['seed']).toEqual(['720'])
+    expect(out.data['candidateId']).toEqual(['900'])
+  })
+
+  it('makes every tip of a neuron nobody has extended its own seed', () => {
+    const table = tipsTable([
+      { [ID_COLUMN_NAME]: '720', end_uid: 0, x: 1, y: 2, z: 3 },
+      { [ID_COLUMN_NAME]: '730', end_uid: 0, x: 4, y: 5, z: 6 },
+      // A row that cannot be searched is still a row of its neuron.
+      { [ID_COLUMN_NAME]: '730', end_uid: 1 },
+    ])
+    const out = tipsWithFirsts(table, [], tipsFromTable(table).rows, false, new Set([0, 1]))
+    expect(out.data['seed']).toEqual(['720', '730', '730'])
+    expect(out.data['accepted_on']).toEqual([null, null, null])
+    expect(out.data['steps']).toEqual([0, 0, 0])
+    expect(out.data['junction']).toEqual([false, false, false])
+  })
+
+  it('writes a piece’s rows as the lineage says, on the piece’s own root', () => {
+    const piece: Piece = {
+      id: '801',
+      seed: '720',
+      parent: '720',
+      depth: 1,
+      path: ['720', '801'],
+    }
+    const seed = tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 1, y: 2, z: 3 }])
+    const own = tipsTable([
+      { [ID_COLUMN_NAME]: '801', end_uid: 0, x: 7, y: 8, z: 9 },
+      { [ID_COLUMN_NAME]: '801', end_uid: 1, x: 7, y: 8, z: 10 },
+    ])
+    const table = concatBatches([seed, own])
+    const lineage = [undefined, ...pieceLineage(piece, 2, 1)]
+    const out = tipsWithFirsts(
+      table,
+      [],
+      tipsFromTable(table).rows,
+      false,
+      new Set([0, 1]),
+      lineage,
+    )
+    expect(out.data[ID_COLUMN_NAME]).toEqual(['720', '801', '801'])
+    expect(out.data['seed']).toEqual(['720', '720', '720'])
+    expect(out.data['accepted_on']).toEqual([null, '720', '720'])
+    expect(out.data['steps']).toEqual([0, 1, 1])
+    expect(out.data['junction']).toEqual([false, false, true])
+    // The end it joins by is not among the rows attempted, so it reads "will not be searched".
+    expect(out.data['searched']).toEqual([null, null, false])
+  })
+
+  it('does not write over a reader’s own `parent` or `depth`', () => {
+    // Names a reader may well have joined onto the tips above this node — a skeleton's parent
+    // node, a depth in the arbour. The lineage is published under names that are not those.
+    const table = tipsTable([
+      { [ID_COLUMN_NAME]: '720', end_uid: 0, x: 1, y: 2, z: 3, parent: 41, depth: 7 },
+    ])
+    const out = tipsWithFirsts(table, [], tipsFromTable(table).rows, false, new Set([0]))
+    expect(out.data['parent']).toEqual([41])
+    expect(out.data['depth']).toEqual([7])
+    expect(out.data['steps']).toEqual([0])
+  })
+
+  it('writes the lineage over one a table brought with it, where that column already sat', () => {
+    // This node's own output fed back round: another run's statement about another tree.
+    const fed = tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 1, y: 2, z: 3, seed: 5 }])
+    const out = tipsWithFirsts(fed, [], tipsFromTable(fed).rows, false, new Set([0]))
+    expect(out.data['seed']).toEqual(['720'])
+    expect(out.schema.columns.map((one) => one.name).indexOf('seed')).toBe(
+      fed.schema.columns.map((one) => one.name).indexOf('seed'),
+    )
+  })
+
+  /**
+   * Invariant 3, for the composition the node actually makes. `inferOutputs` promises
+   * `tipsSchema(incoming)` to every picker below before anything has run; the run publishes
+   * `tipsWithFirsts` over the incoming table with the pieces' rows added. For a round the
+   * lineage was written by a second function ahead of the fold, and the four columns came out
+   * *before* the first candidate's where the schema promised them after — same names, another
+   * order, and nothing compared the two.
+   */
+  it.each([false, true])(
+    'publishes the shape it promised, pieces or none (assessed: %s)',
+    (assessed) => {
+      const piece: Piece = {
+        id: '801',
+        seed: '720',
+        parent: '720',
+        depth: 1,
+        path: ['720', '801'],
+      }
+      const incoming = tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 1, y: 2, z: 3 }])
+      const promised = tipsSchema(incoming.schema, assessed)
+
+      const alone = tipsWithFirsts(
+        incoming,
+        [],
+        tipsFromTable(incoming).rows,
+        assessed,
+        new Set([0]),
+      )
+      expect(alone.schema).toEqual(promised)
+      expect(Object.keys(alone.data)).toEqual(promised.columns.map((one) => one.name))
+
+      const own = tipsTable([{ [ID_COLUMN_NAME]: '801', end_uid: 0, x: 7, y: 8, z: 9 }])
+      const grown = concatBatches([incoming, own])
+      const withPiece = tipsWithFirsts(
+        grown,
+        [end(1, [{ root: '900', dist: 0.1 }])],
+        tipsFromTable(grown).rows,
+        assessed,
+        new Set([0, 1]),
+        [undefined, ...pieceLineage(piece, 1, undefined)],
+      )
+      expect(withPiece.schema).toEqual(promised)
+      expect(Object.keys(withPiece.data)).toEqual(promised.columns.map((one) => one.name))
+      for (const cells of Object.values(withPiece.data)) expect(cells).toHaveLength(2)
+    },
+  )
+
+  it('says which neuron a candidate’s tip belongs to, which is not always the root it is on', () => {
+    // A piece's tip: on the piece's own root, in the neuron being extended.
+    const tips = [
+      { neuronId: '720', endUid: 0, nm: [0, 0, 0] as const, eTip: undefined, row: 0 },
+      {
+        neuronId: '801',
+        endUid: 0,
+        nm: [9, 9, 9] as const,
+        eTip: undefined,
+        row: 1,
+        seed: '720',
+      },
+    ]
+    const table = candidatesTable(
+      [end(0, [{ root: '900', dist: 0.1 }]), end(1, [{ root: '901', dist: 0.2 }])],
+      tips,
+      false,
+    )
+    expect(table.data[ID_COLUMN_NAME]).toEqual(['720', '801'])
+    expect(table.data['seed']).toEqual(['720', '720'])
   })
 })
 

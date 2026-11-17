@@ -4,6 +4,7 @@
  *
  *   pnpm probe:sandbox-pair                            # around the middle of the volume
  *   pnpm probe:sandbox-pair -- --at 10752,28222,2205   # around a voxel at the base scale
+ *   pnpm probe:sandbox-pair -- --chain                  # three in a row, for the chain test
  *
  * **Reads only**, and held to it: it does not import the writer, and it runs behind
  * `fenceWrites({})`, which refuses any chunkedgraph write at `fetch`. It reads one box of the
@@ -100,11 +101,14 @@ async function main() {
     .sort((a, b) => a.size - b.size || b.faces - a.faces)
   console.log(`${ranked.length} of them with both roots current\n`)
 
+  // The face's midpoint, in absolute nanometres: half a voxel past the lower voxel's centre.
+  const contactOf = (e) =>
+    e.voxel.map((v, a) => (box.lo[a] + v + 0.5 + (a === e.axis ? 0.5 : 0)) * scale.resolution[a])
+
+  if (args.all.includes('--chain')) return chains(ranked)
+
   for (const e of ranked.slice(0, SHOWN)) {
-    // The face's midpoint, in absolute nanometres: half a voxel past the lower voxel's centre.
-    const contactNm = e.voxel.map(
-      (v, a) => (box.lo[a] + v + 0.5 + (a === e.axis ? 0.5 : 0)) * scale.resolution[a],
-    )
+    const contactNm = contactOf(e)
     const pair = { neuronRoot: e.p, candidateRoot: e.q, contactNm, minDistUm: 0 }
     const anchors = await anchorMerge(volume, pair, options)
     console.log(
@@ -117,6 +121,69 @@ async function main() {
             `${anchors.candidate.supervoxel} @ ${anchors.candidate.positionNm.join(', ')}`
         : `    not anchored: ${anchors.reason} — ${anchors.message}`,
     )
+  }
+
+  /**
+   * `--chain`: three roots in a row, N – A – B, for the test of a merge made onto a piece that is
+   * merged first (`docs/seam-extend-plan.md`, phase 6; `scripts/probe-cave-merge-chain.mjs`). A
+   * touches both; N and B do not have to touch each other. Anchored the way that merge is: A onto
+   * N, then B onto N **and A read as one side**, which has to land on A.
+   */
+  async function chains(pairs) {
+    const partners = new Map()
+    for (const e of pairs) {
+      for (const [mid, other] of [
+        [e.p, e.q],
+        [e.q, e.p],
+      ]) {
+        partners.set(mid, [...(partners.get(mid) ?? []), { other, e }])
+      }
+    }
+    const found = []
+    for (const [mid, list] of partners) {
+      for (const first of list) {
+        for (const second of list) {
+          if (first.other >= second.other) continue
+          found.push({
+            n: first.other,
+            a: mid,
+            b: second.other,
+            na: first.e,
+            ab: second.e,
+            size: Math.max(sizeOf(first.other), sizeOf(mid), sizeOf(second.other)),
+          })
+        }
+      }
+    }
+    found.sort((x, y) => x.size - y.size)
+    console.log(`${found.length} chains of three\n`)
+    for (const c of found.slice(0, SHOWN)) {
+      const contacts = [contactOf(c.na), contactOf(c.ab)]
+      const onto = await anchorMerge(
+        volume,
+        { neuronRoot: c.n, candidateRoot: c.a, contactNm: contacts[0], minDistUm: 0 },
+        options,
+      )
+      const beyond = await anchorMerge(
+        volume,
+        { neuronRoot: c.n, alsoNeuron: [c.a], candidateRoot: c.b, contactNm: contacts[1], minDistUm: 0 },
+        options,
+      )
+      console.log(
+        `${c.n} (${sizeOf(c.n)} L2) – ${c.a} (${sizeOf(c.a)} L2) – ${c.b} (${sizeOf(c.b)} L2)`,
+      )
+      console.log(
+        `    --chain ${c.n},${c.a},${c.b} --contacts "${contacts
+          .map((nm) => nm.map((n) => n.toFixed(1)).join(','))
+          .join(';')}"`,
+      )
+      console.log(
+        `    first: ${onto.ok ? 'anchors' : `not anchored (${onto.reason})`}; second: ` +
+          (beyond.ok
+            ? `anchors on ${beyond.onRoot === c.a ? 'the middle piece' : `root ${beyond.onRoot}`}`
+            : `not anchored (${beyond.reason})`),
+      )
+    }
   }
 }
 

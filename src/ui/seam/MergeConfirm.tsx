@@ -26,6 +26,7 @@ import { decodeSelectionEdits } from '../../data/neuroglancer/selectionEdits'
 import { controlPartColor } from '../../nodes/output/neuroglancer'
 import type { MergeProgress } from '../../packs/seam/mergeRecord'
 import type { PlannedMerge, PlanRefusal, ReadyPlan } from '../../packs/seam/mergePlan'
+import { tickedWith, withoutOrphans } from '../../packs/seam/mergePlan'
 import { gapLabel, sizeLabel, sizeOf } from '../../packs/seam/reviewQueue'
 import { mergeLineLayer } from '../../packs/seam/scene'
 import { Modal } from '../Modal'
@@ -86,6 +87,7 @@ const REFUSAL_LABEL: Record<PlanRefusal, string> = {
   'merged-elsewhere': 'in another neuron',
   outdated: 'outdated',
   'neuron-outdated': 'neuron edited',
+  'parent-refused': 'nothing to merge onto',
   'same-root': 'same segment',
   'bad-id': 'bad id',
   'no-contact': 'no contact point',
@@ -132,7 +134,11 @@ export function MergeConfirm({
   }))
   let ids = chosen.ids
   if (chosen.plan !== plan) {
-    ids = new Set(plan.merges.map((m) => m.candidateRoot).filter((id) => chosen.ids.has(id)))
+    // …and a piece whose parent is new to the plan, and so unticked, goes with it.
+    ids = withoutOrphans(
+      plan.merges,
+      new Set(plan.merges.map((m) => m.candidateRoot).filter((id) => chosen.ids.has(id))),
+    )
     setChosen({ plan, ids })
   }
   const ticked = useMemo(
@@ -177,20 +183,37 @@ export function MergeConfirm({
       const same = next.size === held.ids.size && [...next].every((id) => held.ids.has(id))
       return same ? held : { plan: held.plan, ids: next }
     })
+  /*
+   * A piece accepted on a piece is merged onto it (`tickedWith`): unticking one unticks what was
+   * accepted beyond it, and ticking one ticks the pieces between it and the neuron.
+   */
+  const replaceWith = (next: Set<string>, ids: ReadonlySet<string>) => {
+    next.clear()
+    for (const id of ids) next.add(id)
+  }
   const toggle = (candidateRoot: string) =>
     setTicked((next) => {
-      if (!next.delete(candidateRoot)) next.add(candidateRoot)
+      replaceWith(next, tickedWith(plan.merges, next, candidateRoot, !next.has(candidateRoot)))
     })
   // A piece hidden or shown in the viewer is unticked or ticked: the view and the list agree.
   const fromViewer = (edits: string[]) => {
     if (started) return
     const { added, removed, hidden } = decodeSelectionEdits(edits)
     setTicked((next) => {
+      // Shown: ticked, with every piece it waits for — which the scene then shows too.
+      let ids: ReadonlySet<string> = next
+      for (const merge of plan.merges) {
+        if (added.has(merge.candidateRoot)) {
+          ids = tickedWith(plan.merges, ids, merge.candidateRoot, true)
+        }
+      }
+      // Hidden wins over shown in one report, and takes what waits for it along.
+      const kept = new Set(ids)
       for (const merge of plan.merges) {
         const id = merge.candidateRoot
-        if (removed.has(id) || hidden.has(id)) next.delete(id)
-        else if (added.has(id)) next.add(id)
+        if (removed.has(id) || hidden.has(id)) kept.delete(id)
       }
+      replaceWith(next, withoutOrphans(plan.merges, kept))
     })
   }
 
@@ -359,6 +382,12 @@ function MergeRow({
       <span className="merge-confirm__facts">
         {[
           `tip ${merge.used.endUid}`,
+          // Made onto a piece that is merged first — or, where the merge point is on the neuron
+          // itself, sent only after the piece it hangs on.
+          merge.needs !== undefined ? `onto ${merge.needs}` : '',
+          merge.parent !== undefined && merge.parent !== merge.needs
+            ? `after ${merge.parent}`
+            : '',
           `rank ${candidate.rank}`,
           sizeLabel(sizeOf(candidate)),
           gapLabel(candidate.minDistUm),

@@ -275,7 +275,7 @@ describe('a card body drawing from a still-running input', () => {
     })
 
     // A reader clicking the row, which is an edit to this node's params made mid-run.
-    act(() => useGraphStore.getState().setParam('review', 'current', '11'))
+    act(() => useGraphStore.getState().setParam('review', 'current', '720575940621522189|11'))
     await waitFor(() => {
       const pair = useGraphStore.getState().nodeOutput('review', 'current')
       if (!isTableValue(pair)) throw new Error('Review has published no Current')
