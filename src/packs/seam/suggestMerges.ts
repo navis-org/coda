@@ -84,6 +84,8 @@ import type { EvalContext, ParamValues } from '../../core/node'
 import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { warnOverWait } from '../../core/limits'
+import { errorMessage } from '../../core/errors'
+import { LruMap } from '../../core/lruMap'
 import type { TableValue } from '../../core/values'
 import { isTableValue } from '../../core/values'
 import { slowGpuDispatch } from '../../ml/support'
@@ -120,13 +122,20 @@ import { openSeamModel } from './openWindowModel'
 import type { OpenedSeamModel } from './openWindowModel'
 import { patchBoxFor, patchScaleFrom, widestPatchReach } from './patchBox'
 import { afterShare } from './progress'
+import type { RunIdentity } from './endMemory'
+import type { RecalledEnd, Remembered } from './endMemory'
+import { endKey, forgetStale, heldEnds, neuronKey, recalled, sessionEnds } from './endMemory'
+import { PUBLISH_INTERVAL_MS } from '../../data/geometryCache'
+import { throwIfAborted, yieldToBrowser } from '../../core/slice'
+import type { Piece } from './pieces'
+import { runBook } from './runBook'
+import { aliasOf, EXTENDED_PORT, extendPairs, junctionOf, piecesOf } from './pieces'
 import { openTreeRanker } from './rankerConfig'
 import type { RankerConfig } from './rankerConfig'
 import { contactsOf, publishedEnd, reportOnRun } from './scoreEnds'
 import type { EndToSearch } from './searchRun'
 import { oneAhead, searchEnds } from './searchRun'
-import type { SearchedEnd } from './searchRun'
-import type { PublishedEnd, TipRow } from './searchTips'
+import type { Lineage, PublishedEnd, TipRow } from './searchTips'
 import {
   candidateFields,
   candidatesTable,
@@ -395,22 +404,41 @@ export const suggestMergesNode = packNode({
   description:
     'Searches around each open end for the piece of segmentation most likely to be its continuation, and ranks them with SEAM’s forest.',
   guide:
-    'Takes a table of open ends and, for each, reads a 6 µm box of segmentation around it, ' +
-    'measures every object that comes near the neuron there, and ranks them with the forest ' +
-    'picked in Ranker. Each end is published as it finishes, so Review Suggestions fills while ' +
-    'the rest of the neuron is still being measured — the `searched` column says which tips ' +
-    'it has reached, and false where it never will, the end lying outside the volume. ' +
-    'Without an Assessor the ranking is ' +
-    'geometric — no probability and no cutoff, and those columns are absent rather than empty. ' +
-    'Pick one and every candidate also goes through SEAM’s own network, which gives the list a ' +
-    'calibrated probability and each tip a shown-or-withheld verdict, for about two seconds ' +
-    'an end more and a 133 MB download. It searches every row it is given either way, so narrow ' +
-    'the ends with a Filter Table above it rather than looking for a cutoff here — though ' +
-    'filtering also narrows what the own-tip rule can compare against, so a filtered run keeps ' +
-    'a few candidates a whole-neuron run would drop.',
+    'Takes a table of open ends and, around each, finds and ranks the pieces of segmentation ' +
+    'that could continue the neuron. Usually wired from Find Open Ends into Review Suggestions, ' +
+    'which fills while the search runs. Pick an Assessor for calibrated probabilities, and wire ' +
+    'the review card’s `Extended` output back into `Review` to search accepted pieces too.',
   cost: 'expensive',
+  /*
+   * The node's own memory of finished ends (`endMemory.ts`). Clear Cache forgets the ends of
+   * this run before any is measured (`ctx.refresh`), and the card's age is that of the oldest
+   * end behind the answer — the contract every `dataCache` node keeps.
+   */
+  dataCache: true,
+  /*
+   * For extending a neuron piece by piece (`pieces.ts`, `docs/seam-extend-plan.md`): an accepted
+   * piece's open ends come from running the chain above `Tips` again for that piece alone.
+   */
+  rerunsInputs: true,
 
-  inputs: [{ id: 'tips', label: 'Tips', type: T.table() }, CAVE_DATASET_INPUT],
+  inputs: [
+    { id: 'tips', label: 'Tips', type: T.table() },
+    CAVE_DATASET_INPUT,
+    /*
+     * **A reference, drawn backwards**: Review Suggestions sits below this node and says which
+     * accepted pieces to extend. It is read from that card's params alone
+     * (`NodeDefinition.asReference`), so this node waits for nothing below it, and re-runs when
+     * that list moves and at no other click on the card.
+     */
+    {
+      id: 'review',
+      label: 'Review',
+      type: T.table(),
+      required: false,
+      reference: true,
+      producedBy: { type: 'seam:review', port: EXTENDED_PORT },
+    },
+  ],
   outputs: [
     { id: 'tips', label: 'Tips', type: T.table() },
     { id: 'candidates', label: 'Candidates', type: T.table() },
@@ -472,7 +500,7 @@ export const suggestMergesNode = packNode({
        * wrong.
        */
       presentational: true,
-      help: 'How much memory to spend holding segmentation this run has already fetched. A chunk of the Aedes segmentation is 8.2 × 8.2 × 2.9 µm and 3 MB — wider than either box an end reads — so an end’s patch box is largely the chunks its own search box just pulled, and so is its neighbour’s: one neuron’s 505 ends fetched 25.4 GB for 2.8 GB of distinct chunks. On that neuron a tip read 72 MB with no cache, 13 MB at this default, and 7 MB at 1.5 GB. Raising it pays most where a Sort above this node has scattered the ends, since a cache the size of the neuron’s working set does not care what order they arrive in. It is held until the run ends, outside the JavaScript heap where nothing refuses it — so a budget past what the machine has loses the run rather than slowing it. 0 holds nothing.',
+      help: 'How much memory to spend holding segmentation this run has already fetched. A chunk of the Aedes segmentation is 8.2 × 8.2 × 2.9 µm and 3 MB — wider than either box an end reads — so an end’s patch box is largely the chunks its own search box just pulled, and so is its neighbour’s: one neuron’s 505 ends fetched 25.4 GB for 2.8 GB of distinct chunks. On that neuron a tip read 72 MB with no cache, 13 MB at this default, and 7 MB at 1.5 GB. Raising it pays most where a Sort above this node has scattered the ends, since a cache the size of the neuron’s working set does not care what order they arrive in. It is held until the run ends, outside the JavaScript heap where nothing refuses it — so a budget past what the machine has loses the run rather than slowing it. 0 holds nothing. It changes no answer, so changing it re-runs nothing, and an end already searched is remembered and reads no segmentation at all: to see what a new budget does, use Clear Cache and run again.',
     },
     caveDatastackParam(
       'Which datastack’s segmentation to search, as `datastack:materialization`. Wire a Dataset instead and this follows it. The materialization decides *when* the supervoxels are read as belonging to a neuron, so it should be the one the open ends were found in.',
@@ -574,11 +602,55 @@ export const suggestMergesNode = packNode({
         candidates: candidatesTable([], [], assessing),
       }
     }
+    const { model, issue: rankerIssue } = chosenRanker(ctx.params)
+    if (!model) throw new Error(rankerIssue)
+    /*
+     * **What this run is, for the memory of finished ends** — everything an end's answer depends
+     * on that every end of the run shares (`endMemory.ts`). Built before anything is opened,
+     * because it also prices the wait: an end already answered costs nothing, and a warning that
+     * counted it would announce twenty minutes for a run that takes one.
+     */
+    const identity: RunIdentity = {
+      ranker: model.id,
+      assessor: assessorModel?.id ?? NO_ASSESSOR,
+      top,
+      deployment: target.deployment,
+      datastack: target.datastack,
+      version: target.version,
+    }
+    const neurons = neuronsOf(rows, identity)
+    const keys = neurons.flatMap((neuron) => neuron.keys)
+    const held = heldFor(ctx, keys)
+    /*
+     * **And the pieces, as far as they can be seen from here** (`foreseePieces`): the ones whose
+     * tips an earlier run found have ends that are remembered or not, and the rest have a chain
+     * to run before anything about them is known. Before anything is opened, for the two things
+     * decided here — and because a Clear Cache has to reach every piece now, while its flag is
+     * still in hand, not as the loop comes to each.
+     */
+    const pieces = piecesOf(
+      extendPairs(ctx.input('review')),
+      neurons.map((one) => one.neuron),
+    )
+    const foreseen = foreseePieces(ctx, identity, neurons, pieces, assessing)
+    /*
+     * A count of **tips**, where the run searches only those whose box fits the volume; a tip
+     * outside it is never remembered, so it is counted and never searched. That errs towards
+     * the longer wait, which is the direction `docs/limits.md` allows a guard rail to be wrong
+     * in — and towards opening an assessor a run of remembered ends did not need.
+     */
+    const toMeasure = keys.length - held.size + foreseen.unremembered
+    const perEnd = secondsPerEnd(assessing, top)
+    const openEnds = plural(toMeasure, 'open end')
     warnOverWait(ctx, {
-      seconds: rows.length * secondsPerEnd(assessing, top),
-      what: assessing
-        ? `Searching and assessing ${plural(rows.length, 'open end')}`
-        : `Searching ${plural(rows.length, 'open end')}`,
+      seconds:
+        toMeasure * perEnd +
+        foreseen.unknown * (SECONDS_PER_PIECE_CHAIN + ENDS_PER_UNSEEN_PIECE * perEnd),
+      what:
+        (assessing ? `Searching and assessing ${openEnds}` : `Searching ${openEnds}`) +
+        (foreseen.unknown > 0
+          ? `, and finding the open ends of ${plural(foreseen.unknown, 'piece')}`
+          : ''),
       lever: assessing
         ? 'Each end is a 6 µm box of segmentation at about 19 MB, a second box for the patches, ' +
           'and a patch through the network per candidate. Narrow the ends with a Filter Table ' +
@@ -587,8 +659,6 @@ export const suggestMergesNode = packNode({
           'on `e_tip` above this node.',
     })
 
-    const { model, issue: rankerIssue } = chosenRanker(ctx.params)
-    if (!model) throw new Error(rankerIssue)
     /*
      * **One instant for the whole run.** Every box is turned into roots at the same moment, so
      * the supervoxels two neighbouring ends share are asked about once — which is what
@@ -604,10 +674,9 @@ export const suggestMergesNode = packNode({
      * This comment used to claim the forest and the volume were fetched concurrently. They never
      * were, and they should not be: every refusal worth having happens before the next step's
      * first request. The ranker first, because a manifest this build cannot read or a config
-     * missing a number costs one small file. Then the assessor, because `openSeamModel` answers
-     * "no usable GPU", "no runnable build" and "nobody ticked Download" before it fetches a
-     * byte — and all three would otherwise come after three CAVE round trips. The volume last,
-     * and only then does a request go to a shared server.
+     * missing a number costs one small file. Then the assessor, where this run can already see
+     * an end to score (below). The volume last, and only then does a request go to a shared
+     * server.
      *
      * It costs a second or so of serialisation on a warm cache. Overlapping them would buy that
      * back and give up the property above, which is the wrong trade on a node whose next step
@@ -624,18 +693,33 @@ export const suggestMergesNode = packNode({
      * nobody ticked — all three are answered by `openSeamModel` before it fetches a byte, and
      * all three would otherwise come after three CAVE round trips.
      *
-     * **The session is open from here**, so everything that can throw is inside the `finally`
-     * below. A session left open holds a worker and a GPU device.
+     * **But only where this run can see something to measure.** The session is a GPU worker and,
+     * the first time, a 133 MB download behind a tick box; a run answered from memory needs none
+     * of it, and would otherwise fail on "no usable GPU" with every answer already in hand. So it
+     * is opened here where a neuron's own end is unremembered, and otherwise on the first end
+     * that needs it — which, with pieces to extend, cannot be known until each piece's tips are.
+     *
+     * **The session is open from the first call**, so everything that can throw is inside the
+     * `finally` below. A session left open holds a worker and a GPU device.
      */
-    const assessor = assessorModel
-      ? await openSeamModel({
+    let session: OpenedSeamModel<AssessorConfig> | undefined
+    let upFront = true
+    const openAssessor =
+      assessorModel &&
+      (async (says?: (note?: string) => void) =>
+        (session ??= await openSeamModel({
           model: assessorModel,
           task: MERGE_ASSESSOR_TASK,
           parse: parseAssessorConfig,
           download: ctx.params.download === true,
           downloadShare: ASSESSOR_SHARE,
           signal: ctx.signal,
-          progress: (fraction, note) => ctx.progress(MODEL_SHARE + fraction, note),
+          // Opened later, the bar is already past where a download would put it: the caller
+          // says what is happening and leaves the bar where it is.
+          progress: (fraction, note) => {
+            if (upFront) ctx.progress(MODEL_SHARE + fraction, note)
+            else says?.(note)
+          },
           /*
            * **Coda's own WGSL, not ONNX Runtime.** `ASSESSOR_RUNTIME` hands back the same
            * `ModelSession`, so nothing below this line knows the difference — but it is 27 ms
@@ -643,18 +727,25 @@ export const suggestMergesNode = packNode({
            * per-element shader (`docs/seam-assessor-speed.md` §14).
            */
           runtime: ASSESSOR_RUNTIME,
-        })
-      : undefined
-    const head = MODEL_SHARE + (assessor ? ASSESSOR_SHARE : 0)
+        })))
     try {
+      // A piece nothing is known of yet has ends to score too, as far as anyone can tell.
+      if (openAssessor && toMeasure + foreseen.unknown > 0) await openAssessor()
+      upFront = false
+      const head = MODEL_SHARE + (session ? ASSESSOR_SHARE : 0)
       ctx.progress(head, 'opening the segmentation')
       return await searchAndScore(ctx, {
         table,
         rows,
+        neurons,
+        held,
+        identity,
+        pieces,
+        foreseen: foreseen.held,
         head,
         ranker,
         plan,
-        assessor,
+        assessor: openAssessor,
         top,
         volume: await openSearchVolume(target.datastack, plan.xyNm, when, options, {
           // Megabytes at the param, bytes inside: a reader thinks in the first and a budget is
@@ -667,21 +758,37 @@ export const suggestMergesNode = packNode({
       // Without the signal and swallowing its own failure, `useAssessorBox`' reasoning: the
       // commonest way to get here is a Cancel, and a close that refuses leaves the worker and
       // its GPU device held for the rest of the session.
-      await assessor?.session.close().catch(() => undefined)
+      await session?.session.close().catch(() => undefined)
     }
   },
 })
 
 /** Everything one run was opened with, so the loop below takes one argument rather than ten. */
 interface RunPlan {
+  /** The incoming tips; the run adds each extended piece's beneath them as it reaches it. */
   readonly table: TableValue
   readonly rows: readonly TipRow[]
+  /** The run's neurons, each with its key in the memory of finished ends. */
+  readonly neurons: readonly RunNeuron[]
+  /** The finished ends the memory held when the run started (`heldEnds`). */
+  readonly held: ReadonlyMap<string, Remembered>
+  /** What every end of the run shares, for the key of a piece's ends — made as it is reached. */
+  readonly identity: RunIdentity
+  /** The accepted pieces to extend, in the order the run takes them (`piecesOf`). */
+  readonly pieces: readonly Piece[]
+  /** What the memory held of each piece whose tips were known when the run started. */
+  readonly foreseen: ReadonlyMap<string, ReadonlyMap<string, Remembered>>
   /** How much of the progress bar the models took before the first end. */
   readonly head: number
   readonly ranker: TreeRanker
   /** The pipeline the forest was fitted with — the box, the pool, the cut, the own-tip radius. */
   readonly plan: RankerConfig
-  readonly assessor: OpenedSeamModel<AssessorConfig> | undefined
+  /**
+   * The assessor's session, **opened by the call** if it is not already — or `undefined` where
+   * none is picked, which is also what decides the tables' columns.
+   */
+  readonly assessor:
+    ((says?: (note?: string) => void) => Promise<OpenedSeamModel<AssessorConfig>>) | undefined
   readonly top: number
   readonly volume: SearchVolume
   readonly options: CaveRequestOptions
@@ -696,8 +803,10 @@ interface RunPlan {
  * the one that must not throw. What is here is the loop; what is above it is what the loop needs.
  */
 async function searchAndScore(ctx: EvalContext, run: RunPlan) {
-  const { table, rows, head, ranker, plan, assessor, top, volume, options } = run
-  const assessing = assessor !== undefined
+  const { rows, neurons, held, identity, pieces, head, ranker, plan, top, volume, options } =
+    run
+  const assessing = run.assessor !== undefined
+  const { foreseen } = run
 
   /*
    * **Timed at the seam the sequences already have.** Every expensive step is injected — which
@@ -722,6 +831,60 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   const halfWidthNm = plan.halfWidthUm * NM_PER_UM
 
   /*
+   * **Asked once**, which is what makes a dataset with no 32 nm scale one sentence rather than
+   * a refusal on every end of every neuron — and only where an assessor runs, since a
+   * geometry-only search reads no patch box and must not be refused for the want of a scale it
+   * never reads. Why the two steps are built per run rather than per end is on
+   * `patchSteps` itself.
+   */
+  type Assess = {
+    scale: VolumeScale
+    floor: number
+    fits: AssessorConfig['fits']
+    steps: AssessSteps
+  }
+  let assess: Assess | undefined
+  /**
+   * What scoring an end needs, made on the first end that is to be scored and kept.
+   *
+   * **One record, not an `assess` and an `assessSteps` beside it.** Built apart they were two
+   * optionals that are always both set or both unset, which the type system cannot know.
+   * `patchSteps` is handed the clock and charges its own stages from inside; `box` is the one
+   * it cannot, being the caller's to name.
+   *
+   * On first need rather than before the loop, because a run answered from memory scores
+   * nothing and must not open a GPU session to find that out (`evaluate` says when it is
+   * already open). The patch scale is still asked once, and before that end reads a box.
+   */
+  const assessFor = async (): Promise<Assess | undefined> => {
+    if (!run.assessor || assess) return assess
+    try {
+      const assessor = await run.assessor((says) => ctx.progress(afterShare(head, shown), says))
+      const scale = patchScaleFrom(volume.info)
+      const made = patchSteps(assessor, scale, volume, options, ctx.signal, clock)
+      assess = {
+        scale,
+        floor: assessor.config.missingPatchScore,
+        fits: assessor.config.fits,
+        steps: { ...made, box: clock.around('reading the patch box', made.box) },
+      }
+    } catch (error) {
+      unscorable = error
+      throw error
+    }
+    return assess
+  }
+  /**
+   * Why nothing can be scored in this run, once that is known: no usable GPU, a download nobody
+   * ticked, a volume with no scale to cut a patch at.
+   *
+   * A refusal about the **run**, however late it is found. Met on the first end of a piece, it
+   * would otherwise be that piece's failure — said, passed over, and met again at the next,
+   * fifty times, under a node that ends green. The piece loop reads this and stops.
+   */
+  let unscorable: unknown
+
+  /*
    * **Which ends can be searched, not which tips exist.** A box that clamps to nothing throws,
    * and one such end would abort a run of several hundred after the expensive ones had been
    * paid for — so it is answered here, once, and counted.
@@ -731,101 +894,147 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
    * that set would keep a candidate that is nearer the unsearchable end and publish it as
    * another end's first — which is a plausible suggestion in the wrong place.
    */
-  const fits = new Set(rows.filter((tip) => boxFits(volume, tip, halfWidthNm)))
-  if (fits.size < rows.length) {
-    const outside = rows.length - fits.size
+  /*
+   * The rows this run will attempt, by their index in the published table. It is what the
+   * `searched` column reads — every row outside it is one the run has warned about, or the end
+   * a piece joins by — and `seam:review` counts the rows still waiting from the difference. A
+   * neuron's own are known here; a piece's are its record's, added when its tips are found
+   * (`runBook.ts`). Together they are the progress bar's whole.
+   */
+  const seedAttempting = new Set(
+    rows.filter((tip) => boxFits(volume, tip, halfWidthNm)).map((tip) => tip.row),
+  )
+  if (seedAttempting.size < rows.length) {
+    const outside = rows.length - seedAttempting.size
     ctx.warn(
       `${plural(outside, 'open end')} ${agree(outside, 'lies', 'lie')} outside the ` +
         'segmentation volume, so no box could be read there. The rest were searched.',
     )
   }
-
+  /**
+   * What the run has found so far, a record per root, from which the tables are put together in
+   * the order a plain run takes everything — whatever order the work is done in (`runBook.ts`).
+   */
+  const book = runBook({
+    table: run.table,
+    rows,
+    neurons: neurons.map((one) => ({ id: one.neuron, at: one.at })),
+    attempting: seedAttempting,
+    order: pieces,
+  })
+  /** The bar only ever moves forward, though its whole grows as pieces' tips are added. */
+  let shown = 0
+  /*
+   * The tables, and the bar from the very same reading: a bar that moved ahead of what is
+   * listed, or stayed behind it, describes another moment.
+   */
+  /** The ends behind the last tables built, for the report at the end. */
+  let listed: readonly PublishedEnd[] = []
+  const publish = () => {
+    const now = book.assemble()
+    listed = now.ends
+    shown = Math.max(shown, now.attempting.size > 0 ? now.ends.length / now.attempting.size : 0)
+    return published(now.table, now.ends, now.tips, assessing, now.attempting, now.lineage)
+  }
+  // The last thing published *is* the answer, so the final return does not build it again.
+  let answer = publish()
+  /** Each root's tips as the run searched them: what the own-tip rule measures a piece against. */
+  const tipsOf = new Map<string, readonly TipRow[]>()
+  /** Ends this run measured itself, and the patches it put through the network for them. */
+  let measured = 0
+  let patches = 0
+  /** Set where something changed without the tables being built again — see `showSoon`. */
+  let behind = false
+  let builtAt = performance.now()
+  /** When the browser was last let in by this loop's own yields (`showSoon`, `letIn`). */
+  let letInAt = performance.now()
+  /** What the bar says of what was last added — shown whenever the tables are. */
+  let note = ''
   /*
    * **Published as they land, because a reader starts before the run does.** `ReviewBody`
    * draws its queue from `inputValues`, so every end that arrives here reaches the review card
    * with nothing downstream re-running (`core/node.ts`, `publish`). An end is yielded only
    * once the own-tip rule has run over it, so a row a reader is looking at never changes.
    *
-   * **No throttle, and that is a measurement rather than an oversight.** `publish`'s rule is
-   * to throttle because each call repaints every card; an end costs ~560 ms warm and a 19 MB
-   * box before that, so the gap between two publishes is already far above the
-   * `PUBLISH_INTERVAL_MS` a geometry channel needs. A throttle here would only ever delay the
-   * last end of a neuron.
+   * **A measured end is published with no throttle, and that is a measurement rather than an
+   * oversight.** `publish`'s rule is to throttle because each call repaints every card; an end
+   * costs ~560 ms warm and a 19 MB box before that, so the gap between two publishes is already
+   * far above the `PUBLISH_INTERVAL_MS` a geometry channel needs. A throttle there would only
+   * ever delay the last end of a neuron. **An end answered from memory is the other case** — it
+   * costs nothing, so several hundred can arrive in one tick — and is throttled, below.
    */
-  /*
-   * **Asked once, before the loop**, which is what makes a dataset with no 32 nm scale one
-   * sentence rather than a refusal on every end of every neuron — and only where an assessor
-   * runs, since a geometry-only search reads no patch box and must not be refused for the want
-   * of a scale it never reads. Why the two steps are built per run rather than per end is on
-   * `patchSteps` itself.
-   */
-  const patchScale = assessor && patchScaleFrom(volume.info)
-  /*
-   * **One record, not an `assess` and an `assessSteps` beside it.** Built apart they were two
-   * optionals that are always both set or both unset, which the type system cannot know — so
-   * the construction needed `assessor!` and the call site `assessSteps!`, two assertions
-   * standing in for one condition.
-   *
-   * `patchSteps` is handed the clock and charges its own stages from inside; `box` is the one
-   * it cannot, being the caller's to name.
-   */
-  const assess =
-    assessor && patchScale
-      ? {
-          scale: patchScale,
-          floor: assessor.config.missingPatchScore,
-          fits: assessor.config.fits,
-          steps: ((made) => ({
-            ...made,
-            box: clock.around('reading the patch box', made.box),
-          }))(patchSteps(assessor, patchScale, volume, options, ctx.signal, clock)),
-        }
-      : undefined
-
-  const ends: PublishedEnd[] = []
-  /*
-   * The rows this run will attempt, by their index in the incoming table — built once here
-   * rather than per publish, since `fits` cannot change inside the loop. It is what the
-   * published `searched` column reads: every row outside it is one of the two the node has
-   * already warned about, and `seam:review` counts the rows still waiting from the difference.
-   */
-  const attempting = new Set([...fits].map((tip) => tip.row))
-  // The last thing published *is* the answer, so the final return does not build it again.
-  let answer = published(table, ends, rows, assessing, attempting)
-  let done = 0
-  for (const [neuron, at] of tipsByNeuron(rows)) {
-    const mine = at.map((i) => rows[i]!)
-    // One neuron's ends overlap; two neurons' do not. See `forgetRoots`.
-    forgetRoots(volume)
+  const build = () => {
     /*
-     * `tip` indexes every one of this neuron's tips, which is what the own-tip rule compares
-     * against; only the ones with a readable box become an end to search.
-     *
-     * **One pass, because two would put the plan's order in a comment.** This used to `filter`
-     * for the plan and `flatMap` for the ends, running the same `fits.has` twice — and the plan
-     * is built in the order the ends are searched, so if the two predicates ever drifted the
-     * cache would evict confidently against the wrong future. Nothing but prose stopped it.
-     * Derived from one list, the ordering holds structurally.
+     * Charged directly rather than through a wrapper: it is the one expensive thing the run
+     * does that is not behind an injected step, and it grows with the run — every publish
+     * rebuilds both tables from every end so far.
      */
-    const toSearch: EndToSearch[] = []
-    for (const [i, tip] of mine.entries()) {
-      if (!fits.has(tip)) continue
-      const end = endToSearch(volume, tip, i, halfWidthNm, options)
-      toSearch.push({ ...end, box: clock.around('reading the search box', end.box) })
+    const at = performance.now()
+    answer = publish()
+    builtAt = performance.now()
+    clock.spend('rebuilding the published tables', builtAt - at)
+    behind = false
+    // With the tables, never apart from them (`publish` moves the bar): one that stayed on
+    // "scoring" through a stretch answered from memory describes another moment.
+    ctx.progress(afterShare(head, shown), note)
+    ctx.publish(answer)
+  }
+  /**
+   * Show what changed **without anything having been measured**: at most a few times a second,
+   * and then let the browser in.
+   *
+   * Every publish rebuilds both tables from every end so far — 20–40 ms at a neuron's 505 ends
+   * — which hides behind the seconds a measured end takes and behind nothing when several
+   * hundred ends, or two hundred pieces, are answered from memory in one tick. And nothing in
+   * such a stretch awaits anything real, so without the yield it is one task: no repaint of what
+   * was just published, and no Cancel.
+   *
+   * **By hand, where the rule is `sliced`** (`core/slice.ts`): that loop's body is synchronous
+   * and its count known, and this is an async stream whose next item may take a tick or eleven
+   * seconds. What is shared with it is the part that matters — the browser is let in on a
+   * clock, and Cancel is read each time round.
+   */
+  const showSoon = async (now = false) => {
+    throwIfAborted(ctx.signal)
+    if (!now && performance.now() - builtAt < PUBLISH_INTERVAL_MS) {
+      behind = true
+      return
     }
-    if (toSearch.length === 0) continue
+    build()
+    await yieldToBrowser()
+    letInAt = performance.now()
+  }
+
+  /**
+   * One neuron's ends that the memory does not hold, searched and scored — each yielded once it
+   * is wholly finished, in the order given, which is `recalled`'s contract.
+   *
+   * **One list, because two would put the plan's order in a comment.** The chunk plan and the
+   * search are both built from `missing`, so the cache cannot evict confidently against a
+   * future the search is not going to have. Remembered ends are in neither: they read nothing.
+   *
+   * An end leaves here numbered within its root, as `searchEnds` numbers it, and is kept under
+   * that number; where it sits in the published table is the run book's to say.
+   *
+   * `competing` is every tip the own-tip rule measures against, the ends to search first: a
+   * neuron's own tips, or an accepted piece's followed by those of its path (`pieces.ts`).
+   */
+  const measure = async function* (
+    competing: readonly TipRow[],
+    missing: readonly EndToSearch[],
+    alias: ReadonlyMap<bigint, bigint> | undefined,
+    signal: AbortSignal,
+  ) {
+    const assess = await assessFor()
     /*
      * **What this neuron is about to read, before it reads any of it.** Both of an end's boxes
      * are functions of its tip position, so the whole sequence is knowable — and with it the
-     * cache evicts what is wanted furthest away rather than what was read longest ago, which on
-     * one neuron at the default budget is 9.3 MB a tip against 13.7. `chunkPlan.ts` holds the
-     * measurement and why the patch box is bounded rather than predicted.
-     *
-     * In `toSearch`'s order, which is the order `searchEnds` yields in — the positions come
-     * from the same list, so the two cannot disagree.
+     * cache evicts what is wanted furthest away rather than what was read longest ago, which
+     * on one neuron at the default budget is 9.3 MB a tip against 13.7. `chunkPlan.ts` holds
+     * the measurement and why the patch box is bounded rather than predicted.
      */
     volume.planEnds(
-      toSearch.map((end) => [...mine[end.tip]!.nm] as Triple),
+      missing.map((end) => [...competing[end.tip]!.nm] as Triple),
       {
         halfWidthNm,
         // No assessor, no patch box — so the plan is the search boxes alone.
@@ -840,9 +1049,10 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     /*
      * **The next end is searched while this one is scored.** `oneAhead` is the whole of it, and
      * `searchRun.ts` holds the reasoning and the one thing it does not buy: both halves call
-     * Pyodide, and there is one worker for the tab, so that part queues rather than overlapping.
-     * What genuinely runs alongside the network is the GPU. The two things it rests on are settled elsewhere rather than here — a yielded end
-     * is final (`searchRun.ts`), and two box reads in flight share one supervoxel lookup
+     * Pyodide, and there is one worker for the tab, so that part queues rather than
+     * overlapping. What genuinely runs alongside the network is the GPU. The two things it
+     * rests on are settled elsewhere rather than here — a yielded end is final
+     * (`searchRun.ts`), and two box reads in flight share one supervoxel lookup
      * (`SearchVolume.asking`).
      *
      * **The eviction plan is still sound, with one caveat that is this file's to record.**
@@ -852,85 +1062,658 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
      * neither is ever dropped ahead of a chunk nothing wants again, which is the property that
      * matters: nothing is evicted while it is still being read in preference to dead bytes.
      *
-     * What is **not** true, and an earlier draft of this comment claimed, is that neither can be
-     * the furthest *finite* next use. `nextUse` answers the nearest end at or after the cursor,
-     * so a chunk only end *p+1* wants scores `p+1` — the largest finite score there is, unless
-     * something held is wanted further ahead still. At a budget too small to hold both ends'
-     * working sets the cache can therefore evict what the read in flight has just fetched, and
-     * the patch box then re-reads what the search box had in hand. It is wasted bytes rather
-     * than a wrong box, and at the default budget the two ends are about 28 chunks against 170
-     * held — but a reader who sets `Chunk cache` low enough is in that régime, which is one
-     * more reason `reportOnReads` exists.
+     * What is **not** true, and an earlier draft of this comment claimed, is that neither can
+     * be the furthest *finite* next use. `nextUse` answers the nearest end at or after the
+     * cursor, so a chunk only end *p+1* wants scores `p+1` — the largest finite score there
+     * is, unless something held is wanted further ahead still. At a budget too small to hold
+     * both ends' working sets the cache can therefore evict what the read in flight has just
+     * fetched, and the patch box then re-reads what the search box had in hand. It is wasted
+     * bytes rather than a wrong box, and at the default budget the two ends are about 28
+     * chunks against 170 held — but a reader who sets `Chunk cache` low enough is in that
+     * régime, which is one more reason `reportOnReads` exists.
      *
-     * What it costs is a second box alive: end *i+1*'s search box is read while end *i*'s patch
-     * box is still being cut from. At a 6 µm and an 8 µm box that is tens of megabytes, against
-     * a chunk cache measured in hundreds.
+     * What it costs is a second box alive: end *i+1*'s search box is read while end *i*'s
+     * patch box is still being cut from. At a 6 µm and an 8 µm box that is tens of megabytes,
+     * against a chunk cache measured in hundreds.
      */
-    for await (const searched of oneAhead(
+    for await (const end of oneAhead(
       searchEnds(
-        tipPositions(mine),
-        toSearch,
+        tipPositions(competing),
+        missing,
         { ranker, topK: plan.topK, ownUm: plan.ownUm },
         steps,
-        { signal: ctx.signal },
+        { signal },
       ),
     )) {
-      // Back to the whole table's numbering: `searchEnds` indexes this neuron's tips alone.
-      const end: SearchedEnd = { ...searched, tip: at[searched.tip]! }
-      const tip = rows[end.tip]!
+      const tip = competing[end.tip]!
+      let finished: PublishedEnd
       if (assess) {
         const scored = await assessEnd(
           {
-            queryRoot: BigInt(tip.neuronId),
+            // A piece's ends are asked about as the neuron's: its path is read as one with it.
+            queryRoot: BigInt(tip.seed ?? tip.neuronId),
             candRoot: end.candRoot,
             contactsNm: contactsOf(end),
+            alias,
           },
           assess.floor,
           assess.steps,
-          { signal: ctx.signal, top },
+          { signal, top },
         )
-        ends.push(publishedEnd(end, scored, tip.eTip, assess.fits))
+        finished = publishedEnd(end, scored, tip.eTip, assess.fits)
       } else {
-        ends.push(searchOnly(end))
+        finished = searchOnly(end)
       }
-      done += 1
       // One end off the plan, so the chunks only it wanted stop being worth keeping.
       volume.endSearched()
-      /*
-       * **Published only once the end is wholly finished**, assessor and all, which is what
-       * keeps the streaming honest now that there is a second stage: a reader must never see a
-       * row ranked by geometry that the assessor is about to reorder underneath them. The cost
-       * is that an assessed end takes about two seconds longer to appear, which is the right
-       * trade — a draft that moves is worse than a wait.
-       */
-      ctx.progress(
-        afterShare(head, done / fits.size),
-        `${assessing ? 'scoring' : 'searching'} ${neuron}`,
-      )
-      /*
-       * Charged directly rather than through a wrapper: it is the one expensive thing the run
-       * does that is not behind an injected step, and it grows with the run — every publish
-       * rebuilds both tables from every end so far.
-       */
-      const builtAt = performance.now()
-      answer = published(table, ends, rows, assessing, attempting)
-      clock.spend('rebuilding the published tables', performance.now() - builtAt)
-      ctx.publish(answer)
+      yield finished
     }
   }
 
-  reportOnRun(ctx, ends, volume.chunks)
-  /*
-   * Patches actually put through the network — `''` in `filled` is a candidate that really was
-   * scored, which is the same vocabulary the run's tally counts. The rate it buys is the one
-   * number in the report that compares against another machine.
+  /**
+   * Take one root's ends as they come — remembered or measured — into the run's answer.
+   *
+   * One body for a neuron's ends and an accepted piece's, because what happens to a finished end
+   * is the same for both; what differs is what was searched, which is the stream's.
    */
-  let patches = 0
-  for (const end of ends)
-    for (const why of end.scores?.filled ?? []) if (why === '') patches += 1
-  const timing = clock.report({ ends: ends.length, patches })
+  const take = async (
+    stream: AsyncIterable<RecalledEnd>,
+    says: string,
+    put: (end: PublishedEnd) => void,
+  ) => {
+    for await (const got of stream) {
+      put(got.end)
+      // The oldest wins, so the card says how long ago the stalest end behind it was measured.
+      ctx.reportFetched(got.at)
+      if (!got.fresh) {
+        note = `${says}: already searched`
+        // An owed publish is made before an end that has to be measured, not after its seconds.
+        await showSoon(got.thenWaits)
+        continue
+      }
+      note = `${assessing ? 'scoring' : 'searching'} ${says}`
+      measured += 1
+      /*
+       * `''` in `filled` is a candidate that really was scored — the vocabulary the run's own
+       * tally counts in. Counted for measured ends only, since the rate it becomes is this
+       * run's: a remembered end's patches were another run's work.
+       */
+      for (const why of got.end.scores?.filled ?? []) if (why === '') patches += 1
+      /*
+       * **Published only once the end is wholly finished**, assessor and all, which is what
+       * keeps the streaming honest now that there is a second stage: a reader must never see
+       * a row ranked by geometry that the assessor is about to reorder underneath them. The
+       * cost is that an assessed end takes about two seconds longer to appear, which is the
+       * right trade — a draft that moves is worse than a wait.
+       */
+      build()
+    }
+  }
+
+  /** One root whose open ends are to be searched: a neuron, or a piece it is being extended by. */
+  interface Root {
+    /** The neuron it is, or is part of — the boxes of two of these do not overlap. */
+    readonly seed: string
+    /** The neuron's id, or the piece's: its name in the run's book, and what the bar calls it. */
+    readonly id: string
+    /** Its own tips; an end is numbered by its tip's place here. */
+    readonly mine: readonly TipRow[]
+    /** Every tip the own-tip rule measures against, `mine` first. */
+    readonly competing: readonly TipRow[]
+    /** Each of `mine`'s key in the memory of finished ends, and what the memory answers of them. */
+    readonly keys: readonly string[]
+    readonly held: ReadonlyMap<string, Remembered>
+    /** A piece's path, read as the seed's in every box; `undefined` for a neuron's own ends. */
+    readonly alias: ReadonlyMap<bigint, bigint> | undefined
+    /** Stops this root's search alone — a piece's, so that one failing does not end the run. */
+    readonly signal: AbortSignal
+  }
+  let lastSeed: string | undefined
+  /**
+   * Search one root's ends: the ones the run attempts, remembered or measured, in their order.
+   *
+   * The same for a neuron and for a piece. A neuron is the plain case — it competes with its own
+   * tips only, and nothing is read as it but itself.
+   *
+   * Only what is still wanted: a root can be searched more than once, and an end it already has
+   * is not asked for again. `rememberedOnly` takes just the ends the memory answers — for a
+   * neuron whose pieces go before the rest of its ends (below).
+   */
+  const searchRoot = async (root: Root, rememberedOnly = false) => {
+    const toSearch: EndToSearch[] = []
+    // A tip outside the volume, or the end a piece joins by, is a competitor and never an end —
+    // and an end the book already has is not asked for again.
+    for (const i of book.wanted(root.id)) {
+      const tip = root.mine[i]!
+      if (rememberedOnly && !root.held.has(root.keys[i]!)) continue
+      const end = endToSearch(
+        volume,
+        tip,
+        i,
+        halfWidthNm,
+        { ...options, signal: root.signal },
+        root.alias,
+      )
+      toSearch.push({ ...end, box: clock.around('reading the search box', end.box) })
+    }
+    if (toSearch.length === 0) return
+    // One neuron's ends overlap, and so do its pieces'; two neurons' do not. See `forgetRoots`.
+    if (lastSeed !== root.seed) forgetRoots(volume)
+    lastSeed = root.seed
+    // `thenWaits` looks ahead within a root; this is the same look across the boundary.
+    if (behind && !root.held.has(root.keys[toSearch[0]!.tip]!)) build()
+    await take(
+      recalled(toSearch, {
+        memory: sessionEnds,
+        held: root.held,
+        keyOf: (end) => root.keys[end.tip]!,
+        // Numbered within the root, as `searchEnds` numbers them and the book keeps them.
+        rowOf: (end) => end.tip,
+        measure: (missing) => measure(root.competing, missing, root.alias, root.signal),
+      }),
+      root.id,
+      (end) => book.put(root.id, end),
+    )
+  }
+
+  let said = ''
+  /**
+   * Let the browser in, on a clock, where a stretch of work awaits nothing real — so a repaint
+   * and a Cancel are not held up by it. `showSoon`'s yield, without anything to show.
+   */
+  const letIn = async () => {
+    if (performance.now() - letInAt < PUBLISH_INTERVAL_MS) return
+    await yieldToBrowser()
+    letInAt = performance.now()
+    throwIfAborted(ctx.signal)
+  }
+  /**
+   * Pieces whose chain could not be run, said once. Not tried again in this run: the memo would
+   * answer with the same failure in other words, and one failure would read as two.
+   */
+  const gaveUp = new Set<string>()
+  /** Whether a neuron has an end to try that the memory does not answer. */
+  const seedWaits = (neuron: string, keys: readonly string[]) =>
+    book.wanted(neuron).some((tip) => !held.has(keys[tip]!))
+  /**
+   * Take one piece the reader asked to have extended: find its open ends, tell the joining one
+   * from the rest, search what is still to be searched.
+   *
+   * **It can be called more than once for a piece, and the second time does only what
+   * changed.** The piece's record (`runBook.ts`) holds its tips and the ends found so far; this
+   * works out the joining end again from what its parent's ends say *now*, and searches the
+   * ends the record does not have. That is what lets a piece go ahead of the ends its neuron
+   * still has left — joined by what there is so far — and be put right once they are all in.
+   *
+   * **A piece that cannot be extended is said and passed over**, never the end of the run: its
+   * mesh may not load, its chain may not be one that can be run again, and the ends already on
+   * the table are worth having either way (`docs/limits.md`). It is said as a warning on this
+   * card and nowhere else: a table of what became of each piece was built and taken out again
+   * (user, 2026-11-16) — few pieces are expected to fail, and it was a third wire into the
+   * review card. A Cancel is the one thing that does stop here.
+   *
+   * `ahead` is a piece offered a turn before its neuron's remaining ends. It takes it only
+   * where an end already found lists it; otherwise its turn comes with the rest.
+   */
+  const settle = async (piece: Piece, ahead = false) => {
+    throwIfAborted(ctx.signal)
+    // A piece with nothing to do awaits nothing real, and there can be hundreds in a row.
+    await letIn()
+    // Where it joins what it was accepted on, and so which of its ends is not an open one.
+    const contact = book.contactOf(piece)
+    if ((ahead && !contact) || gaveUp.has(piece.id)) return
+    let record = book.piece(piece.id)
+    const first = record === undefined
+    let ran = false
+    if (!record) {
+      try {
+        const got = await pieceTips(ctx, piece, (says) => {
+          // The inner chain reports on every state change, mostly the same words.
+          if (says === said) return
+          said = says
+          ctx.progress(afterShare(head, shown), says)
+        })
+        ran = got.ran
+        // Numbered within the piece: where its rows sit in the table is the book's to say.
+        const mine = ownTips(got.tips, piece, assessing)
+        /*
+         * Rows, and none of them this piece's tip: the chain answered about another id, or with
+         * rows that have no position. Said, because the state it leaves — nothing to search —
+         * is the one a piece with no open ends has, and a reader would take the piece for
+         * finished.
+         */
+        if (got.tips.length > 0 && mine.length === 0) {
+          ctx.warn(
+            `${piece.id}: the chain above Tips answered with ${plural(got.tips.length, 'row')}, ` +
+              'none of them an open end of this piece that can be searched.',
+          )
+        }
+        record = book.addPiece(
+          piece,
+          got.tips,
+          mine,
+          mine.map((tip) => boxFits(volume, tip, halfWidthNm)),
+        )
+        tipsOf.set(piece.id, mine)
+      } catch (error) {
+        throwIfAborted(ctx.signal)
+        gaveUp.add(piece.id)
+        ctx.warn(`${piece.id} could not be extended. ${errorMessage(error)}`)
+        return
+      }
+    }
+    const { mine } = record
+    if (!contact && mine.length > 0) {
+      ctx.warn(
+        `${piece.id} is not among the candidates found for ${piece.parent}, so the end it ` +
+          'joins by could not be told from an open one and was searched with the rest.',
+      )
+    }
+    // Which end is the join, by what the parent's ends say now. An end found earlier at a tip
+    // that turns out to be the join is dropped by the book; one that is no longer it is wanted.
+    const moved = book.join(piece.id, junctionOf(mine, contact, plan.ownUm))
+    // Its search failed earlier in this run: joined where it belongs, said once, tried no more.
+    // (Asked again: a record is a reading, and the join has just been said.)
+    if (book.piece(piece.id)?.failed) {
+      behind ||= moved
+      return
+    }
+    const wanted = book.wanted(piece.id)
+    // Taken before, and nothing about it has changed.
+    if (!first && !moved && wanted.length === 0) return
+
+    const { competing, keys } = pieceKeys(identity, piece, mine, tipsOf)
+    /*
+     * What the memory held of this piece when the run started, where its tips were known then —
+     * the reading the wait was priced on and the assessor decided on (`foreseePieces`). A piece
+     * whose chain has only just run is read now: nothing could have been foreseen of it. Taken
+     * again, it is asked of the ends now wanted alone — an old joining tip, never measured in
+     * this run — so Clear Cache and the card's lifetime reach those too, and nothing this run
+     * has just measured is forgotten.
+     */
+    const heldHere = first
+      ? ((ran ? undefined : foreseen.get(piece.id)) ?? heldFor(ctx, keys))
+      : heldFor(
+          ctx,
+          wanted.map((tip) => keys[tip]!),
+        )
+
+    note = `${piece.id}: ${plural(wanted.length, 'open end')} to search`
+    /*
+     * Shown before any of it is searched, so a reader sees the piece's tips, waiting — at once
+     * where that is news (its chain just ran, its join moved, or an end is about to take
+     * seconds), and on the clock where the whole piece is remembered, which on a neuron with two
+     * hundred pieces already extended is every piece but the one just asked for.
+     */
+    const waits = wanted.some((tip) => !heldHere.has(keys[tip]!))
+    await showSoon(ran || waits || (moved && !first))
+    if (wanted.length === 0) return
+
+    // Its own, so that a failure stops what this piece still has in flight and nothing else.
+    const own = new AbortController()
+    try {
+      await searchRoot({
+        seed: piece.seed,
+        id: piece.id,
+        mine,
+        competing,
+        keys,
+        held: heldHere,
+        alias: aliasOf(piece),
+        signal: AbortSignal.any([ctx.signal, own.signal]),
+      })
+    } catch (error) {
+      throwIfAborted(ctx.signal)
+      // Not this piece's failure but the run's: nothing after it could be scored either.
+      if (unscorable !== undefined) throw unscorable
+      /*
+       * The same promise as for its tips: this piece is said and passed over, and the rest go
+       * on. What it had read ahead is stopped, and the ends it never reached are taken off what
+       * the run attempts (`fail`) — left there they would read "not yet" on a finished run, and
+       * the review card would go on counting them as waiting.
+       */
+      own.abort()
+      book.fail(piece.id)
+      ctx.warn(`${piece.id} could not be searched. ${errorMessage(error)}`)
+    }
+    behind = true
+  }
+
+  /*
+   * **A neuron's own ends, and — where the run still has ends to measure — its pieces before
+   * those** (user, 2026-11-16). A reader extends a piece while the search is still running; the
+   * press restarts this run, and left in the plain order the piece would wait behind every end
+   * the run has left, a minute or more for a search of seconds.
+   *
+   * So, a neuron at a time: the ends the memory holds, which cost nothing; then every piece that
+   * can be joined by what those found, breadth first, so a piece of such a piece goes too; then
+   * the rest of the neuron's ends. **Asked of the run, not of the neuron**: a reader extends a
+   * piece of the first neuron, which is finished, while the second is still being searched, and
+   * that piece must not wait for the second neuron's ends either. A run with nothing left to
+   * measure is the plain case and takes no detour.
+   *
+   * **What goes ahead is a draft, and is put right afterwards.** Taken early, a piece is joined
+   * by the ends its parent has *so far*; an end not yet measured may list it at a smaller gap,
+   * and then another of its ends is the one it joins by. So once every neuron's ends are in,
+   * every piece is taken again, in order (`settle`): for nearly all of them nothing has changed
+   * and nothing is done. The tables a run ends on do not depend on when Extend was pressed —
+   * they are put together from the records in the plain order every time (`runBook.ts`).
+   */
+  const runWaits = neurons.some((one) => seedWaits(one.neuron, one.keys))
+  for (const { neuron, mine, keys } of neurons) {
+    tipsOf.set(neuron, mine)
+    const root: Root = {
+      seed: neuron,
+      id: neuron,
+      mine,
+      competing: mine,
+      keys,
+      held,
+      alias: undefined,
+      signal: ctx.signal,
+    }
+    const own = pieces.filter((piece) => piece.seed === neuron)
+    if (own.length === 0 || !runWaits) {
+      await searchRoot(root)
+      continue
+    }
+    await searchRoot(root, true)
+    // Shown before a piece's chain is run, which can take seconds: the press that brought the
+    // run here retired the one whose rows were on the card, and the list is empty until this.
+    if (behind) build()
+    for (const piece of own) await settle(piece, true)
+    await searchRoot(root)
+  }
+
+  // Every neuron's ends are in now. Where a piece joins is asked of the book again, which knows
+  // whether its parent's ends have moved since.
+  for (const piece of pieces) await settle(piece)
+
+  const piecesOutside = book.piecesOutside()
+  if (piecesOutside > 0) {
+    ctx.warn(
+      `${plural(piecesOutside, 'open end')} of the extended pieces ` +
+        `${agree(piecesOutside, 'lies', 'lie')} ` +
+        'outside the segmentation volume, so no box could be read there.',
+    )
+  }
+
+  // The answer has to hold the last ends recalled, shown yet or not.
+  if (behind) build()
+
+  reportOnRun(ctx, listed, volume.chunks)
+  // The rate is the one number in the report that compares against another machine — and both
+  // halves of it are this run's own work, so a run answered from memory says nothing about time.
+  const timing = clock.report({ ends: measured, patches })
   if (timing) ctx.warn(timing)
   return answer
+}
+
+/**
+ * An accepted piece's tips, by the chain that made them and the piece — for the session.
+ *
+ * The chain above `Tips` is a mesh fetched, cleaned and scanned: a second and a half for a small
+ * fragment, twenty for a piece of five hundred level-2 chunks (phase 0). The node's key moves on
+ * every Extend, so every piece already extended would otherwise be run through it again each
+ * time. Keyed on `ctx.inputKey('tips')`, which is the provenance of that chain: change a setting
+ * in it and these are asked for afresh, as the neuron's own tips are.
+ */
+/** A piece's tips as the chain answered, what it warned about, and when — epoch ms. */
+interface KeptTips {
+  readonly tips: TableValue
+  readonly warnings: readonly string[]
+  readonly at: number
+}
+
+type Kept =
+  | KeptTips
+  /** The chain failed for this piece, and when — so it is not run again on every Extend. */
+  | { readonly failed: string; readonly at: number }
+
+const pieceTipsMemo = new LruMap<string, Kept>(512)
+
+/**
+ * How long a piece whose chain failed is left alone.
+ *
+ * Every Extend moves the node's key and runs it again, and a piece that failed was found out by
+ * running its chain — up to twenty seconds for a mesh that will not load. Unremembered, each
+ * failing piece is paid for again on every press, on a run the memory otherwise answers in a
+ * fraction of a second. Remembered for good, a moment's network trouble would be the piece's
+ * answer for the session. Five minutes is neither; Clear Cache tries at once.
+ */
+const FAILED_FOR_MS = 5 * 60 * 1000
+
+/**
+ * What one piece's chain costs before any of its ends is searched, in seconds, and how many
+ * ends a piece nothing is known of is priced at — for the wait warning alone.
+ *
+ * Phase 0's measurement over 33 pieces (`docs/seam-extend-plan.md`): the chain took a median
+ * 1.5 s, and a median piece had two tips with one to search; a quarter were larger, at eleven.
+ * Two is between, and a rate rather than a limit: `WAIT_WARN_SECONDS` decides when to speak.
+ */
+const SECONDS_PER_PIECE_CHAIN = 1.5
+const ENDS_PER_UNSEEN_PIECE = 2
+
+/** The node `rerunInput` puts where the neuron came in: the piece's id, and nothing wired. */
+const PIECE_SOURCE = 'neuron.inputIds'
+
+/**
+ * Where a piece's tips are kept — or `undefined` where the chain above `Tips` has no key, and
+ * then nothing is kept at all: a key without the chain in it would hand one chain's tips to
+ * another's.
+ */
+function pieceTipsKey(ctx: EvalContext, piece: Piece): string | undefined {
+  const chain = ctx.inputKey('tips')
+  return chain === undefined ? undefined : `${chain}|${piece.id}`
+}
+
+/**
+ * What is kept of a piece that this run may answer from: nothing where a Clear Cache asked for
+ * none, nothing older than a lifetime chosen on the card, and a failure only while it is recent.
+ *
+ * The `dataCache` contract, kept for this memory as for the ends': the node offers Clear Cache
+ * and a lifetime, and both mean the tips as well as what was searched from them.
+ */
+function keptOf(ctx: EvalContext, piece: Piece): Kept | undefined {
+  const key = pieceTipsKey(ctx, piece)
+  const kept = key === undefined ? undefined : pieceTipsMemo.get(key)
+  if (!kept || key === undefined) return undefined
+  const age = Date.now() - kept.at
+  const stale =
+    ctx.refresh ||
+    ('failed' in kept ? age >= FAILED_FOR_MS : ctx.maxAgeMs !== undefined && age > ctx.maxAgeMs)
+  if (stale) pieceTipsMemo.delete(key)
+  return stale ? undefined : kept
+}
+
+/**
+ * One accepted piece's open ends: the chain above `Tips`, run again for the piece alone.
+ *
+ * Throws where the chain cannot be run again or a node in it fails; the caller says so and goes
+ * on to the next piece.
+ */
+async function pieceTips(
+  ctx: EvalContext,
+  piece: Piece,
+  report: (says: string) => void,
+): Promise<{ tips: TableValue; ran: boolean }> {
+  const key = pieceTipsKey(ctx, piece)
+  let kept = keptOf(ctx, piece)
+  if (kept && 'failed' in kept) {
+    throw new Error(`${kept.failed} Not tried again for a few minutes; Clear Cache tries now.`)
+  }
+  const ran = !kept
+  if (!kept) {
+    if (!ctx.rerunInput) {
+      throw new Error('This run cannot run the chain above `Tips` again for another neuron.')
+    }
+    report(`${piece.id}: finding its open ends`)
+    try {
+      const { value, warnings } = await ctx.rerunInput(
+        'tips',
+        { type: PIECE_SOURCE, params: { ids: piece.id }, output: 'neurons' },
+        (says) => report(`${piece.id}: ${says}`),
+      )
+      if (!isTableValue(value)) {
+        throw new Error('The chain above `Tips` did not answer with a table of open ends.')
+      }
+      kept = { tips: value, warnings, at: Date.now() }
+    } catch (error) {
+      // A Cancel is not the piece's failure, and must not be remembered as one.
+      throwIfAborted(ctx.signal)
+      if (key !== undefined)
+        pieceTipsMemo.set(key, { failed: errorMessage(error), at: Date.now() })
+      throw error
+    }
+    if (key !== undefined) pieceTipsMemo.set(key, kept)
+  }
+  // The age of the tips counts towards the card's, as each end's does.
+  ctx.reportFetched(kept.at)
+  /*
+   * Said again on every run, kept or not — a caveat that held for the tips holds for an answer
+   * built on them. Without the piece's id, so the scheduler's own de-duplication makes one line
+   * of a warning every piece raises: a fragment has no nucleus, and Find Open Ends says so each
+   * time.
+   */
+  for (const said of kept.warnings) ctx.warn(`While finding a piece’s open ends — ${said}`)
+  return { tips: kept.tips, ran }
+}
+
+/**
+ * A piece's own tips out of its chain's table: on its root, numbered as that table's rows —
+ * where they sit in the published table is the run book's to say — and in the neuron the piece
+ * is being extended into.
+ */
+function ownTips(tips: TableValue, piece: Piece, assessing: boolean): TipRow[] {
+  return tipsFromTable(tips, assessing)
+    .rows.filter((tip) => tip.neuronId === piece.id)
+    .map((tip) => ({ ...tip, seed: piece.seed }))
+}
+
+/**
+ * A piece's ends in the memory of finished ends: every tip the own-tip rule measures them
+ * against — the piece's own, then its path's — and each of its tips' key.
+ *
+ * **One derivation, read twice**, for `neuronsOf`'s reason: by `foreseePieces`, which prices the
+ * run and takes a Clear Cache to every piece before anything is measured, and by the loop. A
+ * key those two spelled apart would be a Clear Cache that forgot nothing, or a wait priced on
+ * ends the run never asks for.
+ */
+function pieceKeys(
+  identity: RunIdentity,
+  piece: Piece,
+  mine: readonly TipRow[],
+  tipsOf: ReadonlyMap<string, readonly TipRow[]>,
+): { competing: TipRow[]; keys: string[] } {
+  const competing = [...mine, ...piece.path.slice(0, -1).flatMap((id) => tipsOf.get(id) ?? [])]
+  const inNeuron = neuronKey(identity, piece.id, competing, piece.path)
+  return { competing, keys: mine.map((tip) => endKey(inNeuron, tip)) }
+}
+
+/**
+ * What can be said of the pieces before the run reaches any of them — and, on a Clear Cache,
+ * everything about them forgotten here.
+ *
+ * A piece whose tips an earlier run found has ends whose keys can be worked out now. What the
+ * memory holds of them is **taken here, once**, and handed to the loop (`held`): the wait is
+ * priced and the assessor opened, or not, on the very reading the run then answers from —
+ * `heldEnds`' reason, which a second look as the loop reached each piece would undo. A piece
+ * nothing is kept of has a chain to run first.
+ *
+ * **Clear Cache is taken to every piece here**, tips and ends both. Its flag is spent when the
+ * run starts, so forgotten as the loop reached each piece, a run cancelled at the third would
+ * leave the fourth to the fiftieth answering from before it on the next run — `forgetStale`'s
+ * own header, one level out.
+ */
+function foreseePieces(
+  ctx: EvalContext,
+  identity: RunIdentity,
+  neurons: readonly RunNeuron[],
+  pieces: readonly Piece[],
+  assessing: boolean,
+): { unremembered: number; unknown: number; held: Map<string, Map<string, Remembered>> } {
+  const tipsOf = new Map<string, readonly TipRow[]>(
+    neurons.map((one) => [one.neuron, one.mine]),
+  )
+  const held = new Map<string, Map<string, Remembered>>()
+  let unremembered = 0
+  let unknown = 0
+  for (const piece of pieces) {
+    const key = pieceTipsKey(ctx, piece)
+    // Read past `keptOf`: a Clear Cache has to find the ends of tips it is about to forget.
+    const any = key === undefined ? undefined : pieceTipsMemo.get(key)
+    const kept = keptOf(ctx, piece)
+    let mine: TipRow[] | undefined
+    if (any && 'tips' in any) {
+      try {
+        mine = ownTips(any.tips, piece, assessing)
+      } catch {
+        // A table this run cannot read (an `e_tip` it now needs): the loop will say so.
+      }
+    }
+    if (!mine) {
+      unknown += 1
+      continue
+    }
+    tipsOf.set(piece.id, mine)
+    const { keys } = pieceKeys(identity, piece, mine, tipsOf)
+    // Forgets what a Clear Cache or a lifetime rules out, then takes what is left.
+    const snapshot = heldFor(ctx, keys)
+    if (!kept) {
+      // The tips themselves are to be found again, so nothing about its ends is known yet.
+      unknown += 1
+      continue
+    }
+    held.set(piece.id, snapshot)
+    /*
+     * Less one: the end a piece joins by is never searched, so it is never remembered, and
+     * counted it would have every piece already extended look as though it had an end to
+     * measure — a wait announced for a run that has none, and an assessor opened for it. Which
+     * end that is cannot be told here (the own-tip radius is the ranker's, not yet opened), so
+     * it is taken off the count; a piece with no such end and exactly one to measure is priced
+     * one end short, and its assessor opened on that end instead.
+     */
+    unremembered += Math.max(0, keys.length - snapshot.size - 1)
+  }
+  return { unremembered, unknown, held }
+}
+
+/**
+ * What the memory holds of these ends, once what the run may not answer from is forgotten.
+ *
+ * `forgetStale` then `heldEnds`, in that order and always together: for a neuron's own ends
+ * before anything is opened, and for a piece's where its tips are first known.
+ */
+function heldFor(ctx: EvalContext, keys: readonly string[]): Map<string, Remembered> {
+  // Clear Cache, and a lifetime chosen on the card.
+  forgetStale(sessionEnds, keys, { refresh: ctx.refresh, maxAgeMs: ctx.maxAgeMs })
+  // Then what is left, taken once — the run prices on this and answers from this.
+  return heldEnds(sessionEnds, keys)
+}
+
+/** One neuron of a run: its tips, where they sit in the table, and its part of an end's key. */
+interface RunNeuron {
+  readonly neuron: string
+  /** Each tip's index in the run's `rows`. */
+  readonly at: readonly number[]
+  readonly mine: readonly TipRow[]
+  /** Each tip's key in the memory of finished ends, beside `mine`. Made once and carried. */
+  readonly keys: readonly string[]
+}
+
+/**
+ * The run's neurons, each with its key in the memory of finished ends.
+ *
+ * **One derivation, read three times** — by what a Clear Cache forgets, by what the run takes
+ * from the memory before anything is opened, and by the loop. Derived apart, nothing would hold the key a wait was priced on equal to the key the run
+ * then asks for, and a drift between them is a warning that miscounts and says nothing else.
+ */
+function neuronsOf(rows: readonly TipRow[], identity: RunIdentity): RunNeuron[] {
+  return [...tipsByNeuron(rows)].map(([neuron, at]) => {
+    const mine = at.map((i) => rows[i]!)
+    const inNeuron = neuronKey(identity, neuron, mine)
+    return { neuron, at, mine, keys: mine.map((tip) => endKey(inNeuron, tip)) }
+  })
 }
 
 /**
@@ -975,7 +1758,7 @@ function patchSteps(
   return {
     box: async (cut) => {
       const box = patchBoxFor(scale, cut.centresNm)
-      const read = await labelledBox(volume, scale, box, options)
+      const read = await labelledBox(volume, scale, box, options, cut.alias)
       return {
         ...read,
         queryRoot: cut.queryRoot,
@@ -1030,9 +1813,10 @@ function published(
   tips: readonly TipRow[],
   assessed: boolean,
   attempting: ReadonlySet<number>,
+  lineage: readonly (Lineage | undefined)[],
 ) {
   return {
-    tips: tipsWithFirsts(table, ends, tips, assessed, attempting),
+    tips: tipsWithFirsts(table, ends, tips, assessed, attempting, lineage),
     candidates: candidatesTable(ends, tips, assessed),
   }
 }

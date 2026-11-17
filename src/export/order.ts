@@ -18,7 +18,8 @@
  * **The condition that makes the hoist valid is the one that makes references sound**: a
  * referenced node's cell must be writable from its params alone. A dataset's is — a `Client(…)`
  * naming a datastack and a version — which is why it can be lifted above the annotations wired
- * into it. Check that before writing an emitter for a node anything references.
+ * into it. Check that before writing an emitter for a node anything references — and a node
+ * read through `asReference` fails it by construction (`referencesFirst` says what to do).
  */
 
 import type { CodaGraph } from '../core/graph'

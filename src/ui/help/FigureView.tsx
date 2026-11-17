@@ -39,7 +39,13 @@ function GraphFigure({ figure }: { figure: FigureGraph }) {
           aria-hidden="true"
         >
           {figure.wires.map((wire, i) => (
-            <path key={i} className="cfig__wire" data-fam={wire.family} d={wire.path} />
+            <path
+              key={i}
+              className="cfig__wire"
+              data-fam={wire.family}
+              data-reference={wire.reference || undefined}
+              d={wire.path}
+            />
           ))}
         </svg>
         {figure.cards.map((card) => (
@@ -63,7 +69,8 @@ function describe(figure: FigureGraph): string {
   if (figure.cards.length === 0) return 'An empty figure'
   const byAlias = new Map(figure.cards.map((c) => [c.alias, c.label]))
   const links = figure.wires.map(
-    (w) => `${byAlias.get(w.from) ?? w.from} into ${byAlias.get(w.to) ?? w.to}`,
+    (w) =>
+      `${byAlias.get(w.from) ?? w.from} ${w.reference ? 'named by' : 'into'} ${byAlias.get(w.to) ?? w.to}`,
   )
   const nodes = figure.cards.map((c) => c.label).join(', ')
   return links.length ? `${nodes}. Wired: ${links.join('; ')}` : nodes

@@ -70,6 +70,11 @@ export interface TipRow {
    * been through a float. The row the reader already measured cannot disagree with itself.
    */
   readonly row: number
+  /**
+   * The neuron this tip's root is being extended *into*, where that is not the root itself —
+   * a tip of an accepted piece (`pieces.ts`). Absent on a neuron's own tips.
+   */
+  readonly seed?: string
 }
 
 /**
@@ -82,6 +87,12 @@ export interface TipRow {
  */
 export const SEARCH_CANDIDATE_FIELDS: readonly Field[] = [
   field('neuron', ID_COLUMN_NAME, 'str'),
+  /*
+   * The neuron the tip belongs to once the reader's accepted pieces are counted in: the tip's
+   * own root for a neuron's tips, and the neuron being extended for a piece's. `ID` cannot say
+   * it — it has to stay the root the tip is on, which is what a verdict and a merge are about.
+   */
+  field('seed', 'seed', 'str'),
   field('end_uid', 'end_uid', 'i64'),
   field('cand_root', 'candidateId', 'str'),
   field('rank', 'rank', 'i64'),
@@ -246,6 +257,39 @@ export function candidateFields(assessed: boolean): readonly Field[] {
  */
 export const SEARCHED_FIELD: Field = field('searched', 'searched', 'bool')
 
+/**
+ * Where a tip sits in a neuron being extended piece by piece (`pieces.ts`).
+ *
+ * `ID` stays the root the tip is on — an accepted piece's own, which a verdict and a merge are
+ * about — so **`seed` is the neuron**: a node below that groups on `ID` sees each piece as its
+ * own neuron. `junction` marks the end a piece joins the neuron by, published and never searched.
+ *
+ * Declared here beside the function that writes them (`tipsWithFirsts`), which is the only one
+ * that does — invariant 3. They were written by a second function for a round, ahead of the
+ * fold, and came out in another order than `tipsSchema` promises a picker.
+ */
+export const LINEAGE_FIELDS: readonly Field[] = [
+  field('seed', 'seed', 'str'),
+  /*
+   * Not `parent` and `depth`. These four are written over whatever the incoming tips carried
+   * under the same name, on every run, and those two are names a reader may well have joined on
+   * above this node — a skeleton's parent node, a depth in the arbour.
+   */
+  field('parent', 'accepted_on', 'str'),
+  field('depth', 'steps', 'i64'),
+  field('junction', 'junction', 'bool'),
+]
+
+/** One row's lineage, by the names `LINEAGE_FIELDS` publishes. */
+export interface Lineage {
+  readonly seed: string
+  /** What the row's root was accepted on; `null` for a neuron's own tip. */
+  readonly parent: string | null
+  /** Steps from the neuron; 0 for its own tips. */
+  readonly depth: number
+  readonly junction: boolean
+}
+
 /** The tip columns a run publishes. The first candidate's, plus the tip's own where scored. */
 export function tipFields(assessed: boolean): readonly Field[] {
   return assessed
@@ -267,7 +311,8 @@ export function tipFields(assessed: boolean): readonly Field[] {
  * `neuron` and `end_uid` are already the tip's own, and `rank` is 1 by definition here.
  */
 export const SEARCH_TIP_FIELDS: readonly Field[] = SEARCH_CANDIDATE_FIELDS.filter(
-  (one) => !['neuron', 'end_uid', 'rank'].includes(one.from),
+  // `seed` is the tip's own too — one of `LINEAGE_FIELDS`, and never a first candidate's.
+  (one) => !['neuron', 'seed', 'end_uid', 'rank'].includes(one.from),
 )
 
 /**
@@ -476,6 +521,7 @@ export function candidatesTable(
     for (let place = 0; place < order.length; place++) {
       const at = order[place]!
       read['neuron']!.push(tip.neuronId)
+      read['seed']!.push(tip.seed ?? tip.neuronId)
       read['end_uid']!.push(tip.endUid)
       read['cand_root']!.push(String(end.candRoot[at]!))
       // **The place in `order`, not the row's index.** With an assessor the two differ — the
@@ -529,6 +575,12 @@ export function tipsWithFirsts(
    * holds (`fits`), and every row outside it is a row the node has already warned about.
    */
   attempting: ReadonlySet<number>,
+  /**
+   * Each row's lineage, by its index in `table` — given for the rows of an accepted piece, and
+   * left out for a neuron's own, which are their own seed. By row and not on `tips`, because a
+   * piece's row that could not be searched is still that piece's.
+   */
+  lineage: readonly (Lineage | undefined)[] = [],
 ): TableValue {
   const data: Record<string, CellValue[]> = {}
   const schema = tipsSchema(table.schema, assessed)
@@ -544,6 +596,18 @@ export function tipsWithFirsts(
    * Left in place it would say "searched" about rows this run is still queueing, which is the
    * one cell in the table a reader is counting on.
    */
+  /*
+   * The lineage, for every row and from this run alone — written over whatever the incoming
+   * table carried under these names, for the reason `searched` is just below.
+   */
+  const ids = table.data[ID_COLUMN_NAME] ?? []
+  for (let row = 0; row < length; row++) {
+    const own = lineage[row]
+    data['seed']![row] = own?.seed ?? idText(ids[row] ?? null)
+    data['accepted_on']![row] = own?.parent ?? null
+    data['steps']![row] = own?.depth ?? 0
+    data['junction']![row] = own?.junction ?? false
+  }
   const searched = data[SEARCHED_FIELD.name]!
   searched.fill(false)
   for (const row of attempting) if (row < length) searched[row] = null
@@ -633,6 +697,7 @@ const FIRST_CANDIDATE_COLUMNS: readonly string[] = [
  * own onto the tips would otherwise watch it move to the end every time this node ran.
  */
 export function tipsSchema(incoming: TableSchema | undefined, assessed: boolean): TableSchema {
-  const wanted = schemaOf(tipFields(assessed))
+  // The lineage last, so a run nobody extended keeps its columns where they were and gains four.
+  const wanted = schemaOf([...tipFields(assessed), ...LINEAGE_FIELDS])
   return incoming ? foldColumns(incoming, wanted.columns) : wanted
 }

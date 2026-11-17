@@ -38,33 +38,61 @@
  * which state it is in, for the button and to pause its own viewer while the overlay has one.
  * What Submit has merged comes back through the record (`mergedSoFar`): such a row says so, and
  * its verdict can no longer be changed.
+ *
+ * ## Extend
+ *
+ * An accepted row has an Extend button (`docs/seam-extend-plan.md`). Pressing it writes the pair
+ * into `extend` and runs the Suggest Merges node this card's `Extended` output is wired back to,
+ * which searches the piece's own open ends; they arrive in `Tips` like any others and are listed
+ * with the neuron's. **Started by hand, unless `Auto-extend` is on** (user, 2026-11-16): then a
+ * press that accepts a piece extends it too (`judgedParams`).
+ * The button then says how far that search has got, read off the rows the piece has published —
+ * there is nothing else to read it from — and pressing it again stops extending the piece.
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import type { CSSProperties } from 'react'
 
+import { referrerOf } from '../../core/graph'
 import { getNodeDef } from '../../core/registry'
 import { isTableValue } from '../../core/values'
 import {
+  acceptedElsewhere,
   acceptedPieces,
+  arrangeTree,
   buildQueue,
-  arrangeRows,
   currentOfQueue,
+  decodeExtend,
   decodeVerdicts,
-  encodeVerdicts,
-  mergedAs,
+  encodeExtend,
+  extendBlocked,
+  extendedKeys,
+  extendPress,
+  extendProgress,
   gapLabel,
+  IN_NEURON_NOTE,
+  judgedParams,
+  leavesWith,
+  liveQueue,
+  liveTree,
+  mergedAs,
   neuronsOf,
+  pairsOf,
   pickedNeuron,
   scenePieces,
   sizeLabel,
   sizeOf,
   stillToMerge,
   stillToSearch,
+  tipKey,
   tipsOf,
   verdictFor,
-  withVerdict,
+  verdictKey,
+  verdictPress,
   VERDICTS,
+  withExtended,
 } from '../../packs/seam/reviewQueue'
+import { EXTENDED_PORT } from '../../packs/seam/pieces'
 import type {
   Candidate,
   QueueMode,
@@ -148,7 +176,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
 
   const tips = inputValues?.['tips']
   const candidates = inputValues?.['candidates']
-  const queue = useMemo(
+  // Every row the tables hold — a piece's joining end and a dropped piece's tips among them.
+  const all = useMemo(
     () =>
       buildQueue(
         isTableValue(tips) ? tips : undefined,
@@ -157,6 +186,23 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     [tips, candidates],
   )
   const verdicts = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
+  /*
+   * What is extended, and so which rows there are to review — read from the params, as `evaluate`
+   * and Suggest Merges read it, so a piece un-accepted here is off the list on that click.
+   *
+   * As the param's own text first, which compares by value: `verdicts` is a new map on every
+   * press, and memoised on it directly a verdict that extends nothing still rebuilt the tree,
+   * the queue and the sorted list — 3 ms a click on a neuron of five hundred tips, 100 ms on
+   * one of two thousand with two hundred pieces (measured 2026-11-16).
+   */
+  const extendedText = useMemo(
+    () => encodeExtend(extendedKeys(node.params.extend, verdicts)),
+    [node.params.extend, verdicts],
+  )
+  // The pairs that are extended — which is not the same question as "is this piece in the tree".
+  const extended = useMemo(() => decodeExtend(extendedText), [extendedText])
+  const tree = useMemo(() => liveTree(all, pairsOf(extended)), [all, extended])
+  const queue = useMemo(() => liveQueue(all, tree), [all, tree])
   /*
    * One neuron at a time. Everything below — the list, the cursor, the counts in the foot — reads
    * `mine`, never `queue`, so no surface of the card can show a second neuron's tips.
@@ -174,20 +220,18 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // Listed one by one rather than as a spread: a spread dependency is one React cannot check,
   // and this memo is over the whole queue, which is thousands of rows — a hundred thousand of
   // them per candidate.
+  // As a tree: a piece's tips beneath the row the piece was accepted on (`arrangeTree`).
   const listed = useMemo(
-    () => arrangeRows(mine, { minConfidence, minSize, shownOnly, sortBy, mode }),
-    [mine, minConfidence, minSize, shownOnly, sortBy, mode],
+    () => arrangeTree(mine, neuron, tree, { minConfidence, minSize, shownOnly, sortBy, mode }),
+    [mine, neuron, tree, minConfidence, minSize, shownOnly, sortBy, mode],
   )
   /*
-   * How many of this neuron's tips are still to come. From the table rather than from the
-   * queue's own length: a tip the run will never reach — its box outside the volume — is
-   * published as `searched: false`, so this count reaches zero where "rows with nothing on them"
-   * would stall above it and read as a run that stopped early.
+   * How many of this neuron's listed tips are still to come. From what the run says of each
+   * rather than from the queue's own length: a tip the run will never reach — its box outside
+   * the volume — is published as `searched: false`, so this count reaches zero where "rows
+   * with nothing on them" would stall above it and read as a run that stopped early.
    */
-  const toSearch =
-    neuron === undefined
-      ? undefined
-      : stillToSearch(isTableValue(tips) ? tips : undefined, neuron)
+  const toSearch = stillToSearch(isTableValue(tips) ? tips : undefined, mine)
   const here = currentOfQueue(mine, String(node.params.current), Number(node.params.rank))
 
   const windowed = useRowWindow(listed.length)
@@ -208,7 +252,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const setParams = useGraphStore((s) => s.setParams)
   const switchTo = (neuronId: string) => {
-    const top = arrangeRows(tipsOf(queue, neuronId), {
+    const top = arrangeTree(tipsOf(queue, neuronId), neuronId, tree, {
       minConfidence,
       minSize,
       shownOnly,
@@ -217,15 +261,16 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     })[0]
     setParams(node.id, {
       neuron: neuronId,
-      current: top ? String(top.tip.endUid) : '',
-      rank: mode === 'candidate' ? (top?.candidate?.rank ?? 1) : 1,
+      current: top ? tipKey(top.tip.neuronId, top.tip.endUid) : '',
+      rank: (top?.hosted ?? top?.candidate)?.rank ?? 1,
     })
   }
 
-  const pick = (tip: QueueTip, candidate: Candidate | undefined) => {
-    setParam('current', String(tip.endUid))
-    // Per candidate a row names its own rank; per tip, clicking opens on the suggestion.
-    setParam('rank', mode === 'candidate' ? (candidate?.rank ?? 1) : 1)
+  const pick = (tip: QueueTip, shows: Candidate | undefined) => {
+    setParam('current', tipKey(tip.neuronId, tip.endUid))
+    // A click opens on what the row shows: per candidate its own; per tip the suggestion, or the
+    // extended piece where the row shows that because its ends hang beneath it.
+    setParam('rank', shows?.rank ?? 1)
   }
   const page = (by: number) => {
     if (!here) return
@@ -233,11 +278,59 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     if (next < 1 || next > here.tip.candidates.length) return
     setParam('rank', next)
   }
-  const judge = (tip: QueueTip, candidate: Candidate, verdict: Verdict) => {
-    setParam(
-      'verdicts',
-      encodeVerdicts(withVerdict(verdicts, tip.neuronId, candidate.candidateId, verdict)),
+  /*
+   * What a press on a verdict writes, and whether it starts a search, is `judgedParams`'s to say
+   * — `Auto-extend`, a large piece and a piece that cannot be extended are all read there.
+   */
+  const judge = (
+    tip: QueueTip,
+    candidate: Candidate,
+    verdict: Verdict,
+    blocked: string | undefined,
+  ) => {
+    const { write, search } = judgedParams(
+      node.params,
+      tip.neuronId,
+      candidate,
+      verdict,
+      blocked,
     )
+    // A piece no longer accepted is no longer extended: both in one edit, one undo step.
+    if (write.extend === undefined) setParam('verdicts', write.verdicts)
+    else setParams(node.id, write)
+    if (search) runSearch()
+  }
+
+  /*
+   * The node this card's `Extended` is wired back to, which is what searches a piece: whoever
+   * reads that output by reference (`referrerOf`). A published set has no such reader.
+   */
+  const searchId = useGraphStore((s) => referrerOf(s.graph, node.id, EXTENDED_PORT))
+  const searchState = useGraphStore((s) =>
+    searchId === undefined ? undefined : s.nodeInfo(searchId).state,
+  )
+  // Its own state too: with a node between the two, nothing is filling here until its first end.
+  const search = {
+    running: filling || searchState === 'running',
+    finished: searchState === 'ok',
+    failed: searchState === 'error',
+  }
+  const runNode = useGraphStore((s) => s.runNode)
+  /** Run the search — whatever auto-run is set to; with it on, the two are one run. */
+  const runSearch = () => {
+    if (searchId !== undefined) void runNode(searchId)
+  }
+  /*
+   * One edit, then a run of the search — so it starts whatever auto-run is set to, and with
+   * auto-run on the two are one run (a newer walk adopts the evaluation, `docs/core.md`).
+   * Stopping runs nothing: the rows leave the list at once (`liveQueue`), and the tables follow
+   * whenever the search next runs.
+   */
+  const extend = (tip: QueueTip, candidate: Candidate, on: boolean) => {
+    setParams(node.id, {
+      extend: withExtended(node.params.extend, tip.neuronId, candidate.candidateId, on),
+    })
+    if (on) runSearch()
   }
 
   /*
@@ -262,6 +355,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     [record, neuron, target],
   )
   const accepted = useMemo(() => acceptedPieces(mine, verdicts), [mine, verdicts])
+  // The pieces this neuron is extended with. Counted for the foot, and what keeps Submit off.
+  const grown = useMemo(
+    () => tree.filter((piece) => piece.seed === neuron).length,
+    [tree, neuron],
+  )
   const toSubmit = useMemo(() => stillToMerge(accepted, merged).length, [accepted, merged])
   const absorbed = merged?.absorbedInto !== undefined
   // This card's Submit, named by document and node: two documents can share a node id.
@@ -321,7 +419,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const showAccepted = node.params.showAccepted !== false
   // Memoised on what the scene depends on, not on `here` (a new object each render): a scroll
   // of the list re-renders the card and must not rebuild the pieces.
-  const hereTip = here?.tip.endUid
+  const hereTip = here && tipKey(here.tip.neuronId, here.tip.endUid)
   const hereCandidate = here?.candidate.candidateId
   const pieces = useMemo(
     () => scenePieces(mine, neuron, here, verdicts, showAccepted, merged, accepted),
@@ -475,11 +573,12 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                * candidate the arrows are on, so paging is visible where it happened. Per
                * candidate a row *is* one candidate and shows itself, and "current" is the pair.
                */
-              const onTip = here?.tip.endUid === tip.endUid
-              const candidate =
-                mode === 'candidate'
-                  ? row.candidate
-                  : ((onTip ? here.candidate : row.candidate) as Candidate | undefined)
+              // The same objects: `here` and the rows are both read off `mine`.
+              const onTip = here?.tip === tip
+              // What the row shows of its own accord (`hosted` is per tip only).
+              const shows = row.hosted ?? row.candidate
+              const candidate: Candidate | undefined =
+                mode === 'tip' && onTip ? here.candidate : shows
               const on =
                 onTip &&
                 (mode === 'tip' || here?.candidate.candidateId === candidate?.candidateId)
@@ -487,9 +586,39 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                 candidate && verdictFor(verdicts, tip.neuronId, candidate.candidateId)
               // Merged by Submit: a verdict on it changes nothing now, so it cannot be changed.
               const done = candidate && mergedAs(merged, candidate.candidateId)
+              // In the neuron already by another road: a second accept would be a second merge.
+              const inNeuron =
+                candidate !== undefined &&
+                acceptedElsewhere(accepted, said, candidate.candidateId)
+              const outdated = !done && candidate !== undefined && edited(candidate.candidateId)
+              const isExtended =
+                candidate !== undefined &&
+                extended.has(verdictKey(tip.neuronId, candidate.candidateId))
+              // What goes off the list with this piece, said before the click that does it.
+              const goesWith = isExtended ? leavesWith(tree, candidate.candidateId) : ''
+              // Why the piece cannot be extended, where it cannot.
+              const blocked = extendBlocked({ wired: searchId !== undefined, done, outdated })
+              /*
+               * The Extend button, on an accepted row only: what it reads, says and whether it
+               * can be pressed are `extendPress`'s, as Submit's are `submitPress`'s.
+               */
+              const extendButton =
+                candidate && said === 'accept'
+                  ? extendPress({
+                      candidate,
+                      progress: isExtended
+                        ? extendProgress(all, tip.seed, candidate.candidateId, search)
+                        : undefined,
+                      blocked,
+                      autoExtend: node.params.autoExtend === true,
+                      goesWith,
+                    })
+                  : undefined
               return (
                 <li
-                  key={`${tip.endUid}:${mode === 'candidate' ? (candidate?.candidateId ?? '') : ''}`}
+                  key={`${tipKey(tip.neuronId, tip.endUid)}:${
+                    mode === 'candidate' ? (candidate?.candidateId ?? '') : ''
+                  }`}
                   className="review-row"
                   data-row
                   aria-setsize={listed.length}
@@ -497,6 +626,16 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   data-current={on ? 'yes' : 'no'}
                   data-verdict={said ?? 'none'}
                   data-merged={done ?? 'no'}
+                  /*
+                   * A piece's tips sit beneath the row the piece was accepted on, a step in for
+                   * every piece between them and the neuron, behind an arrow (`editor.css`).
+                   */
+                  data-depth={row.depth}
+                  style={
+                    row.depth > 0
+                      ? ({ '--depth': Math.min(row.depth, MAX_INDENT) } as CSSProperties)
+                      : undefined
+                  }
                 >
                   {/*
                    * An empty button covering the whole row, with the content as its siblings
@@ -512,11 +651,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   <button
                     type="button"
                     className="review-row__pick"
-                    onClick={() => pick(tip, candidate)}
-                    aria-label={`Show tip ${tip.endUid} and candidate ${
+                    onClick={() => pick(tip, shows)}
+                    aria-label={`Show ${tipName(tip)} and candidate ${
                       candidate?.candidateId ?? 'none'
                     }`}
-                    title={`Show tip ${tip.endUid} and candidate ${candidate?.candidateId ?? '—'}`}
+                    title={`Show ${tipName(tip)} and candidate ${candidate?.candidateId ?? '—'}`}
                   />
                   <span className="review-row__score" style={{ color: scoreInk(row) }}>
                     {row.score === undefined ? '—' : row.score.toFixed(3)}
@@ -532,8 +671,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                         {done === 'merged' ? '✓ merged' : '✓ merged into another neuron'}
                       </span>
                     )}
+                    {inNeuron && !done && (
+                      <span className="review-row__merged" title={IN_NEURON_NOTE}>
+                        in this neuron
+                      </span>
+                    )}
                     {/* Edited since the suggestion: Submit would refuse it. */}
-                    {!done && candidate && edited(candidate.candidateId) && (
+                    {outdated && (
                       <span
                         className="review-row__outdated"
                         title="This piece has been edited since it was suggested, so it cannot be merged as it is."
@@ -545,6 +689,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   <span className="review-row__facts">
                     {candidate
                       ? [
+                          // Which piece the tip is on is the row it sits beneath; said in
+                          // words only where there is no such row.
+                          row.adrift ? `on piece ${tip.neuronId}` : '',
                           // The size the queue sorts and filters on, **with its unit**: a
                           // chunk count is of the whole object and a volume is of the part
                           // inside the search box, so a bare number would be two things.
@@ -586,20 +733,35 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                       >
                         ›
                       </button>
-                      {VERDICTS.map((verdict) => (
+                      {VERDICTS.map((verdict) => {
+                        const can = verdictPress({ verdict, done, inNeuron, goesWith })
+                        return (
+                          <button
+                            key={verdict}
+                            type="button"
+                            className="review-row__verdict"
+                            data-verdict={verdict}
+                            aria-pressed={said === verdict}
+                            disabled={can.disabled}
+                            onClick={() => judge(tip, candidate, verdict, blocked)}
+                            title={can.title}
+                          >
+                            {VERDICT_LABEL[verdict]}
+                          </button>
+                        )
+                      })}
+                      {extendButton && (
                         <button
-                          key={verdict}
                           type="button"
-                          className="review-row__verdict"
-                          data-verdict={verdict}
-                          aria-pressed={said === verdict}
-                          disabled={done !== undefined}
-                          onClick={() => judge(tip, candidate, verdict)}
-                          title={done ? 'Merged by Submit.' : VERDICT_HELP[verdict]}
+                          className="review-row__extend"
+                          aria-pressed={isExtended}
+                          disabled={extendButton.disabled}
+                          onClick={() => extend(tip, candidate, !isExtended)}
+                          title={extendButton.title}
                         >
-                          {VERDICT_LABEL[verdict]}
+                          {extendButton.label}
                         </button>
-                      ))}
+                      )}
                     </div>
                   )}
                 </li>
@@ -655,6 +817,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           <span title="Verdicts recorded on this neuron so far, across every candidate">
             {formatNumber(onNeuron?.judged ?? 0)} judged
           </span>
+          {grown > 0 && (
+            <span title="Accepted pieces of this neuron whose own open ends are searched and listed here.">
+              {plural(grown, 'piece')} extended
+            </span>
+          )}
           {neuronEdited && (
             <span className="review-body__edited">
               query neuron edited since these suggestions were generated
@@ -712,10 +879,18 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   unsure: 'Unsure',
 }
 
-const VERDICT_HELP: Record<Verdict, string> = {
-  accept: 'This piece belongs to the neuron. Submit merges the accepted pieces.',
-  reject: 'This piece does not belong.',
-  unsure: 'Cannot tell. Left out of any calibration, rather than counted as wrong.',
+/**
+ * How many steps in a row is drawn at most. A chain of pieces can be any length, and a row
+ * indented once per piece would end up with no room for the piece's id; past this the rows
+ * stay in tree order and stop moving right.
+ */
+const MAX_INDENT = 6
+
+/** A tip as a row names it: its number, and the piece it is on where that is not the neuron. */
+function tipName(tip: QueueTip): string {
+  return tip.neuronId !== tip.seed
+    ? `tip ${tip.endUid} of piece ${tip.neuronId}`
+    : `tip ${tip.endUid}`
 }
 
 const SUBMIT_HELP =

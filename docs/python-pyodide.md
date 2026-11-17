@@ -222,6 +222,39 @@ proxy it came from, while every proxy taken is still destroyed where it was take
   request carrying `Origin` — so the wheel loads in a browser, which the obvious check says it
   does not. Same shape as the `/api/roimeshes` HEAD-vs-GET finding. jsdelivr is open either way.
 
+### A package that failed to load, and nothing saying so (2026-11-16)
+
+**Pyodide's `loadPackage` does not throw for a package it could not load.** It catches each
+package's failure, writes `The following error occurred while loading pandas:` and the reason to
+its error stream — `console.error`, unless the caller passes `errorCallback` — and resolves. Read
+off the shipped `pyodide.asm.mjs` (v314.0.5, `loadPackageInner`).
+
+Coda passed no `errorCallback`, so a download that broke off went by in silence. A module that
+imports its packages on first use — `cutoutSummary` installs its vendored files inside the first
+call — then ran, was kept in `namespaces`, and failed on every later call for the session:
+`ModuleNotFoundError: No module named 'pandas'`, with Pyodide's advice to call `micropip`, on
+Suggest Merges, after a long wait at "opening the segmentation". The symptom names a package; the
+cause was a request. Seen three times in one day, twice in a probe and once in the app, with
+every file in place on the CDN and its checksum matching each time it was asked for by hand. **What
+makes the request fail was not found**: the episodes lasted a few minutes each and were slow as
+well as failing (one end took 187 s, against nine).
+
+`pyodide/loadPackages.ts` passes `errorCallback`, asks once more after a short pause where a
+package failed — a failed package is not marked loaded, so the second ask fetches only what is
+missing — and then throws with Pyodide's own reason, before the module's source is run or kept.
+The sentence it listens for is Pyodide's wording from one build, so the outcome is checked as
+well: a package named from the lock file must be in `loadedPackages` afterwards. (A wheel by URL
+cannot be checked that way.) The card says when it is trying again, and every line of the error
+stream still reaches the console — reading the stream must not be what hides a `URI mismatch`. So the next call
+starts from the download again, where before only a reload did.
+
+Checked in Chrome with the pandas request failed on purpose (CDP `Fetch.failRequest`, on the
+page's session — a dedicated worker's requests are intercepted there, and `Network.setBlockedURLs`
+does not reach them): two attempts, then `Python could not load what this needs (numpy · scipy ·
+pandas · SEAM cutout and ranker). The following error occurred while loading pandas: Failed to
+fetch …`; the same on a second call; and a normal answer on the third, once the request was let
+through, with no reload.
+
 ### What is not settled
 
 The CDN is a third-party runtime dependency this app otherwise does not have; the wheel is

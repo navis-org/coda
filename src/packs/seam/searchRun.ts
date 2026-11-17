@@ -82,6 +82,15 @@ export interface EndToSearch {
    */
   readonly queryRoot: bigint
   /**
+   * Other roots that are the query too, **already written as `queryRoot` in the box** — an
+   * accepted piece's path, where the end belongs to a neuron being extended (`pieces.ts`).
+   *
+   * Carried here for the one thing the box cannot say once that is done: how big the neuron
+   * is. The ranker's size features read the query's level-2 chunk count, and the neuron as it
+   * will be once merged is these counted with it.
+   */
+  readonly alsoQuery?: readonly bigint[]
+  /**
    * The box and the open end, **as a function**, because a real cutout is ~19 MB and a neuron
    * is ~500 of them. Taking built requests would mean every box existing at once — some nine
    * gigabytes — where this way each is built, measured and dropped before the next is read.
@@ -225,7 +234,8 @@ export async function* searchEnds(
      * This end's roots, its query among them. `l2ChunkCounts` is memoised by root on the node's
      * side, so a root a neighbouring end already bought costs nothing here.
      */
-    const roots = new Set<string>([String(end.queryRoot)])
+    const query = [end.queryRoot, ...(end.alsoQuery ?? [])].map(String)
+    const roots = new Set<string>(query)
     for (const root of pool.candRoot) roots.add(String(root))
     throwIfAborted(options.signal)
     const counts = await steps.counts([...roots])
@@ -237,10 +247,11 @@ export async function* searchEnds(
      * cost the whole run to say something about one of them.
      */
     let candCount: Float64Array
-    const queryCount = counts.get(String(end.queryRoot))
+    const queryCount = queryCountOf(counts, query)
     try {
       if (queryCount === undefined) {
-        refuse(`the query root ${end.queryRoot} has no level-2 chunk count`)
+        const without = query.filter((root) => !counts.has(root))
+        refuse(`the query root ${without.join(', ')} has no level-2 chunk count`)
       }
       candCount = countsInPoolOrder(pool.candRoot, counts)
     } catch (error) {
@@ -392,6 +403,29 @@ function emptyEnd(tip: number): SearchedEnd {
     tooFar: 0,
     anothersTip: 0,
   }
+}
+
+/**
+ * How big the query is: the level-2 chunk counts of every root that is it, summed — or
+ * `undefined` where the chunkedgraph does not list **one** of them, which the caller refuses by
+ * name, as it does a neuron's own end whose root has no count.
+ *
+ * One root for a neuron's own end. For an accepted piece's, the neuron and the pieces between:
+ * what the neuron will be once they are merged. **All of them or none**: a sum over the ones
+ * that happened to be listed is a neuron a fraction of its size, ranked on without a word — and,
+ * carrying no refusal, remembered as the end's answer for the session.
+ */
+export function queryCountOf(
+  counts: ReadonlyMap<string, number>,
+  query: readonly string[],
+): number | undefined {
+  let sum = 0
+  for (const root of query) {
+    const count = counts.get(root)
+    if (count === undefined) return undefined
+    sum += count
+  }
+  return query.length > 0 ? sum : undefined
 }
 
 /** One list cut down to what the rule kept, with `geo_rank` renumbered from one. */

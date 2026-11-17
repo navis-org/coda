@@ -32,6 +32,26 @@ result cache cannot answer a run whose params moved, so without it every restyle
 `loadCachedTable`: a month in IndexedDB is for bulk tables, and this is a handful of ids. It does
 not honour `ctx.refresh` — the node declares no `dataCache` — so an answer stays for the session.
 
+And **Suggest Merges**, one end at a time (`packs/seam/endMemory.ts`): an end is 6 to 11 s and a
+run is tens to hundreds of them, so an entry per *node* loses all of them to anything that moves
+the key — a cancel, or an Extend, which moves it by design
+([seam-extend-plan.md](seam-extend-plan.md)). Keyed on everything an end's answer depends on,
+the other tips of its neuron included; a refused end is not kept; `ctx.refresh` forgets the
+run's ends before measuring any, so a Clear Cache stopped half way leaves nothing old behind. It
+reports the age of the oldest end behind its answer. A first draft reported none, since a
+materialization is a fixed moment — but without an age the card's lifetime menu does nothing,
+and `cached 12m ago` is the only lasting sign that a run of a fifth of a second came from memory.
+It is the first user of `ByteLru` (`core/lruMap.ts`), the byte-budgeted, read-promoting cache
+that three older modules each still write out by hand.
+
+**`ctx.maxAgeMs` came with it**: the lifetime somebody chose on the card, handed to `evaluate`.
+The lifetime's backstop (below) runs a node a second time, with `refresh`, when it reports data
+older than its lifetime — a table read for most `dataCache` nodes, and for this one every end
+again, the ones the first pass had just measured included. A node with a cache of its own reads
+the lifetime and leaves out what is too old the first time, so it never reports an age the
+backstop would act on. And the backstop asks whether the copy was too old **when the node
+started**, not when it finished: a node is not run twice for having taken long.
+
 **The third exists because the first two cannot help each other.** A morphology node's key folds
 in its upstream *provenance*, so it re-runs whenever anything about its Neurons input changes —
 and re-running means re-downloading. Probed on a 12-neuron scene: widening a type pattern from
@@ -598,7 +618,7 @@ Five places implement it, and each was mutation-checked because every failure he
   company on the merge rule (`if (type)` against `?? declared`) and on whether a throw becomes an
   issue.
 - **The scheduler neither waits nor keys on the upstream.** `evaluate` is handed the value
-  `datasetIdentity(type)` builds, and the provenance takes `referenceKey(type)` in place of the
+  `datasetIdentity(type)` builds, and the provenance takes the type's hash (`referenceOf`) in place of the
   upstream node's key — which it *must*, since that node is outside the order and its key may not
   exist yet. It is also the better key: changing the dataset's version re-keys the reader,
   changing its annotations does not, and the reader never sees them. Both are single functions for
@@ -661,8 +681,49 @@ Five places implement it, and each was mutation-checked because every failure he
 
 **Deliberately narrow: a Dataset socket that takes the identity only, not a general information
 edge.** Synthesising a value from a type is defensible exactly because a dataset's identity *is*
-its type; there is no second kind asking, and a general mechanism would have to answer that
-question for every one of them.
+its type; a general mechanism would have to answer that question for every kind of node.
+
+### A second kind: a source that answers from its params (2026-11-16)
+
+`NodeDefinition.asReference(params)` is what a second kind asking looks like, and it does not
+widen the first. The source says what a reader is handed; the condition is the one above — a
+function of the source's params alone — and it is now the source that states it.
+
+It exists for Review Suggestions, which sits *below* the search it steers
+([seam-extend-plan.md](seam-extend-plan.md)): which pieces to extend is in its params, and the
+Suggest Merges above it has to read that without waiting for a node that cannot run first.
+
+- **The key is the hash of the answer, never of the source's params.** Review's cursor and
+  verdicts are data params that move on every click; keyed on them, the search would start over
+  for each row somebody looked at. The reader re-runs when the answer moves and at no other edit.
+- **One function, `referenceOf`, gives the value and the key** to `gatherInputs` and
+  `desiredKeys`, for both kinds — the old `referenceKey` is folded into it. Answers are kept per
+  params record (a `WeakMap`), so the hook and its hash are paid once per edit of the source,
+  not per graph mutation.
+- **The hook is told which output the wire leaves from**, and answers for that one. The type on
+  the wire is that output's, so a value that ignored it could arrive under another output's type.
+- **A reference port wired from a node of neither kind is refused in its own words** — not with
+  the dataset's "version list has not loaded, run again", which is a remedy for something else.
+- **A dataset on the wire is read as a dataset, hook or no hook.** `wireKind` — the inferred
+  type, else the source output's own declaration — is the one reading of "what kind of wire is
+  this", for `referenceOf` and for the refusal. A node may answer from its params on one output
+  and carry a dataset on another; read through the hook, that dataset port would be handed
+  nothing and, "nothing" being an answer, never refused or waited for.
+- **A muted source says nothing, and is keyed on that**, so a switched-off card neither steers
+  its reader nor re-runs it when edited.
+
+**Known, and left:** "run this node" on the reader also runs the source and what feeds it,
+because `resolveScope` scopes with `ancestors`, which follows reference wires. True of a dataset
+reference since they were added; with a source *below* its reader it now reaches further. For
+Review ⇢ Suggest Merges it is harmless — what feeds Review is Suggest Merges — but it is not a
+property to lean on.
+- **Nothing to say is an answer.** `undefined` reaches the reader as an unwired port would;
+  `unresolvedReference` and `settle` are about a dataset that has not named itself and skip a
+  source of this kind.
+- **A hook that throws is read as `undefined`.** It is asked where the keys are derived, on every
+  graph mutation, and a throw there would lose every key in the graph.
+
+`reference.test.ts` pins each, and each was checked by breaking it.
 
 The canvas draws it **dotted** — a wire already wears the colour of the data flowing through it,
 so a hue would read as a type, where what this has to say is that nothing flows.
@@ -687,3 +748,75 @@ dataset refuses export outright, so the only reference port in the tree is on a 
 emitter. The day a caveclient emitter is written it would fire, and it fires as a *plausible*
 TODO rather than as an error. `reference.test.ts` covers the ordering; the end-to-end case has
 nothing to exercise it with until that emitter exists.
+
+## A node re-running the chain above one of its inputs
+
+`ctx.rerunInput(portId, neurons)`: run everything above an input again with another neuron on
+the wire, and hand back what then arrives on the port. Present only on a node declaring
+`rerunsInputs`, which `registerNode` refuses on anything but an `expensive` one.
+
+It is for extending a neuron piece by piece ([seam-extend-plan.md](seam-extend-plan.md)): the
+chain above Suggest Merges' `Tips` — Meshes, a clean-up, Find Open Ends, a Sort — is, read this
+way, a function of one neuron, and an accepted piece is another argument to it.
+
+**A private `Scheduler` over a copy of the graph, not a loop and not a pass on the reader's own.**
+A node holds one cache entry and one state, so a pass on the document's scheduler would leave
+the cards holding another neuron's tables; a `For Each` re-runs every pass when its collection
+grows and publishes no partials. `Scheduler.run` already takes its graph per call, so nothing
+inside the class changed. Phase 0 of the plan ran the real chain this way 42 times in a session.
+
+**The copy holds only what the run needs**: the node that fed the port, and everything feeding
+*it* by an ordinary wire. A run sorts, infers and keys the whole graph it is handed, and a
+partial published inside it derives every cheap node below; uncut, each re-run paid for the whole
+document and re-derived its viewers. A node the chain only *names*, by a reference wire, is kept
+on its own with nothing wired into it. **That is also what keeps the caller out of its own
+re-run**: `ancestors`, which the scheduler scopes a run with, follows reference wires, so a chain
+node naming something below the caller pulled the caller into the copy — and it re-ran its input
+again inside the re-run, without end (found in review, before anything used it).
+
+**Where the neuron comes in** is `core/variantRun.ts`, pure and tested apart: going up from the
+port, the nearest wires carrying a neuron table. The walk does not follow a reference wire, nor a
+wire carrying a dataset — what is above a dataset is where its labels come from, often a neuron
+table too. It refuses, in a sentence: nothing wired; no neuron wire; neuron wires from two
+sources; the old source still feeding the chain by another output (the answer would be half
+about each neuron — though feeding a dataset's labels as well does not count); a loop anywhere
+in what the run needs, a dataset's label chain included.
+
+**A failure is blamed on the chain's own nodes** (`VariantGraph.chain`). A node the chain only
+names sits in the copy with nothing wired into it and may fail there for that reason alone;
+earlier in the graph, it would otherwise be the one the sentence names.
+
+**The swapped-in node has no wires**, on purpose. `Input IDs` wired from a dataset drops ids the
+dataset does not list, and a piece of segmentation is usually not in any neuron table — so the
+chain is handed the id alone, and a node below that reads other neuron columns finds none.
+
+Three things to keep:
+
+- **The closure is made in a module-level function** (`rerunnerFor`), for `makeEvalContext`'s
+  reason: made inline it would keep a superseded walk's whole pass alive. It still holds the
+  graph and its inference, which is why the flag confines it to nodes that ask.
+- **Cancel reaches it through the caller's signal**, and the private scheduler is emptied in a
+  `finally` — it has a lapse timer of its own.
+- **What comes back is not in the caller's key.** The chain's params are, through the port's
+  upstream key; the neuron asked for must come from something that is too.
+
+**"The nearest neuron wire" leaves out a transform that sits on it — known, and left** (user,
+2026-11-16). With `Input IDs → Update Root IDs → Meshes` the cut lands below Update Root IDs, so
+a re-run piece skips it, and nothing says so. Left because a piece does not need what such a
+node does: it is asked about under its own root at the dataset's materialization, the moment the
+search found it at. If a transform that a piece *does* need ever sits there, the two ways out are
+the furthest wire of a neurons-only run (a filter on the seed's own columns then fails loudly on a
+piece) or a declaration of which node to replace.
+
+**Known, and left:**
+
+- **Clear Cache does not reach a re-run.** `ctx.refresh` is a flag on one node, spent when it
+  runs; the private scheduler starts with none, so a re-run answers from the geometry cache. A
+  caller that honours its own `refresh` can say so when it asks — nothing does yet.
+- **Every call pays for the parts of the chain that are the same for every neuron** (the dataset
+  node, measured at 0.1 s of a 1.5 s chain). One private scheduler kept for the evaluation would
+  answer those from its cache, at the price of holding the last neuron's meshes until it ends.
+
+Not shown anywhere: the cards do not move while a re-run is going, so the caller's own progress
+note is the only sign of it (`report`), and the memory meter cannot see what the private
+scheduler holds until it is dropped.

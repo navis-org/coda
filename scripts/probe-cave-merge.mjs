@@ -17,8 +17,8 @@
  * Every root read asks at the server's own now (`Instant` `'server'` in `rootIds.ts`), not this
  * machine's: a clock behind the server's would ask about a moment before the merge and see the old
  * roots. The permission check and those reads are the shipped ones (`permissions.ts`,
- * `rootIds.ts`); the rest of the pre-flight stands in for phase 3's, which this switches to when it
- * lands.
+ * `rootIds.ts`); the rest of the pre-flight is this script's own — a test of the writer alone.
+ * `probe-cave-merge-chain.mjs` runs the shipped pre-flight and the shipped batch.
  */
 
 import { CaveError } from '../src/data/cave/client.ts'

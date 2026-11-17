@@ -66,7 +66,7 @@ function candidate(id: string): Candidate {
 }
 
 function merge(id: string, joinsNeuron = false): PlannedMerge {
-  const row = { endUid: 7, candidate: candidate(id) }
+  const row = { neuronId: NEURON, endUid: 7, candidate: candidate(id) }
   return {
     candidateRoot: id,
     rows: [row],
@@ -126,6 +126,34 @@ describe('the confirm overlay', () => {
     expect(go().textContent).toMatch(/^Merge 1 piece into/)
     fireEvent.click(go())
     expect(onConfirm).toHaveBeenCalledWith([PLAN.merges[1]])
+  })
+
+  /**
+   * A neuron grown piece by piece: the second piece was accepted on the first, and is merged
+   * onto it. What is ticked can always be sent.
+   */
+  it('unticks what was accepted beyond a piece with it, and ticks the piece before with one', () => {
+    const [first, second] = PLAN.merges
+    const tree: ReadyPlan = {
+      ...PLAN,
+      merges: [
+        first!,
+        { ...second!, parent: first!.candidateRoot, needs: first!.candidateRoot },
+      ],
+    }
+    const { onConfirm } = open({ plan: tree })
+    const boxes = () =>
+      screen.getAllByRole<HTMLInputElement>('checkbox').map((box) => box.checked)
+    // The row says what it is merged onto.
+    expect(document.body.textContent).toContain(`onto ${first!.candidateRoot}`)
+    fireEvent.click(screen.getAllByRole('checkbox')[0]!)
+    expect(boxes()).toEqual([false, false])
+    fireEvent.click(screen.getAllByRole('checkbox')[1]!)
+    expect(boxes()).toEqual([true, true])
+    fireEvent.click(screen.getAllByRole('checkbox')[1]!)
+    expect(boxes()).toEqual([true, false])
+    fireEvent.click(go())
+    expect(onConfirm).toHaveBeenCalledWith([tree.merges[0]])
   })
 
   it('cannot confirm nothing', () => {
@@ -206,6 +234,28 @@ describe('the confirm overlay', () => {
     act(() => viewer.onSelectionEdits!(['-648518346000000001']))
     expect(go().textContent).toMatch(/^Merge 1 piece into/)
     expect((screen.getAllByRole('checkbox')[0] as HTMLInputElement).checked).toBe(false)
+  })
+
+  /**
+   * A tree in the viewer: hiding the first piece takes the one made onto it along, and showing
+   * that one again brings the first back — the view and the list agree both ways.
+   */
+  it('follows the tree when pieces are hidden and shown in the viewer', () => {
+    const [first, second] = PLAN.merges
+    const tree: ReadyPlan = {
+      ...PLAN,
+      merges: [
+        first!,
+        { ...second!, parent: first!.candidateRoot, needs: first!.candidateRoot },
+      ],
+    }
+    open({ plan: tree })
+    const boxes = () =>
+      screen.getAllByRole<HTMLInputElement>('checkbox').map((box) => box.checked)
+    act(() => viewer.onSelectionEdits!([`-${first!.candidateRoot}`]))
+    expect(boxes()).toEqual([false, false])
+    act(() => viewer.onSelectionEdits!([`+${second!.candidateRoot}`]))
+    expect(boxes()).toEqual([true, true])
   })
 
   /** Re-check can make a refused piece plannable; the reader has not looked at it yet. */

@@ -42,6 +42,11 @@
   stroke: var(--sock, var(--socket-scalar));
   stroke-width: 1.6;
 }
+/* A wire that names a node rather than carrying its output: dotted, as on the canvas
+   (`.coda-edge--reference`). */
+.cfig__wire[data-reference] {
+  stroke-dasharray: 2 4;
+}
 
 .cfig__card {
   position: absolute;

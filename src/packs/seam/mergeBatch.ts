@@ -4,7 +4,8 @@
  * writer (`MAY_WRITE`), and its own importers are held to a list there too, so nothing reached
  * from an `evaluate`, the assistant or the MCP server can start a batch.
  *
- * One merge at a time, in the order the reader confirmed them, with no pause between and none
+ * One merge at a time, in the plan's order — from the neuron outwards; `prepareMerges` refuses a
+ * list that puts a piece before the one it is made onto — with no pause between and none
  * retried (user, 2026-11-15). Before each, the merge's two supervoxels are mapped to their roots
  * **at the server's now** — never a client instant, which could be behind the server's clock and
  * see the roots from before this batch's last merge:
@@ -14,6 +15,13 @@
  *  - the candidate's must map to **its reviewed root**. If it maps to the neuron's root, it is in
  *    the neuron already (an earlier merge brought it, or somebody else): recorded, nothing sent.
  *    Anything else is an edit to the piece since the plan: that one is not sent, the rest go on.
+ *
+ * **A merge made onto a piece that is not in the neuron yet** (a neuron grown piece by piece:
+ * `PlannedMerge.needs`, the piece its neuron end is on, and `parent`, the piece it was accepted
+ * as a continuation of) is sent only once those pieces' own merges have landed in this batch. It was confirmed after it, so by then the end *is* under the root the batch last made
+ * and the check above holds as it stands. Where that piece did not land — it had been edited, say
+ * — the merge is `not-sent` in those words and the batch goes on: it is not "somebody else edited
+ * the neuron", which is what the unmoved end would otherwise read as.
  *
  * After a merge the server says was made, the same read checks both supervoxels are under its new
  * root: a graph flagged read-only answers success without keeping anything (phase 2).
@@ -38,6 +46,7 @@ import type { GrapheneSource } from '../../data/cave/graphene'
 import { isNodeId, layerOf } from '../../data/cave/graphLayout'
 import { supervoxelRoots } from '../../data/cave/rootIds'
 import type { PlannedMerge, ReadyPlan } from './mergePlan'
+import { waitsFor } from './mergePlan'
 import type {
   EntryBase,
   EntryOutcome,
@@ -159,6 +168,13 @@ export function prepareMerges(
     if (seen.has(merge.candidateRoot)) {
       throw new Error(`${merge.candidateRoot} is listed twice.`)
     }
+    // What it waits for has to be merged first, so it has to be here, and earlier.
+    for (const first of waitsFor(merge)) {
+      if (seen.has(first)) continue
+      throw new Error(
+        `The merge of ${merge.candidateRoot} is made onto ${first}, which is not merged before it.`,
+      )
+    }
     seen.add(merge.candidateRoot)
   }
   /*
@@ -169,6 +185,8 @@ export function prepareMerges(
   const steps: Step[] = merges.map((merge) => ({
     candidateRoot: merge.candidateRoot,
     endUid: merge.used.endUid,
+    waitsFor: waitsFor(merge),
+    parentRoot: merge.used.neuronId === plan.reviewedRoot ? undefined : merge.used.neuronId,
     sending: confirmMerge(plan.graphene, merge.neuron, merge.candidate),
   }))
   const about: About = {
@@ -194,6 +212,10 @@ type About = RecordScope & { readonly reviewedRoot: string }
 interface Step {
   readonly candidateRoot: string
   readonly endUid: number
+  /** The pieces of this batch that have to be in the neuron first (`waitsFor`). */
+  readonly waitsFor: readonly string[]
+  /** The piece it was accepted on, for the record; absent where that is the neuron itself. */
+  readonly parentRoot: string | undefined
   readonly sending: ConfirmedMerge
 }
 
@@ -214,7 +236,12 @@ async function runMerges(
     return { state, currentRoot: expected, message }
   }
 
-  for (const [i, { candidateRoot: id, endUid, sending }] of steps.entries()) {
+  /** The pieces this batch has put in the neuron, or found there already. */
+  const landed = new Set<string>()
+  for (const [
+    i,
+    { candidateRoot: id, endUid, waitsFor: firsts, parentRoot, sending },
+  ] of steps.entries()) {
     if (on.stopRequested()) return endWith('stopped', i, 'Stopped before this merge.')
     // Reads go to the table the write goes to: the confirmation's own, frozen.
     const graphene = sending.graphene
@@ -225,6 +252,7 @@ async function runMerges(
       ...about,
       candidateRoot: id,
       endUid,
+      ...(parentRoot === undefined ? {} : { parentRoot }),
       neuronRoot,
       neuron: sending.neuron,
       candidate: sending.candidate,
@@ -237,6 +265,21 @@ async function runMerges(
     const failWith = (decided: Decided & { message: string }) => {
       keep(decided)
       return endWith('failed', i + 1, `${id}: ${decided.message} Nothing more is sent.`)
+    }
+
+    /*
+     * A piece it waits for did not make it into the neuron: nothing to merge it onto, or no
+     * reason left to. Said as that, before any read — where its end is on that piece, the end
+     * is still under the piece's own root, and the check below would call it somebody else's
+     * edit to the neuron and stop the batch.
+     */
+    const missing = firsts.find((first) => !landed.has(first))
+    if (missing !== undefined) {
+      keep({
+        outcome: 'not-sent',
+        message: `${missing}, the piece this one is merged onto, was not merged. Not sent.`,
+      })
+      continue
     }
 
     on.progress(id, { state: 'sending', message: 'Checking the roots' })
@@ -254,6 +297,7 @@ async function runMerges(
     }
     if (pieceNow === neuronRoot) {
       keep({ outcome: 'already-merged', message: 'Part of the neuron already; nothing sent.' })
+      landed.add(id)
       continue
     }
     if (pieceNow !== id) {
@@ -290,6 +334,7 @@ async function runMerges(
       if (Array.isArray(after) && after[0] === newRoot && after[1] === newRoot) {
         expected = newRoot
         keep({ outcome: 'merged', newRoot, operationId: outcome.operationId })
+        landed.add(id)
         continue
       }
       /*

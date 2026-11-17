@@ -517,6 +517,30 @@ export function isReferencePort(nodeType: string | undefined, portId: string): b
 }
 
 /**
+ * The node that **names** one output of another: the first whose `reference` port is wired from
+ * it, or `undefined`.
+ *
+ * The other direction of a reference wire, for a card that has to act on whoever reads it —
+ * `seam:review` runs the search its `Extended` output is wired back to. Asked of the port's own
+ * declaration rather than of a type id the caller would have to know: the reader says it reads
+ * by reference, and that is the whole of what joins the two.
+ *
+ * A string or nothing, so a store selector can return it as it is (invariant 7).
+ */
+export function referrerOf(
+  graph: CodaGraph,
+  nodeId: string,
+  outputId: string,
+): string | undefined {
+  for (const edge of graph.edges) {
+    if (edge.source !== nodeId || edge.sourceHandle !== outputId) continue
+    const target = graph.nodes.find((node) => node.id === edge.target)
+    if (isReferencePort(target?.type, edge.targetHandle)) return edge.target
+  }
+  return undefined
+}
+
+/**
  * The edges that create an ordering dependency — every edge except one landing on a `reference`
  * port.
  *
@@ -644,7 +668,10 @@ export function topoSort(graph: CodaGraph): TopoResult {
  *
  * A reader left ahead of its reference is not stranded: the walk does not treat an unbound
  * reference port as blocking, and an emitter reading one falls back to the referenced node's
- * *type*, which is all a reference ever promised.
+ * *type*, which is all a dataset reference ever promised. **Not so for a source read through
+ * `NodeDefinition.asReference`**: its value is in its params, not its type, and such a node
+ * consumes inputs, so it is never lifted. No node of that kind has an emitter yet; one that gets
+ * one has to write the params' answer out itself.
  *
  * Relative order is preserved on both sides, so a graph with no references is untouched.
  */

@@ -274,6 +274,17 @@ the shape worth optimising for is the one where a wire is a line that looks like
   whose first input is a Dataset and whose second is Neurons.
 - `caption:` and `focus:`.
 
+**A wire into a `reference` input is drawn dotted, as on the canvas** — read off the port, like
+everything else, so no figure says it. One that runs **backwards**, from a card to one upstream
+of it (Review Suggestions' `Extended` into Suggest Merges' `Review`, 2026-11-17), is kept out of
+the layering and routed *under* the cards between its ends, and the figure grows to hold it
+(`closesLoop`, `attachPaths`). Layered, it pushed the two cards apart; drawn with the canvas' own
+curve, it ran behind the cards — which are drawn over the wires here — and bulged half the
+distance past both ends, where `.cfig` clips. A forward reference (a dataset the card names) is
+layered as it always was. Looked at in Chrome on both documents: the wire is inside the box, and
+nothing scrolls. Where its target is in the first column every card moves over by the turn's
+reach.
+
 **`coda-node` and `coda-graph` differ in one thing, and it is not the number of cards.** A
 `coda-node` figure with two nodes and a wire is a `coda-graph`. What differs is which settings a
 card draws: `coda-node` is an anatomy diagram and shows the full band the real card would;

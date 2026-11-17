@@ -26,8 +26,9 @@
  * this class on the rule above rather than on the budget: there, *a read counts as a use*, because
  * the thing being held is a download somebody keeps asking for rather than a value somebody keeps
  * rewriting. Sharing this class would mean every hit calling `set` to promote, which is the escape
- * hatch `layoutMemo` uses and a poor default. They are three implementations of one shape now, and
- * the next change to any of them is the moment to make them one helper in `src/data`.
+ * hatch `layoutMemo` uses and a poor default. That shape is `ByteLru` below, written when a fourth
+ * such cache was needed (`packs/seam/endMemory.ts`) rather than a fourth copy; the three older
+ * ones have not been moved onto it yet, and the next change to any of them is the moment.
  */
 export class LruMap<K, V> {
   private readonly entries = new Map<K, V>()
@@ -143,5 +144,78 @@ export class PinnedLru<V> {
     const held = this.pinned.get(key)
     if (!held || --held.owners > 0) return
     this.pinned.delete(key)
+  }
+}
+
+/**
+ * A cache held to a **byte** budget, dropping what was used longest ago — where **a read is a
+ * use**, the opposite of `LruMap`'s rule and for the reason its header gives: what is held is
+ * work somebody keeps asking for, not a value somebody keeps rewriting.
+ *
+ * The caller says what each value weighs, since only it knows which arrays the value owns.
+ *
+ * Two rules that the hand-written copies each had to decide, decided once:
+ *
+ * - **A value larger than the whole budget is not kept**, and takes nothing else out with it.
+ *   Evicting everything to hold one entry that the next write evicts is the worst of both.
+ * - **`has` is not a use.** A caller pricing work it may be about to do must not, by asking,
+ *   change what gets dropped.
+ */
+export class ByteLru<K, V> {
+  // Insertion order is recency: a read re-inserts.
+  private readonly entries = new Map<K, { value: V; bytes: number }>()
+  private readonly max: number
+  private total = 0
+
+  constructor(maxBytes: number) {
+    this.max = maxBytes
+  }
+
+  get size(): number {
+    return this.entries.size
+  }
+
+  get bytes(): number {
+    return this.total
+  }
+
+  has(key: K): boolean {
+    return this.entries.has(key)
+  }
+
+  /** The value, **without** counting as a use — `has`' rule, for a caller that needs to look. */
+  peek(key: K): V | undefined {
+    return this.entries.get(key)?.value
+  }
+
+  get(key: K): V | undefined {
+    const entry = this.entries.get(key)
+    if (!entry) return undefined
+    this.entries.delete(key)
+    this.entries.set(key, entry)
+    return entry.value
+  }
+
+  /** Replaces what the key held. Answers whether the value was kept. */
+  set(key: K, value: V, bytes: number): boolean {
+    this.delete(key)
+    // `!(bytes >= 0)` is NaN as well as a negative: a weight that is not a size would make the
+    // total not a number, and every write after it would then empty the cache.
+    if (!(bytes >= 0) || bytes > this.max) return false
+    this.entries.set(key, { value, bytes })
+    this.total += bytes
+    for (const oldest of this.entries.keys()) {
+      if (this.total <= this.max) break
+      this.delete(oldest)
+    }
+    return true
+  }
+
+  delete(key: K): boolean {
+    const entry = this.entries.get(key)
+    if (!entry) return false
+    this.entries.delete(key)
+    this.total -= entry.bytes
+    return true
   }
 }

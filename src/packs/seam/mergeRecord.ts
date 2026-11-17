@@ -99,7 +99,19 @@ export interface EntryBase {
   readonly candidateRoot: string
   /** The tip whose contact the merge was made at. */
   readonly endUid: number
-  /** The neuron's root the merge was checked against: the reviewed one, or the last merge's. */
+  /**
+   * The accepted piece that tip is on, where it is not the neuron itself: the merge was of a
+   * piece accepted on a piece (`docs/seam-extend-plan.md`). **The tip's root, whatever became
+   * of that piece** — in the neuron already or not — so it says whose tip `endUid` numbers; it
+   * is not `PlannedMerge.parent`, which is about what this plan still has to merge. Absent on
+   * the neuron's own tips, and on every entry from before 2026-11-17.
+   */
+  readonly parentRoot?: string | undefined
+  /**
+   * The neuron's root the merge was checked against: the reviewed one, or the last merge's. On
+   * a merge not sent because a piece it waits for did not land, **the root it would have been
+   * checked against** — no check was made, and its neuron end may be on that piece, not here.
+   */
   readonly neuronRoot: string
   readonly neuron: MergeEnd
   readonly candidate: MergeEnd
@@ -251,6 +263,7 @@ export function settledEntry(
     reviewedRoot: entry.reviewedRoot,
     candidateRoot: entry.candidateRoot,
     endUid: entry.endUid,
+    ...(entry.parentRoot === undefined ? {} : { parentRoot: entry.parentRoot }),
     neuronRoot: entry.neuronRoot,
     neuron: entry.neuron,
     candidate: entry.candidate,
@@ -321,6 +334,7 @@ function isEntry(value: unknown): value is MergeRecordEntry {
   if (!absentOr('message', (v) => typeof v === 'string')) return false
   if (!absentOr('deployment', (v) => typeof v === 'string')) return false
   if (!absentOr('datastack', (v) => typeof v === 'string')) return false
+  if (!absentOr('parentRoot', (v) => typeof v === 'string' && isNodeId(v))) return false
   // An operation id is a counter from 1 — the writer's own `isOperationId`, which is `isNodeId`'s.
   if (!absentOr('operationId', (v) => typeof v === 'string' && isNodeId(v))) return false
   if (!absentOr('status', Number.isSafeInteger)) return false
@@ -335,6 +349,9 @@ export function mergesSchema(): TableSchema {
     column('datastack', 'str'),
     column('deployment', 'str'),
     column('end_uid', 'i64'),
+    // The root that tip is on, where it is a piece and not the neuron: a tip's number is its
+    // root's own, so without this the row names another root's tip.
+    column('accepted_on', 'str'),
     column('outcome', 'str'),
     column('neuron_root', 'str'),
     column('new_root', 'str'),
@@ -361,6 +378,7 @@ export function mergesTable(record: MergeRecord): TableValue {
     datastack: cells((e) => e.datastack ?? null),
     deployment: cells((e) => e.deployment ?? null),
     end_uid: cells((e) => e.endUid),
+    accepted_on: cells((e) => e.parentRoot ?? null),
     outcome: cells((e) => e.outcome),
     neuron_root: cells((e) => e.neuronRoot),
     new_root: cells((e) => (e.outcome === 'merged' ? e.newRoot : null)),

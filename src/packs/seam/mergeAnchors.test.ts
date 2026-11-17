@@ -210,6 +210,25 @@ describe('refusals made before anything is read', () => {
     expect(got).toMatchObject({ ok: false, reason: 'same-root' })
   })
 
+  /** The neuron's side can be several roots (`alsoNeuron`): the candidate is none of them. */
+  it('refuses a candidate that is one of the roots read as the neuron’s side', async () => {
+    const got = await anchorMerge(
+      untouchable,
+      { ...pair(String(NEURON), String(CANDIDATE)), alsoNeuron: [String(CANDIDATE)] },
+      options,
+    )
+    expect(got).toMatchObject({ ok: false, reason: 'same-root' })
+  })
+
+  it('refuses a root on the neuron’s side that is not a segment id', async () => {
+    const got = await anchorMerge(
+      untouchable,
+      { ...pair(String(NEURON), String(CANDIDATE)), alsoNeuron: ['0'] },
+      options,
+    )
+    expect(got).toMatchObject({ ok: false, reason: 'bad-id' })
+  })
+
   it('refuses an id that is not a segment id', async () => {
     const got = await anchorMerge(untouchable, pair('7.2e17', String(CANDIDATE)), options)
     expect(got).toMatchObject({ ok: false, reason: 'bad-id' })

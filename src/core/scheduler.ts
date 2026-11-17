@@ -21,6 +21,7 @@ import {
   loopRegion,
   loopsIn,
   mayHaveLoops,
+  nodeLabel,
   nodesById,
   portKey,
   referenceEdgeIds,
@@ -38,6 +39,7 @@ import type {
   NodeDefinition,
   ParamValues,
   PortDef,
+  RerunResult,
 } from './node'
 import { findParam, resolveColumn, resolveColumns, visibleParams, withDefaults } from './node'
 import { getNodeDef } from './registry'
@@ -47,6 +49,8 @@ import type { Value } from './values'
 import { datasetIdentity } from './values'
 import type { DataSource } from '../data/source'
 import { errorMessage } from './errors'
+import { throwIfAborted } from './slice'
+import { variantGraph } from './variantRun'
 import { untilAborted } from '../data/memoPromise'
 
 export type NodeRunState =
@@ -1018,7 +1022,12 @@ export class Scheduler {
             references.has(e.id) &&
             scope.has(e.target) &&
             !nodes.get(e.target)?.disabled &&
-            !datasetIdentity(inference.nodes[e.target]?.inputs[e.targetHandle]),
+            // A source read through `asReference` has no listing to wait for: it is its params.
+            !referenceOf(
+              nodes.get(e.source),
+              e.sourceHandle,
+              inference.nodes[e.target]?.inputs[e.targetHandle],
+            ).named,
         )
         .map((e) => e.source),
     )
@@ -1814,7 +1823,7 @@ export class Scheduler {
        */
       if (port.reference) {
         const type = pass.inference.nodes[nodeId]?.inputs[port.id]
-        const identity = datasetIdentity(type)
+        const read = referenceOf(pass.nodes.get(edge.source), edge.sourceHandle, type)
         /*
          * A wire that resolved to nothing. The node is refused *here*, with a sentence naming
          * the node it references and that node's own reason, rather than left to refuse with
@@ -1822,10 +1831,14 @@ export class Scheduler {
          *
          * First one wins, and nothing overwrites it: a node with two dead references has one
          * story, and it is the first port's.
+         *
+         * Only where it was a dataset that failed to name itself. A source read through
+         * `asReference` that has nothing to say has said so, and its reader is handed `undefined`
+         * as for an unwired port.
          */
-        if (!identity) refusal ??= this.unresolvedReference(pass, port, edge)
-        inputs[port.id] = identity
-        inputKeys[port.id] = referenceKey(type)
+        if (!read.named) refusal ??= this.unresolvedReference(pass, port, edge)
+        inputs[port.id] = read.value
+        inputKeys[port.id] = read.key
         continue
       }
       if (!pass.available.has(edge.source)) {
@@ -1865,6 +1878,22 @@ export class Scheduler {
   private unresolvedReference(pass: RunPass, port: PortDef, edge: GraphEdge): string {
     const source = pass.nodes.get(edge.source)
     const label = (source && getNodeDef(source.type)?.label) ?? source?.type ?? edge.source
+    /*
+     * Not a dataset at all: a reference port wired from a node that neither names a dataset nor
+     * declares `asReference`. "Its version list has not loaded, run again" would be a remedy for
+     * a thing that is not wrong — the wire can never deliver, however often it is run.
+     */
+    const inferred = pass.inference.nodes[edge.target]?.inputs[port.id]
+    // Only where the wire is *known* to be something else. A placeholder for a node this build
+    // lacks, or an output declared `any`, may well stand for a dataset still naming itself.
+    const kind = wireKind(source, edge.sourceHandle, inferred)
+    if (kind !== undefined && kind !== 'dataset' && kind !== 'any') {
+      return (
+        `Input "${port.label ?? port.id}" is wired to ${label}, which cannot be read this way: ` +
+        'this input reads a node without waiting for it to run, and that node has nothing to ' +
+        'say before it has.'
+      )
+    }
     const why = pass.inference.nodes[edge.source]?.issues.find((i) => !i.aboutColumns)?.message
     // `Input "…"` is `inferGraph`'s wording for the same thing, one state along: that one says a
     // port is not connected, this one that what it is connected to cannot answer yet.
@@ -2125,6 +2154,8 @@ export class Scheduler {
       def,
       gathered,
       refresh,
+      // A chosen lifetime, for a node with a cache of its own — `EvalContext.maxAgeMs`.
+      maxAgeMs: policy && policy.maxAgeMs > 0 ? policy.maxAgeMs : undefined,
       iteration,
       owner,
       // No `def.loop === 'end'` guard: the only writer of this map already gates on it, so a
@@ -2159,6 +2190,8 @@ export class Scheduler {
     const { key, fetched, policy } = run
     const signal = ctx.signal
     const nodeStarted = performance.now()
+    // The wall clock too: the lifetime below is asked of the moment the node began.
+    const startedAt = Date.now()
     try {
       let outputs = await def.evaluate(ctx)
       signal.throwIfAborted()
@@ -2168,8 +2201,15 @@ export class Scheduler {
        * node's lifetime — the store keeps a table a month whatever this node asked. The node said
        * how old its data is, so ask again, reading the server this time. Once: a node whose
        * refresh still reports the old age has no fresher copy to give.
+       *
+       * **Asked of when the node started, not of now.** The question is whether the copy was
+       * too old to *read*, and a node cannot be made to pay twice for having taken long: one
+       * whose run crosses the lifetime's edge would otherwise be run again, whole, for data
+       * that was inside its lifetime when it was read. (`EvalContext.maxAgeMs` is the other
+       * half: with it a node leaves out what is already too old, and reports nothing this
+       * would act on.) A result that ages past its lifetime afterwards is a lapse's to find.
        */
-      if (!ctx.refresh && cacheExpired(fetched.at, policy)) {
+      if (!ctx.refresh && cacheExpired(fetched.at, policy, startedAt)) {
         delete fetched.at
         // Released first, so a large stale result is not held beside the one replacing it.
         outputs = {}
@@ -2295,7 +2335,10 @@ export class Scheduler {
          * is right, because this node never sees them.
          */
         if (edge && port.reference) {
-          upstream.push([port.id, referenceKey(inputTypes[port.id])])
+          upstream.push([
+            port.id,
+            referenceOf(nodes.get(edge.source), edge.sourceHandle, inputTypes[port.id]).key,
+          ])
           continue
         }
         upstream.push([
@@ -2373,6 +2416,7 @@ export class Scheduler {
     def: NodeDefinition
     gathered: GatheredInputs
     refresh: boolean
+    maxAgeMs?: number | undefined
     iteration?: LoopIteration | undefined
     accumulated?: Readonly<Record<string, Value>> | undefined
     onFetched?: (at: number) => void
@@ -2384,14 +2428,21 @@ export class Scheduler {
      * `Evaluation` is adopted, and V8 gives every closure made in one scope the same context — so
      * one mention would keep the superseded walk's whole graph alive until the node returned.
      */
-    const { nodeId, def, gathered, refresh, iteration, accumulated, onFetched } = opts
+    const { nodeId, def, gathered, refresh, maxAgeMs, iteration, accumulated, onFetched } = opts
     const params = withDefaults(def, this.nodeOf(opts.pass, nodeId).params)
     const types = (opts.pass.inference.nodes[nodeId]?.inputs ?? {}) as Record<string, never>
     const owner = opts.owner ?? { controller: opts.pass.controller, walk: walkOf(opts.pass) }
     const signal = owner.controller.signal
+    // Called here, not closed over: see `rerunnerFor` for why the closure is made elsewhere.
+    // `registerNode` has already refused the flag on anything but an `expensive` node.
+    const rerunInput = def.rerunsInputs
+      ? rerunnerFor(this.host, opts.pass.graph, opts.pass.inference, nodeId, signal)
+      : undefined
     return {
       params,
+      rerunInput,
       refresh,
+      maxAgeMs,
       iteration,
       accumulated,
       reportFetched: (at) => onFetched?.(at),
@@ -2499,19 +2550,169 @@ function upstreamKey(keys: Map<string, string>, source: string, handle: string):
 }
 
 /**
- * How a `reference` port's upstream is named — the resolved *type*, not the source node's key.
+ * What a `reference` port is handed, and the key it is known by — **the pair, from one place.**
  *
- * It has to be the type: the referenced node is excluded from the order, so its key may not be
- * computed when this is read, and `keys.get` would answer `'unresolved'` forever. It is also the
- * better key, since a dataset's identity is all a reference reads.
+ * Two kinds of source, told apart by the source and never by the reader:
  *
- * One spelling, for `upstreamKey`'s reason and in the same two consumers — `desiredKeys` folds it
- * into the hash that decides whether a node re-runs, and `ctx.inputKey` hands it to the node as
- * the identity of what arrived. Written out twice, they drift into a node that either re-runs
- * forever or never invalidates, with nothing type-checking the pair.
+ * - a node declaring `asReference` hands over what that returns from its params, keyed on the
+ *   answer itself. So the reader re-runs when the answer moves and at no other edit of the
+ *   source — which matters, because the first such source is a card whose other params change on
+ *   every click;
+ * - anything else is a dataset, read off its inferred *type* (`datasetIdentity`) and keyed on
+ *   that type. It has to be the type and not the source node's key: the referenced node is
+ *   excluded from the order, so its key may not be computed when this is read. It is also the
+ *   better key, since a dataset's identity is all such a reference reads.
+ *
+ * `named` says whether there is something to hand over **or the source is the kind that may
+ * honestly have nothing**: only a dataset that has not named itself is a wire to wait for
+ * (`settle`) or to refuse (`unresolvedReference`).
+ *
+ * One function, for `upstreamKey`'s reason: `desiredKeys` folds the key into the hash that
+ * decides whether a node re-runs, `gatherInputs` decides what the node is given and what
+ * `ctx.inputKey` says. Written out twice they drift into a node keyed on one answer and handed
+ * another — or one that re-runs forever, or never — with nothing type-checking the pair.
  */
-function referenceKey(type: CodaType | undefined): string {
-  return `ref:${hashValue(type ?? null)}`
+function referenceOf(
+  source: GraphNode | undefined,
+  output: string,
+  type: CodaType | undefined,
+): { value: Value | undefined; key: string; named: boolean } {
+  const def = source && getNodeDef(source.type)
+  // A dataset on the wire is read as one whatever else its node can say: the hook answers for
+  // the outputs it means to, and a node may carry a dataset output beside them.
+  if (source && def?.asReference && wireKind(source, output, type) !== 'dataset') {
+    // A muted node says nothing — and is keyed on that, so editing it while muted re-runs no one.
+    return source.disabled ? SILENT : answerOf(def, source.params, output)
+  }
+  const value = datasetIdentity(type)
+  return { value, key: `ref:${hashValue(type ?? null)}`, named: value !== undefined }
+}
+
+type ReferenceAnswer = ReturnType<typeof referenceOf>
+
+const SILENT: ReferenceAnswer = { value: undefined, key: `ref:${hashValue(null)}`, named: true }
+
+/**
+ * What kind of value a reference wire stands for: the type inference resolved, else the source
+ * output's own declaration — which is there exactly when inference has nothing, the state the
+ * refusal below is written for. One reading for `referenceOf` and `unresolvedReference`, so a
+ * wire is not a dataset to one of them and something else to the other.
+ */
+function wireKind(
+  source: GraphNode | undefined,
+  output: string,
+  type: CodaType | undefined,
+): CodaType['kind'] | undefined {
+  if (type) return type.kind
+  const def = source && getNodeDef(source.type)
+  return def && outputPorts(def, source.params).find((port) => port.id === output)?.type.kind
+}
+
+/**
+ * `asReference`'s answers, by the params record they were read from.
+ *
+ * An edit replaces the record of the node it edits and no other (`updateNode`), so this is asked
+ * once per edit *of the source* — where unmemoised it was the hook and a hash of its whole
+ * answer per reference wire on every graph mutation, and again per execution. It also makes
+ * "the pair, from one place" literal: the key a node was scheduled on and the value it is handed
+ * are the same object's two fields. Weak, so a record goes with its graph.
+ */
+const answers = new WeakMap<object, Map<string, ReferenceAnswer>>()
+
+function answerOf(def: NodeDefinition, params: ParamValues, output: string): ReferenceAnswer {
+  let held = answers.get(params)
+  if (!held) answers.set(params, (held = new Map()))
+  let answer = held.get(output)
+  if (!answer) {
+    let value: Value | undefined
+    try {
+      value = def.asReference!(withDefaults(def, params), output)
+    } catch {
+      // "Must not throw" is the hook's rule; a key derivation is no place to find out it did.
+      value = undefined
+    }
+    answer = { value, key: `ref:${hashValue(value ?? null)}`, named: true }
+    held.set(output, answer)
+  }
+  return answer
+}
+
+/**
+ * `EvalContext.rerunInput`, bound to one evaluation: the chain above one of the node's inputs,
+ * run for another neuron on a `Scheduler` of its own.
+ *
+ * **A module-level factory, and that is the point.** The closure it returns outlives the walk
+ * that built it whenever its evaluation is adopted, and V8 gives every closure made in one scope
+ * the same context — so made inside `makeEvalContext` it would keep that walk's whole pass alive
+ * (`makeEvalContext`'s own note). Made here it holds the five things it reads. Two of them are
+ * the graph and its inference, which is the cost `NodeDefinition.rerunsInputs` exists to confine
+ * to the nodes that ask for it.
+ *
+ * **A scheduler of its own, so nothing on the canvas moves**: a node holds one cache entry and
+ * one state, and a pass taken on the reader's scheduler would overwrite both with another
+ * neuron's. The private one is dropped when the value is in hand, and what it held goes with it
+ * — the geometry cache, below the `DataSource` seam, is what makes a neuron met twice cheap.
+ *
+ * **A full run, by somebody**: `mode: 'full'` and no `automatic`, since the node calling this is
+ * itself `expensive` and running because a person asked.
+ */
+function rerunnerFor(
+  host: Pick<SchedulerHost, 'resolveSource'>,
+  graph: CodaGraph,
+  inference: InferenceResult,
+  nodeId: string,
+  signal: AbortSignal,
+): NonNullable<EvalContext['rerunInput']> {
+  return async (portId, neurons, report): Promise<RerunResult> => {
+    throwIfAborted(signal)
+    const variant = variantGraph(graph, inference, nodeId, portId, neurons)
+    const byId = nodesById(variant.graph)
+    const inner: Scheduler = new Scheduler({
+      resolveSource: (id) => host.resolveSource(id),
+      // Which inner node is at work, and what it says — the caller's progress note.
+      onStateChange:
+        report &&
+        (() => {
+          for (const [id, node] of byId) {
+            const info = inner.info(id)
+            if (info.state !== 'running') continue
+            report(info.note ? `${nodeLabel(node)}: ${info.note}` : nodeLabel(node))
+            return
+          }
+        }),
+    })
+    const stop = () => inner.cancel()
+    signal.addEventListener('abort', stop, { once: true })
+    try {
+      const { nodeId: target, handle } = variant.source
+      const summary = await inner.run(variant.graph, { mode: 'full', targets: [target] })
+      throwIfAborted(signal)
+      if (inner.info(target).state !== 'ok') {
+        /*
+         * The node that actually failed, not the one left blocked beneath it. A node that could
+         * not start is in `failed` too — an input the swap left unwired, a reference that did not
+         * resolve — so the target itself is only the fallback for a run that ended some other way.
+         *
+         * **Of the chain only.** A node the chain merely names is in the copy with nothing wired
+         * into it, and may well fail there for that reason; it is a bystander, and naming it
+         * would blame a card that has nothing to do with why the chain stopped.
+         */
+        const failed = summary.failed.find((id) => variant.chain.has(id)) ?? target
+        const why = inner.info(failed).error ?? `it ended ${inner.info(failed).state}`
+        throw new Error(`${nodeLabel(byId.get(failed))} could not be run again: ${why}`)
+      }
+      const warnings: string[] = []
+      for (const [id, node] of byId) {
+        const said = inner.warning(id)
+        if (said) warnings.push(`${nodeLabel(node)}: ${said}`)
+      }
+      return { value: inner.output(target, handle), warnings }
+    } finally {
+      signal.removeEventListener('abort', stop)
+      // Drops what it held and clears its lapse timer, which would otherwise outlive it.
+      inner.invalidateAll()
+    }
+  }
 }
 
 /**

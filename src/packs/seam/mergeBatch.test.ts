@@ -54,7 +54,7 @@ function candidate(id: string): Candidate {
 
 /** Piece `n` (7, 8, 9): neuron supervoxel `n1`, its own `n2`, at tip `n`. */
 function merge(root: string): PlannedMerge {
-  const used = { endUid: Number(root), candidate: candidate(root) }
+  const used = { neuronId: NEURON, endUid: Number(root), candidate: candidate(root) }
   return {
     candidateRoot: root,
     rows: [used],
@@ -503,6 +503,141 @@ describe('runMerges', () => {
       ['8', 'not-sent'],
       ['9', 'not-sent'],
     ])
+  })
+})
+
+/**
+ * A neuron grown piece by piece: piece 9 was accepted on piece 7, so its neuron end is a
+ * supervoxel of 7 — not of the neuron — until 7 is merged (`PlannedMerge.needs`).
+ */
+describe('a merge made onto a piece that is merged first', () => {
+  const onto7: PlannedMerge = {
+    ...merge('9'),
+    used: { neuronId: '7', endUid: 9, candidate: candidate('9') },
+    parent: '7',
+    needs: '7',
+  }
+  const TREE: ReadyPlan = { ...PLAN, merges: [PLAN.merges[0]!, onto7] }
+  /** As `segmentation`, with 9's neuron end under piece 7, where the anchor found it. */
+  const grown = () => {
+    const world = segmentation()
+    world.rootOf.set(SV('91'), '7')
+    return world
+  }
+  const runTree = async (services: BatchServices, merges = TREE.merges) => {
+    const record: MergeRecordEntry[] = []
+    const result = await prepareMerges(TREE, merges, AS, services).run({
+      progress: () => {},
+      record: (entry) => record.push(entry),
+      stopRequested: () => false,
+      stillOut: () => {},
+    })
+    return { result, record }
+  }
+
+  it('sends it once that piece is in the neuron, checked against the root that merge made', async () => {
+    const world = grown()
+    const { result, record } = await runTree(world.services)
+    expect(result).toEqual({ state: 'done', currentRoot: '202' })
+    expect(record.map((e) => [e.candidateRoot, e.outcome, e.neuronRoot])).toEqual([
+      ['7', 'merged', NEURON],
+      ['9', 'merged', '201'],
+    ])
+    // The record says which piece it was accepted on; the neuron's own has nothing to say.
+    expect(record.map((e) => e.parentRoot)).toEqual([undefined, '7'])
+    expect(world.sent).toHaveLength(2)
+  })
+
+  /**
+   * 7 was edited since the plan, so it is not sent. 9's neuron end is still under 7's root: read
+   * as it stands, that is "somebody else edited the neuron", and the batch would stop.
+   */
+  it('does not send it where that piece was not merged, says so, and goes on', async () => {
+    const world = grown()
+    world.rootOf.set(SV('72'), '77')
+    const trio: ReadyPlan = { ...TREE, merges: [...TREE.merges, PLAN.merges[1]!] }
+    const record: MergeRecordEntry[] = []
+    const result = await prepareMerges(trio, trio.merges, AS, world.services).run({
+      progress: () => {},
+      record: (entry) => record.push(entry),
+      stopRequested: () => false,
+      stillOut: () => {},
+    })
+    expect(record.map((e) => [e.candidateRoot, e.outcome])).toEqual([
+      ['7', 'not-sent'],
+      ['9', 'not-sent'],
+      ['8', 'merged'],
+    ])
+    expect(record[1]!.message).toBe(
+      '7, the piece this one is merged onto, was not merged. Not sent.',
+    )
+    expect(result.state).toBe('done')
+    // Nothing was read or sent for 9.
+    expect(world.sent.map((sent) => sent.candidate.supervoxel)).toEqual([SV('82')])
+    expect(world.reads.flat()).not.toContain(SV('91'))
+  })
+
+  /**
+   * 7 turns out to be part of 8 (somebody merged the two since the plan), so merging 8 brings it
+   * in: 7 is recorded as already there and nothing is sent for it — and 9 is still merged onto it.
+   */
+  it('counts a piece found in the neuron already as there to be merged onto', async () => {
+    const world = segmentation()
+    world.rootOf.set(SV('72'), '8')
+    world.rootOf.set(SV('91'), '8')
+    const plan: ReadyPlan = { ...PLAN, merges: [PLAN.merges[1]!, PLAN.merges[0]!, onto7] }
+    const record: MergeRecordEntry[] = []
+    await prepareMerges(plan, plan.merges, AS, world.services).run({
+      progress: () => {},
+      record: (entry) => record.push(entry),
+      stopRequested: () => false,
+      stillOut: () => {},
+    })
+    expect(record.map((e) => [e.candidateRoot, e.outcome])).toEqual([
+      ['8', 'merged'],
+      ['7', 'already-merged'],
+      ['9', 'merged'],
+    ])
+  })
+
+  /**
+   * 9's merge point is on the neuron itself, so nothing about the roots stops it — but it was
+   * accepted as a continuation of 7, and 7 was not merged.
+   */
+  it('does not send a piece whose own end is on the neuron when the piece it continues was not merged', async () => {
+    const world = segmentation()
+    world.rootOf.set(SV('72'), '77')
+    const after7: PlannedMerge = { ...merge('9'), parent: '7' }
+    const plan: ReadyPlan = { ...PLAN, merges: [PLAN.merges[0]!, after7] }
+    const record: MergeRecordEntry[] = []
+    await prepareMerges(plan, plan.merges, AS, world.services).run({
+      progress: () => {},
+      record: (entry) => record.push(entry),
+      stopRequested: () => false,
+      stillOut: () => {},
+    })
+    expect(record.map((e) => [e.candidateRoot, e.outcome])).toEqual([
+      ['7', 'not-sent'],
+      ['9', 'not-sent'],
+    ])
+    expect(world.sent).toEqual([])
+    // And a list that leaves 7 out is refused before anything is read.
+    expect(() => prepareMerges(plan, [after7], AS, world.services)).toThrow(
+      /is made onto 7, which is not merged before it/,
+    )
+  })
+
+  it('refuses, before anything is sent, a merge whose piece is not merged before it', () => {
+    const world = grown()
+    // The piece it is made onto is left out, and then listed after it.
+    expect(() => prepareMerges(TREE, [onto7], AS, world.services)).toThrow(
+      /is made onto 7, which is not merged before it/,
+    )
+    expect(() => prepareMerges(TREE, [onto7, TREE.merges[0]!], AS, world.services)).toThrow(
+      /is made onto 7, which is not merged before it/,
+    )
+    expect(world.sent).toEqual([])
+    expect(world.reads).toEqual([])
   })
 })
 

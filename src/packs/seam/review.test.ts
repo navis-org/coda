@@ -12,10 +12,15 @@ import { describe, expect, it } from 'vitest'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import type { EvalContext, ParamValues } from '../../core/node'
-import { defaultParams } from '../../core/node'
+import { defaultParams, makeInferContext } from '../../core/node'
+import { allInputPorts } from '../../core/ports'
 import { requireNodeDef } from '../../core/registry'
-import { column, tableSchema } from '../../core/types'
+import { column, columnNames, tableSchema } from '../../core/types'
+import type { TableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
+import { emptyGraph, referrerOf } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
+import { EXTENDED_PORT, extendPairs } from './pieces'
 import type { LayersValue, TableValue, Value } from '../../core/values'
 import '../../nodes'
 
@@ -93,11 +98,11 @@ describe('one neuron at a time', () => {
   })
 
   it('resolves the cursor only within the picked neuron', async () => {
-    const off = (await run({ neuron: 'n1', current: '2', showAccepted: false }))[
+    const off = (await run({ neuron: 'n1', current: 'n2|2', showAccepted: false }))[
       'current'
     ] as TableValue
     expect(off.length).toBe(0)
-    const on = (await run({ neuron: 'n2', current: '2' }))['current'] as TableValue
+    const on = (await run({ neuron: 'n2', current: 'n2|2' }))['current'] as TableValue
     expect(on.data[ID_COLUMN_NAME]).toEqual(['n2', 'b'])
   })
 
@@ -131,20 +136,20 @@ describe('showing accepted pieces', () => {
     (table.data[ID_COLUMN_NAME] ?? []).map((id, i) => `${id}:${table.data['part']![i]}`)
 
   it('adds the picked neuron’s accepted pieces after the pair under the cursor', async () => {
-    const table = await current({ current: '1', verdicts: 'n1/c=accept;n2/b=accept' })
+    const table = await current({ current: 'n1|1', verdicts: 'n1/c=accept;n2/b=accept' })
     // `b` is accepted on n2, which is not the neuron on screen.
     expect(rows(table)).toEqual(['n1:neuron', 'a:candidate', 'c:accepted'])
   })
 
   /** Every row says where to look, so sorting the table cannot move the camera. */
   it('carries the cursor’s contact on every row', async () => {
-    const table = await current({ current: '1', verdicts: 'n1/c=accept' })
+    const table = await current({ current: 'n1|1', verdicts: 'n1/c=accept' })
     expect(table.data['x']).toEqual([10, 10, 10])
   })
 
   /** Pressing Accept on the piece under the cursor turns it green at once. */
   it('colours the piece under the cursor as accepted once it is', async () => {
-    const table = await current({ current: '1', verdicts: 'n1/a=accept' })
+    const table = await current({ current: 'n1|1', verdicts: 'n1/a=accept' })
     expect(rows(table)).toEqual(['n1:neuron', 'a:accepted'])
   })
 
@@ -156,7 +161,11 @@ describe('showing accepted pieces', () => {
   })
 
   it('shows only the pair when switched off', async () => {
-    const table = await current({ current: '1', verdicts: 'n1/c=accept', showAccepted: false })
+    const table = await current({
+      current: 'n1|1',
+      verdicts: 'n1/c=accept',
+      showAccepted: false,
+    })
     expect(rows(table)).toEqual(['n1:neuron', 'a:candidate'])
   })
 
@@ -219,12 +228,12 @@ describe('after merges', () => {
 
   it('shows the neuron at its root now, and a merged piece as part of it', async () => {
     const verdicts = `${N}/997=accept;${N}/999=accept`
-    const out = await run({ merges: record, verdicts, current: '1' }, inputs)
+    const out = await run({ merges: record, verdicts, current: `${N}|1` }, inputs)
     expect(rows(out['current'] as TableValue)).toEqual([
       '720575940700000001:neuron',
       '999:accepted',
     ])
-    const before = await run({ verdicts, current: '1' }, inputs)
+    const before = await run({ verdicts, current: `${N}|1` }, inputs)
     expect(rows(before['current'] as TableValue)).toEqual([
       `${N}:neuron`,
       '997:accepted',
@@ -232,11 +241,185 @@ describe('after merges', () => {
     ])
     // With no Dataset wired, the record is read for no chunkedgraph: no merge here.
     const unwired = await run(
-      { merges: record, verdicts, current: '1' },
+      { merges: record, verdicts, current: `${N}|1` },
       { ...inputs, dataset: undefined },
     )
     expect(rows(unwired['current'] as TableValue)).toEqual(
       rows(before['current'] as TableValue),
     )
+  })
+})
+
+/**
+ * Extending (`docs/seam-extend-plan.md`): the pairs leave by `Extended`, and a reference to the
+ * node is answered with the same table from its params alone — which is what Suggest Merges
+ * reads, before this node has run.
+ */
+describe('what is extended', () => {
+  const SEED = '648518347558097460'
+  const PIECE = '648518347558680055'
+  const NEXT = '648518347558349370'
+  const def = requireNodeDef('seam:review')
+  const grown = (id: string[], seed: string[], steps: number[], junction: boolean[]) =>
+    makeTable(
+      tableSchema(
+        column(ID_COLUMN_NAME, 'str'),
+        column('end_uid', 'i64'),
+        column('x', 'f64'),
+        column('y', 'f64'),
+        column('z', 'f64'),
+        column('seed', 'str'),
+        column('steps', 'i64'),
+        column('junction', 'bool'),
+      ),
+      {
+        [ID_COLUMN_NAME]: id,
+        end_uid: id.map((_, i) => (junction[i] ? 0 : i === 0 ? 0 : 1)),
+        x: id.map(() => 1),
+        y: id.map(() => 1),
+        z: id.map(() => 1),
+        seed,
+        steps,
+        junction,
+      },
+    )
+  // The neuron's one tip, then the piece's joining end and its one open end.
+  const tips = grown([SEED, PIECE, PIECE], [SEED, SEED, SEED], [0, 1, 1], [false, true, false])
+  const candidates = makeTable(CANDIDATES.schema, {
+    [ID_COLUMN_NAME]: [SEED, PIECE],
+    end_uid: [0, 1],
+    candidateId: [PIECE, NEXT],
+    rank: [1, 1],
+    contact_x: [10, 20],
+    contact_y: [10, 20],
+    contact_z: [10, 20],
+  })
+  const inputs = { tips, candidates }
+  const accepted = `${SEED}/${PIECE}=accept;${PIECE}/${NEXT}=accept`
+  const pairsOf = (value: Value | undefined) => {
+    const table = value as TableValue
+    return table.data['parent']!.map((parent, i) => `${parent}/${table.data['piece']![i]}`)
+  }
+
+  it('promises the pairs’ shape before anything has run', () => {
+    const out = def.inferOutputs!(makeInferContext(def, defaultParams(def), {})) as Record<
+      string,
+      { schema?: TableSchema }
+    >
+    expect(columnNames(out['extended']!.schema!)).toEqual(['parent', 'piece'])
+  })
+
+  it('publishes the pairs that are asked for and still accepted', async () => {
+    const out = await run({ verdicts: accepted, extend: `${SEED}/${PIECE}` }, inputs)
+    expect(pairsOf(out['extended'])).toEqual([`${SEED}/${PIECE}`])
+    expect(pairsOf((await run({ verdicts: accepted }, inputs))['extended'])).toEqual([])
+  })
+
+  /** One function for both, so the search and an ordinary wire cannot read two tables. */
+  it('answers a reference with the same table, from the params alone', async () => {
+    const params = {
+      ...defaultParams(def),
+      verdicts: accepted,
+      extend: `${PIECE}/${NEXT};${SEED}/${PIECE}`,
+    }
+    const referred = def.asReference!(params, 'extended')
+    expect(referred).toEqual((await run(params, inputs))['extended'])
+    // And it is what Suggest Merges reads: two chunkedgraph ids a pair, in a stable order.
+    expect(extendPairs(referred)).toEqual([
+      { parent: SEED, piece: PIECE },
+      { parent: PIECE, piece: NEXT },
+    ])
+    // Only that output answers: a wire from any other is not a reference to read.
+    expect(def.asReference!(params, 'tips')).toBeUndefined()
+  })
+
+  /** The toggle changes what a press writes, never what this node publishes: it re-keys nothing. */
+  it('publishes the same with auto-extend on, and keeps it out of the key', async () => {
+    const params = { verdicts: accepted, extend: `${SEED}/${PIECE}` }
+    expect(await run({ ...params, autoExtend: true }, inputs)).toEqual(
+      await run(params, inputs),
+    )
+    const toggle = def.params!.find((param) => param.id === 'autoExtend')!
+    expect(toggle.presentational).toBe(true)
+    expect(toggle.default).toBe(false)
+  })
+
+  /**
+   * The card finds the node that searches a piece by who reads `Extended` **by reference** —
+   * the reader's own declaration, not a type id the card would have to know.
+   */
+  it('is read by reference by Suggest Merges, which is how the card finds the search', () => {
+    const node = (id: string, type: string) => ({
+      id,
+      type,
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    const edge = (sourceHandle: string, target: string, targetHandle: string) => ({
+      id: `${sourceHandle}-${target}-${targetHandle}`,
+      source: 'r1',
+      sourceHandle,
+      target,
+      targetHandle,
+    })
+    const graph = (edges: ReturnType<typeof edge>[]): CodaGraph => ({
+      ...emptyGraph(),
+      nodes: [
+        node('r1', 'seam:review'),
+        node('s1', 'seam:suggestMerges'),
+        node('f1', 'core.filter'),
+      ],
+      edges,
+    })
+    expect(referrerOf(graph([edge(EXTENDED_PORT, 's1', 'review')]), 'r1', EXTENDED_PORT)).toBe(
+      's1',
+    )
+    // An ordinary wire carries the table; it does not name the card.
+    expect(
+      referrerOf(graph([edge(EXTENDED_PORT, 'f1', 'in')]), 'r1', EXTENDED_PORT),
+    ).toBeUndefined()
+    // Another output wired into the same port is not this one.
+    expect(
+      referrerOf(graph([edge('tips', 's1', 'review')]), 'r1', EXTENDED_PORT),
+    ).toBeUndefined()
+    expect(referrerOf(graph([]), 'r1', EXTENDED_PORT)).toBeUndefined()
+    // And the port Suggest Merges declares names this output as its producer.
+    const port = allInputPorts(requireNodeDef('seam:suggestMerges')).find(
+      (one) => one.id === 'review',
+    )!
+    expect(port.producedBy).toEqual({ type: 'seam:review', port: EXTENDED_PORT })
+  })
+
+  it('reviews the piece’s tips under the neuron, and leaves its joining end out', async () => {
+    const out = await run(
+      { verdicts: accepted, extend: `${SEED}/${PIECE}`, current: `${PIECE}|1` },
+      inputs,
+    )
+    // One neuron in the viewer: the seed, with both accepted pieces green.
+    const current = out['current'] as TableValue
+    expect(current.data[ID_COLUMN_NAME]).toEqual([SEED, PIECE, NEXT])
+    expect(current.data['part']).toEqual(['neuron', 'accepted', 'accepted'])
+    expect(current.data['x']).toEqual([20, 20, 20])
+    expect(points(out)).toEqual([
+      `${SEED}-0-tip`,
+      `${SEED}-0-contact`,
+      `${PIECE}-1-tip`,
+      `${PIECE}-1-contact`,
+    ])
+  })
+
+  /**
+   * The rows of a piece that is no longer extended are still in the table until the search runs
+   * again. They pass through `Tips`, which is a tap; nothing else reads them.
+   */
+  it('reads nothing of a piece that is no longer extended, and still passes its rows on', async () => {
+    const out = await run({ verdicts: accepted, current: `${PIECE}|1` }, inputs)
+    expect((out['tips'] as TableValue).length).toBe(3)
+    // Its rows pass through, with no verdict folded on: the one made there is unread.
+    expect((out['tips'] as TableValue).data['verdict']).toEqual(['accept', null, null])
+    expect((out['current'] as TableValue).data[ID_COLUMN_NAME]).toEqual([SEED, PIECE])
+    expect(points(out)).toEqual([`${SEED}-0-tip`, `${SEED}-0-contact`])
+    const verdicts = out['verdicts'] as TableValue
+    expect(verdicts.data['candidateId']).toEqual([PIECE])
   })
 })

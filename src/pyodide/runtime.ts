@@ -46,6 +46,7 @@ import SKELETONIZE_PY from './skeletonize.py?raw'
 import SKELETONS_PY from './skeletons.py?raw'
 import TOPOLOGY_PY from './topology.py?raw'
 import WARP_PY from './warp.py?raw'
+import { loadPackagesOrThrow } from './loadPackages'
 import sources from './sources.json'
 import type { PyArg, PyResult } from './types'
 
@@ -237,8 +238,13 @@ interface PyNamespace extends PyProxy {
 interface PyodideApi {
   loadPackage(
     names: string | string[],
-    options?: { messageCallback?: (message: string) => void },
+    options?: {
+      messageCallback?: (message: string) => void
+      errorCallback?: (message: string) => void
+    },
   ): Promise<unknown>
+  /** Every package installed so far, by its name in Pyodide's lock file. */
+  loadedPackages: Readonly<Record<string, unknown>>
   runPython(code: string, options?: { globals?: PyNamespace }): unknown
   /** A JS object as a Python one — for a plain object, a dict proxy. */
   toPy(value: object): unknown
@@ -338,7 +344,11 @@ export async function callPython(
     // the second request's DNS, TLS and slow-start all wait on the first transfer finishing —
     // 2.9 MB and 1.1 MB, on the one path where the whole ten megabytes is already being paid.
     const wheels = (spec.wheels ?? []).map((name) => new URL(`wheels/${name}`, siteRoot).href)
-    await py.loadPackage([...spec.packages, ...wheels], { messageCallback: () => {} })
+    // Thrown before anything is run or kept, so a download that failed is retried by the next
+    // call rather than leaving a module that imports what never arrived — `loadPackages.ts`.
+    await loadPackagesOrThrow(py, [...spec.packages, ...wheels], spec.label, {
+      note: (text) => report(0.1, text),
+    })
     // `__name__` seeded, as an import would, so a class or a traceback names its module.
     namespace = py.toPy({
       __name__: module,

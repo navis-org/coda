@@ -200,7 +200,8 @@ function reportOnReads(warner: Warner, chunks?: ChunkReads): void {
   warner.warn(
     `${plural(missed, 'chunk')} of segmentation ${agree(missed, 'was', 'were')} fetched that ` +
       `\`Chunk cache\` did not hold — ${Math.round(100 * share)}% of its reads were answered ` +
-      'from memory. Raising it is the direct fix; the other is the order the ends arrive in, ' +
+      'from memory. Raising it is the direct fix — then Clear Cache and run again, since ends ' +
+      'already searched are remembered and read nothing; the other is the order the ends arrive in, ' +
       'since a `Sort` above this node scatters ends that lie beside each other in the volume ' +
       'and a cache cannot make a scattered walk local.',
   )

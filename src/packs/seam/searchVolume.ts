@@ -176,12 +176,20 @@ export function endToSearch(
   at: number,
   halfWidthNm: number,
   options: CaveRequestOptions,
+  /**
+   * An accepted piece's path, read as the neuron's — `labelledBox`' `alias`, `aliasOf`.
+   * Required for that parameter's reason: an end built without one compiles, reads its box
+   * unaliased, and has the piece's own voxels as a candidate of the neuron it is part of.
+   */
+  alias: ReadonlyMap<bigint, bigint> | undefined,
 ): EndToSearch {
-  const queryRoot = BigInt(tip.neuronId)
+  // The neuron the end is asked about: the tip's own root, or the one it is being extended into.
+  const queryRoot = BigInt(tip.seed ?? tip.neuronId)
   return {
     tip: at,
     queryRoot,
-    box: () => readPool(volume, tip, queryRoot, halfWidthNm, options),
+    ...(alias && alias.size > 0 ? { alsoQuery: [...alias.keys()] } : {}),
+    box: () => readPool(volume, tip, queryRoot, halfWidthNm, options, alias),
   }
 }
 
@@ -191,8 +199,9 @@ async function readPool(
   queryRoot: bigint,
   halfWidthNm: number,
   options: CaveRequestOptions,
+  alias: ReadonlyMap<bigint, bigint> | undefined,
 ): Promise<CandidatePoolRequest> {
   const box = boxAround(volume.scale, [...tip.nm], halfWidthNm)
-  const read = await labelledBox(volume, volume.scale, box, options)
+  const read = await labelledBox(volume, volume.scale, box, options, alias)
   return { ...read, queryRoot, endNm: [...tip.nm] }
 }

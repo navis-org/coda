@@ -90,6 +90,23 @@ describe('the merge record', () => {
     }
   })
 
+  /** A merge of a piece accepted on a piece says which (`docs/seam-extend-plan.md`). */
+  it('keeps the piece a merge was accepted on, and refuses one that is no id', () => {
+    const onPiece = { ...RECORD[1]!, parentRoot: '720575940000000002' }
+    expect(decodeRecord(appendEntry('', onPiece))).toEqual([onPiece])
+    expect(decodeRecord(JSON.stringify([{ ...onPiece, parentRoot: 'seven' }]))).toEqual([])
+    // Absent is the ordinary case: a piece accepted on the neuron itself.
+    expect(decodeRecord(text).every((entry) => entry.parentRoot === undefined)).toBe(true)
+    // Published, so a row's tip number can be read against the root it numbers.
+    const table = mergesTable([onPiece, RECORD[1]!])
+    expect(table.data['accepted_on']).toEqual(['720575940000000002', null])
+    // And kept when a lost reply is settled later.
+    const lost = { ...onPiece, outcome: 'unknown' as const }
+    expect(
+      settledEntry(lost, '720575940700000009', '2026-11-17T00:00:00.000Z').parentRoot,
+    ).toBe('720575940000000002')
+  })
+
   /** The record is the log of every Submit: reading skips what it cannot read, writing keeps it. */
   it('keeps an entry it cannot read when appending', () => {
     const later = { ...RECORD[0], outcome: 'from-a-later-coda' }

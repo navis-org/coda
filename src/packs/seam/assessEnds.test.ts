@@ -18,11 +18,12 @@ import type { AssessSteps, PatchCut } from './assessEnds'
 const FLOOR = -258.4
 
 /** An end of `n` candidates, each a micrometre further along x than the last. */
-function end(n: number) {
+function end(n: number, alias?: ReadonlyMap<bigint, bigint>) {
   return {
     queryRoot: 720n,
     candRoot: BigUint64Array.from({ length: n }, (_, i) => BigInt(100 + i)),
     contactsNm: Array.from({ length: n }, (_, i) => [i * 1000, 0, 0] as Triple),
+    alias,
   }
 }
 
@@ -95,7 +96,17 @@ describe('assessEnd', () => {
       // The capped tail is out of the request entirely, not just out of the scoring.
       candRoots: BigUint64Array.from([100n, 101n]),
       queryRoot: 720n,
+      alias: undefined,
     })
+  })
+
+  it('hands the box the roots that are read as the query’s — an accepted piece’s path', async () => {
+    // The search read the piece as part of the neuron; the patches have to be cut from the same
+    // reading. Left off, the query had no voxel in a piece's patch box and the run failed.
+    const alias = new Map([[801n, 720n]])
+    const run = steps([1])
+    await assessEnd(end(1, alias), FLOOR, run)
+    expect(run.box).toHaveBeenCalledWith(expect.objectContaining({ queryRoot: 720n, alias }))
   })
 
   it('a cap no shorter than the list changes nothing', async () => {

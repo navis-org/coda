@@ -15,20 +15,41 @@ import { column, tableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
 import type { TableValue } from '../../core/values'
 import {
-  DEFAULT_FILTERS,
+  acceptedElsewhere,
   acceptedPieces,
   arrangeRows,
+  arrangeTree,
   buildQueue,
   currentOfQueue,
+  decodeExtend,
   decodeVerdicts,
+  DEFAULT_FILTERS,
+  encodeExtend,
   encodeVerdicts,
+  extendBlocked,
+  extendedKeys,
+  extendedPairs,
+  extendLabel,
+  extendPress,
+  extendProgress,
+  IN_NEURON_NOTE,
+  isLargePiece,
+  judgedParams,
+  LARGE_PIECE_CHUNKS,
+  leavesWith,
+  liveQueue,
+  liveTree,
   neuronsOf,
+  pairsOf,
   pickedNeuron,
   scenePieces,
   sizeOf,
   stillToSearch,
+  tipKey,
   tipsOf,
   verdictFor,
+  verdictPress,
+  withExtended,
   withVerdict,
 } from './reviewQueue'
 import type { Candidate } from './reviewQueue'
@@ -232,22 +253,30 @@ describe("a candidate's size", () => {
 describe('how many tips are still to search', () => {
   const searchedTips = (states: readonly (boolean | null)[]): TableValue =>
     makeTable(
-      tableSchema(column(ID_COLUMN_NAME, 'str'), column('searched', 'bool')),
+      tableSchema(
+        column(ID_COLUMN_NAME, 'str'),
+        column('end_uid', 'i64'),
+        column('searched', 'bool'),
+      ),
       {
         [ID_COLUMN_NAME]: states.map(() => 'n1'),
+        end_uid: states.map((_, i) => i),
         searched: [...states],
       },
       'table',
       states.length,
     )
+  /** Over the tips as the card lists them, which is what the count is taken over. */
+  const waiting = (table: TableValue | undefined) =>
+    stillToSearch(table, buildQueue(table, undefined))
 
   it('counts the tips not yet reached', () => {
-    expect(stillToSearch(searchedTips([true, true, null, null, null]))).toBe(3)
+    expect(waiting(searchedTips([true, true, null, null, null]))).toBe(3)
   })
 
   /** The run is over: the rows it could not reach are `false`, not waiting. */
   it('reaches zero even where some tips were never searchable', () => {
-    expect(stillToSearch(searchedTips([true, false, true, false]))).toBe(0)
+    expect(waiting(searchedTips([true, false, true, false]))).toBe(0)
   })
 
   /**
@@ -256,8 +285,8 @@ describe('how many tips are still to search', () => {
    * has just finished, which is a number about a run that never happened.
    */
   it('says nothing at all about a table without the column', () => {
-    expect(stillToSearch(tipsTable([{ end: 1 }]))).toBeUndefined()
-    expect(stillToSearch(undefined)).toBeUndefined()
+    expect(waiting(tipsTable([{ end: 1 }]))).toBeUndefined()
+    expect(waiting(undefined)).toBeUndefined()
   })
 })
 
@@ -336,26 +365,26 @@ describe('the cursor', () => {
    * leave a reader judging a different tip than the one they are looking at.
    */
   it('follows the tip, not its place in the list', () => {
-    const here = currentOfQueue(queue, '1', 1)!
+    const here = currentOfQueue(queue, 'n1|1', 1)!
     expect(here.tip.endUid).toBe(1)
     const narrowed = arrangeRows(queue, { ...DEFAULT_FILTERS, minConfidence: 0.5 })
     expect(narrowed.map((r) => r.tip.endUid)).toEqual([2])
     // The queue, not the narrowed list, is what the cursor resolves against.
-    expect(currentOfQueue(queue, '1', 1)!.tip.endUid).toBe(1)
+    expect(currentOfQueue(queue, 'n1|1', 1)!.tip.endUid).toBe(1)
   })
 
   it('pages within a tip', () => {
-    expect(currentOfQueue(queue, '1', 2)!.candidate.candidateId).toBe('b')
+    expect(currentOfQueue(queue, 'n1|1', 2)!.candidate.candidateId).toBe('b')
   })
 
   /** Paging past the end is a gesture, not an error. */
   it('falls back to the suggestion for a rank the tip does not have', () => {
-    expect(currentOfQueue(queue, '1', 99)!.candidate.rank).toBe(1)
+    expect(currentOfQueue(queue, 'n1|1', 99)!.candidate.rank).toBe(1)
   })
 
   it('is nothing when unset, or when the tip is gone', () => {
     expect(currentOfQueue(queue, '', 1)).toBeUndefined()
-    expect(currentOfQueue(queue, '404', 1)).toBeUndefined()
+    expect(currentOfQueue(queue, 'n1|404', 1)).toBeUndefined()
   })
 })
 
@@ -678,23 +707,29 @@ describe('one neuron at a time', () => {
 
   /** A cursor on another neuron's tip resolves to nothing, never to that neuron's pair. */
   it('does not resolve a cursor left on another neuron', () => {
-    expect(currentOfQueue(tipsOf(queue, 'n1'), '2', 1)).toBeUndefined()
-    expect(currentOfQueue(tipsOf(queue, 'n2'), '2', 1)?.candidate.candidateId).toBe('c')
+    expect(currentOfQueue(tipsOf(queue, 'n1'), 'n2|2', 1)).toBeUndefined()
+    expect(currentOfQueue(tipsOf(queue, 'n2'), 'n2|2', 1)?.candidate.candidateId).toBe('c')
   })
 
   it('counts only the picked neuron’s tips still to search', () => {
     const tips = makeTable(
-      tableSchema(column(ID_COLUMN_NAME, 'str'), column('searched', 'bool')),
+      tableSchema(
+        column(ID_COLUMN_NAME, 'str'),
+        column('end_uid', 'i64'),
+        column('searched', 'bool'),
+      ),
       {
         [ID_COLUMN_NAME]: ['n1', 'n2', 'n1', 'n2', 'n2'],
+        end_uid: [0, 1, 2, 3, 4],
         searched: [true, null, null, null, false],
       },
       'table',
       5,
     )
-    expect(stillToSearch(tips, 'n1')).toBe(1)
-    expect(stillToSearch(tips, 'n2')).toBe(2)
-    expect(stillToSearch(tips)).toBe(3)
+    const listed = buildQueue(tips, undefined)
+    expect(stillToSearch(tips, tipsOf(listed, 'n1'))).toBe(1)
+    expect(stillToSearch(tips, tipsOf(listed, 'n2'))).toBe(2)
+    expect(stillToSearch(tips, listed)).toBe(3)
   })
 })
 
@@ -801,5 +836,737 @@ describe('the accepted pieces', () => {
       .filter((piece) => piece.part === 'accepted')
       .map((piece) => piece.id)
     expect(green).toEqual([...acceptedPieces(queue, verdicts).keys()])
+  })
+})
+
+/**
+ * A neuron and the pieces it is extended with (`docs/seam-extend-plan.md`).
+ *
+ * Suggest Merges publishes a piece's tips in the same table as the neuron's: `ID` is the piece,
+ * `seed` the neuron being grown. The fixture is one neuron, `n1`, with a piece `p1` accepted on
+ * it and a piece `p2` accepted on `p1` — and **every root has a tip 0**, which is the case a
+ * cursor or a row key read as a bare `end_uid` gets wrong.
+ */
+describe('a neuron and the pieces it is extended with', () => {
+  type Row = {
+    id: string
+    end: number
+    seed: string
+    steps?: number
+    junction?: boolean
+    searched?: boolean | null
+  }
+  const grownTips = (rows: Row[]): TableValue =>
+    makeTable(
+      tableSchema(
+        column(ID_COLUMN_NAME, 'str'),
+        column('end_uid', 'i64'),
+        column('x', 'f64'),
+        column('y', 'f64'),
+        column('z', 'f64'),
+        column('seed', 'str'),
+        column('steps', 'i64'),
+        column('junction', 'bool'),
+        column('searched', 'bool'),
+      ),
+      {
+        [ID_COLUMN_NAME]: rows.map((r) => r.id),
+        end_uid: rows.map((r) => r.end),
+        x: rows.map(() => 1),
+        y: rows.map(() => 2),
+        z: rows.map(() => 3),
+        seed: rows.map((r) => r.seed),
+        steps: rows.map((r) => r.steps ?? 0),
+        junction: rows.map((r) => r.junction ?? false),
+        searched: rows.map((r) => (r.searched === undefined ? true : r.searched)),
+      },
+    )
+  const TIPS = grownTips([
+    { id: 'n1', end: 0, seed: 'n1' },
+    { id: 'n2', end: 0, seed: 'n2' },
+    { id: 'p1', end: 0, seed: 'n1', steps: 1, junction: true, searched: false },
+    { id: 'p1', end: 1, seed: 'n1', steps: 1 },
+    { id: 'p2', end: 0, seed: 'n1', steps: 2, junction: true, searched: false },
+    { id: 'p2', end: 1, seed: 'n1', steps: 2, searched: null },
+    { id: 'p2', end: 2, seed: 'n1', steps: 2, searched: null },
+  ])
+  const CANDIDATES = candidatesTable([
+    { neuron: 'n1', end: 0, id: 'p1', rank: 1 },
+    { neuron: 'n1', end: 0, id: 'x', rank: 2 },
+    { neuron: 'n2', end: 0, id: 'y', rank: 1 },
+    { neuron: 'p1', end: 1, id: 'p2', rank: 1 },
+  ])
+  const all = buildQueue(TIPS, CANDIDATES)
+  const VERDICTS = decodeVerdicts('n1/p1=accept;p1/p2=accept')
+  const EXTEND = 'n1/p1;p1/p2'
+  const names = (tips: readonly { neuronId: string; endUid: number }[]) =>
+    tips.map((tip) => tipKey(tip.neuronId, tip.endUid))
+
+  it('reads which neuron a tip belongs to and what the run did with it', () => {
+    expect(all.map((tip) => [tip.neuronId, tip.seed, tip.junction, tip.search])).toEqual([
+      ['n1', 'n1', false, 'done'],
+      ['n2', 'n2', false, 'done'],
+      ['p1', 'n1', true, 'never'],
+      ['p1', 'n1', false, 'done'],
+      ['p2', 'n1', true, 'never'],
+      ['p2', 'n1', false, 'waiting'],
+      ['p2', 'n1', false, 'waiting'],
+    ])
+  })
+
+  /** A published set has none of these columns, and reads exactly as it did. */
+  it('takes a tip’s own root for its neuron where the table has no seed', () => {
+    const queue = buildQueue(tipsTable([{ end: 1 }, { end: 2, neuron: 'n2' }]), undefined)
+    expect(queue.map((tip) => [tip.seed, tip.junction, tip.search])).toEqual([
+      ['n1', false, 'done'],
+      ['n2', false, 'done'],
+    ])
+  })
+
+  describe('what is extended', () => {
+    it('is a pair that is in the list and still accepted', () => {
+      expect(extendedPairs(EXTEND, VERDICTS)).toEqual([
+        { parent: 'n1', piece: 'p1' },
+        { parent: 'p1', piece: 'p2' },
+      ])
+      // Accepted and not asked for is not extended: an accept starts nothing.
+      expect(extendedPairs('', VERDICTS)).toEqual([])
+      expect(extendedPairs(EXTEND, decodeVerdicts('n1/p1=accept;p1/p2=reject'))).toEqual([
+        { parent: 'n1', piece: 'p1' },
+      ])
+      expect(extendedPairs(EXTEND, decodeVerdicts('n1/p1=unsure'))).toEqual([])
+    })
+
+    /** The list is in a provenance key, and the tables are built in its order. */
+    it('comes out the same whatever order the pieces were pressed in', () => {
+      const one = withExtended(withExtended('', 'p1', 'p2', true), 'n1', 'p1', true)
+      const other = withExtended(withExtended('', 'n1', 'p1', true), 'p1', 'p2', true)
+      expect(one).toBe(other)
+      expect(one).toBe(EXTEND)
+      expect(extendedPairs(one, VERDICTS)).toEqual(extendedPairs(other, VERDICTS))
+      // Twice is once, and taking one out leaves the other.
+      expect(withExtended(EXTEND, 'n1', 'p1', true)).toBe(EXTEND)
+      expect(withExtended(EXTEND, 'n1', 'p1', false)).toBe('p1/p2')
+    })
+
+    it('drops what is not a pair, so a hand edit cannot name half of one', () => {
+      expect([...decodeExtend('n1/p1; ;p2;/p3;n4/;n1/p1')]).toEqual(['n1/p1'])
+      expect(encodeExtend(['b/c', 'a/b', 'b/c'])).toBe('a/b;b/c')
+    })
+  })
+
+  describe('the rows there are to review', () => {
+    const tree = liveTree(all, extendedPairs(EXTEND, VERDICTS))
+
+    it('derives the tree as the search does, from the queue’s neurons', () => {
+      expect(tree.map((piece) => [piece.id, piece.seed, piece.depth])).toEqual([
+        ['p1', 'n1', 1],
+        ['p2', 'n1', 2],
+      ])
+    })
+
+    it('lists a neuron’s own tips and its pieces’, less each joining end', () => {
+      const queue = liveQueue(all, tree)
+      expect(names(queue)).toEqual(['n1|0', 'n2|0', 'p1|1', 'p2|1', 'p2|2'])
+      expect(names(tipsOf(queue, 'n1'))).toEqual(['n1|0', 'p1|1', 'p2|1', 'p2|2'])
+      expect(names(tipsOf(queue, 'n2'))).toEqual(['n2|0'])
+      // A piece is not a neuron to pick.
+      expect(neuronsOf(queue, VERDICTS).map((n) => [n.neuronId, n.tips, n.judged])).toEqual([
+        ['n1', 4, 2],
+        ['n2', 1, 0],
+      ])
+      expect(pickedNeuron(queue, 'p1')).toBe('n1')
+    })
+
+    /**
+     * The click, before the search has run again: the rows are still in the table, and they
+     * are off the list. Everything beyond the piece goes with it.
+     */
+    it('takes a piece’s rows off the moment it is no longer accepted, and those beyond it', () => {
+      const gone = decodeVerdicts('n1/p1=reject;p1/p2=accept')
+      const queue = liveQueue(all, liveTree(all, extendedPairs(EXTEND, gone)))
+      expect(names(queue)).toEqual(['n1|0', 'n2|0'])
+      // The verdict beyond it is kept and unread — nothing of that neuron lists `p2` now.
+      expect(neuronsOf(queue, gone).find((n) => n.neuronId === 'n1')?.judged).toBe(1)
+      expect(acceptedPieces(tipsOf(queue, 'n1'), gone).size).toBe(0)
+    })
+
+    it('leaves the pieces beyond one that is only no longer extended unreachable, not deleted', () => {
+      const queue = liveQueue(all, liveTree(all, extendedPairs('p1/p2', VERDICTS)))
+      expect(names(queue)).toEqual(['n1|0', 'n2|0'])
+      // Extended again, they are back without another press.
+      const back = liveQueue(all, liveTree(all, extendedPairs(EXTEND, VERDICTS)))
+      expect(names(tipsOf(back, 'n1'))).toContain('p2|1')
+    })
+
+    /** Every root has a tip 0: the cursor names the root too, or it lands on the neuron's. */
+    it('resolves the cursor by root and number together', () => {
+      const mine = tipsOf(liveQueue(all, tree), 'n1')
+      expect(currentOfQueue(mine, 'p1|1', 1)?.candidate.candidateId).toBe('p2')
+      expect(currentOfQueue(mine, 'n1|0', 1)?.candidate.candidateId).toBe('p1')
+      // A cursor saved before pieces, as a bare number, is on nothing.
+      expect(currentOfQueue(mine, '0', 1)).toBeUndefined()
+      // A joining end is not listed, so not something to be on either.
+      expect(currentOfQueue(mine, 'p1|0', 1)).toBeUndefined()
+    })
+
+    it('counts a neuron’s tips still to search with its pieces’', () => {
+      const queue = liveQueue(all, tree)
+      expect(stillToSearch(TIPS, tipsOf(queue, 'n1'))).toBe(2)
+      expect(stillToSearch(TIPS, tipsOf(queue, 'n2'))).toBe(0)
+    })
+
+    /**
+     * Stopping a piece runs nothing, so its rows stay in the table, still waiting, until the
+     * search next runs. They are off the list, and so off the count.
+     */
+    it('does not count the waiting tips of a piece that is no longer extended', () => {
+      const dropped = liveQueue(all, liveTree(all, extendedPairs('n1/p1', VERDICTS)))
+      expect(stillToSearch(TIPS, tipsOf(dropped, 'n1'))).toBe(0)
+    })
+
+    /** Two pieces accepted on one tip: the row names the first, and the second's rows say so. */
+    it('has the rows of a second piece on one tip name their piece', () => {
+      const both = buildQueue(
+        grownTips([
+          { id: 'n1', end: 0, seed: 'n1' },
+          { id: 'a1', end: 1, seed: 'n1', steps: 1 },
+          { id: 'a2', end: 1, seed: 'n1', steps: 1 },
+        ]),
+        candidatesTable([
+          { neuron: 'n1', end: 0, id: 'a1', rank: 1 },
+          { neuron: 'n1', end: 0, id: 'a2', rank: 2 },
+        ]),
+      )
+      const verdicts = decodeVerdicts('n1/a1=accept;n1/a2=accept')
+      const grown = liveTree(both, extendedPairs('n1/a1;n1/a2', verdicts))
+      const rows = arrangeTree(
+        tipsOf(liveQueue(both, grown), 'n1'),
+        'n1',
+        grown,
+        DEFAULT_FILTERS,
+      )
+      expect(
+        rows.map((row) => [tipKey(row.tip.neuronId, row.tip.endUid), row.depth, row.adrift]),
+      ).toEqual([
+        ['n1|0', 0, false],
+        ['a1|1', 1, false],
+        ['a2|1', 1, true],
+      ])
+      expect(rows[0]!.hosted?.candidateId).toBe('a1')
+    })
+
+    it('is on nothing with a cursor cut short, rather than on tip 0', () => {
+      const mine = tipsOf(liveQueue(all, tree), 'n1')
+      expect(currentOfQueue(mine, 'n1|', 1)).toBeUndefined()
+      expect(currentOfQueue(mine, 'n1|x', 1)).toBeUndefined()
+      expect(currentOfQueue(mine, 'n1|0', 1)?.tip.endUid).toBe(0)
+    })
+
+    it('shows every accepted piece of the tree in the scene, under the one neuron', () => {
+      const mine = tipsOf(liveQueue(all, tree), 'n1')
+      const here = currentOfQueue(mine, 'p1|1', 1)
+      // The neuron, the piece the tip is on, then what is proposed for it.
+      expect(scenePieces(mine, 'n1', here, VERDICTS, true)).toEqual([
+        { id: 'n1', part: 'neuron' },
+        { id: 'p1', part: 'accepted' },
+        { id: 'p2', part: 'accepted' },
+      ])
+      // With `Show accepted` off the piece under the cursor is still drawn: a candidate beside
+      // the neuron, and nothing between them, is a pair nobody can judge.
+      expect(scenePieces(mine, 'n1', here, VERDICTS, false)).toEqual([
+        { id: 'n1', part: 'neuron' },
+        { id: 'p1', part: 'accepted' },
+        { id: 'p2', part: 'candidate' },
+      ])
+      // On one of the neuron's own tips nothing is added.
+      expect(scenePieces(mine, 'n1', currentOfQueue(mine, 'n1|0', 2), VERDICTS, false)).toEqual(
+        [
+          { id: 'n1', part: 'neuron' },
+          { id: 'x', part: 'candidate' },
+        ],
+      )
+    })
+  })
+
+  /**
+   * The list as it is drawn (user, 2026-11-16): a piece's tips beneath the row the piece was
+   * accepted on, a level in, each level narrowed and sorted on its own.
+   */
+  describe('the list as a tree', () => {
+    type Tip = Row & { r?: number }
+    const scored = (rows: Tip[]): TableValue => {
+      const table = grownTips(rows)
+      return makeTable(tableSchema(...table.schema.columns, column('r', 'f64')), {
+        ...table.data,
+        r: rows.map((row) => row.r ?? null),
+      })
+    }
+    // The neuron's tips 0 (0.2) and 1 (0.9); `p1` accepted on tip 0, `p2` on `p1`'s tip 1.
+    const tips = scored([
+      { id: 'n1', end: 0, seed: 'n1', r: 0.2 },
+      { id: 'n1', end: 1, seed: 'n1', r: 0.9 },
+      { id: 'p1', end: 0, seed: 'n1', steps: 1, junction: true, searched: false },
+      { id: 'p1', end: 1, seed: 'n1', steps: 1, r: 0.95 },
+      { id: 'p1', end: 2, seed: 'n1', steps: 1, r: 0.99 },
+      { id: 'p2', end: 1, seed: 'n1', steps: 2, r: 0.5 },
+    ])
+    const candidates = candidatesTable([
+      { neuron: 'n1', end: 0, id: 'p1', rank: 1, l2: 9 },
+      { neuron: 'n1', end: 1, id: 'z', rank: 1, l2: 9 },
+      { neuron: 'p1', end: 1, id: 'p2', rank: 1, l2: 1 },
+      { neuron: 'p1', end: 2, id: 'w', rank: 1, l2: 9 },
+      { neuron: 'p2', end: 1, id: 'v', rank: 1, l2: 9 },
+    ])
+    const whole = buildQueue(tips, candidates)
+    const drawn = (
+      filters: Partial<typeof DEFAULT_FILTERS> = {},
+      extend = EXTEND,
+      verdicts = VERDICTS,
+      queue = whole,
+    ) => {
+      const tree = liveTree(queue, extendedPairs(extend, verdicts))
+      const mine = tipsOf(liveQueue(queue, tree), 'n1')
+      return arrangeTree(mine, 'n1', tree, { ...DEFAULT_FILTERS, ...filters }).map(
+        (row) => `${'>'.repeat(row.depth)}${tipKey(row.tip.neuronId, row.tip.endUid)}`,
+      )
+    }
+
+    it('puts a piece’s tips under the row it was accepted on, each level in its own order', () => {
+      // Flat, by confidence, this would be p1|2, p1|1, n1|1, p2|1, n1|0.
+      expect(drawn()).toEqual(['n1|1', 'n1|0', '>p1|2', '>p1|1', '>>p2|1'])
+      expect(drawn({ sortBy: 'tip' })).toEqual(['n1|0', '>p1|1', '>>p2|1', '>p1|2', 'n1|1'])
+    })
+
+    it('is the neuron’s own rows where nothing is extended, as before', () => {
+      expect(drawn({}, '')).toEqual(['n1|1', 'n1|0'])
+      expect(arrangeTree(tipsOf(whole, 'n1'), undefined, [], DEFAULT_FILTERS)).toEqual([])
+    })
+
+    /** Filtered out, the rows beneath would hang from nothing. */
+    it('lists the row a piece hangs beneath whatever the filters say, and narrows the rest', () => {
+      // 0.6 drops n1|0 (0.2) and p2|1 (0.5) on its own level; n1|0 stays for what is under it.
+      expect(drawn({ minConfidence: 0.6 })).toEqual(['n1|1', 'n1|0', '>p1|2', '>p1|1'])
+      // 0.97 leaves only p1|2 of the rows nothing hangs beneath — and every row on the way to it.
+      expect(drawn({ minConfidence: 0.97 })).toEqual(['n1|0', '>p1|2', '>p1|1'])
+      // The size filter reads each row's own candidate: p1|1's is one chunk, and it stays too.
+      expect(drawn({ minSize: 5 })).toEqual(['n1|1', 'n1|0', '>p1|2', '>p1|1', '>>p2|1'])
+    })
+
+    it('says which candidate a tip’s row is showing the ends of', () => {
+      const tree = liveTree(whole, extendedPairs(EXTEND, VERDICTS))
+      const rows = arrangeTree(
+        tipsOf(liveQueue(whole, tree), 'n1'),
+        'n1',
+        tree,
+        DEFAULT_FILTERS,
+      )
+      expect(rows.map((row) => row.hosted?.candidateId ?? '')).toEqual(['', 'p1', '', 'p2', ''])
+      expect(rows.every((row) => !row.adrift)).toBe(true)
+    })
+
+    it('hangs them under the piece’s own row where a row is a candidate', () => {
+      const more = buildQueue(
+        tips,
+        candidatesTable([
+          { neuron: 'n1', end: 0, id: 'other', rank: 1 },
+          { neuron: 'n1', end: 0, id: 'p1', rank: 2 },
+          { neuron: 'p1', end: 1, id: 'p2', rank: 1 },
+        ]),
+      )
+      const tree = liveTree(more, extendedPairs('n1/p1', VERDICTS))
+      const rows = arrangeTree(tipsOf(liveQueue(more, tree), 'n1'), 'n1', tree, {
+        ...DEFAULT_FILTERS,
+        mode: 'candidate',
+      })
+      expect(
+        rows.map(
+          (row) => `${'>'.repeat(row.depth)}${row.tip.neuronId}:${row.candidate?.candidateId}`,
+        ),
+      ).toEqual(['n1:other', 'n1:p1', '>p1:p2'])
+      expect(rows.every((row) => row.hosted === undefined)).toBe(true)
+    })
+
+    /** A piece touching the neuron at two tips is under one of them: where the gap is smallest. */
+    it('hangs a piece listed at two tips under the nearer one', () => {
+      const twice = buildQueue(
+        tips,
+        candidatesTable([
+          { neuron: 'n1', end: 0, id: 'p1', rank: 1, gap: 0.4 },
+          { neuron: 'n1', end: 1, id: 'p1', rank: 2, gap: 0.1 },
+          { neuron: 'p1', end: 1, id: 'q', rank: 1 },
+        ]),
+      )
+      expect(drawn({}, 'n1/p1', VERDICTS, twice)).toEqual(['n1|1', '>p1|2', '>p1|1', 'n1|0'])
+    })
+
+    /**
+     * A listing with no contact point is no place to be joined at — the search takes no joining
+     * end from one either (`pieceContacts`) — so the piece hangs under the listing that has one.
+     */
+    it('does not hang a piece under a listing that says nothing of where they touch', () => {
+      const listed = candidatesTable([
+        { neuron: 'n1', end: 0, id: 'p1', rank: 1, gap: 0.1 },
+        { neuron: 'n1', end: 1, id: 'p1', rank: 2, gap: 0.4 },
+        { neuron: 'p1', end: 1, id: 'q', rank: 1 },
+      ])
+      // The nearer listing loses its contact; the further one still has it.
+      const blind = makeTable(listed.schema, {
+        ...listed.data,
+        contact_x: [null, ...listed.data['contact_x']!.slice(1)],
+      })
+      expect(drawn({}, 'n1/p1', VERDICTS, buildQueue(tips, blind))).toEqual([
+        'n1|1',
+        '>p1|2',
+        '>p1|1',
+        'n1|0',
+      ])
+    })
+
+    /** Its parent's rows do not list it — searched by another run, say. Still listed, and it says so. */
+    it('lists a piece no row names after its parent’s rows, saying which piece it is', () => {
+      const unnamed = buildQueue(
+        tips,
+        candidatesTable([{ neuron: 'p1', end: 1, id: 'q', rank: 1 }]),
+      )
+      const tree = liveTree(unnamed, [{ parent: 'n1', piece: 'p1' }])
+      const rows = arrangeTree(
+        tipsOf(liveQueue(unnamed, tree), 'n1'),
+        'n1',
+        tree,
+        DEFAULT_FILTERS,
+      )
+      expect(
+        rows.map(
+          (row) => `${'>'.repeat(row.depth)}${tipKey(row.tip.neuronId, row.tip.endUid)}`,
+        ),
+      ).toEqual(['n1|1', 'n1|0', '>p1|2', '>p1|1'])
+      expect(rows.map((row) => row.adrift)).toEqual([false, false, true, true])
+    })
+
+    it('lists every tip of the neuron once', () => {
+      const tree = liveTree(whole, extendedPairs(EXTEND, VERDICTS))
+      const mine = tipsOf(liveQueue(whole, tree), 'n1')
+      const rows = arrangeTree(mine, 'n1', tree, DEFAULT_FILTERS)
+      expect(new Set(rows.map((row) => row.tip)).size).toBe(mine.length)
+      expect(rows).toHaveLength(mine.length)
+    })
+  })
+
+  /**
+   * What a press on a verdict does. The candidate's size and whatever stands in the way of
+   * extending it are handed over as facts; the rules — the pair kept in step with the verdict,
+   * `Auto-extend`, a large piece left to its button — are decided here, not on the card.
+   */
+  const piece = (candidateId: string, l2Chunks = 3) => ({ candidateId, l2Chunks }) as Candidate
+  describe('a press on a verdict', () => {
+    const params = { verdicts: 'n1/p1=accept;p1/p2=accept', extend: EXTEND }
+    const press = (
+      from: Record<string, unknown>,
+      neuron: string,
+      id: string,
+      verdict: 'accept' | 'reject' | 'unsure',
+    ) => judgedParams(from, neuron, piece(id), verdict, undefined)
+
+    it('takes a piece no longer accepted out of the extended ones, in the same edit', () => {
+      expect(press(params, 'n1', 'p1', 'reject')).toEqual({
+        // The piece beyond keeps its entry: it is back if this one is extended again.
+        write: { verdicts: 'n1/p1=reject;p1/p2=accept', extend: 'p1/p2' },
+        search: false,
+      })
+      // Pressing Accept again clears it, which is un-accepting too.
+      expect(press(params, 'n1', 'p1', 'accept')).toEqual({
+        write: { verdicts: 'p1/p2=accept', extend: 'p1/p2' },
+        search: false,
+      })
+    })
+
+    /** So that accepting it again does not start a search nobody pressed Extend for. */
+    it('does not extend a piece by accepting it', () => {
+      const rejected = press(params, 'n1', 'p1', 'reject').write
+      const again = press({ ...params, ...rejected }, 'n1', 'p1', 'accept')
+      expect(again).toEqual({ write: { verdicts: 'n1/p1=accept;p1/p2=accept' }, search: false })
+      // `p1` is accepted and not extended, so nothing is reached — `p2`'s entry waits.
+      const pairs = extendedPairs(rejected.extend, decodeVerdicts(again.write.verdicts))
+      expect(pairs).toEqual([{ parent: 'p1', piece: 'p2' }])
+      expect(liveTree(all, pairs)).toEqual([])
+    })
+
+    it('writes the verdict alone where nothing extended is touched', () => {
+      expect(press(params, 'n1', 'x', 'reject').write).toEqual({
+        verdicts: 'n1/p1=accept;n1/x=reject;p1/p2=accept',
+      })
+      expect(press({ verdicts: '', extend: '' }, 'n1', 'p1', 'accept')).toEqual({
+        write: { verdicts: 'n1/p1=accept' },
+        search: false,
+      })
+    })
+
+    /** A hand edit can leave a pair extended and re-judged; a press keeps what is there. */
+    it('leaves an accepted pair that is already extended as it is', () => {
+      const odd = { verdicts: 'n1/p1=unsure', extend: 'n1/p1' }
+      expect(press(odd, 'n1', 'p1', 'accept')).toEqual({
+        write: { verdicts: 'n1/p1=accept' },
+        search: false,
+      })
+    })
+  })
+
+  /** `Auto-extend` (user, 2026-11-16): a press that accepts a piece extends it in the same edit. */
+  describe('a press on Accept with auto-extend', () => {
+    const on = { verdicts: '', extend: '', autoExtend: true }
+
+    it('writes the pair into the extended ones with the verdict, and asks for the search', () => {
+      expect(judgedParams(on, 'n1', piece('p1'), 'accept', undefined)).toEqual({
+        write: { verdicts: 'n1/p1=accept', extend: 'n1/p1' },
+        search: true,
+      })
+      // Onto what is there, sorted as the param always is.
+      expect(
+        judgedParams(
+          { ...on, verdicts: 'n1/p1=accept', extend: 'n1/p1' },
+          'p1',
+          piece('p2'),
+          'accept',
+          undefined,
+        ).write,
+      ).toEqual({ verdicts: 'n1/p1=accept;p1/p2=accept', extend: 'n1/p1;p1/p2' })
+    })
+
+    it('extends nothing with the toggle off, which is how it is unless asked', () => {
+      for (const params of [
+        { verdicts: '', extend: '' },
+        { ...on, autoExtend: false },
+      ]) {
+        expect(judgedParams(params, 'n1', piece('p1'), 'accept', undefined)).toEqual({
+          write: { verdicts: 'n1/p1=accept' },
+          search: false,
+        })
+      }
+    })
+
+    it('extends nothing on any other verdict', () => {
+      for (const verdict of ['reject', 'unsure'] as const) {
+        expect(judgedParams(on, 'n1', piece('p1'), verdict, undefined)).toEqual({
+          write: { verdicts: `n1/p1=${verdict}` },
+          search: false,
+        })
+      }
+    })
+
+    /** Accepted, and left to its button: a search of one can take minutes. */
+    it('leaves a large piece to its button', () => {
+      expect(judgedParams(on, 'n1', piece('p1', 41), 'accept', undefined)).toEqual({
+        write: { verdicts: 'n1/p1=accept' },
+        search: false,
+      })
+      expect(judgedParams(on, 'n1', piece('p1', 40), 'accept', undefined).search).toBe(true)
+    })
+
+    it('extends nothing where the piece cannot be extended', () => {
+      expect(judgedParams(on, 'n1', piece('p1'), 'accept', 'no wire back')).toEqual({
+        write: { verdicts: 'n1/p1=accept' },
+        search: false,
+      })
+    })
+
+    /** Accept pressed on an accepted piece clears the verdict, and the toggle must not undo that. */
+    it('still takes the pair out when the press un-accepts, and starts nothing', () => {
+      const extended = { ...on, verdicts: 'n1/p1=accept', extend: 'n1/p1' }
+      expect(judgedParams(extended, 'n1', piece('p1'), 'accept', undefined)).toEqual({
+        write: { verdicts: '', extend: '' },
+        search: false,
+      })
+      expect(judgedParams(extended, 'n1', piece('p1'), 'reject', undefined)).toEqual({
+        write: { verdicts: 'n1/p1=reject', extend: '' },
+        search: false,
+      })
+    })
+
+    it('calls a piece large from 41 level-2 chunks, and never by a volume', () => {
+      const sized = (l2Chunks: number | undefined, volumeUm3?: number) =>
+        ({ l2Chunks, volumeUm3 }) as Candidate
+      expect(LARGE_PIECE_CHUNKS).toBe(41)
+      expect(isLargePiece(sized(40))).toBe(false)
+      expect(isLargePiece(sized(41))).toBe(true)
+      // A published set carries µm³ inside the search box, which says nothing of the whole piece.
+      expect(isLargePiece(sized(undefined, 5000))).toBe(false)
+      expect(isLargePiece(undefined)).toBe(false)
+    })
+  })
+
+  /** The Extend button: what it reads, what its title says, whether it can be pressed. */
+  describe('the Extend button', () => {
+    const blockedBy = (change: Partial<Parameters<typeof extendBlocked>[0]>) =>
+      extendBlocked({ wired: true, done: undefined, outdated: false, ...change })
+    const button = (change: Partial<Parameters<typeof extendPress>[0]> = {}) =>
+      extendPress({
+        candidate: piece('p1', 14),
+        progress: undefined,
+        blocked: undefined,
+        autoExtend: false,
+        goesWith: '',
+        ...change,
+      })
+
+    it('says why a piece cannot be extended, in the order a reader would fix it', () => {
+      expect(blockedBy({})).toBeUndefined()
+      expect(blockedBy({ wired: false, done: 'merged', outdated: true })).toMatch(
+        /Wire this card’s `Extended` output.*published set cannot be extended/,
+      )
+      expect(blockedBy({ done: 'merged', outdated: true })).toMatch(/Merged by Submit/)
+      expect(blockedBy({ done: 'elsewhere' })).toMatch(/another neuron/)
+      expect(blockedBy({ outdated: true })).toMatch(/edited since it was suggested/)
+    })
+
+    it('says how big the piece is before the press, and when that is large', () => {
+      expect(button()).toEqual({
+        label: 'Extend',
+        title: 'Search this piece’s own open ends for what continues it. It is 14 L2 chunks.',
+        disabled: false,
+      })
+      const large = button({ candidate: piece('p1', 61) })
+      expect(large.label).toBe('Extend (large)')
+      expect(large.title).toMatch(/It is 61 L2 chunks\. That is large/)
+      // Said, never refused.
+      expect(large.disabled).toBe(false)
+      expect(large.title).not.toMatch(/Auto-extend/)
+      expect(button({ candidate: piece('p1', 61), autoExtend: true }).title).toMatch(
+        /Auto-extend leaves a piece this size to this button/,
+      )
+    })
+
+    it('is off with the reason where the piece cannot be extended', () => {
+      expect(button({ blocked: 'No wire back.' })).toEqual({
+        label: 'Extend',
+        title: 'No wire back.',
+        disabled: true,
+      })
+    })
+
+    /** Stopping is always allowed, whatever would stand in the way of starting. */
+    it('says how far the search has got once extended, and can always be pressed', () => {
+      const pressed = button({
+        progress: { state: 'searching', done: 3, of: 7 },
+        blocked: 'No wire back.',
+        goesWith: leavesWith([], 'p1'),
+      })
+      expect(pressed).toEqual({
+        label: 'searching 3 of 7',
+        title:
+          'This piece’s own open ends are searched and listed with the neuron’s. Press to ' +
+          'stop extending it, which takes its ends off the list.',
+        disabled: false,
+      })
+    })
+
+    it('says what goes with a piece that has pieces beyond it', () => {
+      const tree = liveTree(all, extendedPairs(EXTEND, VERDICTS))
+      expect(leavesWith(tree, 'p1')).toBe(
+        'takes its ends, and those of the 1 piece extended beyond it, off the list',
+      )
+      expect(leavesWith(tree, 'p2')).toBe('takes its ends off the list')
+    })
+
+    /** The verdict buttons: fixed once merged or in the neuron already; else what a change takes. */
+    it('says when a verdict is fixed, and what changing one takes with it', () => {
+      const at = { verdict: 'reject' as const, done: undefined, inNeuron: false, goesWith: '' }
+      expect(verdictPress(at)).toEqual({
+        title: 'This piece does not belong.',
+        disabled: false,
+      })
+      expect(verdictPress({ ...at, done: 'merged', inNeuron: true })).toEqual({
+        title: 'Merged by Submit.',
+        disabled: true,
+      })
+      expect(verdictPress({ ...at, inNeuron: true })).toEqual({
+        title: IN_NEURON_NOTE,
+        disabled: true,
+      })
+      expect(verdictPress({ ...at, goesWith: 'takes its ends off the list' })).toEqual({
+        title:
+          'This piece does not belong. This piece is extended: changing its verdict takes its ' +
+          'ends off the list.',
+        disabled: false,
+      })
+    })
+
+    /** A second accept of one piece would be a second merge of it. */
+    it('knows a piece that is in the neuron already by another road', () => {
+      const accepted = new Map([['p2', []]])
+      expect(acceptedElsewhere(accepted, undefined, 'p2')).toBe(true)
+      expect(acceptedElsewhere(accepted, 'reject', 'p2')).toBe(true)
+      // Where it was accepted, it is an ordinary accepted row.
+      expect(acceptedElsewhere(accepted, 'accept', 'p2')).toBe(false)
+      expect(acceptedElsewhere(accepted, undefined, 'x')).toBe(false)
+    })
+
+    /** The card memoises on the keys joined: a string says whether the set moved. */
+    it('gives what is extended as sorted keys, and as pairs from them', () => {
+      expect(extendedKeys('p1/p2;n1/p1;n1/x', VERDICTS)).toEqual(['n1/p1', 'p1/p2'])
+      expect(pairsOf(['n1/p1', 'half', 'p1/p2'])).toEqual([
+        { parent: 'n1', piece: 'p1' },
+        { parent: 'p1', piece: 'p2' },
+      ])
+    })
+  })
+
+  describe('how far the search of a piece has got', () => {
+    const idle = { running: false, finished: false }
+    const running = { running: true, finished: false }
+    const finished = { running: false, finished: true }
+
+    it('reads it off the rows the piece has published', () => {
+      // `p1`: a joining end and one searched end.
+      expect(extendProgress(all, 'n1', 'p1', finished)).toEqual({ state: 'searched', ends: 1 })
+      // `p2`: a joining end and two still to come.
+      expect(extendProgress(all, 'n1', 'p2', running)).toEqual({
+        state: 'searching',
+        done: 0,
+        of: 2,
+      })
+      // The same rows with nothing running: a search that was stopped part way.
+      expect(extendProgress(all, 'n1', 'p2', idle)).toEqual({
+        state: 'stopped',
+        done: 0,
+        of: 2,
+      })
+    })
+
+    it('tells a piece with no open end from one that published nothing', () => {
+      const only = buildQueue(
+        grownTips([
+          { id: 'n1', end: 0, seed: 'n1' },
+          { id: 'p1', end: 0, seed: 'n1', steps: 1, junction: true, searched: false },
+          { id: 'p1', end: 1, seed: 'n1', steps: 1, searched: false },
+        ]),
+        undefined,
+      )
+      expect(extendProgress(only, 'n1', 'p1', finished)).toEqual({ state: 'no ends' })
+      expect(extendProgress(only, 'n1', 'p9', running)).toEqual({ state: 'waiting' })
+      expect(extendProgress(only, 'n1', 'p9', finished)).toEqual({ state: 'nothing' })
+      expect(extendProgress(only, 'n1', 'p9', idle)).toEqual({ state: 'not run' })
+      // A search that ended in an error is not one that was never run.
+      expect(extendProgress(only, 'n1', 'p9', { ...idle, failed: true })).toEqual({
+        state: 'failed',
+      })
+      expect(extendProgress(only, 'n1', 'p9', { ...running, failed: true })).toEqual({
+        state: 'waiting',
+      })
+      // Another neuron's piece of the same id is not this one's.
+      expect(extendProgress(only, 'n2', 'p1', finished)).toEqual({ state: 'nothing' })
+    })
+
+    it('says each in a few words', () => {
+      expect(extendLabel({ state: 'waiting' })).toBe('waiting…')
+      expect(extendLabel({ state: 'searching', done: 3, of: 7 })).toBe('searching 3 of 7')
+      expect(extendLabel({ state: 'stopped', done: 3, of: 7 })).toBe('3 of 7 ends searched')
+      expect(extendLabel({ state: 'searched', ends: 1 })).toBe('1 end searched')
+      expect(extendLabel({ state: 'searched', ends: 7 })).toBe('7 ends searched')
+      expect(extendLabel({ state: 'no ends' })).toBe('no open ends')
+      expect(extendLabel({ state: 'nothing' })).toBe('nothing to search')
+      expect(extendLabel({ state: 'not run' })).toBe('not searched yet')
+      expect(extendLabel({ state: 'failed' })).toBe('search failed')
+    })
   })
 })
