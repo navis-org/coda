@@ -46,11 +46,21 @@ Suggest Merges searches every row it is given. To search fewer, cut the table ab
 > **A filtered run keeps a few candidates a whole-neuron run would drop**
 > A candidate is dropped when its contact is nearer to some *other* tip of the same neuron. The node can only compare against the tips it was given, so with most of them filtered away, a piece that belonged to one of the missing tips can show up as a suggestion for one you kept. If you are comparing against a published set, search the whole neuron.
 
+## Which moment is searched
+
+Each neuron is searched as it stood at one moment, which follows the neuron rather than the Dataset. The first run that meets a neuron searches it at the present and keeps that moment in the document, in `Searched at`. The same suggestions then come back after a reload, and when you return to the neuron from another one. On a dataset with a chunkedgraph, the Dataset's materialization does not change what is searched, so it can stay on "Latest".
+
+If a neuron has been edited since its moment, by you through the review card or by somebody else, the card says so. A root that has been replaced is searched as it last stood. To search the neuron as it is now, run [Update Root IDs](#cave.updateRootIds) above `Tips`: the new root is met for the first time and searched at the present.
+
+The card's ⟳ forgets every moment, and the run after it searches each neuron at the present. `Clear Cache` keeps them.
+
+If the chunkedgraph cannot be asked whether a neuron has changed, the run goes on at the moments in `Searched at` and says so. A neuron with no moment yet has to wait for the chunkedgraph.
+
 ## What is remembered
 
 Finished ends are remembered for the session. Cancel a run, or change a setting and change it back, and the next run answers the ends it already has in well under a second and carries on from there. The card's "cached … ago" is the age of the oldest end behind the answer.
 
-`Clear Cache` forgets them, and the next run searches everything again.
+`Clear Cache` forgets them, and the next run searches everything again, at the same moments.
 
 ## Extending accepted pieces
 

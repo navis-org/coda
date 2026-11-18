@@ -207,16 +207,28 @@ describe('reportOnRun', () => {
     expect(said).toEqual([])
   })
 
-  /**
-   * The one tally worth a warning, and only in the shape that is ambiguous: a run that assessed
-   * real candidates and showed none looks identical from the outside to one pointed at the wrong
-   * materialization, so the empty answer says so itself.
-   */
+  /** An empty queue says why it is empty, rather than looking like a run that failed. */
   it('says so when it assessed candidates and showed none of them', () => {
     const { said, warner } = warnings()
     reportOnRun(warner, [tip(false), tip(false)])
     expect(said.join(' ')).toMatch(/None of the 2 assessed tips/)
-    expect(said.join(' ')).toMatch(/materialization/)
+    // The moment follows the root now: a materialization is no longer the other reading.
+    expect(said.join(' ')).not.toMatch(/materialization/)
+  })
+
+  /**
+   * Every end missing its own neuron. Each neuron is read at its own moment, so the cause left
+   * is tips that are not on it — and advice about the cache beside that is noise.
+   */
+  it('names tips that are not on the neuron, and says nothing of the cache, where no end was measured', () => {
+    const { said, warner } = warnings()
+    const missing = { ...tip(null), end: { ...end([]), missingQuery: true } } as PublishedEnd
+    reportOnRun(warner, [missing, missing], { asked: 200, hits: 0, budget: 512 * 1024 * 1024 })
+    const text = said.join(' ')
+    expect(text).toMatch(/None of the 2 open ends had its own neuron/)
+    expect(text).toMatch(/tips that are not on it/)
+    expect(text).not.toMatch(/materialization/)
+    expect(text).not.toMatch(/`Chunk cache`/)
   })
 
   /**

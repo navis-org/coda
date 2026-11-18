@@ -43,9 +43,11 @@ function volumeStub(): RootLookup {
       table: 't',
       base: 'https://cave.example.org/t',
     },
-    at: 1_700_000_000_000,
-    roots: new Map<bigint, bigint>(),
-    asking: new Map<bigint, Promise<void>>(),
+    memo: {
+      at: 1_700_000_000_000,
+      roots: new Map<bigint, bigint>(),
+      asking: new Map<bigint, Promise<void>>(),
+    },
   }
 }
 
@@ -82,14 +84,14 @@ describe('resolving a box’s supervoxels', () => {
     gate.release()
     await done
     expect(gate.asked).toEqual([[1n, 2n, 3n]])
-    expect(volume.roots.get(2n)).toBe(1002n)
+    expect(volume.memo.roots.get(2n)).toBe(1002n)
   })
 
   it('asks nothing for supervoxels it already has', async () => {
     const gate = gated()
     const volume = volumeStub()
-    volume.roots.set(1n, 99n)
-    volume.roots.set(2n, 98n)
+    volume.memo.roots.set(1n, 99n)
+    volume.memo.roots.set(2n, 98n)
     const done = resolveRoots(volume, ids(1, 2), OPTIONS)
     await done
     expect(gate.asked).toEqual([])
@@ -109,12 +111,12 @@ describe('resolving a box’s supervoxels', () => {
     expect(gate.asked).toEqual([[1n, 2n, 3n], [4n]])
     gate.release()
     await Promise.all([first, second])
-    for (const id of [1n, 2n, 3n, 4n]) expect(volume.roots.get(id)).toBe(id + 1000n)
+    for (const id of [1n, 2n, 3n, 4n]) expect(volume.memo.roots.get(id)).toBe(id + 1000n)
   })
 
   /**
    * A joiner must not be resumed before the lookup it joined has written. Without that,
-   * `labelledBox` builds its `roots` array from `volume.roots.get(id)!` and puts `undefined`
+   * `labelledBox` builds its `roots` array from `volume.memo.roots.get(id)!` and puts `undefined`
    * into a `BigUint64Array` for every shared supervoxel.
    */
   it('does not finish a read before the lookup it joined has landed', async () => {
@@ -132,7 +134,7 @@ describe('resolving a box’s supervoxels', () => {
     gate.release()
     await Promise.all([first, second])
     expect(secondDone).toBe(true)
-    expect(volume.roots.get(1n)).toBe(1001n)
+    expect(volume.memo.roots.get(1n)).toBe(1001n)
   })
 
   /**
@@ -144,14 +146,14 @@ describe('resolving a box’s supervoxels', () => {
     rootsAtInstant.mockRejectedValueOnce(new Error('503'))
     const volume = volumeStub()
     await expect(resolveRoots(volume, ids(1, 2), OPTIONS)).rejects.toThrow('503')
-    expect(volume.asking.size).toBe(0)
+    expect(volume.memo.asking.size).toBe(0)
 
     const gate = gated()
     const again = resolveRoots(volume, ids(1, 2), OPTIONS)
     gate.release()
     await again
     expect(gate.asked).toEqual([[1n, 2n]])
-    expect(volume.roots.get(1n)).toBe(1001n)
+    expect(volume.memo.roots.get(1n)).toBe(1001n)
   })
 
   /** A joiner sees the failure too: it has no answer either, and silently returning is worse. */
@@ -166,7 +168,7 @@ describe('resolving a box’s supervoxels', () => {
     refuse!(new Error('503'))
     await expect(first).rejects.toThrow('503')
     await expect(second).rejects.toThrow('503')
-    expect(volume.asking.size).toBe(0)
+    expect(volume.memo.asking.size).toBe(0)
   })
 
   /**
@@ -186,22 +188,43 @@ describe('resolving a box’s supervoxels', () => {
     // The lookup was never aborted, so the other reader still gets its answer.
     gate.release()
     await staying
-    expect(volume.roots.get(1n)).toBe(1001n)
+    expect(volume.memo.roots.get(1n)).toBe(1001n)
   })
 
   /**
-   * `forgetRoots` is called between neurons and deliberately does not touch `asking` — an entry
-   * removes itself when its lookup settles, so a non-empty map there would mean writes still
-   * coming. Pinned because the obvious "tidy up both" edit is wrong and looks right.
+   * `forgetRoots` is called between neurons, and moves the reader to the next neuron's moment
+   * (`docs/seam-live-plan.md`) with a memo of its own. A lookup still in flight — a stopped
+   * piece's, which carries nobody's signal — finishes into the memo it was asked for. Pinned
+   * because both obvious edits are wrong and look right: clearing the old memo in place lets that
+   * answer land in the new one, and waiting for it is a wait nothing can cancel.
    */
-  it('keeps a lookup in flight across forgetting the previous neuron’s roots', async () => {
+  it('moves to the new moment at once, and a lookup in flight lands in the old memo', async () => {
     const gate = gated()
     const volume = volumeStub()
+    const before = volume.memo
     const done = resolveRoots(volume, ids(1, 2), OPTIONS)
-    forgetRoots(volume)
-    expect(volume.asking.size).toBe(2)
+    forgetRoots(volume, 1_800_000_000_000)
+    expect(volume.memo.at).toBe(1_800_000_000_000)
+    expect(volume.memo.roots.size).toBe(0)
     gate.release()
     await done
-    expect(volume.roots.get(1n)).toBe(1001n)
+    // The old moment's answer did not reach the new one.
+    expect(volume.memo.roots.size).toBe(0)
+    expect(before.roots.size).toBe(2)
+    expect(before.asking.size).toBe(0)
+  })
+
+  it('asks a lookup started after the move at the new moment, in the new memo', async () => {
+    const gate = gated()
+    const volume = volumeStub()
+    const first = resolveRoots(volume, ids(1), OPTIONS)
+    forgetRoots(volume, 1_800_000_000_000)
+    const late = resolveRoots(volume, ids(1), OPTIONS)
+    gate.release()
+    await Promise.all([first, late])
+    // Not joined to the old moment's lookup: asked again, at the new moment.
+    expect(rootsAtInstant).toHaveBeenCalledTimes(2)
+    expect(rootsAtInstant.mock.calls[1]![1]).toBe(1_800_000_000_000)
+    expect(volume.memo.roots.get(1n)).toBe(1001n)
   })
 })

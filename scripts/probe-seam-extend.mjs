@@ -213,7 +213,7 @@ const script = `(async () => {
   const plan = opened.config
   const halfWidthNm = plan.halfWidthUm * 1000
   const volume = await searchVolume.openSearchVolume(
-    'wclee_aedes_brain', plan.xyNm, { boundary: T0_MS }, options, { chunkBytes: 512 * 1024 * 1024 },
+    'wclee_aedes_brain', plan.xyNm, T0_MS, options, { chunkBytes: 512 * 1024 * 1024 },
   )
   /*
    * The plan's "one object in the box", done where the plan says to do it: the map every box's

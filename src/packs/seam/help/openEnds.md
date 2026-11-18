@@ -69,6 +69,8 @@ Where that happens, name a CAVE nucleus table in `Nucleus table` and wire the Da
 > **It reads the table itself rather than taking one from a CAVE table card**
 > A CAVE table read the ordinary way gives positions in the table's own voxels, which is a factor out of the nanometres everything here is measured in — and a soma a factor out either masks nothing or masks the whole neuron, with nothing failing. This node asks CAVE for nanometres, so there is no setting to get wrong. (If you do want a table's positions in nanometres elsewhere, the CAVE table card has a `Position units` field for exactly that.)
 
+The table is read live, at a moment the neuron's root is current: now, or for a root that has been edited since, the last moment before the edit, which the card mentions. So a neuron edited after the Dataset's materialization still finds its soma, whatever materialization the Dataset is on.
+
 A neuron with no row in the table keeps all of its tips, which is what no soma has always meant; the node says how many that happened to. A neuron holding two nuclei is a merge and counts as having none.
 
 ## Giving it your own skeletons

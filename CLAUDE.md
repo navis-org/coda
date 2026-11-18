@@ -49,8 +49,9 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 4. **Cache keys are provenance, not content** — `hash(type, params, upstream keys)`: `evaluate` is
    deterministic, hidden mutable state takes an explicit nonce param. `normalizeParams` drops hidden
    (`visibleIf` false) and `presentational: true` params — presentational **only** if it cannot
-   change what `evaluate` returns. Read `ctx.params.x` plainly (`withDefaults`; no `?? literal`) and
-   ask `visibleIf` through `visibleParams`.
+   change what `evaluate` returns, the one exception being a run record (`ParamBase.runRecord`). Read
+   `ctx.params.x` plainly (`withDefaults`; no `?? literal`) and ask `visibleIf` through
+   `visibleParams`.
 
 5. **Resolve column params via `ctx.column()` / `ctx.columns()`,** never `ctx.params.someColumn` —
    infer, validate, evaluate and the key share that resolution. **An unresolved column is not
@@ -525,6 +526,11 @@ rule belongs to one area, its record is in that area's doc.
   record per root, tables assembled on publish). What follows from a root's ends — its join, what
   is still wanted — is asked of the book, never cached beside it. A piece's boxes are read with
   `aliasOf(piece)`, a required argument: left out, the neuron comes back as its own candidate.
+- **The proofreading nodes read the segmentation at the neuron's moment, never the Dataset's
+  materialization** (`docs/seam-live-plan.md`). Suggest Merges keeps one per neuron in `Searched
+  at`, a run record (`ParamBase.runRecord`: written mid-run by `ctx.record`, out of the key, emptied
+  only by the ⟳, which moves the key via `renewNode`); Find Open Ends reads its nucleus table live.
+  A box is rooted through the memo it started with (`BoxReader.memo`), never a shared map moved.
 - **A merge onto a piece waits for `waitsFor` — the piece its end is on *and* the piece it was
   accepted on** — one spelling for the batch and the dialog's ticks. The neuron's side is the
   neuron and the piece's *own* path, never a sibling; an end on any other root refuses that row.

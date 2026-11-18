@@ -19,7 +19,9 @@
  * ## What an end's answer depends on, and what the key holds of it
  *
  * - the forest and the assessor, and how many candidates the assessor was given (`Assess top`);
- * - the segmentation, and the moment it is read at — deployment, datastack, materialization;
+ * - the segmentation, and the moment it is read at — deployment, datastack, and the neuron's
+ *   own moment (`docs/seam-live-plan.md`): `Searched at` moved into its root's life, where it
+ *   was a materialization until 2026-11-17;
  * - the neuron the end belongs to — and, for an accepted piece, the roots it is read as one
  *   with (its path back to the neuron being extended);
  * - **every tip of that neuron the run was given**, not only this one: the own-tip rule drops a
@@ -54,7 +56,7 @@
  * `ctx.refresh` **forgets** every end of the run before it measures any (`forgetStale`) — so a
  * Clear Cache run cancelled half way leaves nothing old behind for the ends it never reached —
  * and every end says when it was measured, which the node reports. A first draft reported no age, on the
- * reasoning that a materialization is a fixed moment and an old end is as true as a new one.
+ * reasoning that a stated moment is fixed and an old end is as true as a new one.
  * True, and beside the point: without an age the card's cache-lifetime menu does nothing at
  * all, and `cached 12m ago` is the only lasting sign that a run of a fifth of a second was
  * answered from here rather than measured.
@@ -149,7 +151,7 @@ export function endMemory(maxBytes = END_MEMORY_BYTES): EndMemory {
 /** The one memory the node reads: every Suggest Merges card in the session shares it. */
 export const sessionEnds = endMemory()
 
-/** What every end of one run has in common. */
+/** What every end of one neuron in a run has in common. */
 export interface RunIdentity {
   /** The forest's model id — see the header for what an id does and does not pin. */
   readonly ranker: string
@@ -159,8 +161,12 @@ export interface RunIdentity {
   readonly top: number
   readonly deployment: string
   readonly datastack: string
-  /** The materialization — the moment every supervoxel is read as belonging to a root. */
-  readonly version: number
+  /**
+   * The moment every supervoxel is read as belonging to a root, epoch ms — **the neuron's**, so
+   * this identity is per neuron: two neurons of one run can be read at different moments, one
+   * replaced before `Searched at` and one not (`docs/seam-live-plan.md`).
+   */
+  readonly moment: number
 }
 
 /**

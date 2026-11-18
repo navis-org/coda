@@ -15,7 +15,7 @@
  * A box is ~14,000 supervoxels and a neuron is hundreds of boxes, so the lookup is the second
  * biggest thing the search does. `rootsAtInstant` is the arm of `rootIds.ts` that does **not**
  * touch the shared store — its docstring says why asking that one per box is quadratic — and
- * `BoxReader.roots` is the map it writes into instead. Overlap between neighbouring ends is
+ * `RootMemo.roots` is the map it writes into instead. Overlap between neighbouring ends is
  * then free, and nothing of the run is kept past it.
  *
  * **Absence is remembered too**, as `0n`. A supervoxel the graph does not list is not going to
@@ -42,17 +42,15 @@ import { readLabelBox } from '../../data/precomputed/volume'
 import { untilAborted } from '../../data/memoPromise'
 import type { LabelBoxRequest } from '../../pyodide/cutoutSummary'
 
-/** A supervoxel volume, and what one reader of it has learned at one instant. */
-export interface BoxReader {
-  /** The supervoxel volume's base URL — the bucket the chunkedgraph named. */
-  readonly base: string
-  readonly info: VolumeInfo
-  /** The chunkedgraph the roots are asked of. */
-  readonly graphene: GrapheneSource
+/**
+ * What one reader has learned about roots, at one instant — replaced whole, never moved
+ * (`BoxReader.memo`, `forgetRoots`).
+ */
+export interface RootMemo {
   /**
-   * The instant every box is rooted at, in epoch ms, resolved once by whoever opens the reader —
-   * `roots` is only true at it. An instant that cannot be resolved is refused there, before the
-   * first byte (`openSearchVolume`'s materialization check), not per box.
+   * The instant every box is rooted at, in epoch ms — `roots` is only true at it. Resolved by
+   * whoever opens the reader, where one that cannot be is refused before the first byte
+   * (`openSearchVolume`).
    *
    * `'server'` is the server's own now (`Instant`), for the merge plan's anchors, read right after
    * this session's own merges. It is **not one moment**: each supervoxel's root is as of when it
@@ -87,11 +85,29 @@ export interface BoxReader {
    * caller can ask about, and the value is the whole lookup that covers it.
    *
    * An entry removes itself when its lookup settles, so this is empty whenever nothing is in
-   * flight. That is why `forgetRoots` does not clear it: a non-empty map there would mean a
-   * lookup whose writes are still coming, and dropping its entries would let the next caller
-   * start a second one for the same supervoxels.
+   * flight.
    */
   readonly asking: Map<bigint, Promise<void>>
+}
+
+/** A supervoxel volume, and what one reader of it has learned at one instant. */
+export interface BoxReader {
+  /** The supervoxel volume's base URL — the bucket the chunkedgraph named. */
+  readonly base: string
+  readonly info: VolumeInfo
+  /** The chunkedgraph the roots are asked of. */
+  readonly graphene: GrapheneSource
+  /**
+   * What this reader knows about roots, at one instant (`RootMemo`).
+   *
+   * **The one field a run changes**, and only through `forgetRoots`, between neurons: the search
+   * reads each neuron at its own moment (`docs/seam-live-plan.md`), and a memo is only true at
+   * one, so a new moment is a new memo rather than an old one moved. Each read takes the memo it
+   * started with (`labelledBox`), so a lookup still in flight when the moment changes — a stopped
+   * piece's, which carries nobody's signal — finishes into the memo it was asked for, which
+   * nothing reads any more, and nobody has to wait for it.
+   */
+  memo: RootMemo
   /**
    * Chunks this reader has already fetched, shared by every box it reads.
    *
@@ -121,7 +137,7 @@ export interface BoxReader {
  * direction silently, since adding a field breaks the stub but removing one leaves a stub that
  * over-supplies.
  */
-export type RootLookup = Pick<BoxReader, 'roots' | 'asking' | 'graphene' | 'at'>
+export type RootLookup = Pick<BoxReader, 'memo' | 'graphene'>
 
 /** A box that has been read and rooted — `LabelBoxRequest` without the search's query root. */
 export type RootedBox = Omit<LabelBoxRequest, 'queryRoot'>
@@ -139,27 +155,33 @@ export function boxReader(
     base: volume.base,
     info: volume.info,
     graphene: volume.graphene,
-    at,
-    roots: new Map(),
-    asking: new Map(),
+    memo: rootMemo(at),
     chunks,
   }
 }
 
+/** An empty memo at `at`. */
+function rootMemo(at: Instant): RootMemo {
+  return { at, roots: new Map(), asking: new Map() }
+}
+
 /**
- * Forget the run's supervoxel lookups.
+ * Forget the run's supervoxel lookups, and read from now on at `at`.
  *
- * Called between neurons by the node. Overlap is what the map is for, and it is a fact about one
+ * Called between neurons by the node. Overlap is what the memo is for, and it is a fact about one
  * neuron's own ends — the tips of two different neurons are nowhere near each other, so carrying
  * the map across them keeps millions of entries that will never be asked for again. Nothing here
  * is a cache in the usual sense: `rootsAtInstant` keeps nothing of its own, by design.
  *
- * **`asking` is deliberately not cleared**, and the field says why in full. The fact that is
- * local to here: this is called between neurons, where the run has finished every end of the
- * last one, so nothing is in flight to be orphaned.
+ * **A new memo, not the old one cleared**, at the same moment as at another. A lookup still in
+ * flight writes into the memo it was asked for and settles there; clearing the old one in place
+ * would let an answer from the last neuron's moment land in the next neuron's map, and the first
+ * version of this waited for every lookup to settle instead — a wait no signal can end, since a
+ * shared lookup carries nobody's. The cost is a supervoxel in flight at the switch asked again,
+ * which between neurons is none.
  */
-export function forgetRoots(volume: Pick<RootLookup, 'roots'>): void {
-  volume.roots.clear()
+export function forgetRoots(volume: Pick<BoxReader, 'memo'>, at: Instant): void {
+  volume.memo = rootMemo(at)
 }
 
 /**
@@ -169,7 +191,7 @@ export function forgetRoots(volume: Pick<RootLookup, 'roots'>): void {
  * `suggestMerges.ts`), and the merge anchors' box at the graph's base scale (`mergeAnchors.ts`).
  * They read different scales around different points, and what they have in common is the
  * supervoxel map. A second copy of this loop would look up the same supervoxels twice — and
- * neighbouring boxes of one neuron overlap heavily, which is the whole premise `BoxReader.roots`
+ * neighbouring boxes of one neuron overlap heavily, which is the whole premise `RootMemo.roots`
  * is built on. One map, and one place that writes it.
  *
  * **No query root.** The search's Python step wants one (`LabelBoxRequest.queryRoot`) and the
@@ -205,7 +227,7 @@ export async function labelledBox(
    * a piece's ends and cleared after, and sound only for as long as nothing read a box for the
    * next root while the last one was still being scored — which is exactly what the search's
    * one-ahead does within a root, and what a prefetch across pieces would do between them. A box
-   * read under the wrong alias is a full, believable pool. Never written into `volume.roots`:
+   * read under the wrong alias is a full, believable pool. Never written into `volume.memo.roots`:
    * that map stays what the chunkedgraph said, shared by every box at this instant.
    *
    * **Required, though usually `undefined`**, so that every caller says which it means. Optional,
@@ -215,17 +237,19 @@ export async function labelledBox(
    */
   alias: ReadonlyMap<bigint, bigint> | undefined,
 ): Promise<RootedBox> {
+  // The memo as the read starts: a box is rooted at one moment, whichever neuron is next.
+  const lookup: RootLookup = { graphene: volume.graphene, memo: volume.memo }
   const read = await readLabelBox(volume.base, scale, box, {
     ...options,
     info: volume.info,
     chunks: volume.chunks,
   })
-  await resolveRoots(volume, read.labels, options)
+  await resolveRoots(lookup, read.labels, options)
   return {
     labels: read.labels,
     index: read.index,
     size: read.size,
-    roots: rootsOf(read.labels, volume.roots, alias),
+    roots: rootsOf(read.labels, lookup.memo.roots, alias),
     resolutionNm: scale.resolution,
     loVoxels: box.lo,
   }
@@ -253,7 +277,7 @@ export function rootsOf(
 }
 
 /**
- * Make sure every one of these supervoxels has a root in `volume.roots`, asking for the ones
+ * Make sure every one of these supervoxels has a root in `volume.memo.roots`, asking for the ones
  * nobody is asking for yet and waiting on the lookups that already cover the rest.
  *
  * ## The partition and the registration are one synchronous block, and that is the whole thing
@@ -290,12 +314,15 @@ export async function resolveRoots(
   labels: BigUint64Array,
   options: CaveRequestOptions,
 ): Promise<void> {
+  // Read once: every write below goes to the memo this call began with (`BoxReader.memo`).
+  const { graphene } = volume
+  const { at, roots, asking } = volume.memo
   const mine: bigint[] = []
   const waits = new Set<Promise<void>>()
   // No `await` in this loop, or in anything between it and the registration below.
   for (const id of labels) {
-    if (volume.roots.has(id)) continue
-    const already = volume.asking.get(id)
+    if (roots.has(id)) continue
+    const already = asking.get(id)
     if (already) waits.add(already)
     else mine.push(id)
   }
@@ -314,9 +341,9 @@ export async function resolveRoots(
      */
     const shared = sharedRequestOptions(options)
     const fill = async () => {
-      const found = await rootsAtInstant(volume.graphene, volume.at, unknown, shared)
+      const found = await rootsAtInstant(graphene, at, unknown, shared)
       // Absence is written too: see the header on why re-asking is the cost that matters.
-      for (let i = 0; i < unknown.length; i++) volume.roots.set(unknown[i]!, found[i]!)
+      for (let i = 0; i < unknown.length; i++) roots.set(unknown[i]!, found[i]!)
     }
     /*
      * The `finally` runs before any awaiter resumes, so nobody can be handed back a supervoxel
@@ -330,9 +357,9 @@ export async function resolveRoots(
      * this wants to be; TypeScript refuses the self-reference in a `const` initialiser.)
      */
     const settled: Promise<void> = fill().finally(() => {
-      for (const id of mine) if (volume.asking.get(id) === settled) volume.asking.delete(id)
+      for (const id of mine) if (asking.get(id) === settled) asking.delete(id)
     })
-    for (const id of mine) volume.asking.set(id, settled)
+    for (const id of mine) asking.set(id, settled)
     waits.add(settled)
   }
   /*

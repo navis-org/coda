@@ -115,7 +115,7 @@ async function main() {
   const volume = await openSearchVolume(
     DATASTACK,
     XY_NM,
-    { boundary: Date.now() },
+    Date.now(),
     options,
     { chunkBytes: BUDGET_MB * 1024 * 1024 },
   )
