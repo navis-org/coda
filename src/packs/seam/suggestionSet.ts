@@ -53,8 +53,14 @@ export interface SuggestionSet {
   readonly neurons: readonly string[]
   /** The neuron held out of the cutoff's calibration, where the set names one. */
   readonly testNeuron: string | undefined
-  /** SEAM's commit, with `-dirty` where it had uncommitted changes. The set's version. */
+  /** SEAM's commit, with `-dirty` where it had uncommitted changes. */
   readonly commit: string
+  /**
+   * The set's own version, e.g. `rv4-ad75ed161bb6` — what SEAM names a set by, and new each
+   * time it is rebuilt (a refit of `r` included), where `commit` need not be. Absent from the
+   * earliest sets.
+   */
+  readonly version: string | undefined
   /** The absolute score at or above which a first candidate is shown. Read, never assumed. */
   readonly cutoff: number
   readonly counts: SuggestionCounts
@@ -153,6 +159,7 @@ export function parseSuggestionSet(json: unknown, manifestUrl: string): Suggesti
     neurons: neurons as string[],
     testNeuron: typeof root.test_neuron === 'string' ? root.test_neuron : undefined,
     commit: asString(root.commit, 'commit', manifestUrl),
+    version: typeof root.version === 'string' && root.version ? root.version : undefined,
     cutoff: asNumber(show.cutoff, 'pipeline.show.cutoff', manifestUrl),
     pipeline,
     counts: {

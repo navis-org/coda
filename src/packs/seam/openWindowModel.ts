@@ -40,6 +40,12 @@ import type { AffinityModel } from './models'
 import { parseWindowConfig } from './windowConfig'
 import type { WindowConfig } from './windowConfig'
 
+/** A manifest as read, and its `config` as the caller's task reads it. */
+export interface SeamManifest<C> {
+  readonly loaded: LoadedManifest
+  readonly config: C
+}
+
 /**
  * The manifest, checked against the task the caller can read it as, and its `config` parsed.
  *
@@ -58,7 +64,7 @@ export async function loadSeamManifest<C>(options: {
   readonly task: string
   readonly parse: (config: unknown, modelId: string) => C
   readonly signal?: AbortSignal
-}): Promise<{ loaded: LoadedManifest; config: C }> {
+}): Promise<SeamManifest<C>> {
   const loaded = await loadManifest(options.model.manifestUrl, options.signal)
   if (loaded.manifest.task !== options.task) {
     throw new Error(
@@ -137,6 +143,11 @@ export interface OpenSeamModelOptions<C> {
    * than by the API. Paired, the build that is priced is the build that is read.
    */
   readonly runtime?: SeamRuntime
+  /**
+   * The manifest, where the caller has read it already (`loadSeamManifest`) — so the model opened
+   * is the version the caller named its answers by, rather than whatever a second read finds.
+   */
+  readonly manifest?: SeamManifest<C>
 }
 
 export interface OpenedSeamModel<C> {
@@ -152,7 +163,7 @@ export async function openSeamModel<C>(
   if (gpu.refusal) throw new Error(gpu.refusal)
 
   options.progress(0, 'reading the model')
-  const { loaded, config } = await loadSeamManifest(options)
+  const { loaded, config } = options.manifest ?? (await loadSeamManifest(options))
   const refusal = options.check?.(config)
   if (refusal) throw new Error(refusal)
 
@@ -208,6 +219,19 @@ export async function openSeamModel<C>(
       )
     },
   })
+  /*
+   * **The worker reads the manifest for itself**, and its weights are checked against that read.
+   * Where the caller named its answers by an earlier read (`options.manifest`), the two must be
+   * one version, or the run would be scored by one model and labelled with another — the exact
+   * mistake `source` exists to stop. They differ only when the file was republished in between.
+   */
+  if (session.loaded.digest !== loaded.digest) {
+    await session.close().catch(() => undefined)
+    throw new Error(
+      `${model.label} was republished while it was being opened, so this run would be scored ` +
+        'by a version other than the one it is labelled with. Run it again.',
+    )
+  }
   return { session, config }
 }
 

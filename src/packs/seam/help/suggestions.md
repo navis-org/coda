@@ -50,6 +50,8 @@ The tips and candidate files are read by byte range, so a large set costs only t
 
 Sort tips by `q`, highest first. `r` puts `q` into words: 0.7 means about seven of ten tips scoring like this one had a right first. It is a staircase of a few wide steps over `q`, so it never reorders tips, but it ties thousands of them that `q` keeps apart. Use it as a rounded label, and don't add it up: a neuron's sum of `r` is mostly its lowest step.
 
+`source` says which set a tip came from: `set:` and the set's version, for example `set:rv4-ad75ed161bb6`. Each version has its own `q`, cutoff and `r`, so don't compare a single-seed set's `q` with a production set's, or `r` from before a refit with `r` after it. A set too old to name a version leaves `source` empty.
+
 > [!WARNING]
 > **`r` is an estimate, and one step covers many tips**
 > SEAM fits its steps on tips a proofreader judged — since 18 November 2026 about 536 of them from 15 neurons, with at least 20 tips behind every step. The lowest step covers most of a neuron's tips with one average, so a low `r` is right on average over very different tips, not about the one in front of you. Take the set version SEAM published with the refit; a set from before it carries the old steps.

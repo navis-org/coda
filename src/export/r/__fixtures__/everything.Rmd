@@ -1814,13 +1814,12 @@ table_from_url <- table_from_url |> mutate(across(all_of(c("layer")), as.charact
 # ── Merge Suggestions ──
 # A directory of suggestion sets. The card pins one by id, so look that id up rather than
 # baking in the path it had when this was exported.
-merge_suggestions_base_sets <- jsonlite::fromJSON("https://example.org/seam/aedes/index.json", simplifyDataFrame = FALSE)$sets
-merge_suggestions_base <- sub("[^/]*$", "", "https://example.org/seam/aedes/index.json")
-merge_suggestions_base <- paste0(
-  merge_suggestions_base,
-  Filter(function(s) s$id == "rv2", merge_suggestions_base_sets)[[1]]$path
+merge_suggestions_manifest_sets <- jsonlite::fromJSON("https://example.org/seam/aedes/index.json", simplifyDataFrame = FALSE)$sets
+merge_suggestions_manifest <- paste0(
+  sub("[^/]*$", "", "https://example.org/seam/aedes/index.json"),
+  Filter(function(s) s$id == "rv2", merge_suggestions_manifest_sets)[[1]]$path
 )
-merge_suggestions_base <- sub("[^/]*$", "", merge_suggestions_base)
+merge_suggestions_base <- sub("[^/]*$", "", merge_suggestions_manifest)
 
 merge_suggestions_tips_file <- tempfile(fileext = ".parquet")
 download.file(paste0(merge_suggestions_base, "tips.parquet"), merge_suggestions_tips_file, mode = "wb", quiet = TRUE)
@@ -1857,6 +1856,15 @@ merge_suggestions_tips <- dplyr::left_join(
   dplyr::select(dplyr::filter(merge_suggestions_candidates, rank == 1), end_uid, candidateId),
   by = "end_uid"
 )
+
+# Which set these numbers are, as the card labels them: q, the cutoff and r belong to this
+# version of the set, and are never to be read against another's.
+merge_suggestions_version <- jsonlite::fromJSON(merge_suggestions_manifest)[["version"]]
+merge_suggestions_tips[["source"]] <- if (is.character(merge_suggestions_version) && length(merge_suggestions_version) == 1 && nzchar(merge_suggestions_version)) {
+  paste0("set:", merge_suggestions_version)
+} else {
+  NA_character_
+}
 
 # One row per neuron: its tips, and how many of them clear the cutoff. Sort the tips by q,
 # never r: r is a staircase over q, and SEAM advises against summing it.

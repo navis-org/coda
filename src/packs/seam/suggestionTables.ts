@@ -67,6 +67,13 @@ export interface Field {
    * value. The organelle flag (2026-11-14) is the case.
    */
   readonly optional?: true
+  /**
+   * **Not in the file: filled in by the loader afterwards**, from where the fact is authoritative.
+   * Every reader of a set — the loader and both exporters — asks the file for the other fields
+   * and fills these itself, under their published name. `candidateId` (from the candidates file)
+   * and `source` (from the manifest) are the two.
+   */
+  readonly filled?: true
 }
 
 /**
@@ -87,16 +94,42 @@ const optional = (from: string, name: string, dtype: DType): Field => ({
   optional: true,
 })
 
+/** A column the loader fills in itself rather than reading from the file. */
+const filledIn = (name: string, dtype: DType): Field => ({
+  from: name,
+  name,
+  dtype,
+  filled: true,
+})
+
 /** A column read only so the loader can check it. Never reaches a published table. */
 const check = (from: string, dtype: DType): Field => ({ from, name: from, dtype, check: true })
 
 /**
- * The `from` of the one published column that does **not** come from the tips file.
+ * **Which `q`, cutoff and `r` a tip's numbers are**, as text: `set:<version>` for a published set
+ * (its manifest's `version`, e.g. `set:rv4-ad75ed161bb6`), or, for a live run of Suggest Merges,
+ * `model:` and the ranker and assessor it ran with, each named by id and the start of its
+ * manifest's SHA-256 (`searchTips.ts`' `runSource`).
  *
- * A field list drives the read, so a column the reader must not ask the file for needs a name
- * the file does not have. This one is filled in afterwards, from the candidates table.
+ * A column because two configurations are never to be read against each other (SEAM,
+ * `coda-note-sort-by-q.md`): a single-seed `q` against production's cutoff or `r` means nothing,
+ * and a refit of `r` changes what one `q` means without changing the set's name or the model's id.
+ * Per row, not per table, because Suggest Merges writes its own over the rows it searched and keeps
+ * a published set's on the rest. Null where a set's manifest names no version (the earliest sets
+ * did not): those numbers cannot be told apart, and the review card does not send them.
  */
-export const FIRST_CANDIDATE = '(first candidate)'
+export const SOURCE_COLUMN = 'source'
+
+/** A published set's `source`, from its manifest's `version`. */
+export function setSource(version: string | undefined): string | null {
+  return version ? `${SET_SOURCE_PREFIX}${version}` : null
+}
+
+/** How a published set's `source` starts — written by the exporters too, so said once. */
+export const SET_SOURCE_PREFIX = 'set:'
+
+/** How a live run's `source` starts (`searchTips.ts`' `runSource`). */
+export const MODEL_SOURCE_PREFIX = 'model:'
 
 /**
  * The tips table: one row per tip, and the queue a reader works through.
@@ -146,10 +179,12 @@ export const TIP_FIELDS: readonly Field[] = [
   // Optional: sets from before 2026-11-14 do not hold it.
   optional('top_organelle', 'organelle', 'bool'),
   // Filled from the candidates file's rank-1 row, not from the column above. See `TIP_FIELDS`.
-  field(FIRST_CANDIDATE, 'candidateId', 'str'),
+  filledIn('candidateId', 'str'),
   field('q', 'q', 'f64'),
   field('shown', 'shown', 'bool'),
   field('r', 'r', 'f64'),
+  // Filled from the manifest, not the file. See `SOURCE_COLUMN`.
+  filledIn(SOURCE_COLUMN, 'str'),
   field('page', 'seam_page', 'str'),
   field('tip_verdict', 'seam_verdict', 'str'),
   field('belongs', 'seam_belongs', 'str'),

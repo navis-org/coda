@@ -31,12 +31,12 @@
  * A key missing one of these serves an answer to a different question, and it would look like a
  * very fast run. `endMemory.test.ts` moves each in turn.
  *
- * **The models are in it by id, and that is one step short of what was loaded.** An id names a
- * manifest at an address, read again on every run, and the box, the cut, the own-tip radius and
- * the fits all come out of it. A manifest republished under the same id while a tab is open
- * would therefore put ends from before and after into one table. A reload starts clean, and
- * Clear Cache does within a session; the key is built before anything is opened, so that the
- * wait can be priced on it, and a digest of the manifests would have to be read first.
+ * **The models are in it by id and digest** (`modelVersion`): an id names a manifest at an
+ * address, and the box, the cut, the own-tip radius and the fits all come out of it, so a
+ * manifest republished under the same id — as SEAM does when it refits `r` — is another model.
+ * By id alone, ends from before and after a refit would land in one table, under one `source`.
+ * So the node reads both manifests before it builds the key, and opens the models from that
+ * same read.
  *
  * What is **not** in it: `Chunk cache`, which decides how bytes arrive and not what they are —
  * presentational on the node for the same reason — and the tip's row in the table, which is
@@ -153,9 +153,9 @@ export const sessionEnds = endMemory()
 
 /** What every end of one neuron in a run has in common. */
 export interface RunIdentity {
-  /** The forest's model id — see the header for what an id does and does not pin. */
+  /** The forest, as `modelVersion` names it: its id and its manifest's digest. */
   readonly ranker: string
-  /** The assessor's model id, or the node's own word for none. */
+  /** The assessor, named the same way, or the node's own word for none. */
   readonly assessor: string
   /** `Assess top`, as the run applies it: 0 where there is no assessor. */
   readonly top: number

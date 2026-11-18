@@ -58,13 +58,14 @@ import type { OpenFile } from './suggestionRead'
 import type { NeuronTips } from './suggestionTables'
 import {
   CANDIDATE_FIELDS,
-  FIRST_CANDIDATE,
+  SOURCE_COLUMN,
   TIP_FIELDS,
   neuronsSchema,
   neuronsTable,
   numberAt,
   pointAt,
   schemaOf,
+  setSource,
   tableOf,
 } from './suggestionTables'
 
@@ -378,6 +379,9 @@ export async function readSuggestions(
   const first = firstCandidates(candidateRead.data)
   const damaged = fillFirstCandidate(tipRead.data, first)
   const stray = strayVerdicts(tipRead.data, candidateRead.data)
+  tipRead.data[SOURCE_COLUMN] = new Array<CellValue>(tipRead.data['end_uid']?.length ?? 0).fill(
+    setSource(set.version),
+  )
   const tips = tableOf(TIP_FIELDS, tipRead.data)
 
   // Read from the published table rather than from the file's own columns, so the positions the
@@ -524,7 +528,7 @@ function fillFirstCandidate(
     out.push(root ?? null)
     if (root !== undefined && said[i] !== null && said[i] !== root) damaged += 1
   }
-  read[FIRST_CANDIDATE] = out
+  read['candidateId'] = out
   return damaged
 }
 

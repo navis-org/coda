@@ -30,6 +30,12 @@ describe('a manifest', () => {
     expect(set.commit).toMatch(/^[0-9a-f]{7,}/)
   })
 
+  it('reads the set’s version, and leaves it unset where the set names none', () => {
+    expect(parse().version).toBe(RAW.version)
+    expect(parse({ version: undefined }).version).toBeUndefined()
+    expect(parse({ version: '' }).version).toBeUndefined()
+  })
+
   /**
    * The cutoff is read, never written down. SEAM refits it whenever a stage changes — and it
    * did: adopting the split stage moved it from 0.2084 to 0.1532, which this test had as a

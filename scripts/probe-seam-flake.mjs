@@ -169,8 +169,10 @@ const setup = `(async () => {
     return { rows, found, seconds }
   }
 
-  const opened = await rankerConfig.openTreeRanker(models.MERGE_RANKER_MODELS[0])
-  const plan = opened.config
+  const rankerModel = models.MERGE_RANKER_MODELS[0]
+  const rankerManifest = await rankerConfig.readRankerManifest(rankerModel)
+  const opened = { ranker: await rankerConfig.openTreeRanker(rankerModel, rankerManifest) }
+  const plan = rankerManifest.config
   const halfWidthNm = plan.halfWidthUm * 1000
   const volume = await searchVolume.openSearchVolume(
     'wclee_aedes_brain', plan.xyNm, ${Date.parse(t0)}, options,
