@@ -1,5 +1,13 @@
 # Reaching FlyTable from a browser
 
+**Since 2026-11-18 (SeaTable 6.2.1):** the access-token reply is `access_token` and `dtable_uuid`
+only — no `dtable_server`, no `use_api_gateway` — and `/dtable-server/…/rows/` answers 404. Coda
+then reads metadata and rows, and sends SQL and row writes, through `/api-gateway/api/v2/…`
+(`BaseAccess.gateway` in `src/data/annotations/seaTable.ts`), which answers a preflight
+`204, *`. Rows come at most 1,000 a page there, and by column key unless `convert_keys=true`.
+`/dtable-server/…/metadata/` and `/dtable-db/` SQL still answered on that date; the record below
+is the state before the upgrade. A `403` from the gateway carried no CORS header when checked.
+
 **State on 2026-10-03:** the two seahub blocks below are in place — `/api/v2.1/workspaces/` and the
 `access-token` path both answer a preflight `204, *`, and keep the header on a `403`. So Coda's
 read path, and a write through `/dtable-server/` (`batch-update-rows`, preflight `204, *`), work

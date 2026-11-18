@@ -9,8 +9,9 @@
  * (`docs/flytable-cors.md`). Measured on a scratch copy, `main_test.info_test`.
  *
  * Writes are `batch-update-rows`: `{row_id, row: {column: value}}` by the row's `_id`, at most
- * 1,000 rows a request — seatable_api's and seaserpent's limit. A newer deployment that says
- * `use_api_gateway` takes both through `{host}/api-gateway/` instead.
+ * 1,000 rows a request — seatable_api's and seaserpent's limit. A deployment on the gateway
+ * (`BaseAccess.gateway`: SeaTable 6, FlyTable since 2026-11) takes both through
+ * `{host}/api-gateway/` instead.
  *
  * Three facts that each fail silently:
  *
@@ -238,8 +239,8 @@ export class SeaTableTarget implements AnnotationTarget {
     const sql =
       `SELECT ${[...new Set(columns)].map(quoteName).join(', ')} ` +
       `FROM ${quoteName(this.config.table)} WHERE ${where} LIMIT ${ROW_LIMIT}`
-    const url = access.use_api_gateway
-      ? `${this.config.host}/api-gateway/api/v2/dtables/${access.dtable_uuid}/sql`
+    const url = access.gateway
+      ? `${access.gateway}/api/v2/dtables/${access.dtable_uuid}/sql`
       : `${access.dtable_db ?? `${this.config.host}/dtable-db`}/api/v1/query/${access.dtable_uuid}/`
     const reply = await request<{
       success?: boolean
@@ -268,8 +269,8 @@ export class SeaTableTarget implements AnnotationTarget {
     signal?: AbortSignal,
   ): Promise<void> {
     const access = await this.base(signal)
-    const url = access.use_api_gateway
-      ? `${this.config.host}/api-gateway/api/v2/dtables/${access.dtable_uuid}/rows/`
+    const url = access.gateway
+      ? `${access.gateway}/api/v2/dtables/${access.dtable_uuid}/rows/`
       : `${access.dtable_server}/api/v1/dtables/${access.dtable_uuid}/batch-update-rows/`
     const reply = await request<{ success?: boolean; error_message?: string }>(
       url,
