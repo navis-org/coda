@@ -1980,3 +1980,284 @@ describe('an evaluation in flight', () => {
     expect(scheduler.owesFullRun).toBe(false)
   })
 })
+
+/**
+ * A partial whose run an edit retired: kept until something newer replaces it, or nothing is
+ * coming to (`docs/core.md`, "A partial result, while the node is still running"). Each step is
+ * the test's to take, since what matters is the order: when the retired evaluation unwinds, and
+ * when its successor publishes.
+ */
+describe('a partial when its run is retired', () => {
+  const ROW = tableSchema(column('x', 'i64'))
+  const rows = (n: number) =>
+    tableFromRows(
+      ROW,
+      Array.from({ length: n }, (_, x) => ({ x })),
+    )
+  const calls: Array<{ publish: () => void; finish: () => void; unwind: () => void }> = []
+
+  // Publishes `k` rows when told to, returns `k × 10`, and ignores its signal until unwound.
+  registerNode({
+    type: 'test.handover.slow',
+    label: 'slow',
+    category: 'utility',
+    cost: 'expensive',
+    inputs: [],
+    outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+    params: [{ id: 'k', label: 'K', kind: 'number', default: 1 }],
+    inferOutputs: () => ({ out: T.table() }),
+    evaluate: (ctx) =>
+      new Promise((resolve, reject) => {
+        const k = Number(ctx.params.k)
+        calls.push({
+          publish: () => ctx.publish({ out: rows(k) }),
+          finish: () => resolve({ out: rows(k * 10) }),
+          unwind: () => reject(new Error('aborted')),
+        })
+      }),
+  })
+
+  /*
+   * What a reader of `slow` — a card — is shown when the walk reaches the node below: past the
+   * node's settling, which is when its partial is due to go.
+   */
+  const handed: number[] = []
+  let watched: Scheduler | undefined
+  registerNode({
+    type: 'test.handover.below',
+    label: 'below',
+    category: 'utility',
+    cost: 'cheap',
+    inputs: [{ id: 'in', label: 'In', type: T.table() }],
+    outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+    inferOutputs: () => ({ out: T.table() }),
+    evaluate: (ctx) => {
+      if (watched) handed.push(shown(watched))
+      return { out: ctx.input('in')! }
+    },
+  })
+
+  beforeEach(() => {
+    calls.length = 0
+    handed.length = 0
+    watched = undefined
+  })
+
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const shown = (scheduler: Scheduler) => {
+    const value = scheduler.output('slow', 'out')
+    return isTableValue(value) ? value.length : -1
+  }
+  const graphAt = (k: number) => {
+    let g = addNode(emptyGraph('handover'), node('slow', 'test.handover.slow', {}))
+    g = addNode(g, node('below', 'test.handover.below', {}))
+    g = addEdge(g, { source: 'slow', sourceHandle: 'out', target: 'below', targetHandle: 'in' })
+    return setNodeParam(g, 'slow', 'k', k)
+  }
+
+  /**
+   * A finished run at k = 1 (10 rows cached), then a run at k = 2 that has published 2 rows, then
+   * an edit to k = 3 — `run` says whether a run follows it, as a press on Extend does.
+   */
+  async function retired(run: boolean, onStateChange?: (scheduler: Scheduler) => void) {
+    const scheduler: Scheduler = onStateChange
+      ? new Scheduler({
+          resolveSource: () => source,
+          onStateChange: () => onStateChange(scheduler),
+        })
+      : makeScheduler()
+    watched = scheduler
+    const first = scheduler.run(graphAt(1), { mode: 'full' })
+    await tick()
+    calls[0]!.finish()
+    await first
+    scheduler.refreshStates(graphAt(2))
+    const second = scheduler.run(graphAt(2), { mode: 'full' })
+    await tick()
+    calls[1]!.publish()
+    expect(shown(scheduler)).toBe(2)
+    scheduler.refreshStates(graphAt(3))
+    const third = run ? scheduler.run(graphAt(3), { mode: 'full' }) : undefined
+    await tick()
+    return { scheduler, second, third }
+  }
+
+  it('stays on screen until the run replacing it publishes', async () => {
+    const { scheduler, second, third } = await retired(true)
+    expect(calls).toHaveLength(3)
+    calls[1]!.unwind()
+    await second
+    // Not the 10 rows the last *finished* run left — two edits old.
+    expect(shown(scheduler)).toBe(2)
+    expect(scheduler.hasPartial('slow')).toBe(true)
+    calls[2]!.publish()
+    expect(shown(scheduler)).toBe(3)
+    calls[2]!.finish()
+    await third
+    expect(shown(scheduler)).toBe(30)
+    expect(scheduler.hasPartial('slow')).toBe(false)
+  })
+
+  it('goes when the run replacing it settles without publishing', async () => {
+    const { scheduler, second, third } = await retired(true)
+    calls[1]!.unwind()
+    await second
+    calls[2]!.finish()
+    await third
+    expect(shown(scheduler)).toBe(30)
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    // At once, not when the walk ends: by the node below, a reader is shown the real result.
+    expect(handed.at(-1)).toBe(30)
+  })
+
+  it('is never dropped by a retired run unwinding after its successor published', async () => {
+    const { scheduler, second, third } = await retired(true)
+    calls[2]!.publish()
+    calls[1]!.unwind()
+    await second
+    expect(shown(scheduler)).toBe(3)
+    calls[2]!.finish()
+    await third
+  })
+
+  it('does not hide a run that finished before the retired one unwound', async () => {
+    const { scheduler, second, third } = await retired(true)
+    // The new run answers — from a cache of its own, say — while the old one is still at work.
+    calls[2]!.finish()
+    await third
+    expect(shown(scheduler)).toBe(30)
+    expect(handed.at(-1)).toBe(30)
+    calls[1]!.unwind()
+    await second
+    expect(shown(scheduler)).toBe(30)
+  })
+
+  it('stays while its node waits for a run, however late the run comes', async () => {
+    // The edit, and no run with it: auto-run's delay, or auto-run off on an expensive node.
+    const { scheduler, second } = await retired(false)
+    calls[1]!.unwind()
+    await second
+    expect(scheduler.info('slow').state).toBe('stale')
+    expect(shown(scheduler)).toBe(2)
+    const later = scheduler.run(graphAt(3), { mode: 'full' })
+    await tick()
+    calls[2]!.publish()
+    expect(shown(scheduler)).toBe(3)
+    calls[2]!.finish()
+    await later
+    expect(shown(scheduler)).toBe(30)
+  })
+
+  it('is kept by an edit elsewhere while its own run is still going', async () => {
+    const { scheduler, second, third } = await retired(true)
+    calls[2]!.publish()
+    // A card dragged: every edit sweeps for partials nobody is working on, and this one is.
+    const moved = graphAt(3)
+    scheduler.refreshStates({
+      ...moved,
+      nodes: moved.nodes.map((n) =>
+        n.id === 'below' ? { ...n, position: { x: 9, y: 9 } } : n,
+      ),
+    })
+    expect(shown(scheduler)).toBe(3)
+    calls[1]!.unwind()
+    calls[2]!.finish()
+    await second
+    await third
+  })
+
+  it('goes when an undo makes the cached result the answer again', async () => {
+    const { scheduler, second } = await retired(false)
+    calls[1]!.unwind()
+    await second
+    scheduler.refreshStates(graphAt(1))
+    expect(scheduler.info('slow').state).toBe('ok')
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    expect(shown(scheduler)).toBe(10)
+  })
+
+  it('goes when its node is switched off', async () => {
+    const { scheduler, second } = await retired(false)
+    calls[1]!.unwind()
+    await second
+    const g = graphAt(3)
+    scheduler.refreshStates({
+      ...g,
+      nodes: g.nodes.map((n) => (n.id === 'slow' ? { ...n, disabled: true } : n)),
+    })
+    expect(scheduler.hasPartial('slow')).toBe(false)
+  })
+
+  it('goes when a walk finds the cached result the answer again', async () => {
+    // A host that runs without asking `refreshStates` first: the walk's cache hit settles it —
+    // at the hit, not when the walk ends, or the node below is reached with the partial shown.
+    const below: boolean[] = []
+    const { scheduler, second } = await retired(false, (s) => {
+      if (s.info('below').state === 'ok') below.push(s.hasPartial('slow'))
+    })
+    calls[1]!.unwind()
+    await second
+    below.length = 0
+    await scheduler.run(graphAt(1), { mode: 'full' })
+    expect(below.length).toBeGreaterThan(0)
+    expect(below.every((held) => !held)).toBe(true)
+    expect(shown(scheduler)).toBe(10)
+  })
+
+  it('goes when every result is thrown away', async () => {
+    // A dataset switch, or a document closed: nothing held may be trusted, a partial least of all.
+    const { scheduler, second } = await retired(false)
+    calls[1]!.unwind()
+    await second
+    scheduler.invalidateAll()
+    expect(scheduler.hasPartial('slow')).toBe(false)
+  })
+
+  it('goes on Cancel', async () => {
+    const { scheduler, second, third } = await retired(true)
+    calls[1]!.unwind()
+    await second
+    expect(scheduler.hasPartial('slow')).toBe(true)
+    scheduler.cancel()
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    calls[2]!.unwind()
+    await third
+    expect(shown(scheduler)).toBe(10)
+  })
+
+  /** A run at k = 1 that published a row and was cancelled, still unwinding, and a run after it. */
+  async function cancelled() {
+    const scheduler = makeScheduler()
+    watched = scheduler
+    const first = scheduler.run(graphAt(1), { mode: 'full' })
+    await tick()
+    calls[0]!.publish()
+    scheduler.cancel()
+    const again = scheduler.run(graphAt(1), { mode: 'full' })
+    await tick()
+    return { scheduler, first, again }
+  }
+
+  it('is not handed on by a cancelled run', async () => {
+    const { scheduler, first, again } = await cancelled()
+    // Nothing comes after a Cancel: the next run starts from nothing, not from what was stopped.
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    calls[0]!.unwind()
+    await first
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    calls[1]!.finish()
+    await again
+  })
+
+  it('is never dropped by a cancelled run unwinding after a new run published', async () => {
+    const { scheduler, first, again } = await cancelled()
+    calls[1]!.publish()
+    calls[0]!.unwind()
+    await first
+    expect(scheduler.hasPartial('slow')).toBe(true)
+    expect(shown(scheduler)).toBe(1)
+    calls[1]!.finish()
+    await again
+    expect(shown(scheduler)).toBe(10)
+  })
+})
