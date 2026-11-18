@@ -122,9 +122,10 @@ export interface QueueTip {
   readonly kind: string
   readonly tipNm: readonly [number, number, number]
   /**
-   * SEAM's estimate of how often a first candidate at this tip's `q` is right — a staircase of
-   * about 14 steps over `q`, fitted on ~335 judged tips and thin below the cutoff. **A label
-   * only** (SEAM, 2026-11-18): never sorted, filtered or summed on (`estimateLabel`).
+   * SEAM's estimate of how often a first candidate at this tip's `q` is right — a staircase of a
+   * few wide steps over `q`, fitted on judged tips (refitted 2026-11-18: 7 steps in production, 9
+   * in the single seed, each on at least 20 tips). **A label only** (SEAM, 2026-11-18): never
+   * sorted, filtered or summed on (`estimateLabel`).
    */
   readonly r: number | undefined
   /**
@@ -136,16 +137,6 @@ export interface QueueTip {
   /** The chance anything belongs at this tip at all, before which piece. */
   readonly pTip: number | undefined
   readonly shown: boolean
-  /**
-   * `q`, `r` and `shown` for the list with its organelles taken out (`q_no_organelles`, …) —
-   * Coda's re-scoring, which `seam:suggestMerges` publishes beside SEAM's. Undefined for a table
-   * that carries no such columns: a published set, or a run with no assessor.
-   */
-  readonly withoutOrganelles?: {
-    readonly q: number | undefined
-    readonly r: number | undefined
-    readonly shown: boolean
-  }
   readonly candidates: readonly Candidate[]
 }
 
@@ -183,13 +174,6 @@ export function buildQueue(
       q: numberAt(tips, 'q', i),
       pTip: numberAt(tips, 'p_tip', i),
       shown: wasShown(tips, i),
-      withoutOrganelles: tips.data['r_no_organelles']
-        ? {
-            q: numberAt(tips, 'q_no_organelles', i),
-            r: numberAt(tips, 'r_no_organelles', i),
-            shown: wasShown(tips, i, 'shown_no_organelles'),
-          }
-        : undefined,
       candidates: lists.get(tipKey(neuronId, endUid)) ?? [],
     })
   }
@@ -406,8 +390,8 @@ export interface QueueRow {
   /**
    * `q` per tip, `conf` per candidate — what the row sorts and filters on (SEAM, 2026-11-18: `r`
    * is a staircase over `q`, so sorting on it only adds ties). Undefined where the set does not
-   * carry it — and on a row that passed over its first candidate with no re-scoring to read,
-   * since SEAM's `q` there is its number for the one passed over.
+   * carry it — and on a row that passed over its first candidate, since SEAM's `q` there is its
+   * number for the one passed over.
    */
   readonly score: number | undefined
   /** Per tip, the `r` beside `score`, for its label alone (`QueueTip.r`). */
@@ -417,43 +401,33 @@ export interface QueueRow {
   /**
    * Per tip, with `Exclude organelles` on: the tip's first candidate is an organelle, so the row
    * leads with the next that is not (user, 2026-11-17 — hidden, its second candidate may be the
-   * continuation and out of sight).
+   * continuation and out of sight), with no `q`, no `r`, and never shown: every calibrated number
+   * describes the first candidate, and the next has only its own `conf` (SEAM, 2026-11-18).
    */
   readonly passedOver?: true
-  /**
-   * Per tip, with `Exclude organelles` on: the tip's list holds an organelle, and `score` and
-   * `shown` are Coda's re-scoring of the list without it (`QueueTip.withoutOrganelles`), not SEAM's.
-   */
-  readonly rescored?: true
 }
 
 /**
  * A tip's row: its first candidate, or with organelles excluded the first that is not one.
  *
- * **With organelles excluded, a list that holds one is read re-scored without it** (user,
- * 2026-11-17), whether or not it leads: `p_cand` is a share of the whole list, so an organelle
- * anywhere in it lowers the first candidate's `q` and `r`. Where the table carries no re-scoring,
- * SEAM's numbers stand — except on a row that passed over its first, where they are about the
- * organelle: no score, and never shown.
+ * **A row that passes over its first candidate carries no numbers** (user, 2026-11-18, after
+ * SEAM's note: "the filter hides; it should not promote"). `q`, the cutoff and `r` all describe
+ * the first candidate; the next has only its own `conf`, shown in its facts, which on rv4 reached
+ * the cutoff for 1 of 1,548 such tips. Coda's re-scoring of the list without its organelles
+ * (2026-11-17) went for the same reason: a number nobody calibrated, under a calibrated name.
+ * An organelle further down a list changes nothing about its tip's row.
  */
 function tipRow(tip: QueueTip, excludeOrganelles: boolean): QueueRow {
   const first = tip.candidates[0]
-  if (!excludeOrganelles || !tip.candidates.some((one) => one.organelle)) {
+  if (!excludeOrganelles || !first?.organelle) {
     return { tip, candidate: first, ...scored(tip.q, tip.r), shown: tip.shown }
   }
-  const passedOver = first?.organelle === true
-  const lean = tip.withoutOrganelles
   return {
     tip,
-    candidate: passedOver ? tip.candidates.find((one) => !one.organelle) : first,
-    ...(lean
-      ? scored(lean.q, lean.r)
-      : passedOver
-        ? scored(undefined, undefined)
-        : scored(tip.q, tip.r)),
-    shown: lean ? lean.shown : !passedOver && tip.shown,
-    ...(passedOver ? { passedOver: true as const } : {}),
-    ...(lean ? { rescored: true as const } : {}),
+    candidate: tip.candidates.find((one) => !one.organelle),
+    score: undefined,
+    shown: false,
+    passedOver: true,
   }
 }
 
@@ -464,8 +438,9 @@ function scored(q: number | undefined, r: number | undefined) {
 
 /**
  * `r` as a reader should see it — rounded to tens, an estimate (SEAM, 2026-11-18). Two decimals
- * would claim a precision 14 steps fitted on ~335 judged tips do not have, and the low steps
- * rest on a handful each, so the ends are open rather than rounded to 0% or 100%.
+ * would claim a precision a staircase of a few steps fitted on a few hundred judged tips does not
+ * have, and one step averages very different tips, so the ends are open rather than rounded to
+ * 0% or 100%.
  */
 export function estimateLabel(r: number): string {
   if (r >= 0.9) return '≥90%'
@@ -516,8 +491,8 @@ export const DEFAULT_FILTERS: QueueFilters = {
  *
  * Only an explicit `false` hides a row, so a set that was cut keeps being cut.
  */
-function wasShown(table: TableValue, row: number, column = 'shown'): boolean {
-  return table.data[column]?.[row] !== false
+function wasShown(table: TableValue, row: number): boolean {
+  return table.data['shown']?.[row] !== false
 }
 
 /**

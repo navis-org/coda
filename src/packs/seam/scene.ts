@@ -242,8 +242,8 @@ export interface Suggestion {
  * would read as a second quantity.
  *
  * **`r` is in the caption only, rounded, as an estimate** (SEAM, 2026-11-18). It is a staircase of
- * about 14 steps over `q`, fitted on ~335 judged tips, and was the colour before: it tied
- * thousands of tips and claimed two decimals its steps do not have.
+ * a few steps over `q`, and was the colour before: it tied thousands of tips and claimed two
+ * decimals its steps do not have.
  */
 export function suggestionLayer(
   suggestions: readonly Suggestion[],

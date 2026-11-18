@@ -575,9 +575,6 @@ describe('an assessed run', () => {
         q: 0.36,
         r: 0.8,
         shown: true,
-        q_no_organelles: 0.36,
-        r_no_organelles: 0.8,
-        shown_no_organelles: true,
       },
     },
   })

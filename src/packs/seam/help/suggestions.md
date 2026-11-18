@@ -48,11 +48,11 @@ The tips and candidate files are read by byte range, so a large set costs only t
 
 `shown` is **SEAM's** decision, not this node's: a first candidate is shown when `q` is at or above a cutoff calibrated on a proofreader's verdicts. There is no threshold setting here, and that is deliberate — narrowing the queue is a [Filter Table](#core.filterTable) on `shown` or on `q`, where the cut is visible as something you did rather than something the node hid.
 
-Sort tips by `q`, highest first. `r` puts `q` into words: 0.7 means about seven of ten tips scoring like this one had a right first. It is a staircase of about 14 steps over `q`, so it never reorders tips, but it ties thousands of them that `q` keeps apart. Use it as a rounded label, and don't add it up: a neuron's sum of `r` is mostly the thin low steps.
+Sort tips by `q`, highest first. `r` puts `q` into words: 0.7 means about seven of ten tips scoring like this one had a right first. It is a staircase of a few wide steps over `q`, so it never reorders tips, but it ties thousands of them that `q` keeps apart. Use it as a rounded label, and don't add it up: a neuron's sum of `r` is mostly its lowest step.
 
 > [!WARNING]
-> **`r` is an estimate, and it runs out at the bottom**
-> Its steps were fitted on about 335 judged tips from five neurons, mostly near the cutoff, and have not been tested on held-out tips. Below `q` 0.01 each step rests on a handful of them. A low `r` there means "nobody has checked suggestions this weak", not "this is nine-tenths likely to be wrong".
+> **`r` is an estimate, and one step covers many tips**
+> SEAM fits its steps on tips a proofreader judged — since 18 November 2026 about 536 of them from 15 neurons, with at least 20 tips behind every step. The lowest step covers most of a neuron's tips with one average, so a low `r` is right on average over very different tips, not about the one in front of you. Take the set version SEAM published with the refit; a set from before it carries the old steps.
 
 Only the **first** candidate of each tip is a suggestion. The rest of the list is context: the cutoff was calibrated on firsts, so treating rank 2 as a second suggestion reads a number that was never fitted for it.
 

@@ -298,7 +298,7 @@ export const reviewNode = packNode({
       default: true,
       absentMeans: true,
       presentational: true,
-      help: 'Leave out candidates the search flags as organelles — mitochondria, vesicles and other pieces wrapped inside one cell, which are never a neurite’s continuation. Per candidate, those candidates are not listed. Per tip, a tip whose first candidate is one stays listed but leads with its next candidate, marked “first was an organelle”. Where Suggest Merges re-scored the list without its organelles, a tip whose list holds one reads that `q`, `r` and verdict instead of SEAM’s, marked “scored without organelles”; without one, a tip that passed over its first shows no `q`, since SEAM’s numbers are about the organelle. The flag is SEAM’s: about one flagged piece in a hundred is not an organelle, so the card counts what the filter did, and switching it off lists everything as it was. A set that carries no flag is unchanged.',
+      help: 'Leave out candidates the search flags as organelles — mitochondria, vesicles and other pieces wrapped inside one cell, which are never a neurite’s continuation. Per candidate, those candidates are not listed. Per tip, a tip whose first candidate is one stays listed but leads with its next candidate, marked “first was an organelle”, with no `q` or `r` and never counted as shown: SEAM’s numbers all describe the first candidate, and the next one has only its own `conf`. An organelle further down a tip’s list changes nothing. The flag is SEAM’s: about one flagged piece in a hundred is not an organelle, so the card counts what the filter did, and switching it off lists everything as it was. A set that carries no flag is unchanged.',
     },
     {
       /*
