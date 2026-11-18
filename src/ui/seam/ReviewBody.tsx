@@ -731,7 +731,6 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                           // re-scored where organelles were taken out of the list.
                           (mode === 'tip' ? row.shown : tip.shown) ? 'shown' : '',
                           row.passedOver ? 'first was an organelle' : '',
-                          row.rescored ? 'scored without organelles' : '',
                           candidate.organelle ? 'organelle' : '',
                         ]
                           .filter(Boolean)

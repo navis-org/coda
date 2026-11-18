@@ -234,7 +234,7 @@ export function tableOf(
 /*
  * **No `expectedRight`.** It was the sum of `r` over a neuron's shown tips, on the first handoff's
  * advice, which SEAM withdrew (2026-11-18, `coda-note-sort-by-q.md`): `r` is a staircase fitted on
- * ~335 judged tips, and a sum is mostly its thin low steps — 432 "expected right" on one rv4
+ * a few hundred judged tips, and a sum is mostly its lowest step — 432 "expected right" on one rv4
  * neuron, resting on a few judged tips. Dropped from this table and both exports (user).
  */
 const NEURON_SUMMARY = [column('tips', 'i64'), column('shown', 'i64')]

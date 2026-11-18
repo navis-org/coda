@@ -1656,12 +1656,12 @@ describe('leaving out organelles', () => {
 })
 
 /**
- * Coda's re-scoring of a list without its organelles (`q_no_organelles`, `r_no_organelles`,
- * `shown_no_organelles`, from `seam:suggestMerges`; user, 2026-11-17): what a tip row reads with
- * `Exclude organelles` on, wherever its list holds one — `q` to sort and filter on, `r` for its
- * label.
+ * SEAM, 2026-11-18: "the filter hides; it should not promote". A row that passes over an organelle
+ * leads with the next candidate (user) but carries none of the first candidate's numbers, and
+ * Coda's re-scoring without organelles (2026-11-17) is not read — a `Tips` table from a run that
+ * still published it keeps the columns, and they change nothing.
  */
-describe('a tip re-scored without its organelles', () => {
+describe('a tip whose list holds an organelle', () => {
   const tips = makeTable(
     tableSchema(
       column(ID_COLUMN_NAME, 'str'),
@@ -1674,92 +1674,51 @@ describe('a tip re-scored without its organelles', () => {
       column('shown_no_organelles', 'bool'),
     ),
     {
-      [ID_COLUMN_NAME]: ['n1', 'n1', 'n1', 'n1'],
-      end_uid: [1, 2, 3, 4],
-      q: [0.9, 0.4, 0.6, 0.8],
-      r: [0.95, 0.5, 0.7, 0.9],
-      shown: [true, false, false, true],
-      q_no_organelles: [0.7, 0.55, 0.6, null],
-      r_no_organelles: [0.8, 0.6, 0.7, null],
-      shown_no_organelles: [false, true, false, false],
+      [ID_COLUMN_NAME]: ['n1', 'n1'],
+      end_uid: [1, 2],
+      q: [0.9, 0.4],
+      r: [0.95, 0.5],
+      shown: [true, false],
+      q_no_organelles: [0.7, 0.55],
+      r_no_organelles: [0.8, 0.6],
+      shown_no_organelles: [true, true],
     },
   )
   const queue = buildQueue(
     tips,
     candidatesTable([
-      // Tip 1 leads with an organelle, tip 2 holds one further down, tip 3 none at all, and
-      // tip 4 nothing but organelles.
+      // Tip 1 leads with an organelle, tip 2 holds one further down.
       { end: 1, id: 'a1', rank: 1, organelle: true },
       { end: 1, id: 'a2', rank: 2, organelle: false },
       { end: 2, id: 'b1', rank: 1, organelle: false },
       { end: 2, id: 'b2', rank: 2, organelle: true },
-      { end: 3, id: 'c1', rank: 1, organelle: false },
-      { end: 4, id: 'd1', rank: 1, organelle: true },
     ]),
   )
-  const byTip = (filters: Partial<QueueFilters> = {}) =>
-    new Map(
-      arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'tip', ...filters }).map((row) => [
-        row.tip.endUid,
-        row,
-      ]),
-    )
+  const byTip = new Map(
+    arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'tip' }).map((row) => [
+      row.tip.endUid,
+      row,
+    ]),
+  )
 
-  it('leads past an organelle with the re-scored q, r and verdict', () => {
-    expect(byTip().get(1)).toMatchObject({
+  it('leads past an organelle with no q, no r and never shown, whatever the table re-scored', () => {
+    expect(byTip.get(1)).toMatchObject({
       candidate: { candidateId: 'a2' },
-      score: 0.7,
-      estimate: 0.8,
-      shown: false,
-      passedOver: true,
-      rescored: true,
-    })
-  })
-
-  /** An organelle second in the list still took a share from the first. */
-  it('re-scores a list that holds an organelle further down, keeping its first', () => {
-    expect(byTip().get(2)).toMatchObject({
-      candidate: { candidateId: 'b1' },
-      score: 0.55,
-      estimate: 0.6,
-      shown: true,
-      rescored: true,
-    })
-    expect(byTip().get(2)!.passedOver).toBeUndefined()
-  })
-
-  it('reads SEAM’s numbers for a list with no organelle, and with the filter off', () => {
-    expect(byTip().get(3)).toEqual({
-      tip: queue[2],
-      candidate: queue[2]!.candidates[0],
-      score: 0.6,
-      estimate: 0.7,
-      shown: false,
-    })
-    expect(byTip({ excludeOrganelles: false }).get(1)).toMatchObject({
-      score: 0.9,
-      shown: true,
-    })
-    expect(byTip({ excludeOrganelles: false }).get(1)!.rescored).toBeUndefined()
-  })
-
-  it('filters and sorts on the re-scored numbers', () => {
-    const ends = (filters: Partial<QueueFilters>) => [...byTip(filters).keys()]
-    expect(
-      [...byTip().values()].filter((row) => row.shown).map((row) => row.tip.endUid),
-    ).toEqual([2])
-    expect(ends({ minConfidence: 0.6 })).toEqual([1, 3])
-    const ranked = arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'confidence' })
-    expect(ranked.map((row) => row.tip.endUid)).toEqual([1, 3, 2, 4])
-  })
-
-  it('leaves a tip of nothing but organelles without a score', () => {
-    expect(byTip().get(4)).toMatchObject({
-      candidate: undefined,
       score: undefined,
       shown: false,
+      passedOver: true,
     })
-    expect(byTip().get(4)!.estimate).toBeUndefined()
+    expect(byTip.get(1)!.estimate).toBeUndefined()
+  })
+
+  it('keeps SEAM’s numbers where the organelle is further down', () => {
+    expect(byTip.get(2)).toEqual({
+      tip: queue[1],
+      candidate: queue[1]!.candidates[0],
+      score: 0.4,
+      estimate: 0.5,
+      shown: false,
+    })
   })
 })
 

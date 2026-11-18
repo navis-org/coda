@@ -2942,7 +2942,8 @@ Merges publishes `organelle_score` and `organelle` on `Candidates` (and the firs
   an organelle; per candidate, the list with the filter off less the list); a flagged candidate
   paged to within a listed tip is marked `organelle` rather than skipped, since paging is by rank
   within the tip's list.
-- **Re-scored without organelles** (same day, user, after seeing passed-over rows lose their
+- ~~**Re-scored without organelles**~~ — **withdrawn 2026-11-18** (user, after SEAM's updated note:
+  "the filter hides; it should not promote"); see the section at the end. What it was: (same day, user, after seeing passed-over rows lose their
   score). Suggest Merges' `publishedEnd` (`scoreEnds.ts`) runs stages 7–9 a second time over the
   list with its flagged candidates taken out — same fits, same `e_tip`, `geo_rank` kept as the
   search gave it rather than renumbered — and publishes `q_no_organelles`, `r_no_organelles` and
@@ -3007,3 +3008,31 @@ on one rv4 neuron). Decided with the user, same day:
   `q` at or above the set's cutoff and the list now leads with `q`, so `Min confidence` at the
   cutoff gives the same list; the help says so. `shown` still marks the row and colours its number.
   A saved `shownOnly` is an undeclared param, which `normalizeParams` and the card ignore.
+
+## SEAM's refit of `r`, and the organelle filter hides (2026-11-18, SEAM 9562ba6)
+
+SEAM's updated `coda-note-sort-by-q.md`: the user judged 123 blind rv4 tips across the whole range
+of `q`; production's `r` held, the single seed's was low in one band, and both were refitted on
+rv2 + rv4 (536 / 537 judged tips, 15 neurons, every step at least 20 tips: 7 steps production, 9
+single seed). Only `r` changed — `q`, the cutoffs (0.118, 0.159), `shown` and every column stay.
+Precision at the cutoff on rv4: production 0.84 [0.74, 0.99], single seed 0.97 [0.91, 0.99].
+
+- **The refit reaches Coda only through hosted files.** Merge Suggestions' hosted sets were older
+  still (rv2 at cutoff 0.208 with a 12-step `r` and no organelle flag; rv4 with the 14-step `r`):
+  the new production sets are `rv2-9db6c7b1b397` and `rv4-ad75ed161bb6`, replaced in place under
+  the same paths. Suggest Merges reads `r` from the assessor manifest's `config.pipeline`, rebuilt
+  with `pnpm make:assessor-manifest <SEAM data/onnx/n3_mal_mask>
+  <coda_rv2_single_s0/fixture.json> <out> --seed 0 --model-e <coda_rv2/fixture.json>` (the
+  single-seed fixture states no Model E block): against the hosted one only `pipeline.r` (9 steps)
+  and a descriptive `pipeline.n_l2` string differ, the graphs byte for byte the same. Uploading
+  is the user's.
+- **The organelle filter hides, it does not promote** (SEAM): `q`, the cutoff and `r` describe the
+  first candidate, and the next has only its `conf` (on rv4 it reached the cutoff for 1 of 1,548
+  such tips). Decided (user): a tip whose first candidate is flagged still **leads with the next
+  candidate**, but with **no `q`, no `r`, never shown** — its `conf` is in its facts. Coda's
+  re-scoring without organelles is gone from both ends (`scoreEnds.ts` and `ASSESSED_TIP_FIELDS`
+  back to their state before it; Review Suggestions reads no `*_no_organelles` column, which a
+  `Tips` table from a run in between may still carry, harmlessly). An organelle further down a
+  list changes nothing about its tip's row.
+- The wording about `r` no longer counts steps or tips where a reader sees it, so the next refit
+  cannot make it wrong; the help cites the 2026-11-18 numbers once, dated.

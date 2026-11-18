@@ -146,11 +146,10 @@ export const ORGANELLE_CUT = 0.5
 /**
  * Whether the search's row `at` is flagged as an organelle — `null` where it was not measured.
  *
- * Read in three places — the candidate rows, the tip's first candidate, and the list the
- * assessor re-scores without its organelles (`scoreEnds.ts`) — so the cut is applied here and
- * nowhere else.
+ * Read in two places — the candidate rows and the tip's first candidate — so the cut is applied
+ * here and nowhere else.
  */
-export function organelleAt(
+function organelleAt(
   columns: Readonly<Record<string, Float64Array>>,
   at: number,
 ): boolean | null {
@@ -211,17 +210,6 @@ export const ASSESSED_TIP_FIELDS: readonly Field[] = [
   field('q', 'q', 'f64'),
   field('r', 'r', 'f64'),
   field('shown', 'shown', 'bool'),
-  /*
-   * **The same three, for the list with its organelles taken out** (user, 2026-11-17) — Coda's,
-   * not SEAM's. `r` is about the first candidate, and the shares are shares of the whole list,
-   * so where an organelle leads it, or only takes a share of it, SEAM's three describe a list
-   * `seam:review` does not show with `Exclude organelles` on. Stages 7–9 again (`scoreEnds.ts`),
-   * with the same fits and `e_tip`, over what is left. The same as the three above where the
-   * list holds no organelle. An estimate: SEAM fitted every stage on lists that still held them.
-   */
-  field('q_no_organelles', 'q_no_organelles', 'f64'),
-  field('r_no_organelles', 'r_no_organelles', 'f64'),
-  field('shown_no_organelles', 'shown_no_organelles', 'bool'),
 ]
 
 /**
@@ -277,17 +265,10 @@ export interface AssessedEnd {
  * candidate, and `shown` where the configuration published no cutoff for the quantity this tip
  * could reach — which `seam:review` draws as "no verdict" rather than as a rejection.
  */
-export interface AssessedTip extends TipVerdict {
+export interface AssessedTip {
   readonly segclr: number
   readonly p_tip: number
   readonly p_top: number
-  readonly q_no_organelles: number | null
-  readonly r_no_organelles: number | null
-  readonly shown_no_organelles: boolean | null
-}
-
-/** Stage 9's answer about a list's first candidate, by the names a tip row publishes it under. */
-export interface TipVerdict {
   readonly q: number | null
   readonly r: number | null
   readonly shown: boolean | null
