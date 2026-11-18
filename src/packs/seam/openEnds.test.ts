@@ -21,6 +21,8 @@ import '../../nodes'
 import { OPEN_END_MODELS, OPEN_END_TASK } from './models'
 import { SEAM_TIP_RULE } from './tips'
 import { OPEN_END_FIELDS } from './openEndsOps'
+import { aboutTheNeuron } from './openEnds'
+import { noLongerCurrent } from './rootMoment'
 import { schemaOf } from './suggestionTables'
 
 const def = requireNodeDef('seam:openEnds')
@@ -167,5 +169,33 @@ describe('what counts as a tip', () => {
     for (const param of def.params ?? []) {
       expect(param.presentational, `${param.id} is presentational`).not.toBe(true)
     }
+  })
+})
+
+/**
+ * Suggest Merges passes on what Find Open Ends says while finding a piece's ends — except the two
+ * about the neuron itself, which on a piece are expected and have no remedy (user, 2026-11-18): a
+ * fragment has no nucleus, and is often replaced by the very Submit that merged it.
+ */
+describe('a warning about the neuron itself', () => {
+  it('is the no-nucleus and the no-longer-current warning, as a rerun chain labels them', () => {
+    const edited = noLongerCurrent(
+      new Map([['648518347524985418', Date.UTC(2026, 10, 17, 14, 9)]]),
+      {
+        one: 'its soma is from before that edit',
+        many: 'their somata are from before those edits',
+      },
+    )
+    expect(aboutTheNeuron(`Find Open Ends: ${edited}`)).toBe(true)
+    expect(
+      aboutTheNeuron(
+        'Find Open Ends: 1 of 1 neurons have no row in `nuclei_v1_aedes`, so their tips are not ' +
+          'masked near the soma.',
+      ),
+    ).toBe(true)
+  })
+
+  it('is not any other warning, which is passed on', () => {
+    expect(aboutTheNeuron('Skeletonize Meshes: 2 meshes could not be read.')).toBe(false)
   })
 })

@@ -80,8 +80,7 @@ import { idText, isSegmentId } from '../../core/ids'
 import { caveServerFor } from '../../data/cave/datastack'
 import { somataFor, somataLive } from '../../data/cave/nuclei'
 import { grapheneFor } from '../../data/cave/rootIds'
-import { agree } from '../../style/format'
-import { editedSince, notRoots } from './rootMoment'
+import { noLongerCurrent, notRoots, saysNoLongerCurrent } from './rootMoment'
 import {
   CAVE_DATASET_INPUT,
   caveTableParam,
@@ -112,6 +111,19 @@ const DOWNLOAD_SHARE = 0.15
  * message reaches, so the signal is read between pages. Thirty-two windows is a few seconds.
  */
 const PAGE = 32
+
+/** The words the no-nucleus warning turns on — what `aboutTheNeuron` finds. */
+const NO_NUCLEUS = 'have no row in '
+
+/**
+ * Whether one of this node's warnings is about the neuron itself — its root no longer current, or
+ * no row in the nucleus table. Neither says anything when the "neuron" is a piece Suggest Merges
+ * is extending (user, 2026-11-18): a fragment has no nucleus, and is often replaced by the very
+ * Submit that merged it.
+ */
+export function aboutTheNeuron(warning: string): boolean {
+  return warning.includes(NO_NUCLEUS) || saysNoLongerCurrent(warning)
+}
 
 const unknownModel = (id: string) =>
   `This graph names the open-end model \`${id}\`, which this build does not carry. ` +
@@ -571,9 +583,10 @@ async function nucleiFor(
       }
   if (replaced.size > 0) {
     ctx.warn(
-      `${editedSince(replaced)} ${agree(replaced.size, 'It was', 'Each was')} read as it ` +
-        'stood then, soma included. Update Root IDs above the meshes brings a neuron to its ' +
-        'current root.',
+      `${noLongerCurrent(replaced, {
+        one: 'its soma is from before that edit',
+        many: 'their somata are from before those edits',
+      })} To read the neuron as it is now, run Update Root IDs above the meshes.`,
     )
   }
   if (unknown.length > 0) {
@@ -586,7 +599,7 @@ async function nucleiFor(
     // merge that `somataFor` gives no soma at all. Those tips are kept, which is what no soma
     // has always meant here — said rather than left as a quietly uneven mask.
     ctx.warn(
-      `${missing} of ${asked} neurons have no row in \`${table}\`, so their tips are not ` +
+      `${missing} of ${asked} neurons ${NO_NUCLEUS}\`${table}\`, so their tips are not ` +
         'masked near the soma. A neuron holding two nuclei is a merge and counts as none.',
     )
   }

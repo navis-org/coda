@@ -104,7 +104,7 @@ import { grapheneFor, instantOf, l2ChunkCounts, rootLives } from '../../data/cav
 import { distinctStrings, groupBy } from '../../core/collections'
 import { namedFew } from '../../core/prose'
 import {
-  editedSince,
+  noLongerCurrent,
   momentsFrom,
   notRoots,
   readSearchedAt,
@@ -158,6 +158,7 @@ import {
 } from './searchTips'
 import { schemaOf } from './suggestionTables'
 import { boxFits, endToSearch, openSearchVolume, unlistedMaterialization } from './searchVolume'
+import { aboutTheNeuron } from './openEnds'
 import { forgetRoots, labelledBox } from './rootedBox'
 import type { SearchVolume } from './searchVolume'
 import { runClock } from './runClock'
@@ -1512,7 +1513,12 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   // The rate is the one number in the report that compares against another machine — and both
   // halves of it are this run's own work, so a run answered from memory says nothing about time.
   const timing = clock.report({ ends: measured, patches })
-  if (timing) ctx.warn(timing)
+  if (timing) {
+    ctx.warn(timing.said)
+    // The whole split, for a reader comparing machines or browsers (`TimingReport`).
+    // eslint-disable-next-line no-console
+    console.info(`Suggest Merges: ${timing.detail}`)
+  }
   return answer
 }
 
@@ -1638,11 +1644,14 @@ async function pieceTips(
   ctx.reportFetched(kept.at)
   /*
    * Said again on every run, kept or not — a caveat that held for the tips holds for an answer
-   * built on them. Without the piece's id, so the scheduler's own de-duplication makes one line
-   * of a warning every piece raises: a fragment has no nucleus, and Find Open Ends says so each
-   * time.
+   * built on them. **Except Find Open Ends' two about the neuron itself** (`aboutTheNeuron`,
+   * user 2026-11-18): every piece has no nucleus, and a piece is often replaced by the very
+   * Submit that merged it, so on a piece both are expected and neither has a remedy. What is
+   * left is about this piece, and says which.
    */
-  for (const said of kept.warnings) ctx.warn(`While finding a piece’s open ends — ${said}`)
+  for (const said of kept.warnings) {
+    if (!aboutTheNeuron(said)) ctx.warn(`Finding the open ends of piece ${piece.id}: ${said}`)
+  }
   return { tips: kept.tips, ran }
 }
 
@@ -1823,12 +1832,7 @@ export async function momentsOf(
         'ends were passed through unsearched.',
     )
   }
-  const {
-    moments,
-    editedBefore: before,
-    editedAfter: after,
-    later,
-  } = momentsFrom(lives, wantedOf)
+  const { moments, edited, later } = momentsFrom(lives, wantedOf)
   /*
    * The moment each neuron is searched at, kept — written before anything is measured. Written
    * back where an entry is new, or names a moment outside its root's life (typed by hand: the
@@ -1840,18 +1844,17 @@ export async function momentsOf(
     ctx.record?.('at', writeSearchedAt(new Map([...record, ...fresh])))
   }
 
-  const remedy = 'Update Root IDs above `Tips` brings a neuron to its current root.'
-  if (before.size > 0) {
+  /*
+   * **One sentence, and Update Root IDs its only remedy** (user, 2026-11-18). Whether the root was
+   * replaced before its moment or after it, the suggestions predate the neuron as it is now. The
+   * ⟳ is not a remedy: a replaced root is read at its last moment at best, the same answer again.
+   */
+  if (edited.size > 0) {
     ctx.warn(
-      `${editedSince(before)} ${agree(before.size, 'It was', 'Each was')} searched as it last ` +
-        `stood. ${remedy}`,
-    )
-  }
-  if (after.size > 0) {
-    ctx.warn(
-      `${editedSince(after)} ${agree(after.size, 'It was', 'Each was')} searched at the ` +
-        `moment in \`Searched at\`, before that edit. The card’s ⟳ searches at the present. ` +
-        remedy,
+      `${noLongerCurrent(edited, {
+        one: 'its suggestions are from before that edit',
+        many: 'their suggestions are from before those edits',
+      })} To search the neuron as it is now, run Update Root IDs above \`Tips\`.`,
     )
   }
   /*

@@ -12,11 +12,12 @@ import { describe, expect, it } from 'vitest'
 import type { RootLife } from '../../data/cave/rootIds'
 import { momentWithin } from '../../data/cave/rootIds'
 import {
-  editedSince,
   momentsFrom,
+  noLongerCurrent,
   notRoots,
+  saysNoLongerCurrent,
   readSearchedAt,
-  utcMinute,
+  utcWhen,
   writeSearchedAt,
 } from './rootMoment'
 
@@ -53,7 +54,7 @@ describe('each neuron’s moment, and what is said about it', () => {
   ])
 
   it('moves the wanted moment into each root’s life, and lists the two a reader is told of', () => {
-    const { moments, editedBefore, editedAfter, later } = momentsFrom(lives, () => MADE)
+    const { moments, edited, later } = momentsFrom(lives, () => MADE)
     expect(Object.fromEntries(moments)).toEqual({
       current: MADE,
       madeLater: MADE + 5_001,
@@ -61,30 +62,42 @@ describe('each neuron’s moment, and what is said about it', () => {
       // Replaced after the wanted moment: read at it, but the neuron has changed since.
       replacedAfter: MADE,
     })
-    expect([...editedBefore.keys()]).toEqual(['replacedBefore'])
-    expect([...editedAfter.keys()]).toEqual(['replacedAfter'])
+    // Before the wanted moment or after it, the answer predates the neuron as it is now.
+    expect([...edited.keys()]).toEqual(['replacedBefore', 'replacedAfter'])
     expect(later).toEqual(['madeLater'])
   })
 })
 
 describe('the wording', () => {
-  it('names a moment to the minute, in UTC, as CAVE stamps read', () => {
-    expect(utcMinute(Date.UTC(2026, 10, 17, 7, 37, 49, 71))).toBe('2026-11-17 07:37 UTC')
+  it('names a moment to the minute, in UTC, in words, with the year only when it is another', () => {
+    const at = Date.UTC(2026, 10, 17, 7, 37, 49, 71)
+    expect(utcWhen(at, Date.UTC(2026, 11, 1))).toBe('07:37 UTC on 17 November')
+    expect(utcWhen(at, Date.UTC(2027, 0, 2))).toBe('07:37 UTC on 17 November 2026')
   })
 
-  it('agrees with one neuron and with several', () => {
-    const at = Date.UTC(2026, 10, 17, 7, 37)
-    expect(editedSince(new Map([['1', at]]))).toBe(
-      'This neuron has been edited since: 1 (current until 2026-11-17 07:37 UTC).',
+  /** The user's own case (2026-11-18): an outdated root asked for again. */
+  it('says a root is no longer current, when it was edited, and what predates the edit', () => {
+    const at = Date.UTC(2026, 10, 17, 14, 9)
+    const answer = {
+      one: 'its suggestions are from before that edit',
+      many: 'their suggestions are from before those edits',
+    }
+    const one = noLongerCurrent(new Map([['648518347559462803', at]]), answer)
+    expect(one).toMatch(
+      /^648518347559462803 is no longer a current root: it was edited at 14:09 UTC on 17 November(?: 2026)?, and its suggestions are from before that edit\.$/,
     )
-    expect(
-      editedSince(
-        new Map([
-          ['1', at],
-          ['2', at],
-        ]),
-      ),
-    ).toMatch(/^These neurons have/)
+    const two = noLongerCurrent(
+      new Map([
+        ['1', at],
+        ['2', at],
+      ]),
+      answer,
+    )
+    expect(two).toMatch(/^2 roots are no longer current: 1 \(edited at 14:09 UTC/)
+    expect(two).toMatch(/their suggestions are from before those edits\.$/)
+    expect(saysNoLongerCurrent(`Find Open Ends: ${one}`)).toBe(true)
+    expect(saysNoLongerCurrent(two)).toBe(true)
+    expect(saysNoLongerCurrent('1 of 3 neurons have no row')).toBe(false)
     expect(notRoots(['1'], 'ds')).toBe('1 is not a root ds’s chunkedgraph knows')
     expect(notRoots(['1', '2'], 'ds')).toBe('1, 2 are not roots ds’s chunkedgraph knows')
   })

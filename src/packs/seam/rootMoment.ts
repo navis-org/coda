@@ -12,16 +12,15 @@ import type { RootLife } from '../../data/cave/rootIds'
 import { momentWithin } from '../../data/cave/rootIds'
 import { agree } from '../../style/format'
 
-/** Each neuron's moment, and the three kinds of neuron a reader is told about. */
+/** Each neuron's moment, and the two kinds of neuron a reader is told about. */
 export interface NeuronMoments {
   readonly moments: Map<string, number>
   /**
-   * Roots replaced before the wanted moment, each with the last moment it was current — read
-   * as it last stood.
+   * Roots no longer current, each with the last moment it was. Read before the edit either way —
+   * at the wanted moment, or as it last stood where it was replaced before that — so a reader is
+   * told the one thing that matters: the answer predates the neuron as it is now.
    */
-  readonly editedBefore: Map<string, number>
-  /** Roots replaced since the wanted moment, likewise — read at it, before the edit. */
-  readonly editedAfter: Map<string, number>
+  readonly edited: Map<string, number>
   /** Roots made after the wanted moment, and so read from when they were made. */
   readonly later: string[]
 }
@@ -36,30 +35,65 @@ export function momentsFrom(
   wantedOf: (root: string) => number,
 ): NeuronMoments {
   const moments = new Map<string, number>()
-  const editedBefore = new Map<string, number>()
-  const editedAfter = new Map<string, number>()
+  const edited = new Map<string, number>()
   const later: string[] = []
   for (const [root, life] of lives) {
     const wanted = wantedOf(root)
     moments.set(root, momentWithin(life, wanted))
-    if (!life.current) (life.last < wanted ? editedBefore : editedAfter).set(root, life.last)
+    if (!life.current) edited.set(root, life.last)
     else if (life.made >= wanted) later.push(root)
   }
-  return { moments, editedBefore, editedAfter, later }
+  return { moments, edited, later }
 }
 
-/** A moment as a reader compares it with CAVE's own stamps: `2026-11-17 07:37 UTC`. */
-export function utcMinute(ms: number): string {
-  return `${new Date(ms).toISOString().slice(0, 16).replace('T', ' ')} UTC`
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+/** A moment as a reader says it: `14:09 UTC on 17 November`, with the year when it is not this one. */
+export function utcWhen(ms: number, now = Date.now()): string {
+  const at = new Date(ms)
+  const time = at.toISOString().slice(11, 16)
+  const year =
+    at.getUTCFullYear() === new Date(now).getUTCFullYear() ? '' : ` ${at.getUTCFullYear()}`
+  return `${time} UTC on ${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}${year}`
 }
 
-/** "This neuron has been edited since: 6485… (current until 2026-11-17 07:37 UTC)." */
-export function editedSince(replaced: ReadonlyMap<string, number>): string {
-  const list = [...replaced].map(([id, at]) => `${id} (current until ${utcMinute(at)})`)
-  return (
-    `${agree(list.length, 'This neuron has', 'These neurons have')} been edited since: ` +
-    `${namedFew(list)}.`
-  )
+/** The words every "no longer current" sentence opens with — what `saysNoLongerCurrent` finds. */
+const NO_LONGER = { one: 'is no longer a current root', many: 'are no longer current' }
+
+/**
+ * "6485… is no longer a current root: it was edited at 14:09 UTC on 17 November, and its
+ * suggestions are from before that edit." — the caller says what is from before it, in both
+ * numbers, and adds the remedy.
+ */
+export function noLongerCurrent(
+  edited: ReadonlyMap<string, number>,
+  answer: { readonly one: string; readonly many: string },
+): string {
+  const [first] = edited
+  if (edited.size === 1 && first) {
+    const [id, at] = first
+    return `${id} ${NO_LONGER.one}: it was edited at ${utcWhen(at)}, and ${answer.one}.`
+  }
+  const list = [...edited].map(([id, at]) => `${id} (edited at ${utcWhen(at)})`)
+  return `${edited.size} roots ${NO_LONGER.many}: ${namedFew(list)}; ${answer.many}.`
+}
+
+/** Whether a warning is one `noLongerCurrent` wrote, so a caller passing warnings on can drop it. */
+export function saysNoLongerCurrent(warning: string): boolean {
+  return warning.includes(NO_LONGER.one) || warning.includes(NO_LONGER.many)
 }
 
 /** "6485… is not a root wclee_aedes_brain's chunkedgraph knows" — the caller ends the sentence. */
