@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { NotFoundError, fetchText } from './fetchText'
+import { NotFoundError, StatusError, fetchText } from './fetchText'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -33,6 +33,33 @@ describe('fetchText', () => {
     const read = fetchText('https://x.test/a', { signal: controller.signal })
     controller.abort()
     await expect(read).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('hands back the status and the body of any other refusal, under the same message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"detail":"expired"}', { status: 401 })),
+    )
+    const read = fetchText('https://x.test/a')
+    await expect(read).rejects.toBeInstanceOf(StatusError)
+    await expect(read).rejects.toMatchObject({
+      status: 401,
+      body: '{"detail":"expired"}',
+      message: 'https://x.test/a returned 401',
+    })
+  })
+
+  it('keeps a cancellation one while the refusal’s body is still arriving', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        statusText: '',
+        text: () => Promise.reject(new DOMException('Aborted', 'AbortError')),
+      })),
+    )
+    await expect(fetchText('https://x.test/a')).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('reports a 404 as a NotFoundError, as before', async () => {
