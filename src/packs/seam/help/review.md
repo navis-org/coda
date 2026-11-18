@@ -66,7 +66,7 @@ With `Show accepted` on (the default), every candidate you have accepted on this
 
 With no row selected, the viewer shows the neuron and its accepted pieces, and the camera stays where it is. Only `Accept` counts; `Reject` and `Unsure` are not drawn.
 
-The number on the left is `r` — the chance this tip's **first** candidate is right. The line under the id is the candidate itself: its size, its rank within the tip's list, its own confidence, the search's own rank, and how far the two pieces are apart.
+The number on the left is `q`, SEAM's score for the tip's **first** candidate. The list is sorted on it, and SEAM's cutoff — what `shown` means — is a value of it. Beneath it is `r`, rounded: about how often a first candidate at that `q` turned out right, such as `≈90%`. Treat it as an estimate. It comes from about 14 steps fitted on some 335 judged tips, mostly near the cutoff, so far below the cutoff it rests on a handful each. The line under the id is the candidate itself: its size, its rank within the tip's list, its own confidence, the search's own rank, and how far the two pieces are apart.
 
 **Size is the candidate's level-2 chunk count** — the chunkedgraph's own decomposition of the whole object, wherever it reaches. That is what `Sort by: size` orders on and what `Min size` counts, because it is the best proxy there is for whether a piece is a loose fragment or part of a neuron. It is coarse by construction: anything small is one chunk, and the number only starts separating pieces further up.
 
@@ -142,11 +142,11 @@ The setting is with the filters in the footer.
 
 ## One row per tip, or per candidate
 
-`One row per` changes the grain. **Per tip** — the default — a row is a tip and its suggestion, and the big number is `r`. This is the unit SEAM calibrated: the cutoff, `p_tip` and `r` were all fitted on first candidates, so a row here is a suggestion somebody made.
+`One row per` changes the grain. **Per tip** — the default — a row is a tip and its suggestion, and the big number is `q`. This is the unit SEAM calibrated: the cutoff, `p_tip` and `r` were all fitted on first candidates, so a row here is a suggestion somebody made.
 
 **Per candidate** gives every candidate of every tip its own row, led by that candidate's `conf`. Nothing at that grain is calibrated — there is no `r` for a rank 4 — but it is how you work when the first candidate is clearly wrong and something further down is clearly right. Clicking a row opens on *that* candidate rather than on the tip's first.
 
-The filters read whichever number the row leads with, so `Min confidence` means `r` per tip and `conf` per candidate.
+The filters read whichever number the row leads with, so `Min confidence` means `q` per tip and `conf` per candidate. Set it from the cutoff your set was made with (0.159 for the single-seed configuration Suggest Merges runs, 0.118 for SEAM's production sets) to browse just below it. `r` is never filtered or sorted on: it has only about 14 values, so thousands of tips would tie.
 
 ## Filtering
 
@@ -154,9 +154,11 @@ The filters read whichever number the row leads with, so `Min confidence` means 
 
 On the card they fold away behind `Filters` in the footer, for when the list is what you want the room for. Expanded, they are in the panel's own controls above the body rather than in it.
 
-`Only SEAM's shown set` leaves just the tips that clear SEAM's own calibrated cutoff. It is **off** by default, and that is deliberate — in the published Aedes set, 97 tips clear the cutoff and another 614 have `r ≥ 0.5`, of which a review found about three in five were real. The cutoff is tuned to be right when it speaks, not to find everything.
+A tip that clears SEAM's own calibrated cutoff is marked `shown`, and its number is drawn in the brighter colour. The cutoff is a value of `q`, so to list only those tips, set `Min confidence` to it. The full list is worth working through too: in the published Aedes set, 97 tips cleared the cutoff, and of the 614 tips just below it a review found about three in five were real. The cutoff is tuned to be right when it speaks, not to find everything.
 
-Every filter reads a tip's **first** candidate, so paging through a tip's other candidates never makes its row jump or disappear.
+`Exclude organelles` leaves out candidates the search flags as organelles: mitochondria, vesicles and other pieces wrapped inside one cell, which are never the continuation of a neurite. It is **on** by default. With one row per candidate, flagged candidates are not listed. With one row per tip, a tip whose first candidate is flagged stays in the list but leads with its next candidate, marked `first was an organelle` — often the real continuation is the second. SEAM's `q`, `r` and `shown` are about the first candidate, so [Suggest Merges](#seam:suggestMerges) scores each list a second time with its organelles taken out, and any tip whose list holds one reads those numbers instead, marked `scored without organelles`. That includes a tip whose organelle is further down: every candidate's share is a share of the whole list, so an organelle anywhere in it lowers the first candidate's `q`. These are Coda's numbers, not SEAM's, and an estimate, since SEAM fitted its scores on lists that still held organelles. A set that carries no such numbers (one from [Merge Suggestions](#seam:suggestions)) keeps SEAM's, except on a row that passed over its first candidate: that row shows no `q` and is never counted as shown, so `Min confidence` passes it by. The footer says how many rows the filter changed. About one flagged piece in a hundred is not an organelle, so switch the filter off to see the list as it was. The flag comes from [Suggest Merges](#seam:suggestMerges), and from [Merge Suggestions](#seam:suggestions) for sets made since SEAM added it. An older published set has no flag, and nothing is left out of it.
+
+Every filter reads a tip's **first** candidate, so paging through a tip's other candidates never makes its row jump or disappear. A flagged candidate you page to is marked `organelle`.
 
 ## Submitting merges
 
@@ -224,5 +226,5 @@ This is common with a published set, which is a snapshot: on Aedes, a neuron fro
 `Verdicts` is the one to keep. It carries every judgement, including those on candidates other than the first, which the folded `verdict` column on `Tips` cannot — a tip is one row.
 
 ```coda-params
-seam:review: mode, minConfidence, minSize, shownOnly, sortBy, showAccepted, autoExtend
+seam:review: mode, minConfidence, minSize, excludeOrganelles, sortBy, showAccepted, autoExtend
 ```

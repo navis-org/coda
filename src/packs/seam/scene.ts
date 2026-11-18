@@ -20,6 +20,7 @@
 import { cycleColor, sequentialColor } from '../../style/colors'
 import { clusterColor } from '../../style/encoding'
 import { clusterName } from './affinityTables'
+import { estimateLabel } from './reviewQueue'
 
 /**
  * How many points one layer draws.
@@ -226,20 +227,23 @@ export interface Suggestion {
   readonly contactNm: readonly [number, number, number]
   /** The piece SEAM proposes merging in. */
   readonly candidateId: string
-  /** The calibrated chance the first candidate is right, in 0..1. */
-  readonly r: number
+  /** SEAM's `q` for the first candidate, in 0..1 — undefined on a table that carries none. */
+  readonly q: number | undefined
+  /** SEAM's `r`, for the caption alone, rounded (`estimateLabel`). */
+  readonly r: number | undefined
 }
 
 /**
  * The suggestions as a point layer.
  *
- * **Coloured by `r`, on the sequential ramp**, because r is a measurement — the chance this
- * suggestion is right — and the thing a reader wants at a glance is which of the points in front
- * of them is worth opening first. The tip and the contact of one suggestion share that colour;
- * what tells them apart is the caption, since a second hue would read as a second quantity.
+ * **Coloured by `q`, on the sequential ramp** — the number the card orders the queue by, so the
+ * point that looks strongest here is the one that sits highest there. The tip and the contact of
+ * one suggestion share that colour; what tells them apart is the caption, since a second hue
+ * would read as a second quantity.
  *
- * `r` is an estimate and SEAM says where it stops being one: it is untested below q 0.003, where
- * its steps rest on eleven tips. The card says so; a colour cannot.
+ * **`r` is in the caption only, rounded, as an estimate** (SEAM, 2026-11-18). It is a staircase of
+ * about 14 steps over `q`, fitted on ~335 judged tips, and was the colour before: it tied
+ * thousands of tips and claimed two decimals its steps do not have.
  */
 export function suggestionLayer(
   suggestions: readonly Suggestion[],
@@ -252,8 +256,14 @@ export function suggestionLayer(
       dropped += 2
       continue
     }
-    const colour = sequentialColor(item.r, 'dark')
-    const said = `${item.neuronId} · tip ${item.endUid} · r ${item.r.toFixed(2)}`
+    const colour = sequentialColor(item.q ?? 0, 'dark')
+    const said = [
+      `${item.neuronId} · tip ${item.endUid}`,
+      item.q === undefined ? '' : `q ${item.q.toFixed(3)}`,
+      item.r === undefined ? '' : `${estimateLabel(item.r)} right (estimate)`,
+    ]
+      .filter(Boolean)
+      .join(' · ')
     annotations.push({
       type: 'point',
       id: `${item.neuronId}-${item.endUid}-tip`,

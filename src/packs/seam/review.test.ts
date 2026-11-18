@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import type { EvalContext, ParamValues } from '../../core/node'
-import { defaultParams, makeInferContext } from '../../core/node'
+import { defaultParams, findParam, makeInferContext } from '../../core/node'
 import { allInputPorts } from '../../core/ports'
 import { requireNodeDef } from '../../core/registry'
 import { column, columnNames, tableSchema } from '../../core/types'
@@ -421,5 +421,18 @@ describe('what is extended', () => {
     expect(points(out)).toEqual([`${SEED}-0-tip`, `${SEED}-0-contact`])
     const verdicts = out['verdicts'] as TableValue
     expect(verdicts.data['candidateId']).toEqual([PIECE])
+  })
+})
+
+describe('Exclude organelles', () => {
+  /** On by default, and on for a graph saved before it existed: a reading aid, publishing nothing. */
+  it('is on by default and when absent, and changes nothing the node publishes', () => {
+    const def = requireNodeDef('seam:review')
+    expect(findParam(def, 'excludeOrganelles')).toMatchObject({
+      kind: 'boolean',
+      default: true,
+      absentMeans: true,
+      presentational: true,
+    })
   })
 })

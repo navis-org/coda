@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { sequentialColor } from '../../style/colors'
 import { clusterColor } from '../../style/encoding'
 import {
   MAX_ANNOTATIONS,
@@ -13,6 +14,7 @@ import {
   fragmentLayer,
   scoreLayer,
   writeDrawnPositions,
+  suggestionLayer,
 } from './scene'
 
 const neuron = (id: string, labels: number[]) => ({
@@ -143,5 +145,34 @@ describe('the scored layers', () => {
     const built = scoreLayer([many], 'merges')
     expect(built.drawn).toBe(MAX_ANNOTATIONS)
     expect(built.dropped).toBe(5)
+  })
+})
+
+/**
+ * SEAM, 2026-11-18: `q` is the number, `r` a rounded estimate in words — the colour follows the
+ * queue's order, and a caption never claims two decimals of a 14-step fit.
+ */
+describe('suggestionLayer', () => {
+  const one = {
+    neuronId: '720575940621522189',
+    endUid: 11,
+    tipNm: [1, 2, 3] as const,
+    contactNm: [4, 5, 6] as const,
+    candidateId: '648518346368395605',
+  }
+
+  it('colours by q and says r only as a rounded estimate', () => {
+    const { layer } = suggestionLayer([{ ...one, q: 0.41, r: 0.93 }], 'merge suggestions')
+    const [tip] = layer.annotations as { props: string[]; description: string }[]
+    expect(tip!.props[0]).toBe(sequentialColor(0.41, 'dark'))
+    expect(tip!.description).toBe(
+      '720575940621522189 · tip 11 · q 0.410 · ≥90% right (estimate) · the tip',
+    )
+  })
+
+  it('says nothing of r where the set has none, rather than a zero', () => {
+    const { layer } = suggestionLayer([{ ...one, q: 0.41, r: undefined }], 'merge suggestions')
+    const [tip] = layer.annotations as { description: string }[]
+    expect(tip!.description).toBe('720575940621522189 · tip 11 · q 0.410 · the tip')
   })
 })

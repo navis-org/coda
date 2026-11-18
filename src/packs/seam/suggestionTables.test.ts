@@ -85,15 +85,12 @@ describe('the per-neuron fold', () => {
   const neurons = ['1', '2', '3']
 
   it('gives a neuron the manifest names but the tips file does not a row of zeroes', () => {
-    const got = neuronsTable(
-      neurons,
-      new Map([['2', { tips: 4, shown: 1, expectedRight: 0.7 }]]),
-    )
+    const got = neuronsTable(neurons, new Map([['2', { tips: 4, shown: 1 }]]))
     expect(got.schema).toEqual(neuronsSchema())
     expect(got.kind).toBe('neurons')
     expect(got.data[ID_COLUMN_NAME]).toEqual(neurons)
     expect(got.data['tips']).toEqual([0, 4, 0])
-    expect(got.data['expectedRight']).toEqual([0, 0.7, 0])
+    expect(got.data['shown']).toEqual([0, 1, 0])
   })
 
   /** The manifest's order, so a tips file sorted by score cannot reorder the neuron list. */
@@ -101,8 +98,8 @@ describe('the per-neuron fold', () => {
     const got = neuronsTable(
       neurons,
       new Map([
-        ['3', { tips: 1, shown: 0, expectedRight: 0 }],
-        ['1', { tips: 2, shown: 0, expectedRight: 0 }],
+        ['3', { tips: 1, shown: 0 }],
+        ['1', { tips: 2, shown: 0 }],
       ]),
     )
     expect(got.data[ID_COLUMN_NAME]).toEqual(['1', '2', '3'])

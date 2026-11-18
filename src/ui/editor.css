@@ -11286,9 +11286,19 @@ details[open] > summary.tile__label {
 }
 .review-row__score {
   grid-area: score;
+  display: flex;
+  flex-direction: column;
   font-variant-numeric: tabular-nums;
   font-size: 16px;
   line-height: 1.1;
+}
+/*
+ * `r`, under `q`, as a rounded estimate (SEAM, 2026-11-18): small and muted, so the number the
+ * list is ordered by is the one that reads first.
+ */
+.review-row__estimate {
+  font-size: 10px;
+  color: var(--text-muted);
 }
 .review-row__id {
   grid-area: id;

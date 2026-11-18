@@ -384,7 +384,7 @@ export async function readSuggestions(
   // cloud draws and the positions the `Tips` table reports cannot come apart.
   const ids = tips.data[ID_COLUMN_NAME] ?? []
   const positions = new Float32Array(tips.length * 3)
-  const perNeuron = new Map<string, { tips: number; shown: number; expectedRight: number }>()
+  const perNeuron = new Map<string, { tips: number; shown: number }>()
   const suggestions: Suggestion[] = []
   let shown = 0
   for (let i = 0; i < tips.length; i++) {
@@ -397,16 +397,10 @@ export async function readSuggestions(
     positions[i * 3 + 1] = tip[1]
     positions[i * 3 + 2] = tip[2]
 
-    const r = numberAt(tips, 'r', i) ?? 0
     const isShown = tips.data['shown']?.[i] === true
-    const held = perNeuron.get(id) ?? { tips: 0, shown: 0, expectedRight: 0 }
+    const held = perNeuron.get(id) ?? { tips: 0, shown: 0 }
     held.tips += 1
-    if (isShown) {
-      held.shown += 1
-      // Summed over the shown rows only: r is the chance a *shown* first is right, and the
-      // handoff's "expected right firsts per neuron" is the sum over what was shown.
-      held.expectedRight += r
-    }
+    if (isShown) held.shown += 1
     perNeuron.set(id, held)
     if (!isShown) continue
     shown += 1
@@ -420,7 +414,8 @@ export async function readSuggestions(
       tipNm: tipAt,
       contactNm: contact,
       candidateId,
-      r,
+      q: numberAt(tips, 'q', i),
+      r: numberAt(tips, 'r', i),
     })
   }
 

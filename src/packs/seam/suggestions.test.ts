@@ -239,41 +239,16 @@ describe('reading a set', () => {
   })
 
   /**
-   * The exact per-neuron numbers, because there are now **three** implementations of this fold —
-   * the node, the pandas emitter and the R one — and two of them have already disagreed.
-   *
-   * The R chunk returned 0.5275 where pandas returned 1.8689: `dplyr::summarise()` binds its
-   * arguments in order, so `shown = sum(shown)` shadowed the logical column before
-   * `expectedRight` read it, `ifelse()` took a length-one condition, and the total became the
-   * first row's `r`. A plausible number, and wrong. These values are what all three produce
-   * against `__fixtures__`, so a change to any one of them is checked by running its cell
+   * The exact per-neuron numbers, because there are **three** implementations of this fold — the
+   * node, the pandas emitter and the R one — and two of them have disagreed before (over
+   * `expectedRight`, the sum of `r` all three dropped on 2026-11-18 at SEAM's word). These are what
+   * all three produce against `__fixtures__`, so a change to any one is checked by running its cell
    * against the same files and comparing this list.
-   *
-   * **They have moved three times**: on 2026-11-10 when the fixtures were cut from a set with
-   * SEAM's split stage in it; on 2026-11-11 for the `za` refit; and on **2026-11-14** for nest 3 and
-   * then the tree ranker, which moved the cutoff to 0.136, refitted `r`'s steps and changed
-   * which candidates the search lists at all. Each time all
-   * three were re-run against the new files before this list was changed, rather than the node's
-   * new answer being pasted over the old one.
-   *
-   * The number of distinct values moves with `r`'s steps and with which tips clear the cutoff,
-   * which is why it is two here and was three before: `r` is a step function over a ten-tip
-   * sample, so repeats are the small fixture's coincidence rather than a fold that has stopped
-   * distinguishing neurons.
    */
-  it('sums r over the shown rows, to the number both exporters produce', () => {
-    expect(
-      (built.neurons.data['expectedRight'] as number[]).map((v) => Number(v.toFixed(4))),
-    ).toEqual([1.8604, 1.8604, 1.7128, 1.7925, 1.7427])
-  })
-
-  /** `r` is the chance a *shown* first is right, so the expectation sums over the shown rows. */
-  it('expects no more right firsts than it shows', () => {
-    for (let i = 0; i < built.neurons.length; i++) {
-      const expected = built.neurons.data['expectedRight']![i] as number
-      expect(expected).toBeGreaterThanOrEqual(0)
-      expect(expected).toBeLessThanOrEqual(built.neurons.data['shown']![i] as number)
-    }
+  it('counts each neuron’s tips and shown tips, as both exporters do', () => {
+    expect(built.neurons.data['tips']).toEqual([5, 5, 5, 5, 5])
+    expect(built.neurons.data['shown']).toEqual([2, 2, 2, 2, 2])
+    expect(built.neurons.data['expectedRight']).toBeUndefined()
   })
 
   /** The layer is the shown suggestions, two points each: where to look and where to merge. */
@@ -283,7 +258,7 @@ describe('reading a set', () => {
       expect(isNeuronId(item.neuronId)).toBe(true)
       expect(isNeuronId(item.candidateId)).toBe(true)
       expect(item.tipNm).not.toEqual(item.contactNm)
-      expect(item.r).toBeGreaterThanOrEqual(0)
+      expect(item.q).toBeGreaterThanOrEqual(SET.cutoff)
     }
   })
 })

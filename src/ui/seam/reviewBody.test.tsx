@@ -71,6 +71,7 @@ const TIPS: TableValue = makeTable(
     column('x', 'f64'),
     column('y', 'f64'),
     column('z', 'f64'),
+    column('q', 'f64'),
     column('r', 'f64'),
     column('shown', 'bool'),
   ),
@@ -81,7 +82,8 @@ const TIPS: TableValue = makeTable(
     x: [1, 4],
     y: [2, 5],
     z: [3, 6],
-    r: [0.91, 0.42],
+    q: [0.91, 0.42],
+    r: [0.95, 0.5],
     shown: [true, false],
   },
 )
@@ -136,7 +138,8 @@ const TWO_TIPS: TableValue = makeTable(TIPS.schema, {
   x: [1, 7, 4],
   y: [2, 8, 5],
   z: [3, 9, 6],
-  r: [0.91, 0.99, 0.42],
+  q: [0.91, 0.99, 0.42],
+  r: [0.95, 0.99, 0.5],
   shown: [true, true, false],
 })
 const TWO_CANDIDATES: TableValue = makeTable(CANDIDATES.schema, {
@@ -223,13 +226,7 @@ describe('the review card', () => {
     draw()
     const labels = [...document.querySelectorAll('.param__label')].map((n) => n.textContent)
     expect(labels).toEqual(
-      expect.arrayContaining([
-        'Min confidence',
-        'Min size',
-        'Only SEAM’s shown set',
-        'Sort by',
-        'Show accepted',
-      ]),
+      expect.arrayContaining(['Min confidence', 'Min size', 'Sort by', 'Show accepted']),
     )
   })
 
@@ -329,7 +326,9 @@ describe('the review card', () => {
   it('lists one row per tip, highest confidence first', () => {
     draw()
     expect(rows()).toHaveLength(2)
-    expect(rows()[0]!.textContent).toContain('0.910')
+    // `q`, which the list is ordered by, with `r` beneath it only as a rounded estimate.
+    expect(rows()[0]!.querySelector('.review-row__score')!.textContent).toBe('0.910≥90%')
+    expect(rows()[1]!.querySelector('.review-row__score')!.textContent).toBe('0.420≈50%')
     expect(rows()[0]!.textContent).toContain('648518346368395605')
     // The candidate's own facts, which are what a reader judges size and reach by.
     // The size the queue sorts and filters on, with its unit: a chunk count is of the whole
@@ -488,6 +487,7 @@ describe('the review card', () => {
       x: Array.from({ length: n }, () => 1),
       y: Array.from({ length: n }, () => 2),
       z: Array.from({ length: n }, () => 3),
+      q: Array.from({ length: n }, (_, i) => 1 - i / n),
       r: Array.from({ length: n }, (_, i) => 1 - i / n),
       shown: Array.from({ length: n }, () => false),
     })
@@ -814,7 +814,8 @@ describe('extending a neuron from the review card', () => {
         x: [1, 4, 7, 8],
         y: [2, 5, 7, 8],
         z: [3, 6, 7, 8],
-        r: [0.91, 0.42, null, 0.3],
+        q: [0.91, 0.42, null, 0.3],
+        r: [0.95, 0.5, null, 0.3],
         shown: [true, false, null, true],
         seed: [NEURON, NEURON, NEURON, NEURON],
         steps: [0, 0, 1, 1],
