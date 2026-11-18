@@ -92,6 +92,7 @@ import type {
   RunSummary,
 } from '../core/scheduler'
 import { Scheduler } from '../core/scheduler'
+import { emptyRecords } from '../core/runRecord'
 import type { TableSchema } from '../core/types'
 import type { Value } from '../core/values'
 import { isTableValue } from '../core/values'
@@ -1304,6 +1305,14 @@ export interface GraphState {
    * IndexedDB in milliseconds with the same bytes.
    */
   clearNodeCache(nodeId: string): void
+  /**
+   * The card's ⟳ and "Fetch Again Now": forget the node's data, empty what its runs recorded
+   * (`ParamBase.runRecord` — the moments `seam:suggestMerges` searched its neurons at), and run
+   * it, which decides afresh. Its own action because `clearNodeCache` is also the Inspector's and the
+   * menu's Clear Cache, which say "forget downloaded data" and must not move a moment in the
+   * document — that would leave a review card's saved verdicts naming another search's answer.
+   */
+  refreshNode(nodeId: string): Promise<void>
   /** Drop every cached result, so the next Run re-fetches from scratch. */
   /**
    * Drop a workflow's results — the one on screen by default, any open one by id (the Memory
@@ -1572,6 +1581,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
       onLapseDue: () => {
         if (activeDoc !== id) return
         rec.scheduler.refreshStates(get().graph, get().inference)
+      },
+      /*
+       * A running node recorded what it decided (`ParamBase.runRecord`). Written into the
+       * document with no undo step and no run: the param is out of the key, so the write
+       * re-keys nothing — it is a record of the run in flight, not an edit asking for one. A
+       * background document's run was cancelled on the way out (`switchDocument`), and the
+       * context drops a cancelled run's record.
+       */
+      onRecord: (nodeId, paramId, value) => {
+        if (activeDoc !== id) return
+        commit((graph) => setNodeParam(graph, nodeId, paramId, value), {
+          history: false,
+          autoRun: false,
+        })
       },
     })
     docs.set(id, rec)
@@ -3569,6 +3592,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     clearNodeCache: (nodeId) => {
       sched().clearNodeCache(get().graph, nodeId)
+    },
+
+    refreshNode: async (nodeId) => {
+      // No undo step and no auto-run, as a record is written: the run below is the one.
+      const before = get().graph
+      commit((graph) => emptyRecords(graph, nodeId), { history: false, autoRun: false })
+      // Where a record was emptied, re-keyed, so a run still deciding on it is stopped rather
+      // than adopted. Every other card's ⟳ is Clear Cache and run, as it always was.
+      if (get().graph !== before) sched().renewNode(get().graph, nodeId)
+      else sched().clearNodeCache(get().graph, nodeId)
+      await runFull([nodeId])
     },
 
     clearResults: (workflowId) => {

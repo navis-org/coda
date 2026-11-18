@@ -408,6 +408,32 @@ interface ParamBase {
    * It auto-runs only where it is not `presentational`, i.e. where it can change a result.
    */
   unrecorded?: boolean
+  /**
+   * **A record the run keeps**, not a setting: what the node decided while it ran, written back
+   * into the document through `ctx.record` so the next run — after a reload too — answers the
+   * same. The card's ⟳ (the store's `refreshNode`) empties it. `core/runRecord.ts`.
+   *
+   * For a node whose answer depends on *when* it is asked, where the moment has to be in the
+   * document: `seam:suggestMerges` reads the live segmentation, and a review card below it saves
+   * verdicts naming the candidates it found — searched again at a new "now" after a reload, they
+   * could name nothing (`docs/seam-live-plan.md`). It keeps the moment it searched each neuron
+   * at, and the neurons are only known while it runs, so the record can only be written after
+   * the run has begun — by the store, through `SchedulerHost.onRecord`, from every surface that
+   * runs it (the dashboard too, where no card is mounted).
+   *
+   * **Declare it `presentational`, `unrecorded` and `internal` as well** — `registerNode` refuses
+   * it otherwise. Presentational, because it is out of the key: written mid-run, in the key it
+   * would re-key the node and everything below it, and run them again, for a record of what they
+   * had just done. That bends invariant 4's wording — a record *is* read by `evaluate` — and
+   * holds by construction instead: the same key means the same upstream, so the same things to
+   * record, and an entry, once written, is what the run that wrote it used. The ways it changes
+   * otherwise are the ⟳, which moves the node's key as it empties the record
+   * (`Scheduler.renewNode`), so a run deciding on the old record is stopped rather than adopted,
+   * and an edit by hand, which `internal` keeps off the card. Unrecorded, because undo must not
+   * take back what a run did. A run outside the store (the MCP server, `rerunInput`)
+   * writes nothing, so `evaluate` must still answer a record that lacks what it is about to add.
+   */
+  runRecord?: boolean
   /** Conditional visibility, evaluated against the node's current params. */
   visibleIf?: (params: ParamValues) => boolean
   /**
@@ -1196,6 +1222,16 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
    * honest state for a node that did not fetch.
    */
   reportFetched(at: number): void
+  /**
+   * Write a `runRecord` param's new value into the document — what this run decided and the
+   * next must read back (`ParamBase.runRecord`). The whole value, not a change to it.
+   *
+   * Throws for a param not declared `runRecord`, so nothing else can be written this way. Does
+   * nothing for a run that has been cancelled, and nothing where the scheduler has no host to
+   * write it (the MCP server, `rerunInput`'s private scheduler). Optional, as `rerunInput` is,
+   * only so a context built by hand in a test need not carry it: the scheduler always does.
+   */
+  record?(paramId: string, value: ParamValue): void
   /**
    * Which pass of a `For Each` this is, when the node sits inside a loop's region.
    *

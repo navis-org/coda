@@ -37,6 +37,7 @@ import type {
   LoopIteration,
   LoopPlan,
   NodeDefinition,
+  ParamValue,
   ParamValues,
   PortDef,
   RerunResult,
@@ -353,6 +354,12 @@ export interface SchedulerHost {
    * this (a document in the background) loses only a badge, and derives it on the way back in.
    */
   onLapseDue?(): void
+  /**
+   * A running node recorded what it decided (`EvalContext.record`, `ParamBase.runRecord`): write
+   * it into the document's `paramId` of `nodeId`. The host owns the document; the scheduler only
+   * relays. Out of the key, so the write re-keys nothing and runs nothing.
+   */
+  onRecord?(nodeId: string, paramId: string, value: ParamValue): void
 }
 
 /**
@@ -929,6 +936,22 @@ export class Scheduler {
   clearNodeCache(graph: CodaGraph, nodeId: string): void {
     this.forceRefresh.add(nodeId)
     this.invalidateNode(graph, nodeId)
+  }
+
+  /**
+   * `clearNodeCache`, with the node's key moved as a lapse moves it (`lapses`) — for a node asked
+   * to decide afresh what its key cannot see: the ⟳ emptying a run record (`ParamBase.runRecord`),
+   * which is out of the key by design.
+   *
+   * Without the move, a run of this node already in flight keeps its key, so the next walk
+   * **adopts** it, and its answer — decided on what the record held before — lands as the
+   * result. Moved, `refreshStates` retires it (`retireMoved`), and everything below the node is
+   * keyed afresh. Session state, like the lapse it borrows: after a reload there is nothing in
+   * flight and no result to tell apart.
+   */
+  renewNode(graph: CodaGraph, nodeId: string): void {
+    this.lapses.set(nodeId, (this.lapses.get(nodeId) ?? 0) + 1)
+    this.clearNodeCache(graph, nodeId)
   }
 
   /** Stop the walk *and* everything it set evaluating — the one gesture that means "all of it". */
@@ -2429,7 +2452,7 @@ export class Scheduler {
      * one mention would keep the superseded walk's whole graph alive until the node returned.
      */
     const { nodeId, def, gathered, refresh, maxAgeMs, iteration, accumulated, onFetched } = opts
-    const params = withDefaults(def, this.nodeOf(opts.pass, nodeId).params)
+    let params = withDefaults(def, this.nodeOf(opts.pass, nodeId).params)
     const types = (opts.pass.inference.nodes[nodeId]?.inputs ?? {}) as Record<string, never>
     const owner = opts.owner ?? { controller: opts.pass.controller, walk: walkOf(opts.pass) }
     const signal = owner.controller.signal
@@ -2439,13 +2462,29 @@ export class Scheduler {
       ? rerunnerFor(this.host, opts.pass.graph, opts.pass.inference, nodeId, signal)
       : undefined
     return {
-      params,
+      /*
+       * A getter, so what this evaluation records it reads back (`record` below). The lifetime
+       * backstop runs `evaluate` a second time on a spread of this context, and a second pass
+       * reading the record as it was before the first would decide afresh what the first had
+       * just decided — a new moment for every neuron Suggest Merges met, and its work wasted.
+       */
+      get params() {
+        return params
+      },
       rerunInput,
       refresh,
       maxAgeMs,
       iteration,
       accumulated,
       reportFetched: (at) => onFetched?.(at),
+      record: (paramId, value) => {
+        if (!findParam(def, paramId)?.runRecord) {
+          throw new Error(`${def.type} records \`${paramId}\`, which is not a run record.`)
+        }
+        if (signal.aborted) return
+        params = { ...params, [paramId]: value }
+        this.host.onRecord?.(nodeId, paramId, value)
+      },
       warn: (message) => {
         const said = this.liveWarnings.get(nodeId) ?? []
         // Deduped, so a warning raised inside a per-item loop says its piece once.

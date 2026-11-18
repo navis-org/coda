@@ -217,6 +217,20 @@ function register<P extends ParamValues>(
     )
   }
   /*
+   * A run record is written mid-run (`ParamBase.runRecord`). In the key, that write would re-key
+   * the node and everything below it and run them again for a record of what they had just done
+   * — silently, which is why the three flags it rests on are checked here, not left to its doc.
+   */
+  for (const param of def.params ?? []) {
+    if (param.runRecord && !(param.presentational && param.unrecorded && param.internal)) {
+      throw new Error(
+        `"${def.type}"'s \`${param.id}\` is a \`runRecord\` but not \`presentational\`, ` +
+          '`unrecorded` and `internal`: a record written mid-run must stay out of the key, the ' +
+          'undo history and the param rows.',
+      )
+    }
+  }
+  /*
    * A companion is placed under its host's *height* on add, before anything has measured the
    * host — so the host has to say how tall it expects to be. Without this it would silently fall
    * back to a guess, and the failure is the one that forced the field: a credit card drawn over

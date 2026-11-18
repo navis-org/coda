@@ -173,13 +173,13 @@ function CodaNodeViewImpl({
    * with Cancel an inch away. See `EvalContext.warn`.
    */
   const runWarning = useGraphStore((s) => s.nodeWarning(id))
-  const clearNodeCache = useGraphStore((s) => s.clearNodeCache)
+  const refreshNode = useGraphStore((s) => s.refreshNode)
   // Where the cache-lifetime menu was opened, while it is open — see `CacheLifetimeMenu`.
   const [cacheMenuAt, setCacheMenuAt] = useState<{ x: number; y: number } | undefined>()
-  // The label's click and the menu's "Fetch Again Now": drop the node's data cache and run it.
+  // The label's click and the menu's "Fetch Again Now": empty what the node's runs recorded, drop
+  // its data cache, and run it (`refreshNode`).
   const refreshData = () => {
-    clearNodeCache(id)
-    void runNode(id)
+    void refreshNode(id)
   }
   // Only the multi-input viewers need these, so they are resolved lazily per render rather
   // than subscribed to — `previewVersion` above is what re-renders the card when they move.
