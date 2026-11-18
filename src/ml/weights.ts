@@ -26,7 +26,7 @@ import type { StoredUsage } from '../data/idb'
 import { memoPromise, untilAborted } from '../data/memoPromise'
 import { unreachable } from '../data/fetchText'
 import type { LoadedManifest } from './manifest'
-import { fileUrl, modelFile } from './manifest'
+import { fileUrl, modelFile, sha256Hex } from './manifest'
 
 /**
  * Two stores, for `uploads.ts`' reason.
@@ -96,15 +96,6 @@ const listeners = new Map<string, Listener[]>()
  */
 function cacheKey(loaded: LoadedManifest, variant: string, part: string): string {
   return `${loaded.manifest.id}/${variant}/${part}/${modelFile(loaded, variant, part).sha256}`
-}
-
-/** sha256 of a buffer, as lower-case hex. */
-async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
-  if (!globalThis.crypto?.subtle) {
-    throw new WeightError('No SubtleCrypto, so the weights cannot be verified')
-  }
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 const write = (body: (tx: IDBTransaction) => void) =>
@@ -249,6 +240,9 @@ export function loadWeights(
       const url = fileUrl(loaded, variant, part)
       // No signal: this is the *shared* work. A caller gives up by `untilAborted` below.
       const bytes = await download(url, entry.bytes, (received) => announce(received, false))
+      if (!globalThis.crypto?.subtle) {
+        throw new WeightError('No SubtleCrypto, so the weights cannot be verified')
+      }
       const got = await sha256Hex(bytes)
       if (got !== entry.sha256) {
         throw new WeightError(

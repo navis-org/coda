@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { installRouteFetch } from '../test/caveStubs'
 import {
   MANIFEST_SCHEMA,
   checkManifest,
   completeVariants,
   fileUrl,
+  loadManifest,
   type LoadedManifest,
   type ModelManifest,
 } from './manifest'
@@ -49,7 +53,33 @@ function manifest(over: Partial<ModelManifest> = {}): ModelManifest {
   } as ModelManifest
 }
 
-const loaded = (m: ModelManifest, url: string): LoadedManifest => ({ manifest: m, url })
+const loaded = (m: ModelManifest, url: string): LoadedManifest => ({
+  manifest: m,
+  url,
+  digest: 'test',
+})
+
+describe('loadManifest', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('names the version it read by the digest of the bytes served', async () => {
+    // Spaced and non-ASCII as a file may be: the digest is of the text served, not a re-encoding.
+    const text = JSON.stringify(manifest({ citation: 'Troidl et al. — µm' }), null, 2) + '\n'
+    installRouteFetch({ '/manifest.json': { body: text } })
+    const got = await loadManifest('https://models.invalid/a/manifest.json')
+    expect(got.digest).toBe(createHash('sha256').update(text, 'utf8').digest('hex'))
+  })
+
+  it('tells a republished manifest from the one before, though its id is the same', async () => {
+    installRouteFetch({ '/manifest.json': { body: JSON.stringify(manifest()) } })
+    const before = await loadManifest('https://models.invalid/a/manifest.json')
+    const refit = manifest({ config: { model: 'ae_d1024_m512', depth: 24, refit: true } })
+    installRouteFetch({ '/manifest.json': { body: JSON.stringify(refit) } })
+    const after = await loadManifest('https://models.invalid/a/manifest.json')
+    expect(after.manifest.id).toBe(before.manifest.id)
+    expect(after.digest).not.toBe(before.digest)
+  })
+})
 
 describe('fileUrl', () => {
   /**

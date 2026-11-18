@@ -66,7 +66,7 @@ describe('the manifest the converter writes', () => {
 
   it('resolves its file against wherever the manifest was fetched from', () => {
     const at = fileUrl(
-      { manifest: RAW, url: 'https://host/x/models/a/manifest.json' },
+      { manifest: RAW, url: 'https://host/x/models/a/manifest.json', digest: 'test' },
       ORT_ASSESSOR_VARIANT,
       ASSESSOR_PART,
     )
