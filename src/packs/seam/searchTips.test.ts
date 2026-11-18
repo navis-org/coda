@@ -19,6 +19,7 @@ import {
   ASSESSED_TIP_FIELDS,
   candidatesTable,
   LINEAGE_FIELDS,
+  ORGANELLE_CUT,
   searchOnly,
   tipFields,
   tipsByNeuron,
@@ -203,6 +204,8 @@ describe('the Candidates table', () => {
       'contact_x',
       'contact_y',
       'contact_z',
+      'organelle_score',
+      'organelle',
     ])
   })
 })
@@ -565,7 +568,17 @@ describe('an assessed run', () => {
         conf: Float64Array.from(order, () => 0.25),
       },
       filled: order.map(() => '' as const),
-      tip: { segclr: 1.5, p_tip: 0.4, p_top: 0.9, q: 0.36, r: 0.8, shown: true },
+      tip: {
+        segclr: 1.5,
+        p_tip: 0.4,
+        p_top: 0.9,
+        q: 0.36,
+        r: 0.8,
+        shown: true,
+        q_no_organelles: 0.36,
+        r_no_organelles: 0.8,
+        shown_no_organelles: true,
+      },
     },
   })
 
@@ -754,5 +767,59 @@ describe('the columns a run requires', () => {
     ])
     expect(() => tipsFromTable(table, true)).not.toThrow()
     expect(tipsFromTable(table, true).rows[0]!.eTip).toBeUndefined()
+  })
+})
+
+/**
+ * The organelle flag (SEAM, 2026-11-14): `organelle_score` is SEAM's `enclosed`, and `organelle`
+ * is it at or above `ORGANELLE_CUT` — worked out in one place for the candidate rows and the tip's
+ * first candidate. A flag, never a rank: nothing here may move.
+ */
+describe('the organelle flag', () => {
+  /** An end whose candidates carry the pool's `enclosed`, as the search's Python step adds it. */
+  function enclosedEnd(enclosed: readonly number[]): PublishedEnd {
+    const plain = end(
+      0,
+      enclosed.map((_, i) => ({ root: String(720575940000000001n + BigInt(i)), dist: 0.1 })),
+    )
+    return {
+      ...plain,
+      end: {
+        ...plain.end,
+        columns: { ...plain.end.columns, enclosed: Float64Array.from(enclosed) },
+      },
+    }
+  }
+  const tips = tipsFromTable(
+    tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 1, y: 2, z: 3 }]),
+  ).rows
+
+  it('scores each candidate by its enclosure, and flags it from the cut up', () => {
+    const at = ORGANELLE_CUT
+    const table = candidatesTable([enclosedEnd([0.92, at, at - 1e-9, Number.NaN])], tips, false)
+    expect(table.data['organelle_score']).toEqual([0.92, at, at - 1e-9, null])
+    // At the cut is an organelle, as SEAM's `>=` has it; an unmeasured piece is not said to be.
+    expect(table.data['organelle']).toEqual([true, true, false, null])
+    // And the order is the search's: a flag moves nothing.
+    expect(table.data['rank']).toEqual([1, 2, 3, 4])
+  })
+
+  it('puts the first candidate’s flag on the tip, as it does every first-candidate column', () => {
+    const tipsOut = tipsWithFirsts(
+      tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 1, y: 2, z: 3 }]),
+      [enclosedEnd([0.8, 0.1])],
+      tips,
+      false,
+      new Set([0]),
+    )
+    expect(tipsOut.data['organelle']).toEqual([true])
+    // The score stays on Candidates: SEAM's tips file carries the flag alone.
+    expect(tipsOut.data['organelle_score']).toBeUndefined()
+  })
+
+  it('says nothing about a pool that was not measured for it', () => {
+    const table = candidatesTable([end(0, [{ root: '1', dist: 0.1 }])], tips, false)
+    expect(table.data['organelle_score']).toEqual([null])
+    expect(table.data['organelle']).toEqual([null])
   })
 })

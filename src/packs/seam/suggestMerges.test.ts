@@ -86,6 +86,37 @@ describe('the card', () => {
   })
 })
 
+describe('the organelle flag', () => {
+  it('promises both columns on Candidates, and the first candidate’s flag on Tips', () => {
+    const out = infer({}, { tips: T.table() })
+    const names = (schema: TableSchema | undefined) => (schema ? columnNames(schema) : [])
+    expect(names(out.candidates!.schema)).toEqual(
+      expect.arrayContaining(['organelle_score', 'organelle']),
+    )
+    expect(names(out.tips!.schema)).toContain('organelle')
+    // The score stays on Candidates, as SEAM's tips file carries the flag alone.
+    expect(names(out.tips!.schema)).not.toContain('organelle_score')
+  })
+})
+
+describe('Searched at', () => {
+  /**
+   * A record the run keeps of each neuron's moment (`docs/seam-live-plan.md`): out of the key,
+   * or writing it mid-run would re-run the node and the review card for a record of what they
+   * had just done; unrecorded, or undo would take it back; internal, or the card would offer it
+   * for editing, and an edit by hand re-runs nothing.
+   */
+  it('is a run record, out of the key, kept off the card and out of undo', () => {
+    expect(findParam(def, 'at')).toMatchObject({
+      runRecord: true,
+      presentational: true,
+      unrecorded: true,
+      internal: true,
+      absentMeans: '',
+    })
+  })
+})
+
 describe('extending a neuron', () => {
   it('takes what to extend by reference, so it waits for nothing below it', () => {
     // Review Suggestions sits below this node. An ordinary input from it would be a cycle.
@@ -237,7 +268,10 @@ describe('the wait it prices', () => {
    */
   it('prices an assessed end above a searched one, and warns sooner for it', () => {
     expect(secondsPerEnd(true, 0)).toBeGreaterThan(secondsPerEnd(false, 0))
-    expect(endsBeforeWarning(true)).toBeLessThan(endsBeforeWarning(false) / 1.5)
+    // Sooner, with no factor: a factor of 1.5 stood here until the organelle measure added 260 ms
+    // to every end (2026-11-17) and took the measured ratio to 1.49 — the move the note above
+    // says a ratio must not be pinned against.
+    expect(endsBeforeWarning(true)).toBeLessThan(endsBeforeWarning(false))
     // And a neuron is hundreds of ends, so an assessed whole neuron is always worth a word.
     expect(endsBeforeWarning(true)).toBeLessThan(500)
   })

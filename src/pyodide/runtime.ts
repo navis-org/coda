@@ -39,6 +39,7 @@ import NBLAST_PY from './nblast.py?raw'
 import SEAM_CANONICAL_PY from './seam/canonical.py?raw'
 import SEAM_CANDIDATES_PY from './seam/candidates.py?raw'
 import SEAM_CUTOUT_PY from './seam/cutout.py?raw'
+import SEAM_ENCLOSURE_PY from './seam/enclosure.py?raw'
 import SEAM_PATCHES_PY from './seam/patches.py?raw'
 import SEAM_SCAN_PY from './seam/scan.py?raw'
 import SEAM_WINDOWS_PY from './seamWindows.py?raw'
@@ -190,7 +191,11 @@ const MODULES: Record<string, PyModule> = {
    */
   cutoutSummary: {
     source: CUTOUT_SUMMARY_PY,
-    vendored: { 'seam.cutout': SEAM_CUTOUT_PY, 'seam.candidates': SEAM_CANDIDATES_PY },
+    vendored: {
+      'seam.cutout': SEAM_CUTOUT_PY,
+      'seam.candidates': SEAM_CANDIDATES_PY,
+      'seam.enclosure': SEAM_ENCLOSURE_PY,
+    },
     packages: ['numpy', 'scipy', 'pandas'],
     label: 'numpy · scipy · pandas · SEAM cutout and ranker',
   },

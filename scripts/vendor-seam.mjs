@@ -66,6 +66,16 @@ const COPIES = [
     source: 'seam/segclr/patches.py',
     what: "the assessor's 129³ patches, and the box labelling under them",
   },
+  /*
+   * The organelle flag (2026-11-17): how much of each object in a search box faces its largest
+   * neighbour. Numpy and pandas only, and run on the box the search has already read, so it is
+   * an ordinary copy.
+   */
+  {
+    file: 'enclosure.py',
+    source: 'seam/enclosure.py',
+    what: 'how enclosed each object in a cutout is — the organelle flag',
+  },
 ]
 /**
  * The runs to take, each named by the markers that bound it rather than by line number.

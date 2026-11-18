@@ -1,6 +1,6 @@
 # Vendored from SEAM
 
-Four **byte-identical copies** of whole SEAM modules, and one slice.
+Five **byte-identical copies** of whole SEAM modules, and one slice.
 
 They are not edited here, and that is the point. SEAM's invariant 3 is that training and
 inference build the model's input through *one* function, and its invariant 11 is that the
@@ -28,6 +28,7 @@ disk, so the hashes cannot go stale — they are for a reader with no SEAM check
 | `scan.py` | `seam/scan.py` | the windows a surface is tiled into |
 | `cutout.py` | `seam/cutout.py` | what is in a supervoxel cutout, and the local shape near a point |
 | `patches.py` | `seam/segclr/patches.py` | the assessor's 129³ patches, and the box labelling under them |
+| `enclosure.py` | `seam/enclosure.py` | how enclosed each object in a cutout is — the organelle flag |
 
 | file | sha256 |
 | --- | --- |
@@ -35,8 +36,9 @@ disk, so the hashes cannot go stale — they are for a reader with no SEAM check
 | `scan.py` | `e65c4d423c3f7e42b06232f0fd1291b13c4e8a0d76e18fbbae598caefa2c5f5d` |
 | `cutout.py` | `5839b36359eed58d4a2c7aea0e1affc136eab05865ed2330f37b8418f499526a` |
 | `patches.py` | `6e5afa7ac45671f1a1877633786671dba1be79c0db54ff05b55b84f6f6eaf94e` |
+| `enclosure.py` | `621421f1a67e4a30f9c3c427a56c3175102f1fa3d63492943ec295f420950196` |
 
-Copied at SEAM commit `0374517`. Recording it matters as much
+Copied at SEAM commit `0374517`; `enclosure.py` at `a3f6eb7` (2026-11-17), last changed upstream in `2ff1f97`. Recording it matters as much
 as the hashes: without it a clean ✓ against a dirty or differently-branched checkout is
 indistinguishable from a real one, and nobody can tell later which SEAM state a feature or a
 patch was copied from.
