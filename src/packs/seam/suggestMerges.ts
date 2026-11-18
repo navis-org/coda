@@ -7,7 +7,7 @@
  * and 5 — the 6 µm box, the eleven geometric features, the forest, the cut, the own-tip rule —
  * in the browser, for the ends on the wire — and stages 6 to 9 too, where an `Assessor` is
  * picked. Everything it publishes was measured here, from the
- * segmentation as the chosen materialization saw it.
+ * segmentation as it stood at each neuron's moment in `Searched at` (`momentsOf`).
  *
  * **The pipeline is Coda's, not a published run's.** The box size, the pool radius, the cut, the
  * own-tip radius and the forest's feature order are one decision — every number was fixed when
@@ -90,6 +90,7 @@ import type { TableValue } from '../../core/values'
 import { isTableValue } from '../../core/values'
 import { slowGpuDispatch } from '../../ml/support'
 import { agree, plural } from '../../style/format'
+import type { CaveTarget } from '../../nodes/lib/caveParams'
 import {
   CAVE_DATASET_INPUT,
   caveDatastackIssues,
@@ -99,7 +100,16 @@ import {
 import { NM_PER_UM } from '../../data/units'
 import type { CandidatePoolRequest, PoolSizesRequest } from '../../pyodide/cutoutSummary'
 import { runCandidatePool, runPoolSizes } from '../../pyodide/cutoutSummary'
-import { l2ChunkCounts } from '../../data/cave/rootIds'
+import { grapheneFor, instantOf, l2ChunkCounts, rootLives } from '../../data/cave/rootIds'
+import { distinctStrings, groupBy } from '../../core/collections'
+import { namedFew } from '../../core/prose'
+import {
+  editedSince,
+  momentsFrom,
+  notRoots,
+  readSearchedAt,
+  writeSearchedAt,
+} from './rootMoment'
 
 import { useAssessorBox } from '../../pyodide/assessorPatches'
 import type { TreeRanker } from './treeRanker'
@@ -147,7 +157,7 @@ import {
   tipsWithFirsts,
 } from './searchTips'
 import { schemaOf } from './suggestionTables'
-import { boxFits, endToSearch, openSearchVolume } from './searchVolume'
+import { boxFits, endToSearch, openSearchVolume, unlistedMaterialization } from './searchVolume'
 import { forgetRoots, labelledBox } from './rootedBox'
 import type { SearchVolume } from './searchVolume'
 import { runClock } from './runClock'
@@ -157,6 +167,14 @@ import type { Triple, VolumeScale } from '../../data/precomputed/volume'
 import type { CaveRequestOptions } from '../../data/cave/client'
 import { formatBytes } from '../../core/limits'
 import { DEFAULT_CHUNK_BUDGET } from '../../data/precomputed/chunkCache'
+
+/**
+ * How far behind this browser's clock a new neuron's moment is taken. A browser clock ahead of
+ * the chunkedgraph's would otherwise name a moment a current root has not reached, and the run
+ * would be capped at the server's now while the record said otherwise. A clock kept by NTP is
+ * well within a second of a server's; five is a margin, not a measurement.
+ */
+const FILL_BEHIND_MS = 5_000
 
 /** How much of the progress bar the ranker gets before the search starts. It is 1.3 MB. */
 const MODEL_SHARE = 0.02
@@ -503,8 +521,32 @@ export const suggestMergesNode = packNode({
       help: 'How much memory to spend holding segmentation this run has already fetched. A chunk of the Aedes segmentation is 8.2 × 8.2 × 2.9 µm and 3 MB — wider than either box an end reads — so an end’s patch box is largely the chunks its own search box just pulled, and so is its neighbour’s: one neuron’s 505 ends fetched 25.4 GB for 2.8 GB of distinct chunks. On that neuron a tip read 72 MB with no cache, 13 MB at this default, and 7 MB at 1.5 GB. Raising it pays most where a Sort above this node has scattered the ends, since a cache the size of the neuron’s working set does not care what order they arrive in. It is held until the run ends, outside the JavaScript heap where nothing refuses it — so a budget past what the machine has loses the run rather than slowing it. 0 holds nothing. It changes no answer, so changing it re-runs nothing, and an end already searched is remembered and reads no segmentation at all: to see what a new budget does, use Clear Cache and run again.',
     },
     caveDatastackParam(
-      'Which datastack’s segmentation to search, as `datastack:materialization`. Wire a Dataset instead and this follows it. The materialization decides *when* the supervoxels are read as belonging to a neuron, so it should be the one the open ends were found in.',
+      'Which datastack’s segmentation to search, as `datastack:materialization`. Wire a Dataset instead and this follows it. Only the datastack is read: the moment the search reads the segmentation at is `Searched at`, moved into each neuron’s own life, never the materialization.',
     ),
+    {
+      id: 'at',
+      kind: 'string',
+      label: 'Searched at',
+      placeholder: 'kept by the node as it runs',
+      default: '',
+      absentMeans: '',
+      /*
+       * **A record the run keeps, not a setting** (`ParamBase.runRecord`): the moment each
+       * neuron was first searched at, as `root=moment` entries (`readSearchedAt`). The search
+       * reads the live segmentation and the review card below saves verdicts naming what it
+       * found; searched again at a new "now" after a reload, those could name nothing. A neuron
+       * is only known once the run is under way, so the run writes the record (`ctx.record`),
+       * and it is out of the key so that writing it re-runs nothing — the same key means the
+       * same neurons, and an entry is what the run that wrote it used. Internal, so the card does
+       * not offer it for editing; unrecorded, so undo does not take it back
+       * (`docs/seam-live-plan.md`).
+       */
+      runRecord: true,
+      presentational: true,
+      unrecorded: true,
+      internal: true,
+      help: 'The moment each neuron was searched at, as `root=moment` entries (ISO 8601, UTC). Kept by the node: the first run that meets a neuron searches it at the present and writes it here, so the same suggestions come back for it after a reload and when you return to it from another neuron. The card’s ⟳ empties it, and the run after searches every neuron at the present. Where a root was edited before its moment, it is searched as it last stood; the card says so.',
+    },
   ],
 
   // Only where an assessor is picked: with none, nothing runs on the GPU and the sentence is
@@ -579,12 +621,12 @@ export const suggestMergesNode = packNode({
     if (issue) throw new Error(issue)
     const assessing = assessorModel !== undefined
 
-    const { rows, dropped } = tipsFromTable(table, assessing)
-    if (dropped > 0) {
+    const parsed = tipsFromTable(table, assessing)
+    if (parsed.dropped > 0) {
       ctx.warn(
-        `${plural(dropped, 'row')} of the Tips table could not be searched — no position, no ` +
-          '`end_uid`, or a neuron that is not a chunkedgraph id. ' +
-          `${agree(dropped, 'It is', 'They are')} passed through unsearched.`,
+        `${plural(parsed.dropped, 'row')} of the Tips table could not be searched — no ` +
+          'position, no `end_uid`, or a neuron that is not a chunkedgraph id. ' +
+          `${agree(parsed.dropped, 'It is', 'They are')} passed through unsearched.`,
       )
     }
     const top = assessing ? Math.max(0, Math.floor(Number(ctx.params.assessTop) || 0)) : 0
@@ -592,33 +634,43 @@ export const suggestMergesNode = packNode({
     /*
      * Through `tipsWithFirsts` rather than handing back `table`, so the empty answer is the shape
      * `inferOutputs` promised: one schema function, one value writer, and no path that publishes
-     * a table a column picker below has not been offered.
+     * a table a column picker below has not been offered. Nothing attempted, so every row of the
+     * incoming table is a row this run will not search — which the warnings say in prose.
      */
-    if (rows.length === 0) {
-      return {
-        // Nothing attempted, so every row of the incoming table is a row this run will not
-        // search — which is what the warning just above says in prose.
-        tips: tipsWithFirsts(table, [], [], assessing, new Set<number>()),
-        candidates: candidatesTable([], [], assessing),
-      }
-    }
+    const nothing = () => ({
+      tips: tipsWithFirsts(table, [], [], assessing, new Set<number>()),
+      candidates: candidatesTable([], [], assessing),
+    })
+    if (parsed.rows.length === 0) return nothing()
     const { model, issue: rankerIssue } = chosenRanker(ctx.params)
     if (!model) throw new Error(rankerIssue)
+    const options = { deployment: target.deployment, signal: ctx.signal }
+
+    /*
+     * **When each neuron is read** — its own moment, not the Dataset's materialization
+     * (`momentsOf`, `docs/seam-live-plan.md`). Asked before anything is priced, since the moment
+     * is in every end's key. A neuron the chunkedgraph never made is passed through unsearched,
+     * as a row with no position is.
+     */
+    const moments = await momentsOf(ctx, target, parsed.rows, options)
+    const rows = parsed.rows.filter((tip) => moments.has(tip.neuronId))
+    if (rows.length === 0) return nothing()
     /*
      * **What this run is, for the memory of finished ends** — everything an end's answer depends
-     * on that every end of the run shares (`endMemory.ts`). Built before anything is opened,
-     * because it also prices the wait: an end already answered costs nothing, and a warning that
-     * counted it would announce twenty minutes for a run that takes one.
+     * on that every end of a neuron shares (`endMemory.ts`), the moment included, so one per
+     * neuron. Built before anything is opened, because it also prices the wait: an end already
+     * answered costs nothing, and a warning that counted it would announce twenty minutes for a
+     * run that takes one.
      */
-    const identity: RunIdentity = {
+    const identityOf = (neuron: string): RunIdentity => ({
       ranker: model.id,
       assessor: assessorModel?.id ?? NO_ASSESSOR,
       top,
       deployment: target.deployment,
       datastack: target.datastack,
-      version: target.version,
-    }
-    const neurons = neuronsOf(rows, identity)
+      moment: moments.get(neuron)!,
+    })
+    const neurons = neuronsOf(rows, identityOf)
     const keys = neurons.flatMap((neuron) => neuron.keys)
     const held = heldFor(ctx, keys)
     /*
@@ -632,7 +684,7 @@ export const suggestMergesNode = packNode({
       extendPairs(ctx.input('review')),
       neurons.map((one) => one.neuron),
     )
-    const foreseen = foreseePieces(ctx, identity, neurons, pieces, assessing)
+    const foreseen = foreseePieces(ctx, identityOf, neurons, pieces, assessing)
     /*
      * A count of **tips**, where the run searches only those whose box fits the volume; a tip
      * outside it is never remembered, so it is counted and never searched. That errs towards
@@ -660,13 +712,14 @@ export const suggestMergesNode = packNode({
     })
 
     /*
-     * **One instant for the whole run.** Every box is turned into roots at the same moment, so
-     * the supervoxels two neighbouring ends share are asked about once — which is what
-     * `SearchVolume.roots` then makes free. The materialization is the dataset's, not the
-     * clock's, which also makes the answer the same on a re-run.
+     * **One moment per neuron.** Every box of a neuron is turned into roots at the same moment,
+     * so the supervoxels two neighbouring ends share are asked about once — which is what
+     * `SearchVolume.roots` then makes free — and the reader is moved to each neuron's moment
+     * where it forgets the last one's roots (`forgetRoots`), before its first box. So the moment
+     * it is opened at only has to be one CAVE can resolve; any neuron's will do. The moment is
+     * in the document (`Searched at`), which also makes the answer the same on a re-run.
      */
-    const when = { version: target.version } as const
-    const options = { deployment: target.deployment, signal: ctx.signal }
+    const openedAt = moments.get(rows[0]!.neuronId)!
 
     /*
      * **Opened in turn, not together, and the order is the whole of the reason.**
@@ -675,8 +728,9 @@ export const suggestMergesNode = packNode({
      * were, and they should not be: every refusal worth having happens before the next step's
      * first request. The ranker first, because a manifest this build cannot read or a config
      * missing a number costs one small file. Then the assessor, where this run can already see
-     * an end to score (below). The volume last, and only then does a request go to a shared
-     * server.
+     * an end to score (below). The volume last. (The neurons' moments came before all three —
+     * three small chunkedgraph requests — because the moment is in every key the wait above was
+     * priced on.)
      *
      * It costs a second or so of serialisation on a warm cache. Overlapping them would buy that
      * back and give up the property above, which is the wrong trade on a node whose next step
@@ -739,7 +793,7 @@ export const suggestMergesNode = packNode({
         rows,
         neurons,
         held,
-        identity,
+        identityOf,
         pieces,
         foreseen: foreseen.held,
         head,
@@ -747,7 +801,7 @@ export const suggestMergesNode = packNode({
         plan,
         assessor: openAssessor,
         top,
-        volume: await openSearchVolume(target.datastack, plan.xyNm, when, options, {
+        volume: await openSearchVolume(target.datastack, plan.xyNm, openedAt, options, {
           // Megabytes at the param, bytes inside: a reader thinks in the first and a budget is
           // spent in the second.
           chunkBytes: Math.max(0, Number(ctx.params.chunkCacheMb)) * 1024 * 1024,
@@ -772,8 +826,11 @@ interface RunPlan {
   readonly neurons: readonly RunNeuron[]
   /** The finished ends the memory held when the run started (`heldEnds`). */
   readonly held: ReadonlyMap<string, Remembered>
-  /** What every end of the run shares, for the key of a piece's ends — made as it is reached. */
-  readonly identity: RunIdentity
+  /**
+   * What every end of a neuron shares, for the keys of its pieces' ends — made as each is
+   * reached. Its `moment` is also what the reader moves to for that neuron (`forgetRoots`).
+   */
+  readonly identityOf: (neuron: string) => RunIdentity
   /** The accepted pieces to extend, in the order the run takes them (`piecesOf`). */
   readonly pieces: readonly Piece[]
   /** What the memory held of each piece whose tips were known when the run started. */
@@ -803,7 +860,7 @@ interface RunPlan {
  * the one that must not throw. What is here is the loop; what is above it is what the loop needs.
  */
 async function searchAndScore(ctx: EvalContext, run: RunPlan) {
-  const { rows, neurons, held, identity, pieces, head, ranker, plan, top, volume, options } =
+  const { rows, neurons, held, identityOf, pieces, head, ranker, plan, top, volume, options } =
     run
   const assessing = run.assessor !== undefined
   const { foreseen } = run
@@ -1197,8 +1254,9 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
       toSearch.push({ ...end, box: clock.around('reading the search box', end.box) })
     }
     if (toSearch.length === 0) return
-    // One neuron's ends overlap, and so do its pieces'; two neurons' do not. See `forgetRoots`.
-    if (lastSeed !== root.seed) forgetRoots(volume)
+    // One neuron's ends overlap, and so do its pieces'; two neurons' do not, and may be read at
+    // different moments. See `forgetRoots`, which moves the reader to this neuron's.
+    if (lastSeed !== root.seed) forgetRoots(volume, identityOf(root.seed).moment)
     lastSeed = root.seed
     // `thenWaits` looks ahead within a root; this is the same look across the boundary.
     if (behind && !root.held.has(root.keys[toSearch[0]!.tip]!)) build()
@@ -1322,7 +1380,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     // Taken before, and nothing about it has changed.
     if (!first && !moved && wanted.length === 0) return
 
-    const { competing, keys } = pieceKeys(identity, piece, mine, tipsOf)
+    const { competing, keys } = pieceKeys(identityOf(piece.seed), piece, mine, tipsOf)
     /*
      * What the memory held of this piece when the run started, where its tips were known then —
      * the reading the wait was priced on and the assessor decided on (`foreseePieces`). A piece
@@ -1426,8 +1484,12 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   }
 
   // Every neuron's ends are in now. Where a piece joins is asked of the book again, which knows
-  // whether its parent's ends have moved since.
-  for (const piece of pieces) await settle(piece)
+  // whether its parent's ends have moved since. A neuron's pieces together, in `piecesOf`'s
+  // order within it: each change of neuron moves the reader to another moment and starts its
+  // supervoxel memo afresh (`forgetRoots`). The tables are the book's order whatever this is.
+  for (const own of groupBy(pieces, (piece) => piece.seed).values()) {
+    for (const piece of own) await settle(piece)
+  }
 
   const piecesOutside = book.piecesOutside()
   if (piecesOutside > 0) {
@@ -1627,7 +1689,7 @@ function pieceKeys(
  */
 function foreseePieces(
   ctx: EvalContext,
-  identity: RunIdentity,
+  identityOf: (neuron: string) => RunIdentity,
   neurons: readonly RunNeuron[],
   pieces: readonly Piece[],
   assessing: boolean,
@@ -1656,7 +1718,7 @@ function foreseePieces(
       continue
     }
     tipsOf.set(piece.id, mine)
-    const { keys } = pieceKeys(identity, piece, mine, tipsOf)
+    const { keys } = pieceKeys(identityOf(piece.seed), piece, mine, tipsOf)
     // Forgets what a Clear Cache or a lifetime rules out, then takes what is left.
     const snapshot = heldFor(ctx, keys)
     if (!kept) {
@@ -1676,6 +1738,133 @@ function foreseePieces(
     unremembered += Math.max(0, keys.length - snapshot.size - 1)
   }
   return { unremembered, unknown, held }
+}
+
+/**
+ * The moment each neuron of the run is read at, by its root id — or no entry for a root the
+ * chunkedgraph never made, which is said and not searched.
+ *
+ * **Each neuron's own moment, kept in `Searched at`** (`ParamBase.runRecord`): the moment the
+ * first run that met it searched it at. A neuron with no entry is searched at the present —
+ * `FILL_BEHIND_MS` behind this browser's clock — and its moment is written back at once, before
+ * anything is measured, so a run cancelled half way and run again searches it at the same moment
+ * and the memory of finished ends answers what was done. A run outside the store writes nothing
+ * (`EvalContext.record`), and meets the neuron as new each time.
+ *
+ * **The moment moved into the root's life** (`momentWithin`): where the root was edited before
+ * its moment, as it last stood; where the record names a moment before the root was made (only
+ * by hand), from when it was made. Both are said, and so is a root edited *after* its moment:
+ * the answer is the recorded one, but the neuron has moved on since.
+ *
+ * **The record is enough without the chunkedgraph.** An entry the node wrote is already inside
+ * the root's life, and stays there: a root's life only grows until it is replaced, and an entry
+ * is written at or before the moment it was asked. So where the chunkedgraph cannot be asked and
+ * every neuron has an entry — a run the memory may answer whole, after a reload too — the run
+ * goes on at the record's moments, and says so. A neuron with no entry has no moment to go on at.
+ *
+ * Without a chunkedgraph root ids never move, and the materialization's moment is as good as any.
+ */
+export async function momentsOf(
+  ctx: EvalContext,
+  target: CaveTarget,
+  rows: readonly TipRow[],
+  options: CaveRequestOptions,
+): Promise<Map<string, number>> {
+  // Plainly: `withDefaults` has put `absentMeans` in (invariant 4).
+  const { moments: record, unread } = readSearchedAt(String(ctx.params.at))
+  if (unread.length > 0) {
+    ctx.warn(
+      `\`Searched at\` held ${namedFew(unread.map((entry) => `“${entry}”`))}, which ` +
+        `${agree(unread.length, 'is not a', 'are not')} \`root=moment\` ` +
+        `${agree(unread.length, 'entry', 'entries')}, so ${agree(unread.length, 'it was', 'they were')} ` +
+        'set aside. The node keeps this field itself, and writes it again without them.',
+    )
+  }
+  // On the paths that write nothing else, so a set-aside entry is not said again every run.
+  const healed = () => {
+    if (unread.length > 0) ctx.record?.('at', writeSearchedAt(record))
+  }
+  const neurons = distinctStrings(rows.map((tip) => tip.neuronId))
+  const graphene = await grapheneFor(target.datastack, options)
+  if (!graphene) {
+    const frozen = await instantOf(target.datastack, { version: target.version }, options)
+    if (frozen === undefined) {
+      throw new Error(unlistedMaterialization(target.datastack, target.version))
+    }
+    healed()
+    return new Map(neurons.map((neuron) => [neuron, frozen]))
+  }
+
+  const now = Date.now() - FILL_BEHIND_MS
+  const wantedOf = (root: string) => record.get(root) ?? now
+  let asked: Awaited<ReturnType<typeof rootLives>>
+  try {
+    asked = await rootLives(graphene, neurons, options)
+  } catch (error) {
+    throwIfAborted(ctx.signal)
+    if (neurons.some((root) => !record.has(root))) throw error
+    ctx.warn(
+      `Whether ${agree(neurons.length, 'this neuron has', 'these neurons have')} been edited ` +
+        `since could not be asked (${errorMessage(error)}), so the moments in \`Searched at\` ` +
+        'were used.',
+    )
+    healed()
+    return new Map(neurons.map((root) => [root, record.get(root)!]))
+  }
+  const { lives, unknown } = asked
+  if (unknown.length > 0) {
+    ctx.warn(
+      `${notRoots(unknown, target.datastack)}, so ${agree(unknown.length, 'its', 'their')} ` +
+        'ends were passed through unsearched.',
+    )
+  }
+  const {
+    moments,
+    editedBefore: before,
+    editedAfter: after,
+    later,
+  } = momentsFrom(lives, wantedOf)
+  /*
+   * The moment each neuron is searched at, kept — written before anything is measured. Written
+   * back where an entry is new, or names a moment outside its root's life (typed by hand: the
+   * node writes only moments inside one), so the record always holds the moment used and the
+   * run that cannot ask the chunkedgraph goes on at the same one. Or where one was set aside.
+   */
+  const fresh = [...moments].filter(([root, moment]) => record.get(root) !== moment)
+  if (fresh.length > 0 || unread.length > 0) {
+    ctx.record?.('at', writeSearchedAt(new Map([...record, ...fresh])))
+  }
+
+  const remedy = 'Update Root IDs above `Tips` brings a neuron to its current root.'
+  if (before.size > 0) {
+    ctx.warn(
+      `${editedSince(before)} ${agree(before.size, 'It was', 'Each was')} searched as it last ` +
+        `stood. ${remedy}`,
+    )
+  }
+  if (after.size > 0) {
+    ctx.warn(
+      `${editedSince(after)} ${agree(after.size, 'It was', 'Each was')} searched at the ` +
+        `moment in \`Searched at\`, before that edit. The card’s ⟳ searches at the present. ` +
+        remedy,
+    )
+  }
+  /*
+   * Only a neuron the record held a moment for. A new one's moment is the present a few seconds
+   * back (`FILL_BEHIND_MS`), and a root made in those seconds — the neuron just merged and its
+   * new root brought in by Update Root IDs — is not one to tell about, and the ⟳ the warning
+   * names would answer the same.
+   */
+  const madeLater = later.filter((root) => record.has(root))
+  if (madeLater.length > 0) {
+    ctx.warn(
+      `${namedFew(madeLater)} ${agree(madeLater.length, 'was', 'were')} made after ` +
+        `${agree(madeLater.length, 'its', 'their')} moment in \`Searched at\`, so ` +
+        `${agree(madeLater.length, 'it was', 'each was')} searched from the moment it was made. ` +
+        'The card’s ⟳ searches at the present.',
+    )
+  }
+  return moments
 }
 
 /**
@@ -1708,10 +1897,13 @@ interface RunNeuron {
  * from the memory before anything is opened, and by the loop. Derived apart, nothing would hold the key a wait was priced on equal to the key the run
  * then asks for, and a drift between them is a warning that miscounts and says nothing else.
  */
-function neuronsOf(rows: readonly TipRow[], identity: RunIdentity): RunNeuron[] {
+function neuronsOf(
+  rows: readonly TipRow[],
+  identityOf: (neuron: string) => RunIdentity,
+): RunNeuron[] {
   return [...tipsByNeuron(rows)].map(([neuron, at]) => {
     const mine = at.map((i) => rows[i]!)
-    const inNeuron = neuronKey(identity, neuron, mine)
+    const inNeuron = neuronKey(identityOf(neuron), neuron, mine)
     return { neuron, at, mine, keys: mine.map((tip) => endKey(inNeuron, tip)) }
   })
 }

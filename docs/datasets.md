@@ -378,6 +378,27 @@ Same rule as the node glyphs, same reason — and the paths now live beside them
 design record for *why* a glyph is a species and a coarse anatomical kind stayed in
 `DatasetPreview.tsx`; only the coordinates moved.
 
+### The SEAM nodes follow the root, not the materialization
+
+A CAVE dataset's materialization is the moment every *query* through it is read at. Three SEAM
+nodes read the segmentation for one neuron at a time, and for them the neuron decides the moment
+instead ([seam-live-plan.md](seam-live-plan.md)): a root minted after the pinned materialization
+names nothing at it, and one replaced before it names nothing either. Measured on 2026-11-17 with
+the Dataset on "Latest" (564) and a root edited that morning: Find Open Ends found no nucleus row,
+and Suggest Merges found its own neuron in none of the ten boxes.
+
+- **Find Open Ends** reads the nucleus table live (`somataLive`), each root at a moment it is
+  current — now, or the last moment before it was replaced.
+- **Suggest Merges** keeps a moment per neuron in `Searched at`, a run record
+  ([core.md](core.md#a-run-record-is-a-param-the-run-writes-and-the-key-leaves-out)), and reads
+  every box of that neuron at it.
+- **Review Suggestions** tells no time of its own: the currency check and Submit's plan read at the
+  server's now.
+
+The Dataset still supplies the datastack, and on a datastack with no chunkedgraph — root ids that
+never move — its materialization's moment is the one used. Everything else below a Dataset is
+unchanged: a pinned materialization is still what a table, a synapse query or a mesh is read at.
+
 ## A datasource is not a dataset
 
 `Neuroglancer Source` (`dataset.ngsource`) sits in this directory and in the Dataset menu, and it

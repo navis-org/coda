@@ -30,8 +30,6 @@
 
 import { findSupervoxels } from '../../data/cave/volumes'
 import type { CaveRequestOptions } from '../../data/cave/client'
-import type { RootsAt } from '../../data/cave/rootIds'
-import { instantOf } from '../../data/cave/rootIds'
 import { chunkCache } from '../../data/precomputed/chunkCache'
 import type { ChunkPlan, ChunkPlanBoxes } from './chunkPlan'
 import { chunkPlanFor } from './chunkPlan'
@@ -78,15 +76,25 @@ export interface SearchVolume extends BoxReader {
  */
 export type EndReach = Omit<ChunkPlanBoxes, 'base' | 'scale'>
 
+/** A materialization with no moment CAVE lists — the one a datastack with no chunkedgraph is read at. */
+export function unlistedMaterialization(datastack: string, version: number): string {
+  return (
+    `Materialization ${version} of ${datastack} has no timestamp CAVE lists, so there is no ` +
+    'moment to read the segmentation at. Point `Datastack` at a materialization the datastack ' +
+    'lists.'
+  )
+}
+
 /**
- * Open a datastack's supervoxel volume at the resolution the pipeline asks for, at the instant
- * `when` names. The datastack's own refusals are `findSupervoxels`'; the one added here is the
- * instant.
+ * Open a datastack's supervoxel volume at the resolution the pipeline asks for, rooted at `at`
+ * until the reader is moved (`forgetRoots`). The datastack's own refusals are
+ * `findSupervoxels`'.
  */
 export async function openSearchVolume(
   datastack: string,
   xyNm: number,
-  when: RootsAt,
+  /** Epoch ms, already resolved by the caller (`momentsOf`), who refuses one that cannot be. */
+  at: number,
   options: CaveRequestOptions,
   /**
    * How much the run may spend holding chunks it has fetched, in bytes.
@@ -98,21 +106,6 @@ export async function openSearchVolume(
   budget: { chunkBytes?: number } = {},
 ): Promise<SearchVolume> {
   const source = await findSupervoxels(datastack, options)
-  /*
-   * Refused here, before a box is read. An unresolvable instant makes every supervoxel resolve to
-   * `0n`, so without this the run reads hundreds of 19 MB boxes, measures each one, and then
-   * reports that no end had its own neuron in its box — true, and naming the wrong cause.
-   * `staleRoots` takes the same decision in prose for the same reason.
-   */
-  const at = await instantOf(datastack, when, options)
-  if (at === undefined) {
-    const version = 'version' in when ? when.version : ''
-    throw new Error(
-      `Materialization ${version} of ${datastack} has no timestamp CAVE lists, so there is no ` +
-        'instant to read the segmentation at. Point `Datastack` at a materialization the ' +
-        'datastack lists.',
-    )
-  }
   const info = await openVolume(source.base, options)
   const scale = scaleNear(info, xyNm)
   // The closures below read only this, so a run's lifetime keeps no more of the source alive.

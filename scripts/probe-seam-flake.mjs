@@ -173,7 +173,7 @@ const setup = `(async () => {
   const plan = opened.config
   const halfWidthNm = plan.halfWidthUm * 1000
   const volume = await searchVolume.openSearchVolume(
-    'wclee_aedes_brain', plan.xyNm, { boundary: ${Date.parse(t0)} }, options,
+    'wclee_aedes_brain', plan.xyNm, ${Date.parse(t0)}, options,
     { chunkBytes: 768 * 1024 * 1024 },
   )
   const steps = {

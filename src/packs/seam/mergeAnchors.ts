@@ -363,7 +363,7 @@ export async function anchorMerge(
     volume.layout,
   )
   if (!found.ok) return found
-  const under = volume.roots.get(BigInt(found.neuron.supervoxel))
+  const under = volume.memo.roots.get(BigInt(found.neuron.supervoxel))
   if (under === undefined) {
     throw new Error(
       `seam merge anchors: no root was read for supervoxel ${found.neuron.supervoxel}, so which ` +

@@ -76,9 +76,12 @@ import type { WindowConfig } from './windowConfig'
 import type { Tips } from './tips'
 import { NM_PER_UM } from '../../data/units'
 import type { NeuronId } from '../../core/ids'
-import { idText, isNeuronId } from '../../core/ids'
+import { idText, isSegmentId } from '../../core/ids'
 import { caveServerFor } from '../../data/cave/datastack'
-import { somataFor } from '../../data/cave/nuclei'
+import { somataFor, somataLive } from '../../data/cave/nuclei'
+import { grapheneFor } from '../../data/cave/rootIds'
+import { agree } from '../../style/format'
+import { editedSince, notRoots } from './rootMoment'
 import {
   CAVE_DATASET_INPUT,
   caveTableParam,
@@ -294,14 +297,14 @@ export const openEndsNode = packNode({
       }
 
       /*
-       * The somata, if a table was named: read at `[1, 1, 1]` through the same path the datastacks
-       * that *do* declare a nucleus table use (`somataFor`), so they arrive in nanometres like the
-       * meshes. That is the whole reason this reads the table itself rather than taking one from a
+       * The somata, if a table was named: read at `[1, 1, 1]` (`somataLive`, or `somataFor` where
+       * the datastack has no chunkedgraph — `nucleiFor` says which), so they arrive in nanometres
+       * like the meshes. That is the whole reason this reads the table itself rather than taking one from a
        * wired CAVE table node: a plain table query answers in the table's own **voxels**, and a
        * soma a factor out either masks nothing or masks the neuron, with nothing failing.
        *
        * A neuron with no row keeps every tip, which is what no soma has always meant here; a root
-       * holding two nuclei is a merge and `somataFor` gives it none, for the same reason.
+       * holding two nuclei is a merge and gets none, for the same reason.
        */
       const somata = await nucleiFor(ctx, meshes, ctx.input('dataset'))
 
@@ -323,7 +326,9 @@ export const openEndsNode = packNode({
           ctx.signal,
         )
         // The table first where there is one, else whatever the source published with the mesh.
-        const soma = somata.get(neuronId) ?? (item.soma ? somaPoint(item) : undefined)
+        // Looked up by the spelling the read was asked in (`idText`), never `String` (invariant 8).
+        const soma =
+          somata.get(idText(item.id) ?? '') ?? (item.soma ? somaPoint(item) : undefined)
         const tips = tipsOf(made.items[0]!, item, {
           rule,
           kinks,
@@ -519,12 +524,22 @@ async function scoreTips(options: ScoreTipsOptions): Promise<void> {
  *
  * It is also the path the datastacks that *do* declare a nucleus table already take, so a
  * dataset that later declares one answers the same way with this field left empty.
+ *
+ * ## At each neuron's own moment, not the Dataset's materialization
+ *
+ * The neuron on the wire is usually one somebody is proofreading, and every merge makes a new
+ * root that no materialization has heard of — read at the Dataset's, it had "no row", and its
+ * soma went unmasked (`docs/seam-live-plan.md`). So where the datastack has a chunkedgraph, the
+ * table is read live, at the last moment each root was current (`somataLive`); the Dataset says
+ * only which datastack. A root that has been replaced since is read as it was then, and said: the
+ * meshes above were fetched for that same old root, so the whole run is about the neuron as it
+ * stood. Without a chunkedgraph root ids never move, and the materialization is as good as any.
  */
 async function nucleiFor(
   ctx: EvalContext,
   meshes: MeshesValue,
   dataset: Value | undefined,
-): Promise<Map<string, [number, number, number]>> {
+): Promise<Map<string, readonly [number, number, number]>> {
   const table = String(ctx.params.nucleusTable ?? '').trim()
   if (!table) return new Map()
   const target = caveTargetOfValue(dataset, ctx.params)
@@ -536,23 +551,46 @@ async function nucleiFor(
   }
   const options = { deployment: target.deployment, signal: ctx.signal }
   const server = await caveServerFor(target.datastack, options)
-  const ids: NeuronId[] = []
-  for (const item of meshes.items) {
-    const id = idText(item.id)
-    if (id && isNeuronId(id)) ids.push(id)
+  // Once each: a neuron can arrive as several items, and the counts below are of neurons. In the
+  // chunkedgraph's grammar, since an id it could not parse is not a root to ask about.
+  const ids = [
+    ...new Set(
+      meshes.items.flatMap((item) => {
+        const id = idText(item.id)
+        return id && isSegmentId(id) ? [id] : []
+      }),
+    ),
+  ]
+  const graphene = await grapheneFor(target.datastack, options)
+  const { somata, replaced, unknown } = graphene
+    ? await somataLive(server, graphene, target.datastack, table, ids, options)
+    : {
+        somata: await somataFor(server, target.datastack, target.version, table, ids, options),
+        replaced: new Map<NeuronId, number>(),
+        unknown: [],
+      }
+  if (replaced.size > 0) {
+    ctx.warn(
+      `${editedSince(replaced)} ${agree(replaced.size, 'It was', 'Each was')} read as it ` +
+        'stood then, soma included. Update Root IDs above the meshes brings a neuron to its ' +
+        'current root.',
+    )
   }
-  const found = await somataFor(server, target.datastack, target.version, table, ids, options)
-  const missing = ids.length - found.size
+  if (unknown.length > 0) {
+    ctx.warn(`${notRoots(unknown, target.datastack)}, so no soma was looked for.`)
+  }
+  const asked = ids.length - unknown.length
+  const missing = asked - somata.size
   if (missing > 0) {
     // Not an error: a nucleus table is routinely incomplete, and a root holding two nuclei is a
     // merge that `somataFor` gives no soma at all. Those tips are kept, which is what no soma
     // has always meant here — said rather than left as a quietly uneven mask.
     ctx.warn(
-      `${missing} of ${ids.length} neurons have no row in \`${table}\`, so their tips are not ` +
+      `${missing} of ${asked} neurons have no row in \`${table}\`, so their tips are not ` +
         'masked near the soma. A neuron holding two nuclei is a merge and counts as none.',
     )
   }
-  return new Map([...found].map(([id, at]) => [id, [at[0], at[1], at[2]]]))
+  return somata
 }
 
 /** The source's soma position, as a tuple the tip rule can read. */

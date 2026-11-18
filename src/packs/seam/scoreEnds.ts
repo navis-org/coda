@@ -168,7 +168,14 @@ export function reportOnRun(
 ): void {
   reportOnSearch(warner, ends)
   reportOnScores(warner, ends)
-  reportOnReads(warner, chunks)
+  /*
+   * **Not where no end was measured.** Advice about the cache beside "none of the ends had its
+   * own neuron in the box" is noise: the reads were real, but the run has nothing to show for
+   * them that a faster read would bring sooner (`docs/seam-live-plan.md`, phase 4).
+   */
+  if (ends.some(({ end }) => !end.missingQuery && end.refusal === undefined)) {
+    reportOnReads(warner, chunks)
+  }
 }
 
 /**
@@ -229,10 +236,12 @@ const POOR_HIT_SHARE = 0.5
 /**
  * The search's own two failures.
  *
- * **Every end missing its own query root is one sentence, not hundreds.** It has one likely
- * cause — the materialization is not the one the ends were found in, so the neuron's root id
- * names nothing in the box — and that is a thing the reader can fix. Scattered per end it reads
- * as a data problem.
+ * **Every end missing its own query root is one sentence, not hundreds.** Each neuron is read
+ * as it stood at its own moment (`Searched at`), so its root names something in the box around
+ * any point on it; what is left is tips that are not on it — a `Tips` table from another neuron,
+ * or positions in another unit — and that is a thing the reader can fix. Scattered per end it
+ * reads as a data problem. (Before the moment followed the root, the usual cause was a
+ * materialization older than the neuron, which named nothing at all.)
  */
 function reportOnSearch(warner: Warner, ends: readonly PublishedEnd[]): void {
   let missing = 0
@@ -244,9 +253,9 @@ function reportOnSearch(warner: Warner, ends: readonly PublishedEnd[]): void {
   if (missing === ends.length && ends.length > 0) {
     warner.warn(
       `None of the ${plural(ends.length, 'open end')} had its own neuron in the box around it, ` +
-        'so there was nothing to measure a candidate against. The usual cause is a ' +
-        '`Datastack` whose materialization is not the one these ends were found in — the ' +
-        'neuron’s root id named nothing in the segmentation at that moment.',
+        'so there was nothing to measure a candidate against. Each neuron was read as it stood ' +
+        'at its moment in `Searched at`, so the usual cause is tips that are not on it: a ' +
+        '`Tips` table from another neuron, or positions that are not in nanometres.',
     )
   } else if (missing > 0) {
     warner.warn(
@@ -277,10 +286,11 @@ function reportOnSearch(warner: Warner, ends: readonly PublishedEnd[]): void {
  * - candidates that took the checkpoint's floor instead of being scored, with the two causes
  *   named apart because they are fixed by different things — a param the reader set, against the
  *   segmentation near a contact;
- * - **a run that assessed real candidates and showed none of them.** This is the one worth
- *   reading twice: "the node ran and found nothing" and "the node found nothing because it was
- *   pointed at the wrong thing" are identical from the outside, so the empty answer says so
- *   itself. A run that *does* show something says nothing — the count is a column.
+ * - **a run that assessed real candidates and showed none of them**, so an empty queue says
+ *   why it is empty rather than looking like a run that failed. A run that *does* show
+ *   something says nothing — the count is a column. (It used to name a materialization older
+ *   than the neuron as the other reading; the moment follows the root now, and a search that
+ *   cannot find its neuron says so in `reportOnSearch` instead.)
  *
  * `shown` has three states and they are counted as three. Folding `null` — the configuration
  * published no cutoff for the quantity these tips could reach — in with `false` would print "0
@@ -342,8 +352,7 @@ function reportOnScores(warner: Warner, ends: readonly PublishedEnd[]): void {
     warner.warn(
       `None of the ${plural(decided.length, 'assessed tip')} has a first candidate above the ` +
         'cutoff this model was fitted with, so the queue is a ranking without a recommendation. ' +
-        'That is an ordinary answer on a well-reconstructed neuron — but it is also what a ' +
-        '`Datastack` whose materialization is not the one these ends were found in looks like.',
+        'That is an ordinary answer on a neuron with little left to merge.',
     )
   }
 }

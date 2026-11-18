@@ -20,7 +20,7 @@ const RUN: RunIdentity = {
   top: 0,
   deployment: 'https://global.example',
   datastack: 'stack',
-  version: 7,
+  moment: 1_794_903_754_257,
 }
 
 const tip = (x: number, eTip?: number, row = 0): TipRow => ({
@@ -401,7 +401,7 @@ describe('the key', () => {
     ['how many candidates the assessor is given', { top: 10 }],
     ['the deployment', { deployment: 'https://other.example' }],
     ['the datastack', { datastack: 'other' }],
-    ['the materialization', { version: 8 }],
+    ['the moment', { moment: 1_794_903_754_258 }],
   ])('moves with %s', (_what, change) => {
     expect(endKey(neuronKey({ ...RUN, ...change }, '720', tips), tips[0]!)).not.toBe(base)
   })
