@@ -545,7 +545,24 @@ Each lands on its own. Nothing before phase 6 touches the write path.
      plain order, and those of a run after Clear Cache with the piece still extended (371 kB
      of `Tips` and `Candidates`, the same bytes as before the book).
    - A neuron with nothing left to measure takes no detour: an Extend pressed after the search
-     has finished runs exactly as before.
+     has finished takes every piece in the plain order, after the memory pass below.
+   - **What the memory answers is taken first and published once** (user, 2026-11-18). Every
+     Extend starts the run again from an empty book, and the card keeps the answer it had only
+     until the first publish. Published on the clock as the book refilled, that first publish
+     held the neurons' rows and whichever pieces had been reached, so the other extended
+     pieces' rows left the list and came back a tick at a time, or all at once behind a
+     piece whose chain had to run. Now the run starts with a quiet pass — every neuron's
+     remembered ends, then every piece whose tips an earlier run kept, with the ends of it the
+     memory holds (`fromMemory`, one flag for "measure nothing" and "publish nothing") — and
+     only then runs a chain or measures an end. A piece taken in that pass is a draft like any
+     other, put right by the last pass. A piece whose kept tips were forgotten (Clear Cache,
+     an eviction) still leaves the list until its chain has run again, as an end forgotten
+     since does until it is measured — and so does a piece whose parent's end that lists it is
+     not remembered, since where it joins cannot be told before that end is measured.
+     Measured in Chrome (scratch probe, reads only; neuron `648518347585551219`, its six best
+     ends, three small pieces extended, a fourth then extended): before, the three pieces' rows
+     went from 4 to 0 at 2.6 s, when the fourth piece's chain published, and came back at the
+     end of the run (7.7 s); after, they stayed at 4 throughout (7.9 s).
 
    **Known, and left**
    - **An end that was refused is not remembered**, so a refused end of a piece that went

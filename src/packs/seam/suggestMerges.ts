@@ -1034,6 +1034,12 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   let patches = 0
   /** Set where something changed without the tables being built again — see `showSoon`. */
   let behind = false
+  /**
+   * Set while the run takes what the memory answers, before anything else (the order of work,
+   * below): nothing is measured (`searchRoot`, `settle`) and so nothing is published
+   * (`showSoon`); the owed tables are built once, when it ends.
+   */
+  let fromMemory = false
   let builtAt = performance.now()
   /** When the browser was last let in by this loop's own yields (`showSoon`, `letIn`). */
   let letInAt = performance.now()
@@ -1082,9 +1088,17 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
    * and its count known, and this is an async stream whose next item may take a tick or eleven
    * seconds. What is shared with it is the part that matters — the browser is let in on a
    * clock, and Cancel is read each time round.
+   *
+   * While the run takes what the memory answers (`fromMemory`) nothing is shown, `now` or not;
+   * the browser is still let in on the clock.
    */
   const showSoon = async (now = false) => {
     throwIfAborted(ctx.signal)
+    if (fromMemory) {
+      behind = true
+      await letIn()
+      return
+    }
     if (!now && performance.now() - builtAt < PUBLISH_INTERVAL_MS) {
       behind = true
       return
@@ -1265,16 +1279,16 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
    * tips only, and nothing is read as it but itself.
    *
    * Only what is still wanted: a root can be searched more than once, and an end it already has
-   * is not asked for again. `rememberedOnly` takes just the ends the memory answers — for a
-   * neuron whose pieces go before the rest of its ends (below).
+   * is not asked for again. While the run takes what the memory answers (`fromMemory`), just the
+   * ends the memory holds — so nothing is measured, and `take` never builds the tables.
    */
-  const searchRoot = async (root: Root, rememberedOnly = false) => {
+  const searchRoot = async (root: Root) => {
     const toSearch: EndToSearch[] = []
     // A tip outside the volume, or the end a piece joins by, is a competitor and never an end —
     // and an end the book already has is not asked for again.
     for (const i of book.wanted(root.id)) {
       const tip = root.mine[i]!
-      if (rememberedOnly && !root.held.has(root.keys[i]!)) continue
+      if (fromMemory && !root.held.has(root.keys[i]!)) continue
       const end = endToSearch(
         volume,
         tip,
@@ -1343,7 +1357,9 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
    * review card. A Cancel is the one thing that does stop here.
    *
    * `ahead` is a piece offered a turn before its neuron's remaining ends. It takes it only
-   * where an end already found lists it; otherwise its turn comes with the rest.
+   * where an end already found lists it; otherwise its turn comes with the rest. While the run
+   * takes what the memory answers (`fromMemory`), a piece whose tips no earlier run kept is
+   * left for later too: finding them means running its chain.
    */
   const settle = async (piece: Piece, ahead = false) => {
     throwIfAborted(ctx.signal)
@@ -1357,12 +1373,19 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     let ran = false
     if (!record) {
       try {
-        const got = await pieceTips(ctx, piece, (says) => {
-          // The inner chain reports on every state change, mostly the same words.
-          if (says === said) return
-          said = says
-          ctx.progress(afterShare(head, shown), says)
-        })
+        const got = await pieceTips(
+          ctx,
+          piece,
+          (says) => {
+            // The inner chain reports on every state change, mostly the same words.
+            if (says === said) return
+            said = says
+            ctx.progress(afterShare(head, shown), says)
+          },
+          fromMemory,
+        )
+        // Taking what the memory answers, and its tips are not kept: its chain runs later.
+        if (!got) return
         ran = got.ran
         // Numbered within the piece: where its rows sit in the table is the book's to say.
         const mine = ownTips(got.tips, piece, assessing)
@@ -1470,19 +1493,24 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   }
 
   /*
-   * **A neuron's own ends, and — where the run still has ends to measure — its pieces before
-   * those** (user, 2026-11-16). A reader extends a piece while the search is still running; the
-   * press restarts this run, and left in the plain order the piece would wait behind every end
-   * the run has left, a minute or more for a search of seconds.
+   * **First, everything the memory answers, published once** (user, 2026-11-18): every neuron's
+   * remembered ends, then every piece whose tips an earlier run kept, with the ends of it the
+   * memory holds (`fromMemory`). Extend moves this node's key, so each press starts the run from
+   * an empty book, and a reader is left the answer they had only until the first publish — which
+   * now holds every row the memory could answer, so a press adds rows and takes none away
+   * (`docs/seam-extend-plan.md` has what it did before). It costs nothing: none of it reads the
+   * network, and the book's order is not the work's.
    *
-   * So, a neuron at a time: the ends the memory holds, which cost nothing; then every piece that
-   * can be joined by what those found, breadth first, so a piece of such a piece goes too; then
-   * the rest of the neuron's ends. **Asked of the run, not of the neuron**: a reader extends a
-   * piece of the first neuron, which is finished, while the second is still being searched, and
-   * that piece must not wait for the second neuron's ends either. A run with nothing left to
-   * measure is the plain case and takes no detour.
+   * **Then, where the run still has ends to measure, a neuron's pieces before those** (user,
+   * 2026-11-16). A reader extends a piece while the search is still running; the press restarts
+   * this run, and left in the plain order the piece would wait behind every end the run has
+   * left, a minute or more for a search of seconds. So, a neuron at a time: every piece that can
+   * be joined by what its ends so far found, breadth first, so a piece of such a piece goes too;
+   * then the rest of the neuron's ends. **Asked of the run, not of the neuron**: a reader extends
+   * a piece of the first neuron, which is finished, while the second is still being searched,
+   * and that piece must not wait for the second neuron's ends either.
    *
-   * **What goes ahead is a draft, and is put right afterwards.** Taken early, a piece is joined
+   * **What goes early is a draft, and is put right afterwards.** Taken early, a piece is joined
    * by the ends its parent has *so far*; an end not yet measured may list it at a smaller gap,
    * and then another of its ends is the one it joins by. So once every neuron's ends are in,
    * every piece is taken again, in order (`settle`): for nearly all of them nothing has changed
@@ -1490,9 +1518,11 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
    * they are put together from the records in the plain order every time (`runBook.ts`).
    */
   const runWaits = neurons.some((one) => seedWaits(one.neuron, one.keys))
+  const piecesBySeed = groupBy(pieces, (piece) => piece.seed)
+  const roots: Root[] = []
   for (const { neuron, mine, keys } of neurons) {
     tipsOf.set(neuron, mine)
-    const root: Root = {
+    roots.push({
       seed: neuron,
       id: neuron,
       mine,
@@ -1501,17 +1531,23 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
       held,
       alias: undefined,
       signal: ctx.signal,
-    }
-    const own = pieces.filter((piece) => piece.seed === neuron)
-    if (own.length === 0 || !runWaits) {
-      await searchRoot(root)
-      continue
-    }
-    await searchRoot(root, true)
-    // Shown before a piece's chain is run, which can take seconds: the press that brought the
-    // run here retired the one whose rows were on the card, and the list is empty until this.
-    if (behind) build()
-    for (const piece of own) await settle(piece, true)
+    })
+  }
+  fromMemory = true
+  for (const root of roots) {
+    await searchRoot(root)
+    for (const piece of piecesBySeed.get(root.seed) ?? []) await settle(piece, true)
+  }
+  fromMemory = false
+  // Shown before anything that takes seconds — a piece's chain, an end to measure. The bar's
+  // words are the pass's, not those the last piece taken in it left behind.
+  if (behind) {
+    note = 'already searched'
+    await showSoon(true)
+  }
+  for (const root of roots) {
+    if (runWaits)
+      for (const piece of piecesBySeed.get(root.seed) ?? []) await settle(piece, true)
     await searchRoot(root)
   }
 
@@ -1519,7 +1555,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   // whether its parent's ends have moved since. A neuron's pieces together, in `piecesOf`'s
   // order within it: each change of neuron moves the reader to another moment and starts its
   // supervoxel memo afresh (`forgetRoots`). The tables are the book's order whatever this is.
-  for (const own of groupBy(pieces, (piece) => piece.seed).values()) {
+  for (const own of piecesBySeed.values()) {
     for (const piece of own) await settle(piece)
   }
 
@@ -1635,9 +1671,16 @@ async function pieceTips(
   ctx: EvalContext,
   piece: Piece,
   report: (says: string) => void,
-): Promise<{ tips: TableValue; ran: boolean }> {
+  /**
+   * Answer from the memo or not at all: `undefined` where the chain would have to run, or a
+   * failure is kept. One reading of the memo decides, so a lifetime crossed between asking and
+   * running cannot start seconds of chain in a stretch that publishes nothing (`fromMemory`).
+   */
+  keptOnly: boolean,
+): Promise<{ tips: TableValue; ran: boolean } | undefined> {
   const key = pieceTipsKey(ctx, piece)
   let kept = keptOf(ctx, piece)
+  if (keptOnly && (!kept || 'failed' in kept)) return undefined
   if (kept && 'failed' in kept) {
     throw new Error(`${kept.failed} Not tried again for a few minutes; Clear Cache tries now.`)
   }
