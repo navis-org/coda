@@ -36,7 +36,8 @@
  */
 
 import type { CaveRequestOptions, CaveRow } from './client'
-import { CaveError, caveGet, cavePost, refuseIfCapped } from './client'
+import { CaveError, caveGet, cavePost, cavePostRaw, refuseIfCapped } from './client'
+import { isSegmentId } from '../../core/ids'
 
 /**
  * A datastack's info record, as far as Coda reads it.
@@ -510,6 +511,92 @@ export async function queryTableChecked(
     optionalCount(countTable(server, datastack, version, query, options)),
   ])
   refuseIfCapped(rows.length, total, refusal.of ?? query.table, refusal.consequence)
+  return rows
+}
+
+/**
+ * What a live query asks: one table, filtered on root-id columns, at a moment.
+ *
+ * Narrower than `CaveTableQuery` on purpose. The live endpoint is a different request in three
+ * ways that each fail **silently** (`queryTableLive`), and the only reader so far filters a few
+ * root ids; a general filter here would be a second spelling of every filter, used once.
+ */
+export interface LiveTableQuery {
+  table: string
+  /** Root ids to keep, by column. Sent as bare integers — see `queryTableLive`. */
+  idsIn: Record<string, readonly string[]>
+  columns?: string[]
+  resolution?: readonly [number, number, number]
+}
+
+/** Query args for the live endpoint: JSON, no reference merge, and a root not current refused. */
+const LIVE_QUERY_ARGS = `${QUERY_ARGS}&merge_reference=false&allow_missing_lookups=false&allow_invalid_root_ids=false`
+
+/**
+ * A table as it stood at a moment, rather than at a materialization —
+ * `caveclient.materialize.live_live_query` (8.2.1).
+ *
+ * For a node that reads a neuron at that neuron's own moment (`docs/seam-live-plan.md`): a root
+ * made after the last materialization has no row in any of them, and reads as "not in the table".
+ *
+ * **Three differences from the materialized endpoint, each measured on `wclee_aedes_brain`
+ * (2026-11-17) and each a silent wrong answer rather than an error:**
+ *
+ * 1. **Root ids must be bare integers.** Quoted, the materialized endpoint matches them and this
+ *    one answers `[]` — "no row" for a neuron that has one. So the body is written as text, the
+ *    ids spliced in, as `is_latest_roots` is sent (`cavePostRaw`), and a value that is not an id
+ *    is refused before it can be spliced into the JSON.
+ * 2. **`select_columns` is a map keyed by table**; a plain list is a 500 here.
+ * 3. **The timestamp is ISO 8601**; epoch seconds are a 500.
+ *
+ * A root not current at `at` is refused by the server (`allow_invalid_root_ids=false`) with a
+ * message naming it, which is what it is: asked about a moment the root did not exist at, "no
+ * row" would be a wrong answer. A caller asks each root at a moment it was current
+ * (`rootLives`).
+ *
+ * **No count beside it, because there is none to have**: the live endpoint answers `count=true`
+ * with rows, as the join endpoint does (measured, 2026-11-17). So the row cap falls back to
+ * `CAVE_MAX_ROWS` (`refuseIfCapped`) — weaker than the server's own count, which is why a query
+ * here must filter on root ids (a few rows each) and an unfiltered one is refused.
+ *
+ * Refused before anything is sent: no id column (it would read the whole table), a value that is
+ * not a 64-bit id (`isSegmentId` — a sign or a leading zero is not a JSON number the server
+ * reads as one), and a moment that is not a time. An empty id list asks about nothing and
+ * answers nothing, where the server would refuse it with a 500.
+ */
+export async function queryTableLive(
+  server: string,
+  datastack: string,
+  at: number,
+  query: LiveTableQuery,
+  refusal: { consequence: string },
+  options: CaveRequestOptions,
+): Promise<CaveRow[]> {
+  const { table } = query
+  const filters = Object.entries(query.idsIn)
+  if (filters.length === 0) {
+    throw new CaveError(`A live read of "${table}" must name the root ids it is about.`)
+  }
+  if (!Number.isFinite(at)) throw new CaveError(`${at} is not a moment to read "${table}" at.`)
+  if (filters.some(([, ids]) => ids.length === 0)) return []
+  const columns = filters.map(([column, ids]) => {
+    const bad = ids.find((id) => !isSegmentId(id))
+    if (bad !== undefined) throw new CaveError(`"${bad}" is not a root id.`)
+    return `${JSON.stringify(column)}:[${ids.join(',')}]`
+  })
+  const body =
+    `{"table":${JSON.stringify(table)},` +
+    `"timestamp":${JSON.stringify(new Date(at).toISOString())},` +
+    `"filter_in_dict":{${JSON.stringify(table)}:{${columns.join(',')}}}` +
+    (query.columns ? `,"select_columns":${JSON.stringify({ [table]: query.columns })}` : '') +
+    (query.resolution ? `,"desired_resolution":${JSON.stringify(query.resolution)}` : '') +
+    '}'
+  const rows = await cavePostRaw<CaveRow[]>(
+    `${server}/materialize/api/v3/datastack/${enc(datastack)}/query?${LIVE_QUERY_ARGS}`,
+    body,
+    options,
+  )
+  refuseIfCapped(rows.length, undefined, table, refusal.consequence)
   return rows
 }
 

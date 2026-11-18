@@ -19,6 +19,7 @@ import {
   l2ChunkCounts,
   peekRootCheck,
   resetRootChecks,
+  rootLives,
   rootTimestamps,
   rootsAtInstant,
   startRootCheck,
@@ -27,6 +28,7 @@ import {
 } from './rootIds'
 import { resetCaveState } from './tables'
 import { DEFAULT_CAVE_SERVER } from './deployments'
+import { parseCaveJson } from './json'
 
 const DATASTACK = 'flywire_fafb_public'
 const DATASET = `${DATASTACK}:783`
@@ -760,5 +762,157 @@ describe("the server's now", () => {
     await expect(rootTimestamps(graphene, ['1'], OPTIONS)).rejects.toThrow(
       /one time for each of the 1 roots/,
     )
+  })
+})
+
+/**
+ * When a root was current, for a node that reads a neuron at its own moment. The fake server
+ * answers as `wclee_aedes_brain` did when measured (2026-11-17): an id it never made is an empty
+ * `root_timestamps` alone and a 500 among others, fails `root_timestamps?latest=true` outright,
+ * and is "not latest".
+ */
+describe('when a root was current', () => {
+  const CURRENT = '648518347585551219'
+  const REPLACED = '648518347558097460'
+  const NEVER = '648518347585551226'
+  type Life = { made: number; last: number; latest: boolean }
+  const KNOWN: Record<string, Life> = {
+    [CURRENT]: { made: 1794901115.922, last: 1794903754.258, latest: true },
+    [REPLACED]: { made: 1757950639.839, last: 1794901069.072, latest: false },
+  }
+
+  /**
+   * `more` adds roots for one test; `short` answers an unknown id among known ones with a short
+   * list instead of the 500 that names it — never seen, but the other way a server could say so.
+   */
+  function installServer({ more = {}, short = false } = {}): string[] {
+    const known: Record<string, Life> = { ...KNOWN, ...more }
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const body = String(init?.body)
+      // Bare integers, never quoted: the server reads `node_ids` as a list of integers.
+      expect(body).not.toMatch(/"\d/)
+      const ids = parseCaveJson<{ node_ids: string[] }>(body).node_ids
+      asked.push(`${url.split('/test_table/')[1]} ${ids.join(',')}`)
+      if (url.includes('is_latest_roots')) {
+        return Response.json({ is_latest: ids.map((id) => known[id]?.latest ?? false) })
+      }
+      if (url.includes('latest=true')) {
+        if (ids.some((id) => !known[id])) {
+          return Response.json({ message: 'pop from an empty deque' }, { status: 500 })
+        }
+        return Response.json({ timestamp: ids.map((id) => known[id]!.last) })
+      }
+      // Alone, an unknown id is an empty list; among known ones, a 500 naming it.
+      const stranger = ids.find((id) => !known[id])
+      if (stranger !== undefined && ids.length > 1 && !short) {
+        return Response.json({ message: stranger }, { status: 500 })
+      }
+      return Response.json({
+        timestamp: ids.filter((id) => known[id]).map((id) => known[id]!.made),
+      })
+    })
+    return asked
+  }
+
+  it('says when each root was made, when it was last current, and whether that is now', async () => {
+    installServer()
+    const { lives, unknown } = await rootLives(graphene, [CURRENT, REPLACED, CURRENT], OPTIONS)
+    expect(unknown).toEqual([])
+    // `last` a millisecond before what `latest=true` answers, as caveclient reads it.
+    expect(lives).toEqual(
+      new Map([
+        [
+          CURRENT,
+          { made: 1794901115.922 * 1000, last: 1794903754.258 * 1000 - 1, current: true },
+        ],
+        [
+          REPLACED,
+          { made: 1757950639.839 * 1000, last: 1794901069.072 * 1000 - 1, current: false },
+        ],
+      ]),
+    )
+  })
+
+  it('names an id the chunkedgraph never made, from its own words, and answers the rest', async () => {
+    const asked = installServer()
+    const { lives, unknown } = await rootLives(graphene, [CURRENT, NEVER, REPLACED], OPTIONS)
+    expect(unknown).toEqual([NEVER])
+    expect([...lives.keys()]).toEqual([CURRENT, REPLACED])
+    // The 500 named it, so the rest are asked once more; `latest=true` never sees it, since it
+    // would fail the call for every root beside it.
+    expect(asked).toEqual([
+      `root_timestamps ${CURRENT},${NEVER},${REPLACED}`,
+      `root_timestamps ${CURRENT},${REPLACED}`,
+      `root_timestamps?latest=true ${CURRENT},${REPLACED}`,
+      `is_latest_roots ${CURRENT},${REPLACED}`,
+    ])
+  })
+
+  it('finds one unknown id among many in one more request', async () => {
+    const many = Array.from({ length: 64 }, (_, i) => String(648518347500000000n + BigInt(i)))
+    const asked = installServer({
+      more: Object.fromEntries(many.map((root) => [root, { made: 1, last: 2, latest: true }])),
+    })
+    const { lives, unknown } = await rootLives(graphene, [...many, NEVER], OPTIONS)
+    expect(unknown).toEqual([NEVER])
+    expect(lives.size).toBe(many.length)
+    expect(asked.filter((call) => call.startsWith('root_timestamps ')).length).toBe(2)
+  })
+
+  it('halves a batch that comes back short without naming anything', async () => {
+    const many = Array.from({ length: 64 }, (_, i) => String(648518347500000000n + BigInt(i)))
+    const asked = installServer({
+      more: Object.fromEntries(many.map((root) => [root, { made: 1, last: 2, latest: true }])),
+      short: true,
+    })
+    const { lives, unknown } = await rootLives(graphene, [...many, NEVER], OPTIONS)
+    expect(unknown).toEqual([NEVER])
+    expect(lives.size).toBe(many.length)
+    // Asked root by root, 65 roots would be 66 calls to find it.
+    expect(asked.filter((call) => call.startsWith('root_timestamps ')).length).toBeLessThan(16)
+  })
+
+  it('asks again only what can change: whether a current root still is', async () => {
+    const asked = installServer()
+    await rootLives(graphene, [CURRENT, REPLACED], OPTIONS)
+    asked.length = 0
+    const { lives } = await rootLives(graphene, [REPLACED, CURRENT], OPTIONS)
+    // When a root was made never changes, and nor does anything about a replaced one.
+    expect(asked).toEqual([
+      `root_timestamps?latest=true ${CURRENT}`,
+      `is_latest_roots ${CURRENT}`,
+    ])
+    // In the order asked, though the memory answered one of them first.
+    expect([...lives.keys()]).toEqual([REPLACED, CURRENT])
+    expect(lives.get(REPLACED)?.current).toBe(false)
+  })
+
+  it('asks nothing for no roots', async () => {
+    const asked = installServer()
+    expect(await rootLives(graphene, [], OPTIONS)).toEqual({ lives: new Map(), unknown: [] })
+    expect(asked).toEqual([])
+  })
+
+  it('refuses a string that is not a root id before anything is sent', async () => {
+    const asked = installServer()
+    for (const bad of ['-1', '0648518347585551219', '1],"x":[2']) {
+      await expect(rootLives(graphene, [CURRENT, bad], OPTIONS)).rejects.toThrow(
+        /not a root id/,
+      )
+    }
+    expect(asked).toEqual([])
+  })
+
+  it('throws a 500 that names none of the ids at once, rather than splitting the batch', async () => {
+    const asked: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      asked.push(url)
+      return Response.json({ message: 'server overloaded' }, { status: 500 })
+    })
+    await expect(rootLives(graphene, [CURRENT, REPLACED], OPTIONS)).rejects.toThrow(
+      /overloaded/,
+    )
+    expect(asked).toHaveLength(1)
   })
 })

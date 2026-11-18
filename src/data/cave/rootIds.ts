@@ -27,7 +27,8 @@ import type { GrapheneSource } from './graphene'
 import { parseGrapheneSource, tableUrl } from './graphene'
 import { channel } from '../channel'
 import { countStrings, distinctStrings } from '../../core/collections'
-import { compareIds } from '../../core/ids'
+import { compareIds, isSegmentId } from '../../core/ids'
+import { LruMap } from '../../core/lruMap'
 
 /**
  * What a completed check found.
@@ -101,6 +102,7 @@ export function peekRootCheck(deployment: string, datasetId: string): RootCheck 
 export function resetRootChecks(): void {
   entries.clear()
   recent.clear()
+  remembered.clear()
 }
 
 /**
@@ -186,7 +188,7 @@ async function run(
 }
 
 /** The chunkedgraph behind a datastack, or undefined where there is none. */
-async function grapheneFor(
+export async function grapheneFor(
   datastack: string,
   options: CaveRequestOptions,
 ): Promise<GrapheneSource | undefined> {
@@ -842,7 +844,35 @@ export async function rootTimestamps(
   roots: readonly string[],
   options: CaveRequestOptions,
 ): Promise<number[]> {
-  const url = tableUrl(graphene, 'root_timestamps')
+  return oneEach(roots, await timestampsOf(graphene, roots, options))
+}
+
+/** `ms`, where it holds one time per root; a throw otherwise. */
+function oneEach(roots: readonly string[], ms: number[]): number[] {
+  if (ms.length !== roots.length) throw notOneTimeEach(roots.length)
+  return ms
+}
+
+/**
+ * One `root_timestamps` call, as epoch ms — **however many times came back.**
+ *
+ * The length is the caller's to judge, because of how an id the chunkedgraph never made is
+ * answered — measured on `wclee_aedes_brain` (2026-11-17), and different on every path:
+ *
+ * - asked **alone**, without `latest`: a 200 with an **empty list**. The same for `0` and for a
+ *   supervoxel id;
+ * - asked **among known roots**, without `latest`: a 500 whose message is the unknown id;
+ * - with `latest=true`, alone or not: a 500, "pop from an empty deque".
+ *
+ * `madeOrUnknown` reads the first two.
+ */
+async function timestampsOf(
+  graphene: GrapheneSource,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+  { latest = false } = {},
+): Promise<number[]> {
+  const url = tableUrl(graphene, `root_timestamps${latest ? '?latest=true' : ''}`)
   const answer = await cavePostRaw<{ timestamp?: unknown }>(
     url,
     `{"node_ids":[${roots.join(',')}]}`,
@@ -851,15 +881,180 @@ export async function rootTimestamps(
   const seconds = answer.timestamp
   if (
     !Array.isArray(seconds) ||
-    seconds.length !== roots.length ||
     !seconds.every((t) => typeof t === 'number' && Number.isFinite(t))
   ) {
-    throw new CaveError(
-      `The chunkedgraph's root_timestamps answer does not hold one time for each of the ` +
-        `${roots.length} roots asked.`,
-    )
+    throw notOneTimeEach(roots.length)
   }
   return seconds.map((t: number) => t * 1000)
+}
+
+function notOneTimeEach(count: number): CaveError {
+  return new CaveError(
+    `The chunkedgraph's root_timestamps answer does not hold one time for each of the ` +
+      `${count} roots asked.`,
+  )
+}
+
+/**
+ * When a root was current: made at `made`, current until `last`, and whether `last` is now.
+ *
+ * Epoch ms throughout. For a root still current, `last` is the server's own now when it was
+ * asked, not the browser's clock — which may be behind, and ask about a moment before a root
+ * made seconds ago existed.
+ */
+export interface RootLife {
+  readonly made: number
+  /**
+   * The last moment the root was current, **less 1 ms**: just before the edit that replaced it,
+   * or the server's now for a root nothing has replaced.
+   *
+   * Less a millisecond because caveclient 8.2.1 takes one off (`get_root_timestamps`), and a
+   * moment exactly at the replacing edit is a boundary a server may place on either side. Aedes
+   * answered "current" at the edit's own time and 1 ms before (2026-11-17); the earlier moment is
+   * the one both readings agree on.
+   *
+   * `last` and `current` are two requests, so a root replaced between them reads
+   * `current: false` with `last` the moment of the first request rather than of the edit. That
+   * is still a moment it was current, which is all a reader at `last` needs.
+   */
+  readonly last: number
+  readonly current: boolean
+}
+
+/**
+ * The moment nearest `at` at which the root was current: `at` itself where the root was current
+ * then, the root's first current moment where it was made after `at`, and `last` where it was
+ * replaced before.
+ *
+ * **First current is `made + 1 ms`, not `made`**: Aedes answered "not latest" at a root's own
+ * creation time and "latest" a millisecond after, for both roots asked (2026-11-17) — the edit's
+ * timestamp belongs to the moment before it. The other end is already safe (`RootLife.last`).
+ */
+export function momentWithin(life: RootLife, at: number): number {
+  return Math.min(Math.max(at, life.made + 1), life.last)
+}
+
+/**
+ * When each root was current — for a node that reads the segmentation at its query neuron's own
+ * moment rather than at a materialization (`docs/seam-live-plan.md`).
+ *
+ * Three calls, each one answer per root: `root_timestamps` for when it was made, the same with
+ * `latest=true` for the last moment it was current, and `is_latest_roots` at the server's now
+ * for whether that moment is now. The third is needed because the second cannot say: for a
+ * current root it answers the moment of the request, which is indistinguishable from a root
+ * replaced in that same second.
+ *
+ * **An id the chunkedgraph never made is in `unknown`, never in `lives`** — and is the one thing
+ * that needs care, because the server says so differently on each call (`timestampsOf`), and
+ * `is_latest_roots` answers `false` for it, which reads as "replaced". The first call is the
+ * check (`madeOrUnknown`), and only known roots go on to the other two.
+ *
+ * A string that is not a 64-bit id at all is refused before anything is sent: it would be spliced
+ * into the body as a bare number.
+ */
+export async function rootLives(
+  graphene: GrapheneSource,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+): Promise<{ lives: Map<string, RootLife>; unknown: string[] }> {
+  const asked = distinctStrings(roots)
+  const bad = asked.find((root) => !isSegmentId(root))
+  if (bad !== undefined) throw new CaveError(`"${bad}" is not a root id.`)
+  const memoKey = (root: string) => `${graphene.server}|${graphene.table}|${root}`
+  const made = new Map<string, number>()
+  const found = new Map<string, RootLife>()
+  for (const root of asked) {
+    const held = remembered.get(memoKey(root))
+    if (held?.life) found.set(root, held.life)
+    else if (held) made.set(root, held.made)
+  }
+  const unknown: string[] = []
+  const toAsk = asked.filter((root) => !made.has(root) && !found.has(root))
+  for (let i = 0; i < toAsk.length; i += CHUNK) {
+    await madeOrUnknown(graphene, toAsk.slice(i, i + CHUNK), options, made, unknown)
+  }
+  const known = [...made.keys()]
+  for (let i = 0; i < known.length; i += CHUNK) {
+    const batch = known.slice(i, i + CHUNK)
+    // Two at once, never more: the one place this file does not ask in turn, and bounded.
+    const [lasts, current] = await Promise.all([
+      timestampsOf(graphene, batch, options, { latest: true }).then((ms) => oneEach(batch, ms)),
+      isLatestRoots(graphene, batch, 'server', options),
+    ])
+    batch.forEach((root, k) => {
+      const life = { made: made.get(root)!, last: lasts[k]! - 1, current: current[k]! }
+      found.set(root, life)
+      // A replaced root is replaced for good; a current one is asked again next time.
+      remembered.set(
+        memoKey(root),
+        life.current ? { made: life.made } : { made: life.made, life },
+      )
+    })
+  }
+  // In the order asked, whatever the memory answered first.
+  const lives = new Map<string, RootLife>()
+  for (const root of asked) if (found.has(root)) lives.set(root, found.get(root)!)
+  return { lives, unknown }
+}
+
+/**
+ * What `rootLives` need never ask again, for the session: when a root was made, and the whole
+ * life of a replaced one. Neither changes — a root id is made once, and a root replaced stays
+ * replaced. A current root's `last` and `current` are asked every time, which is one round trip
+ * where there were two (`root_timestamps` first, then the other two together). An id the
+ * chunkedgraph never made is not kept. Bounded, as entries are a few dozen bytes each.
+ */
+const remembered = new LruMap<string, { made: number; life?: RootLife }>(20_000)
+
+/**
+ * When each root of `batch` was made, into `made` — or into `unknown`, where the chunkedgraph
+ * never made it.
+ *
+ * **Read off the server's own words** (`timestampsOf`): among known roots, the 500 for an unknown
+ * id says that id and nothing else, so it is set aside and the rest asked again — one more
+ * request per unknown id. A 500 that names none of the ids sent is the server failing, and is
+ * thrown at once: halving on any 500 would answer a loaded server with a dozen more requests, and
+ * a run that came through would say nothing of the outage. A root alone answers an empty list.
+ *
+ * A short answer that names nothing was never measured; it is halved, each half asked, down to a
+ * root alone — about 2·log₂*n* requests for one such id in *n*, where asking every root alone was
+ * *n*: ten thousand at `CHUNK`.
+ */
+async function madeOrUnknown(
+  graphene: GrapheneSource,
+  batch: readonly string[],
+  options: CaveRequestOptions,
+  made: Map<string, number>,
+  unknown: string[],
+): Promise<void> {
+  let asking = batch
+  for (;;) {
+    const sent = asking
+    const answer = await timestampsOf(graphene, sent, options).catch((error: unknown) => {
+      const named =
+        error instanceof CaveError && error.status === 500 ? error.detail : undefined
+      if (named !== undefined && sent.length > 1 && sent.includes(named)) return named
+      throw error
+    })
+    if (typeof answer === 'string') {
+      unknown.push(answer)
+      asking = sent.filter((root) => root !== answer)
+      continue
+    }
+    if (answer.length === sent.length) {
+      sent.forEach((root, k) => made.set(root, answer[k]!))
+      return
+    }
+    if (sent.length === 1) {
+      if (answer.length !== 0) throw notOneTimeEach(1)
+      unknown.push(sent[0]!)
+      return
+    }
+    const half = Math.ceil(sent.length / 2)
+    await madeOrUnknown(graphene, sent.slice(0, half), options, made, unknown)
+    await madeOrUnknown(graphene, sent.slice(half), options, made, unknown)
+    return
+  }
 }
 
 /**

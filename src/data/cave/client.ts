@@ -32,10 +32,17 @@ import { DEFAULT_CAVE_SERVER, caveServerLabel, normaliseCaveServer } from './dep
 export class CaveError extends Error {
   /** HTTP status, or 0 for a failure that never got one — a refusal, or an unreachable host. */
   readonly status: number
-  constructor(message: string, status = 0) {
+  /**
+   * What the server said, alone — for a caller that reads the answer rather than shows it. Set
+   * where a response failed; `rootLives` reads it, since one chunkedgraph 500 means "this id
+   * does not exist" and says which in exactly this text.
+   */
+  readonly detail: string | undefined
+  constructor(message: string, status = 0, detail?: string) {
     super(message)
     this.name = 'CaveError'
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -171,8 +178,10 @@ async function request<T>(
   if (response.status === 401 || response.status === 403)
     refuseAuth(url, response.status, text, options)
 
-  if (!response.ok)
-    throw new CaveError(`CAVE returned ${response.status}: ${explain(text)}`, response.status)
+  if (!response.ok) {
+    const said = explain(text)
+    throw new CaveError(`CAVE returned ${response.status}: ${said}`, response.status, said)
+  }
   return parseCaveJson<T>(text)
 }
 
