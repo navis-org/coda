@@ -107,9 +107,27 @@ export interface LoadedManifest {
    * caller actually names, or give each file an absolute `url`.
    */
   readonly url: string
+  /**
+   * The SHA-256 of the manifest's text in UTF-8, lower-case hex: **which** version of the model
+   * this is. A model's `id` stays the same when it is republished with refitted numbers, so the
+   * id alone cannot tell a result from before a refit from one after; the digest can. It is
+   * `sha256sum` of the published file for any manifest saved as UTF-8 without a byte-order mark,
+   * which every one so far is (checked for both SEAM manifests, 2026-11-18): `fetchText` hands
+   * over decoded text, and decoding drops a mark.
+   */
+  readonly digest: string
 }
 
 export class ManifestError extends Error {}
+
+/** SHA-256 of some bytes, as lower-case hex. */
+export async function sha256Hex(bytes: BufferSource): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new ManifestError('This browser has no SubtleCrypto, so a model cannot be checked')
+  }
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
 
 /** One file entry, with the one lookup and the one sentence for a miss. */
 export function modelFile(loaded: LoadedManifest, variant: string, part: string): ModelFile {
@@ -245,5 +263,6 @@ export async function loadManifest(url: string, signal?: AbortSignal): Promise<L
   } catch {
     throw new ManifestError(`${url} did not answer with JSON`)
   }
-  return { manifest: checkManifest(parsed), url }
+  const digest = await sha256Hex(new TextEncoder().encode(text))
+  return { manifest: checkManifest(parsed), url, digest }
 }

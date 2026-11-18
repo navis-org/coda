@@ -56,7 +56,7 @@ async function loaded(over: Record<string, unknown> = {}): Promise<LoadedManifes
       },
     ],
   } as unknown as ModelManifest
-  return { manifest, url: 'https://models.invalid/affinity/manifest.json' }
+  return { manifest, url: 'https://models.invalid/affinity/manifest.json', digest: 'test' }
 }
 
 /** A body delivered as a stream, so the progress path is the one under test. */
