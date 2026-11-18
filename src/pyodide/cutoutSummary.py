@@ -295,6 +295,14 @@ def coda_candidate_pool(request, report=None):
         report(0.7, "measuring the pool")
     pool = candidates.pool_features(frame, query, end_nm)
 
+    # **The pool's roots go out now, before the organelle measure**: the level-2 counts need
+    # exactly these and nothing below, and the measure is a third of this call (2026-11-18). A
+    # dict, the third argument the bridge's `report` takes, converted as the result is
+    # (`runtime.ts`) — and the very array `candRoot` is at the end, not a second spelling of it.
+    cand_root = np.ascontiguousarray(pool["root"].to_numpy(), dtype=np.uint64)
+    if report is not None:
+        report(0.85, "measuring how enclosed each piece is", {"candRoot": cand_root})
+
     # **The organelle flag's measure, on the box already in hand** — SEAM's `seam/enclosure.py`,
     # vendored whole, which reads exactly what is here: `inv` and each supervoxel's root. It costs
     # no request, which is why SEAM put it on the search's cutout. `enclosed`, the candidate's own
@@ -304,8 +312,6 @@ def coda_candidate_pool(request, report=None):
     # the pool's looked up by root, as Python ints both sides: `enclosure`'s own `roots=` filter
     # compares with `isin` against `int64`, and `uint64` against `int64` goes through a float,
     # which rounds an 18-digit id onto its neighbours.
-    if report is not None:
-        report(0.85, "measuring how enclosed each piece is")
     enclosure = seam["seam.enclosure"]
     enclosed = enclosure.enclosure(inv, roots)
     by_root = dict(zip(enclosed["root"].tolist(), enclosed["enclosed"].tolist()))
@@ -328,10 +334,10 @@ def coda_candidate_pool(request, report=None):
         # The ids stay 64-bit and unsigned: an 18-digit id through a float64 is a different
         # object, which is the one error here that could not be seen. `root` is renamed on the
         # way out because the wrapper calls it `candRoot` — the candidate, not the query.
-        if name in ("root", "rep_svid"):
-            out["candRoot" if name == "root" else name] = np.ascontiguousarray(
-                column, dtype=np.uint64
-            )
+        if name == "root":
+            out["candRoot"] = cand_root
+        elif name == "rep_svid":
+            out[name] = np.ascontiguousarray(column, dtype=np.uint64)
         elif column.dtype.kind in "fiub":
             out[name] = np.ascontiguousarray(column, dtype=np.float64)
     if report is not None:

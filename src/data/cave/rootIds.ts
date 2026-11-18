@@ -57,6 +57,24 @@ const MAX_ROOTS_CHECKED = 250_000
 /** Ids per request. caveclient sends one call; this splits it so no single body is enormous. */
 const CHUNK = 10_000
 
+/**
+ * How many `roots_binary` requests one `rootsAtInstant` call keeps in flight — four, as
+ * `LEAVES_STREAMS` is, for SEAM's invariant 8.
+ *
+ * **A cap per call, not the run's share of the server.** Suggest Merges reads the next end's
+ * search box while this end's patch box is read, and the counts run beside both, so its peak
+ * against one chunkedgraph is about twelve requests, not four. A limit per host, shared by
+ * `rootsBinary` and `leavesMany`, is what would hold a total; nothing here does.
+ */
+const ROOT_STREAMS = 4
+
+/**
+ * The fewest ids worth a request of their own. A request costs ~145 ms however small (Aedes,
+ * 2026-11-18), so splitting 900 ids four ways measured 182 ms against 222 — not worth four
+ * requests at a shared server. Below twice this, a lookup stays one request.
+ */
+const ROOT_PIECE_MIN = 1_000
+
 /** How many stale ids a message names. Enough to paste into a search, short enough to read. */
 const EXAMPLES = 3
 
@@ -472,20 +490,26 @@ export async function rootsAtInstant(
   const asked =
     supervoxels.indexOf(0n) < 0 ? supervoxels : supervoxels.filter((id) => id !== 0n)
   const answered = new BigUint64Array(asked.length)
-  for (let i = 0; i < asked.length; i += CHUNK) {
-    /*
-     * Sequential, and **not** because the file has a house style — `l2ChunkCounts` below runs
-     * `LEAVES_STREAMS` at a time. It is because there is usually nothing here to overlap:
-     * `CHUNK` is ten thousand ids a request and the caller passes only the supervoxels it has
-     * not already placed (`rootedBox.ts`' `resolveRoots`), so a box is one request and often
-     * the loop runs once. A pool over one batch buys nothing, and `roots_binary` is a binary
-     * body and a binary reply, so it pays none of the JSON cost the counts path does.
-     */
+  /*
+   * **Split across `ROOT_STREAMS` requests in flight**, each at least `ROOT_PIECE_MIN` ids and
+   * at most `CHUNK`. The time is the server's, per id: one request of 7,200 supervoxels took
+   * 741 ms where the same count as four requests at once took 335 (Aedes, 2026-11-18), against
+   * a floor of ~145 ms for a request of ten. So a box's lookup — which is one request, and the
+   * largest single wait in a Suggest Merges end — is worth splitting, and a small one is not.
+   *
+   * Pieces of one answer, so `inFlight` (`l2ChunkCounts`' reason): a piece that failed must
+   * fail the lookup rather than come back as ids left at `0n`, which would be remembered as
+   * "no object".
+   */
+  const pieces = Math.max(1, Math.min(ROOT_STREAMS, Math.floor(asked.length / ROOT_PIECE_MIN)))
+  const size = Math.max(1, Math.min(CHUNK, Math.ceil(asked.length / pieces)))
+  const starts = Array.from({ length: Math.ceil(asked.length / size) }, (_, k) => k * size)
+  await inFlight(starts, ROOT_STREAMS, async (i) => {
     /*
      * The ids go as they are, never through text, which cost four times the filter above on
      * every box (1.5 ms per 14,000 ids). A view is fine: `cavePostBinary` sends its own bytes.
      */
-    const batch = asked.subarray(i, i + CHUNK)
+    const batch = asked.subarray(i, i + size)
     const answer = await rootsBinary(graphene, batch, at, options)
     /*
      * One root per id, or it is not an answer. Filled with `0n`, a short reply would read as
@@ -499,7 +523,7 @@ export async function rootsAtInstant(
       )
     }
     answered.set(answer, i)
-  }
+  })
   if (asked.length === supervoxels.length) return answered
   const out = new BigUint64Array(supervoxels.length)
   for (let i = 0, next = 0; i < supervoxels.length; i++) {
@@ -541,7 +565,15 @@ async function placeNodes(
  */
 export const VOTE_SAMPLE = 100
 
-/** Roots per `leaves_many` request: a few thousand chunk ids each, so a few MB a reply. */
+/**
+ * Roots per `leaves_many` request. A reply is the chunk ids as text: measured on Aedes
+ * (2026-11-18) at 0.21 MB for fifty pool roots, over a megabyte where the batch holds a large
+ * neuron. The time is the server's — parsing that reply takes 2 ms of a 525 ms request.
+ *
+ * **Twenty-five at eight streams was measured and did not pay**: through the whole node, 25 ends
+ * of Suggest Merges, the stage's median was 780 ms against 929 and the end 3.3 s against 3.2,
+ * which is inside run-to-run noise. Not worth twice the requests at a shared server.
+ */
 const LEAVES_CHUNK = 50
 
 /**
@@ -556,9 +588,7 @@ const LEAVES_CHUNK = 50
  * **It is a rate limit, not the absence of one**, which is the half of SEAM's invariant 8 this
  * has to keep: the servers are shared and public. SEAM's own fetching holds four streams at
  * Aedes, `MESH_CONCURRENCY` is three and `fragmentConcurrencyFor` divides a budget rather than
- * removing it. Four matches the number this pack is already allowed elsewhere, and a reply here
- * is a few megabytes, so four in flight is about twenty megabytes buffered rather than an
- * unbounded fan-out.
+ * removing it. Four matches the number this pack is already allowed elsewhere.
  *
  * `inFlight` rather than `mapWithConcurrency`: the batches are **pieces of one answer**, and
  * `src/data/concurrency.ts`' header is about exactly that difference. A forgiven batch here

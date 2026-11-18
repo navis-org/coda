@@ -59,8 +59,10 @@ export async function mapWithConcurrency<T, R>(
 /**
  * Run `work` over `items`, at most `limit` at a time.
  *
- * **The strict sibling of `mapWithConcurrency` above**: the first failure fails the read, though
- * its siblings still run to completion before it surfaces. The module header argues why.
+ * **The strict sibling of `mapWithConcurrency` above**: the first failure fails the read. The
+ * module header argues why. **And nothing new starts after it** — the items already in flight
+ * finish, but the rest are never sent: the answer is a rejection whatever they say, and every
+ * caller's items are requests at a shared server, which at a `429` is asking for fewer.
  *
  * A pool rather than `Promise.all` because the limit is politeness at a shared public bucket: a
  * caller reading a hundred boxes would otherwise have every chunk of every one of them in flight
@@ -73,6 +75,7 @@ export async function inFlight<T>(
   work: (item: T) => Promise<void>,
 ): Promise<void> {
   let next = 0
+  let failed = false
   const runners = Array.from(
     { length: Math.max(1, Math.min(limit, items.length)) },
     async () => {
@@ -81,8 +84,13 @@ export async function inFlight<T>(
         next += 1
         // `at >= length` rather than `items[at] === undefined`, so an array holding an `undefined`
         // does not end the work early — a trap for the next caller rather than a bug today.
-        if (at >= items.length) return
-        await work(items[at]!)
+        if (failed || at >= items.length) return
+        try {
+          await work(items[at]!)
+        } catch (error) {
+          failed = true
+          throw error
+        }
       }
     },
   )

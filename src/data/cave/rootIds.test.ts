@@ -669,6 +669,65 @@ describe('the root of label 0', () => {
 })
 
 /**
+ * **A box's lookup goes out in pieces, four at a time**, because the server's time is per id and
+ * one 7,200-id request measured 741 ms against 335 for the same ids as four (2026-11-18). The
+ * pieces answer out of order, so what is pinned beside the peak is that every root lands on its
+ * own supervoxel: a piece written at the wrong offset is a box of other neurons' roots.
+ */
+describe('a large lookup', () => {
+  /** A `roots_binary` server whose later pieces answer first, recording the peak in flight. */
+  const servePieces = () => {
+    const sent: bigint[][] = []
+    let open = 0
+    let peak = 0
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      const body = init!.body as ArrayBufferView
+      const ids = [...new BigUint64Array(body.buffer, body.byteOffset, body.byteLength / 8)]
+      sent.push(ids)
+      open += 1
+      peak = Math.max(peak, open)
+      return new Promise<Response>((resolve) =>
+        setTimeout(
+          () => {
+            open -= 1
+            resolve(
+              new Response(BigUint64Array.from(ids, (id) => id + 1_000_000n).buffer, {
+                status: 200,
+              }),
+            )
+          },
+          // The first piece last: an answer written where it arrived would be caught.
+          10 - Math.min(sent.length, 9),
+        ),
+      )
+    })
+    return { sent, peak: () => peak }
+  }
+
+  it('asks in four pieces at once, each root in its own place', async () => {
+    const server = servePieces()
+    const ids = BigUint64Array.from({ length: 8_000 }, (_, i) => BigInt(i + 1))
+    const got = await rootsAtInstant(graphene, 1_700_000_000_000, ids, OPTIONS)
+    expect(server.sent).toHaveLength(4)
+    expect(server.peak()).toBe(4)
+    expect(new Set(server.sent.flat()).size).toBe(8_000)
+    expect(got.every((root, i) => root === ids[i]! + 1_000_000n)).toBe(true)
+  })
+
+  /** A request costs ~145 ms however small, so a few hundred ids are not worth four of them. */
+  it('keeps a small lookup to one request', async () => {
+    const server = servePieces()
+    await rootsAtInstant(
+      graphene,
+      1_700_000_000_000,
+      BigUint64Array.from({ length: 1_500 }, (_, i) => BigInt(i + 1)),
+      OPTIONS,
+    )
+    expect(server.sent).toHaveLength(1)
+  })
+})
+
+/**
  * After our own write, a client clock behind the server's would ask about a moment before it and
  * see the old roots — so `'server'` sends no timestamp, and the server answers at its own now.
  */

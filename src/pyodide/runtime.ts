@@ -268,8 +268,51 @@ let bootPromise: Promise<PyodideApi> | undefined
 /**
  * Each module's own globals, never one shared `py.globals` — see `docs/python-pyodide.md`. Held for
  * the session: a module's functions read their helpers from it at call time.
+ *
+ * **As a promise made once** — not as the namespace, filled when loading
+ * ends. Two first calls to one module can overlap (Suggest Merges warms the cutter's worker while
+ * its first box is opened), and filled on completion both would load, each run the source into a
+ * namespace of its own, and the later `set` would replace the earlier: the cutter's held box would
+ * then sit in a copy no later call reaches. A failed load is forgotten, so the next call retries.
  */
-const namespaces = new Map<string, PyNamespace>()
+const namespaces = new Map<string, Promise<PyNamespace>>()
+
+function namespaceOf(py: PyodideApi, module: string, report: Report): Promise<PyNamespace> {
+  const held = namespaces.get(module)
+  if (held) return held
+  const loading = loadNamespace(py, module, report)
+  namespaces.set(module, loading)
+  loading.catch(() => {
+    if (namespaces.get(module) === loading) namespaces.delete(module)
+  })
+  return loading
+}
+
+async function loadNamespace(
+  py: PyodideApi,
+  module: string,
+  report: Report,
+): Promise<PyNamespace> {
+  const spec = MODULES[module]
+  if (!spec) throw new Error(`No Python module called "${module}"`)
+  report(0.1, spec.label)
+  // One call, not one per package: these come from two different hosts, so awaited in turn
+  // the second request's DNS, TLS and slow-start all wait on the first transfer finishing —
+  // 2.9 MB and 1.1 MB, on the one path where the whole ten megabytes is already being paid.
+  const wheels = (spec.wheels ?? []).map((name) => new URL(`wheels/${name}`, siteRoot).href)
+  // Thrown before anything is run or kept, so a download that failed is retried by the next
+  // call rather than leaving a module that imports what never arrived — `loadPackages.ts`.
+  await loadPackagesOrThrow(py, [...spec.packages, ...wheels], spec.label, {
+    note: (text) => report(0.1, text),
+  })
+  // `__name__` seeded, as an import would, so a class or a traceback names its module.
+  const namespace = py.toPy({
+    __name__: module,
+    ...(spec.vendored ? { __vendored__: spec.vendored } : {}),
+  }) as PyNamespace
+  py.runPython(spec.source, { globals: namespace })
+  return namespace
+}
 
 async function boot(report: Report): Promise<PyodideApi> {
   if (!bootPromise) {
@@ -337,39 +380,37 @@ export async function callPython(
   fn: string,
   args: PyArg[],
   report: Report,
+  /**
+   * A piece of the answer the function has already worked out, which its caller can start on
+   * while the rest is computed — Python's `report(fraction, note, {...})`. Converted as the
+   * result is, below.
+   */
+  onPartial: (partial: PyResult) => void,
 ): Promise<PyResult> {
   const py = await boot(report)
 
-  let namespace = namespaces.get(module)
-  if (!namespace) {
-    const spec = MODULES[module]
-    if (!spec) throw new Error(`No Python module called "${module}"`)
-    report(0.1, spec.label)
-    // One call, not one per package: these come from two different hosts, so awaited in turn
-    // the second request's DNS, TLS and slow-start all wait on the first transfer finishing —
-    // 2.9 MB and 1.1 MB, on the one path where the whole ten megabytes is already being paid.
-    const wheels = (spec.wheels ?? []).map((name) => new URL(`wheels/${name}`, siteRoot).href)
-    // Thrown before anything is run or kept, so a download that failed is retried by the next
-    // call rather than leaving a module that imports what never arrived — `loadPackages.ts`.
-    await loadPackagesOrThrow(py, [...spec.packages, ...wheels], spec.label, {
-      note: (text) => report(0.1, text),
-    })
-    // `__name__` seeded, as an import would, so a class or a traceback names its module.
-    namespace = py.toPy({
-      __name__: module,
-      ...(spec.vendored ? { __vendored__: spec.vendored } : {}),
-    }) as PyNamespace
-    py.runPython(spec.source, { globals: namespace })
-    namespaces.set(module, namespace)
-  }
-
+  const namespace = await namespaceOf(py, module, report)
   const callable = namespace.get(fn)
   if (!callable) throw new Error(`Python module "${module}" defines no "${fn}"`)
 
   let out: PyProxy | undefined
   try {
-    out = callable(...args, (fraction: number, note?: string) => {
+    out = callable(...args, (fraction: number, note?: string, partial?: PyProxy) => {
       report(BOOT_SHARE + (1 - BOOT_SHARE) * fraction, note)
+      /*
+       * Converted and released here, while Python is still running: the call is synchronous, so
+       * this is the only moment it can leave, and a proxy kept past it leaks (above). **A partial
+       * that cannot be sent is dropped**, never raised into Python: it is a head start, and the
+       * final result alone is the answer.
+       */
+      if (partial == null) return
+      try {
+        onPartial(partial.toJs({ dict_converter: Object.fromEntries }) as PyResult)
+      } catch {
+        // Dropped; see above.
+      } finally {
+        partial.destroy()
+      }
     })
     return out.toJs({ dict_converter: Object.fromEntries }) as PyResult
   } finally {
