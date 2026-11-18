@@ -104,6 +104,12 @@ Extended pieces add rows to both tables, after the neuron's own. Four columns on
 
 Group on `seed` if you want one neuron per group. Grouping on `ID` gives you each piece on its own.
 
+## Organelles
+
+Every candidate also carries `organelle_score`: the share of its surface, inside the search box, that faces its single largest neighbour. A mitochondrion or a vesicle sits wrapped inside one cell, so nearly all of it faces that cell; a neurite's continuation meets the neuron at one end and other pieces along its length. `organelle` is true from 0.5 up, which is SEAM's cut: in two blind checks, 39 of the 40 pieces at or above it were organelles, and 2 of the 50 below it were.
+
+The flag changes no rank, `q` or `shown`. With an assessor, each tip also carries `q_no_organelles`, `r_no_organelles` and `shown_no_organelles`: the same three worked out again for the list with its flagged candidates taken out, using the same fits. They equal `q`, `r` and `shown` where the list holds no organelle. They are Coda's, not SEAM's, and an estimate, since SEAM fitted its scores on lists that still held organelles. [Review Suggestions](#seam:review) leaves flagged candidates out unless you untick `Exclude organelles`. The measure is SEAM's own code, run on the box the search has already read, and adds about a quarter of a second to each end. `Tips` carries its first candidate's `organelle`, as [Merge Suggestions](#seam:suggestions)' does; the score is on `Candidates`.
+
 ```coda-params
 seam:suggestMerges: model, assessor, download, assessTop, chunkCacheMb
 ```

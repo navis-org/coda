@@ -55,6 +55,18 @@ export interface Field {
    * whole of what it is worth.
    */
   readonly check?: true
+  /**
+   * **Absent from sets made before SEAM wrote it**: published as nulls there, never refused.
+   *
+   * Every other field is required, and a set missing one is refused by name (`readFields`) —
+   * a schema promising a column nobody can fill is invariant 3's failure. A column SEAM *added*
+   * is different: a set from before it is not damaged, it simply predates the column, and
+   * refusing it would stop every older set loading. So the column is published either way, null
+   * where the set does not hold it, and the table's shape does not depend on the set's age.
+   * Null, not a default: an older set does not say, and `seam:review` reads only an explicit
+   * value. The organelle flag (2026-11-14) is the case.
+   */
+  readonly optional?: true
 }
 
 /**
@@ -66,6 +78,14 @@ export interface Field {
  */
 export const field = (from: string, name: string, dtype: DType, unit?: string): Field =>
   unit === undefined ? { from, name, dtype } : { from, name, dtype, unit }
+
+/** A column SEAM added later: read where the set has it, published as nulls where it does not. */
+const optional = (from: string, name: string, dtype: DType): Field => ({
+  from,
+  name,
+  dtype,
+  optional: true,
+})
 
 /** A column read only so the loader can check it. Never reaches a published table. */
 const check = (from: string, dtype: DType): Field => ({ from, name: from, dtype, check: true })
@@ -121,6 +141,10 @@ export const TIP_FIELDS: readonly Field[] = [
   field('top_contact_y_nm', 'contact_y', 'f64', 'nm'),
   field('top_contact_z_nm', 'contact_z', 'f64', 'nm'),
   field('p_top', 'p_top', 'f64'),
+  // The first candidate's organelle flag, published as `organelle` as Suggest Merges' `Tips` has
+  // it (`searchTips.ts`), so a picker downstream is offered one column from either node.
+  // Optional: sets from before 2026-11-14 do not hold it.
+  optional('top_organelle', 'organelle', 'bool'),
   // Filled from the candidates file's rank-1 row, not from the column above. See `TIP_FIELDS`.
   field(FIRST_CANDIDATE, 'candidateId', 'str'),
   field('q', 'q', 'f64'),
@@ -167,6 +191,12 @@ export const CANDIDATE_FIELDS: readonly Field[] = [
   field('logit_s2', 'logit_s2', 'f64'),
   field('filled', 'filled', 'bool'),
   field('shown', 'shown', 'bool'),
+  /*
+   * SEAM's organelle flag (2026-11-14), the columns Suggest Merges publishes under the same
+   * names (`searchTips.ts`). Optional: sets from before it do not hold them.
+   */
+  optional('organelle_score', 'organelle_score', 'f64'),
+  optional('organelle', 'organelle', 'bool'),
 ]
 
 /** The schema half, from a field list. */

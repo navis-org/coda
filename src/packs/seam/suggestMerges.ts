@@ -237,11 +237,16 @@ const ASSESSOR_SHARE = 0.1
  * `Chunk cache` already holds them — so the box figure is right for an end moving into new
  * segmentation, which on a walk along a neuron is most of them.
  *
+ * **The organelle measure adds a quarter of a second** (2026-11-17): SEAM's `enclosure` on the
+ * same box, in the same Pyodide call as the pool. One rv2 end's warm pool step, five calls each
+ * way in Chrome: a median of 836 ms with it, 577 ms without — 260 ms. So the 2.74 s above is
+ * 3.0 s, and that is the rate.
+ *
  * **A rate, not a limit.** `WAIT_WARN_SECONDS` decides when the number is worth saying; this only
  * turns a count of ends into it, which is `docs/limits.md`' rule about stating a limit in the
  * units of what it protects.
  */
-export const SECONDS_PER_END = 2.7
+export const SECONDS_PER_END = 3.0
 
 /**
  * What one assessed candidate costs, in seconds: a 129³ patch cut and run.

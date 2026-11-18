@@ -119,7 +119,53 @@ export const SEARCH_CANDIDATE_FIELDS: readonly Field[] = [
   field('contact_x_nm', 'contact_x', 'f64', 'nm'),
   field('contact_y_nm', 'contact_y', 'f64', 'nm'),
   field('contact_z_nm', 'contact_z', 'f64', 'nm'),
+  /*
+   * **The organelle flag** (SEAM, 2026-11-14): the share of the candidate's surface, inside the
+   * search box, that faces its single largest neighbour — SEAM's `enclosed`, measured by its own
+   * `seam/enclosure.py` on the box the search already read (vendored, `cutoutSummary.py`). A
+   * mitochondrion or a vesicle sits wrapped in one cell, so nearly all of it faces that cell; a
+   * neurite's continuation meets the neuron at one end and other objects along its length.
+   * `organelle` is that at or above `ORGANELLE_CUT`. **A flag for the reader, never a rank**: it
+   * changes no order, `q` or `shown` — SEAM's own rule — and `seam:review` can leave flagged
+   * pieces out of its list.
+   */
+  field('enclosed', 'organelle_score', 'f64'),
+  field('organelle', 'organelle', 'bool'),
 ]
+
+/**
+ * Where `organelle` starts: SEAM's `ORGANELLE_CUT` (`scripts/pilots/tip_pipeline.py`).
+ *
+ * Measured, not chosen here: two blind eye checks of 90 candidates found 39 of the 40 at or above
+ * it to be organelles (22 mitochondria, 17 others), and 2 of the 50 below it (tiny fragments) —
+ * precision and recall about 0.99. So about one flagged piece in a hundred is not an organelle,
+ * which is why the review card leaves them out by choice and says how many.
+ */
+export const ORGANELLE_CUT = 0.5
+
+/**
+ * Whether the search's row `at` is flagged as an organelle — `null` where it was not measured.
+ *
+ * Read in three places — the candidate rows, the tip's first candidate, and the list the
+ * assessor re-scores without its organelles (`scoreEnds.ts`) — so the cut is applied here and
+ * nowhere else.
+ */
+export function organelleAt(
+  columns: Readonly<Record<string, Float64Array>>,
+  at: number,
+): boolean | null {
+  const score = cell(columns['enclosed'], at)
+  return score === null ? null : score >= ORGANELLE_CUT
+}
+
+/** A search cell by its column name: the pool's own, or `organelle`, worked out from it. */
+function searchCell(
+  columns: Readonly<Record<string, Float64Array>>,
+  name: string,
+  at: number,
+): CellValue {
+  return name === 'organelle' ? organelleAt(columns, at) : cell(columns[name], at)
+}
 
 /**
  * What stage 6 adds to a candidate row, where an assessor ran.
@@ -165,6 +211,17 @@ export const ASSESSED_TIP_FIELDS: readonly Field[] = [
   field('q', 'q', 'f64'),
   field('r', 'r', 'f64'),
   field('shown', 'shown', 'bool'),
+  /*
+   * **The same three, for the list with its organelles taken out** (user, 2026-11-17) — Coda's,
+   * not SEAM's. `r` is about the first candidate, and the shares are shares of the whole list,
+   * so where an organelle leads it, or only takes a share of it, SEAM's three describe a list
+   * `seam:review` does not show with `Exclude organelles` on. Stages 7–9 again (`scoreEnds.ts`),
+   * with the same fits and `e_tip`, over what is left. The same as the three above where the
+   * list holds no organelle. An estimate: SEAM fitted every stage on lists that still held them.
+   */
+  field('q_no_organelles', 'q_no_organelles', 'f64'),
+  field('r_no_organelles', 'r_no_organelles', 'f64'),
+  field('shown_no_organelles', 'shown_no_organelles', 'bool'),
 ]
 
 /**
@@ -220,10 +277,17 @@ export interface AssessedEnd {
  * candidate, and `shown` where the configuration published no cutoff for the quantity this tip
  * could reach — which `seam:review` draws as "no verdict" rather than as a rejection.
  */
-export interface AssessedTip {
+export interface AssessedTip extends TipVerdict {
   readonly segclr: number
   readonly p_tip: number
   readonly p_top: number
+  readonly q_no_organelles: number | null
+  readonly r_no_organelles: number | null
+  readonly shown_no_organelles: boolean | null
+}
+
+/** Stage 9's answer about a list's first candidate, by the names a tip row publishes it under. */
+export interface TipVerdict {
   readonly q: number | null
   readonly r: number | null
   readonly shown: boolean | null
@@ -311,8 +375,10 @@ export function tipFields(assessed: boolean): readonly Field[] {
  * `neuron` and `end_uid` are already the tip's own, and `rank` is 1 by definition here.
  */
 export const SEARCH_TIP_FIELDS: readonly Field[] = SEARCH_CANDIDATE_FIELDS.filter(
-  // `seed` is the tip's own too — one of `LINEAGE_FIELDS`, and never a first candidate's.
-  (one) => !['neuron', 'seed', 'end_uid', 'rank'].includes(one.from),
+  // `seed` is the tip's own too — one of `LINEAGE_FIELDS`, and never a first candidate's. And the
+  // organelle *score* stays on `Candidates`: SEAM's tips file carries the first candidate's flag
+  // only (`top_organelle`), so `Tips` holds `organelle` alone, the same from either node.
+  (one) => !['neuron', 'seed', 'end_uid', 'rank', 'enclosed'].includes(one.from),
 )
 
 /**
@@ -425,8 +491,10 @@ export function tipsByNeuron(rows: readonly TipRow[]): Map<string, number[]> {
  * and `tableOf` hands that to `makeTable` without a length: a ragged table, not a throw. One
  * list, and the two cannot come apart.
  */
-const FROM_SEARCH: readonly string[] = SEARCH_TIP_FIELDS.filter(
-  (one) => one.from !== 'cand_root' && one.from !== 'geo_rank',
+const FROM_SEARCH: readonly string[] = SEARCH_CANDIDATE_FIELDS.filter(
+  // Written rather than copied, by `candidatesTable` itself. From the candidate fields, not the
+  // tip fields: a measurement only `Candidates` carries (`organelle_score`) is one all the same.
+  (one) => !['neuron', 'seed', 'end_uid', 'cand_root', 'rank', 'geo_rank'].includes(one.from),
 ).map((one) => one.from)
 
 /**
@@ -528,7 +596,7 @@ export function candidatesTable(
       // list is published in the assessor's ranking and `geo_rank` keeps the forest's.
       read['rank']!.push(place + 1)
       read['geo_rank']!.push(cell(end.columns['geo_rank'], at) ?? at + 1)
-      for (const from of FROM_SEARCH) read[from]!.push(cell(end.columns[from], at))
+      for (const from of FROM_SEARCH) read[from]!.push(searchCell(end.columns, from, at))
       if (!assessed) continue
       for (const from of FROM_ASSESSOR) read[from]!.push(cell(scores?.columns[from], at))
       read['filled']!.push(scores?.filled[at] ?? null)
@@ -637,7 +705,7 @@ export function tipsWithFirsts(
     data['candidateId']![at] = String(end.candRoot[first]!)
     data['geo_rank']![at] = cell(end.columns['geo_rank'], first) ?? 1
     for (const [name, column] of FIRST_ON_TIP) {
-      data[name]![at] = cell(end.columns[column], first)
+      data[name]![at] = searchCell(end.columns, column, first)
     }
   }
   return makeTable(schema, data, table.kind, length)

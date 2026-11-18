@@ -58,6 +58,68 @@ function assessed(scores: readonly number[], filled?: readonly WhyFilled[]): Ass
   return { score: Float64Array.from(scores), filled: filled ?? scores.map(() => '') }
 }
 
+/**
+ * The list re-scored without its organelles (user, 2026-11-17): stages 7–9 again over what is
+ * left, so `seam:review` can lead a tip past an organelle with a number about the list it shows.
+ */
+describe('publishedEnd, without organelles', () => {
+  /** `p_tip` reads `segclr` here, so an organelle that led the list moves it too. */
+  const READS_SEGCLR: PipelineFits = { ...FITS, pTip: [0, 1, 0] }
+  const flagged = (scores: readonly number[], enclosed: readonly number[]) =>
+    end(scores, {
+      columns: { ...end(scores).columns, enclosed: Float64Array.from(enclosed) },
+    })
+  const without = (one: PublishedEnd) => {
+    const tip = one.scores!.tip
+    return { q: tip.q_no_organelles, r: tip.r_no_organelles, shown: tip.shown_no_organelles }
+  }
+  const plain = (one: PublishedEnd) => {
+    const { q, r, shown } = one.scores!.tip
+    return { q, r, shown }
+  }
+
+  it('is the tip’s own decision where the list holds no organelle, or was never measured', () => {
+    for (const one of [
+      publishedEnd(end([3, 1]), assessed([3, 1]), 0, READS_SEGCLR),
+      publishedEnd(flagged([3, 1], [0.1, NaN]), assessed([3, 1]), 0, READS_SEGCLR),
+    ]) {
+      expect(without(one)).toEqual(plain(one))
+    }
+  })
+
+  /**
+   * **The decision of the list with the organelle never in it.** Every stage reads the whole
+   * list — the leader for `segclr` and `p_tip`, the rest for its share — so the answer is the one
+   * a list of the two others would get, and not the old numbers read off a new row.
+   */
+  it('scores the list with its organelles taken out, as though they were never in it', () => {
+    const one = publishedEnd(
+      flagged([5, 1, 0], [0.9, 0.1, 0.2]),
+      assessed([5, 1, 0]),
+      0,
+      READS_SEGCLR,
+    )
+    const alone = publishedEnd(end([1, 0]), assessed([1, 0]), 0, READS_SEGCLR)
+    expect(without(one)).toEqual(plain(alone))
+    expect(without(one).q).not.toBe(one.scores!.tip.q)
+    // SEAM's own three stay as they were: the first candidate is still the organelle.
+    expect(one.order[0]).toBe(0)
+  })
+
+  /** An organelle that does not lead still took a share of the list from the one that does. */
+  it('raises the first candidate’s share where an organelle further down is taken out', () => {
+    const one = publishedEnd(flagged([1, 1], [0.1, 0.9]), assessed([1, 1]), 0, READS_SEGCLR)
+    expect(one.scores!.tip.p_top).toBeCloseTo(0.5)
+    expect(without(one).q!).toBeGreaterThan(one.scores!.tip.q!)
+  })
+
+  it('decides a list of nothing but organelles as SEAM decides an empty one', () => {
+    const one = publishedEnd(flagged([2, 1], [0.8, 0.95]), assessed([2, 1]), 0, READS_SEGCLR)
+    expect(without(one)).toEqual(plain(publishedEnd(end([]), assessed([]), 0, READS_SEGCLR)))
+    expect(without(one)).toMatchObject({ q: 0, r: null, shown: false })
+  })
+})
+
 describe('publishedEnd', () => {
   /**
    * **The published order is the assessor's, and `geo_rank` keeps the forest's.** SEAM ranks a

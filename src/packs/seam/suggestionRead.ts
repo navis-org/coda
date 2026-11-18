@@ -77,9 +77,16 @@ export async function readFields(
   options: ReadOptions = {},
 ): Promise<{ data: Record<string, CellValue[]>; rows: number }> {
   const held = new Map(reader.summary.columns.map((column) => [column.name, column]))
+  // A column SEAM added later, which this set predates: published as nulls (`Field.optional`).
+  // Not one the set holds as a list or a struct, which Coda skips: that is refused below, with
+  // the reason, as a required one is — read as "predates", it would load as nulls unsaid.
+  const predates = fields.filter(
+    (field) =>
+      field.optional && !held.has(field.from) && !reader.summary.skipped.includes(field.from),
+  )
   // A field the file does not hold because it is filled in afterwards — see `FIRST_CANDIDATE`.
   const columns = fields
-    .filter((field) => field.from !== FIRST_CANDIDATE)
+    .filter((field) => field.from !== FIRST_CANDIDATE && !predates.includes(field))
     .map((field) => {
       const column = held.get(field.from)
       if (!column) {
@@ -115,7 +122,9 @@ export async function readFields(
         `this is refused rather than trimmed.`,
     )
   }
-  return { data: result.data, rows: result.rows }
+  const data: Record<string, CellValue[]> = { ...result.data }
+  for (const field of predates) data[field.from] = new Array<CellValue>(result.rows).fill(null)
+  return { data, rows: result.rows }
 }
 
 /**

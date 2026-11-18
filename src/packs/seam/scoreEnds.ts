@@ -27,8 +27,10 @@ import type { ChunkCache } from '../../data/precomputed/chunkCache'
 import type { Triple } from '../../data/precomputed/volume'
 import type { PipelineFits } from './pipelineFits'
 import type { SearchedEnd } from './searchRun'
-import type { AssessedEnd, EndScores, PublishedEnd } from './searchTips'
+import type { AssessedEnd, EndScores, PublishedEnd, TipVerdict } from './searchTips'
+import { organelleAt } from './searchTips'
 import { decideTip, scoreList } from './stages'
+import type { CandidateList, TipDecision } from './stages'
 
 /**
  * One assessed end, as the two tables will publish it.
@@ -44,17 +46,17 @@ export function publishedEnd(
   fits: PipelineFits,
 ): PublishedEnd {
   const n = end.rows
-  const list = scoreList(
-    {
-      geoRank: columnOf(end, 'geo_rank', n),
-      volUm3: columnOf(end, 'vol_um3', n),
-      // One seed, because a manifest is one checkpoint — `assessorFits` refuses anything else
-      // before the weights are fetched, so this cannot be a list of the wrong length here.
-      assessor: [Array.from(assessed.score)],
-    },
-    fits,
-  )
+  const inputs: CandidateList = {
+    geoRank: columnOf(end, 'geo_rank', n),
+    volUm3: columnOf(end, 'vol_um3', n),
+    // One seed, because a manifest is one checkpoint — `assessorFits` refuses anything else
+    // before the weights are fetched, so this cannot be a list of the wrong length here.
+    assessor: [Array.from(assessed.score)],
+  }
+  const list = scoreList(inputs, fits)
   const tip = decideTip(list, eTip, fits)
+  const verdict = verdictOf(tip)
+  const lean = withoutOrganelles(end, inputs, eTip, fits) ?? verdict
 
   const conf = new Float64Array(n)
   for (let i = 0; i < n; i++) conf[i] = tip.pTip * list.pCand[i]!
@@ -77,21 +79,64 @@ export function publishedEnd(
        * the order came from — and asking the same question twice is how they stop being.
        */
       p_top: list.pTop,
-      q: tip.q ?? null,
-      r: tip.against?.r ?? null,
-      /*
-       * **A verdict's absence, not `false`.** `null` here means the configuration published no
-       * cutoff for the quantity this tip could reach, which `seam:review` draws as "no verdict";
-       * `false` would say the cutoff was applied and this tip did not clear it. The single-seed
-       * configuration always decides, so this is the arm nothing takes today and the one a
-       * split configuration scored live would.
-       */
-      shown: tip.against ? tip.against.verdict === 'shown' : null,
+      ...verdict,
+      q_no_organelles: lean.q,
+      r_no_organelles: lean.r,
+      shown_no_organelles: lean.shown,
     },
   }
   // `list.order` rather than an inversion of `list.rank`: `scoreList` built that permutation
   // to make `rank` and `first` from, and `ListScores.order` says why it is carried.
   return { end, order: list.order, scores }
+}
+
+/** A tip's decision as the three columns a tip row publishes it under. */
+function verdictOf(tip: TipDecision): TipVerdict {
+  return {
+    q: tip.q ?? null,
+    r: tip.against?.r ?? null,
+    /*
+     * **A verdict's absence, not `false`.** `null` here means the configuration published no
+     * cutoff for the quantity this tip could reach, which `seam:review` draws as "no verdict";
+     * `false` would say the cutoff was applied and this tip did not clear it. The single-seed
+     * configuration always decides, so this is the arm nothing takes today and the one a
+     * split configuration scored live would.
+     */
+    shown: tip.against ? tip.against.verdict === 'shown' : null,
+  }
+}
+
+/**
+ * Stages 7–9 again over the list with its organelles taken out — `undefined` where it holds
+ * none, so the caller reuses the decision it has (the answer would be the same one).
+ *
+ * **Every stage, not the first candidate's numbers.** `p_cand` is a share of the whole list, so
+ * an organelle anywhere in it takes from the rest; and `segclr` is the list's best logit, so an
+ * organelle leading it raised `p_tip` too. Removing one moves `q` both ways.
+ *
+ * **`geo_rank` is kept as the search gave it**, not renumbered: it is a feature of the candidate
+ * the fit read, and the list SEAM would have ranked without organelles is not one Coda can see.
+ * An unmeasured candidate (`organelle` null) stays in, as `seam:review` keeps it.
+ */
+function withoutOrganelles(
+  end: SearchedEnd,
+  inputs: CandidateList,
+  eTip: number | undefined,
+  fits: PipelineFits,
+): TipVerdict | undefined {
+  const kept: number[] = []
+  for (let at = 0; at < end.rows; at++) if (organelleAt(end.columns, at) !== true) kept.push(at)
+  if (kept.length === end.rows) return undefined
+  const pick = (column: ArrayLike<number>) => kept.map((at) => column[at]!)
+  const list = scoreList(
+    {
+      geoRank: pick(inputs.geoRank),
+      volUm3: pick(inputs.volUm3),
+      assessor: inputs.assessor.map(pick),
+    },
+    fits,
+  )
+  return verdictOf(decideTip(list, eTip, fits))
 }
 
 /**

@@ -122,13 +122,32 @@ function read(into: string, base: string, file: string, fields: readonly Field[]
   // The joined column is not in the file; see `FIRST_CANDIDATE`.
   const held = fields.filter((field) => field.from !== FIRST_CANDIDATE)
   const tmp = `${into}_file`
+  const columns = rVector(held.map((f) => f.from))
+  /*
+   * **A column SEAM added later (`Field.optional`) is `NA` where the set predates it**, as on the
+   * card. `all_of` refuses a name the file lacks, so the read takes `any_of`, the late columns
+   * are filled where missing, and the selection after it is the check: a missing *required*
+   * column still stops the chunk by name, as the card refuses it.
+   */
+  const late = held.filter((f) => f.optional).map((f) => f.from)
+  const reading =
+    late.length === 0
+      ? [`  col_select = dplyr::all_of(${columns})`, `)`]
+      : [
+          `  col_select = dplyr::any_of(${columns})`,
+          `)`,
+          `# NA where the set predates them, as on the card.`,
+          `for (column in ${rVector(late)}) {`,
+          `  if (!column %in% names(${into})) ${into}[[column]] <- NA`,
+          `}`,
+          `${into} <- ${into}[${columns}]`,
+        ]
   return [
     `${tmp} <- tempfile(fileext = ".parquet")`,
     `download.file(paste0(${base}, ${rStr(file)}), ${tmp}, mode = "wb", quiet = TRUE)`,
     `${into} <- arrow::read_parquet(`,
     `  ${tmp},`,
-    `  col_select = dplyr::all_of(${rVector(held.map((f) => f.from))})`,
-    `)`,
+    ...reading,
     `names(${into}) <- ${rVector(held.map((f) => f.name))}`,
   ]
 }

@@ -1826,17 +1826,27 @@ merge_suggestions_tips_file <- tempfile(fileext = ".parquet")
 download.file(paste0(merge_suggestions_base, "tips.parquet"), merge_suggestions_tips_file, mode = "wb", quiet = TRUE)
 merge_suggestions_tips <- arrow::read_parquet(
   merge_suggestions_tips_file,
-  col_select = dplyr::all_of(c("neuron", "end_uid", "kind", "x_nm", "y_nm", "z_nm", "e_tip", "segclr", "p_tip", "top_cand_root", "top_vol_um3", "top_geo_rank", "top_min_dist_um", "top_contact_x_nm", "top_contact_y_nm", "top_contact_z_nm", "p_top", "q", "shown", "r", "page", "tip_verdict", "belongs", "not_belongs", "first_right"))
+  col_select = dplyr::any_of(c("neuron", "end_uid", "kind", "x_nm", "y_nm", "z_nm", "e_tip", "segclr", "p_tip", "top_cand_root", "top_vol_um3", "top_geo_rank", "top_min_dist_um", "top_contact_x_nm", "top_contact_y_nm", "top_contact_z_nm", "p_top", "top_organelle", "q", "shown", "r", "page", "tip_verdict", "belongs", "not_belongs", "first_right"))
 )
-names(merge_suggestions_tips) <- c("neuronId", "end_uid", "kind", "x", "y", "z", "e_tip", "segclr", "p_tip", "top_cand_root", "vol_um3", "geo_rank", "min_dist_um", "contact_x", "contact_y", "contact_z", "p_top", "q", "shown", "r", "seam_page", "seam_verdict", "seam_belongs", "seam_not_belongs", "seam_first_right")
+# NA where the set predates them, as on the card.
+for (column in c("top_organelle")) {
+  if (!column %in% names(merge_suggestions_tips)) merge_suggestions_tips[[column]] <- NA
+}
+merge_suggestions_tips <- merge_suggestions_tips[c("neuron", "end_uid", "kind", "x_nm", "y_nm", "z_nm", "e_tip", "segclr", "p_tip", "top_cand_root", "top_vol_um3", "top_geo_rank", "top_min_dist_um", "top_contact_x_nm", "top_contact_y_nm", "top_contact_z_nm", "p_top", "top_organelle", "q", "shown", "r", "page", "tip_verdict", "belongs", "not_belongs", "first_right")]
+names(merge_suggestions_tips) <- c("neuronId", "end_uid", "kind", "x", "y", "z", "e_tip", "segclr", "p_tip", "top_cand_root", "vol_um3", "geo_rank", "min_dist_um", "contact_x", "contact_y", "contact_z", "p_top", "organelle", "q", "shown", "r", "seam_page", "seam_verdict", "seam_belongs", "seam_not_belongs", "seam_first_right")
 
 merge_suggestions_candidates_file <- tempfile(fileext = ".parquet")
 download.file(paste0(merge_suggestions_base, "candidates.parquet"), merge_suggestions_candidates_file, mode = "wb", quiet = TRUE)
 merge_suggestions_candidates <- arrow::read_parquet(
   merge_suggestions_candidates_file,
-  col_select = dplyr::all_of(c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown"))
+  col_select = dplyr::any_of(c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle"))
 )
-names(merge_suggestions_candidates) <- c("neuronId", "end_uid", "candidateId", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x", "contact_y", "contact_z", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown")
+# NA where the set predates them, as on the card.
+for (column in c("organelle_score", "organelle")) {
+  if (!column %in% names(merge_suggestions_candidates)) merge_suggestions_candidates[[column]] <- NA
+}
+merge_suggestions_candidates <- merge_suggestions_candidates[c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle")]
+names(merge_suggestions_candidates) <- c("neuronId", "end_uid", "candidateId", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x", "contact_y", "contact_z", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle")
 
 # The first candidate's id, joined from the candidate lists rather than taken from the tips
 # file's own copy. The copy is a denormalised 18-digit id, and in the set as first published

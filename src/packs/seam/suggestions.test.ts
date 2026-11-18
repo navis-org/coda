@@ -36,9 +36,13 @@ import { peekSuggestions, resetSuggestionPeeks } from './suggestionIndex'
 import { parseSuggestionSet } from './suggestionSet'
 import type { OpenFile } from './suggestionRead'
 import { readSuggestions } from './suggestions'
+import { readFields } from './suggestionRead'
+import { ORGANELLE_CUT } from './searchTips'
+import type { Field } from './suggestionTables'
 import {
   CANDIDATE_FIELDS,
   TIP_FIELDS,
+  field,
   neuronsSchema,
   published,
   schemaOf,
@@ -493,5 +497,81 @@ describe('the node, end to end over HTTP', () => {
 
   it('names the address when the set is not there', async () => {
     await expect(run({ url: `${origin}/nothing.json` })).rejects.toThrow()
+  })
+})
+
+/**
+ * A column SEAM added after some sets were made (`Field.optional`): read where the set has it,
+ * nulls where it does not — never a refusal, which would stop every older set loading, and never
+ * a default, since an older set does not say. A required column missing is still refused.
+ */
+describe('a column a set may predate', () => {
+  it('publishes the organelle flag where the set carries it', () => {
+    const flag = built.candidates.data['organelle'] ?? []
+    expect(flag.length).toBe(built.candidates.length)
+    expect(flag.every((value) => typeof value === 'boolean')).toBe(true)
+    expect(flag.some((value) => value === true)).toBe(true)
+    expect(built.candidates.data['organelle_score']?.every((v) => typeof v === 'number')).toBe(
+      true,
+    )
+  })
+
+  it('puts the first candidate’s flag on Tips as `organelle`, as Suggest Merges does', () => {
+    const flag = built.tips.data['organelle'] ?? []
+    expect(flag.length).toBe(built.tips.length)
+    expect(flag.every((value) => value === null || typeof value === 'boolean')).toBe(true)
+    expect(flag.some((value) => typeof value === 'boolean')).toBe(true)
+  })
+
+  /**
+   * Suggest Merges flags with `ORGANELLE_CUT`, a constant, where SEAM ships its cut in the set
+   * (`pipeline.organelles.cutoff`). Held equal here, so a SEAM re-check that moves it is a failing
+   * test rather than two nodes flagging the same piece two ways.
+   */
+  it('flags at the cut SEAM ships with the set', () => {
+    const shipped = JSON.parse(readFileSync(`${DIR}/fixture.json`, 'utf8')) as {
+      pipeline: { organelles: { cutoff: number } }
+    }
+    expect(ORGANELLE_CUT).toBe(shipped.pipeline.organelles.cutoff)
+  })
+
+  it('publishes nulls for an optional column the set does not hold, and reads the rest', async () => {
+    const reader = await openLocal('candidates.parquet')
+    const fields: readonly Field[] = [
+      field('end_uid', 'end_uid', 'i64'),
+      { from: 'organelle_v9', name: 'organelle_v9', dtype: 'bool', optional: true },
+    ]
+    const read = await readFields(reader, fields, 'The candidates file')
+    expect(read.data['end_uid']).toHaveLength(read.rows)
+    expect(read.data['organelle_v9']).toEqual(new Array(read.rows).fill(null))
+  })
+
+  /**
+   * Held as a list or a struct, which Coda skips: not a column the set predates. Read as one, the
+   * flag would load as nulls and `Exclude organelles` would leave nothing out, unsaid.
+   */
+  it('refuses an optional column the set holds in a shape Coda skips, with the reason', async () => {
+    const reader = await openLocal('candidates.parquet')
+    const skipping = {
+      ...reader,
+      summary: { ...reader.summary, skipped: [...reader.summary.skipped, 'organelle_v9'] },
+    }
+    const fields: readonly Field[] = [
+      { from: 'organelle_v9', name: 'organelle_v9', dtype: 'bool', optional: true },
+    ]
+    await expect(readFields(skipping, fields, 'The candidates file')).rejects.toThrow(
+      /a list or a struct/,
+    )
+  })
+
+  it('still refuses a required column the set does not hold, by name', async () => {
+    const reader = await openLocal('candidates.parquet')
+    await expect(
+      readFields(
+        reader,
+        [field('organelle_v9', 'organelle_v9', 'bool')],
+        'The candidates file',
+      ),
+    ).rejects.toThrow(/has no `organelle_v9` column/)
   })
 })

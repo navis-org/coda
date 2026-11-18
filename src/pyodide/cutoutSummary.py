@@ -57,7 +57,7 @@ import numpy as np
 
 
 #: The vendored modules, installed under these names so their own imports work.
-VENDORED = ("seam.cutout", "seam.candidates")
+VENDORED = ("seam.cutout", "seam.candidates", "seam.enclosure")
 
 
 def _install(name: str, source: str, parent):
@@ -264,6 +264,8 @@ def coda_candidate_pool(request, report=None):
 
     end_nm = np.asarray(req["endNm"], dtype=np.float64)
     inv, query = _box(req)
+    # Once, for the summary and for the enclosure measure below.
+    roots = np.asarray(req["roots"], dtype=np.uint64)
 
     if report is not None:
         report(0.1, "measuring the box")
@@ -273,7 +275,7 @@ def coda_candidate_pool(request, report=None):
     frame = cutout.summarize_cutout(
         np.asarray(req["labels"], dtype=np.uint64),
         inv,
-        np.asarray(req["roots"], dtype=np.uint64),
+        roots,
         query,
         np.asarray(req["resolutionNm"], dtype=np.float64),
         np.asarray(req["loVoxels"], dtype=np.int64),
@@ -292,6 +294,24 @@ def coda_candidate_pool(request, report=None):
     if report is not None:
         report(0.7, "measuring the pool")
     pool = candidates.pool_features(frame, query, end_nm)
+
+    # **The organelle flag's measure, on the box already in hand** — SEAM's `seam/enclosure.py`,
+    # vendored whole, which reads exactly what is here: `inv` and each supervoxel's root. It costs
+    # no request, which is why SEAM put it on the search's cutout. `enclosed`, the candidate's own
+    # share of faces towards its largest neighbour, is the column SEAM publishes as
+    # `organelle_score` (`ORGANELLE_COLUMN` in its `tip_pipeline.py`); the group measure beside
+    # it was tried and not adopted, and is left unread. Every object in the box is measured and
+    # the pool's looked up by root, as Python ints both sides: `enclosure`'s own `roots=` filter
+    # compares with `isin` against `int64`, and `uint64` against `int64` goes through a float,
+    # which rounds an 18-digit id onto its neighbours.
+    if report is not None:
+        report(0.85, "measuring how enclosed each piece is")
+    enclosure = seam["seam.enclosure"]
+    enclosed = enclosure.enclosure(inv, roots)
+    by_root = dict(zip(enclosed["root"].tolist(), enclosed["enclosed"].tolist()))
+    pool = pool.assign(
+        enclosed=[by_root.get(int(root), np.nan) for root in pool["root"].tolist()]
+    )
 
     # Every column `pool_features` produced, by its own name — a pass-through rather than a
     # list of the ones this file happens to know about. That is what `cutoutSummary.ts`' header

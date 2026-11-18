@@ -127,10 +127,28 @@ function read(into: string, base: string, file: string, fields: readonly Field[]
   // The joined column is not in the file; see `FIRST_CANDIDATE`.
   const held = fields.filter((field) => field.from !== FIRST_CANDIDATE)
   const renames = held.filter((field) => field.from !== field.name)
+  const columns = pyList(held.map((field) => field.from))
+  /*
+   * **A column SEAM added later (`Field.optional`) is null where the set predates it**, as on the
+   * card. `columns=` refuses a name the file lacks, so the file is read whole, the late columns
+   * filled where missing, and the selection made after — where a missing *required* column
+   * still stops the cell by name, as the card refuses it. Whole costs nothing extra over a URL:
+   * pandas downloads all of it either way.
+   */
+  const late = held.filter((field) => field.optional).map((field) => field.from)
+  const reading =
+    late.length === 0
+      ? [`${into} = pd.read_parquet(${base} + ${pyStr(file)}, columns=${columns})`]
+      : [
+          `${into} = pd.read_parquet(${base} + ${pyStr(file)})`,
+          `# Null where the set predates them, as on the card.`,
+          `for column in ${pyList(late)}:`,
+          `    if column not in ${into}:`,
+          `        ${into}[column] = None`,
+          `${into} = ${into}[${columns}]`,
+        ]
   return [
-    `${into} = pd.read_parquet(${base} + ${pyStr(file)}, columns=${pyList(
-      held.map((field) => field.from),
-    )})`,
+    ...reading,
     `${into} = ${into}.rename(columns={${renames
       .map((field) => `${pyStr(field.from)}: ${pyStr(field.name)}`)
       .join(', ')}})`,

@@ -2909,3 +2909,76 @@ next the largest thing on the list rather than now. What it would settle: bytes 
 many roots are genuinely new per end as a walk goes along a neuron, and whether the chunkedgraph
 offers any route to a size that is not the whole list.
 
+## The organelle flag, ported (2026-11-17, user)
+
+SEAM's flag (`seam/enclosure.py`, SEAM's handoff "The organelle filter") is in Coda: Suggest
+Merges publishes `organelle_score` and `organelle` on `Candidates` (and the first candidate's on
+`Tips`), and Review Suggestions has `Exclude organelles`, on by default.
+
+- **The measure is SEAM's file, vendored whole** (`src/pyodide/seam/enclosure.py`, the fifth
+  byte-identical copy; `pnpm vendor:seam` checks it). It runs in `coda_candidate_pool` on the box
+  the search already holds — `inv` and each supervoxel's root — so it costs no request.
+  `organelle_score` is SEAM's `enclosed` (its `ORGANELLE_COLUMN`; the group measure was tried and
+  not adopted), and `organelle` is it at or above `ORGANELLE_CUT` = 0.5 (`searchTips.ts`). A flag,
+  never a rank: no order, `q` or `shown` moves.
+- **It runs in Pyodide's wasm32 worker** — a worry, since `np.bincount` refuses an `int64` index
+  there and the file bincounts `int64` arrays. It did not refuse.
+- **Parity, measured in Chrome**: `searchEnd.json`'s end (rv2, end 0 of `648518347622603652`)
+  read by Coda at the set's instant and measured by Coda's pool step: all 9 of SEAM's listed
+  candidates found, every `enclosed` within 5e-11 of `replay/rv2/enclosure.parquet`, the same two
+  flagged.
+- **Cost, measured**: the warm pool step on that box, five calls each, a median of 836 ms with
+  the measure against 577 ms without — 260 ms an end. `SECONDS_PER_END` is 3.0 (was 2.7).
+- **On the workflow's neuron** (`648518347585551219`, three ends, Chrome): 27 of 200 candidates
+  flagged, none of them a first candidate, none unmeasured.
+- **Review Suggestions**: `Exclude organelles` (presentational, `absentMeans: true`). Per
+  candidate, a flagged one is not listed. **Per tip, a tip whose first candidate is flagged stays
+  listed and leads with its next candidate that is not** (`QueueRow.passedOver`; decided by the
+  user after code review, 2026-11-17 — first built as SEAM's handoff asked, hiding the tip, which
+  put a second candidate that is the real continuation out of sight). That row carries no `r` and
+  is never `shown`, since SEAM's numbers are about the candidate passed over, so `Min confidence`
+  and `Only SEAM's shown set` pass it by; it says `first was an organelle`, and a tip with nothing
+  but organelles says so. The foot counts what the filter did (per tip, the rows that passed over
+  an organelle; per candidate, the list with the filter off less the list); a flagged candidate
+  paged to within a listed tip is marked `organelle` rather than skipped, since paging is by rank
+  within the tip's list.
+- **Re-scored without organelles** (same day, user, after seeing passed-over rows lose their
+  score). Suggest Merges' `publishedEnd` (`scoreEnds.ts`) runs stages 7–9 a second time over the
+  list with its flagged candidates taken out — same fits, same `e_tip`, `geo_rank` kept as the
+  search gave it rather than renumbered — and publishes `q_no_organelles`, `r_no_organelles` and
+  `shown_no_organelles` on `Tips` (`ASSESSED_TIP_FIELDS`), equal to `q`, `r` and `shown` where the
+  list holds no organelle. **Every stage, not the first's numbers**: `p_cand` is a share of the
+  whole list, so an organelle anywhere in it lowers the first's `q`, and one that led it raised
+  `segclr` and so `p_tip`. So with `Exclude organelles` on, Review reads them for **every tip whose
+  list holds one** (`QueueTip.withoutOrganelles`, `QueueRow.rescored`, marked `scored without
+  organelles`), not only a passed-over row; `QueueRow.shown` carries the row's verdict for the
+  filter, the facts and the score's ink alike (the ink read the first *candidate's* `shown`
+  before, which Suggest Merges' `Candidates` never carries). A table without the columns —
+  Merge Suggestions, a geometry-only run — keeps SEAM's, and a passed-over row there still has
+  no score. **An estimate**: SEAM fitted every stage on lists that still held organelles.
+  **Merge Suggestions not yet**: its sets are the split configuration, so re-scoring needs
+  `head_s0..2` (not read today) and the set's fits, and no set published so far carries the flag.
+  **Ask for SEAM**: remove organelles before ranking, so `r` comes with fits made for that list;
+  and say whether `geo_rank` would then be renumbered.
+- **`Tips` carries `organelle` alone**, from either node (code review, same day): SEAM's tips
+  file has the first candidate's flag (`top_organelle`) and no score, so Suggest Merges' `Tips`
+  leaves the score on `Candidates` too. An optional column a set holds as a list or a struct is
+  refused with the reason, as a required one is, never filled as though the set predated it.
+- **Merge Suggestions carries the flag too** (same day, user): `organelle_score` and `organelle`
+  are on its `CANDIDATE_FIELDS` as **optional** fields (`Field.optional`) — read where the set
+  holds them (SEAM's sets do since 2026-11-14; the fixture's `candidates.parquet` does), and
+  published as **nulls** where it predates them, rather than refused as a missing required column
+  is. Null, not `false`: an older set does not say, and Review reads only an explicit `true`.
+  Tested on the real fixture bytes, with an optional column the file lacks and a required one.
+- **Reviewed** (2026-11-17, one /simplify pass): the foot's count is now the list with the
+  filter off less the list with it on, so it honours every other filter and the tree's rows — a
+  separate count over the unfiltered tips said "left out" of rows `Only SEAM's shown set` had
+  already hidden; the card builds one filters object for both lists; `DEFAULT_FILTERS` excludes
+  organelles, as the param does; Merge Suggestions' `Tips` reads SEAM's `top_organelle` as
+  `organelle` (optional), so `Tips` has one column from either node; a test holds `ORGANELLE_CUT`
+  to the set's `pipeline.organelles.cutoff`. **Left**: the cut is a constant, not read from the
+  ranker manifest (it would need the manifest republished with it). **Asks for SEAM**, since
+  `enclosure.py` is copied unedited: a switch to skip the group measure, which Coda never reads
+  (about 13% of the call, ~35 ms an end in wasm); and the face pairs are counted by sorting
+  (`np.unique`, ~60% of `_faces` on a test box), where `bincount` over `k²` keys was 8x faster
+  for a box of a few thousand objects but costs `k²` memory.
