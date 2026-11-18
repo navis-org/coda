@@ -2,7 +2,7 @@
 
 A reconstruction is full of neurons that stop early. Merge Suggestions reads a set of SEAM's **merge candidates**: places where a neuron ends at a tip, and a separate piece of segmentation just past it is probably its continuation. Each row is one tip, the piece SEAM would merge into it, how likely that is to be right, and whether it clears SEAM's own cutoff.
 
-Nothing is computed here and nothing is written. The set was made by SEAM's pipeline at a pinned snapshot; this node reads it. The merge itself is the proofreader's, made with the `m` tool in the [Neuroglancer](#out.neuroglancer) card.
+Nothing is computed here and nothing is written. The set was made by SEAM's pipeline at a pinned snapshot; this node reads it. To work through the suggestions and merge the ones you accept, wire `Tips` and `Candidates` into [Review Suggestions](#seam:review) — see "Reviewing and merging" below.
 
 > [!IMPORTANT]
 > **This node is about false splits — the pack's other two are about false merges**
@@ -58,11 +58,35 @@ Sort tips by `q`, highest first. `r` puts `q` into words: 0.7 means about seven 
 
 Only the **first** candidate of each tip is a suggestion. The rest of the list is context: the cutoff was calibrated on firsts, so treating rank 2 as a second suggestion reads a number that was never fitted for it.
 
-The `seam_` columns are the verdicts from SEAM's own review of this set, carried so a new round can be compared with the old one. An empty `seam_belongs` means the tip was judged and nothing on its list belonged; an empty cell means nobody looked at it.
+The `seam_` columns are the verdicts from SEAM's own review of this set, carried so a new round can be compared with the old one. An empty `seam_belongs` means the tip was judged and nothing on its list belonged; an empty cell means nobody looked at it. A set SEAM did not review leaves them all empty.
+
+`Candidates` carries `n_l2`, each piece's level-2 chunk count, where the set has it (rv4 on). Review Suggestions sizes pieces by it, as it does for [Suggest Merges](#seam:suggestMerges); where it is empty, the card falls back to `vol_um3`.
+
+## Reviewing and merging
+
+```coda-graph
+caption: The suggestions reviewed one neuron at a time; the full-size viewer follows the card.
+dataset.flywire as ds
+seam:suggestions as sug
+seam:review as review
+out.neuroglancer as ng
+sug:tips -> review:tips
+sug:candidates -> review:candidates
+ds -> review:dataset
+ds -> ng:dataset
+review:current -> ng:control
+review:layers -> ng:layers
+```
+
+[Review Suggestions](#seam:review) takes both tables and lists one neuron's tips at a time. Accept the pieces that belong, then press **Submit**: Coda checks each merge, shows them all beside the neuron as it will look, and merges the ones you confirm, with your own CAVE token. Wire a CAVE Dataset into its `Dataset` socket — the datastack the set was made on — and sign in to its server first.
+
+A piece from a published set cannot be extended: its own open ends were never searched. To grow a neuron piece by piece, search it with [Suggest Merges](#seam:suggestMerges) instead.
 
 ## What a set is tied to
 
-A suggestion set is made at one snapshot, and the manifest carries it. After a merge the neuron's root id changes, so the rest of that neuron's suggestions are at a root that no longer exists — they still name a real place, but the segment they were computed against has moved on. Ask SEAM for a rerun rather than trusting a stale set, and use [Update root IDs](#cave.updateRootIds) if you need the current ids for something else.
+A suggestion set is made at one snapshot, and the manifest carries it. A merge you make through Review Suggestions gives the neuron a new root id, and the card follows it there: the rest of that neuron's suggestions can still be reviewed and submitted.
+
+A neuron somebody else has edited since the snapshot is different. Its suggestions were computed against a segment that has moved on, so Review Suggestions marks it as edited and Submit refuses all of its merges, and a candidate edited since is refused on its own. Ask SEAM for a newer set rather than trusting a stale one, and use [Update root IDs](#cave.updateRootIds) if you need the current ids for something else.
 
 ```coda-params
 seam:suggestions: url, set, layerName

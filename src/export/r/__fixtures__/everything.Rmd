@@ -1838,14 +1838,14 @@ merge_suggestions_candidates_file <- tempfile(fileext = ".parquet")
 download.file(paste0(merge_suggestions_base, "candidates.parquet"), merge_suggestions_candidates_file, mode = "wb", quiet = TRUE)
 merge_suggestions_candidates <- arrow::read_parquet(
   merge_suggestions_candidates_file,
-  col_select = dplyr::any_of(c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle"))
+  col_select = dplyr::any_of(c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle", "n_l2"))
 )
 # NA where the set predates them, as on the card.
-for (column in c("organelle_score", "organelle")) {
+for (column in c("organelle_score", "organelle", "n_l2")) {
   if (!column %in% names(merge_suggestions_candidates)) merge_suggestions_candidates[[column]] <- NA
 }
-merge_suggestions_candidates <- merge_suggestions_candidates[c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle")]
-names(merge_suggestions_candidates) <- c("neuronId", "end_uid", "candidateId", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x", "contact_y", "contact_z", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle")
+merge_suggestions_candidates <- merge_suggestions_candidates[c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle", "n_l2")]
+names(merge_suggestions_candidates) <- c("neuronId", "end_uid", "candidateId", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x", "contact_y", "contact_z", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle", "n_l2")
 
 # The first candidate's id, joined from the candidate lists rather than taken from the tips
 # file's own copy. The copy is a denormalised 18-digit id, and in the set as first published

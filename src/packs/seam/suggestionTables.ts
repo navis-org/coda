@@ -68,6 +68,15 @@ export interface Field {
    */
   readonly optional?: true
   /**
+   * **Held, but may hold nothing**: a column the file writes with no type
+   * (`TableFileColumn.untyped`) is published as nulls. SEAM's review columns in a set nobody
+   * reviewed (rv4) are the case. Required all the same — a set without the column is refused by
+   * name — and a required column without this flag written that way is refused too, since a key
+   * that is all nulls would be an empty queue nobody explained. An `optional` field may be empty
+   * as well as absent.
+   */
+  readonly mayBeEmpty?: true
+  /**
    * **Not in the file: filled in by the loader afterwards**, from where the fact is authoritative.
    * Every reader of a set — the loader and both exporters — asks the file for the other fields
    * and fills these itself, under their published name. `candidateId` (from the candidates file)
@@ -92,6 +101,12 @@ const optional = (from: string, name: string, dtype: DType): Field => ({
   name,
   dtype,
   optional: true,
+})
+
+/** A column every set holds, which may hold nothing (`Field.mayBeEmpty`). */
+const reviewColumn = (from: string, name: string, dtype: DType): Field => ({
+  ...field(from, name, dtype),
+  mayBeEmpty: true,
 })
 
 /** A column the loader fills in itself rather than reading from the file. */
@@ -185,11 +200,12 @@ export const TIP_FIELDS: readonly Field[] = [
   field('r', 'r', 'f64'),
   // Filled from the manifest, not the file. See `SOURCE_COLUMN`.
   filledIn(SOURCE_COLUMN, 'str'),
-  field('page', 'seam_page', 'str'),
-  field('tip_verdict', 'seam_verdict', 'str'),
-  field('belongs', 'seam_belongs', 'str'),
-  field('not_belongs', 'seam_not_belongs', 'str'),
-  field('first_right', 'seam_first_right', 'f64'),
+  // SEAM's own review: always a column, empty where nobody reviewed the set (`mayBeEmpty`).
+  reviewColumn('page', 'seam_page', 'str'),
+  reviewColumn('tip_verdict', 'seam_verdict', 'str'),
+  reviewColumn('belongs', 'seam_belongs', 'str'),
+  reviewColumn('not_belongs', 'seam_not_belongs', 'str'),
+  reviewColumn('first_right', 'seam_first_right', 'f64'),
 ]
 
 /**
@@ -232,6 +248,9 @@ export const CANDIDATE_FIELDS: readonly Field[] = [
    */
   optional('organelle_score', 'organelle_score', 'f64'),
   optional('organelle', 'organelle', 'bool'),
+  // The whole object's level-2 chunk count, as Suggest Merges publishes it (`searchTips.ts`).
+  // Optional (rv4 on); without it, `sizeOf` falls back to `vol_um3`.
+  optional('n_l2', 'n_l2', 'i64'),
 ]
 
 /** The schema half, from a field list. */

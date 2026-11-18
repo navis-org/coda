@@ -37,6 +37,7 @@ import { parseSuggestionSet } from './suggestionSet'
 import type { OpenFile } from './suggestionRead'
 import { readSuggestions } from './suggestions'
 import { readFields } from './suggestionRead'
+import { buildQueue, sizeOf } from './reviewQueue'
 import { ORGANELLE_CUT } from './searchTips'
 import type { Field } from './suggestionTables'
 import {
@@ -51,14 +52,18 @@ import {
 
 const DIR = 'src/packs/seam/__fixtures__'
 
-const SET = parseSuggestionSet(
-  JSON.parse(readFileSync(`${DIR}/fixture.json`, 'utf8')),
-  'https://example.invalid/coda_rv2/fixture.json',
-)
+/** A committed set: its manifest, and the node's own opener pointed at its files, not a URL. */
+function fixtureSet(dir: string, name: string) {
+  const set = parseSuggestionSet(
+    JSON.parse(readFileSync(`${dir}/fixture.json`, 'utf8')),
+    `https://example.invalid/${name}/fixture.json`,
+  )
+  const open: OpenFile = (file) =>
+    openTableFile(blobBytes(new Blob([readFileSync(`${dir}/${file}`)])))
+  return { set, open }
+}
 
-/** The node's own opener, pointed at the committed files instead of at a URL. */
-const openLocal: OpenFile = (file) =>
-  openTableFile(blobBytes(new Blob([readFileSync(`${DIR}/${file}`)])))
+const { set: SET, open: openLocal } = fixtureSet(DIR, 'coda_rv2')
 
 const built = await readSuggestions(SET, openLocal)
 
@@ -562,5 +567,60 @@ describe('a column a set may predate', () => {
         'The candidates file',
       ),
     ).rejects.toThrow(/has no `organelle_v9` column/)
+  })
+})
+
+/** SEAM's rv4 set, trimmed by `__fixtures__/make_rv4.py`: no review, and `n_l2` on candidates. */
+const rv4 = fixtureSet(`${DIR}/rv4`, 'coda_rv4')
+const rv4Read = await readSuggestions(rv4.set, rv4.open)
+
+describe('a set SEAM did not review (rv4)', () => {
+  // SEAM's own review columns, which nobody filled in for this set.
+  const unreviewed = TIP_FIELDS.filter((f) => f.name.startsWith('seam_') && f.dtype === 'str')
+
+  it('is a file whose review columns name no type, as SEAM wrote them', async () => {
+    const reader = await rv4.open('tips.parquet')
+    const held = new Map(reader.summary.columns.map((column) => [column.name, column]))
+    expect(unreviewed).toHaveLength(4)
+    for (const { from } of unreviewed) expect(held.get(from)?.untyped).toBe(true)
+    // Only those: a typed column is never taken for one.
+    expect(held.get('neuron')?.untyped).toBeUndefined()
+    expect(held.get('q')?.untyped).toBeUndefined()
+  })
+
+  it('reads, publishing the untyped columns as nulls under the schema it promised', () => {
+    expect(rv4Read.tips.length).toBe(rv4.set.counts.tips)
+    expect(rv4Read.candidates.length).toBe(rv4.set.counts.candidates)
+    expect(rv4Read.tips.schema).toEqual(schemaOf(TIP_FIELDS))
+    expect(rv4Read.candidates.schema).toEqual(schemaOf(CANDIDATE_FIELDS))
+    for (const { name } of unreviewed) {
+      expect(rv4Read.tips.data[name]).toEqual(new Array(rv4Read.tips.length).fill(null))
+    }
+    // The ids beside them are read as ever: text, exactly.
+    expect(rv4Read.tips.data[ID_COLUMN_NAME]).toContain(rv4.set.neurons[0])
+  })
+
+  /** Only an optional field may hold nothing: a key written empty would be an empty queue unsaid. */
+  it('refuses a required column written with no type, by name', async () => {
+    const reader = await rv4.open('tips.parquet')
+    await expect(
+      readFields(reader, [field('page', 'page', 'str')], 'The tips file'),
+    ).rejects.toThrow(/`page` holds no values/)
+  })
+
+  it('carries each candidate’s level-2 chunk count, and the review card sizes by it', () => {
+    const counts = rv4Read.candidates.data['n_l2'] ?? []
+    expect(counts.length).toBe(rv4Read.candidates.length)
+    expect(counts.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 1)).toBe(
+      true,
+    )
+    const first = buildQueue(rv4Read.tips, rv4Read.candidates)[0]?.candidates[0]
+    expect(sizeOf(first)?.of).toBe('chunks')
+  })
+
+  it('leaves `n_l2` null on a set that predates it, which sizes in µm³ as before', () => {
+    expect(built.candidates.data['n_l2']).toEqual(new Array(built.candidates.length).fill(null))
+    const first = buildQueue(built.tips, built.candidates)[0]?.candidates[0]
+    expect(sizeOf(first)?.of).toBe('um3')
   })
 })

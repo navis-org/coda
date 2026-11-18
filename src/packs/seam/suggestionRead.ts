@@ -76,16 +76,31 @@ export async function readFields(
   options: ReadOptions = {},
 ): Promise<{ data: Record<string, CellValue[]>; rows: number }> {
   const held = new Map(reader.summary.columns.map((column) => [column.name, column]))
-  // A column SEAM added later, which this set predates: published as nulls (`Field.optional`).
-  // Not one the set holds as a list or a struct, which Coda skips: that is refused below, with
-  // the reason, as a required one is — read as "predates", it would load as nulls unsaid.
-  const predates = fields.filter(
-    (field) =>
-      field.optional && !held.has(field.from) && !reader.summary.skipped.includes(field.from),
+  // A field filled in afterwards is not the file's to answer for (`Field.filled`).
+  const own = fields.filter((field) => !field.filled)
+  // An optional column (`Field.optional`) the set predates — not one held as a list or a struct,
+  // which Coda skips: that is refused below with the reason, as a required one is.
+  const predates = (field: Field) =>
+    field.optional === true &&
+    !held.has(field.from) &&
+    !reader.summary.skipped.includes(field.from)
+  // A column the file holds with nothing in it (`TableFileColumn.untyped`).
+  const untyped = (field: Field) => held.get(field.from)?.untyped === true
+  const mayBeEmpty = (field: Field) => field.optional === true || field.mayBeEmpty === true
+  // Published as nulls, never read.
+  const nulls = new Set(
+    own.filter((field) => predates(field) || (untyped(field) && mayBeEmpty(field))),
   )
-  // A field the file does not hold because it is filled in afterwards — see `Field.filled`.
-  const columns = fields
-    .filter((field) => !field.filled && !predates.includes(field))
+  // Any other column the file holds empty is a key or a measure no set can do without.
+  const empty = own.find((field) => untyped(field) && !nulls.has(field))
+  if (empty) {
+    throw new Error(
+      `${what}'s \`${empty.from}\` holds no values: it was written with no type, as a column ` +
+        'of nothing but nulls is. A suggestion set needs it filled in.',
+    )
+  }
+  const columns = own
+    .filter((field) => !nulls.has(field))
     .map((field) => {
       const column = held.get(field.from)
       if (!column) {
@@ -122,7 +137,7 @@ export async function readFields(
     )
   }
   const data: Record<string, CellValue[]> = { ...result.data }
-  for (const field of predates) data[field.from] = new Array<CellValue>(result.rows).fill(null)
+  for (const field of nulls) data[field.from] = new Array<CellValue>(result.rows).fill(null)
   return { data, rows: result.rows }
 }
 

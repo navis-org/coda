@@ -667,6 +667,28 @@ The user's notes, all fixed:
   out; the pieces and the merge lines stay in and on the dataset's layer. A merge changes only the
   neuron layer's segment list, which the viewer sets in place, so the camera holds.
 
+### Published sets (2026-11-18)
+
+Asked for as "the second arm": Submit from a published set (`seam:suggestions`), not only from a
+live Suggest Merges run. **The merge path needed no change** — nothing in the card, the plan or
+the batch tells the two apart, and the first Aedes merge above was from `rv2`. What stopped it was
+upstream: **`rv4` did not load at all.** Nobody had reviewed it, so its four review columns
+(`page`, `tip_verdict`, `belongs`, `not_belongs`) hold no value, and pandas wrote them with Arrow's
+`null` type — parquet's `NULL` logical type over `INT32`. Coda read that as `i64` and refused the
+set. Now `parquet.ts` flags such a column `untyped`, and the set reader publishes it as nulls of
+the declared type without decoding it — **only for a field allowed to be empty** (`optional`, or
+`mayBeEmpty`: the five review columns, still required to be there). Any other field written that
+way is refused by name, since a key of nothing but nulls would be an empty queue nobody explained
+(`suggestionRead.ts`, tested on `__fixtures__/rv4/`, cut by `make_rv4.py`). Also read now: `n_l2`
+(optional), which rv4's candidates carry, so a published set sizes pieces as Suggest Merges does —
+**in one unit per table** (`candidateLists`): where any row has a chunk count, a row without one
+has no size, never a µm³ one beside chunks.
+
+Measured, reads only: all 10 rv4 neurons current on 2026-11-18 (rv2: 3 of 5); the pre-flight on
+live rv4, every shown suggestion of a neuron accepted, planned 16 of 16 and 46 of 46 on two
+neurons. **A published neuron edited since its snapshot is still refused whole** (user,
+2026-11-18: left as it is); the remedy is a newer set, since there is no ⟳ for one.
+
 ### Phase 8 — docs. **Done 2026-11-16**
 
 - `packs/seam/help/review.md`: "Submitting merges" — what you need, what is checked, what happens

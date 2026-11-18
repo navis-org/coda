@@ -240,9 +240,27 @@ describe("a candidate's size", () => {
     })
   })
 
-  /** A `seam:suggestions` set: SEAM's own parquet publishes no chunk count. */
+  /** A `seam:suggestions` set from before rv4: its parquet publishes no chunk count. */
   it('falls back to the in-box volume where it does not', () => {
     expect(sizeOf(candidate({ volumeUm3: 0.25 }))).toEqual({ value: 0.25, of: 'um3' })
+  })
+
+  /**
+   * **One unit per table.** A gap in `n_l2` leaves that row with no size, never one in µm³: a
+   * sort or `Min size` over the queue would otherwise compare chunks with cubic micrometres.
+   */
+  it('gives a row without a chunk count no size, where the table has chunk counts', () => {
+    const queue = buildQueue(
+      tipsTable([{ end: 1 }, { end: 2 }]),
+      candidatesTable([
+        { end: 1, id: 'counted', rank: 1, l2: 3, vol: 0.5 },
+        { end: 2, id: 'missing', rank: 1, vol: 0.5 },
+      ]),
+    )
+    expect(queue.map((tip) => sizeOf(tip.candidates[0]))).toEqual([
+      { value: 3, of: 'chunks' },
+      undefined,
+    ])
   })
 
   it('is nothing at all for a candidate measured neither way, or for no candidate', () => {

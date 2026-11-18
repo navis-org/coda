@@ -222,6 +222,7 @@ function describe(node: SchemaTree): TableFileColumn | undefined {
   }
   const dtype = physicalDType(element.type)
   if (!dtype) return undefined
+  if (logical === 'NULL') return { name, dtype, untyped: true }
   return element.type === 'INT64' ? { name, dtype, int64: true } : { name, dtype }
 }
 
