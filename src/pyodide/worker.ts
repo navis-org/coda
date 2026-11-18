@@ -56,9 +56,14 @@ scope.addEventListener('message', (event) => {
   const { id, call } = request
   void (async () => {
     try {
-      const result = await callPython(call.module, call.fn, call.args, (fraction, note) => {
-        scope.postMessage({ id, kind: 'progress', fraction, note })
-      })
+      const result = await callPython(
+        call.module,
+        call.fn,
+        call.args,
+        (fraction, note) => scope.postMessage({ id, kind: 'progress', fraction, note }),
+        (partial) =>
+          scope.postMessage({ id, kind: 'partial', result: partial }, transferable(partial)),
+      )
       scope.postMessage({ id, kind: 'done', result }, transferable(result))
     } catch (error) {
       scope.postMessage({ id, kind: 'error', message: errorMessage(error) })

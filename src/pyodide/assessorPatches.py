@@ -290,6 +290,17 @@ def _held(req, what):
     return _HELD
 
 
+def coda_assessor_ready(request, report=None):
+    """Boot this bridge's worker and load the vendored cutter, opening no box.
+
+    The cutter has a worker of its own (`engine.ts`' `PyLane`), and a worker boots on its first
+    call: ~1.5 s, which would otherwise land in front of the first end's patches. Suggest Merges
+    asks this while the model downloads, where the boot costs nothing.
+    """
+    _seam(globals()["__vendored__"])
+    return {"ready": True}
+
+
 def coda_assessor_open(request, report=None):
     """Label one box and hold it, saying which candidates it can answer for.
 

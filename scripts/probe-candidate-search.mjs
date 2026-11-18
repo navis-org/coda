@@ -188,6 +188,8 @@ const call = await installBridge(py, {
   vendored: {
     'seam.cutout': 'src/pyodide/seam/cutout.py',
     'seam.candidates': 'src/pyodide/seam/candidates.py',
+    // The organelle flag's measure, which the pool call has run since 2026-11-17.
+    'seam.enclosure': 'src/pyodide/seam/enclosure.py',
   },
 })
 

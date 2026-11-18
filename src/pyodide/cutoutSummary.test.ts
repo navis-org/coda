@@ -187,6 +187,42 @@ describe('runCandidatePool', () => {
     expect(sent.endNm).toEqual([64, 64, 90])
   })
 
+  /**
+   * **The pool's roots come out early, and are read with the final answer's own guard.** An
+   * 18-digit id is the one value a wrong conversion turns into another neuron in silence, and the
+   * early roots are what the counts are asked about (`searchRun.ts`).
+   */
+  it('hands the pool’s roots to `onPool` before it returns, as the same 64-bit ids', async () => {
+    const seen: string[] = []
+    mockedCall.mockImplementation(async (_call, options) => {
+      options?.onPartial?.({
+        candRoot: BigUint64Array.from([864691128455770001n, 864691128455770002n]),
+      })
+      seen.push('returned')
+      return measured()
+    })
+    await runCandidatePool(POOL, {
+      onPool: (candRoot) => seen.push(...[...candRoot].map(String)),
+    })
+    expect(seen).toEqual(['864691128455770001', '864691128455770002', 'returned'])
+  })
+
+  it('passes over an early answer whose ids are not 64-bit, and leaves the refusal to the end', async () => {
+    const onPool = vi.fn()
+    mockedCall.mockImplementation(async (_call, options) => {
+      options?.onPartial?.({ candRoot: Float64Array.from([8.6e17]) })
+      return measured()
+    })
+    await runCandidatePool(POOL, { onPool })
+    expect(onPool).not.toHaveBeenCalled()
+  })
+
+  it('asks for no partial answer when nobody wants one', async () => {
+    mockedCall.mockResolvedValue(measured())
+    await runCandidatePool(POOL)
+    expect(mockedCall.mock.calls[0]![1]?.onPartial).toBeUndefined()
+  })
+
   it('reports a query root missing from its own box without throwing', async () => {
     mockedCall.mockResolvedValue({
       rows: 0,

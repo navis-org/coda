@@ -36,7 +36,7 @@
 
 import type { VoxelIndex } from '../data/precomputed/volume'
 import { callPython } from './engine'
-import type { CallOptions } from './engine'
+import type { CallOptions, PyResult } from './engine'
 import { float64Columns, float64From, numberFrom, uint64From } from './types'
 
 /**
@@ -195,11 +195,19 @@ export interface CandidatePool {
  */
 export async function runCandidatePool(
   request: CandidatePoolRequest,
-  options: CallOptions = {},
+  options: CallOptions & {
+    /**
+     * The pool's roots, as soon as they are known — `CandidatePool.candRoot`, in its order —
+     * while the call goes on to the organelle measure, so the level-2 counts can start
+     * (`searchEnds`). Not called for an end whose query has no voxel in its box.
+     */
+    onPool?: (candRoot: BigUint64Array) => void
+  } = {},
 ): Promise<CandidatePool> {
+  const { onPool, ...rest } = options
   const result = await callPython(
     { module: 'cutoutSummary', fn: 'coda_candidate_pool', args: [request] },
-    options,
+    onPool ? { ...rest, onPartial: (partial) => poolFrom(partial, onPool) } : rest,
   )
   return {
     rows: numberFrom(result, 'rows'),
@@ -208,6 +216,22 @@ export async function runCandidatePool(
     columns: float64Columns(result),
     ms: numberFrom(result, 'ms'),
   }
+}
+
+/**
+ * The early roots, read with the **same guard as the final `candRoot`**, so a float64 id is
+ * refused rather than misread. Refused quietly here: this runs in the worker's message handler,
+ * where a throw reaches nobody, and the final `candRoot` meets the same guard and fails the call
+ * where it can be seen. The caller then simply had no head start.
+ */
+function poolFrom(partial: PyResult, onPool: (candRoot: BigUint64Array) => void): void {
+  let candRoot: BigUint64Array
+  try {
+    candRoot = uint64From(partial, 'candRoot')
+  } catch {
+    return
+  }
+  onPool(candRoot)
 }
 
 /**

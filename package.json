@@ -120,7 +120,8 @@
     "probe:ort-kernels": "node scripts/probe-ort-kernels.mjs",
     "probe:conv3d-kernel": "node scripts/probe-conv3d-kernel.mjs",
     "probe:assessor-gap": "node scripts/probe-assessor-gap.mjs",
-    "probe:gpu-assessor": "node scripts/probe-gpu-assessor.mjs"
+    "probe:gpu-assessor": "node scripts/probe-gpu-assessor.mjs",
+    "probe:suggest-merges": "node scripts/probe-suggest-merges.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

@@ -3036,3 +3036,143 @@ Precision at the cutoff on rv4: production 0.84 [0.74, 0.99], single seed 0.97 [
   list changes nothing about its tip's row.
 - The wording about `r` no longer counts steps or tips where a reader sees it, so the next refit
   cannot make it wrong; the help cites the 2026-11-18 numbers once, dated.
+
+## The search's network, measured apart and through the node (2026-11-18)
+
+A speed audit of the search and the mask assessor, Chrome first (the reader's Firefox loses to
+per-patch GPU overhead instead, which is a separate lever). **`pnpm probe:suggest-merges`** is new:
+it runs the workflow's chain and then `seam:suggestMerges` itself, assessor on and uncapped, over
+the first `--ends` of a neuron (default 25, neuron `648518347585551219`) in a fresh headless
+Chrome per run, and prints the node's own `runClock` split. It needs `pnpm dev --port 5193
+--strictPort` and a CAVE token, and reads only. Runs vary by ±15% with the chunkedgraph's load
+from minute to minute, so **a change is judged only from runs interleaved with the old code**.
+
+### What an end's network is
+
+`probe:seam-tip-boxes` (fixed: it still read `volume.roots`) and a scratch probe over ten
+consecutive tips of the fixture neuron:
+
+- **Bytes are not it.** The chunk cache answers 93% of chunk reads on consecutive tips, and a
+  held search box is 84 ms of decode.
+- **The supervoxel → root lookup is.** `roots_binary` costs ~145 ms however small, then about
+  0.1 ms a supervoxel; an end newly asks 5,000–12,000 supervoxels, nearly all of them the patch
+  box's, which then covers the next tip's search box. 7,200 ids took **741 ms as one request and
+  335 as four at once**.
+- **`leaves_many` is server time, not bandwidth.** Fifty pool roots answered 0.21 MB in 525 ms,
+  of which parsing was 2 ms. The "a few MB a reply" this file and `rootIds.ts` assumed was wrong;
+  so was "the fifth that did not parallelise is the bandwidth" above. One batch holding a large
+  neuron answered 1.24 MB and held its forty-nine neighbours for the length of it.
+
+Both hosts speak HTTP/2, so Chrome's six-connection limit per host is not in play.
+
+### Built: a lookup in four pieces
+
+`rootsAtInstant` splits a lookup into equal pieces of at least `ROOT_PIECE_MIN` (1,000) ids,
+`ROOT_STREAMS` (four) in flight, never above `CHUNK`. `resolveRoots`' sharing is untouched: the
+pieces are inside the one promise it registers. Through the node, interleaved, 25 ends:
+
+| | end | search box, median |
+|---|---|---|
+| one request (old) | 4.5, 4.5, 4.9, 4.6 s | 2.4–2.7 s |
+| **four pieces** | **3.3, 4.0, 3.9, 3.5 s** | **0.8–1.7 s** |
+
+About **4.6 s to 3.7 s an end, a fifth off**.
+
+### Measured and not built: smaller count batches
+
+Twenty-five roots a batch at eight streams, against fifty at four, interleaved: 3.3 s an end
+against 3.2, the stage's median 780 ms against 929. Inside the noise, for twice the requests at
+a shared server, so `LEAVES_CHUNK` and `LEAVES_STREAMS` stay. (Two of those four runs failed with
+"Failed to fetch" at `cave.fanc-fly.com`, one under each setting; the host answered again
+minutes later. A single failed fetch ends the whole node run, not the one end — recorded, not
+changed.)
+
+### What the faster search exposed
+
+`cutting patches` rose from a median of 122 ms an end to ~860. The cut did not get slower: the
+search now reaches its own Pyodide step (`measuring the pool`, ~0.9 s with the organelle
+measure) sooner, and the two queue on `engine.ts`' one worker.
+
+### Built: the cutter on a worker of its own
+
+`engine.ts` holds a worker per **lane** (`PyLane`): `'main'` for every caller, `'assessor'` for
+`assessorPatches.ts`, which chooses it itself because its held box lives in that worker's heap.
+Each lane is torn down alone, so a Cancel on one leaves the other; the memory readout sums the
+heaps and `stopPython` stops every idle one. The price is a second heap and one boot.
+
+Interleaved, 25 ends, the root-lookup change in both:
+
+| | end |
+|---|---|
+| one worker | 3.3, 3.3 s |
+| **two** | **3.0, 2.9 s** |
+
+About a tenth, as priced beforehand: the search's own chain — box, lookup, pool measure, counts —
+is still serial, so freeing the cut shortens the assess half and not the search. `cutting
+patches` falls out of the report (its ~830 ms median was the wait).
+
+### Built: the counts start under the organelle measure
+
+The pool is "every object other than Q within `POOL_MAX_DIST_UM` of it" (`pool_features`), and
+that distance is `summarize_cutout`'s — so the pool's roots cannot be known before most of the
+measure. Asking for every root in the box instead would be 3,794 against 538 on the fixture end,
+seven times the load. What the counts did not need was the rest of the call. Timed apart in
+Pyodide on the fixture end, warm:
+
+| `summarize_cutout` | `pool_features` | organelle measure | columns out |
+|---|---|---|---|
+| 571 ms | 6 ms | 268 ms | 1 ms |
+
+So `coda_candidate_pool` hands the pool's roots over as soon as `pool_features` returns, as a
+**partial result**: a dict passed as the third argument of its `report`, converted exactly as the
+final result is (`runtime.ts`), posted as its own `partial` reply and read by `runCandidatePool`
+with the final `candRoot`'s own guard (`uint64From`). Its `onPool` gives them to `searchEnds`,
+which starts the counts there. (First built as raw bytes on the progress callback; the review
+moved it, since bytes skipped the one check that refuses a float64 id.)
+
+The cutter's own worker (`PyLane`, below) boots on its first call, ~1.5 s; Suggest Merges asks
+it `coda_assessor_ready` while the model downloads, so the first end's patches do not wait for
+it. The lane belongs to a module, not a call: `engine.ts`' `laneOf` maps `assessorPatches` to its
+own worker, so no call can land on the other one and still answer. The
+early answer is not trusted beyond what it holds: a root it lacks is asked again (`topUpCounts`),
+and a failed early ask fails the end where the counts always did, without asking again (code
+review: asked again, it was every batch twice at a server that had just refused them).
+
+Interleaved, 25 ends, the same answer every run (1,455 candidates, one fingerprint — the probe now
+prints a hash of `candidateId`, `geo_rank` and `logit`):
+
+| | end | work alongside something else |
+|---|---|---|
+| counts after the measure | 3.7, 2.9 s | 38%, 42% |
+| **counts under it** | **2.8, 2.7 s** | **45%, 45%** |
+
+The 3.7 is the server's minute rather than the code — every other run of the same build that day
+was 2.9–3.0 — so the clean pair is 2.9 to 2.7, about the ~270 ms the split predicted.
+
+So the day's changes take an end from **~4.6 s to ~2.7 s** in Chrome. What is left in the search
+chain is `summarize_cutout` (~0.57 s, vendored) and the counts (~0.85 s, the server's time)
+in a row; the counts can start no earlier than the distances that define the pool. Firefox is
+bound by the GPU instead (~98 ms a patch), where none of this shows.
+
+### SEAM's faster `enclosure.py`, re-vendored (SEAM `56cf278`, 2026-11-18)
+
+SEAM answered both asks above (skip the group step, which Coda's call without `res` never needed;
+count face pairs with a hash rather than `np.unique`), measured in CPython only: 187 → 97 ms a
+call on 30 rv2 boxes, the same table. Taken **from the commit** (`git show`), not with
+`vendor:seam --write`: that checkout had uncommitted edits to `seam/segclr/patches.py`, which
+`--write` would have copied in.
+
+- **In Pyodide** (Node, the fixture end's box, both copies in one interpreter, Coda's call):
+  **274 → 124 ms**, median of seven. Every value of every column identical; the one difference is
+  `group_n`'s dtype — int32 from the old copy in wasm32, int64 from the new — which CPython cannot
+  show (its default int is 64-bit) and Coda does not read.
+- `probe:candidate-search` passes against SEAM's answer for the fixture end; its warm pool
+  measure 845 → ~718 ms.
+- **Through the node**, interleaved, 25 ends: `measuring the pool` 883/886 → 698/709 ms, the same
+  answer, and the end **unchanged** (3.0, 2.7 s old; 2.9, 3.0 s new). As predicted beforehand:
+  since the counts start under the organelle measure, the measure was already hidden behind them.
+  What the saving buys is Pyodide time on the main lane, not wall clock — today.
+
+Upstream `seam/scan.py` has also moved since `0374517` (SEAM `4c59bb1`: a faster `FaceGrid`, "same
+grid", and `stored_window` split out for Model A). It is Find Open Ends' and was not part of this
+hand-off, so it is **not** re-vendored; `vendor:seam` reports it.

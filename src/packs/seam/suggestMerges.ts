@@ -111,7 +111,7 @@ import {
   writeSearchedAt,
 } from './rootMoment'
 
-import { useAssessorBox } from '../../pyodide/assessorPatches'
+import { readyAssessorPatches, useAssessorBox } from '../../pyodide/assessorPatches'
 import type { TreeRanker } from './treeRanker'
 
 import { assessEnd } from './assessEnds'
@@ -813,7 +813,19 @@ export const suggestMergesNode = packNode({
         })))
     try {
       // A piece nothing is known of yet has ends to score too, as far as anyone can tell.
-      if (openAssessor && toMeasure + foreseen.unknown > 0) await openAssessor()
+      if (openAssessor && toMeasure + foreseen.unknown > 0) {
+        /*
+         * The cutter's worker boots under the model's download rather than before the first
+         * end's patches. Not awaited: a failure here is met again, and said, at the first cut.
+         *
+         * **Never aborted**: an abort tears down the whole lane, and the lane is the tab's — one
+         * run's declined model would take another run's held box with it. So it is asked only
+         * where the download is allowed, which is where a model is meant to open; a model that
+         * then fails leaves a booted worker the memory readout can stop.
+         */
+        if (ctx.params.download === true) void readyAssessorPatches().catch(() => {})
+        await openAssessor()
+      }
       upFront = false
       const head = MODEL_SHARE + (session ? ASSESSOR_SHARE : 0)
       ctx.progress(head, 'opening the segmentation')
@@ -907,8 +919,10 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
    */
   const clock = runClock()
   const steps = {
-    measure: clock.around('measuring the pool', (request: CandidatePoolRequest) =>
-      runCandidatePool(request, { signal: ctx.signal }),
+    measure: clock.around(
+      'measuring the pool',
+      (request: CandidatePoolRequest, onPool?: (candRoot: BigUint64Array) => void) =>
+        runCandidatePool(request, { signal: ctx.signal, onPool }),
     ),
     sizes: clock.around('pool sizes', (request: PoolSizesRequest) =>
       runPoolSizes(request, { signal: ctx.signal }),
@@ -1151,12 +1165,9 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     )
     /*
      * **The next end is searched while this one is scored.** `oneAhead` is the whole of it, and
-     * `searchRun.ts` holds the reasoning and the one thing it does not buy: both halves call
-     * Pyodide, and there is one worker for the tab, so that part queues rather than
-     * overlapping. What genuinely runs alongside the network is the GPU. The two things it
-     * rests on are settled elsewhere rather than here — a yielded end is final
-     * (`searchRun.ts`), and two box reads in flight share one supervoxel lookup
-     * (`SearchVolume.asking`).
+     * `searchRun.ts` holds the reasoning, Pyodide's two workers included. The two things it rests
+     * on are settled elsewhere rather than here — a yielded end is final (`searchRun.ts`), and
+     * two box reads in flight share one supervoxel lookup (`SearchVolume.asking`).
      *
      * **The eviction plan is still sound, with one caveat that is this file's to record.**
      * `chunkPlanFor` gives both boxes of one end *one* position and `endSearched` runs below,

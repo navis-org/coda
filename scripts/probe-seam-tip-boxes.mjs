@@ -198,11 +198,11 @@ async function main() {
     const ms = performance.now() - voxelAt
     voxelMs += ms
 
-    const unknown = new BigUint64Array([...read.labels].filter((id) => !volume.roots.has(id)))
+    const unknown = new BigUint64Array([...read.labels].filter((id) => !volume.memo.roots.has(id)))
     const rootAt = performance.now()
     if (unknown.length > 0) {
-      const found = await rootsAtInstant(volume.graphene, volume.at, unknown, options)
-      for (let k = 0; k < unknown.length; k++) volume.roots.set(unknown[k], found[k])
+      const found = await rootsAtInstant(volume.graphene, volume.memo.at, unknown, options)
+      for (let k = 0; k < unknown.length; k++) volume.memo.roots.set(unknown[k], found[k])
     }
     const lookupMs = performance.now() - rootAt
     rootMs += lookupMs

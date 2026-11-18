@@ -24,8 +24,8 @@
  */
 
 import type { LabelBoxRequest } from './cutoutSummary'
-import { callPython } from './engine'
 import type { CallOptions } from './engine'
+import { callPython } from './engine'
 import { int32From, numberFrom, uint8From } from './types'
 
 /**
@@ -144,6 +144,16 @@ export interface AssessorPatches {
    */
   readonly outside: Int32Array
   readonly ms: number
+}
+
+/**
+ * Boot the cutter's worker and load its module, opening no box — so a caller that knows patches
+ * are coming can pay the boot while it waits for something else (`coda_assessor_ready`).
+ */
+export async function readyAssessorPatches(): Promise<void> {
+  // No signal, on purpose: an abort would tear down the lane, and with it a box another caller
+  // holds there (`seam:suggestMerges` says more).
+  await callPython({ module: 'assessorPatches', fn: 'coda_assessor_ready', args: [{}] })
 }
 
 /**

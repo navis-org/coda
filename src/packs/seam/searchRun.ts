@@ -122,7 +122,15 @@ export interface SearchRules {
  * cache behind it; nothing here assumes one.
  */
 export interface SearchSteps {
-  measure(request: CandidatePoolRequest): Promise<CandidatePool>
+  /**
+   * `onPool` is to be called with the pool's roots as soon as they are known, before the measure
+   * returns (`runCandidatePool`'s own `onPool`), so the counts can start under the rest of it. A
+   * step that never calls it is answered exactly the same, one stage later.
+   */
+  measure(
+    request: CandidatePoolRequest,
+    onPool?: (candRoot: BigUint64Array) => void,
+  ): Promise<CandidatePool>
   sizes(request: PoolSizesRequest): Promise<PoolSizes>
   counts(roots: readonly string[]): Promise<Map<string, number>>
 }
@@ -224,21 +232,38 @@ export async function* searchEnds(
 
   for (const end of ends) {
     throwIfAborted(options.signal)
-    const pool = await steps.measure(await end.box())
-    if (pool.missingQuery) {
-      yield emptyEnd(end.tip)
-      continue
-    }
-
     /*
      * This end's roots, its query among them. `l2ChunkCounts` is memoised by root on the node's
      * side, so a root a neighbouring end already bought costs nothing here.
      */
     const query = [end.queryRoot, ...(end.alsoQuery ?? [])].map(String)
-    const roots = new Set<string>(query)
-    for (const root of pool.candRoot) roots.add(String(root))
+    const rootsOf = (candRoot: BigUint64Array) => [
+      ...new Set([...query, ...Array.from(candRoot, String)]),
+    ]
+    /*
+     * **The counts start as soon as the pool's roots are known**, under the rest of the measure
+     * — the organelle measure, ~270 ms an end that the counts never read (2026-11-18). The
+     * handler goes on where the promise is made, `oneAhead`'s rule: the measure can still throw
+     * with this in flight, and an unawaited rejection is "Uncaught (in promise)". **Started inside
+     * the chain**, so a step that throws rather than rejects is caught too: `onPool` runs in the
+     * Python worker's message handler, where a throw reaches nobody (`CallOptions`).
+     */
+    let early: Promise<EarlyCounts> | undefined
+    const pool = await steps.measure(await end.box(), (candRoot) => {
+      early = Promise.resolve()
+        .then(() => steps.counts(rootsOf(candRoot)))
+        .then(
+          (counts) => ({ counts }),
+          (failed: unknown) => ({ failed }),
+        )
+    })
+    if (pool.missingQuery) {
+      yield emptyEnd(end.tip)
+      continue
+    }
+
     throwIfAborted(options.signal)
-    const counts = await steps.counts([...roots])
+    const counts = await topUpCounts(rootsOf(pool.candRoot), await early, steps)
     /*
      * **This end's failure, not the run's.** A root the chunkedgraph does not list is a fact
      * about one object beside one open end; `countsInPoolOrder` refuses by name because that is
@@ -315,12 +340,12 @@ export async function* searchEnds(
  * with a yielded end is the GPU. Serial, an end cost the sum; one ahead, it costs the largest
  * resource.
  *
- * **They are not disjoint, and the measurement says where.** Both halves also call Pyodide —
- * the search measures its pool, the body cuts its patches — and `src/pyodide/engine.ts` holds
- * **one worker for the tab**, so that work queues rather than overlapping. The first run after
- * this landed went 4.9 s an end to 3.3 against a predicted 2.8, and the stage that appeared to
- * get slower (`cutting patches`, surfacing at 0.39 s) had not: it had started waiting for the
- * worker. Anyone widening the overlap should move the Pyodide work, not the order of the ends.
+ * **Both halves also call Pyodide** — the search measures its pool, the body cuts its patches.
+ * On one worker that work queued: the first run after this landed went 4.9 s an end to 3.3
+ * against a predicted 2.8, and the stage that appeared to get slower (`cutting patches`) had
+ * not, it had started waiting for the worker. The cutter now has a worker of its own
+ * (`src/pyodide/engine.ts`' `PyLane`), which took 3.3 s an end to 3.0 (2026-11-18). Anyone
+ * widening the overlap should move the Pyodide work, not the order of the ends.
  *
  * **One ahead, never more.** Two would mean three ends' boxes alive and a second one queued
  * behind a resource that is already busy, buying nothing for the memory — `assessorRun.ts`
@@ -384,6 +409,38 @@ export async function* oneAhead<T>(stream: AsyncGenerator<T>): AsyncGenerator<T>
      */
     void stream.return?.(undefined)
   }
+}
+
+/** What the early ask came to: the counts, or what it failed with — kept, never swallowed. */
+type EarlyCounts =
+  { readonly counts: ReadonlyMap<string, number> } | { readonly failed: unknown }
+
+/**
+ * The counts for `roots`: the early answer where there is one, and the rest asked now.
+ *
+ * **Asked again for anything the early answer does not hold**, rather than trusting it to be
+ * the same set: the early roots are a promise of the bridge's (`runCandidatePool`'s `onPool`),
+ * and a pool that came back different would otherwise be ranked on holes. In a run they are the
+ * same set, and the only roots asked again are ones the graph does not list — which an answer
+ * leaves out, and `l2ChunkCounts`' memo answers without a request.
+ *
+ * **A failed early ask fails here, as the counts always did, and is not asked again.** Asked
+ * again it was every batch twice at a server that had just refused them — at a `429`, the
+ * opposite of what it asked for — and a Cancel turned into a fresh ask after the Cancel.
+ *
+ * Not "ask everything again and let the memo answer": `SearchSteps.counts` promises no cache, and
+ * `l2ChunkCounts`' memo fills only as each batch lands.
+ */
+async function topUpCounts(
+  roots: readonly string[],
+  early: EarlyCounts | undefined,
+  steps: SearchSteps,
+): Promise<ReadonlyMap<string, number>> {
+  if (!early) return steps.counts(roots)
+  if ('failed' in early) throw early.failed
+  const missing = roots.filter((root) => !early.counts.has(root))
+  if (missing.length === 0) return early.counts
+  return new Map([...early.counts, ...(await steps.counts(missing))])
 }
 
 /** A refusal's sentence, whatever was thrown. */

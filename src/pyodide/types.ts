@@ -102,6 +102,8 @@ export type WorkerRequest =
 /** Worker to main thread. */
 export type WorkerReply =
   | { id: number; kind: 'progress'; fraction: number; note?: string }
+  /** A piece of the answer before the call ends — `CallOptions.onPartial`. */
+  | { id: number; kind: 'partial'; result: PyResult }
   | { id: number; kind: 'done'; result: PyResult }
   | { id: number; kind: 'error'; message: string }
   | { id: number; kind: 'memory'; bytes: number | undefined }

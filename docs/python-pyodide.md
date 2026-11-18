@@ -794,6 +794,32 @@ on the way in — naming one would widen the array straight back out — and it 
 big for the width that arrived, since every index past the width has already wrapped onto a
 different object. Cutting one 66-candidate tip's patches went from a 220 MB peak to 201 MB.
 
+### Two more protocol changes: a second worker, and an answer in two parts (2026-11-18)
+
+Both came out of Suggest Merges' speed work (`docs/seam-suggestions-plan.md`, "The search's
+network, measured apart and through the node"), and both are general.
+
+**A lane is a worker per module.** `engine.ts` holds one worker per lane, made on first use, and
+`laneOf` names a module's: `assessorPatches` runs on `'assessor'`, every other module on `'main'`.
+It is a property of the *module* rather than of a call, because the cutter leaves a labelled box in
+its heap: a call routed elsewhere would load a fresh copy and still answer, from a module with no
+box open. Each lane is torn down alone, so a Cancel on one leaves the other; the memory readout
+sums the heaps and `stopPython` stops every idle one. The price is a second heap and one boot
+(~1.5 s, cached download) — which a caller can move off its critical path, as Suggest Merges does
+with `readyAssessorPatches` under the model download. A new lane is warranted only where two
+bridges' calls run concurrently and one holds state.
+
+**A partial result.** A Python function may call `report(fraction, note, {...})`: the dict is
+converted exactly as the final result is (`toJs({ dict_converter })`, so a `uint64` array arrives
+as a `BigUint64Array`), posted as its own `partial` reply, and handed to `CallOptions.onPartial`.
+The wrapper reads it with the same `uint64From` and friends as the final answer. It exists because
+the call is synchronous inside the worker, so `report` is the only way anything leaves mid-call:
+`coda_candidate_pool` hands over its pool's roots before its organelle measure, and the level-2
+counts start under it. **Neither `onProgress` nor `onPartial` may throw** — both run in the worker's
+message handler, where a throw is an uncaught page error that neither settles nor fails the call.
+A bridge that cannot use a partial should drop it and let the final result's own checks speak
+(`cutoutSummary.ts`' `poolFrom`).
+
 ### syNBLAST: the same matrix, a different question
 
 `neuron.synblast`, `Add ▸ Analysis ▸ syNBLAST`. Synapses in, a score matrix out — the same

@@ -282,6 +282,123 @@ describe('searchEnds', () => {
   })
 })
 
+/**
+ * **The counts start under the rest of the measure**, through its `onPool` (`searchEnds` says
+ * why). Invisible in the answer, so what is pinned
+ * is when they are asked, and that the early answer is not trusted further than it goes.
+ */
+describe('the counts, started early', () => {
+  const near = [0, 0, 0]
+  const RULES = { ranker: RANKER, topK: 100, ownUm: 2 }
+
+  /** `stepsFor`, with a measure that hands over its roots first and returns a tick later. */
+  const earlySteps = (pool: CandidatePool, counts: SearchSteps['counts']) => {
+    const order: string[] = []
+    const steps: SearchSteps = {
+      ...stepsFor([pool], new Map()),
+      measure: vi.fn(async (_request, onPool) => {
+        onPool?.(BigUint64Array.from(pool.candRoot))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        order.push('measured')
+        return pool
+      }),
+      counts: vi.fn(async (roots: readonly string[]) => {
+        order.push('counts')
+        return counts(roots)
+      }),
+    }
+    return { steps, order }
+  }
+
+  it('asks before the measure returns, and once', async () => {
+    const pool = poolOf([1, 2], [near, near])
+    const all = countsFor([pool])
+    const { steps, order } = earlySteps(pool, async () => all)
+    const [one] = await collect(searchEnds(TIPS, [endAt(0, 1n)], RULES, steps))
+    expect(order).toEqual(['counts', 'measured'])
+    expect(steps.counts).toHaveBeenCalledTimes(1)
+    expect(one!.refusal).toBeUndefined()
+    expect(one!.rows).toBe(2)
+  })
+
+  it('asks again only for a root the early answer does not hold', async () => {
+    const pool = poolOf([1, 2], [near, near])
+    const all = countsFor([pool])
+    const lacking = String(pool.candRoot[1])
+    let first = true
+    const { steps } = earlySteps(pool, async (roots) => {
+      const answer = new Map([...all].filter(([root]) => roots.includes(root)))
+      if (first) answer.delete(lacking)
+      first = false
+      return answer
+    })
+    const [one] = await collect(searchEnds(TIPS, [endAt(0, 1n)], RULES, steps))
+    expect(vi.mocked(steps.counts).mock.calls[1]![0]).toEqual([lacking])
+    expect(one!.refusal).toBeUndefined()
+  })
+
+  /* Asked again, a failed ask was every batch twice at a server that had just refused them. */
+  it('fails where the counts always did when the early ask fails, and asks nothing again', async () => {
+    const pool = poolOf([1], [near])
+    let calls = 0
+    const { steps } = earlySteps(pool, async () => {
+      calls += 1
+      throw new Error('429')
+    })
+    await expect(collect(searchEnds(TIPS, [endAt(0, 1n)], RULES, steps))).rejects.toThrow('429')
+    expect(calls).toBe(1)
+  })
+
+  /* `onPool` runs in the Python worker's message handler, where a throw would reach nobody. */
+  it('does not let a counts step that throws, rather than rejects, escape the measure', async () => {
+    const pool = poolOf([1], [near])
+    let escaped: unknown
+    const steps: SearchSteps = {
+      ...stepsFor([pool], new Map()),
+      measure: vi.fn(async (_request, onPool) => {
+        // Where the engine calls it: anything thrown here would be lost.
+        try {
+          onPool?.(BigUint64Array.from(pool.candRoot))
+        } catch (error) {
+          escaped = error
+        }
+        return pool
+      }),
+      // Not `async`: it throws instead of returning a promise.
+      counts: vi.fn((): Promise<Map<string, number>> => {
+        throw new Error('not a promise')
+      }),
+    }
+    await expect(collect(searchEnds(TIPS, [endAt(0, 1n)], RULES, steps))).rejects.toThrow(
+      'not a promise',
+    )
+    expect(escaped).toBeUndefined()
+    expect(steps.counts).toHaveBeenCalledTimes(1)
+  })
+
+  /* A measure that throws with the counts in flight must not leave a rejection nobody awaits. */
+  it('leaves nothing unhandled when the measure fails after the counts began', async () => {
+    const pool = poolOf([1], [near])
+    const steps: SearchSteps = {
+      ...stepsFor([pool], new Map()),
+      measure: vi.fn(async (_request, onPool) => {
+        onPool?.(BigUint64Array.from(pool.candRoot))
+        throw new Error('the worker went away')
+      }),
+      counts: vi.fn(
+        () =>
+          new Promise<Map<string, number>>((_, reject) =>
+            setTimeout(() => reject(new Error('late')), 0),
+          ),
+      ),
+    }
+    await expect(collect(searchEnds(TIPS, [endAt(0, 1n)], RULES, steps))).rejects.toThrow(
+      'the worker went away',
+    )
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  })
+})
+
 describe('how big the query is', () => {
   it('is the one root’s count for a neuron’s own end', () => {
     expect(queryCountOf(new Map([['1', 9000]]), ['1'])).toBe(9000)
