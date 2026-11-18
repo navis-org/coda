@@ -60,6 +60,7 @@ function tip(
     q: undefined,
     pTip: undefined,
     shown: true,
+    source: undefined,
     candidates,
   }
 }

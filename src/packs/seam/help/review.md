@@ -1,6 +1,6 @@
 ## What Review Suggestions does
 
-A queue of SEAM's merge suggestions, one row per tip. Each row is a tip and one of its candidates — the piece SEAM would merge into the neuron there. Click a row and the card's viewer shows the neuron and that candidate in two colours, with the camera on the point where they touch. Accept it, reject it, or mark it unsure, and move on.
+A queue of SEAM's merge suggestions, one row per tip. Each row is a tip and one of its candidates — the piece SEAM would merge into the neuron there. Click a row and the card's viewer shows the neuron and that candidate in two colours, with the camera on the point where they touch. Accept it, reject it, say the neuron ends there, or mark it unsure, and move on.
 
 A verdict is a note saved with the workflow. Nothing is written to the segmentation until you press **Submit** and confirm the merges — see "Submitting merges" below.
 
@@ -52,19 +52,22 @@ With nothing wired to `Current`, expanding the card (⤢) gives it a small viewe
 | ------- | -------------- |
 | a row   | shows that tip's candidate and points the camera at their contact |
 | `‹` `›` | the candidate ranked above or below this one, within the same tip |
-| Accept / Reject / Unsure | records a verdict on the piece you are looking at, for this neuron (greyed out once the piece is merged) |
+| Accept | records that the piece you are looking at belongs to this neuron (greyed out once the piece is merged) |
+| Reject ▾ | records that it does not. The button gives the verdict on its face in one click; `▾` picks between **Reject** (not the continuation), **Ends** (rejected because the neuron ends here) and **Unsure** |
 
-Pressing the same verdict again clears it, so a misclick costs one click.
+Pressing the same verdict again clears it, so a misclick costs one click. The face of the second button shows the row's verdict once it has one, so changing your mind about an `Ends` is still one click.
 
-The row you are on has a blue outline. The bar on its left shows the verdict (green, red or yellow), so you can still tell which row is selected once it has one.
+Use **Ends** when no candidate could be right because the neuron stops at this tip, and **Reject** when the neuron goes on but this piece is not where it goes. SEAM learns different things from the two. Only `Accept` merges.
 
-A verdict is about the piece and the neuron, not about the tip: a piece listed at two tips shows the same verdict on both rows. Verdicts survive running the suggestions again, as long as neither the neuron nor the piece has been edited in between. Verdicts saved before 16 November 2026 were tied to a tip number that changes between runs, and are no longer read.
+The row you are on has a blue outline. The bar on its left shows the verdict (green for accept, red for reject, dashed red for ends, yellow for unsure), so you can still tell which row is selected once it has one.
+
+A verdict is about the piece and the neuron, not about the tip: a piece listed at two tips shows the same verdict on both rows. That holds for **Ends** too, although a neuron ends at one tip: the second row reads Ends as well. Verdicts survive running the suggestions again, as long as neither the neuron nor the piece has been edited in between. Verdicts saved before 16 November 2026 were tied to a tip number that changes between runs, and are no longer read.
 
 ### Seeing what you accepted
 
 With `Show accepted` on (the default), every candidate you have accepted on this neuron is shown in the viewer in green, wherever the cursor is. The scene is then the neuron as it will look once you make the merges, and a piece that does not fit stands out. Accepting the candidate you are looking at turns it from orange to green straight away.
 
-With no row selected, the viewer shows the neuron and its accepted pieces, and the camera stays where it is. Only `Accept` counts; `Reject` and `Unsure` are not drawn.
+With no row selected, the viewer shows the neuron and its accepted pieces, and the camera stays where it is. Only `Accept` counts; the other verdicts are not drawn.
 
 The number on the left is `q`, SEAM's score for the tip's **first** candidate. The list is sorted on it, and SEAM's cutoff — what `shown` means — is a value of it. Beneath it is `r`, rounded: about how often a first candidate at that `q` turned out right, such as `≈90%`. Treat it as an estimate. It comes in a few wide steps, fitted on a few hundred tips a proofreader judged, so one value covers many very different tips — most of a neuron's, at the lowest step. The line under the id is the candidate itself: its size, its rank within the tip's list, its own confidence, the search's own rank, and how far the two pieces are apart.
 
@@ -209,6 +212,14 @@ The card follows the neuron to its new root, in its own viewer and on `Current`.
 With a CAVE dataset wired and you signed in, the card also checks whether the neuron and its candidates are still current, as they arrive. A candidate edited since it was suggested gets a red **outdated** tag. If the neuron itself has been edited — by somebody else, not by your own Submit — the foot says so and Submit is greyed out. Run the suggestions again on the neuron's new root to carry on.
 
 This is common with a published set, which is a snapshot: on Aedes, a neuron from a set a few weeks old has often been edited since.
+
+## Sending your verdicts to SEAM
+
+SEAM's estimate `r` is fitted on tips somebody judged, so your verdicts help it get better. Tick **Help improve** in the card's foot and every verdict you give from then on goes to the lab's server, with the tip, the candidate, their scores and which set or model they came from. The foot then counts what was sent and what is waiting. The ⚙ beside it says what is sent, and is where you add your name and email, both optional.
+
+It is off until you turn it on, and the setting is kept in your browser, not in the workflow, so opening somebody else's workflow never sends anything for you. Your CAVE token is never sent. The server instead asks you to look up one supervoxel's root through your own access, which shows you can read the dataset. Verdicts that cannot be sent straight away, because you are offline or the server is busy, wait in your browser and go with the next one.
+
+Only button presses are sent: undoing a verdict with Ctrl+Z does not send anything, and pressing a verdict again to clear it sends that it was taken back. Verdicts on a tip from an old set that names no version are not sent, because nobody could tell which scores they were judged against. The server collects verdicts for Aedes (`wclee_aedes_brain`); on another dataset the foot says it is not collected.
 
 ## Outputs
 

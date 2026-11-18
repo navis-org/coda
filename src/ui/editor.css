@@ -11263,6 +11263,11 @@ details[open] > summary.tile__label {
 .review-row[data-verdict='unsure'] {
   border-left-color: var(--status-stale);
 }
+/* Ends is a rejection with another reason: Reject's colour, dashed, so the two read apart. */
+.review-row[data-verdict='ends'] {
+  border-left-color: var(--status-error, #e05252);
+  border-left-style: dashed;
+}
 
 /*
  * The click target, as a layer rather than a wrapper — see the note in `ReviewBody.tsx`.
@@ -11384,6 +11389,21 @@ details[open] > summary.tile__label {
   color: var(--text-primary);
   border-color: currentColor;
 }
+/* Reject, Ends and Unsure's split button (`VerdictButtons.tsx`), joined to read as one control. */
+.review-row__split {
+  display: inline-flex;
+}
+.review-row__split > .review-row__verdict:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.review-row__more {
+  margin-left: -1px;
+  padding: 3px 3px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
 /*
  * Extend stands a little apart from the verdicts: it is not a fourth verdict but what to do
  * about one. Pressed, its text is how far the search has got, in tabular figures so a count
@@ -15567,4 +15587,62 @@ select.annotate__input {
 }
 .term-hover__text {
   color: var(--text-secondary, var(--text-primary));
+}
+
+/* ---------------------------------------------------------------------------
+ * Review Suggestions: sending verdicts to SEAM (`VerdictSharing.tsx`), in the card's foot
+ * ------------------------------------------------------------------------- */
+
+/*
+ * Lined up by text, as the rest of `.list-body__foot` is (`align-items: baseline`). A checkbox's
+ * own baseline is not its label's, so the words carry it (`align-self: baseline` makes theirs the
+ * label's), and this box passes it on.
+ */
+.verdict-sharing {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+/* Over `.checkbox-field`, at the foot's own size. */
+.verdict-sharing__switch {
+  gap: 3px;
+  font-size: inherit;
+  white-space: nowrap;
+}
+.verdict-sharing__label {
+  align-self: baseline;
+}
+.verdict-sharing__settings {
+  font-size: 12px;
+  line-height: 1;
+}
+.verdict-sharing__said {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.verdict-sharing__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  font-size: 12px;
+}
+.verdict-sharing__panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+}
+.verdict-sharing__note {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.verdict-sharing__done {
+  align-self: flex-end;
 }
