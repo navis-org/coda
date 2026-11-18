@@ -3811,6 +3811,8 @@ input.field--combo {
 .issue__text {
   user-select: text;
   cursor: text;
+  /* One warning a line (`Scheduler.warning` joins them with a newline). */
+  white-space: pre-line;
   /* A URL is one long unbreakable token; without this it widens the inspector's whole column
      and pushes a 232px card's band past its own edge. */
   overflow-wrap: anywhere;

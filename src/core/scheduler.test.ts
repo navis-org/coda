@@ -977,7 +977,10 @@ describe('a partial below a node boundary', () => {
  * those are easy to lose to a refactor and neither shows up in a type.
  */
 describe('what a node warns about', () => {
-  function register(type: string, opts: { twice?: boolean; fail?: boolean } = {}): void {
+  function register(
+    type: string,
+    opts: { twice?: boolean; fail?: boolean; another?: boolean } = {},
+  ): void {
     registerNode({
       type,
       label: type,
@@ -989,6 +992,7 @@ describe('what a node warns about', () => {
       evaluate: (ctx) => {
         ctx.warn('this is large')
         if (opts.twice) ctx.warn('this is large')
+        if (opts.another) ctx.warn('and this is slow')
         // Read back from inside `evaluate`: the point of the live map is that the card can
         // show this while the node is still working.
         heardWhileRunning = scheduler.warning('n')
@@ -1029,6 +1033,17 @@ describe('what a node warns about', () => {
     register('test.warn.repeats', { twice: true })
     await scheduler.run(graphOver('test.warn.repeats'), { mode: 'full' })
     expect(scheduler.warning('n')).toBe('this is large')
+  })
+
+  /**
+   * One warning a line (user, 2026-11-18): joined with spaces, six warnings on a Suggest Merges
+   * card read as one paragraph. A caller passing them on takes the list, never a split string.
+   */
+  it('keeps two warnings apart: a line each, and an entry each', async () => {
+    register('test.warn.two', { another: true })
+    await scheduler.run(graphOver('test.warn.two'), { mode: 'full' })
+    expect(scheduler.warning('n')).toBe('this is large\nand this is slow')
+    expect(scheduler.warnings('n')).toEqual(['this is large', 'and this is slow'])
   })
 
   it('is dropped when the run fails, where the error is the only thing worth reading', async () => {

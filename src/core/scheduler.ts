@@ -980,17 +980,26 @@ export class Scheduler {
   }
 
   /**
-   * What this node said through `ctx.warn` about the result it is holding, as one string.
+   * What this node said through `ctx.warn` about the result it is holding, as one string — one
+   * warning a line, which the card and the inspector draw as lines (`.issue__text`).
    *
    * Joined rather than handed over as the array, so the snapshot is a primitive and a selector
    * over it is stable by value (invariant 7) — the same trick `error` gets for free by being a
-   * string already. The live map wins over the entry: while a node runs, what it has just said
-   * is newer than whatever its last result came with.
+   * string already. Joined with spaces until 2026-11-18, when six warnings on a Suggest Merges
+   * card read as one paragraph nobody could take apart (user).
    */
   warning(nodeId: string): string | undefined {
-    const live = this.liveWarnings.get(nodeId)
-    const held = live ?? this.cache.get(nodeId)?.warnings
-    return held && held.length > 0 ? held.join(' ') : undefined
+    const held = this.warnings(nodeId)
+    return held.length > 0 ? held.join('\n') : undefined
+  }
+
+  /**
+   * The same warnings, one entry each — for a caller that passes them on, which must not split a
+   * joined string back up. The live map wins over the entry: while a node runs, what it has just
+   * said is newer than whatever its last result came with.
+   */
+  warnings(nodeId: string): readonly string[] {
+    return this.liveWarnings.get(nodeId) ?? this.cache.get(nodeId)?.warnings ?? []
   }
 
   // -------------------------------------------------------------------------
@@ -2741,9 +2750,9 @@ function rerunnerFor(
         throw new Error(`${nodeLabel(byId.get(failed))} could not be run again: ${why}`)
       }
       const warnings: string[] = []
+      // One entry per warning, so the caller can pass each on, or leave one out, by itself.
       for (const [id, node] of byId) {
-        const said = inner.warning(id)
-        if (said) warnings.push(`${nodeLabel(node)}: ${said}`)
+        for (const said of inner.warnings(id)) warnings.push(`${nodeLabel(node)}: ${said}`)
       }
       return { value: inner.output(target, handle), warnings }
     } finally {
