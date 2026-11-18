@@ -2982,3 +2982,28 @@ Merges publishes `organelle_score` and `organelle` on `Candidates` (and the firs
   (about 13% of the call, ~35 ms an end in wasm); and the face pairs are counted by sorting
   (`np.unique`, ~60% of `_faces` on a test box), where `bincount` over `k²` keys was 8x faster
   for a box of a few thousand objects but costs `k²` memory.
+
+## Sorting by `q`, `r` a label (SEAM's note, 2026-11-18)
+
+SEAM's `docs/handoffs/coda-note-sort-by-q.md` withdrew two pieces of its own advice: "browse below
+the cutoff by `r`" and "expected right firsts per neuron = sum of `r`". `r` is an isotonic
+staircase over `q` — about 14 values for thousands of tips, fitted on ~335 judged rv2 tips, mostly
+near the cutoff, untested on held-out tips — so sorting on it only adds ties (1,514 single-seed
+tips below q 0.003 share four values), and a sum is mostly its thin low steps (432 "expected right"
+on one rv4 neuron). Decided with the user, same day:
+
+- **Review Suggestions, per tip, leads with `q`** (`QueueRow.score`): the sort, `Min confidence`
+  and the big number all read it; `conf` per candidate is unchanged. `r` rides beside it as
+  `QueueRow.estimate` and is drawn beneath the number as a rounded label (`estimateLabel`: tens,
+  `≥90%` and `<10%` at the open ends). The organelle re-scoring reads `q_no_organelles`, which
+  Suggest Merges already published.
+- **`expectedRight` is gone** from Merge Suggestions' `Neurons`, its help, and both exports, which
+  were re-run against the fixtures (`tips` 5 and `shown` 2 per neuron from the node, pandas and R).
+- **The neuroglancer layer** is coloured by `q` and captions `q` with the rounded `r` "(estimate)";
+  no `0` where a set has no `r`.
+- Each configuration keeps its own `q`, cutoff and `r`: Coda's single-seed manifest carries 0.159,
+  SEAM's single-seed figure, and nothing compares a `q` across configurations.
+- **`Only SEAM's shown set` removed** from Review Suggestions (user, same day). Per tip `shown` is
+  `q` at or above the set's cutoff and the list now leads with `q`, so `Min confidence` at the
+  cutoff gives the same list; the help says so. `shown` still marks the row and colours its number.
+  A saved `shownOnly` is an undeclared param, which `normalizeParams` and the card ignore.

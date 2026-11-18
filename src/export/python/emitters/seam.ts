@@ -18,11 +18,12 @@
  * frame has their coordinates in three columns.
  *
  * **Checked by running it.** Both cells were executed against `packs/seam/__fixtures__` and give
- * the same `expectedRight` per neuron as the node — 1.8604, 1.8604, 1.7128, 1.7925, 1.7427 — and
- * the same joined `candidateId`, which `suggestions.test.ts` pins. That check is not ceremony:
- * the R chunk disagreed on first writing, and both have been re-run on each recut of the
- * fixtures (2026-11-10, 2026-11-11 for SEAM's `za` refit, and 2026-11-14 for nest 3) rather than
- * the node's new answer being taken as all three.
+ * the same `tips` and `shown` per neuron as the node and the same joined `candidateId`, which
+ * `suggestions.test.ts` pins. That check is not ceremony: the R chunk disagreed on first writing
+ * (over `expectedRight`, the sum of `r` that all three dropped on 2026-11-18 at SEAM's word), and
+ * both have been re-run on each recut of the fixtures (2026-11-10, 2026-11-11 for SEAM's `za`
+ * refit, 2026-11-14 for nest 3, and 2026-11-18) rather than the node's new answer being taken as
+ * all three.
  */
 
 import { ID_COLUMN_NAME } from '../../../core/ids'
@@ -67,15 +68,12 @@ registerEmitter('seam:suggestions', (ctx: EmitContext) => {
     `    on="end_uid", how="left", validate="one_to_one",`,
     `)`,
     ``,
-    `# One row per neuron. r is the chance a shown first candidate is right, so its sum over the`,
-    `# shown rows is how many of them to expect to be real.`,
+    `# One row per neuron: its tips, and how many of them clear the cutoff. Sort the tips by q,`,
+    `# never r: r is a staircase over q, and SEAM advises against summing it.`,
     `${neurons} = (`,
-    `    ${tips}.assign(_shown=${tips}["shown"].astype(int),`,
-    `                  _right=${tips}["r"].where(${tips}["shown"], 0.0))`,
+    `    ${tips}.assign(_shown=${tips}["shown"].astype(int))`,
     `    .groupby(${pyStr(ID_COLUMN_NAME)}, as_index=False)`,
-    `    .agg(tips=(${pyStr(ID_COLUMN_NAME)}, "size"),`,
-    `         shown=("_shown", "sum"),`,
-    `         expectedRight=("_right", "sum"))`,
+    `    .agg(tips=(${pyStr(ID_COLUMN_NAME)}, "size"), shown=("_shown", "sum"))`,
     `)`,
     ...ctx.note(
       'The Points and Layers outputs are the same tips drawn — a cloud and a neuroglancer ' +

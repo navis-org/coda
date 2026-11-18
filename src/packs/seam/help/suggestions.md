@@ -39,22 +39,20 @@ The tips and candidate files are read by byte range, so a large set costs only t
 | `Tips`       | one row per tip: where it is, the first candidate, `q`, `shown`, `r`, and SEAM's own verdicts |
 | `Candidates` | every candidate on every tip's list, ranked — the context behind a suggestion                 |
 | `Points`     | the tips as a cloud, carrying the `Tips` columns                                               |
-| `Neurons`    | one row per neuron: `tips`, `shown` and `expectedRight`                                        |
+| `Neurons`    | one row per neuron: `tips` and `shown`                                                         |
 | `Layers`     | an annotation layer of each shown suggestion — its tip and its contact point                   |
 
 `Neurons` goes straight into [Meshes](#neuron.meshes), which is how the neurons get drawn beside their own suggestions.
 
 ## Reading the numbers
 
-`shown` is **SEAM's** decision, not this node's: a first candidate is shown when `q` is at or above a cutoff calibrated on a proofreader's verdicts. There is no threshold setting here, and that is deliberate — narrowing the queue is a [Filter Table](#core.filterTable) on `shown` or on `r`, where the cut is visible as something you did rather than something the node hid.
+`shown` is **SEAM's** decision, not this node's: a first candidate is shown when `q` is at or above a cutoff calibrated on a proofreader's verdicts. There is no threshold setting here, and that is deliberate — narrowing the queue is a [Filter Table](#core.filterTable) on `shown` or on `q`, where the cut is visible as something you did rather than something the node hid.
 
-`r` is the chance the first candidate is right, in words: 0.7 means about seven of ten tips scoring like this one had a right first. It is calibrated on real verdicts, so it is the number to sort by.
+Sort tips by `q`, highest first. `r` puts `q` into words: 0.7 means about seven of ten tips scoring like this one had a right first. It is a staircase of about 14 steps over `q`, so it never reorders tips, but it ties thousands of them that `q` keeps apart. Use it as a rounded label, and don't add it up: a neuron's sum of `r` is mostly the thin low steps.
 
 > [!WARNING]
 > **`r` is an estimate, and it runs out at the bottom**
-> Below `q` 0.003 its steps rest on eleven tips. A low `r` there means "nobody has checked suggestions this weak", not "this is nine-tenths likely to be wrong".
-
-`expectedRight` on a neuron is the sum of `r` over its shown suggestions — how many of them you should expect to be real before you open any.
+> Its steps were fitted on about 335 judged tips from five neurons, mostly near the cutoff, and have not been tested on held-out tips. Below `q` 0.01 each step rests on a handful of them. A low `r` there means "nobody has checked suggestions this weak", not "this is nine-tenths likely to be wrong".
 
 Only the **first** candidate of each tip is a suggestion. The rest of the list is context: the cutoff was calibrated on firsts, so treating rank 2 as a second suggestion reads a number that was never fitted for it.
 

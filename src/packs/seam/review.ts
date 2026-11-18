@@ -260,7 +260,7 @@ export const reviewNode = packNode({
       default: '',
       presentational: true,
       placeholder: '(any)',
-      help: 'List only tips whose `r` — the chance their first candidate is right — is at least this. A reading aid: it changes nothing this node publishes.',
+      help: 'List only rows whose number is at least this: per tip SEAM’s `q` for the first candidate, the score its cutoff is a value of (0.159 single seed, 0.118 production); per candidate that candidate’s `conf`. A reading aid: it changes nothing this node publishes.',
     },
     {
       /*
@@ -279,13 +279,26 @@ export const reviewNode = packNode({
       placeholder: '(any)',
       help: 'List only tips whose first candidate is at least this big. Size is the candidate’s **level-2 chunk count** — the chunkedgraph’s own decomposition of the whole object, wherever it reaches — which is the best proxy there is for whether a piece is a fragment or part of a neuron. It is coarse: anything small is one chunk, and the number only separates pieces further up. A published set from Merge Suggestions carries no chunk count, and there this falls back to µm³ of the candidate *inside the search box*; every row says which of the two it is showing.',
     },
+    /*
+     * `shownOnly` ("Only SEAM's shown set") was removed (user, 2026-11-18). Per tip `shown` is `q`
+     * at or above the set's cutoff, and the list now leads with `q`, so `Min confidence` at the
+     * cutoff is the same list. A saved value is an undeclared param, which nothing reads.
+     */
     {
-      id: 'shownOnly',
+      /*
+       * **On by default, and a reading aid like the filters above**: it changes nothing this node
+       * publishes. SEAM's flag (`organelle`, `searchTips.ts`) is a piece wrapped inside one cell —
+       * a mitochondrion, a vesicle — which is never a neurite's continuation; about one flagged
+       * piece in a hundred is not one, which is why it is a choice and the card counts what it
+       * left out. `absentMeans`, so a graph saved before it reads as on, as a new one does.
+       */
+      id: 'excludeOrganelles',
       kind: 'boolean',
-      label: 'Only SEAM’s shown set',
-      default: false,
+      label: 'Exclude organelles',
+      default: true,
+      absentMeans: true,
       presentational: true,
-      help: 'List only the tips SEAM itself shows — the ones clearing its calibrated cutoff. Off lists everything, ordered by confidence, which is where most of the real merges are.',
+      help: 'Leave out candidates the search flags as organelles — mitochondria, vesicles and other pieces wrapped inside one cell, which are never a neurite’s continuation. Per candidate, those candidates are not listed. Per tip, a tip whose first candidate is one stays listed but leads with its next candidate, marked “first was an organelle”. Where Suggest Merges re-scored the list without its organelles, a tip whose list holds one reads that `q`, `r` and verdict instead of SEAM’s, marked “scored without organelles”; without one, a tip that passed over its first shows no `q`, since SEAM’s numbers are about the organelle. The flag is SEAM’s: about one flagged piece in a hundred is not an organelle, so the card counts what the filter did, and switching it off lists everything as it was. A set that carries no flag is unchanged.',
     },
     {
       /*
@@ -304,7 +317,7 @@ export const reviewNode = packNode({
         { value: 'tip', label: 'tip' },
         { value: 'candidate', label: 'candidate' },
       ],
-      help: 'Whether a row is a tip with its suggestion, or every candidate of every tip. Per tip the number is `r`, the calibrated chance the first candidate is right; per candidate it is that candidate’s own confidence, which is not calibrated.',
+      help: 'Whether a row is a tip with its suggestion, or every candidate of every tip. Per tip the number is SEAM’s `q` for the first candidate, with `r` beneath it as a rounded estimate of how often such a first is right; per candidate it is that candidate’s own confidence, which is not calibrated.',
     },
     {
       id: 'sortBy',
@@ -436,7 +449,8 @@ export const reviewNode = packNode({
             tipNm: tip.tipNm,
             contactNm,
             candidateId: first.candidateId,
-            r: tip.r ?? 0,
+            q: tip.q,
+            r: tip.r,
           },
         ]
       }),

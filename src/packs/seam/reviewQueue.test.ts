@@ -24,6 +24,7 @@ import {
   decodeExtend,
   decodeVerdicts,
   DEFAULT_FILTERS,
+  estimateLabel,
   encodeExtend,
   encodeVerdicts,
   extendBlocked,
@@ -52,10 +53,17 @@ import {
   withExtended,
   withVerdict,
 } from './reviewQueue'
-import type { Candidate } from './reviewQueue'
+import type { Candidate, QueueFilters } from './reviewQueue'
 
 const tipsTable = (
-  rows: { end: number; neuron?: string; r?: number; shown?: boolean | null; kind?: string }[],
+  rows: {
+    end: number
+    neuron?: string
+    q?: number
+    r?: number
+    shown?: boolean | null
+    kind?: string
+  }[],
 ): TableValue =>
   makeTable(
     tableSchema(
@@ -65,6 +73,7 @@ const tipsTable = (
       column('x', 'f64'),
       column('y', 'f64'),
       column('z', 'f64'),
+      column('q', 'f64'),
       column('r', 'f64'),
       column('shown', 'bool'),
     ),
@@ -75,6 +84,7 @@ const tipsTable = (
       x: rows.map(() => 1),
       y: rows.map(() => 2),
       z: rows.map(() => 3),
+      q: rows.map((r) => r.q ?? null),
       r: rows.map((r) => r.r ?? null),
       // `?? false` would swallow an explicit null, which is the case under test.
       shown: rows.map((r) => (r.shown === undefined ? false : r.shown)),
@@ -90,6 +100,7 @@ const candidatesTable = (
     vol?: number
     l2?: number
     gap?: number
+    organelle?: boolean | null
   }[],
 ): TableValue =>
   makeTable(
@@ -106,11 +117,13 @@ const candidatesTable = (
       column('contact_z', 'f64'),
       column('conf', 'f64'),
       column('shown', 'bool'),
+      column('organelle', 'bool'),
     ),
     {
       [ID_COLUMN_NAME]: rows.map((r) => r.neuron ?? 'n1'),
       end_uid: rows.map((r) => r.end),
       candidateId: rows.map((r) => r.id),
+      organelle: rows.map((r) => r.organelle ?? null),
       rank: rows.map((r) => r.rank),
       vol_um3: rows.map((r) => r.vol ?? 1),
       n_l2: rows.map((r) => r.l2 ?? null),
@@ -293,9 +306,9 @@ describe('how many tips are still to search', () => {
 describe('arranging the queue', () => {
   const queue = buildQueue(
     tipsTable([
-      { end: 1, r: 0.9, shown: true },
-      { end: 2, r: 0.4 },
-      { end: 3, r: 0.6 },
+      { end: 1, q: 0.9, shown: true },
+      { end: 2, q: 0.4 },
+      { end: 3, q: 0.6 },
     ]),
     candidatesTable([
       { end: 1, id: 'a', rank: 1, vol: 0.05 },
@@ -322,20 +335,13 @@ describe('arranging the queue', () => {
     ).toEqual([3, 2])
   })
 
-  /** `shown` is SEAM's absolute cutoff, read from the data and never recomputed here. */
-  it('can keep only SEAM’s shown set', () => {
-    expect(
-      arrangeRows(queue, { ...DEFAULT_FILTERS, shownOnly: true }).map((r) => r.tip.endUid),
-    ).toEqual([1])
-  })
-
   /** Equal rows must not shuffle between renders, or a reader loses their place. */
   it('breaks ties the same way every time', () => {
     const flat = buildQueue(
       tipsTable([
-        { end: 9, r: 0.5 },
-        { end: 4, r: 0.5 },
-        { end: 6, r: 0.5 },
+        { end: 9, q: 0.5 },
+        { end: 4, q: 0.5 },
+        { end: 6, q: 0.5 },
       ]),
       candidatesTable([
         { end: 9, id: 'a', rank: 1 },
@@ -350,8 +356,8 @@ describe('arranging the queue', () => {
 describe('the cursor', () => {
   const queue = buildQueue(
     tipsTable([
-      { end: 1, r: 0.2 },
-      { end: 2, r: 0.9 },
+      { end: 1, q: 0.2 },
+      { end: 2, q: 0.9 },
     ]),
     candidatesTable([
       { end: 1, id: 'a', rank: 1 },
@@ -481,8 +487,8 @@ describe('verdicts', () => {
 describe('one row per candidate', () => {
   const queue = buildQueue(
     tipsTable([
-      { end: 1, r: 0.9, shown: true },
-      { end: 2, r: 0.3 },
+      { end: 1, q: 0.9, shown: true },
+      { end: 2, q: 0.3 },
     ]),
     candidatesTable([
       { end: 1, id: 'a', rank: 1, vol: 1 },
@@ -500,18 +506,19 @@ describe('one row per candidate', () => {
 
   /**
    * The number the row leads with changes with the grain, and so does what the filters read.
-   * `r` is the tip's; `conf` is `p_tip × p_cand` and belongs to one candidate.
+   * `q` is the tip's (SEAM, 2026-11-18: never `r`, a staircase over it); `conf` is
+   * `p_tip × p_cand` and belongs to one candidate.
    */
-  it('leads with r per tip and with the candidate’s own conf per candidate', () => {
+  it('leads with q per tip and with the candidate’s own conf per candidate', () => {
     expect(per('tip').map((r) => r.score)).toEqual([0.9, 0.3])
-    // `candidatesTable` sets conf from the rank, so the order is by that rather than by `r`.
+    // `candidatesTable` sets conf from the rank, so the order is by that rather than by `q`.
     const scores = per('candidate').map((r) => r.score)
     expect(scores).toEqual([...scores].sort((a, b) => (b ?? 0) - (a ?? 0)))
   })
 
   it('narrows on the row’s own number', () => {
     expect(per('tip', { minConfidence: 0.5 }).map((r) => r.tip.endUid)).toEqual([1])
-    // Per candidate the same threshold reads each candidate's conf, not its tip's r.
+    // Per candidate the same threshold reads each candidate's conf, not its tip's q.
     for (const row of per('candidate', { minConfidence: 0.5 })) {
       expect(row.score).toBeGreaterThanOrEqual(0.5)
     }
@@ -631,7 +638,7 @@ describe('a queue with no calibration at all', () => {
    * range being compared, so an unmeasured row outranked a measured negative.
    */
   it('sorts a row with no confidence below one with a negative confidence', () => {
-    const queue = buildQueue(tipsTable([{ end: 1 }, { end: 2, r: -0.5 }]), candidatesTable([]))
+    const queue = buildQueue(tipsTable([{ end: 1 }, { end: 2, q: -0.5 }]), candidatesTable([]))
     const rows = arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'confidence' })
     expect(rows.map((row) => row.tip.endUid)).toEqual([2, 1])
   })
@@ -647,10 +654,10 @@ describe('a queue with no calibration at all', () => {
 describe('one neuron at a time', () => {
   const queue = buildQueue(
     tipsTable([
-      { end: 1, neuron: 'n1', r: 0.2 },
-      { end: 2, neuron: 'n2', r: 0.9 },
-      { end: 3, neuron: 'n1', r: 0.5 },
-      { end: 4, neuron: 'n3', r: 0.7 },
+      { end: 1, neuron: 'n1', q: 0.2 },
+      { end: 2, neuron: 'n2', q: 0.9 },
+      { end: 3, neuron: 'n1', q: 0.5 },
+      { end: 4, neuron: 'n3', q: 0.7 },
     ]),
     candidatesTable([
       { end: 1, id: 'a', rank: 1 },
@@ -1094,22 +1101,22 @@ describe('a neuron and the pieces it is extended with', () => {
    * accepted on, a level in, each level narrowed and sorted on its own.
    */
   describe('the list as a tree', () => {
-    type Tip = Row & { r?: number }
+    type Tip = Row & { q?: number }
     const scored = (rows: Tip[]): TableValue => {
       const table = grownTips(rows)
-      return makeTable(tableSchema(...table.schema.columns, column('r', 'f64')), {
+      return makeTable(tableSchema(...table.schema.columns, column('q', 'f64')), {
         ...table.data,
-        r: rows.map((row) => row.r ?? null),
+        q: rows.map((row) => row.q ?? null),
       })
     }
     // The neuron's tips 0 (0.2) and 1 (0.9); `p1` accepted on tip 0, `p2` on `p1`'s tip 1.
     const tips = scored([
-      { id: 'n1', end: 0, seed: 'n1', r: 0.2 },
-      { id: 'n1', end: 1, seed: 'n1', r: 0.9 },
+      { id: 'n1', end: 0, seed: 'n1', q: 0.2 },
+      { id: 'n1', end: 1, seed: 'n1', q: 0.9 },
       { id: 'p1', end: 0, seed: 'n1', steps: 1, junction: true, searched: false },
-      { id: 'p1', end: 1, seed: 'n1', steps: 1, r: 0.95 },
-      { id: 'p1', end: 2, seed: 'n1', steps: 1, r: 0.99 },
-      { id: 'p2', end: 1, seed: 'n1', steps: 2, r: 0.5 },
+      { id: 'p1', end: 1, seed: 'n1', steps: 1, q: 0.95 },
+      { id: 'p1', end: 2, seed: 'n1', steps: 1, q: 0.99 },
+      { id: 'p2', end: 1, seed: 'n1', steps: 2, q: 0.5 },
     ])
     const candidates = candidatesTable([
       { neuron: 'n1', end: 0, id: 'p1', rank: 1, l2: 9 },
@@ -1568,5 +1575,220 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(extendLabel({ state: 'not run' })).toBe('not searched yet')
       expect(extendLabel({ state: 'failed' })).toBe('search failed')
     })
+  })
+})
+
+/**
+ * `Exclude organelles`: a reading aid like the other filters, reading the row's own candidate —
+ * per tip its first, so a tip whose suggestion is an organelle goes and one whose second is stays;
+ * per candidate the row itself. The foot's count reads rows the same way.
+ */
+describe('leaving out organelles', () => {
+  const queue = buildQueue(
+    tipsTable([{ end: 1, q: 0.9, shown: true }, { end: 2, q: 0.4 }, { end: 3 }, { end: 4 }]),
+    candidatesTable([
+      // Tip 1's suggestion is an organelle; tip 2's second is; tip 3's flag was never measured;
+      // tip 4 has nothing but organelles.
+      { end: 1, id: 'a1', rank: 1, organelle: true },
+      { end: 1, id: 'a2', rank: 2, organelle: false },
+      { end: 2, id: 'b1', rank: 1, organelle: false },
+      { end: 2, id: 'b2', rank: 2, organelle: true },
+      { end: 3, id: 'c1', rank: 1, organelle: null },
+      { end: 4, id: 'd1', rank: 1, organelle: true },
+    ]),
+  )
+  const rows = (filters: Partial<QueueFilters>) =>
+    arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'tip', ...filters })
+
+  it('is on by default, as the node’s own param is', () => {
+    expect(DEFAULT_FILTERS.excludeOrganelles).toBe(true)
+  })
+
+  /**
+   * Per tip, a tip whose first candidate is an organelle stays, leading with the next that is not
+   * (user, 2026-11-17): the second candidate may be the continuation. SEAM's `q` and `shown` are
+   * about the first, so that row carries neither.
+   */
+  it('keeps a tip whose first candidate is an organelle, leading with the next, without its q', () => {
+    const byTip = new Map(rows({}).map((row) => [row.tip.endUid, row]))
+    expect([...byTip.keys()].sort()).toEqual([1, 2, 3, 4])
+    expect(byTip.get(1)).toMatchObject({ candidate: { candidateId: 'a2' }, passedOver: true })
+    expect(byTip.get(1)!.score).toBeUndefined()
+    // A flag further down, or never measured, changes nothing about the row.
+    expect(byTip.get(2)).toMatchObject({ candidate: { candidateId: 'b1' }, score: 0.4 })
+    expect(byTip.get(2)!.passedOver).toBeUndefined()
+    expect(byTip.get(3)!.candidate?.candidateId).toBe('c1')
+    // Nothing but organelles: listed, with nothing to lead with.
+    expect(byTip.get(4)).toMatchObject({ candidate: undefined, passedOver: true })
+  })
+
+  it('reads the tip as SEAM has it with the filter off', () => {
+    const first = rows({ excludeOrganelles: false }).find((row) => row.tip.endUid === 1)!
+    expect(first).toMatchObject({ candidate: { candidateId: 'a1' }, score: 0.9 })
+  })
+
+  it('never counts a passed-over row as shown, nor lets its q pass a confidence filter', () => {
+    const ends = (filters: Partial<QueueFilters>) => rows(filters).map((row) => row.tip.endUid)
+    const shown = (filters: Partial<QueueFilters>) =>
+      rows(filters)
+        .filter((row) => row.shown)
+        .map((row) => row.tip.endUid)
+    expect(shown({ excludeOrganelles: false })).toEqual([1])
+    expect(shown({})).toEqual([])
+    expect(ends({ minConfidence: 0.5, excludeOrganelles: false })).toEqual([1])
+    expect(ends({ minConfidence: 0.5 })).toEqual([])
+  })
+
+  it('leaves out every flagged candidate, per candidate', () => {
+    const ids = rows({ mode: 'candidate' }).map((row) => row.candidate!.candidateId)
+    expect(ids.sort()).toEqual(['a2', 'b1', 'c1'])
+  })
+
+  it('changes nothing in a set that carries no flag', () => {
+    const plain = buildQueue(
+      tipsTable([{ end: 1, q: 0.7 }]),
+      candidatesTable([{ end: 1, id: 'a', rank: 1 }]),
+    )
+    expect(arrangeRows(plain, DEFAULT_FILTERS)).toEqual([
+      { tip: plain[0], candidate: plain[0]!.candidates[0], score: 0.7, shown: false },
+    ])
+  })
+})
+
+/**
+ * Coda's re-scoring of a list without its organelles (`q_no_organelles`, `r_no_organelles`,
+ * `shown_no_organelles`, from `seam:suggestMerges`; user, 2026-11-17): what a tip row reads with
+ * `Exclude organelles` on, wherever its list holds one — `q` to sort and filter on, `r` for its
+ * label.
+ */
+describe('a tip re-scored without its organelles', () => {
+  const tips = makeTable(
+    tableSchema(
+      column(ID_COLUMN_NAME, 'str'),
+      column('end_uid', 'i64'),
+      column('q', 'f64'),
+      column('r', 'f64'),
+      column('shown', 'bool'),
+      column('q_no_organelles', 'f64'),
+      column('r_no_organelles', 'f64'),
+      column('shown_no_organelles', 'bool'),
+    ),
+    {
+      [ID_COLUMN_NAME]: ['n1', 'n1', 'n1', 'n1'],
+      end_uid: [1, 2, 3, 4],
+      q: [0.9, 0.4, 0.6, 0.8],
+      r: [0.95, 0.5, 0.7, 0.9],
+      shown: [true, false, false, true],
+      q_no_organelles: [0.7, 0.55, 0.6, null],
+      r_no_organelles: [0.8, 0.6, 0.7, null],
+      shown_no_organelles: [false, true, false, false],
+    },
+  )
+  const queue = buildQueue(
+    tips,
+    candidatesTable([
+      // Tip 1 leads with an organelle, tip 2 holds one further down, tip 3 none at all, and
+      // tip 4 nothing but organelles.
+      { end: 1, id: 'a1', rank: 1, organelle: true },
+      { end: 1, id: 'a2', rank: 2, organelle: false },
+      { end: 2, id: 'b1', rank: 1, organelle: false },
+      { end: 2, id: 'b2', rank: 2, organelle: true },
+      { end: 3, id: 'c1', rank: 1, organelle: false },
+      { end: 4, id: 'd1', rank: 1, organelle: true },
+    ]),
+  )
+  const byTip = (filters: Partial<QueueFilters> = {}) =>
+    new Map(
+      arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'tip', ...filters }).map((row) => [
+        row.tip.endUid,
+        row,
+      ]),
+    )
+
+  it('leads past an organelle with the re-scored q, r and verdict', () => {
+    expect(byTip().get(1)).toMatchObject({
+      candidate: { candidateId: 'a2' },
+      score: 0.7,
+      estimate: 0.8,
+      shown: false,
+      passedOver: true,
+      rescored: true,
+    })
+  })
+
+  /** An organelle second in the list still took a share from the first. */
+  it('re-scores a list that holds an organelle further down, keeping its first', () => {
+    expect(byTip().get(2)).toMatchObject({
+      candidate: { candidateId: 'b1' },
+      score: 0.55,
+      estimate: 0.6,
+      shown: true,
+      rescored: true,
+    })
+    expect(byTip().get(2)!.passedOver).toBeUndefined()
+  })
+
+  it('reads SEAM’s numbers for a list with no organelle, and with the filter off', () => {
+    expect(byTip().get(3)).toEqual({
+      tip: queue[2],
+      candidate: queue[2]!.candidates[0],
+      score: 0.6,
+      estimate: 0.7,
+      shown: false,
+    })
+    expect(byTip({ excludeOrganelles: false }).get(1)).toMatchObject({
+      score: 0.9,
+      shown: true,
+    })
+    expect(byTip({ excludeOrganelles: false }).get(1)!.rescored).toBeUndefined()
+  })
+
+  it('filters and sorts on the re-scored numbers', () => {
+    const ends = (filters: Partial<QueueFilters>) => [...byTip(filters).keys()]
+    expect(
+      [...byTip().values()].filter((row) => row.shown).map((row) => row.tip.endUid),
+    ).toEqual([2])
+    expect(ends({ minConfidence: 0.6 })).toEqual([1, 3])
+    const ranked = arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'confidence' })
+    expect(ranked.map((row) => row.tip.endUid)).toEqual([1, 3, 2, 4])
+  })
+
+  it('leaves a tip of nothing but organelles without a score', () => {
+    expect(byTip().get(4)).toMatchObject({
+      candidate: undefined,
+      score: undefined,
+      shown: false,
+    })
+    expect(byTip().get(4)!.estimate).toBeUndefined()
+  })
+})
+
+/**
+ * SEAM, 2026-11-18: `r` is shown only as a rounded label, marked an estimate — 14 steps fitted
+ * on ~335 judged tips have no second decimal, and the low ones rest on a handful each.
+ */
+describe('r as a label', () => {
+  it('rounds to tens, and leaves both ends open', () => {
+    expect(estimateLabel(0.93)).toBe('≥90%')
+    expect(estimateLabel(0.86)).toBe('≈90%')
+    expect(estimateLabel(0.5)).toBe('≈50%')
+    expect(estimateLabel(0.14)).toBe('≈10%')
+    expect(estimateLabel(0.03)).toBe('<10%')
+  })
+
+  /** A sort or a filter on `r` ties thousands of tips that `q` keeps apart. */
+  it('is never what a tip row sorts by', () => {
+    const queue = buildQueue(
+      tipsTable([
+        { end: 1, q: 0.5, r: 0.9 },
+        { end: 2, q: 0.6, r: 0.9 },
+      ]),
+      candidatesTable([]),
+    )
+    const ranked = arrangeRows(queue, { ...DEFAULT_FILTERS, sortBy: 'confidence' })
+    expect(ranked.map((row) => [row.tip.endUid, row.score, row.estimate])).toEqual([
+      [2, 0.6, 0.9],
+      [1, 0.5, 0.9],
+    ])
   })
 })

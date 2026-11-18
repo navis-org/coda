@@ -12,11 +12,10 @@
  * boring route that works, and the binary mode is load-bearing on Windows.
  *
  * **Checked by running it.** Both cells were executed against `packs/seam/__fixtures__` and give
- * the same `expectedRight` per neuron as the node — 1.8604, 1.8604, 1.7128, 1.7925, 1.7427 — and
- * the same joined `candidateId`, which `suggestions.test.ts` pins. That check is not ceremony:
- * the R chunk disagreed on first writing, and this list is re-measured on each recut of the
- * fixtures (2026-11-10, 2026-11-11, 2026-11-14): it was left behind by the 2026-11-10 one, which
- * is how a header stating numbers nobody re-ran reads for months.
+ * the same `tips` and `shown` per neuron as the node and the same joined `candidateId`, which
+ * `suggestions.test.ts` pins. That check is not ceremony: the R chunk disagreed on first writing
+ * (over `expectedRight`, the sum of `r` that all three dropped on 2026-11-18 at SEAM's word), and
+ * it is re-run on each recut of the fixtures (2026-11-10, 2026-11-11, 2026-11-14, 2026-11-18).
  */
 
 import { ID_COLUMN_NAME } from '../../../core/ids'
@@ -63,25 +62,11 @@ registerEmitter('seam:suggestions', (ctx: EmitContext) => {
     `  by = "end_uid"`,
     `)`,
     ``,
-    `# One row per neuron. r is the chance a shown first candidate is right, so its sum over the`,
-    `# shown rows is how many of them to expect to be real.`,
-    `#`,
-    `# The two sums are prepared before the grouping rather than written inside summarise(), and`,
-    `# that is not style. dplyr evaluates a summarise() argument list in order and each name it`,
-    `# binds shadows the column of that name, so an expectedRight written after shown = sum(shown)`,
-    `# reads the *scalar* count: ifelse() then takes a length-one condition and returns one`,
-    `# element, making the total the first row's r. It is a plausible number and it is wrong.`,
+    `# One row per neuron: its tips, and how many of them clear the cutoff. Sort the tips by q,`,
+    `# never r: r is a staircase over q, and SEAM advises against summing it.`,
     `${neurons} <- ${tips} |>`,
-    `  dplyr::mutate(`,
-    `    .shown = as.integer(shown),`,
-    `    .right = ifelse(shown, r, 0)`,
-    `  ) |>`,
     `  dplyr::group_by(${rCol(ID_COLUMN_NAME)}) |>`,
-    `  dplyr::summarise(`,
-    `    tips = dplyr::n(),`,
-    `    shown = sum(.shown),`,
-    `    expectedRight = sum(.right)`,
-    `  )`,
+    `  dplyr::summarise(tips = dplyr::n(), shown = sum(shown))`,
     ...ctx.note(
       'The Points and Layers outputs are the same tips drawn — a cloud and a neuroglancer ' +
         'annotation layer. Their coordinates are the `x`, `y` and `z` columns of the tips frame.',

@@ -1870,25 +1870,11 @@ merge_suggestions_tips <- dplyr::left_join(
   by = "end_uid"
 )
 
-# One row per neuron. r is the chance a shown first candidate is right, so its sum over the
-# shown rows is how many of them to expect to be real.
-#
-# The two sums are prepared before the grouping rather than written inside summarise(), and
-# that is not style. dplyr evaluates a summarise() argument list in order and each name it
-# binds shadows the column of that name, so an expectedRight written after shown = sum(shown)
-# reads the *scalar* count: ifelse() then takes a length-one condition and returns one
-# element, making the total the first row's r. It is a plausible number and it is wrong.
+# One row per neuron: its tips, and how many of them clear the cutoff. Sort the tips by q,
+# never r: r is a staircase over q, and SEAM advises against summing it.
 merge_suggestions_neurons <- merge_suggestions_tips |>
-  dplyr::mutate(
-    .shown = as.integer(shown),
-    .right = ifelse(shown, r, 0)
-  ) |>
   dplyr::group_by(`neuronId`) |>
-  dplyr::summarise(
-    tips = dplyr::n(),
-    shown = sum(.shown),
-    expectedRight = sum(.right)
-  )
+  dplyr::summarise(tips = dplyr::n(), shown = sum(shown))
 # NOTE: The Points and Layers outputs are the same tips drawn — a cloud and
 # a neuroglancer annotation layer. Their coordinates are the `x`, `y` and
 # `z` columns of the tips frame.

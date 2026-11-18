@@ -93,6 +93,12 @@ export interface Candidate {
   readonly conf: number | undefined
   /** Whether SEAM shows this one, i.e. it cleared the absolute cutoff. */
   readonly shown: boolean
+  /**
+   * Whether the search flags it as an organelle (`organelle`, `searchTips.ts`): a piece wrapped
+   * inside one cell. Only an explicit `true` — a set that carries no flag flags nothing, and
+   * absent reads the same.
+   */
+  readonly organelle?: boolean
 }
 
 /** One tip, with every candidate the own-tip rule kept for it. */
@@ -115,12 +121,31 @@ export interface QueueTip {
   /** `tip` or `kink` — a leaf, or a sharp bend where a merge often sits. */
   readonly kind: string
   readonly tipNm: readonly [number, number, number]
-  /** The calibrated chance the **first** candidate is right. */
+  /**
+   * SEAM's estimate of how often a first candidate at this tip's `q` is right — a staircase of
+   * about 14 steps over `q`, fitted on ~335 judged tips and thin below the cutoff. **A label
+   * only** (SEAM, 2026-11-18): never sorted, filtered or summed on (`estimateLabel`).
+   */
   readonly r: number | undefined
+  /**
+   * SEAM's score for the tip's first candidate — what the queue sorts and filters on, and what
+   * the cutoff behind `shown` is a value of. `p_tip × p_split`, or `p_tip × p_cand` of the first
+   * in the single-seed configuration; each configuration's own, never compared across them.
+   */
   readonly q: number | undefined
   /** The chance anything belongs at this tip at all, before which piece. */
   readonly pTip: number | undefined
   readonly shown: boolean
+  /**
+   * `q`, `r` and `shown` for the list with its organelles taken out (`q_no_organelles`, …) —
+   * Coda's re-scoring, which `seam:suggestMerges` publishes beside SEAM's. Undefined for a table
+   * that carries no such columns: a published set, or a run with no assessor.
+   */
+  readonly withoutOrganelles?: {
+    readonly q: number | undefined
+    readonly r: number | undefined
+    readonly shown: boolean
+  }
   readonly candidates: readonly Candidate[]
 }
 
@@ -158,6 +183,13 @@ export function buildQueue(
       q: numberAt(tips, 'q', i),
       pTip: numberAt(tips, 'p_tip', i),
       shown: wasShown(tips, i),
+      withoutOrganelles: tips.data['r_no_organelles']
+        ? {
+            q: numberAt(tips, 'q_no_organelles', i),
+            r: numberAt(tips, 'r_no_organelles', i),
+            shown: wasShown(tips, i, 'shown_no_organelles'),
+          }
+        : undefined,
       candidates: lists.get(tipKey(neuronId, endUid)) ?? [],
     })
   }
@@ -260,6 +292,7 @@ function candidateLists(table: TableValue | undefined): Map<string, Candidate[]>
       pCand: numberAt(table, 'p_cand', i),
       conf: numberAt(table, 'conf', i),
       shown: wasShown(table, i),
+      organelle: table.data['organelle']?.[i] === true,
     })
     lists.set(key, held)
   }
@@ -365,22 +398,94 @@ export type QueueMode = 'tip' | 'candidate'
 /** One row of the queue: a tip, the candidate the row is about, and the number it leads with. */
 export interface QueueRow {
   readonly tip: QueueTip
-  /** Undefined only in `tip` mode, for a tip whose search found nothing within reach. */
+  /**
+   * Undefined only in `tip` mode: for a tip whose search found nothing within reach, or whose
+   * every candidate is an organelle that `Exclude organelles` passed over.
+   */
   readonly candidate: Candidate | undefined
-  /** `r` per tip, `conf` per candidate. Undefined where the set does not carry it. */
+  /**
+   * `q` per tip, `conf` per candidate — what the row sorts and filters on (SEAM, 2026-11-18: `r`
+   * is a staircase over `q`, so sorting on it only adds ties). Undefined where the set does not
+   * carry it — and on a row that passed over its first candidate with no re-scoring to read,
+   * since SEAM's `q` there is its number for the one passed over.
+   */
   readonly score: number | undefined
+  /** Per tip, the `r` beside `score`, for its label alone (`QueueTip.r`). */
+  readonly estimate?: number
+  /** Whether the row clears SEAM's cutoff: the tip's verdict per tip, the candidate's per candidate. */
+  readonly shown: boolean
+  /**
+   * Per tip, with `Exclude organelles` on: the tip's first candidate is an organelle, so the row
+   * leads with the next that is not (user, 2026-11-17 — hidden, its second candidate may be the
+   * continuation and out of sight).
+   */
+  readonly passedOver?: true
+  /**
+   * Per tip, with `Exclude organelles` on: the tip's list holds an organelle, and `score` and
+   * `shown` are Coda's re-scoring of the list without it (`QueueTip.withoutOrganelles`), not SEAM's.
+   */
+  readonly rescored?: true
+}
+
+/**
+ * A tip's row: its first candidate, or with organelles excluded the first that is not one.
+ *
+ * **With organelles excluded, a list that holds one is read re-scored without it** (user,
+ * 2026-11-17), whether or not it leads: `p_cand` is a share of the whole list, so an organelle
+ * anywhere in it lowers the first candidate's `q` and `r`. Where the table carries no re-scoring,
+ * SEAM's numbers stand — except on a row that passed over its first, where they are about the
+ * organelle: no score, and never shown.
+ */
+function tipRow(tip: QueueTip, excludeOrganelles: boolean): QueueRow {
+  const first = tip.candidates[0]
+  if (!excludeOrganelles || !tip.candidates.some((one) => one.organelle)) {
+    return { tip, candidate: first, ...scored(tip.q, tip.r), shown: tip.shown }
+  }
+  const passedOver = first?.organelle === true
+  const lean = tip.withoutOrganelles
+  return {
+    tip,
+    candidate: passedOver ? tip.candidates.find((one) => !one.organelle) : first,
+    ...(lean
+      ? scored(lean.q, lean.r)
+      : passedOver
+        ? scored(undefined, undefined)
+        : scored(tip.q, tip.r)),
+    shown: lean ? lean.shown : !passedOver && tip.shown,
+    ...(passedOver ? { passedOver: true as const } : {}),
+    ...(lean ? { rescored: true as const } : {}),
+  }
+}
+
+/** A tip row's `score` and the `estimate` beside it, the second only where there is one. */
+function scored(q: number | undefined, r: number | undefined) {
+  return { score: q, ...(r === undefined ? {} : { estimate: r }) }
+}
+
+/**
+ * `r` as a reader should see it — rounded to tens, an estimate (SEAM, 2026-11-18). Two decimals
+ * would claim a precision 14 steps fitted on ~335 judged tips do not have, and the low steps
+ * rest on a handful each, so the ends are open rather than rounded to 0% or 100%.
+ */
+export function estimateLabel(r: number): string {
+  if (r >= 0.9) return '≥90%'
+  if (r < 0.1) return '<10%'
+  return `≈${Math.round(r * 10) * 10}%`
 }
 
 export interface QueueFilters {
-  /** Keep tips whose `r` is at or above this. Undefined keeps every tip. */
+  /**
+   * Keep rows whose `score` is at or above this — `q` per tip, `conf` per candidate (user,
+   * 2026-11-18, after SEAM's note: never `r`). Undefined keeps every row.
+   */
   readonly minConfidence: number | undefined
   /**
    * Keep tips whose **first** candidate is at least this big, in whatever `sizeOf` answers in —
    * level-2 chunks where the table carries them, µm³ on a published set that does not.
    */
   readonly minSize: number | undefined
-  /** Keep only the tips SEAM shows — its own absolute cutoff, never one invented here. */
-  readonly shownOnly: boolean
+  /** Leave out a row whose candidate is flagged as an organelle (`Candidate.organelle`). */
+  readonly excludeOrganelles: boolean
   readonly sortBy: SortBy
   readonly mode: QueueMode
 }
@@ -388,7 +493,8 @@ export interface QueueFilters {
 export const DEFAULT_FILTERS: QueueFilters = {
   minConfidence: undefined,
   minSize: undefined,
-  shownOnly: false,
+  // The node's own default (`seam:review`'s `excludeOrganelles`): a set with no flag is unchanged.
+  excludeOrganelles: true,
   sortBy: 'confidence',
   mode: 'tip',
 }
@@ -410,8 +516,8 @@ export const DEFAULT_FILTERS: QueueFilters = {
  *
  * Only an explicit `false` hides a row, so a set that was cut keeps being cut.
  */
-function wasShown(table: TableValue, row: number): boolean {
-  return table.data['shown']?.[row] !== false
+function wasShown(table: TableValue, row: number, column = 'shown'): boolean {
+  return table.data[column]?.[row] !== false
 }
 
 /**
@@ -434,14 +540,19 @@ export function arrangeRows(
   const rows: QueueRow[] =
     filters.mode === 'candidate'
       ? queue.flatMap((tip) =>
-          tip.candidates.map((candidate) => ({ tip, candidate, score: candidate.conf })),
+          tip.candidates.map((candidate) => ({
+            tip,
+            candidate,
+            score: candidate.conf,
+            shown: candidate.shown,
+          })),
         )
-      : queue.map((tip) => ({ tip, candidate: tip.candidates[0], score: tip.r }))
+      : queue.map((tip) => tipRow(tip, filters.excludeOrganelles))
 
   const kept = rows.filter((row) => {
     if (always(row)) return true
-    const shown = filters.mode === 'candidate' ? row.candidate?.shown : row.tip.shown
-    if (filters.shownOnly && !shown) return false
+    // Per candidate only: per tip, `tipRow` has already led with a candidate that is not one.
+    if (filters.excludeOrganelles && row.candidate?.organelle) return false
     if (filters.minConfidence !== undefined && (row.score ?? 0) < filters.minConfidence) {
       return false
     }
@@ -457,7 +568,7 @@ export function arrangeRows(
    * every real one, and `-1` is inside the range of things being compared — a volume cannot be
    * negative but a confidence fit can, so an unmeasured row was sorting above a measured one.
    *
-   * A table with no `r` at all — `seam:suggestMerges` publishes one, its ranking being
+   * A table with no `q` at all — `seam:suggestMerges` publishes one, its ranking being
    * geometric — scores every row the same and falls through to the `end_uid` tie-break below,
    * which is the table's own order. That is the honest answer rather than a defect to patch
    * here: there is no confidence to sort by, and substituting a number on another scale (the

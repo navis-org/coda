@@ -231,13 +231,13 @@ export function tableOf(
 }
 
 /** The per-neuron summary's columns, folded onto the neurons this set covers. */
-const NEURON_SUMMARY = [
-  column('tips', 'i64'),
-  column('shown', 'i64'),
-  // Not a count: the handoff's own reading of r, which is a probability per tip, so its sum over
-  // a neuron is how many of that neuron's shown firsts are expected to be right.
-  column('expectedRight', 'f64'),
-]
+/*
+ * **No `expectedRight`.** It was the sum of `r` over a neuron's shown tips, on the first handoff's
+ * advice, which SEAM withdrew (2026-11-18, `coda-note-sort-by-q.md`): `r` is a staircase fitted on
+ * ~335 judged tips, and a sum is mostly its thin low steps — 432 "expected right" on one rv4
+ * neuron, resting on a few judged tips. Dropped from this table and both exports (user).
+ */
+const NEURON_SUMMARY = [column('tips', 'i64'), column('shown', 'i64')]
 
 export function neuronsSchema(): TableSchema {
   return tableSchema(column(ID_COLUMN_NAME, 'str'), ...NEURON_SUMMARY)
@@ -247,7 +247,6 @@ export function neuronsSchema(): TableSchema {
 export interface NeuronTips {
   readonly tips: number
   readonly shown: number
-  readonly expectedRight: number
 }
 
 /**
@@ -264,19 +263,13 @@ export function neuronsTable(
   const ids: CellValue[] = []
   const tips: CellValue[] = []
   const shown: CellValue[] = []
-  const expected: CellValue[] = []
   for (const id of neurons) {
     const got = perNeuron.get(id)
     ids.push(id)
     tips.push(got?.tips ?? 0)
     shown.push(got?.shown ?? 0)
-    expected.push(got?.expectedRight ?? 0)
   }
-  return makeTable(
-    neuronsSchema(),
-    { [ID_COLUMN_NAME]: ids, tips, shown, expectedRight: expected },
-    'neurons',
-  )
+  return makeTable(neuronsSchema(), { [ID_COLUMN_NAME]: ids, tips, shown }, 'neurons')
 }
 
 /**

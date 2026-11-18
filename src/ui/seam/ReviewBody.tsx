@@ -80,6 +80,7 @@ import {
   pairsOf,
   pickedNeuron,
   scenePieces,
+  estimateLabel,
   sizeLabel,
   sizeOf,
   stillToMerge,
@@ -214,17 +215,39 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
 
   const minConfidence = numberOr(node.params.minConfidence)
   const minSize = numberOr(node.params.minSize)
-  const shownOnly = node.params.shownOnly === true
+  // On unless switched off: `absentMeans: true`, and the card reads the stored param as it is.
+  const excludeOrganelles = node.params.excludeOrganelles !== false
   const sortBy = String(node.params.sortBy ?? 'confidence') as SortBy
   const mode = String(node.params.mode ?? 'tip') as QueueMode
-  // Listed one by one rather than as a spread: a spread dependency is one React cannot check,
-  // and this memo is over the whole queue, which is thousands of rows — a hundred thousand of
-  // them per candidate.
+  /*
+   * One filters object for every list the card builds from them, so a filter added later is
+   * added once. Its fields listed one by one rather than as a spread: a spread dependency is one
+   * React cannot check, and the memos below are over the whole queue, which is thousands of
+   * rows — a hundred thousand of them per candidate.
+   */
+  const filters = useMemo(
+    () => ({ minConfidence, minSize, excludeOrganelles, sortBy, mode }),
+    [minConfidence, minSize, excludeOrganelles, sortBy, mode],
+  )
   // As a tree: a piece's tips beneath the row the piece was accepted on (`arrangeTree`).
   const listed = useMemo(
-    () => arrangeTree(mine, neuron, tree, { minConfidence, minSize, shownOnly, sortBy, mode }),
-    [mine, neuron, tree, minConfidence, minSize, shownOnly, sortBy, mode],
+    () => arrangeTree(mine, neuron, tree, filters),
+    [mine, neuron, tree, filters],
   )
+  /*
+   * What `Exclude organelles` did to this list, said in the foot since about one flagged piece
+   * in a hundred is not an organelle. Per tip it leaves no tip out — a tip whose first candidate
+   * is one leads with the next (`QueueRow.passedOver`) — so the count is of those rows. Per
+   * candidate it is the same list with the filter off, less this one: counted that way rather
+   * than by a second reading of the rows, so it honours every other filter exactly — a separate
+   * count once said "left out" of rows another filter had hidden anyway.
+   */
+  const organellesOut = useMemo(() => {
+    if (!excludeOrganelles) return 0
+    if (mode === 'tip') return listed.filter((row) => row.passedOver).length
+    const all = arrangeTree(mine, neuron, tree, { ...filters, excludeOrganelles: false })
+    return all.length - listed.length
+  }, [excludeOrganelles, mode, mine, neuron, tree, filters, listed])
   /*
    * How many of this neuron's listed tips are still to come. From what the run says of each
    * rather than from the queue's own length: a tip the run will never reach — its box outside
@@ -252,13 +275,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const setParams = useGraphStore((s) => s.setParams)
   const switchTo = (neuronId: string) => {
-    const top = arrangeTree(tipsOf(queue, neuronId), neuronId, tree, {
-      minConfidence,
-      minSize,
-      shownOnly,
-      sortBy,
-      mode,
-    })[0]
+    const top = arrangeTree(tipsOf(queue, neuronId), neuronId, tree, filters)[0]
     setParams(node.id, {
       neuron: neuronId,
       current: top ? tipKey(top.tip.neuronId, top.tip.endUid) : '',
@@ -658,7 +675,12 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                     title={`Show ${tipName(tip)} and candidate ${candidate?.candidateId ?? '—'}`}
                   />
                   <span className="review-row__score" style={{ color: scoreInk(row) }}>
-                    {row.score === undefined ? '—' : row.score.toFixed(3)}
+                    <span>{row.score === undefined ? '—' : row.score.toFixed(3)}</span>
+                    {row.estimate !== undefined && (
+                      <span className="review-row__estimate">
+                        {estimateLabel(row.estimate)}
+                      </span>
+                    )}
                   </span>
                   <span className="review-row__id">
                     {candidate?.candidateId ?? 'no candidate'}
@@ -705,11 +727,18 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                           candidate.geoRank === undefined ? '' : `geo ${candidate.geoRank}`,
                           gapLabel(candidate.minDistUm),
                           tip.kind === 'kink' ? 'kink' : '',
-                          tip.shown ? 'shown' : '',
+                          // The tip's verdict on either grain; per tip, the row's own, which is
+                          // re-scored where organelles were taken out of the list.
+                          (mode === 'tip' ? row.shown : tip.shown) ? 'shown' : '',
+                          row.passedOver ? 'first was an organelle' : '',
+                          row.rescored ? 'scored without organelles' : '',
+                          candidate.organelle ? 'organelle' : '',
                         ]
                           .filter(Boolean)
                           .join(' · ')
-                      : 'the search found nothing within reach of this tip'}
+                      : row.passedOver
+                        ? 'every candidate here is flagged as an organelle'
+                        : 'the search found nothing within reach of this tip'}
                   </span>
                   {candidate && (
                     <div className="review-row__acts">
@@ -799,6 +828,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               ? plural(total, unit)
               : `${formatNumber(listed.length)} of ${plural(total, unit)}`}
           </span>
+          {organellesOut > 0 && (
+            <span title="Exclude organelles: the search flags these as pieces wrapped inside one cell. Per candidate they are left out; per tip, a tip whose first candidate is one leads with the next instead, without SEAM’s r, which is about the first. About one flagged piece in a hundred is not an organelle — switch the filter off to see them.">
+              {mode === 'candidate'
+                ? `${plural(organellesOut, 'organelle')} left out`
+                : `${plural(organellesOut, 'tip')} passing over an organelle first`}
+            </span>
+          )}
           {filling && (
             <span
               className="review-body__filling"
@@ -988,8 +1024,7 @@ export function submitPress(at: {
  * which side of a calibrated cutoff this sits.
  */
 function scoreInk(row: QueueRow): string {
-  const shown = row.candidate?.shown ?? row.tip.shown
-  return cycleColor(shown ? 1 : 0, 'dark')
+  return cycleColor(row.shown ? 1 : 0, 'dark')
 }
 
 /** A filter field as a number, or undefined for "no limit". Empty is a decision, not a zero. */
