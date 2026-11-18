@@ -246,6 +246,45 @@ with `refresh`. That costs a second `evaluate` in that one case — for an annot
 IndexedDB read thrown away — and needs no node to know the feature exists. Threading a `maxAgeMs`
 through `loadCachedTable` and `cachedGeometry` would save the read and touch every `DataSource`.
 
+## A run record is a param the run writes and the key leaves out
+
+`ParamBase.runRecord` (built 2026-11-17 for `seam:suggestMerges`' `Searched at`;
+[seam-live-plan.md](seam-live-plan.md)). Some answers depend on something the node can only decide
+while it runs, and must decide the same way next time — after a reload, and when the reader comes
+back to a neuron from another. Suggest Merges searches each neuron at the moment it first met it,
+and only learns which neurons there are once its inputs have arrived. So the node writes what it
+decided into one of its own params, through `ctx.record(paramId, value)`, and reads it back next run.
+
+**The pieces.** `EvalContext.record` refuses a param not declared `runRecord` and does nothing for
+an aborted evaluation; otherwise it hands the value to `SchedulerHost.onRecord`. The store commits
+it with `{ history: false, autoRun: false }`, from every surface that runs a node — the dashboard
+included, where no card is mounted, which is why the store writes it and not the card. A run outside
+the store (the MCP server, `rerunInput`'s private scheduler) writes nothing, so `evaluate` must answer
+a record that lacks what it is about to add.
+
+**Out of the key, and that bends invariant 4's wording.** A record is declared `presentational`,
+`unrecorded` and `internal`, and `registerNode` refuses one that is not. In the key, a write made
+mid-run would re-key the node and everything below it and run them all again for a record of what
+they had just done. Yet `evaluate` reads it, which is what invariant 4 says a presentational param
+must not be read for. It holds by construction instead: the same key means the same upstream, so
+the same things to record, and an entry, once written, is what the run that wrote it used.
+Unrecorded because undo must not take back what a run did; internal because a record edited by
+hand is a different answer under the same key.
+
+**Read back by the evaluation that wrote it.** `ctx.params` is a getter over the evaluation's own
+copy, which `record` replaces. The lifetime backstop above runs `evaluate` a second time on a spread
+of the context, and before this the second pass read the record as it was before the first —
+deciding again what the first had just decided (a new moment for every new neuron, and its ends
+searched twice).
+
+**The card's ⟳ empties it, Clear Cache does not.** The ⟳ is the store's `refreshNode`:
+`emptyRecords` (`core/runRecord.ts`), then `Scheduler.renewNode` — a lapse asked for, so the key
+moves — then a run. The key has to move because the record is not in it: a run already in flight,
+deciding on the old record, would otherwise be **adopted** by the next walk and its answer kept.
+A card with no record to empty gets Clear Cache and a run, as before. Clear Cache leaves the record
+alone, because it says "forget downloaded data", and a review card's saved verdicts may name the
+answer the record reproduces.
+
 ## A partial result, while the node is still running
 
 `ctx.publish(outputs)` puts a half-finished value on a node's output port without the node having

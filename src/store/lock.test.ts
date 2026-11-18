@@ -453,6 +453,9 @@ describe('every store action is on one side of the lock', () => {
     'cancelRun',
     'invalidateNode',
     'clearNodeCache',
+    // The card's ⟳: the node's run record emptied (a `setParam`'s kind of edit, and live for the
+    // same reason), its key moved and its cache dropped, and the node run.
+    'refreshNode',
     'clearResults',
     'needsRun',
     'nodeInfo',
