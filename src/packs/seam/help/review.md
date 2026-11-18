@@ -167,7 +167,9 @@ Every filter reads a tip's **first** candidate, so paging through a tip's other 
 
 Once you have accepted pieces on a neuron, **Submit** at the foot of the card merges them into it, with your own CAVE token. The number on the button is how many accepted pieces are not merged yet.
 
-You need a CAVE Dataset wired into `Dataset`, and to be signed in to its server (Sources). If Submit is greyed out, hover over it to see why — for example, the search is still running, or nothing is accepted.
+You need a CAVE Dataset wired into `Dataset`, and to be signed in to its server (Sources). If Submit is greyed out, hover over it to see why — for example, nothing is accepted.
+
+You do not have to wait for the search to finish. Submit merges what you have accepted so far, and pieces you accept later go in the next Submit. The search carries on as it was: it reads the neuron as it stood when it was first searched, so your merges do not change its results.
 
 > [!WARNING]
 > **These are real edits**

@@ -495,9 +495,16 @@ On the review card's foot: **Submit (n)**, n = this neuron's accepted pieces not
 this workflow, here or into another reviewed neuron (`mergedSoFar`). **Disabled with the reason as
 its title** (`submitPress`): this card's own Submit open or merging first, since that is what the
 button shows; then in the order a reader would fix them — nothing wired; not a CAVE dataset; not
-signed in to its deployment; the search still filling (`nodeInputsFilling`) — reviewing a
-third-full queue is fine, submitting from one is not; this neuron merged into another under
-review; nothing accepted; everything accepted merged — and another card's Submit last.
+signed in to its deployment; this neuron merged into another under review; nothing accepted;
+everything accepted merged — and another card's Submit last.
+
+**Changed (user, 2026-11-18): Submit is no longer held while the search is still filling.** It
+was (`nodeInputsFilling`, "submitting from a third-full queue is not fine"), but the plan reads
+only accepted pieces, so a tip still to arrive cannot change what one Submit sends; and the hold
+was coarser than its reason — any input running blocked it, another neuron's search or an Extend
+included. Overlapping is safe for the search: every neuron's moment is fixed before the run reads
+anything (`momentsOf`), and tips arriving after a merge are the reviewed root's, which
+`mergedSoFar` already maps to the root now, a merged piece drawn as merged.
 
 - **A session, not card state** (`ui/seam/mergeSession.ts`, the one module in `MAY_SUBMIT`, and
   reachable only from its overlay and its card, `MAY_OPEN`). A batch outlives the card's surface —

@@ -438,7 +438,6 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     signedIn,
     queue,
     neuron,
-    filling,
     absorbed,
     neuronEdited,
     accepted: accepted.size,
@@ -949,7 +948,6 @@ export function submitPress(at: {
   signedIn: boolean
   queue: readonly QueueTip[]
   neuron: string | undefined
-  filling: boolean
   absorbed: boolean
   /** The query neuron edited since its suggestions were made (`rootCurrency`). */
   neuronEdited: boolean
@@ -975,11 +973,12 @@ export function submitPress(at: {
       `Sign in to ${caveServerLabel(target.deployment)} (Sources) to submit merges.`,
     )
   }
-  if (at.filling) {
-    return blocked(
-      'The search is still running. Submit once every tip is scored, so no piece is missed.',
-    )
-  }
+  /*
+   * **Not held while the search is still running** (user, 2026-11-18). The plan reads only what
+   * is accepted, so a tip still to arrive cannot change what one Submit sends — a piece accepted
+   * later goes in the next. And the search cannot be thrown by a merge it did not see: every
+   * neuron is read at its own moment, fixed before the run reads anything (`Searched at`).
+   */
   if (at.absorbed) {
     return blocked(
       'This neuron has been merged into another one under review. Submit from that one.',
