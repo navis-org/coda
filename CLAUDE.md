@@ -516,7 +516,7 @@ rule belongs to one area, its record is in that area's doc.
   with no neuron wire, two neuron sources or a loop, in a sentence; a node the chain only *names*
   is kept without its inputs, or the caller re-runs itself without end.
 
-### The SEAM pack — [docs/seam-extend-plan.md](docs/seam-extend-plan.md), [docs/seam-merge-plan.md](docs/seam-merge-plan.md)
+### The SEAM pack — [docs/seam-extend-plan.md](docs/seam-extend-plan.md), [docs/seam-merge-plan.md](docs/seam-merge-plan.md), [docs/seam-verdict-log-plan.md](docs/seam-verdict-log-plan.md)
 
 - **Where an accepted piece sits is one derivation, `piecesOf`** (fewest steps from the neuron, then
   the lower parent id, breadth first), read by the search, the review card and the merge plan —
