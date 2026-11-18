@@ -114,7 +114,7 @@ export const reviewNode = packNode({
   guide:
     'A queue of merge suggestions for one neuron, picked at the top of the card. Each row is a ' +
     'tip and one of its candidates; clicking a row shows that candidate beside its neuron. ' +
-    'Accept, reject or mark unsure, and page through a tip’s other candidates with the arrows. ' +
+    'Give each a verdict, and page through a tip’s other candidates with the arrows. ' +
     'The verdicts are saved with the workflow. Submit checks the accepted pieces and, once you ' +
     'confirm, merges them into the neuron.',
   cost: 'cheap',

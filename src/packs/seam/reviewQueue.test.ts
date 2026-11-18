@@ -53,7 +53,7 @@ import {
   withExtended,
   withVerdict,
 } from './reviewQueue'
-import type { Candidate, QueueFilters } from './reviewQueue'
+import type { Candidate, QueueFilters, Verdict } from './reviewQueue'
 
 const tipsTable = (
   rows: {
@@ -1272,7 +1272,7 @@ describe('a neuron and the pieces it is extended with', () => {
       from: Record<string, unknown>,
       neuron: string,
       id: string,
-      verdict: 'accept' | 'reject' | 'unsure',
+      verdict: Verdict,
     ) => judgedParams(from, neuron, piece(id), verdict, undefined)
 
     it('takes a piece no longer accepted out of the extended ones, in the same edit', () => {
@@ -1280,11 +1280,13 @@ describe('a neuron and the pieces it is extended with', () => {
         // The piece beyond keeps its entry: it is back if this one is extended again.
         write: { verdicts: 'n1/p1=reject;p1/p2=accept', extend: 'p1/p2' },
         search: false,
+        said: 'reject',
       })
       // Pressing Accept again clears it, which is un-accepting too.
       expect(press(params, 'n1', 'p1', 'accept')).toEqual({
         write: { verdicts: 'p1/p2=accept', extend: 'p1/p2' },
         search: false,
+        said: undefined,
       })
     })
 
@@ -1292,7 +1294,11 @@ describe('a neuron and the pieces it is extended with', () => {
     it('does not extend a piece by accepting it', () => {
       const rejected = press(params, 'n1', 'p1', 'reject').write
       const again = press({ ...params, ...rejected }, 'n1', 'p1', 'accept')
-      expect(again).toEqual({ write: { verdicts: 'n1/p1=accept;p1/p2=accept' }, search: false })
+      expect(again).toEqual({
+        write: { verdicts: 'n1/p1=accept;p1/p2=accept' },
+        search: false,
+        said: 'accept',
+      })
       // `p1` is accepted and not extended, so nothing is reached — `p2`'s entry waits.
       const pairs = extendedPairs(rejected.extend, decodeVerdicts(again.write.verdicts))
       expect(pairs).toEqual([{ parent: 'p1', piece: 'p2' }])
@@ -1306,7 +1312,15 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(press({ verdicts: '', extend: '' }, 'n1', 'p1', 'accept')).toEqual({
         write: { verdicts: 'n1/p1=accept' },
         search: false,
+        said: 'accept',
       })
+    })
+
+    /** What the card sends: the verdict after the press, none where the press took it back. */
+    it('says the verdict the press left, Ends included, and none where it cleared one', () => {
+      expect(press({ verdicts: '' }, 'n1', 'p1', 'ends').said).toBe('ends')
+      expect(press({ verdicts: 'n1/p1=ends' }, 'n1', 'p1', 'ends').said).toBeUndefined()
+      expect(press({ verdicts: 'n1/p1=ends' }, 'n1', 'p1', 'reject').said).toBe('reject')
     })
 
     /** A hand edit can leave a pair extended and re-judged; a press keeps what is there. */
@@ -1315,6 +1329,7 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(press(odd, 'n1', 'p1', 'accept')).toEqual({
         write: { verdicts: 'n1/p1=accept' },
         search: false,
+        said: 'accept',
       })
     })
   })
@@ -1327,6 +1342,7 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(judgedParams(on, 'n1', piece('p1'), 'accept', undefined)).toEqual({
         write: { verdicts: 'n1/p1=accept', extend: 'n1/p1' },
         search: true,
+        said: 'accept',
       })
       // Onto what is there, sorted as the param always is.
       expect(
@@ -1348,15 +1364,17 @@ describe('a neuron and the pieces it is extended with', () => {
         expect(judgedParams(params, 'n1', piece('p1'), 'accept', undefined)).toEqual({
           write: { verdicts: 'n1/p1=accept' },
           search: false,
+          said: 'accept',
         })
       }
     })
 
     it('extends nothing on any other verdict', () => {
-      for (const verdict of ['reject', 'unsure'] as const) {
+      for (const verdict of ['reject', 'ends', 'unsure'] as const) {
         expect(judgedParams(on, 'n1', piece('p1'), verdict, undefined)).toEqual({
           write: { verdicts: `n1/p1=${verdict}` },
           search: false,
+          said: verdict,
         })
       }
     })
@@ -1366,6 +1384,7 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(judgedParams(on, 'n1', piece('p1', 41), 'accept', undefined)).toEqual({
         write: { verdicts: 'n1/p1=accept' },
         search: false,
+        said: 'accept',
       })
       expect(judgedParams(on, 'n1', piece('p1', 40), 'accept', undefined).search).toBe(true)
     })
@@ -1374,6 +1393,7 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(judgedParams(on, 'n1', piece('p1'), 'accept', 'no wire back')).toEqual({
         write: { verdicts: 'n1/p1=accept' },
         search: false,
+        said: 'accept',
       })
     })
 
@@ -1383,10 +1403,12 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(judgedParams(extended, 'n1', piece('p1'), 'accept', undefined)).toEqual({
         write: { verdicts: '', extend: '' },
         search: false,
+        said: undefined,
       })
       expect(judgedParams(extended, 'n1', piece('p1'), 'reject', undefined)).toEqual({
         write: { verdicts: 'n1/p1=reject', extend: '' },
         search: false,
+        said: 'reject',
       })
     })
 
@@ -1479,7 +1501,7 @@ describe('a neuron and the pieces it is extended with', () => {
     it('says when a verdict is fixed, and what changing one takes with it', () => {
       const at = { verdict: 'reject' as const, done: undefined, inNeuron: false, goesWith: '' }
       expect(verdictPress(at)).toEqual({
-        title: 'This piece does not belong.',
+        title: 'This piece does not belong: it is not the continuation.',
         disabled: false,
       })
       expect(verdictPress({ ...at, done: 'merged', inNeuron: true })).toEqual({
@@ -1492,7 +1514,7 @@ describe('a neuron and the pieces it is extended with', () => {
       })
       expect(verdictPress({ ...at, goesWith: 'takes its ends off the list' })).toEqual({
         title:
-          'This piece does not belong. This piece is extended: changing its verdict takes its ' +
+          'This piece does not belong: it is not the continuation. This piece is extended: changing its verdict takes its ' +
           'ends off the list.',
         disabled: false,
       })

@@ -52,12 +52,25 @@ import { formatNumber, plural } from '../../style/format'
 import type { MergedSoFar } from './mergeRecord'
 import type { ExtendPair, Piece } from './pieces'
 import { piecesOf } from './pieces'
-import { numberAt, pointAt } from './suggestionTables'
+import { SOURCE_COLUMN, numberAt, pointAt } from './suggestionTables'
 
-/** What a reader can say about a piece for a neuron. SEAM's vocabulary, in their words. */
-export type Verdict = 'accept' | 'reject' | 'unsure'
+/**
+ * What a reader can say about a piece for a neuron. SEAM's vocabulary, in their words, and one of
+ * Coda's: `ends` is a rejection whose reason is that the neuron ends at this tip, where `reject`
+ * is a wrong continuation (user, 2026-11-18) — two different mistakes for SEAM to learn from.
+ * Only `accept` merges.
+ */
+export type Verdict = 'accept' | 'reject' | 'ends' | 'unsure'
 
-export const VERDICTS: readonly Verdict[] = ['accept', 'reject', 'unsure']
+export const VERDICTS: readonly Verdict[] = ['accept', 'reject', 'ends', 'unsure']
+
+/** The verdicts behind the row's split button (`VerdictButtons.tsx`, user, 2026-11-18). */
+export const NOT_ACCEPT: readonly Verdict[] = ['reject', 'ends', 'unsure']
+
+/** The split button's face: the row's own verdict where it is one of `NOT_ACCEPT`, else Reject. */
+export function faceOf(said: Verdict | undefined): Verdict {
+  return said !== undefined && NOT_ACCEPT.includes(said) ? said : NOT_ACCEPT[0]!
+}
 
 /** One candidate of a tip, as the card draws it. */
 export interface Candidate {
@@ -137,6 +150,8 @@ export interface QueueTip {
   /** The chance anything belongs at this tip at all, before which piece. */
   readonly pTip: number | undefined
   readonly shown: boolean
+  /** Which `q`, cutoff and `r` these numbers are (`SOURCE_COLUMN`); what a sent verdict is filed by. */
+  readonly source: string | undefined
   readonly candidates: readonly Candidate[]
 }
 
@@ -174,6 +189,7 @@ export function buildQueue(
       q: numberAt(tips, 'q', i),
       pTip: numberAt(tips, 'p_tip', i),
       shown: wasShown(tips, i),
+      source: text(tips, SOURCE_COLUMN, i),
       candidates: lists.get(tipKey(neuronId, endUid)) ?? [],
     })
   }
@@ -1068,7 +1084,8 @@ function piecesBeyond(pieces: readonly Piece[], id: string): number {
  *   large** (`isLargePiece`), which is left to its button.
  *
  * `search` is true where the press extended the piece, so the card runs the search it would
- * have run for a press on Extend. Decided here rather than on the card: these are the rules a
+ * have run for a press on Extend. `said` is the pair's verdict after the press — none where it
+ * took the verdict back — which is what the card sends (`verdictInput`). Decided here rather than on the card: these are the rules a
  * reader's click is held to, and a component is where a rule goes untested.
  */
 export function judgedParams(
@@ -1079,7 +1096,11 @@ export function judgedParams(
   verdict: Verdict,
   /** Why the piece cannot be extended, where it cannot. */
   blocked: string | undefined,
-): { write: { verdicts: string; extend?: string }; search: boolean } {
+): {
+  write: { verdicts: string; extend?: string }
+  search: boolean
+  said: Verdict | undefined
+} {
   const { candidateId } = candidate
   const next = withVerdict(decodeVerdicts(params['verdicts']), neuronId, candidateId, verdict)
   const verdicts = encodeVerdicts(next)
@@ -1088,11 +1109,12 @@ export function judgedParams(
   const has = extended.has(key)
   const auto =
     params['autoExtend'] === true && blocked === undefined && !isLargePiece(candidate)
-  const want = next.get(key) === 'accept' && (has || auto)
-  if (want === has) return { write: { verdicts }, search: false }
+  const said = next.get(key)
+  const want = said === 'accept' && (has || auto)
+  if (want === has) return { write: { verdicts }, search: false, said }
   if (want) extended.add(key)
   else extended.delete(key)
-  return { write: { verdicts, extend: encodeExtend(extended) }, search: want }
+  return { write: { verdicts, extend: encodeExtend(extended) }, search: want, said }
 }
 
 /**
@@ -1222,7 +1244,8 @@ export const IN_NEURON_NOTE = 'Accepted already, on another piece of this neuron
 
 const VERDICT_HELP: Record<Verdict, string> = {
   accept: 'This piece belongs to the neuron. Submit merges the accepted pieces.',
-  reject: 'This piece does not belong.',
+  reject: 'This piece does not belong: it is not the continuation.',
+  ends: 'This piece does not belong, because the neuron ends here.',
   unsure: 'Cannot tell. Left out of any calibration, rather than counted as wrong.',
 }
 

@@ -33,6 +33,8 @@ import '../../nodes'
 import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import type { SubmitState } from './mergeSession'
+import type * as VerdictLog from '../../data/verdictLog'
+import { resetVerdictLog, verdictLogState, writeSharing } from '../../data/verdictLog'
 import { ReviewBody, submitPress } from './ReviewBody'
 
 /** Submit's session, faked: the card only reads its state and opens it. */
@@ -49,6 +51,12 @@ vi.mock('../../packs/seam/rootCurrency', () => ({
     subscribe: () => () => {},
     version: () => 0,
   },
+}))
+/** The verdict log's sending, faked: what a press flushes. What the server collects is its reply. */
+const flushVerdicts = vi.fn(() => Promise.resolve())
+vi.mock('../../data/verdictLog', async (importOriginal) => ({
+  ...(await importOriginal<typeof VerdictLog>()),
+  flushVerdicts: () => flushVerdicts(),
 }))
 vi.mock('./mergeSession', () => ({
   STILL_OUT_NOTICE: 'A merge sent earlier has not answered yet.',
@@ -1123,5 +1131,188 @@ describe('extending a neuron from the review card', () => {
     expect(request.queue).toHaveLength(3)
     resetCredentials()
     openSubmit.mockReset()
+  })
+})
+
+/**
+ * Reject, Ends and Unsure share one split button (user, 2026-11-18): the face is a verdict in one
+ * press — the row's own where it is one of the three, else Reject — and the ▾ the menu of all three.
+ */
+describe('the split verdict button', () => {
+  const face = () => rows()[0]!.querySelectorAll<HTMLButtonElement>('.review-row__verdict')[1]!
+  const more = () => rows()[0]!.querySelector<HTMLButtonElement>('.review-row__more')!
+  const item = (name: string) => screen.getByRole('menuitemradio', { name: new RegExp(name) })
+
+  it('reads Reject on a row with no verdict, and gives it in one press', () => {
+    const written = draw({ current: at(11), rank: 1 })
+    expect(face().textContent).toBe('Reject')
+    fireEvent.click(face())
+    expect(written['verdicts']).toBe('720575940621522189/648518346368395605=reject')
+  })
+
+  it('opens Reject, Ends and Unsure, and records the one picked', () => {
+    const written = draw({ current: at(11), rank: 1 })
+    fireEvent.click(more())
+    expect(screen.getAllByRole('menuitemradio').map((one) => one.textContent)).toEqual([
+      'Reject',
+      'Ends',
+      'Unsure',
+    ])
+    fireEvent.click(item('Ends'))
+    expect(written['verdicts']).toBe('720575940621522189/648518346368395605=ends')
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+  })
+
+  it('closes its menu from ▾ as well as from outside', () => {
+    draw({ current: at(11), rank: 1 })
+    fireEvent.click(more())
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(3)
+    // The press as a browser sends it: pointerdown first, then the click.
+    fireEvent.pointerDown(more())
+    fireEvent.click(more())
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+    fireEvent.click(more())
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+  })
+
+  it('takes the keyboard into the menu, and down it with the arrows', () => {
+    draw({ current: at(11), rank: 1 })
+    fireEvent.click(more())
+    expect(document.activeElement).toBe(item('Reject'))
+    fireEvent.keyDown(item('Reject'), { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(item('Ends'))
+    fireEvent.keyDown(item('Ends'), { key: 'ArrowUp' })
+    fireEvent.keyDown(item('Reject'), { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(item('Unsure'))
+  })
+
+  it('shows the row’s own verdict on the face, ticked in the menu, and on the row', () => {
+    draw({ current: at(11), rank: 1, verdicts: '720575940621522189/648518346368395605=ends' })
+    expect(face().textContent).toBe('Ends')
+    expect(face().getAttribute('aria-pressed')).toBe('true')
+    expect(rows()[0]!.getAttribute('data-verdict')).toBe('ends')
+    fireEvent.click(more())
+    expect(item('Ends').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('takes Ends back when the face is pressed again', () => {
+    const written = draw({
+      current: at(11),
+      rank: 1,
+      verdicts: '720575940621522189/648518346368395605=ends',
+    })
+    fireEvent.click(face())
+    expect(written['verdicts']).toBe('')
+  })
+})
+
+/**
+ * A press sends the verdict to SEAM, where the reader opted in (`verdictLog.ts`). Only the press:
+ * the network half is faked here, and what the press queued is read off the log's own state.
+ */
+describe('sending verdicts to SEAM', () => {
+  const CAVE: Value = {
+    kind: 'dataset',
+    sourceId: 'cave',
+    datasetId: 'test_stack:1',
+    label: 'test',
+  }
+  const LABELLED: TableValue = makeTable(
+    tableSchema(...TIPS.schema.columns, column('source', 'str')),
+    { ...TIPS.data, source: ['set:rv4-ad75ed161bb6', 'set:rv4-ad75ed161bb6'] },
+  )
+  const queued = () =>
+    JSON.parse(window.localStorage.getItem('coda.verdictQueue') ?? '[]') as {
+      target: { datastack: string }
+      record: Record<string, unknown>
+    }[]
+  const reject = () =>
+    fireEvent.click(rows()[0]!.querySelectorAll<HTMLButtonElement>('.review-row__verdict')[1]!)
+  /** Drawn, and the server's answer about what it collects let in. */
+  async function drawSharing(params: ParamValues = {}, tips = LABELLED, dataset = CAVE) {
+    draw({ current: at(11), rank: 1, ...params }, true, CANDIDATES, tips, dataset)
+    await act(async () => {})
+  }
+
+  /** The server's list of what it collects, the one request the card itself makes. */
+  const collecting = (datastacks: readonly string[]) =>
+    vi.stubGlobal(
+      'fetch',
+      async () => new Response(JSON.stringify({ collecting: true, datastacks })),
+    )
+
+  beforeEach(() => {
+    resetVerdictLog()
+    flushVerdicts.mockClear()
+    collecting(['test_stack'])
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sends nothing while the reader has not turned it on', async () => {
+    await drawSharing()
+    reject()
+    expect(queued()).toEqual([])
+    expect(flushVerdicts).not.toHaveBeenCalled()
+  })
+
+  it('sends a press, with the tip, the candidate and the word, and flushes', async () => {
+    writeSharing({ on: true, name: 'A Reader', email: '' })
+    await drawSharing()
+    reject()
+    const [one] = queued()
+    expect(one!.target.datastack).toBe('test_stack')
+    expect(one!.record).toMatchObject({
+      source: 'set:rv4-ad75ed161bb6',
+      neuron: '720575940621522189',
+      piece: '720575940621522189',
+      end_uid: 11,
+      candidate: '648518346368395605',
+      rank: 1,
+      q: 0.91,
+      r: 0.95,
+      verdict: 'reject',
+      name: 'A Reader',
+    })
+    expect(flushVerdicts).toHaveBeenCalled()
+  })
+
+  it('sends a verdict taken back as cleared', async () => {
+    writeSharing({ on: true, name: '', email: '' })
+    await drawSharing({ verdicts: '720575940621522189/648518346368395605=reject' })
+    reject()
+    expect(queued()[0]!.record['verdict']).toBe('cleared')
+  })
+
+  it('sends nothing for a tip whose source is not SEAM’s', async () => {
+    writeSharing({ on: true, name: '', email: '' })
+    await drawSharing({}, TIPS)
+    reject()
+    expect(queued()).toEqual([])
+  })
+
+  it('sends nothing for a datastack the server does not collect, and says so', async () => {
+    writeSharing({ on: true, name: '', email: '' })
+    collecting(['other_stack'])
+    await drawSharing()
+    reject()
+    expect(queued()).toEqual([])
+    expect(screen.getByText(/Not collected for test_stack/)).toBeTruthy()
+  })
+
+  it('turns sending on from the switch in the foot, and counts what is sent', async () => {
+    await drawSharing()
+    fireEvent.click(screen.getByLabelText('Help improve'))
+    expect(verdictLogState().sharing.on).toBe(true)
+    expect(screen.getByText(/0 sent/)).toBeTruthy()
+  })
+
+  it('keeps the name and email from the panel', async () => {
+    await drawSharing()
+    fireEvent.click(screen.getByLabelText('What Help improve sends, and your name and email'))
+    fireEvent.change(screen.getByLabelText('Email'), {
+      target: { value: 'reader@example.org' },
+    })
+    expect(verdictLogState().sharing.email).toBe('reader@example.org')
   })
 })

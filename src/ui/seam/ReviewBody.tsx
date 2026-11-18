@@ -90,7 +90,6 @@ import {
   verdictFor,
   verdictKey,
   verdictPress,
-  VERDICTS,
   withExtended,
 } from '../../packs/seam/reviewQueue'
 import { EXTENDED_PORT } from '../../packs/seam/pieces'
@@ -126,6 +125,10 @@ import { useGraphStore } from '../../store/graphStore'
 import { useDatasetInput } from '../useDatasetInput'
 import { usePublishedScene } from '../viewers/NeuroglancerProfileFrame'
 import { NeuroglancerViewer } from '../viewers/NeuroglancerViewer'
+import { flushVerdicts } from '../../data/verdictLog'
+import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
+import { VerdictButtons } from './VerdictButtons'
+import { VerdictSharing } from './VerdictSharing'
 import { useRowWindow } from '../useRowWindow'
 import { controlPartColor } from '../../nodes/output/neuroglancer'
 
@@ -305,7 +308,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     verdict: Verdict,
     blocked: string | undefined,
   ) => {
-    const { write, search } = judgedParams(
+    const { write, search, said } = judgedParams(
       node.params,
       tip.neuronId,
       candidate,
@@ -316,6 +319,15 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     if (write.extend === undefined) setParam('verdicts', write.verdicts)
     else setParams(node.id, write)
     if (search) runSearch()
+    /*
+     * **And to SEAM, where the reader opted in** (`verdictLog.ts`): the press, never the param,
+     * so an undo or a loaded workflow sends nothing (user, 2026-11-18). A second press on the
+     * same verdict took it back, which is a record too.
+     */
+    if (target) {
+      const input = verdictInput(tip, candidate, said ?? 'cleared', __APP_VERSION__)
+      if (queueVerdict(target, input) === undefined) void flushVerdicts()
+    }
   }
 
   /*
@@ -761,23 +773,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                       >
                         ›
                       </button>
-                      {VERDICTS.map((verdict) => {
-                        const can = verdictPress({ verdict, done, inNeuron, goesWith })
-                        return (
-                          <button
-                            key={verdict}
-                            type="button"
-                            className="review-row__verdict"
-                            data-verdict={verdict}
-                            aria-pressed={said === verdict}
-                            disabled={can.disabled}
-                            onClick={() => judge(tip, candidate, verdict, blocked)}
-                            title={can.title}
-                          >
-                            {VERDICT_LABEL[verdict]}
-                          </button>
-                        )
-                      })}
+                      <VerdictButtons
+                        said={said}
+                        press={(verdict) => verdictPress({ verdict, done, inNeuron, goesWith })}
+                        onJudge={(verdict) => judge(tip, candidate, verdict, blocked)}
+                      />
                       {extendButton && (
                         <button
                           type="button"
@@ -806,6 +806,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
         )}
 
         <div className="list-body__foot">
+          <VerdictSharing datastack={target?.datastack} />
           {compact && (
             <button
               type="button"
@@ -906,12 +907,6 @@ function neuronLabel(entry: QueueNeuron): string {
     plural(entry.tips, 'tip'),
     `${formatNumber(entry.judged)} judged`,
   ].join(' · ')
-}
-
-const VERDICT_LABEL: Record<Verdict, string> = {
-  accept: 'Accept',
-  reject: 'Reject',
-  unsure: 'Unsure',
 }
 
 /**
