@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, TableValue } from '../../core/values'
+import type { LoadedManifest, ModelManifest } from '../../ml/manifest'
 import { makeTable } from '../../core/values'
 import {
   ASSESSED_CANDIDATE_FIELDS,
@@ -20,6 +21,8 @@ import {
   candidatesTable,
   LINEAGE_FIELDS,
   ORGANELLE_CUT,
+  modelVersion,
+  runSource,
   searchOnly,
   tipFields,
   tipsByNeuron,
@@ -46,7 +49,9 @@ function tipsTable(rows: readonly Partial<Record<string, CellValue>>[]): TableVa
   )
   const schema = tableSchema(
     ...schemaOf(OPEN_END_FIELDS).columns,
-    ...extra.map((name) => column(name, name === 'candidateId' ? 'str' : 'f64')),
+    ...extra.map((name) =>
+      column(name, name === 'candidateId' || name === 'source' ? 'str' : 'f64'),
+    ),
   )
   const data: Record<string, CellValue[]> = {}
   for (const col of schema.columns) {
@@ -368,6 +373,67 @@ describe('the first candidate on the tip row', () => {
     expect(out.data['contact_y']).toEqual([200])
     expect(out.data['contact_z']).toEqual([300])
     expect(out.data['vol_um3']).toEqual([0.5])
+  })
+})
+
+describe('which fits a searched tip’s numbers come from', () => {
+  const read = (id: string, digest: string): LoadedManifest => ({
+    manifest: { id } as ModelManifest,
+    url: `https://example.invalid/${id}/manifest.json`,
+    digest,
+  })
+  const RANKER = read('trees_sizes_tip', 'd0da2c7b5fe6a1b2c3d4e5f6')
+  const ASSESSOR = read('n3_mal_mask_s0', 'c1a615400751a1b2c3d4e5f6')
+
+  it('names the ranker and the assessor by id and the start of their manifests’ digests', () => {
+    expect(runSource(RANKER, ASSESSOR)).toBe(
+      'model:trees_sizes_tip@d0da2c7b5fe6/n3_mal_mask_s0@c1a615400751',
+    )
+    expect(runSource(RANKER, undefined)).toBe('model:trees_sizes_tip@d0da2c7b5fe6/none')
+  })
+
+  it('keys a model by its whole digest, so a refit under the same id is another model', () => {
+    expect(modelVersion(RANKER)).toBe('trees_sizes_tip@d0da2c7b5fe6a1b2c3d4e5f6')
+    expect(modelVersion(read('trees_sizes_tip', 'ffff'))).not.toBe(modelVersion(RANKER))
+  })
+
+  it('publishes the column whether or not an assessor ran', () => {
+    for (const assessed of [false, true]) {
+      expect(tipFields(assessed).map((one) => one.name)).toContain('source')
+    }
+  })
+
+  /**
+   * A `Tips` table from `seam:suggestions` arrives labelled with its set. A row this run searched
+   * now carries this run's numbers, so it carries this run's label; a row it did not search still
+   * carries the set's numbers, so it keeps the set's.
+   */
+  it('labels the rows it searched with its own, and leaves the set’s on the rest', () => {
+    const table = tipsTable([
+      { [ID_COLUMN_NAME]: '800', end_uid: 0, x: 0, y: 0, z: 0, source: 'set:rv4-ad75ed161bb6' },
+      { [ID_COLUMN_NAME]: '800', end_uid: 1, x: 0, y: 0, z: 0, source: 'set:rv4-ad75ed161bb6' },
+    ])
+    const { rows } = tipsFromTable(table)
+    const label = runSource(RANKER, ASSESSOR)
+    const out = tipsWithFirsts(
+      table,
+      [end(0, [{ root: '55', dist: 0.2 }])],
+      rows,
+      false,
+      attempted(rows),
+      [],
+      label,
+    )
+    expect(out.data['source']).toEqual([label, 'set:rv4-ad75ed161bb6'])
+  })
+
+  it('labels a searched row null where the caller does not say, so nothing sends it', () => {
+    const table = tipsTable([
+      { [ID_COLUMN_NAME]: '800', end_uid: 0, x: 0, y: 0, z: 0, source: 'set:rv4-ad75ed161bb6' },
+    ])
+    const { rows } = tipsFromTable(table)
+    const out = tipsWithFirsts(table, [end(0, [])], rows, false, attempted(rows))
+    expect(out.data['source']).toEqual([null])
   })
 })
 

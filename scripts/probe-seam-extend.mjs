@@ -209,8 +209,10 @@ const script = `(async () => {
   }
 
   // ── The search, with the path's roots read as the start's ───────────────────────────────────
-  const opened = await rankerConfig.openTreeRanker(models.MERGE_RANKER_MODELS[0])
-  const plan = opened.config
+  const rankerModel = models.MERGE_RANKER_MODELS[0]
+  const rankerManifest = await rankerConfig.readRankerManifest(rankerModel)
+  const opened = { ranker: await rankerConfig.openTreeRanker(rankerModel, rankerManifest) }
+  const plan = rankerManifest.config
   const halfWidthNm = plan.halfWidthUm * 1000
   const volume = await searchVolume.openSearchVolume(
     'wclee_aedes_brain', plan.xyNm, T0_MS, options, { chunkBytes: 512 * 1024 * 1024 },

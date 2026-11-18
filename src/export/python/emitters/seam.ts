@@ -28,9 +28,13 @@
 
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { suggestionsAddress } from '../../../packs/seam/suggestionIndex'
-import { FIRST_CANDIDATE } from '../../../packs/seam/suggestionTables'
 import type { Field } from '../../../packs/seam/suggestionTables'
-import { CANDIDATE_FIELDS, TIP_FIELDS } from '../../../packs/seam/suggestionTables'
+import {
+  CANDIDATE_FIELDS,
+  SET_SOURCE_PREFIX,
+  SOURCE_COLUMN,
+  TIP_FIELDS,
+} from '../../../packs/seam/suggestionTables'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -47,13 +51,16 @@ registerEmitter('seam:suggestions', (ctx: EmitContext) => {
   }
   ctx.require('pandas')
 
+  const manifest = `${ctx.name}_manifest`
   const base = `${ctx.name}_base`
+  const version = `${ctx.name}_version`
   const tips = ctx.output('tips')
   const candidates = ctx.output('candidates')
   const neurons = ctx.output('neurons')
 
   return [
-    ...resolve(base, url, String(ctx.params['set'] ?? '').trim()),
+    ...resolve(manifest, url, String(ctx.params['set'] ?? '').trim()),
+    `${base} = ${manifest}.rsplit("/", 1)[0] + "/"`,
     ``,
     ...read(tips, base, 'tips.parquet', TIP_FIELDS),
     ``,
@@ -66,6 +73,13 @@ registerEmitter('seam:suggestions', (ctx: EmitContext) => {
     `${tips} = ${tips}.merge(`,
     `    ${candidates}.loc[${candidates}["rank"] == 1, ["end_uid", "candidateId"]],`,
     `    on="end_uid", how="left", validate="one_to_one",`,
+    `)`,
+    ``,
+    `# Which set these numbers are, as the card labels them: q, the cutoff and r belong to this`,
+    `# version of the set, and are never to be read against another's.`,
+    `${version} = pd.read_json(${manifest}, typ="series").get("version")`,
+    `${tips}[${pyStr(SOURCE_COLUMN)}] = (`,
+    `    ${pyStr(SET_SOURCE_PREFIX)} + ${version} if isinstance(${version}, str) and ${version} else None`,
     `)`,
     ``,
     `# One row per neuron: its tips, and how many of them clear the cutoff. Sort the tips by q,`,
@@ -91,22 +105,16 @@ registerEmitter('seam:suggestions', (ctx: EmitContext) => {
  * set's path — and the id is what both are pinned to, so looking it up is also what makes the
  * two provably the same set.
  */
-function resolve(base: string, url: string, set: string): string[] {
-  if (!set) {
-    return [
-      `# One set's manifest; its files sit beside it.`,
-      `${base} = ${pyStr(url)}.rsplit("/", 1)[0] + "/"`,
-    ]
-  }
+function resolve(manifest: string, url: string, set: string): string[] {
+  if (!set)
+    return [`# One set's manifest; its files sit beside it.`, `${manifest} = ${pyStr(url)}`]
   return [
     `# A directory of suggestion sets. The card pins one by id, so look that id up rather than`,
     `# baking in the path it had when this was exported.`,
-    `${base} = ${pyStr(url)}.rsplit("/", 1)[0] + "/"`,
-    `${base} = ${base} + next(`,
+    `${manifest} = ${pyStr(url)}.rsplit("/", 1)[0] + "/" + next(`,
     `    s["path"] for s in pd.read_json(${pyStr(url)}, typ="series")["sets"]`,
     `    if s["id"] == ${pyStr(set)}`,
     `)`,
-    `${base} = ${base}.rsplit("/", 1)[0] + "/"`,
   ]
 }
 
@@ -122,8 +130,8 @@ function resolve(base: string, url: string, set: string): string[] {
  * through a float names a different neuron (invariant 8).
  */
 function read(into: string, base: string, file: string, fields: readonly Field[]): string[] {
-  // The joined column is not in the file; see `FIRST_CANDIDATE`.
-  const held = fields.filter((field) => field.from !== FIRST_CANDIDATE)
+  // The columns the loader fills in itself are not in the file; see `Field.filled`.
+  const held = fields.filter((field) => !field.filled)
   const renames = held.filter((field) => field.from !== field.name)
   const columns = pyList(held.map((field) => field.from))
   /*

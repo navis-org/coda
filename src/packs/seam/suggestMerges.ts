@@ -128,7 +128,7 @@ import {
   mergeAssessorModel,
   mergeRankerModel,
 } from './models'
-import { openSeamModel } from './openWindowModel'
+import { loadSeamManifest, openSeamModel } from './openWindowModel'
 import type { OpenedSeamModel } from './openWindowModel'
 import { patchBoxFor, patchScaleFrom, widestPatchReach } from './patchBox'
 import { afterShare } from './progress'
@@ -139,16 +139,19 @@ import { PUBLISH_INTERVAL_MS } from '../../data/geometryCache'
 import { throwIfAborted, yieldToBrowser } from '../../core/slice'
 import type { Piece } from './pieces'
 import { runBook } from './runBook'
+import type { Assembled } from './runBook'
 import { aliasOf, EXTENDED_PORT, extendPairs, junctionOf, piecesOf } from './pieces'
-import { openTreeRanker } from './rankerConfig'
+import { openTreeRanker, readRankerManifest } from './rankerConfig'
 import type { RankerConfig } from './rankerConfig'
 import { contactsOf, publishedEnd, reportOnRun } from './scoreEnds'
 import type { EndToSearch } from './searchRun'
 import { oneAhead, searchEnds } from './searchRun'
-import type { Lineage, PublishedEnd, TipRow } from './searchTips'
+import type { PublishedEnd, TipRow } from './searchTips'
 import {
   candidateFields,
   candidatesTable,
+  modelVersion,
+  runSource,
   searchOnly,
   tipPositions,
   tipsByNeuron,
@@ -653,6 +656,24 @@ export const suggestMergesNode = packNode({
     const options = { deployment: target.deployment, signal: ctx.signal }
 
     /*
+     * **Both manifests, read once and first** — two files of a few kilobytes. First, because a
+     * manifest this build cannot read is the cheapest refusal there is. Once, because the version
+     * read is the version everything is named by: the memory of finished ends is keyed on it
+     * (`identityOf` below), `source` says it on every searched tip, and both models are opened
+     * from this same read rather than a second one that could find a republished file.
+     */
+    ctx.progress(0, 'reading the models')
+    const rankerManifest = await readRankerManifest(model, ctx.signal)
+    const assessorManifest =
+      assessorModel &&
+      (await loadSeamManifest({
+        model: assessorModel,
+        task: MERGE_ASSESSOR_TASK,
+        parse: parseAssessorConfig,
+        signal: ctx.signal,
+      }))
+
+    /*
      * **When each neuron is read** — its own moment, not the Dataset's materialization
      * (`momentsOf`, `docs/seam-live-plan.md`). Asked before anything is priced, since the moment
      * is in every end's key. A neuron the chunkedgraph never made is passed through unsearched,
@@ -669,8 +690,8 @@ export const suggestMergesNode = packNode({
      * run that takes one.
      */
     const identityOf = (neuron: string): RunIdentity => ({
-      ranker: model.id,
-      assessor: assessorModel?.id ?? NO_ASSESSOR,
+      ranker: modelVersion(rankerManifest.loaded),
+      assessor: assessorManifest ? modelVersion(assessorManifest.loaded) : NO_ASSESSOR,
       top,
       deployment: target.deployment,
       datastack: target.datastack,
@@ -742,7 +763,8 @@ export const suggestMergesNode = packNode({
      * back and give up the property above, which is the wrong trade on a node whose next step
      * is a 19 MB read per end.
      */
-    const { ranker, config: plan } = await openTreeRanker(model, {
+    const plan = rankerManifest.config
+    const ranker = await openTreeRanker(model, rankerManifest, {
       signal: ctx.signal,
       progress: (fraction, note) => ctx.progress(fraction * MODEL_SHARE, note),
     })
@@ -771,6 +793,7 @@ export const suggestMergesNode = packNode({
           model: assessorModel,
           task: MERGE_ASSESSOR_TASK,
           parse: parseAssessorConfig,
+          ...(assessorManifest ? { manifest: assessorManifest } : {}),
           download: ctx.params.download === true,
           downloadShare: ASSESSOR_SHARE,
           signal: ctx.signal,
@@ -806,6 +829,7 @@ export const suggestMergesNode = packNode({
         ranker,
         plan,
         assessor: openAssessor,
+        source: runSource(rankerManifest.loaded, assessorManifest?.loaded),
         top,
         volume: await openSearchVolume(target.datastack, plan.xyNm, openedAt, options, {
           // Megabytes at the param, bytes inside: a reader thinks in the first and a budget is
@@ -855,6 +879,8 @@ interface RunPlan {
   readonly top: number
   readonly volume: SearchVolume
   readonly options: CaveRequestOptions
+  /** What this run's numbers come from, for the tips it searches (`runSource`). */
+  readonly source: string
 }
 
 /**
@@ -997,7 +1023,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     const now = book.assemble()
     listed = now.ends
     shown = Math.max(shown, now.attempting.size > 0 ? now.ends.length / now.attempting.size : 0)
-    return published(now.table, now.ends, now.tips, assessing, now.attempting, now.lineage)
+    return published(now, assessing, run.source)
   }
   // The last thing published *is* the answer, so the final return does not build it again.
   let answer = publish()
@@ -2007,16 +2033,10 @@ function patchSteps(
  * two shapes, and the review card reads them by column name and would say nothing about the
  * difference.
  */
-function published(
-  table: TableValue,
-  ends: readonly PublishedEnd[],
-  tips: readonly TipRow[],
-  assessed: boolean,
-  attempting: ReadonlySet<number>,
-  lineage: readonly (Lineage | undefined)[],
-) {
+function published(now: Assembled, assessed: boolean, source: string) {
+  const { table, ends, tips, attempting, lineage } = now
   return {
-    tips: tipsWithFirsts(table, ends, tips, assessed, attempting, lineage),
+    tips: tipsWithFirsts(table, ends, tips, assessed, attempting, lineage, source),
     candidates: candidatesTable(ends, tips, assessed),
   }
 }

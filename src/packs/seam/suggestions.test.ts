@@ -41,6 +41,7 @@ import { ORGANELLE_CUT } from './searchTips'
 import type { Field } from './suggestionTables'
 import {
   CANDIDATE_FIELDS,
+  SOURCE_COLUMN,
   TIP_FIELDS,
   field,
   neuronsSchema,
@@ -472,6 +473,19 @@ describe('the node, end to end over HTTP', () => {
 
   it('names the address when the set is not there', async () => {
     await expect(run({ url: `${origin}/nothing.json` })).rejects.toThrow()
+  })
+})
+
+describe('which set a tip came from', () => {
+  it('labels every tip with the set’s version, as Suggest Merges labels its own', () => {
+    const source = built.tips.data[SOURCE_COLUMN] ?? []
+    expect(source.length).toBe(built.tips.length)
+    expect(new Set(source)).toEqual(new Set([`set:${SET.version}`]))
+  })
+
+  it('leaves it null for a set whose manifest names no version', async () => {
+    const old = await readSuggestions({ ...SET, version: undefined }, openLocal)
+    expect(new Set(old.tips.data[SOURCE_COLUMN])).toEqual(new Set([null]))
   })
 })
 

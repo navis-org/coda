@@ -29,7 +29,6 @@ import type { ByteSpec } from '../../data/files/bytes'
 import { openTableSpec, readRows } from '../../data/files/read'
 import type { TableFileReader } from '../../data/files/reader'
 import { formatNumber } from '../../style/format'
-import { FIRST_CANDIDATE } from './suggestionTables'
 import type { Field } from './suggestionTables'
 
 /**
@@ -84,9 +83,9 @@ export async function readFields(
     (field) =>
       field.optional && !held.has(field.from) && !reader.summary.skipped.includes(field.from),
   )
-  // A field the file does not hold because it is filled in afterwards — see `FIRST_CANDIDATE`.
+  // A field the file does not hold because it is filled in afterwards — see `Field.filled`.
   const columns = fields
-    .filter((field) => field.from !== FIRST_CANDIDATE && !predates.includes(field))
+    .filter((field) => !field.filled && !predates.includes(field))
     .map((field) => {
       const column = held.get(field.from)
       if (!column) {

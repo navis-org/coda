@@ -50,6 +50,7 @@
 
 import { completeVariants } from '../../ml/manifest'
 import { loadSeamManifest } from './openWindowModel'
+import type { SeamManifest } from './openWindowModel'
 import { loadWeights } from '../../ml/weights'
 import type { AffinityModel } from './models'
 import { MERGE_RANKER_TASK } from './models'
@@ -142,9 +143,10 @@ function asNumber(value: unknown, field: string, modelId: string): number {
  * megabytes. Everything else is shared: the manifest, the task check and the verified,
  * deduplicated weight cache.
  *
- * The config is parsed **before** the weights are fetched, as `openSeamModel` does and for the
- * same reason: a manifest this build cannot read should cost nothing. `refusePoolRadius` runs
- * there too, so a model whose pool this build cannot reproduce costs no download either.
+ * The config is parsed **before** the weights are fetched — by `readRankerManifest`, which the
+ * caller runs first — as `openSeamModel` does and for the same reason: a manifest this build
+ * cannot read should cost nothing. `refusePoolRadius` runs there too, so a model whose pool this
+ * build cannot reproduce costs no download either.
  *
  * It reports a **raw** fraction and lets the caller scale it, where `openSeamModel` takes a
  * `downloadShare` and scales inside. Deliberate: that one owns the whole of its share because an
@@ -152,16 +154,12 @@ function asNumber(value: unknown, field: string, modelId: string): number {
  */
 export async function openTreeRanker(
   model: AffinityModel,
+  /** The manifest, read by `readRankerManifest` — the version the run is named by. */
+  manifest: SeamManifest<RankerConfig>,
   options: { signal?: AbortSignal; progress?: (fraction: number, note?: string) => void } = {},
-): Promise<{ ranker: TreeRanker; config: RankerConfig }> {
-  options.progress?.(0, 'reading the ranker')
-  const { loaded, config } = await loadSeamManifest({
-    model,
-    task: MERGE_RANKER_TASK,
-    parse: parseRankerConfig,
-    signal: options.signal,
-  })
-  refusePoolRadius(config, model.label)
+): Promise<TreeRanker> {
+  options.progress?.(0, 'opening the ranker')
+  const { loaded, config } = manifest
   /*
    * One variant, picked by name rather than through `preferredVariant` — that one chooses
    * between quantisations by which operators a WebGPU build can run, which is a question a text
@@ -192,7 +190,26 @@ export async function openTreeRanker(
    * feature is a different key rather than the old forest handed back under new columns. The
    * 1.3 MB of text is dropped as soon as it returns.
    */
-  return { ranker: treeRankerFor(model.manifestUrl, text, config.features), config }
+  // By digest as well as address: a forest republished under one address is another forest.
+  return treeRankerFor(`${model.manifestUrl}@${loaded.digest}`, text, config.features)
+}
+
+/**
+ * The ranker's manifest, read and its config checked: `openTreeRanker`'s first half, apart so a
+ * caller can know which version it is about to run before it opens it.
+ */
+export async function readRankerManifest(
+  model: AffinityModel,
+  signal?: AbortSignal,
+): Promise<SeamManifest<RankerConfig>> {
+  const read = await loadSeamManifest({
+    model,
+    task: MERGE_RANKER_TASK,
+    parse: parseRankerConfig,
+    signal,
+  })
+  refusePoolRadius(read.config, model.label)
+  return read
 }
 
 /** Refuse a model whose pool radius is not the one the vendored code will actually apply. */

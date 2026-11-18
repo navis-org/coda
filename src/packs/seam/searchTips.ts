@@ -35,12 +35,21 @@
 import { ID_COLUMN_NAME, idText, isSegmentId } from '../../core/ids'
 import { groupBy } from '../../core/collections'
 import type { TableSchema } from '../../core/types'
+import type { LoadedManifest } from '../../ml/manifest'
 import type { CellValue, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { foldColumns } from '../../nodes/lib/tableOps'
 import type { SearchedEnd } from './searchRun'
 import type { Field } from './suggestionTables'
-import { field, numberAt, published, schemaOf, tableOf } from './suggestionTables'
+import {
+  MODEL_SOURCE_PREFIX,
+  SOURCE_COLUMN,
+  field,
+  numberAt,
+  published,
+  schemaOf,
+  tableOf,
+} from './suggestionTables'
 
 /** One row of an incoming `Tips` table, as the search needs it. */
 export interface TipRow {
@@ -303,6 +312,38 @@ export function candidateFields(assessed: boolean): readonly Field[] {
 export const SEARCHED_FIELD: Field = field('searched', 'searched', 'bool')
 
 /**
+ * Which ranker and assessor a searched tip's numbers come from (`SOURCE_COLUMN`), so a verdict on
+ * it can be read against the right fits. Written on every row this run searched, assessed or not.
+ */
+export const RUN_SOURCE_FIELD: Field = field(SOURCE_COLUMN, SOURCE_COLUMN, 'str')
+
+/** How much of a manifest's SHA-256 a `source` carries: enough to tell versions apart. */
+const DIGEST_CHARS = 12
+
+/**
+ * A model as a run read it: its id and its manifest's digest (`LoadedManifest.digest`), the
+ * whole digest unless told otherwise. What the memory of finished ends is keyed on, and — cut
+ * short — what `source` says, so the two name one version.
+ */
+export function modelVersion(loaded: LoadedManifest, chars?: number): string {
+  return `${loaded.manifest.id}@${loaded.digest.slice(0, chars)}`
+}
+
+/**
+ * A live run's `source`: `model:<ranker>@<digest>/<assessor>@<digest>`, or `/none` where no
+ * assessor ran. **By digest, not only by id**: a model is republished under the same id when SEAM
+ * refits it (`r` was, on 2026-11-18), and what a `q` means changes with the fits. Anybody holding
+ * the published manifest can match the digest with `sha256sum`.
+ */
+export function runSource(
+  ranker: LoadedManifest,
+  assessor: LoadedManifest | undefined,
+): string {
+  const assessed = assessor ? modelVersion(assessor, DIGEST_CHARS) : 'none'
+  return `${MODEL_SOURCE_PREFIX}${modelVersion(ranker, DIGEST_CHARS)}/${assessed}`
+}
+
+/**
  * Where a tip sits in a neuron being extended piece by piece (`pieces.ts`).
  *
  * `ID` stays the root the tip is on — an accepted piece's own, which a verdict and a merge are
@@ -338,8 +379,8 @@ export interface Lineage {
 /** The tip columns a run publishes. The first candidate's, plus the tip's own where scored. */
 export function tipFields(assessed: boolean): readonly Field[] {
   return assessed
-    ? [...SEARCH_TIP_FIELDS, ...ASSESSED_TIP_FIELDS, SEARCHED_FIELD]
-    : [...SEARCH_TIP_FIELDS, SEARCHED_FIELD]
+    ? [...SEARCH_TIP_FIELDS, ...ASSESSED_TIP_FIELDS, RUN_SOURCE_FIELD, SEARCHED_FIELD]
+    : [...SEARCH_TIP_FIELDS, RUN_SOURCE_FIELD, SEARCHED_FIELD]
 }
 
 /**
@@ -630,6 +671,12 @@ export function tipsWithFirsts(
    * piece's row that could not be searched is still that piece's.
    */
   lineage: readonly (Lineage | undefined)[] = [],
+  /**
+   * What this run's numbers come from (`runSource`), written on every row it searched. Null
+   * where a caller does not say, which the review card reads as "not to be sent": a verdict
+   * labelled with the wrong fits is worse for SEAM than one never sent.
+   */
+  source: string | null = null,
 ): TableValue {
   const data: Record<string, CellValue[]> = {}
   const schema = tipsSchema(table.schema, assessed)
@@ -674,6 +721,7 @@ export function tipsWithFirsts(
      */
     // Guarded, because `p_top` is only there when the incoming table brought it.
     for (const name of FIRST_CANDIDATE_COLUMNS) if (data[name]) data[name]![at] = null
+    data[SOURCE_COLUMN]![at] = source
     /*
      * **The tip's own numbers are written even where its list is empty**, and the candidate's are
      * not. That is SEAM's shape rather than a convenience: a tip with no candidates still has a
@@ -735,6 +783,8 @@ const FIRST_CANDIDATE_COLUMNS: readonly string[] = [
    * of a cleared row cannot make.
    */
   ...ASSESSED_TIP_FIELDS.map((one) => one.name),
+  // Which fits those were: a published set's label must not stay on a row this run rewrote.
+  SOURCE_COLUMN,
 ]
 
 /**

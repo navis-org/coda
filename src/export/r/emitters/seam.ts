@@ -20,9 +20,13 @@
 
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { suggestionsAddress } from '../../../packs/seam/suggestionIndex'
-import { FIRST_CANDIDATE } from '../../../packs/seam/suggestionTables'
 import type { Field } from '../../../packs/seam/suggestionTables'
-import { CANDIDATE_FIELDS, TIP_FIELDS } from '../../../packs/seam/suggestionTables'
+import {
+  CANDIDATE_FIELDS,
+  SET_SOURCE_PREFIX,
+  SOURCE_COLUMN,
+  TIP_FIELDS,
+} from '../../../packs/seam/suggestionTables'
 import { rCol, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -39,14 +43,18 @@ registerEmitter('seam:suggestions', (ctx: EmitContext) => {
   }
   ctx.library('arrow')
   ctx.library('dplyr')
+  ctx.library('jsonlite')
 
+  const manifest = `${ctx.name}_manifest`
   const base = `${ctx.name}_base`
+  const version = `${ctx.name}_version`
   const tips = ctx.output('tips')
   const candidates = ctx.output('candidates')
   const neurons = ctx.output('neurons')
 
   return [
-    ...resolve(ctx, base, url, String(ctx.params['set'] ?? '').trim()),
+    ...resolve(manifest, url, String(ctx.params['set'] ?? '').trim()),
+    `${base} <- sub("[^/]*$", "", ${manifest})`,
     ``,
     ...read(tips, base, 'tips.parquet', TIP_FIELDS),
     ``,
@@ -62,6 +70,16 @@ registerEmitter('seam:suggestions', (ctx: EmitContext) => {
     `  by = "end_uid"`,
     `)`,
     ``,
+    `# Which set these numbers are, as the card labels them: q, the cutoff and r belong to this`,
+    `# version of the set, and are never to be read against another's.`,
+    // `[[`, not `$`, which would take a key that merely starts with "version".
+    `${version} <- jsonlite::fromJSON(${manifest})[["version"]]`,
+    `${tips}[[${rStr(SOURCE_COLUMN)}]] <- if (is.character(${version}) && length(${version}) == 1 && nzchar(${version})) {`,
+    `  paste0(${rStr(SET_SOURCE_PREFIX)}, ${version})`,
+    `} else {`,
+    `  NA_character_`,
+    `}`,
+    ``,
     `# One row per neuron: its tips, and how many of them clear the cutoff. Sort the tips by q,`,
     `# never r: r is a staircase over q, and SEAM advises against summing it.`,
     `${neurons} <- ${tips} |>`,
@@ -75,24 +93,17 @@ registerEmitter('seam:suggestions', (ctx: EmitContext) => {
 })
 
 /** The Python emitter's `resolve`, in jsonlite. Its reasoning applies unchanged. */
-function resolve(ctx: EmitContext, base: string, url: string, set: string): string[] {
-  if (!set) {
-    return [
-      `# One set's manifest; its files sit beside it.`,
-      `${base} <- sub("[^/]*$", "", ${rStr(url)})`,
-    ]
-  }
-  ctx.library('jsonlite')
+function resolve(manifest: string, url: string, set: string): string[] {
+  if (!set)
+    return [`# One set's manifest; its files sit beside it.`, `${manifest} <- ${rStr(url)}`]
   return [
     `# A directory of suggestion sets. The card pins one by id, so look that id up rather than`,
     `# baking in the path it had when this was exported.`,
-    `${base}_sets <- jsonlite::fromJSON(${rStr(url)}, simplifyDataFrame = FALSE)$sets`,
-    `${base} <- sub("[^/]*$", "", ${rStr(url)})`,
-    `${base} <- paste0(`,
-    `  ${base},`,
-    `  Filter(function(s) s$id == ${rStr(set)}, ${base}_sets)[[1]]$path`,
+    `${manifest}_sets <- jsonlite::fromJSON(${rStr(url)}, simplifyDataFrame = FALSE)$sets`,
+    `${manifest} <- paste0(`,
+    `  sub("[^/]*$", "", ${rStr(url)}),`,
+    `  Filter(function(s) s$id == ${rStr(set)}, ${manifest}_sets)[[1]]$path`,
     `)`,
-    `${base} <- sub("[^/]*$", "", ${base})`,
   ]
 }
 
@@ -104,8 +115,8 @@ function resolve(ctx: EmitContext, base: string, url: string, set: string): stri
  * the card. The rename is positional against that same list, so the two cannot come apart.
  */
 function read(into: string, base: string, file: string, fields: readonly Field[]): string[] {
-  // The joined column is not in the file; see `FIRST_CANDIDATE`.
-  const held = fields.filter((field) => field.from !== FIRST_CANDIDATE)
+  // The columns the loader fills in itself are not in the file; see `Field.filled`.
+  const held = fields.filter((field) => !field.filled)
   const tmp = `${into}_file`
   const columns = rVector(held.map((f) => f.from))
   /*
