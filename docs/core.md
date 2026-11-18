@@ -302,11 +302,48 @@ evaluation, nothing new in a saved file.
 Three things had to be true, and each was a separate bug waiting:
 
 **A preview is not a cache entry.** It lives in `Scheduler.previews`, read *before* the cache by
-`output`/`outputs` and dropped the moment the node settles — onto the real result, or onto
-nothing. A partial stored under the node's provenance key would be the answer *for that key*
+`output`/`outputs` and dropped by the rule below. A partial stored under the node's provenance key would be the answer *for that key*
 (invariant 4), so a run cancelled at body 250 of 300 would leave a scene that looks complete and
 that no later run would even be scheduled to fix. The geometry is still in `geometryCache`, so
 dropping it costs a redraw rather than a re-download.
+
+**A partial stays until something newer replaces it, or nothing is coming to** (user,
+2026-11-18). Newer is a publish, or a run of the node ending on its own — success or error, and
+whoever published the partial. Nothing coming is Cancel, `invalidateAll` (a dataset switch, a
+document closed), or a node no longer `stale` — fresh from the cache again (dropped at the
+walk's cache hit, not when the walk ends), switched off, refused, or `blocked` (`dropUnawaited`,
+asked on every edit and at the end of every walk, which sets states an edit never sees).
+`blocked` is not told apart: it is also a node whose upstream is only waiting for the same run,
+so an edit *above* a node that is publishing still drops its partial, as it always did — the
+Extend case is an edit to the node itself. **A run that was stopped
+drops nothing on its way out**, so a retired run's partial is kept for the run replacing it —
+except a loop's pass, since the run replacing it starts again at the first element (and a pass
+unwinding late can still drop its successor's partial, as before). Dropping one partial drops
+every derived answer (`dropDerived`), so where another stands, its chain is derived again — a
+moment of the cache below it, with two nodes publishing at once.
+
+The rule it replaced dropped the partial with the run that made it, however that run ended — and
+an edit retiring a run in flight then handed every reader the cache, the last run that
+*finished*, until the new run's first publish. On a node edited faster than it finishes that is
+several edits old: pressing Extend on Review Suggestions while the last search was still running
+blanked the list and the Neuroglancer card beside it, and both came back a moment later.
+Measured in Chrome on a second Extend pressed 3.5 s into the first one's search: the card's tips
+went 12 → 10 → 12, with a 375 ms gap; 12 throughout after. It had a second gap of the same kind:
+a stopped run unwinds when its work next looks at its signal, which can be after its successor
+has published, and its drop then took the successor's partial with it.
+
+What it costs: with auto-run off, or on an expensive node auto-run defers, an edit to a node
+that was publishing leaves its partial on screen beside the `stale` badge until the next Run,
+where the last finished result stood before. Meanwhile `hasPartial` stays true, so a card
+reading it (Review Suggestions' foot) says the queue is still filling; the partial is held beside
+the old cache entry; and it is a live publisher to `derivePreviews`, so every edit — a card
+dragged, each frame — derives the cheap nodes below it again and re-renders their readers, which
+before happened only while something streamed. A derive that remembered what it last derived
+from would cut that; not built.
+
+`scheduler.test.ts`' "a partial when its run is retired" pins the cases; each was checked by
+breaking it, except three that need a graph of their own: a loop's pass dropping on stop, a
+second partial's chain derived again, and `blocked` counting as nothing coming.
 
 **`onPreview` is its own host hook, not `onStateChange`.** A state change moves a badge, and a
 card subscribes to it through its *own* node's state; a preview changes what is on somebody

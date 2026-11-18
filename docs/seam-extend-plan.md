@@ -563,6 +563,12 @@ Each lands on its own. Nothing before phase 6 touches the write path.
      ends, three small pieces extended, a fourth then extended): before, the three pieces' rows
      went from 4 to 0 at 2.6 s, when the fourth piece's chain published, and came back at the
      end of the run (7.7 s); after, they stayed at 4 throughout (7.9 s).
+   - **And an Extend pressed while the last search is still running** blanked the list and the
+     Neuroglancer card for a moment (user, 2026-11-18). Not this node's doing: the press retires
+     the evaluation in flight, and its partial was dropped then, so every reader fell back to
+     the last run that *finished* until the new run's first publish. Fixed in the scheduler —
+     a stopped run's partial now stays until the run replacing it publishes — with the
+     measurement in [core.md](core.md), "A partial result, while the node is still running".
 
    **Known, and left**
    - **An end that was refused is not remembered**, so a refused end of a piece that went

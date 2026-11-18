@@ -440,7 +440,12 @@ export class Scheduler {
    *
    * Read *before* the cache by `output`/`outputs`, because while a node is running the preview
    * is the newer truth and whatever the cache holds belongs to a key that has already moved.
-   * Dropped when the node settles, which is what makes that precedence safe to state so simply.
+   *
+   * **Kept until something newer replaces it, or nothing is coming to** (`docs/core.md`, "A
+   * partial result, while the node is still running"). Newer: a publish, or a run of the node
+   * ending on its own (the evaluation's `finally`). Nothing coming: Cancel, `invalidateAll`, or
+   * a node no longer `stale` (`dropUnawaited`). A run that was stopped drops nothing, so a
+   * retired run's partial stands until the run replacing it publishes.
    */
   private previews = new HeldMap<Record<string, Value>>()
   /**
@@ -821,6 +826,8 @@ export class Scheduler {
 
     this.pruneCache(graph)
     this.host.onStateChange?.()
+    // Not `partialsDropped`: the derive it would ask for is asked below, for every edit.
+    if (this.dropUnawaited()) this.host.onPreview?.()
     /*
      * The edit may have been downstream of a partial — a reader clicking a row in a card while
      * the node above it is still fetching — so what was derived from it is now an answer to the
@@ -880,6 +887,8 @@ export class Scheduler {
     // An evaluation still in flight would put its result straight back under a key that, after a
     // dataset switch, nothing may trust any more.
     for (const [nodeId, evaluation] of this.evaluations) this.retire(nodeId, evaluation)
+    // A retired run keeps its partial (`previews`); after this, nothing is to be trusted.
+    this.dropAllPartials()
     this.cache.clear()
     this.states.clear()
     this.forceRefresh.clear()
@@ -959,13 +968,52 @@ export class Scheduler {
     this.requestedFull.clear()
     this.abort?.abort()
     for (const evaluation of this.evaluations.values()) evaluation.controller.abort()
-    /*
-     * A derive is speculative work like any other, and what it was computed from is on its way
-     * out. Its own `finally` would drop these once the node holding the partial unwound — but a
-     * node that ignores its signal never unwinds, and a derived answer standing over a cancelled
-     * run is the "looks complete but isn't" failure one node further along.
-     */
-    if (this.dropDerived()) this.host.onPreview?.()
+    // Nothing comes after a Cancel, and a node ignoring its signal never unwinds at all.
+    this.dropAllPartials()
+  }
+
+  /**
+   * Drop a node's partial and everything derived from it; whether there was one. The caller
+   * says so once for however many it drops (`partialsDropped`).
+   */
+  private dropPartial(nodeId: string): boolean {
+    if (!this.previews.delete(nodeId)) return false
+    this.dropDerived()
+    return true
+  }
+
+  /**
+   * Announce dropped partials. `dropDerived` drops every derived entry, not only the dropped
+   * node's, so where another node's partial still stands — a retired run's, kept — its chain is
+   * derived again.
+   */
+  private partialsDropped(): void {
+    if (this.previews.size > 0) this.askDerive()
+    this.host.onPreview?.()
+  }
+
+  /** Drop every partial, own and derived, and the derive in flight; announced. */
+  private dropAllPartials(): void {
+    const had = this.previews.size > 0
+    this.dropDerived()
+    this.previews.clear()
+    if (had) this.host.onPreview?.()
+  }
+
+  /**
+   * Drop the partials of nodes nobody is working on and no run is awaited for: no live
+   * evaluation, and no longer `stale` — fresh from the cache again, switched off, refused, or
+   * waiting on an upstream that cannot run (`blocked`). See `previews`.
+   */
+  private dropUnawaited(): boolean {
+    // The nodes' own, taken first: the first drop empties `derived`.
+    const own = [...this.previews.keys()].filter((nodeId) => !this.derived.has(nodeId))
+    let dropped = false
+    for (const nodeId of own) {
+      if (this.live(nodeId) || this.info(nodeId).state === 'stale') continue
+      if (this.dropPartial(nodeId)) dropped = true
+    }
+    return dropped
   }
 
   /**
@@ -1029,6 +1077,9 @@ export class Scheduler {
       return await promise
     } finally {
       if (this.inFlight === promise) this.inFlight = undefined
+      // The walk sets states `refreshStates` never sees — a refusal, a cache hit — and a partial
+      // whose node one of them settled is waiting for nothing any more.
+      if (this.dropUnawaited()) this.partialsDropped()
     }
   }
 
@@ -1977,6 +2028,9 @@ export class Scheduler {
     const foldingHere = iteration !== undefined && def.loop === 'end'
     if (pass.available.has(nodeId) && !foldingHere) {
       this.setState(nodeId, { state: 'ok', ...pick(this.states.get(nodeId), 'durationMs') })
+      // The cache answers the node's key, so a retired run's partial is answering an older one:
+      // gone now, not when the walk ends, or every reader is shown it over the answer.
+      if (this.dropPartial(nodeId)) this.partialsDropped()
       return 'skipped'
     }
 
@@ -2200,6 +2254,7 @@ export class Scheduler {
     })
     return this.finish(nodeId, def, ctx, {
       key: pass.keys.get(nodeId)!,
+      inLoop: iteration !== undefined,
       // A loop exit folds into what its last pass returned — see `RunPass.accumulations`.
       accumulations: def.loop === 'end' && iteration ? pass.accumulations : undefined,
       fetched,
@@ -2214,6 +2269,8 @@ export class Scheduler {
     ctx: EvalContext,
     run: {
       key: string
+      /** A pass of a loop region, whose next run starts again at the first element. */
+      inLoop: boolean
       accumulations: Map<string, Readonly<Record<string, Value>>> | undefined
       fetched: { at?: number }
       policy: CachePolicy | undefined
@@ -2287,33 +2344,12 @@ export class Scheduler {
       return 'failed'
     } finally {
       /*
-       * The preview dies with the run that made it, however that run ended.
-       *
-       * On success the real outputs are already in the cache and the preview is the same
-       * value one publish out of date. On an error or a cancel there is no result to show, and
-       * a partial scene left standing beside a `stale` badge is the "looks complete but isn't"
-       * failure this whole mechanism is arranged to avoid — the geometry is still in
-       * `geometryCache`, so the next run redraws it at once anyway.
+       * Ended on its own, ok or error: this run is the newest work on the node — a stopped one
+       * cannot get past its `throwIfAborted` — so whatever partial the node holds goes, whoever
+       * published it. A stopped run drops nothing (`previews`), except a loop's pass: the run
+       * replacing it starts again at the first element, so its next publish answers another.
        */
-      // Announced, not just deleted: on an error or a cancel nothing else will move, and a
-      // card drawing from this node's port would otherwise keep the dropped partial on screen.
-      /*
-       * **And everything derived from it — but only where there was something to derive from.**
-       * Each derived answer was computed from this node's partial, so each is about a value that
-       * has just stopped existing: on success the walk is already on its way to those nodes with
-       * the real inputs, and on a cancel there is nothing left for them to be a preview *of*.
-       * This is also what stops an in-flight derive, which is the half that matters — see
-       * `dropDerived`.
-       *
-       * Gated on this node having held a partial, because this `finally` runs for **every**
-       * node. Unconditional it would be a node settling anywhere in the graph dropping the chain
-       * under a node still streaming; that it cannot happen today rests on the walk running one
-       * node at a time, which is a premise of this file rather than of this line.
-       */
-      if (this.previews.delete(nodeId)) {
-        this.dropDerived()
-        this.host.onPreview?.()
-      }
+      if ((!signal.aborted || run.inLoop) && this.dropPartial(nodeId)) this.partialsDropped()
       // The entry above took a copy on success; on a failure or a cancel there is nothing to
       // caveat, and the error is the only thing worth reading.
       this.liveWarnings.delete(nodeId)

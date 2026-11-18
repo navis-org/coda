@@ -496,7 +496,9 @@ rule belongs to one area, its record is in that area's doc.
 - **A new run supersedes the walk, never the work.** A newer walk **adopts** an evaluation owned by
   its provenance key, a key-moving edit **retires** it (`retireMoved`), only Cancel stops all.
   `refreshStates` leaves a live `running` badge alone; a cheap pass during a Run goes through
-  `runFull` (`requestedFull`). Loops are excluded on purpose.
+  `runFull` (`requestedFull`). Loops are excluded on purpose. A partial stays until something
+  newer replaces it (a publish, a run ending on its own) or nothing is coming (Cancel, a node no
+  longer waiting); a stopped run drops nothing.
 - **A published partial crosses `cheap` node boundaries, and nothing derived is ever cached**
   (`derivePreviews`): an answer computed from half an input answers no provenance key. `cheap` is
   the only gate, a node already `ok` stops the walk, loops are excluded, and a derived run reports
