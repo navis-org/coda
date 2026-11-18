@@ -99,7 +99,19 @@ export interface RunClock {
    * here, because it says how much of a stage is already hidden behind another and therefore
    * whether attacking it would buy anything.
    */
-  report(run: { ends: number; patches: number }): string | undefined
+  report(run: { ends: number; patches: number }): TimingReport | undefined
+}
+
+/**
+ * The report in two lengths (user, 2026-11-18). `said` is the card's sentence: the wait, the two
+ * stages that took most of it, and the levers. `detail` is everything above — every stage with
+ * its shape and the network's rate a patch — for the browser console, where the reader who
+ * needs it (two browsers, 27 ms a patch against 98) can still find it, and the card stays a
+ * sentence a reader can act on.
+ */
+export interface TimingReport {
+  readonly said: string
+  readonly detail: string
 }
 
 /**
@@ -259,13 +271,21 @@ export function runClock(now: () => number = () => performance.now()): RunClock 
         overlap >= OVERLAP_WORTH_SAYING
           ? `, ${Math.round(100 * overlap)}% of it alongside something else`
           : ''
-      return (
-        `${plural(ends, 'end')} took ${(elapsed / 1000 / ends).toFixed(1)} s each. The stages ` +
-        `this node times come to ${(total / 1000 / ends).toFixed(1)} s of work an end` +
-        `${alongside}: ${named.join(', ')}. ` +
-        'Reading is `Chunk cache`; scoring patches is `Assess top` and the assessor you picked; ' +
-        'everything is fewer ends, which is a `Filter Table` above this node.'
-      )
+      const each = `${plural(ends, 'end')} took ${(elapsed / 1000 / ends).toFixed(1)} s each`
+      const most = [...spent]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 2)
+        .filter(([, ms]) => ms / total >= WORTH_NAMING)
+        .map(([stage, ms]) => `${stage} (${Math.round((100 * ms) / total)}%)`)
+      return {
+        said:
+          `${each}, mostly ${most.join(' and ')}. To speed this up, raise \`Chunk cache\`, ` +
+          'lower `Assess top`, or search fewer ends with a `Filter Table` above this node.',
+        detail:
+          `${each}. The stages this node times come to ` +
+          `${(total / 1000 / ends).toFixed(1)} s of work an end${alongside}, in ms: ` +
+          `${named.join(', ')}.`,
+      }
     },
   }
 }

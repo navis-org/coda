@@ -303,6 +303,17 @@ nothing; it should be left off there.
    nanometres), since each neuron is read at its own moment; "showed none" no longer names a
    materialization; the chunk-cache advice is left off a run where no end was measured
    (`reportOnRun`). Pinned in `scoreEnds.test.ts`.
+   **Reworded again, 2026-11-18 (user, on an outdated root asked for again).** Six warnings ran
+   into one paragraph, the "edited since" one offered the ⟳ (which reads a replaced root at its
+   last moment, the same answer), and every extended piece repeated Find Open Ends' "edited" and
+   "no row in the nucleus table". Now: a card's warnings are one a line (`Scheduler.warning`
+   joins with a newline, `.issue__text` is `pre-line`; `Scheduler.warnings` gives the list, which
+   a rerun chain passes on entry by entry); an outdated root is one sentence in both nodes
+   (`noLongerCurrent`: "… is no longer a current root: it was edited at 14:09 UTC on 17 November,
+   and its suggestions are from before that edit. To search the neuron as it is now, run Update
+   Root IDs above `Tips`."); a piece's two warnings about itself are dropped (`aboutTheNeuron`)
+   and any other names the piece; and the timing report is one sentence on the card
+   (`TimingReport.said`) with the per-stage split in the console (`detail`).
 5. **Docs**: both help pages, `datasets.md`'s note on which nodes follow the root, and a line in
    CLAUDE.md's SEAM section. **Done 2026-11-18**: `help/suggestMerges.md` ("Which moment is
    searched"), `help/openEnds.md` (the live nucleus read), `datasets.md` ("The SEAM nodes follow

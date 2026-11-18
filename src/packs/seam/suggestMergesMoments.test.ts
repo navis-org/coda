@@ -171,13 +171,24 @@ describe('the moment Suggest Merges searches each neuron at', () => {
     expect(readSearchedAt(String(recorded[0]![1])).moments.get(OLD)).toBe(KEPT + 60_001)
   })
 
-  it('says a neuron edited after its moment was searched at it, before the edit', async () => {
+  /**
+   * The user's case (2026-11-18): a root searched before, asked for again once outdated. One
+   * sentence, and Update Root IDs its only remedy — the ⟳ would read the replaced root at its
+   * last moment, the same answer again, so it is not offered.
+   */
+  it('says a neuron edited since is no longer current, and only Update Root IDs as the remedy', async () => {
     const edited = { made: KEPT - 60_000, last: KEPT + 10_000, current: false }
     lives.mockResolvedValueOnce({ lives: new Map([[OLD, edited]]), unknown: [] })
     const { warnings, moments } = ask(`${OLD}=2026-11-17T08:40:12.000Z`)
     expect((await moments).get(OLD)).toBe(KEPT)
-    expect(warnings.join(' ')).toMatch(
-      /searched at the moment in `Searched at`, before that edit/,
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toMatch(
+      new RegExp(
+        `^${OLD} is no longer a current root: it was edited at 08:40 UTC on 17 November` +
+          '(?: 2026)?, and its suggestions are from before that edit\\. To search the neuron as ' +
+          'it is now, run Update Root IDs above `Tips`\\.$',
+      ),
     )
+    expect(warnings[0]).not.toMatch(/⟳/)
   })
 })

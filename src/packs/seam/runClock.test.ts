@@ -29,11 +29,29 @@ const step = (tick: (ms: number) => void, ms: number, fail = false) => {
 }
 
 describe('the run clock', () => {
+  /**
+   * The card's sentence (user, 2026-11-18): the wait, the two stages that took most of it, and
+   * the levers. The per-stage shapes and the network's rate are `detail`, for the console.
+   */
+  it('says the wait and the two biggest stages in one sentence, the rest in the detail', async () => {
+    const { clock, tick } = fake()
+    await clock.around('reading the search box', step(tick, 40_000))()
+    await clock.around('running the network', step(tick, 30_000))()
+    await clock.around('measuring the pool', step(tick, 10_000))()
+    const { said, detail } = clock.report({ ends: 10, patches: 0 })!
+    expect(said).toBe(
+      '10 ends took 8.0 s each, mostly reading the search box (50%) and running the network ' +
+        '(38%). To speed this up, raise `Chunk cache`, lower `Assess top`, or search fewer ends ' +
+        'with a `Filter Table` above this node.',
+    )
+    expect(detail).toMatch(/measuring the pool 13%/)
+  })
+
   it('charges a wrapped step to its stage', async () => {
     const { clock, tick } = fake()
     await clock.around('measuring the pool', step(tick, 40_000))()
     await clock.around('reading the search box', step(tick, 30_000))()
-    const said = clock.report({ ends: 10, patches: 0 })!
+    const said = clock.report({ ends: 10, patches: 0 })!.detail
     expect(said).toMatch(/measuring the pool 57%/)
     expect(said).toMatch(/reading the search box 43%/)
   })
@@ -47,7 +65,7 @@ describe('the run clock', () => {
     await expect(
       clock.around('reading the patch box', step(tick, 70_000, true))(),
     ).rejects.toThrow()
-    expect(clock.report({ ends: 10, patches: 0 })).toMatch(/reading the patch box 100%/)
+    expect(clock.report({ ends: 10, patches: 0 })?.detail).toMatch(/reading the patch box 100%/)
   })
 
   /** The clock is moved as well as charged: `spend` names work that really took wall time. */
@@ -55,7 +73,7 @@ describe('the run clock', () => {
     const { clock, tick } = fake()
     tick(70_000)
     clock.spend('rebuilding the published tables', 70_000)
-    expect(clock.report({ ends: 10, patches: 0 })).toMatch(
+    expect(clock.report({ ends: 10, patches: 0 })?.detail).toMatch(
       /rebuilding the published tables 100%/,
     )
   })
@@ -72,7 +90,7 @@ describe('the run clock', () => {
     tick(70_000)
     clock.spend('reading the search box', 50_000)
     clock.spend('running the network', 50_000)
-    return clock.report({ ends: 10, patches: 0 })!
+    return clock.report({ ends: 10, patches: 0 })!.detail
   }
 
   it('states the wait and the work separately', async () => {
@@ -100,7 +118,7 @@ describe('the run clock', () => {
     await clock.around('running the network', step(tick, 35_000))()
     // A little wall clock that no stage claimed, as a real run always has.
     tick(4_000)
-    expect(clock.report({ ends: 10, patches: 0 })).not.toMatch(/alongside/)
+    expect(clock.report({ ends: 10, patches: 0 })?.detail).not.toMatch(/alongside/)
   })
 
   /** A minute. Shorter and the split is one cold end rather than a fact about the run. */
@@ -126,7 +144,7 @@ describe('the run clock', () => {
   it('states the cost of an end, not the cost of the run', async () => {
     const { clock, tick } = fake()
     await clock.around('measuring the pool', step(tick, 100_000))()
-    expect(clock.report({ ends: 25, patches: 0 })).toMatch(/25 ends took 4.0 s each/)
+    expect(clock.report({ ends: 25, patches: 0 })?.detail).toMatch(/25 ends took 4.0 s each/)
   })
 
   /**
@@ -151,7 +169,7 @@ describe('the run clock', () => {
     for (let i = 0; i < 25; i++) {
       await clock.around('cutting patches', step(tick, i < 5 ? 1_000 : 10_000))()
     }
-    const said = clock.report({ ends: 25, patches: 0 })!
+    const said = clock.report({ ends: 25, patches: 0 })!.detail
     expect(said).toMatch(/cutting patches 100% \(best 1000, median 10000/)
     // No rate: a patch count is the network's denominator and means nothing for a cut.
     expect(said).not.toMatch(/a patch\)/)
@@ -162,7 +180,7 @@ describe('the run clock', () => {
     const { clock, tick } = fake()
     await clock.around('measuring the pool', step(tick, 99_000))()
     await clock.around('pool sizes', step(tick, 1_000))()
-    const said = clock.report({ ends: 10, patches: 0 })!
+    const said = clock.report({ ends: 10, patches: 0 })!.detail
     expect(said).toMatch(/measuring the pool 99%/)
     expect(said).not.toMatch(/pool sizes/)
   })
@@ -176,7 +194,7 @@ describe('the run clock', () => {
   it('names what the network cost a patch, where it ran any', async () => {
     const { clock, tick } = fake()
     await clock.around('running the network', step(tick, 91_000))()
-    expect(clock.report({ ends: 10, patches: 1000 })).toMatch(
+    expect(clock.report({ ends: 10, patches: 1000 })?.detail).toMatch(
       /running the network 100% \(91 ms a patch\)/,
     )
   })
@@ -193,7 +211,7 @@ describe('the run clock', () => {
     const run = clock.around('running the network', step(tick, 30_000))
     await run()
     await clock.around('running the network', step(tick, 90_000))()
-    const said = clock.report({ ends: 2, patches: 2 })!
+    const said = clock.report({ ends: 2, patches: 2 })!.detail
     expect(said).toMatch(/60000 ms a patch\)/)
     expect(said).not.toMatch(/median/)
   })
@@ -213,7 +231,7 @@ describe('the run clock', () => {
     for (let i = 0; i < 25; i++) {
       await clock.around('running the network', step(tick, i < 5 ? 1_000 : 10_000))()
     }
-    const said = clock.report({ ends: 1, patches: 25 })!
+    const said = clock.report({ ends: 1, patches: 25 })!.detail
     expect(said).toMatch(/best 1000/)
     expect(said).toMatch(/median 10000/)
     expect(said).toMatch(/first fifth 1000 and last 10000/)
@@ -223,7 +241,7 @@ describe('the run clock', () => {
   it('names no rate where the network ran nothing', async () => {
     const { clock, tick } = fake()
     await clock.around('running the network', step(tick, 70_000))()
-    const said = clock.report({ ends: 10, patches: 0 })!
+    const said = clock.report({ ends: 10, patches: 0 })!.detail
     expect(said).toMatch(/running the network 100%/)
     expect(said).not.toMatch(/a patch/)
   })
@@ -232,7 +250,7 @@ describe('the run clock', () => {
   it('names what a reader can do about it', async () => {
     const { clock, tick } = fake()
     await clock.around('reading the search box', step(tick, 70_000))()
-    const said = clock.report({ ends: 10, patches: 0 })!
+    const said = clock.report({ ends: 10, patches: 0 })!.said
     expect(said).toMatch(/`Chunk cache`/)
     expect(said).toMatch(/`Assess top`/)
     expect(said).toMatch(/`Filter Table`/)
