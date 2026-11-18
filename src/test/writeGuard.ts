@@ -11,11 +11,14 @@
  * A test that stubs `fetch` replaces this, which is the point: a stub is not a server.
  *
  * The routes are every chunkedgraph route that writes (`isChunkedgraphEdit`, shared with the
- * sandbox fence) — not only the two Coda sends.
+ * sandbox fence) — not only the two Coda sends — and **every** request to the verdict log
+ * (`VERDICT_SERVER`, `src/data/verdictLog.ts`): a test's verdict would land in SEAM's calibration
+ * data, and even a challenge asks the lab's server for work.
  */
 
 import { afterAll, afterEach } from 'vitest'
 
+import { VERDICT_SERVER } from '../data/verdictServer'
 import { isChunkedgraphEdit, requestUrl } from './sandboxWrites'
 
 const attempts: string[] = []
@@ -24,6 +27,19 @@ const attempts: string[] = []
 export function takeWriteAttempts(): string[] {
   return attempts.splice(0)
 }
+
+/**
+ * The servers no test may reach, each with what it is. A new one is a row here, not another
+ * condition in the wrapper below.
+ */
+const NEVER_REACHED: readonly {
+  readonly what: string
+  readonly matches: (url: string) => boolean
+}[] = [
+  { what: 'a chunkedgraph edit endpoint', matches: isChunkedgraphEdit },
+  // A test's verdict would land in SEAM's calibration data.
+  { what: 'the verdict log', matches: (url) => url.startsWith(VERDICT_SERVER) },
+]
 
 /** Registered, so a fresh load of this module still recognises a wrapper an earlier one installed. */
 const GUARD = Symbol.for('coda.writeGuard')
@@ -38,9 +54,12 @@ export function installWriteGuard(): void {
     const real = globalThis.fetch
     const guarded = (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input)
-      if (isChunkedgraphEdit(url)) {
+      const server = NEVER_REACHED.find((one) => one.matches(url))
+      if (server) {
         attempts.push(url)
-        return Promise.reject(new Error(`A test reached a chunkedgraph edit endpoint: ${url}`))
+        return Promise.reject(
+          new Error(`A test reached a server Coda writes to (${server.what}): ${url}`),
+        )
       }
       return real(input, init)
     }
@@ -54,6 +73,6 @@ export function installWriteGuard(): void {
 function failIfTripped(): void {
   const tripped = takeWriteAttempts()
   if (tripped.length > 0) {
-    throw new Error(`A test reached a chunkedgraph edit endpoint: ${tripped.join(', ')}`)
+    throw new Error(`A test reached a server Coda writes to: ${tripped.join(', ')}`)
   }
 }

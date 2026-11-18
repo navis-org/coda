@@ -21,12 +21,18 @@ export function readStorage(name: string): string | undefined {
   }
 }
 
-/** Writing `undefined` removes the key, so "no value" has one representation rather than two. */
-export function writeStorage(name: string, value: string | undefined): void {
+/**
+ * Writing `undefined` removes the key, so "no value" has one representation rather than two.
+ * Whether it landed is returned, for the caller whose only copy it is (the verdict queue); every
+ * other caller keeps its value in memory and can ignore it.
+ */
+export function writeStorage(name: string, value: string | undefined): boolean {
   try {
-    if (value) window.localStorage?.setItem(name, value)
-    else window.localStorage?.removeItem(name)
+    if (value) window.localStorage.setItem(name, value)
+    else window.localStorage.removeItem(name)
+    return true
   } catch {
     // Storage disabled or full. The in-memory value still works for this session.
+    return false
   }
 }

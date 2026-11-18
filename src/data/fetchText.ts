@@ -20,15 +20,38 @@
  */
 
 /**
+ * Any other refusal, with its status and the body the server sent — for a caller whose next step
+ * depends on which refusal it was (the verdict log: an expired session is answered by a new one,
+ * a bad record by dropping it, a busy server by waiting). The message is the one every caller
+ * already reads.
+ */
+export class StatusError extends Error {
+  override readonly name: string = 'StatusError'
+  readonly status: number
+  readonly body: string
+
+  constructor(message: string, status: number, body: string) {
+    super(message)
+    this.status = status
+    this.body = body
+  }
+}
+
+/**
  * A 404, as a type rather than a sentence.
  *
  * For a caller to whom *absent* is an answer rather than a failure: NeuronBridge's bucket is keyed
  * by body id, so a neuron it has no matches for is a missing object, and the only other way to
  * tell that from a dead host would be matching on the message. The message is unchanged, so every
- * caller that only reads it sees exactly what it did before.
+ * caller that only reads it sees exactly what it did before. A `StatusError` too, so a caller that
+ * reads the server's own sentence finds it here as well.
  */
-export class NotFoundError extends Error {
+export class NotFoundError extends StatusError {
   override readonly name = 'NotFoundError'
+
+  constructor(message: string, body = '') {
+    super(message, 404, body)
+  }
 }
 
 /** What a caller knows about the request: the sentences for its failures, and how to make it. */
@@ -78,15 +101,25 @@ export async function fetchText(url: string, options: FetchTextOptions = {}): Pr
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw unreachable(url, options.hint)
   }
+  if (response.ok) return response.text()
+  let body = ''
+  try {
+    body = await response.text()
+  } catch (error) {
+    // A cancellation stays one; any other body that cannot be read adds nothing to the status.
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+  }
   if (response.status === 404) {
     throw new NotFoundError(
       options.notFound
         ? `${url} returned 404. ${options.notFound}`
         : `${url} returned 404 ${response.statusText}`.trim(),
+      body,
     )
   }
-  if (!response.ok) {
-    throw new Error(`${url} returned ${response.status} ${response.statusText}`.trim())
-  }
-  return response.text()
+  throw new StatusError(
+    `${url} returned ${response.status} ${response.statusText}`.trim(),
+    response.status,
+    body,
+  )
 }
