@@ -90,7 +90,7 @@ export interface Candidate {
    * asking. Coarse by construction: a chunk is a fixed box of the volume, so small things are
    * one chunk and the number only separates them further up.
    *
-   * Absent on a `seam:suggestions` table, whose parquet carries no chunk count — see `sizeOf`.
+   * Absent where the table carries none — see `sizeOf`.
    */
   readonly l2Chunks: number | undefined
   readonly minDistUm: number | undefined
@@ -274,6 +274,8 @@ export const tipKey = (neuronId: string, endUid: number) => `${neuronId}|${endUi
 function candidateLists(table: TableValue | undefined): Map<string, Candidate[]> {
   const lists = new Map<string, Candidate[]>()
   if (!table) return lists
+  // One unit per table (`sizeOf`): where any row has a chunk count, a row without one has no size.
+  const chunked = table.data['n_l2']?.some((count) => typeof count === 'number') === true
   for (let i = 0; i < table.length; i++) {
     const endUid = numberAt(table, 'end_uid', i)
     const neuronId = text(table, ID_COLUMN_NAME, i)
@@ -285,7 +287,7 @@ function candidateLists(table: TableValue | undefined): Map<string, Candidate[]>
       candidateId,
       rank: numberAt(table, 'rank', i) ?? held.length + 1,
       geoRank: numberAt(table, 'geo_rank', i),
-      volumeUm3: numberAt(table, 'vol_um3', i),
+      volumeUm3: chunked ? undefined : numberAt(table, 'vol_um3', i),
       l2Chunks: numberAt(table, 'n_l2', i),
       minDistUm: numberAt(table, 'min_dist_um', i),
       contactNm: pointAt(table, ['contact_x', 'contact_y', 'contact_z'], i),
@@ -340,14 +342,14 @@ export interface CandidateSize {
  *
  * **Two quantities, and the card says which it is showing**, because they are not comparable: a
  * chunk count is of the whole object and a volume is of the part inside the search box, and the
- * numbers differ by orders of magnitude. `seam:suggestMerges` publishes `n_l2` and that is what
- * "size" means; a `seam:suggestions` set carries no chunk count — SEAM's own
- * `candidates.parquet` does not publish one — and falls back to the volume rather than losing
- * the control entirely.
+ * numbers differ by orders of magnitude. `n_l2` is what "size" means — `seam:suggestMerges`
+ * publishes it, and so does a `seam:suggestions` set from rv4 on; a set made before carries no
+ * chunk count and falls back to the volume rather than losing the control entirely.
  *
- * One table is one producer, so within a queue every row answers in the same unit and a sort is
- * never comparing the two. What a *reader* must not do is carry a number from one to the other,
- * which is why every row prints its unit.
+ * **One unit per table**, decided where the candidates are read (`candidateLists`): a table with
+ * any chunk count drops the volume from every row, so a row missing its count has no size rather
+ * than one in µm³, and a sort or `Min size` never compares the two. What a *reader* must not do
+ * is carry a number from one table to the other, which is why every row prints its unit.
  */
 export function sizeOf(candidate: Candidate | undefined): CandidateSize | undefined {
   if (!candidate) return undefined
@@ -360,8 +362,8 @@ export function sizeOf(candidate: Candidate | undefined): CandidateSize | undefi
  * A candidate's size as a row prints it, unit and all — the card's queue and Submit's overlay
  * alike, so one candidate never reads two ways.
  *
- * **Never a bare number.** `seam:suggestMerges` publishes a level-2 chunk count, which is of the
- * whole object; a published set carries only `vol_um3`, which is the part inside the search box.
+ * **Never a bare number.** A level-2 chunk count is of the whole object; `vol_um3`, `sizeOf`'s
+ * fallback, is the part inside the search box.
  * The two differ by orders of magnitude and answer different questions, so a row that printed
  * `14` would be the one place a reader could confuse them — including when typing a number into
  * `Min size`, which reads whichever the table has.
@@ -1128,7 +1130,7 @@ export function judgedParams(
  */
 export const LARGE_PIECE_CHUNKS = 41
 
-/** Whether a piece is large by its chunk count; a size in µm³ (a published set) never is. */
+/** Whether a piece is large by its chunk count; a size in µm³ (`sizeOf`'s fallback) never is. */
 export function isLargePiece(candidate: Candidate | undefined): boolean {
   const size = sizeOf(candidate)
   return size?.of === 'chunks' && size.value >= LARGE_PIECE_CHUNKS

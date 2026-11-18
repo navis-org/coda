@@ -75,7 +75,7 @@ The number on the left is `q`, SEAM's score for the tip's **first** candidate. T
 
 > [!NOTE]
 > **Not the same as `vol_um3`**
-> The table also carries `vol_um3`, which is the candidate's voxels *inside the 6 µm search box* — how much of the piece is near the tip rather than how big the piece is. A long neurite passing through counts only for the part in view. A set from [Merge Suggestions](#seam:suggestions) carries no chunk count, and there the rows fall back to µm³ and say so; the two differ by orders of magnitude, so a number that worked in `Min size` on one will not mean the same on the other.
+> The table also carries `vol_um3`, which is the candidate's voxels *inside the 6 µm search box* — how much of the piece is near the tip rather than how big the piece is. A long neurite passing through counts only for the part in view. Where the candidates carry no chunk count (`n_l2` — a [Merge Suggestions](#seam:suggestions) set from before rv4), the rows fall back to µm³ and say so; the two differ by orders of magnitude, so a number that worked in `Min size` on one will not mean the same on the other.
 
 `conf` there is the candidate's own score, `p_tip × p_cand`: how likely something belongs at this tip at all, times how much of that belongs to *this* piece. For a first candidate it is exactly the `q` SEAM's cutoff is applied to.
 

@@ -934,6 +934,13 @@ export interface TableFileColumn {
   readonly overflow?: true
   /** A timestamp or date, read as ISO text. */
   readonly time?: true
+  /**
+   * The file gives the column no type, and every value is empty: parquet's `NULL` logical type,
+   * which pandas writes for a column holding nothing but `None`. `dtype` is the storage's, a
+   * placeholder rather than a statement, so a reader that declares its own columns may take it
+   * as any type, all nulls.
+   */
+  readonly untyped?: true
 }
 
 /**

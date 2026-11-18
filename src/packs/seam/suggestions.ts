@@ -30,8 +30,10 @@
  *
  * ## Read-only
  *
- * SEAM suggests; the proofreader makes the merge with their own tools and their own token. This
- * node fetches files over HTTP and nothing else.
+ * SEAM suggests; the proofreader decides. This node fetches files over HTTP and nothing else. The
+ * merges are made downstream, by `seam:review`'s Submit with the reader's own token — the same
+ * path for a published set as for a live Suggest Merges run (`docs/seam-merge-plan.md`), which
+ * this node is kept out of reach of (`importGraph.test.ts`).
  */
 
 import { packNode } from '../../core/registry'
@@ -190,8 +192,8 @@ export const suggestionsNode = packNode({
   guide:
     'Reads SEAM’s merge candidates for a set of neurons from a published suggestion set. Each ' +
     'row is a tip, with the piece SEAM would merge into it, how likely that is to be right, and ' +
-    'whether it clears SEAM’s own cutoff. Nothing is computed here and nothing is written: the ' +
-    'merge is the proofreader’s, in the Neuroglancer card.',
+    'whether it clears SEAM’s own cutoff. Nothing is computed here and nothing is written: wire ' +
+    'both tables into Review Suggestions to work through them and submit the merges you accept.',
   cost: 'expensive',
 
   inputs: [{ id: 'layers', label: 'Layers', type: T.layers(), required: false }],

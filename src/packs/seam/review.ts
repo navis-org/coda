@@ -277,7 +277,7 @@ export const reviewNode = packNode({
       default: '',
       presentational: true,
       placeholder: '(any)',
-      help: 'List only tips whose first candidate is at least this big. Size is the candidate’s **level-2 chunk count** — the chunkedgraph’s own decomposition of the whole object, wherever it reaches — which is the best proxy there is for whether a piece is a fragment or part of a neuron. It is coarse: anything small is one chunk, and the number only separates pieces further up. A published set from Merge Suggestions carries no chunk count, and there this falls back to µm³ of the candidate *inside the search box*; every row says which of the two it is showing.',
+      help: 'List only tips whose first candidate is at least this big. Size is the candidate’s **level-2 chunk count** — the chunkedgraph’s own decomposition of the whole object, wherever it reaches — which is the best proxy there is for whether a piece is a fragment or part of a neuron. It is coarse: anything small is one chunk, and the number only separates pieces further up. Where the candidates carry no chunk count (`n_l2`; published sets before rv4), this falls back to µm³ of the candidate *inside the search box*; every row says which of the two it is showing.',
     },
     /*
      * `shownOnly` ("Only SEAM's shown set") was removed (user, 2026-11-18). Per tip `shown` is `q`
@@ -367,8 +367,8 @@ export const reviewNode = packNode({
       ['minConfidence', '`Min confidence` is a chance, so it is between 0 and 1'],
       /*
        * **No unit in the sentence**, because the unit is the table's and not this param's.
-       * A `seam:suggestMerges` run publishes `n_l2` and the size is a count of level-2 chunks;
-       * a published `seam:suggestions` set carries `vol_um3` and it is a volume. Naming either
+       * Where the candidates carry `n_l2` the size is a count of level-2 chunks; where they do
+       * not (a published set from before rv4) it is `vol_um3`, a volume. Naming either
        * here is a sentence that is wrong half the time, and the check does not need it — what
        * is being refused is a negative size, which is impossible in both units.
        */
