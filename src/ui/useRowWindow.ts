@@ -85,6 +85,42 @@ export function scrollToShow(
   return Math.max(0, Math.round(top - (viewport - rowHeight) / 2))
 }
 
+/** How far down the previous rows to look for one still listed to hold the view by. */
+const ANCHOR_SEARCH = 50
+
+/**
+ * Where to scroll so the list holds still when its rows change under a reader — or `undefined`
+ * where nothing need move. The row at the top of the view before (`prev`, keys in list order)
+ * keeps its place after (`next`); where it has gone, the first after it that is still listed.
+ * `above` counts the rows that arrived above it, now out of view: what the "new above" note says.
+ *
+ * Done by hand because the browser's own scroll anchoring cannot: the rows are placed by index
+ * behind spacers, so an insertion above moves no element the browser could anchor to.
+ */
+export function anchoredScroll(
+  prev: readonly string[],
+  next: readonly string[],
+  scrollTop: number,
+  rowHeight: number,
+  /** Whether a row is new to the reader; by default, a key `prev` did not have. */
+  isNew?: (key: string) => boolean,
+): { scrollTop: number; above: number } | undefined {
+  if (rowHeight <= 0 || prev.length === 0) return undefined
+  const first = Math.min(prev.length - 1, Math.floor(scrollTop / rowHeight))
+  const at = new Map(next.map((key, index) => [key, index]))
+  for (let i = first; i < prev.length && i < first + ANCHOR_SEARCH; i++) {
+    const j = at.get(prev[i]!)
+    if (j === undefined) continue
+    if (j === i) return undefined
+    const seen = new Set(prev)
+    const fresh = isNew ?? ((key: string) => !seen.has(key))
+    let above = 0
+    for (let k = 0; k < j; k++) if (fresh(next[k]!)) above++
+    return { scrollTop: Math.max(0, scrollTop + (j - i) * rowHeight), above }
+  }
+  return undefined
+}
+
 export function useRowWindow(count: number) {
   const [list, setList] = useState<HTMLElement | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -138,11 +174,35 @@ export function useRowWindow(count: number) {
     [list, rowHeight, viewport],
   )
 
+  /**
+   * Hold the view still as the rows change from `prev` to `next` (`anchoredScroll`): called in a
+   * layout effect, so the list is moved before it is painted where it would have jumped. What
+   * arrived above the reader's place, now out of view, comes back.
+   */
+  const keepPlace = useCallback(
+    (
+      prev: readonly string[],
+      next: readonly string[],
+      isNew?: (key: string) => boolean,
+    ): number => {
+      if (!list) return 0
+      const moved = anchoredScroll(prev, next, list.scrollTop, rowHeight, isNew)
+      if (!moved) return 0
+      list.scrollTop = moved.scrollTop
+      setScrollTop(moved.scrollTop)
+      return moved.above
+    },
+    [list, rowHeight],
+  )
+
   return {
     ref: setList,
     onScroll,
     toTop,
     toRow,
+    keepPlace,
+    /** Whether the list is scrolled to its very top. */
+    atTop: scrollTop <= 0,
     rows: rowWindow(count, rowHeight, scrollTop, viewport || FALLBACK_VIEWPORT_PX),
   }
 }
