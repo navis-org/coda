@@ -303,6 +303,21 @@ export const reviewNode = packNode({
       presentational: true,
       help: `Extend each piece as you accept it, without pressing Extend: its own open ends are searched and listed beneath it. A large piece — ${LARGE_PIECE_CHUNKS} level-2 chunks or more — is left to its Extend button, since searching one can take minutes. Switching this on starts nothing: pieces accepted earlier keep their Extend button.`,
     },
+    /*
+     * The reader's floor for Auto-extend (user, 2026-11-19): a first candidate is taken only where
+     * SEAM's cutoff passes it **and** its `q` is at least this, so it can only raise the bar. Text,
+     * as `Min confidence` is, so empty means the default — SEAM's cutoff alone. **Data**: it goes
+     * to the search in `Extended` (`ExtendPlan.autoMinQ`), but only while an Auto-extend is live,
+     * so setting it with none pressed re-runs nothing.
+     */
+    {
+      id: 'autoMinQ',
+      kind: 'string',
+      label: 'Auto-extend min q',
+      default: '',
+      placeholder: 'SEAM’s cutoff',
+      help: 'The least `q` Auto-extend accepts a candidate at. Empty is SEAM’s own cutoff (0.159 for the runs Suggest Merges makes, 0.118 for SEAM’s published sets); a higher number makes Auto-extend take fewer, surer pieces. A number below the cutoff changes nothing, since the cutoff still applies. Changing it while an Auto-extend is running grows the tree again by the new rule; pieces it no longer takes are no longer accepted.',
+    },
     {
       id: 'minConfidence',
       kind: 'string',
@@ -423,11 +438,12 @@ export const reviewNode = packNode({
        * is being refused is a negative size, which is impossible in both units.
        */
       ['minSize', '`Min size` is a size, so it is not negative'],
+      ['autoMinQ', '`Auto-extend min q` is a chance, so it is between 0 and 1'],
     ] as const) {
       const text = String(ctx.params[id]).trim()
       if (!text) continue
       const value = Number(text)
-      const ok = id === 'minConfidence' ? value >= 0 && value <= 1 : value >= 0
+      const ok = id === 'minSize' ? value >= 0 : value >= 0 && value <= 1
       if (!Number.isFinite(value) || !ok) issues.push(`${what} — not “${text}”.`)
     }
     return issues

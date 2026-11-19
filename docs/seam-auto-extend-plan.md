@@ -138,6 +138,25 @@ Any other verdict takes the press out with the pair. Stopping its Auto-extend (`
 with no verdict and no press, so not accepted; `Extend` from the menu writes the reader's accept,
 as it does for any unjudged pair.
 
+## Auto-extend min q (user, 2026-11-19)
+
+The reader's own floor on `q`, over SEAM's cutoff: `autoTakes(first, minQ)` takes a first candidate
+only where it is `shown` **and** `q >= minQ`, so the floor can raise the bar and never lower it (a
+candidate with no `q` is not taken under a floor). One param on the card, `autoMinQ` — text, as
+`Min confidence` is, empty being SEAM's cutoff alone (`autoMinQOf`) — and one rule on both sides:
+
+- **The search** is told it in `Extended`'s `auto_min_q` column, the same on every row
+  (`ExtendPlan.autoMinQ`, `extendPlanOf`), and applies it in `firstsOf`.
+- **The card** grows its tree by the plan's (`reviewGrowth` → `autoFirsts(queue, plan.autoMinQ)`),
+  so the two trees cannot disagree, and reads the param itself for what a press *would* take
+  (`autoOffered(queue, minQ)`): the refusals it writes down, the menu, `Auto-extend listed`.
+- **Sent only while an Auto-extend is live** (`PlanTexts.minQ`), as the refusals are: setting it with
+  none pressed re-keys no search. Changing it under a live one re-runs the search, and the tree is
+  grown afresh by the new rule; pieces it no longer takes leave with what lies beyond them.
+
+Not checked at the node: no test drives the search's own Auto-extend (none did before either); the
+plan's round trip and the card's growth are tested, and the search's change is the one call.
+
 ## Known, and left
 
 - **The wait is not priced** for pieces Auto-extend has yet to find. `warnOverWait` counts what is

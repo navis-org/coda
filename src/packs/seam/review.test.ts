@@ -307,7 +307,12 @@ describe('what is extended', () => {
       string,
       { schema?: TableSchema }
     >
-    expect(columnNames(out['extended']!.schema!)).toEqual(['parent', 'piece', 'mode'])
+    expect(columnNames(out['extended']!.schema!)).toEqual([
+      'parent',
+      'piece',
+      'mode',
+      'auto_min_q',
+    ])
   })
 
   it('publishes the pairs that are asked for and still accepted', async () => {

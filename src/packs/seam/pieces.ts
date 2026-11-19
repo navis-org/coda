@@ -101,11 +101,16 @@ export const EXTENDED_PORT = 'extended'
  * `refused` for a pair the reader gave a verdict other than accept — which Auto-extend must not
  * take, and which is sent only while an Auto-extend is live (`docs/seam-auto-extend-plan.md`).
  * A table without the column is every row `extend`, as before it existed.
+ *
+ * `auto_min_q` is the reader's own floor for Auto-extend (`ExtendPlan.autoMinQ`), the same on every
+ * row and written only while an Auto-extend is live — as the refusals are — so changing it with
+ * none to apply it to re-keys no search. Empty, or a table without it, is SEAM's cutoff alone.
  */
 export const EXTENDED_FIELDS: readonly Field[] = [
   field('parent', 'parent', 'str'),
   field('piece', 'piece', 'str'),
   field('mode', 'mode', 'str'),
+  field('auto_min_q', 'auto_min_q', 'f64'),
 ]
 
 type ExtendMode = 'extend' | 'auto' | 'refused'
@@ -122,6 +127,11 @@ export interface ExtendPlan {
   readonly roots: ReadonlySet<string>
   /** Pairs, as `parent/piece`, that Auto-extend must not accept: the reader said otherwise. */
   readonly refused: ReadonlySet<string>
+  /**
+   * The least `q` Auto-extend takes a first candidate at, on top of SEAM's cutoff (`autoTakes`):
+   * the reader's to raise (user, 2026-11-19). Undefined is SEAM's cutoff alone.
+   */
+  readonly autoMinQ?: number | undefined
 }
 
 /** The plan as the table `seam:review` publishes — the one writer of that shape. */
@@ -135,6 +145,7 @@ export function extendedTable(plan: ExtendPlan): TableValue {
       ...plan.pairs.map((pair): ExtendMode => (plan.roots.has(pair.piece) ? 'auto' : 'extend')),
       ...refused.map((): ExtendMode => 'refused'),
     ],
+    auto_min_q: rows.map(() => plan.autoMinQ ?? null),
   })
 }
 
@@ -152,6 +163,10 @@ export function extendPlanOf(value: Value | undefined): ExtendPlan {
   const parents = value.data['parent'] ?? []
   const pieces = value.data['piece'] ?? []
   const modes = value.data['mode']
+  // The same on every row; a cell that is no chance is SEAM's cutoff alone.
+  const floor = (value.data['auto_min_q'] ?? []).find(
+    (cell): cell is number => typeof cell === 'number' && cell >= 0 && cell <= 1,
+  )
   const seen = new Set<string>()
   for (let i = 0; i < value.length; i++) {
     const parent = idText(parents[i] ?? null)
@@ -171,7 +186,7 @@ export function extendPlanOf(value: Value | undefined): ExtendPlan {
     pairs.push({ parent, piece })
     if (mode === 'auto') roots.add(piece)
   }
-  return { pairs, roots, refused }
+  return { pairs, roots, refused, ...(floor === undefined ? {} : { autoMinQ: floor }) }
 }
 
 /**
@@ -196,15 +211,23 @@ export const AUTO_DEPTH = 10
  * its finished ends and by the card over the published rows, so the two grow the same tree.
  *
  * SEAM's own cutoff (`shown`, and only an explicit `true`: a run with no assessor has no cutoff),
- * not an organelle, not large, and a real object.
+ * and the reader's floor on `q` where one is set (`ExtendPlan.autoMinQ`) — which can only raise
+ * the bar, since the cutoff still applies under it — not an organelle, not large, and a real
+ * object.
  */
-export function autoTakes(first: {
-  readonly shown: boolean | null | undefined
-  readonly organelle: boolean | null | undefined
-  readonly l2Chunks: number | null | undefined
-  readonly id: string
-}): boolean {
+export function autoTakes(
+  first: {
+    readonly shown: boolean | null | undefined
+    /** SEAM's `q` for the tip: the number its cutoff is a value of. */
+    readonly q: number | null | undefined
+    readonly organelle: boolean | null | undefined
+    readonly l2Chunks: number | null | undefined
+    readonly id: string
+  },
+  minQ?: number,
+): boolean {
   if (first.shown !== true || first.organelle === true) return false
+  if (minQ !== undefined && !(typeof first.q === 'number' && first.q >= minQ)) return false
   if (typeof first.l2Chunks === 'number' && first.l2Chunks >= LARGE_PIECE_CHUNKS) return false
   return isNodeId(first.id)
 }
