@@ -1587,12 +1587,17 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
       // The first candidate's cells as the tables publish them (`searchCell`).
       const organelle = searchCell(end.columns, 'organelle', at)
       const l2Chunks = searchCell(end.columns, 'n_l2', at)
-      const takes = autoTakes({
-        shown: scores?.tip.shown,
-        organelle: typeof organelle === 'boolean' ? organelle : null,
-        l2Chunks: typeof l2Chunks === 'number' ? l2Chunks : null,
-        id,
-      })
+      const takes = autoTakes(
+        {
+          shown: scores?.tip.shown,
+          q: scores?.tip.q,
+          organelle: typeof organelle === 'boolean' ? organelle : null,
+          l2Chunks: typeof l2Chunks === 'number' ? l2Chunks : null,
+          id,
+        },
+        // The reader's floor, as the card applies it (`autoFirsts`): one tree on both sides.
+        extendPlan.autoMinQ,
+      )
       return takes ? [id] : []
     })
   /** The pieces the run takes, in the plain order — the book's too. */

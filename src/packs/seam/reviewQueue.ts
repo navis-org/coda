@@ -1177,6 +1177,23 @@ export interface PlanTexts {
    * told: to it they are presses like any other.
    */
   readonly taken: string
+  /**
+   * The reader's floor on `q` for Auto-extend (`autoMinQOf`), as text — and empty while no
+   * Auto-extend is live, as the refusals are, so changing it then re-keys no search.
+   */
+  readonly minQ: string
+}
+
+/**
+ * The `Auto-extend min q` param as a floor: a chance, `0` to `1`, or undefined — SEAM's cutoff
+ * alone — where it is empty or not a chance (`validate` says which). Text, as Coda's other
+ * optional limits are, so an empty field can mean "the default" (user, 2026-11-19).
+ */
+export function autoMinQOf(raw: unknown): number | undefined {
+  const text = String(raw ?? '').trim()
+  if (text === '') return undefined
+  const value = Number(text)
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined
 }
 
 export function planTexts(
@@ -1197,20 +1214,24 @@ export function planTexts(
           const said = stored.get(key)
           return said !== undefined && said !== 'accept'
         })
+  const minQ = roots.length === 0 ? undefined : autoMinQOf(params['autoMinQ'])
   return {
     extend: encodeExtend(keys),
     autoRoots: encodeExtend(roots),
     refused: encodeExtend(refused),
     taken: encodeExtend(taken),
+    minQ: minQ === undefined ? '' : String(minQ),
   }
 }
 
 /** The plan the texts say. */
 export function planOfTexts(texts: Omit<PlanTexts, 'taken'>): ExtendPlan {
+  const autoMinQ = autoMinQOf(texts.minQ)
   return {
     pairs: pairsOf(decodeExtend(texts.extend)),
     roots: new Set(pairsOf(decodeExtend(texts.autoRoots)).map((pair) => pair.piece)),
     refused: decodeExtend(texts.refused),
+    ...(autoMinQ === undefined ? {} : { autoMinQ }),
   }
 }
 
@@ -1232,25 +1253,33 @@ export function extendPlanFrom(
  * tree the search grew. Only searched ends of the piece in its own neuron, in its tips' order.
  * The queue is grouped on the first call: with no Auto-extend live there is none.
  */
-export function autoFirsts(queue: readonly QueueTip[]): (piece: Piece) => string[] {
+export function autoFirsts(
+  queue: readonly QueueTip[],
+  /** The reader's floor on `q` (`ExtendPlan.autoMinQ`). */
+  minQ?: number,
+): (piece: Piece) => string[] {
   let byPiece: Map<string, QueueTip[]> | undefined
   return (piece) =>
     ((byPiece ??= groupBy(queue, (tip) => tip.neuronId)).get(piece.id) ?? []).flatMap((tip) => {
-      const first = tip.seed === piece.seed ? autoFirstOf(tip) : undefined
+      const first = tip.seed === piece.seed ? autoFirstOf(tip, minQ) : undefined
       return first === undefined ? [] : [first]
     })
 }
 
 /** The first candidate Auto-extend would take at a tip, where it would (`autoTakes`). */
-function autoFirstOf(tip: QueueTip): string | undefined {
+function autoFirstOf(tip: QueueTip, minQ: number | undefined): string | undefined {
   const first = tip.candidates[0]
   if (tip.junction || tip.search !== 'done' || !first) return undefined
-  const takes = autoTakes({
-    shown: tip.cleared,
-    organelle: first.organelle,
-    l2Chunks: first.l2Chunks,
-    id: first.candidateId,
-  })
+  const takes = autoTakes(
+    {
+      shown: tip.cleared,
+      q: tip.q,
+      organelle: first.organelle,
+      l2Chunks: first.l2Chunks,
+      id: first.candidateId,
+    },
+    minQ,
+  )
   return takes ? first.candidateId : undefined
 }
 
@@ -1259,10 +1288,14 @@ function autoFirstOf(tip: QueueTip): string | undefined {
  * refusals to. `growAuto` asks a refusal only of such a pair, so a reject of anything else changes
  * no tree, and with this the card rebuilds none for it (100 ms a click at two thousand tips).
  */
-export function autoOffered(queue: readonly QueueTip[]): ReadonlySet<string> {
+export function autoOffered(
+  queue: readonly QueueTip[],
+  /** The reader's floor on `q` (`autoMinQOf`), whether or not an Auto-extend is live yet. */
+  minQ?: number,
+): ReadonlySet<string> {
   const out = new Set<string>()
   for (const tip of queue) {
-    const first = autoFirstOf(tip)
+    const first = autoFirstOf(tip, minQ)
     if (first !== undefined) out.add(verdictKey(tip.neuronId, first))
   }
   return out
@@ -1271,7 +1304,11 @@ export function autoOffered(queue: readonly QueueTip[]): ReadonlySet<string> {
 /** The tree the card lists: every neuron's pieces, with what Auto-extend took grown on. */
 export function reviewGrowth(queue: readonly QueueTip[], plan: ExtendPlan): AutoGrowth {
   // The neurons are the queue's seeds, in table order.
-  return growAuto(plan, [...new Set(queue.map((tip) => tip.seed))], autoFirsts(queue))
+  return growAuto(
+    plan,
+    [...new Set(queue.map((tip) => tip.seed))],
+    autoFirsts(queue, plan.autoMinQ),
+  )
 }
 
 /**
@@ -1734,7 +1771,8 @@ export function extendPress(at: {
 
 /** What Auto-extend does, said wherever it is offered or reported. */
 const AUTO_EXTEND_RULE =
-  'Auto-extend accepts the first candidate of each end that clears SEAM’s cutoff, and extends ' +
+  'Auto-extend accepts the first candidate of each end that clears SEAM’s cutoff — and ' +
+  '`Auto-extend min q`, where set — and extends ' +
   `it in turn, up to ${AUTO_DEPTH} layers out. A candidate of ${LARGE_PIECE_CHUNKS} level-2 ` +
   'chunks or more, or flagged as an organelle, is not taken.'
 

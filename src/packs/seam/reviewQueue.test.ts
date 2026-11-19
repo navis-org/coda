@@ -1984,6 +1984,44 @@ describe('Auto-extend, as the card reads it', () => {
     expect([...autoOffered(all)].sort()).toEqual(['100/201', '201/301', '301/402'])
   })
 
+  /** `Auto-extend min q` (user, 2026-11-19): a floor on `q` the reader raises over SEAM's cutoff. */
+  describe('with the reader’s floor', () => {
+    // The fixture's tips, with SEAM's `q` for each: 201's end towards 301 is the weak one.
+    const Q = [0.6, null, 0.3, 0.7, 0.2, null, 0.9, 0.5]
+    const scored = buildQueue(
+      makeTable(tableSchema(...TIPS.schema.columns, column('q', 'f64')), {
+        ...TIPS.data,
+        q: Q,
+      }),
+      CANDIDATES,
+    )
+
+    it('offers and grows only what clears it', () => {
+      expect([...autoOffered(scored, 0.4)].sort()).toEqual(['100/201', '301/402'])
+      const params = { ...PRESSED, autoMinQ: '0.4' }
+      const plan = extendPlanFrom(params, decodeVerdicts(params.verdicts))
+      expect(plan.autoMinQ).toBe(0.4)
+      // 301 falls below it, so nothing beyond 201 is taken — 402 included.
+      expect(reviewGrowth(scored, plan).tree.map((piece) => piece.id)).toEqual(['201'])
+      // Empty is SEAM's cutoff alone: the tree as before.
+      const plain = extendPlanFrom(PRESSED, decodeVerdicts(PRESSED.verdicts))
+      expect(reviewGrowth(scored, plain).tree.map((piece) => piece.id)).toEqual([
+        '201',
+        '301',
+        '402',
+      ])
+    })
+
+    it('goes to the search only while an Auto-extend is live, so setting it re-keys nothing else', () => {
+      const stored = decodeVerdicts(PRESSED.verdicts)
+      expect(planTexts({ ...PRESSED, autoMinQ: '0.4' }, stored).minQ).toBe('0.4')
+      expect(planTexts({ ...PRESSED, autoRoots: '', autoMinQ: '0.4' }, stored).minQ).toBe('')
+      // Not a chance: SEAM's cutoff alone (`validate` says why).
+      expect(planTexts({ ...PRESSED, autoMinQ: '2' }, stored).minQ).toBe('')
+      expect(planTexts({ ...PRESSED, autoMinQ: 'high' }, stored).minQ).toBe('')
+    })
+  })
+
   /** A reject of a pair it could take moves the search's key; a reject of anything else must not. */
   it('writes a refusal down only for a pair it could take, and keeps it with the verdict', () => {
     const at = (neuron: string, end: number) =>

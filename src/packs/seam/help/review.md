@@ -160,6 +160,8 @@ Auto-extend does not accept:
 
 It needs SEAM's cutoff, so Suggest Merges must have an `Assessor`. Without one the menu item is greyed out.
 
+**`Auto-extend min q`** raises the bar. Empty, Auto-extend takes what clears SEAM's cutoff; set to a number, it takes a first candidate only where its `q` is at least that as well — `0.4`, say, for fewer and surer pieces. A number below the cutoff changes nothing, since the cutoff still applies. Changing it while an Auto-extend is running grows the tree again by the new rule: pieces it no longer takes, and everything beyond them, come off the list, and pieces you accepted yourself stay. `Auto-extend listed` counts by it too.
+
 The pieces it accepts are listed like any other, with an `auto` tag, and the footer counts them (`12 by Auto-extend`). Their Extend button shows how far their search has got and cannot be pressed. To stop extending them, change the piece you chose Auto-extend on.
 
 - **Accept** on an `auto` row makes the verdict your own. Nothing else changes.

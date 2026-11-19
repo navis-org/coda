@@ -74,6 +74,7 @@ import {
   AUTO_LISTED_HELP,
   AUTO_REJECT_NOTE,
   autoJudged,
+  autoMinQOf,
   autoOffered,
   autoUnavailable,
   decodeExtend,
@@ -235,22 +236,40 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           extend: node.params.extend,
           autoRoots: node.params.autoRoots,
           autoRefused: node.params.autoRefused,
+          autoMinQ: node.params.autoMinQ,
         },
         stored,
       ),
-    [node.params.extend, node.params.autoRoots, node.params.autoRefused, stored],
+    [
+      node.params.extend,
+      node.params.autoRoots,
+      node.params.autoRefused,
+      node.params.autoMinQ,
+      stored,
+    ],
   )
   const {
     extend: extendedText,
     autoRoots: autoText,
     refused: refusedText,
     taken: takenText,
+    minQ: minQText,
   } = texts
-  // The pairs Auto-extend could take: a verdict on one is written down for it (`judgedParams`).
-  const offered = useMemo(() => autoOffered(all), [all])
+  /*
+   * The pairs Auto-extend could take: a verdict on one is written down for it (`judgedParams`).
+   * By the reader's floor whether or not an Auto-extend is live yet — what a press would take.
+   */
+  const minQ = autoMinQOf(node.params.autoMinQ)
+  const offered = useMemo(() => autoOffered(all, minQ), [all, minQ])
   const plan = useMemo(
-    () => planOfTexts({ extend: extendedText, autoRoots: autoText, refused: refusedText }),
-    [extendedText, autoText, refusedText],
+    () =>
+      planOfTexts({
+        extend: extendedText,
+        autoRoots: autoText,
+        refused: refusedText,
+        minQ: minQText,
+      }),
+    [extendedText, autoText, refusedText, minQText],
   )
   // The pairs the reader extended — which is not the same question as "is this piece in the tree".
   const extended = useMemo(() => decodeExtend(extendedText), [extendedText])

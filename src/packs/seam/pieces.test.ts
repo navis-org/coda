@@ -326,11 +326,36 @@ describe('the plan on the wire', () => {
     expect([...plan.refused]).toEqual(['802/803'])
     // A refusal is not a piece to extend.
     expect(extendPairs(table)).toEqual(pairs)
+    // No floor set: SEAM's cutoff alone, on the wire as on the card.
+    expect(plan.autoMinQ).toBeUndefined()
+  })
+
+  it('carries the reader’s Auto-extend floor, and reads none from a table without one', () => {
+    const plan = {
+      pairs: [pair('720', '801')],
+      roots: new Set(['801']),
+      refused: new Set<string>(),
+    }
+    expect(extendPlanOf(extendedTable({ ...plan, autoMinQ: 0.4 })).autoMinQ).toBe(0.4)
+    const old = extendedTable(plan)
+    const { auto_min_q: _floor, ...before } = old.data
+    expect(extendPlanOf({ ...old, data: before }).autoMinQ).toBeUndefined()
   })
 })
 
 describe('what Auto-extend takes', () => {
-  const first = { shown: true, organelle: false, l2Chunks: 3, id: '801' }
+  const first = { shown: true, q: 0.3, organelle: false, l2Chunks: 3, id: '801' }
+
+  /** `Auto-extend min q` (user, 2026-11-19): a floor on `q`, over SEAM's cutoff, never under it. */
+  it('takes only what clears the reader’s floor too, where one is set', () => {
+    expect(autoTakes(first, 0.3)).toBe(true)
+    expect(autoTakes(first, 0.31)).toBe(false)
+    // No `q` to hold to a floor: not taken under one, as before without one.
+    expect(autoTakes({ ...first, q: null }, 0.2)).toBe(false)
+    expect(autoTakes({ ...first, q: null })).toBe(true)
+    // A floor below the cutoff lowers nothing: SEAM's cutoff still decides.
+    expect(autoTakes({ ...first, shown: false }, 0)).toBe(false)
+  })
 
   it('takes a first candidate that clears SEAM’s cutoff', () => {
     expect(autoTakes(first)).toBe(true)
