@@ -689,6 +689,36 @@ live rv4, every shown suggestion of a neuron accepted, planned 16 of 16 and 46 o
 neurons. **A published neuron edited since its snapshot is still refused whole** (user,
 2026-11-18: left as it is); the remedy is a newer set, since there is no ⟳ for one.
 
+### Keeping a long campaign small (user, 2026-11-19)
+
+A verdict was 45 characters and a record entry about 455, against a tab's ~2 M-character slot
+(`docs/persistence.md`): fifty neurons of ~300 verdicts and ~30 merges each came to about 1.4 MB.
+Two measures, both chosen by the user:
+
+- **A tighter format** for `verdicts`, `extend`, `autoRoots` and `autoRefused`: grouped by parent,
+  a letter per verdict — `parent/piece=a,piece=r;…`, ~21 characters a verdict. The flat form is
+  read as groups of one, so older workflows load; an older Coda reads none of the new.
+- **The full work of the last ten neurons worked on** (`reviewEviction.ts`, the `recent` param). A
+  write for an eleventh clears the oldest neuron's pairs in the same edit — decided from the params
+  at a write, never from `Tips`, which arrives late and in parts, and said on the status bar. A
+  neuron is a parent **no pair names as a piece**: a piece whose accept is taken back leaves
+  `extend`, but the verdicts naming it still say what it is. Reach from the kept neurons follows
+  every pair (`piecesOf`), so verdicts waiting beyond a piece taken back stay with their neuron.
+- **The record keeps its own last ten neurons** (`appendRecorded`, `RECORD_KEPT_NEURONS`) — not
+  `recent`, since the record grows only at a Submit, and a Start over clears `recent` but not the
+  record. Older neurons' entries are **shortened** (`shortenedRecord`) where the record grows,
+  inside the hold the append already has: one writer, one write, no race with a batch. Every
+  outcome but a settled `unknown` becomes `[outcome, deployment, datastack, reviewed, candidate,
+  newRoot?]` — a refusal too, since a neuron the record names is one under review (`otherRoots`)
+  — and `mergedSoFar` answers exactly as before. A neuron with a merge unsettled in its
+  chunkedgraph is left whole, settling reads its supervoxels. A short entry is a list, so a reader
+  that cannot read it keeps it, as `appendEntry` keeps any entry. (First built as a second held
+  write at the eviction, keyed on `recent`; /simplify moved it to the append and /code-review gave
+  the record its own recency.)
+
+Full entries of the ten kept neurons are not compacted: bounded by the ten, the saving was about
+60 kB against a change to the format the batch writes.
+
 ### Phase 8 — docs. **Done 2026-11-16**
 
 - `packs/seam/help/review.md`: "Submitting merges" — what you need, what is checked, what happens

@@ -28,6 +28,16 @@
  * sandbox merge would move the neuron's root, and take its pieces, on production too (audit of
  * 77c0625, 2026-11-16). An entry naming none — written before entries did — is kept and shown in
  * `Merges`, and read for no chunkedgraph.
+ *
+ * ## Short entries, for neurons no longer kept in full
+ *
+ * The record keeps its full entries for the last `RECORD_KEPT_NEURONS` neurons it names (user,
+ * 2026-11-19, `appendRecorded`), as the card keeps its verdicts for the neurons last worked on
+ * (`reviewEviction.ts`). An older neuron keeps, of its record, what `mergedSoFar` reads and no more
+ * (`ShortEntry`, `shortenedRecord`): which pieces went in, what was refused, and the roots the
+ * merges made. That is all the next Submit needs, so shortening is lossless for every merge to
+ * come; only `Merges` loses the detail of those rows. Written as a list, never an object, so a reader that cannot read one
+ * skips it and keeps it, as `appendEntry` keeps any entry it cannot read.
  */
 
 import { ID_COLUMN_NAME } from '../../core/ids'
@@ -58,7 +68,7 @@ export function recordScopeOf(dataset: DatasetIdentity | undefined): RecordScope
   return deployment && parsed ? { deployment, datastack: parsed.datastack } : undefined
 }
 
-const inScope = (entry: MergeRecordEntry, scope: RecordScope | undefined): boolean =>
+const inScope = (entry: RecordEntry, scope: RecordScope | undefined): boolean =>
   scope !== undefined &&
   entry.deployment === scope.deployment &&
   entry.datastack === scope.datastack
@@ -140,10 +150,29 @@ export type EntryOutcome =
 
 export type MergeRecordEntry = EntryBase & EntryOutcome
 
-export type MergeRecord = readonly MergeRecordEntry[]
+/**
+ * A merge of a neuron the record no longer keeps in full (the header): what `mergedSoFar` reads of
+ * it — the scope, the two roots, the outcome, and the root a merge made. A refusal is kept too,
+ * since its neuron is still a reviewed one (`otherRoots`); only a settled `unknown` is dropped.
+ */
+export type ShortEntry = {
+  readonly short: true
+  readonly deployment?: string | undefined
+  readonly datastack?: string | undefined
+  readonly reviewedRoot: string
+  readonly candidateRoot: string
+} & (
+  | { readonly outcome: 'merged'; readonly newRoot: string }
+  | { readonly outcome: 'already-merged' | 'failed' | 'not-sent' }
+)
+
+/** An entry as the record is read: in full, or short. */
+export type RecordEntry = MergeRecordEntry | ShortEntry
+
+export type MergeRecord = readonly RecordEntry[]
 
 /** Whether the entry's piece is part of its neuron now, by this workflow's account. */
-const inNeuron = (entry: MergeRecordEntry): boolean =>
+const inNeuron = (entry: RecordEntry): boolean =>
   entry.outcome === 'merged' || entry.outcome === 'already-merged'
 
 export interface MergedSoFar {
@@ -198,7 +227,8 @@ export function mergedSoFar(
     if (!mine) otherRoots.add(entry.reviewedRoot)
     else if (entry.outcome === 'unknown') unsettled.push(entry)
     else if (entry.outcome === 'merged') unsettled = []
-    else if (entry.outcome === 'failed') {
+    // A short entry's neuron has nothing unsettled (`shortenedRecord`), so it settles nothing.
+    else if (entry.outcome === 'failed' && !('short' in entry)) {
       // The server's refusal of the same pair at the same root: nothing was written, so a late
       // answer to a merge recorded `unknown` settles it as not made.
       unsettled = unsettled.filter(
@@ -292,13 +322,117 @@ export function appendEntry(raw: unknown, entry: MergeRecordEntry): string {
   return JSON.stringify([...held, entry])
 }
 
+/** How many neurons the record keeps in full: the last this many it names (user, 2026-11-19). */
+export const RECORD_KEPT_NEURONS = 10
+
+/**
+ * `appendEntry`, with every neuron but **the last `RECORD_KEPT_NEURONS` the record names** — the
+ * entry's own among them — shortened (the header). The record's own recency, not the card's
+ * `recent`: the record grows only at a Submit, so the neurons last submitted are the ones whose
+ * detail is still being read, and a Start over, which clears `recent`, leaves it alone. Shortened
+ * where the record grows, inside the hold the append already has, so it is one write and never
+ * races a batch.
+ */
+export function appendRecorded(raw: unknown, entry: MergeRecordEntry): string {
+  const next = appendEntry(raw, entry)
+  const kept = new Set<string>()
+  const record = decodeRecord(next)
+  for (let at = record.length - 1; at >= 0 && kept.size < RECORD_KEPT_NEURONS; at--) {
+    kept.add(record[at]!.reviewedRoot)
+  }
+  return shortenedRecord(next, kept) ?? next
+}
+
 /**
  * The record from the param. An entry that is not one — a hand edit, a file from a later Coda — is
  * skipped rather than guessed at; what it said is still true on the server, which the plan and the
  * batch ask before anything is sent.
  */
-export function decodeRecord(raw: unknown): MergeRecordEntry[] {
-  return (parsedList(raw) ?? []).filter(isEntry)
+export function decodeRecord(raw: unknown): RecordEntry[] {
+  const out: RecordEntry[] = []
+  for (const value of parsedList(raw) ?? []) {
+    const entry = isEntry(value) ? value : shortOf(value)
+    if (entry) out.push(entry)
+  }
+  return out
+}
+
+/**
+ * The record with every neuron not in `kept` shortened (the header), or undefined where there is
+ * nothing to shorten. **A neuron with a merge still unsettled in any chunkedgraph is left whole**
+ * — settling it reads the supervoxels of its entries (`mergePlan`'s `settle`), and a `failed` entry
+ * can be what settles another. With none, every `unknown` was settled by an entry after it, so
+ * dropping the unknowns with the failures leaves `mergedSoFar`'s answer as it was. Entries this
+ * cannot read are kept, as `appendEntry` keeps them, and the order is kept: it is what makes the
+ * last merge's root the current one.
+ */
+export function shortenedRecord(raw: unknown, kept: ReadonlySet<string>): string | undefined {
+  const held = parsedList(raw)
+  if (!held) return undefined
+  const entries = held.map((value) => (isEntry(value) ? value : undefined))
+  const full = entries.filter((entry) => entry !== undefined)
+  // Only an `unknown` can be unsettled, and only in the chunkedgraph it was made on.
+  const open = new Set<string>()
+  for (const { reviewedRoot: root, outcome, deployment, datastack } of full) {
+    if (outcome !== 'unknown' || kept.has(root) || open.has(root)) continue
+    if (deployment === undefined || datastack === undefined) continue
+    if (mergedSoFar(full, root, { deployment, datastack }).unsettled.length > 0) open.add(root)
+  }
+  let changed = false
+  const out: unknown[] = []
+  held.forEach((value, at) => {
+    const entry = entries[at]
+    if (!entry || kept.has(entry.reviewedRoot) || open.has(entry.reviewedRoot)) {
+      out.push(value)
+      return
+    }
+    changed = true
+    if (entry.outcome !== 'unknown') out.push(shortText(entry))
+  })
+  return changed ? JSON.stringify(out) : undefined
+}
+
+/**
+ * A short entry as the param holds it: `[outcome, deployment, datastack, reviewed, candidate]`,
+ * and the new root after a `merged` one. Absent scope is `null`, as JSON has no undefined.
+ */
+function shortText(entry: Exclude<MergeRecordEntry, { outcome: 'unknown' }>): unknown[] {
+  const head = [
+    entry.outcome,
+    entry.deployment ?? null,
+    entry.datastack ?? null,
+    entry.reviewedRoot,
+    entry.candidateRoot,
+  ]
+  return entry.outcome === 'merged' ? [...head, entry.newRoot] : head
+}
+
+function shortOf(value: unknown): ShortEntry | undefined {
+  if (!Array.isArray(value)) return undefined
+  const [outcome, deployment, datastack, reviewedRoot, candidateRoot, newRoot] =
+    value as unknown[]
+  const scope = (v: unknown) => v === null || typeof v === 'string'
+  const id = (v: unknown): v is string => typeof v === 'string' && isNodeId(v)
+  if (!scope(deployment) || !scope(datastack) || !id(reviewedRoot) || !id(candidateRoot)) {
+    return undefined
+  }
+  const base = {
+    short: true as const,
+    ...(typeof deployment === 'string' ? { deployment } : {}),
+    ...(typeof datastack === 'string' ? { datastack } : {}),
+    reviewedRoot,
+    candidateRoot,
+  }
+  if (
+    (outcome === 'already-merged' || outcome === 'failed' || outcome === 'not-sent') &&
+    value.length === 5
+  ) {
+    return { ...base, outcome }
+  }
+  if (outcome === 'merged' && value.length === 6 && id(newRoot)) {
+    return { ...base, outcome: 'merged', newRoot }
+  }
+  return undefined
 }
 
 function parsedList(raw: unknown): unknown[] | undefined {
@@ -371,29 +505,32 @@ export function mergesSchema(): TableSchema {
 
 /** The record as a table, in the order it was written. */
 export function mergesTable(record: MergeRecord): TableValue {
-  const cells = (read: (entry: MergeRecordEntry) => CellValue) => record.map(read)
+  const cells = (read: (entry: RecordEntry) => CellValue) => record.map(read)
+  // What a short entry no longer holds is null (the header).
+  const full = (read: (entry: MergeRecordEntry) => CellValue) =>
+    cells((e) => ('short' in e ? null : read(e)))
   return makeTable(mergesSchema(), {
     [ID_COLUMN_NAME]: cells((e) => e.reviewedRoot),
     candidateId: cells((e) => e.candidateRoot),
     datastack: cells((e) => e.datastack ?? null),
     deployment: cells((e) => e.deployment ?? null),
-    end_uid: cells((e) => e.endUid),
-    accepted_on: cells((e) => e.parentRoot ?? null),
+    end_uid: full((e) => e.endUid),
+    accepted_on: full((e) => e.parentRoot ?? null),
     outcome: cells((e) => e.outcome),
-    neuron_root: cells((e) => e.neuronRoot),
+    neuron_root: full((e) => e.neuronRoot),
     new_root: cells((e) => (e.outcome === 'merged' ? e.newRoot : null)),
-    operation_id: cells((e) =>
+    operation_id: full((e) =>
       e.outcome === 'merged' || e.outcome === 'unknown' ? (e.operationId ?? null) : null,
     ),
-    neuron_supervoxel: cells((e) => e.neuron.supervoxel),
-    candidate_supervoxel: cells((e) => e.candidate.supervoxel),
-    neuron_x: cells((e) => e.neuron.positionNm[0]),
-    neuron_y: cells((e) => e.neuron.positionNm[1]),
-    neuron_z: cells((e) => e.neuron.positionNm[2]),
-    candidate_x: cells((e) => e.candidate.positionNm[0]),
-    candidate_y: cells((e) => e.candidate.positionNm[1]),
-    candidate_z: cells((e) => e.candidate.positionNm[2]),
-    at: cells((e) => e.at),
-    message: cells((e) => e.message ?? null),
+    neuron_supervoxel: full((e) => e.neuron.supervoxel),
+    candidate_supervoxel: full((e) => e.candidate.supervoxel),
+    neuron_x: full((e) => e.neuron.positionNm[0]),
+    neuron_y: full((e) => e.neuron.positionNm[1]),
+    neuron_z: full((e) => e.neuron.positionNm[2]),
+    candidate_x: full((e) => e.candidate.positionNm[0]),
+    candidate_y: full((e) => e.candidate.positionNm[1]),
+    candidate_z: full((e) => e.candidate.positionNm[2]),
+    at: full((e) => e.at),
+    message: full((e) => e.message ?? null),
   })
 }

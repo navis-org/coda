@@ -179,6 +179,33 @@ describe('Submit', () => {
     ])
   })
 
+  /**
+   * The record keeps its last ten neurons in full (`appendRecorded`), shortened where it grows: in
+   * the same write as the append, through the batch's own hold.
+   */
+  it('shortens a neuron past the record’s last ten, as it appends', async () => {
+    const others = Array.from({ length: 10 }, (_, i) => ({
+      ...entry('merged', `30${i}`),
+      reviewedRoot: `20${i}`,
+      neuronRoot: `20${i}`,
+    }))
+    store().setParam('review', 'merges', JSON.stringify(others))
+    await opened()
+    const batch = heldBatch()
+    confirmSubmit([MERGE])
+    batch.on().record(entry('merged', '201'))
+    expect(record()[0]).toEqual({
+      short: true,
+      reviewedRoot: '200',
+      candidateRoot: '7',
+      outcome: 'merged',
+      newRoot: '300',
+    })
+    expect(record().slice(1)).toEqual([...others.slice(1), entry('merged', '201')])
+    stopSubmit()
+    batch.finish({ state: 'stopped', currentRoot: '201', message: 'Stopped.' })
+  })
+
   it('holds the card, appends the record live, and lets go when the batch ends', async () => {
     await opened()
     const batch = heldBatch()

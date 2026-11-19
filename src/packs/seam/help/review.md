@@ -183,6 +183,16 @@ A row you accepted yourself, and have not extended, is Auto-extended and stays y
 
 It does not touch the merge record or the merges themselves: pieces Submit merged are still shown as merged, and the next Submit still starts from the neuron's new root. It sends nothing to SEAM, even with **Help improve** ticked: verdicts already sent stay sent.
 
+## How much the card keeps
+
+The card keeps your full work for the **last 10 neurons** you worked on, so a long session does not outgrow the browser's storage for the workflow. Giving a verdict, extending a piece or pressing Auto-extend listed counts as working on a neuron; only looking at one in the dropdown does not.
+
+When you start on an eleventh neuron, the one you worked on longest ago loses its verdicts, extended pieces and Auto-extends, in the same step as your press. The status bar says how many neurons were cleared, and Ctrl+Z brings them back.
+
+> [!NOTE]
+> **Merges are never forgotten**
+> The merge record keeps its full detail for the last 10 neurons you submitted. Older neurons' merges are kept in a short form: which pieces went in, what was refused, and the roots the merges made. That is all the next Submit needs, so nothing can be merged twice. In `Merges`, those rows keep their ids and outcome, and the supervoxels, positions and times are empty.
+
 ## One row per tip, or per candidate
 
 `One row per` changes the grain. **Per tip** — the default — a row is a tip and its suggestion, and the big number is `q`. This is the unit SEAM calibrated: the cutoff, `p_tip` and `r` were all fitted on first candidates, so a row here is a suggestion somebody made.

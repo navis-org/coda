@@ -42,6 +42,7 @@ import type { TableSchema } from '../../core/types'
 import type { CellValue, LayersValue, TableValue } from '../../core/values'
 import { isDatasetValue, isTableValue, layersFrom, makeTable } from '../../core/values'
 import { foldColumns } from '../../nodes/lib/tableOps'
+import { KEPT_NEURONS } from './reviewEviction'
 import {
   decodeRecord,
   mergedSoFar,
@@ -271,6 +272,21 @@ export const reviewNode = packNode({
       default: '',
       internal: true,
       help: 'Pairs, as `parent/piece`, that Auto-extend could accept and you gave another verdict, so it does not take them. Set by the verdict buttons.',
+    },
+    /*
+     * The neurons last worked on, oldest first (`reviewEviction.ts`): the card keeps the full
+     * work of these and no others. **Presentational**: `evaluate` never reads it; what it decides
+     * is written into the params that are data, in the same edit.
+     */
+    {
+      id: 'recent',
+      advanced: true,
+      kind: 'string',
+      label: 'Recent neurons',
+      default: '',
+      internal: true,
+      presentational: true,
+      help: `The neurons you last gave a verdict or extended a piece on, oldest first. The card keeps its work for the last ${KEPT_NEURONS}; an older neuron's verdicts and extended pieces are cleared as you start on another. Undo brings them back.`,
     },
     /*
      * **Presentational**: `evaluate` never reads it. It changes what a press on Accept writes,

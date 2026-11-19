@@ -478,6 +478,45 @@ describe('verdicts', () => {
     expect(neuronsOf(queue, said)).toEqual([{ neuronId: 'n1', tips: 2, judged: 1 }])
   })
 
+  /** Grouped by parent, a letter a verdict (user, 2026-11-19): a long campaign must fit. */
+  it('writes each parent once and a letter per verdict, and reads the flat form it replaced', () => {
+    const said = new Map<string, Verdict>([
+      ['n1/p2', 'reject'],
+      ['n1/p1', 'accept'],
+      ['p1/p3', 'ends'],
+      ['n2/p4', 'unsure'],
+    ])
+    const text = encodeVerdicts(said)
+    expect(text).toBe('n1/p1=a,p2=r;n2/p4=u;p1/p3=e')
+    expect(decodeVerdicts(text)).toEqual(said)
+    expect(decodeVerdicts('n1/p2=reject;n1/p1=accept;p1/p3=ends;n2/p4=unsure')).toEqual(said)
+    expect(
+      encodeVerdicts(decodeVerdicts('n1/p2=reject;n1/p1=accept;p1/p3=ends;n2/p4=unsure')),
+    ).toBe(text)
+    // Nothing that is not a verdict is read.
+    expect(decodeVerdicts('n1/p1=x,p2=;/p3=a;n1/=a').size).toBe(0)
+  })
+
+  it('writes a thousand verdicts on real ids in under half the room the flat form took', () => {
+    const said = new Map<string, Verdict>()
+    for (let i = 0; i < 1000; i++) {
+      said.set(
+        `72057594062152${String(i % 10).padStart(4, '0')}/6485183463${String(i).padStart(8, '0')}`,
+        'reject',
+      )
+    }
+    const flat = [...said].map(([key, verdict]) => `${key}=${verdict}`).join(';')
+    expect(encodeVerdicts(said).length).toBeLessThan(flat.length / 2)
+  })
+
+  it('groups the extended pairs the same way, and reads the flat form', () => {
+    const keys = ['n1/p2', 'p1/p3', 'n1/p1']
+    expect(encodeExtend(keys)).toBe('n1/p1,p2;p1/p3')
+    expect(decodeExtend('n1/p1,p2;p1/p3')).toEqual(new Set(keys))
+    expect(decodeExtend('n1/p2;p1/p3;n1/p1')).toEqual(new Set(keys))
+    expect(decodeExtend('n1/,p2;/p3')).toEqual(new Set(['n1/p2']))
+  })
+
   /** Kept in the param, so nothing is deleted, and read as no verdict on anything (user). */
   it('keeps a key of the old tip shape, and never reads it', () => {
     const queue = buildQueue(
@@ -488,7 +527,7 @@ describe('verdicts', () => {
     expect(acceptedPieces(queue, old).size).toBe(0)
     expect(neuronsOf(queue, old)[0]!.judged).toBe(0)
     const kept = encodeVerdicts(withVerdict(old, 'n1', '901', 'reject'))
-    expect(kept).toBe('5:900=accept;n1/901=reject')
+    expect(kept).toBe('5:900=accept;n1/901=r')
   })
 
   /**
@@ -1320,13 +1359,13 @@ describe('a neuron and the pieces it is extended with', () => {
     it('takes a piece no longer accepted out of the extended ones, in the same edit', () => {
       expect(press(params, 'n1', 'p1', 'reject')).toEqual({
         // The piece beyond keeps its entry: it is back if this one is extended again.
-        write: { verdicts: 'n1/p1=reject;p1/p2=accept', extend: 'p1/p2' },
+        write: { verdicts: 'n1/p1=r;p1/p2=a', extend: 'p1/p2' },
         search: false,
         said: 'reject',
       })
       // Pressing Accept again clears it, which is un-accepting too.
       expect(press(params, 'n1', 'p1', 'accept')).toEqual({
-        write: { verdicts: 'p1/p2=accept', extend: 'p1/p2' },
+        write: { verdicts: 'p1/p2=a', extend: 'p1/p2' },
         search: false,
         said: undefined,
       })
@@ -1337,7 +1376,7 @@ describe('a neuron and the pieces it is extended with', () => {
       const rejected = press(params, 'n1', 'p1', 'reject').write
       const again = press({ ...params, ...rejected }, 'n1', 'p1', 'accept')
       expect(again).toEqual({
-        write: { verdicts: 'n1/p1=accept;p1/p2=accept' },
+        write: { verdicts: 'n1/p1=a;p1/p2=a' },
         search: false,
         said: 'accept',
       })
@@ -1349,10 +1388,10 @@ describe('a neuron and the pieces it is extended with', () => {
 
     it('writes the verdict alone where nothing extended is touched', () => {
       expect(press(params, 'n1', 'x', 'reject').write).toEqual({
-        verdicts: 'n1/p1=accept;n1/x=reject;p1/p2=accept',
+        verdicts: 'n1/p1=a,x=r;p1/p2=a',
       })
       expect(press({ verdicts: '', extend: '' }, 'n1', 'p1', 'accept')).toEqual({
-        write: { verdicts: 'n1/p1=accept' },
+        write: { verdicts: 'n1/p1=a' },
         search: false,
         said: 'accept',
       })
@@ -1369,7 +1408,7 @@ describe('a neuron and the pieces it is extended with', () => {
     it('leaves an accepted pair that is already extended as it is', () => {
       const odd = { verdicts: 'n1/p1=unsure', extend: 'n1/p1' }
       expect(press(odd, 'n1', 'p1', 'accept')).toEqual({
-        write: { verdicts: 'n1/p1=accept' },
+        write: { verdicts: 'n1/p1=a' },
         search: false,
         said: 'accept',
       })
@@ -1382,7 +1421,7 @@ describe('a neuron and the pieces it is extended with', () => {
 
     it('writes the pair into the extended ones with the verdict, and asks for the search', () => {
       expect(judgedParams(on, 'n1', piece('p1'), 'accept', undefined)).toEqual({
-        write: { verdicts: 'n1/p1=accept', extend: 'n1/p1' },
+        write: { verdicts: 'n1/p1=a', extend: 'n1/p1' },
         search: true,
         said: 'accept',
       })
@@ -1395,7 +1434,7 @@ describe('a neuron and the pieces it is extended with', () => {
           'accept',
           undefined,
         ).write,
-      ).toEqual({ verdicts: 'n1/p1=accept;p1/p2=accept', extend: 'n1/p1;p1/p2' })
+      ).toEqual({ verdicts: 'n1/p1=a;p1/p2=a', extend: 'n1/p1;p1/p2' })
     })
 
     it('extends nothing with the toggle off, which is how it is unless asked', () => {
@@ -1404,7 +1443,7 @@ describe('a neuron and the pieces it is extended with', () => {
         { ...on, extendOnAccept: false },
       ]) {
         expect(judgedParams(params, 'n1', piece('p1'), 'accept', undefined)).toEqual({
-          write: { verdicts: 'n1/p1=accept' },
+          write: { verdicts: 'n1/p1=a' },
           search: false,
           said: 'accept',
         })
@@ -1414,7 +1453,7 @@ describe('a neuron and the pieces it is extended with', () => {
     it('extends nothing on any other verdict', () => {
       for (const verdict of ['reject', 'ends', 'unsure'] as const) {
         expect(judgedParams(on, 'n1', piece('p1'), verdict, undefined)).toEqual({
-          write: { verdicts: `n1/p1=${verdict}` },
+          write: { verdicts: `n1/p1=${verdict[0]}` },
           search: false,
           said: verdict,
         })
@@ -1424,7 +1463,7 @@ describe('a neuron and the pieces it is extended with', () => {
     /** Accepted, and left to its button: a search of one can take minutes. */
     it('leaves a large piece to its button', () => {
       expect(judgedParams(on, 'n1', piece('p1', 41), 'accept', undefined)).toEqual({
-        write: { verdicts: 'n1/p1=accept' },
+        write: { verdicts: 'n1/p1=a' },
         search: false,
         said: 'accept',
       })
@@ -1433,7 +1472,7 @@ describe('a neuron and the pieces it is extended with', () => {
 
     it('extends nothing where the piece cannot be extended', () => {
       expect(judgedParams(on, 'n1', piece('p1'), 'accept', 'no wire back')).toEqual({
-        write: { verdicts: 'n1/p1=accept' },
+        write: { verdicts: 'n1/p1=a' },
         search: false,
         said: 'accept',
       })
@@ -1448,7 +1487,7 @@ describe('a neuron and the pieces it is extended with', () => {
         said: undefined,
       })
       expect(judgedParams(extended, 'n1', piece('p1'), 'reject', undefined)).toEqual({
-        write: { verdicts: 'n1/p1=reject', extend: '' },
+        write: { verdicts: 'n1/p1=r', extend: '' },
         search: false,
         said: 'reject',
       })
@@ -2173,10 +2212,10 @@ describe('Auto-extend, as the card reads it', () => {
     it('writes Auto-extend presses, and no verdict', () => {
       const write = listedAutoParams(PARAMS, ['100/201', '100/205'], autoOffered(queue))
       expect(write).toEqual({
-        extend: '100/201;100/205',
-        autoRoots: '100/201;100/205',
+        extend: '100/201,205',
+        autoRoots: '100/201,205',
         // The turn-downs it could now take, as an Auto-extend press writes them.
-        autoRefused: '100/202;100/208',
+        autoRefused: '100/202,208',
       })
     })
 
