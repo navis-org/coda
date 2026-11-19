@@ -13,8 +13,8 @@
  * which tears every layer down and rebuilds it — the reason an update has to wait for the pointer
  * to leave, and meshes reload.
  *
- * Frame to card, as it changes: the segment under the pointer (`FrameHoverMessage`), which the
- * review card lights its rows by.
+ * Frame to card, as it changes: the segment under the pointer and where the pointer is
+ * (`FrameHoverMessage`), which the review card lights its rows by and takes a hand pick from.
  *
  * And keys, both ways: a key pressed in the frame goes to the frame's document and never reaches
  * Coda's, so the card says which chords are Coda's (`FrameKeysMessage`) and the frame hands those
@@ -228,17 +228,28 @@ export const FRAME_HOVER_MESSAGE = 'coda:ng-hover'
 
 /**
  * Frame to card: the segment under the pointer, as text (invariant 8), or `null` where there is
- * none — the pointer on empty space, or out of the frame. Posted only when it changes, and not
- * stamped with an update: it says where the pointer is, not what the scene holds.
+ * none — the pointer on empty space, or out of the frame. Posted when it changes, and not stamped
+ * with an update: it says where the pointer is, not what the scene holds.
+ *
+ * **And where the pointer is, in absolute nanometres** (`positionNm`), posted as it moves over
+ * one segment too: a hand pick (`J`, `handPicks.ts`) is a segment *and* a place on it. On a 3D
+ * panel neuroglancer puts the pointer on the surface it picked, so the place is on the segment.
+ * Absent where the frame cannot say — no `x`/`y`/`z` in metres among its dimensions.
  */
 export interface FrameHoverMessage {
   type: typeof FRAME_HOVER_MESSAGE
   segment: string | null
+  positionNm?: readonly [number, number, number]
 }
 
 export function isFrameHoverMessage(data: unknown): data is FrameHoverMessage {
-  const segment = messageOf(data, FRAME_HOVER_MESSAGE)?.['segment']
-  return segment === null || (typeof segment === 'string' && isSegmentId(segment))
+  const message = messageOf(data, FRAME_HOVER_MESSAGE)
+  const segment = message?.['segment']
+  const at = message?.['positionNm']
+  const placed =
+    at === undefined ||
+    (Array.isArray(at) && at.length === 3 && at.every((v) => Number.isFinite(v)))
+  return placed && (segment === null || (typeof segment === 'string' && isSegmentId(segment)))
 }
 
 export const FRAME_KEY_MESSAGE = 'coda:ng-key'
@@ -269,6 +280,30 @@ export function isAltDigit(event: {
     !event.ctrlKey &&
     !event.shiftKey &&
     /^Digit[1-9]$/.test(event.code)
+  )
+}
+
+/**
+ * The hand-pick key (`J`, for join), bare: take the segment under the pointer into the review card
+ * (`handPicks.ts`). Neither neuroglancer nor Spelunker binds `J`, so the frame claims it always and
+ * hands it back (`FrameKeyMessage`) — with focus in the frame, Coda's document never hears it.
+ * Matched by position (`code`), as a key handed back carries no `key`.
+ */
+export const PICK_KEY_CODE = 'KeyJ'
+
+export function isPickKey(event: {
+  code: string
+  altKey: boolean
+  metaKey: boolean
+  ctrlKey: boolean
+  shiftKey: boolean
+}): boolean {
+  return (
+    event.code === PICK_KEY_CODE &&
+    !event.altKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey
   )
 }
 

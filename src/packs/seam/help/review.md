@@ -87,6 +87,14 @@ The number on the left is `q`, SEAM's score for the tip's **first** candidate. T
 > **Rank 1 is the suggestion; the rest is context**
 > SEAM's cutoff was calibrated on first candidates only, so the row you see when you click is the suggestion. The arrows let you look down the list — useful when the first is clearly wrong and the second is clearly right — but a verdict on rank 4 is your judgement rather than one of SEAM's suggestions. Both are kept, and the `Verdicts` table says which rank each was.
 
+### Adding a piece by hand
+
+Suggest Merges sometimes misses an open end, or does not list the piece that belongs there. Point at that piece in Neuroglancer, where it meets the neuron, and press **J**. The piece is added to the list and accepted in one step, and the cursor moves to it. **Add from viewer**, in the footer, does the same for the piece the pointer last rested on, if you would rather click.
+
+A piece the list already holds is simply accepted where it is listed. Anything else is first checked against the segmentation, which takes a moment and needs you signed in to CAVE: the neuron, or a piece it is extended with, has to lie within 1.5 µm of where you pointed. The check finds the two supervoxels to merge the way Submit does, so a piece that passes here can be merged. If it fails, the status bar says why and nothing is added.
+
+A piece added within 2 µm of one of the neuron's tips is listed as one more candidate of that tip; further away, it gets a tip of its own. Either way its row comes first, whatever the filters and the sort, is marked **by hand**, and shows none of SEAM's numbers, since SEAM did not score it. You can extend it, judge it again and submit it like any other. Ctrl+Z takes it off the list. Hand picks are never sent to SEAM with **Help improve**, and Start over clears them with everything else. With several Review Suggestions cards open, the pick goes to the one you expanded, pinned or selected.
+
 ## Extending a neuron
 
 A piece you accept often has open ends of its own. With suggestions from [Suggest Merges](#seam:suggestMerges) you can search those too and grow the neuron piece by piece, all in one queue: accept a piece, extend it, accept one of the new suggestions, extend that, and Submit the lot at the end.
@@ -185,7 +193,7 @@ A row you accepted yourself, and have not extended, is Auto-extended and stays y
 
 ## Starting over
 
-**Start over…**, in the footer, clears every verdict, extended piece and Auto-extend on the card, for every neuron, so you can review from the beginning. It asks first and says how much it will clear. The whole clear is one undo step.
+**Start over…**, in the footer, clears every verdict, extended piece, Auto-extend and hand pick on the card, for every neuron, so you can review from the beginning. It asks first and says how much it will clear. The whole clear is one undo step.
 
 It does not touch the merge record or the merges themselves: pieces Submit merged are still shown as merged, and the next Submit still starts from the neuron's new root. It sends nothing to SEAM, even with **Help improve** ticked: verdicts already sent stay sent.
 
@@ -193,7 +201,7 @@ It does not touch the merge record or the merges themselves: pieces Submit merge
 
 The card keeps your full work for the **last 10 neurons** you worked on, so a long session does not outgrow the browser's storage for the workflow. Giving a verdict, extending a piece or pressing Auto-extend listed counts as working on a neuron; only looking at one in the dropdown does not.
 
-When you start on an eleventh neuron, the one you worked on longest ago loses its verdicts, extended pieces and Auto-extends, in the same step as your press. The status bar says how many neurons were cleared, and Ctrl+Z brings them back.
+When you start on an eleventh neuron, the one you worked on longest ago loses its verdicts, extended pieces, Auto-extends and hand picks, in the same step as your press. The status bar says how many neurons were cleared, and Ctrl+Z brings them back.
 
 > [!NOTE]
 > **Merges are never forgotten**
@@ -284,7 +292,7 @@ Only button presses are sent: undoing a verdict with Ctrl+Z does not send anythi
 | Output     | Contents                                                                    |
 | ---------- | ----------------------------------------------------------------------------- |
 | `Tips`     | the tips passed through, with a `verdict` column for each one's first candidate |
-| `Verdicts` | one row per judgement — neuron, candidate, verdict, and the tip and rank where the piece is first listed |
+| `Verdicts` | one row per judgement — neuron, candidate, verdict, the tip and rank where the piece is first listed, and `by_hand` for a piece you added by hand |
 | `Current`  | the ids to show — the neuron at its root now, the candidate being looked at and, with `Show accepted` on, every accepted piece not yet merged — with a `part` column saying which is which |
 | `Layers`   | an annotation layer of **every** shown suggestion on the picked neuron — a map of where the work is |
 | `Merges`   | one row per merge Submit made or tried, on every neuron — the datastack, the outcome, the new root, the operation ID, both supervoxels and their positions, and the time. `accepted_on` names the piece a merge was accepted on, and is empty for a piece accepted on the neuron itself |

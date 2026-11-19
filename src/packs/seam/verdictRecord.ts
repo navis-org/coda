@@ -59,7 +59,9 @@ export function verdictInput(
   coda: string | null,
 ): VerdictInput {
   return {
-    source: tip.source ?? '',
+    // No source for a hand pick, so `queueVerdict` never sends one: SEAM suggested nothing there
+    // to judge (user, 2026-11-19), whichever press or merge it comes from.
+    source: candidate.hand ? '' : (tip.source ?? ''),
     neuron: tip.seed,
     piece: tip.neuronId,
     end_uid: tip.endUid,

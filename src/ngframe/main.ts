@@ -29,6 +29,7 @@ import {
   type FrameKeyMessage,
   isAltDigit,
   isFrameKeysMessage,
+  isPickKey,
   FRAME_STATE_MESSAGE,
   FRAME_VIEW_MESSAGE,
   type FrameStateMessage,
@@ -122,15 +123,20 @@ const HOVER_MS = 100
  * segmentation layer's own hover highlight is drawn from (`segmentSelectionState`, the mapped id,
  * so a root rather than a supervoxel), from the first visible layer that has one. Read on
  * neuroglancer's pointer signal, at most every `HOVER_MS`, and cleared when the pointer leaves.
+ *
+ * With the pointer's place in nanometres (`pointerNm`), posted as it moves over a segment too, so
+ * a hand pick is taken where the pointer is rather than where it came onto the segment.
  */
 function reportHover(ng: typeof viewer): void {
   type Hovered = { hasSelectedSegment?: boolean; selectedSegment?: bigint }
-  let posted: string | null = null
+  let posted = ''
   let timer: ReturnType<typeof setTimeout> | undefined
   const post = (segment: string | null) => {
-    if (segment === posted) return
-    posted = segment
-    const message: FrameHoverMessage = { type: FRAME_HOVER_MESSAGE, segment }
+    const positionNm = segment === null ? undefined : pointerNm(ng)
+    const text = `${segment}@${positionNm?.join(',')}`
+    if (text === posted) return
+    posted = text
+    const message: FrameHoverMessage = { type: FRAME_HOVER_MESSAGE, segment, positionNm }
     window.parent.postMessage(message, window.location.origin)
   }
   const read = (): string | null => {
@@ -156,6 +162,36 @@ function reportHover(ng: typeof viewer): void {
     timer = undefined
     post(null)
   })
+}
+
+/**
+ * Where the pointer is, in absolute nanometres, or undefined where neuroglancer cannot say: the
+ * pointer off every panel, or a coordinate space with no `x`/`y`/`z` in metres. Rounded to the
+ * nanometre — a place to look for a voxel, never finer than one.
+ */
+function pointerNm(ng: typeof viewer): [number, number, number] | undefined {
+  const mouse = ng.mouseState as unknown as {
+    active?: boolean
+    position?: Float32Array
+    coordinateSpace?: {
+      names?: readonly string[]
+      units?: readonly string[]
+      scales?: Float64Array
+    }
+  }
+  const space = mouse.coordinateSpace
+  if (!mouse.active || !mouse.position || !space?.names || !space.units || !space.scales) {
+    return undefined
+  }
+  const at: number[] = []
+  for (const axis of ['x', 'y', 'z']) {
+    const i = space.names.indexOf(axis)
+    if (i < 0 || space.units[i] !== 'm') return undefined
+    const nm = mouse.position[i]! * space.scales[i]! * 1e9
+    if (!Number.isFinite(nm)) return undefined
+    at.push(Math.round(nm))
+  }
+  return at as [number, number, number]
 }
 
 /*
@@ -387,17 +423,23 @@ function sameColors(a: Record<string, string>, b: Record<string, string>): boole
  * and never Coda's, so without this the dashboard's ⌥1–9 did nothing once somebody had clicked into
  * the scene — and neuroglancer toggled a layer's picking instead. Capture phase, so it is taken
  * before neuroglancer's own bindings see it; a field in the frame keeps it, for the same reason
- * Coda's own fields do (⌥digit is how a Mac types `¡` and `™`).
+ * Coda's own fields do (⌥digit is how a Mac types `¡` and `™`). The hand-pick key (`isPickKey`)
+ * goes back the same way, for the review card (`segmentHover.ts`).
  */
 window.addEventListener(
   'keydown',
   (event) => {
-    if (!claimAltDigits || window.parent === window || isTypingTarget(event.target)) return
-    if (!isAltDigit(event)) return
+    if (window.parent === window || isTypingTarget(event.target)) return
+    // ⌥1–9 only while Coda claims them; the hand-pick key always, being unbound in neuroglancer.
+    if (!(claimAltDigits && isAltDigit(event)) && !isPickKey(event)) return
     event.preventDefault()
     event.stopImmediatePropagation()
     window.parent.postMessage(
-      { type: FRAME_KEY_MESSAGE, code: event.code, altKey: true } satisfies FrameKeyMessage,
+      {
+        type: FRAME_KEY_MESSAGE,
+        code: event.code,
+        altKey: event.altKey,
+      } satisfies FrameKeyMessage,
       window.location.origin,
     )
   },

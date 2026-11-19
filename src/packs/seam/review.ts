@@ -57,6 +57,7 @@ import {
   extendedTable,
   verdictKey,
 } from './pieces'
+import { decodePicks, withPicks } from './handPicks'
 import { suggestionLayer } from './scene'
 import type { CurrentItem, QueueTip, ScenePiece, Verdict } from './reviewQueue'
 import {
@@ -84,6 +85,8 @@ export function verdictsSchema(): TableSchema {
     column('candidateId', 'str'),
     column('rank', 'i64'),
     column(VERDICT_COLUMN, 'str'),
+    // Picked in neuroglancer by the reader (`handPicks.ts`), not suggested: SEAM missed it.
+    column('by_hand', 'bool'),
   )
 }
 
@@ -233,6 +236,20 @@ export const reviewNode = packNode({
       internal: true,
       unrecorded: true,
       help: 'Every merge Submit has made or tried from this card, saved with the workflow. Written only by Submit, and not an undo step: undoing cannot erase a merge the server still holds.',
+    },
+    /*
+     * The candidates the reader picked in neuroglancer (`handPicks.ts`), each accepted as it was
+     * added. **Data**: they are rows of the queue, so of `Verdicts`, `Current` and the merges.
+     * Written by the pick key and the card's Add button only, with the accept, in one edit.
+     */
+    {
+      id: 'picks',
+      advanced: true,
+      kind: 'string',
+      label: 'Hand picks',
+      default: '',
+      internal: true,
+      help: 'The candidates you added from neuroglancer, with where each meets the neuron. Set by pressing J with the pointer on a segment, or by Add from viewer.',
     },
     /*
      * **Data, not presentational**: it adds rows to `Current`, which is what the Neuroglancer
@@ -463,7 +480,7 @@ export const reviewNode = packNode({
           'through, so the node needs both of Merge Suggestions’ tables.',
       )
     }
-    const all = buildQueue(tips, candidates)
+    const all = withPicks(buildQueue(tips, candidates), decodePicks(ctx.params.picks))
     // What there is to review: each neuron's tips and those of the pieces in its tree — as the
     // params say the tree is now, whatever rows the search has yet to drop — with what
     // Auto-extend took grown on, by the rule the search grew it by. Its accepts count wherever an
@@ -616,6 +633,7 @@ function verdictsTable(
   const candidateIds: CellValue[] = []
   const ranks: CellValue[] = []
   const said: CellValue[] = []
+  const byHand: CellValue[] = []
   const listed = new Set<string>()
   for (const tip of queue) {
     for (const candidate of tip.candidates) {
@@ -628,6 +646,7 @@ function verdictsTable(
       candidateIds.push(candidate.candidateId)
       ranks.push(candidate.rank)
       said.push(verdict)
+      byHand.push(candidate.hand === true)
     }
   }
   return makeTable(verdictsSchema(), {
@@ -636,5 +655,6 @@ function verdictsTable(
     candidateId: candidateIds,
     rank: ranks,
     [VERDICT_COLUMN]: said,
+    by_hand: byHand,
   })
 }

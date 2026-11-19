@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { decodePicks, encodePicks } from './handPicks'
 import { KEPT_NEURONS, decodeRecent, withRecentWork } from './reviewEviction'
 import { decodeExtend, decodeVerdicts, encodeVerdicts } from './reviewQueue'
 
@@ -173,5 +174,32 @@ describe('the work a review card keeps', () => {
     const done = withRecentWork(params, neuron(KEPT_NEURONS + 1), write)
     expect(done.evicted).toEqual([neuron(1)])
     expect(judgedNeurons({ ...params, ...done.write }).has(neuron(KEPT_NEURONS + 1))).toBe(true)
+  })
+})
+
+describe('hand picks', () => {
+  it('go with their neuron, on it or on a piece of it, and stay with a kept one', () => {
+    const ids = range(KEPT_NEURONS + 1)
+    const pick = (i: number, root: string, n: number) => ({
+      n,
+      seed: neuron(i),
+      root,
+      candidateId: piece(i, 7),
+      contactNm: [1, 2, 3] as const,
+      gapUm: 0.1,
+      l2Chunks: undefined,
+    })
+    const params = {
+      ...workOn(ids),
+      recent: ids.slice(0, KEPT_NEURONS).map(neuron).join(';'),
+      picks: encodePicks([
+        pick(1, neuron(1), 1),
+        pick(1, piece(1, 1), 2),
+        pick(2, piece(2, 1), 3),
+      ]),
+    }
+    const done = withRecentWork(params, neuron(KEPT_NEURONS + 1), {})
+    expect(done.evicted).toEqual([neuron(1)])
+    expect(decodePicks(done.write['picks']).map((one) => one.n)).toEqual([3])
   })
 })

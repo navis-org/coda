@@ -11406,6 +11406,18 @@ details[open] > summary.tile__label {
   color: var(--text-secondary);
 }
 /*
+ * A hand pick (`handPicks.ts`): the auto chip's shape, solid — the reader's own word, where the
+ * dashed one is Auto-extend's.
+ */
+.review-row__hand {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--text-secondary);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+/*
  * A piece edited since it was suggested: the merged chip's shape, in `--status-refused` — the red
  * measured per mode for text — since Submit would refuse it.
  */

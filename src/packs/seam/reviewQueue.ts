@@ -126,6 +126,11 @@ export interface Candidate {
    * absent reads the same.
    */
   readonly organelle?: boolean
+  /**
+   * Added by the reader from neuroglancer (`handPicks.ts`), not by the search: no rank of SEAM's,
+   * no confidence, and never sent to SEAM's verdict log.
+   */
+  readonly hand?: true
 }
 
 /** One tip, with every candidate the own-tip rule kept for it. */
@@ -447,7 +452,8 @@ export interface QueueRow {
 }
 
 /**
- * A tip's row: its first candidate, or with organelles excluded the first that is not one.
+ * A tip's row: its first candidate, or with organelles excluded the first that is not one — and
+ * where the reader picked a candidate by hand for it, that one, with none of SEAM's numbers.
  *
  * **A row that passes over its first candidate carries no numbers** (user, 2026-11-18, after
  * SEAM's note: "the filter hides; it should not promote"). `q`, the cutoff and `r` all describe
@@ -457,6 +463,8 @@ export interface QueueRow {
  * An organelle further down a list changes nothing about its tip's row.
  */
 function tipRow(tip: QueueTip, excludeOrganelles: boolean): QueueRow {
+  const hand = tip.candidates.find((one) => one.hand)
+  if (hand) return { tip, candidate: hand, score: undefined, shown: false }
   const first = tip.candidates[0]
   if (!excludeOrganelles || !first?.organelle) {
     return { tip, candidate: first, ...scored(tip.q, tip.r), shown: tip.shown }
@@ -564,7 +572,8 @@ export function arrangeRows(
       : queue.map((tip) => tipRow(tip, filters.excludeOrganelles))
 
   const kept = rows.filter((row) => {
-    if (always(row)) return true
+    // A hand pick (`Candidate.hand`) is listed whatever the filters say: the reader vouched for it.
+    if (row.candidate?.hand || always(row)) return true
     // Per candidate only: per tip, `tipRow` has already led with a candidate that is not one.
     if (filters.excludeOrganelles && row.candidate?.organelle) return false
     if (filters.minConfidence !== undefined && (row.score ?? 0) < filters.minConfidence) {
@@ -599,8 +608,10 @@ export function arrangeRows(
    * Descending, with the tip and then the rank breaking ties, so the order is the same on every
    * render — a list whose equal rows shuffle is one a reader cannot keep their place in.
    */
+  // A hand pick first, whatever the sort: the reader put it there.
   return kept.sort(
     (a, b) =>
+      Number(b.candidate?.hand === true) - Number(a.candidate?.hand === true) ||
       by(b) - by(a) ||
       a.tip.endUid - b.tip.endUid ||
       (a.candidate?.rank ?? 0) - (b.candidate?.rank ?? 0),
@@ -732,7 +743,7 @@ interface Hosted {
 const NONE_HOSTED: readonly Hosted[] = []
 
 /** How far a candidate is from the neuron where the search measured it; unmeasured is last. */
-const gapOf = (candidate: Candidate) => candidate.minDistUm ?? Number.POSITIVE_INFINITY
+export const gapOf = (candidate: Candidate) => candidate.minDistUm ?? Number.POSITIVE_INFINITY
 
 /** The tip and candidate a card is on, where both still exist. */
 export interface CurrentItem {
@@ -762,8 +773,9 @@ export function currentOfQueue(
   if (at <= 0) return undefined
   const neuronId = key.slice(0, at)
   const number = key.slice(at + 1)
-  // `Number('')` is 0, and tip 0 is a real tip: a cursor cut short is on nothing.
-  if (!/^\d+$/.test(number)) return undefined
+  // `Number('')` is 0, and tip 0 is a real tip: a cursor cut short is on nothing. Negative is a
+  // hand pick's own tip (`handPicks.ts`).
+  if (!/^-?\d+$/.test(number)) return undefined
   const endUid = Number(number)
   const tip = queue.find((item) => item.endUid === endUid && item.neuronId === neuronId)
   if (!tip || tip.candidates.length === 0) return undefined
@@ -1795,7 +1807,7 @@ export function storedWork(params: Readonly<Record<string, unknown>>): {
 } {
   const verdicts = decodeVerdicts(params['verdicts']).size
   const extended = decodeExtend(params['extend']).size
-  const any = verdicts > 0 || PAIR_PARAMS.some((id) => decodeExtend(params[id]).size > 0)
+  const any = WORK_PARAMS.some((id) => String(params[id] ?? '').trim() !== '')
   return { verdicts, extended, any }
 }
 
@@ -1807,20 +1819,26 @@ export function storedWork(params: Readonly<Record<string, unknown>>): {
 export const PAIR_PARAMS = ['extend', 'autoRoots', 'autoRefused'] as const
 
 /**
+ * Every param holding the card's review work, read by Start over (what it clears, and whether
+ * there is anything to) and by `withRecentWork`, which keeps or drops each one's entries by neuron.
+ * Hand picks (`handPicks.ts`) are entries of their own, by the root they touch.
+ */
+export const WORK_PARAMS = ['verdicts', ...PAIR_PARAMS, 'picks'] as const
+
+/**
  * What Start over writes (user, 2026-11-19): every neuron's verdicts, extended pieces,
- * Auto-extend presses and refusals, cleared in one edit — one undo step. **The merge record
+ * Auto-extend presses, refusals and hand picks, cleared in one edit — one undo step. **The merge record
  * stays**: those merges are on the server, and the record is what lets the next Submit start from
  * the neuron's new root. The neuron and the cursor stay too, so the card does not jump. Nothing
  * goes to SEAM's verdict log, which records presses, not starting over.
  */
 export const START_OVER_WRITE: Readonly<Record<string, string>> = Object.freeze({
-  verdicts: '',
-  ...Object.fromEntries(PAIR_PARAMS.map((id) => [id, ''])),
+  ...Object.fromEntries(WORK_PARAMS.map((id) => [id, ''])),
   recent: '',
 })
 
 export const START_OVER_HELP =
-  'Clear every verdict, extended piece and Auto-extend on every neuron of this card, to review ' +
+  'Clear every verdict, extended piece, Auto-extend and hand pick on every neuron of this card, to review ' +
   'from the start. The merge record stays, as do the merges themselves. Ctrl+Z brings it back.'
 
 /** How to undo what Auto-extend took — the tag, the foot, the held button and the menu say it. */

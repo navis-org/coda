@@ -82,6 +82,12 @@ describe('a row as a record', () => {
       true,
     )
   })
+
+  it('names no source for a hand pick, so no sender queues it, on a SEAM tip or not', () => {
+    const record = verdictInput(tip, { ...candidate, hand: true }, 'accept', null)
+    expect(record.source).toBe('')
+    expect(isSeamSource(record.source)).toBe(false)
+  })
 })
 
 describe('which verdicts are sent', () => {

@@ -6,8 +6,8 @@
  * A neuron is worked on when the card writes something for it — a verdict, an Extend, an
  * Auto-extend, Auto-extend listed — never when it is only looked at. The order is the `recent`
  * param, oldest first. When a write puts more than `KEPT_NEURONS` neurons in it, the oldest lose
- * their verdicts, extended pieces, Auto-extend presses and refusals **in that same edit**, so one
- * Ctrl+Z brings them back, and the card says so on the status bar. The merge record keeps its own
+ * their verdicts, extended pieces, Auto-extend presses, refusals and hand picks **in that same
+ * edit**, so one Ctrl+Z brings them back, and the card says so on the status bar. The merge record keeps its own
  * recency (`appendRecorded`): it grows only at a Submit.
  *
  * **Decided from the params alone, at a write, never from the input**: `Tips` arrives late and in
@@ -22,6 +22,7 @@
  */
 
 import { compareIds } from '../../core/ids'
+import { decodePicks, encodePicks } from './handPicks'
 import { pairsOf, piecesOf, verdictPair } from './pieces'
 import {
   PAIR_PARAMS,
@@ -94,5 +95,12 @@ export function withRecentWork(
   }
   put('verdicts', encodeVerdicts(new Map([...verdicts].filter(([key]) => keeps(key)))))
   for (const [id, keys] of lists) put(id, encodeExtend([...keys].filter(keeps)))
+  // A hand pick goes with the pair that accepts it: on a root the kept neurons reach.
+  if (after['picks']) {
+    put(
+      'picks',
+      encodePicks(decodePicks(after['picks']).filter((pick) => reach.has(pick.root))),
+    )
+  }
   return { write: out, evicted }
 }
