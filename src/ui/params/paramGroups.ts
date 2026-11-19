@@ -169,7 +169,9 @@ export function facetLabel(param: ParamDef): string {
 
 /**
  * The panel's admission rule: presentational params, plus anything in a group that has
- * declared `affectsData`.
+ * declared `affectsData` — **never an `internal` one**, which some widget writes and nothing is
+ * to advertise (`ParamBase.internal`): a review card's `Recent neurons` or a Neuroglancer card's
+ * `Saved view` drawn as a control on the rail was a list of ids nobody types (user, 2026-11-19).
  *
  * Presentational-only is what makes a styling panel safe to touch, and it was the flat rail's
  * whole promise. A group opting out of it is a deliberate act by a node definition, and the
@@ -181,7 +183,8 @@ export function paramsForPanel(def: NodeDefinition): (param: ParamDef) => boolea
     (def.paramGroups ?? []).filter((g) => g.affectsData).map((g) => g.id),
   )
   return (param) =>
-    param.presentational === true || (!!param.group && dataGroups.has(param.group))
+    param.internal !== true &&
+    (param.presentational === true || (!!param.group && dataGroups.has(param.group)))
 }
 
 /**
