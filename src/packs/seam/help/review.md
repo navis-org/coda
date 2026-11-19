@@ -162,6 +162,17 @@ The pieces it accepts are listed like any other, with an `auto` tag, and the foo
 - **Reject**, `Ends` or `Unsure` drops the piece and everything Auto-extend found beyond it, at once. The next time Suggest Merges runs, it does not take that piece. A verdict on a row Auto-extend could never take changes nothing about the search.
 - Pressing the button again, or the ticked item in the menu, stops Auto-extend and takes everything it found off the list. `Extend` in the menu keeps the piece's own ends but drops what Auto-extend took.
 
+### Auto-extend listed
+
+**Auto-extend listed**, in the footer beside Submit, chooses Auto-extend on every listed row whose first candidate clears SEAM's cutoff, in one click. "Listed" means every row the filters let through, whether or not it is scrolled into view. The number on the button says how many rows it would take. It leaves out:
+
+- a row you gave `Reject`, `Ends` or `Unsure`;
+- a row Auto-extend would not accept (an organelle, or a large piece);
+- a piece already extended, by you or by Auto-extend, or already in the neuron on another row;
+- a piece that cannot be extended (merged, or edited since it was suggested).
+
+A row you accepted yourself, and have not extended, is Auto-extended and stays yours. A row you had not judged is accepted by Auto-extend, not by you: it gets the `auto` tag and is counted with the rest. Accept it to make the verdict your own. Stopping its Auto-extend takes the accept back too. The whole click is one undo step.
+
 > [!WARNING]
 > **Submit merges what Auto-extend accepted**
 > Pieces tagged `auto` count as accepted. Look through them, or reject what is wrong, before you press Submit. The confirm dialog tags them `auto` too, says how many there are, and lets you untick any of them.

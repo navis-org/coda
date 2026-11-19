@@ -948,6 +948,78 @@ describe('extending a neuron from the review card', () => {
     })
   })
 
+  /*
+   * `Auto-extend listed` (user, 2026-11-19): the neuron's end 11 clears the cutoff and its first
+   * candidate is `PIECE`; end 22 does not. One press, one edit, one run.
+   */
+  describe('Auto-extend listed', () => {
+    const button = () =>
+      screen.getByRole('button', { name: /Auto-extend listed/ }) as HTMLButtonElement
+
+    it('presses Auto-extend on each listed row that clears, in one step', () => {
+      useGraphStore.setState({ past: [] } as never)
+      draw({}, true, grownCandidates(), grownTips(true))
+      expect(button().textContent).toBe('Auto-extend listed (1)')
+      const before = useGraphStore.getState().past.length
+      fireEvent.click(button())
+      expect(stored()['extend']).toBe(`${NEURON}/${PIECE}`)
+      expect(stored()['autoRoots']).toBe(`${NEURON}/${PIECE}`)
+      // No verdict of the reader's is written: the accept is Auto-extend's.
+      expect(stored()['verdicts'] ?? '').toBe('')
+      expect(useGraphStore.getState().past.length).toBe(before + 1)
+      expect(runNode).toHaveBeenCalledTimes(1)
+    })
+
+    it('marks and counts what it took as Auto-extend’s, and has nothing left to take', () => {
+      const TAKEN = `${NEURON}/${PIECE}`
+      draw({ extend: TAKEN, autoRoots: TAKEN }, true, grownCandidates(), grownTips(true))
+      const piece = rows().find((row) => row.textContent?.startsWith(`0.910`))!
+      expect(piece.querySelector('.review-row__auto')?.getAttribute('title')).toMatch(
+        /Auto-extend listed/,
+      )
+      // The piece, and `NEXT`, which Auto-extend took beyond it.
+      expect(document.body.textContent).toMatch(/2 by Auto-extend/)
+      expect(button().disabled).toBe(true)
+    })
+
+    it('leaves out a row the reader turned down', () => {
+      draw({ verdicts: `${NEURON}/${PIECE}=unsure` }, true, grownCandidates(), grownTips(true))
+      expect(button().disabled).toBe(true)
+      expect(button().textContent).toBe('Auto-extend listed (0)')
+    })
+
+    it('says what to wire where nothing searches', () => {
+      wiredBack = false
+      draw({}, true, grownCandidates(), grownTips(true))
+      expect(button().disabled).toBe(true)
+      expect(button().title).toMatch(/Wire this card’s `Extended` output/)
+    })
+
+    it('leaves a piece you extended by hand as it is', () => {
+      draw(
+        { verdicts: ACCEPTED, extend: `${NEURON}/${PIECE}` },
+        true,
+        grownCandidates(),
+        grownTips(true),
+      )
+      // The neuron's end lists PIECE (extended by hand); the piece's own end lists NEXT.
+      fireEvent.click(button())
+      expect(stored()['autoRoots']).toBe(`${PIECE}/${NEXT}`)
+      expect(stored()['extend']).toBe(`${PIECE}/${NEXT};${NEURON}/${PIECE}`)
+    })
+
+    it('is off, with the reason, where the search has no cutoff', () => {
+      const tips = grownTips(true)
+      const bare = makeTable(
+        tableSchema(...tips.schema.columns.filter((one) => one.name !== 'shown')),
+        Object.fromEntries(Object.entries(tips.data).filter(([name]) => name !== 'shown')),
+      )
+      draw({}, true, grownCandidates(), bare)
+      expect(button().disabled).toBe(true)
+      expect(button().title).toMatch(/Assessor/)
+    })
+  })
+
   describe('with Extend on accept on', () => {
     const accept = (row: Element) =>
       row.querySelector<HTMLButtonElement>('.review-row__verdict[data-verdict="accept"]')!

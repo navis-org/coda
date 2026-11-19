@@ -50,7 +50,7 @@
  * there is nothing else to read it from — and pressing it again stops extending the piece.
  */
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties } from 'react'
 
 import { referrerOf } from '../../core/graph'
@@ -63,6 +63,7 @@ import {
   arrangeTree,
   buildQueue,
   currentOfQueue,
+  AUTO_LISTED_HELP,
   AUTO_REJECT_NOTE,
   autoJudged,
   autoOffered,
@@ -78,6 +79,8 @@ import {
   IN_NEURON_NOTE,
   judgedParams,
   leavesWith,
+  listedAutoPairs,
+  listedAutoParams,
   liveQueue,
   mergedAs,
   neuronsOf,
@@ -222,7 +225,12 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       ),
     [node.params.extend, node.params.autoRoots, node.params.autoRefused, stored],
   )
-  const { extend: extendedText, autoRoots: autoText, refused: refusedText } = texts
+  const {
+    extend: extendedText,
+    autoRoots: autoText,
+    refused: refusedText,
+    taken: takenText,
+  } = texts
   // The pairs Auto-extend could take: a verdict on one is written down for it (`judgedParams`).
   const offered = useMemo(() => autoOffered(all), [all])
   const plan = useMemo(
@@ -232,6 +240,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // The pairs the reader extended — which is not the same question as "is this piece in the tree".
   const extended = useMemo(() => decodeExtend(extendedText), [extendedText])
   const autoPressed = useMemo(() => decodeExtend(autoText), [autoText])
+  // The presses `Auto-extend listed` made on SEAM's word: accepted by Auto-extend, not the reader.
+  const taken = useMemo(() => decodeExtend(takenText), [takenText])
   // The tree, with what Auto-extend took grown on by the rule the search grew it by.
   const growth = useMemo(() => reviewGrowth(all, plan), [all, plan])
   const tree = growth.tree
@@ -244,8 +254,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * where the reader has said nothing (`unjudged`) — as `evaluate` and Submit read them.
    */
   const { verdicts, unjudged } = useMemo(
-    () => autoJudged(stored, growth.accepted),
-    [stored, growth],
+    () => autoJudged(stored, growth.accepted, taken),
+    [stored, growth, taken],
   )
   /*
    * One neuron at a time. Everything below — the list, the cursor, the counts in the foot — reads
@@ -479,9 +489,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     // Gated on a sign-in: the read needs the reader's token, and without one it would be refused.
     if (target && signedIn) rootCurrency.ask(target, askAbout)
   }, [target, signedIn, askAbout])
-  useSyncExternalStore(rootCurrency.subscribe, rootCurrency.version)
-  const edited = (id: string) =>
-    target !== undefined && rootCurrency.current(target, id) === false
+  // A new function when an answer lands, so a memo that reads it is redone then.
+  const currency = useSyncExternalStore(rootCurrency.subscribe, rootCurrency.version)
+  const edited = useCallback(
+    (id: string) => target !== undefined && rootCurrency.current(target, id) === false,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- what it reads is versioned by `currency`.
+    [target, currency],
+  )
   /*
    * The query neuron edited since its suggestions were made — by somebody else: this workflow's
    * own merges are `currentRoot` already, and a lost reply still unsettled is the plan's to settle,
@@ -489,6 +503,61 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const neuronEdited =
     neuronNow !== undefined && !absorbed && merged?.unsettled.length === 0 && edited(neuronNow)
+  // Why a piece cannot be extended, where it cannot: read by each row and by Auto-extend listed.
+  const blockedOf = useCallback(
+    (id: string) => {
+      const done = mergedAs(merged, id)
+      return extendBlocked({
+        wired: searchId !== undefined,
+        done,
+        outdated: !done && edited(id),
+      })
+    },
+    [merged, searchId, edited],
+  )
+  /*
+   * `Auto-extend listed` (user, 2026-11-19): Auto-extend on every listed row whose first candidate
+   * clears SEAM's cutoff and the reader has not turned down — which rows, `listedAutoPairs`'s to
+   * say; what is written, `listedAutoParams`'. Memoised: it reads every listed row, and a scroll
+   * re-renders the card.
+   */
+  const listedAuto = useMemo(
+    () =>
+      noAuto !== undefined
+        ? []
+        : listedAutoPairs(listed, {
+            extended,
+            autoPressed,
+            accepted: growth.accepted,
+            unjudged,
+            searched,
+            offered,
+            stored,
+            verdicts,
+            acceptedHere: accepted,
+            blocked: blockedOf,
+          }),
+    [
+      noAuto,
+      listed,
+      extended,
+      autoPressed,
+      growth,
+      unjudged,
+      searched,
+      offered,
+      stored,
+      verdicts,
+      accepted,
+      blockedOf,
+    ],
+  )
+  const autoListed = () => {
+    if (listedAuto.length === 0) return
+    setParams(node.id, listedAutoParams(node.params, listedAuto, offered))
+    runSearch()
+  }
+
   const press = submitPress({
     docId,
     nodeId: node.id,
@@ -696,7 +765,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               const goesWith =
                 isExtended && candidate ? leavesWith(tree, candidate.candidateId) : ''
               // Why the piece cannot be extended, where it cannot.
-              const blocked = extendBlocked({ wired: searchId !== undefined, done, outdated })
+              const blocked = candidate && blockedOf(candidate.candidateId)
               /*
                * The Extend button, on an accepted row only: what it reads, says and whether it
                * can be pressed are `extendPress`'s, as Submit's are `submitPress`'s; its menu's
@@ -790,7 +859,12 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                     {autoFrom !== undefined && !done && (
                       <span
                         className="review-row__auto"
-                        title={`Accepted by the Auto-extend on ${autoFrom}. Press Accept to make it your own verdict. ${AUTO_REJECT_NOTE}`}
+                        title={`${
+                          candidate &&
+                          taken.has(verdictKey(tip.neuronId, candidate.candidateId))
+                            ? 'Accepted on SEAM’s cutoff by Auto-extend listed.'
+                            : `Accepted by the Auto-extend on ${autoFrom}.`
+                        } Press Accept to make it your own verdict. ${AUTO_REJECT_NOTE}`}
                       >
                         auto
                       </span>
@@ -970,6 +1044,27 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               merged into another neuron under review
             </span>
           )}
+          {/*
+           * Auto-extend on every listed row that clears SEAM's cutoff, in one edit. Disabled with
+           * the reason as its title, as Submit is.
+           */}
+          <button
+            type="button"
+            className="btn review-body__auto-listed"
+            disabled={listedAuto.length === 0}
+            title={
+              noAuto ??
+              (listedAuto.length > 0
+                ? AUTO_LISTED_HELP
+                : searchId === undefined
+                  ? // Unwired, every row is blocked: say what to wire, as a row's Extend does.
+                    extendBlocked({ wired: false, done: undefined, outdated: false })
+                  : `No listed row is left for it: ${AUTO_LISTED_HELP}`)
+            }
+            onClick={autoListed}
+          >
+            {`Auto-extend listed (${formatNumber(listedAuto.length)})`}
+          </button>
           {/*
            * Submit: the accepted pieces of this neuron not yet merged, checked and listed in an
            * overlay before anything is sent. Disabled with the reason as its title.
