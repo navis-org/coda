@@ -10999,14 +10999,20 @@ details[open] > summary.tile__label {
  * `Auto-extend listed` stands beside Submit at the foot's right end, and takes the push to the
  * right from it: the two are one group, the button that fills the queue and the one that sends it.
  */
-.review-body__auto-listed,
-.review-body__submit {
-  margin-left: auto;
+/* The foot's buttons, on their own row under the facts, to the right: Start over, or its question. */
+.review-body__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 3px 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.review-body__actions .btn {
   font-size: 11px;
   padding: 2px 10px;
-}
-.review-body__auto-listed + .review-body__submit {
-  margin-left: 0;
 }
 
 /*
