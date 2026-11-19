@@ -93,7 +93,10 @@ import {
   estimateLabel,
   sizeLabel,
   sizeOf,
+  START_OVER_HELP,
+  START_OVER_WRITE,
   stillToMerge,
+  storedWork,
   stillToSearch,
   tipKey,
   tipsOf,
@@ -556,6 +559,18 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     if (listedAuto.length === 0) return
     setParams(node.id, listedAutoParams(node.params, listedAuto, offered))
     runSearch()
+  }
+
+  /*
+   * Start over: asked in place, as the shelf asks before a delete (no `window.confirm`, which
+   * jsdom lacks), then one edit. Nothing runs: the extended pieces' rows leave the list at once
+   * (`liveQueue`), as when Extend is stopped.
+   */
+  const [askingStartOver, setAskingStartOver] = useState(false)
+  const work = useMemo(() => storedWork(node.params), [node.params])
+  const startOver = () => {
+    setAskingStartOver(false)
+    setParams(node.id, { ...START_OVER_WRITE })
   }
 
   const press = submitPress({
@@ -1044,50 +1059,94 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               merged into another neuron under review
             </span>
           )}
-          {/*
-           * Auto-extend on every listed row that clears SEAM's cutoff, in one edit. Disabled with
-           * the reason as its title, as Submit is.
-           */}
-          <button
-            type="button"
-            className="btn review-body__auto-listed"
-            disabled={listedAuto.length === 0}
-            title={
-              noAuto ??
-              (listedAuto.length > 0
-                ? AUTO_LISTED_HELP
-                : searchId === undefined
-                  ? // Unwired, every row is blocked: say what to wire, as a row's Extend does.
-                    extendBlocked({ wired: false, done: undefined, outdated: false })
-                  : `No listed row is left for it: ${AUTO_LISTED_HELP}`)
-            }
-            onClick={autoListed}
-          >
-            {`Auto-extend listed (${formatNumber(listedAuto.length)})`}
-          </button>
-          {/*
-           * Submit: the accepted pieces of this neuron not yet merged, checked and listed in an
-           * overlay before anything is sent. Disabled with the reason as its title.
-           */}
-          <button
-            type="button"
-            className="btn btn--primary review-body__submit"
-            // While the check runs, nothing else is drawn for it: the button is its Cancel.
-            disabled={submitting !== 'planning' && 'blocked' in press}
-            title={
-              submitting === 'planning'
-                ? 'Stop checking, and open nothing.'
-                : 'blocked' in press
-                  ? press.blocked
-                  : SUBMIT_HELP
-            }
-            onClick={() => {
-              if (submitting === 'planning') closeSubmit()
-              else if ('request' in press) openSubmit(press.request)
-            }}
-          >
-            {SUBMIT_LABEL[submitting] ?? `Submit (${formatNumber(toSubmit)})`}
-          </button>
+        </div>
+        {/*
+         * The buttons on a row of their own, under the facts (user, 2026-11-19): sharing one
+         * wrapping row, they broke onto a second line anyway, wherever the facts ran out.
+         */}
+        <div className="review-body__actions">
+          {askingStartOver ? (
+            <>
+              <span className="review-body__ask">
+                {`Clear ${plural(work.verdicts, 'verdict')} and ${plural(work.extended, 'extended piece')} on every neuron? The merge record stays.`}
+              </span>
+              <button
+                type="button"
+                className="btn review-body__clear"
+                data-tone="danger"
+                onClick={startOver}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="btn review-body__cancel"
+                onClick={() => setAskingStartOver(false)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn review-body__start-over"
+                disabled={!work.any}
+                title={
+                  work.any
+                    ? START_OVER_HELP
+                    : 'Nothing to clear: no verdict or extended piece is stored.'
+                }
+                onClick={() => setAskingStartOver(true)}
+              >
+                Start over…
+              </button>
+              {/*
+               * Auto-extend on every listed row that clears SEAM's cutoff, in one edit. Disabled with
+               * the reason as its title, as Submit is.
+               */}
+              <button
+                type="button"
+                className="btn review-body__auto-listed"
+                disabled={listedAuto.length === 0}
+                title={
+                  noAuto ??
+                  (listedAuto.length > 0
+                    ? AUTO_LISTED_HELP
+                    : searchId === undefined
+                      ? // Unwired, every row is blocked: say what to wire, as a row's Extend does.
+                        extendBlocked({ wired: false, done: undefined, outdated: false })
+                      : `No listed row is left for it: ${AUTO_LISTED_HELP}`)
+                }
+                onClick={autoListed}
+              >
+                {`Auto-extend listed (${formatNumber(listedAuto.length)})`}
+              </button>
+              {/*
+               * Submit: the accepted pieces of this neuron not yet merged, checked and listed in an
+               * overlay before anything is sent. Disabled with the reason as its title.
+               */}
+              <button
+                type="button"
+                className="btn btn--primary review-body__submit"
+                // While the check runs, nothing else is drawn for it: the button is its Cancel.
+                disabled={submitting !== 'planning' && 'blocked' in press}
+                title={
+                  submitting === 'planning'
+                    ? 'Stop checking, and open nothing.'
+                    : 'blocked' in press
+                      ? press.blocked
+                      : SUBMIT_HELP
+                }
+                onClick={() => {
+                  if (submitting === 'planning') closeSubmit()
+                  else if ('request' in press) openSubmit(press.request)
+                }}
+              >
+                {SUBMIT_LABEL[submitting] ?? `Submit (${formatNumber(toSubmit)})`}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -1661,6 +1661,44 @@ export const AUTO_LISTED_HELP =
   'other than Accept is left out. What it accepts is Auto-extend’s, tagged “auto”, until you ' +
   `judge it. ${AUTO_EXTEND_RULE}`
 
+/**
+ * The review work the card holds, as Start over counts it: the reader's verdicts, and the pieces
+ * extended — by hand, by Auto-extend or by Auto-extend listed (an Auto-extend press is in
+ * `extend` too). `any` is whether there is anything to clear at all, refusals included.
+ */
+export function storedWork(params: Readonly<Record<string, unknown>>): {
+  verdicts: number
+  extended: number
+  any: boolean
+} {
+  const verdicts = decodeVerdicts(params['verdicts']).size
+  const extended = decodeExtend(params['extend']).size
+  const any =
+    verdicts > 0 ||
+    extended > 0 ||
+    decodeExtend(params['autoRoots']).size > 0 ||
+    decodeExtend(params['autoRefused']).size > 0
+  return { verdicts, extended, any }
+}
+
+/**
+ * What Start over writes (user, 2026-11-19): every neuron's verdicts, extended pieces,
+ * Auto-extend presses and refusals, cleared in one edit — one undo step. **The merge record
+ * stays**: those merges are on the server, and the record is what lets the next Submit start from
+ * the neuron's new root. The neuron and the cursor stay too, so the card does not jump. Nothing
+ * goes to SEAM's verdict log, which records presses, not starting over.
+ */
+export const START_OVER_WRITE: Readonly<Record<string, string>> = Object.freeze({
+  verdicts: '',
+  extend: '',
+  autoRoots: '',
+  autoRefused: '',
+})
+
+export const START_OVER_HELP =
+  'Clear every verdict, extended piece and Auto-extend on every neuron of this card, to review ' +
+  'from the start. The merge record stays, as do the merges themselves. Ctrl+Z brings it back.'
+
 /** How to undo what Auto-extend took — the tag, the foot, the held button and the menu say it. */
 export const AUTO_REJECT_NOTE =
   'Submit merges what Auto-extend accepted; reject a piece to drop it and what was taken beyond it.'

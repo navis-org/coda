@@ -1020,6 +1020,51 @@ describe('extending a neuron from the review card', () => {
     })
   })
 
+  describe('Start over', () => {
+    const button = () => screen.getByRole('button', { name: /Start over/ }) as HTMLButtonElement
+    const work = {
+      ...EXTENDED,
+      verdicts: `${ACCEPTED};${NEURON}/${OTHER}=reject`,
+      autoRoots: `${NEURON}/${PIECE}`,
+      autoRefused: `${NEURON}/${OTHER}`,
+      merges: '[]',
+      current: `${NEURON}|11`,
+    }
+
+    it('is off where nothing is stored', () => {
+      draw({}, true, grownCandidates(), grownTips(true))
+      expect(button().disabled).toBe(true)
+    })
+
+    it('asks first, and Cancel clears nothing', () => {
+      draw(work, true, grownCandidates(), grownTips(true))
+      fireEvent.click(button())
+      expect(document.querySelector('.review-body__ask')?.textContent).toBe(
+        'Clear 2 verdicts and 1 extended piece on every neuron? The merge record stays.',
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(stored()['verdicts']).toBe(work.verdicts)
+      expect(button()).toBeTruthy()
+    })
+
+    it('clears the review work in one undo step, keeping the merge record and the cursor', () => {
+      useGraphStore.setState({ past: [] } as never)
+      draw(work, true, grownCandidates(), grownTips(true))
+      fireEvent.click(button())
+      fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+      for (const id of ['verdicts', 'extend', 'autoRoots', 'autoRefused']) {
+        expect(stored()[id]).toBe('')
+      }
+      expect(stored()['merges']).toBe('[]')
+      expect(stored()['current']).toBe(`${NEURON}|11`)
+      expect(runNode).not.toHaveBeenCalled()
+      expect(useGraphStore.getState().past.length).toBe(1)
+      useGraphStore.getState().undo()
+      expect(stored()['verdicts']).toBe(work.verdicts)
+      expect(stored()['extend']).toBe(work.extend)
+    })
+  })
+
   describe('with Extend on accept on', () => {
     const accept = (row: Element) =>
       row.querySelector<HTMLButtonElement>('.review-row__verdict[data-verdict="accept"]')!

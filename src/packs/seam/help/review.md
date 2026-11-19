@@ -177,6 +177,12 @@ A row you accepted yourself, and have not extended, is Auto-extended and stays y
 > **Submit merges what Auto-extend accepted**
 > Pieces tagged `auto` count as accepted. Look through them, or reject what is wrong, before you press Submit. The confirm dialog tags them `auto` too, says how many there are, and lets you untick any of them.
 
+## Starting over
+
+**Start over…**, in the footer, clears every verdict, extended piece and Auto-extend on the card, for every neuron, so you can review from the beginning. It asks first and says how much it will clear. The whole clear is one undo step.
+
+It does not touch the merge record or the merges themselves: pieces Submit merged are still shown as merged, and the next Submit still starts from the neuron's new root. It sends nothing to SEAM, even with **Help improve** ticked: verdicts already sent stay sent.
+
 ## One row per tip, or per candidate
 
 `One row per` changes the grain. **Per tip** — the default — a row is a tip and its suggestion, and the big number is `q`. This is the unit SEAM calibrated: the cutoff, `p_tip` and `r` were all fitted on first candidates, so a row here is a suggestion somebody made.
