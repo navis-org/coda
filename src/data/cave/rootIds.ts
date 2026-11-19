@@ -18,9 +18,12 @@
  */
 
 import { cacheGet, cacheSet } from '../cache'
-import { inFlight } from '../concurrency'
+import type { Slots } from '../concurrency'
+import { inFlight, slots } from '../concurrency'
 import type { CaveRequestOptions } from './client'
-import { CaveError, cavePostBinary, cavePostRaw } from './client'
+import { CaveError, cavePostBinary, cavePostRaw, sharedRequestOptions } from './client'
+import type { SharedAsk } from '../memoPromise'
+import { shareInFlight } from '../memoPromise'
 import { datastackRecord, materializationsFor, versionFrozenAt } from './datastack'
 import { deploymentKey } from './deployments'
 import type { GrapheneSource } from './graphene'
@@ -61,10 +64,8 @@ const CHUNK = 10_000
  * How many `roots_binary` requests one `rootsAtInstant` call keeps in flight — four, as
  * `LEAVES_STREAMS` is, for SEAM's invariant 8.
  *
- * **A cap per call, not the run's share of the server.** Suggest Merges reads the next end's
- * search box while this end's patch box is read, and the counts run beside both, so its peak
- * against one chunkedgraph is about twelve requests, not four. A limit per host, shared by
- * `rootsBinary` and `leavesMany`, is what would hold a total; nothing here does.
+ * **A cap per call, not the run's share of the server**: several calls run at once in Suggest
+ * Merges, and what bounds them together is `CHUNKEDGRAPH_BUDGET`.
  */
 const ROOT_STREAMS = 4
 
@@ -739,10 +740,12 @@ async function leavesMany(
   options: CaveRequestOptions,
 ): Promise<Map<string, string[]>> {
   const url = tableUrl(graphene, `node/leaves_many?stop_layer=${VOTE_LAYER}`)
-  const answer = await cavePostRaw<Record<string, (string | number)[]>>(
-    url,
-    `{"node_ids":[${roots.join(',')}]}`,
-    options,
+  const answer = await chunkedgraphRead(graphene, options.signal, () =>
+    cavePostRaw<Record<string, (string | number)[]>>(
+      url,
+      `{"node_ids":[${roots.join(',')}]}`,
+      options,
+    ),
   ).catch((error: unknown) => {
     if (error instanceof CaveError && error.status === 404) {
       /*
@@ -798,6 +801,62 @@ function timestampQuery(at: Instant): string {
   return at === 'server' ? '' : `?timestamp=${at / 1000}`
 }
 
+/**
+ * How many `roots_binary` and `leaves_many` requests may be in flight at one chunkedgraph, from
+ * every caller in the tab together — the user's figure (2026-11-19), above the ~12 a Suggest
+ * Merges run reached once its reads overlapped. **Those two endpoints only**, the search's hot
+ * path: this file's other chunkedgraph reads (`is_latest_roots`, `root_timestamps`) and other
+ * files' (`l2.ts`, the mesh manifests) go around it, and are not counted. `ROOT_STREAMS` and
+ * `LEAVES_STREAMS` still cap a single call; this is the total those calls share, so a run that
+ * reads several ends at once stays within it however many it reads.
+ *
+ * Measured before it was chosen: with three or four ends' lookups and counts in flight at once,
+ * the Aedes chunkedgraph did each end's work in 0.4-0.7 s against 1.0-1.7 one at a time, its
+ * median request slowing from ~430 ms to ~600-880 (`docs/seam-suggestions-plan.md`).
+ */
+const CHUNKEDGRAPH_BUDGET = 16
+
+const budgets = new Map<string, Slots>()
+
+/** The tab's budget at one chunkedgraph server. */
+function budgetAt(graphene: GrapheneSource): Slots {
+  let budget = budgets.get(graphene.server)
+  if (!budget) {
+    budget = slots(CHUNKEDGRAPH_BUDGET)
+    budgets.set(graphene.server, budget)
+  }
+  return budget
+}
+
+/**
+ * A chunkedgraph read, inside the server's budget, **asked again once if the connection
+ * dropped under it.**
+ *
+ * The server closes its HTTP/2 connections from time to time with a `GOAWAY` (code 0, "no
+ * error"), and every request still open on that connection fails at once — twelve to fifteen
+ * lookups in one measurement (2026-11-19). These reads are `POST`s, which no browser retries on
+ * its own, so one such close failed a whole Suggest Merges run. Only a request that got no
+ * answer (`CaveError.noAnswer`) or lost it mid-read is asked again; an HTTP error or a bad body
+ * is the server's answer, and a Cancel is an `AbortError`. A host that refuses cross-origin reads
+ * is asked twice too, since a browser cannot tell that from a dropped connection.
+ */
+async function chunkedgraphRead<T>(
+  graphene: GrapheneSource,
+  signal: AbortSignal | undefined,
+  read: () => Promise<T>,
+): Promise<T> {
+  return budgetAt(graphene).run(async () => {
+    try {
+      return await read()
+    } catch (error) {
+      // No answer at all, or one cut off while it was read (`noAnswer`, set by the client
+      // only there); never an answer the server gave, and never after the caller has gone.
+      if (!(error instanceof CaveError && error.noAnswer) || signal?.aborted) throw error
+      return read()
+    }
+  }, signal)
+}
+
 /** One `roots_binary` call. */
 function rootsBinary(
   graphene: GrapheneSource,
@@ -805,7 +864,9 @@ function rootsBinary(
   at: Instant,
   options: CaveRequestOptions,
 ): Promise<BigUint64Array> {
-  return cavePostBinary(tableUrl(graphene, `roots_binary${timestampQuery(at)}`), ids, options)
+  return chunkedgraphRead(graphene, options.signal, () =>
+    cavePostBinary(tableUrl(graphene, `roots_binary${timestampQuery(at)}`), ids, options),
+  )
 }
 
 /**
@@ -1105,12 +1166,18 @@ async function madeOrUnknown(
  */
 const l2Counts = new Map<string, number>()
 
+/** Roots whose count is being asked for right now, each to the batch that will answer it. */
+const l2Asking = new Map<string, SharedAsk>()
+
 /** A root the graph does not list. Distinct from 0, which is a count nobody took. */
 const ABSENT = -1
 
 /** Test-only: forget the counts so a suite can re-observe the requests. */
 export function resetL2ChunkCounts(): void {
   l2Counts.clear()
+  l2Asking.clear()
+  // And the budgets, so one test's stuck requests cannot hold slots for the next.
+  budgets.clear()
 }
 
 /**
@@ -1136,19 +1203,12 @@ export function resetL2ChunkCounts(): void {
  * for the same root however they interleave, and a call that fails partway still keeps what the
  * batches that landed bought.
  *
- * Across *calls* it is still "both fetch": two concurrent callers over the same roots each find
- * the memo empty and each ask. Deliberate, for now — the search runs one open end at a time, and
- * the obvious fix, a promise per root as `memoPromise` gives, would key per root and so destroy
- * the fifty-root batching that is the point of this function. Sharing in flight means sharing a
- * *batch*, which is worth writing only once something calls this concurrently.
- *
- * **Pipelining the search behind the assessor has since landed and is not that caller**, which
- * is worth saying because it looks like one. `oneAhead` overlaps an end's *search* with the
- * previous end's *assessor*, and the counts are asked for only inside `searchEnds`, which runs
- * strictly one end at a time; the assessor never asks for counts. So there is still exactly one
- * caller of this in flight at a time. What would change that is a second generator, or counts
- * moving into the assessed half — and the mechanism then exists one file along, as
- * `searchVolume.ts`' `resolveRoots`, rather than needing to be invented.
+ * **Across calls, a request in flight is shared** (`l2Asking`, `shareInFlight`): the search counts
+ * several ends at once (2026-11-19), and neighbouring ends' pools are largely the same roots, so
+ * two callers would otherwise each find the memo empty and each ask. Shared per caller's set,
+ * never per root — a promise per root would destroy the fifty-root batching that is the point of
+ * this function. A joiner waits for the whole of the request it joined, a few batches at most,
+ * which is off the critical path now the search runs ahead of the GPU.
  */
 export async function l2ChunkCounts(
   graphene: GrapheneSource,
@@ -1157,25 +1217,37 @@ export async function l2ChunkCounts(
 ): Promise<Map<string, number>> {
   const at = (root: string) => `${graphene.server}|${graphene.table}|${root}`
   const distinct = distinctStrings(roots)
-  const wanted = distinct.filter((root) => !l2Counts.has(at(root)))
-  const batches = Array.from({ length: Math.ceil(wanted.length / LEAVES_CHUNK) }, (_, i) =>
-    wanted.slice(i * LEAVES_CHUNK, (i + 1) * LEAVES_CHUNK),
+  const keyed = new Map(distinct.map((root) => [at(root), root]))
+  const shared = sharedRequestOptions(options)
+  // Inside the shared request the batching is as before: fifty roots a request,
+  // `LEAVES_STREAMS` at a time, the memo filling as each batch lands.
+  await shareInFlight(
+    keyed.keys(),
+    (key) => l2Counts.has(key),
+    l2Asking,
+    async (mine, signal) => {
+      const wanted = mine.map((key) => keyed.get(key)!)
+      const batches = Array.from({ length: Math.ceil(wanted.length / LEAVES_CHUNK) }, (_, i) =>
+        wanted.slice(i * LEAVES_CHUNK, (i + 1) * LEAVES_CHUNK),
+      )
+      await inFlight(batches, LEAVES_STREAMS, async (batch) => {
+        const lists = await leavesMany(graphene, batch, { ...shared, signal })
+        for (const root of batch) {
+          /*
+           * **Absence is remembered too, as its own state.** A root the graph does not list is
+           * not going to start appearing — a chunkedgraph id either exists or never did — so
+           * leaving it out of the memo means every later pool holding it pays another round trip
+           * that can only answer "still absent". The search's premise is that roots recur across
+           * neighbouring tips, so that is one unremovable request per open end.
+           *
+           * `ABSENT` rather than 0: zero is a count this never took, and the smallest possible.
+           */
+          l2Counts.set(at(root), lists.get(root)?.length ?? ABSENT)
+        }
+      })
+    },
+    options.signal,
   )
-  await inFlight(batches, LEAVES_STREAMS, async (batch) => {
-    const lists = await leavesMany(graphene, batch, options)
-    for (const root of batch) {
-      /*
-       * **Absence is remembered too, as its own state.** A root the graph does not list is not
-       * going to start appearing — a chunkedgraph id either exists or never did — so leaving it
-       * out of the memo means every later pool holding it pays another round trip that can only
-       * answer "still absent". The search's premise is that roots recur across neighbouring
-       * tips, so that is one unremovable request per open end.
-       *
-       * `ABSENT` rather than 0: zero is a count this never took, and the smallest possible one.
-       */
-      l2Counts.set(at(root), lists.get(root)?.length ?? ABSENT)
-    }
-  })
   const out = new Map<string, number>()
   for (const root of distinct) {
     const held = l2Counts.get(at(root))

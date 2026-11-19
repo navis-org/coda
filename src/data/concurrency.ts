@@ -1,5 +1,6 @@
 /**
- * The two bounded-concurrency pools, and the difference between them is the whole point.
+ * The two bounded-concurrency pools, and the difference between them is the whole point — plus
+ * `slots`, a budget *shared* across callers rather than one call's own bound.
  *
  * `mapWithConcurrency` **forgives a failed item**, which is right when the items are separate
  * answers — forty-nine skeletons should survive the fiftieth. `inFlight` **fails the whole read
@@ -95,4 +96,55 @@ export async function inFlight<T>(
     },
   )
   await Promise.all(runners)
+}
+
+/** A budget of requests in flight, shared by every caller that holds it (`slots`). */
+export interface Slots {
+  /** Run `work` once a slot is free. A caller cancelled while waiting leaves the queue. */
+  run<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T>
+}
+
+/**
+ * At most `limit` pieces of work at once, **across callers** — where `inFlight` bounds one
+ * call's own items, this bounds everyone who shares it. First come, first served.
+ *
+ * For politeness at a shared server whose load is the sum of several readers: Suggest Merges
+ * reads one end's boxes while it counts another's, and a cap per call let those add up past
+ * what any of them was allowed (`rootIds.ts`' `CHUNKEDGRAPH_BUDGET`).
+ */
+export function slots(limit: number): Slots {
+  let busy = 0
+  const waiting: (() => void)[] = []
+  const release = () => {
+    const next = waiting.shift()
+    if (next) next()
+    else busy -= 1
+  }
+  return {
+    async run(work, signal) {
+      if (busy >= limit) {
+        await new Promise<void>((resolve, reject) => {
+          const go = () => {
+            signal?.removeEventListener('abort', leave)
+            resolve()
+          }
+          const leave = () => {
+            const at = waiting.indexOf(go)
+            if (at >= 0) waiting.splice(at, 1)
+            reject(signal!.reason)
+          }
+          if (signal?.aborted) return leave()
+          signal?.addEventListener('abort', leave, { once: true })
+          waiting.push(go)
+        })
+      } else {
+        busy += 1
+      }
+      try {
+        return await work()
+      } finally {
+        release()
+      }
+    },
+  }
 }

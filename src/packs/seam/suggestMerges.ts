@@ -114,7 +114,7 @@ import {
 import { readyAssessorPatches, useAssessorBox } from '../../pyodide/assessorPatches'
 import type { TreeRanker } from './treeRanker'
 
-import { assessEnd } from './assessEnds'
+import { assessEnd, startPatchBox } from './assessEnds'
 import type { AssessSteps } from './assessEnds'
 import { ASSESSOR_RUNTIME, parseAssessorConfig } from './assessorModel'
 import type { AssessorConfig } from './assessorModel'
@@ -154,7 +154,7 @@ import {
 import { openTreeRanker, readRankerManifest } from './rankerConfig'
 import type { RankerConfig } from './rankerConfig'
 import { contactsOf, publishedEnd, reportOnRun } from './scoreEnds'
-import type { EndToSearch } from './searchRun'
+import type { EndToSearch, SearchedEnd } from './searchRun'
 import { oneAhead, searchEnds } from './searchRun'
 import type { PublishedEnd, TipRow } from './searchTips'
 import {
@@ -202,6 +202,21 @@ const MODEL_SHARE = 0.02
  * default comes to disagree with the documentation of itself.
  */
 const DEFAULT_CHUNK_MB = DEFAULT_CHUNK_BUDGET / (1024 * 1024)
+
+/**
+ * How many ends are searched at once (`SearchOptions.depth`), ahead of the one being scored.
+ *
+ * The search was the run's pace — box, pool and counts in a row, ~3.1 s an end against ~1.8 s
+ * of scoring, the GPU idle ~1.5 s an end (`pnpm probe:suggest-merges`, 2026-11-19). Replaying
+ * that run's own step times through a search this deep put an end at ~2.0 s at 3 and ~1.9 at
+ * 4, against a floor of 1.79 for scoring alone, so 3 holds one box less for a tenth of a
+ * second. It rests on the chunkedgraph keeping up, which was measured: three or four ends'
+ * lookups and counts at once took 0.4-0.7 s of its time an end against 1.0-1.7 one at a time,
+ * inside the tab's budget at that server (`rootIds.ts`' `CHUNKEDGRAPH_BUDGET`).
+ *
+ * The cost is memory: each end under way holds its box (~19 MB) until it is measured.
+ */
+const SEARCH_DEPTH = 3
 
 /**
  * Where `Chunk cache` stops being an ordinary number and starts being a decision about a
@@ -1180,63 +1195,89 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
       },
     )
     /*
-     * **The next end is searched while this one is scored.** `oneAhead` is the whole of it, and
-     * `searchRun.ts` holds the reasoning, Pyodide's two workers included. The two things it rests
-     * on are settled elsewhere rather than here — a yielded end is final (`searchRun.ts`), and
-     * two box reads in flight share one supervoxel lookup (`SearchVolume.asking`).
+     * **Several ends are under way while this one is scored**: `searchEnds` keeps
+     * `SEARCH_DEPTH` searching, `oneAhead` asks for the next before the body scores this one, and
+     * `arriving` starts that next end's patch box as it comes. `searchRun.ts` holds the reasoning;
+     * what it rests on is settled there and in `rootedBox.ts` — a yielded end is final, and boxes
+     * read together share their supervoxel lookups (`shareInFlight`).
      *
-     * **The eviction plan is still sound, with one caveat that is this file's to record.**
+     * **The eviction plan stays sound, with one caveat that is this file's to record.**
      * `chunkPlanFor` gives both boxes of one end *one* position and `endSearched` runs below,
-     * after the assessor — so with two ends in flight the plan sits at *p* while the reads
-     * belong to *p* (the patch box) and *p+1* (the search box). Neither scores `Infinity`, so
-     * neither is ever dropped ahead of a chunk nothing wants again, which is the property that
-     * matters: nothing is evicted while it is still being read in preference to dead bytes.
+     * after the assessor — so the plan sits at *p* while the reads belong to *p* (this end's
+     * scoring), *p+1* (the patch box read ahead) and up to *p+3* (the searches). None scores
+     * `Infinity`, so nothing still being read is dropped in preference to dead bytes. But
+     * `nextUse` answers the nearest end at or after the cursor, so a chunk only the furthest
+     * end wants scores highest of the finite ones: at a budget too small for every end in
+     * flight, the cache can evict what a read has just fetched, and it is fetched again —
+     * wasted bytes, never a wrong box. At the default budget the ends in flight want ~70 chunks
+     * against 170 held; a reader who sets `Chunk cache` low meets it sooner, which is one more
+     * reason `reportOnReads` exists.
      *
-     * What is **not** true, and an earlier draft of this comment claimed, is that neither can
-     * be the furthest *finite* next use. `nextUse` answers the nearest end at or after the
-     * cursor, so a chunk only end *p+1* wants scores `p+1` — the largest finite score there
-     * is, unless something held is wanted further ahead still. At a budget too small to hold
-     * both ends' working sets the cache can therefore evict what the read in flight has just
-     * fetched, and the patch box then re-reads what the search box had in hand. It is wasted
-     * bytes rather than a wrong box, and at the default budget the two ends are about 28
-     * chunks against 170 held — but a reader who sets `Chunk cache` low enough is in that
-     * régime, which is one more reason `reportOnReads` exists.
-     *
-     * What it costs is a second box alive: end *i+1*'s search box is read while end *i*'s
-     * patch box is still being cut from. At a 6 µm and an 8 µm box that is tens of megabytes,
-     * against a chunk cache measured in hundreds.
+     * What it costs is boxes alive: up to three search boxes and two patch boxes at once — not
+     * yet measured as a peak.
      */
-    for await (const end of oneAhead(
-      searchEnds(
-        tipPositions(competing),
-        missing,
-        { ranker, topK: plan.topK, ownUm: plan.ownUm },
-        steps,
-        { signal },
-      ),
-    )) {
-      const tip = competing[end.tip]!
-      let finished: PublishedEnd
-      if (assess) {
-        const scored = await assessEnd(
-          {
-            // A piece's ends are asked about as the neuron's: its path is read as one with it.
-            queryRoot: BigInt(tip.seed ?? tip.neuronId),
-            candRoot: end.candRoot,
-            contactsNm: contactsOf(end),
-            alias,
-          },
-          assess.floor,
-          assess.steps,
-          { signal, top },
-        )
-        finished = publishedEnd(end, scored, tip.eTip, assess.fits)
-      } else {
-        finished = searchOnly(end)
+    /*
+     * **Each end's patch box starts as the end arrives from the search**, and `oneAhead` asks for
+     * the next end before the body scores this one — so the next box is read while the GPU
+     * scores, rather than between two scorings with the GPU idle. Only the read runs ahead: the
+     * cutter still holds one box at a time (`useAssessorBox`), and each end is scored, finished
+     * and yielded in order.
+     */
+    /*
+     * **The search's own stop, aborted the moment this loop ends** — scoring failed, or the
+     * consumer stopped. Closing the generators is not enough: `oneAhead`'s `return()` waits
+     * behind the `next()` it has pending, so the ends `searchEnds` has under way would go on to
+     * measure, and `arriving` read one more patch box, before the close arrived.
+     */
+    const stop = new AbortController()
+    const searching = AbortSignal.any([signal, stop.signal])
+    const arriving = async function* (stream: AsyncGenerator<SearchedEnd>) {
+      for await (const end of stream) {
+        // Thrown, not returned: a stream that just ended would read as one that came up short.
+        throwIfAborted(searching)
+        const tip = competing[end.tip]!
+        // A piece's ends are asked about as the neuron's: its path is read as one with it.
+        const toAssess = assess && {
+          queryRoot: BigInt(tip.seed ?? tip.neuronId),
+          candRoot: end.candRoot,
+          contactsNm: contactsOf(end),
+          alias,
+        }
+        const box = assess && toAssess && startPatchBox(toAssess, assess.steps, { signal, top })
+        yield { end, tip, toAssess, box }
       }
-      // One end off the plan, so the chunks only it wanted stop being worth keeping.
-      volume.endSearched()
-      yield finished
+    }
+    try {
+      for await (const { end, tip, toAssess, box } of oneAhead(
+        arriving(
+          searchEnds(
+            tipPositions(competing),
+            missing,
+            { ranker, topK: plan.topK, ownUm: plan.ownUm },
+            steps,
+            { signal: searching, depth: SEARCH_DEPTH },
+          ),
+        ),
+      )) {
+        let finished: PublishedEnd
+        if (assess && toAssess) {
+          const scored = await assessEnd(
+            toAssess,
+            assess.floor,
+            assess.steps,
+            { signal, top },
+            box,
+          )
+          finished = publishedEnd(end, scored, tip.eTip, assess.fits)
+        } else {
+          finished = searchOnly(end)
+        }
+        // One end off the plan, so the chunks only it wanted stop being worth keeping.
+        volume.endSearched()
+        yield finished
+      }
+    } finally {
+      stop.abort()
     }
   }
 

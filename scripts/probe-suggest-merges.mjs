@@ -5,7 +5,7 @@
  *
  *   pnpm dev --port 5193 --strictPort           # in another terminal
  *   pnpm probe:suggest-merges                   # needs a CAVE token
- *   pnpm probe:suggest-merges -- --ends 25 --neuron 648518347585551219 --runs 2
+ *   pnpm probe:suggest-merges -- --ends 40 --neuron 648518347585551219 --runs 2
  *
  * ## Why this exists
  *
@@ -52,7 +52,11 @@ const args = probeArgs()
 const url = args.value('--url') ?? 'http://localhost:5193/'
 /** The neuron of the reader's own Chrome profile (2026-11-15), searched at the present. */
 const neuron = args.value('--neuron') ?? '648518347585551219'
-const ends = Number(args.value('--ends') ?? 25)
+/**
+ * 40, not the 25 the first readings used: since the search went three deep a 25-end run takes
+ * under the 60 s below which the node stays quiet about time (`TIMING_WORTH_REPORTING_SECONDS`).
+ */
+const ends = Number(args.value('--ends') ?? 40)
 const runs = Number(args.value('--runs') ?? 1)
 const PROFILE = '/tmp/coda-suggest-merges-profile'
 const token = requireCaveToken()

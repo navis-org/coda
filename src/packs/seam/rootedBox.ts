@@ -39,7 +39,8 @@ import { rootsAtInstant } from '../../data/cave/rootIds'
 import type { ChunkCache } from '../../data/precomputed/chunkCache'
 import type { VolumeInfo, VolumeScale, VoxelBox } from '../../data/precomputed/volume'
 import { readLabelBox } from '../../data/precomputed/volume'
-import { untilAborted } from '../../data/memoPromise'
+import type { SharedAsk } from '../../data/memoPromise'
+import { shareInFlight } from '../../data/memoPromise'
 import type { LabelBoxRequest } from '../../pyodide/cutoutSummary'
 
 /**
@@ -79,15 +80,15 @@ export interface RootMemo {
    * the same thing, so nothing downstream could notice: it is paid in requests at a shared
    * public server (SEAM's invariant 8) and in wall clock.
    *
-   * **One entry per supervoxel, all pointing at a handful of shared promises.** A promise per
-   * supervoxel *request* would destroy the batching that `rootsAtInstant` exists for — the same
-   * trap `l2ChunkCounts` records about `memoPromise`. This keys by supervoxel, which is what a
-   * caller can ask about, and the value is the whole lookup that covers it.
+   * **One entry per supervoxel, all pointing at a handful of shared lookups** (`SharedAsk`). A
+   * promise per supervoxel *request* would destroy the batching that `rootsAtInstant` exists for.
+   * This keys by supervoxel, which is what a caller can ask about, and the value is the whole
+   * lookup that covers it.
    *
-   * An entry removes itself when its lookup settles, so this is empty whenever nothing is in
-   * flight.
+   * An entry leaves when its lookup settles, or at once when the lookup is stopped because no
+   * caller still waits on it (`shareInFlight`), so this is empty whenever nothing is in flight.
    */
-  readonly asking: Map<bigint, Promise<void>>
+  readonly asking: Map<bigint, SharedAsk>
 }
 
 /** A supervoxel volume, and what one reader of it has learned at one instant. */
@@ -197,17 +198,17 @@ export function forgetRoots(volume: Pick<BoxReader, 'memo'>, at: Instant): void 
  * **No query root.** The search's Python step wants one (`LabelBoxRequest.queryRoot`) and the
  * anchors do not, so the callers that want it add it.
  *
- * **Safe to have two of these in flight.** `resolveRoots` shares a lookup between callers rather
- * than letting each ask, so pipelining an end's patch box against the next end's search box does
- * not double the chunkedgraph's work. Reading the voxels is already safe: `ChunkCache.set` is
+ * **Safe to have several of these in flight** — up to four in Suggest Merges, three search boxes
+ * and a patch box. `resolveRoots` shares a lookup between callers rather than letting each ask, so
+ * reading neighbouring ends' boxes together does not multiply the chunkedgraph's work. Reading the voxels is already safe: `ChunkCache.set` is
  * idempotent on a key it already holds, so a chunk fetched twice is wasted bytes rather than a
  * wrong box.
  *
  * **Two things that costs, both open and both recorded in `docs/seam-suggestions-plan.md`.** A
- * chunk neither read holds yet is fetched by both, since the cache has no in-flight map — the
- * shape `asking` is for supervoxels, one layer up. And `overChunks` bounds its own concurrency
- * per call (`DEFAULT_CONCURRENCY`), so two reads in flight claim twice the streams that
- * constant was measured to take as its share of a bucket shared with meshes and thumbnails.
+ * chunk no read holds yet is fetched by each read that wants it, since the cache has no in-flight
+ * map — the shape `asking` is for supervoxels, one layer up. And `overChunks` bounds its own
+ * concurrency per call (`DEFAULT_CONCURRENCY`), so the reads in flight each claim the streams
+ * that constant was measured to take as its share of a bucket shared with meshes and thumbnails.
  *
  * `scale` is a parameter, and the reader has none, for the same reason: a patch is cut at
  * `PATCH_NM`, the search box at whatever the ranker's manifest asked for and an anchor at the
@@ -280,15 +281,7 @@ export function rootsOf(
  * Make sure every one of these supervoxels has a root in `volume.memo.roots`, asking for the ones
  * nobody is asking for yet and waiting on the lookups that already cover the rest.
  *
- * ## The partition and the registration are one synchronous block, and that is the whole thing
- *
- * Nothing may yield between reading `roots`/`asking` and writing `asking`. JavaScript is single
- * threaded, so a block with no `await` in it cannot be interleaved — and the moment one is added
- * between the two, a second caller runs in the gap, sees the same supervoxels in neither map,
- * and asks for them again. That failure is invisible: the answers agree, the run is correct, and
- * the only sign is twice the requests at a server that is not ours.
- *
- * So the loop below is deliberately dull, and the `await` is deliberately last.
+ * The sharing is `shareInFlight`'s (`src/data/memoPromise.ts`); see the note inside.
  *
  * Exported for `rootedBox.test.ts`, which is the one thing here worth a test of its own: the
  * invariant is about *interleaving*, so it cannot be checked by reading the call site and it
@@ -317,59 +310,23 @@ export async function resolveRoots(
   // Read once: every write below goes to the memo this call began with (`BoxReader.memo`).
   const { graphene } = volume
   const { at, roots, asking } = volume.memo
-  const mine: bigint[] = []
-  const waits = new Set<Promise<void>>()
-  // No `await` in this loop, or in anything between it and the registration below.
-  for (const id of labels) {
-    if (roots.has(id)) continue
-    const already = asking.get(id)
-    if (already) waits.add(already)
-    else mine.push(id)
-  }
-  if (mine.length > 0) {
-    const unknown = BigUint64Array.from(mine)
-    /*
-     * One promise, and the `finally` is inside it: a `finally` on the async body completes
-     * before the promise it returns settles, so no awaiter can resume and find its supervoxel
-     * still listed as being asked about. A second `turn.finally(...)` promise wrapped around a
-     * first bought exactly that same guarantee and a paragraph explaining itself.
-     *
-     * **`sharedRequestOptions`, never the caller's own.** This is a request other callers join,
-     * and a joiner must not be cancelled by whoever happened to start it — `src/data/cave`'s
-     * rule, kept by `l2.ts` and `skeletonService.ts`' own shared lookups. Benign while both
-     * joiners are one run with one signal, which is exactly when a rule stops being greppable.
-     */
-    const shared = sharedRequestOptions(options)
-    const fill = async () => {
-      const found = await rootsAtInstant(graphene, at, unknown, shared)
+  /*
+   * `shareInFlight` holds the rules this used to spell out by hand: one synchronous partition
+   * and registration, a shared lookup carrying nobody's signal (`sharedRequestOptions`, `src/
+   * data/cave`'s rule, kept by `l2.ts` and `skeletonService.ts` too), and a failed one leaving
+   * nothing to join. The lookup is stopped only when every box waiting on it has been.
+   */
+  const shared = sharedRequestOptions(options)
+  await shareInFlight(
+    labels,
+    (id) => roots.has(id),
+    asking,
+    async (mine, signal) => {
+      const unknown = BigUint64Array.from(mine)
+      const found = await rootsAtInstant(graphene, at, unknown, { ...shared, signal })
       // Absence is written too: see the header on why re-asking is the cost that matters.
       for (let i = 0; i < unknown.length; i++) roots.set(unknown[i]!, found[i]!)
-    }
-    /*
-     * The `finally` runs before any awaiter resumes, so nobody can be handed back a supervoxel
-     * that is still listed as being asked about. Removed **only where this lookup is still the
-     * registered one**: a failed lookup must leave nothing for a retry to join, and a retry that
-     * has already registered its own must not be unregistered by its predecessor's unwind.
-     * `memoPromise`'s `forget` records the same rule for the one-promise-per-key case, which
-     * this cannot use — many keys, one promise.
-     *
-     * (A `try`/`finally` inside an async IIFE would be one promise instead of two, and is what
-     * this wants to be; TypeScript refuses the self-reference in a `const` initialiser.)
-     */
-    const settled: Promise<void> = fill().finally(() => {
-      for (const id of mine) if (asking.get(id) === settled) asking.delete(id)
-    })
-    for (const id of mine) asking.set(id, settled)
-    waits.add(settled)
-  }
-  /*
-   * **Waited with the caller's own signal, not the request's.** The lookup is shared, so a
-   * Cancel must not abort it out from under the other reader — `sharedRequestOptions` is what
-   * keeps the signal off the wire. What a cancelled caller does instead is stop waiting, which
-   * is `untilAborted`'s whole job and the rule `memoPromise` states for every shared read here.
-   */
-  await untilAborted(
-    Promise.all(waits).then(() => undefined),
+    },
     options.signal,
   )
 }

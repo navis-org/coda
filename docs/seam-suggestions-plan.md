@@ -3042,7 +3042,7 @@ Precision at the cutoff on rv4: production 0.84 [0.74, 0.99], single seed 0.97 [
 A speed audit of the search and the mask assessor, Chrome first (the reader's Firefox loses to
 per-patch GPU overhead instead, which is a separate lever). **`pnpm probe:suggest-merges`** is new:
 it runs the workflow's chain and then `seam:suggestMerges` itself, assessor on and uncapped, over
-the first `--ends` of a neuron (default 25, neuron `648518347585551219`) in a fresh headless
+the first `--ends` of a neuron (default 40 since 2026-11-19, 25 before; neuron `648518347585551219`) in a fresh headless
 Chrome per run, and prints the node's own `runClock` split. It needs `pnpm dev --port 5193
 --strictPort` and a CAVE token, and reads only. Runs vary by ±15% with the chunkedgraph's load
 from minute to minute, so **a change is judged only from runs interleaved with the old code**.
@@ -3176,3 +3176,62 @@ call on 30 rv2 boxes, the same table. Taken **from the commit** (`git show`), no
 Upstream `seam/scan.py` has also moved since `0374517` (SEAM `4c59bb1`: a faster `FaceGrid`, "same
 grid", and `stored_window` split out for Model A). It is Find Open Ends' and was not part of this
 hand-off, so it is **not** re-vendored; `vendor:seam` reports it.
+
+## A step per queue: the search three deep, the patch box read during scoring (2026-11-19)
+
+A Gantt chart of one run (one row per end, captured from `runClock` with a temporary hook) showed
+an end at 3.45 s with the search setting the pace: one end searched at a time, its box (1.19 s),
+pool (0.72 s) and counts (1.38 s) in a row on three different resources, and the GPU idle
+~1.5 s an end waiting for the next list. Replaying that run's step times through a queue per
+step put an end at ~2.0 s with the search three ends ahead, ~1.9 at four, against a floor of
+1.79 s for scoring alone (decided with the user: measure the server first, then build; budget 16
+requests in flight).
+
+### What the chunkedgraph does with several ends at once
+
+Tips 15 µm apart, so no boxes overlap; one end's lookups and pool-sized counts each, one at a
+time and then together, alternated:
+
+| ends at once | chunkedgraph work an end | median request, lookups / counts |
+|---|---|---|
+| 1 | 1.03-1.68 s | 397-448 / 170-285 ms |
+| 3 | 0.64-0.70 s | 571-588 / 309-316 ms |
+| 4 | 0.42-0.43 s | 859-884 / 181-185 ms |
+
+Requests slow a little; throughput rises 2.5-4x. **And the server closes HTTP/2 connections now
+and then** (`GOAWAY`, code 0): every request open on the connection fails at once, twelve to
+fifteen in one measurement. These reads are `POST`s, which no browser retries — very likely the
+"Failed to fetch" that ended two runs on 2026-11-18.
+
+### Built
+
+- **One budget per chunkedgraph** (`CHUNKEDGRAPH_BUDGET`, 16, `concurrency.ts`' `slots`), shared
+  by `roots_binary` and `leaves_many` from every caller; the per-call caps stay.
+- **A dropped connection is asked again once** — only a failure that got no answer; an HTTP
+  error is the server's answer and a Cancel is an `AbortError`.
+- **`l2ChunkCounts` shares a request in flight** between callers, since neighbouring ends' pools
+  are mostly the same roots — through `shareInFlight` (`memoPromise.ts`), which `resolveRoots`
+  now uses too, and which stops a shared request only once every caller waiting on it has gone.
+- **`searchEnds` keeps up to `depth` ends under way** (`SEARCH_DEPTH` 3): boxes read together,
+  measures taking turns on the Python worker in end order, counts overlapping, ends yielded in
+  order and final. `depth` 1 is the old sequence.
+- **The next patch box is read while the GPU scores** (`startPatchBox`): only the read runs ahead;
+  the cutter still holds one box at a time.
+
+### Measured through the node, interleaved, same answer every run
+
+| | end | answer |
+|---|---|---|
+| search one at a time | 3.5, 3.0 s | 1,455 candidates, `88e34af85d3d` |
+| search three deep | 2.5, 2.8 s | the same |
+| … 40 ends, patch box after scoring | 2.5, 2.4 s | 2,280 candidates, `183319f3239e` |
+| **… 40 ends, patch box during scoring** | **2.0, 2.0 s** | the same |
+
+Three deep alone fell short of the model, and the timeline said why: the searches now finished
+~4 s ahead of scoring, and the scoring half had become the serial part — every patch box read
+sat between two scorings with the GPU idle ~0.6 s. Reading it ahead closed that. **An end is
+now ~2.0 s against a 1.8 s floor**, from 4.6 at the start of this work. In Chrome the GPU is the
+pace now; in Firefox it always was (~98 ms a patch), and none of this shows there.
+
+A 25-end run now finishes under the 60 s below which the node says nothing about time, so the
+probe defaults to 40 ends.

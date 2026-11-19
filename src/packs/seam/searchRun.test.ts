@@ -683,3 +683,139 @@ describe('one ahead', () => {
     }
   })
 })
+
+/**
+ * **Several ends under way at once** (`SearchOptions.depth`): the boxes read together, the
+ * measures one at a time in end order, the ends yielded in order and unchanged. None of it is
+ * visible in the answer, so what is pinned is when each step is asked.
+ */
+describe('a deeper search', () => {
+  /** Four tips 20 µm apart, each end's one candidate touching its own tip. */
+  const FOUR = Float32Array.from([0, 0, 0, 20_000, 0, 0, 40_000, 0, 0, 60_000, 0, 0])
+  const pools = [0, 1, 2, 3].map((k) => poolOf([k + 1], [[k * 20_000, 0, 0]]))
+  const counts = new Map<string, number>()
+  for (const pool of pools) for (const root of pool.candRoot) counts.set(String(root), 40)
+  for (const query of ['1', '2', '3', '4']) counts.set(query, 9000)
+  const RULES = { ranker: RANKER, topK: 100, ownUm: 2 }
+
+  /** Boxes that answer only when released, measures that record when they ran. */
+  const staged = () => {
+    const log: string[] = []
+    const release: (() => void)[] = []
+    const ends = [0, 1, 2, 3].map((k) => ({
+      tip: k,
+      queryRoot: BigInt(k + 1),
+      box: () => {
+        log.push(`box ${k}`)
+        return new Promise<CandidatePoolRequest>(
+          (resolve) => (release[k] = () => resolve(boxFor(BigInt(k + 1)))),
+        )
+      },
+    }))
+    let measuring = 0
+    const steps: SearchSteps = {
+      ...stepsFor(pools, counts),
+      measure: vi.fn(async (request: CandidatePoolRequest) => {
+        const k = Number(request.queryRoot - 1n)
+        measuring += 1
+        log.push(`measure ${k}${measuring > 1 ? ' (overlapping)' : ''}`)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        measuring -= 1
+        return pools[k]!
+      }),
+    }
+    return { ends, steps, log, release }
+  }
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 5))
+
+  it('reads `depth` ends’ boxes before the first is yielded, and no more', async () => {
+    const { ends, steps, log, release } = staged()
+    const search = searchEnds(FOUR, ends, RULES, steps, { depth: 3 })
+    const first = search.next()
+    await flush()
+    expect(log).toEqual(['box 0', 'box 1', 'box 2'])
+    release.forEach((go) => go())
+    await first
+    await search.return(undefined)
+  })
+
+  it('measures one end at a time, in end order, whatever order the boxes arrive in', async () => {
+    const { ends, steps, log, release } = staged()
+    const search = searchEnds(FOUR, ends, RULES, steps, { depth: 4 })
+    const all = collect(search)
+    await flush()
+    release[3]!()
+    release[1]!()
+    await flush()
+    release[2]!()
+    release[0]!()
+    const got = await all
+    expect(log.filter((line) => line.startsWith('measure'))).toEqual([
+      'measure 0',
+      'measure 1',
+      'measure 2',
+      'measure 3',
+    ])
+    expect(got.map((one) => one.tip)).toEqual([0, 1, 2, 3])
+  })
+
+  it('treats a depth that is not a number as one, never as no search', async () => {
+    const { ends, steps, release } = staged()
+    const all = collect(searchEnds(FOUR, ends, RULES, steps, { depth: Number.NaN }))
+    for (let k = 0; k < 4; k++) {
+      await flush()
+      release[k]?.()
+    }
+    expect((await all).map((one) => one.tip)).toEqual([0, 1, 2, 3])
+  })
+
+  it('answers exactly what the one-at-a-time search answers', async () => {
+    const run = async (depth: number) => {
+      const { ends, steps, release } = staged()
+      const all = collect(searchEnds(FOUR, ends, RULES, steps, { depth }))
+      for (let k = 0; k < 4; k++) {
+        await flush()
+        release[k]?.()
+      }
+      return all
+    }
+    const one = await run(1)
+    const deep = await run(3)
+    expect(deep.map((e) => [e.tip, e.rows, [...e.candRoot]])).toEqual(
+      one.map((e) => [e.tip, e.rows, [...e.candRoot]]),
+    )
+  })
+
+  /* A consumer that stops — a failure, a break — leaves the ends already under way unmeasured. */
+  it('measures nothing more once the consumer has stopped', async () => {
+    const { ends, steps, release } = staged()
+    const search = searchEnds(FOUR, ends, RULES, steps, { depth: 3 })
+    const first = search.next()
+    await flush()
+    release[0]!()
+    await first
+    await search.return(undefined)
+    release[1]!()
+    release[2]!()
+    await flush()
+    expect(steps.measure).toHaveBeenCalledTimes(1)
+  })
+
+  /* A later end failing while an earlier one is yielded must wait its turn, and leave nothing unhandled. */
+  it('yields the ends before a failure, then fails, and the next measure is not held up', async () => {
+    const { ends, steps, release } = staged()
+    ends[2] = { ...ends[2]!, box: () => Promise.reject(new Error('the bucket refused')) }
+    const got: number[] = []
+    const run = (async () => {
+      for await (const end of searchEnds(FOUR, ends, RULES, steps, { depth: 4 }))
+        got.push(end.tip)
+    })()
+    await flush()
+    release[0]!()
+    release[1]!()
+    release[3]!()
+    await expect(run).rejects.toThrow('the bucket refused')
+    expect(got).toEqual([0, 1])
+    await flush()
+  })
+})

@@ -563,6 +563,55 @@ describe('level-2 chunk counts', () => {
     expect(calls[0]).toHaveLength(50)
   })
 
+  /**
+   * **Two calls at once share a batch in flight** rather than both asking. The search counts
+   * several ends at once, and neighbouring ends' pools are mostly the same roots.
+   */
+  it('asks once for a root two concurrent calls both want', async () => {
+    const roots = manyRoots(80)
+    const server = servePeak(oneChunkEach(roots))
+    const [a, b] = await Promise.all([
+      l2ChunkCounts(graphene, roots.slice(0, 60), OPTIONS),
+      l2ChunkCounts(graphene, roots.slice(20), OPTIONS),
+    ])
+    expect(a.size).toBe(60)
+    expect(b.size).toBe(60)
+    const asked = server.calls.flat()
+    expect(asked).toHaveLength(80)
+    expect(new Set(asked).size).toBe(80)
+  })
+
+  /* A joiner of a batch that fails fails with it, and the failure leaves nothing to join. */
+  it('fails a caller that joined a failed batch, and asks again afterwards', async () => {
+    let refuse = true
+    const calls: string[][] = []
+    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { node_ids?: (string | number)[] }
+      const nodes = (body.node_ids ?? []).map(String)
+      calls.push(nodes)
+      return new Promise<Response>((resolve) =>
+        setTimeout(() => {
+          resolve(
+            refuse
+              ? ({ ok: false, status: 503, text: () => Promise.resolve('busy') } as Response)
+              : ({
+                  ok: true,
+                  status: 200,
+                  text: () => Promise.resolve(JSON.stringify({ '7001': [1, 2] })),
+                } as Response),
+          )
+        }, 0),
+      )
+    })
+    const first = l2ChunkCounts(graphene, ['7001'], OPTIONS)
+    const joiner = l2ChunkCounts(graphene, ['7001'], OPTIONS)
+    await expect(first).rejects.toThrow()
+    await expect(joiner).rejects.toThrow()
+    expect(calls).toHaveLength(1)
+    refuse = false
+    expect((await l2ChunkCounts(graphene, ['7001'], OPTIONS)).get('7001')).toBe(2)
+  })
+
   it('asks for a repeated root once within a single call', async () => {
     const calls = serve({ '100': [1] })
     await l2ChunkCounts(graphene, ['100', '100', '100'], OPTIONS)
@@ -674,36 +723,36 @@ describe('the root of label 0', () => {
  * pieces answer out of order, so what is pinned beside the peak is that every root lands on its
  * own supervoxel: a piece written at the wrong offset is a box of other neurons' roots.
  */
-describe('a large lookup', () => {
-  /** A `roots_binary` server whose later pieces answer first, recording the peak in flight. */
-  const servePieces = () => {
-    const sent: bigint[][] = []
-    let open = 0
-    let peak = 0
-    vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
-      const body = init!.body as ArrayBufferView
-      const ids = [...new BigUint64Array(body.buffer, body.byteOffset, body.byteLength / 8)]
-      sent.push(ids)
-      open += 1
-      peak = Math.max(peak, open)
-      return new Promise<Response>((resolve) =>
-        setTimeout(
-          () => {
-            open -= 1
-            resolve(
-              new Response(BigUint64Array.from(ids, (id) => id + 1_000_000n).buffer, {
-                status: 200,
-              }),
-            )
-          },
-          // The first piece last: an answer written where it arrived would be caught.
-          10 - Math.min(sent.length, 9),
-        ),
-      )
-    })
-    return { sent, peak: () => peak }
-  }
+/** A `roots_binary` server whose later pieces answer first, recording the peak in flight. */
+const servePieces = () => {
+  const sent: bigint[][] = []
+  let open = 0
+  let peak = 0
+  vi.stubGlobal('fetch', (_url: string, init?: RequestInit) => {
+    const body = init!.body as ArrayBufferView
+    const ids = [...new BigUint64Array(body.buffer, body.byteOffset, body.byteLength / 8)]
+    sent.push(ids)
+    open += 1
+    peak = Math.max(peak, open)
+    return new Promise<Response>((resolve) =>
+      setTimeout(
+        () => {
+          open -= 1
+          resolve(
+            new Response(BigUint64Array.from(ids, (id) => id + 1_000_000n).buffer, {
+              status: 200,
+            }),
+          )
+        },
+        // The first piece last: an answer written where it arrived would be caught.
+        10 - Math.min(sent.length, 9),
+      ),
+    )
+  })
+  return { sent, peak: () => peak }
+}
 
+describe('a large lookup', () => {
   it('asks in four pieces at once, each root in its own place', async () => {
     const server = servePieces()
     const ids = BigUint64Array.from({ length: 8_000 }, (_, i) => BigInt(i + 1))
@@ -724,6 +773,90 @@ describe('a large lookup', () => {
       OPTIONS,
     )
     expect(server.sent).toHaveLength(1)
+  })
+})
+
+/**
+ * **The chunkedgraph closes its HTTP/2 connections now and then** (`GOAWAY`, code 0), and every
+ * request open on one fails at once. These reads are `POST`s, which no browser retries, so one
+ * close used to fail a whole run: they are asked again once, and only for a failure that got no
+ * answer — an HTTP error is the server's answer.
+ */
+describe('a dropped connection', () => {
+  const answering = (ids: BigUint64Array) =>
+    new Response(BigUint64Array.from(ids, (id) => id + 1000n).buffer, { status: 200 })
+  const idsOf = (init?: RequestInit) => {
+    const body = init!.body as ArrayBufferView
+    return new BigUint64Array(body.buffer, body.byteOffset, body.byteLength / 8)
+  }
+
+  it('is asked again once, and answers', async () => {
+    let calls = 0
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      calls += 1
+      if (calls === 1) throw new TypeError('fetch failed')
+      return answering(idsOf(init))
+    })
+    const got = await rootsAtInstant(
+      graphene,
+      1_700_000_000_000,
+      BigUint64Array.from([5n]),
+      OPTIONS,
+    )
+    expect([...got]).toEqual([1005n])
+    expect(calls).toBe(2)
+  })
+
+  it('does not ask again for an answer it got but could not read', async () => {
+    let calls = 0
+    vi.stubGlobal('fetch', async () => {
+      calls += 1
+      return new Response(new Uint8Array(5).buffer, { status: 200 })
+    })
+    await expect(
+      rootsAtInstant(graphene, 1_700_000_000_000, BigUint64Array.from([5n]), OPTIONS),
+    ).rejects.toThrow(/not whole uint64s/)
+    expect(calls).toBe(1)
+  })
+
+  it('fails if it drops again, and an HTTP error is never asked again', async () => {
+    let calls = 0
+    vi.stubGlobal('fetch', async () => {
+      calls += 1
+      throw new TypeError('fetch failed')
+    })
+    await expect(
+      rootsAtInstant(graphene, 1_700_000_000_000, BigUint64Array.from([5n]), OPTIONS),
+    ).rejects.toThrow()
+    expect(calls).toBe(2)
+    calls = 0
+    vi.stubGlobal('fetch', async () => {
+      calls += 1
+      return new Response('busy', { status: 503 })
+    })
+    await expect(
+      rootsAtInstant(graphene, 1_700_000_000_000, BigUint64Array.from([5n]), OPTIONS),
+    ).rejects.toThrow()
+    expect(calls).toBe(1)
+  })
+})
+
+/**
+ * **One budget per server, shared by every call** — the user's sixteen. Four lookup streams a
+ * call is a cap per call; five calls at once would be twenty without it.
+ */
+describe('the budget at one chunkedgraph', () => {
+  it('keeps every call together to sixteen requests in flight', async () => {
+    const server = servePieces()
+    const call = (k: number) =>
+      rootsAtInstant(
+        graphene,
+        1_700_000_000_000,
+        BigUint64Array.from({ length: 8_000 }, (_, i) => BigInt(k * 100_000 + i + 1)),
+        OPTIONS,
+      )
+    await Promise.all([0, 1, 2, 3, 4].map(call))
+    expect(server.peak()).toBe(16)
   })
 })
 
