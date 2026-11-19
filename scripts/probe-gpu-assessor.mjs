@@ -27,10 +27,10 @@
  */
 
 import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { ASSESSOR_WORK as WORK, assessorFixture } from './lib/assessorFixture.mjs'
 import { APP_MODULE, launchChrome, probeArgs, probeReport } from './lib/browserProbe.mjs'
 import { serveOrtPage } from './lib/ortPage.mjs'
 
@@ -43,13 +43,7 @@ if (!exported) {
 }
 const ends = (args.value('--ends') ?? '20,1475').split(',').map((one) => one.trim())
 
-const WORK = join(process.env.CODA_PROBE_DIR ?? '/tmp', 'coda-gpu-assessor')
-execFileSync(
-  process.env.CODA_PYTHON ?? 'python3',
-  ['-I', 'scripts/lib/seam_assessor.py', 'lists', exported, WORK, ...ends],
-  { stdio: 'inherit' },
-)
-const fixture = JSON.parse(readFileSync(join(WORK, 'lists.json'), 'utf8'))
+const { fixture, manifest, matmul, convFile, lists } = assessorFixture(exported, ends)
 
 /* SEAM's directory at `/`, the lists and the manifest at `/work/`. CORS-open, because the page
  * is the dev server's origin. The ORT page `serveOrtPage` also serves goes unused here. */
@@ -64,16 +58,7 @@ const { base: models, stop } = await serveOrtPage({
  * SEAM's manifest, so a file that changed under the same name is caught by `src/ml`'s check.
  * Written beside the lists, so each file carries its absolute `url` (`ModelFile.url`).
  */
-const manifest = JSON.parse(readFileSync('src/packs/seam/__fixtures__/assessorManifest.json', 'utf8'))
-const matmul = manifest.files.find((file) => file.variant === 'matmul')
-const convFile = matmul.file.replace('_mm_', '_')
 const convPath = join(exported, convFile)
-/* The plain export's name is the MatMul one's without `_mm_`. If SEAM ever names them otherwise,
- * this would list the MatMul file as `conv` and fail as "it may be the MatMul rewrite". */
-if (convFile === matmul.file || !existsSync(convPath)) {
-  console.error(`No plain Conv export beside ${matmul.file} in ${exported} (looked for ${convFile})`)
-  process.exit(2)
-}
 const sha = createHash('sha256').update(readFileSync(convPath)).digest('hex')
 manifest.files = [
   { ...matmul, url: `${models}/${matmul.file}` },
@@ -103,7 +88,6 @@ const { evaluate, waitFor, send, close } = await launchChrome({
 await send('Page.navigate', { url })
 await waitFor('Boolean(document.querySelector("#root"))', 'the app')
 
-const lists = fixture.lists.map((one) => ({ end: one.end_uid, patches: one.patches, size: one.size }))
 
 // ── 3 first: the network on the page's thread, each step timed ────────────────────────────────
 const profiled = await evaluate(

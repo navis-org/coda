@@ -71,20 +71,7 @@ export async function launchChrome({
     ],
     { stdio: 'ignore' },
   )
-  const bye = () => {
-    try {
-      chrome.kill()
-    } catch {
-      // Already gone.
-    }
-  }
-  process.on('exit', bye)
-  for (const event of ['uncaughtException', 'unhandledRejection']) {
-    process.on(event, (error) => {
-      console.error(error)
-      process.exit(1)
-    })
-  }
+  const bye = killOnExit(() => chrome.kill())
 
   const page = await firstPage(port)
   const ws = new WebSocket(page.webSocketDebuggerUrl)
@@ -141,28 +128,8 @@ export async function launchChrome({
     return reply.result?.result?.value
   }
 
-  /**
-   * Poll an expression until it answers truthily.
-   *
-   * Beats a fixed sleep on both ends: a fast machine does not wait, a slow one is not measured
-   * half-built. `what` is the sentence the timeout throws, so make it name the thing waited for.
-   */
-  const waitFor = async (expression, what, { tries = 150, every = 100 } = {}) => {
-    for (let i = 0; i < tries; i++) {
-      // Errors are a *normal* answer while polling: right after `Page.navigate` the old
-      // execution context is being torn down, and asking it anything answers "Execution context
-      // was destroyed". That is precisely the state this loop exists to wait out, so it counts
-      // as "not yet" rather than as a failure — `evaluate` still throws for a caller that is
-      // not polling.
-      try {
-        if (await evaluate(expression)) return
-      } catch {
-        // Not ready. The timeout below is what reports a page that never arrives.
-      }
-      await sleep(every)
-    }
-    throw new Error(`timed out waiting for ${what}`)
-  }
+  /** Poll an expression until it answers truthily (`pollUntil`). */
+  const waitFor = (expression, what, options) => pollUntil(evaluate, expression, what, options)
 
   /** Write a PNG into the temp dir — never the working directory, which is the repo root. */
   const screenshot = async (name) => {
@@ -271,6 +238,27 @@ export async function launchChrome({
     },
     evaluate,
     waitFor,
+    /** `Page.navigate`, as `launchFirefox` has it, so a probe can drive either browser. */
+    navigate: (to) => send('Page.navigate', { url: to }),
+    reload: () => send('Page.reload'),
+    /**
+     * Call a page-side function, given as source, with string arguments — for a credential,
+     * which goes in as an argument and never into an expression, a log or a file.
+     */
+    async callFunction(source, ...values) {
+      const global = await send('Runtime.evaluate', { expression: 'globalThis' })
+      if (global.error) throw new Error(`Runtime.evaluate: ${global.error.message ?? global.error}`)
+      const reply = await send('Runtime.callFunctionOn', {
+        objectId: global.result.result.objectId,
+        functionDeclaration: source,
+        arguments: values.map((value) => ({ value })),
+        awaitPromise: true,
+        returnByValue: true,
+      })
+      if (reply.error) throw new Error(`Runtime.callFunctionOn: ${reply.error.message ?? reply.error}`)
+      if (reply.result?.exceptionDetails) throw new Error('the page threw')
+      return reply.result?.result?.value
+    },
     screenshot,
     setDevice,
     /**
@@ -342,6 +330,56 @@ export const RECT = `(selector) => {
  * not working.
  */
 export const PANE_ZOOM = `Number(/scale\\((.*?)\\)/.exec(document.querySelector('.react-flow__viewport')?.style.transform ?? '')?.[1] ?? 1)`
+
+/**
+ * Kill a browser on any exit of this process, a throw included, and make a throw an exit.
+ * Returns the kill, for a `close`. The crash handlers are registered once per process, however
+ * many browsers a probe launches.
+ */
+export function killOnExit(kill) {
+  const bye = () => {
+    try {
+      kill()
+    } catch {
+      // Already gone.
+    }
+  }
+  process.on('exit', bye)
+  if (!crashHandled) {
+    crashHandled = true
+    for (const event of ['uncaughtException', 'unhandledRejection']) {
+      process.on(event, (error) => {
+        console.error(error)
+        process.exit(1)
+      })
+    }
+  }
+  return bye
+}
+let crashHandled = false
+
+/**
+ * Poll an expression until it answers truthily — every launcher's `waitFor`.
+ *
+ * Beats a fixed sleep on both ends: a fast machine does not wait, a slow one is not measured
+ * half-built. `what` is the sentence the timeout throws, so make it name the thing waited for.
+ */
+export async function pollUntil(evaluate, expression, what, { tries = 150, every = 100 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    // Errors are a *normal* answer while polling: right after `Page.navigate` the old
+    // execution context is being torn down, and asking it anything answers "Execution context
+    // was destroyed". That is precisely the state this loop exists to wait out, so it counts
+    // as "not yet" rather than as a failure — `evaluate` still throws for a caller that is
+    // not polling.
+    try {
+      if (await evaluate(expression)) return
+    } catch {
+      // Not ready. The timeout below is what reports a page that never arrives.
+    }
+    await sleep(every)
+  }
+  throw new Error(`timed out waiting for ${what}`)
+}
 
 /** The DevTools page target, once Chrome is listening. */
 async function firstPage(port) {
@@ -531,18 +569,21 @@ export function requireCaveToken() {
 
 /** Hand the token to the page's CAVE credentials for the default deployment. Answers whether it took. */
 export function handCaveToken(send, token) {
-  return handToken(
-    send,
-    `async function (t) {
-      const appModule = ${APP_MODULE}
-      const m = await appModule('/src/data/cave/credentials.ts')
-      const d = await appModule('/src/data/cave/deployments.ts')
-      m.setToken(d.DEFAULT_CAVE_SERVER, t)
-      return !!m.getToken(d.DEFAULT_CAVE_SERVER)
-    }`,
-    token,
-  )
+  return handToken(send, CAVE_TOKEN_STORE, token)
 }
+
+/**
+ * The page-side half of `handCaveToken`, as source: stores the token in the app's own CAVE
+ * credentials and answers whether it took. Exported for `firefoxProbe.mjs`' `callFunction`,
+ * so the two browsers hand the token over through one function rather than two copies.
+ */
+export const CAVE_TOKEN_STORE = `async function (t) {
+  const appModule = ${APP_MODULE}
+  const m = await appModule('/src/data/cave/credentials.ts')
+  const d = await appModule('/src/data/cave/deployments.ts')
+  m.setToken(d.DEFAULT_CAVE_SERVER, t)
+  return !!m.getToken(d.DEFAULT_CAVE_SERVER)
+}`
 
 /**
  * The Aedes chunkedgraph, which two probes both read supervoxel roots from.

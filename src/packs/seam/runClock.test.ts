@@ -68,6 +68,35 @@ describe('the run clock', () => {
     expect(clock.report({ ends: 10, patches: 0 })?.detail).toMatch(/reading the patch box 100%/)
   })
 
+  /*
+   * Three patches in flight on one queue: each call's own span counts the ones ahead of it
+   * (10, 20 and 30 ms), but the GPU was busy 30 ms. The queue's time is charged, once.
+   */
+  it('charges a queue the time it was busy, not each call its wait', async () => {
+    const { clock, tick } = fake()
+    const answers: (() => void)[] = []
+    const run = clock.aroundQueue(
+      'running the network',
+      () => new Promise<void>((resolve) => answers.push(resolve)),
+    )
+    const calls = [run(), run(), run()]
+    for (const answer of answers) {
+      tick(10)
+      answer()
+      await Promise.resolve()
+      await Promise.resolve()
+    }
+    await Promise.all(calls)
+    expect(clock.spent('running the network')).toBe(30)
+    // Idle between two bursts is not charged: the next call starts the clock again.
+    tick(100)
+    const late = run()
+    tick(5)
+    answers[3]!()
+    await late
+    expect(clock.spent('running the network')).toBe(35)
+  })
+
   /** The clock is moved as well as charged: `spend` names work that really took wall time. */
   it('takes a stage charged directly, for work behind no step', () => {
     const { clock, tick } = fake()

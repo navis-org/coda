@@ -110,17 +110,15 @@ export async function gpuSupport(): Promise<GpuSupport> {
 }
 
 /**
- * Whether this browser spends far more on *submitting* a WebGPU dispatch than on running it.
+ * Whether this browser answers a wait for the GPU slowly, whatever the work: Firefox.
  *
- * **Measured, and the spread is wider than anything else around the call.** SEAM's mask
- * assessor is 86.8 GFLOP a patch in one submit, and the same 25 open ends on the same laptop,
- * the same GPU and the same WGSL took 27 ms a patch in Chrome and 98 in Firefox — 6.2 s an end
- * against 11.0. A ladder of nine controlled rungs (`pnpm probe:assessor-gap`) cleared every
- * other candidate in Chrome: the scoring loop, the Pyodide cut running beside it, half a
- * gigabyte of held buffers, a blocked main thread, a page repainting every frame and Chrome's
- * own GPU flags come to under 7 ms between them. What is left is the browser's own path from
- * `submit` to the answer, which the probe can see directly: timing one network a step at a time
- * forces a synchronisation per dispatch and turns 26 ms into 358.
+ * **Measured, in both browsers** (2026-11-19, `pnpm probe:gpu-browsers`,
+ * `docs/seam-assessor-speed.md` §16). Firefox answers every wait — `mapAsync`,
+ * `onSubmittedWorkDone`, an empty submit included — in ~100 ms; Chrome in under one. Code that
+ * waits once per item pays it per item: SEAM's assessor took 98 ms a patch in Firefox against 27
+ * in Chrome until it kept patches in flight, and 29 against 19 since. It took a probe that could
+ * drive Firefox to see it: a ladder of nine rungs in Chrome (`pnpm probe:assessor-gap`) had
+ * cleared everything around the network and could not look inside the other browser.
  *
  * **Asked by name, which nothing else in this file does.** Every other question here is a
  * capability — is there an adapter, does the backend implement this op — and the browser answers

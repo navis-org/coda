@@ -73,15 +73,23 @@ export interface RunClock {
     stage: Stage,
     step: (...args: A) => Promise<R>,
   ): (...args: A) => Promise<R>
+  /**
+   * `around` for a step whose calls wait in **one queue**, so a call's own duration counts the
+   * calls ahead of it: the assessor with several patches in flight, where twelve outstanding
+   * calls each lasting the twelve would charge the network twelve times over.
+   *
+   * Each call is charged the time since the previous call finished, or since it was made where
+   * none was outstanding, so the stage comes to the time the queue was busy. No call's shape is
+   * kept: a gap between two answers is no call's cost, and Firefox hands answers back in
+   * batches, so the report gives such a stage its rate alone.
+   */
+  aroundQueue<A extends readonly unknown[], R>(
+    stage: Stage,
+    step: (...args: A) => Promise<R>,
+  ): (...args: A) => Promise<R>
   /** Charge a stage directly, for work that is not behind an injected step. */
   spend(stage: Stage, ms: number): void
-  /**
-   * What a stage has taken so far.
-   *
-   * For a caller charging one stage the time of another **minus** a third: the assessor's loop
-   * runs the network from inside the cutting, so timing the two as they nest would count the
-   * GPU twice and put the stages over 100%. Read before and after, subtract, charge the rest.
-   */
+  /** What a stage has taken so far. */
   spent(stage: Stage): number
   /**
    * What the run spent, longest first — or undefined where there is nothing worth saying.
@@ -163,7 +171,8 @@ const OVERLAP_WORTH_SAYING = 0.05
  * **two browsers**, 27 ms a patch in Chrome against 98 in Firefox on one laptop and one GPU
  * (`slowGpuDispatch`). What made it findable was that a reader could report what their machine
  * did in the one unit that compares against anything, without this file knowing which browser
- * they were in.
+ * they were in. (And the browser was not the end of it: driven directly, Firefox waits ~100 ms
+ * for any GPU answer, which keeping patches in flight shares out — 29 ms a patch since.)
  */
 function shapeOf(calls: readonly number[]): string {
   if (calls.length < 20) return ''
@@ -202,8 +211,12 @@ export function runClock(now: () => number = () => performance.now()): RunClock 
    * over a long run, against the tens of thousands the network already kept.
    */
   const calls = new Map<Stage, number[]>()
-  const add = (stage: Stage, ms: number) => {
+  /** `aroundQueue`'s state: how many calls are out on a stage, and since when it is charged. */
+  const queues = new Map<Stage, { outstanding: number; since: number }>()
+  /** `sample` false charges the time without keeping it as a call, for `aroundQueue`. */
+  const add = (stage: Stage, ms: number, sample = true) => {
     spent.set(stage, (spent.get(stage) ?? 0) + ms)
+    if (!sample) return
     const seen = calls.get(stage)
     if (seen) seen.push(ms)
     else calls.set(stage, [ms])
@@ -219,6 +232,24 @@ export function runClock(now: () => number = () => performance.now()): RunClock 
           // In a `finally`, so a step that throws or is cancelled still reports what it spent.
           // A run that failed slowly is exactly the one somebody wants the split for.
           add(stage, now() - at)
+        }
+      }
+    },
+    aroundQueue(stage, step) {
+      return async (...args) => {
+        // Per stage, not per wrapper, so two wrappers of one queue still share its clock.
+        const queue = queues.get(stage) ?? { outstanding: 0, since: 0 }
+        queues.set(stage, queue)
+        if (queue.outstanding++ === 0) queue.since = now()
+        try {
+          return await step(...args)
+        } finally {
+          queue.outstanding -= 1
+          const at = now()
+          // Charged but not sampled: a gap between two answers is no call's cost, and answers
+          // that arrive together would read as calls of 0 ms in `shapeOf`.
+          add(stage, at - queue.since, false)
+          queue.since = at
         }
       }
     },
@@ -244,9 +275,9 @@ export function runClock(now: () => number = () => performance.now()): RunClock 
           /*
            * **The rate, where there is one.** A share says how the run divided; it does not say
            * whether the number is the work, the machine or the browser. The same 25 ends on one
-           * laptop put the same network at 27 ms a patch in Chrome and 98 in Firefox — a 3.6x
-           * difference that decides whether `Assess top` is worth anything, and that nothing
-           * else on screen reveals.
+           * laptop once put the same network at 27 ms a patch in Chrome and 98 in Firefox — a
+           * difference that decided whether `Assess top` was worth anything, and that nothing
+           * else on screen revealed.
            */
           const shape = shapeOf(calls.get(stage) ?? [])
           /*

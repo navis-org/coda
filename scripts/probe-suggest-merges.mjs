@@ -40,12 +40,12 @@
 
 import {
   APP_MODULE,
+  CAVE_TOKEN_STORE,
   deleteProfileOnExit,
-  handCaveToken,
-  launchChrome,
   probeArgs,
   requireCaveToken,
 } from './lib/browserProbe.mjs'
+import { launchBrowser } from './lib/firefoxProbe.mjs'
 import { extendChain } from './lib/seamExtendChain.mjs'
 
 const args = probeArgs()
@@ -58,7 +58,13 @@ const neuron = args.value('--neuron') ?? '648518347585551219'
  */
 const ends = Number(args.value('--ends') ?? 40)
 const runs = Number(args.value('--runs') ?? 1)
-const PROFILE = '/tmp/coda-suggest-merges-profile'
+/**
+ * `chrome` or `firefox`. Firefox is driven over WebDriver BiDi (`firefoxProbe.mjs`) and with a
+ * window, since headless it offers no WebGPU adapter; the readers' runs are Firefox, so it is
+ * the browser a guard rail's slow figure (`SLOW_SECONDS_PER_PATCH`) is taken in.
+ */
+const browser = args.value('--browser') ?? 'chrome'
+const PROFILE = `/tmp/coda-suggest-merges-${browser}-profile`
 const token = requireCaveToken()
 
 /**
@@ -100,19 +106,18 @@ let closeLatest = () => {}
 deleteProfileOnExit(PROFILE, () => closeLatest())
 
 async function once(run) {
-  const { waitFor, send, close } = await launchChrome({
-    port: 9367,
+  const { waitFor, navigate, reload, callFunction, evaluate, close } = await launchBrowser(browser, {
+    port: browser === 'firefox' ? 9369 : 9367,
     profile: PROFILE,
-    args: ['--use-angle=metal', '--enable-gpu', '--enable-unsafe-webgpu'],
   })
   closeLatest = close
-  await send('Page.navigate', { url })
+  await navigate(url)
   await waitFor('Boolean(document.querySelector("#root"))', 'the app')
-  if (!(await handCaveToken(send, token))) {
+  if ((await callFunction(CAVE_TOKEN_STORE, token)) !== true) {
     console.error('the page did not take the CAVE token')
     process.exit(2)
   }
-  await send('Page.reload')
+  await reload()
   await waitFor('Boolean(document.querySelector("#root"))', 'the app')
 
   const script = `(async () => {
@@ -155,7 +160,7 @@ async function once(run) {
     const text = JSON.stringify([col('candidateId'), col('geo_rank'), logits])
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
     const fingerprint = Array.from(new Uint8Array(digest).slice(0, 6), (b) => b.toString(16).padStart(2, '0')).join('')
-    return {
+    return JSON.stringify({
       tips: tips?.length ?? 0,
       seconds,
       errors: ids.flatMap((id) => {
@@ -166,22 +171,19 @@ async function once(run) {
       detail: said.find((line) => line.startsWith('Suggest Merges:')) ?? '',
       candidates: table?.length ?? 0,
       fingerprint,
-    }
+    })
   })()`
-  const reply = await send('Runtime.evaluate', {
-    expression: script,
-    awaitPromise: true,
-    returnByValue: true,
-    timeout: 3_600_000,
-  })
-  close()
-  if (reply.result?.exceptionDetails || !reply.result?.result) {
-    console.error(JSON.stringify(reply.result?.exceptionDetails ?? reply, null, 2))
+  let got
+  try {
+    got = JSON.parse(await evaluate(script, 3_600_000))
+  } catch (error) {
+    console.error(error)
     process.exit(1)
+  } finally {
+    close()
   }
-  const got = reply.result.result.value
   console.log(
-    `\nrun ${run}: ${got.tips} ends, ${got.seconds.toFixed(1)} s for the node, ` +
+    `\nrun ${run} (${browser}): ${got.tips} ends, ${got.seconds.toFixed(1)} s for the node, ` +
       `${got.candidates} candidates, answer ${got.fingerprint}`,
   )
   for (const error of got.errors) console.log(`  ✗ ${error}`)

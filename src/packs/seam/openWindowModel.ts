@@ -98,6 +98,11 @@ export interface SeamRuntime {
   readonly open: (
     options: Omit<OpenOptions, 'createWorker' | 'variant'>,
   ) => Promise<ModelSession>
+  /**
+   * How many runs a caller may keep outstanding on what `open` returns. Absent is one at a
+   * time; beside the opener because it is a fact about the worker behind it.
+   */
+  readonly inFlight?: number
 }
 
 export interface OpenSeamModelOptions<C> {
@@ -153,6 +158,8 @@ export interface OpenSeamModelOptions<C> {
 export interface OpenedSeamModel<C> {
   readonly session: ModelSession
   readonly config: C
+  /** How many runs may be outstanding on `session`: the runtime's `inFlight`, else one. */
+  readonly inFlight: number
 }
 
 export async function openSeamModel<C>(
@@ -232,7 +239,7 @@ export async function openSeamModel<C>(
         'by a version other than the one it is labelled with. Run it again.',
     )
   }
-  return { session, config }
+  return { session, config, inFlight: options.runtime?.inFlight ?? 1 }
 }
 
 /**
