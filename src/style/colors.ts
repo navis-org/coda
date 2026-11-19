@@ -62,6 +62,23 @@ export const MAX_SERIES = 8
 export const OTHER_LABEL = 'Other'
 
 /**
+ * A lighter step of the dark `aqua` green (`#199e70`, slot 3): an accepted piece *in focus* — the
+ * candidate under the review card's cursor, where the reader or Auto-extend accepted it, so it
+ * stands out among the other green pieces (user, 2026-11-18). Drawn only in a scene, on black.
+ *
+ * **Validated, not picked** (the dataviz skill's validator, `--mode dark --surface #000000
+ * --pairs all`, with the scene's other three: `#3987e5`, `#d95926`, `#199e70`): chroma 0.1 or
+ * more; CVD all pairs 9.4 or more (the worst is the existing green and orange); normal-vision
+ * 20.9 or more (the worst is the existing blue and green); contrast past 3:1. **It fails one
+ * check on purpose, the lightness band** (OKLCH L 0.835 against the band's ~0.67): that band
+ * holds categorical series to one weight, and this is a lighter step of one series meant to
+ * weigh more. Not a fourth hue, which the all-pairs gate does not allow. Lighter candidates
+ * lost chroma (`#9ae6c4`, 0.089); darker ones fell under the normal-vision floor beside the
+ * green (`#4cc792`, 12.6).
+ */
+export const FOCUS_GREEN = '#7ee0b5'
+
+/**
  * The categorical palettes an encoding can cycle through.
  *
  * Two rules govern this table, and both are about not doing by eye what somebody else has

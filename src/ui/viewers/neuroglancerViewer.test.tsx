@@ -1543,6 +1543,113 @@ describe('neurons changed inside the viewer', () => {
     expect(frameSrc(view.container)).not.toBe(before)
   })
 
+  /*
+   * Review Suggestions under Auto-extend: a piece taken arrives with the tips of the piece it was
+   * taken on, so its points layer changes in the same update. A local layer's points go in place
+   * with the segments, so the whole update applies under the pointer (user, 2026-11-18).
+   */
+  it('sets a local annotation layer’s points in place with the segments', () => {
+    const pointsOf = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ type: 'point', id: String(i) }))
+    const withPoints = (segments: string[], n: number) => {
+      const scene = sceneWith(segments)
+      const tips = {
+        type: 'annotation',
+        name: 'tips',
+        source: 'local://annotations',
+        annotations: pointsOf(n),
+      }
+      return { ...scene, layers: [...scene.layers, tips] }
+    }
+    const view = mounted(sceneUrl(undefined, withPoints(['1'], 1)))
+    const posted = speakingFrame(view.container, withPoints(['1'], 1))
+    const before = frameSrc(view.container)
+    fireEvent.mouseEnter(scaleBox(view.container)!)
+    rerendered(view, sceneUrl(undefined, withPoints(['1', '2'], 3)))
+    expect(posted).toHaveBeenCalledWith(
+      {
+        type: 'coda:ng-set-segments',
+        layers: [{ name: OWNED, segments: ['1', '2'], segmentColors: {} }],
+        annotations: [{ name: 'tips', annotations: pointsOf(3) }],
+        update: 2,
+      },
+      window.location.origin,
+    )
+    fireEvent.mouseLeave(scaleBox(view.container)!)
+    flushMerge()
+    // Nothing left to navigate for.
+    expect(frameSrc(view.container)).toBe(before)
+  })
+
+  /*
+   * An annotation layer the frame cannot refill — not local — still navigates, and waits for the
+   * pointer; the segments in the same update need not wait with it.
+   */
+  it('sets the selection ahead of a navigation that waits for the pointer', () => {
+    const withPoints = (segments: string[], n: number) => {
+      const scene = sceneWith(segments)
+      const annotations = Array.from({ length: n }, (_, i) => ({
+        type: 'point',
+        id: String(i),
+      }))
+      return {
+        ...scene,
+        layers: [...scene.layers, { type: 'annotation', name: 'tips', annotations }],
+      }
+    }
+    const view = mounted(sceneUrl(undefined, withPoints(['1'], 1)))
+    const posted = speakingFrame(view.container, withPoints(['1'], 1))
+    const before = frameSrc(view.container)
+    fireEvent.mouseEnter(scaleBox(view.container)!)
+    rerendered(view, sceneUrl(undefined, withPoints(['1', '2'], 3)))
+    expect(posted).toHaveBeenCalledWith(
+      {
+        type: 'coda:ng-set-segments',
+        layers: [{ name: OWNED, segments: ['1', '2'], segmentColors: {} }],
+        update: 2,
+      },
+      window.location.origin,
+    )
+    // The frame's report of that update is the scene it was sent, not a neuron added by hand.
+    report(view.container, withPoints(['1', '2'], 1))
+    expect(view.onSelectionEdits).not.toHaveBeenCalled()
+    // The points are still held.
+    flushMerge()
+    expect(frameSrc(view.container)).toBe(before)
+    fireEvent.mouseLeave(scaleBox(view.container)!)
+    flushMerge()
+    expect(frameSrc(view.container)).not.toBe(before)
+  })
+
+  it('takes the scene it went ahead from, arriving again, as a selection to set back', () => {
+    const withPoints = (segments: string[], n: number) => {
+      const scene = sceneWith(segments)
+      const annotations = Array.from({ length: n }, (_, i) => ({
+        type: 'point',
+        id: String(i),
+      }))
+      return {
+        ...scene,
+        layers: [...scene.layers, { type: 'annotation', name: 'tips', annotations }],
+      }
+    }
+    const first = sceneUrl(undefined, withPoints(['1'], 1))
+    const view = mounted(first)
+    const posted = speakingFrame(view.container, withPoints(['1'], 1))
+    fireEvent.mouseEnter(scaleBox(view.container)!)
+    rerendered(view, sceneUrl(undefined, withPoints(['1', '2'], 3)))
+    // Undone before the points went in: the frame shows `2`, so it is taken out again.
+    rerendered(view, first)
+    expect(posted).toHaveBeenLastCalledWith(
+      {
+        type: 'coda:ng-set-segments',
+        layers: [{ name: OWNED, segments: ['1'], segmentColors: {} }],
+        update: 3,
+      },
+      window.location.origin,
+    )
+  })
+
   it('navigates as before for a frame that never said it can take one', () => {
     // A typed `Viewer`, or the public demo through the dev proxy: no report, no in-place update.
     const view = mounted(URL_A)

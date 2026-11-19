@@ -166,8 +166,11 @@ function organelleAt(
   return score === null ? null : score >= ORGANELLE_CUT
 }
 
-/** A search cell by its column name: the pool's own, or `organelle`, worked out from it. */
-function searchCell(
+/**
+ * A search cell by its column name: the pool's own, or `organelle`, worked out from it. Also how
+ * Auto-extend reads an end's first candidate (`suggestMerges.ts`), as the tables publish it.
+ */
+export function searchCell(
   columns: Readonly<Record<string, Float64Array>>,
   name: string,
   at: number,

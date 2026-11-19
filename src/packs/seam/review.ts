@@ -49,23 +49,27 @@ import {
   mergesTable,
   recordScopeOf,
 } from './mergeRecord'
-import { EXTENDED_PORT, extendedSchema, extendedTable } from './pieces'
+import {
+  EXTENDED_PORT,
+  LARGE_PIECE_CHUNKS,
+  extendedSchema,
+  extendedTable,
+  verdictKey,
+} from './pieces'
 import { suggestionLayer } from './scene'
 import type { CurrentItem, QueueTip, ScenePiece, Verdict } from './reviewQueue'
 import {
   buildQueue,
   currentOfQueue,
   decodeVerdicts,
-  extendedPairs,
-  LARGE_PIECE_CHUNKS,
+  extendPlanFrom,
   liveQueue,
-  liveTree,
   pickedNeuron,
+  reviewStateOf,
   scenePieces,
   tipKey,
   tipsOf,
   verdictFor,
-  verdictKey,
 } from './reviewQueue'
 
 /** The column the verdicts are folded onto the tips under. */
@@ -201,7 +205,7 @@ export const reviewNode = packNode({
     },
     /*
      * Which accepted pieces are extended: verdict keys, `parent/piece`. Written by the card's
-     * Extend button, read with the verdicts by `extendedPairs` — a pair counts only while its
+     * Extend button, read with the verdicts by `extendedKeys` — a pair counts only while its
      * verdict is `accept`. **Data** (it decides which rows there are to review, and what
      * `Extended` says) and an ordinary undo step.
      */
@@ -241,14 +245,44 @@ export const reviewNode = packNode({
       help: 'Also show every candidate you accepted on this neuron in the viewer, in green, wherever the cursor is — the neuron as it will look once you make the merges. With no row selected, the neuron and its accepted pieces are shown and the camera stays where it is.',
     },
     /*
-     * **Presentational**: `evaluate` never reads it. It changes what a press on Accept writes,
-     * and what is written — `extend` — is the data. Off by default: the search is started by
-     * hand unless the reader asks otherwise (user, 2026-11-16).
+     * The pieces Auto-extend was pressed on: verdict keys, `parent/piece`, each also in `extend`
+     * (`extendParams`). **Data**: it is what the search is told to grow, and what the card counts
+     * as accepted follows from it (`docs/seam-auto-extend-plan.md`).
      */
     {
-      id: 'autoExtend',
+      id: 'autoRoots',
+      advanced: true,
+      kind: 'string',
+      label: 'Auto-extended pieces',
+      default: '',
+      internal: true,
+      help: 'The pieces Auto-extend was chosen on, as `parent/piece` pairs. Set by the menu of the Extend button on an accepted row.',
+    },
+    /*
+     * The pairs Auto-extend could take that the reader turned down, written by the press
+     * (`judgedParams`). **Data**: the search is told them while an Auto-extend is live, and a
+     * reject of anything else is in no key (`planTexts`).
+     */
+    {
+      id: 'autoRefused',
+      advanced: true,
+      kind: 'string',
+      label: 'Turned down for Auto-extend',
+      default: '',
+      internal: true,
+      help: 'Pairs, as `parent/piece`, that Auto-extend could accept and you gave another verdict, so it does not take them. Set by the verdict buttons.',
+    },
+    /*
+     * **Presentational**: `evaluate` never reads it. It changes what a press on Accept writes,
+     * and what is written — `extend` — is the data. Off by default: the search is started by
+     * hand unless the reader asks otherwise (user, 2026-11-16). Called `Auto-extend` until that
+     * name went to the menu item that accepts and extends on its own (user, 2026-11-18).
+     */
+    {
+      id: 'extendOnAccept',
+      formerId: 'autoExtend',
       kind: 'boolean',
-      label: 'Auto-extend',
+      label: 'Extend on accept',
       default: false,
       presentational: true,
       help: `Extend each piece as you accept it, without pressing Extend: its own open ends are searched and listed beneath it. A large piece — ${LARGE_PIECE_CHUNKS} level-2 chunks or more — is left to its Extend button, since searching one can take minutes. Switching this on starts nothing: pieces accepted earlier keep their Extend button.`,
@@ -358,7 +392,7 @@ export const reviewNode = packNode({
    */
   asReference: (params, output) =>
     output === EXTENDED_PORT
-      ? extendedTable(extendedPairs(params.extend, decodeVerdicts(params.verdicts)))
+      ? extendedTable(extendPlanFrom(params, decodeVerdicts(params['verdicts'])))
       : undefined,
 
   validate: (ctx) => {
@@ -398,11 +432,12 @@ export const reviewNode = packNode({
       )
     }
     const all = buildQueue(tips, candidates)
-    const verdicts = decodeVerdicts(ctx.params.verdicts)
-    const pairs = extendedPairs(ctx.params.extend, verdicts)
     // What there is to review: each neuron's tips and those of the pieces in its tree — as the
-    // params say the tree is now, whatever rows the search has yet to drop.
-    const queue = liveQueue(all, liveTree(all, pairs))
+    // params say the tree is now, whatever rows the search has yet to drop — with what
+    // Auto-extend took grown on, by the rule the search grew it by. Its accepts count wherever an
+    // accept is read, and are never a reader's verdict: `Tips` and `Verdicts` carry `stored`.
+    const { stored, plan, growth, verdicts } = reviewStateOf(ctx.params, all)
+    const queue = liveQueue(all, growth.tree)
     // The cursor resolves within the picked neuron only, so a cursor left on another neuron's
     // tip — after the fallback to the first, or a hand edit — shows nothing rather than a pair
     // from a neuron the card is not on.
@@ -460,15 +495,16 @@ export const reviewNode = packNode({
     return {
       // Every row that came in passes through, a hidden piece's among them — but a verdict is
       // folded on only where it is read: on a row that is listed, as `Verdicts` has it.
-      tips: withVerdicts(tips, queue, verdicts),
-      verdicts: verdictsTable(queue, verdicts),
+      tips: withVerdicts(tips, queue, stored),
+      verdicts: verdictsTable(queue, stored),
       current: currentPieces(pieces, here),
       layers: {
         kind: 'layers',
         items: [...layersFrom(ctx.input('layers')), layer.layer],
       } satisfies LayersValue,
       merges: mergesTable(record),
-      [EXTENDED_PORT]: extendedTable(pairs),
+      // The same table a reference is handed (`asReference`), from the same plan.
+      [EXTENDED_PORT]: extendedTable(plan),
     }
   },
 })

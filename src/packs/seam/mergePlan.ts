@@ -61,7 +61,7 @@ import { anchorMerge, openAnchorVolume } from './mergeAnchors'
 import type { AcceptedRow, QueueTip, Verdicts } from './reviewQueue'
 import type { MergeRecord, MergeRecordEntry } from './mergeRecord'
 import { mergedSoFar, sharedNewRoot } from './mergeRecord'
-import { piecesOf } from './pieces'
+import { piecesOf, verdictKey } from './pieces'
 import { acceptedPieces, tipsOf } from './reviewQueue'
 
 /** Why an accepted piece is not in the plan. Every one is a reason not to send. */
@@ -108,6 +108,12 @@ export interface PlannedMerge {
    * a continuation of that piece.
    */
   readonly needs?: string | undefined
+  /**
+   * Accepted by Auto-extend alone: every pair it was accepted on is in `PlanRequest.unjudged`.
+   * The dialog tags it, and once merged it goes to SEAM as `auto-accepted`, never as `accept`
+   * (`docs/seam-auto-extend-plan.md`).
+   */
+  readonly auto: boolean
 }
 
 export interface RejectedMerge {
@@ -156,6 +162,11 @@ export interface PlanRequest {
   readonly queue: readonly QueueTip[]
   readonly reviewedRoot: string
   readonly verdicts: Verdicts
+  /**
+   * The accepts in `verdicts` that are Auto-extend's alone, by pair (`autoJudged().unjudged`) —
+   * what marks a merge `auto`. Absent is none.
+   */
+  readonly unjudged?: ReadonlyMap<string, string> | undefined
   readonly record: MergeRecord
 }
 
@@ -409,6 +420,12 @@ async function plan(
         neuron: anchors.neuron,
         candidate: anchors.candidate,
         joinsNeuron: otherNeurons.has(candidateRoot),
+        // Every pair it was accepted on Auto-extend's alone — and there is at least one.
+        auto:
+          rows.length > 0 &&
+          rows.every(
+            (one) => request.unjudged?.has(verdictKey(one.neuronId, candidateRoot)) === true,
+          ),
         parent: unmerged[0],
         needs: on !== undefined && on !== currentRoot ? on : undefined,
       })

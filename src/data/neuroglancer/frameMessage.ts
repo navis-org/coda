@@ -8,16 +8,17 @@
  * Messages rather than reads of `location.hash`, which neuroglancer writes with
  * `history.replaceState`, firing no event.
  *
- * Card to frame: set these layers' segments and colours in place (`FrameSegmentsMessage`). The
- * alternative is restoring `layers` through the fragment, which tears every layer down and
- * rebuilds it — the reason an update has to wait for the pointer to leave, and meshes reload.
+ * Card to frame: set these layers' segments and colours, and local annotation layers' annotations,
+ * in place (`FrameSegmentsMessage`). The alternative is restoring `layers` through the fragment,
+ * which tears every layer down and rebuilds it — the reason an update has to wait for the pointer
+ * to leave, and meshes reload.
  *
  * And keys, both ways: a key pressed in the frame goes to the frame's document and never reaches
  * Coda's, so the card says which chords are Coda's (`FrameKeysMessage`) and the frame hands those
  * back (`FrameKeyMessage`) instead of letting neuroglancer have them.
  */
 
-import type { LayerSelection, NgScene } from './scene'
+import type { LayerAnnotations, LayerSelection, NgScene } from './scene'
 
 /**
  * Which of the card's updates a report describes — the number every navigation and every in-place
@@ -60,15 +61,22 @@ export function isFrameStateMessage(data: unknown): data is FrameStateMessage {
 
 export const FRAME_SEGMENTS_MESSAGE = 'coda:ng-set-segments'
 
+/** Named for its first use; it carries both kinds of in-place change (`inPlaceChanges`). */
 export interface FrameSegmentsMessage {
   type: typeof FRAME_SEGMENTS_MESSAGE
   layers: LayerSelection[]
+  /** Local annotation layers' contents, replaced whole. Left out where none changed. */
+  annotations?: LayerAnnotations[]
   update: number
 }
 
 export function isFrameSegmentsMessage(data: unknown): data is FrameSegmentsMessage {
   const message = messageOf(data, FRAME_SEGMENTS_MESSAGE)
-  return Array.isArray(message?.['layers']) && typeof message['update'] === 'number'
+  return (
+    Array.isArray(message?.['layers']) &&
+    (message['annotations'] === undefined || Array.isArray(message['annotations'])) &&
+    typeof message['update'] === 'number'
+  )
 }
 
 /** `data` as a message of this type, or undefined. */

@@ -25,6 +25,7 @@ import type { DataSource } from '../../data/source'
 import { CANONICAL_SCHEMAS, registerSource, requireSource } from '../../data/source'
 import { resolveColor } from '../../style/encoding'
 import { readColorSpec } from '../lib/encodingParams'
+import { FOCUS_GREEN } from '../../style/colors'
 import { controlFocusNm, controlPartColor, frameTarget } from './neuroglancer'
 import '../index'
 
@@ -1028,6 +1029,22 @@ describe('a card driving the scene', () => {
       .find(Boolean)!
     expect(new Set([colors['10001'], colors['20002'], colors['30003']]).size).toBe(3)
     expect(colors['30003']).toBe(controlPartColor('accepted'))
+  })
+
+  /** The accepted piece in hand, among other green ones: the same green, a lighter step. */
+  it('colours an accepted piece in focus apart from the other accepted ones', async () => {
+    const { scene } = await sceneFrom({}, undefined, stubSource(), [], {
+      control: control([
+        { id: '10001', part: 'neuron' },
+        { id: '30003', part: 'accepted' },
+        { id: '40004', part: 'focus' },
+      ]),
+    })
+    const colors = layersOf(scene)
+      .map((l) => l['segmentColors'] as Record<string, string> | undefined)
+      .find(Boolean)!
+    expect(colors['40004']).toBe(FOCUS_GREEN)
+    expect(colors['40004']).not.toBe(colors['30003'])
   })
 
   /** The camera reads the first row, so sorting the table cannot move it somewhere else. */

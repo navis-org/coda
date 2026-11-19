@@ -10,10 +10,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { NgScene } from '../../data/neuroglancer/scene'
-import { parseSceneUrl, selectionChanges } from '../../data/neuroglancer/scene'
+import { inPlaceChanges, parseSceneUrl } from '../../data/neuroglancer/scene'
 import type { MergeProgress } from '../../packs/seam/mergeRecord'
 import type { PlannedMerge, ReadyPlan } from '../../packs/seam/mergePlan'
-import type { Candidate } from '../../packs/seam/reviewQueue'
+import type { Candidate, QueueTip } from '../../packs/seam/reviewQueue'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { Modal } from '../Modal'
 import { MergeConfirm } from './MergeConfirm'
@@ -65,8 +65,11 @@ function candidate(id: string): Candidate {
   }
 }
 
+/** A row's tip, which these tests do not read. */
+const TIP = {} as QueueTip
+
 function merge(id: string, joinsNeuron = false): PlannedMerge {
-  const row = { neuronId: NEURON, endUid: 7, candidate: candidate(id) }
+  const row = { neuronId: NEURON, endUid: 7, candidate: candidate(id), tip: TIP }
   return {
     candidateRoot: id,
     rows: [row],
@@ -74,6 +77,7 @@ function merge(id: string, joinsNeuron = false): PlannedMerge {
     neuron: { supervoxel: `${id}1`, positionNm: [96, 192, 427.5] },
     candidate: { supervoxel: `${id}2`, positionNm: [112, 208, 472.5] },
     joinsNeuron,
+    auto: false,
   }
 }
 
@@ -208,7 +212,7 @@ describe('the confirm overlay', () => {
     expect(segmentsOf(after, 'neuron')).toEqual([NEURON])
     expect(linesOf(after)).toEqual(linesOf(before))
     // What the viewer itself asks to set a change in place rather than re-navigating.
-    expect(selectionChanges(before, after)).toBeDefined()
+    expect(inPlaceChanges(before, after)?.whole).toBe(true)
   })
 
   /*
@@ -353,7 +357,7 @@ describe('the confirm overlay', () => {
     )
     const after = parseSceneUrl(shown.at(-1)!)!
     expect(segmentsOf(after, 'neuron')).toEqual(['720575940000000009'])
-    expect(selectionChanges(before, after)).toBeDefined()
+    expect(inPlaceChanges(before, after)?.whole).toBe(true)
   })
 
   /** The whole neuron, from its tips and the merges' points, rather than the published zoom. */

@@ -20,7 +20,7 @@ import type { TableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
 import { emptyGraph, referrerOf } from '../../core/graph'
 import type { CodaGraph } from '../../core/graph'
-import { EXTENDED_PORT, extendPairs } from './pieces'
+import { EXTENDED_PORT, extendPlanOf } from './pieces'
 import type { LayersValue, TableValue, Value } from '../../core/values'
 import '../../nodes'
 
@@ -148,9 +148,10 @@ describe('showing accepted pieces', () => {
   })
 
   /** Pressing Accept on the piece under the cursor turns it green at once. */
-  it('colours the piece under the cursor as accepted once it is', async () => {
+  /** Accepted, and in focus: a lighter green, so it stands out among the other green pieces. */
+  it('colours the piece under the cursor as accepted, in focus, once it is', async () => {
     const table = await current({ current: 'n1|1', verdicts: 'n1/a=accept' })
-    expect(rows(table)).toEqual(['n1:neuron', 'a:accepted'])
+    expect(rows(table)).toEqual(['n1:neuron', 'a:focus'])
   })
 
   /** Accepted pieces mean nothing on their own, so the neuron leads; the camera stays put. */
@@ -236,7 +237,7 @@ describe('after merges', () => {
     const before = await run({ verdicts, current: `${N}|1` }, inputs)
     expect(rows(before['current'] as TableValue)).toEqual([
       `${N}:neuron`,
-      '997:accepted',
+      '997:focus',
       '999:accepted',
     ])
     // With no Dataset wired, the record is read for no chunkedgraph: no merge here.
@@ -306,7 +307,7 @@ describe('what is extended', () => {
       string,
       { schema?: TableSchema }
     >
-    expect(columnNames(out['extended']!.schema!)).toEqual(['parent', 'piece'])
+    expect(columnNames(out['extended']!.schema!)).toEqual(['parent', 'piece', 'mode'])
   })
 
   it('publishes the pairs that are asked for and still accepted', async () => {
@@ -325,7 +326,7 @@ describe('what is extended', () => {
     const referred = def.asReference!(params, 'extended')
     expect(referred).toEqual((await run(params, inputs))['extended'])
     // And it is what Suggest Merges reads: two chunkedgraph ids a pair, in a stable order.
-    expect(extendPairs(referred)).toEqual([
+    expect(extendPlanOf(referred).pairs).toEqual([
       { parent: SEED, piece: PIECE },
       { parent: PIECE, piece: NEXT },
     ])
@@ -334,14 +335,16 @@ describe('what is extended', () => {
   })
 
   /** The toggle changes what a press writes, never what this node publishes: it re-keys nothing. */
-  it('publishes the same with auto-extend on, and keeps it out of the key', async () => {
+  it('publishes the same with Extend on accept on, and keeps it out of the key', async () => {
     const params = { verdicts: accepted, extend: `${SEED}/${PIECE}` }
-    expect(await run({ ...params, autoExtend: true }, inputs)).toEqual(
+    expect(await run({ ...params, extendOnAccept: true }, inputs)).toEqual(
       await run(params, inputs),
     )
-    const toggle = def.params!.find((param) => param.id === 'autoExtend')!
+    const toggle = def.params!.find((param) => param.id === 'extendOnAccept')!
     expect(toggle.presentational).toBe(true)
     expect(toggle.default).toBe(false)
+    // Saved as `autoExtend` before the name went to the menu's Auto-extend (user, 2026-11-18).
+    expect(toggle.formerId).toBe('autoExtend')
   })
 
   /**
@@ -395,10 +398,11 @@ describe('what is extended', () => {
       { verdicts: accepted, extend: `${SEED}/${PIECE}`, current: `${PIECE}|1` },
       inputs,
     )
-    // One neuron in the viewer: the seed, with both accepted pieces green.
+    // One neuron in the viewer: the seed, with both accepted pieces green — the one in hand in
+    // focus.
     const current = out['current'] as TableValue
     expect(current.data[ID_COLUMN_NAME]).toEqual([SEED, PIECE, NEXT])
-    expect(current.data['part']).toEqual(['neuron', 'accepted', 'accepted'])
+    expect(current.data['part']).toEqual(['neuron', 'accepted', 'focus'])
     expect(current.data['x']).toEqual([20, 20, 20])
     expect(points(out)).toEqual([
       `${SEED}-0-tip`,

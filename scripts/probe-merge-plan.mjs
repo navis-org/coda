@@ -26,8 +26,8 @@ import {
   buildQueue,
   pickedNeuron,
   tipsOf,
-  verdictKey,
 } from '../src/packs/seam/reviewQueue.ts'
+import { verdictKey } from '../src/packs/seam/pieces.ts'
 import { parseSuggestionSet } from '../src/packs/seam/suggestionSet.ts'
 import { readSuggestions } from '../src/packs/seam/suggestions.ts'
 import { isChunkedgraphEdit, requestUrl } from '../src/test/sandboxWrites.ts'

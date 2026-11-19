@@ -84,11 +84,26 @@ Coda                                   server                              chunk
 | `candidate`, `rank` | the candidate judged | which piece, and its place in the tip's list |
 | `q`, `r`, `p_tip` | the tip | the tip's numbers — about its **first** candidate, whichever is judged |
 | `conf`, `shown`, `organelle` | the candidate | its own; `organelle` is `true` or null (not known), never a guessed `false` |
-| `verdict` | the press | `accept`, `reject`, `ends`, `unsure`, or `cleared` |
+| `verdict` | the press | `accept`, `reject`, `ends`, `unsure`, or `cleared`; or `auto-accepted`, sent by Submit (below) |
 | `at` | the browser's clock | when it was pressed |
 | `searched_at` | — | always null: the card does not know the run's moment; the ids and `at` say it |
 | `coda` | `__APP_VERSION__` | Coda's version |
 | `name`, `email` | the reader | as typed, or null |
+
+**`auto-accepted` is not a press** (user, 2026-11-18; `docs/seam-auto-extend-plan.md`). A piece
+Auto-extend accepted and the reader never judged is sent when Submit merges it, one record per
+merge that landed (`PlannedMerge.auto`, set by the plan from the same `unjudged` the card reads),
+from the row the merge was made at, and all of them in one post when the batch ends
+(`mergeSession.ts`). Its own word so SEAM never takes its own pick for a
+reader's verdict; SEAM's reading guide says so. **The server's word has to be deployed before a
+Coda that sends it**, as `ends` did: an older server refuses the record (422), and the queue drops
+it and says so; the other records go.
+
+A merge whose answer comes after the batch gave up on it (`waitFor`) is sent when the answer says
+merged; the records are made at the press (`autoSender`), so the wait keeps only those. **Not
+sent, known:** a lost reply the next Submit settles as merged (`made.settled`) — that plan no
+longer holds the merge, so whether it was Auto-extend's cannot be told cleanly — and an
+`already-merged` piece, which this Submit did not merge.
 
 The server adds `datastack` (the session's, never the client's), `session` (one reader's records
 together even with no name) and `received_at` (stamped under the write lock, so posts are stored in

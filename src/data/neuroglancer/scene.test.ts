@@ -29,7 +29,7 @@ import {
   viewerKind,
   splitSceneUrl,
   selfHostedViewer,
-  selectionChanges,
+  inPlaceChanges,
   selectionLayerName,
   layerListing,
   segmentEntry,
@@ -1081,24 +1081,45 @@ describe('which deployment opens', () => {
 })
 
 describe('what can be set in place', () => {
-  const scene = (segments: string[], extra: Record<string, unknown> = {}) => ({
+  const points = (n: number) => ({
+    type: 'annotation',
+    name: 'merge suggestions',
+    source: { url: 'local://annotations', transform: {} },
+    annotations: Array.from({ length: n }, (_, i) => ({ type: 'point', id: String(i) })),
+  })
+  const scene = (
+    segments: string[],
+    extra: Record<string, unknown> = {},
+    more: Record<string, unknown>[] = [],
+  ) => ({
     position: [1, 2, 3],
     layout: '3d',
     layers: [
       { type: 'image', name: 'em', source: 'precomputed://gs://b/em' },
       { type: 'segmentation', name: 'banc', source: 'graphene://x', segments, ...extra },
+      ...more,
     ],
+  })
+  const restyle = (
+    of: ReturnType<typeof scene>,
+    name: string,
+    change: Record<string, unknown>,
+  ) => ({
+    ...of,
+    layers: of.layers.map((layer) => (layer.name === name ? { ...layer, ...change } : layer)),
   })
 
   it('names the layers whose segments or colours changed, and nothing else', () => {
-    expect(selectionChanges(scene(['1']), scene(['1', '2']))).toEqual([
-      { name: 'banc', segments: ['1', '2'], segmentColors: {} },
-    ])
+    expect(inPlaceChanges(scene(['1']), scene(['1', '2']))).toMatchObject({
+      segments: [{ name: 'banc', segments: ['1', '2'], segmentColors: {} }],
+      annotations: [],
+      whole: true,
+    })
     expect(
-      selectionChanges(
+      inPlaceChanges(
         scene(['1']),
         scene(['1'], { segmentColors: { '1': '#ff0000' }, segmentDefaultColor: '#00ff00' }),
-      ),
+      )?.segments,
     ).toEqual([
       {
         name: 'banc',
@@ -1109,30 +1130,96 @@ describe('what can be set in place', () => {
     ])
   })
 
-  it('answers empty for the same scene', () => {
-    expect(selectionChanges(scene(['1']), scene(['1']))).toEqual([])
+  it('answers nothing to set, and whole, for the same scene', () => {
+    expect(inPlaceChanges(scene(['1']), scene(['1']))).toMatchObject({
+      segments: [],
+      annotations: [],
+      whole: true,
+    })
   })
 
-  it('refuses anything that is not a selection, which then navigates', () => {
+  it('names a local annotation layer whose annotations changed', () => {
+    // Review Suggestions under Auto-extend: a piece taken, with the tips of the piece it was taken
+    // on as new points, in one update — all of it in place.
+    const changes = inPlaceChanges(
+      scene(['1'], {}, [points(2)]),
+      scene(['1', '2'], {}, [points(4)]),
+    )
+    expect(changes?.whole).toBe(true)
+    expect(changes?.segments).toEqual([
+      { name: 'banc', segments: ['1', '2'], segmentColors: {} },
+    ])
+    expect(changes?.annotations).toEqual([
+      { name: 'merge suggestions', annotations: points(4).annotations },
+    ])
+  })
+
+  it('names no annotation layer that is not local, or changed otherwise', () => {
+    const remote = { ...points(1), source: 'precomputed://gs://b/synapses' }
     expect(
-      selectionChanges(scene(['1']), { ...scene(['1', '2']), layout: '4panel' }),
+      inPlaceChanges(
+        scene(['1'], {}, [remote]),
+        scene(['1'], {}, [{ ...remote, annotations: [] }]),
+      )?.whole,
+    ).toBe(false)
+    const reshaded = restyle(scene(['1'], {}, [points(2)]), 'merge suggestions', {
+      shader: 'void main() {}',
+      annotations: points(3).annotations,
+    })
+    const changes = inPlaceChanges(scene(['1'], {}, [points(2)]), reshaded)
+    expect(changes?.whole).toBe(false)
+    expect(changes?.annotations).toEqual([])
+  })
+
+  it('is not whole where anything else changes, and refuses another scene', () => {
+    expect(
+      inPlaceChanges(scene(['1']), { ...scene(['1', '2']), layout: '4panel' }),
     ).toBeUndefined()
     expect(
-      selectionChanges(scene(['1']), { ...scene(['1']), position: [9, 9, 9] }),
+      inPlaceChanges(scene(['1']), { ...scene(['1']), position: [9, 9, 9] }),
     ).toBeUndefined()
     // Another key of the same layer.
-    expect(selectionChanges(scene(['1']), scene(['2'], { objectAlpha: 0.5 }))).toBeUndefined()
+    expect(inPlaceChanges(scene(['1']), scene(['2'], { objectAlpha: 0.5 }))?.whole).toBe(false)
     // A layer added, or renamed.
     const more = scene(['1'])
     expect(
-      selectionChanges(scene(['1']), { ...more, layers: [...more.layers, { name: 'shell' }] }),
-    ).toBeUndefined()
+      inPlaceChanges(scene(['1']), { ...more, layers: [...more.layers, { name: 'shell' }] })
+        ?.whole,
+    ).toBe(false)
     expect(
-      selectionChanges(scene(['1']), {
+      inPlaceChanges(scene(['1']), {
         ...more,
         layers: [more.layers[0]!, { ...more.layers[1]!, name: 'other' }],
-      }),
-    ).toBeUndefined()
+      })?.whole,
+    ).toBe(false)
+    // Two layers of one name: the frame could not tell which to set.
+    const twice = scene(['1', '2'], {}, [{ type: 'segmentation', name: 'banc', segments: [] }])
+    expect(inPlaceChanges(scene(['1']), twice)).toBeUndefined()
+  })
+
+  it('sends ahead of a navigation what can go in place, and says what the frame then shows', () => {
+    const before = scene(['1'], {}, [points(2)])
+    // A layer added beside the change: that part has to navigate.
+    const next = scene(['1', '2'], {}, [
+      points(4),
+      { type: 'image', name: 'extra', source: 'x' },
+    ])
+    const ahead = inPlaceChanges(before, next)!
+    expect(ahead.whole).toBe(false)
+    expect(ahead.segments).toEqual([{ name: 'banc', segments: ['1', '2'], segmentColors: {} }])
+    expect(ahead.annotations).toHaveLength(1)
+    expect(ahead.scene).toEqual(scene(['1', '2'], {}, [points(4)]))
+    // Once it is shown, only the added layer is left, and nothing more goes in place.
+    const after = inPlaceChanges(ahead.scene, next)!
+    expect(after.whole).toBe(false)
+    expect([...after.segments, ...after.annotations]).toEqual([])
+  })
+
+  it('keeps a layer whose selection changed with another of its keys, for the navigation', () => {
+    const next = restyle(scene(['1', '2']), 'banc', { objectAlpha: 0.5 })
+    const changes = inPlaceChanges(scene(['1']), next)!
+    expect(changes.segments).toEqual([])
+    expect(changes.scene).toEqual(scene(['1']))
   })
 })
 
@@ -1244,8 +1331,9 @@ describe('a Seung-lab-flavoured scene', () => {
   it('still has its neuron layer found, and its selection set in place', () => {
     expect(selectionLayerName(scene, 'flywire_fafb:783')).toBe('flywire_fafb')
     const more = { layers: [scene.layers[0]!, { ...scene.layers[1]!, segments: ['1', '2'] }] }
-    expect(selectionChanges(scene, more)).toEqual([
-      { name: 'flywire_fafb', segments: ['1', '2'], segmentColors: {} },
-    ])
+    expect(inPlaceChanges(scene, more)).toMatchObject({
+      segments: [{ name: 'flywire_fafb', segments: ['1', '2'], segmentColors: {} }],
+      whole: true,
+    })
   })
 })

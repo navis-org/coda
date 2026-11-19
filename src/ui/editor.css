@@ -11330,6 +11330,18 @@ details[open] > summary.tile__label {
   color: var(--text-primary);
 }
 /*
+ * A piece Auto-extend accepted and the reader has not judged: the merged chip's shape, dashed and
+ * muted — no hue of its own, the palette having none to spare — so it reads as provisional.
+ */
+.review-row__auto {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px dashed var(--text-secondary);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+/*
  * A piece edited since it was suggested: the merged chip's shape, in `--status-refused` — the red
  * measured per mode for text — since Submit would refuse it.
  */
@@ -11389,11 +11401,14 @@ details[open] > summary.tile__label {
   color: var(--text-primary);
   border-color: currentColor;
 }
-/* Reject, Ends and Unsure's split button (`VerdictButtons.tsx`), joined to read as one control. */
+/*
+ * Reject, Ends and Unsure's split button (`VerdictButtons.tsx`), and Extend's (`ExtendButtons.tsx`),
+ * each joined to read as one control.
+ */
 .review-row__split {
   display: inline-flex;
 }
-.review-row__split > .review-row__verdict:first-child {
+.review-row__split > :first-child {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -11409,8 +11424,10 @@ details[open] > summary.tile__label {
  * about one. Pressed, its text is how far the search has got, in tabular figures so a count
  * going up does not shift the buttons beside it.
  */
-.review-row__extend {
+.review-row__split--extend {
   margin-left: 4px;
+}
+.review-row__extend {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

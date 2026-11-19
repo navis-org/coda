@@ -65,7 +65,7 @@ A verdict is about the piece and the neuron, not about the tip: a piece listed a
 
 ### Seeing what you accepted
 
-With `Show accepted` on (the default), every candidate you have accepted on this neuron is shown in the viewer in green, wherever the cursor is. The scene is then the neuron as it will look once you make the merges, and a piece that does not fit stands out. Accepting the candidate you are looking at turns it from orange to green straight away.
+With `Show accepted` on (the default), every candidate you have accepted on this neuron is shown in the viewer in green, wherever the cursor is. The scene is then the neuron as it will look once you make the merges, and a piece that does not fit stands out. Accepting the candidate you are looking at turns it from orange to a lighter green straight away, and it stays that lighter green while you are on it, so you can pick out the piece in hand among the others — handy in a long Auto-extend chain, where every piece is accepted.
 
 With no row selected, the viewer shows the neuron and its accepted pieces, and the camera stays where it is. Only `Accept` counts; the other verdicts are not drawn.
 
@@ -134,14 +134,37 @@ A candidate you have already accepted somewhere else on this neuron has an `in t
 
 Rejecting or clearing an extended piece takes its tips off the list, along with those of every piece extended beyond it. The verdict buttons say how many pieces go with it before you click. Your verdicts on those rows are kept: accept and extend the piece again and they come back. It is one undo step.
 
-### Auto-extend
+### Extend on accept
 
-With `Auto-extend` on, accepting a piece extends it straight away. Two things to know:
+With `Extend on accept` on, accepting a piece extends it straight away. Two things to know:
 
 - A large piece (41 chunks or more) is accepted and left to its `Extend (large)` button.
 - Switching it on starts nothing. Pieces you accepted earlier keep their Extend button.
 
 The setting is with the filters in the footer.
+
+### Auto-extend
+
+The ▾ beside Extend offers **Auto-extend**. It extends the piece, and then, at each of the piece's open ends, accepts the first candidate if it clears SEAM's cutoff (it is `shown`) and extends that piece in the same way. This goes on until no candidate clears the cutoff, or ten layers beyond the piece you chose it on. Pieces on the tenth layer are accepted but not searched; each keeps an Extend button of its own.
+
+Auto-extend does not accept:
+
+- a candidate flagged as an organelle;
+- a large piece (41 level-2 chunks or more);
+- a piece already in the neuron;
+- a pair you have given any verdict other than Accept.
+
+It needs SEAM's cutoff, so Suggest Merges must have an `Assessor`. Without one the menu item is greyed out.
+
+The pieces it accepts are listed like any other, with an `auto` tag, and the footer counts them (`12 by Auto-extend`). Their Extend button shows how far their search has got and cannot be pressed. To stop extending them, change the piece you chose Auto-extend on.
+
+- **Accept** on an `auto` row makes the verdict your own. Nothing else changes.
+- **Reject**, `Ends` or `Unsure` drops the piece and everything Auto-extend found beyond it, at once. The next time Suggest Merges runs, it does not take that piece. A verdict on a row Auto-extend could never take changes nothing about the search.
+- Pressing the button again, or the ticked item in the menu, stops Auto-extend and takes everything it found off the list. `Extend` in the menu keeps the piece's own ends but drops what Auto-extend took.
+
+> [!WARNING]
+> **Submit merges what Auto-extend accepted**
+> Pieces tagged `auto` count as accepted. Look through them, or reject what is wrong, before you press Submit. The confirm dialog tags them `auto` too, says how many there are, and lets you untick any of them.
 
 ## One row per tip, or per candidate
 
@@ -221,7 +244,7 @@ SEAM's estimate `r` is fitted on tips somebody judged, so your verdicts help it 
 
 It is off until you turn it on, and the setting is kept in your browser, not in the workflow, so opening somebody else's workflow never sends anything for you. Your CAVE token is never sent. The server instead asks you to look up one supervoxel's root through your own access, which shows you can read the dataset. Verdicts that cannot be sent straight away, because you are offline or the server is busy, wait in your browser and go with the next one.
 
-Only button presses are sent: undoing a verdict with Ctrl+Z does not send anything, and pressing a verdict again to clear it sends that it was taken back. Verdicts on a tip from an old set that names no version are not sent, because nobody could tell which scores they were judged against. The server collects verdicts for Aedes (`wclee_aedes_brain`); on another dataset the foot says it is not collected.
+Only button presses are sent: undoing a verdict with Ctrl+Z does not send anything, and pressing a verdict again to clear it sends that it was taken back. A piece Auto-extend accepted is sent only when Submit merges it without your having judged it, and then as `auto-accepted`, never as an accept. Verdicts on a tip from an old set that names no version are not sent, because nobody could tell which scores they were judged against. The server collects verdicts for Aedes (`wclee_aedes_brain`); on another dataset the foot says it is not collected.
 
 ## Outputs
 
@@ -239,5 +262,5 @@ Only button presses are sent: undoing a verdict with Ctrl+Z does not send anythi
 `Verdicts` is the one to keep. It carries every judgement, including those on candidates other than the first, which the folded `verdict` column on `Tips` cannot — a tip is one row.
 
 ```coda-params
-seam:review: mode, minConfidence, minSize, excludeOrganelles, sortBy, showAccepted, autoExtend
+seam:review: mode, minConfidence, minSize, excludeOrganelles, sortBy, showAccepted, extendOnAccept
 ```

@@ -12,7 +12,8 @@
  */
 
 import { ID_COLUMN_NAME } from '../../../core/ids'
-import { decodeVerdicts, verdictPair } from '../../../packs/seam/reviewQueue'
+import { verdictPair } from '../../../packs/seam/pieces'
+import { decodeVerdicts } from '../../../packs/seam/reviewQueue'
 import { pyList } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'

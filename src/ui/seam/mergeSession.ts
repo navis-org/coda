@@ -40,13 +40,15 @@ import { useSyncExternalStore } from 'react'
 
 import { errorMessage } from '../../core/errors'
 import { channel } from '../../data/channel'
+import { flushVerdicts } from '../../data/verdictLog'
 import { prepareMerges } from '../../packs/seam/mergeBatch'
 import type { PlannedMerge, ReadyPlan } from '../../packs/seam/mergePlan'
 import { planMerges } from '../../packs/seam/mergePlan'
 import type { MergeProgress, MergeRecordEntry } from '../../packs/seam/mergeRecord'
 import { appendEntry, decodeRecord, settledEntry } from '../../packs/seam/mergeRecord'
 import type { QueueTip } from '../../packs/seam/reviewQueue'
-import { decodeVerdicts } from '../../packs/seam/reviewQueue'
+import { reviewStateOf } from '../../packs/seam/reviewQueue'
+import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
 import type { WriteHold } from '../../store/graphStore'
 import { useGraphStore } from '../../store/graphStore'
 import { isTourActive } from '../tour/tourState'
@@ -177,6 +179,9 @@ async function plan(request: SubmitRequest): Promise<void> {
   const controller = (planning = new AbortController())
   if (!onScreen(request)) return endWith(MOVED)
   const params = liveParams(request.nodeId)
+  // Live, as the record is: a verdict changed since the press is the reader's latest word.
+  // Auto-extend's accepts with them, as the card reads them (`reviewStateOf`).
+  const { verdicts, unjudged } = reviewStateOf(params, request.queue)
   let made
   try {
     made = await planMerges(
@@ -184,8 +189,8 @@ async function plan(request: SubmitRequest): Promise<void> {
         datastack: request.datastack,
         queue: request.queue,
         reviewedRoot: request.reviewedRoot,
-        // Live, as the record is: a verdict changed since the press is the reader's latest word.
-        verdicts: decodeVerdicts(params['verdicts']),
+        verdicts,
+        unjudged,
         record: decodeRecord(params['merges']),
       },
       { deployment: request.deployment, signal: controller.signal },
@@ -270,7 +275,12 @@ function warnLeaving(event: BeforeUnloadEvent): void {
  * Hold every Submit until `answer` settles, and record what it says (the header). Only the card's
  * two ids are kept for it, never the press with its queue: the request may never answer.
  */
-function waitFor(card: Card, answer: Promise<MergeRecordEntry | undefined>): void {
+function waitFor(
+  card: Card,
+  answer: Promise<MergeRecordEntry | undefined>,
+  /** Said of a merge that landed: what `autoSender` sends of it. */
+  merged: (candidateRoot: string) => boolean,
+): void {
   endWait()
   const timer = setTimeout(() => {
     if (!endWait(timer)) return
@@ -288,6 +298,8 @@ function waitFor(card: Card, answer: Promise<MergeRecordEntry | undefined>): voi
     // Past the limit, or forgotten (`resetSubmit`): a later batch may have moved the neuron on.
     if (!endWait(timer) || !entry) return
     const refused = appendHeld(card, entry)
+    // A merge that landed is one whatever became of its record: SEAM hears of it.
+    if (entry.outcome === 'merged' && merged(entry.candidateRoot)) void flushVerdicts()
     useGraphStore
       .getState()
       .setNotice(
@@ -347,13 +359,26 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
    * Submit can open in between: the overlay is up until `running` goes false, after this.
    */
   let stillOutAnswer: Promise<MergeRecordEntry | undefined> | undefined
+  /*
+   * **A piece Auto-extend accepted, merged unjudged, goes to SEAM as `auto-accepted`** (user,
+   * 2026-11-18) — at the merge, so it is what the reader let through, and never as `accept`.
+   * Queued only where the reader shares verdicts ("Help improve"; `enqueueVerdict` asks).
+   */
+  let autoSent = false
+  const sendAutoAccepted = autoSender(merges, {
+    deployment: request.deployment,
+    datastack: request.datastack,
+  })
   void batch
     .run({
       progress: (candidateRoot, state) =>
         show({ progress: new Map(live.progress).set(candidateRoot, state) }),
       record: (entry: MergeRecordEntry) => {
         hold.update('merges', (now) => appendEntry(now, entry))
-        if (entry.outcome === 'merged') show({ neuronRoot: entry.newRoot })
+        if (entry.outcome === 'merged') {
+          show({ neuronRoot: entry.newRoot })
+          autoSent = sendAutoAccepted(entry.candidateRoot) || autoSent
+        }
       },
       stopRequested: () => sending.stop,
       stillOut: (answer) => (stillOutAnswer = answer),
@@ -364,14 +389,45 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
     )
     .then((message) => {
       hold.release()
+      // Every Auto-extend piece merged, in one post, where the reader shares verdicts.
+      if (autoSent) void flushVerdicts()
       if (inFlight === sending) inFlight = undefined
       // Before the wait adds the same listener back, which a later removal would take with it.
       window.removeEventListener('beforeunload', warnLeaving)
       if (stillOutAnswer)
-        waitFor({ docId: request.docId, nodeId: request.nodeId }, stillOutAnswer)
+        waitFor(
+          { docId: request.docId, nodeId: request.nodeId },
+          stillOutAnswer,
+          sendAutoAccepted,
+        )
       show({ running: false })
       if (message) useGraphStore.getState().setNotice(message)
     })
+}
+
+/**
+ * What sends an Auto-extend piece's `auto-accepted` once its merge lands — by the batch, or by an
+ * answer that comes after it (`waitFor`). The records are made here, from the ticked merges, so
+ * what a late answer keeps alive is these few small records and never the press with its queue.
+ * Answers whether one was queued; each is sent at most once.
+ */
+function autoSender(
+  merges: readonly PlannedMerge[],
+  target: { deployment: string; datastack: string },
+): (candidateRoot: string) => boolean {
+  const records = new Map(
+    merges
+      .filter((merge) => merge.auto)
+      .map((merge) => [
+        merge.candidateRoot,
+        verdictInput(merge.used.tip, merge.used.candidate, 'auto-accepted', __APP_VERSION__),
+      ]),
+  )
+  return (candidateRoot) => {
+    const record = records.get(candidateRoot)
+    records.delete(candidateRoot)
+    return record !== undefined && queueVerdict(target, record) === undefined
+  }
 }
 
 /** Stop after the merge in flight. */

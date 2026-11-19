@@ -19,7 +19,7 @@ import type { BatchServices } from './mergeBatch'
 import { prepareMerges } from './mergeBatch'
 import type { PlannedMerge, ReadyPlan } from './mergePlan'
 import type { MergeProgress, MergeRecordEntry } from './mergeRecord'
-import type { Candidate } from './reviewQueue'
+import type { Candidate, QueueTip } from './reviewQueue'
 
 const GRAPHENE = parseGrapheneSource(
   'graphene://https://cave.example.org/segmentation/table/test_table',
@@ -53,8 +53,11 @@ function candidate(id: string): Candidate {
 }
 
 /** Piece `n` (7, 8, 9): neuron supervoxel `n1`, its own `n2`, at tip `n`. */
+/** A row's tip, which these tests do not read. */
+const TIP = {} as QueueTip
+
 function merge(root: string): PlannedMerge {
-  const used = { neuronId: NEURON, endUid: Number(root), candidate: candidate(root) }
+  const used = { neuronId: NEURON, endUid: Number(root), candidate: candidate(root), tip: TIP }
   return {
     candidateRoot: root,
     rows: [used],
@@ -62,6 +65,7 @@ function merge(root: string): PlannedMerge {
     neuron: { supervoxel: SV(`${root}1`), positionNm: [1, 2, 3] },
     candidate: { supervoxel: SV(`${root}2`), positionNm: [4, 5, 6] },
     joinsNeuron: false,
+    auto: false,
   }
 }
 
@@ -513,7 +517,7 @@ describe('runMerges', () => {
 describe('a merge made onto a piece that is merged first', () => {
   const onto7: PlannedMerge = {
     ...merge('9'),
-    used: { neuronId: '7', endUid: 9, candidate: candidate('9') },
+    used: { neuronId: '7', endUid: 9, candidate: candidate('9'), tip: TIP },
     parent: '7',
     needs: '7',
   }

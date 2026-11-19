@@ -36,10 +36,15 @@
  * its queue is its own tips and those of every piece in its tree.
  *
  * **Which pieces those are is read from the card's own params, never from the rows** (`extend`
- * and the verdicts, `extendedPairs`) — the same pairs Suggest Merges is handed. The rows are what
+ * and the verdicts, `extendedKeys`) — the same pairs Suggest Merges is handed. The rows are what
  * the search has got round to; the params are what the reader asked for. A piece that was
  * un-accepted is gone from the list on that click (`liveQueue`), whether or not the search has
  * run again and dropped its rows.
+ *
+ * **Except what Auto-extend took** (`docs/seam-auto-extend-plan.md`): the reader presses it on a
+ * piece, and the search accepts and extends what clears SEAM's cutoff beyond it. Those pieces are
+ * grown from the published rows by the rule the search grew them by (`reviewGrowth`, `growAuto`),
+ * and their accepts are never written — `autoJudged` adds them wherever an accept is read.
  *
  * **Every tip is named by its root and its number together** (`tipKey`). Each piece is a run of
  * its own, and every one of them has a tip 0.
@@ -50,8 +55,16 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
 import { formatNumber, plural } from '../../style/format'
 import type { MergedSoFar } from './mergeRecord'
-import type { ExtendPair, Piece } from './pieces'
-import { piecesOf } from './pieces'
+import type { AutoGrowth, ExtendPlan, Piece } from './pieces'
+import {
+  AUTO_DEPTH,
+  LARGE_PIECE_CHUNKS,
+  autoTakes,
+  growAuto,
+  pairsOf,
+  verdictKey,
+  verdictPair,
+} from './pieces'
 import { SOURCE_COLUMN, numberAt, pointAt } from './suggestionTables'
 
 /**
@@ -150,6 +163,12 @@ export interface QueueTip {
   /** The chance anything belongs at this tip at all, before which piece. */
   readonly pTip: number | undefined
   readonly shown: boolean
+  /**
+   * Whether the table says, in so many words, that the first candidate cleared SEAM's cutoff —
+   * what Auto-extend takes (`autoTakes`). Not `shown`, which reads a table with no such column
+   * (a search with no assessor) as shown throughout.
+   */
+  readonly cleared: boolean
   /** Which `q`, cutoff and `r` these numbers are (`SOURCE_COLUMN`); what a sent verdict is filed by. */
   readonly source: string | undefined
   readonly candidates: readonly Candidate[]
@@ -189,6 +208,7 @@ export function buildQueue(
       q: numberAt(tips, 'q', i),
       pTip: numberAt(tips, 'p_tip', i),
       shown: wasShown(tips, i),
+      cleared: tips.data['shown']?.[i] === true,
       source: text(tips, SOURCE_COLUMN, i),
       candidates: lists.get(tipKey(neuronId, endUid)) ?? [],
     })
@@ -614,7 +634,7 @@ export interface TreeRow extends QueueRow {
  *   by another run — goes after the parent's rows, a level in, and says which piece it is
  *   (`adrift`).
  *
- * `tips` is the neuron's (`tipsOf` over `liveQueue`) and `pieces` the tree (`liveTree`).
+ * `tips` is the neuron's (`tipsOf` over `liveQueue`) and `pieces` the tree (`reviewGrowth`).
  */
 export function arrangeTree(
   tips: readonly QueueTip[],
@@ -754,9 +774,12 @@ export function currentOfQueue(
  * What a piece in the scene is, which decides its colour (`controlPartColor` downstream).
  *
  * `neuron` and `candidate` are the pair under the cursor; `accepted` is a piece the reader already
- * said belongs, shown so the scene is the neuron as it will look once the merges are made.
+ * said belongs, shown so the scene is the neuron as it will look once the merges are made. `focus`
+ * is the candidate under the cursor where it is accepted — by the reader or by Auto-extend — in a
+ * lighter green, so the piece being looked at stands out in a chain of green ones (user,
+ * 2026-11-18).
  */
-export type ScenePart = 'neuron' | 'candidate' | 'accepted'
+export type ScenePart = 'neuron' | 'candidate' | 'accepted' | 'focus'
 
 export interface ScenePiece {
   readonly id: string
@@ -767,8 +790,9 @@ export interface ScenePiece {
  * The segments to show, in order: the pair under the cursor, then every accepted piece.
  *
  * **Accepted is a fact about the piece, not the pair.** A piece accepted on any of the neuron's
- * tips is going to be merged, so it is green wherever it appears — including as the candidate
- * under the cursor, which is what makes pressing Accept visibly land.
+ * tips is going to be merged, so it is green wherever it appears — and as the candidate under the
+ * cursor a lighter green (`focus`), which is what makes pressing Accept visibly land and the piece
+ * in hand stand out among the others.
  *
  * With no cursor and `showAccepted` on, the neuron still leads: accepted pieces mean nothing
  * floating on their own. With no cursor and it off, there is nothing to show, as before.
@@ -815,7 +839,7 @@ export function scenePieces(
   }
   const id = here?.candidate.candidateId
   if (id !== undefined && mergedAs(merged, id) === undefined) {
-    add(id, isAccepted.has(id) ? 'accepted' : 'candidate')
+    add(id, isAccepted.has(id) ? 'focus' : 'candidate')
   }
   for (const id of toMerge) add(id, 'accepted')
   return out
@@ -830,6 +854,8 @@ export interface AcceptedRow {
   readonly neuronId: string
   readonly endUid: number
   readonly candidate: Candidate
+  /** The tip itself, for what describes the row whole (`verdictInput`). */
+  readonly tip: QueueTip
 }
 
 /**
@@ -859,7 +885,7 @@ export function acceptedPieces(
     for (const candidate of tip.candidates) {
       if (!mine.has(candidate.candidateId)) continue
       const rows = pieces.get(candidate.candidateId) ?? []
-      rows.push({ neuronId: tip.neuronId, endUid: tip.endUid, candidate })
+      rows.push({ neuronId: tip.neuronId, endUid: tip.endUid, candidate, tip })
       pieces.set(candidate.candidateId, rows)
     }
   }
@@ -905,18 +931,6 @@ export function mergedAs(
  * be read as a new one.
  */
 export type Verdicts = ReadonlyMap<string, Verdict>
-
-export const verdictKey = (neuronId: string, candidateId: string): string =>
-  `${neuronId}/${candidateId}`
-
-/** A key's two ids, or undefined for one of the old shape (or a hand edit). */
-export function verdictPair(
-  key: string,
-): { neuronId: string; candidateId: string } | undefined {
-  const at = key.indexOf('/')
-  if (at <= 0 || at === key.length - 1) return undefined
-  return { neuronId: key.slice(0, at), candidateId: key.slice(at + 1) }
-}
 
 export function decodeVerdicts(raw: unknown): Map<string, Verdict> {
   const out = new Map<string, Verdict>()
@@ -1013,41 +1027,17 @@ export function withExtended(raw: unknown, parent: string, piece: string, on: bo
 
 /**
  * What is extended: a pair in `extend` whose verdict is still `accept` — **the one rule**, read by
- * the `Extended` output, by the reference Suggest Merges holds to this card, and by the card.
+ * the `Extended` output, by the reference Suggest Merges holds to this card, and by the card —
+ * as the keys the param holds, sorted. Joined, it is a string, and a string compares by value
+ * where a fresh array of pairs never does — the card memoises on it, so a verdict that extends
+ * nothing re-sorts nothing.
  *
  * Whether a pair can be *reached* from a neuron is not asked here: that takes the neurons, which
  * are rows of a table, and this must answer from the params alone. `piecesOf` asks it, on both
  * sides, of these same pairs.
  */
-export function extendedPairs(extend: unknown, verdicts: Verdicts): ExtendPair[] {
-  return pairsOf(extendedKeys(extend, verdicts))
-}
-
-/**
- * `extendedPairs` as the keys the param holds, sorted. For a reader that wants to know whether
- * the set *moved*: joined, it is a string, and a string compares by value where a fresh array of
- * pairs never does — the card memoises on it, so a verdict that extends nothing re-sorts nothing.
- */
 export function extendedKeys(extend: unknown, verdicts: Verdicts): string[] {
   return [...decodeExtend(extend)].filter((key) => verdicts.get(key) === 'accept').sort()
-}
-
-/** Keys as pairs, in the order given. */
-export function pairsOf(keys: Iterable<string>): ExtendPair[] {
-  const out: ExtendPair[] = []
-  for (const key of keys) {
-    const pair = verdictPair(key)
-    if (pair) out.push({ parent: pair.neuronId, piece: pair.candidateId })
-  }
-  return out
-}
-
-/**
- * The pieces each neuron of the queue is extended with — the tree, by `piecesOf`, which is the
- * derivation Suggest Merges searches by. The neurons are the queue's seeds in table order.
- */
-export function liveTree(queue: readonly QueueTip[], pairs: readonly ExtendPair[]): Piece[] {
-  return piecesOf(pairs, [...new Set(queue.map((tip) => tip.seed))])
 }
 
 /**
@@ -1066,6 +1056,219 @@ export function liveQueue(queue: readonly QueueTip[], pieces: readonly Piece[]):
   )
 }
 
+/**
+ * The plan as three texts of sorted keys, which compare by value — what the card memoises on, so
+ * a press that changes none of them rebuilds no tree.
+ *
+ * - `extend`: the pairs extended (`extendedKeys`);
+ * - `autoRoots`: those of them Auto-extend was pressed on;
+ * - `refused`: the pairs Auto-extend could take that the reader gave a verdict other than accept
+ *   (`autoRefused`, written by the press, `judgedParams`) — **only while an Auto-extend is live**,
+ *   and empty otherwise. A reject of a piece Auto-extend took must reach the search, which cannot
+ *   be told from the params which pieces those are; so the press, which can, writes it down. A
+ *   reject of anything else moves no key: every one would otherwise retire a search in flight
+ *   (`docs/seam-auto-extend-plan.md`).
+ */
+export interface PlanTexts {
+  readonly extend: string
+  readonly autoRoots: string
+  readonly refused: string
+}
+
+export function planTexts(
+  params: Readonly<Record<string, unknown>>,
+  stored: Verdicts,
+): PlanTexts {
+  const keys = extendedKeys(params['extend'], stored)
+  const live = new Set(keys)
+  const roots = [...decodeExtend(params['autoRoots'])].filter((key) => live.has(key))
+  // The press wrote these (`judgedParams`); one the reader has since accepted or cleared is none.
+  const refused =
+    roots.length === 0
+      ? []
+      : [...decodeExtend(params['autoRefused'])].filter((key) => {
+          const said = stored.get(key)
+          return said !== undefined && said !== 'accept'
+        })
+  return {
+    extend: encodeExtend(keys),
+    autoRoots: encodeExtend(roots),
+    refused: encodeExtend(refused),
+  }
+}
+
+/** The plan the texts say. */
+export function planOfTexts(texts: PlanTexts): ExtendPlan {
+  return {
+    pairs: pairsOf(decodeExtend(texts.extend)),
+    roots: new Set(pairsOf(decodeExtend(texts.autoRoots)).map((pair) => pair.piece)),
+    refused: decodeExtend(texts.refused),
+  }
+}
+
+/**
+ * What the card's params tell the search: the pieces extended, which of them Auto-extend was
+ * pressed on, and what Auto-extend must not take — **from the params alone**, as a reference
+ * requires (`asReference`).
+ */
+export function extendPlanFrom(
+  params: Readonly<Record<string, unknown>>,
+  stored: Verdicts,
+): ExtendPlan {
+  return planOfTexts(planTexts(params, stored))
+}
+
+/**
+ * The first candidates Auto-extend takes at a piece's ends, **read off the published rows** — the
+ * same rule (`autoTakes`) the search applies to the ends it has finished, so the card grows the
+ * tree the search grew. Only searched ends of the piece in its own neuron, in its tips' order.
+ * The queue is grouped on the first call: with no Auto-extend live there is none.
+ */
+export function autoFirsts(queue: readonly QueueTip[]): (piece: Piece) => string[] {
+  let byPiece: Map<string, QueueTip[]> | undefined
+  return (piece) =>
+    ((byPiece ??= groupBy(queue, (tip) => tip.neuronId)).get(piece.id) ?? []).flatMap((tip) => {
+      const first = tip.seed === piece.seed ? autoFirstOf(tip) : undefined
+      return first === undefined ? [] : [first]
+    })
+}
+
+/** The first candidate Auto-extend would take at a tip, where it would (`autoTakes`). */
+function autoFirstOf(tip: QueueTip): string | undefined {
+  const first = tip.candidates[0]
+  if (tip.junction || tip.search !== 'done' || !first) return undefined
+  const takes = autoTakes({
+    shown: tip.cleared,
+    organelle: first.organelle,
+    l2Chunks: first.l2Chunks,
+    id: first.candidateId,
+  })
+  return takes ? first.candidateId : undefined
+}
+
+/**
+ * Every pair Auto-extend could take anywhere in the queue, as keys — what the card narrows its
+ * refusals to. `growAuto` asks a refusal only of such a pair, so a reject of anything else changes
+ * no tree, and with this the card rebuilds none for it (100 ms a click at two thousand tips).
+ */
+export function autoOffered(queue: readonly QueueTip[]): ReadonlySet<string> {
+  const out = new Set<string>()
+  for (const tip of queue) {
+    const first = autoFirstOf(tip)
+    if (first !== undefined) out.add(verdictKey(tip.neuronId, first))
+  }
+  return out
+}
+
+/** The tree the card lists: every neuron's pieces, with what Auto-extend took grown on. */
+export function reviewGrowth(queue: readonly QueueTip[], plan: ExtendPlan): AutoGrowth {
+  // The neurons are the queue's seeds, in table order.
+  return growAuto(plan, [...new Set(queue.map((tip) => tip.seed))], autoFirsts(queue))
+}
+
+/**
+ * The verdicts as everything downstream reads them, and the accepts that are Auto-extend's alone.
+ *
+ * - `verdicts`: the reader's, and an accept for each pair Auto-extend took that the reader has
+ *   said nothing about. Never written to the param — an Auto-extend accept is the search's word,
+ *   and a reader's press is the only verdict there is;
+ * - `unjudged`: those pairs, each to the piece Auto-extend was pressed on — what the card tags
+ *   `auto`, counts in its foot, and Submit's dialog marks.
+ */
+export function autoJudged(
+  stored: Verdicts,
+  accepted: ReadonlyMap<string, string>,
+): { verdicts: Verdicts; unjudged: ReadonlyMap<string, string> } {
+  if (accepted.size === 0) return { verdicts: stored, unjudged: accepted }
+  const verdicts = new Map(stored)
+  const unjudged = new Map<string, string>()
+  for (const [key, root] of accepted) {
+    if (verdicts.has(key)) continue
+    verdicts.set(key, 'accept')
+    unjudged.set(key, root)
+  }
+  return { verdicts, unjudged }
+}
+
+/**
+ * Everything the card works out of its params and the queue, in one call — **the one derivation**
+ * for a reader with no card in hand: `evaluate`, and Submit's plan. The card makes the same calls
+ * one memo at a time (`planTexts`, `planOfTexts`, `reviewGrowth`, `autoJudged`).
+ */
+export function reviewStateOf(
+  params: Readonly<Record<string, unknown>>,
+  queue: readonly QueueTip[],
+): {
+  stored: Verdicts
+  plan: ExtendPlan
+  growth: AutoGrowth
+  verdicts: Verdicts
+  unjudged: ReadonlyMap<string, string>
+} {
+  const stored = decodeVerdicts(params['verdicts'])
+  const plan = extendPlanFrom(params, stored)
+  const growth = reviewGrowth(queue, plan)
+  return { stored, plan, growth, ...autoJudged(stored, growth.accepted) }
+}
+
+/**
+ * How an accepted row's piece is extended: by the reader's own press (`choice`), or by an
+ * Auto-extend further up that took and searches it (`held`, `autoFrom`). Read by the Extend
+ * button and its menu.
+ */
+export function rowExtend(
+  /** The row's pair; `undefined` for a row with no candidate, which nothing extends. */
+  key: string | undefined,
+  at: {
+    /** The pairs the reader extended (`planTexts().extend`). */
+    readonly extended: ReadonlySet<string>
+    /** Those of them Auto-extend was pressed on. */
+    readonly autoPressed: ReadonlySet<string>
+    /** Everything Auto-extend took (`AutoGrowth.accepted`), judged since or not. */
+    readonly accepted: ReadonlyMap<string, string>
+    /** Those of them the reader has not judged (`autoJudged().unjudged`): the `auto` tag. */
+    readonly unjudged: ReadonlyMap<string, string>
+    /** The pieces whose ends are searched (`AutoGrowth.searched`), by id. */
+    readonly searched: ReadonlySet<string>
+  },
+): {
+  choice: ExtendChoice
+  /** The press that took it, while the reader has not judged it: the row's `auto` tag. */
+  autoFrom: string | undefined
+  /** The press that took it, judged since or not: what the Extend button names. */
+  heldBy: string | undefined
+  held: boolean
+  extended: boolean
+} {
+  if (key === undefined) {
+    return {
+      choice: 'off',
+      autoFrom: undefined,
+      heldBy: undefined,
+      held: false,
+      extended: false,
+    }
+  }
+  const choice: ExtendChoice = !at.extended.has(key)
+    ? 'off'
+    : at.autoPressed.has(key)
+      ? 'auto'
+      : 'extend'
+  // An Accept on a piece Auto-extend took makes the verdict the reader's, and the search goes on
+  // taking and searching it: it is held all the same.
+  const heldBy = at.accepted.get(key)
+  const piece = verdictPair(key)?.candidateId
+  const held =
+    heldBy !== undefined && choice === 'off' && piece !== undefined && at.searched.has(piece)
+  return {
+    choice,
+    autoFrom: at.unjudged.get(key),
+    heldBy,
+    held,
+    extended: choice !== 'off' || held,
+  }
+}
+
 /** How many pieces were extended beyond this one, and so go with it if it goes. */
 function piecesBeyond(pieces: readonly Piece[], id: string): number {
   return pieces.filter((piece) => piece.id !== id && piece.path.includes(id)).length
@@ -1075,13 +1278,13 @@ function piecesBeyond(pieces: readonly Piece[], id: string): number {
  * What a press on a verdict button does: what it writes, and whether a search is to be started.
  *
  * **The verdict, and the pair kept in step with it in `extend`, in one edit.** After the press
- * the pair is extended where it is accepted and either was extended already or `Auto-extend`
+ * the pair is extended where it is accepted and either was extended already or `Extend on accept`
  * asks for it:
  *
  * - a pair no longer accepted is taken out. Left in, accepting the piece again would start its
  *   search without anybody pressing Extend. The pieces beyond it keep their own entries: they
  *   are unreachable until this one is extended again, and back when it is;
- * - with `Auto-extend` on (user, 2026-11-16), a press that accepts a piece puts the pair in —
+ * - with `Extend on accept` on (user, 2026-11-16), a press that accepts a piece puts the pair in —
  *   **unless the piece cannot be extended** (`blocked`, `extendBlocked`'s answer) **or is
  *   large** (`isLargePiece`), which is left to its button.
  *
@@ -1091,15 +1294,17 @@ function piecesBeyond(pieces: readonly Piece[], id: string): number {
  * reader's click is held to, and a component is where a rule goes untested.
  */
 export function judgedParams(
-  /** The card's params: `verdicts`, `extend` and `autoExtend` are read. */
+  /** The card's params: `verdicts`, `extend`, `autoRoots`, `autoRefused`, `extendOnAccept`. */
   params: Readonly<Record<string, unknown>>,
   neuronId: string,
   candidate: Candidate,
   verdict: Verdict,
   /** Why the piece cannot be extended, where it cannot. */
   blocked: string | undefined,
+  /** Whether Auto-extend could take this pair (`autoOffered`): a refusal of it is written down. */
+  offered = false,
 ): {
-  write: { verdicts: string; extend?: string }
+  write: { verdicts: string; extend?: string; autoRoots?: string; autoRefused?: string }
   search: boolean
   said: Verdict | undefined
 } {
@@ -1107,28 +1312,80 @@ export function judgedParams(
   const next = withVerdict(decodeVerdicts(params['verdicts']), neuronId, candidateId, verdict)
   const verdicts = encodeVerdicts(next)
   const key = verdictKey(neuronId, candidateId)
-  const extended = decodeExtend(params['extend'])
-  const has = extended.has(key)
-  const auto =
-    params['autoExtend'] === true && blocked === undefined && !isLargePiece(candidate)
+  const has = decodeExtend(params['extend']).has(key)
+  const onAccept =
+    params['extendOnAccept'] === true && blocked === undefined && !isLargePiece(candidate)
   const said = next.get(key)
-  const want = said === 'accept' && (has || auto)
-  if (want === has) return { write: { verdicts }, search: false, said }
-  if (want) extended.add(key)
-  else extended.delete(key)
-  return { write: { verdicts, extend: encodeExtend(extended) }, search: want, said }
+  const want = said === 'accept' && (has || onAccept)
+  /*
+   * What Auto-extend must not take, kept in step with the verdict: a pair it could take that is
+   * now refused goes in, and one accepted or cleared comes out.
+   */
+  const refusedNow = decodeExtend(params['autoRefused']).has(key)
+  const refuse = said !== undefined && said !== 'accept' && (offered || refusedNow)
+  const refusal =
+    refuse === refusedNow
+      ? {}
+      : { autoRefused: withExtended(params['autoRefused'], neuronId, candidateId, refuse) }
+  if (want === has) return { write: { verdicts, ...refusal }, search: false, said }
+  const write: { verdicts: string; extend: string; autoRoots?: string; autoRefused?: string } =
+    {
+      verdicts,
+      extend: withExtended(params['extend'], neuronId, candidateId, want),
+      ...refusal,
+    }
+  // An Auto-extend press goes with the pair it was pressed on: un-accepted, it is gone too.
+  if (!want && decodeExtend(params['autoRoots']).has(key)) {
+    write.autoRoots = withExtended(params['autoRoots'], neuronId, candidateId, false)
+  }
+  return { write, search: want, said }
 }
 
+/** How a piece is extended by the reader's own press: by hand, by Auto-extend, or not at all. */
+export type ExtendChoice = 'extend' | 'auto' | 'off'
+
 /**
- * From this many level-2 chunks a piece is large: the Extend button says so, and `Auto-extend`
- * leaves it to the button (user, 2026-11-16).
+ * What choosing Extend, Auto-extend or neither on a row writes — one edit, one undo step. An
+ * Auto-extend press is also in `extend`, so everything that asks "is it extended" asks one param.
  *
- * Measured, not chosen (`docs/seam-extend-plan.md`, phase 0): below it a piece's open ends were
- * found in under 2 s and it had a handful of them; from 41 chunks the median was 6 s and 73 tips,
- * 21 s at 496 chunks and 150 s at 2,704 — before any end is searched. Said, never refused
- * (`docs/limits.md`): one press still extends it.
+ * **A piece Auto-extend took is confirmed by the press**: its accept is written as the reader's,
+ * since `extend` counts only a pair the reader accepted (`extendedKeys`) — and a reader who
+ * chose to extend a piece has judged it.
  */
-export const LARGE_PIECE_CHUNKS = 41
+export function extendParams(
+  params: Readonly<Record<string, unknown>>,
+  neuronId: string,
+  candidateId: string,
+  choice: ExtendChoice,
+  /** Whether the pair is accepted by Auto-extend alone (`autoJudged().unjudged`). */
+  unjudged: boolean,
+  /** The pairs Auto-extend could take (`autoOffered`). */
+  offered: ReadonlySet<string> = new Set(),
+): { extend: string; autoRoots: string; verdicts?: string; autoRefused?: string } {
+  const write: { extend: string; autoRoots: string; verdicts?: string; autoRefused?: string } =
+    {
+      extend: withExtended(params['extend'], neuronId, candidateId, choice !== 'off'),
+      autoRoots: withExtended(params['autoRoots'], neuronId, candidateId, choice === 'auto'),
+    }
+  const stored = decodeVerdicts(params['verdicts'])
+  if (choice !== 'off' && unjudged) {
+    write.verdicts = encodeVerdicts(withVerdict(stored, neuronId, candidateId, 'accept'))
+  }
+  /*
+   * **An Auto-extend press writes down the refusals made before it** that it could now take: a
+   * reject given while the pair was not one Auto-extend could take (before an assessor ran, say)
+   * was not written down by its press (`judgedParams`), and Auto-extend would take it.
+   */
+  if (choice === 'auto') {
+    const refused = decodeExtend(params['autoRefused'])
+    const before = refused.size
+    for (const [key, said] of stored) {
+      if (said !== 'accept' && offered.has(key)) refused.add(key)
+    }
+    if (refused.size !== before) write.autoRefused = encodeExtend(refused)
+  }
+  return write
+}
 
 /** Whether a piece is large by its chunk count; a size in µm³ (`sizeOf`'s fallback) never is. */
 export function isLargePiece(candidate: Candidate | undefined): boolean {
@@ -1194,22 +1451,48 @@ export function extendPress(at: {
   progress: ExtendProgress | undefined
   /** `extendBlocked`'s answer. */
   blocked: string | undefined
-  autoExtend: boolean
+  extendOnAccept: boolean
   /** `leavesWith`'s answer, for a piece that is extended. */
   goesWith: string
-}): { label: string; title: string; disabled: boolean } {
-  if (at.progress) {
+  /** How the reader extended it (`rowExtend`). */
+  choice: ExtendChoice
+  /** Taken and searched by an Auto-extend further up, not by a press of its own (`rowExtend`). */
+  held: boolean
+  /** The piece that Auto-extend was pressed on, where it took this one (`rowExtend().autoFrom`). */
+  heldBy: string | undefined
+  /** For an Auto-extend press: how many pieces it has taken so far. */
+  took: number
+}): { label: string; title: string; disabled: boolean; writes: ExtendChoice } {
+  // A press on the face extends by hand, or stops extending what the reader extended.
+  const writes: ExtendChoice = at.choice === 'off' ? 'extend' : 'off'
+  // Searched by an Auto-extend further up. A piece on its last layer is not held, and is offered
+  // Extend like any other below.
+  if (at.held && at.progress) {
     return {
       label: extendLabel(at.progress),
-      title:
-        'This piece’s own open ends are searched and listed with the neuron’s. Press to stop ' +
-        `extending it, which ${at.goesWith}.`,
+      title: `Accepted and extended by the Auto-extend on ${at.heldBy}. ${AUTO_REJECT_NOTE}`,
+      disabled: true,
+      writes,
+    }
+  }
+  if (at.progress) {
+    const auto = at.choice === 'auto'
+    return {
+      label: auto ? `auto · ${extendLabel(at.progress)}` : extendLabel(at.progress),
+      title: [
+        'This piece’s own open ends are searched and listed with the neuron’s.',
+        auto ? `${AUTO_EXTEND_RULE} ${plural(at.took, 'piece')} so far.` : '',
+        `Press to stop extending it, which ${at.goesWith}.`,
+      ]
+        .filter(Boolean)
+        .join(' '),
       disabled: false,
+      writes,
     }
   }
   const large = isLargePiece(at.candidate)
   const label = large ? 'Extend (large)' : 'Extend'
-  if (at.blocked !== undefined) return { label, title: at.blocked, disabled: true }
+  if (at.blocked !== undefined) return { label, title: at.blocked, disabled: true, writes }
   const size = sizeOf(at.candidate)
   return {
     label,
@@ -1217,12 +1500,81 @@ export function extendPress(at: {
       'Search this piece’s own open ends for what continues it.',
       size ? `It is ${sizeLabel(size)}.` : '',
       large ? LARGE_PIECE_NOTE : '',
-      large && at.autoExtend ? 'Auto-extend leaves a piece this size to this button.' : '',
+      large && at.extendOnAccept
+        ? 'Extend on accept leaves a piece this size to this button.'
+        : '',
+      at.heldBy !== undefined
+        ? `Auto-extend on ${at.heldBy} accepted it, on its last layer.`
+        : '',
     ]
       .filter(Boolean)
       .join(' '),
     disabled: false,
+    writes,
   }
+}
+
+/** What Auto-extend does, said wherever it is offered or reported. */
+const AUTO_EXTEND_RULE =
+  'Auto-extend accepts the first candidate of each end that clears SEAM’s cutoff, and extends ' +
+  `it in turn, up to ${AUTO_DEPTH} layers out. A candidate of ${LARGE_PIECE_CHUNKS} level-2 ` +
+  'chunks or more, or flagged as an organelle, is not taken.'
+
+/** How to undo what Auto-extend took — the tag, the foot, the held button and the menu say it. */
+export const AUTO_REJECT_NOTE =
+  'Submit merges what Auto-extend accepted; reject a piece to drop it and what was taken beyond it.'
+
+/**
+ * What the Extend button's menu offers: Extend and Auto-extend, the reader's own choice ticked —
+ * a press on the ticked one stops extending, as a press on the verdict a row has takes it back.
+ * Each item says what its press writes (`writes`), so the card decides nothing.
+ */
+export function extendMenu(at: {
+  choice: ExtendChoice
+  /** `extendBlocked`'s answer — it stops a start, never a stop. */
+  blocked: string | undefined
+  /** Held by an Auto-extend further up: nothing to choose (`extendPress`). */
+  held: boolean
+  /** Why Auto-extend cannot run on this card's tables, where it cannot (`autoUnavailable`). */
+  noAuto: string | undefined
+}): Array<{
+  value: 'extend' | 'auto'
+  label: string
+  title: string
+  disabled: boolean
+  writes: ExtendChoice
+}> {
+  const item = (value: 'extend' | 'auto', label: string, help: string) => {
+    if (at.choice === value) {
+      return {
+        value,
+        label,
+        title: 'Stop extending this piece.',
+        disabled: false,
+        writes: 'off' as const,
+      }
+    }
+    const why = at.held
+      ? 'Auto-extend further up extends this piece already.'
+      : (at.blocked ?? (value === 'auto' ? at.noAuto : undefined))
+    return { value, label, title: why ?? help, disabled: why !== undefined, writes: value }
+  }
+  return [
+    item('extend', 'Extend', 'Search this piece’s own open ends for what continues it.'),
+    item('auto', 'Auto-extend', `${AUTO_EXTEND_RULE} ${AUTO_REJECT_NOTE}`),
+  ]
+}
+
+/**
+ * Why Auto-extend cannot run on these tables, or `undefined` where it can: it takes SEAM's own
+ * cutoff, which only a search with an assessor publishes (`shown`).
+ */
+export function autoUnavailable(tips: TableValue | undefined): string | undefined {
+  if (tips?.data['shown']) return undefined
+  return (
+    'Auto-extend accepts what clears SEAM’s cutoff, and these suggestions have none: pick an ' +
+    'Assessor on Suggest Merges.'
+  )
 }
 
 /**
@@ -1266,10 +1618,22 @@ export function verdictPress(at: {
   inNeuron: boolean
   /** `leavesWith`'s answer for an extended piece; empty otherwise. */
   goesWith: string
+  /**
+   * Where Auto-extend took the piece: `unjudged` while the accept is its alone, `judged` once
+   * the reader's Accept made it theirs. A press on Accept then toggles the reader's own word,
+   * and the piece stays accepted either way — only a refusal drops it.
+   */
+  auto?: 'unjudged' | 'judged' | undefined
 }): { title: string; disabled: boolean } {
   if (at.done) return { title: 'Merged by Submit.', disabled: true }
   if (at.inNeuron) return { title: IN_NEURON_NOTE, disabled: true }
-  const help = VERDICT_HELP[at.verdict]
+  const help =
+    at.verdict !== 'accept' || at.auto === undefined
+      ? VERDICT_HELP[at.verdict]
+      : at.auto === 'unjudged'
+        ? 'Accepted by Auto-extend. Press to make the accept your own verdict.'
+        : 'Your accept. Press to take it back: Auto-extend still accepts the piece, so to drop ' +
+          'it, reject it.'
   return {
     title: at.goesWith
       ? `${help} This piece is extended: changing its verdict ${at.goesWith}.`

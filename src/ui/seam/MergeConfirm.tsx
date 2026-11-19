@@ -264,6 +264,7 @@ export function MergeConfirm({
             <h2>Merges into {neuronRoot}</h2>
             <p>
               {plan.datastack} · checked at {new Date(plannedAt).toLocaleTimeString()}
+              {autoCount(plan)}
               {onRecheck && !started && (
                 <button type="button" className="btn btn--ghost" onClick={onRecheck}>
                   Re-check
@@ -358,6 +359,12 @@ export function MergeConfirm({
   )
 }
 
+/** How many of the plan's merges Auto-extend accepted, said beside when it was checked. */
+function autoCount(plan: ReadyPlan): string {
+  const count = plan.merges.filter((merge) => merge.auto).length
+  return count === 0 ? '' : ` · ${count} accepted by Auto-extend`
+}
+
 function MergeRow({
   merge,
   ticked,
@@ -381,6 +388,7 @@ function MergeRow({
       </label>
       <span className="merge-confirm__facts">
         {[
+          merge.auto ? 'auto' : '',
           `tip ${merge.used.endUid}`,
           // Made onto a piece that is merged first — or, where the merge point is on the neuron
           // itself, sent only after the piece it hangs on.
@@ -422,7 +430,7 @@ function MergeRow({
  *
  * Every layer is the plan's, never the ticks': only segment lists change between two scenes — a
  * tick in the pieces' layer, a merge in the neuron's — so the viewer sets them in place
- * (`selectionChanges`) and the camera stays where the reader put it.
+ * (`inPlaceChanges`) and the camera stays where the reader put it.
  */
 function mergeScene(
   published: NgScene,

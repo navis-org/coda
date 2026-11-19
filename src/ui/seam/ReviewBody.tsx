@@ -55,6 +55,7 @@ import type { CSSProperties } from 'react'
 
 import { referrerOf } from '../../core/graph'
 import { getNodeDef } from '../../core/registry'
+import { countStrings } from '../../core/collections'
 import { isTableValue } from '../../core/values'
 import {
   acceptedElsewhere,
@@ -62,11 +63,15 @@ import {
   arrangeTree,
   buildQueue,
   currentOfQueue,
+  AUTO_REJECT_NOTE,
+  autoJudged,
+  autoOffered,
+  autoUnavailable,
   decodeExtend,
   decodeVerdicts,
-  encodeExtend,
   extendBlocked,
-  extendedKeys,
+  extendMenu,
+  extendParams,
   extendPress,
   extendProgress,
   gapLabel,
@@ -74,11 +79,13 @@ import {
   judgedParams,
   leavesWith,
   liveQueue,
-  liveTree,
   mergedAs,
   neuronsOf,
-  pairsOf,
   pickedNeuron,
+  planOfTexts,
+  planTexts,
+  reviewGrowth,
+  rowExtend,
   scenePieces,
   estimateLabel,
   sizeLabel,
@@ -88,13 +95,12 @@ import {
   tipKey,
   tipsOf,
   verdictFor,
-  verdictKey,
   verdictPress,
-  withExtended,
 } from '../../packs/seam/reviewQueue'
-import { EXTENDED_PORT } from '../../packs/seam/pieces'
+import { EXTENDED_PORT, pairsOf, verdictKey } from '../../packs/seam/pieces'
 import type {
   Candidate,
+  ExtendChoice,
   QueueMode,
   QueueNeuron,
   QueueRow,
@@ -127,6 +133,7 @@ import { usePublishedScene } from '../viewers/NeuroglancerProfileFrame'
 import { NeuroglancerViewer } from '../viewers/NeuroglancerViewer'
 import { flushVerdicts } from '../../data/verdictLog'
 import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
+import { ExtendButtons } from './ExtendButtons'
 import { VerdictButtons } from './VerdictButtons'
 import { VerdictSharing } from './VerdictSharing'
 import { useRowWindow } from '../useRowWindow'
@@ -189,29 +196,63 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       ),
     [tips, candidates],
   )
-  const verdicts = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
+  // The reader's own verdicts. Everything that reads "accepted" reads `verdicts`, below.
+  const stored = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
   /*
    * What is extended, and so which rows there are to review — read from the params, as `evaluate`
-   * and Suggest Merges read it, so a piece un-accepted here is off the list on that click.
+   * and Suggest Merges read it, so a piece un-accepted here is off the list on that click. The
+   * same calls `reviewStateOf` makes, one memo at a time.
    *
-   * As the param's own text first, which compares by value: `verdicts` is a new map on every
-   * press, and memoised on it directly a verdict that extends nothing still rebuilt the tree,
-   * the queue and the sorted list — 3 ms a click on a neuron of five hundred tips, 100 ms on
-   * one of two thousand with two hundred pieces (measured 2026-11-16).
+   * As the plan's texts first (`planTexts`), which compare by value: `stored` is a new map on
+   * every press, and memoised on it directly a verdict that extends nothing still rebuilt the
+   * tree, the queue and the sorted list — 3 ms a click on a neuron of five hundred tips, 100 ms
+   * on one of two thousand with two hundred pieces (measured 2026-11-16). The refusals hold only
+   * pairs Auto-extend could take, and only while one is live, so a reject of anything else
+   * rebuilds nothing either.
    */
-  const extendedText = useMemo(
-    () => encodeExtend(extendedKeys(node.params.extend, verdicts)),
-    [node.params.extend, verdicts],
+  const texts = useMemo(
+    () =>
+      planTexts(
+        {
+          extend: node.params.extend,
+          autoRoots: node.params.autoRoots,
+          autoRefused: node.params.autoRefused,
+        },
+        stored,
+      ),
+    [node.params.extend, node.params.autoRoots, node.params.autoRefused, stored],
   )
-  // The pairs that are extended — which is not the same question as "is this piece in the tree".
+  const { extend: extendedText, autoRoots: autoText, refused: refusedText } = texts
+  // The pairs Auto-extend could take: a verdict on one is written down for it (`judgedParams`).
+  const offered = useMemo(() => autoOffered(all), [all])
+  const plan = useMemo(
+    () => planOfTexts({ extend: extendedText, autoRoots: autoText, refused: refusedText }),
+    [extendedText, autoText, refusedText],
+  )
+  // The pairs the reader extended — which is not the same question as "is this piece in the tree".
   const extended = useMemo(() => decodeExtend(extendedText), [extendedText])
-  const tree = useMemo(() => liveTree(all, pairsOf(extended)), [all, extended])
+  const autoPressed = useMemo(() => decodeExtend(autoText), [autoText])
+  // The tree, with what Auto-extend took grown on by the rule the search grew it by.
+  const growth = useMemo(() => reviewGrowth(all, plan), [all, plan])
+  const tree = growth.tree
   const queue = useMemo(() => liveQueue(all, tree), [all, tree])
+  // The pieces whose ends are searched, and how many pieces each Auto-extend press has taken.
+  const searched = useMemo(() => new Set(growth.searched.map((piece) => piece.id)), [growth])
+  const autoTook = useMemo(() => countStrings(growth.accepted.values()), [growth])
+  /*
+   * The verdicts everything reads as accepted or not: the reader's, and Auto-extend's accepts
+   * where the reader has said nothing (`unjudged`) — as `evaluate` and Submit read them.
+   */
+  const { verdicts, unjudged } = useMemo(
+    () => autoJudged(stored, growth.accepted),
+    [stored, growth],
+  )
   /*
    * One neuron at a time. Everything below — the list, the cursor, the counts in the foot — reads
    * `mine`, never `queue`, so no surface of the card can show a second neuron's tips.
    */
-  const neurons = useMemo(() => neuronsOf(queue, verdicts), [queue, verdicts])
+  // "Judged" is the reader's own word: an Auto-extend accept is not a judgement.
+  const neurons = useMemo(() => neuronsOf(queue, stored), [queue, stored])
   const neuron = pickedNeuron(queue, String(node.params.neuron ?? ''))
   const mine = useMemo(() => tipsOf(queue, neuron), [queue, neuron])
   const onNeuron = neurons.find((entry) => entry.neuronId === neuron)
@@ -314,9 +355,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       candidate,
       verdict,
       blocked,
+      offered.has(verdictKey(tip.neuronId, candidate.candidateId)),
     )
-    // A piece no longer accepted is no longer extended: both in one edit, one undo step.
-    if (write.extend === undefined) setParam('verdicts', write.verdicts)
+    // A piece no longer accepted is no longer extended, and a refusal is kept with the verdict:
+    // all in one edit, one undo step.
+    if (Object.keys(write).length === 1) setParam('verdicts', write.verdicts)
     else setParams(node.id, write)
     if (search) runSearch()
     /*
@@ -355,12 +398,23 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * Stopping runs nothing: the rows leave the list at once (`liveQueue`), and the tables follow
    * whenever the search next runs.
    */
-  const extend = (tip: QueueTip, candidate: Candidate, on: boolean) => {
-    setParams(node.id, {
-      extend: withExtended(node.params.extend, tip.neuronId, candidate.candidateId, on),
-    })
-    if (on) runSearch()
+  const extend = (tip: QueueTip, candidate: Candidate, choice: ExtendChoice) => {
+    const unjudgedHere = unjudged.has(verdictKey(tip.neuronId, candidate.candidateId))
+    setParams(
+      node.id,
+      extendParams(
+        node.params,
+        tip.neuronId,
+        candidate.candidateId,
+        choice,
+        unjudgedHere,
+        offered,
+      ),
+    )
+    if (choice !== 'off') runSearch()
   }
+  // Auto-extend takes SEAM's cutoff, which a search with no assessor does not publish.
+  const noAuto = autoUnavailable(isTableValue(tips) ? tips : undefined)
 
   /*
    * The same pieces `Current` publishes, in the same colours the Neuroglancer node gives them —
@@ -389,6 +443,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     () => tree.filter((piece) => piece.seed === neuron).length,
     [tree, neuron],
   )
+  // Of those, the ones Auto-extend accepted and the reader has not judged.
+  const autoAccepted = useMemo(() => {
+    const seedOf = new Map(tree.map((piece) => [piece.id, piece.seed]))
+    return pairsOf(unjudged.keys()).filter((pair) => seedOf.get(pair.piece) === neuron).length
+  }, [unjudged, tree, neuron])
   const toSubmit = useMemo(() => stillToMerge(accepted, merged).length, [accepted, merged])
   const absorbed = merged?.absorbedInto !== undefined
   // This card's Submit, named by document and node: two documents can share a node id.
@@ -619,16 +678,29 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                 candidate !== undefined &&
                 acceptedElsewhere(accepted, said, candidate.candidateId)
               const outdated = !done && candidate !== undefined && edited(candidate.candidateId)
-              const isExtended =
-                candidate !== undefined &&
-                extended.has(verdictKey(tip.neuronId, candidate.candidateId))
+              // How the piece is extended: by the reader's press, or by an Auto-extend further up.
+              const {
+                choice,
+                autoFrom,
+                heldBy,
+                held,
+                extended: isExtended,
+              } = rowExtend(candidate && verdictKey(tip.neuronId, candidate.candidateId), {
+                extended,
+                autoPressed,
+                accepted: growth.accepted,
+                unjudged,
+                searched,
+              })
               // What goes off the list with this piece, said before the click that does it.
-              const goesWith = isExtended ? leavesWith(tree, candidate.candidateId) : ''
+              const goesWith =
+                isExtended && candidate ? leavesWith(tree, candidate.candidateId) : ''
               // Why the piece cannot be extended, where it cannot.
               const blocked = extendBlocked({ wired: searchId !== undefined, done, outdated })
               /*
                * The Extend button, on an accepted row only: what it reads, says and whether it
-               * can be pressed are `extendPress`'s, as Submit's are `submitPress`'s.
+               * can be pressed are `extendPress`'s, as Submit's are `submitPress`'s; its menu's
+               * are `extendMenu`'s.
                */
               const extendButton =
                 candidate && said === 'accept'
@@ -638,10 +710,15 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                         ? extendProgress(all, tip.seed, candidate.candidateId, search)
                         : undefined,
                       blocked,
-                      autoExtend: node.params.autoExtend === true,
+                      extendOnAccept: node.params.extendOnAccept === true,
                       goesWith,
+                      choice,
+                      held,
+                      heldBy,
+                      took: autoTook.get(candidate.candidateId) ?? 0,
                     })
                   : undefined
+              const menu = extendButton && extendMenu({ choice, blocked, held, noAuto })
               return (
                 <li
                   key={`${tipKey(tip.neuronId, tip.endUid)}:${
@@ -709,6 +786,15 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                         in this neuron
                       </span>
                     )}
+                    {/* Accepted by Auto-extend, and not yet by the reader. */}
+                    {autoFrom !== undefined && !done && (
+                      <span
+                        className="review-row__auto"
+                        title={`Accepted by the Auto-extend on ${autoFrom}. Press Accept to make it your own verdict. ${AUTO_REJECT_NOTE}`}
+                      >
+                        auto
+                      </span>
+                    )}
                     {/* Edited since the suggestion: Submit would refuse it. */}
                     {outdated && (
                       <span
@@ -774,20 +860,30 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                       </button>
                       <VerdictButtons
                         said={said}
-                        press={(verdict) => verdictPress({ verdict, done, inNeuron, goesWith })}
+                        press={(verdict) =>
+                          verdictPress({
+                            verdict,
+                            done,
+                            inNeuron,
+                            goesWith,
+                            auto:
+                              autoFrom !== undefined
+                                ? 'unjudged'
+                                : heldBy !== undefined
+                                  ? 'judged'
+                                  : undefined,
+                          })
+                        }
                         onJudge={(verdict) => judge(tip, candidate, verdict, blocked)}
                       />
-                      {extendButton && (
-                        <button
-                          type="button"
-                          className="review-row__extend"
-                          aria-pressed={isExtended}
-                          disabled={extendButton.disabled}
-                          onClick={() => extend(tip, candidate, !isExtended)}
-                          title={extendButton.title}
-                        >
-                          {extendButton.label}
-                        </button>
+                      {extendButton && menu && (
+                        <ExtendButtons
+                          face={extendButton}
+                          pressed={isExtended}
+                          menu={menu}
+                          checked={choice === 'off' ? undefined : choice}
+                          onPress={(writes) => extend(tip, candidate, writes)}
+                        />
                       )}
                     </div>
                   )}
@@ -855,6 +951,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           {grown > 0 && (
             <span title="Accepted pieces of this neuron whose own open ends are searched and listed here.">
               {plural(grown, 'piece')} extended
+            </span>
+          )}
+          {autoAccepted > 0 && (
+            <span
+              title={`Pieces Auto-extend accepted that you have not judged, marked “auto” in the list. ${AUTO_REJECT_NOTE}`}
+            >
+              {formatNumber(autoAccepted)} by Auto-extend
             </span>
           )}
           {neuronEdited && (

@@ -872,3 +872,5 @@ hand-made merges.
   materialization, as the seed is. A Submit part way through does not stop further extending,
   since unmerged pieces keep their roots.
 - **Starting automatically on accept**, and a cap on how many merges one Submit sends.
+- **Extending on and on by SEAM's cutoff**: built later as Auto-extend, in
+  [seam-auto-extend-plan.md](seam-auto-extend-plan.md).

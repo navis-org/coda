@@ -10,8 +10,13 @@ import { enqueueVerdict } from '../../data/verdictLog'
 import type { Candidate, QueueTip, Verdict } from './reviewQueue'
 import { MODEL_SOURCE_PREFIX, SET_SOURCE_PREFIX } from './suggestionTables'
 
-/** What a press on the review card says about one candidate; `cleared` takes a verdict back. */
-export type VerdictWord = Verdict | 'cleared'
+/**
+ * What a record says about one candidate: a press on the review card, `cleared` for a verdict
+ * taken back — or `auto-accepted`, which is no press: a piece Auto-extend accepted on SEAM's own
+ * cutoff and Submit merged without the reader judging it (user, 2026-11-18). Its own word, never
+ * `accept`, so SEAM never takes its own pick for a reader's verdict.
+ */
+export type VerdictWord = Verdict | 'cleared' | 'auto-accepted'
 
 /** One verdict, as the card describes it. Ids are text throughout (invariant 8). */
 export interface VerdictInput {
