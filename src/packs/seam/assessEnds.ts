@@ -125,6 +125,49 @@ export interface AssessOptions {
   readonly top?: number
 }
 
+/** How many of the list to score: `options.top` within the list, or all of it. */
+function topOf(all: number, options: AssessOptions): number {
+  return options.top && options.top > 0 ? Math.min(options.top, all) : all
+}
+
+/**
+ * Start reading one end's patch box, **ahead of scoring it** — `undefined` for an end with no
+ * candidates, which reads none.
+ *
+ * Its own step because it need not wait for the GPU: the box depends only on the end's contacts,
+ * which the search has long since found, so a run reads the next end's box while the GPU scores
+ * this one. Serial, the GPU stood idle for every box read — ~0.6 s an end once the search ran
+ * ahead (`docs/seam-suggestions-plan.md`, 2026-11-19). Hand the promise to `assessEnd`.
+ *
+ * The rejection is handled here, where the promise is made (`oneAhead`'s rule): it may be waiting
+ * unread while another end is scored, and `assessEnd` turns it into the end's refusal.
+ */
+export function startPatchBox(
+  end: EndToAssess,
+  steps: Pick<AssessSteps, 'box'>,
+  options: AssessOptions = {},
+): Promise<AssessorBoxRequest> | undefined {
+  const all = end.candRoot.length
+  if (all === 0) return undefined
+  const top = topOf(all, options)
+  /*
+   * **The capped candidates are left out of the box as well as the scoring**, which is the cap's
+   * second saving and the larger one on a tip whose tail straggles: the box is sized by the
+   * points in it, so a candidate 4 µm away that nobody is going to score should not be widening
+   * the read.
+   */
+  const box = Promise.resolve().then(() =>
+    steps.box({
+      centresNm: end.contactsNm.slice(0, top),
+      candRoots: BigUint64Array.from(end.candRoot.subarray(0, top)),
+      queryRoot: end.queryRoot,
+      alias: end.alias,
+    }),
+  )
+  void box.catch(() => {})
+  return box
+}
+
 /**
  * Score one end's candidates.
  *
@@ -137,30 +180,24 @@ export async function assessEnd(
   floor: number,
   steps: AssessSteps,
   options: AssessOptions = {},
+  /**
+   * The end's patch box, already being read (`startPatchBox`) — with the **same** `options.top`.
+   * Absent, it is read here, which is the serial order.
+   */
+  box?: Promise<AssessorBoxRequest>,
 ): Promise<AssessedEnd> {
   const all = end.candRoot.length
   const score = new Float64Array(all).fill(floor)
   const filled: WhyFilled[] = new Array<WhyFilled>(all).fill('no patch')
   if (all === 0) return { score, filled }
 
-  const top = options.top && options.top > 0 ? Math.min(options.top, all) : all
+  const top = topOf(all, options)
   for (let i = top; i < all; i++) filled[i] = 'capped'
   throwIfAborted(options.signal)
 
-  /*
-   * **The capped candidates are left out of the box as well as the scoring**, which is the cap's
-   * second saving and the larger one on a tip whose tail straggles: the box is sized by the
-   * points in it, so a candidate 4 µm away that nobody is going to score should not be widening
-   * the read.
-   */
   let request: AssessorBoxRequest
   try {
-    request = await steps.box({
-      centresNm: end.contactsNm.slice(0, top),
-      candRoots: BigUint64Array.from(end.candRoot.subarray(0, top)),
-      queryRoot: end.queryRoot,
-      alias: end.alias,
-    })
+    request = await (box ?? startPatchBox(end, steps, options)!)
   } catch (error) {
     /*
      * **Every candidate is "no patch" here, including the ones past the cap.** `filled` says why

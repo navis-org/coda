@@ -38,12 +38,45 @@ export class CaveError extends Error {
    * does not exist" and says which in exactly this text.
    */
   readonly detail: string | undefined
+  /**
+   * The request got no answer at all — `fetch` itself failed: a connection dropped under it, a
+   * host down, or a cross-origin refusal, which a browser does not tell apart. Set only there, so
+   * a reader asking "is this worth asking again" is not answered yes by a bad body (status 0 too).
+   */
+  noAnswer = false
   constructor(message: string, status = 0, detail?: string) {
     super(message)
     this.name = 'CaveError'
     this.status = status
     this.detail = detail
   }
+}
+
+/**
+ * The answer's body, or the error for one cut off while it was read — no answer either
+ * (`CaveError.noAnswer`): a connection dropped mid-reply fails here, not in `fetch`.
+ */
+async function bodyOf<T>(url: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read()
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    const cut = new CaveError(
+      `The answer from CAVE at ${new URL(url).origin} was cut off. (${errorMessage(error)})`,
+    )
+    cut.noAnswer = true
+    throw cut
+  }
+}
+
+/** The error for a request `fetch` itself refused — no answer at all (`CaveError.noAnswer`). */
+function unreachable(url: string, error: unknown): CaveError {
+  const refused = new CaveError(
+    `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
+      `the host is down. The browser does not say which. (${errorMessage(error)})`,
+  )
+  refused.noAnswer = true
+  return refused
 }
 
 /**
@@ -166,13 +199,10 @@ async function request<T>(
     // An AbortError is the scheduler cancelling. It must stay an AbortError, or the run
     // machinery reports "the server is down" for a run the user stopped.
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new CaveError(
-      `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down. The browser does not say which. (${errorMessage(error)})`,
-    )
+    throw unreachable(url, error)
   }
 
-  const text = await response.text()
+  const text = await bodyOf(url, () => response.text())
   // `text` is read *before* this branch because the refusal is in the body: the canned sentence
   // was being told to somebody whose token was fine and whose remedy was a terms page.
   if (response.status === 401 || response.status === 403)
@@ -406,17 +436,14 @@ export async function cavePostBinary(
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new CaveError(
-      `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down. The browser does not say which. (${errorMessage(error)})`,
-    )
+    throw unreachable(url, error)
   }
   if (response.status === 401 || response.status === 403)
     refuseAuth(url, response.status, await response.text(), options)
   if (!response.ok) {
     throw new CaveError(`CAVE returned ${response.status}`, response.status)
   }
-  const buffer = await response.arrayBuffer()
+  const buffer = await bodyOf(url, () => response.arrayBuffer())
   // A partial word would silently truncate the last id rather than failing.
   if (buffer.byteLength % 8 !== 0) {
     throw new CaveError(`CAVE returned ${buffer.byteLength} bytes, which is not whole uint64s`)
@@ -450,10 +477,7 @@ export async function caveGetBytes(
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new CaveError(
-      `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down. The browser does not say which. (${errorMessage(error)})`,
-    )
+    throw unreachable(url, error)
   }
   if (response.status === 404) return undefined
   if (response.status === 401 || response.status === 403)

@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { Triple } from '../../data/precomputed/volume'
 import type { AssessorBoxRequest } from '../../pyodide/assessorPatches'
-import { assessEnd } from './assessEnds'
+import { assessEnd, startPatchBox } from './assessEnds'
 import type { AssessSteps, PatchCut } from './assessEnds'
 
 const FLOOR = -258.4
@@ -189,5 +189,38 @@ describe('assessEnd', () => {
       assessEnd(end(2), FLOOR, run, { signal: AbortSignal.abort() }),
     ).rejects.toThrow()
     expect(run.box).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * **The patch box can be read ahead of scoring** (`startPatchBox`): a run reads the next end's
+ * box while the GPU scores this one. What it must keep is the serial order's answers.
+ */
+describe('a patch box read ahead', () => {
+  it('is the box `assessEnd` scores, and no second one is read', async () => {
+    const s = steps([1, 2, 3])
+    const box = startPatchBox(end(3), s, { top: 2 })!
+    const got = await assessEnd(end(3), FLOOR, s, { top: 2 }, box)
+    expect(s.box).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(s.box).mock.calls[0]![0].centresNm).toHaveLength(2)
+    expect([...got.score]).toEqual([1, 2, FLOOR])
+    expect(got.filled).toEqual(['', '', 'capped'])
+  })
+
+  it('is not started for an end with no candidates', () => {
+    expect(startPatchBox(end(0), steps([]))).toBeUndefined()
+  })
+
+  /* It may sit unread while another end is scored, so its failure must not escape. */
+  it('that failed while waiting becomes the end’s refusal', async () => {
+    const s = steps([1])
+    s.box = vi.fn(async () => {
+      throw new Error('the box clamps to nothing')
+    })
+    const box = startPatchBox(end(1), s)!
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const got = await assessEnd(end(1), FLOOR, s, {}, box)
+    expect(got.refusal).toBe('the box clamps to nothing')
+    expect(s.score).not.toHaveBeenCalled()
   })
 })

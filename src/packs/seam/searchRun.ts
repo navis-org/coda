@@ -16,7 +16,7 @@
  * - and the rule is measured against **every tip of the neuron**, including ends no list was
  *   searched for, which still take candidates away from their neighbours.
  *
- * ## One end at a time, finished before the next is begun
+ * ## Several ends under way, each yielded finished and in order
  *
  * This yields each end as it is done, because the node publishes them: a reader starts working
  * through the queue while the rest of the neuron is still being measured
@@ -33,6 +33,14 @@
  * end** — about 200 ms against an end's two seconds, and nothing at all for an end that
  * introduces no new root.
  *
+ * **Up to `depth` ends are under way at once** (2026-11-19, `SearchOptions.depth`). One at a
+ * time, an end's box, pool and counts ran in a row on three different resources, each idle
+ * most of an end, and the search set the run's pace — 3.1 s an end against 1.8 of scoring.
+ * Several deep, the next ends' boxes are read and their counts asked while this end is
+ * measured; the measures still take turns on the one Python worker, in end order, and the ends
+ * are still yielded in order and final. The chunkedgraph was measured keeping up first
+ * (`docs/seam-suggestions-plan.md`), inside one budget per server (`rootIds.ts`).
+ *
  * ## The prefetch that looked free and was not
  *
  * Most of an end is network with the worker idle — the box, then the supervoxel lookups, then
@@ -41,8 +49,10 @@
  * supervoxels their ends share as unknown and asked the chunkedgraph for them twice, and
  * neighbouring ends are exactly where that overlap is.
  *
- * `SearchVolume.asking` is what made it free: one lookup, shared between the reads that want
- * it. `oneAhead` below is the other half, and the node wraps this generator in it.
+ * Sharing the lookups is what made it free (`rootedBox.ts`' `resolveRoots`, through
+ * `shareInFlight`): one lookup, shared between the reads that want it — however many are in
+ * flight, now that several ends are searched at once. `oneAhead` below is the other half, and the
+ * node wraps this generator in it.
  *
  * So the sequence lives here, taking its steps as functions — which is `openEndRun.ts`' own
  * argument in this pack ("the sequence is where the failures live, and all of them are quiet…
@@ -57,6 +67,8 @@
  */
 
 import { throwIfAborted } from '../../core/slice'
+import type { Slots } from '../../data/concurrency'
+import { slots } from '../../data/concurrency'
 import type {
   CandidatePool,
   CandidatePoolRequest,
@@ -148,6 +160,11 @@ export interface SearchSteps {
  */
 export interface SearchOptions {
   readonly signal?: AbortSignal
+  /**
+   * How many ends may be under way at once, the one being waited for among them — box read,
+   * measure queued, counts in flight. 1, the default, begins each end only when it is asked for.
+   */
+  readonly depth?: number
 }
 
 /** One end's answer: the list SEAM would publish for it. */
@@ -211,7 +228,6 @@ export async function* searchEnds(
   steps: SearchSteps,
   options: SearchOptions = {},
 ): AsyncGenerator<SearchedEnd> {
-  const { ranker, topK, ownUm } = rules
   /*
    * **Checked before anything is measured**, which is `ownTipRule`'s own discipline — it refuses
    * a bad tip before building its tree, because the caller would otherwise pay for the tree
@@ -230,26 +246,88 @@ export async function* searchEnds(
     at.add(end.tip)
   }
 
-  for (const end of ends) {
+  /*
+   * **Up to `depth` ends under way at once, yielded in order.** Each end's box is read as soon as
+   * it is started, alongside the others'; the measures take turns on the Python worker in end
+   * order; the counts overlap freely inside the chunkedgraph's budget. `depth` 1 is the old
+   * sequence exactly — an end is begun when it is asked for.
+   *
+   * **A started end's failure waits its turn.** Its promise carries a handler from the moment it
+   * is made (`oneAhead`'s rule), so an end failing while an earlier one is still being yielded is
+   * not an unhandled rejection; it surfaces when its own turn comes, as it would have serially.
+   */
+  // A depth that is not a number is the old sequence, never no search at all.
+  const depth = Number.isFinite(options.depth) ? Math.max(1, Math.floor(options.depth!)) : 1
+  // The measures, one at a time, in the order the ends were started (`searchOne` says how).
+  const turns = slots(1)
+  /*
+   * **Stopped when this generator closes**, a failure or a `break`: the ends still queued for the
+   * measure leave the queue and measure nothing; one already measuring finishes its own steps,
+   * whose signals are their own. But a close reaches here only once the
+   * end being awaited has finished — an async generator's `return()` waits behind its pending
+   * `next()` — so a caller that must stop at once aborts `options.signal` itself, as Suggest
+   * Merges does. A box read already in flight finishes: its signal is its step's own.
+   */
+  const own = new AbortController()
+  const signal = options.signal ? AbortSignal.any([options.signal, own.signal]) : own.signal
+  const each = { ...options, signal }
+  const queue: Promise<SearchedEnd>[] = []
+  let next = 0
+  try {
+    for (;;) {
+      throwIfAborted(options.signal)
+      while (next < ends.length && queue.length < depth) {
+        const one = searchOne(ends[next++]!, turns, tipsNm, rules, steps, each)
+        void one.catch(() => {})
+        queue.push(one)
+      }
+      const one = queue.shift()
+      if (!one) return
+      yield await one
+    }
+  } finally {
+    own.abort()
+  }
+}
+
+/** One end searched: its box, pool, counts, sizes, ranking and the own-tip rule. */
+async function searchOne(
+  end: EndToSearch,
+  turns: Slots,
+  tipsNm: Float32Array,
+  rules: SearchRules,
+  steps: SearchSteps,
+  options: SearchOptions,
+): Promise<SearchedEnd> {
+  const { ranker, topK, ownUm } = rules
+  /*
+   * This end's roots, its query among them. `l2ChunkCounts` is memoised by root on the node's
+   * side, so a root a neighbouring end already bought costs nothing here.
+   */
+  const query = [end.queryRoot, ...(end.alsoQuery ?? [])].map(String)
+  const rootsOf = (candRoot: BigUint64Array) => [
+    ...new Set([...query, ...Array.from(candRoot, String)]),
+  ]
+  /*
+   * **The counts start as soon as the pool's roots are known**, under the rest of the measure
+   * — the organelle measure, ~270 ms an end that the counts never read (2026-11-18). The
+   * handler goes on where the promise is made, `oneAhead`'s rule: the measure can still throw
+   * with this in flight, and an unawaited rejection is "Uncaught (in promise)". **Started inside
+   * the chain**, so a step that throws rather than rejects is caught too: `onPool` runs in the
+   * Python worker's message handler, where a throw reaches nobody (`CallOptions`).
+   */
+  let early: Promise<EarlyCounts> | undefined
+  /*
+   * **The box is read at once, alongside the other ends'; the measure waits its turn.** The end
+   * takes its place in line before anything here is awaited, so the line is the order the ends
+   * were started, whichever box arrives first; and it holds its place while its box is read.
+   */
+  const box = Promise.resolve().then(() => end.box())
+  void box.catch(() => {})
+  const pool = await turns.run(async () => {
+    const request = await box
     throwIfAborted(options.signal)
-    /*
-     * This end's roots, its query among them. `l2ChunkCounts` is memoised by root on the node's
-     * side, so a root a neighbouring end already bought costs nothing here.
-     */
-    const query = [end.queryRoot, ...(end.alsoQuery ?? [])].map(String)
-    const rootsOf = (candRoot: BigUint64Array) => [
-      ...new Set([...query, ...Array.from(candRoot, String)]),
-    ]
-    /*
-     * **The counts start as soon as the pool's roots are known**, under the rest of the measure
-     * — the organelle measure, ~270 ms an end that the counts never read (2026-11-18). The
-     * handler goes on where the promise is made, `oneAhead`'s rule: the measure can still throw
-     * with this in flight, and an unawaited rejection is "Uncaught (in promise)". **Started inside
-     * the chain**, so a step that throws rather than rejects is caught too: `onPool` runs in the
-     * Python worker's message handler, where a throw reaches nobody (`CallOptions`).
-     */
-    let early: Promise<EarlyCounts> | undefined
-    const pool = await steps.measure(await end.box(), (candRoot) => {
+    return steps.measure(request, (candRoot) => {
       early = Promise.resolve()
         .then(() => steps.counts(rootsOf(candRoot)))
         .then(
@@ -257,78 +335,74 @@ export async function* searchEnds(
           (failed: unknown) => ({ failed }),
         )
     })
-    if (pool.missingQuery) {
-      yield emptyEnd(end.tip)
-      continue
-    }
+  }, options.signal)
+  if (pool.missingQuery) return emptyEnd(end.tip)
 
-    throwIfAborted(options.signal)
-    const counts = await topUpCounts(rootsOf(pool.candRoot), await early, steps)
-    /*
-     * **This end's failure, not the run's.** A root the chunkedgraph does not list is a fact
-     * about one object beside one open end; `countsInPoolOrder` refuses by name because that is
-     * where the hole is created, and here is where it is survivable. A neuron is hundreds of
-     * ends and the expensive half is already spent by the time this is known, so a throw would
-     * cost the whole run to say something about one of them.
-     */
-    let candCount: Float64Array
-    const queryCount = queryCountOf(counts, query)
-    try {
-      if (queryCount === undefined) {
-        const without = query.filter((root) => !counts.has(root))
-        refuse(`the query root ${without.join(', ')} has no level-2 chunk count`)
-      }
-      candCount = countsInPoolOrder(pool.candRoot, counts)
-    } catch (error) {
-      yield { ...emptyEnd(end.tip), missingQuery: false, refusal: messageOf(error) }
-      continue
+  throwIfAborted(options.signal)
+  const counts = await topUpCounts(rootsOf(pool.candRoot), await early, steps)
+  /*
+   * **This end's failure, not the run's.** A root the chunkedgraph does not list is a fact
+   * about one object beside one open end; `countsInPoolOrder` refuses by name because that is
+   * where the hole is created, and here is where it is survivable. A neuron is hundreds of
+   * ends and the expensive half is already spent by the time this is known, so a throw would
+   * cost the whole run to say something about one of them.
+   */
+  let candCount: Float64Array
+  const queryCount = queryCountOf(counts, query)
+  try {
+    if (queryCount === undefined) {
+      const without = query.filter((root) => !counts.has(root))
+      refuse(`the query root ${without.join(', ')} has no level-2 chunk count`)
     }
-
-    /*
-     * **Copies, because `callPython` transfers.** Every view in a request is handed to the
-     * worker and detached on this side, so sending either of these as they are would empty the
-     * array that `measured` and then `rankPool` read on the next two lines — surfacing as "the
-     * pool says 538 rows and its candidate ids number 0" on the first end, and *only* in the
-     * app: the unit test's fake and the probe's in-process bridge both post nothing.
-     *
-     * **It is per array read afterwards, not per array sent**, which is the part that caught
-     * this twice. `candRoot` was copied here from the beginning and `candCount` was not, and
-     * that was right for exactly as long as nothing read `candCount` again — publishing it as
-     * `n_l2` two lines down made it wrong, with the same sentence and a different column name.
-     * A `searchRun.test.ts` fake that detaches what it is given is what now holds the rule.
-     */
-    const sizes = await steps.sizes({
-      candRoot: BigUint64Array.from(pool.candRoot),
-      candCount: Float64Array.from(candCount),
-      queryRoot: end.queryRoot,
-      queryCount: queryCount!,
-    })
-    const measured: MeasuredPool = {
-      rows: pool.rows,
-      candRoot: pool.candRoot,
-      /*
-       * The two size features join the rest here, which is the one place that knows they came
-       * by a second route. `rankPool` is deliberately feature-agnostic and must not learn it.
-       *
-       * **`n_l2` is the count itself, carried beside them and used by neither.** The ranker
-       * reads `l2c`, which is `log10` of it, and the published column has to be the raw number:
-       * a reader sorting a review queue by how big a piece is wants the quantity, and
-       * reconstructing it from a log in the card would be this pack holding a feature's
-       * definition in two places. It costs one `Float64Array` already in hand.
-       */
-      columns: { ...pool.columns, l2c: sizes.l2c, l2x: sizes.l2x, n_l2: candCount },
-    }
-    const ranking = rankPool(ranker, measured, topK)
-
-    /*
-     * **The rule, after the cut, against every tip of the neuron.** One list per call: the lists
-     * are independent — each is tested against the same tip positions — so this answers exactly
-     * what the whole-neuron call answered, one end sooner. It rebuilds the k-d tree per end,
-     * which over a few hundred points is microseconds against this end's 560 ms of measuring.
-     */
-    const list: EndCandidates = { rows: ranking.rows, columns: ranking.columns, tip: end.tip }
-    yield gather(ranking, ownTipRule(tipsNm, [list], ownUm)[0]!, pool)
+    candCount = countsInPoolOrder(pool.candRoot, counts)
+  } catch (error) {
+    return { ...emptyEnd(end.tip), missingQuery: false, refusal: messageOf(error) }
   }
+
+  /*
+   * **Copies, because `callPython` transfers.** Every view in a request is handed to the
+   * worker and detached on this side, so sending either of these as they are would empty the
+   * array that `measured` and then `rankPool` read on the next two lines — surfacing as "the
+   * pool says 538 rows and its candidate ids number 0" on the first end, and *only* in the
+   * app: the unit test's fake and the probe's in-process bridge both post nothing.
+   *
+   * **It is per array read afterwards, not per array sent**, which is the part that caught
+   * this twice. `candRoot` was copied here from the beginning and `candCount` was not, and
+   * that was right for exactly as long as nothing read `candCount` again — publishing it as
+   * `n_l2` two lines down made it wrong, with the same sentence and a different column name.
+   * A `searchRun.test.ts` fake that detaches what it is given is what now holds the rule.
+   */
+  const sizes = await steps.sizes({
+    candRoot: BigUint64Array.from(pool.candRoot),
+    candCount: Float64Array.from(candCount),
+    queryRoot: end.queryRoot,
+    queryCount: queryCount!,
+  })
+  const measured: MeasuredPool = {
+    rows: pool.rows,
+    candRoot: pool.candRoot,
+    /*
+     * The two size features join the rest here, which is the one place that knows they came
+     * by a second route. `rankPool` is deliberately feature-agnostic and must not learn it.
+     *
+     * **`n_l2` is the count itself, carried beside them and used by neither.** The ranker
+     * reads `l2c`, which is `log10` of it, and the published column has to be the raw number:
+     * a reader sorting a review queue by how big a piece is wants the quantity, and
+     * reconstructing it from a log in the card would be this pack holding a feature's
+     * definition in two places. It costs one `Float64Array` already in hand.
+     */
+    columns: { ...pool.columns, l2c: sizes.l2c, l2x: sizes.l2x, n_l2: candCount },
+  }
+  const ranking = rankPool(ranker, measured, topK)
+
+  /*
+   * **The rule, after the cut, against every tip of the neuron.** One list per call: the lists
+   * are independent — each is tested against the same tip positions — so this answers exactly
+   * what the whole-neuron call answered, one end sooner. It rebuilds the k-d tree per end,
+   * which over a few hundred points is microseconds against this end's 560 ms of measuring.
+   */
+  const list: EndCandidates = { rows: ranking.rows, columns: ranking.columns, tip: end.tip }
+  return gather(ranking, ownTipRule(tipsNm, [list], ownUm)[0]!, pool)
 }
 
 /**
@@ -347,9 +421,9 @@ export async function* searchEnds(
  * (`src/pyodide/engine.ts`' `PyLane`), which took 3.3 s an end to 3.0 (2026-11-18). Anyone
  * widening the overlap should move the Pyodide work, not the order of the ends.
  *
- * **One ahead, never more.** Two would mean three ends' boxes alive and a second one queued
- * behind a resource that is already busy, buying nothing for the memory — `assessorRun.ts`
- * reached the same depth for the same reason, one file along.
+ * **One ahead, never more — here.** This only makes the next value be asked for before the body
+ * runs; how far a source runs ahead of *that* is the source's own business (`searchEnds`'
+ * `depth`), and a second layer of lookahead here would only hold another finished end.
  *
  * ## The two things a caller must know
  *
@@ -359,9 +433,9 @@ export async function* searchEnds(
  * an earlier one. A generator whose values settle only once the next is drawn would be
  * published half-made.
  *
- * **Whatever the source does while running ahead must be safe to do twice over.** For a search
- * that means two box reads in flight against one volume, which is what `SearchVolume.asking`
- * is for.
+ * **Whatever the source does while running ahead must be safe to do more than once at a time.**
+ * For a search that means several box reads in flight against one volume, whose supervoxel
+ * lookups `resolveRoots` shares (`shareInFlight`).
  *
  * Generic because the shape is, and here rather than in `src/core` because the two paragraphs
  * above are what make it correct and they are facts about this sequence.
@@ -397,10 +471,10 @@ export async function* oneAhead<T>(stream: AsyncGenerator<T>): AsyncGenerator<T>
      * and its outstanding `next()` runs to completion into a run that is being discarded. For a
      * search that is a whole end: a 19 MB box read, a chunkedgraph lookup and a Pyodide measure,
      * all written into a volume nobody will read. The box read and the bridge call carry the
-     * run's signal, so a Cancel stops most of it; the supervoxel lookup deliberately does not
-     * (it is shared, so one caller's Cancel must not be every caller's — `resolveRoots`), and
-     * on every other exit, the assessor throwing or a bridge call failing, nothing stops any of
-     * it. This does.
+     * run's signal, so a Cancel stops most of it, and a shared lookup stops once nobody waits on
+     * it (`shareInFlight`). On every other exit — the assessor throwing, a bridge call failing —
+     * this is what stops it: closing `searchEnds` stops the ends it has under way from measuring
+     * (its own stop signal), though a read already in flight finishes.
      *
      * **`void`, not `await`.** `return()` queues behind the pending `next()`, so awaiting it
      * would make the failing path wait out the very prefetch it is trying to abandon. Not

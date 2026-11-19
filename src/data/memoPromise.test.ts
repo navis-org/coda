@@ -9,7 +9,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { ReplayedFailures, memoPromise, untilAborted } from './memoPromise'
+import type { SharedAsk } from './memoPromise'
+import { ReplayedFailures, memoPromise, shareInFlight, untilAborted } from './memoPromise'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -110,5 +111,88 @@ describe('ReplayedFailures', () => {
     failures.record('k', new Error('500'), undefined)
     failures.forget('k')
     expect(() => failures.check('k', undefined)).not.toThrow()
+  })
+})
+
+/**
+ * **Many keys asked once between however many callers want them**, and stopped only when every
+ * one of them has stopped waiting — a single caller's Cancel must not fail another's answer.
+ */
+describe('shareInFlight', () => {
+  /** An `ask` the test answers by hand, recording what it was asked and whether it was stopped. */
+  const gatedAsk = () => {
+    const asked: string[][] = []
+    const stopped: boolean[] = []
+    const answers: (() => void)[] = []
+    const held = new Set<string>()
+    const ask = (mine: string[], signal: AbortSignal) => {
+      asked.push(mine)
+      const at = stopped.push(false) - 1
+      signal.addEventListener('abort', () => (stopped[at] = true))
+      return new Promise<void>((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason))
+        answers.push(() => {
+          for (const key of mine) held.add(key)
+          resolve()
+        })
+      })
+    }
+    return { asked, stopped, answers, held, ask }
+  }
+
+  it('asks once for keys two callers want, and answers both', async () => {
+    const g = gatedAsk()
+    const asking = new Map<string, SharedAsk>()
+    const a = shareInFlight(['1', '2'], (k) => g.held.has(k), asking, g.ask, undefined)
+    const b = shareInFlight(['2', '3'], (k) => g.held.has(k), asking, g.ask, undefined)
+    expect(g.asked).toEqual([['1', '2'], ['3']])
+    g.answers.forEach((go) => go())
+    await Promise.all([a, b])
+    expect(asking.size).toBe(0)
+  })
+
+  it('keeps a request going while anyone still waits on it', async () => {
+    const g = gatedAsk()
+    const asking = new Map<string, SharedAsk>()
+    const leaving = new AbortController()
+    const a = shareInFlight(['1'], (k) => g.held.has(k), asking, g.ask, leaving.signal)
+    const b = shareInFlight(['1'], (k) => g.held.has(k), asking, g.ask, undefined)
+    leaving.abort()
+    await expect(a).rejects.toThrow()
+    expect(g.stopped).toEqual([false])
+    g.answers[0]!()
+    await b
+    expect(g.held.has('1')).toBe(true)
+  })
+
+  /* A caller that left on another request's failure must not keep this one running for nobody. */
+  it('gives up a caller’s place when one of its requests fails, not only when it cancels', async () => {
+    const g = gatedAsk()
+    const asking = new Map<string, SharedAsk>()
+    const staying = new AbortController()
+    // B owns '2'; A joins it and owns '1', which will fail.
+    const b = shareInFlight(['2'], (k) => g.held.has(k), asking, g.ask, staying.signal)
+    const failing = (mine: string[], signal: AbortSignal) =>
+      mine.includes('1') ? Promise.reject(new Error('refused')) : g.ask(mine, signal)
+    const a = shareInFlight(['1', '2'], (k) => g.held.has(k), asking, failing, undefined)
+    await expect(a).rejects.toThrow('refused')
+    staying.abort()
+    await expect(b).rejects.toThrow()
+    expect(g.stopped).toEqual([true])
+  })
+
+  it('stops a request nobody waits for any more, and the next caller asks afresh', async () => {
+    const g = gatedAsk()
+    const asking = new Map<string, SharedAsk>()
+    const leaving = new AbortController()
+    const a = shareInFlight(['1'], (k) => g.held.has(k), asking, g.ask, leaving.signal)
+    leaving.abort()
+    await expect(a).rejects.toThrow()
+    expect(g.stopped).toEqual([true])
+    expect(asking.size).toBe(0)
+    const again = shareInFlight(['1'], (k) => g.held.has(k), asking, g.ask, undefined)
+    expect(g.asked).toEqual([['1'], ['1']])
+    g.answers[1]!()
+    await again
   })
 })

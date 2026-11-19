@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type * as RootIds from '../../data/cave/rootIds'
 import type { CaveRequestOptions } from '../../data/cave/client'
+import type { SharedAsk } from '../../data/memoPromise'
 import type { RootLookup } from './rootedBox'
 import { forgetRoots, resolveRoots } from './rootedBox'
 
@@ -46,7 +47,7 @@ function volumeStub(): RootLookup {
     memo: {
       at: 1_700_000_000_000,
       roots: new Map<bigint, bigint>(),
-      asking: new Map<bigint, Promise<void>>(),
+      asking: new Map<bigint, SharedAsk>(),
     },
   }
 }
