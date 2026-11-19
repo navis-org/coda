@@ -552,3 +552,52 @@ subgroup features), not the plan.
 
 Not yet measured: another GPU vendor. Every number here is one M3 Max, and §10's #33856 is the
 reminder that a kernel fast on one GPU can be slow on another.
+
+---
+
+## 15. The stem reads the patch and skips its background: 26.5 ms to 21.1 (2026-11-19)
+
+Once the search ran three deep (`docs/seam-suggestions-plan.md`, "A step per queue"), the GPU set
+the pace of Suggest Merges in Chrome: 1.65 s of every 1.91 s end was the network, 61 patches at
+26.8 ms. Timed a step at a time (each step carries ~0.28 ms of submit), the stem was the largest
+single step at ~7.1 ms of a 26.6 ms patch, and stage 0's four 3³ convolutions ~9.6 together.
+
+**A real patch is ~97% background.** Over the probe's 24 fixture patches the query is 2-4% of the
+voxels and the candidate under 1%. The stem's two input channels are functions of one label —
+outside both objects 0 and 0, inside them 1 and ±1 (`encodeShader`) — so the dense stem spends
+nearly all of its 24 GFLOP multiplying by zero.
+
+**`stemShader`** gives each workgroup a 4 × 4 × 4 cube of output voxels and loads its footprint
+(13³ labels at stride 2 under a 7³ kernel, 8.8 KB) into workgroup memory straight from the patch,
+so `encode` is no longer dispatched. A workgroup whose footprint is all background writes the
+bias-only answer; the others walk the 343 taps in order, adding weights only where a label is
+set. Each thread holds one voxel and 16 channels.
+
+**It is the dense stem's sum term for term**, not an approximation of it: both channels go through
+the same `fma(w, x, acc)` as the dense stem, with x 0, 1 or ±1; a tap whose channels are both 0
+adds nothing, so leaving it out changes nothing; and the terms come in the dense order — tap by
+tap, channel 0 before channel 1 — multiplying by the very channel values
+`encode` writes (one helper, `labelChannels`, spells them for both). Checked rather than argued:
+`segclrPlan(graph, { denseStem: true })` still plans the reference, `encode` then the dense stem,
+and `probe:gpu-assessor` now scores every fixture patch through both and fails unless every
+logit is equal.
+
+`pnpm probe:gpu-assessor`, same machine, same session, the two builds back to back:
+
+| | stem, timed alone | a patch, best / median |
+|---|---|---|
+| dense stem + `encode` | 7.5 ms + 0.8 | 26.5 / 27.1 ms |
+| **sparse stem** | **1.7 ms** | **21.1 / 21.4 ms** |
+
+So a patch is **about a fifth cheaper**: 4.1 TFLOP/s of the dense equivalent at the best time,
+and 6.4x the 136 ms of ONNX Runtime. Through the node, over 40 ends, it was 22 ms a patch, and
+that is what `SECONDS_PER_PATCH` says (0.022). Not measured: Firefox (`SLOW_SECONDS_PER_PATCH` stays at
+its old figure), and patches whose objects fill much more of the window, where fewer workgroups
+can skip and the cost rises by an amount nobody has measured — the sparse stem reads its weights
+from global memory without the dense path's tiling, so a patch that is all object could cost more
+than the dense stem did. The plan itself
+says the stem reads the patch (`PATCH`, an input that is no buffer), so the encoded patch's 17 MB
+is no longer allocated and `encode` no longer compiled.
+
+What is left of a patch is the dense convolutions, stage 0's four first: 64 channels on 33³,
+running at ~4 TFLOP/s on the fast path.

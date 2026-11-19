@@ -15,11 +15,10 @@
  * spread between them was 8%.
  *
  * The reduction index is tap-major, `k = tap · Cin + ci`. When `Cin` is a multiple of the tile's
- * 16, one tile is one tap, so a thread works out its input address once per tile. The stem
- * (`Cin` = 2) is the exception and takes the general path, which works the address out per
- * element. That path is not a cold one: the stem's 343 taps make it 24 of the 86.8 GFLOP and
- * the largest single step (docs/seam-assessor-speed.md §14), so it is the first place to look
- * for time.
+ * 16, one tile is one tap, so a thread works out its input address once per tile. A stem with
+ * another `Cin` takes the general path, which works the address out per element. Only the dense
+ * reference's stem takes it here (`segclrPlan`'s `denseStem`); the network's own stem reads the
+ * patch instead (`stemShader`).
  *
  * ## Splitting the reduction
  *
@@ -69,6 +68,8 @@ export interface ConvLayout {
  * The target was swept from 80 to 2,560 on an M3 Max and every value from 160 to 1,280 timed the
  * whole patch within 0.4 ms of the others (docs/seam-assessor-speed.md §14), so it is not tuned.
  */
+// The stem's 7³ x 2 reduction never splits, and `stemShader`'s bit-for-bit match with it depends
+// on that: a split sum adds its terms in another order. `gpuAssessor.test.ts` pins it.
 const SPLIT_TARGET = 320
 
 export function convLayout(step: ConvStep): ConvLayout {
@@ -294,6 +295,166 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 }`
 }
 
+/** Output voxels along each side of a sparse stem's workgroup: a 4 × 4 × 4 cube. */
+const STEM_CUBE = 4
+/** Output channels a sparse stem's thread computes. */
+const STEM_CHANNELS = 16
+
+/**
+ * Where network voxel (`x`, `y`, `z`) sits in the patch `lab` — (X, Y, Z) on disk, the network's
+ * axes (Z, Y, X) — as a WGSL index expression. One spelling for the two shaders that read it.
+ */
+function labIndex(x: string, y: string, z: string, edge: number): string {
+  return `${z} * ${u(edge * edge)} + ${y} * ${u(edge)} + ${x}`
+}
+
+/**
+ * A label's two input channels, as WGSL expressions on the f32 label `l`: channel 0 is the union
+ * mask, channel 1 +1 on C (2) and −1 on Q (1). One spelling for `encodeShader`, which writes
+ * them, and `stemShader`, which multiplies by them — so the two cannot come to disagree.
+ *
+ * **Channel 0 is zero only where channel 1 is too** (both need a positive label), so channel 0
+ * alone says whether a label contributes anything: the stem's background test.
+ */
+function labelChannels(l: string): readonly [string, string] {
+  return [
+    `select(0.0, 1.0, ${l} > 0.0)`,
+    `select(0.0, 1.0, ${l} == 2.0) - select(0.0, 1.0, ${l} == 1.0)`,
+  ]
+}
+
+/** The edge of the cube of labels one sparse-stem workgroup reads. */
+export function stemFootprint(step: ConvStep): number {
+  return (STEM_CUBE - 1) * step.stride + step.kernel
+}
+
+/** The sparse stem's workgroups: one per cube of output voxels. */
+export function stemGroups(step: ConvStep): [number, number, number] {
+  const side = Math.ceil(step.outEdge / STEM_CUBE)
+  return [side, side, side]
+}
+
+/**
+ * **The stem, read from the patch of labels and skipping its background** — exactly the dense
+ * convolution's answer, in about a fifth of its time. Bindings: 0 the patch (`lab`, read through
+ * `labIndex`), 1 weights (`convWeightLayout`'s), 2 output, 3 epilogue parameters.
+ *
+ * The stem's two input channels are functions of one label (`encodeShader`): 0 everywhere outside
+ * the two objects, and inside them 1 on channel 0 and ±1 on channel 1. A real patch is ~97%
+ * background (the fixture lists: Q 2-4% of voxels, C under 1%), so the dense stem spends nearly
+ * all of its 24 GFLOP multiplying by zero. This one loads each workgroup's footprint of labels
+ * into workgroup memory, writes the bias-only answer for a workgroup whose footprint is all
+ * background, and elsewhere walks the taps adding weights only where a label is set.
+ *
+ * **It is the dense stem's sum, term for term.** It multiplies by the same channel values
+ * (`labelChannels`), with the same `fma(w, x, acc)`, in the same order — tap by tap, channel 0
+ * before channel 1 — and leaves out only taps where both channels are 0, whose terms add exactly
+ * nothing. The answer is the same to the bit — even a zero's sign, since both sums start at +0
+ * and adding a zero to +0 gives +0 — unless the GPU flushes a subnormal sum to zero, where the
+ * dense stem's zero terms would flush it and the skipped ones do not. `segclrPlan`'s `denseStem`
+ * builds the reference, and the probe checks the bits rather than trusting this.
+ */
+export function stemShader(step: ConvStep): string {
+  // Two input channels, the two `labelChannels` makes: the weight rows below assume exactly them.
+  if (step.cin !== 2)
+    throw new Error(`${step.name}: a stem read from the patch has 2 channels, not ${step.cin}`)
+  // Each thread holds `STEM_CHANNELS` outputs, and a workgroup is at most 256 threads.
+  if (step.cout % STEM_CHANNELS !== 0 || STEM_CUBE ** 3 * (step.cout / STEM_CHANNELS) > 256)
+    throw new Error(`${step.name}: ${step.cout} output channels do not fit the sparse stem`)
+  // The footprint lives in workgroup memory, guaranteed only to 16 KiB; the epilogue binds no
+  // residual here.
+  if (stemFootprint(step) ** 3 * 4 + 4 > 16384 || step.residual)
+    throw new Error(
+      `${step.name}: a ${stemFootprint(step)}³ footprint or a residual does not fit the sparse stem`,
+    )
+  const si = step.inEdge
+  const so = step.outEdge
+  const vo = so ** 3
+  const kk = step.kernel
+  const stride = step.stride
+  const cout = step.cout
+  const foot = stemFootprint(step)
+  const footVoxels = foot ** 3
+  const threads = STEM_CUBE ** 3 * (cout / STEM_CHANNELS)
+  const channels = labelChannels('l')
+  const each = (fn: (j: number) => string) =>
+    Array.from({ length: STEM_CHANNELS }, (_, j) => fn(j)).join('\n')
+  return /* wgsl */ `
+@group(0) @binding(0) var<storage, read> lab: array<f32>;
+@group(0) @binding(1) var<storage, read> wt: array<f32>;
+@group(0) @binding(2) var<storage, read_write> outp: array<f32>;
+@group(0) @binding(3) var<storage, read> ep: array<f32>;
+var<workgroup> Ls: array<f32, ${footVoxels}>;
+// Zero at the start of every workgroup, as all workgroup memory is.
+var<workgroup> anySet: atomic<u32>;
+
+@compute @workgroup_size(${threads})
+fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
+  // This workgroup's cube of output voxels, and its footprint's corner in the input.
+  let fx0 = i32(wg.x) * ${STEM_CUBE * stride} - ${step.pad};
+  let fy0 = i32(wg.y) * ${STEM_CUBE * stride} - ${step.pad};
+  let fz0 = i32(wg.z) * ${STEM_CUBE * stride} - ${step.pad};
+  // The footprint's labels.
+  for (var e = li; e < ${u(footVoxels)}; e += ${u(threads)}) {
+    let xi = fx0 + i32(e / ${u(foot * foot)});
+    let yi = fy0 + i32((e / ${u(foot)}) % ${u(foot)});
+    let zi = fz0 + i32(e % ${u(foot)});
+    var l = 0.0;
+    if (xi >= 0 && xi < ${si} && yi >= 0 && yi < ${si} && zi >= 0 && zi < ${si}) {
+      l = lab[${labIndex('u32(xi)', 'u32(yi)', 'u32(zi)', si)}];
+    }
+    Ls[e] = l;
+    if (${channels[0]} != 0.0) { atomicOr(&anySet, 1u); }
+  }
+  workgroupBarrier();
+  let anyLabel = atomicLoad(&anySet);
+
+  // This thread: one output voxel of the cube, ${STEM_CHANNELS} channels.
+  let cv = li % ${u(STEM_CUBE ** 3)};
+  let c0 = (li / ${u(STEM_CUBE ** 3)}) * ${u(STEM_CHANNELS)};
+  let vx = cv / ${u(STEM_CUBE * STEM_CUBE)};
+  let vy = (cv / ${u(STEM_CUBE)}) % ${u(STEM_CUBE)};
+  let vz = cv % ${u(STEM_CUBE)};
+  let ox = wg.x * ${u(STEM_CUBE)} + vx;
+  let oy = wg.y * ${u(STEM_CUBE)} + vy;
+  let oz = wg.z * ${u(STEM_CUBE)} + vz;
+  if (ox >= ${u(so)} || oy >= ${u(so)} || oz >= ${u(so)}) { return; }
+${each((j) => `  var acc${j} = 0.0;`)}
+  if (anyLabel != 0u) {
+    let lx = vx * ${u(stride)};
+    let ly = vy * ${u(stride)};
+    let lz = vz * ${u(stride)};
+    for (var t0 = 0u; t0 < ${u(kk)}; t0++) {
+      for (var t1 = 0u; t1 < ${u(kk)}; t1++) {
+        for (var t2 = 0u; t2 < ${u(kk)}; t2++) {
+          let l = Ls[(lx + t0) * ${u(foot * foot)} + (ly + t1) * ${u(foot)} + lz + t2];
+          // Channel 0 alone says whether this tap adds anything (\`labelChannels\`).
+          let ch0 = ${channels[0]};
+          if (ch0 != 0.0) {
+            let ch1 = ${channels[1]};
+            // Rows (tap · Cin + ci) · Cout, as \`convWeightLayout\` lays them out.
+            let w = ((t0 * ${u(kk * kk)} + t1 * ${u(kk)} + t2) * 2u) * ${u(cout)} + c0;
+${each(
+  (j) => `            acc${j} = fma(wt[w + ${u(j)}], ch0, acc${j});
+            acc${j} = fma(wt[w + ${u(cout + j)}], ch1, acc${j});`,
+)}
+          }
+        }
+      }
+    }
+  }
+  let n = (ox * ${u(so)} + oy) * ${u(so)} + oz;
+${each(
+  (j) => `  {
+    let m = c0 + ${u(j)};
+    var v = acc${j};
+    ${epilogue(step)}
+    outp[m * ${u(vo)} + n] = v;
+  }`,
+)}
+}`
+}
+
 /**
  * The patch to the network's two channels. `lab` is (X, Y, Z), the network's axes (Z, Y, X):
  * network voxel (a, b, c) is `lab[c][b][a]`. Channel 0 is the union mask, channel 1 +1 on C (2)
@@ -301,6 +462,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
  */
 export function encodeShader(edge: number): string {
   const v = edge ** 3
+  const [channel0, channel1] = labelChannels('l')
   return /* wgsl */ `
 @group(0) @binding(0) var<storage, read> lab: array<f32>;
 @group(0) @binding(1) var<storage, read_write> outp: array<f32>;
@@ -312,9 +474,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let a = e / ${u(edge * edge)};
   let b = (e / ${u(edge)}) % ${u(edge)};
   let c = e % ${u(edge)};
-  let l = lab[c * ${u(edge * edge)} + b * ${u(edge)} + a];
-  outp[e] = select(0.0, 1.0, l > 0.0);
-  outp[${u(v)} + e] = select(0.0, 1.0, l == 2.0) - select(0.0, 1.0, l == 1.0);
+  let l = lab[${labIndex('a', 'b', 'c', edge)}];
+  outp[e] = ${channel0};
+  outp[${u(v)} + e] = ${channel1};
 }`
 }
 

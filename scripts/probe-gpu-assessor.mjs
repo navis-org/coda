@@ -15,7 +15,8 @@
  *    hand-written one via `openGpuAssessor`, one patch a run as `scoreCandidates` feeds them.
  *    Warm: each list is scored twice and the second pass is the one quoted.
  * 3. **Where the time goes.** The network built on the page's own thread and each step timed on
- *    its own, so the next optimisation is aimed rather than guessed.
+ *    its own, so the next optimisation is aimed rather than guessed — and beside it the dense
+ *    reference (`segclrPlan`'s `denseStem`), whose logits the sparse stem must equal to the bit.
  *
  * The models are served from SEAM's export directory with a manifest written here: Coda's
  * fixture manifest (the `matmul` build ONNX Runtime runs), plus the plain `conv` export the
@@ -115,7 +116,8 @@ const profiled = await evaluate(
   ])
   const bytes = new Uint8Array(await (await fetch(${JSON.stringify(`${models}/${convFile}`)})).arrayBuffer())
   const t0 = performance.now()
-  const plan = planning.segclrPlan(onnx.readOnnx(bytes))
+  const graph = onnx.readOnnx(bytes)
+  const plan = planning.segclrPlan(graph)
   const device = await net.assessorDevice()
   const network = await net.buildNetwork(device, plan)
   const built = performance.now() - t0
@@ -131,9 +133,32 @@ const profiled = await evaluate(
     await network.score(patch)
     times.push(performance.now() - t)
   }
+  /*
+   * The dense reference (\`segclrPlan\`'s \`denseStem\`): \`encode\` then the dense stem, which the
+   * sparse stem must equal to the bit (docs/seam-assessor-speed.md §15). Every patch of every
+   * list, through both, compared as values.
+   */
+  const reference = await net.buildNetwork(device, planning.segclrPlan(graph, { denseStem: true }))
+  const mismatches = []
+  const referenceTimes = []
+  let compared = 0
+  for (const one of ${JSON.stringify(lists)}) {
+    const all = new Uint8Array(await (await fetch(${JSON.stringify(`${models}/work/`)} + one.end + '.u8')).arrayBuffer())
+    const size = one.size ** 3
+    for (let i = 0; i < one.patches; i++) {
+      const p = Float32Array.from(all.subarray(i * size, (i + 1) * size))
+      const sparse = await network.score(p)
+      const t = performance.now()
+      const dense = await reference.score(p)
+      referenceTimes.push(performance.now() - t)
+      compared += 1
+      if (!Object.is(sparse, dense)) mismatches.push({ end: one.end, patch: i, sparse, dense })
+    }
+  }
+  reference.destroy()
   network.destroy()
   device.destroy()
-  return { built, steps, times, flops: network.flops, bytes: network.bytes, adapter: device.adapterInfo?.description || device.adapterInfo?.vendor }
+  return { built, steps, times, compared, mismatches, referenceTimes, flops: network.flops, bytes: network.bytes, adapter: device.adapterInfo?.description || device.adapterInfo?.vendor }
 })()`,
   900_000,
 )
@@ -147,6 +172,15 @@ console.log(`  ${'sum'.padEnd(28)} ${stepTotal.toFixed(1).padStart(7)} ms`)
 const direct = Math.min(...profiled.times)
 console.log(
   `\n  one submit, page thread: best ${direct.toFixed(1)} ms = ${(profiled.flops / 1e9 / direct).toFixed(2)} TFLOP/s`,
+)
+
+const median = (v) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)]
+if (profiled.referenceTimes.length)
+  console.log(`  the dense reference (denseStem), same thread: median ${median(profiled.referenceTimes).toFixed(1)} ms`)
+report.check(
+  profiled.compared > 0 && profiled.mismatches.length === 0,
+  `the sparse stem's logits equal the dense reference's to the bit on ${profiled.compared} patches` +
+    (profiled.mismatches.length ? `; first apart: ${JSON.stringify(profiled.mismatches[0])}` : ''),
 )
 
 // ── 1 and 2: both runtimes through openModel's session, on every patch ────────────────────────
@@ -206,7 +240,6 @@ const sameRanking = (got, torch) =>
   torch.every((a, i) =>
     torch.every((b, j) => Math.abs(a - b) <= 2 * TOLERANCE || (a > b) === (got[i] > got[j])),
   )
-const median = (v) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)]
 console.log(`\nopen: hand-written ${scored.opened.gpu.toFixed(0)} ms, ONNX Runtime ${scored.opened.ort.toFixed(0)} ms\n`)
 for (const row of scored.lists) {
   const torch = fixture.lists.find((one) => one.end_uid === row.end).torch[0]

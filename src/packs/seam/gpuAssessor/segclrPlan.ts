@@ -94,7 +94,16 @@ export interface HeadStep {
 
 export type PlanStep = EncodeStep | ConvStep | MaxPoolStep | HeadStep
 
+/**
+ * The input of a step that reads **the patch of labels itself** — the uploaded `lab`, never an
+ * intermediate, so no buffer is planned for it (`inputsOf` leaves it out). The stem reads it by
+ * default (`shaders.ts`' `stemShader`); `denseStem` puts `encode` before it instead.
+ */
+export const PATCH = 'patch'
+
 export interface AssessorPlan {
+  /** The patch's edge in voxels: what a caller uploads, as (X, Y, Z) labels. */
+  readonly edge: number
   readonly steps: readonly PlanStep[]
   /** Multiply-adds × 2 over the convolutions and the head, for a TFLOP/s figure. */
   readonly flops: number
@@ -109,11 +118,12 @@ export function outputOf(step: PlanStep): { name: string; floats: number } | und
   return undefined
 }
 
-/** The tensors a step reads. */
+/** The intermediate tensors a step reads — not the patch itself (`PATCH`), which is no tensor. */
 export function inputsOf(step: PlanStep): string[] {
   if (step.kind === 'encode') return []
-  if (step.kind === 'conv' && step.residual) return [step.input, step.residual]
-  return [step.input]
+  const read =
+    step.kind === 'conv' && step.residual ? [step.input, step.residual] : [step.input]
+  return read.filter((name) => name !== PATCH)
 }
 
 /**
@@ -289,9 +299,21 @@ function batchNorm(
   return { scale, shift }
 }
 
-/** Build the plan from a parsed export. Throws `AssessorPlanError` for any other network. */
-export function segclrPlan(graph: OnnxGraph): AssessorPlan {
-  const steps: PlanStep[] = [{ kind: 'encode', output: 'x', edge: PATCH_EDGE }]
+/**
+ * Build the plan from a parsed export. Throws `AssessorPlanError` for any other network.
+ *
+ * **The stem reads the patch itself** (`PATCH`, `stemShader`): its two channels are functions of
+ * one label and a real patch is ~97% background (docs/seam-assessor-speed.md §15). `denseStem`
+ * plans the reference instead — `encode` to two channels, then the dense convolution — whose
+ * answer is the same to the bit, for checking that it still is.
+ */
+export function segclrPlan(
+  graph: OnnxGraph,
+  options: { readonly denseStem?: boolean } = {},
+): AssessorPlan {
+  const steps: PlanStep[] = options.denseStem
+    ? [{ kind: 'encode', output: 'x', edge: PATCH_EDGE }]
+    : []
   let flops = 0
 
   const conv = (
@@ -319,7 +341,7 @@ export function segclrPlan(graph: OnnxGraph): AssessorPlan {
   const stem = conv({
     name: 'conv1',
     from: '/net/conv1/Conv_output_0',
-    input: 'x',
+    input: options.denseStem ? 'x' : PATCH,
     output: 'stem',
     cin: 2,
     cout: WIDTHS[0],
@@ -407,5 +429,5 @@ export function segclrPlan(graph: OnnxGraph): AssessorPlan {
   })
   flops += 2 * width
 
-  return { steps, flops }
+  return { edge: PATCH_EDGE, steps, flops }
 }

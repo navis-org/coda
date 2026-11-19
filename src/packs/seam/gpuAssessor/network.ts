@@ -20,7 +20,7 @@
 import { errorMessage } from '../../../core/errors'
 import { gpuSupport } from '../../../ml/support'
 import type { AssessorPlan, ConvStep, PlanStep } from './segclrPlan'
-import { bufferSlots, outputOf } from './segclrPlan'
+import { PATCH, bufferSlots, outputOf } from './segclrPlan'
 import {
   convLayout,
   convShader,
@@ -32,6 +32,8 @@ import {
   headShader,
   maxPoolShader,
   reduceShader,
+  stemGroups,
+  stemShader,
 } from './shaders'
 
 export interface StepTiming {
@@ -228,9 +230,10 @@ export async function buildNetwork(
  * The build itself. Its own function, so the network it returns closes over none of this scope.
  *
  * Intermediates share buffers once they are dead: the plan's order is fixed, so each tensor's
- * last reader is known, and a buffer freed by one step is taken by a later one that fits. What is
- * live at once peaks at the encoded patch plus the stem's output (88 MB), against 160 MB for a
- * buffer each.
+ * last reader is known, and a buffer freed by one step is taken by a later one that fits. The
+ * patch itself is no intermediate: the stem reads the uploaded labels (`PATCH`, `stemShader`)
+ * unless the plan is the dense reference (`segclrPlan`'s `denseStem`), whose `encode` step
+ * writes the two channels first.
  */
 async function assemble(
   device: GPUDevice,
@@ -263,9 +266,18 @@ async function assemble(
   }
   const upload = (data: Float32Array) => filled(data.length, (into) => into.set(data))
 
-  const encode = plan.steps[0]
-  if (encode?.kind !== 'encode') throw new Error('The plan does not start from the patch')
-  const lab = buffer(encode.edge ** 3 * 4)
+  // The patch buffer is sized by the plan and read by the steps that take the patch, each at its
+  // own edge: `encode` in the dense reference, the stem otherwise.
+  const patchEdges = plan.steps.flatMap((step) =>
+    step.kind === 'encode'
+      ? [step.edge]
+      : step.kind === 'conv' && step.input === PATCH
+        ? [step.inEdge]
+        : [],
+  )
+  if (patchEdges.length === 0 || patchEdges.some((edge) => edge !== plan.edge))
+    throw new Error(`The plan does not read its ${plan.edge}³ patch at that edge`)
+  const lab = buffer(plan.edge ** 3 * 4)
   const logit = buffer(4)
   const readback = buffer(4, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST)
 
@@ -337,6 +349,7 @@ async function assemble(
    */
   const shaders = plan.steps.map((step) => {
     if (step.kind === 'encode') return { main: compile(encodeShader(step.edge)) }
+    if (step.kind === 'conv' && step.input === PATCH) return { main: compile(stemShader(step)) }
     if (step.kind === 'maxpool') return { main: compile(maxPoolShader(step)) }
     if (step.kind === 'head') return { main: compile(headShader(step)) }
     const { splits } = layouts.get(step)!
@@ -349,7 +362,7 @@ async function assemble(
   const forStep = (step: PlanStep, at: number): Promise<Dispatch>[] => {
     const { main, sum } = shaders[at]!
     if (step.kind === 'encode') {
-      return [dispatch('encode', main, [lab, tensorOf(step.output)], flat(encode.edge ** 3))]
+      return [dispatch('encode', main, [lab, tensorOf(step.output)], flat(step.edge ** 3))]
     }
     if (step.kind === 'maxpool') {
       const buffers = [tensorOf(step.input), tensorOf(step.output)]
@@ -366,8 +379,11 @@ async function assemble(
     )
     const params = upload(epilogueParams(step))
     const residual = step.residual ? [tensorOf(step.residual)] : []
-    const input = tensorOf(step.input)
     const output = tensorOf(step.output)
+    if (step.input === PATCH) {
+      return [dispatch(step.name, main, [lab, weights, output, params], stemGroups(step))]
+    }
+    const input = tensorOf(step.input)
     if (!sum) {
       return [
         dispatch(step.name, main, [input, weights, output, params, ...residual], layout.groups),
@@ -407,7 +423,7 @@ async function assemble(
     lab,
     logit,
     readback,
-    edge: encode.edge,
+    edge: plan.edge,
     flops: plan.flops,
   })
 }

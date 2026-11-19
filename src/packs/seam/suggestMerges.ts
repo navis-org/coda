@@ -41,11 +41,12 @@
  *
  * **What it costs on top of the search is a quarter of an end, and that is browser-dependent.**
  * A measured run of 25 ends in Chrome took 6.2 s each with the network at 25% — 27 ms a patch,
- * the figure a bare probe gets on the same GPU. The same run in Firefox took 11.0 s an end with
+ * the figure a bare probe got on the same GPU then; reading the patch sparsely in the stem has
+ * since made it 22. The same run in Firefox took 11.0 s an end with
  * the network at half of it, because a WebGPU dispatch costs that browser far more to submit and
  * synchronise; `SECONDS_PER_PATCH` has the measurement and `SLOW_WEBGPU` is what says so on the
  * card. The checkpoint is a 133 MB download. The network is Coda's own WGSL implementation
- * rather than ONNX Runtime — 27 ms a patch against 136 — so most of an assessed end is the two
+ * rather than ONNX Runtime — 22 ms a patch against 136 — so most of an assessed end is the two
  * boxes it reads.
  *
  * `Assess top` caps the patches per end; what the cap costs in answers is measured on SEAM's own
@@ -281,12 +282,13 @@ export const SECONDS_PER_END = 3.0
 /**
  * What one assessed candidate costs, in seconds: a 129³ patch cut and run.
  *
- * **27 ms, measured in a run rather than in a probe.** 25 open ends of an Aedes neuron through
- * Coda's own WGSL implementation, best 26 and median 26 — the same figure
- * `pnpm probe:gpu-assessor` gets on a bare page (`docs/seam-assessor-speed.md` §14), so the loop
- * around the network costs nothing worth a constant. The cut is about 40 ms a group of four and
- * is prefetched one group deep, so it hides behind the GPU that group costs and does not appear
- * here.
+ * **22 ms, the figure measured through the node.** Since the stem reads the patch itself
+ * (2026-11-19, `docs/seam-assessor-speed.md` §15): 21.1 ms best and 21.4 median in
+ * `pnpm probe:gpu-assessor`, and 22 ms a patch through the node over 40 real ends, which is the
+ * one taken: it is the mean over the patches a run actually meets. A patch whose objects fill
+ * more of the window skips less of the stem and costs more; how much more is not measured. It was 27 before (§14), the same in a run and on a
+ * bare page. The cut is about 40 ms a group of four and is prefetched one group deep, so it hides
+ * behind the GPU that group costs and does not appear here.
  *
  * **It is a rate for one browser, and the spread between browsers is larger than anything else
  * on this page.** The same 25 ends on the same laptop and the same GPU measured **98 ms a
@@ -301,13 +303,14 @@ export const SECONDS_PER_END = 3.0
  * `slowGpuDispatch` which of them applies; `SLOW_SECONDS_PER_PATCH` carries the Firefox
  * measurement and the reason.
  *
- * The consequence is not only a number in a warning. At 27 ms the scoring is a quarter of an end
- * and `Assess top` is a weak lever; at 98 it is half the run and the cap is the biggest one
- * there is. Which is why the node reports the rate, and the fastest call beside it, after a run
- * rather than this file claiming to know (`runClock.ts`).
+ * The consequence is not only a number in a warning. In Chrome the scoring is now most of an end
+ * (the search runs ahead of it), and `Assess top` the one lever on it that changes answers; at 98
+ * it is most of the run in Firefox, and the cap the biggest lever there is. Which is why the node
+ * reports the rate, and the fastest call beside it, after a run rather than this file claiming to
+ * know (`runClock.ts`).
  *
  * **The ONNX Runtime path was 136 ms** for the same network and the same answer — its WebGPU
- * backend runs 3D `Conv` through a per-element shader — so this is 5.1x cheaper. That is not
+ * backend runs 3D `Conv` through a per-element shader — so this is about 6x cheaper. That is not
  * only a faster run: it moves where an end's time *goes*, which is why `Assess top` no longer
  * promises much. `secondsPerEnd` is the sum.
  *
@@ -317,7 +320,7 @@ export const SECONDS_PER_END = 3.0
  * from. Both are recorded because prose contrasting against either was comparing a measurement
  * with something that was not one.)
  */
-const SECONDS_PER_PATCH = 0.027
+const SECONDS_PER_PATCH = 0.022
 
 /**
  * What a patch costs where the browser's WebGPU dispatch is the slow kind — `slowGpuDispatch`.
@@ -328,6 +331,10 @@ const SECONDS_PER_PATCH = 0.027
  * thirty-five minutes where the measurement says ninety — and under-stating is the one direction
  * `docs/limits.md` says a guard rail must not fail in. `SECONDS_PER_END` records being caught by
  * exactly that once already.
+ *
+ * **Not re-measured since the sparse stem** (2026-11-19), which took ~5 ms of GPU work off a
+ * patch and one dispatch of the ~40 that Firefox pays for. Left at the old figure, since a guard
+ * rail must not under-state, until a Firefox run says what it is now.
  *
  * It costs nothing to ask: the browser fact is already on hand for the card's hint, and
  * `slowGpuDispatch` answers `false` where there is no `navigator` at all (the MCP server, a

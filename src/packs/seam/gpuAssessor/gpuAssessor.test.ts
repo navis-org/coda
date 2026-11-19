@@ -16,6 +16,7 @@ import { readOnnx } from './onnxProto'
 import type { ConvStep } from './segclrPlan'
 import {
   AssessorPlanError,
+  PATCH,
   PATCH_EDGE,
   bufferSlots,
   inputsOf,
@@ -23,7 +24,15 @@ import {
   samePad,
   segclrPlan,
 } from './segclrPlan'
-import { TILE_K, convLayout, convWeightLayout, epilogueParams } from './shaders'
+import {
+  TILE_K,
+  convLayout,
+  convWeightLayout,
+  epilogueParams,
+  stemFootprint,
+  stemGroups,
+  stemShader,
+} from './shaders'
 
 // ── A protobuf writer, just enough to build test files ───────────────────────────────────────
 
@@ -224,9 +233,7 @@ describe('segclrPlan', () => {
 
   it('is 21 convolutions, ending at 512 channels on 5³', () => {
     expect(convs).toHaveLength(21)
-    expect(plan.steps.map((step) => step.kind).join()).toMatch(
-      /^encode,conv,maxpool,(conv,)+head$/,
-    )
+    expect(plan.steps.map((step) => step.kind).join()).toMatch(/^conv,maxpool,(conv,)+head$/)
     expect(convs.at(-1)).toMatchObject({ cout: 512, outEdge: 5 })
   })
 
@@ -260,11 +267,46 @@ describe('segclrPlan', () => {
     }
   })
 
-  it('shares buffers: the encoded patch and the stem output, plus what the blocks need', () => {
+  it('shares buffers: the stem output, plus what the blocks need, and none for the patch', () => {
     // The stem's 70 MB is taken by the stages once the pool has read it, so the slots come to
-    // the encoded patch, the stem, and three for a block (input, first conv, shortcut).
+    // the stem and three for a block (input, first conv, shortcut). The patch is the upload
+    // itself (`PATCH`); the dense reference adds the encoded patch's 17 MB.
     const { sizes } = bufferSlots(plan.steps)
-    expect(sizes.length).toBeLessThanOrEqual(5)
+    expect(sizes.length).toBeLessThanOrEqual(4)
+    const total = (of: number[]) => of.reduce((sum, floats) => sum + floats, 0)
+    const dense = bufferSlots(segclrPlan(syntheticExport(), { denseStem: true }).steps).sizes
+    expect(total(dense)).toBeGreaterThan(total(sizes))
+  })
+
+  /**
+   * **The stem, and only the stem, reads the patch of labels** (`stemShader`). Its answer is the
+   * dense stem's to the bit — `probe:gpu-assessor` holds that, on a GPU; what is pinned here is
+   * which step takes the sparse path, and the shape of the dispatch it gets.
+   */
+  it('reads the stem from the patch, in cubes of four voxels a side', () => {
+    expect(plan.steps[0]).toMatchObject({ kind: 'conv', name: 'conv1', input: PATCH })
+    expect(plan.steps.filter((step) => 'input' in step && step.input === PATCH)).toHaveLength(1)
+    expect(plan.edge).toBe(PATCH_EDGE)
+    expect(stemGroups(convs[0]!)).toEqual([17, 17, 17])
+    // A cube of 4 outputs at stride 2 under a 7³ kernel reads 13³ labels: 8.8 KB of workgroup
+    // memory, under the 16 KB every WebGPU device offers.
+    expect(stemFootprint(convs[0]!)).toBe(13)
+    expect(() => stemShader({ ...convs[0]!, cin: 3 })).toThrow(/2 channels/)
+  })
+
+  /* The reference the sparse stem is checked against, still planned on request. */
+  it('plans the dense reference on request: encode, then the dense stem', () => {
+    const dense = segclrPlan(syntheticExport(), { denseStem: true })
+    expect(dense.steps[0]).toMatchObject({ kind: 'encode', output: 'x' })
+    const encode = dense.steps[0]!
+    expect(dense.steps[1]).toMatchObject({
+      kind: 'conv',
+      input: encode.kind === 'encode' ? encode.output : '',
+    })
+    expect(dense.flops).toBe(plan.flops)
+    // The sparse stem matches it to the bit only while its sum is not split (`SPLIT_TARGET`).
+    const stem = dense.steps[1]!
+    expect(stem.kind === 'conv' && convLayout(stem).splits).toBe(1)
   })
 
   it('refuses the MatMul rewrite in a sentence', () => {
