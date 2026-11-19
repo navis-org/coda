@@ -47,6 +47,8 @@ import {
   planTexts,
   rowExtend,
   leavesWith,
+  listedAutoPairs,
+  listedAutoParams,
   liveQueue,
   neuronsOf,
   pickedNeuron,
@@ -2070,6 +2072,171 @@ describe('Auto-extend, as the card reads it', () => {
       const menu = extendMenu({ choice: 'off', blocked: undefined, held: false, noAuto })
       expect(menu[1]).toMatchObject({ disabled: true, title: noAuto })
       expect(menu[0]!.disabled).toBe(false)
+    })
+  })
+
+  /*
+   * `Auto-extend listed` (user, 2026-11-19): Auto-extend on every listed row whose first
+   * candidate clears, the reader's turn-downs left out — and what it accepts stays Auto-extend's.
+   */
+  describe('Auto-extend listed', () => {
+    const LISTED_TIPS = tips([
+      { id: '100', end: 1, steps: 0, shown: true },
+      { id: '100', end: 2, steps: 0, shown: true },
+      { id: '100', end: 3, steps: 0, shown: false },
+      { id: '100', end: 4, steps: 0, shown: true },
+      { id: '100', end: 5, steps: 0, shown: true },
+      // A second end of the neuron offering the same piece: one pair, one press.
+      { id: '100', end: 6, steps: 0, shown: true },
+      { id: '100', end: 7, steps: 0, shown: true },
+      { id: '100', end: 8, steps: 0, shown: true },
+      { id: '201', end: 0, steps: 1, junction: true },
+      { id: '201', end: 1, steps: 1, shown: true },
+      { id: '201', end: 2, steps: 1, shown: true },
+    ])
+    const LISTED_CANDIDATES = candidatesTable([
+      { neuron: '100', end: 1, id: '201', rank: 1, l2: 2 },
+      { neuron: '100', end: 2, id: '202', rank: 1, l2: 2 },
+      { neuron: '100', end: 3, id: '203', rank: 1, l2: 2 },
+      { neuron: '100', end: 4, id: '204', rank: 1, l2: 2, organelle: true },
+      { neuron: '100', end: 5, id: '205', rank: 1, l2: 2 },
+      { neuron: '100', end: 6, id: '201', rank: 1, l2: 2 },
+      { neuron: '100', end: 7, id: '207', rank: 1, l2: 2 },
+      { neuron: '100', end: 8, id: '208', rank: 1, l2: 2 },
+      { neuron: '201', end: 1, id: '301', rank: 1, l2: 2 },
+      // Accepted on the neuron already: a second accept would be a second merge.
+      { neuron: '201', end: 2, id: '205', rank: 1, l2: 2 },
+    ])
+    const queue = buildQueue(LISTED_TIPS, LISTED_CANDIDATES)
+    const PARAMS = { verdicts: '100/202=reject;100/205=accept;100/208=unsure' }
+    // 207 stands for a piece that cannot be extended (merged, edited since, unwired).
+    const blocked = (id: string) => (id === '207' ? 'merged' : undefined)
+
+    const listedFor = (params: Readonly<Record<string, unknown>>) => {
+      const state = reviewStateOf(params, queue)
+      const texts = planTexts(params, state.stored)
+      const tree = state.growth.tree
+      const mine = tipsOf(liveQueue(queue, tree), '100')
+      return listedAutoPairs(arrangeTree(mine, '100', tree, DEFAULT_FILTERS), {
+        extended: decodeExtend(texts.extend),
+        autoPressed: decodeExtend(texts.autoRoots),
+        accepted: state.growth.accepted,
+        unjudged: state.unjudged,
+        searched: new Set(state.growth.searched.map((piece) => piece.id)),
+        offered: autoOffered(queue),
+        stored: state.stored,
+        acceptedHere: acceptedPieces(mine, state.verdicts),
+        verdicts: state.verdicts,
+        blocked,
+      })
+    }
+    const press = (params: Readonly<Record<string, unknown>>) => ({
+      ...params,
+      ...listedAutoParams(params, listedFor(params), autoOffered(queue)),
+    })
+    const candidateOf = (neuron: string, end: number) =>
+      queue.find((tip) => tip.neuronId === neuron && tip.endUid === end)!.candidates[0]!
+
+    it('takes each listed first that clears, and leaves out what the reader turned down', () => {
+      /*
+       * Not 202 (rejected), 203 (under the cutoff), 204 (an organelle), 207 (blocked) or 208
+       * (unsure). 205, accepted by the reader, is pressed Auto-extend on too.
+       */
+      expect(listedFor(PARAMS)).toEqual(['100/201', '100/205'])
+    })
+
+    it('leaves a piece the reader extended by hand as it is', () => {
+      expect(listedFor({ ...PARAMS, extend: '100/205' })).toEqual(['100/201'])
+    })
+
+    it('leaves out what a filter hides', () => {
+      const state = reviewStateOf(PARAMS, queue)
+      const mine = tipsOf(liveQueue(queue, state.growth.tree), '100')
+      const rows = arrangeTree(mine, '100', state.growth.tree, DEFAULT_FILTERS).filter(
+        (row) => row.tip.endUid !== 1 && row.tip.endUid !== 6,
+      )
+      const pairs = listedAutoPairs(rows, {
+        extended: new Set(),
+        autoPressed: new Set(),
+        accepted: new Map(),
+        unjudged: new Map(),
+        searched: new Set(),
+        offered: autoOffered(queue),
+        stored: state.stored,
+        acceptedHere: acceptedPieces(mine, state.verdicts),
+        verdicts: state.verdicts,
+        blocked,
+      })
+      expect(pairs).toEqual(['100/205'])
+    })
+
+    it('writes Auto-extend presses, and no verdict', () => {
+      const write = listedAutoParams(PARAMS, ['100/201', '100/205'], autoOffered(queue))
+      expect(write).toEqual({
+        extend: '100/201;100/205',
+        autoRoots: '100/201;100/205',
+        // The turn-downs it could now take, as an Auto-extend press writes them.
+        autoRefused: '100/202;100/208',
+      })
+    })
+
+    it('accepts on SEAM’s word, not the reader’s, and grows the tree from each', () => {
+      const after = press(PARAMS)
+      const state = reviewStateOf(after, queue)
+      expect(state.stored.has('100/201')).toBe(false)
+      expect(state.verdicts.get('100/201')).toBe('accept')
+      // Its own press: the `auto` tag names the piece itself.
+      expect(state.unjudged.get('100/201')).toBe('201')
+      expect(state.unjudged.has('100/205')).toBe(false)
+      expect([...state.plan.roots].sort()).toEqual(['201', '205'])
+      // Auto-extend took 301 beyond it, and not 205, which is the reader's.
+      expect(state.growth.accepted.get('201/301')).toBe('201')
+      expect(state.growth.accepted.has('201/205')).toBe(false)
+      // A second press finds nothing left: each is pressed, or held, or in the neuron already.
+      expect(listedFor(after)).toEqual([])
+    })
+
+    it('makes a pair the reader’s on any verdict', () => {
+      const after = press(PARAMS)
+      const accept = judgedParams(
+        after,
+        '100',
+        candidateOf('100', 1),
+        'accept',
+        undefined,
+        true,
+      )
+      expect(accept.write.extend).toBeUndefined()
+      const kept = reviewStateOf({ ...after, ...accept.write }, queue)
+      expect(kept.unjudged.has('100/201')).toBe(false)
+      expect(kept.plan.roots.has('201')).toBe(true)
+
+      const reject = judgedParams(
+        after,
+        '100',
+        candidateOf('100', 1),
+        'reject',
+        undefined,
+        true,
+      )
+      expect(reject.write).toMatchObject({ extend: '100/205', autoRoots: '100/205' })
+      const rejected = reviewStateOf({ ...after, ...reject.write }, queue)
+      expect(rejected.verdicts.get('100/201')).toBe('reject')
+    })
+
+    it('takes its accept back when its Auto-extend is stopped', () => {
+      const after = press(PARAMS)
+      const write = extendParams(after, '100', '201', 'off', true, autoOffered(queue))
+      const state = reviewStateOf({ ...after, ...write }, queue)
+      expect(state.verdicts.has('100/201')).toBe(false)
+    })
+
+    it('reads a press with no verdict as taken, and only a press', () => {
+      const pressed = { ...PARAMS, extend: '100/201;100/205', autoRoots: '100/201' }
+      expect(planTexts(pressed, decodeVerdicts(PARAMS.verdicts)).taken).toBe('100/201')
+      // Extended by hand with no verdict: not accepted, as before.
+      const state = reviewStateOf({ ...PARAMS, extend: '100/201;100/205' }, queue)
+      expect(state.verdicts.has('100/201')).toBe(false)
     })
   })
 })

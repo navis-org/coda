@@ -262,12 +262,9 @@ export function growAuto(
       for (const id of firsts(piece)) {
         if (reserved.has(id) || placed.has(id)) continue
         if (plan.refused.has(verdictKey(piece.id, id))) continue
-        const rival = claims.get(id)
-        const better =
-          !rival ||
-          piece.depth < rival.parent.depth ||
-          (piece.depth === rival.parent.depth && compareIds(piece.id, rival.parent.id) < 0)
-        if (better) claims.set(id, { parent: piece, root: from.root, layer: from.layer + 1 })
+        if (nearerClaim(piece, claims.get(id)?.parent)) {
+          claims.set(id, { parent: piece, root: from.root, layer: from.layer + 1 })
+        }
       }
     }
     if (claims.size === 0) {
@@ -279,6 +276,22 @@ export function growAuto(
       if (claim.layer >= AUTO_DEPTH) last.add(id)
     }
   }
+}
+
+/**
+ * Whether a parent's claim on a candidate beats the claim held: **nearer the seed, then the lower
+ * id** — `piecesOf`'s rule, so a piece two parents offer goes to the one the tree would place it
+ * under. Read by `growAuto` and by `Auto-extend listed` (`listedAutoPairs`).
+ */
+export function nearerClaim(
+  parent: { readonly depth: number; readonly id: string },
+  held: { readonly depth: number; readonly id: string } | undefined,
+): boolean {
+  if (!held) return true
+  return (
+    parent.depth < held.depth ||
+    (parent.depth === held.depth && compareIds(parent.id, held.id) < 0)
+  )
 }
 
 /**

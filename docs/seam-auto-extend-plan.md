@@ -99,6 +99,45 @@ place as well as the segments (`inPlaceChanges`, see
 [viewers-neuroglancer.md](viewers-neuroglancer.md)), so the whole update applies at once, under the
 pointer, with nothing rebuilt.
 
+## Auto-extend listed (user, 2026-11-19)
+
+The ask: a button that adds every visible piece above the cutoff to the Auto-extend queue, unless
+it is rejected. Decisions: **what it accepts is Auto-extend's, not the reader's** (tagged `auto`,
+sent to SEAM as `auto-accepted` if merged), and **any verdict other than accept** keeps a row out,
+the rule Auto-extend keeps further out.
+
+**Which rows** (`listedAutoPairs`): the rows `arrangeTree` lists through the filters, scrolled
+into view or not, that show their tip's first candidate where Auto-extend would take it
+(`autoOffered`), less the turned-down, a piece in the neuron already by another road
+(`acceptedElsewhere`), and **a piece extended already**, by hand or by Auto-extend (`rowExtend`) —
+the first /code-review found the button turning a hand Extend into an Auto-extend, on the one
+kind of row a filter cannot hide (`arrangeTree` always lists a row hosting an extended piece). Past that, **the row's own Auto-extend item decides** (`extendMenu`): a row
+whose item is greyed out (blocked, held by a press further up) or would stop one is left out, so a
+new reason to grey the item out reaches the button too. A piece two rows offer goes to one parent
+by `growAuto`'s rule (`nearerClaim`, shared). Why a piece is blocked is one callback on the card
+(`blockedOf`), read by the rows and the button.
+
+**What it writes** (`listedAutoParams`): what `extendParams` writes for one Auto-extend press, for
+each pair — the pair in `extend` and `autoRoots`, and the refusals it could now take
+(`refusalsBefore`, shared) — **but no verdict**. One `setParams`, one undo step, then a run of the
+search.
+
+**A press with no verdict is the button's accept** (`extendedKeys`, `PlanTexts.taken`). Every other
+writer of `autoRoots` writes an accept with it (the menu is on accepted rows only, and
+`extendParams` writes the accept of a pair Auto-extend took), and a verdict press or a stop changes
+the state: a verdict stores one, and Reject, Ends, Unsure, clearing and a stop take the pair out of
+`autoRoots`. So no param says which presses the button made: a first version kept one,
+`autoTaken`, and the /simplify pass found it derivable. `extendedKeys` counts such a pair as
+extended, and `autoJudged` adds it to `unjudged`, each to itself, which tags the row `auto`, counts
+it, and marks the merge `auto` at Submit. Writing the reader's accept instead would send SEAM its
+own pick back as a reader's. **The search is told nothing new**: to it these are Auto-extend
+presses like any other, so `suggestMerges.ts` did not change.
+
+**How a taken pair stops being Auto-extend's.** Accept makes it the reader's, and the press stays.
+Any other verdict takes the press out with the pair. Stopping its Auto-extend (`off`) leaves it
+with no verdict and no press, so not accepted; `Extend` from the menu writes the reader's accept,
+as it does for any unjudged pair.
+
 ## Known, and left
 
 - **The wait is not priced** for pieces Auto-extend has yet to find. `warnOverWait` counts what is
