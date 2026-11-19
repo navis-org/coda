@@ -3626,7 +3626,7 @@ input.field--combo {
   min-width: 0;
 }
 .context-menu__endpoint-node {
-  color: var(--text);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -11403,7 +11403,7 @@ details[open] > summary.tile__label {
   padding: 3px 6px;
   border: 1px solid var(--border);
   border-radius: 3px;
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--text-secondary);
   cursor: pointer;
 }
