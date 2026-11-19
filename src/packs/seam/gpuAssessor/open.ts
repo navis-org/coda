@@ -30,6 +30,27 @@ import type { ModelSession, OpenOptions } from '../../../ml/session'
  */
 export const GPU_ASSESSOR_VARIANT = 'conv'
 
+/**
+ * How many patches a caller should keep in flight with this runtime (`scoreCandidates`'
+ * `inFlight`).
+ *
+ * **Twelve, measured in both browsers** (2026-11-19, `pnpm probe:gpu-browsers`, M3 Max). In
+ * Firefox every wait for the GPU costs ~100 ms whatever the work — an empty submit included — so
+ * a patch waited on alone costs 100 ms against ~30 of computing; in flight together, 4 cost 50 ms
+ * a patch, 12 cost 33, and 24 and 57 no less (33, 32). Chrome's patch is 21 ms alone and 19-20
+ * at any depth. Past twelve there is nothing left to buy, and each patch in flight holds an
+ * 8.5 MB upload in the browser's staging until the GPU reaches it.
+ *
+ * **Not six, though six measured the same here.** What a depth must do is keep the GPU busy
+ * across one ~100 ms wait, and this laptop computes about three patches in that time; a GPU three
+ * times as fast needs about ten. Twelve covers it, at ~100 MB of staging.
+ *
+ * Here and not in the scoring loop, because it is a fact about this runtime: ONNX Runtime's
+ * worker is not known to take overlapping runs, so `scoreCandidates` defaults to one at a time
+ * and `ASSESSOR_RUNTIME` carries this beside the opener it belongs to.
+ */
+export const GPU_ASSESSOR_IN_FLIGHT = 12
+
 export function openGpuAssessor(
   options: Omit<OpenOptions, 'createWorker' | 'variant'>,
 ): Promise<ModelSession> {

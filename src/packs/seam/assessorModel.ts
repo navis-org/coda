@@ -23,7 +23,11 @@
  * plausible logit.
  */
 
-import { GPU_ASSESSOR_VARIANT, openGpuAssessor } from './gpuAssessor/open'
+import {
+  GPU_ASSESSOR_IN_FLIGHT,
+  GPU_ASSESSOR_VARIANT,
+  openGpuAssessor,
+} from './gpuAssessor/open'
 import type { SeamRuntime } from './openWindowModel'
 import { PATCH_NM, PATCH_VOXELS } from './patchBox'
 import type { PipelineFits } from './pipelineFits'
@@ -65,6 +69,7 @@ export const ORT_ASSESSOR_VARIANT = 'matmul'
 export const ASSESSOR_RUNTIME: SeamRuntime = {
   variant: GPU_ASSESSOR_VARIANT,
   open: openGpuAssessor,
+  inFlight: GPU_ASSESSOR_IN_FLIGHT,
 }
 
 /** What the pack reads out of a `merge-assessor` manifest's `config`. */

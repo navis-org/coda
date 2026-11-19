@@ -91,7 +91,12 @@ async function open(
   return loaded
 }
 
-async function run(request: Extract<WorkerRequest, { type: 'run' }>): Promise<WireTensor[]> {
+/**
+ * Checked synchronously and handed to the network, and the answer returned as a promise that
+ * closes over nothing of the request: with patches in flight (`GPU_ASSESSOR_IN_FLIGHT`), a
+ * request held until its answer would keep twelve 8.4 MB patches alive that the GPU already has.
+ */
+function run(request: Extract<WorkerRequest, { type: 'run' }>): Promise<WireTensor[]> {
   const model = opened
   if (!model || request.model !== model.id || request.part !== model.part)
     throw new Error(`${request.model}/${request.part} is not open`)
@@ -114,21 +119,41 @@ async function run(request: Extract<WorkerRequest, { type: 'run' }>): Promise<Wi
   if (wanted.some((name) => name !== model.output)) {
     throw new Error(`${model.part} has one output, ${model.output}`)
   }
-  const logit = await model.network.score(new Float32Array(feed.data))
-  return [
-    { name: model.output, type: 'float32', dims: [1], data: Float32Array.of(logit).buffer },
-  ]
+  const { output } = model
+  return model.network
+    .score(new Float32Array(feed.data))
+    .then((logit) => [
+      { name: output, type: 'float32', dims: [1], data: Float32Array.of(logit).buffer },
+    ])
+}
+
+/** Post a run's answer once it comes, holding only its id. */
+async function answer(id: number, tensors: Promise<WireTensor[]>) {
+  try {
+    const got = await tensors
+    post({ id, type: 'ok', tensors: got }, transfersOf(got))
+  } catch (error) {
+    post({ id, type: 'error', message: errorMessage(error) })
+  }
 }
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const request = event.data
+  if (request.type === 'run') {
+    // Not awaited in this frame, which holds the request and so the patch (`run`).
+    let tensors: Promise<WireTensor[]>
+    try {
+      tensors = run(request)
+    } catch (error) {
+      tensors = Promise.reject(error)
+    }
+    void answer(request.id, tensors)
+    return
+  }
   try {
     if (request.type === 'open') {
       const loaded = await open(request.id, request.manifestUrl, request.variant, request.task)
       post({ id: request.id, type: 'ok', loaded })
-    } else if (request.type === 'run') {
-      const tensors = await run(request)
-      post({ id: request.id, type: 'ok', tensors }, transfersOf(tensors))
     } else if (request.type === 'release') {
       // Nothing is ever held, so there is nothing to drop.
       post({ id: request.id, type: 'ok' })

@@ -253,6 +253,50 @@ describe('scoreCandidates', () => {
     expect(order.slice(0, 3)).toEqual(['cut 0', `cut ${PATCH_GROUP}`, 'run'])
   })
 
+  /*
+   * The hand-written assessor keeps patches in flight (`GPU_ASSESSOR_IN_FLIGHT`). The runner
+   * answers late and in reverse order within each burst; every logit must still land on its
+   * own candidate, and never more than `inFlight` runs may be out at once.
+   */
+  it('keeps up to `inFlight` runs out and still answers each candidate', async () => {
+    const present = [4, 0, 6, 2, 1, 5, 3, 7, 8, 9]
+    let out = 0
+    let most = 0
+    const held: (() => void)[] = []
+    const release = () => {
+      for (const one of held.splice(0).reverse()) one()
+    }
+    const base = runner(() => 0)
+    const session = {
+      loaded: base.loaded,
+      run: vi.fn(async (request: Parameters<GraphRunner['run']>[0]) => {
+        out += 1
+        most = Math.max(most, out)
+        const call = session.run.mock.calls.length - 1
+        await new Promise<void>((resolve) => {
+          held.push(resolve)
+          // Released in reverse once three are waiting; the tail once no more arrive.
+          if (held.length === 3) release()
+          else setTimeout(release, 0)
+        })
+        out -= 1
+        expect(request.feeds).toHaveLength(1)
+        return [
+          {
+            name: 'logit',
+            type: 'float32' as const,
+            dims: [1],
+            data: Float32Array.of(100 + present[call]!).buffer,
+          },
+        ]
+      }),
+    } as unknown as GraphRunner & { run: ReturnType<typeof vi.fn> }
+    const got = await scoreCandidates(session, CONFIG, open(present), { inFlight: 3 })
+    expect(most).toBe(3)
+    expect([...got.logits]).toEqual(Array.from({ length: 10 }, (_, k) => 100 + k))
+    expect(got.scored).toBe(10)
+  })
+
   it('reports progress through the tip', async () => {
     const seen: number[] = []
     await scoreCandidates(

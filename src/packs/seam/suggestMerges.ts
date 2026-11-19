@@ -40,14 +40,13 @@
  * SEAM's own published numbers.
  *
  * **What it costs on top of the search is a quarter of an end, and that is browser-dependent.**
- * A measured run of 25 ends in Chrome took 6.2 s each with the network at 25% — 27 ms a patch,
- * the figure a bare probe got on the same GPU then; reading the patch sparsely in the stem has
- * since made it 22. The same run in Firefox took 11.0 s an end with
- * the network at half of it, because a WebGPU dispatch costs that browser far more to submit and
- * synchronise; `SECONDS_PER_PATCH` has the measurement and `SLOW_WEBGPU` is what says so on the
- * card. The checkpoint is a 133 MB download. The network is Coda's own WGSL implementation
- * rather than ONNX Runtime — 22 ms a patch against 136 — so most of an assessed end is the two
- * boxes it reads.
+ * 40 ends measured through the node on one laptop (2026-11-19): 19 ms a patch in Chrome and 29
+ * in Firefox, 1.8 s an end against 2.3. Firefox was 98 ms a patch and 6.2 s an end until the
+ * patches were kept in flight — every wait for the GPU costs it ~100 ms, and the network had
+ * waited once a patch; `SLOW_SECONDS_PER_PATCH` has the story. The card once told Firefox
+ * readers to try Chrome; at 1.3x an end that would overstate it, so it no longer does. The checkpoint is a 133 MB download. The network is Coda's own WGSL
+ * implementation rather than ONNX Runtime — 19 ms a patch against 136 — so most of an assessed
+ * end is the two boxes it reads.
  *
  * `Assess top` caps the patches per end; what the cap costs in answers is measured on SEAM's own
  * set, in `assessEnds.ts`' header, and the part worth knowing is that it does not only lose
@@ -79,8 +78,6 @@
  * token — SEAM's invariant 7, which holds in every phase of this pack.
  */
 
-import type { NodeHint } from '../../core/graph'
-import { NO_HINTS } from '../../core/graph'
 import type { EvalContext, ParamValues } from '../../core/node'
 import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
@@ -282,35 +279,30 @@ export const SECONDS_PER_END = 3.0
 /**
  * What one assessed candidate costs, in seconds: a 129³ patch cut and run.
  *
- * **22 ms, the figure measured through the node.** Since the stem reads the patch itself
- * (2026-11-19, `docs/seam-assessor-speed.md` §15): 21.1 ms best and 21.4 median in
- * `pnpm probe:gpu-assessor`, and 22 ms a patch through the node over 40 real ends, which is the
- * one taken: it is the mean over the patches a run actually meets. A patch whose objects fill
- * more of the window skips less of the stem and costs more; how much more is not measured. It was 27 before (§14), the same in a run and on a
- * bare page. The cut is about 40 ms a group of four and is prefetched one group deep, so it hides
- * behind the GPU that group costs and does not appear here.
+ * **20 ms, measured through the node and in a probe** (2026-11-19, Chrome, patches kept in flight,
+ * `docs/seam-assessor-speed.md` §16): 19 ms a patch over 40 real ends through the node, 19.8
+ * median in `pnpm probe:gpu-browsers` at `GPU_ASSESSOR_IN_FLIGHT`. It was 22 one at a time
+ * (§15), 27 before the stem read the patch itself (§14). A patch whose objects fill more of the
+ * window skips less of the stem and costs more; how much more is not measured. The cut is about
+ * 40 ms a group of four and is prefetched one group deep, so it hides behind the GPU that group
+ * costs and does not appear here.
  *
- * **It is a rate for one browser, and the spread between browsers is larger than anything else
- * on this page.** The same 25 ends on the same laptop and the same GPU measured **98 ms a
- * patch** in Firefox against 27 in Chrome — 11.0 s an end against 6.2 — because the cost is in
- * how a browser's WebGPU submits and synchronises a dispatch, not in the arithmetic. A ladder
- * of nine controlled rungs (`pnpm probe:assessor-gap`) cleared everything else: the loop, the
- * Pyodide cut beside it, `Chunk cache`'s bytes, a blocked main thread, a repainting page and
- * Chrome's own GPU flags are all worth under 7 ms between them.
+ * **It is a rate for one browser.** Firefox computes the same patch in ~30 ms, and until the
+ * patches were kept in flight it paid 98, because there every wait for the GPU costs ~100 ms;
+ * `SLOW_SECONDS_PER_PATCH` has it.
  *
  * **This is the fast figure and there is a second constant for the other**, rather than an
  * average of the two, which would be a number no reader experiences. `secondsPerEnd` asks
  * `slowGpuDispatch` which of them applies; `SLOW_SECONDS_PER_PATCH` carries the Firefox
  * measurement and the reason.
  *
- * The consequence is not only a number in a warning. In Chrome the scoring is now most of an end
- * (the search runs ahead of it), and `Assess top` the one lever on it that changes answers; at 98
- * it is most of the run in Firefox, and the cap the biggest lever there is. Which is why the node
+ * The consequence is not only a number in a warning. The scoring is about as long as the search
+ * now, and `Assess top` the one lever on it that changes answers. Which is why the node
  * reports the rate, and the fastest call beside it, after a run rather than this file claiming to
  * know (`runClock.ts`).
  *
  * **The ONNX Runtime path was 136 ms** for the same network and the same answer — its WebGPU
- * backend runs 3D `Conv` through a per-element shader — so this is about 6x cheaper. That is not
+ * backend runs 3D `Conv` through a per-element shader — so this is about 7x cheaper. That is not
  * only a faster run: it moves where an end's time *goes*, which is why `Assess top` no longer
  * promises much. `secondsPerEnd` is the sum.
  *
@@ -320,49 +312,28 @@ export const SECONDS_PER_END = 3.0
  * from. Both are recorded because prose contrasting against either was comparing a measurement
  * with something that was not one.)
  */
-const SECONDS_PER_PATCH = 0.022
+const SECONDS_PER_PATCH = 0.02
 
 /**
  * What a patch costs where the browser's WebGPU dispatch is the slow kind — `slowGpuDispatch`.
  *
- * **98 ms, the measured figure, not a safety margin.** The same 25 ends on one laptop and one
- * GPU: 27 ms a patch in Chrome and 98 in Firefox, 6.2 s an end against 11.0. Pricing every
- * reader at the fast rate left `warnOverWait` under-stating a 500-end Firefox run as about
- * thirty-five minutes where the measurement says ninety — and under-stating is the one direction
- * `docs/limits.md` says a guard rail must not fail in. `SECONDS_PER_END` records being caught by
- * exactly that once already.
+ * **33 ms, the larger of two measurements** (2026-11-19, Firefox 160, `docs/seam-assessor-speed.md`
+ * §16): 29 ms a patch over 40 real ends through the node (`pnpm probe:suggest-merges --browser
+ * firefox`), 33.3 in `pnpm probe:gpu-browsers` at `GPU_ASSESSOR_IN_FLIGHT`. The larger is taken
+ * because under-stating is the one direction `docs/limits.md` says a guard rail must not fail
+ * in; `SECONDS_PER_END` records being caught by exactly that once already.
  *
- * **Not re-measured since the sparse stem** (2026-11-19), which took ~5 ms of GPU work off a
- * patch and one dispatch of the ~40 that Firefox pays for. Left at the old figure, since a guard
- * rail must not under-state, until a Firefox run says what it is now.
+ * **It was 98, and the reason is the thing worth knowing.** Firefox answers every wait for the
+ * GPU in ~100 ms whatever the work — an empty submit included — so a network that waited once a
+ * patch paid ~100 ms for ~30 of computing, 6.2 s an end against Chrome's 1.8. The ladder of
+ * `pnpm probe:assessor-gap` could not see it: it drives Chrome only. Keeping patches in flight
+ * shares the wait (`GPU_ASSESSOR_IN_FLIGHT`), and what is left is Firefox's own arithmetic.
  *
- * It costs nothing to ask: the browser fact is already on hand for the card's hint, and
- * `slowGpuDispatch` answers `false` where there is no `navigator` at all (the MCP server, a
- * build-time render), which is the Chrome figure and the right default for a machine nobody is
- * waiting at.
+ * It costs nothing to ask, and `slowGpuDispatch` answers `false` where there is no `navigator`
+ * at all (the MCP server, a build-time render), which is the Chrome figure and the right default
+ * for a machine nobody is waiting at.
  */
-const SLOW_SECONDS_PER_PATCH = 0.098
-
-/**
- * What a reader on a browser with a costly WebGPU dispatch should know before a long run.
- *
- * Derived from the browser rather than written into the document (`NodeDefinition.readerHints`),
- * which is the whole reason it can be stated at all: it is false for most readers, and a
- * sentence saved by a Firefox user would ride a share link to a Chrome one.
- *
- * **Two sentences, with the measurement left out.** A draft quoted the figures — 98 ms a patch
- * against 27 — and named `Assess top` as the fallback. Both belong somewhere, and a hint box on
- * a card is not it: `docs/help.md` has the rule, and a reader who wants the number gets it from
- * the node's own report after a run. What a hint owes them is the one thing they cannot work out
- * for themselves, which is that the browser is the cause.
- */
-const SLOW_WEBGPU: readonly NodeHint[] = [
-  {
-    text:
-      'This assessor runs significantly slower in Firefox than in Chrome. If speed is a ' +
-      'problem, try running it in Chrome.',
-  },
-]
+const SLOW_SECONDS_PER_PATCH = 0.033
 
 /**
  * The patch box an end's whole list shares: a little over 8 µm of segmentation, read once.
@@ -540,7 +511,7 @@ export const suggestMergesNode = packNode({
       step: 5,
       absentMeans: 0,
       visibleIf: (params) => params.assessor !== NO_ASSESSOR,
-      help: 'How many of each end’s ranked candidates to put through the assessor, counting from the forest’s first. 0 is all of them, which is what SEAM does. **What it saves depends on your browser, by a lot**: the same 25 ends on the same laptop and the same GPU measured 27 ms a patch in Chrome, where the network was a quarter of the run, and 98 ms in Firefox, where it was half — 6.2 s an end against 11.0. On the Firefox run, capping at 10 took an end from 11.0 s to 4.5. Run once uncapped and read the `ms a patch` in the timing the node reports: under about 30 ms the cap buys little and a Filter Table above this node is the better lever, and well above it the cap is the biggest lever there is. What it costs is answers, and not only lost ones: flooring the rest of the list concentrates the first candidate’s share and so raises `q`, so a cap invents a few suggestions as well as losing a few. Against SEAM’s own 2,708 tips a cap of 25 changes the verdict on 5, and a cap of 10 on 21.',
+      help: 'How many of each end’s ranked candidates to put through the assessor, counting from the forest’s first. 0 is all of them, which is what SEAM does. **It usually saves little**: 40 ends on one laptop measured 19 ms a patch in Chrome and 29 in Firefox, 1.8 s and 2.3 s an end, with the network a fifth to a third of the run. Run once uncapped and read the `ms a patch` in the timing the node reports: around these rates a Filter Table above this node is the better lever, and only well above them is the cap worth what it costs. What it costs is answers, and not only lost ones: flooring the rest of the list concentrates the first candidate’s share and so raises `q`, so a cap invents a few suggestions as well as losing a few. Against SEAM’s own 2,708 tips a cap of 25 changes the verdict on 5, and a cap of 10 on 21.',
     },
     {
       id: 'chunkCacheMb',
@@ -590,11 +561,6 @@ export const suggestMergesNode = packNode({
       help: 'The moment each neuron was searched at, as `root=moment` entries (ISO 8601, UTC). Kept by the node: the first run that meets a neuron searches it at the present and writes it here, so the same suggestions come back for it after a reload and when you return to it from another neuron. The card’s ⟳ empties it, and the run after searches every neuron at the present. Where a root was edited before its moment, it is searched as it last stood; the card says so.',
     },
   ],
-
-  // Only where an assessor is picked: with none, nothing runs on the GPU and the sentence is
-  // about a cost this run does not pay.
-  readerHints: (params) =>
-    params.assessor !== NO_ASSESSOR && slowGpuDispatch() ? SLOW_WEBGPU : NO_HINTS,
 
   /*
    * The full published shape, before anything runs — invariant 2's reason. A column picker on a
@@ -2156,7 +2122,7 @@ function patchSteps(
    */
   const timed: GraphRunner = {
     loaded: assessor.session.loaded,
-    run: clock.around('running the network', (request: RunRequest) =>
+    run: clock.aroundQueue('running the network', (request: RunRequest) =>
       assessor.session.run(request),
     ),
   }
@@ -2181,9 +2147,8 @@ function patchSteps(
      * **Timed as three stages**, because that is how many different things it is and how many
      * different controls they answer to — see `STAGES`. The open is the time before the
      * callback's first line, since that is what `useAssessorBox` does in between; the network
-     * is a wrapper on `session.run`; and the cutting is what is left of the loop once the
-     * network's share is taken out of it, which is why the clock can be read as well as
-     * written.
+     * is a queue-timed wrapper on `session.run`; and the cutting is a wrapper on the box's
+     * `cut`, each call the Pyodide work for one group.
      */
     score: async (request) => {
       const askedAt = performance.now()
@@ -2191,12 +2156,13 @@ function patchSteps(
         request,
         async (open) => {
           clock.spend('handing the patch box to Python', performance.now() - askedAt)
-          const ranBefore = clock.spent('running the network')
-          const loopAt = performance.now()
-          const answer = await scoreCandidates(timed, assessor.config, open, { signal })
-          const ran = clock.spent('running the network') - ranBefore
-          clock.spend('cutting patches', performance.now() - loopAt - ran)
-          return answer
+          // The cut timed as its own calls: with runs in flight the network's queue is busy
+          // while the loop waits for a cut, so "the loop minus the network" would hide it.
+          const timedOpen = { ...open, cut: clock.around('cutting patches', open.cut) }
+          return scoreCandidates(timed, assessor.config, timedOpen, {
+            signal,
+            inFlight: assessor.inFlight,
+          })
         },
         { signal },
       )

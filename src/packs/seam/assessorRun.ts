@@ -29,10 +29,19 @@
  *
  * What the group size does control is the Pyodide crossing and the Cancel latency, which is why
  * patches are asked for in groups rather than one at a time or all at once.
+ *
+ * ## Several runs in flight, answered in order
+ *
+ * One patch a run, but not one run at a time where the runtime takes overlapping runs
+ * (`AssessorRunOptions.inFlight`): the hand-written one does, and in Firefox it is worth 3x
+ * (`GPU_ASSESSOR_IN_FLIGHT` has the measurement). The answers are taken in
+ * the order the patches were sent, and each goes to the candidate its patch was cut for, so the
+ * depth moves time and never an answer.
  */
 
 import { throwIfAborted } from '../../core/slice'
 import { soleGraph } from '../../ml/manifest'
+import type { WireTensor } from '../../ml/protocol'
 import type { GraphRunner } from '../../ml/session'
 import type { AssessorPatches, OpenAssessorBox } from '../../pyodide/assessorPatches'
 import type { AssessorConfig } from './assessorModel'
@@ -51,8 +60,9 @@ export type ScoringConfig = Pick<AssessorConfig, 'patchVoxels' | 'missingPatchSc
 /**
  * How many patches to ask Pyodide for at a time.
  *
- * **Not a Cancel bound.** The signal is looked at between every patch, so a Cancel waits one
- * inference — about 26.5 ms on Coda's own runtime — whatever this is; and the cut is off the critical path, because
+ * **Not a Cancel bound.** The signal is looked at between every patch, so a Cancel waits for one
+ * answer — a patch's inference, or one ~100 ms wait in Firefox — whatever this is; and the cut
+ * is off the critical path, because
  * the next group is asked for before this one is scored. What the number actually trades is
  * crossings against bytes held in JavaScript: 25 crossings for a hundred-candidate tip, against
  * 8.4 MB of patches live, doubled while a prefetch is outstanding.
@@ -61,6 +71,12 @@ export const PATCH_GROUP = 4
 
 export interface AssessorRunOptions {
   readonly signal?: AbortSignal
+  /**
+   * How many runs may be outstanding at once. 1, the default, waits for each answer before the
+   * next patch is sent — the only safe reading for a runtime nobody has shown takes overlapping
+   * runs. The hand-written assessor's figure is `GPU_ASSESSOR_IN_FLIGHT`.
+   */
+  readonly inFlight?: number
   /** 0..1 through this tip's candidates. Called per group. */
   readonly onProgress?: (fraction: number) => void
 }
@@ -162,6 +178,31 @@ export async function scoreCandidates(
   }
   let ahead = groupAt(0)
 
+  /*
+   * The runs sent and not yet answered, oldest first. Taken in that order, so a refusal names
+   * the earliest candidate that failed, and the answer cannot depend on the depth.
+   */
+  const depth = Math.max(1, Math.floor(options.inFlight ?? 1))
+  const flying: {
+    readonly candidate: number
+    readonly answer: Promise<readonly WireTensor[]>
+  }[] = []
+  const settleOldest = async () => {
+    const { candidate, answer } = flying.shift()!
+    const answered = await answer
+    const got = answered.find((one) => one.name === output)
+    if (!got) throw new Error(`${id} returned no ${output}`)
+    const value = new Float32Array(got.data)[0]
+    if (value === undefined || !Number.isFinite(value)) {
+      /*
+       * Refused rather than carried: a NaN would sort unpredictably and then poison the
+       * softmax over the whole list, taking every other candidate's share with it.
+       */
+      throw new Error(`${id} answered ${String(value)} for candidate ${candidate}`)
+    }
+    logits[candidate] = value
+  }
+
   for (let from = 0; ahead; from += PATCH_GROUP) {
     throwIfAborted(options.signal)
     const group = await ahead
@@ -184,7 +225,7 @@ export async function scoreCandidates(
        * of four, and not this.
        */
       const patch = new Float32Array(group.patches.subarray(k * voxels, (k + 1) * voxels))
-      const answered = await session.run({
+      const answer = session.run({
         part,
         feeds: [
           {
@@ -195,23 +236,24 @@ export async function scoreCandidates(
           },
         ],
       })
-      const got = answered.find((one) => one.name === output)
-      if (!got) throw new Error(`${id} returned no ${output}`)
-      const value = new Float32Array(got.data)[0]
-      if (value === undefined || !Number.isFinite(value)) {
-        /*
-         * Refused rather than carried: a NaN would sort unpredictably and then poison the
-         * softmax over the whole list, taking every other candidate's share with it.
-         */
-        throw new Error(`${id} answered ${String(value)} for candidate ${candidate}`)
-      }
-      logits[candidate] = value
+      // Handled where it is made, as the prefetch above is: a Cancel or an earlier refusal
+      // leaves the loop with runs still out, and nobody will await them.
+      void answer.catch(() => {})
+      flying.push({ candidate, answer })
+      if (flying.length >= depth) await settleOldest()
     }
-    options.onProgress?.(Math.min(from + PATCH_GROUP, box.present.length) / box.present.length)
+    // What has been answered or could not be cut, as a share of the box's candidates; the
+    // runs still out are the difference.
+    const reached = Math.min(from + PATCH_GROUP, box.present.length) - flying.length
+    if (reached < box.present.length) options.onProgress?.(reached / box.present.length)
   }
-  // A tip whose box could cut nothing never enters the loop, and a progress bar that never
-  // reaches its end reads as a run that stalled rather than one with no work in it.
-  if (box.present.length === 0) options.onProgress?.(1)
+  while (flying.length > 0) {
+    throwIfAborted(options.signal)
+    await settleOldest()
+  }
+  // Once, at the end — also for a tip whose box could cut nothing, which never enters the
+  // loop: a progress bar that never reaches its end reads as a run that stalled.
+  options.onProgress?.(1)
 
   return {
     logits,

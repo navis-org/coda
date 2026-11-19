@@ -7,8 +7,13 @@
  * and reused for every patch, so scoring a patch is one 8.5 MB upload, ~40 dispatches and a
  * 4-byte read back.
  *
- * **One patch at a time.** The scoring loop (`assessorRun.ts`) already feeds one, and the
- * buffers are shared between calls, so `score` queues its callers rather than interleaving them.
+ * **Submitted one at a time, read back together.** The buffers are shared between calls, so
+ * `score` submits its callers in turn; but it does not wait for one patch's answer before
+ * submitting the next. The GPU runs submitted work in order, so patch *n+1*'s upload cannot land
+ * before patch *n* has been computed, and each patch's logit is copied to a read-back buffer of
+ * its own. That is what lets a caller keep several patches in flight, which Firefox needs: it
+ * answers every wait for the GPU in ~100 ms (`GPU_ASSESSOR_IN_FLIGHT` has the measurement). The
+ * answers are the same to the bit either way.
  *
  * **The network keeps nothing of the plan.** The plan's weights are views into the 133 MB file,
  * so a scoring method closing over the build's scope would keep the file alive for the session
@@ -84,7 +89,8 @@ export class AssessorNetwork {
   private readonly owned: readonly GPUBuffer[]
   private readonly lab: GPUBuffer
   private readonly logit: GPUBuffer
-  private readonly readback: GPUBuffer
+  /** Read-back buffers no patch is using, one per patch once in flight; made as needed. */
+  private readonly spare: GPUBuffer[] = []
   /** The patch's edge in voxels: what a caller must feed. */
   readonly edge: number
   /** Multiply-adds × 2 a patch, for a TFLOP/s figure. */
@@ -98,7 +104,6 @@ export class AssessorNetwork {
     owned: readonly GPUBuffer[]
     lab: GPUBuffer
     logit: GPUBuffer
-    readback: GPUBuffer
     edge: number
     flops: number
   }) {
@@ -107,7 +112,6 @@ export class AssessorNetwork {
     this.owned = parts.owned
     this.lab = parts.lab
     this.logit = parts.logit
-    this.readback = parts.readback
     this.edge = parts.edge
     this.flops = parts.flops
     this.bytes = parts.owned.reduce((n, one) => n + one.size, 0)
@@ -118,23 +122,41 @@ export class AssessorNetwork {
 
   /** One patch, (X, Y, Z) float32 labels at the plan's edge, to one logit. */
   score(patch: Float32Array): Promise<number> {
-    return this.serial(async () => {
-      this.load(patch)
-      const encoder = this.device.createCommandEncoder()
-      const pass = encoder.beginComputePass()
-      for (const one of this.dispatches) record(pass, one)
-      pass.end()
-      encoder.copyBufferToBuffer(this.logit, 0, this.readback, 0, 4)
-      this.device.queue.submit([encoder.finish()])
-      await this.readback.mapAsync(GPUMapMode.READ)
-      // Unmapped whatever happens: a buffer left mapped refuses every later `mapAsync`, so one
-      // failed read would fail every patch after it.
-      try {
-        return new Float32Array(this.readback.getMappedRange())[0]!
-      } finally {
-        this.readback.unmap()
-      }
-    })
+    // In turn up to the submit (behind a `profile` too, which reuses the buffers between its
+    // awaits); the wait for the answer is outside the queue, so the next patch need not wait.
+    // Nothing that waits for the answer closes over `patch`, so a patch in flight is the
+    // browser's staging copy alone once it is submitted.
+    return this.serial(async () => this.submit(patch)).then((readback) => this.read(readback))
+  }
+
+  private submit(patch: Float32Array): GPUBuffer {
+    this.load(patch)
+    const readback =
+      this.spare.pop() ??
+      this.device.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      })
+    const encoder = this.device.createCommandEncoder()
+    const pass = encoder.beginComputePass()
+    for (const one of this.dispatches) record(pass, one)
+    pass.end()
+    encoder.copyBufferToBuffer(this.logit, 0, readback, 0, 4)
+    this.device.queue.submit([encoder.finish()])
+    return readback
+  }
+
+  private async read(readback: GPUBuffer): Promise<number> {
+    // Unmapped whatever happens: a buffer left mapped refuses every later `mapAsync`, so one
+    // failed read would fail the patch that next took it. (Unmapping one never mapped is a no-op.)
+    try {
+      await readback.mapAsync(GPUMapMode.READ)
+      return new Float32Array(readback.getMappedRange())[0]!
+    } finally {
+      readback.unmap()
+      if (this.destroyed) readback.destroy()
+      else this.spare.push(readback)
+    }
   }
 
   /**
@@ -163,12 +185,19 @@ export class AssessorNetwork {
     })
   }
 
-  /** Refuse new work now; free the buffers once the run in flight, if any, has finished. */
+  /**
+   * Refuse new work now; free the buffers once the GPU has finished what was submitted. A
+   * patch still being read back frees its own read-back buffer when its answer arrives.
+   */
   destroy(): void {
     this.destroyed = true
-    void this.queue.then(() => {
-      for (const one of this.owned) one.destroy()
-    })
+    void this.queue
+      .then(() => this.device.queue.onSubmittedWorkDone())
+      .catch(() => {})
+      .then(() => {
+        for (const one of this.owned) one.destroy()
+        for (const one of this.spare.splice(0)) one.destroy()
+      })
   }
 
   private load(patch: Float32Array): void {
@@ -279,7 +308,6 @@ async function assemble(
     throw new Error(`The plan does not read its ${plan.edge}³ patch at that edge`)
   const lab = buffer(plan.edge ** 3 * 4)
   const logit = buffer(4)
-  const readback = buffer(4, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST)
 
   // Intermediates share buffers once dead (`bufferSlots`).
   const { sizes, slotOf } = bufferSlots(plan.steps)
@@ -422,7 +450,6 @@ async function assemble(
     owned,
     lab,
     logit,
-    readback,
     edge: plan.edge,
     flops: plan.flops,
   })

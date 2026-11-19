@@ -121,6 +121,7 @@
     "probe:conv3d-kernel": "node scripts/probe-conv3d-kernel.mjs",
     "probe:assessor-gap": "node scripts/probe-assessor-gap.mjs",
     "probe:gpu-assessor": "node scripts/probe-gpu-assessor.mjs",
+    "probe:gpu-browsers": "node scripts/probe-gpu-browsers.mjs",
     "probe:suggest-merges": "node scripts/probe-suggest-merges.mjs"
   },
   "dependencies": {

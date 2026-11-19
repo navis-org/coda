@@ -601,3 +601,55 @@ is no longer allocated and `encode` no longer compiled.
 
 What is left of a patch is the dense convolutions, stage 0's four first: 64 channels on 33³,
 running at ~4 TFLOP/s on the fast path.
+
+## 16. Firefox waits ~100 ms for any GPU answer: patches in flight, 98 ms to 29 (2026-11-19)
+
+The node measured 98 ms a patch in Firefox against 27 in Chrome, and `probe:assessor-gap` had
+cleared everything around the network — but only in Chrome, the one browser the probes could
+drive, so "Chrome is better optimised" was a guess about where the 71 ms went. `pnpm
+probe:gpu-browsers` drives Firefox too, over WebDriver BiDi (`scripts/lib/firefoxProbe.mjs`), and
+runs the same page in both. Firefox 160 against Chrome, M3 Max, the fixture's six real patches:
+
+| ms, median | Firefox | Chrome |
+|---|---|---|
+| `score()`, one at a time | 100 | 21.2 |
+| `score()`, 4 in flight, a patch | 50 | 20.2 |
+| `score()`, 12 in flight, a patch | 33.3 | 19.8 |
+| `score()`, 24 in flight, a patch | 33.3 | 19.8 |
+| the 8.5 MB upload alone, waited on | 100 | 1.1 |
+| an empty submit, waited on | 100 | 0.1 |
+| a read back after 0 / 400 trivial dispatches | 100 / 100 | 0.3 / 0.9 |
+
+**Every wait for the GPU costs Firefox ~100 ms, whatever the work.** An empty submit takes as
+long as a patch, and every step of the network timed alone (`profile`) reads 100. With several
+patches in flight the totals are whole multiples of 100 ms (57 patches took exactly 1,800), so
+Firefox seems to notice finished GPU work on a timer of about that period. Under the wait,
+Firefox computes a patch in about 30 ms — 1.5x Chrome, not 3.6x. A raw version of the same
+experiment, one command buffer holding several patches with one read back, came out the same as
+separate submits in flight, so it is the waiting and not the submitting.
+
+**So the network no longer waits for one answer before submitting the next.** `score` submits in
+turn (the buffers are shared) and reads each logit back through a read-back buffer of its own,
+outside the queue; the GPU runs submitted work in order, so a patch's upload cannot overtake the
+patch before it. `scoreCandidates` keeps up to `inFlight` runs out and takes the answers in
+order, and the runtime record carries the depth (`ASSESSOR_RUNTIME.inFlight`,
+`GPU_ASSESSOR_IN_FLIGHT` = 12, past which nothing more was bought). The run clock times the
+network as a queue (`aroundQueue`), the time it was busy, since twelve outstanding calls each
+lasting the twelve would charge it twelve times over, and keeps no per-call shape (Firefox's
+answers arrive in batches, so most gaps read 0). `cutting patches` is timed on the cut's own
+calls, since "the loop minus the network" stopped meaning anything once the network's queue was
+busy while the loop waited for a cut. The answers are the same to the bit — the
+probe checks every in-flight answer against the one-at-a-time one — and the node's answer
+fingerprint is the same in both browsers and at both depths.
+
+Through the node, 40 ends of the same neuron, `pnpm probe:suggest-merges`, the same day:
+
+| | a patch | an end |
+|---|---|---|
+| Firefox, one at a time | 98 ms | 6.2 s |
+| **Firefox, 12 in flight** | **29 ms** | **2.3 s** |
+| Chrome, 12 in flight | 19 ms | 1.8 s |
+
+`SLOW_SECONDS_PER_PATCH` is 0.033 (the probe's figure, the larger) and `SECONDS_PER_PATCH` 0.02.
+The node probe takes `--browser firefox`; Firefox runs with a window, since headless it offers no
+WebGPU adapter.
