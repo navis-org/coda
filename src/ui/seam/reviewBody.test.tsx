@@ -227,6 +227,8 @@ function draw(
 }
 
 const rows = () => [...document.querySelectorAll('.review-row')]
+/** The verdicts as the store holds them: a press writes through `setParams`, `recent` with it. */
+const storedVerdicts = () => useGraphStore.getState().graph.nodes[0]!.params['verdicts']
 
 describe('the review card', () => {
   /** The controls the card exists for. A body drawing only the fields it liked would hide them. */
@@ -394,19 +396,42 @@ describe('the review card', () => {
    * said "not a merge" means that one, not the tip's first.
    */
   it('records a verdict against the candidate being shown', () => {
-    const written = draw({ current: at(11), rank: 2 })
+    draw({ current: at(11), rank: 2 })
     fireEvent.click(rows()[0]!.querySelectorAll('.review-row__verdict')[1]!)
-    expect(written['verdicts']).toBe('720575940621522189/648518346356867476=reject')
+    expect(storedVerdicts()).toBe('720575940621522189/648518346356867476=r')
+  })
+
+  /**
+   * The full work of the last ten neurons worked on (`reviewEviction.ts`, user, 2026-11-19): a
+   * press on an eleventh clears the oldest's verdicts in the same edit.
+   */
+  it('clears the oldest neuron’s work as an eleventh is started', () => {
+    const others = Array.from({ length: 10 }, (_, i) => `72057594000000000${i}`)
+    draw({
+      current: at(11),
+      rank: 1,
+      verdicts: others.map((id) => `${id}/648518346000000001=r`).join(';'),
+      recent: others.join(';'),
+    })
+    fireEvent.click(rows()[0]!.querySelectorAll('.review-row__verdict')[1]!)
+    const params = useGraphStore.getState().graph.nodes[0]!.params
+    expect(String(params['verdicts'])).not.toContain(others[0])
+    expect(String(params['verdicts'])).toContain(others[1])
+    expect(String(params['recent']).split(';')).toEqual([...others.slice(1), NEURON])
+    // Nothing on the card shows it went, so the status bar says so, and how to have it back.
+    expect(useGraphStore.getState().notice).toMatch(
+      /^Cleared the verdicts .* of 1 neuron .* back\.$/,
+    )
   })
 
   it('clears a verdict when the same one is pressed again', () => {
-    const written = draw({
+    draw({
       current: at(11),
       rank: 1,
       verdicts: '720575940621522189/648518346368395605=accept',
     })
     fireEvent.click(rows()[0]!.querySelectorAll('.review-row__verdict')[0]!)
-    expect(written['verdicts']).toBe('')
+    expect(storedVerdicts()).toBe('')
   })
 
   it('narrows the list by confidence without touching the queue’s count', () => {
@@ -1080,7 +1105,7 @@ describe('extending a neuron from the review card', () => {
       draw({ extendOnAccept: true })
       const before = useGraphStore.getState().past.length
       fireEvent.click(accept(rows()[0]!))
-      expect(stored()['verdicts']).toBe(ACCEPTED)
+      expect(stored()['verdicts']).toBe(`${NEURON}/${PIECE}=a`)
       expect(stored()['extend']).toBe(`${NEURON}/${PIECE}`)
       expect(useGraphStore.getState().past.length).toBe(before + 1)
       expect(runNode).toHaveBeenCalledTimes(1)
@@ -1097,9 +1122,9 @@ describe('extending a neuron from the review card', () => {
 
     /** 61 chunks: accepted, and left to its button, which says why. */
     it('leaves a large piece to its button', () => {
-      const written = draw({ extendOnAccept: true })
+      draw({ extendOnAccept: true })
       fireEvent.click(accept(rows()[1]!))
-      expect(written['verdicts']).toBe(`${NEURON}/${SECOND}=accept`)
+      expect(storedVerdicts()).toBe(`${NEURON}/${SECOND}=a`)
       expect(stored()['extend']).toBe('')
       expect(runNode).not.toHaveBeenCalled()
       cleanup()
@@ -1112,9 +1137,9 @@ describe('extending a neuron from the review card', () => {
 
     it('extends nothing where nothing is wired back', () => {
       wiredBack = false
-      const written = draw({ extendOnAccept: true })
+      draw({ extendOnAccept: true })
       fireEvent.click(accept(rows()[0]!))
-      expect(written['verdicts']).toBe(ACCEPTED)
+      expect(storedVerdicts()).toBe(`${NEURON}/${PIECE}=a`)
       expect(stored()['extend']).toBe('')
       expect(runNode).not.toHaveBeenCalled()
     })
@@ -1187,7 +1212,7 @@ describe('extending a neuron from the review card', () => {
     // And a verdict there is about the piece and its candidate, not the neuron and it.
     fireEvent.click(lit[0]!.querySelector('.review-row__verdict')!)
     // (The piece's id sorts before the neuron's, and the param is written sorted.)
-    expect(written['verdicts']).toBe(`${PIECE}/${NEXT}=accept;${NEURON}/${PIECE}=accept`)
+    expect(storedVerdicts()).toBe(`${PIECE}/${NEXT}=a;${NEURON}/${PIECE}=a`)
   })
 
   /**
@@ -1242,7 +1267,7 @@ describe('extending a neuron from the review card', () => {
     )
     const before = useGraphStore.getState().past.length
     fireEvent.click(reject)
-    expect(stored()['verdicts']).toBe(`${PIECE}/${NEXT}=accept;${NEURON}/${PIECE}=reject`)
+    expect(stored()['verdicts']).toBe(`${PIECE}/${NEXT}=a;${NEURON}/${PIECE}=r`)
     // The piece beyond keeps its entry, unreachable until this one is extended again.
     expect(stored()['extend']).toBe(`${PIECE}/${NEXT}`)
     expect(useGraphStore.getState().past.length).toBe(before + 1)
@@ -1302,22 +1327,15 @@ describe('the split verdict button', () => {
   const face = () => rows()[0]!.querySelectorAll<HTMLButtonElement>('.review-row__verdict')[1]!
   const more = () => rows()[0]!.querySelector<HTMLButtonElement>('.review-row__more')!
   const item = (name: string) => screen.getByRole('menuitemradio', { name: new RegExp(name) })
-  /*
-   * The verdict as written, by either road: alone through the card's own setter, or through the
-   * store beside the refusal Auto-extend is to keep (this candidate clears the cutoff).
-   */
-  const verdictsOf = (written: Record<string, unknown>) =>
-    written['verdicts'] ?? useGraphStore.getState().graph.nodes[0]!.params['verdicts']
-
   it('reads Reject on a row with no verdict, and gives it in one press', () => {
-    const written = draw({ current: at(11), rank: 1 })
+    draw({ current: at(11), rank: 1 })
     expect(face().textContent).toBe('Reject')
     fireEvent.click(face())
-    expect(verdictsOf(written)).toBe('720575940621522189/648518346368395605=reject')
+    expect(storedVerdicts()).toBe('720575940621522189/648518346368395605=r')
   })
 
   it('opens Reject, Ends and Unsure, and records the one picked', () => {
-    const written = draw({ current: at(11), rank: 1 })
+    draw({ current: at(11), rank: 1 })
     fireEvent.click(more())
     expect(screen.getAllByRole('menuitemradio').map((one) => one.textContent)).toEqual([
       'Reject',
@@ -1325,7 +1343,7 @@ describe('the split verdict button', () => {
       'Unsure',
     ])
     fireEvent.click(item('Ends'))
-    expect(verdictsOf(written)).toBe('720575940621522189/648518346368395605=ends')
+    expect(storedVerdicts()).toBe('720575940621522189/648518346368395605=e')
     expect(screen.queryByRole('menuitemradio')).toBeNull()
   })
 
@@ -1363,13 +1381,13 @@ describe('the split verdict button', () => {
   })
 
   it('takes Ends back when the face is pressed again', () => {
-    const written = draw({
+    draw({
       current: at(11),
       rank: 1,
       verdicts: '720575940621522189/648518346368395605=ends',
     })
     fireEvent.click(face())
-    expect(written['verdicts']).toBe('')
+    expect(storedVerdicts()).toBe('')
   })
 })
 

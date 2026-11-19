@@ -45,7 +45,7 @@ import { prepareMerges } from '../../packs/seam/mergeBatch'
 import type { PlannedMerge, ReadyPlan } from '../../packs/seam/mergePlan'
 import { planMerges } from '../../packs/seam/mergePlan'
 import type { MergeProgress, MergeRecordEntry } from '../../packs/seam/mergeRecord'
-import { appendEntry, decodeRecord, settledEntry } from '../../packs/seam/mergeRecord'
+import { appendRecorded, decodeRecord, settledEntry } from '../../packs/seam/mergeRecord'
 import type { QueueTip } from '../../packs/seam/reviewQueue'
 import { reviewStateOf } from '../../packs/seam/reviewQueue'
 import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
@@ -241,7 +241,7 @@ function appendHeld(card: Card, entry: MergeRecordEntry): string | undefined {
   try {
     const hold = useGraphStore.getState().holdForWrite(card.docId, card.nodeId)
     try {
-      hold.update('merges', (now) => appendEntry(now, entry))
+      hold.update('merges', (now) => appendRecorded(now, entry))
     } finally {
       hold.release()
     }
@@ -374,7 +374,7 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
       progress: (candidateRoot, state) =>
         show({ progress: new Map(live.progress).set(candidateRoot, state) }),
       record: (entry: MergeRecordEntry) => {
-        hold.update('merges', (now) => appendEntry(now, entry))
+        hold.update('merges', (now) => appendRecorded(now, entry))
         if (entry.outcome === 'merged') {
           show({ neuronRoot: entry.newRoot })
           autoSent = sendAutoAccepted(entry.candidateRoot) || autoSent

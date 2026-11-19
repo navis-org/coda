@@ -935,28 +935,110 @@ export type Verdicts = ReadonlyMap<string, Verdict>
 
 export function decodeVerdicts(raw: unknown): Map<string, Verdict> {
   const out = new Map<string, Verdict>()
-  for (const entry of String(raw ?? '').split(';')) {
-    const at = entry.lastIndexOf('=')
-    if (at <= 0) continue
-    const key = entry.slice(0, at)
-    const value = entry.slice(at + 1) as Verdict
-    if (VERDICTS.includes(value)) out.set(key, value)
+  for (const [parent, item] of groupedItems(raw, (old) => {
+    // A key of the old shape, `${endUid}:${candidateId}=accept`: kept, never read.
+    const at = old.lastIndexOf('=')
+    const value = old.slice(at + 1) as Verdict
+    if (at > 0 && VERDICTS.includes(value)) out.set(old.slice(0, at).trim(), value)
+  })) {
+    const at = item.lastIndexOf('=')
+    const said = at > 0 ? verdictOfText(item.slice(at + 1).trim()) : undefined
+    if (said) out.set(`${parent}/${item.slice(0, at).trim()}`, said)
   }
   return out
 }
 
 /**
- * Write the verdicts back, in a stable order.
+ * Write the verdicts back, in a stable order, grouped by parent with one letter per verdict:
+ * `parent/piece=a,piece=r;parent/piece=u` (user, 2026-11-19, to keep a long campaign inside the
+ * browser's storage: 21 characters a verdict rather than 45). `decodeVerdicts` reads the flat
+ * form it replaced, `parent/piece=accept;…`, as groups of one.
  *
  * Sorted, because this string is a param and a param is in the provenance key: an unordered
  * encoding would re-key the node — and so re-run everything downstream — every time a map
  * happened to iterate differently.
  */
 export function encodeVerdicts(verdicts: Verdicts): string {
-  return [...verdicts.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, value]) => `${key}=${value}`)
-    .join(';')
+  const legacy: string[] = []
+  const pairs: string[] = []
+  for (const key of verdicts.keys()) (verdictPair(key) ? pairs : legacy).push(key)
+  const said = (key: string) => VERDICT_LETTER[verdicts.get(key)!]
+  return [
+    ...legacy.sort().map((key) => `${key}=${verdicts.get(key)!}`),
+    ...groupedPairs(pairs, (key, piece) => `${piece}=${said(key)}`),
+  ].join(';')
+}
+
+/** One letter per verdict in the param. */
+const VERDICT_LETTER: Readonly<Record<Verdict, string>> = {
+  accept: 'a',
+  reject: 'r',
+  ends: 'e',
+  unsure: 'u',
+}
+
+function verdictOfText(text: string): Verdict | undefined {
+  if (VERDICTS.includes(text as Verdict)) return text as Verdict
+  return VERDICTS.find((verdict) => VERDICT_LETTER[verdict] === text)
+}
+
+/**
+ * Pair keys as the params write them: each parent once, `parent/item,item`, parents and their
+ * items in sorted order — grouped by the parent read off each key, so the text has one spelling
+ * whatever characters an id holds.
+ */
+function groupedPairs(
+  keys: readonly string[],
+  item: (key: string, piece: string) => string,
+): string[] {
+  const byParent = new Map<string, string[]>()
+  for (const key of [...keys].sort()) {
+    const slash = key.indexOf('/')
+    const parent = key.slice(0, slash)
+    const items = byParent.get(parent) ?? []
+    if (items.length === 0) byParent.set(parent, items)
+    items.push(item(key, key.slice(slash + 1)))
+  }
+  return [...byParent.keys()]
+    .sort()
+    .map((parent) => `${parent}/${byParent.get(parent)!.join(',')}`)
+}
+
+/**
+ * `groupedPairs`' text read back: each `(parent, item)`, trimmed, the flat form it replaced being
+ * groups of one. A segment with no `/` is not a group; `other` is handed it, where it is wanted.
+ */
+function* groupedItems(
+  raw: unknown,
+  other?: (segment: string) => void,
+): Generator<readonly [string, string]> {
+  for (const segment of String(raw ?? '').split(';')) {
+    const slash = segment.indexOf('/')
+    if (slash < 0) {
+      other?.(segment)
+      continue
+    }
+    const parent = segment.slice(0, slash).trim()
+    if (!parent) continue
+    for (const item of segment.slice(slash + 1).split(',')) {
+      if (item.trim()) yield [parent, item.trim()]
+    }
+  }
+}
+
+/**
+ * The parents a pair param names — the head of each segment — without reading its pairs: what
+ * `withRecentWork` asks of every press, at a few hundred slices where decoding the verdicts is
+ * thousands of pairs.
+ */
+export function pairParents(raw: unknown): string[] {
+  const out: string[] = []
+  for (const segment of String(raw ?? '').split(';')) {
+    const slash = segment.indexOf('/')
+    const parent = slash > 0 ? segment.slice(0, slash).trim() : ''
+    if (parent) out.push(parent)
+  }
+  return out
 }
 
 /** The pieces with a verdict `keep` takes, by neuron; a key of the old shape is none. */
@@ -1007,15 +1089,17 @@ export function withVerdict(
  */
 export function decodeExtend(raw: unknown): Set<string> {
   const out = new Set<string>()
-  for (const entry of String(raw ?? '').split(';')) {
-    const key = entry.trim()
+  for (const [parent, piece] of groupedItems(raw)) {
+    const key = `${parent}/${piece}`
     if (verdictPair(key)) out.add(key)
   }
   return out
 }
 
+/** Grouped by parent as the verdicts are (`encodeVerdicts`): `parent/piece,piece;parent/piece`. */
 export function encodeExtend(keys: Iterable<string>): string {
-  return [...new Set(keys)].sort().join(';')
+  const pairs = [...new Set(keys)].filter((key) => verdictPair(key))
+  return groupedPairs(pairs, (_key, piece) => piece).join(';')
 }
 
 /** `extend` with one pair added or taken out. */
@@ -1673,13 +1757,16 @@ export function storedWork(params: Readonly<Record<string, unknown>>): {
 } {
   const verdicts = decodeVerdicts(params['verdicts']).size
   const extended = decodeExtend(params['extend']).size
-  const any =
-    verdicts > 0 ||
-    extended > 0 ||
-    decodeExtend(params['autoRoots']).size > 0 ||
-    decodeExtend(params['autoRefused']).size > 0
+  const any = verdicts > 0 || PAIR_PARAMS.some((id) => decodeExtend(params[id]).size > 0)
   return { verdicts, extended, any }
 }
+
+/**
+ * The card's review work beside `verdicts`: pair lists, `parent/piece`. **One list** for Start
+ * over, which clears them, and for `withRecentWork`, which keeps or drops a neuron's — a param
+ * added to one and not the other would survive the clear, or the eviction, in silence.
+ */
+export const PAIR_PARAMS = ['extend', 'autoRoots', 'autoRefused'] as const
 
 /**
  * What Start over writes (user, 2026-11-19): every neuron's verdicts, extended pieces,
@@ -1690,9 +1777,8 @@ export function storedWork(params: Readonly<Record<string, unknown>>): {
  */
 export const START_OVER_WRITE: Readonly<Record<string, string>> = Object.freeze({
   verdicts: '',
-  extend: '',
-  autoRoots: '',
-  autoRefused: '',
+  ...Object.fromEntries(PAIR_PARAMS.map((id) => [id, ''])),
+  recent: '',
 })
 
 export const START_OVER_HELP =

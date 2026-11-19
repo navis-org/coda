@@ -104,6 +104,7 @@ import {
   verdictPress,
 } from '../../packs/seam/reviewQueue'
 import { EXTENDED_PORT, pairsOf, verdictKey } from '../../packs/seam/pieces'
+import { KEPT_NEURONS, withRecentWork } from '../../packs/seam/reviewEviction'
 import type {
   Candidate,
   ExtendChoice,
@@ -134,6 +135,7 @@ import { ParamField } from '../params/ParamField'
 import { cardParams } from '../params/paramGroups'
 import type { NodeBodyProps } from '../nodes/nodeBodies'
 import { useGraphStore } from '../../store/graphStore'
+import { shortcutKeys } from '../shortcuts'
 import { useDatasetInput } from '../useDatasetInput'
 import { usePublishedScene } from '../viewers/NeuroglancerProfileFrame'
 import { NeuroglancerViewer } from '../viewers/NeuroglancerViewer'
@@ -340,6 +342,24 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     })
   }
 
+  /*
+   * Every write of work on the neuron goes through here: `recent` moves on, and the work of a
+   * neuron past the last `KEPT_NEURONS` goes in the same edit (`withRecentWork`) — said on the
+   * status bar, since nothing on the card shows it went, and the first press in a workflow from
+   * before the list can clear many at once.
+   */
+  const setNotice = useGraphStore((s) => s.setNotice)
+  const commitWork = (write: Readonly<Record<string, string>>) => {
+    const { write: full, evicted } = withRecentWork(node.params, neuron, write)
+    setParams(node.id, full)
+    if (evicted.length === 0) return
+    setNotice(
+      `Cleared the verdicts and extended pieces of ${plural(evicted.length, 'neuron')} you had not ` +
+        `worked on lately: this card keeps its last ${KEPT_NEURONS}. ` +
+        `${shortcutKeys('undo')} brings them back.`,
+    )
+  }
+
   const pick = (tip: QueueTip, shows: Candidate | undefined) => {
     setParam('current', tipKey(tip.neuronId, tip.endUid))
     // A click opens on what the row shows: per candidate its own; per tip the suggestion, or the
@@ -372,8 +392,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     )
     // A piece no longer accepted is no longer extended, and a refusal is kept with the verdict:
     // all in one edit, one undo step.
-    if (Object.keys(write).length === 1) setParam('verdicts', write.verdicts)
-    else setParams(node.id, write)
+    commitWork(write)
     if (search) runSearch()
     /*
      * **And to SEAM, where the reader opted in** (`verdictLog.ts`): the press, never the param,
@@ -413,8 +432,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const extend = (tip: QueueTip, candidate: Candidate, choice: ExtendChoice) => {
     const unjudgedHere = unjudged.has(verdictKey(tip.neuronId, candidate.candidateId))
-    setParams(
-      node.id,
+    commitWork(
       extendParams(
         node.params,
         tip.neuronId,
@@ -557,7 +575,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   )
   const autoListed = () => {
     if (listedAuto.length === 0) return
-    setParams(node.id, listedAutoParams(node.params, listedAuto, offered))
+    commitWork(listedAutoParams(node.params, listedAuto, offered))
     runSearch()
   }
 

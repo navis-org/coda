@@ -8,15 +8,18 @@ import { describe, expect, it } from 'vitest'
 
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
-import type { MergeRecordEntry, RecordScope } from './mergeRecord'
+import type { MergeRecord, MergeRecordEntry, RecordScope } from './mergeRecord'
 import {
   decodeRecord,
   appendEntry,
+  appendRecorded,
+  RECORD_KEPT_NEURONS,
   mergedSoFar as readFor,
   mergesSchema,
   mergesTable,
   recordScopeOf,
   settledEntry,
+  shortenedRecord,
 } from './mergeRecord'
 
 /** Past 2⁵³, where an id that went through a number would come back different. */
@@ -27,8 +30,7 @@ const SCOPE: RecordScope = {
   deployment: 'https://global.example.org',
   datastack: 'fanc_sandbox',
 }
-const mergedSoFar = (record: readonly MergeRecordEntry[], root: string) =>
-  readFor(record, root, SCOPE)
+const mergedSoFar = (record: MergeRecord, root: string) => readFor(record, root, SCOPE)
 
 const base = {
   ...SCOPE,
@@ -96,7 +98,11 @@ describe('the merge record', () => {
     expect(decodeRecord(appendEntry('', onPiece))).toEqual([onPiece])
     expect(decodeRecord(JSON.stringify([{ ...onPiece, parentRoot: 'seven' }]))).toEqual([])
     // Absent is the ordinary case: a piece accepted on the neuron itself.
-    expect(decodeRecord(text).every((entry) => entry.parentRoot === undefined)).toBe(true)
+    expect(
+      decodeRecord(text).every(
+        (entry) => !('parentRoot' in entry) || entry.parentRoot === undefined,
+      ),
+    ).toBe(true)
     // Published, so a row's tip number can be read against the root it numbers.
     const table = mergesTable([onPiece, RECORD[1]!])
     expect(table.data['accepted_on']).toEqual(['720575940000000002', null])
@@ -311,5 +317,138 @@ describe('the Merges table', () => {
     expect(table.data['candidate_z']![0]).toBe(517.5)
     expect(table.data['message']![2]).toBe('Refused (400): no')
     expect(table.data['datastack']![0]).toBe('fanc_sandbox')
+  })
+})
+
+/**
+ * A neuron the card no longer keeps in full keeps of its record what `mergedSoFar` reads
+ * (`reviewEviction.ts`, user, 2026-11-19): the next Submit must read it exactly as before.
+ */
+describe('a shortened record', () => {
+  const OTHER = '720575940699999999'
+  // `RECORD` without its unknown, which is the other neuron's: every merge of NEURON is settled.
+  const settled = RECORD.slice(0, -1)
+  const text = JSON.stringify(settled)
+  const answers = (record: MergeRecord) => {
+    const read = mergedSoFar(record, NEURON)
+    return { ...read, pieces: [...read.pieces], elsewhere: [...read.elsewhere] }
+  }
+
+  it('reads for every merge to come as the full one did, at a third of the length', () => {
+    const short = shortenedRecord(text, new Set())!
+    expect(answers(decodeRecord(short))).toEqual(answers(decodeRecord(text)))
+    expect(short.length).toBeLessThan(text.length / 3)
+    // Of the four: the two that put a piece in the neuron. A refusal moves nothing.
+    expect(decodeRecord(short).map((entry) => entry.outcome)).toEqual([
+      'merged',
+      'already-merged',
+      'failed',
+      'merged',
+    ])
+  })
+
+  it('leaves the neurons kept, and says where there is nothing to shorten', () => {
+    expect(shortenedRecord(text, new Set([NEURON]))).toBeUndefined()
+    expect(shortenedRecord('', new Set())).toBeUndefined()
+    const once = shortenedRecord(text, new Set())!
+    expect(shortenedRecord(once, new Set())).toBeUndefined()
+  })
+
+  /** Settling a lost reply reads its supervoxels; a later refusal can be what settles it. */
+  it('leaves a neuron whole while a merge of it is unsettled', () => {
+    const open = JSON.stringify(RECORD)
+    const short = decodeRecord(shortenedRecord(open, new Set())!)
+    expect(short.filter((entry) => entry.reviewedRoot === OTHER)).toEqual([RECORD.at(-1)])
+    expect(short.filter((entry) => entry.reviewedRoot === NEURON)).toHaveLength(4)
+  })
+
+  it('keeps what it cannot read, and the order, and takes appends after it', () => {
+    const raw = JSON.stringify([{ hand: 'edit' }, ...settled])
+    const short = shortenedRecord(raw, new Set())!
+    expect(JSON.parse(short)[0]).toEqual({ hand: 'edit' })
+    const next = {
+      ...settled[0]!,
+      candidateRoot: '720575940000000009',
+      newRoot: '720575940700000003',
+      neuronRoot: '720575940700000002',
+    }
+    expect(mergedSoFar(decodeRecord(appendEntry(short, next)), NEURON).currentRoot).toBe(
+      '720575940700000003',
+    )
+  })
+
+  it('is read by its scope, as a full entry is', () => {
+    const short = decodeRecord(shortenedRecord(text, new Set())!)
+    const elsewhere = readFor(short, NEURON, { ...SCOPE, datastack: 'fanc_production' })
+    expect(elsewhere.currentRoot).toBe(NEURON)
+    expect(elsewhere.pieces.size).toBe(0)
+  })
+
+  it('lists its rows in Merges with what it no longer holds empty', () => {
+    const table = mergesTable(decodeRecord(shortenedRecord(text, new Set())!))
+    expect(table.data['candidateId']).toEqual([
+      '720575940000000001',
+      '720575940000000002',
+      '720575940000000003',
+      '720575940000000004',
+    ])
+    expect(table.data['outcome']).toEqual(['merged', 'already-merged', 'failed', 'merged'])
+    expect(table.data['new_root']).toEqual([
+      '720575940700000001',
+      null,
+      null,
+      '720575940700000002',
+    ])
+    expect(table.data['neuron_supervoxel']).toEqual([null, null, null, null])
+    expect(table.data['datastack']![0]).toBe('fanc_sandbox')
+  })
+
+  /** Where the record grows (`mergeSession.ts`): the last ten neurons it names are kept. */
+  it('is made as an entry is appended, by the record’s own last ten neurons', () => {
+    const neuron = (i: number) => `72057594000000${String(i).padStart(4, '0')}`
+    const one = (i: number) => ({
+      ...settled[0]!,
+      reviewedRoot: neuron(i),
+      neuronRoot: neuron(i),
+      newRoot: `72057594070000${String(i).padStart(4, '0')}`,
+    })
+    let raw = ''
+    for (let i = 1; i <= RECORD_KEPT_NEURONS; i++) raw = appendRecorded(raw, one(i))
+    expect(decodeRecord(raw).some((entry) => 'short' in entry)).toBe(false)
+    raw = appendRecorded(raw, one(RECORD_KEPT_NEURONS + 1))
+    const read = decodeRecord(raw)
+    expect(read.filter((entry) => 'short' in entry).map((entry) => entry.reviewedRoot)).toEqual(
+      [neuron(1)],
+    )
+    expect(read.at(-1)).toEqual(one(RECORD_KEPT_NEURONS + 1))
+  })
+
+  /** Another reviewed neuron is any the record names (`otherRoots`), whatever became of its merge. */
+  it('keeps a refusal, so its neuron is still one under review', () => {
+    const refused = { ...RECORD[2]!, reviewedRoot: OTHER, neuronRoot: OTHER }
+    const raw = JSON.stringify([refused])
+    const short = decodeRecord(shortenedRecord(raw, new Set())!)
+    expect(short).toEqual([
+      {
+        short: true,
+        ...SCOPE,
+        reviewedRoot: OTHER,
+        candidateRoot: refused.candidateRoot,
+        outcome: 'failed',
+      },
+    ])
+    expect(mergedSoFar(short, NEURON).otherRoots).toEqual(
+      mergedSoFar([refused], NEURON).otherRoots,
+    )
+  })
+
+  it('reads no short entry that is malformed', () => {
+    const bad = [
+      ['merged', null, null, NEURON, '720575940000000001'],
+      ['already-merged', null, null, 'x', '720575940000000001'],
+      ['unknown', null, null, NEURON, '720575940000000001'],
+      ['failed', null, null, NEURON, '720575940000000001', '720575940700000001'],
+    ]
+    expect(decodeRecord(JSON.stringify(bad))).toEqual([])
   })
 })
