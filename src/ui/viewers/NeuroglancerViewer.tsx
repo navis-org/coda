@@ -99,6 +99,7 @@ import {
   FRAME_KEYS_MESSAGE,
   FRAME_SEGMENTS_MESSAGE,
   FRAME_SET_VIEW_MESSAGE,
+  isFrameHoverMessage,
   isFrameKeyMessage,
   isFrameUnappliedMessage,
   decodeSavedView,
@@ -118,6 +119,7 @@ import { describeLegend, resolveColor } from '../../style/encoding'
 import { copyText } from '../export'
 import { useLatest } from '../useLatest'
 import { useGraphStore } from '../../store/graphStore'
+import { setHoveredSegment } from './segmentHover'
 import { RootRegistry } from './persistentRoots'
 import type { RootLease } from './persistentRoots'
 import { forgetScene, recallScene, rememberScene } from './sceneMemo'
@@ -858,10 +860,18 @@ export function NeuroglancerViewer({
    * (`FRAME_UPDATE_KEY`).
    */
   useEffect(() => {
+    // The frame whose hover this surface last passed on, to clear as it goes (`segmentHover.ts`).
+    let hoveredFrom: object | undefined
     const listen = (event: MessageEvent) => {
       const kept = leaseRef.current?.root
       if (!kept || event.source !== kept.frame.contentWindow) return
       if (event.origin !== window.location.origin) return
+      if (isFrameHoverMessage(event.data)) {
+        // Where the pointer is, not what the scene holds: no update to match.
+        hoveredFrom = kept.frame
+        setHoveredSegment(kept.frame, event.data.segment ?? undefined)
+        return
+      }
       if (isFrameKeyMessage(event.data)) {
         // As if pressed here: Coda's own shortcut listener decides, tour and all.
         const { code, altKey } = event.data
@@ -895,7 +905,10 @@ export function NeuroglancerViewer({
       }
     }
     window.addEventListener('message', listen)
-    return () => window.removeEventListener('message', listen)
+    return () => {
+      window.removeEventListener('message', listen)
+      if (hoveredFrom) setHoveredSegment(hoveredFrom, undefined)
+    }
   }, [handlers, tellKeysRef, tellFocusRef])
 
   const [pasting, setPasting] = useState(false)

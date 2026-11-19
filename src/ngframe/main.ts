@@ -23,6 +23,8 @@ import { isTypingTarget } from '../core/keys'
 import {
   FRAME_UNAPPLIED_MESSAGE,
   type FrameUnappliedMessage,
+  FRAME_HOVER_MESSAGE,
+  type FrameHoverMessage,
   FRAME_KEY_MESSAGE,
   type FrameKeyMessage,
   isAltDigit,
@@ -71,7 +73,10 @@ window.addEventListener('hashchange', () => {
   // fragment names the layers. A merge naming none (the layer bar alone) told no layer anything.
   if (!merge || Array.isArray(parseSceneUrl(window.location.hash)?.['layers'])) told.clear()
 })
-if (window.parent !== window) reportChanges(viewer)
+if (window.parent !== window) {
+  reportChanges(viewer)
+  reportHover(viewer)
+}
 
 /** Post the layers and the view to the card whenever they settle after a change. */
 function reportChanges(ng: typeof viewer): void {
@@ -106,6 +111,50 @@ function reportChanges(ng: typeof viewer): void {
         post({ type: FRAME_VIEW_MESSAGE, view, update: applied })
       }
     }, SETTLE_MS)
+  })
+}
+
+/** How often, at most, the segment under the pointer is posted: often enough to follow a sweep. */
+const HOVER_MS = 100
+
+/**
+ * Post the segment under the pointer whenever it changes (`FrameHoverMessage`): the root id each
+ * segmentation layer's own hover highlight is drawn from (`segmentSelectionState`, the mapped id,
+ * so a root rather than a supervoxel), from the first visible layer that has one. Read on
+ * neuroglancer's pointer signal, at most every `HOVER_MS`, and cleared when the pointer leaves.
+ */
+function reportHover(ng: typeof viewer): void {
+  type Hovered = { hasSelectedSegment?: boolean; selectedSegment?: bigint }
+  let posted: string | null = null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const post = (segment: string | null) => {
+    if (segment === posted) return
+    posted = segment
+    const message: FrameHoverMessage = { type: FRAME_HOVER_MESSAGE, segment }
+    window.parent.postMessage(message, window.location.origin)
+  }
+  const read = (): string | null => {
+    for (const managed of ng.layerManager.managedLayers) {
+      if (!managed.visible) continue
+      const layer = managed.layer as {
+        displayState?: { segmentSelectionState?: Hovered }
+      } | null
+      const hovered = layer?.displayState?.segmentSelectionState
+      const id = hovered?.hasSelectedSegment ? hovered.selectedSegment : undefined
+      if (id !== undefined && id !== 0n) return id.toString()
+    }
+    return null
+  }
+  ng.layerSelectedValues.changed.add(() => {
+    timer ??= setTimeout(() => {
+      timer = undefined
+      post(read())
+    }, HOVER_MS)
+  })
+  document.documentElement.addEventListener('mouseleave', () => {
+    clearTimeout(timer)
+    timer = undefined
+    post(null)
   })
 }
 

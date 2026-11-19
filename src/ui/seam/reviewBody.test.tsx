@@ -36,6 +36,7 @@ import type { SubmitState } from './mergeSession'
 import type * as VerdictLog from '../../data/verdictLog'
 import { resetVerdictLog, verdictLogState, writeSharing } from '../../data/verdictLog'
 import { ReviewBody, submitPress } from './ReviewBody'
+import { setHoveredSegment } from '../viewers/segmentHover'
 
 /** Submit's session, faked: the card only reads its state and opens it. */
 const openSubmit = vi.fn()
@@ -422,6 +423,20 @@ describe('the review card', () => {
     expect(useGraphStore.getState().notice).toMatch(
       /^Cleared the verdicts .* of 1 neuron .* back\.$/,
     )
+  })
+
+  /** The piece under the pointer in a neuroglancer frame (`segmentHover.ts`, user, 2026-11-19). */
+  it('lights the rows showing the segment under the pointer in a viewer', () => {
+    const frame = {}
+    draw({ current: at(11), rank: 1 })
+    const lit = () => rows().filter((row) => row.getAttribute('data-hovered') === 'yes')
+    expect(lit()).toHaveLength(0)
+    act(() => setHoveredSegment(frame, '648518346368395605'))
+    expect(lit()).toEqual([rows()[0]])
+    // The neuron itself, or anything the card does not list, lights nothing.
+    act(() => setHoveredSegment(frame, NEURON))
+    expect(lit()).toHaveLength(0)
+    act(() => setHoveredSegment(frame, undefined))
   })
 
   it('clears a verdict when the same one is pressed again', () => {

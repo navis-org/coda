@@ -586,3 +586,14 @@ Limits: only the dataset's own segmentation layer is read back, so a neuron adde
 volume of a multi-volume scene (a BigClust project) is not seen; FlyWire's public segmentation
 fails in mainline and spelunker alike, upstream; and the exporters still refuse the node, so a
 `Selected` wired downstream blocks the notebook.
+
+### The segment under the pointer (user, 2026-11-19)
+
+The frame also posts the root id under the pointer (`FrameHoverMessage`, `coda:ng-hover`), read
+from each segmentation layer's own hover state (`segmentSelectionState` — the mapped id, so a
+root, not a supervoxel), at most every 100 ms and only when it changes, `null` when the pointer
+leaves. Not stamped with an update: it says where the pointer is, not what the scene holds. The
+viewer hands it to one app-wide value (`ui/viewers/segmentHover.ts`) — a root id names one object
+whichever frame hovered it, so a reader asks only whether it lists it — which only the frame that
+set it clears. The review card lights the rows showing it and, after a 500 ms rest, scrolls the
+first into view (`useRowWindow`'s `toRow`, which leaves a row already in view alone).

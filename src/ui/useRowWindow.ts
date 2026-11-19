@@ -70,6 +70,21 @@ export function rowWindow(
   }
 }
 
+/**
+ * Where to scroll so row `index` is in view, centred — or `undefined` where it is wholly in view
+ * already, so a reader who can see it keeps their place.
+ */
+export function scrollToShow(
+  index: number,
+  rowHeight: number,
+  scrollTop: number,
+  viewport: number,
+): number | undefined {
+  const top = index * rowHeight
+  if (top >= scrollTop && top + rowHeight <= scrollTop + viewport) return undefined
+  return Math.max(0, Math.round(top - (viewport - rowHeight) / 2))
+}
+
 export function useRowWindow(count: number) {
   const [list, setList] = useState<HTMLElement | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -103,10 +118,31 @@ export function useRowWindow(count: number) {
     setScrollTop(0)
   }, [list])
 
+  /**
+   * Row `index` into view, centred, where it is not in view already — a list that moved under a
+   * reader who could already see the row would lose their place for nothing.
+   */
+  const toRow = useCallback(
+    (index: number) => {
+      if (!list) return
+      const next = scrollToShow(
+        index,
+        rowHeight,
+        list.scrollTop,
+        viewport || FALLBACK_VIEWPORT_PX,
+      )
+      if (next === undefined) return
+      list.scrollTop = next
+      setScrollTop(next)
+    },
+    [list, rowHeight, viewport],
+  )
+
   return {
     ref: setList,
     onScroll,
     toTop,
+    toRow,
     rows: rowWindow(count, rowHeight, scrollTop, viewport || FALLBACK_VIEWPORT_PX),
   }
 }

@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { rowWindow } from './useRowWindow'
+import { rowWindow, scrollToShow } from './useRowWindow'
 
 describe('the rows a list draws', () => {
   it('draws the rows in view and a margin past the bottom', () => {
@@ -47,5 +47,21 @@ describe('the rows a list draws', () => {
 
   it('draws nothing for an empty list', () => {
     expect(rowWindow(0, 50, 0, 500)).toEqual({ start: 0, end: 0, before: 0, after: 0 })
+  })
+})
+
+/** A row the pointer rests on in a viewer, brought into view (`ReviewBody.tsx`). */
+describe('scrolling a row into view', () => {
+  it('leaves a list alone where the row is in view already', () => {
+    expect(scrollToShow(3, 50, 0, 500)).toBeUndefined()
+    expect(scrollToShow(9, 50, 0, 500)).toBeUndefined()
+  })
+
+  it('centres a row out of view, below or above', () => {
+    // Row 100's top is at 5000; centred in 500px, the view starts 225px above it.
+    expect(scrollToShow(100, 50, 0, 500)).toBe(4775)
+    expect(scrollToShow(2, 50, 4775, 500)).toBe(0)
+    // Half out at the bottom is out.
+    expect(scrollToShow(10, 50, 0, 520)).toBe(265)
   })
 })

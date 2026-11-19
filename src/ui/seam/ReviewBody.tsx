@@ -50,7 +50,7 @@
  * there is nothing else to read it from — and pressing it again stops extending the piece.
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties } from 'react'
 
 import { referrerOf } from '../../core/graph'
@@ -139,6 +139,7 @@ import { shortcutKeys } from '../shortcuts'
 import { useDatasetInput } from '../useDatasetInput'
 import { usePublishedScene } from '../viewers/NeuroglancerProfileFrame'
 import { NeuroglancerViewer } from '../viewers/NeuroglancerViewer'
+import { useHoveredSegment, useRestedSegment } from '../viewers/segmentHover'
 import { flushVerdicts } from '../../data/verdictLog'
 import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
 import { ExtendButtons } from './ExtendButtons'
@@ -318,8 +319,26 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
 
   const windowed = useRowWindow(listed.length)
   // A different neuron is a different list: start it at the top, where the switch put the cursor.
-  const { toTop } = windowed
+  const { toTop, toRow } = windowed
   useEffect(() => toTop(), [neuron, toTop])
+
+  /*
+   * The segment under the pointer in a neuroglancer frame (`segmentHover.ts`, user, 2026-11-19):
+   * the rows showing it are lit as the pointer moves, and once it rests the first of them is
+   * scrolled into view — the list draws only what is in view, so a row scrolled away could not
+   * light up otherwise. Asked only on a rest, never as the list changes under a still pointer.
+   */
+  const hovered = useHoveredSegment()
+  const rested = useRestedSegment()
+  const scrolledFor = useRef(0)
+  useEffect(() => {
+    if (!rested || rested.count === scrolledFor.current) return
+    scrolledFor.current = rested.count
+    const at = listed.findIndex(
+      (row) => (row.hosted ?? row.candidate)?.candidateId === rested.segment,
+    )
+    if (at >= 0) toRow(at)
+  }, [rested, listed, toRow])
 
   const unit = mode === 'candidate' ? 'candidate' : 'tip'
   const total =
@@ -831,6 +850,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   aria-setsize={listed.length}
                   aria-posinset={windowed.rows.start + offset + 1}
                   data-current={on ? 'yes' : 'no'}
+                  data-hovered={
+                    hovered !== undefined && candidate?.candidateId === hovered
+                      ? 'yes'
+                      : undefined
+                  }
                   data-verdict={said ?? 'none'}
                   data-merged={done ?? 'no'}
                   /*

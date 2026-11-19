@@ -69,6 +69,8 @@ With `Show accepted` on (the default), every candidate you have accepted on this
 
 With no row selected, the viewer shows the neuron and its accepted pieces, and the camera stays where it is. Only `Accept` counts; the other verdicts are not drawn.
 
+Hovering over a piece in Neuroglancer — the card's own viewer or a Neuroglancer node — lights up the rows showing it, in blue. Rest the pointer on it for half a second and the list scrolls to the first of those rows, if it is out of view. Only Coda’s own Neuroglancer can tell the card what is under the pointer, so it does not work where a Neuroglancer node shows another viewer.
+
 The number on the left is `q`, SEAM's score for the tip's **first** candidate. The list is sorted on it, and SEAM's cutoff — what `shown` means — is a value of it. Beneath it is `r`, rounded: about how often a first candidate at that `q` turned out right, such as `≈90%`. Treat it as an estimate. It comes in a few wide steps, fitted on a few hundred tips a proofreader judged, so one value covers many very different tips — most of a neuron's, at the lowest step. The line under the id is the candidate itself: its size, its rank within the tip's list, its own confidence, the search's own rank, and how far the two pieces are apart.
 
 **Size is the candidate's level-2 chunk count** — the chunkedgraph's own decomposition of the whole object, wherever it reaches. That is what `Sort by: size` orders on and what `Min size` counts, because it is the best proxy there is for whether a piece is a loose fragment or part of a neuron. It is coarse by construction: anything small is one chunk, and the number only starts separating pieces further up.

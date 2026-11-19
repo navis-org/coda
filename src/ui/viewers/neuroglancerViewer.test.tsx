@@ -24,6 +24,7 @@ import {
   withLayerPanel,
 } from '../../data/neuroglancer/scene'
 import {
+  FRAME_HOVER_MESSAGE,
   FRAME_STATE_MESSAGE,
   FRAME_UPDATE_KEY,
   FRAME_VIEW_MESSAGE,
@@ -31,6 +32,7 @@ import {
 } from '../../data/neuroglancer/frameMessage'
 import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { hoveredSegment } from './segmentHover'
 import { useGraphStore } from '../../store/graphStore'
 import { RELEASE_AFTER_MS } from './persistentRoots'
 import { resetSceneMemos } from './sceneMemo'
@@ -1191,6 +1193,22 @@ describe('neurons changed inside the viewer', () => {
     frameLoaded(view.container)
     return { ...view, onSelectionEdits }
   }
+
+  /** For the review card to light its rows by (`segmentHover.ts`): not stamped with an update. */
+  it('passes on the segment under the pointer in its own frame, and clears it as it goes', () => {
+    const { container, unmount } = mounted(URL_A)
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: '720575940621522189' })
+    expect(hoveredSegment()).toBe('720575940621522189')
+    // Not from its own frame, or not a segment id: ignored.
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: '5' }, {})
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: 'x' })
+    expect(hoveredSegment()).toBe('720575940621522189')
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: null })
+    expect(hoveredSegment()).toBeUndefined()
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: '720575940621522189' })
+    unmount()
+    expect(hoveredSegment()).toBeUndefined()
+  })
 
   it('writes a neuron double-clicked into the scene back as an edit', () => {
     const { container, onSelectionEdits } = mounted(URL_A)
