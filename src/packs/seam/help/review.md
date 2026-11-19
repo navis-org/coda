@@ -42,6 +42,8 @@ The N is the picked neuron's tips, not candidates, and it reaches zero: an end t
 > **A filter or a sort reaches only what has arrived**
 > `Min confidence`, `Min size` and `Sort by` narrow the tips published so far. On a third-full queue that is a third of the neuron, which is what the caption in the foot is there to say. Nothing is lost — a verdict recorded now is kept — but the top of the list will move as more ends land.
 
+The list holds still as tips arrive: the row at the top of the view stays where it is, even when a new tip is sorted in above it. A blue note at the top, **↑ N new above**, counts the tips scored or added above you; click it to go to the top. A tip that is scored, or added, where you can see it flashes blue for a moment.
+
 With nothing wired to `Current`, expanding the card (⤢) gives it a small viewer of its own so it is usable by itself. That is a fallback: it is a second WebGL context showing two segments, and it stands down the moment something else is driving.
 
 > [!IMPORTANT]

@@ -26,7 +26,7 @@ import { requireNodeDef } from '../../core/registry'
 import { column, tableSchema } from '../../core/types'
 import { selectTable } from '../../nodes/lib/tableOps'
 import { makeTable } from '../../core/values'
-import type { TableValue, Value } from '../../core/values'
+import type { CellValue, TableValue, Value } from '../../core/values'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import '../../nodes'
@@ -211,21 +211,38 @@ function draw(
     },
   } as never)
   const written: Record<string, ParamValue> = {}
-  const inputValues: Record<string, Value | undefined> = { tips, candidates, dataset }
-  render(
-    <ReviewBody
-      node={node}
-      ctx={makeInferContext(def, node.params, {})}
-      inputValues={inputValues}
-      compact={compact}
-      setParam={(id, value) => {
-        written[id] = value
-      }}
-      onError={() => {}}
-    />,
-  )
+  const body = (
+    over: { tips?: TableValue; candidates?: TableValue; params?: ParamValues } = {},
+  ) => {
+    const drawn = { ...node, params: { ...node.params, ...over.params } }
+    return (
+      <ReviewBody
+        node={drawn}
+        ctx={makeInferContext(def, drawn.params, {})}
+        inputValues={{
+          tips: over.tips ?? tips,
+          candidates: over.candidates ?? candidates,
+          dataset,
+        }}
+        compact={compact}
+        setParam={(id, value) => {
+          written[id] = value
+        }}
+        onError={() => {}}
+      />
+    )
+  }
+  const view = render(body())
+  redraw = (over) => view.rerender(body(over))
   return written
 }
+
+/** The card `draw` last drew, drawn again over new tables or params — as a search publishing. */
+let redraw: (over: {
+  tips?: TableValue
+  candidates?: TableValue
+  params?: ParamValues
+}) => void = () => {}
 
 const rows = () => [...document.querySelectorAll('.review-row')]
 /** The verdicts as the store holds them: a press writes through `setParams`, `recent` with it. */
@@ -437,6 +454,73 @@ describe('the review card', () => {
     act(() => setHoveredSegment(frame, NEURON))
     expect(lit()).toHaveLength(0)
     act(() => setHoveredSegment(frame, undefined))
+  })
+
+  /** Rows arriving while the search runs (user, 2026-11-19): the list holds still and says so. */
+  describe('as rows arrive', () => {
+    const arrivedRows = () =>
+      rows()
+        .filter((row) => row.getAttribute('data-arrived') === 'yes')
+        .map(endOf)
+    const endOf = (row: Element) => row.querySelector('.review-row__id')?.textContent ?? ''
+    // The neuron's first tip alone, as a search that has scored one.
+    const first = (table: TableValue, keep: (at: number) => boolean) =>
+      makeTable(
+        table.schema,
+        Object.fromEntries(
+          Object.entries(table.data).map(([name, cells]) => [
+            name,
+            (cells as CellValue[]).filter((_, at) => keep(at)),
+          ]),
+        ),
+      )
+    const ONE_TIP = first(TIPS, (at) => at === 0)
+    const ONE_CANDIDATES = first(CANDIDATES, (at) => CANDIDATES.data['end_uid']![at] === 11)
+
+    it('tints a row that arrives, and nothing that was there', () => {
+      draw({}, true, ONE_CANDIDATES, ONE_TIP)
+      expect(arrivedRows()).toEqual([])
+      act(() => redraw({ tips: TIPS, candidates: CANDIDATES }))
+      expect(rows()).toHaveLength(2)
+      expect(rows()[1]!.getAttribute('data-arrived')).toBe('yes')
+      expect(rows()[0]!.getAttribute('data-arrived')).toBeNull()
+    })
+
+    /** The usual arrival: a neuron's tips are listed first, and scored one by one. */
+    it('tints a row listed already as it gets its candidate', () => {
+      draw({}, true, ONE_CANDIDATES, TIPS)
+      expect(rows()).toHaveLength(2)
+      expect(arrivedRows()).toEqual([])
+      act(() => redraw({ tips: TIPS, candidates: CANDIDATES }))
+      const tinted = rows().filter((row) => row.getAttribute('data-arrived') === 'yes')
+      expect(tinted).toHaveLength(1)
+      expect(tinted[0]!.textContent).toContain('0.420')
+    })
+
+    it('tints nothing where the reader changed the view rather than the search the data', () => {
+      draw({}, true, ONE_CANDIDATES, ONE_TIP)
+      act(() => redraw({ tips: TIPS, candidates: CANDIDATES, params: { sortBy: 'size' } }))
+      expect(rows()).toHaveLength(2)
+      expect(arrivedRows()).toEqual([])
+    })
+
+    it('holds still as a row arrives above, and says how many came in up there', () => {
+      // Tip 22 sorted above tip 11, the row at the top of the view.
+      const above = makeTable(TIPS.schema, { ...TIPS.data, q: [0.42, 0.91] })
+      draw(
+        {},
+        true,
+        ONE_CANDIDATES,
+        first(above, (at) => at === 0),
+      )
+      expect(document.querySelector('.review-body__new-above')).toBeNull()
+      act(() => redraw({ tips: above, candidates: CANDIDATES }))
+      const note = document.querySelector<HTMLButtonElement>('.review-body__new-above')!
+      expect(note.textContent).toBe('↑ 1 new above')
+      // Taken to the top, the note has done its job.
+      act(() => note.click())
+      expect(document.querySelector('.review-body__new-above')).toBeNull()
+    })
   })
 
   it('clears a verdict when the same one is pressed again', () => {

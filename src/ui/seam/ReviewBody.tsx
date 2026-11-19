@@ -50,7 +50,15 @@
  * there is nothing else to read it from — and pressing it again stops extending the piece.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import type { CSSProperties } from 'react'
 
 import { referrerOf } from '../../core/graph'
@@ -113,6 +121,7 @@ import type {
   QueueRow,
   QueueTip,
   SortBy,
+  TreeRow,
   Verdict,
 } from '../../packs/seam/reviewQueue'
 import {
@@ -319,8 +328,60 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
 
   const windowed = useRowWindow(listed.length)
   // A different neuron is a different list: start it at the top, where the switch put the cursor.
-  const { toTop, toRow } = windowed
+  const { toTop, toRow, keepPlace, atTop } = windowed
   useEffect(() => toTop(), [neuron, toTop])
+
+  /*
+   * Rows arriving while the search runs (user, 2026-11-19). **The list holds still**: the row at
+   * the top of the view keeps its place (`keepPlace`), so a tip sorted in above it no longer
+   * pushes everything down, and the note at the top says how many came in above, out of sight.
+   * **And a row that arrives is tinted for a moment** (`data-arrived`), so one landing in view
+   * is seen. Only for the data changing under the same view: a new neuron, sort, filter or grain
+   * is a new list, and nothing in it is "new".
+   *
+   * **New is what a row shows, not the row**: a neuron's tips are listed before they are scored,
+   * so the usual arrival is a tip already listed getting its candidate and sorting into place —
+   * the same key, tracked as the same row by the place-holding, but news to the reader
+   * (`rowShowsOf`). The note counts those too.
+   */
+  const rowKeys = useMemo(() => listed.map((row) => rowKeyOf(row, mode)), [listed, mode])
+  const rowShows = useMemo(() => listed.map((row) => rowShowsOf(row, mode)), [listed, mode])
+  const view = useMemo(() => ({ neuron, filters }), [neuron, filters])
+  const shown = useRef<{
+    view: typeof view
+    keys: readonly string[]
+    shows: readonly string[]
+  }>(undefined)
+  const [newAbove, setNewAbove] = useState(0)
+  const [arrived, setArrived] = useState<ReadonlySet<string>>(NONE_ARRIVED)
+  useLayoutEffect(() => {
+    const last = shown.current
+    shown.current = { view, keys: rowKeys, shows: rowShows }
+    if (last?.shows === rowShows) return
+    if (!last || last.view !== view || last.keys.length === 0) {
+      setNewAbove(0)
+      setArrived(NONE_ARRIVED)
+      return
+    }
+    const seen = new Set(last.shows)
+    const fresh = new Set<string>()
+    rowShows.forEach((shows, at) => {
+      if (!seen.has(shows)) fresh.add(rowKeys[at]!)
+    })
+    // Added to what is still fading, so a batch landing mid-fade does not cut the last one short.
+    if (fresh.size > 0) setArrived((was) => new Set([...was, ...fresh]))
+    const above = keepPlace(last.keys, rowKeys, (key) => fresh.has(key))
+    if (above > 0) setNewAbove((n) => n + above)
+  }, [rowKeys, rowShows, view, keepPlace])
+  useEffect(() => {
+    if (arrived.size === 0) return
+    const timer = setTimeout(() => setArrived(NONE_ARRIVED), ARRIVED_MS)
+    return () => clearTimeout(timer)
+  }, [arrived])
+  // Seen once the reader is back at the top.
+  useEffect(() => {
+    if (atTop) setNewAbove(0)
+  }, [atTop])
 
   /*
    * The segment under the pointer in a neuroglancer frame (`segmentHover.ts`, user, 2026-11-19):
@@ -761,274 +822,293 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               : `No tip passes the filters. ${formatNumber(mine.length)} in this neuron’s queue.`}
           </div>
         ) : (
-          <ol className="review-list nowheel" ref={windowed.ref} onScroll={windowed.onScroll}>
+          <div className="review-list-frame">
             {/*
-             * Every row is reachable by scrolling, and only those in view are drawn: a neuron is
-             * hundreds of tips and, per candidate, tens of thousands of rows of six buttons each.
-             * The spacers stand in for the rest so the scrollbar is the whole list's.
+             * Over the list rather than above it: a note pushing the list down as it appears would
+             * be the very jump the list holds still against.
              */}
-            {windowed.rows.before > 0 && (
-              <li
-                className="review-list__spacer"
-                aria-hidden="true"
-                style={{ height: windowed.rows.before }}
-              />
+            {newAbove > 0 && !atTop && (
+              <button
+                type="button"
+                className="review-body__new-above"
+                title="Rows the search added above where you are reading. The list held still rather than move under you; this takes you to the top."
+                onClick={() => {
+                  toTop()
+                  setNewAbove(0)
+                }}
+              >
+                {`↑ ${formatNumber(newAbove)} new above`}
+              </button>
             )}
-            {listed.slice(windowed.rows.start, windowed.rows.end).map((row, offset) => {
-              const tip = row.tip
-              /*
-               * Per tip, the row follows the cursor: the tip being reviewed shows whichever
-               * candidate the arrows are on, so paging is visible where it happened. Per
-               * candidate a row *is* one candidate and shows itself, and "current" is the pair.
-               */
-              // The same objects: `here` and the rows are both read off `mine`.
-              const onTip = here?.tip === tip
-              // What the row shows of its own accord (`hosted` is per tip only).
-              const shows = row.hosted ?? row.candidate
-              const candidate: Candidate | undefined =
-                mode === 'tip' && onTip ? here.candidate : shows
-              const on =
-                onTip &&
-                (mode === 'tip' || here?.candidate.candidateId === candidate?.candidateId)
-              const said =
-                candidate && verdictFor(verdicts, tip.neuronId, candidate.candidateId)
-              // Merged by Submit: a verdict on it changes nothing now, so it cannot be changed.
-              const done = candidate && mergedAs(merged, candidate.candidateId)
-              // In the neuron already by another road: a second accept would be a second merge.
-              const inNeuron =
-                candidate !== undefined &&
-                acceptedElsewhere(accepted, said, candidate.candidateId)
-              const outdated = !done && candidate !== undefined && edited(candidate.candidateId)
-              // How the piece is extended: by the reader's press, or by an Auto-extend further up.
-              const {
-                choice,
-                autoFrom,
-                heldBy,
-                held,
-                extended: isExtended,
-              } = rowExtend(candidate && verdictKey(tip.neuronId, candidate.candidateId), {
-                extended,
-                autoPressed,
-                accepted: growth.accepted,
-                unjudged,
-                searched,
-              })
-              // What goes off the list with this piece, said before the click that does it.
-              const goesWith =
-                isExtended && candidate ? leavesWith(tree, candidate.candidateId) : ''
-              // Why the piece cannot be extended, where it cannot.
-              const blocked = candidate && blockedOf(candidate.candidateId)
-              /*
-               * The Extend button, on an accepted row only: what it reads, says and whether it
-               * can be pressed are `extendPress`'s, as Submit's are `submitPress`'s; its menu's
-               * are `extendMenu`'s.
-               */
-              const extendButton =
-                candidate && said === 'accept'
-                  ? extendPress({
-                      candidate,
-                      progress: isExtended
-                        ? extendProgress(all, tip.seed, candidate.candidateId, search)
-                        : undefined,
-                      blocked,
-                      extendOnAccept: node.params.extendOnAccept === true,
-                      goesWith,
-                      choice,
-                      held,
-                      heldBy,
-                      took: autoTook.get(candidate.candidateId) ?? 0,
-                    })
-                  : undefined
-              const menu = extendButton && extendMenu({ choice, blocked, held, noAuto })
-              return (
+            <ol className="review-list nowheel" ref={windowed.ref} onScroll={windowed.onScroll}>
+              {/*
+               * Every row is reachable by scrolling, and only those in view are drawn: a neuron is
+               * hundreds of tips and, per candidate, tens of thousands of rows of six buttons each.
+               * The spacers stand in for the rest so the scrollbar is the whole list's.
+               */}
+              {windowed.rows.before > 0 && (
                 <li
-                  key={`${tipKey(tip.neuronId, tip.endUid)}:${
-                    mode === 'candidate' ? (candidate?.candidateId ?? '') : ''
-                  }`}
-                  className="review-row"
-                  data-row
-                  aria-setsize={listed.length}
-                  aria-posinset={windowed.rows.start + offset + 1}
-                  data-current={on ? 'yes' : 'no'}
-                  data-hovered={
-                    hovered !== undefined && candidate?.candidateId === hovered
-                      ? 'yes'
-                      : undefined
-                  }
-                  data-verdict={said ?? 'none'}
-                  data-merged={done ?? 'no'}
-                  /*
-                   * A piece's tips sit beneath the row the piece was accepted on, a step in for
-                   * every piece between them and the neuron, behind an arrow (`editor.css`).
-                   */
-                  data-depth={row.depth}
-                  style={
-                    row.depth > 0
-                      ? ({ '--depth': Math.min(row.depth, MAX_INDENT) } as CSSProperties)
-                      : undefined
-                  }
-                >
-                  {/*
-                   * An empty button covering the whole row, with the content as its siblings
-                   * above it.
-                   *
-                   * The row's three parts do not nest: the confidence spans both rows, the acts
-                   * sit top-right, and the measurements run the full width *under* them. No
-                   * single element can hold all three and still be one rectangle, so the click
-                   * target is a layer rather than a wrapper. It keeps the keyboard reach a real
-                   * button gives — one tab stop per row — and takes its name from `aria-label`,
-                   * having no text of its own.
-                   */}
-                  <button
-                    type="button"
-                    className="review-row__pick"
-                    onClick={() => pick(tip, shows)}
-                    aria-label={`Show ${tipName(tip)} and candidate ${
-                      candidate?.candidateId ?? 'none'
-                    }`}
-                    title={`Show ${tipName(tip)} and candidate ${candidate?.candidateId ?? '—'}`}
-                  />
-                  <span className="review-row__score" style={{ color: scoreInk(row) }}>
-                    <span>{row.score === undefined ? '—' : row.score.toFixed(3)}</span>
-                    {row.estimate !== undefined && (
-                      <span className="review-row__estimate">
-                        {estimateLabel(row.estimate)}
-                      </span>
-                    )}
-                  </span>
-                  <span className="review-row__id">
-                    {candidate?.candidateId ?? 'no candidate'}
+                  className="review-list__spacer"
+                  aria-hidden="true"
+                  style={{ height: windowed.rows.before }}
+                />
+              )}
+              {listed.slice(windowed.rows.start, windowed.rows.end).map((row, offset) => {
+                const tip = row.tip
+                /*
+                 * Per tip, the row follows the cursor: the tip being reviewed shows whichever
+                 * candidate the arrows are on, so paging is visible where it happened. Per
+                 * candidate a row *is* one candidate and shows itself, and "current" is the pair.
+                 */
+                // The same objects: `here` and the rows are both read off `mine`.
+                const onTip = here?.tip === tip
+                // What the row shows of its own accord (`hosted` is per tip only).
+                const shows = row.hosted ?? row.candidate
+                const candidate: Candidate | undefined =
+                  mode === 'tip' && onTip ? here.candidate : shows
+                const on =
+                  onTip &&
+                  (mode === 'tip' || here?.candidate.candidateId === candidate?.candidateId)
+                const said =
+                  candidate && verdictFor(verdicts, tip.neuronId, candidate.candidateId)
+                // Merged by Submit: a verdict on it changes nothing now, so it cannot be changed.
+                const done = candidate && mergedAs(merged, candidate.candidateId)
+                // In the neuron already by another road: a second accept would be a second merge.
+                const inNeuron =
+                  candidate !== undefined &&
+                  acceptedElsewhere(accepted, said, candidate.candidateId)
+                const outdated =
+                  !done && candidate !== undefined && edited(candidate.candidateId)
+                // How the piece is extended: by the reader's press, or by an Auto-extend further up.
+                const {
+                  choice,
+                  autoFrom,
+                  heldBy,
+                  held,
+                  extended: isExtended,
+                } = rowExtend(candidate && verdictKey(tip.neuronId, candidate.candidateId), {
+                  extended,
+                  autoPressed,
+                  accepted: growth.accepted,
+                  unjudged,
+                  searched,
+                })
+                // What goes off the list with this piece, said before the click that does it.
+                const goesWith =
+                  isExtended && candidate ? leavesWith(tree, candidate.candidateId) : ''
+                // Why the piece cannot be extended, where it cannot.
+                const blocked = candidate && blockedOf(candidate.candidateId)
+                /*
+                 * The Extend button, on an accepted row only: what it reads, says and whether it
+                 * can be pressed are `extendPress`'s, as Submit's are `submitPress`'s; its menu's
+                 * are `extendMenu`'s.
+                 */
+                const extendButton =
+                  candidate && said === 'accept'
+                    ? extendPress({
+                        candidate,
+                        progress: isExtended
+                          ? extendProgress(all, tip.seed, candidate.candidateId, search)
+                          : undefined,
+                        blocked,
+                        extendOnAccept: node.params.extendOnAccept === true,
+                        goesWith,
+                        choice,
+                        held,
+                        heldBy,
+                        took: autoTook.get(candidate.candidateId) ?? 0,
+                      })
+                    : undefined
+                const menu = extendButton && extendMenu({ choice, blocked, held, noAuto })
+                return (
+                  <li
+                    key={rowKeyOf(row, mode)}
+                    className="review-row"
+                    data-row
+                    aria-setsize={listed.length}
+                    aria-posinset={windowed.rows.start + offset + 1}
+                    data-current={on ? 'yes' : 'no'}
+                    data-arrived={arrived.has(rowKeyOf(row, mode)) ? 'yes' : undefined}
+                    data-hovered={
+                      hovered !== undefined && candidate?.candidateId === hovered
+                        ? 'yes'
+                        : undefined
+                    }
+                    data-verdict={said ?? 'none'}
+                    data-merged={done ?? 'no'}
+                    /*
+                     * A piece's tips sit beneath the row the piece was accepted on, a step in for
+                     * every piece between them and the neuron, behind an arrow (`editor.css`).
+                     */
+                    data-depth={row.depth}
+                    style={
+                      row.depth > 0
+                        ? ({ '--depth': Math.min(row.depth, MAX_INDENT) } as CSSProperties)
+                        : undefined
+                    }
+                  >
                     {/*
-                     * Its own chip, not one more muted fact: a merged piece must stand apart
-                     * from the ones still to merge at a glance (user, 2026-11-16).
+                     * An empty button covering the whole row, with the content as its siblings
+                     * above it.
+                     *
+                     * The row's three parts do not nest: the confidence spans both rows, the acts
+                     * sit top-right, and the measurements run the full width *under* them. No
+                     * single element can hold all three and still be one rectangle, so the click
+                     * target is a layer rather than a wrapper. It keeps the keyboard reach a real
+                     * button gives — one tab stop per row — and takes its name from `aria-label`,
+                     * having no text of its own.
                      */}
-                    {done && (
-                      <span className="review-row__merged">
-                        {done === 'merged' ? '✓ merged' : '✓ merged into another neuron'}
-                      </span>
-                    )}
-                    {inNeuron && !done && (
-                      <span className="review-row__merged" title={IN_NEURON_NOTE}>
-                        in this neuron
-                      </span>
-                    )}
-                    {/* Accepted by Auto-extend, and not yet by the reader. */}
-                    {autoFrom !== undefined && !done && (
-                      <span
-                        className="review-row__auto"
-                        title={`${
-                          candidate &&
-                          taken.has(verdictKey(tip.neuronId, candidate.candidateId))
-                            ? 'Accepted on SEAM’s cutoff by Auto-extend listed.'
-                            : `Accepted by the Auto-extend on ${autoFrom}.`
-                        } Press Accept to make it your own verdict. ${AUTO_REJECT_NOTE}`}
-                      >
-                        auto
-                      </span>
-                    )}
-                    {/* Edited since the suggestion: Submit would refuse it. */}
-                    {outdated && (
-                      <span
-                        className="review-row__outdated"
-                        title="This piece has been edited since it was suggested, so it cannot be merged as it is."
-                      >
-                        outdated
-                      </span>
-                    )}
-                  </span>
-                  <span className="review-row__facts">
-                    {candidate
-                      ? [
-                          // Which piece the tip is on is the row it sits beneath; said in
-                          // words only where there is no such row.
-                          row.adrift ? `on piece ${tip.neuronId}` : '',
-                          // The size the queue sorts and filters on, **with its unit**: a
-                          // chunk count is of the whole object and a volume is of the part
-                          // inside the search box, so a bare number would be two things.
-                          sizeLabel(sizeOf(candidate)),
-                          `rank ${candidate.rank}/${tip.candidates.length}`,
-                          // Its own confidence, p_tip x p_cand — the number `candidate` mode
-                          // leads with, carried here so the two modes show the same facts.
-                          candidate.conf === undefined
-                            ? ''
-                            : `conf ${candidate.conf.toFixed(3)}`,
-                          candidate.geoRank === undefined ? '' : `geo ${candidate.geoRank}`,
-                          gapLabel(candidate.minDistUm),
-                          tip.kind === 'kink' ? 'kink' : '',
-                          // The tip's verdict on either grain; per tip, the row's own, which is
-                          // re-scored where organelles were taken out of the list.
-                          (mode === 'tip' ? row.shown : tip.shown) ? 'shown' : '',
-                          row.passedOver ? 'first was an organelle' : '',
-                          candidate.organelle ? 'organelle' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')
-                      : row.passedOver
-                        ? 'every candidate here is flagged as an organelle'
-                        : 'the search found nothing within reach of this tip'}
-                  </span>
-                  {candidate && (
-                    <div className="review-row__acts">
-                      <button
-                        type="button"
-                        className="review-row__page"
-                        disabled={!on || candidate.rank <= 1}
-                        onClick={() => page(-1)}
-                        aria-label="Previous candidate"
-                        title="The candidate ranked above this one"
-                      >
-                        ‹
-                      </button>
-                      <button
-                        type="button"
-                        className="review-row__page"
-                        disabled={!on || candidate.rank >= tip.candidates.length}
-                        onClick={() => page(1)}
-                        aria-label="Next candidate"
-                        title="The next candidate down this tip’s list"
-                      >
-                        ›
-                      </button>
-                      <VerdictButtons
-                        said={said}
-                        press={(verdict) =>
-                          verdictPress({
-                            verdict,
-                            done,
-                            inNeuron,
-                            goesWith,
-                            auto:
-                              autoFrom !== undefined
-                                ? 'unjudged'
-                                : heldBy !== undefined
-                                  ? 'judged'
-                                  : undefined,
-                          })
-                        }
-                        onJudge={(verdict) => judge(tip, candidate, verdict, blocked)}
-                      />
-                      {extendButton && menu && (
-                        <ExtendButtons
-                          face={extendButton}
-                          pressed={isExtended}
-                          menu={menu}
-                          checked={choice === 'off' ? undefined : choice}
-                          onPress={(writes) => extend(tip, candidate, writes)}
-                        />
+                    <button
+                      type="button"
+                      className="review-row__pick"
+                      onClick={() => pick(tip, shows)}
+                      aria-label={`Show ${tipName(tip)} and candidate ${
+                        candidate?.candidateId ?? 'none'
+                      }`}
+                      title={`Show ${tipName(tip)} and candidate ${candidate?.candidateId ?? '—'}`}
+                    />
+                    <span className="review-row__score" style={{ color: scoreInk(row) }}>
+                      <span>{row.score === undefined ? '—' : row.score.toFixed(3)}</span>
+                      {row.estimate !== undefined && (
+                        <span className="review-row__estimate">
+                          {estimateLabel(row.estimate)}
+                        </span>
                       )}
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-            {windowed.rows.after > 0 && (
-              <li
-                className="review-list__spacer"
-                aria-hidden="true"
-                style={{ height: windowed.rows.after }}
-              />
-            )}
-          </ol>
+                    </span>
+                    <span className="review-row__id">
+                      {candidate?.candidateId ?? 'no candidate'}
+                      {/*
+                       * Its own chip, not one more muted fact: a merged piece must stand apart
+                       * from the ones still to merge at a glance (user, 2026-11-16).
+                       */}
+                      {done && (
+                        <span className="review-row__merged">
+                          {done === 'merged' ? '✓ merged' : '✓ merged into another neuron'}
+                        </span>
+                      )}
+                      {inNeuron && !done && (
+                        <span className="review-row__merged" title={IN_NEURON_NOTE}>
+                          in this neuron
+                        </span>
+                      )}
+                      {/* Accepted by Auto-extend, and not yet by the reader. */}
+                      {autoFrom !== undefined && !done && (
+                        <span
+                          className="review-row__auto"
+                          title={`${
+                            candidate &&
+                            taken.has(verdictKey(tip.neuronId, candidate.candidateId))
+                              ? 'Accepted on SEAM’s cutoff by Auto-extend listed.'
+                              : `Accepted by the Auto-extend on ${autoFrom}.`
+                          } Press Accept to make it your own verdict. ${AUTO_REJECT_NOTE}`}
+                        >
+                          auto
+                        </span>
+                      )}
+                      {/* Edited since the suggestion: Submit would refuse it. */}
+                      {outdated && (
+                        <span
+                          className="review-row__outdated"
+                          title="This piece has been edited since it was suggested, so it cannot be merged as it is."
+                        >
+                          outdated
+                        </span>
+                      )}
+                    </span>
+                    <span className="review-row__facts">
+                      {candidate
+                        ? [
+                            // Which piece the tip is on is the row it sits beneath; said in
+                            // words only where there is no such row.
+                            row.adrift ? `on piece ${tip.neuronId}` : '',
+                            // The size the queue sorts and filters on, **with its unit**: a
+                            // chunk count is of the whole object and a volume is of the part
+                            // inside the search box, so a bare number would be two things.
+                            sizeLabel(sizeOf(candidate)),
+                            `rank ${candidate.rank}/${tip.candidates.length}`,
+                            // Its own confidence, p_tip x p_cand — the number `candidate` mode
+                            // leads with, carried here so the two modes show the same facts.
+                            candidate.conf === undefined
+                              ? ''
+                              : `conf ${candidate.conf.toFixed(3)}`,
+                            candidate.geoRank === undefined ? '' : `geo ${candidate.geoRank}`,
+                            gapLabel(candidate.minDistUm),
+                            tip.kind === 'kink' ? 'kink' : '',
+                            // The tip's verdict on either grain; per tip, the row's own, which is
+                            // re-scored where organelles were taken out of the list.
+                            (mode === 'tip' ? row.shown : tip.shown) ? 'shown' : '',
+                            row.passedOver ? 'first was an organelle' : '',
+                            candidate.organelle ? 'organelle' : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')
+                        : row.passedOver
+                          ? 'every candidate here is flagged as an organelle'
+                          : 'the search found nothing within reach of this tip'}
+                    </span>
+                    {candidate && (
+                      <div className="review-row__acts">
+                        <button
+                          type="button"
+                          className="review-row__page"
+                          disabled={!on || candidate.rank <= 1}
+                          onClick={() => page(-1)}
+                          aria-label="Previous candidate"
+                          title="The candidate ranked above this one"
+                        >
+                          ‹
+                        </button>
+                        <button
+                          type="button"
+                          className="review-row__page"
+                          disabled={!on || candidate.rank >= tip.candidates.length}
+                          onClick={() => page(1)}
+                          aria-label="Next candidate"
+                          title="The next candidate down this tip’s list"
+                        >
+                          ›
+                        </button>
+                        <VerdictButtons
+                          said={said}
+                          press={(verdict) =>
+                            verdictPress({
+                              verdict,
+                              done,
+                              inNeuron,
+                              goesWith,
+                              auto:
+                                autoFrom !== undefined
+                                  ? 'unjudged'
+                                  : heldBy !== undefined
+                                    ? 'judged'
+                                    : undefined,
+                            })
+                          }
+                          onJudge={(verdict) => judge(tip, candidate, verdict, blocked)}
+                        />
+                        {extendButton && menu && (
+                          <ExtendButtons
+                            face={extendButton}
+                            pressed={isExtended}
+                            menu={menu}
+                            checked={choice === 'off' ? undefined : choice}
+                            onPress={(writes) => extend(tip, candidate, writes)}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+              {windowed.rows.after > 0 && (
+                <li
+                  className="review-list__spacer"
+                  aria-hidden="true"
+                  style={{ height: windowed.rows.after }}
+                />
+              )}
+            </ol>
+          </div>
         )}
 
         <div className="list-body__foot">
@@ -1193,6 +1273,22 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       </div>
     </div>
   )
+}
+
+/** How long a row that arrived stays tinted: long enough to catch the eye, gone by the next. */
+const ARRIVED_MS = 1600
+
+const NONE_ARRIVED: ReadonlySet<string> = new Set()
+
+/** A row's identity across updates, and React's key: its tip, and per candidate the candidate. */
+function rowKeyOf(row: TreeRow, mode: QueueMode): string {
+  const candidate = mode === 'candidate' ? (row.candidate?.candidateId ?? '') : ''
+  return `${tipKey(row.tip.neuronId, row.tip.endUid)}:${candidate}`
+}
+
+/** What a row shows the reader: the row, and the piece it leads with — none until it is scored. */
+function rowShowsOf(row: TreeRow, mode: QueueMode): string {
+  return `${rowKeyOf(row, mode)}#${(row.hosted ?? row.candidate)?.candidateId ?? ''}`
 }
 
 /**

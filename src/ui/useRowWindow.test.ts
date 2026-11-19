@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { rowWindow, scrollToShow } from './useRowWindow'
+import { anchoredScroll, rowWindow, scrollToShow } from './useRowWindow'
 
 describe('the rows a list draws', () => {
   it('draws the rows in view and a margin past the bottom', () => {
@@ -63,5 +63,54 @@ describe('scrolling a row into view', () => {
     expect(scrollToShow(2, 50, 4775, 500)).toBe(0)
     // Half out at the bottom is out.
     expect(scrollToShow(10, 50, 0, 520)).toBe(265)
+  })
+})
+
+/** Rows arriving under a reader: the row at the top of the view keeps its place. */
+describe('holding the list still', () => {
+  const keys = (...names: string[]) => names
+
+  it('scrolls down by the rows that arrived above the top of the view, and counts them', () => {
+    // Rows of 50px, scrolled to row c (100px). Two arrive above it.
+    expect(
+      anchoredScroll(keys('a', 'b', 'c', 'd'), keys('x', 'a', 'y', 'b', 'c', 'd'), 100, 50),
+    ).toEqual({
+      scrollTop: 200,
+      above: 2,
+    })
+  })
+
+  it('keeps the part-scrolled offset of the row at the top', () => {
+    expect(anchoredScroll(keys('a', 'b', 'c'), keys('x', 'a', 'b', 'c'), 130, 50)).toEqual({
+      scrollTop: 180,
+      above: 1,
+    })
+  })
+
+  it('moves nothing where only rows below arrived', () => {
+    expect(
+      anchoredScroll(keys('a', 'b', 'c'), keys('a', 'b', 'x', 'c'), 50, 50),
+    ).toBeUndefined()
+  })
+
+  it('counts a row that moved up from below as no arrival', () => {
+    // `d` re-sorted above `b`: the view holds, and nothing is new.
+    expect(anchoredScroll(keys('a', 'b', 'c', 'd'), keys('a', 'd', 'b', 'c'), 50, 50)).toEqual({
+      scrollTop: 100,
+      above: 0,
+    })
+  })
+
+  it('holds by the next row still listed where the top one has gone', () => {
+    // `b` was at the top and is gone; `c`, 50px below it, moved down a row and keeps that offset.
+    expect(anchoredScroll(keys('a', 'b', 'c'), keys('x', 'y', 'a', 'c'), 50, 50)).toEqual({
+      scrollTop: 100,
+      above: 2,
+    })
+  })
+
+  it('moves nothing where none of the rows from the view is still listed', () => {
+    expect(anchoredScroll(keys('a', 'b'), keys('x', 'y'), 50, 50)).toBeUndefined()
+    expect(anchoredScroll([], keys('x'), 0, 50)).toBeUndefined()
   })
 })
