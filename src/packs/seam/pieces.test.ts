@@ -10,11 +10,15 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
-import type { ExtendPair, Piece } from './pieces'
+import type { ExtendPair, ExtendPlan, Piece } from './pieces'
 import {
+  AUTO_DEPTH,
+  LARGE_PIECE_CHUNKS,
   aliasOf,
+  autoTakes,
+  extendPlanOf,
+  growAuto,
   pieceContacts,
-  extendPairs,
   extendedSchema,
   extendedTable,
   junctionOf,
@@ -26,6 +30,10 @@ import type { PublishedEnd, TipRow } from './searchTips'
 import { searchOnly } from './searchTips'
 
 const pair = (parent: string, piece: string): ExtendPair => ({ parent, piece })
+const extendPairs = (value: Parameters<typeof extendPlanOf>[0]) => extendPlanOf(value).pairs
+
+/** The wire's table as it was before `mode`. */
+const PAIRS_ONLY = tableSchema(column('parent', 'str'), column('piece', 'str'))
 
 const summary = (pieces: readonly Piece[]) =>
   pieces.map((piece) => `${piece.id}<${piece.parent} d${piece.depth} in ${piece.seed}`)
@@ -33,7 +41,7 @@ const summary = (pieces: readonly Piece[]) =>
 describe('the pairs on the wire', () => {
   it('round-trips through the table Review publishes', () => {
     const pairs = [pair('720', '801'), pair('801', '802')]
-    const table = extendedTable(pairs)
+    const table = extendedTable({ pairs, roots: new Set(), refused: new Set() })
     expect(table.schema).toEqual(extendedSchema())
     expect(extendPairs(table)).toEqual(pairs)
   })
@@ -50,7 +58,8 @@ describe('the pairs on the wire', () => {
 
   it('leaves out a row that is not two chunkedgraph ids, a piece on itself, and a repeat', () => {
     // Each id is about to be a root asked of a chunkedgraph, so a name or a float is not let by.
-    const table = makeTable(extendedSchema(), {
+    // Without `mode`, as the table was before it: every row read as `extend`.
+    const table = makeTable(PAIRS_ONLY, {
       parent: ['720', 'LC4', '720', '720', '7.2e+17', '720'],
       piece: ['801', '802', '720', '801', '803', null],
     })
@@ -60,7 +69,7 @@ describe('the pairs on the wire', () => {
   it('never takes 0 for a piece or for what it was accepted on', () => {
     // 0 is "no object": the root of every supervoxel the chunkedgraph does not list. Read as a
     // piece it would have all of those written as the neuron's, in every box of its tree.
-    const table = makeTable(extendedSchema(), { parent: ['720', '0'], piece: ['0', '801'] })
+    const table = makeTable(PAIRS_ONLY, { parent: ['720', '0'], piece: ['0', '801'] })
     expect(extendPairs(table)).toEqual([])
   })
 })
@@ -299,5 +308,208 @@ describe('what the run says of a piece', () => {
     // No joining end found: none is marked, rather than the first.
     expect(pieceLineage(piece, 2, undefined).map((one) => one.junction)).toEqual([false, false])
     expect(pieceLineage(piece, 0, undefined)).toEqual([])
+  })
+})
+
+describe('the plan on the wire', () => {
+  it('round-trips the pieces Auto-extend was pressed on and the pairs it must not take', () => {
+    const pairs = [pair('720', '801'), pair('801', '802')]
+    const table = extendedTable({
+      pairs,
+      roots: new Set(['802']),
+      refused: new Set(['802/803']),
+    })
+    expect(table.data['mode']).toEqual(['extend', 'auto', 'refused'])
+    const plan = extendPlanOf(table)
+    expect(plan.pairs).toEqual(pairs)
+    expect([...plan.roots]).toEqual(['802'])
+    expect([...plan.refused]).toEqual(['802/803'])
+    // A refusal is not a piece to extend.
+    expect(extendPairs(table)).toEqual(pairs)
+  })
+})
+
+describe('what Auto-extend takes', () => {
+  const first = { shown: true, organelle: false, l2Chunks: 3, id: '801' }
+
+  it('takes a first candidate that clears SEAM’s cutoff', () => {
+    expect(autoTakes(first)).toBe(true)
+    // A size the table does not carry is no reason to refuse it.
+    expect(autoTakes({ ...first, l2Chunks: undefined })).toBe(true)
+  })
+
+  it('takes nothing without an explicit cutoff — a run with no assessor has none', () => {
+    expect(autoTakes({ ...first, shown: false })).toBe(false)
+    expect(autoTakes({ ...first, shown: null })).toBe(false)
+    expect(autoTakes({ ...first, shown: undefined })).toBe(false)
+  })
+
+  it('takes no organelle, no large piece and no non-object', () => {
+    expect(autoTakes({ ...first, organelle: true })).toBe(false)
+    expect(autoTakes({ ...first, l2Chunks: LARGE_PIECE_CHUNKS })).toBe(false)
+    expect(autoTakes({ ...first, l2Chunks: LARGE_PIECE_CHUNKS - 1 })).toBe(true)
+    expect(autoTakes({ ...first, id: '0' })).toBe(false)
+    expect(autoTakes({ ...first, id: 'LC4' })).toBe(false)
+  })
+})
+
+describe('the tree Auto-extend grows', () => {
+  const plan = (
+    pairs: ExtendPair[],
+    roots: string[] = [],
+    refused: string[] = [],
+  ): ExtendPlan => ({ pairs, roots: new Set(roots), refused: new Set(refused) })
+  /** What each piece's ends offer, by piece id. */
+  const offering =
+    (offers: Record<string, string[]>) =>
+    (piece: Piece): string[] =>
+      offers[piece.id] ?? []
+  /** A chain 801 → 802 → … one piece a layer, `n` long beyond 801. */
+  const chain = (n: number) =>
+    Object.fromEntries(Array.from({ length: n }, (_, i) => [`${801 + i}`, [`${802 + i}`]]))
+
+  it('grows nothing where Auto-extend was not pressed', () => {
+    const grown = growAuto(plan([pair('720', '801')]), ['720'], offering(chain(3)))
+    expect(summary(grown.tree)).toEqual(['801<720 d1 in 720'])
+    expect(grown.searched).toEqual(grown.tree)
+    expect(grown.accepted.size).toBe(0)
+  })
+
+  it('takes the first candidates of the pressed piece’s ends, and of theirs, layer by layer', () => {
+    const grown = growAuto(
+      plan([pair('720', '801')], ['801']),
+      ['720'],
+      offering({ '801': ['802', '803'], '802': ['804'] }),
+    )
+    expect(summary(grown.tree)).toEqual([
+      '801<720 d1 in 720',
+      '802<801 d2 in 720',
+      '803<801 d2 in 720',
+      '804<802 d3 in 720',
+    ])
+    // Each to the piece it was pressed on; the pressed piece is the reader's, not Auto-extend's.
+    expect([...grown.accepted]).toEqual([
+      ['801/802', '801'],
+      ['801/803', '801'],
+      ['802/804', '801'],
+    ])
+  })
+
+  it(`stops ${AUTO_DEPTH} layers out, and searches nothing on the last`, () => {
+    const grown = growAuto(plan([pair('720', '801')], ['801']), ['720'], offering(chain(20)))
+    // The pressed piece, then ten layers.
+    expect(grown.tree).toHaveLength(1 + AUTO_DEPTH)
+    expect(grown.accepted.size).toBe(AUTO_DEPTH)
+    const last = grown.tree.at(-1)!
+    expect(last.id).toBe(`${801 + AUTO_DEPTH}`)
+    expect(grown.searched.map((piece) => piece.id)).not.toContain(last.id)
+    expect(grown.searched).toHaveLength(AUTO_DEPTH)
+  })
+
+  /** Extended by hand, a piece of the last layer is searched — and Auto-extend goes no further. */
+  it('takes nothing beyond its last layer, even where the reader extends a piece there', () => {
+    const last = `${801 + AUTO_DEPTH}`
+    const before = `${800 + AUTO_DEPTH}`
+    const grown = growAuto(
+      plan([pair('720', '801'), pair(before, last)], ['801']),
+      ['720'],
+      offering(chain(20)),
+    )
+    expect(grown.searched.map((piece) => piece.id)).toContain(last)
+    expect(grown.accepted.has(`${last}/${802 + AUTO_DEPTH}`)).toBe(false)
+  })
+
+  it('counts the layers from the piece it was pressed on, not from the neuron', () => {
+    const deep = [pair('720', '701'), pair('701', '702'), pair('702', '801')]
+    const grown = growAuto(plan(deep, ['801']), ['720'], offering(chain(20)))
+    expect(grown.accepted.size).toBe(AUTO_DEPTH)
+  })
+
+  it('starts the count again at a press nested under another’s tree', () => {
+    // 801 pressed; its 5th layer, 806, extended by hand and pressed too.
+    const grown = growAuto(
+      plan([pair('720', '801'), pair('805', '806')], ['801', '806']),
+      ['720'],
+      offering(chain(30)),
+    )
+    // 801 takes 802..805 and 806 itself is the reader's; 806 then takes ten layers.
+    expect(grown.accepted.size).toBe(4 + AUTO_DEPTH)
+    expect(grown.accepted.get('806/807')).toBe('806')
+  })
+
+  it('takes nothing the reader refused, nor anything beyond it', () => {
+    const grown = growAuto(
+      plan([pair('720', '801')], ['801'], ['801/802']),
+      ['720'],
+      offering({ '801': ['802', '803'], '802': ['804'] }),
+    )
+    expect(grown.tree.map((piece) => piece.id)).toEqual(['801', '803'])
+  })
+
+  it('takes nothing already in the tree, a neuron or a piece', () => {
+    const grown = growAuto(
+      plan([pair('720', '801'), pair('720', '802')], ['801']),
+      ['720', '900'],
+      offering({ '801': ['720', '802', '900', '803'] }),
+    )
+    expect([...grown.accepted.keys()]).toEqual(['801/803'])
+    // 802 keeps its place, under the neuron.
+    expect(summary(grown.tree)).toContain('802<720 d1 in 720')
+  })
+
+  /** Placed under its hand pair once that is reachable: taking it too would be a second accept. */
+  it('takes no piece the reader extended by hand, wherever it is placed', () => {
+    const grown = growAuto(
+      plan([pair('720', '801'), pair('902', '850')], ['801']),
+      ['720'],
+      offering({ '801': ['850', '851'] }),
+    )
+    expect([...grown.accepted.keys()]).toEqual(['801/851'])
+  })
+
+  it('gives a piece offered twice in one round to the nearer, then the lower id', () => {
+    const pairs = [pair('720', '802'), pair('720', '801'), pair('801', '803')]
+    const grown = growAuto(
+      plan(pairs, ['801', '802']),
+      ['720'],
+      offering({ '801': ['850'], '802': ['850'], '803': ['851'] }),
+    )
+    expect(grown.accepted.get('801/850')).toBe('801')
+    expect(grown.accepted.has('802/850')).toBe(false)
+  })
+
+  /**
+   * Within one neuron the tree is breadth first, so the nearer piece comes first anyway; across
+   * two it does not — the first neuron's pieces are all listed before the second's.
+   */
+  it('gives it to the nearer piece first, across neurons too', () => {
+    // 803 is two steps from 720; 900 one step from 730, listed after all of 720's.
+    const pairs = [pair('720', '801'), pair('801', '803'), pair('730', '900')]
+    const grown = growAuto(
+      plan(pairs, ['803', '900']),
+      ['720', '730'],
+      offering({ '803': ['850'], '900': ['850'] }),
+    )
+    expect(grown.accepted.get('900/850')).toBe('900')
+    expect(grown.accepted.has('803/850')).toBe(false)
+  })
+
+  it('places a piece extended by hand beyond one Auto-extend took', () => {
+    const grown = growAuto(
+      plan([pair('720', '801'), pair('802', '900')], ['801']),
+      ['720'],
+      offering({ '801': ['802'] }),
+    )
+    expect(summary(grown.tree)).toContain('900<802 d3 in 720')
+  })
+
+  /** A reload, then Run, must give the tables the session had. */
+  it('does not depend on the order the pairs were written in', () => {
+    const pairs = [pair('720', '801'), pair('720', '802'), pair('802', '803')]
+    const offers = offering({ '801': ['850', '851'], '803': ['851'], '850': ['852'] })
+    const one = growAuto(plan(pairs, ['801', '802']), ['720'], offers)
+    const other = growAuto(plan([...pairs].reverse(), ['802', '801']), ['720'], offers)
+    expect(summary(other.tree)).toEqual(summary(one.tree))
+    expect([...other.accepted].sort()).toEqual([...one.accepted].sort())
   })
 })

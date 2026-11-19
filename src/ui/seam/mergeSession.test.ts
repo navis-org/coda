@@ -11,10 +11,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addNode, emptyGraph } from '../../core/graph'
+import type * as VerdictLog from '../../data/verdictLog'
 import '../../nodes'
 import type { BatchCallbacks, BatchResult } from '../../packs/seam/mergeBatch'
 import type { MergePlan, PlannedMerge, ReadyPlan } from '../../packs/seam/mergePlan'
 import type { MergeRecordEntry } from '../../packs/seam/mergeRecord'
+import type { QueueTip } from '../../packs/seam/reviewQueue'
 import { decodeRecord } from '../../packs/seam/mergeRecord'
 import { useGraphStore } from '../../store/graphStore'
 import { node } from '../../test/graph'
@@ -28,6 +30,17 @@ vi.mock('../../packs/seam/mergeBatch', () => ({
 }))
 let touring = false
 vi.mock('../tour/tourState', () => ({ isTourActive: () => touring }))
+/*
+ * The verdict queue watched rather than written: nothing here may reach the verdict server either.
+ * `queueVerdict` runs as it is, its source check and all, and lands here.
+ */
+const queued = vi.fn<(target: unknown, input: { verdict: string }) => undefined>()
+const flushed = vi.fn(() => Promise.resolve())
+vi.mock('../../data/verdictLog', async (importOriginal) => ({
+  ...(await importOriginal<typeof VerdictLog>()),
+  enqueueVerdict: (target: unknown, input: { verdict: string }) => queued(target, input),
+  flushVerdicts: () => flushed(),
+}))
 
 const {
   STILL_OUT_MS,
@@ -53,11 +66,32 @@ let REQUEST = {
   datastack: 'test',
   sourceId: 'cave',
   datasetId: 'test:1',
-  queue: [],
+  queue: [
+    {
+      neuronId: '100',
+      seed: '100',
+      endUid: 1,
+      kind: 'tip',
+      tipNm: [1, 2, 3],
+      source: 'model:ranker@abc/assessor@def',
+      candidates: [],
+    },
+  ] as unknown as QueueTip[],
   reviewedRoot: '100',
 }
 
-const MERGE = { candidateRoot: '7' } as PlannedMerge
+const MERGE = {
+  candidateRoot: '7',
+  used: {
+    neuronId: '100',
+    endUid: 1,
+    candidate: { candidateId: '7', rank: 1, shown: true },
+    tip: REQUEST.queue[0],
+  },
+  auto: false,
+} as PlannedMerge
+/** The same merge, accepted by Auto-extend alone (`PlannedMerge.auto`). */
+const AUTO_MERGE = { ...MERGE, auto: true } as PlannedMerge
 const PLAN: ReadyPlan = {
   ok: true,
   datastack: 'test',
@@ -110,6 +144,8 @@ beforeEach(() => {
   REQUEST = { ...REQUEST, docId: store().activeTabId }
   planMerges.mockReset()
   prepareMerges.mockReset()
+  queued.mockReset()
+  flushed.mockClear()
 })
 
 afterEach(() => {
@@ -186,6 +222,42 @@ describe('Submit', () => {
     expect(currentSubmit()).toBeUndefined()
   })
 
+  /** Never as `accept`: SEAM must not take its own pick for a reader's verdict (user, 2026-11-18). */
+  it('sends a piece Auto-extend accepted, once merged, as `auto-accepted`', async () => {
+    await opened({ ...PLAN, merges: [AUTO_MERGE] })
+    const batch = heldBatch()
+    confirmSubmit([AUTO_MERGE])
+    batch.on().record(entry('unknown'))
+    expect(queued).not.toHaveBeenCalled()
+    batch.on().record(entry('merged'))
+    expect(queued).toHaveBeenCalledTimes(1)
+    expect(queued.mock.calls[0]![0]).toEqual({
+      deployment: REQUEST.deployment,
+      datastack: REQUEST.datastack,
+    })
+    expect(queued.mock.calls[0]![1]).toMatchObject({
+      verdict: 'auto-accepted',
+      neuron: '100',
+      piece: '100',
+      candidate: '7',
+    })
+    // One post when the batch ends, not one per merge.
+    expect(flushed).not.toHaveBeenCalled()
+    batch.finish({ state: 'done', currentRoot: '201', message: '' })
+    await vi.waitFor(() => expect(flushed).toHaveBeenCalledTimes(1))
+  })
+
+  it('sends nothing for a merge the reader accepted: their press was the record', async () => {
+    await opened()
+    const batch = heldBatch()
+    confirmSubmit([MERGE])
+    batch.on().record(entry('merged'))
+    batch.finish({ state: 'done', currentRoot: '201', message: '' })
+    await vi.waitFor(() => expect(currentSubmit()).toMatchObject({ running: false }))
+    expect(queued).not.toHaveBeenCalled()
+    expect(flushed).not.toHaveBeenCalled()
+  })
+
   it('starts nothing, and holds nothing, where the batch cannot be prepared', async () => {
     await opened()
     prepareMerges.mockImplementation(() => {
@@ -244,10 +316,10 @@ describe('Submit', () => {
    */
   describe('a merge still out', () => {
     /** Run a batch whose merge times out, and hand back the answer to give it later. */
-    async function timedOut() {
-      await opened()
+    async function timedOut(merge: PlannedMerge = MERGE) {
+      await opened({ ...PLAN, merges: [merge] })
       const batch = heldBatch()
-      confirmSubmit([MERGE])
+      confirmSubmit([merge])
       let answer: (entry: MergeRecordEntry | undefined) => void = () => {}
       batch.on().record(entry('unknown'))
       batch.on().stillOut(new Promise((resolve) => (answer = resolve)))
@@ -256,6 +328,26 @@ describe('Submit', () => {
       closeSubmit()
       return (entry: MergeRecordEntry | undefined) => answer(entry)
     }
+
+    /** The merge landed, late: an Auto-extend piece is sent all the same, and only once. */
+    it('sends a piece Auto-extend accepted when its late answer says merged', async () => {
+      const answer = await timedOut(AUTO_MERGE)
+      expect(queued).not.toHaveBeenCalled()
+      answer(entry('merged', '201'))
+      await vi.waitFor(() => expect(queued).toHaveBeenCalledTimes(1))
+      expect(queued.mock.calls[0]![1]).toMatchObject({
+        verdict: 'auto-accepted',
+        candidate: '7',
+      })
+      await vi.waitFor(() => expect(flushed).toHaveBeenCalledTimes(1))
+    })
+
+    it('sends nothing when the late answer says it did not land', async () => {
+      const answer = await timedOut(AUTO_MERGE)
+      answer({ ...entry('unknown') } as MergeRecordEntry)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(queued).not.toHaveBeenCalled()
+    })
 
     /** Closing the tab meanwhile would lose the answer: the browser asks first, until it comes. */
     it('asks before the tab closes while it waits', async () => {

@@ -14,7 +14,7 @@ import type { PlannedMerge, PlanRequest, PlanServices } from './mergePlan'
 import { acceptedTree, planMerges, tickedWith, withoutOrphans } from './mergePlan'
 import type { MergeRecordEntry, RecordOutcome } from './mergeRecord'
 import type { Candidate, QueueTip, Verdict } from './reviewQueue'
-import { verdictKey } from './reviewQueue'
+import { verdictKey } from './pieces'
 
 const GRAPHENE: GrapheneSource = {
   server: 'https://cave.example.org',
@@ -60,6 +60,7 @@ function tip(
     q: undefined,
     pTip: undefined,
     shown: true,
+    cleared: true,
     source: undefined,
     candidates,
   }
@@ -188,6 +189,22 @@ describe('planMerges', () => {
     expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['7', '8', '9'])
     expect(plan.rejected).toEqual([])
     expect(plan.currentRoot).toBe(NEURON)
+  })
+
+  /** What the dialog tags and SEAM is sent as `auto-accepted`: Auto-extend's accept alone. */
+  it('marks a merge Auto-extend accepted and the reader never judged', async () => {
+    const unjudged = new Map([[verdictKey(NEURON, '8'), NEURON]])
+    const plan = await planned({ ...request(queue, all), unjudged }, services().fake)
+    expect(plan.merges.map((m) => [m.candidateRoot, m.auto])).toEqual([
+      ['7', false],
+      ['8', true],
+      ['9', false],
+    ])
+    // With none given, nothing is.
+    const plain = await planned(request(queue, all), services().fake)
+    expect(plain.merges.every((m) => !m.auto)).toBe(true)
+    // The row the merge is made at carries its tip, for the record sent of it.
+    expect(plan.merges[1]!.used.tip).toBe(queue[0])
   })
 
   it('refuses every piece when the neuron is not current, and opens no volume', async () => {
@@ -730,6 +747,7 @@ describe('planning a neuron grown piece by piece', () => {
       neuronId,
       endUid,
       candidate: candidate(id, 1, gap),
+      tip: {} as QueueTip,
     })
 
     /** A piece merged already is the neuron: what was accepted on it is one step out. */

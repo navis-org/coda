@@ -305,9 +305,9 @@ export interface MergeLine {
  * **Each line is linked to its piece** (`segments`, `linkedSegmentationLayer` naming the layer the
  * pieces are in, `filterBySegmentation`), so neuroglancer draws a line only while its piece is
  * shown. Unticking a piece — or hiding it in the viewer — hides its line with no change to this
- * layer, and only a changed segment list is something the viewer sets in place
- * (`selectionChanges`); a changed layer is a re-navigation that rebuilds every layer and re-centres
- * the camera.
+ * layer, and only a changed segment list or a local layer's annotations is something the viewer
+ * sets in place (`inPlaceChanges`); any other change to a layer is a re-navigation that rebuilds
+ * every layer and re-centres the camera.
  */
 export function mergeLineLayer(
   lines: readonly MergeLine[],

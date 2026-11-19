@@ -903,19 +903,64 @@ describe('extending a neuron from the review card', () => {
     expect(button.title).toMatch(/published set cannot be extended/)
   })
 
-  describe('with Auto-extend on', () => {
+  describe('Auto-extend', () => {
+    const more = () =>
+      rows()[0]!.querySelector<HTMLButtonElement>(
+        '.review-row__split--extend .review-row__more',
+      )!
+    const PRESSED = { ...EXTENDED, autoRoots: `${NEURON}/${PIECE}` }
+
+    it('is offered beside Extend, and writes the press and runs the search in one step', () => {
+      // An edit with the same tag within 700 ms joins the last undo step: the test before's.
+      useGraphStore.setState({ past: [] } as never)
+      draw({ verdicts: ACCEPTED })
+      const before = useGraphStore.getState().past.length
+      fireEvent.click(more())
+      expect(screen.getAllByRole('menuitemradio').map((one) => one.textContent)).toEqual([
+        'Extend',
+        'Auto-extend',
+      ])
+      fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto-extend/ }))
+      expect(stored()['extend']).toBe(`${NEURON}/${PIECE}`)
+      expect(stored()['autoRoots']).toBe(`${NEURON}/${PIECE}`)
+      expect(useGraphStore.getState().past.length).toBe(before + 1)
+      expect(runNode).toHaveBeenCalledTimes(1)
+    })
+
+    /** The piece's tip offers `NEXT`, which cleared the cutoff: Auto-extend took it. */
+    it('lists what it took as accepted, marked as its own, and counts it', () => {
+      draw(PRESSED, true, grownCandidates(), grownTips(true))
+      const taken = rows().find((row) => row.textContent?.includes(NEXT))!
+      expect(taken.querySelector('.review-row__auto')?.textContent).toBe('auto')
+      expect(
+        taken
+          .querySelector('.review-row__verdict[data-verdict="accept"]')!
+          .getAttribute('aria-pressed'),
+      ).toBe('true')
+      expect(document.body.textContent).toMatch(/1 by Auto-extend/)
+      // Nothing was written: an Auto-extend accept is not the reader's verdict.
+      expect(stored()['verdicts']).toBe(ACCEPTED)
+    })
+
+    it('takes nothing where Auto-extend was not pressed', () => {
+      draw(EXTENDED, true, grownCandidates(), grownTips(true))
+      expect(document.querySelector('.review-row__auto')).toBeNull()
+    })
+  })
+
+  describe('with Extend on accept on', () => {
     const accept = (row: Element) =>
       row.querySelector<HTMLButtonElement>('.review-row__verdict[data-verdict="accept"]')!
 
     it('is a field on the card, off unless asked for', () => {
       draw()
       const labels = [...document.querySelectorAll('.param__label')].map((n) => n.textContent)
-      expect(labels).toContain('Auto-extend')
-      expect(stored()['autoExtend']).toBe(false)
+      expect(labels).toContain('Extend on accept')
+      expect(stored()['extendOnAccept']).toBe(false)
     })
 
     it('extends a piece as it is accepted: one edit, and the search is run', () => {
-      draw({ autoExtend: true })
+      draw({ extendOnAccept: true })
       const before = useGraphStore.getState().past.length
       fireEvent.click(accept(rows()[0]!))
       expect(stored()['verdicts']).toBe(ACCEPTED)
@@ -927,7 +972,7 @@ describe('extending a neuron from the review card', () => {
 
     /** Switching it on is not a press on Accept. */
     it('starts nothing for a piece accepted earlier, which keeps its button', () => {
-      draw({ autoExtend: true, verdicts: ACCEPTED })
+      draw({ extendOnAccept: true, verdicts: ACCEPTED })
       expect(runNode).not.toHaveBeenCalled()
       expect(stored()['extend']).toBe('')
       expect(extendButtons()[0]!.textContent).toBe('Extend')
@@ -935,22 +980,22 @@ describe('extending a neuron from the review card', () => {
 
     /** 61 chunks: accepted, and left to its button, which says why. */
     it('leaves a large piece to its button', () => {
-      const written = draw({ autoExtend: true })
+      const written = draw({ extendOnAccept: true })
       fireEvent.click(accept(rows()[1]!))
       expect(written['verdicts']).toBe(`${NEURON}/${SECOND}=accept`)
       expect(stored()['extend']).toBe('')
       expect(runNode).not.toHaveBeenCalled()
       cleanup()
-      draw({ autoExtend: true, verdicts: `${NEURON}/${SECOND}=accept` })
+      draw({ extendOnAccept: true, verdicts: `${NEURON}/${SECOND}=accept` })
       expect(extendButtons()[0]!.textContent).toBe('Extend (large)')
       expect(extendButtons()[0]!.title).toMatch(
-        /Auto-extend leaves a piece this size to this button/,
+        /Extend on accept leaves a piece this size to this button/,
       )
     })
 
     it('extends nothing where nothing is wired back', () => {
       wiredBack = false
-      const written = draw({ autoExtend: true })
+      const written = draw({ extendOnAccept: true })
       fireEvent.click(accept(rows()[0]!))
       expect(written['verdicts']).toBe(ACCEPTED)
       expect(stored()['extend']).toBe('')
@@ -1140,12 +1185,18 @@ describe('the split verdict button', () => {
   const face = () => rows()[0]!.querySelectorAll<HTMLButtonElement>('.review-row__verdict')[1]!
   const more = () => rows()[0]!.querySelector<HTMLButtonElement>('.review-row__more')!
   const item = (name: string) => screen.getByRole('menuitemradio', { name: new RegExp(name) })
+  /*
+   * The verdict as written, by either road: alone through the card's own setter, or through the
+   * store beside the refusal Auto-extend is to keep (this candidate clears the cutoff).
+   */
+  const verdictsOf = (written: Record<string, unknown>) =>
+    written['verdicts'] ?? useGraphStore.getState().graph.nodes[0]!.params['verdicts']
 
   it('reads Reject on a row with no verdict, and gives it in one press', () => {
     const written = draw({ current: at(11), rank: 1 })
     expect(face().textContent).toBe('Reject')
     fireEvent.click(face())
-    expect(written['verdicts']).toBe('720575940621522189/648518346368395605=reject')
+    expect(verdictsOf(written)).toBe('720575940621522189/648518346368395605=reject')
   })
 
   it('opens Reject, Ends and Unsure, and records the one picked', () => {
@@ -1157,7 +1208,7 @@ describe('the split verdict button', () => {
       'Unsure',
     ])
     fireEvent.click(item('Ends'))
-    expect(written['verdicts']).toBe('720575940621522189/648518346368395605=ends')
+    expect(verdictsOf(written)).toBe('720575940621522189/648518346368395605=ends')
     expect(screen.queryByRole('menuitemradio')).toBeNull()
   })
 

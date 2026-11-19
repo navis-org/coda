@@ -64,7 +64,9 @@
  * **Except where nothing is restored.** Coda's own frame takes a change that is only a selection —
  * which neurons show, and their colours — as a message and edits the live layer in place
  * (`FrameSegmentsMessage`), so that, the commonest update by far, applies under the cursor with
- * the camera, the layout and the loaded meshes left alone. Only a structural change still navigates.
+ * the camera, the layout and the loaded meshes left alone. A local annotation layer's annotations
+ * go the same way. Only a structural change still navigates, and what can go in place goes ahead of
+ * it (`inPlaceChanges`).
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -86,7 +88,7 @@ import {
   layerPanelPatch,
   withLayerPanel,
   selectionLayerName,
-  selectionChanges,
+  inPlaceChanges,
   layerListing,
   sceneUrlBase,
 } from '../../data/neuroglancer/scene'
@@ -573,8 +575,9 @@ export function NeuroglancerViewer({
     const split = splitSceneUrl(url)
 
     /*
-     * Only a selection changed, and the frame is Coda's own (it has reported): set it in place, no
-     * pointer hold, no navigation — see the file header. Anything else navigates, below.
+     * Only segments, colours or local annotations changed, and the frame is Coda's own (it has
+     * reported): set them in place, no pointer hold, no navigation — see the file header. Anything
+     * else navigates, below.
      */
     if (
       was &&
@@ -585,20 +588,32 @@ export function NeuroglancerViewer({
       was.viewerType === viewerType &&
       was.layerPanel === layerBar
     ) {
-      const changes = selectionChanges(was.scene, split.scene)
-      if (changes) {
-        if (changes.length > 0) {
+      const inPlace = inPlaceChanges(was.scene, split.scene)
+      if (inPlace) {
+        const { segments, annotations } = inPlace
+        const sent = segments.length > 0 || annotations.length > 0
+        if (sent) {
           const message: FrameSegmentsMessage = {
             type: FRAME_SEGMENTS_MESSAGE,
-            layers: changes,
+            layers: segments,
+            ...(annotations.length > 0 ? { annotations } : {}),
             update: nextUpdate(),
           }
           kept.frame.contentWindow?.postMessage(message, window.location.origin)
         }
-        kept.applied = { ...was, url, scene: split.scene }
-        // A navigation held for the pointer is superseded: this is the scene to show now.
-        heldRef.current = false
-        return
+        if (inPlace.whole) {
+          kept.applied = { ...was, url, scene: split.scene }
+          // A navigation held for the pointer is superseded: this is the scene to show now.
+          heldRef.current = false
+          return
+        }
+        /*
+         * More than that changed, so a navigation follows, and what could go in place went ahead
+         * of it. Recorded as what the frame now shows, since its reports are folded against
+         * `applied.scene`; with the URL cleared, as no URL is this scene, so the same URL arriving
+         * again is not taken for one already applied.
+         */
+        if (sent) kept.applied = { ...was, url: '', scene: inPlace.scene }
       }
     }
 

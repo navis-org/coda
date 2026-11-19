@@ -329,6 +329,92 @@ describe('the run book', () => {
  * Where a piece joins is read off its parent's ends, and the book answers from the ends there
  * are when it is asked — no caller keeps the answer, so none can keep an old one.
  */
+describe('the order growing as Auto-extend takes pieces', () => {
+  it('hands back a root’s finished ends in the order of its tips', () => {
+    const book = base()
+    add(book, P1, [0, 1])
+    book.join(P1.id, undefined)
+    book.put(P1.id, end(1, 'second'))
+    book.put(P1.id, end(0, 'first'))
+    expect(named(book.endsOf(P1.id))).toEqual(['first@0', 'second@1'])
+    expect(book.endsOf('999')).toEqual([])
+  })
+
+  it('publishes a piece added to the order, in its place', () => {
+    const book = runBook({
+      table: tipsTable([N1]),
+      rows: [tip(N1, 0)],
+      neurons: [{ id: N1, at: [0] }],
+      attempting: new Set([0]),
+      order: [P1],
+    })
+    add(book, P1, [0])
+    book.join(P1.id, undefined)
+    const taken = piece('850', '801', [N1, '801', '850'])
+    book.reorder([P1, taken])
+    add(book, taken, [0])
+    book.join(taken.id, undefined)
+    expect(book.assemble().table.data[ID_COLUMN_NAME]).toEqual([N1, '801', '850'])
+  })
+
+  /** Its ends were searched with another path read as the neuron (`aliasOf`). */
+  it('forgets a piece whose path moved, and the pieces beyond it', () => {
+    const book = base()
+    add(book, P1, [0])
+    add(book, Q, [0])
+    for (const one of [P1, Q]) book.join(one.id, undefined)
+    book.put(Q.id, end(0, 'q'))
+    // 803 is now reached through 802; 801 stays where it was.
+    const moved = piece('803', '802', [N1, '802', '803'])
+    book.reorder([P1, P2, moved])
+    expect(book.piece(P1.id)).toBeDefined()
+    expect(book.piece(Q.id)).toBeUndefined()
+    expect(book.endsOf(Q.id)).toEqual([])
+  })
+
+  /** A new record counts its ends from 0 again, and must not meet the old reading's number. */
+  it('asks where a moved piece’s own pieces join it afresh', () => {
+    const book = base()
+    add(book, P1, [0, 1])
+    book.join(P1.id, undefined)
+    // Q joins 801 at its second end, as 801 stood.
+    book.put(P1.id, end(0, 'a'))
+    book.put(P1.id, end(1, 'b', [{ root: '803', gap: 0.1, at: 5 }]))
+    expect(book.contactOf(Q)).toEqual([5000, 0, 0])
+    // 801 is now reached another way: its record goes, and is made again.
+    const moved = piece('801', '802', [N1, '802', '801'])
+    const q = piece('803', '801', [N1, '802', '801', '803'])
+    book.reorder([P2, moved, q])
+    add(book, moved, [0, 1])
+    book.join(moved.id, undefined)
+    book.put(moved.id, end(0, 'a'))
+    book.put(moved.id, end(1, 'b', [{ root: '803', gap: 0.1, at: 9 }]))
+    // As many ends as before, so the same version number: the contact is the new end's.
+    expect(book.contactOf(q)).toEqual([9000, 0, 0])
+  })
+
+  it('counts no open end outside the volume for a piece the order dropped', () => {
+    const book = base()
+    book.addPiece(P2, tipsTable([P2.id, P2.id]), [tip(P2.id, 0), tip(P2.id, 1)], [false, true])
+    book.join(P2.id, undefined)
+    expect(book.piecesOutside()).toBe(1)
+    book.reorder([P1])
+    expect(book.piecesOutside()).toBe(0)
+  })
+
+  it('keeps a piece no longer in the order, and leaves it out of the tables', () => {
+    const book = base()
+    add(book, P1, [0])
+    add(book, P2, [0])
+    for (const one of [P1, P2]) book.join(one.id, undefined)
+    book.reorder([P1])
+    expect(book.assemble().table.data[ID_COLUMN_NAME]).toEqual([N1, N2, N1, '801'])
+    // Back in its old place, it is published again as it was.
+    book.reorder([P1, P2])
+    expect(book.assemble().table.data[ID_COLUMN_NAME]).toEqual([N1, N2, N1, '801', '802'])
+  })
+})
+
 describe('where a piece joins, by what its parent’s ends say now', () => {
   it('has no contact until an end of the parent lists the piece', () => {
     const book = base()

@@ -61,40 +61,97 @@ export interface ExtendPair {
 }
 
 /**
+ * A pair's key, `parent/piece` — **one spelling**, and the key a reader's verdict on a candidate is
+ * filed under too (`seam:review`'s `verdicts`): the neuron or piece a tip is on, and the candidate.
+ * Both ids are digits, so neither can hold the separator. An older verdict key, `end_uid:id`,
+ * reads as no pair (`verdictPair`), so it can never be taken for one.
+ */
+export const verdictKey = (neuronId: string, candidateId: string): string =>
+  `${neuronId}/${candidateId}`
+
+/** A key's two ids, or undefined for one of the old shape (or a hand edit). */
+export function verdictPair(
+  key: string,
+): { neuronId: string; candidateId: string } | undefined {
+  const at = key.indexOf('/')
+  if (at <= 0 || at === key.length - 1) return undefined
+  return { neuronId: key.slice(0, at), candidateId: key.slice(at + 1) }
+}
+
+/** Keys as pairs, in the order given; a key that is no pair is left out. */
+export function pairsOf(keys: Iterable<string>): ExtendPair[] {
+  const out: ExtendPair[] = []
+  for (const key of keys) {
+    const pair = verdictPair(key)
+    if (pair) out.push({ parent: pair.neuronId, piece: pair.candidateId })
+  }
+  return out
+}
+
+/**
  * The output of `seam:review` the pairs leave by, and so the one a reference to it is read from.
  * One spelling for the node's port, its `asReference`, Suggest Merges' `producedBy` and the card.
  */
 export const EXTENDED_PORT = 'extended'
 
-/** The table a reference to `seam:review` is handed: one row per pair. */
+/**
+ * The table a reference to `seam:review` is handed: one row per pair, and what the row says of it.
+ *
+ * `mode` is `extend` for a piece extended by hand, `auto` for one Auto-extend was pressed on, and
+ * `refused` for a pair the reader gave a verdict other than accept — which Auto-extend must not
+ * take, and which is sent only while an Auto-extend is live (`docs/seam-auto-extend-plan.md`).
+ * A table without the column is every row `extend`, as before it existed.
+ */
 export const EXTENDED_FIELDS: readonly Field[] = [
   field('parent', 'parent', 'str'),
   field('piece', 'piece', 'str'),
+  field('mode', 'mode', 'str'),
 ]
+
+type ExtendMode = 'extend' | 'auto' | 'refused'
 
 export function extendedSchema(): TableSchema {
   return schemaOf(EXTENDED_FIELDS)
 }
 
-/** The pairs as the table `seam:review` publishes — the one writer of that shape. */
-export function extendedTable(pairs: readonly ExtendPair[]): TableValue {
+/** What Review hands the search: the pieces to extend, and what Auto-extend is told. */
+export interface ExtendPlan {
+  /** Every piece extended, by hand or by an Auto-extend press — `auto` pairs among them. */
+  readonly pairs: readonly ExtendPair[]
+  /** The pieces Auto-extend was pressed on, by id. Each is a piece of a pair in `pairs`. */
+  readonly roots: ReadonlySet<string>
+  /** Pairs, as `parent/piece`, that Auto-extend must not accept: the reader said otherwise. */
+  readonly refused: ReadonlySet<string>
+}
+
+/** The plan as the table `seam:review` publishes — the one writer of that shape. */
+export function extendedTable(plan: ExtendPlan): TableValue {
+  const refused = pairsOf([...plan.refused].sort())
+  const rows = [...plan.pairs, ...refused]
   return tableOf(EXTENDED_FIELDS, {
-    parent: pairs.map((pair) => pair.parent),
-    piece: pairs.map((pair) => pair.piece),
+    parent: rows.map((pair) => pair.parent),
+    piece: rows.map((pair) => pair.piece),
+    mode: [
+      ...plan.pairs.map((pair): ExtendMode => (plan.roots.has(pair.piece) ? 'auto' : 'extend')),
+      ...refused.map((): ExtendMode => 'refused'),
+    ],
   })
 }
 
 /**
- * The pairs out of whatever is on the wire — and nothing for anything that is not such a table.
+ * The plan out of whatever is on the wire — and nothing for anything that is not such a table.
  *
  * Read strictly, because each id is about to be a root the search asks a chunkedgraph for: a row
  * that is not two chunkedgraph ids, or names a piece as its own parent, is left out.
  */
-export function extendPairs(value: Value | undefined): ExtendPair[] {
-  if (!isTableValue(value)) return []
+export function extendPlanOf(value: Value | undefined): ExtendPlan {
+  const pairs: ExtendPair[] = []
+  const roots = new Set<string>()
+  const refused = new Set<string>()
+  if (!isTableValue(value)) return { pairs, roots, refused }
   const parents = value.data['parent'] ?? []
   const pieces = value.data['piece'] ?? []
-  const out: ExtendPair[] = []
+  const modes = value.data['mode']
   const seen = new Set<string>()
   for (let i = 0; i < value.length; i++) {
     const parent = idText(parents[i] ?? null)
@@ -103,12 +160,148 @@ export function extendPairs(value: Value | undefined): ExtendPair[] {
     // `isNodeId`, as the merge plan asks of the same ids: 0 is "no object", and read as a
     // piece it would have every unlisted supervoxel in a box written as the neuron's.
     if (!isNodeId(parent) || !isNodeId(piece)) continue
-    const key = `${parent}/${piece}`
+    const key = verdictKey(parent, piece)
+    const mode = modes?.[i] ?? 'extend'
+    if (mode === 'refused') {
+      refused.add(key)
+      continue
+    }
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ parent, piece })
+    pairs.push({ parent, piece })
+    if (mode === 'auto') roots.add(piece)
   }
-  return out
+  return { pairs, roots, refused }
+}
+
+/**
+ * From this many level-2 chunks a piece is large: the Extend button says so, `Extend on accept`
+ * leaves it to the button, and Auto-extend does not accept it (users, 2026-11-16 and -18).
+ *
+ * Measured, not chosen (`docs/seam-extend-plan.md`, phase 0): below it a piece's open ends were
+ * found in under 2 s and it had a handful of them; from 41 chunks the median was 6 s and 73 tips,
+ * 21 s at 496 chunks and 150 s at 2,704 — before any end is searched. Said, never refused
+ * (`docs/limits.md`): one press still extends it.
+ */
+export const LARGE_PIECE_CHUNKS = 41
+
+/**
+ * How many layers of pieces one Auto-extend press may accept, counted from the piece it was
+ * pressed on (user, 2026-11-18). Pieces on the last layer are accepted and not searched.
+ */
+export const AUTO_DEPTH = 10
+
+/**
+ * Whether Auto-extend takes an end's first candidate — **the one rule**, read by the search over
+ * its finished ends and by the card over the published rows, so the two grow the same tree.
+ *
+ * SEAM's own cutoff (`shown`, and only an explicit `true`: a run with no assessor has no cutoff),
+ * not an organelle, not large, and a real object.
+ */
+export function autoTakes(first: {
+  readonly shown: boolean | null | undefined
+  readonly organelle: boolean | null | undefined
+  readonly l2Chunks: number | null | undefined
+  readonly id: string
+}): boolean {
+  if (first.shown !== true || first.organelle === true) return false
+  if (typeof first.l2Chunks === 'number' && first.l2Chunks >= LARGE_PIECE_CHUNKS) return false
+  return isNodeId(first.id)
+}
+
+/** What Auto-extend added to the tree: the tree, and which pairs it accepted. */
+export interface AutoGrowth {
+  /** Every piece placed — by hand and by Auto-extend — in `piecesOf`'s order. */
+  readonly tree: readonly Piece[]
+  /** The pieces whose own ends are searched: all of `tree` but Auto-extend's last layer. */
+  readonly searched: readonly Piece[]
+  /** The pairs Auto-extend accepted, as `parent/piece`, each to the piece it was pressed on. */
+  readonly accepted: ReadonlyMap<string, string>
+}
+
+/**
+ * The tree, with what Auto-extend accepted grown onto it — **one derivation, read by the search
+ * and by the card**, so what is searched and what is listed as accepted cannot disagree.
+ *
+ * In rounds from the pairs extended by hand: every searched piece below an Auto-extend press, and
+ * fewer than `AUTO_DEPTH` layers below it, offers the first candidates `firsts` names for its
+ * ends (already filtered by `autoTakes`). A candidate is taken unless it is refused, a seed,
+ * extended by hand, or placed in the tree already — **so a piece is never taken twice**, each
+ * round only adds pairs, and the rounds end. (A piece the reader extended *beyond* one Auto-extend
+ * took can move nearer the seed once that one is placed; `RunBook.reorder` searches it again
+ * there.) A candidate offered by two pieces in one round goes to the nearer the seed, then to the
+ * lower id: `piecesOf`'s rule. A press nested under another's tree starts its own count.
+ *
+ * Nothing here depends on the order of clicks: the rounds are a function of the pairs and of
+ * what the ends say, so a reload and a run end on the same tree.
+ */
+export function growAuto(
+  plan: ExtendPlan,
+  seeds: readonly string[],
+  /** The first candidates Auto-extend may take at a piece's ends, in its tips' order. */
+  firsts: (piece: Piece) => readonly string[],
+): AutoGrowth {
+  const accepted = new Map<string, string>()
+  if (plan.roots.size === 0) {
+    const tree = piecesOf(plan.pairs, seeds)
+    return { tree, searched: tree, accepted }
+  }
+  /** Auto-extend's last layer: accepted, never searched, and offering nothing. */
+  const last = new Set<string>()
+  const pairs = [...plan.pairs]
+  // A piece the reader extended by hand is theirs, wherever the tree places it: never taken too.
+  const reserved = new Set([...seeds, ...plan.pairs.map((pair) => pair.piece)])
+  for (;;) {
+    const tree = piecesOf(pairs, seeds)
+    const placed = new Set(tree.map((piece) => piece.id))
+    const claims = new Map<string, { parent: Piece; root: string; layer: number }>()
+    for (const piece of tree) {
+      if (last.has(piece.id)) continue
+      const from = pressedOn(piece, plan.roots)
+      if (!from || from.layer >= AUTO_DEPTH) continue
+      for (const id of firsts(piece)) {
+        if (reserved.has(id) || placed.has(id)) continue
+        if (plan.refused.has(verdictKey(piece.id, id))) continue
+        const rival = claims.get(id)
+        const better =
+          !rival ||
+          piece.depth < rival.parent.depth ||
+          (piece.depth === rival.parent.depth && compareIds(piece.id, rival.parent.id) < 0)
+        if (better) claims.set(id, { parent: piece, root: from.root, layer: from.layer + 1 })
+      }
+    }
+    if (claims.size === 0) {
+      return { tree, searched: tree.filter((piece) => !last.has(piece.id)), accepted }
+    }
+    for (const [id, claim] of [...claims].sort(([a], [b]) => compareIds(a, b))) {
+      pairs.push({ parent: claim.parent.id, piece: id })
+      accepted.set(verdictKey(claim.parent.id, id), claim.root)
+      if (claim.layer >= AUTO_DEPTH) last.add(id)
+    }
+  }
+}
+
+/**
+ * The nearest Auto-extend press on a piece's way to its seed, itself included, and how far up.
+ * Every id on a placed piece's path is placed: `piecesOf` reaches a piece only through it.
+ */
+function pressedOn(
+  piece: Piece,
+  roots: ReadonlySet<string>,
+): { root: string; layer: number } | undefined {
+  for (let at = piece.path.length - 1; at > 0; at--) {
+    const id = piece.path[at]!
+    if (roots.has(id)) return { root: id, layer: piece.path.length - 1 - at }
+  }
+  return undefined
+}
+
+/**
+ * Where a piece sits, as one string: its path. Two readings of a piece with the same key were
+ * searched as part of the same neuron-so-far (`aliasOf`), so their ends are the same ends.
+ */
+export function pathKey(piece: Pick<Piece, 'path'>): string {
+  return piece.path.join('/')
 }
 
 /** One piece of a neuron being extended, placed in its tree. */
@@ -187,7 +380,7 @@ export function piecesOf(pairs: readonly ExtendPair[], seeds: readonly string[])
  * its parent in that order).
  *
  * **For all of one parent's pieces at once, in one walk of its ends.** Compared as the numbers the lists hold: a string per candidate of every end of the parent was
- * most of what an Extend pressed on a large neuron cost. The ids are `extendPairs`', so each is
+ * most of what an Extend pressed on a large neuron cost. The ids are `extendPlanOf`'s, so each is
  * a chunkedgraph id and always parses.
  */
 export function pieceContacts(

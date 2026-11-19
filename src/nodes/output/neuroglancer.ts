@@ -46,7 +46,7 @@ import { datasetCacheKey } from '../../data/neuronIndex'
 import { unmatchedIds } from '../lib/idList'
 import { errorMessage } from '../../core/errors'
 import { plural } from '../../style/format'
-import { cycleColor } from '../../style/colors'
+import { FOCUS_GREEN, cycleColor } from '../../style/colors'
 import {
   applySelectionEdits,
   decodeSelectionEdits,
@@ -551,11 +551,14 @@ registerNode({
  * pairs rather than picked: `neuron` blue, `candidate` orange, `accepted` green. The question a
  * reader is answering is whether a candidate belongs to the neuron, which they cannot see if the
  * two are one colour; `accepted` is a piece they already said does, so the scene shows the neuron
- * as it will look once the merges are made. Anything else, or no `part` at all, takes the first.
+ * as it will look once the merges are made. `focus` is an accepted piece under the cursor, in a
+ * lighter step of that green (`FOCUS_GREEN`). Anything else, or no `part` at all, takes the first.
  *
  * Exported for `seam:review`'s own fallback viewer, so the two surfaces cannot disagree.
  */
 export function controlPartColor(part: unknown): string {
+  // An accepted piece in focus: a lighter step of the accepted green (`FOCUS_GREEN`).
+  if (part === 'focus') return FOCUS_GREEN
   const slot = part === 'candidate' ? 1 : part === 'accepted' ? 2 : 0
   return cycleColor(slot, VIEWER_MODE)
 }

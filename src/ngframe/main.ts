@@ -36,7 +36,7 @@ import {
   isFrameSetViewMessage,
   updateIn,
 } from '../data/neuroglancer/frameMessage'
-import type { LayerSelection } from '../data/neuroglancer/scene'
+import type { LayerAnnotations, LayerSelection } from '../data/neuroglancer/scene'
 import { layerListing, parseSceneUrl, segmentEntry } from '../data/neuroglancer/scene'
 import { keepUnseenChanges } from '../data/neuroglancer/selectionEdits'
 
@@ -110,7 +110,8 @@ function reportChanges(ng: typeof viewer): void {
 }
 
 /*
- * Segments and colours set in place, from the card (`FrameSegmentsMessage`): no layer is restored,
+ * Segments and colours, and a local annotation layer's annotations, set in place from the card
+ * (`FrameSegmentsMessage`): no layer is restored,
  * so this applies under the cursor and keeps the camera, the layout and loaded meshes. Only ids
  * that changed are touched. Adding to `visibleSegments` selects too, and deleting from
  * `selectedSegments` hides too — the pair neuroglancer's own restore relies on.
@@ -133,6 +134,7 @@ window.addEventListener('message', (event) => {
   // fully applied, so its reports are dropped rather than read against a scene it is not showing.
   let all = true
   for (const selection of event.data.layers) all = setSelection(selection) && all
+  for (const change of event.data.annotations ?? []) all = setAnnotations(change) && all
   if (all) applied = event.data.update
   else {
     window.parent.postMessage(
@@ -203,6 +205,25 @@ const CROSS_SECTION_PIXELS = 500
 const PROJECTION_SPAN = 2
 /** And how much of it a cross-section frames. */
 const CROSS_SECTION_SPAN = 0.5
+
+/**
+ * Replace a local annotation layer's annotations, as its own `restoreState` reads them from a scene:
+ * the layer and its render layers are kept, and `changed` redraws them. False where the layer is
+ * not a local annotation layer whose source has loaded, or an annotation does not parse — the card
+ * then navigates, which restores the whole layer.
+ */
+function setAnnotations(change: LayerAnnotations): boolean {
+  const layer = viewer.layerManager.getLayerByName(change.name)?.layer as
+    { localAnnotations?: { restoreState?: (json: unknown) => void } } | null | undefined
+  const local = layer?.localAnnotations
+  if (typeof local?.restoreState !== 'function') return false
+  try {
+    local.restoreState(change.annotations)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /**
  * The part of a segmentation layer this touches. Read by shape because the package ships no

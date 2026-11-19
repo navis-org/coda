@@ -29,19 +29,26 @@ import {
   encodeVerdicts,
   extendBlocked,
   extendedKeys,
-  extendedPairs,
   extendLabel,
   extendPress,
   extendProgress,
   IN_NEURON_NOTE,
   isLargePiece,
   judgedParams,
-  LARGE_PIECE_CHUNKS,
+  autoFirsts,
+  autoUnavailable,
+  extendMenu,
+  extendParams,
+  extendPlanFrom,
+  reviewGrowth,
+  reviewStateOf,
+  autoJudged,
+  autoOffered,
+  planTexts,
+  rowExtend,
   leavesWith,
   liveQueue,
-  liveTree,
   neuronsOf,
-  pairsOf,
   pickedNeuron,
   scenePieces,
   sizeOf,
@@ -53,7 +60,21 @@ import {
   withExtended,
   withVerdict,
 } from './reviewQueue'
-import type { Candidate, QueueFilters, Verdict } from './reviewQueue'
+import { LARGE_PIECE_CHUNKS, pairsOf } from './pieces'
+import type { ExtendPair } from './pieces'
+
+/** What is extended, as pairs: `extendedKeys` read back. */
+const extendedPairs = (extend: unknown, verdicts: Verdicts) =>
+  pairsOf(extendedKeys(extend, verdicts))
+/** The tree of the pairs alone, with no Auto-extend: `reviewGrowth`'s. */
+const liveTree = (queue: readonly QueueTip[], pairs: readonly ExtendPair[]) =>
+  reviewGrowth(queue, { pairs, roots: new Set(), refused: new Set() }).tree
+/** The verdicts as everything downstream reads them. */
+const reviewedVerdicts = (
+  params: Readonly<Record<string, unknown>>,
+  queue: readonly QueueTip[],
+) => reviewStateOf(params, queue).verdicts
+import type { Candidate, QueueFilters, QueueTip, Verdict, Verdicts } from './reviewQueue'
 
 const tipsTable = (
   rows: {
@@ -1092,10 +1113,11 @@ describe('a neuron and the pieces it is extended with', () => {
       const mine = tipsOf(liveQueue(all, tree), 'n1')
       const here = currentOfQueue(mine, 'p1|1', 1)
       // The neuron, the piece the tip is on, then what is proposed for it.
+      // The candidate in hand is accepted, and drawn in focus among the green pieces.
       expect(scenePieces(mine, 'n1', here, VERDICTS, true)).toEqual([
         { id: 'n1', part: 'neuron' },
         { id: 'p1', part: 'accepted' },
-        { id: 'p2', part: 'accepted' },
+        { id: 'p2', part: 'focus' },
       ])
       // With `Show accepted` off the piece under the cursor is still drawn: a candidate beside
       // the neuron, and nothing between them, is a pair nobody can judge.
@@ -1281,7 +1303,7 @@ describe('a neuron and the pieces it is extended with', () => {
   /**
    * What a press on a verdict does. The candidate's size and whatever stands in the way of
    * extending it are handed over as facts; the rules — the pair kept in step with the verdict,
-   * `Auto-extend`, a large piece left to its button — are decided here, not on the card.
+   * `Extend on accept`, a large piece left to its button — are decided here, not on the card.
    */
   const piece = (candidateId: string, l2Chunks = 3) => ({ candidateId, l2Chunks }) as Candidate
   describe('a press on a verdict', () => {
@@ -1352,9 +1374,9 @@ describe('a neuron and the pieces it is extended with', () => {
     })
   })
 
-  /** `Auto-extend` (user, 2026-11-16): a press that accepts a piece extends it in the same edit. */
+  /** `Extend on accept` (user, 2026-11-16): a press that accepts a piece extends it in the same edit. */
   describe('a press on Accept with auto-extend', () => {
-    const on = { verdicts: '', extend: '', autoExtend: true }
+    const on = { verdicts: '', extend: '', extendOnAccept: true }
 
     it('writes the pair into the extended ones with the verdict, and asks for the search', () => {
       expect(judgedParams(on, 'n1', piece('p1'), 'accept', undefined)).toEqual({
@@ -1377,7 +1399,7 @@ describe('a neuron and the pieces it is extended with', () => {
     it('extends nothing with the toggle off, which is how it is unless asked', () => {
       for (const params of [
         { verdicts: '', extend: '' },
-        { ...on, autoExtend: false },
+        { ...on, extendOnAccept: false },
       ]) {
         expect(judgedParams(params, 'n1', piece('p1'), 'accept', undefined)).toEqual({
           write: { verdicts: 'n1/p1=accept' },
@@ -1451,8 +1473,12 @@ describe('a neuron and the pieces it is extended with', () => {
         candidate: piece('p1', 14),
         progress: undefined,
         blocked: undefined,
-        autoExtend: false,
+        extendOnAccept: false,
         goesWith: '',
+        choice: 'off',
+        held: false,
+        heldBy: undefined,
+        took: 0,
         ...change,
       })
 
@@ -1467,7 +1493,7 @@ describe('a neuron and the pieces it is extended with', () => {
     })
 
     it('says how big the piece is before the press, and when that is large', () => {
-      expect(button()).toEqual({
+      expect(button()).toMatchObject({
         label: 'Extend',
         title: 'Search this piece’s own open ends for what continues it. It is 14 L2 chunks.',
         disabled: false,
@@ -1477,14 +1503,14 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(large.title).toMatch(/It is 61 L2 chunks\. That is large/)
       // Said, never refused.
       expect(large.disabled).toBe(false)
-      expect(large.title).not.toMatch(/Auto-extend/)
-      expect(button({ candidate: piece('p1', 61), autoExtend: true }).title).toMatch(
-        /Auto-extend leaves a piece this size to this button/,
+      expect(large.title).not.toMatch(/Extend on accept/)
+      expect(button({ candidate: piece('p1', 61), extendOnAccept: true }).title).toMatch(
+        /Extend on accept leaves a piece this size to this button/,
       )
     })
 
     it('is off with the reason where the piece cannot be extended', () => {
-      expect(button({ blocked: 'No wire back.' })).toEqual({
+      expect(button({ blocked: 'No wire back.' })).toMatchObject({
         label: 'Extend',
         title: 'No wire back.',
         disabled: true,
@@ -1498,7 +1524,7 @@ describe('a neuron and the pieces it is extended with', () => {
         blocked: 'No wire back.',
         goesWith: leavesWith([], 'p1'),
       })
-      expect(pressed).toEqual({
+      expect(pressed).toMatchObject({
         label: 'searching 3 of 7',
         title:
           'This piece’s own open ends are searched and listed with the neuron’s. Press to ' +
@@ -1789,5 +1815,336 @@ describe('r as a label', () => {
       [2, 0.6, 0.9],
       [1, 0.5, 0.9],
     ])
+  })
+})
+
+/**
+ * Auto-extend on the card (`docs/seam-auto-extend-plan.md`): the reader pressed it on piece
+ * `201`, accepted on neuron `100`. The card grows the tree from the published rows by the
+ * search's own rule, so the accepts it shows are the ones the search searched — and Submit merges.
+ * The ids are numbers because Auto-extend takes only a real chunkedgraph id.
+ *
+ * `201`'s ends: tip 1 offers `301` (cleared), tip 2 an organelle (`302`), tip 3 nothing that
+ * cleared (`303`). `301`'s ends: tip 1 a large piece (`401`), tip 2 `402`.
+ */
+describe('Auto-extend, as the card reads it', () => {
+  type Row = { id: string; end: number; steps: number; junction?: boolean; shown?: boolean }
+  const tips = (rows: Row[]): TableValue =>
+    makeTable(
+      tableSchema(
+        column(ID_COLUMN_NAME, 'str'),
+        column('end_uid', 'i64'),
+        column('x', 'f64'),
+        column('y', 'f64'),
+        column('z', 'f64'),
+        column('seed', 'str'),
+        column('steps', 'i64'),
+        column('junction', 'bool'),
+        column('searched', 'bool'),
+        column('shown', 'bool'),
+      ),
+      {
+        [ID_COLUMN_NAME]: rows.map((r) => r.id),
+        end_uid: rows.map((r) => r.end),
+        x: rows.map(() => 1),
+        y: rows.map(() => 2),
+        z: rows.map(() => 3),
+        seed: rows.map(() => '100'),
+        steps: rows.map((r) => r.steps),
+        junction: rows.map((r) => r.junction ?? false),
+        searched: rows.map((r) => !r.junction),
+        shown: rows.map((r) => r.shown ?? false),
+      },
+    )
+  const TIPS = tips([
+    { id: '100', end: 0, steps: 0, shown: true },
+    { id: '201', end: 0, steps: 1, junction: true },
+    { id: '201', end: 1, steps: 1, shown: true },
+    { id: '201', end: 2, steps: 1, shown: true },
+    { id: '201', end: 3, steps: 1, shown: false },
+    { id: '301', end: 0, steps: 2, junction: true },
+    { id: '301', end: 1, steps: 2, shown: true },
+    { id: '301', end: 2, steps: 2, shown: true },
+  ])
+  const CANDIDATES = candidatesTable([
+    { neuron: '100', end: 0, id: '201', rank: 1, l2: 2 },
+    { neuron: '201', end: 1, id: '301', rank: 1, l2: 3 },
+    { neuron: '201', end: 2, id: '302', rank: 1, l2: 1, organelle: true },
+    { neuron: '201', end: 3, id: '303', rank: 1, l2: 1 },
+    { neuron: '301', end: 1, id: '401', rank: 1, l2: LARGE_PIECE_CHUNKS + 20 },
+    { neuron: '301', end: 2, id: '402', rank: 1, l2: 2 },
+  ])
+  const all = buildQueue(TIPS, CANDIDATES)
+  const PRESSED = { verdicts: '100/201=accept', extend: '100/201', autoRoots: '100/201' }
+
+  it('takes what clears the cutoff, and no organelle or large piece', () => {
+    const firsts = autoFirsts(all)
+    const piece = (id: string) => ({
+      id,
+      seed: '100',
+      parent: '100',
+      depth: 1,
+      path: ['100', id],
+    })
+    expect(firsts(piece('201'))).toEqual(['301'])
+    expect(firsts(piece('301'))).toEqual(['402'])
+    // Another neuron's rows on the same root are not this piece's.
+    expect(firsts({ ...piece('201'), seed: '999' })).toEqual([])
+  })
+
+  it('accepts what Auto-extend took, where the reader said nothing', () => {
+    const verdicts = reviewedVerdicts(PRESSED, all)
+    expect(verdicts.get('201/301')).toBe('accept')
+    expect(verdicts.get('301/402')).toBe('accept')
+    expect(verdicts.has('201/302')).toBe(false)
+    expect(verdicts.has('301/401')).toBe(false)
+    // The pieces it took are on the list, and so are their tips.
+    const tree = reviewGrowth(all, extendPlanFrom(PRESSED, decodeVerdicts(PRESSED.verdicts)))
+    expect(tree.tree.map((piece) => piece.id)).toEqual(['201', '301', '402'])
+    expect(liveQueue(all, tree.tree).map((tip) => tip.neuronId)).toContain('301')
+  })
+
+  it('accepts nothing where Auto-extend was not pressed, or the piece is not extended', () => {
+    expect(reviewedVerdicts({ ...PRESSED, autoRoots: '' }, all).has('201/301')).toBe(false)
+    // Pressed, then no longer extended: the press is dead with it.
+    expect(reviewedVerdicts({ ...PRESSED, extend: '' }, all).has('201/301')).toBe(false)
+    // And un-accepted.
+    const rejected = { ...PRESSED, verdicts: '100/201=reject' }
+    expect(reviewedVerdicts(rejected, all).has('201/301')).toBe(false)
+  })
+
+  it('lets the reader’s verdict win, and drops what lies beyond a refused piece', () => {
+    // As the press writes it: the verdict, and the refusal beside it (`judgedParams`).
+    const verdicts = reviewedVerdicts(
+      { ...PRESSED, verdicts: '100/201=accept;201/301=reject', autoRefused: '201/301' },
+      all,
+    )
+    expect(verdicts.get('201/301')).toBe('reject')
+    expect(verdicts.has('301/402')).toBe(false)
+  })
+
+  it('tells the search what it was pressed on, and the refusals only while one is live', () => {
+    // A refusal is one the press wrote down, and is still the reader's word.
+    const stored = decodeVerdicts('100/201=accept;201/301=reject;100/109=reject')
+    const params = { ...PRESSED, autoRefused: '201/301;201/303' }
+    expect(planTexts(params, stored).refused).toBe('201/301')
+    const live = extendPlanFrom(params, stored)
+    expect([...live.roots]).toEqual(['201'])
+    expect([...live.refused]).toEqual(['201/301'])
+    // No press: no refusals on the wire, so a reject re-keys no search.
+    const none = extendPlanFrom({ ...params, autoRoots: '' }, stored)
+    expect(none.roots.size).toBe(0)
+    expect(none.refused.size).toBe(0)
+    // A press on a pair that is not extended is not live.
+    expect(extendPlanFrom({ ...params, extend: '' }, stored).roots.size).toBe(0)
+  })
+
+  it('knows which pairs it could take anywhere in the queue', () => {
+    expect([...autoOffered(all)].sort()).toEqual(['100/201', '201/301', '301/402'])
+  })
+
+  /** A reject of a pair it could take moves the search's key; a reject of anything else must not. */
+  it('writes a refusal down only for a pair it could take, and keeps it with the verdict', () => {
+    const at = (neuron: string, end: number) =>
+      all.find((tip) => tip.neuronId === neuron && tip.endUid === end)!.candidates[0]!
+    const params = { ...PRESSED, autoRefused: '' }
+    const offered = judgedParams(params, '201', at('201', 1), 'reject', undefined, true)
+    expect(offered.write.autoRefused).toBe('201/301')
+    const other = judgedParams(params, '201', at('201', 3), 'reject', undefined, false)
+    expect(other.write.autoRefused).toBeUndefined()
+    // Taken back, or turned into an accept, the refusal goes with it.
+    const refused = { ...params, ...offered.write }
+    expect(
+      judgedParams(refused, '201', at('201', 1), 'reject', undefined, true).write.autoRefused,
+    ).toBe('')
+    expect(
+      judgedParams(refused, '201', at('201', 1), 'accept', undefined, true).write.autoRefused,
+    ).toBe('')
+  })
+
+  it('writes down, when pressed, the refusals given before it could take the pair', () => {
+    const params = { verdicts: '100/201=accept;201/301=reject;100/109=reject', extend: '' }
+    const written = extendParams(params, '100', '201', 'auto', false, autoOffered(all))
+    expect(written.autoRefused).toBe('201/301')
+    expect(
+      extendParams(params, '100', '201', 'extend', false, autoOffered(all)).autoRefused,
+    ).toBeUndefined()
+  })
+
+  describe('what a press writes', () => {
+    it('writes Auto-extend into both lists, and stopping takes it out of both', () => {
+      const params = { verdicts: '100/201=accept', extend: '', autoRoots: '' }
+      const on = extendParams(params, '100', '201', 'auto', false)
+      expect(on).toEqual({ extend: '100/201', autoRoots: '100/201' })
+      const plain = extendParams({ ...params, ...on }, '100', '201', 'extend', false)
+      expect(plain).toEqual({ extend: '100/201', autoRoots: '' })
+      expect(extendParams({ ...params, ...on }, '100', '201', 'off', false)).toEqual({
+        extend: '',
+        autoRoots: '',
+      })
+    })
+
+    /** `extend` counts only a pair the reader accepted, so choosing to extend one confirms it. */
+    it('confirms a piece Auto-extend took when the reader extends it', () => {
+      const written = extendParams(PRESSED, '201', '301', 'extend', true)
+      expect(decodeVerdicts(written.verdicts).get('201/301')).toBe('accept')
+      expect(written.extend).toBe('100/201;201/301')
+    })
+
+    it('takes the press away with the accept it was pressed on', () => {
+      const piece = all.find((tip) => tip.neuronId === '100')!.candidates[0]!
+      const { write } = judgedParams(PRESSED, '100', piece, 'reject', undefined)
+      expect(write.extend).toBe('')
+      expect(write.autoRoots).toBe('')
+    })
+  })
+
+  describe('the Extend button', () => {
+    const piece = all.find((tip) => tip.neuronId === '201' && tip.endUid === 1)!.candidates[0]!
+    const base = {
+      candidate: piece,
+      blocked: undefined,
+      extendOnAccept: false,
+      goesWith: '',
+      held: false,
+      heldBy: undefined,
+      took: 0,
+    }
+
+    it('says how far a piece Auto-extend searches has got, and cannot be pressed', () => {
+      const face = extendPress({
+        ...base,
+        progress: { state: 'searched', ends: 2 },
+        choice: 'off',
+        held: true,
+        heldBy: '201',
+      })
+      expect(face).toMatchObject({ label: '2 ends searched', disabled: true })
+      expect(face.title).toMatch(/Auto-extend on 201/)
+    })
+
+    it('says what a press on its face writes: Extend, or stopping what the reader chose', () => {
+      expect(extendPress({ ...base, progress: undefined, choice: 'off' }).writes).toBe('extend')
+      const searched = { state: 'searched', ends: 1 } as const
+      expect(extendPress({ ...base, progress: searched, choice: 'extend' }).writes).toBe('off')
+      expect(extendPress({ ...base, progress: searched, choice: 'auto' }).writes).toBe('off')
+    })
+
+    it('offers Extend on a piece of its last layer, which it did not search', () => {
+      const face = extendPress({ ...base, progress: undefined, choice: 'off', heldBy: '201' })
+      expect(face).toMatchObject({ label: 'Extend', disabled: false })
+      expect(face.title).toMatch(/last layer/)
+    })
+
+    it('marks the piece it was pressed on, and counts what it took', () => {
+      const face = extendPress({
+        ...base,
+        progress: { state: 'searched', ends: 2 },
+        choice: 'auto',
+        took: 2,
+      })
+      expect(face.label).toBe('auto · 2 ends searched')
+      expect(face.title).toMatch(/2 pieces so far/)
+    })
+
+    it('ticks the reader’s choice, whose press stops it', () => {
+      const menu = extendMenu({
+        choice: 'auto',
+        blocked: undefined,
+        held: false,
+        noAuto: undefined,
+      })
+      expect(menu.map((item) => [item.value, item.disabled, item.writes])).toEqual([
+        ['extend', false, 'extend'],
+        ['auto', false, 'off'],
+      ])
+      expect(menu[1]!.title).toMatch(/Stop extending/)
+    })
+
+    it('offers no Auto-extend where the tables have no cutoff', () => {
+      // `tipsTable` carries `shown`; a table without it is a search with no assessor.
+      expect(autoUnavailable(tipsTable([{ end: 1 }]))).toBeUndefined()
+      const bare = makeTable(tableSchema(column('end_uid', 'i64')), { end_uid: [1] })
+      const noAuto = autoUnavailable(bare)
+      expect(noAuto).toMatch(/Assessor/)
+      const menu = extendMenu({ choice: 'off', blocked: undefined, held: false, noAuto })
+      expect(menu[1]).toMatchObject({ disabled: true, title: noAuto })
+      expect(menu[0]!.disabled).toBe(false)
+    })
+  })
+})
+
+describe('Auto-extend: what is the reader\u2019s and what is not', () => {
+  it('counts an Auto-extend accept only where the reader has said nothing', () => {
+    const stored = decodeVerdicts('1/2=accept;2/3=reject')
+    const accepted = new Map([
+      ['2/3', '2'],
+      ['2/4', '2'],
+    ])
+    const { verdicts, unjudged } = autoJudged(stored, accepted)
+    expect(verdicts.get('2/3')).toBe('reject')
+    expect(verdicts.get('2/4')).toBe('accept')
+    expect([...unjudged]).toEqual([['2/4', '2']])
+    // Nothing taken: the reader's own map, untouched.
+    expect(autoJudged(stored, new Map()).verdicts).toBe(stored)
+  })
+
+  describe('a row of the list', () => {
+    const at = {
+      extended: new Set(['1/2', '2/3']),
+      autoPressed: new Set(['2/3']),
+      accepted: new Map([
+        ['3/4', '3'],
+        ['4/5', '3'],
+      ]),
+      unjudged: new Map([
+        ['3/4', '3'],
+        ['4/5', '3'],
+      ]),
+      searched: new Set(['2', '3', '4']),
+    }
+
+    it('says how the reader extended it', () => {
+      expect(rowExtend('1/2', at)).toMatchObject({
+        choice: 'extend',
+        held: false,
+        extended: true,
+      })
+      expect(rowExtend('2/3', at)).toMatchObject({ choice: 'auto', extended: true })
+      expect(rowExtend('9/9', at)).toMatchObject({ choice: 'off', extended: false })
+    })
+
+    it('is held by the press that took and searches it', () => {
+      expect(rowExtend('3/4', at)).toEqual({
+        choice: 'off',
+        autoFrom: '3',
+        heldBy: '3',
+        held: true,
+        extended: true,
+      })
+    })
+
+    /** The reader's Accept makes the verdict theirs; the search goes on searching the piece. */
+    it('stays held once the reader accepts it, and loses only its tag', () => {
+      const judged = { ...at, unjudged: new Map([['4/5', '3']]) }
+      expect(rowExtend('3/4', judged)).toEqual({
+        choice: 'off',
+        autoFrom: undefined,
+        heldBy: '3',
+        held: true,
+        extended: true,
+      })
+    })
+
+    /** Its last layer: taken, not searched — the reader may extend it. */
+    it('is not held where Auto-extend took it and did not search it', () => {
+      expect(rowExtend('4/5', at)).toEqual({
+        choice: 'off',
+        autoFrom: '3',
+        heldBy: '3',
+        held: false,
+        extended: false,
+      })
+    })
   })
 })

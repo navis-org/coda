@@ -101,7 +101,7 @@ import { NM_PER_UM } from '../../data/units'
 import type { CandidatePoolRequest, PoolSizesRequest } from '../../pyodide/cutoutSummary'
 import { runCandidatePool, runPoolSizes } from '../../pyodide/cutoutSummary'
 import { grapheneFor, instantOf, l2ChunkCounts, rootLives } from '../../data/cave/rootIds'
-import { distinctStrings, groupBy } from '../../core/collections'
+import { distinctStrings } from '../../core/collections'
 import { namedFew } from '../../core/prose'
 import {
   noLongerCurrent,
@@ -140,7 +140,17 @@ import { throwIfAborted, yieldToBrowser } from '../../core/slice'
 import type { Piece } from './pieces'
 import { runBook } from './runBook'
 import type { Assembled } from './runBook'
-import { aliasOf, EXTENDED_PORT, extendPairs, junctionOf, piecesOf } from './pieces'
+import type { ExtendPlan } from './pieces'
+import {
+  aliasOf,
+  autoTakes,
+  EXTENDED_PORT,
+  extendPlanOf,
+  growAuto,
+  junctionOf,
+  pathKey,
+  piecesOf,
+} from './pieces'
 import { openTreeRanker, readRankerManifest } from './rankerConfig'
 import type { RankerConfig } from './rankerConfig'
 import { contactsOf, publishedEnd, reportOnRun } from './scoreEnds'
@@ -152,6 +162,7 @@ import {
   candidatesTable,
   modelVersion,
   runSource,
+  searchCell,
   searchOnly,
   tipPositions,
   tipsByNeuron,
@@ -707,8 +718,10 @@ export const suggestMergesNode = packNode({
      * decided here — and because a Clear Cache has to reach every piece now, while its flag is
      * still in hand, not as the loop comes to each.
      */
+    const extendPlan = extendPlanOf(ctx.input('review'))
+    // The pieces extended by hand. What Auto-extend takes is not known before their ends are.
     const pieces = piecesOf(
-      extendPairs(ctx.input('review')),
+      extendPlan.pairs,
       neurons.map((one) => one.neuron),
     )
     const foreseen = foreseePieces(ctx, identityOf, neurons, pieces, assessing)
@@ -836,6 +849,7 @@ export const suggestMergesNode = packNode({
         held,
         identityOf,
         pieces,
+        extendPlan,
         foreseen: foreseen.held,
         head,
         ranker,
@@ -875,6 +889,8 @@ interface RunPlan {
   readonly identityOf: (neuron: string) => RunIdentity
   /** The accepted pieces to extend, in the order the run takes them (`piecesOf`). */
   readonly pieces: readonly Piece[]
+  /** What Review asked for, Auto-extend's presses and refusals among it. */
+  readonly extendPlan: ExtendPlan
   /** What the memory held of each piece whose tips were known when the run started. */
   readonly foreseen: ReadonlyMap<string, ReadonlyMap<string, Remembered>>
   /** How much of the progress bar the models took before the first end. */
@@ -907,7 +923,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   const { rows, neurons, held, identityOf, pieces, head, ranker, plan, top, volume, options } =
     run
   const assessing = run.assessor !== undefined
-  const { foreseen } = run
+  const { foreseen, extendPlan } = run
 
   /*
    * **Timed at the seam the sequences already have.** Every expensive step is injected — which
@@ -1529,7 +1545,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
    * they are put together from the records in the plain order every time (`runBook.ts`).
    */
   const runWaits = neurons.some((one) => seedWaits(one.neuron, one.keys))
-  const piecesBySeed = groupBy(pieces, (piece) => piece.seed)
+  const seeds = neurons.map((one) => one.neuron)
   const roots: Root[] = []
   for (const { neuron, mine, keys } of neurons) {
     tipsOf.set(neuron, mine)
@@ -1544,10 +1560,67 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
       signal: ctx.signal,
     })
   }
+
+  /**
+   * The first candidates Auto-extend takes at a piece's ends — `autoTakes` over the ends the book
+   * has, as the card applies it to the published rows (`autoFirsts`), so both grow one tree.
+   */
+  const firstsOf = (piece: Piece) =>
+    book.endsOf(piece.id).flatMap(({ end, order, scores }) => {
+      const at = order[0]
+      if (at === undefined) return []
+      const id = String(end.candRoot[at])
+      // The first candidate's cells as the tables publish them (`searchCell`).
+      const organelle = searchCell(end.columns, 'organelle', at)
+      const l2Chunks = searchCell(end.columns, 'n_l2', at)
+      const takes = autoTakes({
+        shown: scores?.tip.shown,
+        organelle: typeof organelle === 'boolean' ? organelle : null,
+        l2Chunks: typeof l2Chunks === 'number' ? l2Chunks : null,
+        id,
+      })
+      return takes ? [id] : []
+    })
+  /** The pieces the run takes, in the plain order — the book's too. */
+  let order = pieces
+  /**
+   * Take the pieces — one neuron's, or every one — and, where an Auto-extend was pressed, the
+   * pieces it takes from their ends, round after round until it takes no more
+   * (`docs/seam-auto-extend-plan.md`). Without one, a single pass in `piecesOf`'s order.
+   *
+   * **The tree is grown afresh from the book every round** (`growAuto`), never added to: taken
+   * early, a piece's ends are a draft, and what Auto-extend took from them may not stand once
+   * they are all in. So the last call, made once every end is, grows the tree a plain run grows.
+   */
+  const grow = async (ahead: boolean, seed?: string) => {
+    const settleAll = async () => {
+      for (const piece of order) {
+        if (seed === undefined || piece.seed === seed) await settle(piece, ahead)
+      }
+    }
+    if (extendPlan.roots.size === 0) return settleAll()
+    for (let round = 0; round < MAX_GROW_ROUNDS; round++) {
+      const next = growAuto(extendPlan, seeds, firstsOf).searched
+      const same =
+        next.length === order.length &&
+        next.every((piece, at) => pathKey(piece) === pathKey(order[at]!))
+      if (same && round > 0) return
+      if (!same) {
+        book.reorder(next)
+        order = next
+      }
+      await settleAll()
+    }
+    ctx.warn(
+      `Auto-extend was stopped after ${MAX_GROW_ROUNDS} rounds without settling on a tree. ` +
+        'The pieces it had taken are listed.',
+    )
+  }
+
   fromMemory = true
   for (const root of roots) {
     await searchRoot(root)
-    for (const piece of piecesBySeed.get(root.seed) ?? []) await settle(piece, true)
+    await grow(true, root.seed)
   }
   fromMemory = false
   // Shown before anything that takes seconds — a piece's chain, an end to measure. The bar's
@@ -1557,8 +1630,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     await showSoon(true)
   }
   for (const root of roots) {
-    if (runWaits)
-      for (const piece of piecesBySeed.get(root.seed) ?? []) await settle(piece, true)
+    if (runWaits) await grow(true, root.seed)
     await searchRoot(root)
   }
 
@@ -1566,9 +1638,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   // whether its parent's ends have moved since. A neuron's pieces together, in `piecesOf`'s
   // order within it: each change of neuron moves the reader to another moment and starts its
   // supervoxel memo afresh (`forgetRoots`). The tables are the book's order whatever this is.
-  for (const own of piecesBySeed.values()) {
-    for (const piece of own) await settle(piece)
-  }
+  await grow(false)
 
   const piecesOutside = book.piecesOutside()
   if (piecesOutside > 0) {
@@ -1617,6 +1687,13 @@ type Kept =
   | { readonly failed: string; readonly at: number }
 
 const pieceTipsMemo = new LruMap<string, Kept>(512)
+
+/**
+ * How many rounds Auto-extend may take before it is stopped. Each round is a layer or less, and
+ * `AUTO_DEPTH` layers is ten; a nested press adds its own. Far above any tree that settles, so
+ * reaching it means one that does not — said, never silent.
+ */
+const MAX_GROW_ROUNDS = 100
 
 /**
  * How long a piece whose chain failed is left alone.

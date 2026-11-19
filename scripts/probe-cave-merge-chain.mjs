@@ -35,7 +35,7 @@ import { isNodeId } from '../src/data/cave/graphLayout.ts'
 import { isLatestRoots, l2ChunkCounts, supervoxelRoots } from '../src/data/cave/rootIds.ts'
 import { READ_TIMEOUT_MS, prepareMerges } from '../src/packs/seam/mergeBatch.ts'
 import { planMerges } from '../src/packs/seam/mergePlan.ts'
-import { verdictKey } from '../src/packs/seam/reviewQueue.ts'
+import { verdictKey } from '../src/packs/seam/pieces.ts'
 import { FENCE_REFUSED, SANDBOX, fenceWrites } from '../src/test/sandboxWrites.ts'
 import { AEDES_DEPLOYMENT, probeArgs, probeReport, requireCaveToken } from './lib/browserProbe.mjs'
 

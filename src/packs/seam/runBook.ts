@@ -34,7 +34,7 @@ import { groupBy } from '../../core/collections'
 import { concatBatches } from '../../nodes/lib/tableOps'
 import type { TableValue } from '../../core/values'
 import type { Piece } from './pieces'
-import { pieceContacts, pieceLineage } from './pieces'
+import { pathKey, pieceContacts, pieceLineage } from './pieces'
 import type { Lineage, PublishedEnd, TipRow } from './searchTips'
 
 /** One neuron of the run: its tips' places in the incoming rows. */
@@ -78,6 +78,8 @@ interface Entry {
   version: number
   /** A piece's own tips table, which of `mine` fit in the volume, its join and whether it failed. */
   grown?: {
+    /** The path it was searched as part of (`pathKey`). */
+    path: string
     tips: TableValue
     fits: readonly boolean[]
     junction: number | undefined
@@ -121,6 +123,15 @@ export interface RunBook {
   fail(id: string): void
   /** How many of the pieces' open ends — the joining end is none — have no box inside the volume. */
   piecesOutside(): number
+  /** A root's finished ends in the order of its tips — what Auto-extend reads (`growAuto`). */
+  endsOf(root: string): PublishedEnd[]
+  /**
+   * The pieces the run takes, in the plain order, as it now knows them — Auto-extend adds pieces
+   * as their parents' ends come in. **A piece whose path moved loses its record**, and the pieces
+   * beyond it with theirs: its ends were searched as part of another neuron-so-far
+   * (`aliasOf`), and are searched again. A piece no longer listed keeps its record, unpublished.
+   */
+  reorder(order: readonly Piece[]): void
   assemble(): Assembled
 }
 
@@ -148,7 +159,8 @@ export function runBook(base: {
     for (const [i, tip] of mine.entries()) if (base.attempting.has(tip.row)) attempt.add(i)
     roots.set(neuron.id, { mine, attempt, ends: new Map(), version: 0 })
   }
-  const siblings = groupBy(base.order, (piece) => piece.parent)
+  let order = base.order
+  let siblings = groupBy(order, (piece) => piece.parent)
   /** Where a parent's pieces join it, and the parent's `version` that was read at. */
   const joins = new Map<string, { at: number; found: ReturnType<typeof pieceContacts> }>()
   /** The parts of `assemble` that only move when a piece is added, joined or fails. */
@@ -162,7 +174,7 @@ export function runBook(base: {
     const lineage: (Lineage | undefined)[] = []
     const offsets = new Map<string, number>()
     let rows = base.table.length
-    for (const piece of base.order) {
+    for (const piece of order) {
       const root = roots.get(piece.id)
       if (!root?.grown) continue
       const { grown } = root
@@ -224,7 +236,7 @@ export function runBook(base: {
         attempt: new Set(),
         ends: new Map(),
         version: 0,
-        grown: { tips, fits, junction: undefined, failed: false },
+        grown: { path: pathKey(piece), tips, fits, junction: undefined, failed: false },
       }
       roots.set(piece.id, root)
       shaped = undefined
@@ -278,12 +290,41 @@ export function runBook(base: {
     },
     piecesOutside: () => {
       let outside = 0
-      // The joining end is no open end, inside the volume or not.
-      for (const { grown } of roots.values()) {
+      // The joining end is no open end, inside the volume or not. A piece the order no longer
+      // holds is not published, and is not counted.
+      for (const piece of order) {
+        const grown = roots.get(piece.id)?.grown
         if (!grown) continue
         outside += grown.fits.filter((fit, i) => !fit && i !== grown.junction).length
       }
       return outside
+    },
+    endsOf: (id) => {
+      const root = roots.get(id)
+      return root ? inOrder(root).map(([, end]) => end) : []
+    },
+    reorder: (next) => {
+      for (const piece of next) {
+        const grown = roots.get(piece.id)?.grown
+        if (grown && grown.path !== pathKey(piece)) {
+          roots.delete(piece.id)
+          // Where its own pieces join it was read off the old record's ends; a new record counts
+          // its `version` from 0 again, and could meet the old reading's number.
+          joins.delete(piece.id)
+        }
+      }
+      const before = siblings
+      order = next
+      siblings = groupBy(order, (piece) => piece.parent)
+      // Where a parent's pieces join it is asked afresh only where who they are changed: a
+      // walk of every end of the parent, which a round of Auto-extend would otherwise repeat for
+      // every parent there is.
+      const ids = (pieces: readonly Piece[] | undefined) =>
+        (pieces ?? []).map((piece) => piece.id).join(';')
+      for (const parent of new Set([...before.keys(), ...siblings.keys()])) {
+        if (ids(before.get(parent)) !== ids(siblings.get(parent))) joins.delete(parent)
+      }
+      shaped = undefined
     },
     assemble: () => {
       const { value, offsets } = shapeNow()
@@ -296,7 +337,7 @@ export function runBook(base: {
       // Each neuron's ends as its tips are listed — whatever order they were finished in.
       for (const neuron of base.neurons) take(roots.get(neuron.id)!, (tip) => neuron.at[tip]!)
       // Then each piece's, in the plain order, numbered into the whole.
-      for (const piece of base.order) {
+      for (const piece of order) {
         const offset = offsets.get(piece.id)
         if (offset !== undefined) take(roots.get(piece.id)!, (tip) => offset + tip)
       }
