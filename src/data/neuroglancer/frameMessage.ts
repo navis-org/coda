@@ -13,11 +13,15 @@
  * which tears every layer down and rebuilds it — the reason an update has to wait for the pointer
  * to leave, and meshes reload.
  *
+ * Frame to card, as it changes: the segment under the pointer (`FrameHoverMessage`), which the
+ * review card lights its rows by.
+ *
  * And keys, both ways: a key pressed in the frame goes to the frame's document and never reaches
  * Coda's, so the card says which chords are Coda's (`FrameKeysMessage`) and the frame hands those
  * back (`FrameKeyMessage`) instead of letting neuroglancer have them.
  */
 
+import { isSegmentId } from '../../core/ids'
 import type { LayerAnnotations, LayerSelection, NgScene } from './scene'
 
 /**
@@ -218,6 +222,23 @@ export interface FrameKeysMessage {
 
 export function isFrameKeysMessage(data: unknown): data is FrameKeysMessage {
   return typeof messageOf(data, FRAME_KEYS_MESSAGE)?.['altDigits'] === 'boolean'
+}
+
+export const FRAME_HOVER_MESSAGE = 'coda:ng-hover'
+
+/**
+ * Frame to card: the segment under the pointer, as text (invariant 8), or `null` where there is
+ * none — the pointer on empty space, or out of the frame. Posted only when it changes, and not
+ * stamped with an update: it says where the pointer is, not what the scene holds.
+ */
+export interface FrameHoverMessage {
+  type: typeof FRAME_HOVER_MESSAGE
+  segment: string | null
+}
+
+export function isFrameHoverMessage(data: unknown): data is FrameHoverMessage {
+  const segment = messageOf(data, FRAME_HOVER_MESSAGE)?.['segment']
+  return segment === null || (typeof segment === 'string' && isSegmentId(segment))
 }
 
 export const FRAME_KEY_MESSAGE = 'coda:ng-key'
