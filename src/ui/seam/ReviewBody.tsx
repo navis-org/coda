@@ -149,7 +149,15 @@ import { shortcutKeys } from '../shortcuts'
 import { useDatasetInput } from '../useDatasetInput'
 import { usePublishedScene } from '../viewers/NeuroglancerProfileFrame'
 import { NeuroglancerViewer } from '../viewers/NeuroglancerViewer'
-import { useHoveredSegment, useRestedSegment } from '../viewers/segmentHover'
+import type { PointedSegment } from '../viewers/segmentHover'
+import {
+  restedPoint,
+  useHoveredSegment,
+  useRestedSegment,
+  useSegmentPick,
+} from '../viewers/segmentHover'
+import { decodePicks, encodePicks, listedAt, withPicks } from '../../packs/seam/handPicks'
+import { checkPick } from '../../packs/seam/pickCheck'
 import { flushVerdicts } from '../../data/verdictLog'
 import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
 import { ExtendButtons } from './ExtendButtons'
@@ -206,8 +214,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
 
   const tips = inputValues?.['tips']
   const candidates = inputValues?.['candidates']
-  // Every row the tables hold — a piece's joining end and a dropped piece's tips among them.
-  const all = useMemo(
+  const picks = useMemo(() => decodePicks(node.params.picks), [node.params.picks])
+  // Every row the tables hold — a piece's joining end and a dropped piece's tips among them — and
+  // the reader's hand picks, placed on them as `evaluate` places them (`withPicks`).
+  // Two memos, so a pick placed or undone does not build the tables' thousands of rows again.
+  const built = useMemo(
     () =>
       buildQueue(
         isTableValue(tips) ? tips : undefined,
@@ -215,6 +226,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       ),
     [tips, candidates],
   )
+  const all = useMemo(() => withPicks(built, picks), [built, picks])
   // The reader's own verdicts. Everything that reads "accepted" reads `verdicts`, below.
   const stored = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
   /*
@@ -410,7 +422,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const hovered = useHoveredSegment()
   const rested = useRestedSegment()
-  const scrolledFor = useRef(0)
+  // From the rest there was at mount: a card mounting again must not scroll to an old one.
+  const scrolledFor = useRef(rested?.count ?? 0)
   useEffect(() => {
     if (!rested || rested.count === scrolledFor.current) return
     scrolledFor.current = rested.count
@@ -448,9 +461,14 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * before the list can clear many at once.
    */
   const setNotice = useGraphStore((s) => s.setNotice)
-  const commitWork = (write: Readonly<Record<string, string>>) => {
-    const { write: full, evicted } = withRecentWork(node.params, neuron, write)
-    setParams(node.id, full)
+  const commitWork = (
+    write: Readonly<Record<string, string>>,
+    // Written in the same edit, and no work of its own: the cursor moving to what was written.
+    also: Readonly<Record<string, string | number>> = {},
+    params: Readonly<Record<string, unknown>> = node.params,
+  ) => {
+    const { write: full, evicted } = withRecentWork(params, neuron, write)
+    setParams(node.id, { ...full, ...also })
     if (evicted.length === 0) return
     setNotice(
       `Cleared the verdicts and extended pieces of ${plural(evicted.length, 'neuron')} you had not ` +
@@ -480,6 +498,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     candidate: Candidate,
     verdict: Verdict,
     blocked: string | undefined,
+    also?: Readonly<Record<string, string | number>>,
   ) => {
     const { write, search, said } = judgedParams(
       node.params,
@@ -491,12 +510,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     )
     // A piece no longer accepted is no longer extended, and a refusal is kept with the verdict:
     // all in one edit, one undo step.
-    commitWork(write)
+    commitWork(write, also)
     if (search) runSearch()
     /*
      * **And to SEAM, where the reader opted in** (`verdictLog.ts`): the press, never the param,
      * so an undo or a loaded workflow sends nothing (user, 2026-11-18). A second press on the
-     * same verdict took it back, which is a record too.
+     * same verdict took it back, which is a record too. A hand pick's carries no source, and is
+     * not queued (`verdictInput`).
      */
     if (target) {
       const input = verdictInput(tip, candidate, said ?? 'cleared', __APP_VERSION__)
@@ -677,6 +697,118 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     commitWork(listedAutoParams(node.params, listedAuto, offered))
     runSearch()
   }
+
+  /*
+   * A hand pick (`handPicks.ts`, user, 2026-11-19): the segment under the pointer in a
+   * neuroglancer frame, added to this neuron's list and accepted, on `J` or the Add button. A
+   * piece the list already holds is accepted where it is listed; anything else is checked against
+   * the segmentation first (`checkPick`), which takes a moment, so the status bar says so.
+   */
+  const [checking, setChecking] = useState<string>()
+  // Set at once, where `checking` waits for a render: a second press before then is turned away.
+  const checkingRef = useRef(false)
+  // The neuron's side of a pick besides the neuron: its extended pieces not merged into it yet.
+  const unmergedPieces = useMemo(
+    () =>
+      tree
+        .filter((piece) => piece.seed === neuron && mergedAs(merged, piece.id) === undefined)
+        .map((piece) => piece.id),
+    [tree, neuron, merged],
+  )
+  const pickAbort = useRef<AbortController>(undefined)
+  useEffect(() => () => pickAbort.current?.abort(), [])
+  const addPick = async ({ segment, positionNm }: PointedSegment) => {
+    if (neuron === undefined || checkingRef.current) return
+    if (mergedAs(merged, segment)) {
+      setNotice(`${segment} has been merged already.`)
+      return
+    }
+    const listed = listedAt(mine, segment)
+    if (listed) {
+      const { tip, candidate } = listed
+      const cursor = { current: tipKey(tip.neuronId, tip.endUid), rank: candidate.rank }
+      if (verdictFor(stored, tip.neuronId, segment) === 'accept') {
+        setParams(node.id, cursor)
+        setNotice(`${segment} is listed and accepted already.`)
+      } else {
+        judge(tip, candidate, 'accept', blockedOf(segment), cursor)
+        setNotice(`${segment} was listed already, and is accepted now.`)
+      }
+      return
+    }
+    if (!target) {
+      setNotice(
+        'A hand pick is checked against the segmentation, which needs a CAVE dataset wired into `Dataset`.',
+      )
+      return
+    }
+    if (!signedIn) {
+      setNotice(
+        `Sign in to ${target.deployment} to add a hand pick: it is checked against the segmentation first.`,
+      )
+      return
+    }
+    if (!positionNm) {
+      setNotice(
+        'Neuroglancer did not say where the pointer was. Point at the piece in a panel.',
+      )
+      return
+    }
+    const controller = new AbortController()
+    pickAbort.current = controller
+    checkingRef.current = true
+    setChecking(segment)
+    setNotice(`Checking ${segment} against the segmentation…`)
+    let checked
+    try {
+      checked = await checkPick(
+        {
+          datastack: target.datastack,
+          segment,
+          positionNm: [...positionNm],
+          seed: neuron,
+          neuronRoot: merged?.currentRoot ?? neuron,
+          pieces: unmergedPieces,
+        },
+        { deployment: target.deployment, signal: controller.signal },
+      )
+    } catch {
+      return // Cancelled: the card went away.
+    } finally {
+      checkingRef.current = false
+      setChecking(undefined)
+    }
+    if (!checked.ok) {
+      setNotice(checked.message)
+      return
+    }
+    // Written into the card as it is now, and only into the document it was picked in.
+    const store = useGraphStore.getState()
+    const params = store.graph.nodes.find((one) => one.id === node.id)?.params
+    if (store.activeTabId !== docId || !params) return
+    const { root, contactNm, gapUm, l2Chunks } = checked
+    const held = decodePicks(params['picks'])
+    if (held.some((one) => one.seed === neuron && one.candidateId === segment)) return
+    const n = held.reduce((most, one) => Math.max(most, one.n), 0) + 1
+    const pick = { n, seed: neuron, root, candidateId: segment, contactNm, gapUm, l2Chunks }
+    // Where it lands is where the queue will list it: placed by `withPicks` itself.
+    const placed = listedAt(withPicks(mine, [pick]), segment)!
+    // An accept left from before, on a pair no longer listed: judged again, it would be cleared.
+    const already = verdictFor(decodeVerdicts(params['verdicts']), root, segment) === 'accept'
+    const { write, search } = already
+      ? { write: {}, search: false }
+      : judgedParams(params, root, placed.candidate, 'accept', blockedOf(segment))
+    // The cursor goes to it only where the reader is still on that neuron.
+    const stayed = String(params['neuron'] ?? '') === String(node.params.neuron ?? '')
+    commitWork(
+      { ...write, picks: encodePicks([...held, pick]) },
+      stayed ? { current: tipKey(root, placed.tip.endUid), rank: placed.candidate.rank } : {},
+      params,
+    )
+    if (search) runSearch()
+    setNotice(`Added ${segment} by hand and accepted it: ${gapLabel(gapUm)} from the neuron.`)
+  }
+  useSegmentPick(node.id, (pointed) => void addPick(pointed))
 
   /*
    * Start over: asked in place, as the shelf asks before a delete (no `window.confirm`, which
@@ -1024,6 +1156,14 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                           auto
                         </span>
                       )}
+                      {candidate?.hand && (
+                        <span
+                          className="review-row__hand"
+                          title="You added this piece from neuroglancer: the search did not list it here. Undo takes it off the list."
+                        >
+                          by hand
+                        </span>
+                      )}
                       {/* Edited since the suggestion: Submit would refuse it. */}
                       {outdated && (
                         <span
@@ -1241,6 +1381,28 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                 onClick={() => setAskingStartOver(true)}
               >
                 Start over…
+              </button>
+              {/*
+               * The pick key's button, for whoever does not know the key: the segment the pointer
+               * last rested on, since the pointer has left the frame to press this.
+               */}
+              <button
+                type="button"
+                className="btn review-body__add-pick"
+                disabled={
+                  rested === undefined || checking !== undefined || neuron === undefined
+                }
+                title={
+                  rested === undefined
+                    ? `Rest the pointer on a piece in Neuroglancer first. Or press ${shortcutKeys('pick-segment')} with the pointer on it.`
+                    : `Add ${rested.segment}, which the pointer last rested on in Neuroglancer, to this neuron’s list and accept it. Or press ${shortcutKeys('pick-segment')} with the pointer on a piece.`
+                }
+                onClick={() => {
+                  const pointed = restedPoint()
+                  if (pointed) void addPick(pointed)
+                }}
+              >
+                {checking !== undefined ? 'Checking…' : 'Add from viewer'}
               </button>
               {/*
                * Auto-extend on every listed row that clears SEAM's cutoff, in one edit. Disabled with

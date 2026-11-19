@@ -795,3 +795,41 @@ layer-1 check in `confirmMerge` itself, so the sandbox probe gets it too.
   there. The sandbox now runs Aedes' version on Aedes' host, but it is not Aedes' data.
 - **Root ids in place of supervoxels**: try it in the sandbox (above).
 - **`remesh`** defaults to true server-side; leave it.
+
+## Hand picks (user, 2026-11-19)
+
+A reader can add a candidate Suggest Merges missed: point at it in a Neuroglancer frame and press
+`J`, or use the card's **Add from viewer** (the segment the pointer last rested on). Code:
+`packs/seam/handPicks.ts` (storage, placement), `packs/seam/pickCheck.ts` (the check),
+`ui/viewers/segmentHover.ts` (the key and the pointer's place).
+
+- **A pick is a segment and a place.** The frame posts the pointer's position in nm with each hover
+  report (`FrameHoverMessage.positionNm`, from `mouseState`); on a 3D panel it is on the surface
+  neuroglancer picked. `J` is unbound in neuroglancer and Spelunker, so the frame always hands it
+  back (`isPickKey`).
+- **Checked before it is written, with Submit's own code** (`anchorMerge`, reads only, at the
+  server's now): both pieces' nearest voxels within `UNKNOWN_GAP_REACH_NM` (1.5 µm) of the place,
+  the neuron's side being the neuron's root now and its unmerged extended pieces (`alsoNeuron`).
+  Their midpoint is the pick's contact and their distance its gap. Each piece lies within 1.5 µm
+  of the place, so the gap is at most 3 µm and Submit's reach around the midpoint
+  (`gap/2 + ANCHOR_MARGIN_NM` ≤ `MAX_REACH_NM`) always holds both — a pick that passes the check
+  cannot be refused as `gap-too-wide`. The size is `leaves_many`'s, and its failure never refuses.
+- **Placed each time the queue is built, never stored by tip number** (`withPicks`): on the
+  touched root's tip nearest the contact within 2 µm (SEAM's own-tip reach), else a tip of its own,
+  `end_uid = -n`. `end_uid` is a run's counter; stored, a re-run would move the pick.
+- **Accepted in the same edit** (user, 2026-11-19), through `judgedParams`, so Extend on accept and
+  the large-piece rule apply. A piece already listed is accepted where it is listed and stores no
+  pick.
+- **Never sent to SEAM's verdict log** (user, 2026-11-19): it has no score or source. It shows in
+  `Verdicts` as `by_hand`.
+- Cleared by Start over and evicted with its neuron (`withRecentWork`, by the root it touches).
+
+- **One card takes a pick**: the only review card open, else the expanded, pinned or only
+  selected one; with several and none chosen, the status bar asks to select one. A held key's
+  repeats are ignored, and a pick already stored for the neuron is not stored twice.
+
+Open (code review, 2026-11-19): a pick cannot be removed except by undo or Start over, and a
+rejected one stays first in the list; a pick on a tip leads that tip's row, so an accepted
+first candidate there is reached with the arrows (unless extended); a pick's rank on a tip is the
+tip's list length + 1, so a re-run that lists more candidates there moves it, and a saved cursor
+rank with it.

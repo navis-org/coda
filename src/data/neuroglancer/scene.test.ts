@@ -11,7 +11,13 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NgScene } from './scene'
-import { decodeSavedView, encodeSavedView, isAltDigit } from './frameMessage'
+import {
+  decodeSavedView,
+  encodeSavedView,
+  isAltDigit,
+  isFrameHoverMessage,
+  isPickKey,
+} from './frameMessage'
 import {
   buildScene,
   layerSourceUrl,
@@ -1312,6 +1318,41 @@ describe('the dashboard tab keys', () => {
     expect(press('Digit3')).toBe(false)
     expect(press('Digit3', { altKey: true, shiftKey: true })).toBe(false)
     expect(press('KeyA', { altKey: true })).toBe(false)
+  })
+
+  it('leave the hand-pick key alone, which is J and nothing else', () => {
+    const pick = (
+      code: string,
+      mods: Partial<Record<'altKey' | 'metaKey' | 'ctrlKey' | 'shiftKey', boolean>> = {},
+    ) =>
+      isPickKey({
+        code,
+        altKey: false,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        ...mods,
+      })
+    expect(pick('KeyJ')).toBe(true)
+    expect(pick('KeyJ', { shiftKey: true })).toBe(false)
+    expect(pick('KeyJ', { metaKey: true })).toBe(false)
+    expect(pick('KeyK')).toBe(false)
+    expect(press('KeyJ', { altKey: true })).toBe(false)
+  })
+})
+
+describe('the hover report', () => {
+  const report = (extra: Record<string, unknown>) => ({ type: 'coda:ng-hover', ...extra })
+
+  it('takes a segment id or nothing, with a place in three finite numbers or none', () => {
+    expect(isFrameHoverMessage(report({ segment: null }))).toBe(true)
+    expect(isFrameHoverMessage(report({ segment: '720575940621522189' }))).toBe(true)
+    expect(
+      isFrameHoverMessage(report({ segment: '720575940621522189', positionNm: [1, 2, 3] })),
+    ).toBe(true)
+    expect(isFrameHoverMessage(report({ segment: '1', positionNm: [1, 2] }))).toBe(false)
+    expect(isFrameHoverMessage(report({ segment: '1', positionNm: [1, 2, NaN] }))).toBe(false)
+    expect(isFrameHoverMessage(report({ segment: 'x' }))).toBe(false)
   })
 })
 

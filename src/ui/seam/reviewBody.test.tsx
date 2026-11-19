@@ -37,6 +37,8 @@ import type * as VerdictLog from '../../data/verdictLog'
 import { resetVerdictLog, verdictLogState, writeSharing } from '../../data/verdictLog'
 import { ReviewBody, submitPress } from './ReviewBody'
 import { setHoveredSegment } from '../viewers/segmentHover'
+import { decodePicks, encodePicks } from '../../packs/seam/handPicks'
+import { decodeVerdicts } from '../../packs/seam/reviewQueue'
 
 /** Submit's session, faked: the card only reads its state and opens it. */
 const openSubmit = vi.fn()
@@ -58,6 +60,11 @@ const flushVerdicts = vi.fn(() => Promise.resolve())
 vi.mock('../../data/verdictLog', async (importOriginal) => ({
   ...(await importOriginal<typeof VerdictLog>()),
   flushVerdicts: () => flushVerdicts(),
+}))
+/** A hand pick's check against the segmentation, faked: what it answers is the test's. */
+const checkPick = vi.fn()
+vi.mock('../../packs/seam/pickCheck', () => ({
+  checkPick: (...args: unknown[]) => checkPick(...args),
 }))
 vi.mock('./mergeSession', () => ({
   STILL_OUT_NOTICE: 'A merge sent earlier has not answered yet.',
@@ -1597,5 +1604,148 @@ describe('sending verdicts to SEAM', () => {
       target: { value: 'reader@example.org' },
     })
     expect(verdictLogState().sharing.email).toBe('reader@example.org')
+  })
+})
+
+describe('hand picks on the review card', () => {
+  const FRAME = {}
+  /** Tip 11's second candidate: listed, and not accepted. */
+  const LISTED = '648518346356867476'
+  const PICKED = '648518346399999999'
+  const CAVE: Value = {
+    kind: 'dataset',
+    sourceId: 'cave',
+    datasetId: 'test_stack:1',
+    label: 'test',
+  }
+  const stored = () => useGraphStore.getState().graph.nodes[0]!.params
+  const notice = () => useGraphStore.getState().notice
+  /** `J` with the pointer on `segment`, in a frame, and whatever the check does after it. */
+  const pick = async (segment: string) => {
+    setHoveredSegment(FRAME, segment, [5000, 5000, 5000])
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyJ' }))
+    })
+  }
+
+  beforeEach(() => useGraphStore.setState({ past: [], notice: undefined } as never))
+  afterEach(() => {
+    setHoveredSegment(FRAME, undefined)
+    resetCredentials()
+    checkPick.mockReset()
+  })
+
+  it('accepts a piece the list holds where it is listed, and moves there, in one step', async () => {
+    draw({ current: at(22), rank: 1 })
+    await pick(LISTED)
+    expect(decodeVerdicts(stored()['verdicts']).get(`${NEURON}/${LISTED}`)).toBe('accept')
+    expect(stored()['current']).toBe(at(11))
+    expect(stored()['rank']).toBe(2)
+    expect(stored()['picks']).toBe('')
+    expect(useGraphStore.getState().past.length).toBe(1)
+    expect(checkPick).not.toHaveBeenCalled()
+  })
+
+  it('says what it needs before checking a piece the list does not hold', async () => {
+    draw()
+    await pick(PICKED)
+    expect(notice()).toMatch(/needs a CAVE dataset/)
+    draw({}, true, CANDIDATES, TIPS, CAVE)
+    await pick(PICKED)
+    expect(notice()).toMatch(/Sign in to/)
+    expect(checkPick).not.toHaveBeenCalled()
+    expect(useGraphStore.getState().past.length).toBe(0)
+  })
+
+  it('checks a new piece, then lists and accepts it, in one step', async () => {
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    checkPick.mockResolvedValue({
+      ok: true,
+      root: NEURON,
+      contactNm: [5000, 5000, 5000],
+      gapUm: 0.3,
+      l2Chunks: 3,
+    })
+    draw({}, true, CANDIDATES, TIPS, CAVE)
+    await pick(PICKED)
+    expect(checkPick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        datastack: 'test_stack',
+        segment: PICKED,
+        positionNm: [5000, 5000, 5000],
+        seed: NEURON,
+        neuronRoot: NEURON,
+      }),
+      expect.objectContaining({ deployment: DEFAULT_CAVE_SERVER }),
+    )
+    expect(decodePicks(stored()['picks'])).toEqual([
+      {
+        n: 1,
+        seed: NEURON,
+        root: NEURON,
+        candidateId: PICKED,
+        contactNm: [5000, 5000, 5000],
+        gapUm: 0.3,
+        l2Chunks: 3,
+      },
+    ])
+    expect(decodeVerdicts(stored()['verdicts']).get(`${NEURON}/${PICKED}`)).toBe('accept')
+    // No tip within 2 µm of it: a tip of its own.
+    expect(stored()['current']).toBe(at(-1))
+    expect(stored()['rank']).toBe(1)
+    expect(useGraphStore.getState().past.length).toBe(1)
+    expect(notice()).toMatch(/^Added .* by hand and accepted it/)
+  })
+
+  it('checks once for two presses before the first answers', async () => {
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    let answer: (value: unknown) => void = () => {}
+    checkPick.mockReturnValue(new Promise((resolve) => (answer = resolve)))
+    draw({}, true, CANDIDATES, TIPS, CAVE)
+    setHoveredSegment(FRAME, PICKED, [5000, 5000, 5000])
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyJ' }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyJ' }))
+    })
+    await act(async () =>
+      answer({
+        ok: true,
+        root: NEURON,
+        contactNm: [5000, 5000, 5000],
+        gapUm: 0.3,
+        l2Chunks: 3,
+      }),
+    )
+    expect(checkPick).toHaveBeenCalledTimes(1)
+    expect(decodePicks(stored()['picks'])).toHaveLength(1)
+  })
+
+  it('writes nothing for a pick the check refuses, and says why', async () => {
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    checkPick.mockResolvedValue({ ok: false, message: 'That is the neuron itself.' })
+    draw({}, true, CANDIDATES, TIPS, CAVE)
+    await pick(PICKED)
+    expect(notice()).toBe('That is the neuron itself.')
+    expect(useGraphStore.getState().past.length).toBe(0)
+  })
+
+  it('draws a hand pick first, marked, with none of SEAM’s numbers', () => {
+    draw({
+      picks: encodePicks([
+        {
+          n: 1,
+          seed: NEURON,
+          root: NEURON,
+          candidateId: PICKED,
+          contactNm: [9000, 9000, 9000],
+          gapUm: 0.3,
+          l2Chunks: 3,
+        },
+      ]),
+    })
+    expect(rows()).toHaveLength(3)
+    const first = rows()[0]!
+    expect(first.querySelector('.review-row__id')?.textContent).toBe(`${PICKED}by hand`)
+    expect(first.querySelector('.review-row__score')?.textContent).toBe('—')
   })
 })

@@ -869,7 +869,7 @@ export function NeuroglancerViewer({
       if (isFrameHoverMessage(event.data)) {
         // Where the pointer is, not what the scene holds: no update to match.
         hoveredFrom = kept.frame
-        setHoveredSegment(kept.frame, event.data.segment ?? undefined)
+        setHoveredSegment(kept.frame, event.data.segment ?? undefined, event.data.positionNm)
         return
       }
       if (isFrameKeyMessage(event.data)) {

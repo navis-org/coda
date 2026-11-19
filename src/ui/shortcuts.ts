@@ -273,6 +273,12 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         hint: "The browser's own tabs and address bar gone",
       },
       {
+        id: 'pick-segment',
+        chords: [{ key: 'J' }],
+        label: 'Add the piece under the pointer to Review Suggestions',
+        hint: 'In Neuroglancer, with a Review Suggestions card open: listed for its neuron and accepted',
+      },
+      {
         id: 'escape',
         chords: [{ key: 'Esc' }],
         label: 'Close the menu, dialog or expanded result',
