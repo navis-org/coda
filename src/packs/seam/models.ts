@@ -39,6 +39,11 @@ export interface AffinityModel {
   readonly manifestUrl: string
   /** One sentence: what it is and what it was trained on. Shown under the param. */
   readonly detail: string
+  /**
+   * Why it is no longer offered, where it is not: `EnumOption.retired`, so a card that holds it
+   * loads and runs exactly as before and nothing new can pick it.
+   */
+  readonly retired?: string
 }
 
 /** Every point affinity model's `task`, checked against the manifest's own on open. */
@@ -159,6 +164,26 @@ export const MERGE_ASSESSOR_TASK = 'merge-assessor'
  * fraction of a second for the segmentation of the same window.
  */
 export const MERGE_ASSESSOR_MODELS: readonly AffinityModel[] = [
+  /*
+   * **Student 1 in seed 0's place** (SEAM's `coda-student1.md`, user, 2026-11-20): the same
+   * network, trained to copy the averaged score of the three seeds rather than the plain yes/no
+   * label, with ref, `p_tip`, the cutoff and `r` refitted for it. On a test set no fit had seen
+   * (Aedes h2, 634 lists) more right first candidates clear the cutoff — tiny pieces 0.321
+   * against 0.243, ordinary 0.697 against 0.657 — with first place unchanged; on real tips the
+   * gain is small (rv2: 133 shown against 145, 31 right against 30 on the test neuron), and
+   * precision at the cutoff on rv4 is 0.976.
+   */
+  {
+    id: 'n3d_mal_mask_s1',
+    label: 'SEAM mask assessor, student 1 (Aedes)',
+    manifestUrl:
+      'https://flyemdev.mrc-lmb.cam.ac.uk/flyconnectome/coda/models/seam-n3d-mal-mask-s1/manifest.json',
+    detail:
+      'Judges whether a candidate piece continues the neuron, from a 4 µm window of the ' +
+      'segmentation around the place they touch. One network trained to copy the averaged score ' +
+      'of SEAM’s three checkpoints, with the stages after it refitted for it — the cheapest ' +
+      'configuration that reaches a calibrated answer.',
+  },
   {
     id: 'n3_mal_mask_s0',
     label: 'SEAM mask assessor, one seed (Aedes)',
@@ -167,8 +192,8 @@ export const MERGE_ASSESSOR_MODELS: readonly AffinityModel[] = [
     detail:
       'Judges whether a candidate piece continues the neuron, from a 4 µm window of the ' +
       'segmentation around the place they touch. One of SEAM’s three checkpoints, with the ' +
-      'stages after it refitted for running alone — the cheapest configuration that reaches a ' +
-      'calibrated answer.',
+      'stages after it refitted for running alone.',
+    retired: 'replaced by student 1',
   },
 ]
 

@@ -109,6 +109,16 @@ def prepare_lists(src: Path, out: Path, ends: list[int]) -> None:
     import pandas as pd
 
     manifest = json.loads((src / "manifest.json").read_text())
+    # A student (`n3d_mal_mask`, 2026-11-20) is scored on its teacher's lists and patches, which
+    # its manifest points at (`fixture.lists`), with its own PyTorch logits in a check file
+    # beside it (`fixture.scores`). The lists and patches are checked against the manifest of
+    # the directory that holds them; the scores against the student's.
+    scores = None
+    if "scores" in manifest["fixture"]:
+        name = manifest["fixture"]["scores"]
+        scores = pd.read_parquet(checked(src, name, manifest["files"][name]))
+        src = (src / manifest["fixture"]["lists"]).resolve().parent
+        manifest = json.loads((src / "manifest.json").read_text())
     checked(src, "lists.parquet", manifest["files"]["lists.parquet"])
     held = pd.read_parquet(src / "lists.parquet")
 
@@ -130,6 +140,10 @@ def prepare_lists(src: Path, out: Path, ends: list[int]) -> None:
             # with another one's patch -- every logit plausible, every one of them wrong.
             raise SystemExit(f"end {end}'s `i` is not 0..n-1; the patch order cannot be trusted")
         (out / f"{end}.u8").write_bytes(patches.tobytes(order="C"))
+        if scores is not None:
+            own = scores[scores.end_uid == end].sort_values("i").reset_index(drop=True)
+            if list(own.i) != list(rows.i) or list(own.cand_root) != list(rows.cand_root):
+                raise SystemExit(f"end {end}: the check file and lists.parquet list other candidates")
         wanted.append(
             {
                 "end_uid": int(end),
@@ -149,13 +163,20 @@ def prepare_lists(src: Path, out: Path, ends: list[int]) -> None:
                 # is written against. The two are now close enough that SEAM's own
                 # `cluster_fp32` passes that rule (q within 3.5e-4), which it did not under
                 # bf16 -- a stored score used to miss an exact fp32 browser by about a logit.
-                "torch": [[float(v) for v in rows[f"torch_s{k}"]] for k in range(3)],
+                # A student's: its one model, in the first place, where a probe reads it.
+                "torch": [[float(v) for v in own.torch]]
+                if scores is not None
+                else [[float(v) for v in rows[f"torch_s{k}"]] for k in range(3)],
                 # Neither is read by a probe, and both are here on purpose: `lists.json` is
                 # also something a human opens when a browser's number looks wrong, and the
                 # first question is always "wrong against what". `ort_cpu` says what the same
                 # graph answers on a CPU, `stored` what the cluster actually recorded.
-                "ort_cpu": [[float(v) for v in rows[f"ort_s{k}"]] for k in range(3)],
-                "stored": [[float(v) for v in rows[f"stored_s{k}"]] for k in range(3)],
+                "ort_cpu": [[float(v) for v in own.ort]]
+                if scores is not None
+                else [[float(v) for v in rows[f"ort_s{k}"]] for k in range(3)],
+                "stored": []
+                if scores is not None
+                else [[float(v) for v in rows[f"stored_s{k}"]] for k in range(3)],
             }
         )
     (out / "lists.json").write_text(

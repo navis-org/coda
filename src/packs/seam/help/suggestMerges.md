@@ -36,6 +36,8 @@ With `Assessor` set to "None — rank by geometry", you get the forest's ranking
 
 Pick an assessor and each candidate's 4 µm patch of segmentation also goes through SEAM's network. Every candidate then carries `p_cand` and `conf`, each tip carries `p_tip`, `q` and `r`, and `shown` says whether the tip clears SEAM's calibrated cutoff. The checkpoint is a 133 MB download, kept in your browser, and `Download the model` has to be ticked before the node fetches it.
 
+The assessor offered is SEAM's student 1, one network trained to copy the average of SEAM's three checkpoints. It replaced the single checkpoint (seed 0) on 2026-11-20 because more of the right suggestions clear its cutoff. A graph saved with seed 0 keeps it and runs as before, and you can switch it to student 1 under `Assessor`. The two give different numbers, so a run with student 1 searches every end again.
+
 > [!NOTE]
 > **Firefox is slower at this**
 > The network runs on WebGPU, and a patch costs about 27 ms in Chrome against about 98 ms in Firefox on the same machine. If you are on Firefox and the run is slow, `Assess top` is the setting to try: capping at 10 took a measured end from 11.0 s to 4.5 s. It changes a few answers, so read its tooltip first.

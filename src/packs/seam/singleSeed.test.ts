@@ -55,43 +55,65 @@ interface GoldenTip {
   }
 }
 
-const GOLDEN = JSON.parse(
-  readFileSync(new URL('./__fixtures__/singleSeedTips.json', import.meta.url), 'utf8'),
-) as { cutoff: number; tips: readonly GoldenTip[] }
-
-const MANIFEST = JSON.parse(
-  readFileSync(new URL('./__fixtures__/assessorManifest.json', import.meta.url), 'utf8'),
-) as ModelManifest
-
-const FITS = parseAssessorConfig(MANIFEST.config, MANIFEST.id).fits
-
-/** One tip through stages 7–9, exactly as the node runs it. */
-function recompute(tip: GoldenTip) {
-  const list = scoreList(
-    { geoRank: tip.in.geo_rank, volUm3: tip.in.vol_um3, assessor: [tip.in.score_s0] },
-    FITS,
-  )
-  return { list, decided: decideTip(list, tip.e_tip, FITS) }
+function fixture<T>(name: string): T {
+  return JSON.parse(
+    readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url), 'utf8'),
+  ) as T
 }
 
-/** The largest absolute difference over every tip, for one quantity. */
-function worst(
-  of: (tip: GoldenTip) => readonly number[],
-  want: (tip: GoldenTip) => readonly number[],
-) {
-  let top = 0
-  for (const tip of GOLDEN.tips) {
-    const got = of(tip)
-    const expected = want(tip)
-    expect(got.length, `${tip.neuron}/${tip.end_uid}`).toBe(expected.length)
-    for (let i = 0; i < got.length; i++) {
-      top = Math.max(top, Math.abs(got[i]! - expected[i]!))
-    }
+/**
+ * Each configuration Coda can run, as the file that gets uploaded and SEAM's golden for it. Seed 0
+ * is retired from the menu (2026-11-20) and still runs for a card that holds it, so it keeps its
+ * check; student 1 (`n3d_mal_mask_s1`, SEAM's `coda-student1.md`) is the one offered.
+ *
+ * `onTheLine` is the tip whose `q` is its own cutoff, to the last bit — see the verdict test.
+ */
+const CONFIGURATIONS = [
+  {
+    name: 'seed 0',
+    golden: 'singleSeedTips.json',
+    manifest: 'assessorManifest.json',
+    onTheLine: ['648518347558097460/704'],
+  },
+  {
+    name: 'student 1',
+    golden: 'student1Tips.json',
+    manifest: 'assessorManifestStudent1.json',
+    onTheLine: ['648518347686959617/573'],
+  },
+]
+
+describe.each(CONFIGURATIONS)('$name, against SEAM’s own numbers', (configuration) => {
+  const GOLDEN = fixture<{ cutoff: number; tips: readonly GoldenTip[] }>(configuration.golden)
+  const MANIFEST = fixture<ModelManifest>(configuration.manifest)
+  const FITS = parseAssessorConfig(MANIFEST.config, MANIFEST.id).fits
+
+  /** One tip through stages 7–9, exactly as the node runs it. */
+  function recompute(tip: GoldenTip) {
+    const list = scoreList(
+      { geoRank: tip.in.geo_rank, volUm3: tip.in.vol_um3, assessor: [tip.in.score_s0] },
+      FITS,
+    )
+    return { list, decided: decideTip(list, tip.e_tip, FITS) }
   }
-  return top
-}
 
-describe('the single-seed configuration, against SEAM’s own numbers', () => {
+  /** The largest absolute difference over every tip, for one quantity. */
+  function worst(
+    of: (tip: GoldenTip) => readonly number[],
+    want: (tip: GoldenTip) => readonly number[],
+  ) {
+    let top = 0
+    for (const tip of GOLDEN.tips) {
+      const got = of(tip)
+      const expected = want(tip)
+      expect(got.length, `${tip.neuron}/${tip.end_uid}`).toBe(expected.length)
+      for (let i = 0; i < got.length; i++) {
+        top = Math.max(top, Math.abs(got[i]! - expected[i]!))
+      }
+    }
+    return top
+  }
+
   /**
    * The fits this runs on are the manifest's, which is the file that gets uploaded. Pinned
    * against SEAM's published cutoff so a regenerated manifest and a regenerated golden have to
@@ -210,7 +232,7 @@ describe('the single-seed configuration, against SEAM’s own numbers', () => {
    * lower** because the two sum the same products in different orders.
    *
    * So the assertion is: the verdicts agree except where `q` is within a few bits of the cutoff,
-   * and there is **exactly one** such tip in a set of 2,708. A tolerance inside `decideTip`
+   * and there is **exactly one** such tip in each configuration's set of 2,708. A tolerance inside `decideTip`
    * would be the wrong fix — it would move the cutoff for every tip to rescue a tie that only
    * exists because the cutoff was read off this one.
    */
@@ -227,7 +249,7 @@ describe('the single-seed configuration, against SEAM’s own numbers', () => {
       }
       expect(decided.against?.verdict === 'shown', where).toBe(tip.seam.shown)
     }
-    expect(onTheLine).toEqual(['648518347558097460/704'])
+    expect(onTheLine).toEqual(configuration.onTheLine)
   })
 
   /**

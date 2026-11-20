@@ -490,7 +490,11 @@ export const suggestMergesNode = packNode({
       default: NO_ASSESSOR,
       options: [
         { value: NO_ASSESSOR, label: 'None — rank by geometry' },
-        ...MERGE_ASSESSOR_MODELS.map((model) => ({ value: model.id, label: model.label })),
+        ...MERGE_ASSESSOR_MODELS.map((model) => ({
+          value: model.id,
+          label: model.label,
+          ...(model.retired === undefined ? {} : { retired: model.retired }),
+        })),
       ],
       help: 'Which checkpoint judges whether each candidate really continues the neuron. Without one the answer is the forest’s ranking and nothing else — no probability and no cutoff. With one, each candidate gets a 4 µm patch of segmentation through the network, and the tip gets SEAM’s own `q`, `r` and shown/withheld. It costs about two seconds an end on top of the search, and the model is a 133 MB download kept in this browser.',
     },
