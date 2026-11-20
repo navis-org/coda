@@ -3087,6 +3087,47 @@ a shared server, so `LEAVES_CHUNK` and `LEAVES_STREAMS` stay. (Two of those four
 minutes later. A single failed fetch ends the whole node run, not the one end — recorded, not
 changed.)
 
+### Done: larger count batches, 160 roots at two streams (2026-11-20)
+
+The CAVE maintainers, asked about a counts-only endpoint, suggested fewer and larger requests.
+Nothing above fifty had been tried, and fifty itself was chosen for reply size, not time. Now
+`LEAVES_CHUNK` is 160 and `LEAVES_STREAMS` two: **the same speed with a third of the
+requests**. `rootsByMajority` keeps fifty (`VOTE_BATCH`) — its roots are whole stale neurons,
+which these measurements did not cover.
+
+**Warm caches, kept out.** The roots each end asks were recorded from a node run with the
+requests stubbed out, so recording warmed nothing. A cold reading used only roots never asked
+before; a warm one asked the same roots under every setting, the order rotating.
+
+Replayed outside the node, each end's real list (~320 roots, median), ms per 100 roots:
+
+| | 50 × 4 | 100 × 2 | 160 × 2 | 320 × 1 |
+|---|---|---|---|---|
+| cold, 19 ends each | 172 | 215 | 184 | 203 |
+| warm, the same 40 ends under all four | 183 | 193 | 194 | 225 |
+
+A request's time is ~175 ms plus 67 ms per thousand level-2 ids in it, so the server does not
+split a request: one for a whole end waits on its biggest root alone, and is slowest.
+
+Through the node, Chrome, a fresh browser a run, 40 ends:
+
+| run | 50 × 4 | 160 × 2 |
+|---|---|---|
+| cold, four blocks never asked before (ends 200-359): stage median per end | 776, 936 ms | 783, 951 ms |
+| cold, ms per 100 roots | 245, 289 | 285, 229 |
+| warm, ends 200-239 interleaved: ms per 100 roots | 210, 251 | 212, 216 |
+| requests per run | 276-290 | 104-125 |
+
+Answers were equal to the bit across all five runs of one block. The whole node's time per end
+moved from 1.66 to 2.92 s over the four warm runs of the same ends, so a change this size in the
+counts cannot be seen there. A warm server was ~15% quicker per root in the node and no quicker
+in the replay.
+
+The same session measured `stop_layer=3` against 2 for the same roots, one request at a time:
+~150 ms of floor per request, then ~17 ms per thousand level-2 ids for the walk to layer 3 and
+~26 more for the level-2 ids themselves. A counts-only endpoint could save that second part —
+~0.1-0.2 s an end — and not the floor or the walk.
+
 ### What the faster search exposed
 
 `cutting patches` rose from a median of 122 ms an end to ~860. The cut did not get slower: the
