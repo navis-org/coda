@@ -70,7 +70,7 @@ export function utcWhen(ms: number, now = Date.now()): string {
   return `${time} UTC on ${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}${year}`
 }
 
-/** The words every "no longer current" sentence opens with — what `saysNoLongerCurrent` finds. */
+/** The words every "no longer current" sentence opens with. */
 const NO_LONGER = { one: 'is no longer a current root', many: 'are no longer current' }
 
 /**
@@ -89,11 +89,6 @@ export function noLongerCurrent(
   }
   const list = [...edited].map(([id, at]) => `${id} (edited at ${utcWhen(at)})`)
   return `${edited.size} roots ${NO_LONGER.many}: ${namedFew(list)}; ${answer.many}.`
-}
-
-/** Whether a warning is one `noLongerCurrent` wrote, so a caller passing warnings on can drop it. */
-export function saysNoLongerCurrent(warning: string): boolean {
-  return warning.includes(NO_LONGER.one) || warning.includes(NO_LONGER.many)
 }
 
 /** "6485… is not a root wclee_aedes_brain's chunkedgraph knows" — the caller ends the sentence. */

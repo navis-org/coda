@@ -29,15 +29,9 @@ import { cacheGet, cacheSet } from '../../data/cache'
 import { datasetCacheKey } from '../../data/neuronIndex'
 import type { DataSource } from '../../data/source'
 import { regionList } from '../../data/source'
-import type { MeshesValue } from '../../core/values'
+import { type MeshesValue, meshSurfaceArea } from '../../core/values'
 import type { RoiView } from './roiProjection'
-import {
-  ROI_VIEWS,
-  TRACE_GRID,
-  meshSurfaceArea,
-  meshVolume,
-  projectRegions,
-} from './roiProjection'
+import { ROI_VIEWS, TRACE_GRID, meshVolume, projectRegions } from './roiProjection'
 
 /**
  * Bumped when anything about the stored shape or the way it is traced changes.

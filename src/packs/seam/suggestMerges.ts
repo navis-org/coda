@@ -170,7 +170,7 @@ import {
 } from './searchTips'
 import { schemaOf } from './suggestionTables'
 import { boxFits, endToSearch, openSearchVolume, unlistedMaterialization } from './searchVolume'
-import { aboutTheNeuron } from './openEnds'
+import { openEndsNode } from './openEnds'
 import { forgetRoots, labelledBox } from './rootedBox'
 import type { SearchVolume } from './searchVolume'
 import { runClock } from './runClock'
@@ -1744,6 +1744,13 @@ const ENDS_PER_UNSEEN_PIECE = 2
 const PIECE_SOURCE = 'neuron.inputIds'
 
 /**
+ * What a piece's chain runs with that the neuron's did not: **the nucleus lookup only for a piece
+ * that could hold a nucleus**, by its mesh surface — under the smallest nucleus measured, with a
+ * margin (`docs/seam-extend-plan.md`, "Phase 0 — results").
+ */
+const PIECE_SETTINGS = { [openEndsNode.type]: { nucleusMinAreaUm2: 75 } } as const
+
+/**
  * Where a piece's tips are kept — or `undefined` where the chain above `Tips` has no key, and
  * then nothing is kept at all: a key without the chain in it would hand one chain's tips to
  * another's.
@@ -1805,7 +1812,7 @@ async function pieceTips(
       const { value, warnings } = await ctx.rerunInput(
         'tips',
         { type: PIECE_SOURCE, params: { ids: piece.id }, output: 'neurons' },
-        (says) => report(`${piece.id}: ${says}`),
+        { report: (says) => report(`${piece.id}: ${says}`), settings: PIECE_SETTINGS },
       )
       if (!isTableValue(value)) {
         throw new Error('The chain above `Tips` did not answer with a table of open ends.')
@@ -1824,14 +1831,12 @@ async function pieceTips(
   ctx.reportFetched(kept.at)
   /*
    * Said again on every run, kept or not — a caveat that held for the tips holds for an answer
-   * built on them. **Except Find Open Ends' two about the neuron itself** (`aboutTheNeuron`,
-   * user 2026-11-18): every piece has no nucleus, and a piece is often replaced by the very
-   * Submit that merged it, so on a piece both are expected and neither has a remedy. What is
-   * left is about this piece, and says which.
+   * built on them, and names the piece. Find Open Ends' two about the nucleus lookup — no row in
+   * the table, a root no longer current — are said only for a piece large enough to be asked
+   * (`PIECE_SETTINGS`), where a missing soma mask is worth knowing about.
    */
-  for (const said of kept.warnings) {
-    if (!aboutTheNeuron(said)) ctx.warn(`Finding the open ends of piece ${piece.id}: ${said}`)
-  }
+  for (const said of kept.warnings)
+    ctx.warn(`Finding the open ends of piece ${piece.id}: ${said}`)
   return { tips: kept.tips, ran }
 }
 

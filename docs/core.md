@@ -827,9 +827,14 @@ nothing to exercise it with until that emitter exists.
 
 ## A node re-running the chain above one of its inputs
 
-`ctx.rerunInput(portId, neurons)`: run everything above an input again with another neuron on
-the wire, and hand back what then arrives on the port. Present only on a node declaring
-`rerunsInputs`, which `registerNode` refuses on anything but an `expensive` one.
+`ctx.rerunInput(portId, neurons, { report?, settings? })`: run everything above an input again with
+another neuron on the wire, and hand back what then arrives on the port. Present only on a node
+declaring `rerunsInputs`, which `registerNode` refuses on anything but an `expensive` one.
+`settings` (`RerunSettings`) lays params over every copied node of a type — what the caller knows
+of the neuron that the chain was not built for — and refuses a param the type does not declare.
+A caller's constant, so the port's upstream key still names the run. Suggest Merges' one use:
+the nucleus lookup only for a piece large enough to hold a nucleus ([seam-extend-plan.md](seam-extend-plan.md),
+"Phase 0 — results").
 
 It is for extending a neuron piece by piece ([seam-extend-plan.md](seam-extend-plan.md)): the
 chain above Suggest Merges' `Tips` — Meshes, a clean-up, Find Open Ends, a Sort — is, read this

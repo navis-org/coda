@@ -74,7 +74,7 @@ The wire is dotted and runs backwards on the canvas. It carries no data downstre
 
 Here is what happens for each extended piece:
 
-1. **Its open ends are found** by running everything above `Tips` again with that piece in place of your neuron: the meshes, Find Open Ends, and any Sort or Sample you have there. A Sample that keeps the best 25 therefore keeps the best 25 of *each piece*.
+1. **Its open ends are found** by running everything above `Tips` again with that piece in place of your neuron: the meshes, Find Open Ends, and any Sort or Sample you have there. A Sample that keeps the best 25 therefore keeps the best 25 of *each piece*. Find Open Ends reads its `Nucleus table` only for a piece large enough to hold a nucleus, at least 75 µm² of mesh surface. The lookup took most of the time it spent on a small piece, and a smaller piece cannot hold one.
 2. **The end where it joins the neuron is left out.** That is the one tip nearest the contact the piece was accepted at. It is published with `junction` true and never searched.
 3. **The remaining ends are searched with the neuron and the piece read as one object**, along with any accepted pieces between the two. So the neuron itself never comes back as a candidate, and the ranker sees the size of the whole thing.
 

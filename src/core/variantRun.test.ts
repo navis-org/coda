@@ -62,10 +62,13 @@ beforeAll(() => {
       { id: 'dataset', label: 'Dataset', type: T.dataset(), required: false },
     ],
     outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+    // Said in the trace where set: a re-run's `settings` lay it over the copy's steps.
+    params: [{ id: 'mark', kind: 'string', label: 'Mark', default: '' }],
     inferOutputs: () => ({ out: T.table() }),
     evaluate: async (ctx) => {
       const ids = idsOf(ctx.input('in'))
-      ran.push(`step:${ids.join(',')}`)
+      const mark = String(ctx.params.mark)
+      ran.push(`step:${ids.join(',')}${mark ? `@${mark}` : ''}`)
       ctx.progress(0.1, 'working')
       if (ids.includes('bad')) throw new Error('no such neuron')
       if (ids.includes('loud')) ctx.warn('this one was slow')
@@ -176,6 +179,8 @@ beforeAll(() => {
       { id: 'ask', kind: 'string', label: 'Ask', default: '' },
       // Which node to put in: the default is a source, as a caller would pass.
       { id: 'swap', kind: 'string', label: 'Swap', default: 'test.var.neurons' },
+      // Laid over the copy's steps where set (`RerunSettings`).
+      { id: 'mark', kind: 'string', label: 'Mark', default: '' },
     ],
     inferOutputs: () => ({ out: T.table() }),
     evaluate: async (ctx) => {
@@ -192,7 +197,12 @@ beforeAll(() => {
             String(ctx.params.swap) === 'test.var.neurons'
               ? { type: 'test.var.neurons', params: { ids: ask }, output: 'neurons' }
               : { type: String(ctx.params.swap), params: {}, output: 'out' },
-            (note) => notes.push(note),
+            {
+              report: (note) => notes.push(note),
+              ...(ctx.params.mark
+                ? { settings: { 'test.var.step': { mark: String(ctx.params.mark) } } }
+                : {}),
+            },
           )
           answer = { ids: idsOf(got.value), warnings: got.warnings, notes }
         } catch (error) {
@@ -261,6 +271,32 @@ describe('where the neuron comes in', () => {
     expect(source).toEqual({ nodeId: 'b', handle: 'out' })
     // The document's own graph is not written through.
     expect(g.edges.find((e) => e.target === 'a')!.source).toBe('pick')
+  })
+
+  it('lays the settings over every copied node of their type, and nothing else', () => {
+    const g = chain()
+    const { graph } = variantGraph(g, inferGraph(g), 'call', 'tips', SWAP, {
+      'test.var.step': { mark: 'piece' },
+    })
+    const steps = graph.nodes.filter((n) => n.type === 'test.var.step')
+    expect(steps.map((n) => n.params['mark'])).toEqual(['piece', 'piece'])
+    // The swap keeps its own params, and the document's nodes are not written through.
+    expect(graph.nodes.find((n) => n.type === 'test.var.neurons')!.params).toEqual({
+      ids: 'other',
+    })
+    expect(g.nodes.find((n) => n.id === 'a')!.params['mark']).toBeUndefined()
+  })
+
+  it('refuses a setting the type has no param for, so a rename cannot quietly drop it', () => {
+    const g = chain()
+    expect(() =>
+      variantGraph(g, inferGraph(g), 'call', 'tips', SWAP, {
+        'test.var.step': { marked: 'x' },
+      }),
+    ).toThrow(/test.var.step has no param `marked`/)
+    expect(() =>
+      variantGraph(g, inferGraph(g), 'call', 'tips', SWAP, { 'test.var.gone': { mark: 'x' } }),
+    ).toThrow(/test.var.gone, which is not a node type this build has/)
   })
 
   it('keeps only what the run will reach — not the caller, the old source, or a bystander', () => {
@@ -489,6 +525,31 @@ describe('the re-run, on a scheduler of its own', () => {
       'pick:other',
       'step:other',
       'step:other',
+    ])
+  })
+
+  it('runs the copy with the settings asked for, and the canvas without them', async () => {
+    ran = []
+    const sched = scheduler()
+    const g = chain('other')
+    const call = g.nodes.find((n) => n.id === 'call')!
+    await sched.run(
+      {
+        ...g,
+        nodes: g.nodes.map((n) =>
+          n === call ? { ...n, params: { ...n.params, mark: 'piece' } } : n,
+        ),
+      },
+      { mode: 'full' },
+    )
+    expect(ran).toEqual([
+      'pick:seed',
+      'step:seed',
+      'step:seed',
+      'caller:seed',
+      'pick:other',
+      'step:other@piece',
+      'step:other@piece',
     ])
   })
 

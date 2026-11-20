@@ -1058,6 +1058,14 @@ export interface NeuronSwap {
   output: string
 }
 
+/**
+ * Params laid over every node of a type in a re-run's copy of the chain, by node type — what the
+ * caller knows of the neuron that the chain was not built for. Only the copy is changed, and a
+ * param the type does not declare is refused (`variantGraph`), so a renamed one cannot quietly
+ * stop applying.
+ */
+export type RerunSettings = Readonly<Record<string, ParamValues>>
+
 /** What a re-run chain delivered on the port, and what its nodes warned about on the way. */
 export interface RerunResult {
   value: Value | undefined
@@ -1078,18 +1086,19 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
    * asked about.
    *
    * It carries this evaluation's signal, so Cancel stops it. `report` is told which inner node is
-   * running and what it says, each time one reports progress — for the caller's own note. It throws, in a sentence, where the chain cannot be re-run —
+   * running and what it says, each time one reports progress — for the caller's own note.
+   * `settings` lays params over the copy's nodes (`RerunSettings`). It throws, in a sentence, where the chain cannot be re-run —
    * no neuron wire above the port, two from different sources, a loop — and where an inner node
    * fails.
    *
    * **What comes back is not in this node's key**, and does not need to be: the chain's own params
    * are, through the port's upstream key, and the neuron asked for must come from something that
-   * is too — a param, or a reference.
+   * is too — a param, or a reference. So are `settings`, which must be the caller's constant.
    */
   rerunInput?(
     portId: string,
     neurons: NeuronSwap,
-    report?: (note: string) => void,
+    options?: { report?: (note: string) => void; settings?: RerunSettings },
   ): Promise<RerunResult>
   /** Realised value on an input port, or undefined when unconnected. */
   input(portId: string): Value | undefined

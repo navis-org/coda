@@ -20,9 +20,9 @@ import type { CodaType, TableSchema } from '../../core/types'
 import '../../nodes'
 import { OPEN_END_MODELS, OPEN_END_TASK } from './models'
 import { SEAM_TIP_RULE } from './tips'
+import { askedForNucleus } from './openEnds'
+import type { MeshesValue } from '../../core/values'
 import { OPEN_END_FIELDS } from './openEndsOps'
-import { aboutTheNeuron } from './openEnds'
-import { noLongerCurrent } from './rootMoment'
 import { schemaOf } from './suggestionTables'
 
 const def = requireNodeDef('seam:openEnds')
@@ -173,29 +173,34 @@ describe('what counts as a tip', () => {
 })
 
 /**
- * Suggest Merges passes on what Find Open Ends says while finding a piece's ends — except the two
- * about the neuron itself, which on a piece are expected and have no remedy (user, 2026-11-18): a
- * fragment has no nucleus, and is often replaced by the very Submit that merged it.
+ * Which meshes the nucleus table is asked about (`askedForNucleus`): a piece's chain asks only
+ * about one that could hold a nucleus, by surface area (user, 2026-11-20).
  */
-describe('a warning about the neuron itself', () => {
-  it('is the no-nucleus and the no-longer-current warning, as a rerun chain labels them', () => {
-    const edited = noLongerCurrent(
-      new Map([['648518347524985418', Date.UTC(2026, 10, 17, 14, 9)]]),
-      {
-        one: 'its soma is from before that edit',
-        many: 'their somata are from before those edits',
-      },
+describe('asking the nucleus table', () => {
+  /** A flat square of `sideUm` µm, in nanometres: two triangles, `sideUm²` µm² of surface. */
+  const square = (id: string, sideUm: number) => {
+    const s = sideUm * 1000
+    return {
+      id,
+      positions: Float32Array.from([0, 0, 0, s, 0, 0, s, s, 0, 0, s, 0]),
+      indices: Uint32Array.from([0, 1, 2, 0, 2, 3]),
+    }
+  }
+  const meshes = (...items: ReturnType<typeof square>[]) =>
+    ({ kind: 'meshes', items, attributes: {}, bounds: {} }) as unknown as MeshesValue
+  const BIG = '648518347590381436'
+  const SMALL = '648518346846408976'
+
+  it('asks about every neuron at 0, once each, and never about an id that is no root', () => {
+    expect(askedForNucleus(meshes(square(BIG, 1), square(BIG, 1), square('x', 50)), 0)).toEqual(
+      [BIG],
     )
-    expect(aboutTheNeuron(`Find Open Ends: ${edited}`)).toBe(true)
-    expect(
-      aboutTheNeuron(
-        'Find Open Ends: 1 of 1 neurons have no row in `nuclei_v1_aedes`, so their tips are not ' +
-          'masked near the soma.',
-      ),
-    ).toBe(true)
   })
 
-  it('is not any other warning, which is passed on', () => {
-    expect(aboutTheNeuron('Skeletonize Meshes: 2 meshes could not be read.')).toBe(false)
+  it('leaves out a neuron with less surface than a nucleus, summed over its items', () => {
+    const set = meshes(square(BIG, 7), square(BIG, 6), square(SMALL, 8))
+    // 49 + 36 = 85 µm² against 64: only the first reaches 75.
+    expect(askedForNucleus(set, 75)).toEqual([BIG])
+    expect(askedForNucleus(meshes(square(SMALL, 8)), 75)).toEqual([])
   })
 })

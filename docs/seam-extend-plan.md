@@ -823,6 +823,23 @@ Medians. An end costs 2.0–2.9 s to search, as `SECONDS_PER_END` says. For the 
 pieces together: 40 s of chain and 179 s of search. So a step on a typical fragment is a few
 seconds, and the search, not the chain, is what a larger piece costs.
 
+**The chain's own time is mostly the nucleus lookup** (user, 2026-11-20; `pnpm
+probe:seam-piece-chain`, the 39 pieces extended on one Aedes neuron, the on-demand workflow's
+chain, Chrome). Find Open Ends awaits it — the root's history and a live nucleus-table query —
+before it builds a window, and it costs the same at every size: 2.7–3.1 s of a 4.0–4.5 s cold
+chain (61–75%), medians by size, against ~0.5 s for meshes and ~0.5 s for the rest of Find Open
+Ends. The live query alone was 1.1–2.1 s in the browser.
+
+**So a piece is asked about only if it could hold a nucleus** (user, 2026-11-20): at least 75 µm²
+of mesh surface as Find Open Ends receives it (`nucleusMinAreaUm2`, set for a piece's chain by
+`PIECE_SETTINGS` through `RerunSettings`; 0 on the card). The smallest of 10,000 Aedes nuclei
+(by level-2 chunks and faces, `648518347590381436`) is 2 chunks, 26,470 faces and **114 µm²** as
+fetched, **88 µm²** after the on-demand workflow's Clean Meshes; the 39 pieces were at most 74
+and 60. **Area, not chunks or faces**: two-chunk pieces were 614–4,628 faces beside the nucleus's
+26,470, and three pieces had more faces than it (34,864–36,583) at 68–74 µm². Area survives the
+clean-up (80–88% kept, against 20% of the faces), so the rule holds whatever the chain does.
+Assumed: the smallest nucleus by chunks and faces is the smallest by area.
+
 **The junction.** The piece's nearest tip sits a median 0.25 µm from the contact it was accepted
 at; 23 of 26 pieces have one within 2 µm. Of the three that do not, two are larger pieces (19 and
 39 chunks) where only twelve of the tips were kept, so the joining end may not have been among

@@ -429,7 +429,7 @@ function cableWeights(item: SkeletonGeometry): Weights {
 /**
  * Each vertex weighted by a third of the area of every triangle at it: the weights sum to it.
  *
- * `triangleArea` is `core/values.ts`', shared with the ROI viewer's `meshSurfaceArea` — so a
+ * `triangleArea` is `core/values.ts`', shared with `meshSurfaceArea` beside it — so a
  * region's reported surface area and the weight spread over its vertices are one formula, and
  * `total` here equals what that function returns for the same mesh by construction. The
  * `cableLength` arrangement one function up, for its reason.

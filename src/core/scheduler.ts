@@ -2747,9 +2747,9 @@ function rerunnerFor(
   nodeId: string,
   signal: AbortSignal,
 ): NonNullable<EvalContext['rerunInput']> {
-  return async (portId, neurons, report): Promise<RerunResult> => {
+  return async (portId, neurons, { report, settings } = {}): Promise<RerunResult> => {
     throwIfAborted(signal)
-    const variant = variantGraph(graph, inference, nodeId, portId, neurons)
+    const variant = variantGraph(graph, inference, nodeId, portId, neurons, settings)
     const byId = nodesById(variant.graph)
     const inner: Scheduler = new Scheduler({
       resolveSource: (id) => host.resolveSource(id),

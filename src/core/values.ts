@@ -1243,6 +1243,24 @@ export function triangleArea(positions: Float32Array, a: number, b: number, c: n
   return Math.sqrt(cx * cx + cy * cy + cz * cz) / 2
 }
 
+/**
+ * Total triangle area, in the positions' units squared. Reported beside a volume where a shell's
+ * roughness is worth seeing, and what Find Open Ends sizes a mesh by against a nucleus.
+ */
+export function meshSurfaceArea(positions: Float32Array, indices: Uint32Array): number {
+  let sum = 0
+  const triangles = Math.floor(indices.length / 3)
+  for (let t = 0; t < triangles; t++) {
+    sum += triangleArea(
+      positions,
+      indices[t * 3]! * 3,
+      indices[t * 3 + 1]! * 3,
+      indices[t * 3 + 2]! * 3,
+    )
+  }
+  return sum
+}
+
 /** Per-item axis-aligned box, six entries each: min xyz then max xyz. */
 export type Boxes = Float64Array
 

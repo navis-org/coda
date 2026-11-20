@@ -56,7 +56,7 @@
 import { packNode } from '../../core/registry'
 import type { EvalContext } from '../../core/node'
 import { T } from '../../core/types'
-import { isMeshesValue } from '../../core/values'
+import { isMeshesValue, meshSurfaceArea } from '../../core/values'
 import type {
   MeshGeometry,
   MeshesValue,
@@ -80,7 +80,7 @@ import { idText, isSegmentId } from '../../core/ids'
 import { caveServerFor } from '../../data/cave/datastack'
 import { somataFor, somataLive } from '../../data/cave/nuclei'
 import { grapheneFor } from '../../data/cave/rootIds'
-import { noLongerCurrent, notRoots, saysNoLongerCurrent } from './rootMoment'
+import { noLongerCurrent, notRoots } from './rootMoment'
 import {
   CAVE_DATASET_INPUT,
   caveTableParam,
@@ -111,19 +111,6 @@ const DOWNLOAD_SHARE = 0.15
  * message reaches, so the signal is read between pages. Thirty-two windows is a few seconds.
  */
 const PAGE = 32
-
-/** The words the no-nucleus warning turns on — what `aboutTheNeuron` finds. */
-const NO_NUCLEUS = 'have no row in '
-
-/**
- * Whether one of this node's warnings is about the neuron itself — its root no longer current, or
- * no row in the nucleus table. Neither says anything when the "neuron" is a piece Suggest Merges
- * is extending (user, 2026-11-18): a fragment has no nucleus, and is often replaced by the very
- * Submit that merged it.
- */
-export function aboutTheNeuron(warning: string): boolean {
-  return warning.includes(NO_NUCLEUS) || saysNoLongerCurrent(warning)
-}
 
 const unknownModel = (id: string) =>
   `This graph names the open-end model \`${id}\`, which this build does not carry. ` +
@@ -199,6 +186,21 @@ export const openEndsNode = packNode({
       placeholder: 'nucleus_detection_v0',
       help: 'A CAVE table of nuclei, read for each neuron’s soma so `Soma mask` has something to measure from. Only needed where the dataset does not publish soma positions itself; wire the Dataset it belongs to.',
     }),
+    /*
+     * **Set by Suggest Merges for a piece's chain, never on the card** (`RerunSettings`): a mesh
+     * smaller than any nucleus cannot hold one, and the lookup was most of a small piece's chain
+     * (`docs/seam-extend-plan.md`, "Phase 0 — results"). 0, the default, asks about every mesh.
+     */
+    {
+      id: 'nucleusMinAreaUm2',
+      kind: 'number',
+      label: 'Nucleus lookup from (µm²)',
+      default: 0,
+      min: 0,
+      advanced: true,
+      internal: true,
+      help: 'Ask the nucleus table only about meshes with at least this much surface. A mesh smaller than any nucleus cannot hold one. 0 asks about every mesh.',
+    },
     {
       id: 'somaMask',
       kind: 'number',
@@ -522,6 +524,24 @@ async function scoreTips(options: ScoreTipsOptions): Promise<void> {
 }
 
 /**
+ * The neurons worth asking the nucleus table about: each once — a neuron can arrive as several
+ * items, and the counts are of neurons — in the chunkedgraph's grammar, since an id it could not
+ * parse is not a root to ask about, and with at least `minAreaUm2` of mesh surface (summed over
+ * its items, the meshes in nanometres): a smaller one cannot hold a nucleus.
+ */
+export function askedForNucleus(meshes: MeshesValue, minAreaUm2: number): string[] {
+  const area = new Map<string, number>()
+  for (const item of meshes.items) {
+    const id = idText(item.id)
+    if (!id || !isSegmentId(id)) continue
+    const um2 =
+      minAreaUm2 > 0 ? meshSurfaceArea(item.positions, item.indices) / NM_PER_UM ** 2 : 0
+    area.set(id, (area.get(id) ?? 0) + um2)
+  }
+  return [...area].filter(([, um2]) => um2 >= minAreaUm2).map(([id]) => id)
+}
+
+/**
  * Each neuron's soma from a CAVE nucleus table, in nanometres — or nothing, where none was named.
  *
  * **Read here rather than taken from a wired CAVE table node.** A plain table query answers in
@@ -552,7 +572,7 @@ async function nucleiFor(
   meshes: MeshesValue,
   dataset: Value | undefined,
 ): Promise<Map<string, readonly [number, number, number]>> {
-  const table = String(ctx.params.nucleusTable ?? '').trim()
+  const table = String(ctx.params.nucleusTable).trim()
   if (!table) return new Map()
   const target = caveTargetOfValue(dataset, ctx.params)
   if (!target) {
@@ -563,16 +583,8 @@ async function nucleiFor(
   }
   const options = { deployment: target.deployment, signal: ctx.signal }
   const server = await caveServerFor(target.datastack, options)
-  // Once each: a neuron can arrive as several items, and the counts below are of neurons. In the
-  // chunkedgraph's grammar, since an id it could not parse is not a root to ask about.
-  const ids = [
-    ...new Set(
-      meshes.items.flatMap((item) => {
-        const id = idText(item.id)
-        return id && isSegmentId(id) ? [id] : []
-      }),
-    ),
-  ]
+  const ids = askedForNucleus(meshes, Number(ctx.params.nucleusMinAreaUm2))
+  if (ids.length === 0) return new Map()
   const graphene = await grapheneFor(target.datastack, options)
   const { somata, replaced, unknown } = graphene
     ? await somataLive(server, graphene, target.datastack, table, ids, options)
@@ -599,7 +611,7 @@ async function nucleiFor(
     // merge that `somataFor` gives no soma at all. Those tips are kept, which is what no soma
     // has always meant here — said rather than left as a quietly uneven mask.
     ctx.warn(
-      `${missing} of ${asked} neurons ${NO_NUCLEUS}\`${table}\`, so their tips are not ` +
+      `${missing} of ${asked} neurons have no row in \`${table}\`, so their tips are not ` +
         'masked near the soma. A neuron holding two nuclei is a merge and counts as none.',
     )
   }

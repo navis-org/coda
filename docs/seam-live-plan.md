@@ -311,8 +311,9 @@ nothing; it should be left off there.
    a rerun chain passes on entry by entry); an outdated root is one sentence in both nodes
    (`noLongerCurrent`: "… is no longer a current root: it was edited at 14:09 UTC on 17 November,
    and its suggestions are from before that edit. To search the neuron as it is now, run Update
-   Root IDs above `Tips`."); a piece's two warnings about itself are dropped (`aboutTheNeuron`)
-   and any other names the piece; and the timing report is one sentence on the card
+   Root IDs above `Tips`."); a piece's two warnings about itself were dropped (`aboutTheNeuron`,
+   gone 2026-11-20: a piece is asked about only where large enough to hold a nucleus, and then
+   both are worth saying) and any other names the piece; and the timing report is one sentence on the card
    (`TimingReport.said`) with the per-stage split in the console (`detail`).
 5. **Docs**: both help pages, `datasets.md`'s note on which nodes follow the root, and a line in
    CLAUDE.md's SEAM section. **Done 2026-11-18**: `help/suggestMerges.md` ("Which moment is

@@ -57,7 +57,7 @@
 import type { CodaGraph, GraphEdge } from './graph'
 import { nodeLabel, nodesById, portKey, referenceEdgeIds } from './graph'
 import type { InferenceResult } from './inference'
-import type { NeuronSwap } from './node'
+import type { NeuronSwap, RerunSettings } from './node'
 import { getNodeDef } from './registry'
 
 /** A graph with the neuron swapped, and where on it the asked-for value will arrive. */
@@ -87,7 +87,16 @@ export function variantGraph(
   nodeId: string,
   portId: string,
   swap: NeuronSwap,
+  /** Params laid over each copied node of a type (`RerunSettings`). */
+  settings: RerunSettings = {},
 ): VariantGraph {
+  for (const [type, params] of Object.entries(settings)) {
+    const def = getNodeDef(type)
+    if (!def) refuse(`its settings name ${type}, which is not a node type this build has.`)
+    const declared = new Set((def.params ?? []).map((param) => param.id))
+    const unknown = Object.keys(params).find((id) => !declared.has(id))
+    if (unknown !== undefined) refuse(`${type} has no param \`${unknown}\` to set.`)
+  }
   const references = referenceEdgeIds(graph)
   const nodes = nodesById(graph)
   const inbound = new Map<string, GraphEdge[]>()
@@ -195,7 +204,14 @@ export function variantGraph(
     graph: {
       ...graph,
       nodes: [
-        ...graph.nodes.filter((node) => needed.has(node.id) || named.has(node.id)),
+        ...graph.nodes
+          .filter((node) => needed.has(node.id) || named.has(node.id))
+          // On the chain only: a node it merely names is read for its params as they stand.
+          .map((node) =>
+            needed.has(node.id) && settings[node.type]
+              ? { ...node, params: { ...node.params, ...settings[node.type] } }
+              : node,
+          ),
         { id: swapId, type: swap.type, position: { x: 0, y: 0 }, params: swap.params },
       ],
       edges: edges.filter(

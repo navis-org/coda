@@ -15,7 +15,6 @@ import {
   momentsFrom,
   noLongerCurrent,
   notRoots,
-  saysNoLongerCurrent,
   readSearchedAt,
   utcWhen,
   writeSearchedAt,
@@ -95,9 +94,6 @@ describe('the wording', () => {
     )
     expect(two).toMatch(/^2 roots are no longer current: 1 \(edited at 14:09 UTC/)
     expect(two).toMatch(/their suggestions are from before those edits\.$/)
-    expect(saysNoLongerCurrent(`Find Open Ends: ${one}`)).toBe(true)
-    expect(saysNoLongerCurrent(two)).toBe(true)
-    expect(saysNoLongerCurrent('1 of 3 neurons have no row')).toBe(false)
     expect(notRoots(['1'], 'ds')).toBe('1 is not a root ds’s chunkedgraph knows')
     expect(notRoots(['1', '2'], 'ds')).toBe('1, 2 are not roots ds’s chunkedgraph knows')
   })
