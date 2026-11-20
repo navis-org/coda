@@ -104,7 +104,7 @@ export async function checkPick(
     if (root === undefined) {
       return {
         ok: false,
-        message: `The nearest part of the neuron there is on ${on}, which is neither the neuron nor a piece it is extended with.`,
+        message: `The nearest part of the neuron there is on ${on}, which is neither the neuron nor a piece accepted on it.`,
       }
     }
     const a = anchors.neuron.positionNm
@@ -132,7 +132,7 @@ export async function checkPick(
 function refusalOf(anchors: Extract<Anchors, { ok: false }>, segment: string): string {
   switch (anchors.reason) {
     case 'neuron-absent':
-      return `No part of the neuron lies within ${REACH} of where you pointed. Point at ${segment} where it meets the neuron.`
+      return `No part of the neuron, or of a piece accepted on it, lies within ${REACH} of where you pointed. Point at ${segment} close to where it meets one of them.`
     case 'candidate-absent':
       return `${segment} is not within ${REACH} of where you pointed in the segmentation today. It may have been edited since the viewer loaded it.`
     default:

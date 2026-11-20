@@ -1900,8 +1900,9 @@ export const START_OVER_WRITE: Readonly<Record<string, string>> = Object.freeze(
 })
 
 export const START_OVER_HELP =
-  'Clear every verdict, extended piece, Auto-extend and hand pick on every neuron of this card, to review ' +
-  'from the start. The merge record stays, as do the merges themselves. Ctrl+Z brings it back.'
+  'Clear every verdict, extended piece, Auto-extend and hand pick on every neuron of this card, and ' +
+  'what you double-clicked into the Neuroglancer cards wired directly to it, to review from the start. ' +
+  'The merge record stays, as do the merges themselves. Ctrl+Z brings it back.'
 
 /** How to undo what Auto-extend took — the tag, the foot, the held button and the menu say it. */
 export const AUTO_REJECT_NOTE =

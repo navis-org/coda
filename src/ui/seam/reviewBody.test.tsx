@@ -36,6 +36,7 @@ import type { SubmitState } from './mergeSession'
 import type * as VerdictLog from '../../data/verdictLog'
 import { resetVerdictLog, verdictLogState, writeSharing } from '../../data/verdictLog'
 import { ReviewBody, submitPress } from './ReviewBody'
+import { NEUROGLANCER_TYPE } from '../../nodes/output/neuroglancer'
 import { setHoveredSegment } from '../viewers/segmentHover'
 import { decodePicks, encodePicks } from '../../packs/seam/handPicks'
 import { decodeVerdicts } from '../../packs/seam/reviewQueue'
@@ -1205,6 +1206,97 @@ describe('extending a neuron from the review card', () => {
       useGraphStore.getState().undo()
       expect(stored()['verdicts']).toBe(work.verdicts)
       expect(stored()['extend']).toBe(work.extend)
+    })
+
+    /*
+     * A piece is double-clicked into the viewer to be picked by hand, and that is kept on the
+     * viewer's card: Start over takes it too, or it stays on screen as nobody's (user, 2026-11-20).
+     */
+    it('clears the double-clicks of the Neuroglancer cards it is wired to, in the same step', () => {
+      useGraphStore.setState({ past: [] } as never)
+      draw(work, true, grownCandidates(), grownTips(true))
+      const { graph } = useGraphStore.getState()
+      const both = ['+648518347595637224', '-648518347459229211']
+      const viewer = (id: string, selectionEdits: string[]) =>
+        ({
+          id,
+          type: NEUROGLANCER_TYPE,
+          position: { x: 0, y: 0 },
+          params: { selectionEdits },
+        }) as never
+      const wire = (target: string) => ({
+        id: `w-${target}`,
+        source: 'r1',
+        sourceHandle: 'layers',
+        target,
+        targetHandle: 'layers',
+      })
+      act(() =>
+        useGraphStore.setState({
+          graph: {
+            ...graph,
+            nodes: [
+              ...graph.nodes,
+              viewer('ng', both),
+              viewer('bare', []),
+              viewer('elsewhere', both),
+            ],
+            edges: [...graph.edges, wire('ng'), wire('bare')],
+          },
+        } as never),
+      )
+      const viewerNode = (id: string) =>
+        useGraphStore.getState().graph.nodes.find((one) => one.id === id)!
+      const edits = (id: string) => viewerNode(id).params['selectionEdits']
+      const bare = viewerNode('bare')
+      fireEvent.click(button())
+      // It says what it will clear beyond the card: the one wired viewer holding double-clicks.
+      expect(document.querySelector('.review-body__ask')?.textContent).toMatch(
+        /, and the double-clicks in 1 Neuroglancer card\? The merge record stays\.$/,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+      expect(edits('ng')).toEqual([])
+      // One with nothing to clear is not written; one not wired to this card is somebody else's.
+      expect(viewerNode('bare')).toBe(bare)
+      expect(edits('elsewhere')).toHaveLength(2)
+      expect(stored()['verdicts']).toBe('')
+      expect(useGraphStore.getState().past.length).toBe(1)
+      useGraphStore.getState().undo()
+      expect(edits('ng')).toHaveLength(2)
+      expect(stored()['verdicts']).toBe(work.verdicts)
+    })
+
+    it('is on where only a wired viewer holds double-clicks', () => {
+      draw({}, true, grownCandidates(), grownTips(true))
+      expect(button().disabled).toBe(true)
+      const { graph } = useGraphStore.getState()
+      act(() =>
+        useGraphStore.setState({
+          graph: {
+            ...graph,
+            nodes: [
+              ...graph.nodes,
+              {
+                id: 'ng',
+                type: NEUROGLANCER_TYPE,
+                position: { x: 0, y: 0 },
+                params: { selectionEdits: ['+648518347595637224'] },
+              },
+            ],
+            edges: [
+              ...graph.edges,
+              {
+                id: 'w',
+                source: 'r1',
+                sourceHandle: 'current',
+                target: 'ng',
+                targetHandle: 'control',
+              },
+            ],
+          },
+        } as never),
+      )
+      expect(button().disabled).toBe(false)
     })
   })
 

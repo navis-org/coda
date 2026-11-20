@@ -431,6 +431,8 @@ describe('every store action is on one side of the lock', () => {
     'setParam',
     // Several params in one commit: `setParam`'s kind of edit, made once.
     'setParams',
+    // Several nodes' params in one commit: the same kind of edit, across cards.
+    'setParamsMany',
     'renameNode',
     'toggleDisabled',
     'toggleCollapsed',

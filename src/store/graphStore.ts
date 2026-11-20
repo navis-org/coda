@@ -1177,6 +1177,13 @@ export interface GraphState {
    * rows placed on it). Two `setParam`s would be two steps, and undoing one leaves the other.
    */
   setParams(nodeId: string, values: Readonly<Record<string, ParamValue>>): void
+  /**
+   * Several nodes' params in one edit, one undo step — for a gesture whose meaning spans cards:
+   * Review Suggestions' Start over also clears its viewers' double-clicks.
+   */
+  setParamsMany(
+    changes: readonly { nodeId: string; values: Readonly<Record<string, ParamValue>> }[],
+  ): void
   renameNode(nodeId: string, title: string): void
   toggleDisabled(nodeIds: string[]): void
   toggleCollapsed(nodeIds: string[]): void
@@ -3241,12 +3248,21 @@ export const useGraphStore = create<GraphState>((set, get) => {
       })
     },
 
-    setParams: (nodeId, values) => {
-      const ids = Object.keys(values)
-      if (ids.length === 0) return
+    setParams: (nodeId, values) => get().setParamsMany([{ nodeId, values }]),
+
+    setParamsMany: (changes) => {
+      const writes = changes.flatMap(({ nodeId, values }) =>
+        Object.keys(values).map((id) => ({ nodeId, id, value: values[id]! })),
+      )
+      if (writes.length === 0) return
       commit(
-        (g) => ids.reduce((graph, id) => setNodeParam(graph, nodeId, id, values[id]!), g),
-        { tag: `params:${nodeId}:${ids.sort().join(',')}` },
+        (g) => writes.reduce((graph, w) => setNodeParam(graph, w.nodeId, w.id, w.value), g),
+        {
+          tag: `params:${writes
+            .map((w) => `${w.nodeId}.${w.id}`)
+            .sort()
+            .join(',')}`,
+        },
       )
     },
 

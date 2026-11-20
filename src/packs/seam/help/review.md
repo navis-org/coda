@@ -193,7 +193,7 @@ A row you accepted yourself, and have not extended, is Auto-extended and stays y
 
 ## Starting over
 
-**Start over…**, in the footer, clears every verdict, extended piece, Auto-extend and hand pick on the card, for every neuron, so you can review from the beginning. It asks first and says how much it will clear. The whole clear is one undo step.
+**Start over…**, in the footer, clears every verdict, extended piece, Auto-extend and hand pick on the card, for every neuron, so you can review from the beginning. It also clears what you double-clicked into, or out of, the Neuroglancer cards wired directly to it, such as pieces you selected in order to pick them by hand, and its question says so. It asks first and says how much it will clear. The whole clear is one undo step.
 
 It does not touch the merge record or the merges themselves: pieces Submit merged are still shown as merged, and the next Submit still starts from the neuron's new root. It sends nothing to SEAM, even with **Help improve** ticked: verdicts already sent stay sent.
 

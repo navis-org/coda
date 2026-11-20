@@ -61,6 +61,7 @@ import {
 } from 'react'
 import type { CSSProperties } from 'react'
 
+import type { CodaGraph } from '../../core/graph'
 import { referrerOf } from '../../core/graph'
 import { getNodeDef } from '../../core/registry'
 import { countStrings } from '../../core/collections'
@@ -179,7 +180,7 @@ import { ExtendButtons } from './ExtendButtons'
 import { VerdictButtons } from './VerdictButtons'
 import { VerdictSharing } from './VerdictSharing'
 import { useRowWindow } from '../useRowWindow'
-import { controlPartColor } from '../../nodes/output/neuroglancer'
+import { NEUROGLANCER_TYPE, controlPartColor } from '../../nodes/output/neuroglancer'
 
 /** Where the card remembers whether its filters are folded. Per node, per browser. */
 const FILTERS_KEY = 'coda.seam.review.filters'
@@ -857,9 +858,25 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const [askingStartOver, setAskingStartOver] = useState(false)
   const work = useMemo(() => storedWork(node.params), [node.params])
+  /*
+   * And the double-clicks in every Neuroglancer card this one is wired to (user, 2026-11-20):
+   * finding a piece to pick by hand means double-clicking it into the viewer, which keeps it on
+   * that card, so after a Start over it stayed on screen in neuroglancer's own colours, a piece
+   * of nobody's list. One edit with the card's own write, one undo step.
+   */
+  const setParamsMany = useGraphStore((s) => s.setParamsMany)
+  // As text, so the selector hands out a primitive (invariant 7); counted in the prompt.
+  const viewerText = useGraphStore((s) => viewersWithEdits(s.graph, node.id).join(','))
+  const viewers = viewerText === '' ? [] : viewerText.split(',')
   const startOver = () => {
     setAskingStartOver(false)
-    setParams(node.id, { ...START_OVER_WRITE })
+    setParamsMany([
+      { nodeId: node.id, values: { ...START_OVER_WRITE } },
+      ...viewersWithEdits(useGraphStore.getState().graph, node.id).map((nodeId) => ({
+        nodeId,
+        values: { selectionEdits: [] },
+      })),
+    ])
   }
 
   const press = submitPress({
@@ -1389,7 +1406,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           {askingStartOver ? (
             <>
               <span className="review-body__ask">
-                {`Clear ${plural(work.verdicts, 'verdict')} and ${plural(work.extended, 'extended piece')} on every neuron? The merge record stays.`}
+                {`Clear ${plural(work.verdicts, 'verdict')} and ${plural(work.extended, 'extended piece')} on every neuron${viewers.length > 0 ? `, and the double-clicks in ${plural(viewers.length, 'Neuroglancer card')}` : ''}? The merge record stays.`}
               </span>
               <button
                 type="button"
@@ -1412,11 +1429,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               <button
                 type="button"
                 className="btn review-body__start-over"
-                disabled={!work.any}
+                disabled={!work.any && viewers.length === 0}
                 title={
-                  work.any
+                  work.any || viewers.length > 0
                     ? START_OVER_HELP
-                    : 'Nothing to clear: no verdict or extended piece is stored.'
+                    : 'Nothing to clear: no verdict or extended piece is stored, and no viewer wired to this card holds a double-click.'
                 }
                 onClick={() => setAskingStartOver(true)}
               >
@@ -1537,6 +1554,22 @@ function neuronLabel(entry: QueueNeuron): string {
 const MAX_INDENT = 6
 
 /** A tip as a row names it: its number, and the piece it is on where that is not the neuron. */
+/**
+ * The Neuroglancer cards wired directly from `nodeId` that hold double-clicks of their own — what
+ * Start over clears with the card's work, so a viewer with nothing to clear is not written.
+ */
+function viewersWithEdits(graph: CodaGraph, nodeId: string): string[] {
+  return graph.nodes
+    .filter(
+      (one) =>
+        one.type === NEUROGLANCER_TYPE &&
+        Array.isArray(one.params['selectionEdits']) &&
+        one.params['selectionEdits'].length > 0 &&
+        graph.edges.some((edge) => edge.source === nodeId && edge.target === one.id),
+    )
+    .map((one) => one.id)
+}
+
 function tipName(tip: QueueTip): string {
   return tip.neuronId !== tip.seed
     ? `tip ${tip.endUid} of piece ${tip.neuronId}`

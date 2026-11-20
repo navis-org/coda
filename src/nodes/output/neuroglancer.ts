@@ -153,8 +153,11 @@ function withVisibleColumn(schema: TableSchema): TableSchema {
   return foldColumns(schema, [column(VISIBLE_COLUMN, 'bool')])
 }
 
+/** The card's type, for a card that acts on the viewers wired to it (Review Suggestions' Start over). */
+export const NEUROGLANCER_TYPE = 'out.neuroglancer'
+
 registerNode({
-  type: 'out.neuroglancer',
+  type: NEUROGLANCER_TYPE,
   label: 'Neuroglancer',
   category: 'visualisation',
   description: "View neurons in the dataset's own neuroglancer scene.",

@@ -107,7 +107,9 @@ describe('checking a hand pick', () => {
     const { live } = services({ ok: false, reason: 'neuron-absent', message: 'raw' })
     const checked = await checkPick(request(), OPTIONS, live)
     expect(checked.ok).toBe(false)
-    expect(!checked.ok && checked.message).toMatch(/No part of the neuron lies within 1\.5 µm/)
+    expect(!checked.ok && checked.message).toMatch(
+      /No part of the neuron, or of a piece accepted on it, lies within 1\.5 µm .*close to where it meets/,
+    )
   })
 
   it('refuses an end on a root that is neither the neuron nor its piece', async () => {
