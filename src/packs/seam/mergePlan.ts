@@ -45,6 +45,7 @@
  */
 
 import { errorMessage } from '../../core/errors'
+import { slots as slotsOf } from '../../data/concurrency'
 import type { CaveRequestOptions } from '../../data/cave/client'
 import { datastackRecord } from '../../data/cave/datastack'
 import type { GrapheneSource } from '../../data/cave/graphene'
@@ -168,7 +169,20 @@ export interface PlanRequest {
    */
   readonly unjudged?: ReadonlyMap<string, string> | undefined
   readonly record: MergeRecord
+  /**
+   * Progress through the anchor step, the one that takes the time: how many of the pieces that
+   * reached it are decided — found, refused, or refused for a parent — of how many. Not called
+   * before it, whose requests are one each. `onProgress`, as the readers' `(done, total)` is.
+   */
+  readonly onProgress?: (done: number, total: number) => void
 }
+
+/**
+ * How many pieces' anchors are read at once. Six: about four and a half times one at a time, and
+ * flat past it, the bytes being the limit there — measured in `docs/seam-merge-plan.md`, phase 3,
+ * step 4 (`pnpm probe:seam-anchors`).
+ */
+export const ANCHORS_IN_FLIGHT = 6
 
 /** What the plan asks of the servers, apart so the logic can be tested without one. */
 export interface PlanServices {
@@ -362,41 +376,92 @@ async function plan(
   })
   if (current.length === 0) return planned([])
 
-  // Anchors, one piece at a time: they share the volume's chunks. The volume is opened only now,
-  // once a current piece needs it.
+  /*
+   * Anchors, `ANCHORS_IN_FLIGHT` pieces at a time on one volume, which they share: its chunks,
+   * and its memo of supervoxel roots, whose lookups are shared while in flight. The volume is
+   * opened only now, once a current piece needs it.
+   *
+   * **A piece's box is read beside its parent's, and kept only if the parent anchors.** The read
+   * needs only the pieces on its way to the neuron, never their anchors, so a chain of pieces
+   * accepted on pieces runs side by side rather than a link at a time; a read under a parent that
+   * is then refused is the one thing wasted. Tree order puts every parent first, so the slots go
+   * to parents first and the waits cannot go round in a circle.
+   */
   const volume = await services.openVolume(datastack, options)
-  const merges: PlannedMerge[] = []
-  /** The pieces this plan merges so far: what a piece further out may be merged onto. */
-  const joining = new Set<string>()
-  // In tree order, so every piece between a piece and the neuron is decided before it.
+  /** A failure about the datastack, the first: it ends the check, and the pieces waiting with it. */
+  const stop = new AbortController()
+  const signal = options.signal ? AbortSignal.any([options.signal, stop.signal]) : stop.signal
+  /** That failure: the pieces it stops reject as aborted, sooner, and must not be what is said. */
+  let failure: { error: unknown } | undefined
+  const slots = slotsOf(ANCHORS_IN_FLIGHT)
+  let done = 0
+  const decided = new Map<string, Promise<PlannedMerge | undefined>>()
+  /**
+   * The pieces known to be refused, marked the moment they are — a failed anchor inside its slot,
+   * before the slot passes on, often to the piece hanging on it — so a read still queued under
+   * one does not start.
+   */
+  const refused = new Set<string>()
   for (const candidateRoot of current) {
+    decided.set(
+      candidateRoot,
+      decide(candidateRoot).then((merge) => {
+        done += 1
+        try {
+          request.onProgress?.(done, current.length)
+        } catch {
+          // A count that could not be shown is no reason to lose the plan it counts.
+        }
+        return merge
+      }),
+    )
+  }
+  const merges = await Promise.all(decided.values()).catch((error: unknown) => {
+    stop.abort()
+    throw failure ? failure.error : error
+  })
+  return planned(
+    merges.filter((merge) => merge !== undefined),
+    volume.layout,
+  )
+
+  /** One piece's merge, or undefined where it is refused, which says why. */
+  async function decide(candidateRoot: string): Promise<PlannedMerge | undefined> {
     const rows = pieces.get(candidateRoot)!
     const path = pathOf.get(candidateRoot)
     if (path === undefined) {
+      refused.add(candidateRoot)
       reject(
         candidateRoot,
         'parent-refused',
         'It has no way back to the neuron through the accepted pieces, so there is nothing to merge it onto.',
       )
-      continue
+      return undefined
     }
     /*
      * The pieces on the way that are still their own roots, nearest first. **The way stops at
      * the first piece that is in the neuron already**: from there inwards it is the neuron as it
      * stands, whatever became of the pieces beyond — one that was edited and never merged does
      * not hold up a piece whose own parent is in.
+     *
+     * Only the nearest is waited for: its own way is this one less itself, so it anchors only
+     * where every piece further in does.
      */
     const merged = path.findIndex((id) => inNeuron.has(id))
     const unmerged = merged < 0 ? path : path.slice(0, merged)
-    const missing = unmerged.find((id) => !joining.has(id))
-    if (missing !== undefined) {
+    const parent = unmerged[0]
+    // A parent that is not being anchored at all was refused before this step.
+    const before = parent === undefined ? undefined : decided.get(parent)
+    const parentRefused = () => {
+      refused.add(candidateRoot)
       reject(
         candidateRoot,
         'parent-refused',
-        `${missing}, which lies between it and the neuron, cannot be merged, so this piece has nothing to be merged onto.`,
+        `${parent}, which lies between it and the neuron, cannot be merged, so this piece has nothing to be merged onto.`,
       )
-      continue
+      return undefined
     }
+    if (parent !== undefined && before === undefined) return parentRefused()
     /*
      * The neuron's side is **the neuron and the pieces on this piece's own way to it** — what
      * the reader accepted it as a continuation of. Not every piece planned so far: two pieces
@@ -404,37 +469,65 @@ async function plan(
      * nobody accepted, and each would wait for the other. Whatever the anchor lands on is merged
      * before this (`needs`), and the batch checks the end is under its root at that moment.
      */
-    const { row, anchors } = await anchorRows(
-      volume,
-      currentRoot,
-      unmerged,
+    const [read, parentMerge] = await Promise.all([
+      slots.run(async () => {
+        // Any piece on the way, not only the parent: one further in may be refused while the
+        // parent's own read is still out.
+        if (unmerged.some((id) => refused.has(id))) {
+          refused.add(candidateRoot)
+          return undefined
+        }
+        try {
+          const got = await anchorRows(volume, currentRoot, unmerged, candidateRoot, rows)
+          if (!got.anchors.ok) refused.add(candidateRoot)
+          return got
+        } catch (error) {
+          /*
+           * A read under a parent that is then refused is one the one-at-a-time loop never
+           * sent, so its failure is not the check's: wait for the parent, and where it is
+           * refused, say that instead. Otherwise, before the slot passes on: nothing new is
+           * sent after the first failure.
+           */
+          if (
+            !signal.aborted &&
+            before &&
+            (await before.catch(() => undefined)) === undefined
+          ) {
+            refused.add(candidateRoot)
+            return undefined
+          }
+          failure ??= { error }
+          stop.abort()
+          throw error
+        }
+      }, signal),
+      before,
+    ])
+    // No read is only ever a parent refused, which this says.
+    if (!read || (parent !== undefined && parentMerge === undefined)) return parentRefused()
+    const { row, anchors } = read
+    if (!anchors.ok) {
+      reject(candidateRoot, anchors.reason, anchors.message)
+      return undefined
+    }
+    const on = anchors.onRoot
+    return {
       candidateRoot,
       rows,
-    )
-    if (anchors.ok) {
-      const on = anchors.onRoot
-      merges.push({
-        candidateRoot,
-        rows,
-        used: row,
-        neuron: anchors.neuron,
-        candidate: anchors.candidate,
-        joinsNeuron: otherNeurons.has(candidateRoot),
-        // Every pair it was accepted on Auto-extend's alone — and there is at least one.
-        auto:
-          rows.length > 0 &&
-          rows.every(
-            (one) => request.unjudged?.has(verdictKey(one.neuronId, candidateRoot)) === true,
-          ),
-        parent: unmerged[0],
-        needs: on !== undefined && on !== currentRoot ? on : undefined,
-      })
-      joining.add(candidateRoot)
-    } else {
-      reject(candidateRoot, anchors.reason, anchors.message)
+      used: row,
+      neuron: anchors.neuron,
+      candidate: anchors.candidate,
+      joinsNeuron: otherNeurons.has(candidateRoot),
+      // Every pair it was accepted on Auto-extend's alone — and there is at least one.
+      auto:
+        rows.length > 0 &&
+        rows.every(
+          (one) => request.unjudged?.has(verdictKey(one.neuronId, candidateRoot)) === true,
+        ),
+      parent,
+      needs: on !== undefined && on !== currentRoot ? on : undefined,
     }
   }
-  return planned(merges, volume.layout)
 
   /**
    * The first lost reply that the roots show was **this merge and nothing after it**:
@@ -485,7 +578,7 @@ async function plan(
       const anchors = await services.anchor(
         on,
         { neuronRoot, alsoNeuron, candidateRoot, contactNm, minDistUm },
-        options,
+        { ...options, signal },
       )
       const under = anchors.ok ? anchors.onRoot : undefined
       const known =

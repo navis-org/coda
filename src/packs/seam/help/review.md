@@ -239,7 +239,7 @@ You do not have to wait for the search to finish. Submit merges what you have ac
 > **These are real edits**
 > Submit changes the shared segmentation, and everybody working on that datastack sees the result. There is no Undo button in Coda: to reverse a merge, take its operation ID from the `Merges` table and undo it with your usual tool, e.g. caveclient's `client.chunkedgraph.undo_operation(...)`.
 
-Pressing Submit sends nothing yet. Coda first checks the accepted pieces and then opens an overlay with the list on the left and the neuron as the merges will make it on the right: the neuron see-through, each piece in green and a line across each gap where the merge is made. Untick anything you are not sure about, then press **Merge 3 pieces into 720575940… on wclee_aedes_brain**. Only a click or Space presses it, never Enter.
+Pressing Submit sends nothing yet. Coda first checks the accepted pieces — that you may edit, that nothing has changed since, and where exactly each merge goes — and the button counts the pieces as it does. Finding where a piece goes means reading the segmentation around it, under a fifth of a second a piece, so a neuron with 200 accepted pieces takes about half a minute. Press the button again to cancel the check; nothing has been sent. It then opens an overlay with the list on the left and the neuron as the merges will make it on the right: the neuron see-through, each piece in green and a line across each gap where the merge is made. Untick anything you are not sure about, then press **Merge 3 pieces into 720575940… on wclee_aedes_brain**. Only a click or Space presses it, never Enter.
 
 ### A neuron you extended
 

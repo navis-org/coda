@@ -14,7 +14,12 @@ import { addNode, emptyGraph } from '../../core/graph'
 import type * as VerdictLog from '../../data/verdictLog'
 import '../../nodes'
 import type { BatchCallbacks, BatchResult } from '../../packs/seam/mergeBatch'
-import type { MergePlan, PlannedMerge, ReadyPlan } from '../../packs/seam/mergePlan'
+import type {
+  MergePlan,
+  PlanRequest,
+  PlannedMerge,
+  ReadyPlan,
+} from '../../packs/seam/mergePlan'
 import type { MergeRecordEntry } from '../../packs/seam/mergeRecord'
 import type { QueueTip } from '../../packs/seam/reviewQueue'
 import { decodeRecord } from '../../packs/seam/mergeRecord'
@@ -22,9 +27,11 @@ import { useGraphStore } from '../../store/graphStore'
 import { node } from '../../test/graph'
 import { clearStorage } from '../../test/jsdomStubs'
 
-const planMerges = vi.fn<() => Promise<MergePlan>>()
+const planMerges = vi.fn<(request: PlanRequest) => Promise<MergePlan>>()
 const prepareMerges = vi.fn()
-vi.mock('../../packs/seam/mergePlan', () => ({ planMerges: () => planMerges() }))
+vi.mock('../../packs/seam/mergePlan', () => ({
+  planMerges: (request: PlanRequest) => planMerges(request),
+}))
 vi.mock('../../packs/seam/mergeBatch', () => ({
   prepareMerges: (...args: unknown[]) => prepareMerges(...args),
 }))
@@ -51,6 +58,7 @@ const {
   recheckSubmit,
   resetSubmit,
   stopSubmit,
+  submitCheckedOf,
   submitStateOf,
 } = await import('./mergeSession')
 
@@ -169,6 +177,44 @@ describe('Submit', () => {
     await opened({ ok: false, message: 'Your CAVE account may not edit test.' })
     expect(currentSubmit()).toBeUndefined()
     expect(store().notice).toBe('Your CAVE account may not edit test.')
+  })
+
+  it('counts the pieces checked, for this check and this card alone', async () => {
+    let told: PlanRequest | undefined
+    let finish: (plan: MergePlan) => void = () => {}
+    planMerges.mockImplementation((request) => {
+      told = request
+      return new Promise((resolve) => (finish = resolve))
+    })
+    openSubmit(REQUEST)
+    expect(submitCheckedOf(REQUEST.docId, REQUEST.nodeId)).toBeUndefined()
+    told!.onProgress!(3, 10)
+    expect(submitCheckedOf(REQUEST.docId, REQUEST.nodeId)).toEqual({ done: 3, total: 10 })
+    expect(submitCheckedOf(REQUEST.docId, 'another')).toBeUndefined()
+    finish(PLAN)
+    await vi.waitFor(() => expect(currentSubmit()?.phase).toBe('ready'))
+    expect(submitCheckedOf(REQUEST.docId, REQUEST.nodeId)).toBeUndefined()
+    // A check that was closed says nothing more, though its reads may still be finishing.
+    closeSubmit()
+    const stale = told!
+    planMerges.mockImplementation(() => new Promise(() => {}))
+    openSubmit(REQUEST)
+    stale.onProgress!(9, 10)
+    expect(submitCheckedOf(REQUEST.docId, REQUEST.nodeId)).toBeUndefined()
+  })
+
+  /** A Re-check plans from the open overlay: its count must not take the overlay down. */
+  it('keeps the overlay up while a Re-check counts', async () => {
+    await opened()
+    let told: PlanRequest | undefined
+    planMerges.mockImplementation((request) => {
+      told = request
+      return new Promise(() => {})
+    })
+    recheckSubmit()
+    told!.onProgress!(1, 5)
+    expect(currentSubmit()?.phase).toBe('ready')
+    expect(submitCheckedOf(REQUEST.docId, REQUEST.nodeId)).toBeUndefined()
   })
 
   it('records a settled lost reply as soon as the plan arrives', async () => {
