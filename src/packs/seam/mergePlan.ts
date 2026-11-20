@@ -12,19 +12,22 @@
  *     piece is refused on its own.
  *  4. **Anchors** for each current piece (`mergeAnchors.ts`), trying its rows in turn.
  *
- * ## A neuron grown piece by piece is merged from the neuron outwards
+ * ## A neuron grown piece by piece is a tree of merges
  *
  * A piece can be accepted on a tip of another accepted piece (`docs/seam-extend-plan.md`), and
- * none of it is merged before Submit. So the plan is a tree, and three things follow:
+ * none of it is merged before Submit. So the plan is a tree, and four things follow:
  *
- *  - **Parents first.** `merges` lists a piece after every piece between it and the neuron.
+ *  - **Listed parents first.** `merges` lists a piece after every piece between it and the
+ *    neuron, which is how the dialog's ticks read it; the batch sends from the tips in.
  *  - **A merge's neuron end may be on a piece that is not in the neuron yet.** The search measured
  *    the contact to the neuron and the pieces between read as one object, so the anchor is looked
- *    for on any of them (`AnchorPair.alsoNeuron`), and `needs` names the piece it landed on. By
- *    the time the batch reaches the merge that piece is in the neuron — it went first — and the
- *    batch's own check ("the neuron end is under the root this batch last made") holds unchanged.
+ *    for on any of them (`AnchorPair.alsoNeuron`), and `needs` names the piece it landed on. The
+ *    batch merges it onto that piece, wherever that piece is by then (`mergeBatch.ts`).
  *  - **A piece is refused where a piece on its way to the neuron is** (`parent-refused`): it has
  *    nothing to be merged onto.
+ *  - **Pieces this workflow joined short of the neuron** — a batch that stopped part way —
+ *    **are one piece now**, under one root (`MergedSoFar.joined`). The farthest in of them is
+ *    planned at that root (`pieceRoot`) and carries the rest; the others are `joined`.
  *
  * ## Why step 3 needs no lineage lookup
  *
@@ -61,7 +64,7 @@ import type { AnchorPair, AnchorRefusal, AnchorVolume, Anchors } from './mergeAn
 import { anchorMerge, openAnchorVolume } from './mergeAnchors'
 import type { AcceptedRow, QueueTip, Verdicts } from './reviewQueue'
 import type { MergeRecord, MergeRecordEntry } from './mergeRecord'
-import { mergedSoFar, sharedNewRoot } from './mergeRecord'
+import { mergedSoFar, rootNow as rootNowIn, settledEntry, sharedNewRoot } from './mergeRecord'
 import { piecesOf, verdictKey } from './pieces'
 import { acceptedPairs, acceptedPieces, tipsOf } from './reviewQueue'
 
@@ -77,6 +80,11 @@ export type PlanRefusal =
   | 'neuron-outdated'
   /** A piece between it and the neuron cannot be merged, so it has nothing to be merged onto. */
   | 'parent-refused'
+  /**
+   * This workflow merged it onto the piece it was accepted on already, short of the neuron (a batch
+   * that stopped part way): it goes in with that piece's merge, which is planned.
+   */
+  | 'joined'
   | AnchorRefusal
 
 export interface PlannedMerge {
@@ -110,6 +118,11 @@ export interface PlannedMerge {
    */
   readonly needs?: string | undefined
   /**
+   * The root the piece is under now, where that is not its own: pieces this workflow merged onto it
+   * already, short of the neuron (`MergedSoFar.joined`). What its end is checked against.
+   */
+  readonly pieceRoot?: string | undefined
+  /**
    * Accepted by Auto-extend alone: every pair it was accepted on is in `PlanRequest.unjudged`.
    * The dialog tags it, and once merged it goes to SEAM as `auto-accepted`, never as `accept`
    * (`docs/seam-auto-extend-plan.md`).
@@ -136,12 +149,11 @@ export type MergePlan =
       /** Its root now: the reviewed one, or the last this workflow's merges produced. */
       readonly currentRoot: string
       /**
-       * A lost reply the roots show was this merge (`MergedSoFar.unsettled`): `currentRoot` is
-       * already its root. The caller records it as soon as the plan arrives (`settledEntry`),
-       * whether or not anything is merged after it.
+       * Lost replies the roots show were made (`MergedSoFar.unsettled`), as the entries that say
+       * so (`settledEntry`): the plan is made as if they were recorded. The caller appends them as
+       * soon as the plan arrives, whether or not anything is merged after them.
        */
-      readonly settled?:
-        { readonly entry: MergeRecordEntry; readonly newRoot: string } | undefined
+      readonly settled?: readonly MergeRecordEntry[] | undefined
       /**
        * The chunkedgraph's id layout, from the anchor volume: what `prepareMerges` checks every
        * end is a supervoxel with. Present whenever `merges` is not empty.
@@ -264,15 +276,30 @@ async function plan(
   }
 
   // This workflow's own merges: what is done, the neuron's root now, and other neurons' pieces.
-  const own = mergedSoFar(request.record, reviewedRoot, { deployment, datastack })
+  const scope = { deployment, datastack }
+  const recorded = mergedSoFar(request.record, reviewedRoot, scope)
   /*
-   * Merges whose reply was lost and that nothing has settled: if one landed, the neuron is at a
-   * root the record does not name, and the currency check below would refuse it on every Submit.
+   * Merges whose reply was lost and that nothing has settled: where one landed, its pieces are
+   * under a root the record does not name, and the currency check below would refuse them on every
+   * Submit. Read again with those that did, as the record will be once the caller appends them.
    */
-  const settled = await settle(own.unsettled, own.currentRoot, graphene)
-  const currentRoot = settled?.newRoot ?? own.currentRoot
-  const inNeuron = new Set(own.pieces)
-  if (settled) inNeuron.add(settled.entry.candidateRoot)
+  const at = new Date().toISOString()
+  // Each its own pair of roots, so asked side by side.
+  const settled = (
+    await Promise.all(
+      recorded.unsettled.map(async (entry) => {
+        const newRoot = await settle(entry, graphene)
+        return newRoot === undefined ? undefined : settledEntry(entry, newRoot, at)
+      }),
+    )
+  ).filter((entry) => entry !== undefined)
+  const own =
+    settled.length === 0
+      ? recorded
+      : mergedSoFar([...request.record, ...settled], reviewedRoot, scope)
+  const { currentRoot, pieces: inNeuron } = own
+  /** A piece's root now: its own, or that of the pieces this workflow merged onto it. */
+  const rootNow = (id: string) => rootNowIn(own.joined, id)
   /*
    * The tree grows from the neuron **as it stands**: the reviewed root and every piece this
    * workflow has merged into it already. A piece accepted on one of those is one step out,
@@ -291,7 +318,23 @@ async function plan(
   // By `seed`: a piece this neuron or another is extended with is not a neuron under review.
   const otherNeurons = new Set([...request.queue.map((tip) => tip.seed), ...own.otherRoots])
   for (const root of ownRoots) otherNeurons.delete(root)
+  /** The piece it hangs on is under the same root: the two went together already. */
+  const joinedOnto = (id: string): string | undefined => {
+    const parent = pathOf.get(id)?.[0]
+    return own.joined.has(id) && parent !== undefined && rootNow(parent) === rootNow(id)
+      ? parent
+      : undefined
+  }
+  /** Pieces joined with it short of the neuron that the reader no longer accepts. */
+  const dropped = (id: string): string[] => {
+    if (!own.joined.has(id)) return []
+    const root = rootNow(id)
+    return [...own.joined]
+      .filter(([member, at]) => at === root && member !== id && !pieces.has(member))
+      .map(([member]) => member)
+  }
   const open = [...pieces.keys()].filter((candidateRoot) => {
+    const onto = joinedOnto(candidateRoot)
     if (inNeuron.has(candidateRoot)) {
       reject(
         candidateRoot,
@@ -305,6 +348,20 @@ async function plan(
         candidateRoot,
         'merged-elsewhere',
         'Merged into another neuron under review already, by this workflow.',
+      )
+    } else if (onto !== undefined) {
+      reject(
+        candidateRoot,
+        'joined',
+        `Merged onto ${onto} by this workflow already; it goes into the neuron with it.`,
+      )
+    } else if (dropped(candidateRoot).length > 0) {
+      const names = dropped(candidateRoot)
+      reject(
+        candidateRoot,
+        'joined',
+        `This workflow merged it with ${names.join(', ')}, which ${names.length === 1 ? 'is' : 'are'} ` +
+          'no longer accepted: merging it into the neuron would take them in too.',
       )
     } else if (!isNodeId(candidateRoot)) {
       // Before any request: one cell that is no id would fail the whole currency read.
@@ -323,7 +380,7 @@ async function plan(
     graphene,
     reviewedRoot,
     currentRoot,
-    ...(settled ? { settled } : {}),
+    ...(settled.length > 0 ? { settled } : {}),
     ...(layout ? { layout } : {}),
     merges,
     rejected: [...rejected].sort(
@@ -351,7 +408,7 @@ async function plan(
     }
   }
 
-  const latest = await services.latest(graphene, [currentRoot, ...open], options)
+  const latest = await services.latest(graphene, [currentRoot, ...open.map(rootNow)], options)
   // One verdict per root, or currency is unknown — never a piece planned on a missing answer.
   if (latest.length !== open.length + 1) {
     throw new Error(
@@ -371,7 +428,13 @@ async function plan(
   }
   const current = open.filter((candidateRoot, i) => {
     if (latest[i + 1]) return true
-    reject(candidateRoot, 'outdated', 'This piece has been edited since it was suggested.')
+    reject(
+      candidateRoot,
+      'outdated',
+      rootNow(candidateRoot) === candidateRoot
+        ? 'This piece has been edited since it was suggested.'
+        : `This piece and the pieces this workflow merged onto it (${rootNow(candidateRoot)}) have been edited since.`,
+    )
     return false
   })
   if (current.length === 0) return planned([])
@@ -449,7 +512,18 @@ async function plan(
      */
     const merged = path.findIndex((id) => inNeuron.has(id))
     const unmerged = merged < 0 ? path : path.slice(0, merged)
-    const parent = unmerged[0]
+    /*
+     * A piece on the way that this workflow joined to others short of the neuron goes in with the
+     * merge of the farthest in of them (`joined`): that one is the merge waited for, and their
+     * root is what its end is found on.
+     */
+    const carrier = (id: string) => {
+      let last: string | undefined
+      for (const other of unmerged) if (rootNow(other) === rootNow(id)) last = other
+      return last
+    }
+    const parent = unmerged[0] === undefined ? undefined : carrier(unmerged[0])
+    const alsoNeuron = [...new Set(unmerged.map(rootNow))]
     // A parent that is not being anchored at all was refused before this step.
     const before = parent === undefined ? undefined : decided.get(parent)
     const parentRefused = () => {
@@ -478,7 +552,13 @@ async function plan(
           return undefined
         }
         try {
-          const got = await anchorRows(volume, currentRoot, unmerged, candidateRoot, rows)
+          const got = await anchorRows(
+            volume,
+            currentRoot,
+            alsoNeuron,
+            rootNow(candidateRoot),
+            rows,
+          )
           if (!got.anchors.ok) refused.add(candidateRoot)
           return got
         } catch (error) {
@@ -511,8 +591,10 @@ async function plan(
       return undefined
     }
     const on = anchors.onRoot
+    const pieceRoot = rootNow(candidateRoot)
     return {
       candidateRoot,
+      ...(pieceRoot === candidateRoot ? {} : { pieceRoot }),
       rows,
       used: row,
       neuron: anchors.neuron,
@@ -525,36 +607,34 @@ async function plan(
           (one) => request.unjudged?.has(verdictKey(one.neuronId, candidateRoot)) === true,
         ),
       parent,
-      needs: on !== undefined && on !== currentRoot ? on : undefined,
+      needs: on !== undefined && on !== currentRoot ? carrier(on) : undefined,
     }
   }
 
   /**
-   * The first lost reply that the roots show was **this merge and nothing after it**:
+   * The root a lost reply made, where the roots show it was **this merge and nothing after it**:
    *
    *  1. both its supervoxels are under one new root at the server's now (`sharedNewRoot`), and
-   *  2. just before that root was made, they were under exactly the neuron's root and the piece's.
+   *  2. just before that root was made, they were under exactly the two roots it was checked
+   *     against — the neuron's (or the pieces' it was merged onto) and the piece's.
    *
    * The second is what tells our merge from somebody else's later edit: after one, both ends sit
    * under *their* root, made from ours, and adopting it would plan onto a neuron somebody else has
    * edited — what "an outdated neuron refuses every piece" forbids. So that case is left unsettled
-   * and refused, as is any other. Only entries checked against the root the record names now.
+   * and refused, as is any other.
    */
   async function settle(
-    entries: readonly MergeRecordEntry[],
-    recorded: string,
+    entry: MergeRecordEntry,
     on: GrapheneSource,
-  ): Promise<{ entry: MergeRecordEntry; newRoot: string } | undefined> {
-    for (const entry of entries) {
-      if (entry.neuronRoot !== recorded) continue
-      const ends = [entry.neuron.supervoxel, entry.candidate.supervoxel]
-      const newRoot = sharedNewRoot(await services.roots(on, ends, 'server', options), recorded)
-      if (newRoot === undefined) continue
-      const [made] = await services.created(on, [newRoot], options)
-      const before = await services.roots(on, ends, made! - 1, options)
-      if (before[0] === recorded && before[1] === entry.candidateRoot) return { entry, newRoot }
-    }
-    return undefined
+  ): Promise<string | undefined> {
+    const ends = [entry.neuron.supervoxel, entry.candidate.supervoxel]
+    const onto = entry.neuronRoot
+    const newRoot = sharedNewRoot(await services.roots(on, ends, 'server', options), onto)
+    if (newRoot === undefined) return undefined
+    const [made] = await services.created(on, [newRoot], options)
+    const before = await services.roots(on, ends, made! - 1, options)
+    const piece = entry.candidateRootAt ?? entry.candidateRoot
+    return before[0] === onto && before[1] === piece ? newRoot : undefined
   }
 
   /**

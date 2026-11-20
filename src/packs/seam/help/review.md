@@ -261,11 +261,17 @@ Before the overlay opens:
 
 Pieces that cannot be merged are listed under **N not merged**, each with its reason. `Re-check` asks again, e.g. after somebody else's edit.
 
-Then, just before each merge, both supervoxels are looked up again on the server. If somebody else has edited the neuron in the meantime, the batch stops there. A piece that is already part of the neuron is skipped. A piece that was edited in the meantime is recorded as not sent, and so is every piece that was to be merged onto it; the batch carries on with the rest.
+Then, just before each merge, both supervoxels are looked up again on the server. If somebody else has edited the neuron in the meantime, the batch stops there. A piece that is already part of what it is merged onto is skipped. A piece that was edited in the meantime is recorded as not sent, and so is every piece that was to be merged onto it; the batch carries on with the rest.
 
 ### While it runs
 
-Merges are sent one at a time, in the order listed, and each row shows how it went. `Stop after this merge` stops before the next one. The first failure stops the batch, and nothing is ever retried. If a reply is lost — the network drops, or the server takes more than two minutes — the merge is recorded as **unknown**, and the next Submit on that neuron reads the roots to find out what happened before planning anything. A merge that is merely slow is still waited for: Submit stays greyed out, and the browser asks before you close the tab, until the server answers (for up to ten minutes); the answer is then added to `Merges`.
+Up to eight merges are out at once, and each row shows how it went. A neuron grown piece by piece is merged from the outermost pieces in: a piece accepted on another piece is merged onto it first, and its row says **✓ joined** until the two go into the neuron together. Pieces on different branches go side by side; only the merges onto the neuron itself go one at a time, since each gives it a new root. A batch of 244 merges, 41 of them onto the neuron, takes 66 rounds of merges this way instead of 244.
+
+The button beneath counts the merges done, as `Merging, 12 of 230 done…`. Pressing it sends nothing more and waits for the merges already out. The first failure does the same, and nothing is ever retried. If a reply is lost — the network drops, or the server takes more than two minutes — the merge is recorded as **unknown**, and the next Submit on that neuron reads the roots to find out what happened before planning anything. A merge that is merely slow is still waited for: Submit stays greyed out, and the browser asks before you close the tab, until the server answers (for up to ten minutes); the answer is then added to `Merges`.
+
+> [!NOTE]
+> **A stopped batch can leave pieces joined to each other, not to the neuron**
+> Their rows say **✓ joined, not in the neuron yet**, and the viewer draws them as one segment. The next Submit merges each group into the neuron whole, in one merge; the pieces it carries are listed as *joined already*.
 
 While merges are being sent, the card and its workflow stay put: deleting the card, undoing it away, loading another workflow or switching tabs are refused until the batch ends, and the browser asks before you close the tab.
 
@@ -285,7 +291,7 @@ SEAM's estimate `r` is fitted on tips somebody judged, so your verdicts help it 
 
 It is off until you turn it on, and the setting is kept in your browser, not in the workflow, so opening somebody else's workflow never sends anything for you. Your CAVE token is never sent. The server instead asks you to look up one supervoxel's root through your own access, which shows you can read the dataset. Verdicts that cannot be sent straight away, because you are offline or the server is busy, wait in your browser and go with the next one.
 
-Only button presses are sent: undoing a verdict with Ctrl+Z does not send anything, and pressing a verdict again to clear it sends that it was taken back. A piece Auto-extend accepted is sent only when Submit merges it without your having judged it, and then as `auto-accepted`, never as an accept. Verdicts on a tip from an old set that names no version are not sent, because nobody could tell which scores they were judged against. The server collects verdicts for Aedes (`wclee_aedes_brain`); on another dataset the foot says it is not collected.
+Only button presses are sent: undoing a verdict with Ctrl+Z does not send anything, and pressing a verdict again to clear it sends that it was taken back. A piece Auto-extend accepted is sent only when Submit merges it into the neuron without your having judged it, and then as `auto-accepted`, never as an accept. Verdicts on a tip from an old set that names no version are not sent, because nobody could tell which scores they were judged against. The server collects verdicts for Aedes (`wclee_aedes_brain`); on another dataset the foot says it is not collected.
 
 ## Outputs
 

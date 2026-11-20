@@ -810,6 +810,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           seed: neuron,
           neuronRoot: merged?.currentRoot ?? neuron,
           pieces: unmergedPieces,
+          joined: merged?.joined,
         },
         { deployment: target.deployment, signal: controller.signal },
       )
@@ -1191,7 +1192,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                        */}
                       {done && (
                         <span className="review-row__merged">
-                          {done === 'merged' ? '✓ merged' : '✓ merged into another neuron'}
+                          {done === 'merged'
+                            ? '✓ merged'
+                            : done === 'joined'
+                              ? '✓ joined, not in the neuron yet'
+                              : '✓ merged into another neuron'}
                         </span>
                       )}
                       {inNeuron && !done && (

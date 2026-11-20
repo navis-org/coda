@@ -15,11 +15,13 @@ import {
   confirmSubmit,
   recheckSubmit,
   stopSubmit,
+  useStopping,
   useSubmitSession,
 } from './mergeSession'
 
 export function MergeSubmitHost() {
   const session = useSubmitSession()
+  const stopping = useStopping()
   const request = session?.request
   const published = usePublishedScene(request?.sourceId, request?.datasetId)
   // The neuron's tips: where it reaches, so the overlay opens on all of it.
@@ -38,6 +40,7 @@ export function MergeSubmitHost() {
       extentNm={extentNm}
       progress={session.progress}
       running={session.running}
+      stopping={stopping}
       neuronRoot={session.neuronRoot}
       onConfirm={confirmSubmit}
       onStop={stopSubmit}

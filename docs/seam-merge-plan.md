@@ -390,7 +390,7 @@ reader has to look at the end product before confirming. Decided with them:
   hidden in the viewer and Merge pressed within the frame's report delay sends the piece. During a
   batch, a merged piece's line leaves the view with it — phase 5 decides how a batch is drawn.
 - **Progress in the same overlay** (phase 5 drives it): `progress` per piece, `running`, `onStop`
-  ("Stop after this merge"), and `neuronRoot` so the view follows the neuron to its new root.
+  ("Stop after this merge"; since 2026-11-20 it counts, "Merging 13 of 230… (stop after this one)", and reads "Stopping after merge 13 of 230…" once pressed), and `neuronRoot` so the view follows the neuron to its new root.
 - Refusals are listed under "N not merged", folded unless nothing can be merged; "checked at" and
   Re-check (`onRecheck`) sit in the header.
 
@@ -858,3 +858,93 @@ placed before it. Decided: **every accepted, unmerged piece counts** (`unmergedP
 card), the picks go on **after** `liveQueue` (card and `evaluate` alike), and the list walks to
 such a piece (`listedTree`, over the accepted pairs by `piecesOf`). Submit plans it like any piece
 on a piece. The piece's ends are not searched.
+
+## Merging a tree from its tips, several at once (user, 2026-11-20)
+
+Asked for after a 244-merge batch on `648518347603854112` (Aedes, 18:22–18:29 UTC) took 6 min 49 s
+one at a time. Read off its `Merges` record: **1.65 s a merge** (p10–p90 1.45–1.97 s, max 2.48),
+which is the check before, the merge and the check after. The accepted pieces were a tree
+**11 deep, with 41 pieces on the neuron itself** and the other 203 on pieces.
+
+**Why not side by side onto the neuron.** Each merge gives the neuron a new root, the server locks
+a root while it edits (`LockingError` → 500, why Spelunker's `bulkMerge` retries), and the batch's
+check — "the neuron end is under the root this batch last made" — needs the order. So a merge
+*onto the neuron* is still one at a time.
+
+**Why from the tips.** A merge onto a piece not yet in the neuron joins the two short of it, on
+roots nothing else is using, so different branches can go at once. Replayed on the measured tree
+(one round per merge, no root in two merges at once, the farthest from the neuron first):
+
+| at most out at once | rounds | at 1.65 s a round |
+| --- | --- | --- |
+| 1 (before) | 244 | 6.7 min |
+| 4 | 91 | 2.5 min |
+| **8 (chosen, user)** | **66** | **1.8 min** |
+| no cap | 41 | 1.1 min |
+
+41 is the floor: the neuron's own 41 merges. Eight is under Spelunker's twenty in flight, and every
+merge goes to the shared fast remesh queue (`priority=True`). **Not measured: whether the server
+takes longer per merge with eight out.** The first live batch will say.
+
+What changed, by module:
+
+- **`mergeBatch.ts`** keeps which root each piece is under in the record's own `Groups`, replaying
+  each entry as it keeps it — so the run and every later reading of its record cannot disagree —
+  and which roots are out. It starts any merge whose two roots are free, deepest first, up to
+  `MERGES_IN_FLIGHT`, and tells the session the neuron's root with each entry. A merge whose
+  end lies on a piece further in than the one it continues (`needs` ≠ `parent`) waits until that
+  one has joined what its end is on. A stop, or the first failure, starts nothing more and waits
+  for the merges out; each is recorded as it lands. A merge onto pieces short of the neuron that
+  somebody else edited is not sent, and the rest go on; one onto the neuron stops the batch, as
+  before. Several merges can be still out after a batch, and Submit waits for all of them
+  (`mergeSession.ts`' `waitFor`).
+- **The record** says the two roots each merge was checked against: `neuronRoot` (the neuron's, or
+  that of the pieces it was merged onto) and, where it was not the piece's own,
+  `candidateRootAt` (a `candidate_root` column in `Merges`). `mergedSoFar` replays the merges in
+  order (`Groups`), so the neuron's root is the root of its group, and pieces joined short of it
+  are `joined`, with their root. A lost reply is open while both its roots stand (was: until the
+  neuron's next merge), and the plan settles every open one, not the first. A neuron with joined
+  pieces is never shortened (a short entry has no `neuronRoot`).
+- **The plan** treats a group as one piece: the piece farthest in carries it, at the group's root
+  (`PlannedMerge.pieceRoot`, which its currency and its anchor are read at); the rest are refused
+  `joined`. A piece on the way that is in a group is reached through that piece (`parent`, `needs`).
+- **The card**: `mergedAs` answers `joined`. Such a row reads "✓ joined, not in the neuron yet",
+  its verdicts and Extend are off, the viewer draws it as its group's root, a hand pick on that
+  root is refused as a piece already accepted, and Submit still counts it.
+- **The overlay**: a row joined short of the neuron reads "✓ joined", and "✓ merged" once its
+  group is in. The Stop button counts what is done ("Merging, 12 of 230 done… (stop)") and reads
+  "Stopping…" once pressed.
+
+Two reviews after it (2026-11-20) settled the edges:
+
+- **A failure stops new starts at once**: a send that did not plainly land halts the run before
+  its check after (up to `READ_TIMEOUT_MS`), so no merge starts behind a lost reply. A failure is
+  said over a stop pressed meanwhile. Stop is asked once a pass, so a stop while every merge left
+  is waiting is still a stop. A callback that throws rejects the batch only once nothing is out,
+  so the card is never let go of while merges are landing.
+- **`auto-accepted` goes to SEAM when the piece is in the neuron** (`BatchCallbacks.record`'s
+  `intoNeuron`), not when it joins pieces short of it: a stopped batch may leave it short for
+  good. The rule of 2026-11-18 ("at the merge") read as "into the neuron".
+- **A group holding a piece no longer accepted is refused** (`joined`, naming it): its merge would
+  take that piece in too.
+- **A hand pick whose end lands on a joined group is refused** ("Submit them, then pick again"):
+  which of the group's pieces it continues cannot be told.
+- **A short entry of a merge made short of the neuron keeps the root it was made onto** (a sixth
+  or seventh element): read without it, the merge would move the neuron.
+
+**The sandbox test, run 2026-11-20 with the user's go-ahead** (`pnpm probe:cave-merge-tree -- …
+--i-asked …`; `pnpm probe:sandbox-pair -- --tree` finds trees, reads only). A tree of four on
+`fanc_sandbox`: N `648518346483097022`, A `648518346472387337` and C `648518346517248810` on N,
+B `648518346496357251` on A (1 / 2 / 2 / 1 level-2 chunks). The shipped plan and batch, as two
+Submits:
+
+| Step | Answer |
+| --- | --- |
+| Submit 1, stopped after its first round | **two merges out at once**: B onto A (operation 106947, root `…487926814`) and C onto N (106948, root `…511085621`); A waited, its root held by B's merge; `stopped` |
+| The record, read back | A and B joined at `…487926814`, C in the neuron at `…511085621`; the server agrees, supervoxel by supervoxel |
+| Submit 2's plan | A alone, at A and B's root (`pieceRoot`); B refused `joined`, C `already-merged` |
+| Submit 2's batch | A, carrying B, onto the neuron (106949), checked at A and B's root; all six supervoxels under `…499197534`, none of the four old roots current |
+| Undos, last first | 106950, 106951, 106952: the four pieces apart again at their old sizes, now `648518346518610655` / `648518346475140664` / `648518346494179442` / `648518346497563382` |
+
+Six writes, all on the sandbox table. Not measured here: whether the server takes longer per merge
+with eight out — four pieces cannot show it. The first Aedes batch will.

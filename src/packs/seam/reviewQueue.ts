@@ -55,6 +55,7 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
 import { formatNumber, plural } from '../../style/format'
 import type { MergedSoFar } from './mergeRecord'
+import { rootNow } from './mergeRecord'
 import type { AutoGrowth, ExtendPlan, Piece } from './pieces'
 import {
   AUTO_DEPTH,
@@ -908,15 +909,26 @@ export function scenePieces(
    * accepted` says: a candidate beside a neuron, with the piece it would be merged onto not
    * drawn between them, is a pair nobody can judge.
    */
+  // A piece joined to others short of the neuron is drawn as their root: its own is retired.
   const on = here?.tip.neuronId
-  if (on !== undefined && on !== here?.tip.seed && mergedAs(merged, on) === undefined) {
-    add(on, 'accepted')
-  }
   const id = here?.candidate.candidateId
-  if (id !== undefined && mergedAs(merged, id) === undefined) {
-    add(id, isAccepted.has(id) ? 'focus' : 'candidate')
+  // Joined to the piece its tip is on, the candidate is that segment: drawn as the one in hand.
+  const sameSegment =
+    on !== undefined &&
+    id !== undefined &&
+    rootNow(merged?.joined, on) === rootNow(merged?.joined, id)
+  if (
+    on !== undefined &&
+    on !== here?.tip.seed &&
+    !sameSegment &&
+    !inAnotherRoot(mergedAs(merged, on))
+  ) {
+    add(rootNow(merged?.joined, on), 'accepted')
   }
-  for (const id of toMerge) add(id, 'accepted')
+  if (id !== undefined && !inAnotherRoot(mergedAs(merged, id))) {
+    add(rootNow(merged?.joined, id), isAccepted.has(id) ? 'focus' : 'candidate')
+  }
+  for (const id of toMerge) add(rootNow(merged?.joined, id), 'accepted')
   return out
 }
 
@@ -981,17 +993,25 @@ export function stillToMerge(
   accepted: ReadonlyMap<string, readonly AcceptedRow[]>,
   merged: MergedSoFar | undefined,
 ): string[] {
-  return [...accepted.keys()].filter((id) => mergedAs(merged, id) === undefined)
+  return [...accepted.keys()].filter((id) => !inAnotherRoot(mergedAs(merged, id)))
 }
 
-/** Where Submit has put a piece, by the record: into the neuron, into another one, or nowhere. */
-export function mergedAs(
-  merged: MergedSoFar | undefined,
-  id: string,
-): 'merged' | 'elsewhere' | undefined {
+/**
+ * Where Submit has put a piece, by the record: into the neuron (`merged`), together with other
+ * pieces not in it yet (`joined`: a batch stopped part way; the next Submit takes them in
+ * together — the piece they were merged onto as much as the pieces merged onto it), into another
+ * reviewed neuron (`elsewhere`), or nowhere.
+ */
+export type MergedAs = 'merged' | 'joined' | 'elsewhere'
+
+export function mergedAs(merged: MergedSoFar | undefined, id: string): MergedAs | undefined {
   if (merged?.pieces.has(id)) return 'merged'
+  if (merged?.joined.has(id)) return 'joined'
   return merged?.elsewhere.has(id) ? 'elsewhere' : undefined
 }
+
+/** Part of a neuron's root, not drawn or asked about as itself. */
+const inAnotherRoot = (as: MergedAs | undefined) => as === 'merged' || as === 'elsewhere'
 
 /**
  * A verdict, keyed on the neuron and the piece (the header says why not the tip).
@@ -1732,7 +1752,7 @@ export function extendBlocked(at: {
   /** Whether the card's `Extended` output is wired back to a node that searches. */
   wired: boolean
   /** Where Submit has put the piece (`mergedAs`). */
-  done: 'merged' | 'elsewhere' | undefined
+  done: MergedAs | undefined
   /** Edited since it was suggested (`rootCurrency`). */
   outdated: boolean
 }): string | undefined {
@@ -1749,6 +1769,12 @@ export function extendBlocked(at: {
     )
   }
   if (at.done === 'elsewhere') return 'Merged into another neuron by Submit.'
+  if (at.done === 'joined') {
+    return (
+      'Merged by Submit with other accepted pieces, short of the neuron; the next Submit takes ' +
+      'them in together.'
+    )
+  }
   if (at.outdated) {
     return 'This piece has been edited since it was suggested, so its ends are not these any more.'
   }
@@ -1997,7 +2023,7 @@ const VERDICT_HELP: Record<Verdict, string> = {
 export function verdictPress(at: {
   verdict: Verdict
   /** Where Submit has put the piece (`mergedAs`). */
-  done: 'merged' | 'elsewhere' | undefined
+  done: MergedAs | undefined
   /** `acceptedElsewhere`'s answer. */
   inNeuron: boolean
   /** `leavesWith`'s answer for an extended piece; empty otherwise. */
@@ -2009,6 +2035,12 @@ export function verdictPress(at: {
    */
   auto?: 'unjudged' | 'judged' | undefined
 }): { title: string; disabled: boolean } {
+  if (at.done === 'joined') {
+    return {
+      title: 'Merged by Submit with other accepted pieces; not in the neuron yet.',
+      disabled: true,
+    }
+  }
   if (at.done) return { title: 'Merged by Submit.', disabled: true }
   if (at.inNeuron) return { title: IN_NEURON_NOTE, disabled: true }
   const help =

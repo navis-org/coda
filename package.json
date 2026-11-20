@@ -115,6 +115,7 @@
     "probe:sandbox-pair": "vite-node scripts/probe-sandbox-pair.mjs",
     "probe:cave-merge": "vite-node scripts/probe-cave-merge.mjs",
     "probe:cave-merge-chain": "vite-node scripts/probe-cave-merge-chain.mjs",
+    "probe:cave-merge-tree": "vite-node scripts/probe-cave-merge-tree.mjs",
     "probe:merge-plan": "vite-node scripts/probe-merge-plan.mjs",
     "probe:assessor-ops": "node scripts/probe-assessor-ops.mjs",
     "probe:assessor-patch": "vite-node scripts/probe-assessor-patch.ts",

@@ -123,6 +123,25 @@ describe('checking a hand pick', () => {
     expect((await checkPick(request(), OPTIONS, live)).ok).toBe(false)
   })
 
+  /** Pieces a stopped Submit joined short of the neuron are one segment: which to continue? */
+  it('reads joined pieces at their root, and refuses a pick on them until they are submitted', async () => {
+    const GROUP = '720575940650000001'
+    const joined = new Map([[PIECE, GROUP]])
+    const { live, asked } = services({
+      ok: true,
+      neuron: end([0, 0, 0]),
+      candidate: end([0, 0, 100]),
+      chunks: 0,
+      onRoot: GROUP,
+    })
+    const checked = await checkPick(request({ joined }), OPTIONS, live)
+    expect(asked[0]!.alsoNeuron).toEqual([GROUP])
+    expect(!checked.ok && checked.message).toMatch(/joined short of the neuron\. Submit them/)
+    // Pointing at the group itself is pointing at an accepted piece.
+    const itself = await checkPick(request({ joined, segment: GROUP }), OPTIONS, live)
+    expect(!itself.ok && itself.message).toBe('That piece is already accepted on this neuron.')
+  })
+
   it('is not refused for want of a size', async () => {
     const { live } = services(
       { ok: true, neuron: end([0, 0, 0]), candidate: end([0, 0, 0]), chunks: 0, onRoot: NOW },

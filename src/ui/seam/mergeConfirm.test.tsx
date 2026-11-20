@@ -311,7 +311,8 @@ describe('the confirm overlay', () => {
       screen.getAllByRole('checkbox').every((box) => (box as HTMLInputElement).disabled),
     ).toBe(true)
     expect(screen.queryByRole('button', { name: /^Merge \d+ piece/ })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Stop after this merge' }))
+    // How many are decided: one, the second being sent.
+    fireEvent.click(screen.getByRole('button', { name: 'Merging, 1 of 2 done… (stop)' }))
     expect(onStop).toHaveBeenCalled()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
@@ -320,6 +321,17 @@ describe('the confirm overlay', () => {
     const scene = parseSceneUrl(shown.at(-1)!)!
     expect(segmentsOf(scene, 'neuron')).toEqual(['720575940000000009'])
     expect(segmentsOf(scene)).toEqual(['648518346000000002'])
+  })
+
+  it('says Stop was taken, and takes no second press', () => {
+    const onStop = vi.fn()
+    const progress = new Map<string, MergeProgress>([
+      ['648518346000000001', { state: 'sending' }],
+      ['648518346000000002', { state: 'waiting' }],
+    ])
+    open({ running: true, stopping: true, progress, onStop })
+    const button = screen.getByRole('button', { name: 'Stopping, 0 of 2 done…' })
+    expect((button as HTMLButtonElement).disabled).toBe(true)
   })
 
   /*

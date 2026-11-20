@@ -22,7 +22,7 @@ import type {
 } from '../../packs/seam/mergePlan'
 import type { MergeRecordEntry } from '../../packs/seam/mergeRecord'
 import type { QueueTip } from '../../packs/seam/reviewQueue'
-import { decodeRecord } from '../../packs/seam/mergeRecord'
+import { decodeRecord, settledEntry } from '../../packs/seam/mergeRecord'
 import { useGraphStore } from '../../store/graphStore'
 import { node } from '../../test/graph'
 import { clearStorage } from '../../test/jsdomStubs'
@@ -58,6 +58,7 @@ const {
   recheckSubmit,
   resetSubmit,
   stopSubmit,
+  submitStopping,
   submitCheckedOf,
   submitStateOf,
 } = await import('./mergeSession')
@@ -219,7 +220,8 @@ describe('Submit', () => {
 
   it('records a settled lost reply as soon as the plan arrives', async () => {
     const lost = entry('unknown')
-    await opened({ ...PLAN, currentRoot: '150', settled: { entry: lost, newRoot: '150' } })
+    const settled = settledEntry(lost, '150', '2026-11-16T11:00:00.000Z')
+    await opened({ ...PLAN, currentRoot: '150', settled: [settled] })
     expect(record()).toEqual([
       expect.objectContaining({ outcome: 'merged', newRoot: '150', candidateRoot: '7' }),
     ])
@@ -239,7 +241,7 @@ describe('Submit', () => {
     await opened()
     const batch = heldBatch()
     confirmSubmit([MERGE])
-    batch.on().record(entry('merged', '201'))
+    batch.on().record(entry('merged', '201'), '201', ['7'])
     expect(record()[0]).toEqual({
       short: true,
       reviewedRoot: '200',
@@ -270,24 +272,32 @@ describe('Submit', () => {
 
     // Each entry lands on the param as it is now, with no undo step; the neuron follows.
     batch.on().progress('7', { state: 'sending' })
-    batch.on().record(entry('merged', '201'))
+    batch.on().record(entry('merged', '201'), '201', ['7'])
     store().setParam('review', 'verdicts', '1:7=accept') // an edit in between is kept
-    batch.on().record(entry('merged', '202'))
+    // A merge onto pieces short of the neuron moves those, never the neuron.
+    batch.on().record({ ...entry('merged', '250'), neuronRoot: '8' }, '201', [])
+    expect(currentSubmit()).toMatchObject({ neuronRoot: '201' })
+    batch.on().record({ ...entry('merged', '202'), neuronRoot: '201' }, '202', ['7'])
     expect(record().map((e) => (e.outcome === 'merged' ? e.newRoot : ''))).toEqual([
       '201',
+      '250',
       '202',
     ])
     expect(store().past).toHaveLength(past + 1)
     expect(currentSubmit()).toMatchObject({ neuronRoot: '202' })
 
+    expect(submitStopping()).toBe(false)
     stopSubmit()
     expect(batch.on().stopRequested()).toBe(true)
+    expect(submitStopping()).toBe(true)
     batch.finish({
       state: 'stopped',
       currentRoot: '202',
       message: 'Stopped before this merge.',
     })
     await vi.waitFor(() => expect(currentSubmit()).toMatchObject({ running: false }))
+    // The batch is over, so nothing is stopping any more.
+    expect(submitStopping()).toBe(false)
     expect(store().notice).toBe('Stopped before this merge.')
     store().deleteNodes(['review'])
     expect(store().graph.nodes).toHaveLength(0)
@@ -300,9 +310,13 @@ describe('Submit', () => {
     await opened({ ...PLAN, merges: [AUTO_MERGE] })
     const batch = heldBatch()
     confirmSubmit([AUTO_MERGE])
-    batch.on().record(entry('unknown'))
+    batch.on().record(entry('unknown'), '100', [])
     expect(queued).not.toHaveBeenCalled()
-    batch.on().record(entry('merged'))
+    // Merged onto pieces short of the neuron: not in it yet, and it may never be.
+    batch.on().record({ ...entry('merged', '250'), neuronRoot: '8' }, '100', [])
+    expect(queued).not.toHaveBeenCalled()
+    // In with the merge that took its group in.
+    batch.on().record({ ...entry('merged'), candidateRoot: '8' }, '201', ['8', '7'])
     expect(queued).toHaveBeenCalledTimes(1)
     expect(queued.mock.calls[0]![0]).toEqual({
       deployment: REQUEST.deployment,
@@ -324,7 +338,7 @@ describe('Submit', () => {
     await opened()
     const batch = heldBatch()
     confirmSubmit([MERGE])
-    batch.on().record(entry('merged'))
+    batch.on().record(entry('merged'), '201', ['7'])
     batch.finish({ state: 'done', currentRoot: '201', message: '' })
     await vi.waitFor(() => expect(currentSubmit()).toMatchObject({ running: false }))
     expect(queued).not.toHaveBeenCalled()
@@ -394,8 +408,8 @@ describe('Submit', () => {
       const batch = heldBatch()
       confirmSubmit([merge])
       let answer: (entry: MergeRecordEntry | undefined) => void = () => {}
-      batch.on().record(entry('unknown'))
-      batch.on().stillOut(new Promise((resolve) => (answer = resolve)))
+      batch.on().record(entry('unknown'), '100', [])
+      batch.on().stillOut(new Promise((resolve) => (answer = resolve)), true)
       batch.finish({ state: 'failed', currentRoot: '100', message: 'The reply was lost.' })
       await vi.waitFor(() => expect(currentSubmit()).toMatchObject({ running: false }))
       closeSubmit()
@@ -452,13 +466,37 @@ describe('Submit', () => {
       expect(store().notice).toMatch(/answered: merged/)
     })
 
+    /** Several merges are out at once, so several can be still out: Submit waits for all. */
+    it('holds every Submit until the last of several answers, recording each', async () => {
+      await opened()
+      const batch = heldBatch()
+      confirmSubmit([MERGE])
+      const answers: ((entry: MergeRecordEntry | undefined) => void)[] = []
+      for (const _ of [1, 2]) {
+        batch.on().record(entry('unknown'), '100', [])
+        batch.on().stillOut(new Promise((resolve) => answers.push(resolve)), true)
+      }
+      batch.finish({ state: 'failed', currentRoot: '100', message: 'The reply was lost.' })
+      await vi.waitFor(() => expect(currentSubmit()).toMatchObject({ running: false }))
+      closeSubmit()
+
+      answers[0]!({ ...entry('merged', '201'), operationId: '1' } as MergeRecordEntry)
+      await vi.waitFor(() => expect(record()).toHaveLength(3))
+      expect(submitStateOf(REQUEST.docId, 'review')).toBe('waiting')
+      answers[1]!(undefined)
+      await vi.waitFor(() => expect(submitStateOf(REQUEST.docId, 'review')).toBe('none'))
+      expect(record().map((e) => e.outcome)).toEqual(['unknown', 'unknown', 'merged'])
+    })
+
     /** An answer landing while the batch still holds the card is recorded once it lets go. */
     it('records an answer that lands before the batch has let go of the card', async () => {
       await opened()
       const batch = heldBatch()
       confirmSubmit([MERGE])
-      batch.on().record(entry('unknown'))
-      batch.on().stillOut(Promise.resolve({ ...entry('merged', '201') } as MergeRecordEntry))
+      batch.on().record(entry('unknown'), '100', [])
+      batch
+        .on()
+        .stillOut(Promise.resolve({ ...entry('merged', '201') } as MergeRecordEntry), true)
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(record().map((e) => e.outcome)).toEqual(['unknown'])
       batch.finish({ state: 'failed', currentRoot: '100', message: 'The reply was lost.' })

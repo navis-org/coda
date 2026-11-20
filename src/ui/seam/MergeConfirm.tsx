@@ -48,6 +48,8 @@ export interface MergeConfirmProps {
   /** Per candidate root, once the batch runs. */
   readonly progress?: ReadonlyMap<string, MergeProgress> | undefined
   readonly running?: boolean | undefined
+  /** Stop was pressed: nothing more is sent, and the merges out are waited for. */
+  readonly stopping?: boolean | undefined
   /** The neuron's root now, where the batch has moved it on from the plan's. */
   readonly neuronRoot?: string | undefined
   /**
@@ -88,6 +90,7 @@ const REFUSAL_LABEL: Record<PlanRefusal, string> = {
   outdated: 'outdated',
   'neuron-outdated': 'neuron edited',
   'parent-refused': 'nothing to merge onto',
+  joined: 'joined already',
   'same-root': 'same segment',
   'bad-id': 'bad id',
   'no-contact': 'no contact point',
@@ -102,6 +105,7 @@ const REFUSAL_LABEL: Record<PlanRefusal, string> = {
 const PROGRESS_LABEL: Record<MergeProgress['state'], string> = {
   waiting: '…',
   sending: 'sending',
+  joined: '✓ joined',
   merged: '✓ merged',
   'already-merged': '✓ already',
   failed: '✗ failed',
@@ -118,6 +122,7 @@ export function MergeConfirm({
   extentNm,
   progress,
   running = false,
+  stopping = false,
   neuronRoot = plan.currentRoot,
   onConfirm,
   onStop,
@@ -323,8 +328,18 @@ export function MergeConfirm({
             )}
             {failed && <p className="merge-confirm__failed">Not started: {failed}</p>}
             {running ? (
-              <button type="button" className="btn" onClick={onStop} disabled={!onStop}>
-                Stop after this merge
+              <button
+                type="button"
+                className="btn"
+                onClick={onStop}
+                disabled={!onStop || stopping}
+                title={
+                  stopping
+                    ? undefined
+                    : 'Send nothing more; the merges already out are waited for.'
+                }
+              >
+                {stopLabel(progress, stopping)}
               </button>
             ) : (
               <button type="button" className="btn" onClick={onClose} disabled={locked}>
@@ -357,6 +372,20 @@ export function MergeConfirm({
       </div>
     </Modal>
   )
+}
+
+/**
+ * Where the batch has got to, on its Stop button: how many merges are decided. Several are out at
+ * once (`MERGES_IN_FLIGHT`), so a stop waits for those, and nothing more is sent.
+ */
+function stopLabel(
+  progress: ReadonlyMap<string, MergeProgress> | undefined,
+  stopping: boolean,
+): string {
+  const states = [...(progress?.values() ?? [])]
+  const decided = states.filter((p) => p.state !== 'waiting' && p.state !== 'sending').length
+  const count = states.length === 0 ? '' : `, ${decided} of ${states.length} done`
+  return stopping ? `Stopping${count}…` : `Merging${count}… (stop)`
 }
 
 /** How many of the plan's merges Auto-extend accepted, said beside when it was checked. */

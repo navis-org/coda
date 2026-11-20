@@ -45,7 +45,7 @@ import { prepareMerges } from '../../packs/seam/mergeBatch'
 import type { PlannedMerge, ReadyPlan } from '../../packs/seam/mergePlan'
 import { planMerges } from '../../packs/seam/mergePlan'
 import type { MergeProgress, MergeRecordEntry } from '../../packs/seam/mergeRecord'
-import { appendRecorded, decodeRecord, settledEntry } from '../../packs/seam/mergeRecord'
+import { appendRecorded, decodeRecord } from '../../packs/seam/mergeRecord'
 import type { QueueTip } from '../../packs/seam/reviewQueue'
 import { reviewStateOf } from '../../packs/seam/reviewQueue'
 import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
@@ -240,14 +240,13 @@ async function plan(request: SubmitRequest): Promise<void> {
   // Another document came on screen during the check: the plan was made from this one's card.
   if (!onScreen(request)) return endWith(MOVED)
   /*
-   * A lost reply the plan showed was this merge: recorded now, whether or not anything is merged
-   * after it — the plan's root is already the new one, and the record must say so too, or the
-   * next Submit would start from the old one. Through a hold, which refuses unless the card is
+   * Lost replies the plan showed were made: recorded now, whether or not anything is merged after
+   * them — the plan's roots are already the new ones, and the record must say so too, or the
+   * next Submit would start from the old ones. Through a hold, which refuses unless the card is
    * on screen in the document it was pressed in.
    */
-  if (made.settled) {
-    const { entry, newRoot } = made.settled
-    const refused = appendHeld(request, settledEntry(entry, newRoot, new Date().toISOString()))
+  for (const entry of made.settled ?? []) {
+    const refused = appendHeld(request, entry)
     if (refused) return endWith(`Submit was not opened: ${refused}`)
   }
   publish({
@@ -306,12 +305,13 @@ function warnLeaving(event: BeforeUnloadEvent): void {
 }
 
 /**
- * Hold every Submit until `answer` settles, and record what it says (the header). Only the card's
- * two ids are kept for it, never the press with its queue: the request may never answer.
+ * Hold every Submit until every one of `answers` settles, and record what each says (the header).
+ * Only the card's two ids are kept for them, never the press with its queue: a request may never
+ * answer.
  */
 function waitFor(
   card: Card,
-  answer: Promise<MergeRecordEntry | undefined>,
+  answers: readonly StillOut[],
   /** Said of a merge that landed: what `autoSender` sends of it. */
   merged: (candidateRoot: string) => boolean,
 ): void {
@@ -328,12 +328,22 @@ function waitFor(
   stillOut = timer
   window.addEventListener('beforeunload', warnLeaving)
   changed.notify()
-  void answer.then((entry) => {
+  let left = answers.length
+  for (const { answer, intoNeuron } of answers) {
+    void answer.then((entry) => answered(entry, intoNeuron))
+  }
+  function answered(entry: MergeRecordEntry | undefined, intoNeuron: boolean): void {
     // Past the limit, or forgotten (`resetSubmit`): a later batch may have moved the neuron on.
-    if (!endWait(timer) || !entry) return
+    if (stillOut !== timer) return
+    left -= 1
+    if (left === 0) endWait(timer)
+    if (!entry) return
     const refused = appendHeld(card, entry)
     // A merge that landed is one whatever became of its record: SEAM hears of it.
-    if (entry.outcome === 'merged' && merged(entry.candidateRoot)) void flushVerdicts()
+    // Only one made into the neuron: one short of it may never get there.
+    if (entry.outcome === 'merged' && intoNeuron && merged(entry.candidateRoot)) {
+      void flushVerdicts()
+    }
     useGraphStore
       .getState()
       .setNotice(
@@ -344,7 +354,13 @@ function waitFor(
                 : 'Nothing was merged; the next Submit may send it again.')
           : `A merge sent earlier answered: ${entry.outcome}. Recorded in Merges.`,
       )
-  })
+  }
+}
+
+/** A merge the batch stopped waiting for, and whether it was made onto the neuron itself. */
+interface StillOut {
+  readonly answer: Promise<MergeRecordEntry | undefined>
+  readonly intoNeuron: boolean
 }
 
 /** Close the session and say why on the status bar. */
@@ -392,11 +408,13 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
    * its answer can land while the batch still holds it, and a second hold would be refused. No
    * Submit can open in between: the overlay is up until `running` goes false, after this.
    */
-  let stillOutAnswer: Promise<MergeRecordEntry | undefined> | undefined
+  const stillOutAnswers: StillOut[] = []
   /*
    * **A piece Auto-extend accepted, merged unjudged, goes to SEAM as `auto-accepted`** (user,
-   * 2026-11-18) — at the merge, so it is what the reader let through, and never as `accept`.
-   * Queued only where the reader shares verdicts ("Help improve"; `enqueueVerdict` asks).
+   * 2026-11-18) — once it is in the neuron, so it is what the reader let through, and never as
+   * `accept`. A piece merged onto pieces short of the neuron goes when its group does: the batch
+   * stopping first, it may never. Queued only where the reader shares verdicts ("Help improve";
+   * `enqueueVerdict` asks).
    */
   let autoSent = false
   const sendAutoAccepted = autoSender(merges, {
@@ -407,15 +425,14 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
     .run({
       progress: (candidateRoot, state) =>
         show({ progress: new Map(live.progress).set(candidateRoot, state) }),
-      record: (entry: MergeRecordEntry) => {
+      record: (entry, neuronRoot, intoNeuron) => {
         hold.update('merges', (now) => appendRecorded(now, entry))
-        if (entry.outcome === 'merged') {
-          show({ neuronRoot: entry.newRoot })
-          autoSent = sendAutoAccepted(entry.candidateRoot) || autoSent
-        }
+        // The batch says where the neuron is: a merge onto pieces short of it moves those.
+        if (neuronRoot !== live.neuronRoot) show({ neuronRoot })
+        for (const id of intoNeuron) autoSent = sendAutoAccepted(id) || autoSent
       },
       stopRequested: () => sending.stop,
-      stillOut: (answer) => (stillOutAnswer = answer),
+      stillOut: (answer, intoNeuron) => stillOutAnswers.push({ answer, intoNeuron }),
     })
     .then(
       (result) => result.message,
@@ -428,10 +445,10 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
       if (inFlight === sending) inFlight = undefined
       // Before the wait adds the same listener back, which a later removal would take with it.
       window.removeEventListener('beforeunload', warnLeaving)
-      if (stillOutAnswer)
+      if (stillOutAnswers.length > 0)
         waitFor(
           { docId: request.docId, nodeId: request.nodeId },
-          stillOutAnswer,
+          stillOutAnswers,
           sendAutoAccepted,
         )
       show({ running: false })
@@ -466,7 +483,18 @@ function autoSender(
 
 /** Stop after the merge in flight. */
 export function stopSubmit(): void {
-  if (inFlight) inFlight.stop = true
+  if (!inFlight || inFlight.stop) return
+  inFlight.stop = true
+  changed.notify()
+}
+
+/** Whether Stop was pressed on the batch being sent: the overlay's button says so until it ends. */
+export function submitStopping(): boolean {
+  return inFlight?.stop ?? false
+}
+
+export function useStopping(): boolean {
+  return useSyncExternalStore(changed.subscribe, submitStopping)
 }
 
 /** Close the overlay, or cancel the check before it. Refused while merges are being sent. */

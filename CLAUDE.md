@@ -533,9 +533,12 @@ rule belongs to one area, its record is in that area's doc.
   at`, a run record (`ParamBase.runRecord`: written mid-run by `ctx.record`, out of the key, emptied
   only by the ⟳, which moves the key via `renewNode`); Find Open Ends reads its nucleus table live.
   A box is rooted through the memo it started with (`BoxReader.memo`), never a shared map moved.
-- **A merge onto a piece waits for `waitsFor` — the piece its end is on *and* the piece it was
-  accepted on** — one spelling for the batch and the dialog's ticks. The neuron's side is the
-  neuron and the piece's *own* path, never a sibling; an end on any other root refuses that row.
+- **`waitsFor` — the piece a merge's end is on *and* the piece it was accepted on — is what the
+  dialog's ticks follow.** The neuron's side is the neuron and the piece's *own* path, never a
+  sibling; an end on any other root refuses that row. **The batch sends from the tips in, up to
+  `MERGES_IN_FLIGHT`, never one root in two merges** (the server's root lock), so a stop can leave
+  pieces joined short of the neuron: the record replays each merge's two roots (`neuronRoot`,
+  `candidateRootAt`) into `MergedSoFar.joined`, and the plan merges a group at its root.
 
 ### The wizard, the pages and the help — [docs/wizard.md](docs/wizard.md), [docs/pages.md](docs/pages.md), [docs/help.md](docs/help.md)
 

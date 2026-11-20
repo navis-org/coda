@@ -304,7 +304,14 @@ describe('planMerges', () => {
         ['11', '12', '999'],
       ])
       expect(plan.currentRoot).toBe('150')
-      expect(plan.settled).toEqual({ entry: record[0], newRoot: '150' })
+      expect(plan.settled).toEqual([
+        expect.objectContaining({
+          ...record[0],
+          at: expect.any(String),
+          outcome: 'merged',
+          newRoot: '150',
+        }),
+      ])
       expect(asked.latest).toEqual([['150', '8', '9']])
       expect(refusals(plan)).toEqual([['7', 'already-merged']])
     })
@@ -783,6 +790,85 @@ describe('planning a neuron grown piece by piece', () => {
   it('does not take a piece of this neuron for another neuron under review', async () => {
     const plan = await planned(grown(), services({ onRoot: onParent }).fake)
     expect(plan.merges.map((m) => m.joinsNeuron)).toEqual([false, false, false, false])
+  })
+
+  /**
+   * A batch that merges from the tips in and stopped part way leaves pieces merged onto each other
+   * short of the neuron (`MergedSoFar.joined`). Each group goes in with the merge of the piece
+   * farthest in, at the group's root; the rest are listed as joined already.
+   */
+  describe('pieces joined short of the neuron', () => {
+    /** `candidate` merged onto `onto` (a root) by this workflow, making `newRoot`. */
+    const joined = (candidate: string, onto: string, newRoot: string, at?: string) => ({
+      ...made(NEURON, candidate, newRoot),
+      neuronRoot: onto,
+      ...(at === undefined ? {} : { candidateRootAt: at }),
+    })
+
+    it('plans the group whole, at its root, and lists the rest as joined', async () => {
+      // 11 onto 9, then 9 (with 11) onto 7: all three under 302, short of the neuron.
+      const record = [joined('11', '9', '301'), joined('9', '7', '302', '301')]
+      const { fake, asked } = services()
+      const plan = await planned(grown(record), fake)
+      expect(plan.merges.map((m) => [m.candidateRoot, m.pieceRoot])).toEqual([
+        ['7', '302'],
+        ['8', undefined],
+      ])
+      expect(refusals(plan)).toEqual([
+        ['9', 'joined'],
+        ['11', 'joined'],
+      ])
+      expect(plan.rejected[0]!.message).toBe(
+        'Merged onto 7 by this workflow already; it goes into the neuron with it.',
+      )
+      // Its currency and its end are read at the group's root.
+      expect(asked.latest).toEqual([[NEURON, '302', '8']])
+      expect(asked.anchored.map((p) => p.candidateRoot)).toEqual(['302', '8'])
+      expect(plan.currentRoot).toBe(NEURON)
+    })
+
+    it('reads the pieces on the way at their group root, and waits for the group’s merge', async () => {
+      // 11 onto 9 only: 9 carries the two, onto 7, which is still its own.
+      const record = [joined('11', '9', '301')]
+      const { fake, asked } = services({
+        onRoot: (pair) => (pair.candidateRoot === '301' ? '7' : undefined),
+      })
+      const plan = await planned(grown(record), fake)
+      expect(plan.merges.map((m) => [m.candidateRoot, m.parent, m.needs, m.pieceRoot])).toEqual(
+        [
+          ['7', undefined, undefined, undefined],
+          ['8', undefined, undefined, undefined],
+          ['9', '7', '7', '301'],
+        ],
+      )
+      expect(refusals(plan)).toEqual([['11', 'joined']])
+      expect(asked.anchored.find((p) => p.candidateRoot === '301')!.alsoNeuron).toEqual(['7'])
+    })
+
+    /** The reader rejected 9 after a stopped batch joined 11 onto it: 11 would take 9 in. */
+    it('refuses a group holding a piece no longer accepted', async () => {
+      const record = [joined('11', '9', '301')]
+      const rejected9 = new Map(verdicts).set(verdictKey('7', '9'), 'reject')
+      // 11 is accepted on the neuron too, so it still has a way there without 9.
+      const queue2 = [...queue, tip(2, [candidate('11', 1, 0.1)])]
+      const verdicts2 = new Map(rejected9).set(verdictKey(NEURON, '11'), 'accept')
+      const plan = await planned(
+        { ...grown(record), queue: queue2, verdicts: verdicts2 },
+        services().fake,
+      )
+      const refused = plan.rejected.find((r) => r.candidateRoot === '11')!
+      expect(refused.reason).toBe('joined')
+      expect(refused.message).toContain('9, which is no longer accepted')
+      expect(plan.merges.map((m) => m.candidateRoot)).not.toContain('11')
+    })
+
+    it('says an edited group was edited with what it carries', async () => {
+      const record = [joined('11', '9', '301')]
+      const plan = await planned(grown(record), services({ stale: ['301'] }).fake)
+      const refused = plan.rejected.find((r) => r.candidateRoot === '9')!
+      expect(refused.reason).toBe('outdated')
+      expect(refused.message).toContain('(301)')
+    })
   })
 
   describe('the accepted pieces as a tree', () => {

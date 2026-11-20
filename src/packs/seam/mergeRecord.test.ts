@@ -73,7 +73,13 @@ const RECORD: MergeRecordEntry[] = [
     outcome: 'merged',
     newRoot: '720575940700000002',
   },
-  { ...base, reviewedRoot: '720575940699999999', candidateRoot: '9', outcome: 'unknown' },
+  {
+    ...base,
+    reviewedRoot: '720575940699999999',
+    neuronRoot: '720575940699999999',
+    candidateRoot: '9',
+    outcome: 'unknown',
+  },
 ]
 
 describe('the merge record', () => {
@@ -187,6 +193,7 @@ describe('mergedSoFar', () => {
       currentRoot: '720575940700000002',
       roots: [NEURON, '720575940700000001', '720575940700000002'],
       pieces: new Set(['720575940000000001', '720575940000000002', '720575940000000004']),
+      joined: new Map(),
       otherRoots: new Set(['720575940699999999']),
       elsewhere: new Set(),
       unsettled: [],
@@ -200,12 +207,109 @@ describe('mergedSoFar', () => {
       currentRoot: '720575940699999999',
       roots: ['720575940699999999'],
       pieces: new Set(),
+      joined: new Map(),
       otherRoots: new Set([NEURON, '720575940700000001', '720575940700000002']),
       elsewhere: new Set(['720575940000000001', '720575940000000002', '720575940000000004']),
       // A lost reply nothing has settled: the plan asks the roots.
       unsettled: [RECORD[4]],
       absorbedInto: undefined,
     })
+  })
+})
+
+/**
+ * A batch merges a tree from its tips in (`mergeBatch.ts`), so a stopped one can leave pieces
+ * merged onto each other and not yet into the neuron. The record says each merge's two roots,
+ * and is replayed in its order.
+ */
+describe('pieces joined short of the neuron', () => {
+  const P1 = '720575940000000011'
+  const P2 = '720575940000000012'
+  const G = '720575940700000031'
+  /** P2 onto P1, short of the neuron. */
+  const onto: MergeRecordEntry = {
+    ...base,
+    candidateRoot: P2,
+    parentRoot: P1,
+    neuronRoot: P1,
+    outcome: 'merged',
+    newRoot: G,
+  }
+  /** P1, carrying P2, into the neuron. */
+  const into: MergeRecordEntry = {
+    ...base,
+    candidateRoot: P1,
+    candidateRootAt: G,
+    outcome: 'merged',
+    newRoot: '720575940700000032',
+  }
+
+  it('are joined, both at their root, and the neuron has not moved', () => {
+    const so = mergedSoFar([onto], NEURON)
+    expect(so.currentRoot).toBe(NEURON)
+    // Their root was never the neuron's.
+    expect(so.roots).toEqual([NEURON])
+    expect(so.pieces).toEqual(new Set())
+    expect(so.joined).toEqual(
+      new Map([
+        [P1, G],
+        [P2, G],
+      ]),
+    )
+  })
+
+  it('go into the neuron together with the merge that carries them', () => {
+    const so = mergedSoFar([onto, into], NEURON)
+    expect(so.currentRoot).toBe('720575940700000032')
+    expect(so.roots).toEqual([NEURON, '720575940700000032'])
+    expect(so.pieces).toEqual(new Set([P1, P2]))
+    expect(so.joined).toEqual(new Map())
+  })
+
+  it('leave a lost reply on the neuron open while the neuron’s root stands', () => {
+    const lost: MergeRecordEntry = {
+      ...base,
+      candidateRoot: '720575940000000013',
+      outcome: 'unknown',
+    }
+    // A merge short of the neuron after it moves nothing it was checked against.
+    expect(mergedSoFar([lost, onto], NEURON).unsettled).toEqual([lost])
+    // One into the neuron does.
+    expect(mergedSoFar([lost, onto, into], NEURON).unsettled).toEqual([])
+  })
+
+  it('keep a lost reply carrying them open until their root moves', () => {
+    const lost: MergeRecordEntry = { ...into, outcome: 'unknown' } as MergeRecordEntry
+    expect(mergedSoFar([onto, lost], NEURON).unsettled).toEqual([lost])
+    const settled = settledEntry(lost, '720575940700000033', '2026-11-16T11:00:00.000Z')
+    expect(settled).toMatchObject({ candidateRootAt: G, neuronRoot: NEURON })
+    const after = mergedSoFar([onto, lost, settled], NEURON)
+    expect(after).toMatchObject({ currentRoot: '720575940700000033', unsettled: [] })
+    expect(after.pieces).toEqual(new Set([P1, P2]))
+  })
+
+  it('keep their neuron whole when the record is shortened', () => {
+    const text = JSON.stringify([onto])
+    expect(shortenedRecord(text, new Set())).toBeUndefined()
+    // Once in the neuron, it shortens, the merge short of it keeping the root it was made onto.
+    const done = decodeRecord(shortenedRecord(JSON.stringify([onto, into]), new Set())!)
+    expect(done[0]).toMatchObject({ short: true, neuronRoot: P1, newRoot: G })
+    expect(done[1]).not.toHaveProperty('neuronRoot')
+    expect(mergedSoFar(done, NEURON).currentRoot).toBe('720575940700000032')
+    expect(mergedSoFar(done, NEURON).pieces).toEqual(new Set([P1, P2]))
+    // Read as one into the neuron, the merge short of it would leave the neuron at its root.
+    const found: MergeRecordEntry = {
+      ...base,
+      candidateRoot: P1,
+      candidateRootAt: G,
+      outcome: 'already-merged',
+    }
+    const shortened = decodeRecord(shortenedRecord(JSON.stringify([onto, found]), new Set())!)
+    expect(mergedSoFar(shortened, NEURON).currentRoot).toBe(NEURON)
+  })
+
+  it('show the root a piece was checked at in Merges', () => {
+    expect(mergesTable([onto, into]).data['candidate_root']).toEqual([null, G])
   })
 })
 

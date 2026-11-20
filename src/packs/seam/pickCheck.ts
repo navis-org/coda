@@ -14,6 +14,7 @@ import { NM_PER_UM } from '../../data/units'
 import { distance2 } from './handPicks'
 import type { AnchorPair, AnchorVolume, Anchors } from './mergeAnchors'
 import { UNKNOWN_GAP_REACH_NM, anchorMerge, openAnchorVolume } from './mergeAnchors'
+import { rootNow } from './mergeRecord'
 
 /** What a pick is checked against: the segment, the place, and the neuron as it stands. */
 export interface PickRequest {
@@ -25,6 +26,11 @@ export interface PickRequest {
   readonly neuronRoot: string
   /** The pieces the neuron is extended with and not merged yet: its tips are on them too. */
   readonly pieces: readonly string[]
+  /**
+   * Of those, the ones Submit merged onto each other short of the neuron, each with their root
+   * now (`MergedSoFar.joined`): what the segmentation has them under.
+   */
+  readonly joined?: ReadonlyMap<string, string> | undefined
 }
 
 export type PickCheck =
@@ -71,10 +77,11 @@ export async function checkPick(
   services: PickServices = LIVE,
 ): Promise<PickCheck> {
   const { segment, seed, neuronRoot, pieces } = request
+  const rootOf = (id: string) => rootNow(request.joined, id)
   if (segment === seed || segment === neuronRoot) {
     return { ok: false, message: 'That is the neuron itself.' }
   }
-  if (pieces.includes(segment)) {
+  if (pieces.some((piece) => piece === segment || rootOf(piece) === segment)) {
     return { ok: false, message: 'That piece is already accepted on this neuron.' }
   }
   try {
@@ -89,7 +96,7 @@ export async function checkPick(
       volume,
       {
         neuronRoot,
-        alsoNeuron: pieces,
+        alsoNeuron: [...new Set(pieces.map(rootOf))],
         candidateRoot: segment,
         contactNm: request.positionNm,
         // Unmeasured: looked for at `UNKNOWN_GAP_REACH_NM`.
@@ -99,12 +106,18 @@ export async function checkPick(
     )
     if (!anchors.ok) return { ok: false, message: refusalOf(anchors, segment) }
     const on = anchors.onRoot
-    const root =
-      on === neuronRoot || on === undefined ? seed : pieces.includes(on) ? on : undefined
+    const root = on === neuronRoot || on === undefined ? seed : pieces.find((p) => p === on)
     if (root === undefined) {
+      /*
+       * Pieces Submit joined short of the neuron are one segment now: which of them the pick
+       * continues cannot be told, and it would be placed on whichever came first.
+       */
+      const joined = pieces.some((piece) => piece !== on && rootOf(piece) === on)
       return {
         ok: false,
-        message: `The nearest part of the neuron there is on ${on}, which is neither the neuron nor a piece accepted on it.`,
+        message: joined
+          ? `The nearest part of the neuron there is on ${on}, pieces Submit joined short of the neuron. Submit them, then pick again.`
+          : `The nearest part of the neuron there is on ${on}, which is neither the neuron nor a piece accepted on it.`,
       }
     }
     const a = anchors.neuron.positionNm

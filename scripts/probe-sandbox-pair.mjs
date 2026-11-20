@@ -5,6 +5,7 @@
  *   pnpm probe:sandbox-pair                            # around the middle of the volume
  *   pnpm probe:sandbox-pair -- --at 10752,28222,2205   # around a voxel at the base scale
  *   pnpm probe:sandbox-pair -- --chain                  # three in a row, for the chain test
+ *   pnpm probe:sandbox-pair -- --tree                   # a chain and a second piece on its neuron
  *
  * **Reads only**, and held to it: it does not import the writer, and it runs behind
  * `fenceWrites({})`, which refuses any chunkedgraph write at `fetch`. It reads one box of the
@@ -106,6 +107,7 @@ async function main() {
     e.voxel.map((v, a) => (box.lo[a] + v + 0.5 + (a === e.axis ? 0.5 : 0)) * scale.resolution[a])
 
   if (args.all.includes('--chain')) return chains(ranked)
+  if (args.all.includes('--tree')) return trees(ranked)
 
   for (const e of ranked.slice(0, SHOWN)) {
     const contactNm = contactOf(e)
@@ -129,6 +131,76 @@ async function main() {
    * touches both; N and B do not have to touch each other. Anchored the way that merge is: A onto
    * N, then B onto N **and A read as one side**, which has to land on A.
    */
+  /**
+   * `--tree`: a chain N – A – B and a fourth root C touching N too, for the test of a batch that
+   * merges from the tips in (`scripts/probe-cave-merge-tree.mjs`): B onto A and C onto N go side
+   * by side, on roots nothing else uses. C touches neither A nor B.
+   */
+  async function trees(pairs) {
+    const partners = new Map()
+    const touch = new Set()
+    for (const e of pairs) {
+      touch.add(`${e.p},${e.q}`).add(`${e.q},${e.p}`)
+      for (const [one, other] of [
+        [e.p, e.q],
+        [e.q, e.p],
+      ]) {
+        partners.set(one, [...(partners.get(one) ?? []), { other, e }])
+      }
+    }
+    const found = []
+    for (const [n, onN] of partners) {
+      for (const { other: a, e: na } of onN) {
+        for (const { other: b, e: ab } of partners.get(a) ?? []) {
+          if (b === n || touch.has(`${b},${n}`)) continue
+          for (const { other: c, e: nc } of onN) {
+            if (c === a || c === b || touch.has(`${c},${a}`) || touch.has(`${c},${b}`)) continue
+            found.push({
+              n, a, b, c, na, ab, nc,
+              size: Math.max(...[n, a, b, c].map(sizeOf)),
+            })
+          }
+        }
+      }
+    }
+    found.sort((x, y) => x.size - y.size)
+    console.log(`${found.length} trees of four\n`)
+    for (const t of found.slice(0, SHOWN)) {
+      const contacts = [contactOf(t.na), contactOf(t.ab), contactOf(t.nc)]
+      const a = await anchorMerge(
+        volume,
+        { neuronRoot: t.n, candidateRoot: t.a, contactNm: contacts[0], minDistUm: 0 },
+        options,
+      )
+      const b = await anchorMerge(
+        volume,
+        { neuronRoot: t.n, alsoNeuron: [t.a], candidateRoot: t.b, contactNm: contacts[1], minDistUm: 0 },
+        options,
+      )
+      const c = await anchorMerge(
+        volume,
+        { neuronRoot: t.n, candidateRoot: t.c, contactNm: contacts[2], minDistUm: 0 },
+        options,
+      )
+      console.log(
+        `${t.n} (${sizeOf(t.n)} L2): A ${t.a} (${sizeOf(t.a)}), B ${t.b} (${sizeOf(t.b)}) on A, ` +
+          `C ${t.c} (${sizeOf(t.c)})`,
+      )
+      console.log(
+        `    --tree ${t.n},${t.a},${t.b},${t.c} --contacts "${contacts
+          .map((nm) => nm.map((v) => v.toFixed(1)).join(','))
+          .join(';')}"`,
+      )
+      console.log(
+        `    A ${a.ok ? 'anchors' : `not anchored (${a.reason})`}; B ` +
+          (b.ok
+            ? `anchors on ${b.onRoot === t.a ? 'A' : `root ${b.onRoot}`}`
+            : `not anchored (${b.reason})`) +
+          `; C ${c.ok ? 'anchors' : `not anchored (${c.reason})`}`,
+      )
+    }
+  }
+
   async function chains(pairs) {
     const partners = new Map()
     for (const e of pairs) {

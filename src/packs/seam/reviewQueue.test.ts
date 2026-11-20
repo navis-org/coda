@@ -853,6 +853,7 @@ describe('the scene after merges', () => {
     currentRoot: 'n1b',
     roots: ['n1', 'n1b'],
     pieces: new Set(['p']),
+    joined: new Map<string, string>(),
     otherRoots: new Set<string>(),
     elsewhere: new Set<string>(),
     unsettled: [],
@@ -863,6 +864,14 @@ describe('the scene after merges', () => {
     expect(scenePieces(queue, 'n1', undefined, verdicts, true, merged)).toEqual([
       { id: 'n1b', part: 'neuron' },
       { id: 'q', part: 'accepted' },
+    ])
+  })
+
+  it('draws pieces joined short of the neuron as their root', () => {
+    const joined = { ...merged, joined: new Map([['q', 'g1']]) }
+    expect(scenePieces(queue, 'n1', undefined, verdicts, true, joined)).toEqual([
+      { id: 'n1b', part: 'neuron' },
+      { id: 'g1', part: 'accepted' },
     ])
   })
 

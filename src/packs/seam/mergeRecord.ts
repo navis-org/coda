@@ -95,7 +95,11 @@ export type RecordOutcome =
  * without naming a module that writes.
  */
 export interface MergeProgress {
-  readonly state: 'waiting' | 'sending' | RecordOutcome
+  /**
+   * `joined`: merged onto pieces that are not in the neuron yet; it goes in with them. Recorded
+   * `merged`, as it is one.
+   */
+  readonly state: 'waiting' | 'sending' | 'joined' | RecordOutcome
   readonly message?: string | undefined
 }
 
@@ -118,11 +122,18 @@ export interface EntryBase {
    */
   readonly parentRoot?: string | undefined
   /**
-   * The neuron's root the merge was checked against: the reviewed one, or the last merge's. On
-   * a merge not sent because a piece it waits for did not land, **the root it would have been
-   * checked against** — no check was made, and its neuron end may be on that piece, not here.
+   * The root the merge's neuron end was checked against: the neuron's (the reviewed one, or the
+   * last merge's), or, **for a piece merged onto pieces not in the neuron yet** (a batch merges a
+   * tree from its tips, `mergeBatch.ts`), the root of those pieces. On a merge not sent because a
+   * piece it waits for did not land, **the root it would have been checked against** — no check
+   * was made.
    */
   readonly neuronRoot: string
+  /**
+   * The root the piece's end was checked against, where that was not the piece's own: pieces this
+   * workflow had already merged onto it. Absent where it was the piece itself.
+   */
+  readonly candidateRootAt?: string | undefined
   readonly neuron: MergeEnd
   readonly candidate: MergeEnd
   /** When the batch decided, ISO 8601. */
@@ -135,7 +146,7 @@ export interface EntryBase {
 export type EntryOutcome =
   | {
       readonly outcome: 'merged'
-      /** The neuron's root after this merge. */
+      /** The root this merge made: the neuron's, or that of the pieces it joined (`neuronRoot`). */
       readonly newRoot: string
       /** Absent where the reply was lost and the roots showed the merge. */
       readonly operationId?: string | undefined
@@ -162,8 +173,14 @@ export type ShortEntry = {
   readonly reviewedRoot: string
   readonly candidateRoot: string
 } & (
-  | { readonly outcome: 'merged'; readonly newRoot: string }
-  | { readonly outcome: 'already-merged' | 'failed' | 'not-sent' }
+  | {
+      readonly outcome: 'merged'
+      readonly newRoot: string
+      /** Where it was made onto pieces short of the neuron: their root (`neuronRoot`). */
+      readonly neuronRoot?: string | undefined
+    }
+  | { readonly outcome: 'already-merged'; readonly neuronRoot?: string | undefined }
+  | { readonly outcome: 'failed' | 'not-sent' }
 )
 
 /** An entry as the record is read: in full, or short. */
@@ -182,14 +199,20 @@ export interface MergedSoFar {
   readonly roots: readonly string[]
   /** The pieces in the neuron by this workflow's account: merged, or found merged. */
   readonly pieces: ReadonlySet<string>
+  /**
+   * Pieces this workflow merged onto each other and not yet into the neuron — a batch that merges
+   * a tree from its tips and stopped part way — each with the root they are under together now.
+   * The piece that was merged onto is here too: its own root is gone as well.
+   */
+  readonly joined: ReadonlyMap<string, string>
   /** Every root another reviewed neuron in the record has had. */
   readonly otherRoots: ReadonlySet<string>
   /** The pieces this workflow put in another reviewed neuron: part of that one now. */
   readonly elsewhere: ReadonlySet<string>
   /**
-   * The neuron's `unknown` entries since its last `merged` one: merges whose reply was lost, which
-   * nothing has settled. Any of them may have landed since — even after a later batch's check — and
-   * then the neuron's root is not `currentRoot`. The plan asks the roots (`mergePlan.ts`).
+   * The neuron's `unknown` entries whose two roots no later merge has moved: merges whose reply was
+   * lost, which nothing has settled. Any of them may have landed since — even after a later batch's
+   * check — and then those roots are not the record's. The plan asks the roots (`mergePlan.ts`).
    */
   readonly unsettled: readonly MergeRecordEntry[]
   /**
@@ -211,56 +234,155 @@ export function mergedSoFar(
   reviewedRoot: string,
   scope: RecordScope | undefined,
 ): MergedSoFar {
+  const groups = new Groups()
   const roots = [reviewedRoot]
   const pieces = new Set<string>()
   const otherRoots = new Set<string>()
   const elsewhere = new Set<string>()
-  let unsettled: MergeRecordEntry[] = []
-  // Each reviewed neuron's root now, and which reviewed neuron took each one in, if any did.
-  const latest = new Map<string, string>()
-  const takenBy = new Map<string, string>()
+  /** Every root a merge made, which is never a piece. */
+  const made = new Set<string>()
+  /** The pieces this neuron's merges joined to something, wherever they are now. */
+  const mineIn: string[] = []
+  let unknowns: MergeRecordEntry[] = []
+  // Whether another reviewed neuron took this one in.
+  let taken = false
   for (const entry of record) {
     if (!inScope(entry, scope)) continue
-    if (entry.outcome === 'merged') latest.set(entry.reviewedRoot, entry.newRoot)
-    if (inNeuron(entry)) takenBy.set(entry.candidateRoot, entry.reviewedRoot)
+    // Made onto its neuron's group, as it stood: a merge short of it gives the neuron no root.
+    const ontoNeuron =
+      'short' in entry
+        ? !('neuronRoot' in entry && entry.neuronRoot !== undefined)
+        : groups.find(entry.neuronRoot) === groups.find(entry.reviewedRoot)
+    groups.replay(entry)
+    if (entry.outcome === 'merged') made.add(entry.newRoot)
+    if (inNeuron(entry) && entry.candidateRoot === reviewedRoot) taken = true
     const mine = entry.reviewedRoot === reviewedRoot
     if (!mine) otherRoots.add(entry.reviewedRoot)
-    else if (entry.outcome === 'unknown') unsettled.push(entry)
-    else if (entry.outcome === 'merged') unsettled = []
+    else if (entry.outcome === 'unknown') unknowns.push(entry)
     // A short entry's neuron has nothing unsettled (`shortenedRecord`), so it settles nothing.
     else if (entry.outcome === 'failed' && !('short' in entry)) {
       // The server's refusal of the same pair at the same root: nothing was written, so a late
       // answer to a merge recorded `unknown` settles it as not made.
-      unsettled = unsettled.filter(
+      unknowns = unknowns.filter(
         (open) =>
           open.candidateRoot !== entry.candidateRoot || open.neuronRoot !== entry.neuronRoot,
       )
     }
     if (!inNeuron(entry)) continue
-    ;(mine ? pieces : elsewhere).add(entry.candidateRoot)
-    if (entry.outcome !== 'merged') continue
+    if (mine) mineIn.push(entry.candidateRoot)
+    else elsewhere.add(entry.candidateRoot)
+    if (entry.outcome !== 'merged' || !ontoNeuron) continue
     if (mine) roots.push(entry.newRoot)
     else otherRoots.add(entry.newRoot)
   }
-  // Followed to the end — A into B, then B into C, is C — and never round a loop.
-  let absorbedBy: string | undefined
-  for (let at = takenBy.get(reviewedRoot), seen = new Set([reviewedRoot]); at;) {
-    if (seen.has(at)) break
-    seen.add(at)
-    absorbedBy = at
-    at = takenBy.get(at)
+  const currentRoot = groups.find(reviewedRoot)
+  // Each group of pieces not in the neuron, every piece in it: the record's own roots are not pieces.
+  const joined = new Map<string, string>()
+  for (const id of mineIn) {
+    const root = groups.find(id)
+    if (root === currentRoot) {
+      pieces.add(id)
+      continue
+    }
+    if (joined.has(id)) continue
+    for (const member of groups.members(id)) {
+      if (!made.has(member) && member !== reviewedRoot) joined.set(member, root)
+    }
   }
-  const absorbedInto =
-    absorbedBy === undefined ? undefined : (latest.get(absorbedBy) ?? absorbedBy)
+  /*
+   * A lost reply is open while both roots it was checked against still stand: a merge recorded
+   * after it onto either has moved that root on, and was checked against the root it moved.
+   */
+  const standing = (id: string) => groups.find(id) === id
+  const unsettled = unknowns.filter(
+    (entry) =>
+      standing(entry.neuronRoot) && standing(entry.candidateRootAt ?? entry.candidateRoot),
+  )
   return {
-    currentRoot: roots.at(-1)!,
+    currentRoot,
     roots,
     pieces,
+    joined,
     otherRoots,
     elsewhere,
     unsettled,
-    absorbedInto,
+    // A neuron another took in is drawn as what it is part of now: its own root is retired.
+    absorbedInto: taken ? currentRoot : undefined,
   }
+}
+
+/**
+ * Which root each id is under by the record's account — pieces, reviewed neurons, and the roots
+ * merges made — replayed in the order the entries were written. **A merge joins two groups**: the
+ * one its neuron end was checked against and the piece's; an `already-merged` puts the piece's
+ * group under the other's root, as nothing new was made. A short entry is of a neuron whose
+ * pieces all went into it (`shortenedRecord`), so its neuron end is the neuron's group.
+ *
+ * **The batch keeps its own account in one of these too** (`mergeBatch.ts`), replaying each entry
+ * as it records it, so the run and every later reading of its record cannot disagree.
+ */
+export class Groups {
+  private readonly groupOf = new Map<string, Group>()
+
+  /** The root `id` is under: its own where nothing has joined it. */
+  find(id: string): string {
+    return this.groupOf.get(id)?.root ?? id
+  }
+
+  /** Every id in `id`'s group, the roots merges made among them. */
+  members(id: string): readonly string[] {
+    return this.groupOf.get(id)?.members ?? [id]
+  }
+
+  /** `id` under `root`, as a batch starts from its plan's roots. */
+  seed(id: string, root: string): void {
+    this.join(root, [id])
+  }
+
+  replay(entry: RecordEntry): void {
+    if (!inNeuron(entry)) return
+    const onto =
+      'short' in entry
+        ? (('neuronRoot' in entry ? entry.neuronRoot : undefined) ?? entry.reviewedRoot)
+        : entry.neuronRoot
+    const piece =
+      'short' in entry ? entry.candidateRoot : (entry.candidateRootAt ?? entry.candidateRoot)
+    const ids = [onto, piece, entry.candidateRoot]
+    if (entry.outcome === 'merged') this.join(entry.newRoot, ids)
+    else this.join(this.find(onto), ids)
+  }
+
+  /** `root` and the groups of `ids`, one group under `root` from now on: the smaller moved. */
+  private join(root: string, ids: readonly string[]): void {
+    const groups = new Set<Group>()
+    for (const id of [root, ...ids]) {
+      let group = this.groupOf.get(id)
+      if (!group) {
+        group = { root: id, members: [id] }
+        this.groupOf.set(id, group)
+      }
+      groups.add(group)
+    }
+    const into = [...groups].reduce((a, b) => (b.members.length > a.members.length ? b : a))
+    for (const group of groups) {
+      if (group === into) continue
+      for (const member of group.members) {
+        into.members.push(member)
+        this.groupOf.set(member, into)
+      }
+    }
+    into.root = root
+  }
+}
+
+interface Group {
+  root: string
+  readonly members: string[]
+}
+
+/** The root a piece is read as: its own, or that of the pieces it was joined to (`joined`). */
+export function rootNow(joined: ReadonlyMap<string, string> | undefined, id: string): string {
+  return joined?.get(id) ?? id
 }
 
 /**
@@ -295,6 +417,7 @@ export function settledEntry(
     endUid: entry.endUid,
     ...(entry.parentRoot === undefined ? {} : { parentRoot: entry.parentRoot }),
     neuronRoot: entry.neuronRoot,
+    ...(entry.candidateRootAt === undefined ? {} : { candidateRootAt: entry.candidateRootAt }),
     neuron: entry.neuron,
     candidate: entry.candidate,
     at,
@@ -361,7 +484,9 @@ export function decodeRecord(raw: unknown): RecordEntry[] {
  * The record with every neuron not in `kept` shortened (the header), or undefined where there is
  * nothing to shorten. **A neuron with a merge still unsettled in any chunkedgraph is left whole**
  * — settling it reads the supervoxels of its entries (`mergePlan`'s `settle`), and a `failed` entry
- * can be what settles another. With none, every `unknown` was settled by an entry after it, so
+ * can be what settles another — **and so is one with pieces joined short of it** (`joined`), whose
+ * groups are read off whole entries. A merge made short of the neuron that has since gone in keeps
+ * the root it was made onto in its short form, as nothing else would tell it from one into it. With none, every `unknown` was settled by an entry after it, so
  * dropping the unknowns with the failures leaves `mergedSoFar`'s answer as it was. Entries this
  * cannot read are kept, as `appendEntry` keeps them, and the order is kept: it is what makes the
  * last merge's root the current one.
@@ -371,12 +496,26 @@ export function shortenedRecord(raw: unknown, kept: ReadonlySet<string>): string
   if (!held) return undefined
   const entries = held.map((value) => (isEntry(value) ? value : undefined))
   const full = entries.filter((entry) => entry !== undefined)
-  // Only an `unknown` can be unsettled, and only in the chunkedgraph it was made on.
+  /*
+   * Only an `unknown` can be unsettled, and only a `merged` can join pieces short of the neuron;
+   * each in the chunkedgraph it was made on.
+   */
   const open = new Set<string>()
-  for (const { reviewedRoot: root, outcome, deployment, datastack } of full) {
-    if (outcome !== 'unknown' || kept.has(root) || open.has(root)) continue
-    if (deployment === undefined || datastack === undefined) continue
-    if (mergedSoFar(full, root, { deployment, datastack }).unsettled.length > 0) open.add(root)
+  // Each neuron read once per chunkedgraph: a neuron of hundreds of merges is one replay.
+  const read = new Map<string, MergedSoFar>()
+  const soOf = (entry: MergeRecordEntry): MergedSoFar | undefined => {
+    const { reviewedRoot: root, deployment, datastack } = entry
+    if (deployment === undefined || datastack === undefined) return undefined
+    const key = `${root}|${deployment}|${datastack}`
+    let so = read.get(key)
+    if (!so) read.set(key, (so = mergedSoFar(full, root, { deployment, datastack })))
+    return so
+  }
+  for (const entry of full) {
+    if (entry.outcome !== 'unknown' && entry.outcome !== 'merged') continue
+    if (kept.has(entry.reviewedRoot) || open.has(entry.reviewedRoot)) continue
+    const so = soOf(entry)
+    if (so && (so.unsettled.length > 0 || so.joined.size > 0)) open.add(entry.reviewedRoot)
   }
   let changed = false
   const out: unknown[] = []
@@ -387,16 +526,23 @@ export function shortenedRecord(raw: unknown, kept: ReadonlySet<string>): string
       return
     }
     changed = true
-    if (entry.outcome !== 'unknown') out.push(shortText(entry))
+    if (entry.outcome === 'unknown') return
+    // A merge made onto pieces short of the neuron keeps their root: it was no neuron root.
+    const ontoNeuron = soOf(entry)?.roots.includes(entry.neuronRoot) ?? true
+    out.push(shortText(entry, ontoNeuron))
   })
   return changed ? JSON.stringify(out) : undefined
 }
 
 /**
  * A short entry as the param holds it: `[outcome, deployment, datastack, reviewed, candidate]`,
- * and the new root after a `merged` one. Absent scope is `null`, as JSON has no undefined.
+ * the new root after a `merged` one, and last, where a `merged` or `already-merged` one was made
+ * onto pieces short of the neuron, their root. Absent scope is `null`, as JSON has no undefined.
  */
-function shortText(entry: Exclude<MergeRecordEntry, { outcome: 'unknown' }>): unknown[] {
+function shortText(
+  entry: Exclude<MergeRecordEntry, { outcome: 'unknown' }>,
+  ontoNeuron: boolean,
+): unknown[] {
   const head = [
     entry.outcome,
     entry.deployment ?? null,
@@ -404,12 +550,14 @@ function shortText(entry: Exclude<MergeRecordEntry, { outcome: 'unknown' }>): un
     entry.reviewedRoot,
     entry.candidateRoot,
   ]
-  return entry.outcome === 'merged' ? [...head, entry.newRoot] : head
+  const onto = ontoNeuron ? [] : [entry.neuronRoot]
+  if (entry.outcome === 'merged') return [...head, entry.newRoot, ...onto]
+  return entry.outcome === 'already-merged' ? [...head, ...onto] : head
 }
 
 function shortOf(value: unknown): ShortEntry | undefined {
   if (!Array.isArray(value)) return undefined
-  const [outcome, deployment, datastack, reviewedRoot, candidateRoot, newRoot] =
+  const [outcome, deployment, datastack, reviewedRoot, candidateRoot, sixth, seventh] =
     value as unknown[]
   const scope = (v: unknown) => v === null || typeof v === 'string'
   const id = (v: unknown): v is string => typeof v === 'string' && isNodeId(v)
@@ -423,14 +571,18 @@ function shortOf(value: unknown): ShortEntry | undefined {
     reviewedRoot,
     candidateRoot,
   }
-  if (
-    (outcome === 'already-merged' || outcome === 'failed' || outcome === 'not-sent') &&
-    value.length === 5
-  ) {
+  if ((outcome === 'failed' || outcome === 'not-sent') && value.length === 5) {
     return { ...base, outcome }
   }
-  if (outcome === 'merged' && value.length === 6 && id(newRoot)) {
-    return { ...base, outcome: 'merged', newRoot }
+  if (outcome === 'already-merged') {
+    if (value.length === 5) return { ...base, outcome }
+    if (value.length === 6 && id(sixth)) return { ...base, outcome, neuronRoot: sixth }
+  }
+  if (outcome === 'merged' && id(sixth)) {
+    if (value.length === 6) return { ...base, outcome: 'merged', newRoot: sixth }
+    if (value.length === 7 && id(seventh)) {
+      return { ...base, outcome: 'merged', newRoot: sixth, neuronRoot: seventh }
+    }
   }
   return undefined
 }
@@ -469,6 +621,7 @@ function isEntry(value: unknown): value is MergeRecordEntry {
   if (!absentOr('deployment', (v) => typeof v === 'string')) return false
   if (!absentOr('datastack', (v) => typeof v === 'string')) return false
   if (!absentOr('parentRoot', (v) => typeof v === 'string' && isNodeId(v))) return false
+  if (!absentOr('candidateRootAt', (v) => typeof v === 'string' && isNodeId(v))) return false
   // An operation id is a counter from 1 — the writer's own `isOperationId`, which is `isNodeId`'s.
   if (!absentOr('operationId', (v) => typeof v === 'string' && isNodeId(v))) return false
   if (!absentOr('status', Number.isSafeInteger)) return false
@@ -487,7 +640,10 @@ export function mergesSchema(): TableSchema {
     // root's own, so without this the row names another root's tip.
     column('accepted_on', 'str'),
     column('outcome', 'str'),
+    // What each end was checked against: `neuron_root` is the neuron's, or the root of pieces
+    // merged onto each other short of it; `candidate_root` is empty where it was the piece's own.
     column('neuron_root', 'str'),
+    column('candidate_root', 'str'),
     column('new_root', 'str'),
     column('operation_id', 'str'),
     column('neuron_supervoxel', 'str'),
@@ -518,6 +674,7 @@ export function mergesTable(record: MergeRecord): TableValue {
     accepted_on: full((e) => e.parentRoot ?? null),
     outcome: cells((e) => e.outcome),
     neuron_root: full((e) => e.neuronRoot),
+    candidate_root: full((e) => e.candidateRootAt ?? null),
     new_root: cells((e) => (e.outcome === 'merged' ? e.newRoot : null)),
     operation_id: full((e) =>
       e.outcome === 'merged' || e.outcome === 'unknown' ? (e.operationId ?? null) : null,
