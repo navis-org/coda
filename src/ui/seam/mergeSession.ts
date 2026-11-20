@@ -94,6 +94,11 @@ type ReadySession = Extract<SubmitSession, { phase: 'ready' }>
 
 let session: SubmitSession | undefined
 let planning: AbortController | undefined
+/**
+ * How far the check under way has got (`PlanRequest.onProgress`): beside the session, never in
+ * it, since a Re-check plans from the open overlay and a count must not move its phase.
+ */
+let checked: SubmitChecked | undefined
 /** The batch being sent: the store's hold, and whether Stop was pressed. */
 let inFlight: { readonly hold: WriteHold; stop: boolean } | undefined
 /** A merge the batch stopped waiting for, still out (the header): its limit's timer. */
@@ -102,6 +107,8 @@ const changed = channel()
 
 function publish(next: SubmitSession | undefined): void {
   session = next
+  // A new phase is a new check, or none: the count of the last one is nobody's.
+  checked = undefined
   changed.notify()
 }
 
@@ -131,6 +138,24 @@ export function submitStateOf(docId: string, nodeId: string): SubmitState {
     if (session.phase === 'ready') return 'other'
   }
   return stillOut ? 'waiting' : 'none'
+}
+
+/** How many pieces a check has decided, of how many (`PlanRequest.onProgress`). */
+export type SubmitChecked = { readonly done: number; readonly total: number }
+
+/**
+ * How far this card's check has got, while the card's button is the check — the overlay is not
+ * up — and once the check reaches the pieces. The held object, the same until the next count,
+ * so the selector hands out nothing new between equal answers (invariant 7).
+ */
+export function submitCheckedOf(docId: string, nodeId: string): SubmitChecked | undefined {
+  if (session?.phase !== 'planning') return undefined
+  const { request } = session
+  return request.docId === docId && request.nodeId === nodeId ? checked : undefined
+}
+
+export function useSubmitChecked(docId: string, nodeId: string): SubmitChecked | undefined {
+  return useSyncExternalStore(changed.subscribe, () => submitCheckedOf(docId, nodeId))
 }
 
 /** A card's Submit state, as a primitive (invariant 7). */
@@ -177,6 +202,7 @@ const onScreen = (request: SubmitRequest) =>
 async function plan(request: SubmitRequest): Promise<void> {
   planning?.abort()
   const controller = (planning = new AbortController())
+  checked = undefined
   if (!onScreen(request)) return endWith(MOVED)
   const params = liveParams(request.nodeId)
   // Live, as the record is: a verdict changed since the press is the reader's latest word.
@@ -192,6 +218,14 @@ async function plan(request: SubmitRequest): Promise<void> {
         verdicts,
         unjudged,
         record: decodeRecord(params['merges']),
+        // Only while this check is the one under way: a closed or re-asked one says nothing.
+        // Drawn only on the card's button, while the check is all there is: a Re-check counts
+        // under the open overlay, and says nothing.
+        onProgress: (done, total) => {
+          if (planning !== controller || session?.phase !== 'planning') return
+          checked = { done, total }
+          changed.notify()
+        },
       },
       { deployment: request.deployment, signal: controller.signal },
     )

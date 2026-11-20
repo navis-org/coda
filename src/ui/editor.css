@@ -11014,6 +11014,10 @@ details[open] > summary.tile__label {
   font-size: 11px;
   padding: 2px 10px;
 }
+/* Submit counts the pieces it checks: equal-width digits, so the button does not jitter. */
+.review-body__submit {
+  font-variant-numeric: tabular-nums;
+}
 
 /*
  * Submit's confirm overlay (`MergeConfirm.tsx`): the plan beside the neuron as the merges will make

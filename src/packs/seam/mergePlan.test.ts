@@ -11,7 +11,13 @@ import type { GrapheneSource } from '../../data/cave/graphene'
 import type { GraphLayout } from '../../data/cave/graphLayout'
 import type { AnchorPair, AnchorRefusal, AnchorVolume } from './mergeAnchors'
 import type { PlannedMerge, PlanRequest, PlanServices } from './mergePlan'
-import { acceptedTree, planMerges, tickedWith, withoutOrphans } from './mergePlan'
+import {
+  ANCHORS_IN_FLIGHT,
+  acceptedTree,
+  planMerges,
+  tickedWith,
+  withoutOrphans,
+} from './mergePlan'
 import type { MergeRecordEntry, RecordOutcome } from './mergeRecord'
 import type { Candidate, QueueTip, Verdict } from './reviewQueue'
 import { verdictKey } from './pieces'
@@ -607,6 +613,35 @@ describe('planning a neuron grown piece by piece', () => {
     return on !== undefined && pair.alsoNeuron?.includes(on) ? on : undefined
   }
 
+  /*
+   * Anchors are read several at a time (`ANCHORS_IN_FLIGHT`). A piece accepted on a piece is read
+   * beside it — a chain runs side by side — and is planned only once that piece is.
+   */
+  it('reads a chain of pieces side by side, and plans each once the piece it hangs on is', async () => {
+    const { fake, asked } = services({ onRoot: onParent })
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    const read = fake.anchor
+    fake.anchor = async (volume, pair, options) => {
+      if (pair.candidateRoot === '7') await held
+      return read(volume, pair, options)
+    }
+    const counted: number[] = []
+    const plan = planMerges(
+      { ...grown(), onProgress: (done) => counted.push(done) },
+      OPTIONS,
+      fake,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Every box asked for while 7's is still out; only 8, beside it on the neuron, is decided.
+    expect(asked.anchored.map((p) => p.candidateRoot)).toEqual(['8', '9', '11'])
+    expect(counted).toEqual([1])
+    release()
+    const made = await plan
+    if (!made.ok) throw new Error(made.message)
+    expect(made.merges.map((m) => m.candidateRoot)).toEqual(['7', '8', '9', '11'])
+  })
+
   it('merges from the neuron outwards, whatever order the queue lists the tips in', async () => {
     const plan = await planned(grown(), services({ onRoot: onParent }).fake)
     expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['7', '8', '9', '11'])
@@ -686,7 +721,15 @@ describe('planning a neuron grown piece by piece', () => {
       ['11', 'parent-refused'],
     ])
     expect(plan.rejected[1]!.message).toMatch(/^7, which lies between it and the neuron/)
-    // No box is read for a piece with nothing to be merged onto.
+    // 11 is refused for 9, the piece it hangs on, which is refused for 7.
+    expect(plan.rejected[2]!.message).toMatch(/^9, which lies between it and the neuron/)
+    // Read beside 7, as a chain is: the boxes under it are what a refusal wastes.
+    expect(asked.anchored.map((p) => p.candidateRoot).sort()).toEqual(['11', '7', '8', '9'])
+  })
+
+  it('reads no box for a piece whose parent was refused before the anchors', async () => {
+    const { fake, asked } = services({ onRoot: onParent, stale: ['9'] })
+    await planned(grown(), fake)
     expect(asked.anchored.map((p) => p.candidateRoot)).toEqual(['7', '8'])
   })
 
@@ -891,5 +934,163 @@ describe('planning a neuron grown piece by piece', () => {
       expect([...withoutOrphans(merges, new Set(['7', '11']))]).toEqual(['7'])
       expect([...withoutOrphans(merges, all)]).toEqual(['7', '8', '9', '11'])
     })
+  })
+})
+
+describe('reading the anchors of many pieces', () => {
+  const MANY = Array.from({ length: 10 }, (_, i) => String(200 + i))
+  const queue = MANY.map((id, i) => tip(i + 1, [candidate(id, 1, 0.5)]))
+  const judged = MANY.map((id): [string, Verdict] => [id, 'accept'])
+
+  /** The fake's anchor, slowed by a timer tick and counting how many are under way at once. */
+  function slowed(fake: PlanServices, also?: (pair: AnchorPair) => void) {
+    const seen = { now: 0, most: 0, signals: [] as (AbortSignal | undefined)[] }
+    const read = fake.anchor
+    fake.anchor = async (volume, pair, options) => {
+      seen.signals.push(options.signal)
+      seen.now += 1
+      seen.most = Math.max(seen.most, seen.now)
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        also?.(pair)
+        return await read(volume, pair, options)
+      } finally {
+        seen.now -= 1
+      }
+    }
+    return seen
+  }
+
+  it(`reads ${ANCHORS_IN_FLIGHT} at a time, and plans in the order of the pieces`, async () => {
+    const { fake } = services()
+    const seen = slowed(fake)
+    const counted: [number, number][] = []
+    const plan = await planned(
+      { ...request(queue, judged), onProgress: (done, total) => counted.push([done, total]) },
+      fake,
+    )
+    expect(seen.most).toBe(ANCHORS_IN_FLIGHT)
+    expect(plan.merges.map((m) => m.candidateRoot)).toEqual(MANY)
+    // One count per piece, rising to all of them.
+    expect(counted).toEqual(MANY.map((_, i) => [i + 1, MANY.length]))
+  })
+
+  it('stops every other read at the first that fails, and says why', async () => {
+    const { fake } = services()
+    let failed = false
+    let afterwards = 0
+    let stopped = 0
+    fake.anchor = async (_, pair, options) => {
+      if (failed) afterwards += 1
+      if (pair.candidateRoot === '202') {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        failed = true
+        throw new Error('503 from the bucket')
+      }
+      // Every other read runs until it is stopped.
+      return new Promise((_, reject) =>
+        options.signal?.addEventListener('abort', () => {
+          stopped += 1
+          reject(options.signal!.reason as Error)
+        }),
+      )
+    }
+    const plan = await planMerges(request(queue, judged), OPTIONS, fake)
+    expect(plan).toEqual({
+      ok: false,
+      message: 'The check before merging could not finish: 503 from the bucket',
+    })
+    // The five beside it were stopped, and the slot it freed started nothing.
+    expect(stopped).toBe(ANCHORS_IN_FLIGHT - 1)
+    expect(afterwards).toBe(0)
+  })
+
+  it('does not fail the check on a read under a parent that is refused', async () => {
+    const chain = [
+      tip(1, [candidate('7', 1, 0.5)]),
+      tip(1, [candidate('9', 1, 0.5)], '7', NEURON),
+    ]
+    const verdicts = new Map<string, Verdict>([
+      [verdictKey(NEURON, '7'), 'accept'],
+      [verdictKey('7', '9'), 'accept'],
+    ])
+    const { fake } = services({
+      refuse: (pair) => (pair.candidateRoot === '7' ? 'too-far' : undefined),
+    })
+    const read = fake.anchor
+    fake.anchor = async (volume, pair, options) => {
+      if (pair.candidateRoot === '9') throw new Error('503 from the bucket')
+      // 7 answers after 9 has failed, so 9's failure waits on it.
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      return read(volume, pair, options)
+    }
+    const plan = await planned(
+      { datastack: 'test', queue: chain, reviewedRoot: NEURON, verdicts, record: [] },
+      fake,
+    )
+    expect(refusals(plan)).toEqual([
+      ['7', 'too-far'],
+      ['9', 'parent-refused'],
+    ])
+  })
+
+  it('reads no box for a piece still queued under a refused one, down the chain', async () => {
+    const BUSY = Array.from({ length: ANCHORS_IN_FLIGHT }, (_, i) => String(300 + i))
+    const grownQueue = [
+      ...BUSY.map((id, i) => tip(i + 1, [candidate(id, 1, 0.5)])),
+      tip(50, [candidate('7', 1, 0.5)]),
+      tip(1, [candidate('9', 1, 0.5)], '7', NEURON),
+      tip(1, [candidate('11', 1, 0.5)], '9', NEURON),
+    ]
+    const verdicts = new Map<string, Verdict>([
+      ...BUSY.map((id): [string, Verdict] => [verdictKey(NEURON, id), 'accept']),
+      [verdictKey(NEURON, '7'), 'accept'],
+      [verdictKey('7', '9'), 'accept'],
+      [verdictKey('9', '11'), 'accept'],
+    ])
+    const { fake, asked } = services({
+      refuse: (pair) => (pair.candidateRoot === '7' ? 'too-far' : undefined),
+    })
+    // The busy pieces hold every slot until let go, one at a time.
+    const gates = BUSY.map(() => {
+      let open!: () => void
+      return { held: new Promise<void>((resolve) => (open = resolve)), open: () => open() }
+    })
+    const read = fake.anchor
+    fake.anchor = async (volume, pair, options) => {
+      const at = BUSY.indexOf(pair.candidateRoot)
+      if (at >= 0) await gates[at]!.held
+      return read(volume, pair, options)
+    }
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+    const plan = planMerges(
+      { datastack: 'test', queue: grownQueue, reviewedRoot: NEURON, verdicts, record: [] },
+      OPTIONS,
+      fake,
+    )
+    for (const gate of gates) {
+      await tick()
+      gate.open()
+    }
+    const made = await plan
+    if (!made.ok) throw new Error(made.message)
+    expect(refusals(made)).toEqual([
+      ['7', 'too-far'],
+      ['9', 'parent-refused'],
+      ['11', 'parent-refused'],
+    ])
+    // Down the chain, each slot handed on as the refusal is: 9 skips for 7, 11 for 9.
+    expect(asked.anchored.map((p) => p.candidateRoot)).not.toContain('9')
+    expect(asked.anchored.map((p) => p.candidateRoot)).not.toContain('11')
+  })
+
+  it('lets a cancel through as a cancel', async () => {
+    const { fake } = services()
+    slowed(fake)
+    const cancel = new AbortController()
+    const plan = planMerges(request(queue, judged), { ...OPTIONS, signal: cancel.signal }, fake)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    cancel.abort()
+    await expect(plan).rejects.toMatchObject({ name: 'AbortError' })
   })
 })

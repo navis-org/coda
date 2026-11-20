@@ -44,6 +44,7 @@ import { decodeVerdicts } from '../../packs/seam/reviewQueue'
 const openSubmit = vi.fn()
 const closeSubmit = vi.fn()
 let submitState: SubmitState = 'none'
+let submitChecked: { done: number; total: number } | undefined
 /** The currency check, faked: roots in `edited` are outdated, and what was asked is kept. */
 const edited = new Set<string>()
 const askedCurrency: string[][] = []
@@ -71,6 +72,7 @@ vi.mock('./mergeSession', () => ({
   openSubmit: (...args: unknown[]) => openSubmit(...args),
   closeSubmit: () => closeSubmit(),
   useSubmitState: () => submitState,
+  useSubmitChecked: () => submitChecked,
 }))
 
 const TYPE = 'seam:review'
@@ -687,6 +689,7 @@ describe('Submit on the review card', () => {
     openSubmit.mockReset()
     closeSubmit.mockReset()
     submitState = 'none'
+    submitChecked = undefined
     edited.clear()
     askedCurrency.length = 0
   })
@@ -740,6 +743,15 @@ describe('Submit on the review card', () => {
     fireEvent.click(button())
     expect(closeSubmit).toHaveBeenCalled()
     expect(openSubmit).not.toHaveBeenCalled()
+  })
+
+  it('counts the pieces checked once the check reaches them', () => {
+    submitState = 'planning'
+    submitChecked = { done: 12, total: 1234 }
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    draw(ACCEPTED, true, CANDIDATES, TIPS, CAVE_DATASET)
+    expect(button().textContent).toBe('Checking 12 of 1,234… (cancel)')
+    expect(button().disabled).toBe(false)
   })
 
   /** A sign-in in the Sources panel lifts the reason without anything else changing. */

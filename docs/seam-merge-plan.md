@@ -329,8 +329,24 @@ sentence where nothing can be planned (no permission, not a chunkedgraph, a chec
    shortcut exists there. An
    outdated neuron refuses every piece (`neuron-outdated`); an outdated piece is refused alone
    (`outdated`).
-4. **Anchors**, one piece at a time, each row until one anchors. The volume is opened only here,
-   once a current piece needs it.
+4. **Anchors**, `ANCHORS_IN_FLIGHT` (6) pieces at a time, each row until one anchors. The volume
+   is opened only here, once a current piece needs it. A piece's box is read beside its parent's
+   — a chain of pieces accepted on pieces runs side by side — and kept only if the parent
+   anchors. A piece whose parent is already known to be refused when its turn comes is not read
+   (refused before this step, or marked inside its own slot the moment its anchor fails), and a
+   read under a parent that is then refused cannot fail the check: its error waits for the
+   parent and gives way to `parent-refused`. So the plan, refusals and all, is the one the
+   one-at-a-time loop made — `planned` sorts the refusals into the pieces' order. The first
+   failure stops every other read before its slot passes on. **Measured (user, 2026-11-20, 200+
+   pieces "Checking" for minutes; `pnpm probe:seam-anchors`, 120 ends of one Aedes neuron in a
+   plan's order):** 768 ms a piece one at a time — the box's ~3.4 base-scale chunks of 3 MB,
+   under one in ten cached, 666 ms; the roots of ~790 supervoxels, 210 ms — against 168 ms at
+   six in flight (755 against 131 in a second shuffle, through `slots`), flat to sixteen (the
+   bytes are the limit there). Taking the pieces in order of place helps one at a time only (768
+   to 568 ms): anchors in flight together each fetch a chunk they share, as the cache holds no
+   request in flight — sharing those is the next lever, in the volume reader Suggest Merges
+   shares. The button counts the pieces decided (`PlanRequest.onProgress`, "Checking 12 of 212…
+   (cancel)").
 
 **Changed from the plan: no `get_latest_roots`** — why is in `mergePlan.ts`' header. In short, an
 outside merge into the neuron changes the *neuron's* root, so step 3 refuses it whole first.

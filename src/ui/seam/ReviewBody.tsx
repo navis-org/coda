@@ -138,7 +138,13 @@ import { caveServerLabel } from '../../data/cave/deployments'
 import { getToken, subscribeTokens } from '../../data/cave/credentials'
 import { rootCurrency } from '../../packs/seam/rootCurrency'
 import type { SubmitRequest, SubmitState } from './mergeSession'
-import { STILL_OUT_NOTICE, closeSubmit, openSubmit, useSubmitState } from './mergeSession'
+import {
+  STILL_OUT_NOTICE,
+  closeSubmit,
+  openSubmit,
+  useSubmitChecked,
+  useSubmitState,
+} from './mergeSession'
 import { formatNumber, plural } from '../../style/format'
 import { cycleColor } from '../../style/colors'
 import { ParamField } from '../params/ParamField'
@@ -1446,7 +1452,12 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   else if ('request' in press) openSubmit(press.request)
                 }}
               >
-                {SUBMIT_LABEL[submitting] ?? `Submit (${formatNumber(toSubmit)})`}
+                <SubmitLabel
+                  docId={docId}
+                  nodeId={node.id}
+                  state={submitting}
+                  count={toSubmit}
+                />
               </button>
             </>
           )}
@@ -1507,6 +1518,25 @@ const SUBMIT_LABEL: Partial<Record<SubmitState, string>> = {
   planning: 'Checking… (cancel)',
   open: 'Submit open',
   running: 'Merging…',
+}
+
+/**
+ * The button's text: the pieces to submit, or how far a Submit has got — with the pieces checked
+ * so far once the check reaches them. Its own component, so a count re-renders the label rather
+ * than the card.
+ */
+function SubmitLabel(props: {
+  docId: string
+  nodeId: string
+  state: SubmitState
+  count: number
+}) {
+  const checked = useSubmitChecked(props.docId, props.nodeId)
+  // Only while this card's check runs: the state is `planning` whenever there is one.
+  if (checked) {
+    return `Checking ${formatNumber(checked.done)} of ${formatNumber(checked.total)}… (cancel)`
+  }
+  return SUBMIT_LABEL[props.state] ?? `Submit (${formatNumber(props.count)})`
 }
 
 /**

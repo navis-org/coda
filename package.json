@@ -108,6 +108,7 @@
     "make:assessor-manifest": "python3 -I scripts/make-assessor-manifest.py",
     "make:ranker-manifest": "node scripts/make-ranker-manifest.mjs",
     "probe:candidate-search": "vite-node scripts/probe-candidate-search.mjs",
+    "probe:seam-anchors": "vite-node scripts/probe-seam-anchors.mjs",
     "probe:seam-tip-boxes": "vite-node scripts/probe-seam-tip-boxes.mjs",
     "probe:merge-anchors": "vite-node scripts/probe-merge-anchors.mjs",
     "probe:sandbox-pair": "vite-node scripts/probe-sandbox-pair.mjs",
