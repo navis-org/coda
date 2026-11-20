@@ -240,9 +240,17 @@ describe('parseAssessorConfig', () => {
 })
 
 describe('the models this build offers', () => {
-  it('finds seed 0 by the id the manifest declares', () => {
-    expect(mergeAssessorModel(RAW.id)).toBeDefined()
-    expect(MERGE_ASSESSOR_MODELS[0]?.id).toBe(RAW.id)
+  it('offers student 1 first and keeps seed 0, retired, by the ids their manifests declare', () => {
+    const student = JSON.parse(
+      readFileSync(
+        new URL('./__fixtures__/assessorManifestStudent1.json', import.meta.url),
+        'utf8',
+      ),
+    ) as { id: string }
+    expect(MERGE_ASSESSOR_MODELS.map((model) => model.id)).toEqual([student.id, RAW.id])
+    expect(mergeAssessorModel(student.id)?.retired).toBeUndefined()
+    // A card already holding seed 0 still finds it; nothing new is offered it.
+    expect(mergeAssessorModel(RAW.id)?.retired).toBeDefined()
   })
 
   it('answers undefined for an id this build no longer carries', () => {

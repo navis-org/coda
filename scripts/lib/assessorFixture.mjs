@@ -12,6 +12,9 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+/** The assessors Coda ships a fixture manifest for. */
+const FIXTURE_MANIFESTS = ['assessorManifest.json', 'assessorManifestStudent1.json']
+
 /** Where the lists, the cut patches and the written manifest go. */
 export const ASSESSOR_WORK = join(process.env.CODA_PROBE_DIR ?? '/tmp', 'coda-gpu-assessor')
 
@@ -27,9 +30,17 @@ export function assessorFixture(exported, ends) {
     { stdio: 'inherit' },
   )
   const fixture = JSON.parse(readFileSync(join(ASSESSOR_WORK, 'lists.json'), 'utf8'))
-  const manifest = JSON.parse(
-    readFileSync('src/packs/seam/__fixtures__/assessorManifest.json', 'utf8'),
+  // Coda's fixture manifest for the model this export holds: seed 0's, or student 1's.
+  const manifests = FIXTURE_MANIFESTS.map((name) =>
+    JSON.parse(readFileSync(join('src/packs/seam/__fixtures__', name), 'utf8')),
   )
+  const manifest = manifests.find((one) =>
+    existsSync(join(exported, one.files.find((file) => file.variant === 'matmul').file)),
+  )
+  if (!manifest) {
+    console.error(`${exported} holds none of the models in ${FIXTURE_MANIFESTS.join(', ')}`)
+    process.exit(2)
+  }
   const matmul = manifest.files.find((file) => file.variant === 'matmul')
   // The plain export's name is the MatMul one's without `_mm_`.
   const convFile = matmul.file.replace('_mm_', '_')

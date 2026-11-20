@@ -3235,3 +3235,35 @@ pace now; in Firefox it always was (~98 ms a patch), and none of this shows ther
 
 A 25-end run now finishes under the 60 s below which the node says nothing about time, so the
 probe defaults to 40 ends.
+
+## Student 1 in seed 0's place (SEAM's `coda-student1.md`, user, 2026-11-20)
+
+SEAM's student 1 (`n3d_mal_mask_s1`) is the same network as seed 0, trained to copy the averaged
+score of the three seeds rather than the plain yes/no label, with ref, `p_tip`, the cutoff (0.1565
+on `q`) and `r` (8 steps, rv2 + rv4 verdicts) refitted for it. SEAM's numbers: on Aedes h2 (634
+lists no fit saw) more right firsts clear the cutoff — tiny 0.321 against 0.243, ordinary 0.697
+against 0.657 — with first place unchanged; on real tips the gain is small (rv2: 133 shown against
+145; the test neuron 31 right against 30); precision at the cutoff on rv4 0.976 [0.921, 1.000].
+Tiny pieces' precision on h2 is 0.84, against seed 0's 0.80 and a target of 0.9.
+
+- **Decided (user): replace, by retiring.** Student 1 is the `Assessor` offered; seed 0 is an
+  `EnumOption.retired` row (`AffinityModel.retired`), so a card holding it loads and runs as
+  before, its remembered ends and its verdict-log `source` intact, and nothing new can pick it.
+- **Its floor is its own:** `missingPatchScore` −22.54 against seed 0's −258.38 — the model's
+  lowest unclipped logit on `rr_h1c_val`, as before; student 1's logits sit in a narrower range.
+  Both clip to −20 in ref. SEAM wrote `n3d_mal_mask/manifest.json` for it (SEAM `158af3f`).
+- **Packaged** with `pnpm make:assessor-manifest <SEAM data/onnx/n3d_mal_mask>
+  <coda_rv2_student1/fixture.json> ~/coda-models/seam-n3d-mal-mask-s1 --seed 1 --model-e
+  <coda_rv2/fixture.json>`. Uploading is the user's; the row's URL is
+  `…/coda/models/seam-n3d-mal-mask-s1/manifest.json`.
+- **Checked:** `singleSeed.test.ts` runs both configurations against their goldens
+  (`student1Tips.json` from `coda_rv2_student1`, `rv2-a709679d9827`): every logit, share, rank,
+  `q`, `r` and verdict reproduces, with one tip sitting on its own cutoff, as seed 0 has.
+  `probe:gpu-assessor` on the student export (its lists and patches are seed 0's, its PyTorch
+  logits `n3d_mal_mask_s1_check.parquet`, which `seam_assessor.py lists` now reads): the
+  hand-written assessor within 2.7e-6 of PyTorch, ranking identical, 22 ms a patch in Chrome;
+  `probe:gpu-browsers` in Firefox 33 ms a patch in flight, every answer equal to the one-at-a-time
+  one.
+- **Not done:** Merge Suggestions' hosted sets are still seed 0's (`rv2-9db6c7b1b397`,
+  `rv4-ad75ed161bb6`). SEAM's student-1 sets (`coda_rv2_student1`, `coda_rv4_student1`) can
+  replace them with `scripts/seam-suggestion-dir.mjs`; that upload is the user's too.
