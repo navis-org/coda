@@ -68,8 +68,8 @@ const MAX_ROOTS_CHECKED = 250_000
 const CHUNK = 10_000
 
 /**
- * How many `roots_binary` requests one `rootsAtInstant` call keeps in flight — four, as
- * `LEAVES_STREAMS` is, for SEAM's invariant 8.
+ * How many `roots_binary` requests one `rootsAtInstant` call keeps in flight — four, the
+ * streams SEAM's own fetching holds at Aedes, for SEAM's invariant 8.
  *
  * **A cap per call, not the run's share of the server**: several calls run at once in Suggest
  * Merges, and what bounds them together is `CHUNKEDGRAPH_BUDGET`.
@@ -574,36 +574,52 @@ async function placeNodes(
 export const VOTE_SAMPLE = 100
 
 /**
- * Roots per `leaves_many` request. A reply is the chunk ids as text: measured on Aedes
- * (2026-11-18) at 0.21 MB for fifty pool roots, over a megabyte where the batch holds a large
- * neuron. The time is the server's — parsing that reply takes 2 ms of a 525 ms request.
+ * Roots per `leaves_many` request for `l2ChunkCounts`. A reply is the chunk ids as text, ~25
+ * bytes an id; the time is the server's — parsing a reply takes 2 ms of a 525 ms request.
  *
- * **Twenty-five at eight streams was measured and did not pay**: through the whole node, 25 ends
- * of Suggest Merges, the stage's median was 780 ms against 929 and the end 3.3 s against 3.2,
- * which is inside run-to-run noise. Not worth twice the requests at a shared server.
+ * **160 at two streams, because it is as fast as fifty at four with a third of the requests**
+ * (2026-11-20, Aedes; `docs/seam-suggestions-plan.md`, "count batches"). An end asks ~320 new
+ * roots. Replayed against the server, cold: 172 ms per 100 roots at fifty by four, 184 at 160 by
+ * two, 203 for a whole end in one request. Through the node, 40-end blocks never asked before,
+ * the stage's median per end was 776 and 936 ms against 783 and 951 — and the same roots warm,
+ * interleaved, 210-251 ms per 100 roots against 212-216. The CAVE maintainers asked for fewer,
+ * larger requests; at a tie on time that is the kinder setting at a shared server.
+ *
+ * **Larger does not pay**, because the server does not split a request: its time is ~175 ms
+ * plus 67 per thousand level-2 ids in it, so one request for a whole end waits on its biggest
+ * root alone. **Smaller did not pay either**: twenty-five at eight streams, 3.3 s an end
+ * against 3.2, inside run-to-run noise.
  */
-const LEAVES_CHUNK = 50
+const LEAVES_CHUNK = 160
 
 /**
- * How many `leaves_many` requests are in flight at once.
+ * How many `leaves_many` requests one `l2ChunkCounts` call keeps in flight. With
+ * `LEAVES_CHUNK` that is an end's ~320 roots in one round.
  *
- * **Four, because this became the largest stage in a run and the batches are a queue.** A
- * candidate pool is about 500 roots, so a fresh open end is ten of these one after another, and
- * `Suggest Merges` measured the stage at **33% of a 6.2 s end** — more than the GPU, the search
- * box or the patch box. Ten sequential round trips at a shared server is latency the caller is
- * simply standing in.
+ * **Concurrency at all, because this was the largest stage in a run and the batches are a
+ * queue.** Sent one after another, fifty roots a request, `Suggest Merges` measured the stage
+ * at **33% of a 6.2 s end** — more than the GPU, the search box or the patch box. Four in flight
+ * took it from 2.05 s to 0.83; 160 a request at two holds that with a third of the requests.
  *
  * **It is a rate limit, not the absence of one**, which is the half of SEAM's invariant 8 this
  * has to keep: the servers are shared and public. SEAM's own fetching holds four streams at
  * Aedes, `MESH_CONCURRENCY` is three and `fragmentConcurrencyFor` divides a budget rather than
- * removing it. Four matches the number this pack is already allowed elsewhere.
+ * removing it. Several ends' calls overlap in a run; `CHUNKEDGRAPH_BUDGET` caps them together.
  *
  * `inFlight` rather than `mapWithConcurrency`: the batches are **pieces of one answer**, and
  * `src/data/concurrency.ts`' header is about exactly that difference. A forgiven batch here
  * would come back as roots missing from the map, which `countsInPoolOrder` would then refuse as
  * a hole in the pool — a request failure reported as a fact about the data.
  */
-const LEAVES_STREAMS = 4
+const LEAVES_STREAMS = 2
+
+/**
+ * Stale roots per `leaves_many` request in `rootsByMajority`. Fifty, the size `l2ChunkCounts`
+ * used before it went to `LEAVES_CHUNK`'s 160: the batch measurements were of candidate pools,
+ * mostly one-chunk flakes, and a stale root here is a whole neuron of thousands, so a larger
+ * batch is a larger reply nobody has timed. An advisory repair, sequential on purpose.
+ */
+const VOTE_BATCH = 50
 
 /** The chunkedgraph layer a vote samples. Level 2 is a neuron's chunks; level 1 its supervoxels. */
 const VOTE_LAYER = 2
@@ -650,13 +666,13 @@ export async function rootsByMajority(
     if (verdict) out.set(root, verdict)
   }
   const unknown = distinctStrings(roots).filter((root) => !out.has(root))
-  for (let i = 0; i < unknown.length; i += LEAVES_CHUNK) {
+  for (let i = 0; i < unknown.length; i += VOTE_BATCH) {
     /*
      * Sequential on purpose. This is the advisory repair, not a path anybody is waiting on —
      * `l2ChunkCounts` is the one loop here that goes concurrent, because it is a third of the
      * wait in an interactive run and this is not.
      */
-    const lists = await leavesMany(graphene, unknown.slice(i, i + LEAVES_CHUNK), options)
+    const lists = await leavesMany(graphene, unknown.slice(i, i + VOTE_BATCH), options)
     const samples = new Map([...lists].map(([root, ids]) => [root, strided(ids)]))
     // Distinct: a stale root and its stale descendant in one batch share chunks.
     const chunks = distinctStrings([...samples.values()].flat())
@@ -1186,9 +1202,9 @@ export function resetL2ChunkCounts(): void {
  * features cannot see because they are measured inside a 6 µm box around the open end; the rest
  * is in `docs/seam-suggestions-plan.md`.
  *
- * Batched fifty to a request against a shared public chunkedgraph (SEAM's invariant 8), which is
- * what keeps a pool to a request per fifty roots rather than one per candidate, and
- * `LEAVES_STREAMS` of those in flight at a time.
+ * Batched `LEAVES_CHUNK` (160) to a request against a shared public chunkedgraph (SEAM's
+ * invariant 8), which keeps an end's ~320 new roots to two requests rather than one per
+ * candidate, and `LEAVES_STREAMS` of those in flight at a time.
  *
  * **A root the graph does not list comes back absent, not zero** — zero is the smallest possible
  * size and would read as a speck. Note that nothing here *refuses* a short answer: SEAM's own
@@ -1204,7 +1220,7 @@ export function resetL2ChunkCounts(): void {
  * **Across calls, a request in flight is shared** (`l2Asking`, `shareInFlight`): the search counts
  * several ends at once (2026-11-19), and neighbouring ends' pools are largely the same roots, so
  * two callers would otherwise each find the memo empty and each ask. Shared per caller's set,
- * never per root — a promise per root would destroy the fifty-root batching that is the point of
+ * never per root — a promise per root would destroy the batching that is the point of
  * this function. A joiner waits for the whole of the request it joined, a few batches at most,
  * which is off the critical path now the search runs ahead of the GPU.
  */
@@ -1217,7 +1233,7 @@ export async function l2ChunkCounts(
   const distinct = distinctStrings(roots)
   const keyed = new Map(distinct.map((root) => [at(root), root]))
   const shared = sharedRequestOptions(options)
-  // Inside the shared request the batching is as before: fifty roots a request,
+  // Inside the shared request the batching is as before: `LEAVES_CHUNK` roots a request,
   // `LEAVES_STREAMS` at a time, the memo filling as each batch lands.
   await shareInFlight(
     keyed.keys(),

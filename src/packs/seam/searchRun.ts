@@ -29,9 +29,9 @@
  * `l2ChunkCounts` once for every root, and ranked — which meant nothing was reviewable until
  * every box in the neuron had been read. Per end the roots are asked for per end, and that is
  * cheaper than it looks: `l2ChunkCounts` memoises by root, so the overlap between neighbouring
- * ends is still free and the bound on what was lost is **one partially-filled batch of fifty per
- * end** — about 200 ms against an end's two seconds, and nothing at all for an end that
- * introduces no new root.
+ * ends is still free and the bound on what was lost is **one partially-filled batch per end**
+ * — about 200 ms against an end's two seconds, and nothing at all for an end that introduces no
+ * new root.
  *
  * **Up to `depth` ends are under way at once** (2026-11-19, `SearchOptions.depth`). One at a
  * time, an end's box, pool and counts ran in a row on three different resources, each idle
@@ -130,7 +130,7 @@ export interface SearchRules {
  * The three steps, as functions.
  *
  * `counts` takes every root at once rather than one end's, because the roots of neighbouring
- * tips overlap heavily and `l2ChunkCounts` batches fifty to a request. A caller may put its own
+ * tips overlap heavily and `l2ChunkCounts` batches 160 to a request. A caller may put its own
  * cache behind it; nothing here assumes one.
  */
 export interface SearchSteps {

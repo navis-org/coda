@@ -196,7 +196,7 @@ describe('searchEnds', () => {
    * One call per end, asking only about that end — which is what streaming costs. The batching
    * that was lost is not the saving it looks like: `l2ChunkCounts` memoises by root on the
    * node's side, so a root a neighbouring end already bought is not fetched again, and only the
-   * request count rises at the margin where a batch of fifty is not full.
+   * request count rises at the margin where a batch is not full.
    */
   it('asks for each end’s counts as that end is reached, and for its query', async () => {
     const pools = [poolOf([1], [near]), poolOf([2], [near])]
