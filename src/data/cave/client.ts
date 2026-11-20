@@ -25,6 +25,7 @@
 
 import { errorMessage } from '../../core/errors'
 import { bodyExcerpt } from '../errorBody'
+import { delay } from '../source'
 import { parseCaveJson } from './json'
 import { getToken, reportAuthFailure } from './credentials'
 import { DEFAULT_CAVE_SERVER, caveServerLabel, normaliseCaveServer } from './deployments'
@@ -176,7 +177,40 @@ export interface CaveRequestOptions {
 /** One row of a CAVE query result: the API answers with an array of record objects. */
 export type CaveRow = Record<string, string | number | boolean | null>
 
-async function request<T>(
+/**
+ * How long a read that got **no answer** (`CaveError.noAnswer`) waits before it is asked again,
+ * each spread by up to half either way so reads that failed together do not return together.
+ * Not a status — that is the server's answer — and never a write. Why: `docs/backends-cave.md`,
+ * "Smaller decisions".
+ */
+const READ_AGAIN_MS = [1000, 4000] as const
+
+/**
+ * `once`, and again after each of `READ_AGAIN_MS` while it gets no answer. Exported for a caller
+ * that holds a slot per request (`chunkedgraphRead`): it asks again around the slot, so a read
+ * waiting out a dropped connection holds none, with requests made once (`cavePostRawOnce`).
+ */
+export async function readAgain<T>(
+  options: Pick<CaveRequestOptions, 'signal'>,
+  once: () => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await once()
+    } catch (error) {
+      const wait = READ_AGAIN_MS[attempt]
+      if (wait === undefined || !(error instanceof CaveError && error.noAnswer)) throw error
+      await delay(wait * (0.5 + Math.random()), options.signal)
+    }
+  }
+}
+
+/** A JSON read, asked again where it got no answer (`readAgain`). */
+function request<T>(url: string, init: RequestInit, options: CaveRequestOptions): Promise<T> {
+  return readAgain(options, () => requestOnce<T>(url, init, options))
+}
+
+async function requestOnce<T>(
   url: string,
   init: RequestInit,
   options: CaveRequestOptions,
@@ -411,7 +445,8 @@ export function cavePost<T>(
  * JavaScript runs on both are.
  *
  * Its own function rather than an option on `request`, which parses JSON unconditionally and
- * would have to grow a branch through every error path to do otherwise.
+ * would have to grow a branch through every error path to do otherwise. **Made once**: its one
+ * caller asks again around its budget slot (`chunkedgraphRead`, `readAgain`).
  */
 export async function cavePostBinary(
   url: string,
@@ -464,7 +499,14 @@ export async function cavePostBinary(
  * that, and one missing body must not fail a batch of five hundred — the same rule
  * `precomputed/skeletons.ts` states for a bucket.
  */
-export async function caveGetBytes(
+export function caveGetBytes(
+  url: string,
+  options: CaveRequestOptions,
+): Promise<ArrayBuffer | undefined> {
+  return readAgain(options, () => caveGetBytesOnce(url, options))
+}
+
+async function caveGetBytesOnce(
   url: string,
   options: CaveRequestOptions,
 ): Promise<ArrayBuffer | undefined> {
@@ -483,7 +525,8 @@ export async function caveGetBytes(
   if (response.status === 401 || response.status === 403)
     refuseAuth(url, response.status, await response.text(), options)
   if (!response.ok) throw new CaveError(`CAVE returned ${response.status}`, response.status)
-  return response.arrayBuffer()
+  // A body cut off mid-read is no answer, as `request`'s is.
+  return bodyOf(url, () => response.arrayBuffer())
 }
 
 /**
@@ -503,6 +546,15 @@ export function cavePostRaw<T>(
   return request<T>(url, { method: 'POST', body }, options)
 }
 
+/** `cavePostRaw` made once, for a caller that asks again itself (`readAgain`). */
+export function cavePostRawOnce<T>(
+  url: string,
+  body: string,
+  options: CaveRequestOptions,
+): Promise<T> {
+  return requestOnce<T>(url, { method: 'POST', body }, options)
+}
+
 /**
  * A POST that changes something on the server: `cavePostRaw`, refusing to follow a redirect.
  *
@@ -516,5 +568,6 @@ export function cavePostWrite<T>(
   body: string,
   options: CaveRequestOptions,
 ): Promise<T> {
-  return request<T>(url, { method: 'POST', body, redirect: 'error' }, options)
+  // Once only: a merge whose reply was lost may well have happened, and only the roots can say.
+  return requestOnce<T>(url, { method: 'POST', body, redirect: 'error' }, options)
 }

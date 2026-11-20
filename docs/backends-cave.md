@@ -1060,6 +1060,21 @@ object starting at its first byte.
 
 ### Smaller decisions
 
+- **A read that got no answer is asked again, twice, after about 1 s and 4 s; a write never is**
+  (`client.ts`' `readAgain`, `READ_AGAIN_MS`; user, 2026-11-20). A Suggest Merges run on Aedes lost
+  41 of 43 extended pieces to "Failed to fetch" from `cave.fanc-fly.com` — the same reads answered
+  200 minutes later — and with them everything accepted on their ends, Auto-extend's most of all.
+  No answer is the dropped HTTP/2 connection `chunkedgraphRead` measured (2026-11-19), or a busy
+  proxy's error page without a CORS header — which can hide a 429 or a 503 too, so those are
+  asked again when the browser cannot see them. Each wait is spread by up to half either way,
+  since a dropped connection fails a dozen reads at once. **A status the browser can see is not
+  asked again**: it is the server's answer. JSON reads and `caveGetBytes` ask again themselves;
+  `chunkedgraphRead` asks again around its `CHUNKEDGRAPH_BUDGET` slot, with requests made once
+  (`cavePostBinary`, `cavePostRawOnce`), so a read waiting holds no slot. `cavePostWrite` calls
+  `requestOnce`: a lost merge reply may be a merge made (`edits.ts`). What it costs: a host that
+  is down, or refuses cross-origin reads, takes ~1.5–7.5 s longer to say so per read; and a shared
+  request (`sharedRequestOptions`, no signal) is still asked again after a Cancel, as its fetch
+  was always finished.
 - **`neuronId` is `str` on this source, and `type` is the only other renamed column.**
   `pt_root_id` → `neuronId` and the `cell_type` annotation kind → `type`; everything else keeps
   CAVE's own spelling (`super_class`, `cell_class`), the same call neuPrint's passthroughs make.

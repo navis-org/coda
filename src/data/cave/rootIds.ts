@@ -21,7 +21,14 @@ import { cacheGet, cacheSet } from '../cache'
 import type { Slots } from '../concurrency'
 import { inFlight, slots } from '../concurrency'
 import type { CaveRequestOptions } from './client'
-import { CaveError, cavePostBinary, cavePostRaw, sharedRequestOptions } from './client'
+import {
+  CaveError,
+  cavePostBinary,
+  cavePostRaw,
+  cavePostRawOnce,
+  readAgain,
+  sharedRequestOptions,
+} from './client'
 import type { SharedAsk } from '../memoPromise'
 import { shareInFlight } from '../memoPromise'
 import { datastackRecord, materializationsFor, versionFrozenAt } from './datastack'
@@ -741,7 +748,7 @@ async function leavesMany(
 ): Promise<Map<string, string[]>> {
   const url = tableUrl(graphene, `node/leaves_many?stop_layer=${VOTE_LAYER}`)
   const answer = await chunkedgraphRead(graphene, options.signal, () =>
-    cavePostRaw<Record<string, (string | number)[]>>(
+    cavePostRawOnce<Record<string, (string | number)[]>>(
       url,
       `{"node_ids":[${roots.join(',')}]}`,
       options,
@@ -829,32 +836,23 @@ function budgetAt(graphene: GrapheneSource): Slots {
 }
 
 /**
- * A chunkedgraph read, inside the server's budget, **asked again once if the connection
- * dropped under it.**
+ * A chunkedgraph read, inside the server's budget, **asked again if the connection dropped under
+ * it** — the client's rule (`readAgain`), applied around the slot rather than inside it, so a
+ * read waiting to be asked again holds none. `read` makes its request once.
  *
  * The server closes its HTTP/2 connections from time to time with a `GOAWAY` (code 0, "no
  * error"), and every request still open on that connection fails at once — twelve to fifteen
  * lookups in one measurement (2026-11-19). These reads are `POST`s, which no browser retries on
  * its own, so one such close failed a whole Suggest Merges run. Only a request that got no
  * answer (`CaveError.noAnswer`) or lost it mid-read is asked again; an HTTP error or a bad body
- * is the server's answer, and a Cancel is an `AbortError`. A host that refuses cross-origin reads
- * is asked twice too, since a browser cannot tell that from a dropped connection.
+ * is the server's answer, and a Cancel is an `AbortError`.
  */
-async function chunkedgraphRead<T>(
+function chunkedgraphRead<T>(
   graphene: GrapheneSource,
   signal: AbortSignal | undefined,
   read: () => Promise<T>,
 ): Promise<T> {
-  return budgetAt(graphene).run(async () => {
-    try {
-      return await read()
-    } catch (error) {
-      // No answer at all, or one cut off while it was read (`noAnswer`, set by the client
-      // only there); never an answer the server gave, and never after the caller has gone.
-      if (!(error instanceof CaveError && error.noAnswer) || signal?.aborted) throw error
-      return read()
-    }
-  }, signal)
+  return readAgain({ signal }, () => budgetAt(graphene).run(read, signal))
 }
 
 /** One `roots_binary` call. */

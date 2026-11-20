@@ -779,10 +779,19 @@ describe('a large lookup', () => {
 /**
  * **The chunkedgraph closes its HTTP/2 connections now and then** (`GOAWAY`, code 0), and every
  * request open on one fails at once. These reads are `POST`s, which no browser retries, so one
- * close used to fail a whole run: they are asked again once, and only for a failure that got no
- * answer — an HTTP error is the server's answer.
+ * close used to fail a whole run: they are asked again, twice, a moment apart (`readAgain`), and
+ * only for a failure that got no answer — an HTTP error is the server's answer.
  */
 describe('a dropped connection', () => {
+  afterEach(() => vi.useRealTimers())
+  /** The lookup, with the waits between asks passed at once. */
+  const looked = async () => {
+    vi.useFakeTimers()
+    const got = rootsAtInstant(graphene, 1_700_000_000_000, BigUint64Array.from([5n]), OPTIONS)
+    got.catch(() => {})
+    await vi.runAllTimersAsync()
+    return got
+  }
   const answering = (ids: BigUint64Array) =>
     new Response(BigUint64Array.from(ids, (id) => id + 1000n).buffer, { status: 200 })
   const idsOf = (init?: RequestInit) => {
@@ -790,20 +799,14 @@ describe('a dropped connection', () => {
     return new BigUint64Array(body.buffer, body.byteOffset, body.byteLength / 8)
   }
 
-  it('is asked again once, and answers', async () => {
+  it('is asked again, and answers', async () => {
     let calls = 0
     vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
       calls += 1
       if (calls === 1) throw new TypeError('fetch failed')
       return answering(idsOf(init))
     })
-    const got = await rootsAtInstant(
-      graphene,
-      1_700_000_000_000,
-      BigUint64Array.from([5n]),
-      OPTIONS,
-    )
-    expect([...got]).toEqual([1005n])
+    expect([...(await looked())]).toEqual([1005n])
     expect(calls).toBe(2)
   })
 
@@ -819,16 +822,14 @@ describe('a dropped connection', () => {
     expect(calls).toBe(1)
   })
 
-  it('fails if it drops again, and an HTTP error is never asked again', async () => {
+  it('fails if it keeps dropping, and an HTTP error is never asked again', async () => {
     let calls = 0
     vi.stubGlobal('fetch', async () => {
       calls += 1
       throw new TypeError('fetch failed')
     })
-    await expect(
-      rootsAtInstant(graphene, 1_700_000_000_000, BigUint64Array.from([5n]), OPTIONS),
-    ).rejects.toThrow()
-    expect(calls).toBe(2)
+    await expect(looked()).rejects.toThrow()
+    expect(calls).toBe(3)
     calls = 0
     vi.stubGlobal('fetch', async () => {
       calls += 1
