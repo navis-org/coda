@@ -9,9 +9,26 @@ import { describe, expect, it } from 'vitest'
 
 import type { Triple } from '../../data/precomputed/volume'
 import type { HandPick } from './handPicks'
-import { PICK_TIP_UM, decodePicks, encodePicks, listedAt, withPicks } from './handPicks'
+import {
+  PICK_TIP_UM,
+  decodePicks,
+  encodePicks,
+  listedAt,
+  unreachedTips,
+  withLivePicks,
+  withPicks,
+} from './handPicks'
 import type { Candidate, QueueTip } from './reviewQueue'
-import { DEFAULT_FILTERS, arrangeRows, currentOfQueue, tipKey } from './reviewQueue'
+import {
+  DEFAULT_FILTERS,
+  acceptedPieces,
+  arrangeRows,
+  currentOfQueue,
+  listedKey,
+  listedTree,
+  tipKey,
+} from './reviewQueue'
+import { verdictKey } from './pieces'
 
 const NEURON = '720575940621522189'
 const PIECE = '720575940630442210'
@@ -158,5 +175,54 @@ describe('the stored picks', () => {
     expect(
       decodePicks(JSON.stringify([[1, 'a'], 'x', [2, 'a', 'b', 'c', 1, 2, 3, 0.1, null]])),
     ).toHaveLength(1)
+  })
+})
+
+/**
+ * A second hop by hand (user, 2026-11-20): a pick on a piece accepted and never extended keeps its
+ * own row there, and the list walks to it (`listedTree`).
+ */
+describe('a pick on a piece accepted and not extended', () => {
+  const NEXT = '720575940630000004'
+  // The neuron's tip 1 lists PIECE; PIECE is accepted, and a hand pick sits on it.
+  const queue = withPicks(
+    [tip(1, um(0), { candidates: [candidate(PIECE, 1, { minDistUm: 0.2 })] })],
+    [pick({ root: PIECE, candidateId: NEXT, contactNm: um(3) })],
+  )
+  const verdicts = new Map([
+    [verdictKey(NEURON, PIECE), 'accept' as const],
+    [verdictKey(PIECE, NEXT), 'accept' as const],
+  ])
+
+  it('is a tip of its own on that piece', () => {
+    expect(queue.map((one) => [one.neuronId, one.endUid])).toEqual([
+      [NEURON, 1],
+      [PIECE, -1],
+    ])
+  })
+
+  it('leaves the queue once the piece it is on is no longer accepted', () => {
+    const live = [tip(1, um(0), { candidates: [candidate(PIECE, 1, { minDistUm: 0.2 })] })]
+    const picks = [pick({ root: PIECE, candidateId: NEXT, contactNm: um(3) })]
+    expect(withLivePicks(live, picks, verdicts, [])).toHaveLength(2)
+    expect(unreachedTips(withPicks(live, picks), verdicts, [])).toBe('')
+    // PIECE rejected: NEXT's accept on it stands, but nothing reaches it from the neuron.
+    const taken = new Map([...verdicts, [verdictKey(NEURON, PIECE), 'reject' as const]])
+    expect(withLivePicks(live, picks, taken, []).map((one) => one.neuronId)).toEqual([NEURON])
+    expect(unreachedTips(withPicks(live, picks), taken, [])).toBe(`${NEURON}|${PIECE}|-1`)
+  })
+
+  it('puts the piece in the tree the list walks, and nothing when there is no such row', () => {
+    const accepted = acceptedPieces(queue, verdicts)
+    const key = listedKey([], queue, accepted, NEURON)
+    expect(key).toBe(`${NEURON}>${PIECE}`)
+    expect(listedTree([], key)).toEqual([
+      { id: PIECE, seed: NEURON, parent: NEURON, depth: 1, path: [NEURON, PIECE] },
+    ])
+    // Nothing outside the tree: no key, and the very same tree.
+    const plain = [tip(1, um(0))]
+    const none: never[] = []
+    expect(listedKey(none, plain, acceptedPieces(plain, verdicts), NEURON)).toBe('')
+    expect(listedTree(none, '')).toBe(none)
   })
 })

@@ -63,6 +63,7 @@ import {
   growAuto,
   nearerClaim,
   pairsOf,
+  piecesOf,
   verdictKey,
   verdictPair,
 } from './pieces'
@@ -733,6 +734,67 @@ export function arrangeTree(
   }
   list(seed, 0, false)
   return out
+}
+
+/**
+ * Every accepted piece as a pair with what it was accepted on, each parent once — what
+ * `piecesOf` places by. Shared by the list (`listedKey`) and Submit's plan (`acceptedTree`).
+ */
+export function acceptedPairs(
+  accepted: ReadonlyMap<string, readonly AcceptedRow[]>,
+): { parent: string; piece: string }[] {
+  return [...accepted].flatMap(([piece, rows]) =>
+    [...new Set(rows.map((row) => row.neuronId))].map((parent) => ({ parent, piece })),
+  )
+}
+
+/**
+ * What the list walks for one neuron beyond its extended pieces (`arrangeTree`): **an accepted
+ * piece holding rows of its own outside them** — a hand pick's tip on a piece accepted and never
+ * extended (user, 2026-11-20) — with the pieces between it and the neuron, placed by `piecesOf`.
+ * As text, each piece's path from the neuron joined by `>`, sorted, `''` where there is none —
+ * which is nearly always — so the card can compare it by value; `listedTree` reads it back.
+ */
+export function listedKey(
+  tree: readonly Piece[],
+  tips: readonly QueueTip[],
+  accepted: ReadonlyMap<string, readonly AcceptedRow[]>,
+  seed: string | undefined,
+): string {
+  if (seed === undefined) return ''
+  const inTree = new Set(tree.map((piece) => piece.id))
+  const outside = new Set(
+    tips
+      .filter((tip) => tip.seed === seed && tip.neuronId !== seed && !inTree.has(tip.neuronId))
+      .map((tip) => tip.neuronId),
+  )
+  if (outside.size === 0) return ''
+  const placed = piecesOf(acceptedPairs(accepted), [seed])
+  const wanted = new Set(
+    placed.filter((piece) => outside.has(piece.id)).flatMap((piece) => piece.path.slice(1)),
+  )
+  return placed
+    .filter((piece) => wanted.has(piece.id) && !inTree.has(piece.id))
+    .map((piece) => piece.path.join('>'))
+    .sort()
+    .join(';')
+}
+
+/** The tree the list walks: `tree`, and the pieces `listedKey` named — the same array for none. */
+export function listedTree(tree: readonly Piece[], key: string): readonly Piece[] {
+  if (key === '') return tree
+  const extra = key.split(';').map((text): Piece => {
+    const path = text.split('>')
+    return {
+      id: path.at(-1)!,
+      seed: path[0]!,
+      parent: path.at(-2)!,
+      depth: path.length - 1,
+      path,
+    }
+  })
+  // Parents first, as `piecesOf` lists them, so a walk meets a piece after the one it hangs on.
+  return [...tree, ...extra.sort((a, b) => a.depth - b.depth)]
 }
 
 /** A piece as one tip lists it, for the rows that hang beneath that tip's row. */

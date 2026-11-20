@@ -57,7 +57,7 @@ import {
   extendedTable,
   verdictKey,
 } from './pieces'
-import { decodePicks, withPicks } from './handPicks'
+import { decodePicks, withLivePicks } from './handPicks'
 import { suggestionLayer } from './scene'
 import type { CurrentItem, QueueTip, ScenePiece, Verdict } from './reviewQueue'
 import {
@@ -480,13 +480,20 @@ export const reviewNode = packNode({
           'through, so the node needs both of Merge Suggestions’ tables.',
       )
     }
-    const all = withPicks(buildQueue(tips, candidates), decodePicks(ctx.params.picks))
+    const built = buildQueue(tips, candidates)
     // What there is to review: each neuron's tips and those of the pieces in its tree — as the
     // params say the tree is now, whatever rows the search has yet to drop — with what
     // Auto-extend took grown on, by the rule the search grew it by. Its accepts count wherever an
     // accept is read, and are never a reader's verdict: `Tips` and `Verdicts` carry `stored`.
-    const { stored, plan, growth, verdicts } = reviewStateOf(ctx.params, all)
-    const queue = liveQueue(all, growth.tree)
+    // The hand picks go on last (`withPicks`), so one on a piece accepted and never extended
+    // keeps its own row: placed before, it was dropped with that piece's tips.
+    const { stored, plan, growth, verdicts } = reviewStateOf(ctx.params, built)
+    const queue = withLivePicks(
+      liveQueue(built, growth.tree),
+      decodePicks(ctx.params.picks),
+      verdicts,
+      growth.tree,
+    )
     // The cursor resolves within the picked neuron only, so a cursor left on another neuron's
     // tip — after the fallback to the first, or a hand edit — shows nothing rather than a pair
     // from a neuron the card is not on.

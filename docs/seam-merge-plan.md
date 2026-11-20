@@ -849,3 +849,12 @@ rejected one stays first in the list; a pick on a tip leads that tip's row, so a
 first candidate there is reached with the arrows (unless extended); a pick's rank on a tip is the
 tip's list length + 1, so a re-run that lists more candidates there moves it, and a saved cursor
 rank with it.
+
+**A second hop on a piece accepted and not extended (user, 2026-11-20).** The check took only the
+neuron and its *extended* pieces as the neuron's side, so a pick touching a piece accepted by hand
+(and never extended) was refused — "No part of the neuron lies within 1.5 µm" — and its row would
+have been dropped anyway: `liveQueue` keeps tips of pieces in the tree only, and the picks were
+placed before it. Decided: **every accepted, unmerged piece counts** (`unmergedPieces` on the
+card), the picks go on **after** `liveQueue` (card and `evaluate` alike), and the list walks to
+such a piece (`listedTree`, over the accepted pairs by `piecesOf`). Submit plans it like any piece
+on a piece. The piece's ends are not searched.

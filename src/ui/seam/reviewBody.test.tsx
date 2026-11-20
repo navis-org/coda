@@ -1709,6 +1709,42 @@ describe('hand picks on the review card', () => {
     expect(notice()).toMatch(/^Added .* by hand and accepted it/)
   })
 
+  /*
+   * A second hop by hand (user, 2026-11-20): a piece accepted and never extended counts as the
+   * neuron's for the check, and the pick's row stays on it — before, the check looked for the
+   * neuron alone, and a row on a piece outside the tree was dropped with that piece's tips.
+   */
+  it('takes a pick touching a piece accepted and not extended, and lists it on that piece', async () => {
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    checkPick.mockResolvedValue({
+      ok: true,
+      root: LISTED,
+      contactNm: [5000, 5000, 5000],
+      gapUm: 0.4,
+      l2Chunks: 2,
+    })
+    draw({ verdicts: `${NEURON}/${LISTED}=a` }, true, CANDIDATES, TIPS, CAVE)
+    await pick(PICKED)
+    expect(checkPick).toHaveBeenCalledWith(
+      expect.objectContaining({ pieces: expect.arrayContaining([LISTED]) }),
+      expect.anything(),
+    )
+    expect(decodePicks(stored()['picks'])[0]).toMatchObject({
+      root: LISTED,
+      candidateId: PICKED,
+    })
+    expect(decodeVerdicts(stored()['verdicts']).get(`${LISTED}/${PICKED}`)).toBe('accept')
+    // The cursor on the pick's own tip on that piece: a row the list holds.
+    expect(stored()['current']).toBe(`${LISTED}|-1`)
+    expect(notice()).toMatch(/^Added .* by hand and accepted it/)
+    // Drawn again from what was written: the row is there, beneath the piece it touches.
+    cleanup()
+    draw({ ...stored() }, true, CANDIDATES, TIPS, CAVE)
+    expect(rows().map((row) => row.querySelector('.review-row__id')?.textContent)).toContain(
+      `${PICKED}by hand`,
+    )
+  })
+
   it('checks once for two presses before the first answers', async () => {
     setToken(DEFAULT_CAVE_SERVER, 'test-token')
     let answer: (value: unknown) => void = () => {}

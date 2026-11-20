@@ -63,7 +63,7 @@ import type { AcceptedRow, QueueTip, Verdicts } from './reviewQueue'
 import type { MergeRecord, MergeRecordEntry } from './mergeRecord'
 import { mergedSoFar, sharedNewRoot } from './mergeRecord'
 import { piecesOf, verdictKey } from './pieces'
-import { acceptedPieces, tipsOf } from './reviewQueue'
+import { acceptedPairs, acceptedPieces, tipsOf } from './reviewQueue'
 
 /** Why an accepted piece is not in the plan. Every one is a reason not to send. */
 export type PlanRefusal =
@@ -622,9 +622,7 @@ export function acceptedTree(
   accepted: ReadonlyMap<string, readonly AcceptedRow[]>,
   seeds: readonly string[],
 ): { pieces: Map<string, AcceptedRow[]>; pathOf: Map<string, string[]> } {
-  const pairs = [...accepted].flatMap(([piece, rows]) =>
-    [...new Set(rows.map((row) => row.neuronId))].map((parent) => ({ parent, piece })),
-  )
+  const pairs = acceptedPairs(accepted)
   const rowsOf = new Map<string, AcceptedRow[]>()
   const pathOf = new Map<string, string[]>()
   for (const placed of piecesOf(pairs, seeds)) {

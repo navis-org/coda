@@ -35,8 +35,10 @@
 import type { Triple } from '../../data/precomputed/volume'
 import { NM_PER_UM } from '../../data/units'
 import { OWN_TIP_UM } from './ownTip'
-import type { Candidate, QueueTip } from './reviewQueue'
-import { gapOf } from './reviewQueue'
+import type { Piece } from './pieces'
+import { piecesOf } from './pieces'
+import type { Candidate, QueueTip, Verdicts } from './reviewQueue'
+import { acceptedPairs, acceptedPieces, gapOf } from './reviewQueue'
 
 /** How near a tip a pick's contact must be to join that tip's list: SEAM's own-tip reach. */
 export const PICK_TIP_UM = OWN_TIP_UM
@@ -137,6 +139,60 @@ export function withPicks(
     }
   }
   return out
+}
+
+/**
+ * The rows to review with every pick on them (`withPicks`), **less a pick's own tip on a piece
+ * the neuron no longer reaches** through accepted pieces — one picked on a piece accepted and
+ * not extended, whose accept was taken back. Placed after `liveQueue`, a pick on a piece outside
+ * the tree keeps its row (user, 2026-11-20), so this is what drops it again; left, it counted as
+ * accepted — Submit's count, the scene, the next pick's check — with no row to show or undo.
+ */
+export function withLivePicks(
+  live: readonly QueueTip[],
+  picks: readonly HandPick[],
+  verdicts: Verdicts,
+  tree: readonly Piece[],
+): readonly QueueTip[] {
+  const placed = withPicks(live, picks)
+  return withoutTips(placed, unreachedTips(placed, verdicts, tree))
+}
+
+/**
+ * The tips of `placed` on a piece outside `tree` that the neuron no longer reaches through
+ * accepted pieces, as text (`seed|root|end_uid`, sorted; `''` for none, nearly always) — so the
+ * card can compare it by value: `verdicts` is new on every click, and the list is rebuilt from
+ * whatever the queue is.
+ */
+export function unreachedTips(
+  placed: readonly QueueTip[],
+  verdicts: Verdicts,
+  tree: readonly Piece[],
+): string {
+  const key = (seed: string, id: string) => `${seed}|${id}`
+  const inTree = new Set(tree.map((piece) => key(piece.seed, piece.id)))
+  const off = placed.filter(
+    (tip) => tip.neuronId !== tip.seed && !inTree.has(key(tip.seed, tip.neuronId)),
+  )
+  if (off.length === 0) return ''
+  const seeds = [...new Set(placed.map((tip) => tip.seed))]
+  const reached = new Set(
+    piecesOf(acceptedPairs(acceptedPieces(placed, verdicts)), seeds).map((piece) =>
+      key(piece.seed, piece.id),
+    ),
+  )
+  return off
+    .filter((tip) => !reached.has(key(tip.seed, tip.neuronId)))
+    .map((tip) => `${key(tip.seed, tip.neuronId)}|${tip.endUid}`)
+    .sort()
+    .join(';')
+}
+
+/** `placed` less the tips `unreachedTips` named — the same array for none. */
+export function withoutTips(placed: readonly QueueTip[], dropped: string): readonly QueueTip[] {
+  if (dropped === '') return placed
+  const gone = new Set(dropped.split(';'))
+  return placed.filter((tip) => !gone.has(`${tip.seed}|${tip.neuronId}|${tip.endUid}`))
 }
 
 /**

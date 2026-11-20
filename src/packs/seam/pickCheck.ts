@@ -75,7 +75,7 @@ export async function checkPick(
     return { ok: false, message: 'That is the neuron itself.' }
   }
   if (pieces.includes(segment)) {
-    return { ok: false, message: 'That piece is already accepted and extended on this neuron.' }
+    return { ok: false, message: 'That piece is already accepted on this neuron.' }
   }
   try {
     const volume = await services.openVolume(request.datastack, options)

@@ -90,6 +90,8 @@ import {
   leavesWith,
   listedAutoPairs,
   listedAutoParams,
+  listedKey,
+  listedTree,
   liveQueue,
   mergedAs,
   neuronsOf,
@@ -162,7 +164,14 @@ import {
   useRestedSegment,
   useSegmentPick,
 } from '../viewers/segmentHover'
-import { decodePicks, encodePicks, listedAt, withPicks } from '../../packs/seam/handPicks'
+import {
+  decodePicks,
+  encodePicks,
+  listedAt,
+  unreachedTips,
+  withPicks,
+  withoutTips,
+} from '../../packs/seam/handPicks'
 import { checkPick } from '../../packs/seam/pickCheck'
 import { flushVerdicts } from '../../data/verdictLog'
 import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
@@ -221,9 +230,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const tips = inputValues?.['tips']
   const candidates = inputValues?.['candidates']
   const picks = useMemo(() => decodePicks(node.params.picks), [node.params.picks])
-  // Every row the tables hold — a piece's joining end and a dropped piece's tips among them — and
-  // the reader's hand picks, placed on them as `evaluate` places them (`withPicks`).
-  // Two memos, so a pick placed or undone does not build the tables' thousands of rows again.
+  // Every row the tables hold — a piece's joining end and a dropped piece's tips among them. The
+  // reader's hand picks go on after the rows to review are chosen (`queue`, as `evaluate` does),
+  // so one on a piece accepted and never extended keeps its own row.
   const built = useMemo(
     () =>
       buildQueue(
@@ -232,7 +241,6 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       ),
     [tips, candidates],
   )
-  const all = useMemo(() => withPicks(built, picks), [built, picks])
   // The reader's own verdicts. Everything that reads "accepted" reads `verdicts`, below.
   const stored = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
   /*
@@ -278,7 +286,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * By the reader's floor whether or not an Auto-extend is live yet — what a press would take.
    */
   const minQ = autoMinQOf(node.params.autoMinQ)
-  const offered = useMemo(() => autoOffered(all, minQ), [all, minQ])
+  const offered = useMemo(() => autoOffered(built, minQ), [built, minQ])
   const plan = useMemo(
     () =>
       planOfTexts({
@@ -295,9 +303,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // The presses `Auto-extend listed` made on SEAM's word: accepted by Auto-extend, not the reader.
   const taken = useMemo(() => decodeExtend(takenText), [takenText])
   // The tree, with what Auto-extend took grown on by the rule the search grew it by.
-  const growth = useMemo(() => reviewGrowth(all, plan), [all, plan])
+  const growth = useMemo(() => reviewGrowth(built, plan), [built, plan])
   const tree = growth.tree
-  const queue = useMemo(() => liveQueue(all, tree), [all, tree])
   // The pieces whose ends are searched, and how many pieces each Auto-extend press has taken.
   const searched = useMemo(() => new Set(growth.searched.map((piece) => piece.id)), [growth])
   const autoTook = useMemo(() => countStrings(growth.accepted.values()), [growth])
@@ -310,6 +317,17 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     [stored, growth, taken],
   )
   /*
+   * The rows to review, the hand picks on them (`withLivePicks`) — less one on a piece the neuron
+   * no longer reaches, named as text first so a verdict click that drops none keeps this queue
+   * and the list built from it.
+   */
+  const placed = useMemo(() => withPicks(liveQueue(built, tree), picks), [built, tree, picks])
+  const unreached = useMemo(
+    () => unreachedTips(placed, verdicts, tree),
+    [placed, verdicts, tree],
+  )
+  const queue = useMemo(() => withoutTips(placed, unreached), [placed, unreached])
+  /*
    * One neuron at a time. Everything below — the list, the cursor, the counts in the foot — reads
    * `mine`, never `queue`, so no surface of the card can show a second neuron's tips.
    */
@@ -317,6 +335,17 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const neurons = useMemo(() => neuronsOf(queue, stored), [queue, stored])
   const neuron = pickedNeuron(queue, String(node.params.neuron ?? ''))
   const mine = useMemo(() => tipsOf(queue, neuron), [queue, neuron])
+  const accepted = useMemo(() => acceptedPieces(mine, verdicts), [mine, verdicts])
+  /*
+   * The tree the list walks: the extended pieces, and an accepted one a hand pick sits on — as a
+   * text first (`listedKey`), so a verdict that places no such piece does not rebuild the list:
+   * `accepted` is new on every click, and `arrangeTree` is most of a click's cost.
+   */
+  const listKey = useMemo(
+    () => listedKey(tree, mine, accepted, neuron),
+    [tree, mine, accepted, neuron],
+  )
+  const listTree = useMemo(() => listedTree(tree, listKey), [tree, listKey])
   const onNeuron = neurons.find((entry) => entry.neuronId === neuron)
 
   const minConfidence = numberOr(node.params.minConfidence)
@@ -337,8 +366,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   )
   // As a tree: a piece's tips beneath the row the piece was accepted on (`arrangeTree`).
   const listed = useMemo(
-    () => arrangeTree(mine, neuron, tree, filters),
-    [mine, neuron, tree, filters],
+    () => arrangeTree(mine, neuron, listTree, filters),
+    [mine, neuron, listTree, filters],
   )
   /*
    * What `Exclude organelles` did to this list, said in the foot since about one flagged piece
@@ -351,9 +380,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const organellesOut = useMemo(() => {
     if (!excludeOrganelles) return 0
     if (mode === 'tip') return listed.filter((row) => row.passedOver).length
-    const all = arrangeTree(mine, neuron, tree, { ...filters, excludeOrganelles: false })
+    const all = arrangeTree(mine, neuron, listTree, { ...filters, excludeOrganelles: false })
     return all.length - listed.length
-  }, [excludeOrganelles, mode, mine, neuron, tree, filters, listed])
+  }, [excludeOrganelles, mode, mine, neuron, listTree, filters, listed])
   /*
    * How many of this neuron's listed tips are still to come. From what the run says of each
    * rather than from the queue's own length: a tip the run will never reach — its box outside
@@ -452,7 +481,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const setParams = useGraphStore((s) => s.setParams)
   const switchTo = (neuronId: string) => {
-    const top = arrangeTree(tipsOf(queue, neuronId), neuronId, tree, filters)[0]
+    const theirs = tipsOf(queue, neuronId)
+    // The tree its list will walk, hand-picked pieces outside the extended ones included.
+    const walked = listedTree(
+      tree,
+      listedKey(tree, theirs, acceptedPieces(theirs, verdicts), neuronId),
+    )
+    const top = arrangeTree(theirs, neuronId, walked, filters)[0]
     setParams(node.id, {
       neuron: neuronId,
       current: top ? tipKey(top.tip.neuronId, top.tip.endUid) : '',
@@ -593,7 +628,6 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     () => (neuron === undefined ? undefined : mergedSoFar(record, neuron, target)),
     [record, neuron, target],
   )
-  const accepted = useMemo(() => acceptedPieces(mine, verdicts), [mine, verdicts])
   // The pieces this neuron is extended with. Counted for the foot, and what keeps Submit off.
   const grown = useMemo(
     () => tree.filter((piece) => piece.seed === neuron).length,
@@ -604,7 +638,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     const seedOf = new Map(tree.map((piece) => [piece.id, piece.seed]))
     return pairsOf(unjudged.keys()).filter((pair) => seedOf.get(pair.piece) === neuron).length
   }, [unjudged, tree, neuron])
-  const toSubmit = useMemo(() => stillToMerge(accepted, merged).length, [accepted, merged])
+  const stillToMergeHere = useMemo(() => stillToMerge(accepted, merged), [accepted, merged])
+  const toSubmit = stillToMergeHere.length
   const absorbed = merged?.absorbedInto !== undefined
   // This card's Submit, named by document and node: two documents can share a node id.
   const docId = useGraphStore((s) => s.activeTabId)
@@ -713,14 +748,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const [checking, setChecking] = useState<string>()
   // Set at once, where `checking` waits for a render: a second press before then is turned away.
   const checkingRef = useRef(false)
-  // The neuron's side of a pick besides the neuron: its extended pieces not merged into it yet.
-  const unmergedPieces = useMemo(
-    () =>
-      tree
-        .filter((piece) => piece.seed === neuron && mergedAs(merged, piece.id) === undefined)
-        .map((piece) => piece.id),
-    [tree, neuron, merged],
-  )
+  /*
+   * What a hand pick may touch besides the neuron: **every piece accepted on it and not merged
+   * yet**, extended or not (user, 2026-11-20) — what Submit merges (`toSubmit`), so a pick on one
+   * is a second hop like any other, and its row stays on that piece (`withPicks` after
+   * `liveQueue`).
+   */
+  const unmergedPieces = stillToMergeHere
   const pickAbort = useRef<AbortController>(undefined)
   useEffect(() => () => pickAbort.current?.abort(), [])
   const addPick = async ({ segment, positionNm }: PointedSegment) => {
@@ -1065,7 +1099,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                     ? extendPress({
                         candidate,
                         progress: isExtended
-                          ? extendProgress(all, tip.seed, candidate.candidateId, search)
+                          ? extendProgress(built, tip.seed, candidate.candidateId, search)
                           : undefined,
                         blocked,
                         extendOnAccept: node.params.extendOnAccept === true,
