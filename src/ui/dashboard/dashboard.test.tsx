@@ -114,6 +114,42 @@ describe('entering the dashboard', () => {
     expect(screen.queryByRole('complementary', { name: 'Pinned viewer' })).toBeNull()
   })
 
+  /*
+   * `Editor` drew the notice, and `Editor` is not mounted here: a hand pick refused in a sentence
+   * read as "nothing happens" (user, 2026-11-20). Either view draws it, exactly once.
+   */
+  it('shows the status notice, as the canvas does', async () => {
+    await renderRun(false)
+    act(() => store().setDashboardOpen(true))
+    act(() =>
+      store().setNotice('No part of the neuron lies within 1.5 µm of where you pointed.'),
+    )
+    expect(screen.getAllByRole('status').map((el) => el.textContent)).toEqual([
+      'No part of the neuron lies within 1.5 µm of where you pointed.×',
+    ])
+    act(() => store().setDashboardOpen(false))
+    expect(screen.getAllByText(/No part of the neuron/)).toHaveLength(1)
+  })
+
+  /*
+   * A run's whole-app effects — its files, its title flash — were `Editor`'s, which is not
+   * mounted here: a run started from the dashboard wrote none of its files (user, 2026-11-20).
+   */
+  it('tells a reader away from the tab that a run started here has finished', async () => {
+    const away = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+    try {
+      await renderRun(true)
+      const ran = store().lastRun!
+      act(() => store().setDashboardOpen(true))
+      document.title = 'Coda'
+      // The same run, long enough to be announced (`NOTIFY_AFTER_MS`), landing while the grid is up.
+      act(() => useGraphStore.setState({ lastRun: { ...ran, durationMs: 20_000 } }))
+      expect(document.title).toBe('✓ Run finished')
+    } finally {
+      away.mockRestore()
+    }
+  })
+
   it('says so when there is nothing on it, rather than showing an empty grid', async () => {
     await renderRun(false)
     act(() => store().setDashboardOpen(true))

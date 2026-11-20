@@ -87,9 +87,7 @@ import { LOCKED_NOTICE } from './lockCopy'
 import { draggedWireStyle, wireStyle } from '../style/socketStyle'
 import { dragPortSocket, useDragOrigin } from './dragOrigin'
 import { useArrange } from './useArrange'
-import { useDownloads } from './useDownloads'
-import { useRunNotify } from './notify'
-import { useForEach } from './useForEach'
+import { StatusNotice } from './StatusNotice'
 import { usePinchToCanvas } from './usePinchToCanvas'
 
 /**
@@ -167,7 +165,6 @@ function EditorCanvas() {
   const graph = useGraphStore((s) => s.graph)
   const selection = useGraphStore((s) => s.selection)
   const inference = useGraphStore((s) => s.inference)
-  const notice = useGraphStore((s) => s.notice)
   const setNotice = useGraphStore((s) => s.setNotice)
   // A primitive, not the panels object: snapshots are compared by identity and `togglePanel`
   // returns a fresh one each call. The button that flips it is `MinimapControl`, in the rail.
@@ -218,14 +215,6 @@ function EditorCanvas() {
   const { arrange, overrides: arrangeOverrides, routes: arrangeRoutes } = useArrange()
   // A primitive, so the snapshot identity check is satisfied — invariant 7.
   const edgeRouting = useGraphStore((s) => s.edgeRouting)
-  // Mounted here rather than from the Download node's own card: a collapsed card unmounts its
-  // body, and a Download node that stopped writing when somebody tidied it away would be a bug
-  // nobody could reproduce on purpose.
-  useDownloads()
-  useForEach()
-  // Same reasoning: a run finishing is a whole-app event, and the tab it lands on may have no
-  // card expanded at all.
-  useRunNotify()
   const wrapperRef = useRef<HTMLDivElement>(null)
   usePinchToCanvas(wrapperRef)
   const pointerRef = useRef({ x: 0, y: 0 })
@@ -1489,14 +1478,7 @@ function EditorCanvas() {
         />
       )}
 
-      {notice && (
-        <div className="notice" role="status">
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice(undefined)} title="Dismiss">
-            ×
-          </button>
-        </div>
-      )}
+      <StatusNotice />
     </div>
   )
 }

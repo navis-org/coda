@@ -29,6 +29,9 @@ import { GroupPeek } from './ui/panels/GroupPeek'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
 import { ScreenMap } from './ui/tour/ScreenMap'
 import { useNarrowShell } from './ui/smallScreen'
+import { useDownloads } from './ui/useDownloads'
+import { useForEach } from './ui/useForEach'
+import { useRunNotify } from './ui/notify'
 import { WorkflowScope } from './ui/viewers/workflowScope'
 
 export function App() {
@@ -95,6 +98,7 @@ export function App() {
         style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
       >
         {!focused && <Toolbar />}
+        <RunEffects />
         {dashboardOpen ? <DashboardView /> : <Editor />}
         {/*
          * Between the canvas and the inspector, and before it in the DOM so tab order runs left to
@@ -199,4 +203,18 @@ export function App() {
       </div>
     </WorkflowScope.Provider>
   )
+}
+
+/**
+ * A run's files and its notice when it lands — Download nodes, a `For Each`'s per-pass files,
+ * the title flash. Under `App`, not in `Editor` (where they were) and not on a card: a run
+ * finishing is a whole-app event, a collapsed card unmounts its body, and `Editor` is not mounted
+ * while the dashboard is up — a run started there wrote none of its files (user, 2026-11-20).
+ * A component of its own, drawing nothing, so what they subscribe to re-renders only this.
+ */
+function RunEffects(): null {
+  useDownloads()
+  useForEach()
+  useRunNotify()
+  return null
 }
