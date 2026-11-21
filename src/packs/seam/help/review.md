@@ -166,6 +166,8 @@ Auto-extend does not accept:
 - a piece already in the neuron;
 - a pair you have given any verdict other than Accept.
 
+Where a chain stops because its next piece is large, that row is marked with a `!`. A piece that size at the end of a chain is often a false merge, either in that piece or in a piece earlier in the chain that has led into another neuron. Hover over the `!` for the piece's size and `q`. If both look right in the viewer, accept the piece and extend it yourself.
+
 It needs SEAM's cutoff, so Suggest Merges must have an `Assessor`. Without one the menu item is greyed out.
 
 **`Auto-extend min q`** raises the bar. Empty, Auto-extend takes what clears SEAM's cutoff; set to a number, it takes a first candidate only where its `q` is at least that as well — `0.4`, say, for fewer and surer pieces. A number below the cutoff changes nothing, since the cutoff still applies. Changing it while an Auto-extend is running grows the tree again by the new rule: pieces it no longer takes, and everything beyond them, come off the list, and pieces you accepted yourself stay. `Auto-extend listed` counts by it too.

@@ -206,6 +206,16 @@ export const LARGE_PIECE_CHUNKS = 41
  */
 export const AUTO_DEPTH = 10
 
+/** What `autoTakes` asks of an end's first candidate. */
+export interface AutoFirst {
+  readonly shown: boolean | null | undefined
+  /** SEAM's `q` for the tip: the number its cutoff is a value of. */
+  readonly q: number | null | undefined
+  readonly organelle: boolean | null | undefined
+  readonly l2Chunks: number | null | undefined
+  readonly id: string
+}
+
 /**
  * Whether Auto-extend takes an end's first candidate — **the one rule**, read by the search over
  * its finished ends and by the card over the published rows, so the two grow the same tree.
@@ -215,21 +225,22 @@ export const AUTO_DEPTH = 10
  * the bar, since the cutoff still applies under it — not an organelle, not large, and a real
  * object.
  */
-export function autoTakes(
-  first: {
-    readonly shown: boolean | null | undefined
-    /** SEAM's `q` for the tip: the number its cutoff is a value of. */
-    readonly q: number | null | undefined
-    readonly organelle: boolean | null | undefined
-    readonly l2Chunks: number | null | undefined
-    readonly id: string
-  },
-  minQ?: number,
-): boolean {
+export function autoTakes(first: AutoFirst, minQ?: number): boolean {
   if (first.shown !== true || first.organelle === true) return false
   if (minQ !== undefined && !(typeof first.q === 'number' && first.q >= minQ)) return false
   if (typeof first.l2Chunks === 'number' && first.l2Chunks >= LARGE_PIECE_CHUNKS) return false
   return isNodeId(first.id)
+}
+
+/**
+ * The size Auto-extend turned an end's first candidate down for, where that was **its size
+ * alone** — refused by `autoTakes`, taken with the size left out, so the two cannot drift. Where a
+ * chain stops on a piece this large it has usually run into a false merge, in that piece or in the
+ * chain itself (user, 2026-11-21), so the card marks the row.
+ */
+export function autoTooLarge(first: AutoFirst, minQ?: number): number | undefined {
+  if (autoTakes(first, minQ) || !autoTakes({ ...first, l2Chunks: undefined }, minQ)) return
+  return first.l2Chunks ?? undefined
 }
 
 /** What Auto-extend added to the tree: the tree, and which pairs it accepted. */
@@ -240,6 +251,11 @@ export interface AutoGrowth {
   readonly searched: readonly Piece[]
   /** The pairs Auto-extend accepted, as `parent/piece`, each to the piece it was pressed on. */
   readonly accepted: ReadonlyMap<string, string>
+  /**
+   * The pieces whose ends Auto-extend reads: below a press and fewer than `AUTO_DEPTH` layers
+   * down — where the card looks for a chain stopped on a large piece (`autoStoppedLarge`).
+   */
+  readonly autoRead: readonly Piece[]
 }
 
 /**
@@ -267,7 +283,7 @@ export function growAuto(
   const accepted = new Map<string, string>()
   if (plan.roots.size === 0) {
     const tree = piecesOf(plan.pairs, seeds)
-    return { tree, searched: tree, accepted }
+    return { tree, searched: tree, accepted, autoRead: [] }
   }
   /** Auto-extend's last layer: accepted, never searched, and offering nothing. */
   const last = new Set<string>()
@@ -278,10 +294,12 @@ export function growAuto(
     const tree = piecesOf(pairs, seeds)
     const placed = new Set(tree.map((piece) => piece.id))
     const claims = new Map<string, { parent: Piece; root: string; layer: number }>()
+    const autoRead: Piece[] = []
     for (const piece of tree) {
       if (last.has(piece.id)) continue
       const from = pressedOn(piece, plan.roots)
       if (!from || from.layer >= AUTO_DEPTH) continue
+      autoRead.push(piece)
       for (const id of firsts(piece)) {
         if (reserved.has(id) || placed.has(id)) continue
         if (plan.refused.has(verdictKey(piece.id, id))) continue
@@ -291,7 +309,7 @@ export function growAuto(
       }
     }
     if (claims.size === 0) {
-      return { tree, searched: tree.filter((piece) => !last.has(piece.id)), accepted }
+      return { tree, searched: tree.filter((piece) => !last.has(piece.id)), accepted, autoRead }
     }
     for (const [id, claim] of [...claims].sort(([a], [b]) => compareIds(a, b))) {
       pairs.push({ parent: claim.parent.id, piece: id })

@@ -77,6 +77,8 @@ import {
   autoJudged,
   autoMinQOf,
   autoOffered,
+  autoStoppedLarge,
+  autoStoppedNote,
   autoUnavailable,
   decodeExtend,
   decodeVerdicts,
@@ -309,6 +311,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // The pieces whose ends are searched, and how many pieces each Auto-extend press has taken.
   const searched = useMemo(() => new Set(growth.searched.map((piece) => piece.id)), [growth])
   const autoTook = useMemo(() => countStrings(growth.accepted.values()), [growth])
+  // Where an Auto-extend stopped on a piece too large to take: those rows carry a `!`.
+  const stoppedLarge = useMemo(
+    () => autoStoppedLarge(built, growth, plan),
+    [built, growth, plan],
+  )
   /*
    * The verdicts everything reads as accepted or not: the reader's, and Auto-extend's accepts
    * where the reader has said nothing (`unjudged`) — as `evaluate` and Submit read them.
@@ -1078,6 +1085,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                 const on =
                   onTip &&
                   (mode === 'tip' || here?.candidate.candidateId === candidate?.candidateId)
+                // The pair the row shows, as `parent/piece`.
+                const key = candidate && verdictKey(tip.neuronId, candidate.candidateId)
                 const said =
                   candidate && verdictFor(verdicts, tip.neuronId, candidate.candidateId)
                 // Merged by Submit: a verdict on it changes nothing now, so it cannot be changed.
@@ -1088,6 +1097,12 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   acceptedElsewhere(accepted, said, candidate.candidateId)
                 const outdated =
                   !done && candidate !== undefined && edited(candidate.candidateId)
+                // Auto-extend stopped at this end on the piece the row shows, too large to take.
+                const stop = stoppedLarge.get(tipKey(tip.neuronId, tip.endUid))
+                const stopNote =
+                  stop && stop.id === candidate?.candidateId
+                    ? autoStoppedNote(stop.chunks, tip.q)
+                    : ''
                 // How the piece is extended: by the reader's press, or by an Auto-extend further up.
                 const {
                   choice,
@@ -1095,7 +1110,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                   heldBy,
                   held,
                   extended: isExtended,
-                } = rowExtend(candidate && verdictKey(tip.neuronId, candidate.candidateId), {
+                } = rowExtend(key, {
                   extended,
                   autoPressed,
                   accepted: growth.accepted,
@@ -1184,8 +1199,27 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                         </span>
                       )}
                     </span>
-                    <span className="review-row__id">
+                    {/*
+                     * Its chips take the pointer back so their titles show (`editor.css`), and a
+                     * click on one bubbles here: it picks the row, as a click beside it does. The
+                     * line's own text gives the pointer up, so this never runs twice.
+                     */}
+                    <span className="review-row__id" onClick={() => pick(tip, shows)}>
                       {candidate?.candidateId ?? 'no candidate'}
+                      {/*
+                       * Auto-extend stopped here on a piece too large to take — often a false
+                       * merge, in this piece or in the chain (user, 2026-11-21).
+                       */}
+                      {stopNote && (
+                        <span
+                          className="review-row__stopped"
+                          role="img"
+                          aria-label={stopNote}
+                          title={stopNote}
+                        >
+                          !
+                        </span>
+                      )}
                       {/*
                        * Its own chip, not one more muted fact: a merged piece must stand apart
                        * from the ones still to merge at a glance (user, 2026-11-16).
@@ -1209,8 +1243,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                         <span
                           className="review-row__auto"
                           title={`${
-                            candidate &&
-                            taken.has(verdictKey(tip.neuronId, candidate.candidateId))
+                            key !== undefined && taken.has(key)
                               ? 'Accepted on SEAM’s cutoff by Auto-extend listed.'
                               : `Accepted by the Auto-extend on ${autoFrom}.`
                           } Press Accept to make it your own verdict. ${AUTO_REJECT_NOTE}`}

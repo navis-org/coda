@@ -11359,6 +11359,15 @@ details[open] > summary.tile__label {
   position: relative;
   pointer-events: none;
 }
+/*
+ * A chip with a title takes the pointer back, or its title never shows: the line gives the
+ * pointer up to the row's layer, and so would the chip (checked in Chrome, 2026-11-21). A click
+ * on one picks the row all the same — it bubbles to `.review-row__id`'s handler.
+ */
+.review-row__id > [title] {
+  pointer-events: auto;
+  cursor: pointer;
+}
 .review-row__score {
   grid-area: score;
   display: flex;
@@ -11433,6 +11442,25 @@ details[open] > summary.tile__label {
   font-size: 10px;
   font-weight: 600;
   color: var(--status-refused);
+}
+/*
+ * Where an Auto-extend stopped on a piece too large to take (`autoStoppedLarge`): a mark in
+ * `--status-warn`, the amber measured per mode for text, and a sentence on hover.
+ */
+.review-row__stopped {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  border: 1px solid var(--status-warn);
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--status-warn);
+  vertical-align: 1px;
 }
 .review-body__edited {
   color: var(--status-refused);

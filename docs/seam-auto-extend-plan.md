@@ -157,6 +157,33 @@ candidate with no `q` is not taken under a floor). One param on the card, `autoM
 Not checked at the node: no test drives the search's own Auto-extend (none did before either); the
 plan's round trip and the card's growth are tested, and the search's change is the one call.
 
+## Where a chain stopped on a large piece (user, 2026-11-21)
+
+A chain that reaches a candidate of 41 chunks or more stops there, and that is usually a false
+merge — in the large piece, or in a piece earlier in the chain that has led it into another
+neuron. The row used to say nothing; now it carries a `!` in `--status-warn`, and a sentence on
+hover with the piece's size, its `q`, the limit and what to look at (`autoStoppedNote`).
+
+- **Which rows** is `autoStoppedLarge(queue, growth, plan)`: a tip of a piece Auto-extend reads
+  (`AutoGrowth.autoRead` — under a press, fewer than `AUTO_DEPTH` layers down, as `growAuto`
+  itself reports) whose first candidate is turned down **for its size alone** (`autoTooLarge`, which is `autoTakes` with
+  the size left out, so the two cannot drift). An organelle, or a candidate under the cutoff or
+  the reader's floor, would have stopped the chain anyway and is not marked.
+- **By tip, not by pair** (`tipKey` → the piece and its size): the stop is one end's first
+  candidate, so another end listing the same piece lower down — or a rank-2 row per candidate —
+  is not marked, and the note's `q` is the stopped end's.
+- **Not marked:** a large candidate on a piece extended by hand outside any press (nothing was
+  going to take it); one `growAuto` passes over whatever its size — a seed, a piece extended by
+  hand, one already in the tree; and a pair the reader turned down (`ExtendPlan.refused`: they
+  have looked). An accept of it keeps the mark: accepting merges it, and the warning is about
+  exactly that.
+- **A chip with a title takes the pointer back** (`.review-row__id > [title]`, checked in Chrome):
+  `.review-row__id` gives the pointer up to the row's click layer, so before this no chip's title
+  showed on hover — `auto`, `by hand`, `outdated` and `in this neuron` included. A click on a chip
+  bubbles to the id line's own `onClick`, which picks the row; the line's text still gives the
+  pointer up, so the pick never runs twice. It does not focus the row's button; left, since the
+  card's keys follow `current`, never focus, and Firefox on macOS focuses no button on a click.
+
 ## Known, and left
 
 - **The wait is not priced** for pieces Auto-extend has yet to find. `warnOverWait` counts what is

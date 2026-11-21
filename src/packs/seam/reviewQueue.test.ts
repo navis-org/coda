@@ -44,6 +44,8 @@ import {
   reviewStateOf,
   autoJudged,
   autoOffered,
+  autoStoppedLarge,
+  autoStoppedNote,
   planTexts,
   rowExtend,
   leavesWith,
@@ -1991,6 +1993,59 @@ describe('Auto-extend, as the card reads it', () => {
 
   it('knows which pairs it could take anywhere in the queue', () => {
     expect([...autoOffered(all)].sort()).toEqual(['100/201', '201/301', '301/402'])
+  })
+
+  /** The `!` on a row (user, 2026-11-21): where a chain stopped on a piece too large to take. */
+  describe('where it stopped on a piece too large to take', () => {
+    const stopped = (params: Record<string, string>) => {
+      const plan = extendPlanFrom(params, decodeVerdicts(params.verdicts))
+      return autoStoppedLarge(all, reviewGrowth(all, plan), plan)
+    }
+
+    it('marks the end that stopped, with the piece and its size', () => {
+      expect([...stopped(PRESSED)]).toEqual([
+        ['301|1', { id: '401', chunks: LARGE_PIECE_CHUNKS + 20 }],
+      ])
+    })
+
+    it('marks nothing where Auto-extend never read the end', () => {
+      expect(stopped({ ...PRESSED, autoRoots: '' }).size).toBe(0)
+      // 301 extended by hand, with no press above it: its large candidate stopped nothing.
+      const byHand = {
+        verdicts: '100/201=accept;201/301=accept',
+        extend: '100/201;201/301',
+        autoRoots: '',
+      }
+      expect(stopped(byHand).size).toBe(0)
+    })
+
+    /** `growAuto` passes these over whatever their size: no size stopped the chain there. */
+    it('marks nothing Auto-extend would pass over anyway', () => {
+      // 401 extended by hand, under 301: in the tree, and the reader's own.
+      const byHand = {
+        verdicts: `${PRESSED.verdicts};301/401=accept`,
+        extend: `${PRESSED.extend};301/401`,
+        autoRoots: PRESSED.autoRoots,
+      }
+      expect(stopped(byHand).size).toBe(0)
+    })
+
+    it('marks nothing the reader has turned down', () => {
+      const refused = {
+        ...PRESSED,
+        verdicts: `${PRESSED.verdicts};301/401=reject`,
+        autoRefused: '301/401',
+      }
+      expect(stopped(refused).size).toBe(0)
+    })
+
+    it('says why on hover, with the numbers', () => {
+      const note = autoStoppedNote(61, 0.42)
+      expect(note).toContain('61 L2 chunks')
+      expect(note).toContain('q 0.420')
+      expect(note).toContain(`${LARGE_PIECE_CHUNKS} or more`)
+      expect(autoStoppedNote(61, undefined)).not.toContain('q ')
+    })
   })
 
   /** `Auto-extend min q` (user, 2026-11-19): a floor on `q` the reader raises over SEAM's cutoff. */

@@ -56,11 +56,12 @@ import type { CellValue, TableValue } from '../../core/values'
 import { formatNumber, plural } from '../../style/format'
 import type { MergedSoFar } from './mergeRecord'
 import { rootNow } from './mergeRecord'
-import type { AutoGrowth, ExtendPlan, Piece } from './pieces'
+import type { AutoFirst, AutoGrowth, ExtendPlan, Piece } from './pieces'
 import {
   AUTO_DEPTH,
   LARGE_PIECE_CHUNKS,
   autoTakes,
+  autoTooLarge,
   growAuto,
   nearerClaim,
   pairsOf,
@@ -1362,19 +1363,82 @@ export function autoFirsts(
 
 /** The first candidate Auto-extend would take at a tip, where it would (`autoTakes`). */
 function autoFirstOf(tip: QueueTip, minQ: number | undefined): string | undefined {
+  const first = autoAsks(tip)
+  return first && autoTakes(first, minQ) ? first.id : undefined
+}
+
+/** What `autoTakes` asks of a tip's first candidate — `undefined` where it asks nothing. */
+function autoAsks(tip: QueueTip): AutoFirst | undefined {
   const first = tip.candidates[0]
   if (tip.junction || tip.search !== 'done' || !first) return undefined
-  const takes = autoTakes(
-    {
-      shown: tip.cleared,
-      q: tip.q,
-      organelle: first.organelle,
-      l2Chunks: first.l2Chunks,
-      id: first.candidateId,
-    },
-    minQ,
-  )
-  return takes ? first.candidateId : undefined
+  return {
+    shown: tip.cleared,
+    q: tip.q,
+    organelle: first.organelle,
+    l2Chunks: first.l2Chunks,
+    id: first.candidateId,
+  }
+}
+
+/** Where an Auto-extend stopped on a piece too large to take: the piece, and its size. */
+export interface AutoStop {
+  readonly id: string
+  readonly chunks: number
+}
+
+/**
+ * Where an Auto-extend stopped because the next piece was too large (`autoTooLarge`), by the
+ * tip's key (`tipKey`) — the rows the card marks `!` (user, 2026-11-21). By tip, not by pair: the
+ * stop is that end's first candidate, so another end listing the same piece lower down is not
+ * marked, and the note's `q` is the stopped end's.
+ *
+ * Only where size is all that stopped it:
+ * - only ends Auto-extend reads (`AutoGrowth.autoRead`): a piece extended by hand and outside any
+ *   press was never going to be taken;
+ * - not a piece `growAuto` passes over whatever its size — a seed, a piece extended by hand, one
+ *   already in the tree;
+ * - not a pair the reader turned down (`ExtendPlan.refused`): they have looked at it.
+ */
+export function autoStoppedLarge(
+  queue: readonly QueueTip[],
+  growth: AutoGrowth,
+  plan: ExtendPlan,
+): ReadonlyMap<string, AutoStop> {
+  const out = new Map<string, AutoStop>()
+  if (growth.autoRead.length === 0) return out
+  // `growAuto`'s `reserved` and `placed`: never taken, so no size stopped anything there.
+  const passedOver = new Set([
+    ...queue.map((tip) => tip.seed),
+    ...plan.pairs.map((pair) => pair.piece),
+    ...growth.tree.map((piece) => piece.id),
+  ])
+  const byPiece = groupBy(queue, (tip) => tip.neuronId)
+  for (const piece of growth.autoRead) {
+    for (const tip of byPiece.get(piece.id) ?? []) {
+      const first = tip.seed === piece.seed ? autoAsks(tip) : undefined
+      if (!first || passedOver.has(first.id)) continue
+      if (plan.refused.has(verdictKey(piece.id, first.id))) continue
+      const chunks = autoTooLarge(first, plan.autoMinQ)
+      if (chunks !== undefined)
+        out.set(tipKey(tip.neuronId, tip.endUid), { id: first.id, chunks })
+    }
+  }
+  return out
+}
+
+/** What the `!` on a row Auto-extend stopped at says on hover (`autoStoppedLarge`). */
+export function autoStoppedNote(chunks: number, q: number | undefined): string {
+  return [
+    `Auto-extend stopped here. This candidate clears SEAM’s cutoff${
+      q === undefined ? '' : ` (q ${q.toFixed(3)})`
+    }, but it is ${sizeLabel({ value: chunks, of: 'chunks' })}, and Auto-extend does not take ` +
+      `a piece of ${LARGE_PIECE_CHUNKS} or more.`,
+    'A piece this large at the end of a chain is often a false merge: either this piece has ' +
+      'been merged with something it should not be, or a piece earlier in the chain has, and ' +
+      'the chain has wandered into another neuron.',
+    'Look at the piece and the chain in the viewer. If both are right, Accept it and Extend ' +
+      'carries on from it.',
+  ].join(' ')
 }
 
 /**

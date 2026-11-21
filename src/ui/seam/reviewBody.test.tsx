@@ -40,6 +40,7 @@ import { NEUROGLANCER_TYPE } from '../../nodes/output/neuroglancer'
 import { setHoveredSegment } from '../viewers/segmentHover'
 import { decodePicks, encodePicks } from '../../packs/seam/handPicks'
 import { decodeVerdicts } from '../../packs/seam/reviewQueue'
+import { LARGE_PIECE_CHUNKS } from '../../packs/seam/pieces'
 
 /** Submit's session, faked: the card only reads its state and opens it. */
 const openSubmit = vi.fn()
@@ -973,8 +974,8 @@ describe('extending a neuron from the review card', () => {
         searched: [true, true, false, searched],
       },
     )
-  /** The piece's end lists `candidateId`: a new piece by default. */
-  const grownCandidates = (candidateId = NEXT): TableValue =>
+  /** The piece's end lists `candidateId`: a new piece by default, of `chunks` level-2 chunks. */
+  const grownCandidates = (candidateId = NEXT, chunks = 3): TableValue =>
     makeTable(CANDIDATES.schema, {
       ...CANDIDATES.data,
       [ID_COLUMN_NAME]: [...CANDIDATES.data[ID_COLUMN_NAME]!, PIECE],
@@ -982,7 +983,7 @@ describe('extending a neuron from the review card', () => {
       candidateId: [...CANDIDATES.data['candidateId']!, candidateId],
       rank: [...CANDIDATES.data['rank']!, 1],
       vol_um3: [...CANDIDATES.data['vol_um3']!, 1],
-      n_l2: [...CANDIDATES.data['n_l2']!, 3],
+      n_l2: [...CANDIDATES.data['n_l2']!, chunks],
       conf: [...CANDIDATES.data['conf']!, 0.2],
       contact_x: [...CANDIDATES.data['contact_x']!, 14],
       contact_y: [...CANDIDATES.data['contact_y']!, 24],
@@ -1086,9 +1087,36 @@ describe('extending a neuron from the review card', () => {
       expect(stored()['verdicts']).toBe(ACCEPTED)
     })
 
+    /** The chip takes the pointer for its title (`editor.css`), and a click on it still picks. */
+    it('picks the row from a click on its chip', () => {
+      const written = draw(PRESSED, true, grownCandidates(), grownTips(true))
+      const taken = rows().find((row) => row.textContent?.includes(NEXT))!
+      fireEvent.click(taken.querySelector('.review-row__auto')!)
+      expect(written).toEqual({ current: `${PIECE}|11`, rank: 1 })
+    })
+
     it('takes nothing where Auto-extend was not pressed', () => {
       draw(EXTENDED, true, grownCandidates(), grownTips(true))
       expect(document.querySelector('.review-row__auto')).toBeNull()
+    })
+
+    /** The `!` (user, 2026-11-21): a chain stopped on a piece too large to take. */
+    it('marks where it stopped on a piece too large to take, and says why on hover', () => {
+      draw(PRESSED, true, grownCandidates(NEXT, LARGE_PIECE_CHUNKS), grownTips(true))
+      const row = rows().find((one) => one.textContent?.includes(NEXT))!
+      expect(row.querySelector('.review-row__auto')).toBeNull()
+      const mark = row.querySelector<HTMLElement>('.review-row__stopped')!
+      expect(mark.textContent).toBe('!')
+      expect(mark.title).toMatch(/^Auto-extend stopped here/)
+      expect(mark.title).toContain(`${LARGE_PIECE_CHUNKS} L2 chunks`)
+      expect(mark.getAttribute('aria-label')).toBe(mark.title)
+      // One mark, on that row alone.
+      expect(document.querySelectorAll('.review-row__stopped')).toHaveLength(1)
+    })
+
+    it('marks nothing where Auto-extend was not pressed', () => {
+      draw(EXTENDED, true, grownCandidates(NEXT, LARGE_PIECE_CHUNKS), grownTips(true))
+      expect(document.querySelector('.review-row__stopped')).toBeNull()
     })
   })
 

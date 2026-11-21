@@ -16,6 +16,7 @@ import {
   LARGE_PIECE_CHUNKS,
   aliasOf,
   autoTakes,
+  autoTooLarge,
   extendPlanOf,
   growAuto,
   pieceContacts,
@@ -369,6 +370,17 @@ describe('what Auto-extend takes', () => {
     expect(autoTakes({ ...first, shown: undefined })).toBe(false)
   })
 
+  it('knows a first candidate turned down for its size alone', () => {
+    const large = { ...first, l2Chunks: LARGE_PIECE_CHUNKS }
+    expect(autoTooLarge(large)).toBe(LARGE_PIECE_CHUNKS)
+    expect(autoTooLarge(first)).toBeUndefined()
+    expect(autoTooLarge({ ...first, l2Chunks: undefined })).toBeUndefined()
+    // Turned down for something else as well: not for its size alone.
+    expect(autoTooLarge({ ...large, shown: false })).toBeUndefined()
+    expect(autoTooLarge({ ...large, organelle: true })).toBeUndefined()
+    expect(autoTooLarge(large, 0.5)).toBeUndefined()
+  })
+
   it('takes no organelle, no large piece and no non-object', () => {
     expect(autoTakes({ ...first, organelle: true })).toBe(false)
     expect(autoTakes({ ...first, l2Chunks: LARGE_PIECE_CHUNKS })).toBe(false)
@@ -429,6 +441,11 @@ describe('the tree Auto-extend grows', () => {
     expect(last.id).toBe(`${801 + AUTO_DEPTH}`)
     expect(grown.searched.map((piece) => piece.id)).not.toContain(last.id)
     expect(grown.searched).toHaveLength(AUTO_DEPTH)
+    // What Auto-extend reads is what it searched, and nothing where nothing was pressed.
+    expect(grown.autoRead).toEqual(grown.searched)
+    expect(
+      growAuto(plan([pair('720', '801')], []), ['720'], offering(chain(20))).autoRead,
+    ).toEqual([])
   })
 
   /** Extended by hand, a piece of the last layer is searched — and Auto-extend goes no further. */
@@ -442,6 +459,8 @@ describe('the tree Auto-extend grows', () => {
     )
     expect(grown.searched.map((piece) => piece.id)).toContain(last)
     expect(grown.accepted.has(`${last}/${802 + AUTO_DEPTH}`)).toBe(false)
+    // Searched for the reader, not read by Auto-extend: a large piece there stopped nothing.
+    expect(grown.autoRead.map((piece) => piece.id)).not.toContain(last)
   })
 
   it('counts the layers from the piece it was pressed on, not from the neuron', () => {
