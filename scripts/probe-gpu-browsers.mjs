@@ -18,12 +18,23 @@
  * `network.score` therefore no longer waits for one answer before submitting the next, and
  * `GPU_ASSESSOR_IN_FLIGHT` says how many to keep out (`docs/seam-assessor-speed.md` §16).
  *
+ * **Since (2026-11-21, §17-18):** stage 0 computes only what an object can reach, and Firefox
+ * builds forms of the kernels its shader translator is quick with — 13.5 ms a patch in Chrome and
+ * 17 in Firefox on the same patches, where the paragraph above says 19-20 and ~30.
+ *
  * ## The readings
  *
  * - `score()`, one at a time and with 4, 12 and 24 in flight: the method the node calls, through
  *   its own queue and read-back pool. Every answer in flight must equal the one-at-a-time answer
  *   to the bit — the GPU runs submitted work in order, which is what makes sharing the buffers
  *   safe — and that is checked.
+ * - Every one-at-a-time answer against the dense reference's (`segclrPlan`'s `denseStem`, every
+ *   voxel computed), to the bit, **in each browser** — the two build different forms of the same
+ *   sums (`frugalShaders`, docs/seam-assessor-speed.md §18), so each is held to the plain
+ *   reference.
+ * - Each step alone, recorded many times in its one submit (`profile`'s `repeats`), which is
+ *   the only way to time one in Firefox. `--form frugal|plain` builds that form whatever the
+ *   browser, and `--no-skip` computes every voxel of stage 0: what the background skip is worth.
  * - The pieces of one patch's round trip, each waited on alone: the 8.5 MB upload; an empty
  *   submit; a read back after 0 and after 400 trivial dispatches. Equal in Firefox is the
  *   finding: the wait, not the work.
@@ -51,6 +62,16 @@ if (!exported) {
 }
 const browsers = (args.value('--browsers') ?? 'firefox,chrome').split(',').map((one) => one.trim())
 const ends = (args.value('--ends') ?? '20,1475').split(',').map((one) => one.trim())
+/** `frugal` or `plain` to build that form whatever the browser; absent, the browser's own. */
+const form = args.value('--form')
+if (form !== undefined && form !== 'frugal' && form !== 'plain') {
+  console.error(`--form is frugal or plain, not ${form}`)
+  process.exit(2)
+}
+const options = {
+  ...(form ? { frugal: form === 'frugal' } : {}),
+  ...(args.all.includes('--no-skip') ? { skipBackground: false } : {}),
+}
 /** Depths for `score()`. Twelve is `GPU_ASSESSOR_IN_FLIGHT`. */
 const DEPTHS = [1, 4, 6, 8, 12, 24]
 const IN_FLIGHT = 12
@@ -62,7 +83,16 @@ const { base, stop } = await serveOrtPage({
   dirs: { '/': exported, '/work/': ASSESSOR_WORK },
 })
 
-const page = `(async () => {
+/**
+ * The page's script for one browser. Firefox answers a wait for the GPU in steps of ~100 ms, so
+ * it gets a stream of at least 150 patches a reading and each step 300 times a submit; Chrome
+ * needs neither, and takes 40 and 30.
+ */
+const page = (browser) => {
+  const total = lists.reduce((sum, one) => sum + one.patches, 0)
+  const laps = Math.max(1, Math.ceil((browser === 'firefox' ? 150 : 40) / total))
+  const repeats = browser === 'firefox' ? 300 : 30
+  return `(async () => {
   const load = ${APP_MODULE}
   const [onnx, planning, net] = await Promise.all([
     load('/src/packs/seam/gpuAssessor/onnxProto.ts'),
@@ -71,7 +101,7 @@ const page = `(async () => {
   ])
   const graph = onnx.readOnnx(new Uint8Array(await (await fetch(${JSON.stringify(`${base}/${convFile}`)})).arrayBuffer()))
   const device = await net.assessorDevice()
-  const network = await net.buildNetwork(device, planning.segclrPlan(graph))
+  const network = await net.buildNetwork(device, planning.segclrPlan(graph), ${JSON.stringify(options)})
   const info = device.adapterInfo ?? (await navigator.gpu.requestAdapter())?.info ?? {}
   const voxels = network.edge ** 3
   const patches = []
@@ -87,17 +117,42 @@ const page = `(async () => {
   // Warm, and the one-at-a-time answers every depth must equal.
   const serial = []
   for (let r = 0; r < 2; r++) for (let i = 0; i < patches.length; i++) serial[i] = await network.score(patches[i])
+  // The reference: the dense stem, every voxel, the plain form — one fixed thing in both browsers.
+  const reference = await net.buildNetwork(device, planning.segclrPlan(graph, { denseStem: true }), { skipBackground: false, frugal: false })
+  // A dozen in flight, as the node keeps: each one out is an 8.5 MB upload waiting its turn.
+  let equalReference = true
+  const checking = []
+  for (let i = 0; i < patches.length; i++) {
+    checking.push(reference.score(patches[i]).then((v) => { equalReference &&= Object.is(v, serial[i]) }))
+    if (checking.length >= 12) await checking.shift()
+  }
+  await Promise.all(checking)
+  reference.destroy()
 
+  /*
+   * Each depth as one stream: every patch, LAPS times over, with that many kept in flight.
+   * A stream and not a batch a reading, because Firefox notices finished work about every
+   * 100 ms — a batch of twelve reads 200 ms or 300, never the 210 it took, while a stream of a
+   * hundred and fifty patches is out by under a millisecond a patch.
+   */
+  const LAPS = ${laps}
   const score = {}
   let equal = true
   for (const depth of ${JSON.stringify(DEPTHS)}) {
     const each = []
-    for (let r = 0; r < Math.max(3, Math.ceil(N / depth)); r++) {
-      const which = Array.from({ length: depth }, (_, k) => (r * depth + k) % patches.length)
+    for (let r = 0; r < 3; r++) {
+      const got = []
+      const waiting = []
       const t = performance.now()
-      const got = await Promise.all(which.map((i) => network.score(patches[i])))
-      each.push((performance.now() - t) / depth)
-      equal &&= got.every((v, k) => Object.is(v, serial[which[k]]))
+      for (let lap = 0; lap < (depth === 1 ? 1 : LAPS); lap++) {
+        for (let i = 0; i < patches.length; i++) {
+          waiting.push(network.score(patches[i]).then((v) => { got.push([i, v]) }))
+          if (waiting.length >= depth) await waiting.shift()
+        }
+      }
+      await Promise.all(waiting)
+      each.push((performance.now() - t) / got.length)
+      equal &&= got.every(([i, v]) => Object.is(v, serial[i]))
     }
     score[depth] = st(each)
   }
@@ -134,13 +189,16 @@ const page = `(async () => {
     }))
     trivial[k] = st(xs)
   }
+  // Each step alone, many times a submit: Firefox answers a wait in ~100 ms whatever the work.
+  const steps = await network.profile(patches[0], ${repeats})
   o.destroy(); back.destroy(); network.destroy()
   return JSON.stringify({
     adapter: [info.vendor, info.architecture].filter(Boolean).join(' '),
     patches: patches.length,
-    score, equal, upload: st(upload), empty: st(empty), trivial,
+    score, equal, equalReference, steps, upload: st(upload), empty: st(empty), trivial,
   })
 })()`
+}
 
 const results = {}
 const ports = { firefox: 9339, chrome: 9358 }
@@ -152,7 +210,7 @@ for (const browser of browsers) {
   })
   await navigate(url)
   await waitFor('Boolean(document.querySelector("#root"))', 'the app')
-  results[browser] = JSON.parse(await evaluate(page, 900_000))
+  results[browser] = JSON.parse(await evaluate(page(browser), 1_800_000))
   close()
 }
 stop()
@@ -171,9 +229,24 @@ row('a read back after 0 dispatches', (r) => r.trivial[0])
 row('a read back after 400 trivial dispatches', (r) => r.trivial[400])
 console.log('')
 
+// Firefox's are whole multiples of 100 ms over its 300 repeats: a step under 0.33 reads as it.
+console.log(`  ${'each step alone, ms'.padEnd(40)}${names.map((n) => n.padStart(18)).join('')}`)
+for (const step of results[names[0]].steps) {
+  const cells = names.map((n) => {
+    const found = results[n].steps.find((one) => one.name === step.name)
+    return (found ? found.ms.toFixed(2) : '').padStart(18)
+  })
+  console.log(`  ${step.name.padEnd(40)}${cells.join('')}`)
+}
+console.log('')
+
 const report = probeReport()
 for (const name of names) {
   const r = results[name]
+  report.check(
+    r.equalReference,
+    `${name}: every answer equals the dense reference's to the bit (${r.patches} patches)`,
+  )
   report.check(
     r.equal,
     `${name}: every answer in flight equals the one-at-a-time answer to the bit (${r.patches} patches)`,

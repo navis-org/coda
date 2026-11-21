@@ -23,14 +23,18 @@ import {
   outputOf,
   samePad,
   segclrPlan,
+  skippableConvs,
 } from './segclrPlan'
 import {
   TILE_K,
   convLayout,
+  convShader,
+  listedTogether,
   convWeightLayout,
   epilogueParams,
   stemFootprint,
   stemGroups,
+  stemPacks,
   stemShader,
 } from './shaders'
 
@@ -220,6 +224,8 @@ describe('samePad', () => {
 describe('segclrPlan', () => {
   const plan = segclrPlan(syntheticExport())
   const convs = plan.steps.filter((step): step is ConvStep => step.kind === 'conv')
+  /** Stage 0's four 3³ convolutions: the ones that compute only what an object can reach. */
+  const skippable = [...skippableConvs(plan.steps).depthOf.keys()]
 
   it('cuts the patch the scoring loop does', () => {
     expect(PATCH_EDGE).toBe(PATCH_VOXELS)
@@ -292,6 +298,81 @@ describe('segclrPlan', () => {
     // memory, under the 16 KB every WebGPU device offers.
     expect(stemFootprint(convs[0]!)).toBe(13)
     expect(() => stemShader({ ...convs[0]!, cin: 3 })).toThrow(/2 channels/)
+  })
+
+  /**
+   * **Stage 0 computes only what an object can reach** (`network.ts`). That the logit stays the
+   * same to the bit is `probe:gpu-assessor`'s to hold, on a GPU; what is pinned here is which
+   * convolutions take part and how far each one's reach has grown — a depth one short computes
+   * too few voxels, and every answer would still be a logit.
+   */
+  it('skips the background in stage 0 alone, a 3³ window further at each convolution', () => {
+    const { pool, depthOf } = skippableConvs(plan.steps)
+    expect(pool?.output).toBe('pool')
+    expect([...depthOf].map(([step, depth]) => [step.name, depth])).toEqual([
+      ['s0b0.conv_0', 1],
+      ['s0b0.conv_1', 2],
+      ['s0b1.conv_0', 3],
+      ['s0b1.conv_1', 4],
+    ])
+    // Every one of them can compute a list alongside the others — none splits its sum and all
+    // are one width — so none falls back to computing every voxel (`network.ts`).
+    expect(listedTogether(skippable)).toEqual(skippable)
+    // One that splits is left out, and so is one of another width.
+    const late = convs.find((step) => convLayout(step).splits > 1)!
+    expect(listedTogether([...skippable, late, { ...skippable[0]!, cout: 128 }])).toEqual(
+      skippable,
+    )
+  })
+
+  it('stops following a reach it cannot work out', () => {
+    // A 5³ window reaches two voxels further, which nothing here follows: the chain ends at
+    // that convolution rather than counting it as reaching no further than its input.
+    const wider = plan.steps.map((step) =>
+      step.kind === 'conv' && step.name === 's0b0.conv_1' ? { ...step, kernel: 5 } : step,
+    )
+    expect([...skippableConvs(wider).depthOf.keys()].map((step) => step.name)).toEqual([
+      's0b0.conv_0',
+    ])
+  })
+
+  it('binds the list of voxels after whatever else a convolution reads', () => {
+    const [first, second] = skippable
+    // No residual on a block's first convolution, one on its second.
+    expect(convShader(first!, convLayout(first!), { listed: true })).toContain('@binding(4)')
+    expect(convShader(second!, convLayout(second!), { listed: true })).toContain('@binding(5)')
+    expect(convShader(second!, convLayout(second!))).not.toContain('@binding(5)')
+    // A split sum is added up for every voxel by its second pass, so it cannot take a list.
+    const late = convs.find((step) => convLayout(step).splits > 1)!
+    expect(() => convShader(late, convLayout(late), { listed: true })).toThrow(/splits its sum/)
+  })
+
+  it('writes the inner loop out as the same sixteen steps', () => {
+    const [first] = skippable
+    const steps = (code: string) => code.match(/acc0_0 = fma/g)
+    expect(steps(convShader(first!, convLayout(first!)))).toHaveLength(1)
+    expect(steps(convShader(first!, convLayout(first!), { unrolled: true }))).toHaveLength(
+      TILE_K,
+    )
+  })
+
+  it('writes the stem in two forms, and flags its reach only when asked', () => {
+    const stem = convs[0]!
+    const foot = stemFootprint(stem)
+    expect(stemShader(stem)).toContain(`array<f32, ${foot ** 3}>`)
+    expect(stemShader(stem)).not.toContain('@binding(4)')
+    // A row of labels to a word, two bits each, in place of a float a label.
+    const packed = stemShader(stem, { reach: true, packed: true })
+    expect(packed).toContain(`array<u32, ${foot ** 2}>`)
+    expect(packed).not.toContain(`array<f32, ${foot ** 3}>`)
+    expect(packed).toContain('@binding(4)')
+    // A row wider than sixteen labels does not fit a word: such a stem is written plain
+    // (`network.ts` asks `stemPacks`), and asking for it packed anyway is refused.
+    expect(stemPacks(stem)).toBe(true)
+    expect(stemPacks({ ...stem, kernel: 15 })).toBe(false)
+    expect(() => stemShader({ ...stem, kernel: 15 }, { packed: true })).toThrow(
+      /pack into a word/,
+    )
   })
 
   /* The reference the sparse stem is checked against, still planned on request. */

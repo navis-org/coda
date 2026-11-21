@@ -38,9 +38,7 @@ Pick an assessor and each candidate's 4 µm patch of segmentation also goes thro
 
 The assessor offered is SEAM's student 1, one network trained to copy the average of SEAM's three checkpoints. It replaced the single checkpoint (seed 0) on 2026-11-20 because more of the right suggestions clear its cutoff. A graph saved with seed 0 keeps it and runs as before, and you can switch it to student 1 under `Assessor`. The two give different numbers, so a run with student 1 searches every end again.
 
-> [!NOTE]
-> **Firefox is slower at this**
-> The network runs on WebGPU, and a patch costs about 27 ms in Chrome against about 98 ms in Firefox on the same machine. If you are on Firefox and the run is slow, `Assess top` is the setting to try: capping at 10 took a measured end from 11.0 s to 4.5 s. It changes a few answers, so read its tooltip first.
+The network runs on WebGPU. On a recent laptop a patch takes about 15 ms in Chrome and about 20 ms in Firefox, so an end with 55 candidates spends about a second on the GPU. `Assess top` caps how many candidates are scored per end. It changes a few answers, so read its tooltip first.
 
 ## Narrowing the ends
 

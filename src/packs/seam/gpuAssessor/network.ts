@@ -4,8 +4,19 @@
  *
  * `segclrPlan.ts` says what to compute and `shaders.ts` how; this owns the GPU side — the buffers,
  * the pipelines, and the one submit per patch. Everything is allocated when the network is built
- * and reused for every patch, so scoring a patch is one 8.5 MB upload, ~40 dispatches and a
+ * and reused for every patch, so scoring a patch is one 8.5 MB upload, ~50 dispatches and a
  * 4-byte read back.
+ *
+ * **Stage 0 computes only what an object can reach.** Away from the two objects every layer's
+ * output is the network's answer to an empty patch, borders included, so that answer is computed
+ * once, when the network is built (`captureBackground`), and a patch computes only the voxels of
+ * each stage-0 convolution within reach of a label — 26% of them on average over SEAM's lists —
+ * with the rest copied from the empty patch's answer. **The logit is the same to the bit**: a
+ * voxel out of reach reads only inputs that are themselves the empty patch's, through the same
+ * shader, so what is copied is what would have been computed; and a voxel in reach is computed
+ * as it always was, since listing voxels changes which workgroup computes one and not the order
+ * of its sum. `pnpm probe:gpu-assessor` holds every fixture patch to the dense reference rather
+ * than trusting that (docs/seam-assessor-speed.md §17).
  *
  * **Submitted one at a time, read back together.** The buffers are shared between calls, so
  * `score` submits its callers in turn; but it does not wait for one patch's answer before
@@ -23,21 +34,28 @@
  */
 
 import { errorMessage } from '../../../core/errors'
-import { gpuSupport } from '../../../ml/support'
-import type { AssessorPlan, ConvStep, PlanStep } from './segclrPlan'
-import { PATCH, bufferSlots, outputOf } from './segclrPlan'
+import { frugalShaders, gpuSupport } from '../../../ml/support'
+import type { AssessorPlan, ConvStep, MaxPoolStep, PlanStep } from './segclrPlan'
+import { PATCH, bufferSlots, outputOf, skippableConvs } from './segclrPlan'
 import {
+  channelTiles,
   convLayout,
   convShader,
   convWeightFloats,
   convWeightLayout,
   encodeShader,
   epilogueParams,
+  fillShader,
   FLAT,
+  gatherListLength,
+  gatherShader,
   headShader,
+  listedTogether,
   maxPoolShader,
+  reachShader,
   reduceShader,
   stemGroups,
+  stemPacks,
   stemShader,
 } from './shaders'
 
@@ -67,6 +85,31 @@ interface Dispatch {
   readonly pipeline: GPUComputePipeline
   readonly group: GPUBindGroup
   readonly groups: readonly [number, number, number]
+  /** Where the GPU wrote this dispatch's size (`gatherShader`); `groups` is then its ceiling. */
+  readonly indirect?: GPUBuffer
+  /** It works out what a patch's labels reach, so `captureBackground` leaves it out. */
+  readonly findsReach?: true
+  /** A skipping convolution: where its output is copied to, whole, as the empty patch's answer. */
+  readonly capture?: { readonly from: GPUBuffer; readonly to: GPUBuffer }
+}
+
+/** What a dispatch is besides its shader and buffers. */
+type Role = Pick<Dispatch, 'indirect' | 'findsReach' | 'capture'>
+
+/** How a network is built, beyond its plan. Neither option changes a logit. */
+export interface NetworkOptions {
+  /**
+   * `false` computes every voxel of stage 0. The reference the shipped network is held to says so
+   * (with `segclrPlan`'s `denseStem`), and alone it measures what the skip is worth
+   * (`pnpm probe:gpu-browsers -- --no-skip`).
+   */
+  readonly skipBackground?: boolean
+  /**
+   * The forms that spare a shader translator its loops and workgroup memory (`ConvForm.unrolled`,
+   * `StemForm.packed`). The browser's own answer when absent (`frugalShaders`); a probe names it
+   * to time one form in the other browser, and to hold both to one reference.
+   */
+  readonly frugal?: boolean
 }
 
 const STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
@@ -75,7 +118,8 @@ const STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsag
 function record(pass: GPUComputePassEncoder, one: Dispatch): void {
   pass.setPipeline(one.pipeline)
   pass.setBindGroup(0, one.group)
-  pass.dispatchWorkgroups(...one.groups)
+  if (one.indirect) pass.dispatchWorkgroupsIndirect(one.indirect, 0)
+  else pass.dispatchWorkgroups(...one.groups)
 }
 
 /** A built network: GPU objects only, so nothing of the plan or the file stays reachable. */
@@ -93,7 +137,11 @@ export class AssessorNetwork {
   private readonly spare: GPUBuffer[] = []
   /** The patch's edge in voxels: what a caller must feed. */
   readonly edge: number
-  /** Multiply-adds × 2 a patch, for a TFLOP/s figure. */
+  /**
+   * Multiply-adds × 2 a patch, for a TFLOP/s figure — **of the plan, every voxel counted**. The
+   * background a patch skips is still in it, so a figure from it is the dense network's rate at
+   * this speed, not the arithmetic done.
+   */
   readonly flops: number
   /** The GPU memory held, in bytes: weights and every intermediate. */
   readonly bytes: number
@@ -160,26 +208,32 @@ export class AssessorNetwork {
   }
 
   /**
-   * The same pass with a submit and a wait after every step, so each is timed alone. Slower in
-   * total than `score` — it drains the GPU between steps — and meant for a probe, not a run.
-   * Every figure includes one submit-and-wait round trip (~0.2 ms here), so a step that takes
-   * microseconds on the GPU reads as that floor: read the big steps' share, not the small ones'.
-   * GPU timestamp queries would remove it, at the cost of an optional device feature.
+   * The same pass with a submit and a wait after every step, so each is timed alone. Meant for a
+   * probe, not a run: it drains the GPU between steps.
+   *
+   * `repeats` records each step that many times in its one submit and divides. A step reads only
+   * what earlier steps wrote and writes elsewhere, so running it again changes nothing; and every
+   * figure carries one round trip — ~0.3 ms in Chrome, ~100 ms in Firefox — divided by `repeats`.
+   * So one repeat reads as the round trip for any small step, thirty time a step in Chrome, and
+   * three hundred are what it takes in Firefox. GPU timestamp queries would do without, at the
+   * cost of an optional device feature.
    */
-  profile(patch: Float32Array): Promise<StepTiming[]> {
+  profile(patch: Float32Array, repeats = 1): Promise<StepTiming[]> {
     return this.serial(async () => {
+      // A whole number of at least one: none would divide by zero, a part of one mis-divide.
+      const times = Math.max(1, Math.floor(repeats))
       this.load(patch)
       await this.device.queue.onSubmittedWorkDone()
       const out: StepTiming[] = []
       for (const one of this.dispatches) {
         const encoder = this.device.createCommandEncoder()
         const pass = encoder.beginComputePass()
-        record(pass, one)
+        for (let r = 0; r < times; r++) record(pass, one)
         pass.end()
         const t = performance.now()
         this.device.queue.submit([encoder.finish()])
         await this.device.queue.onSubmittedWorkDone()
-        out.push({ name: one.name, ms: performance.now() - t })
+        out.push({ name: one.name, ms: (performance.now() - t) / times })
       }
       return out
     })
@@ -232,6 +286,7 @@ export class AssessorNetwork {
 export async function buildNetwork(
   device: GPUDevice,
   plan: AssessorPlan,
+  options: NetworkOptions = {},
 ): Promise<AssessorNetwork> {
   const owned: GPUBuffer[] = []
   device.pushErrorScope('out-of-memory')
@@ -239,7 +294,7 @@ export async function buildNetwork(
   let network: AssessorNetwork | undefined
   let failure: unknown
   try {
-    network = await assemble(device, plan, owned)
+    network = await assemble(device, plan, owned, options)
   } catch (error) {
     failure = error
   }
@@ -255,6 +310,84 @@ export async function buildNetwork(
   return network
 }
 
+/** One depth of reach: the pool's outputs within that many 3³ windows of a label. */
+interface ReachLevel {
+  /** One flag a voxel. */
+  readonly flags: GPUBuffer
+  /** The flagged voxels in index order (`gatherShader`), and the dispatch as long as the list. */
+  readonly list: GPUBuffer
+  readonly args: GPUBuffer
+}
+
+/**
+ * The background skip's buffers, and which level each skipping convolution computes.
+ *
+ * `depths` is every convolution taking part with how many 3³ windows past the pool its output
+ * sits (`skippableConvs`), at least one of them and each at depth one or more.
+ */
+function backgroundSkip(
+  stem: ConvStep,
+  pool: MaxPoolStep,
+  depths: readonly (readonly [ConvStep, number])[],
+  buffer: (size: number, usage?: number) => GPUBuffer,
+) {
+  const voxels = pool.outEdge ** 3
+  const levels: ReachLevel[] = Array.from(
+    { length: Math.max(...depths.map(([, depth]) => depth)) },
+    () => ({
+      flags: buffer(voxels * 4),
+      list: buffer(gatherListLength(voxels) * 4),
+      args: buffer(12, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT),
+    }),
+  )
+  return {
+    pool,
+    voxels,
+    /** Any one skipping convolution: all read a 3³ window and are one width (`listedTogether`). */
+    like: depths[0]![0],
+    /** Which of the stem's outputs any label reaches, and which of the pool's. */
+    reached: buffer(stem.outEdge ** 3 * 4),
+    pooled: buffer(voxels * 4),
+    levels,
+    levelOf: new Map(depths.map(([step, depth]) => [step, levels[depth - 1]!] as const)),
+  }
+}
+type BackgroundSkip = ReturnType<typeof backgroundSkip>
+
+/**
+ * The empty patch's answer at every skipping convolution, computed once as the network is built.
+ *
+ * The patch buffer is new, so it is all background. The steps run one at a time, in order, with
+ * every flag set to "in reach" — so each skipping convolution lists and computes its whole
+ * output, through the very shader a real patch's voxels in reach go through, and that output is
+ * copied aside (`Dispatch.capture`). That shared shader is what makes a copied voxel equal a
+ * computed one to the bit.
+ *
+ * The steps that work out the flags are left out (`Dispatch.findsReach`), so each level's flags
+ * stay set for the step that lists them; a real patch runs them all and overwrites every one. (A
+ * convolution's fill runs here too, copying a background not yet captured, and is then
+ * overwritten whole.) Nothing past the last skipping convolution is run.
+ */
+function captureBackground(
+  device: GPUDevice,
+  dispatches: readonly Dispatch[],
+  skip: BackgroundSkip,
+): void {
+  const ones = new Uint32Array(skip.voxels).fill(1)
+  for (const level of skip.levels) device.queue.writeBuffer(level.flags, 0, ones)
+  const last = dispatches.reduce((at, one, index) => (one.capture ? index : at), -1)
+  for (const one of dispatches.slice(0, last + 1)) {
+    if (one.findsReach) continue
+    const encoder = device.createCommandEncoder()
+    const pass = encoder.beginComputePass()
+    record(pass, one)
+    pass.end()
+    const { capture } = one
+    if (capture) encoder.copyBufferToBuffer(capture.from, 0, capture.to, 0, capture.to.size)
+    device.queue.submit([encoder.finish()])
+  }
+}
+
 /**
  * The build itself. Its own function, so the network it returns closes over none of this scope.
  *
@@ -268,6 +401,7 @@ async function assemble(
   device: GPUDevice,
   plan: AssessorPlan,
   owned: GPUBuffer[],
+  options: NetworkOptions,
 ): Promise<AssessorNetwork> {
   const limits = device.limits
   const buffer = (size: number, usage = STORAGE, mapped = false): GPUBuffer => {
@@ -315,10 +449,10 @@ async function assemble(
   const tensorOf = (name: string): GPUBuffer => slots[slotOf.get(name)!]!
   const floatsOf = (step: PlanStep): number => outputOf(step)?.floats ?? 0
 
-  // One scratch buffer for every split step's partial sums: they run one after another. A step
-  // that does not split writes its output directly and needs none.
   const convs = plan.steps.filter((step): step is ConvStep => step.kind === 'conv')
   const layouts = new Map(convs.map((step) => [step, convLayout(step)]))
+  // One scratch buffer for every split step's partial sums: they run one after another. A step
+  // that does not split writes its output directly and needs none.
   const scratch = buffer(
     4 *
       Math.max(
@@ -328,6 +462,21 @@ async function assemble(
         ),
       ),
   )
+
+  /*
+   * The background skip, decided once. It starts from the stem's own flags, so it needs the stem
+   * that reads the patch, feeding the pool — the dense reference has no such stem, and computes
+   * every voxel. A convolution takes part if it can compute a list alongside the others
+   * (`listedTogether`), which every stage-0 one can; one that could not would be computed whole.
+   */
+  const stem = convs.find((step) => step.input === PATCH)
+  const { pool, depthOf } = skippableConvs(plan.steps)
+  const taking = new Set(listedTogether([...depthOf.keys()]))
+  const depths = [...depthOf].filter(([step]) => taking.has(step))
+  const skip =
+    stem && pool?.input === stem.output && depths.length > 0 && options.skipBackground !== false
+      ? backgroundSkip(stem, pool, depths, buffer)
+      : undefined
 
   /*
    * Compiled once per distinct shader — every size is a constant in the code, so two steps of
@@ -356,6 +505,7 @@ async function assemble(
     compiling: Promise<GPUComputePipeline>,
     buffers: readonly GPUBuffer[],
     groups: readonly [number, number, number],
+    role: Role = {},
   ): Promise<Dispatch> => {
     const most = limits.maxComputeWorkgroupsPerDimension
     if (groups.some((n) => n > most)) {
@@ -368,24 +518,60 @@ async function assemble(
       layout: pipeline.getBindGroupLayout(0),
       entries: buffers.map((one, binding) => ({ binding, resource: { buffer: one } })),
     })
-    return { name, pipeline, group, groups }
+    return { name, pipeline, group, groups, ...role }
   }
 
   /*
-   * Every compile is asked for before any weights are rearranged: the rearranging is ~70 ms of
-   * CPU, most of it in stage 3 at the end of the list, and the GPU compiles meanwhile.
+   * Every step's compile is asked for before any weights are rearranged: the rearranging is
+   * ~70 ms of CPU, most of it in stage 3 at the end of the list, and the GPU compiles meanwhile.
+   * (The skip's own four small shaders are asked for as their steps are reached.)
    */
+  const frugal = options.frugal ?? frugalShaders()
   const shaders = plan.steps.map((step) => {
     if (step.kind === 'encode') return { main: compile(encodeShader(step.edge)) }
-    if (step.kind === 'conv' && step.input === PATCH) return { main: compile(stemShader(step)) }
+    if (step.kind === 'conv' && step.input === PATCH) {
+      const packed = frugal && stemPacks(step)
+      return { main: compile(stemShader(step, { reach: Boolean(skip), packed })) }
+    }
     if (step.kind === 'maxpool') return { main: compile(maxPoolShader(step)) }
     if (step.kind === 'head') return { main: compile(headShader(step)) }
     const { splits } = layouts.get(step)!
     return {
-      main: compile(convShader(step, layouts.get(step)!)),
+      main: compile(
+        convShader(step, layouts.get(step)!, {
+          listed: skip?.levelOf.has(step),
+          unrolled: frugal,
+        }),
+      ),
       sum: splits > 1 ? compile(reduceShader(step, splits)) : undefined,
     }
   })
+
+  /** After the pool: the flags at every depth, and the list and dispatch for each. */
+  const reachDispatches = (skip: BackgroundSkip): Promise<Dispatch>[] => {
+    const { voxels } = skip
+    const findsReach = { findsReach: true } as const
+    // One 3³ window further a level: the window of the convolutions themselves.
+    const grow = compile(reachShader(skip.like))
+    const listing = compile(gatherShader(voxels, channelTiles(skip.like)))
+    const made = [
+      dispatch(
+        'reach 0',
+        compile(reachShader(skip.pool)),
+        [skip.reached, skip.pooled],
+        flat(voxels),
+        findsReach,
+      ),
+    ]
+    skip.levels.forEach((level, at) => {
+      const from = at === 0 ? skip.pooled : skip.levels[at - 1]!.flags
+      made.push(
+        dispatch(`reach ${at + 1}`, grow, [from, level.flags], flat(voxels), findsReach),
+        dispatch(`list ${at + 1}`, listing, [level.flags, level.list, level.args], [1, 1, 1]),
+      )
+    })
+    return made
+  }
 
   const forStep = (step: PlanStep, at: number): Promise<Dispatch>[] => {
     const { main, sum } = shaders[at]!
@@ -394,7 +580,8 @@ async function assemble(
     }
     if (step.kind === 'maxpool') {
       const buffers = [tensorOf(step.input), tensorOf(step.output)]
-      return [dispatch('pool1', main, buffers, flat(floatsOf(step)))]
+      const pooling = dispatch('pool1', main, buffers, flat(floatsOf(step)))
+      return skip && step === skip.pool ? [pooling, ...reachDispatches(skip)] : [pooling]
     }
     if (step.kind === 'head') {
       return [
@@ -409,12 +596,29 @@ async function assemble(
     const residual = step.residual ? [tensorOf(step.residual)] : []
     const output = tensorOf(step.output)
     if (step.input === PATCH) {
-      return [dispatch(step.name, main, [lab, weights, output, params], stemGroups(step))]
+      const bound = [lab, weights, output, params, ...(skip ? [skip.reached] : [])]
+      return [dispatch(step.name, main, bound, stemGroups(step))]
     }
     const input = tensorOf(step.input)
     if (!sum) {
+      const bound = [input, weights, output, params, ...residual]
+      const level = skip?.levelOf.get(step)
+      if (!level) return [dispatch(step.name, main, bound, layout.groups)]
+      // A skipping convolution: its whole output set to the empty patch's answer, then the
+      // voxels in reach computed over it.
+      const floats = floatsOf(step)
+      const background = buffer(floats * 4)
       return [
-        dispatch(step.name, main, [input, weights, output, params, ...residual], layout.groups),
+        dispatch(
+          `${step.name} (background)`,
+          compile(fillShader(floats)),
+          [background, output],
+          flat(floats),
+        ),
+        dispatch(step.name, main, [...bound, level.list], layout.groups, {
+          indirect: level.args,
+          capture: { from: output, to: background },
+        }),
       ]
     }
     return [
@@ -444,9 +648,11 @@ async function assemble(
   if (thrown) throw thrown.error
   const failed = settled.find((one): one is PromiseRejectedResult => one.status === 'rejected')
   if (failed) throw failed.reason
+  const dispatches = settled.flatMap((one) => (one.status === 'fulfilled' ? [one.value] : []))
+  if (skip) captureBackground(device, dispatches, skip)
   return new AssessorNetwork({
     device,
-    dispatches: settled.flatMap((one) => (one.status === 'fulfilled' ? [one.value] : [])),
+    dispatches,
     owned,
     lab,
     logit,

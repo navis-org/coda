@@ -39,14 +39,17 @@
  * against the cutoff this configuration was fitted with. `singleSeed.test.ts` holds all of it to
  * SEAM's own published numbers.
  *
- * **What it costs on top of the search is a quarter of an end, and that is browser-dependent.**
- * 40 ends measured through the node on one laptop (2026-11-19): 19 ms a patch in Chrome and 29
- * in Firefox, 1.8 s an end against 2.3. Firefox was 98 ms a patch and 6.2 s an end until the
- * patches were kept in flight — every wait for the GPU costs it ~100 ms, and the network had
- * waited once a patch; `SLOW_SECONDS_PER_PATCH` has the story. The card once told Firefox
- * readers to try Chrome; at 1.3x an end that would overstate it, so it no longer does. The checkpoint is a 133 MB download. The network is Coda's own WGSL
- * implementation rather than ONNX Runtime — 19 ms a patch against 136 — so most of an assessed
- * end is the two boxes it reads.
+ * **What it costs on top of the search is a share of an end, and that is browser-dependent.**
+ * 60 ends measured through the node on one laptop (2026-11-21): 13 to 16 ms a patch in Chrome
+ * and 19 in Firefox, 1.2-1.3 s an end against 1.4-1.5 — the search sets the pace in both now.
+ * Firefox was 98 ms a patch and 6.2 s an end until the patches were kept in flight — every wait
+ * for the GPU costs it ~100 ms, and the network had waited once a patch — and 30 ms over the same 60
+ * ends until stage 0 skipped its background and the kernels took the forms Firefox is quick with;
+ * `SLOW_SECONDS_PER_PATCH` has the story. The card once told Firefox
+ * readers to try Chrome; at 1.2x an end that would overstate it, so it no longer does. The
+ * checkpoint is a 133 MB download. The network is Coda's own WGSL implementation rather than
+ * ONNX Runtime — 14 ms a patch against 134 — so most of an assessed end is the two boxes it
+ * reads.
  *
  * `Assess top` caps the patches per end; what the cap costs in answers is measured on SEAM's own
  * set, in `assessEnds.ts`' header, and the part worth knowing is that it does not only lose
@@ -279,15 +282,16 @@ export const SECONDS_PER_END = 3.0
 /**
  * What one assessed candidate costs, in seconds: a 129³ patch cut and run.
  *
- * **20 ms, measured through the node and in a probe** (2026-11-19, Chrome, patches kept in flight,
- * `docs/seam-assessor-speed.md` §16): 19 ms a patch over 40 real ends through the node, 19.8
- * median in `pnpm probe:gpu-browsers` at `GPU_ASSESSOR_IN_FLIGHT`. It was 22 one at a time
- * (§15), 27 before the stem read the patch itself (§14). A patch whose objects fill more of the
- * window skips less of the stem and costs more; how much more is not measured. The cut is about
- * 40 ms a group of four and is prefetched one group deep, so it hides behind the GPU that group
- * costs and does not appear here.
+ * **16 ms, the larger of what the node and a probe measured** (2026-11-21, Chrome, patches kept in
+ * flight, `docs/seam-assessor-speed.md` §17): 13 and 16 ms a patch over 60 real ends through the
+ * node in two runs, 13.5 median in `pnpm probe:gpu-browsers` at `GPU_ASSESSOR_IN_FLIGHT`. It was
+ * 20 before stage 0 skipped its background (§16), 22 one at a time (§15), 27 before the stem read
+ * the patch itself (§14). **It depends on the patch**: one whose objects fill more of the window
+ * has less background to skip — the patches of SEAM's short lists measured 15.9 against the
+ * 13.5 of its long ones. The cut is about 40 ms a group of four and is prefetched one group deep,
+ * so it hides behind the GPU that group costs and does not appear here.
  *
- * **It is a rate for one browser.** Firefox computes the same patch in ~30 ms, and until the
+ * **It is a rate for one browser.** Firefox computes the same patch in ~19 ms, and until the
  * patches were kept in flight it paid 98, because there every wait for the GPU costs ~100 ms;
  * `SLOW_SECONDS_PER_PATCH` has it.
  *
@@ -312,16 +316,24 @@ export const SECONDS_PER_END = 3.0
  * from. Both are recorded because prose contrasting against either was comparing a measurement
  * with something that was not one.)
  */
-const SECONDS_PER_PATCH = 0.02
+const SECONDS_PER_PATCH = 0.016
 
 /**
  * What a patch costs where the browser's WebGPU dispatch is the slow kind — `slowGpuDispatch`.
  *
- * **33 ms, the larger of two measurements** (2026-11-19, Firefox 160, `docs/seam-assessor-speed.md`
- * §16): 29 ms a patch over 40 real ends through the node (`pnpm probe:suggest-merges --browser
- * firefox`), 33.3 in `pnpm probe:gpu-browsers` at `GPU_ASSESSOR_IN_FLIGHT`. The larger is taken
- * because under-stating is the one direction `docs/limits.md` says a guard rail must not fail
- * in; `SECONDS_PER_END` records being caught by exactly that once already.
+ * **26 ms, the largest of the measurements** (2026-11-21, Firefox 160,
+ * `docs/seam-assessor-speed.md` §18). On a Mac, where Firefox builds the kernel forms its shader
+ * translator is quick with (`frugalShaders`): 19 ms a patch over 60 real ends through the node,
+ * twice (`pnpm probe:suggest-merges --browser firefox`), and in `pnpm probe:gpu-browsers` at
+ * `GPU_ASSESSOR_IN_FLIGHT` 16.9 on the patches of SEAM's long lists and 20.0 on its short ones,
+ * whose objects fill more of the window and leave less background to skip. In the plain forms,
+ * which Firefox runs anywhere else, the same two sets measured 21.6 and 25.7. The largest is
+ * taken because under-stating is the one direction `docs/limits.md` says a guard rail must not
+ * fail in; `SECONDS_PER_END` records being caught by exactly that once already.
+ *
+ * Before stage 0 skipped its background the same 60 ends measured 30 ms a patch that day — 29
+ * over 40 ends on 2026-11-19 — and this constant was 0.033, a probe's figure that was a batch's
+ * rounding.
  *
  * **It was 98, and the reason is the thing worth knowing.** Firefox answers every wait for the
  * GPU in ~100 ms whatever the work — an empty submit included — so a network that waited once a
@@ -333,7 +345,7 @@ const SECONDS_PER_PATCH = 0.02
  * at all (the MCP server, a build-time render), which is the Chrome figure and the right default
  * for a machine nobody is waiting at.
  */
-const SLOW_SECONDS_PER_PATCH = 0.033
+const SLOW_SECONDS_PER_PATCH = 0.026
 
 /**
  * The patch box an end's whole list shares: a little over 8 µm of segmentation, read once.
@@ -496,7 +508,7 @@ export const suggestMergesNode = packNode({
           ...(model.retired === undefined ? {} : { retired: model.retired }),
         })),
       ],
-      help: 'Which checkpoint judges whether each candidate really continues the neuron. Without one the answer is the forest’s ranking and nothing else — no probability and no cutoff. With one, each candidate gets a 4 µm patch of segmentation through the network, and the tip gets SEAM’s own `q`, `r` and shown/withheld. It costs about two seconds an end on top of the search, and the model is a 133 MB download kept in this browser.',
+      help: 'Which checkpoint judges whether each candidate really continues the neuron. Without one the answer is the forest’s ranking and nothing else — no probability and no cutoff. With one, each candidate gets a 4 µm patch of segmentation through the network, and the tip gets SEAM’s own `q`, `r` and shown/withheld. An assessed end took 1.2 to 1.5 s on one laptop, 13 to 19 ms of it on the GPU for each candidate, and the model is a 133 MB download kept in this browser.',
     },
     {
       id: 'download',
@@ -515,7 +527,7 @@ export const suggestMergesNode = packNode({
       step: 5,
       absentMeans: 0,
       visibleIf: (params) => params.assessor !== NO_ASSESSOR,
-      help: 'How many of each end’s ranked candidates to put through the assessor, counting from the forest’s first. 0 is all of them, which is what SEAM does. **It usually saves little**: 40 ends on one laptop measured 19 ms a patch in Chrome and 29 in Firefox, 1.8 s and 2.3 s an end, with the network a fifth to a third of the run. Run once uncapped and read the `ms a patch` in the timing the node reports: around these rates a Filter Table above this node is the better lever, and only well above them is the cap worth what it costs. What it costs is answers, and not only lost ones: flooring the rest of the list concentrates the first candidate’s share and so raises `q`, so a cap invents a few suggestions as well as losing a few. Against SEAM’s own 2,708 tips a cap of 25 changes the verdict on 5, and a cap of 10 on 21.',
+      help: 'How many of each end’s ranked candidates to put through the assessor, counting from the forest’s first. 0 is all of them, which is what SEAM does. **It usually saves little**: 60 ends on one laptop measured 13 to 16 ms a patch in Chrome and 19 in Firefox, 1.2 to 1.5 s an end, with the search setting the pace in both. Run once uncapped and read the `ms a patch` in the timing the node reports: around these rates a Filter Table above this node is the better lever, and only well above them is the cap worth what it costs. What it costs is answers, and not only lost ones: flooring the rest of the list concentrates the first candidate’s share and so raises `q`, so a cap invents a few suggestions as well as losing a few. Against SEAM’s own 2,708 tips a cap of 25 changes the verdict on 5, and a cap of 10 on 21.',
     },
     {
       id: 'chunkCacheMb',

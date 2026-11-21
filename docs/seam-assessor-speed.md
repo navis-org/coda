@@ -653,3 +653,153 @@ Through the node, 40 ends of the same neuron, `pnpm probe:suggest-merges`, the s
 `SLOW_SECONDS_PER_PATCH` is 0.033 (the probe's figure, the larger) and `SECONDS_PER_PATCH` 0.02.
 The node probe takes `--browser firefox`; Firefox runs with a window, since headless it offers no
 WebGPU adapter.
+
+## 17. Stage 0 computes only what an object can reach: 18.8 ms to 13.5 (2026-11-21)
+
+§15 ended on "what is left of a patch is the dense convolutions, stage 0's four first". Timed a
+step at a time with the round trip spread thin (`profile`'s `repeats`, below), stage 0's four 3³
+convolutions were 9.3 ms of a 20 ms patch, stage 1 4.9, stage 2 3.2, stage 3 2.2, the stem 1.0 —
+every stage at 2.8–3.4 TFLOP/s, so nothing but stage 0's size singles it out.
+
+**Away from the two objects every layer's output is the same for every patch**: the network's
+answer to an empty patch, borders included, since a voxel with no label in its receptive field
+sees only what the empty patch's voxel sees. So that answer is computed once, as the network is
+built (`captureBackground`), and a patch computes only the voxels of each stage-0 convolution an
+object can reach:
+
+- the stem flags, per output voxel, whether any label is in its window (`StemForm.reach`);
+- `reachShader` carries the flags through the pool's window, then one 3³ window further for each
+  convolution (`skippableConvs` says which convolution sits at which depth);
+- `gatherShader` lists the flagged voxels in index order — one workgroup, a count, a barrier, a
+  write — and writes the dispatch that is as long as the list;
+- the convolution's output is set to the empty patch's answer (`fillShader`, 0.1 ms) and the
+  listed voxels are computed over it, 64 of the list a workgroup (`ConvForm.listed`,
+  `dispatchWorkgroupsIndirect`).
+
+**The logit is the same to the bit**, and for two reasons that are each checked. A voxel out of
+reach reads only inputs that are the empty patch's, through the very shader that computed the
+copy. A voxel in reach is summed as before: listing voxels changes which workgroup computes one,
+never the order of its terms. `probe:gpu-assessor` and `probe:gpu-browsers` hold every fixture
+patch to the dense reference (`denseStem`, which has no stem to flag from and so computes every
+voxel) — 72 patches equal in both browsers.
+
+How much there is to skip, over every fourth patch of SEAM's 40 published lists (364 patches,
+computed from the labels alone): the four convolutions need 14%, 22%, 30% and 39% of their
+voxels — 26% on average, the 90th percentile patch 26% to 60%.
+
+| ms a patch, 12 in flight, Chrome | long lists (37 patches) | short lists (35 patches) |
+|---|---|---|
+| every voxel | 18.8 | 19.2 |
+| **only what is in reach** | **13.5** | **15.9** |
+
+**It depends on the patch**, as §15 said the stem would: a short list's candidates sit close to a
+thick stretch of the neuron and fill more of the window. The long lists are the population — they
+are most of the patches — and ends 885, 91 and 1218 match the 364-patch average.
+
+**The first version skipped by 4 × 4 × 4 cube and gave 1.23x, not 1.40x.** A cube with any voxel in
+reach computes all 64, and on a 33-voxel side the ninth cube along each axis is mostly outside
+the volume: 44% of the work survived where a voxel-fine skip leaves 26%. It was also the simpler
+shader — a flag test and an early return a workgroup — and is not kept.
+
+Stage 1 is not skipped. Its reach is 45%, 62%, 77% and 89% of the voxels (the same 364 patches),
+its first convolution is stride 2, and all four split their sum, which a listed convolution cannot
+do; about 1.3 ms a patch is the estimate, and it is an estimate. The skip costs 39 MB of GPU
+memory (235 MB to 274): four tensors of the empty patch's answer, the flags and the lists.
+
+**`profile(patch, repeats)`** records each step that many times in its one submit and divides. A
+step reads what earlier steps wrote and writes elsewhere, so running it again changes nothing;
+at thirty repeats the ~0.3 ms round trip that every earlier per-step table carried is a hundredth
+of a millisecond, and at three hundred a step can be timed in Firefox at all (§16).
+
+Through the node, Chrome, 60 ends of the fixture neuron, interleaved with the old kernel, the same
+answer every run (3,219 candidates, `f26c2dd57783`): 19 ms a patch to 13, and an end from 1.4 s
+to 1.2–1.3. **The end moves less than the patch because the search sets the pace** — it has
+since "a step per queue" (`docs/seam-suggestions-plan.md`), and a faster GPU waits for it.
+`SECONDS_PER_PATCH` is 0.016, the larger of the node's readings.
+
+## 18. Firefox charges for loops and for workgroup memory: 29.1 ms to 16.9 (2026-11-21)
+
+§16 left Firefox computing a patch in ~30 ms against Chrome's 20 and called what was left
+"Firefox's own arithmetic". It is not the arithmetic. With the inner multiply-add loop left out
+of every convolution (a measurement — the logit is nonsense), a patch costs Chrome 5.6 ms and
+Firefox 15.5; so the loop itself is 13.9 ms in one and 13.6 in the other, and **the whole gap is
+in what surrounds it**. Per step (`profile`'s `repeats`, 300): the stem 4.0 ms against Chrome's
+1.0, each convolution about 1.35 times Chrome's.
+
+Three causes, each found by changing one thing:
+
+| changed, Firefox | ms a patch | Chrome |
+|---|---|---|
+| as shipped on 2026-11-19 | 29.1 | 18.8 |
+| 2,048 floats of workgroup memory nothing uses, added to every convolution | 32.4 | 18.5 |
+| the 16-step inner loop written out | 25.7 | 19.3 |
+| the stem's footprint packed, 169 words for 2,197 floats | 26.4 | 18.9 |
+| no input read / no weight read (measurements) | 27.0 / 26.4 | 18.1 / 18.6 |
+
+- **Workgroup memory costs Firefox time whether or not it is used**: 3.3 ms a patch for 2,048
+  idle floats a workgroup, nothing in Chrome. The likeliest reading is that its translator clears
+  a workgroup's memory on one thread while the rest wait; what is measured is the cost. The stem
+  holds 8.8 KB a workgroup over 4,913 workgroups, so it was the worst hit. **`StemForm.packed`**
+  holds a row of the footprint in a word, two bits a label, and steps over a row with none: 2.7 ms
+  a patch in Firefox, nothing either way in Chrome. (Stepping over empty rows *without* packing —
+  a flag a row beside the floats — bought nothing in either browser, which is what says it was
+  the memory.) It takes labels as whole numbers 0 to 3, which a patch's are.
+- **A loop costs Firefox per iteration**: the inner loop written out (`ConvForm.unrolled`) is
+  3.4 ms a patch there and costs Chrome 2%. Writing out the two loops that fill the tiles as well
+  was worse in both.
+- **Reading a buffer costs Firefox more** — 2.1 ms a patch for the input and 2.7 for the weights,
+  against 0.7 and 0.3 — and this is not fixed. Declaring every buffer at its size
+  (`array<f32, n>`) changed nothing in either browser.
+
+So the kernels have a second form, built where `frugalShaders` (`src/ml/support.ts`) says so —
+Firefox on a Mac, by name, for `slowGpuDispatch`'s reason — and both forms are the same sums in
+the same order: every one of 72 patches equals the plain dense reference to the bit in each
+browser. **On a Mac only, because that is what was measured.** Firefox translates a shader for
+Metal here and for other targets on Windows and Linux; what a loop or a workgroup's memory costs
+through those is not known, and a form sixteen times as long is not free to compile. A reading
+there (`pnpm probe:gpu-browsers -- --form frugal` against `--form plain`) would settle it.
+
+| ms a patch, 12 in flight | Firefox, long lists | short lists | Chrome, long lists | short lists |
+|---|---|---|---|---|
+| 2026-11-19 | 29.1 | 29.3 | 18.8 | 19.2 |
+| stage 0 in reach only (§17) | 21.6 | 25.7 | 13.5 | 16.0 |
+| … and the stem packed | 19.6 | 22.9 | 13.5 | 16.0 |
+| **… and the inner loop written out** | **16.9** | **20.0** | 13.9 | 16.3 |
+
+Through the node, Firefox, 60 ends, interleaved with the old kernel, the same answer as Chrome's
+every run: **30 ms a patch to 18–19, an end from 2.0 s to 1.4–1.5** (124.7 s to 90–94). Firefox
+is now bound by the search as Chrome is. `SLOW_SECONDS_PER_PATCH` is 0.026: the short lists'
+figure in the plain forms, which Firefox runs anywhere but a Mac (below), since a guard rail may
+over-state a wait and must not under-state one.
+
+Not done: the convolutions' own 2,048 floats of tiles are still cleared for every workgroup of
+every convolution, and a lower `SPLIT_TARGET` in this form would trade workgroups for that; nobody
+has measured it. `probe:gpu-browsers` now times a **stream** of
+patches at each depth rather than a batch: a batch of twelve reads 200 ms or 300 in Firefox, never
+the 210 it took — §16's 33 ms at twelve in flight was that rounding, of a patch that took 29.
+
+## 19. Tried the same day and not kept (2026-11-21)
+
+- **Winograd's F(2×2×2, 3×3×3)** for the stride-1 3³ convolutions: 64 multiplies a channel pair
+  for eight outputs rather than 216. Correct — logits within 1.5e-5 of the direct network's —
+  and 1.17x on a patch in Chrome with stages 0 and 1 converted (18.8 ms to 16.1), which is all
+  3.4 times fewer multiplies bought: on a stage-0 convolution the multiplies were 0.4 ms, the
+  input transform 0.6, folding the 64 products into eight outputs 0.25, against 2.1 ms direct.
+  Stages 2 and 3 were slower (the block grid wastes 1.4x and 1.7x at 9 and 5 voxels a side).
+  **The thread's shape decides everything**: 8 channels × 4 blocks a thread, the direct kernel's
+  shape, holds 256 outputs in an array and ran 0.8x; 4 × 2 keeps 64 in registers. On top of §17
+  it adds 6% in Chrome, and in Firefox it is slower than the network it replaces (33.8 ms against
+  29.1). Not the same sum, so it would also have cost the "to the bit" check.
+- **Scoring fewer patches.** On SEAM's 2,705 student-1 tips: no candidate repeats a (neuron,
+  candidate, contact) across tips, so a logit cannot be reused; no cut on distance, size or the
+  organelle score spares the winners (32 judged-right candidates carry the organelle flag); a cap
+  on the forest's rank loses real suggestions however the tail is filled (4.5% of shown winners
+  sit past rank 15).
+- **The likely winners first, the tails later** — an end's first eight candidates, its list
+  finished at once only where `q` already reached 0.02, the rest of every list after the root's
+  ends had all had that. Built in the node and run: the final answer was the plain run's to the
+  fingerprint, and **it bought nothing**. In Firefox with §18's kernel the first pass was done at
+  84 s against 90 s for the whole plain run, and the run then took 135 s; in Chrome 64 s against
+  69–75, then 94. Fewer patches an end do not make an end sooner once the search sets the pace,
+  and the second pass reads its patch boxes again, one at a time.
+

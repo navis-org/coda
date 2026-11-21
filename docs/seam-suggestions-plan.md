@@ -3308,3 +3308,25 @@ Tiny pieces' precision on h2 is 0.84, against seed 0's 0.80 and a target of 0.9.
 - **Not done:** Merge Suggestions' hosted sets are still seed 0's (`rv2-9db6c7b1b397`,
   `rv4-ad75ed161bb6`). SEAM's student-1 sets (`coda_rv2_student1`, `coda_rv4_student1`) can
   replace them with `scripts/seam-suggestion-dir.mjs`; that upload is the user's too.
+
+## The assessor's kernel, and what was tried on the patches themselves (2026-11-21)
+
+`docs/seam-assessor-speed.md` §17–19 has the measurements. In short: stage 0 of the network now
+computes only the voxels an object can reach (the same logit to the bit, 18.8 ms a patch to 13.5
+in Chrome), and Firefox builds forms of the kernels its shader translator is quick with (29.1 ms
+to 16.9). Through the node, 60 ends, interleaved, one answer (`f26c2dd57783`):
+
+| | before | after |
+|---|---|---|
+| Chrome | 87.6 s, 19 ms a patch | 74–81 s, 13–16 ms a patch |
+| Firefox | 124.7 s, 30 ms a patch | 90–94 s, 19 ms a patch |
+
+**The search sets the pace in both browsers now** — 1.2 to 1.5 s an end — so what an end costs is
+again the search's chain (box, pool, counts) at `SEARCH_DEPTH` 3 inside `CHUNKEDGRAPH_BUDGET`.
+
+**Measured and not built: the tails later.** Scoring each end's first eight candidates before the
+rest of any list reproduced the plain answer and was no sooner at its first pass and half again
+as long in all (§19): with the search as the pace, fewer patches an end do not bring an end
+forward. A cap by rank, a reused logit and a narrower pool were each priced on SEAM's 2,705
+student-1 tips first and lost for the reasons §19 gives.
+

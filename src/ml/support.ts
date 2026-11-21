@@ -116,7 +116,7 @@ export async function gpuSupport(): Promise<GpuSupport> {
  * `docs/seam-assessor-speed.md` §16). Firefox answers every wait — `mapAsync`,
  * `onSubmittedWorkDone`, an empty submit included — in ~100 ms; Chrome in under one. Code that
  * waits once per item pays it per item: SEAM's assessor took 98 ms a patch in Firefox against 27
- * in Chrome until it kept patches in flight, and 29 against 19 since. It took a probe that could
+ * in Chrome until it kept patches in flight, and 29 against 19 once it did. It took a probe that could
  * drive Firefox to see it: a ladder of nine rungs in Chrome (`pnpm probe:assessor-gap`) had
  * cleared everything around the network and could not look inside the other browser.
  *
@@ -131,6 +131,42 @@ export async function gpuSupport(): Promise<GpuSupport> {
  * this repo was taken rather than reasoned forward.
  */
 export function slowGpuDispatch(): boolean {
+  return firefox()
+}
+
+/** Firefox, by name: what both measurements here were taken in, and all either claims. */
+function firefox(): boolean {
   const agent = (globalThis.navigator as Navigator | undefined)?.userAgent
   return typeof agent === 'string' && agent.includes('Firefox/')
+}
+
+/**
+ * Whether to build the forms of a shader that spare the browser's translator its loops and its
+ * workgroup memory: Firefox on a Mac, whose translator charges for both where Chrome's does not.
+ *
+ * **Measured, in both browsers** (2026-11-21, M3 Max, Firefox 160, `pnpm probe:gpu-browsers`,
+ * `docs/seam-assessor-speed.md` §18). SEAM's assessor ran the same multiply-adds in the same time
+ * in both — about 13.7 ms a patch — and everything around them cost Firefox 15.5 ms against
+ * Chrome's 5.6. Two causes were found by changing one thing at a time: 2,048 floats of workgroup
+ * memory that nothing used cost Firefox 3.3 ms a patch and Chrome nothing, and a 16-step loop
+ * written out saved it 3.4 ms while costing Chrome 2%. So a kernel has a second form for this
+ * browser — less workgroup memory, the hot loop written out — and this says when to build it.
+ *
+ * Asked by name for `slowGpuDispatch`'s reason: there is no feature to ask about. The shaders
+ * compile and answer the same to the bit; only the clock differs. **A second question about the
+ * same browser, not the same question** — were Firefox's waits fixed tomorrow, its translator
+ * would be no quicker with a loop.
+ */
+export function frugalShaders(): boolean {
+  return firefox() && onMac()
+}
+
+/**
+ * A Mac, by name — where `frugalShaders` was measured. Firefox translates a shader for Metal
+ * there and for other targets elsewhere, and what a loop or a workgroup's memory costs through
+ * those is not known; the plain forms are what every other browser and platform runs.
+ */
+function onMac(): boolean {
+  const agent = (globalThis.navigator as Navigator | undefined)?.userAgent
+  return typeof agent === 'string' && agent.includes('Macintosh')
 }

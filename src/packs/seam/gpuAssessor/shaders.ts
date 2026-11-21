@@ -32,6 +32,21 @@
  *
  * Everything between one convolution and the next is folded in: bias; then for a block's
  * convolutions ReLU and the batch norm's scale and shift; then the residual add and its ReLU.
+ *
+ * ## Skipping the background
+ *
+ * A stage-0 convolution computes only the output voxels an object can reach, and `network.ts`
+ * says why that is the same logit to the bit. The parts are here: the stem flags which of its
+ * outputs any label reaches (`StemForm.reach`); `reachShader` carries the flags through the pool
+ * and each 3³ window; `gatherShader` lists the flagged voxels and sizes the dispatch; `fillShader`
+ * sets an output to the empty patch's answer; and `ConvForm.listed` computes the list over it.
+ *
+ * ## Two forms for two shader translators
+ *
+ * Firefox's translator guards every loop iteration and clears a workgroup's memory slowly, which
+ * Chrome's does not (§18): so there the inner loop is written out (`ConvForm.unrolled`) and the
+ * stem holds its labels two bits each (`StemForm.packed`). Both are the same sums in the same
+ * order.
  */
 
 import type { ConvStep, HeadStep, MaxPoolStep } from './segclrPlan'
@@ -72,15 +87,48 @@ export interface ConvLayout {
 // on that: a split sum adds its terms in another order. `gpuAssessor.test.ts` pins it.
 const SPLIT_TARGET = 320
 
+/** Tiles of output channels a convolution's dispatch runs along its second side. */
+export function channelTiles(step: ConvStep): number {
+  return step.cout / TILE_M
+}
+
+/**
+ * Which of these convolutions can compute one list of voxels between them (`ConvForm.listed`):
+ * none that splits its sum, whose second pass adds up every voxel; and only those as wide as the
+ * first, since the list's dispatch is written once for all of them (`gatherShader`).
+ */
+export function listedTogether(steps: readonly ConvStep[]): ConvStep[] {
+  const whole = steps.filter((step) => convLayout(step).splits === 1)
+  return whole.filter((step) => channelTiles(step) === channelTiles(whole[0]!))
+}
+
 export function convLayout(step: ConvStep): ConvLayout {
   if (step.cout % TILE_M)
     throw new Error(`${step.name}: ${step.cout} channels is not a multiple of ${TILE_M}`)
   const k = step.cin * step.kernel ** 3
   const chunks = Math.ceil(k / TILE_K)
   const across = Math.ceil(step.outEdge ** 3 / TILE_N)
-  const tiles = across * (step.cout / TILE_M)
+  const tiles = across * channelTiles(step)
   const splits = Math.max(1, Math.min(Math.floor(chunks / 8), Math.round(SPLIT_TARGET / tiles)))
-  return { k, chunks, splits, groups: [across, step.cout / TILE_M, splits] }
+  return { k, chunks, splits, groups: [across, channelTiles(step), splits] }
+}
+
+/**
+ * How a convolution is written, beyond what its step says. Neither changes a sum: the same terms
+ * are added in the same order for every output either way.
+ */
+export interface ConvForm {
+  /**
+   * Compute only the output voxels listed in an extra binding (`lst`, after the residual's) — 64
+   * of the list a workgroup, the dispatch as long as the list (`gatherShader`). The step must not
+   * split, since a split's second pass adds every voxel's partial sums.
+   */
+  readonly listed?: boolean
+  /**
+   * The inner loop's sixteen steps written out, for a translator that charges for a loop's
+   * iterations (`frugalShaders` in `src/ml/support.ts` has the measurement).
+   */
+  readonly unrolled?: boolean
 }
 
 /** Floats in a step's laid-out weights: `[k][Cout]`, zero-padded to whole tiles. */
@@ -143,6 +191,28 @@ function corner(index: string, so: number, stride: number, pad: number): string 
   let cz = i32(${index} % ${u(so)}) * ${stride} - ${pad};`
 }
 
+/**
+ * A step's window walked around (`cx`, `cy`, `cz`) — `corner`'s names — as WGSL: `visit` at every
+ * input voxel inside the volume, given that voxel's index within one channel. One spelling for
+ * the pool and for the flags that say what the pool's outputs reach, which are only right while
+ * they walk the same window.
+ */
+function windowWalk(kernel: number, si: number, visit: (index: string) => string): string {
+  return `for (var dx = 0; dx < ${kernel}; dx++) {
+    let x = cx + dx;
+    if (x < 0 || x >= ${si}) { continue; }
+    for (var dy = 0; dy < ${kernel}; dy++) {
+      let y = cy + dy;
+      if (y < 0 || y >= ${si}) { continue; }
+      for (var dz = 0; dz < ${kernel}; dz++) {
+        let z = cz + dz;
+        if (z < 0 || z >= ${si}) { continue; }
+        ${visit(`u32(x) * ${u(si * si)} + u32(y) * ${u(si)} + u32(z)`)}
+      }
+    }
+  }`
+}
+
 /** The epilogue as WGSL, on `v` for channel `m` at voxel `n`. */
 function epilogue(step: ConvStep): string {
   const c = step.cout
@@ -154,10 +224,20 @@ function epilogue(step: ConvStep): string {
 
 /**
  * The convolution. Bindings: 0 input, 1 weights, 2 output (or partial sums when split),
- * 3 epilogue parameters and 4 the residual, both only when not split.
+ * 3 epilogue parameters and 4 the residual, both only when not split; then the list of voxels to
+ * compute, where the form is `listed`.
  */
-export function convShader(step: ConvStep, layout: ConvLayout): string {
+export function convShader(step: ConvStep, layout: ConvLayout, form: ConvForm = {}): string {
   const { k, chunks, splits } = layout
+  if (form.listed && splits !== 1)
+    throw new Error(
+      `${step.name}: a convolution that splits its sum cannot compute a list of voxels`,
+    )
+  /**
+   * The output voxel at `local` (0 to 63) of this workgroup's tile: the next 64 in index order,
+   * or the next 64 of the list — whose last tile is padded with an index past every voxel.
+   */
+  const voxel = (local: string) => (form.listed ? `lst[n0 + ${local}]` : `n0 + ${local}`)
   const si = step.inEdge
   const so = step.outEdge
   const vi = si ** 3
@@ -210,9 +290,29 @@ export function convShader(step: ConvStep, layout: ConvLayout): string {
       Bs[r * ${u(TILE_N)} + nn] = select(0.0, inp[ci * ${u(vi)} + base], inb && kidx < ${u(k)});
     }`
 
+  /**
+   * A thread's `PER_N` output voxels. Listed, each is read from the list once, before the
+   * writes, rather than at every one of them.
+   */
+  const threadVoxels = form.listed
+    ? cols((s) => `  let vox${s} = ${voxel(`tn + ${u(s * NB)}`)};`)
+    : ''
+  const reductionStep = (
+    r: string,
+  ) => `${rows((i) => `      let a${i} = As[${r} * ${u(TILE_M)} + tm + ${u(i * MB)}];`)}
+${cols((j) => `      let b${j} = Bs[${r} * ${u(TILE_N)} + tn + ${u(j * NB)}];`)}
+${both((i, j) => `      acc${i}_${j} = fma(a${i}, b${j}, acc${i}_${j});`)}`
+  const inner = form.unrolled
+    ? Array.from({ length: TILE_K }, (_, r) => `    {\n${reductionStep(u(r))}\n    }`).join(
+        '\n',
+      )
+    : `    for (var r = 0u; r < ${u(TILE_K)}; r++) {
+${reductionStep('r')}
+    }`
+
   const write = (r: number, s: number) => {
     const m = `(m0 + tm + ${u(r * MB)})`
-    const n = `(n0 + tn + ${u(s * NB)})`
+    const n = form.listed ? `vox${s}` : `(${voxel(`tn + ${u(s * NB)}`)})`
     return splits === 1
       ? `  if (${n} < ${u(vo)}) {
     let m = ${m};
@@ -230,6 +330,7 @@ export function convShader(step: ConvStep, layout: ConvLayout): string {
 @group(0) @binding(2) var<storage, read_write> outp: array<f32>;
 ${splits === 1 ? '@group(0) @binding(3) var<storage, read> ep: array<f32>;' : ''}
 ${splits === 1 && step.residual ? '@group(0) @binding(4) var<storage, read> res: array<f32>;' : ''}
+${form.listed ? `@group(0) @binding(${step.residual ? 5 : 4}) var<storage, read> lst: array<u32>;` : ''}
 var<workgroup> As: array<f32, ${TILE_K * TILE_M}>;
 var<workgroup> Bs: array<f32, ${TILE_K * TILE_N}>;
 
@@ -245,7 +346,7 @@ ${both((r, s) => `  var acc${r}_${s} = 0.0;`)}
   // corner of its window in the input.
   let nn = li % ${u(TILE_N)};
   let kb = li / ${u(TILE_N)};
-  let gn = n0 + nn;
+  let gn = ${voxel('nn')};
   let valid = gn < ${u(vo)};
   ${corner('gn', so, step.stride, step.pad)}
 
@@ -258,13 +359,10 @@ ${both((r, s) => `  var acc${r}_${s} = 0.0;`)}
       As[e] = wt[a0 + (e / ${u(TILE_M)}) * ${u(step.cout)} + e % ${u(TILE_M)}];
     }
     workgroupBarrier();
-    for (var r = 0u; r < ${u(TILE_K)}; r++) {
-${rows((i) => `      let a${i} = As[r * ${u(TILE_M)} + tm + ${u(i * MB)}];`)}
-${cols((j) => `      let b${j} = Bs[r * ${u(TILE_N)} + tn + ${u(j * NB)}];`)}
-${both((i, j) => `      acc${i}_${j} = fma(a${i}, b${j}, acc${i}_${j});`)}
-    }
+${inner}
     workgroupBarrier();
   }
+${threadVoxels}
 ${both(write)}
 }`
 }
@@ -323,6 +421,35 @@ function labelChannels(l: string): readonly [string, string] {
   ]
 }
 
+/** How the stem is written, beyond its step. Neither changes a sum. */
+export interface StemForm {
+  /**
+   * Also write, per output voxel, whether any label is in its window (binding 4, `reach`): where
+   * the background skip starts from. An output with no label in reach is the bias alone.
+   */
+  readonly reach?: boolean
+  /**
+   * Hold the footprint a row to a word, two bits a label — 169 words where the plain form holds
+   * 2,197 floats — for a translator that charges for workgroup memory (`frugalShaders`). Firefox's
+   * stem took 4.0 ms against Chrome's 1.0; packed, a patch is 2.7 ms cheaper there and no
+   * different in Chrome (docs/seam-assessor-speed.md §18).
+   *
+   * **Labels are taken as the whole numbers 0 to 3.** A patch is a mask of 0, 1 and 2 — the
+   * cutter's bytes, widened to floats by `scoreCandidates` — so the two forms see the same
+   * labels; one in between would be truncated here, where the plain form reads the float it is.
+   */
+  readonly packed?: boolean
+}
+
+/**
+ * Whether a stem's footprint packs (`StemForm.packed`): a row of it, two bits a label, in one
+ * 32-bit word. The packed form is a choice about speed, so a stem that does not pack is written
+ * plain rather than refused.
+ */
+export function stemPacks(step: ConvStep): boolean {
+  return stemFootprint(step) <= 16
+}
+
 /** The edge of the cube of labels one sparse-stem workgroup reads. */
 export function stemFootprint(step: ConvStep): number {
   return (STEM_CUBE - 1) * step.stride + step.kernel
@@ -354,18 +481,21 @@ export function stemGroups(step: ConvStep): [number, number, number] {
  * dense stem's zero terms would flush it and the skipped ones do not. `segclrPlan`'s `denseStem`
  * builds the reference, and the probe checks the bits rather than trusting this.
  */
-export function stemShader(step: ConvStep): string {
+export function stemShader(step: ConvStep, form: StemForm = {}): string {
   // Two input channels, the two `labelChannels` makes: the weight rows below assume exactly them.
   if (step.cin !== 2)
     throw new Error(`${step.name}: a stem read from the patch has 2 channels, not ${step.cin}`)
   // Each thread holds `STEM_CHANNELS` outputs, and a workgroup is at most 256 threads.
   if (step.cout % STEM_CHANNELS !== 0 || STEM_CUBE ** 3 * (step.cout / STEM_CHANNELS) > 256)
     throw new Error(`${step.name}: ${step.cout} output channels do not fit the sparse stem`)
-  // The footprint lives in workgroup memory, guaranteed only to 16 KiB; the epilogue binds no
-  // residual here.
-  if (stemFootprint(step) ** 3 * 4 + 4 > 16384 || step.residual)
+  const foot = stemFootprint(step)
+  if (form.packed && !stemPacks(step))
+    throw new Error(`${step.name}: a ${foot}-label row does not pack into a word`)
+  // The footprint lives in workgroup memory, guaranteed only to 16 KiB — a float a label, or a
+  // word a row when packed; the epilogue binds no residual here.
+  if ((form.packed ? foot ** 2 : foot ** 3) * 4 + 4 > 16384 || step.residual)
     throw new Error(
-      `${step.name}: a ${stemFootprint(step)}³ footprint or a residual does not fit the sparse stem`,
+      `${step.name}: a ${foot}³ footprint or a residual does not fit the sparse stem`,
     )
   const si = step.inEdge
   const so = step.outEdge
@@ -373,7 +503,6 @@ export function stemShader(step: ConvStep): string {
   const kk = step.kernel
   const stride = step.stride
   const cout = step.cout
-  const foot = stemFootprint(step)
   const footVoxels = foot ** 3
   const threads = STEM_CUBE ** 3 * (cout / STEM_CHANNELS)
   const channels = labelChannels('l')
@@ -384,7 +513,13 @@ export function stemShader(step: ConvStep): string {
 @group(0) @binding(1) var<storage, read> wt: array<f32>;
 @group(0) @binding(2) var<storage, read_write> outp: array<f32>;
 @group(0) @binding(3) var<storage, read> ep: array<f32>;
-var<workgroup> Ls: array<f32, ${footVoxels}>;
+${form.reach ? '@group(0) @binding(4) var<storage, read_write> reach: array<u32>;' : ''}
+${
+  form.packed
+    ? `// The footprint a row (along its last axis) to a word, two bits a label.
+var<workgroup> Rw: array<u32, ${foot * foot}>;`
+    : `var<workgroup> Ls: array<f32, ${footVoxels}>;`
+}
 // Zero at the start of every workgroup, as all workgroup memory is.
 var<workgroup> anySet: atomic<u32>;
 
@@ -394,7 +529,26 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
   let fx0 = i32(wg.x) * ${STEM_CUBE * stride} - ${step.pad};
   let fy0 = i32(wg.y) * ${STEM_CUBE * stride} - ${step.pad};
   let fz0 = i32(wg.z) * ${STEM_CUBE * stride} - ${step.pad};
-  // The footprint's labels.
+${
+  form.packed
+    ? `  // The footprint's labels, a row a thread.
+  for (var rw = li; rw < ${u(foot * foot)}; rw += ${u(threads)}) {
+    let xi = fx0 + i32(rw / ${u(foot)});
+    let yi = fy0 + i32(rw % ${u(foot)});
+    var bits = 0u;
+    if (xi >= 0 && xi < ${si} && yi >= 0 && yi < ${si}) {
+      for (var z = 0u; z < ${u(foot)}; z++) {
+        let zi = fz0 + i32(z);
+        if (zi >= 0 && zi < ${si}) {
+          // Masked as well as clamped: a label that is not a number must not reach its neighbour's bits.
+          bits = bits | ((u32(clamp(lab[${labIndex('u32(xi)', 'u32(yi)', 'u32(zi)', si)}], 0.0, 3.0)) & 3u) << (2u * z));
+        }
+      }
+    }
+    Rw[rw] = bits;
+    if (bits != 0u) { atomicOr(&anySet, 1u); }
+  }`
+    : `  // The footprint's labels.
   for (var e = li; e < ${u(footVoxels)}; e += ${u(threads)}) {
     let xi = fx0 + i32(e / ${u(foot * foot)});
     let yi = fy0 + i32((e / ${u(foot)}) % ${u(foot)});
@@ -405,7 +559,8 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
     }
     Ls[e] = l;
     if (${channels[0]} != 0.0) { atomicOr(&anySet, 1u); }
-  }
+  }`
+}
   workgroupBarrier();
   let anyLabel = atomicLoad(&anySet);
 
@@ -420,17 +575,26 @@ fn main(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u
   let oz = wg.z * ${u(STEM_CUBE)} + vz;
   if (ox >= ${u(so)} || oy >= ${u(so)} || oz >= ${u(so)}) { return; }
 ${each((j) => `  var acc${j} = 0.0;`)}
+${form.reach ? '  var hit = 0u;' : ''}
   if (anyLabel != 0u) {
     let lx = vx * ${u(stride)};
     let ly = vy * ${u(stride)};
     let lz = vz * ${u(stride)};
     for (var t0 = 0u; t0 < ${u(kk)}; t0++) {
       for (var t1 = 0u; t1 < ${u(kk)}; t1++) {
+${
+  form.packed
+    ? `        // This tap row's ${kk} labels; a row with none adds nothing.
+        let row = (Rw[(lx + t0) * ${u(foot)} + ly + t1] >> (2u * lz)) & ${u(4 ** kk - 1)};
+        if (row == 0u) { continue; }`
+    : ''
+}
         for (var t2 = 0u; t2 < ${u(kk)}; t2++) {
-          let l = Ls[(lx + t0) * ${u(foot * foot)} + (ly + t1) * ${u(foot)} + lz + t2];
+          let l = ${form.packed ? 'f32((row >> (2u * t2)) & 3u)' : `Ls[(lx + t0) * ${u(foot * foot)} + (ly + t1) * ${u(foot)} + lz + t2]`};
           // Channel 0 alone says whether this tap adds anything (\`labelChannels\`).
           let ch0 = ${channels[0]};
           if (ch0 != 0.0) {
+${form.reach ? '            hit = 1u;' : ''}
             let ch1 = ${channels[1]};
             // Rows (tap · Cin + ci) · Cout, as \`convWeightLayout\` lays them out.
             let w = ((t0 * ${u(kk * kk)} + t1 * ${u(kk)} + t2) * 2u) * ${u(cout)} + c0;
@@ -444,6 +608,7 @@ ${each(
     }
   }
   let n = (ox * ${u(so)} + oy) * ${u(so)} + oz;
+${form.reach ? '  if (c0 == 0u) { reach[n] = hit; }' : ''}
 ${each(
   (j) => `  {
     let m = c0 + ${u(j)};
@@ -480,6 +645,103 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 }`
 }
 
+/**
+ * Which outputs of a windowed step any flagged input reaches: a max pool's window for the first
+ * set of flags, a 3³ convolution's for each after it. Bindings: 0 the input's flags, 1 the
+ * output's. Outside the volume nothing is flagged.
+ */
+export function reachShader(window: ReachWindow): string {
+  const si = window.inEdge
+  const so = window.outEdge
+  return /* wgsl */ `
+@group(0) @binding(0) var<storage, read> inp: array<u32>;
+@group(0) @binding(1) var<storage, read_write> outp: array<u32>;
+
+@compute @workgroup_size(${FLAT})
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let e = id.x;
+  if (e >= ${u(so ** 3)}) { return; }
+  ${corner('e', so, window.stride, window.pad)}
+  var some = 0u;
+  ${windowWalk(window.kernel, si, (index) => `some = some | inp[${index}];`)}
+  outp[e] = some;
+}`
+}
+
+/** The window a step reads its input through: the pool's, or a convolution's. */
+export type ReachWindow = Pick<MaxPoolStep, 'inEdge' | 'outEdge' | 'kernel' | 'stride' | 'pad'>
+
+/**
+ * The flagged voxels of `act`, listed in index order, and the dispatch that computes them.
+ * Bindings: 0 the flags, 1 the list, 2 the dispatch's three sizes.
+ *
+ * One workgroup. Each thread counts the flags in its own stretch of voxels; after a barrier it
+ * knows how many come before it and writes its own from there — so the list is in index order,
+ * and neighbours in the volume stay neighbours in a tile. The first thread writes the dispatch
+ * (a workgroup per `TILE_N` of the list, `tiles` of them along channels) and pads the last tile
+ * with an index past every voxel, which `convShader` reads as "not a voxel".
+ */
+export function gatherShader(voxels: number, tiles: number): string {
+  const per = Math.ceil(voxels / FLAT)
+  return /* wgsl */ `
+@group(0) @binding(0) var<storage, read> act: array<u32>;
+@group(0) @binding(1) var<storage, read_write> lst: array<u32>;
+@group(0) @binding(2) var<storage, read_write> args: array<u32>;
+var<workgroup> counts: array<u32, ${FLAT}>;
+
+@compute @workgroup_size(${FLAT})
+fn main(@builtin(local_invocation_index) li: u32) {
+  let first = li * ${u(per)};
+  let last = min(first + ${u(per)}, ${u(voxels)});
+  var count = 0u;
+  for (var e = first; e < last; e++) { if (act[e] != 0u) { count++; } }
+  counts[li] = count;
+  workgroupBarrier();
+  var at = 0u;
+  var total = 0u;
+  for (var i = 0u; i < ${u(FLAT)}; i++) {
+    let c = counts[i];
+    if (i < li) { at += c; }
+    total += c;
+  }
+  for (var e = first; e < last; e++) {
+    if (act[e] != 0u) { lst[at] = e; at++; }
+  }
+  if (li == 0u) {
+    let groups = (total + ${u(TILE_N - 1)}) / ${u(TILE_N)};
+    args[0] = groups;
+    args[1] = ${u(tiles)};
+    args[2] = 1u;
+    for (var i = total; i < groups * ${u(TILE_N)}; i++) { lst[i] = 0xffffffffu; }
+  }
+}`
+}
+
+/** Entries a `gatherShader` list needs: every voxel, and the last tile's padding. */
+export function gatherListLength(voxels: number): number {
+  return voxels + TILE_N
+}
+
+/**
+ * One tensor copied over another, element for element: the empty patch's answer over a whole
+ * output, before its convolution computes the voxels an object can reach. Bindings: 0 from, 1 to.
+ *
+ * A shader and not `copyBufferToBuffer`, which cannot be recorded inside a compute pass: a patch
+ * is one pass, and four copies would cut it into five. It measured 0.1 ms.
+ */
+export function fillShader(floats: number): string {
+  return /* wgsl */ `
+@group(0) @binding(0) var<storage, read> bg: array<f32>;
+@group(0) @binding(1) var<storage, read_write> outp: array<f32>;
+
+@compute @workgroup_size(${FLAT})
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let e = id.x;
+  if (e >= ${u(floats)}) { return; }
+  outp[e] = bg[e];
+}`
+}
+
 /** Max over a window, padding never winning. Bindings: 0 input, 1 output. */
 export function maxPoolShader(step: MaxPoolStep): string {
   const si = step.inEdge
@@ -497,19 +759,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let n = e % ${u(so ** 3)};
   ${corner('n', so, step.stride, step.pad)}
   var best = -0x1.fffffep+127f;
-  for (var dx = 0; dx < ${step.kernel}; dx++) {
-    let x = cx + dx;
-    if (x < 0 || x >= ${si}) { continue; }
-    for (var dy = 0; dy < ${step.kernel}; dy++) {
-      let y = cy + dy;
-      if (y < 0 || y >= ${si}) { continue; }
-      for (var dz = 0; dz < ${step.kernel}; dz++) {
-        let z = cz + dz;
-        if (z < 0 || z >= ${si}) { continue; }
-        best = max(best, inp[ch * ${u(si ** 3)} + u32(x) * ${u(si * si)} + u32(y) * ${u(si)} + u32(z)]);
-      }
-    }
-  }
+  ${windowWalk(step.kernel, si, (index) => `best = max(best, inp[ch * ${u(si ** 3)} + ${index}]);`)}
   outp[e] = best;
 }`
 }

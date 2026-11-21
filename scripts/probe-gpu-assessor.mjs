@@ -16,7 +16,8 @@
  *    Warm: each list is scored twice and the second pass is the one quoted.
  * 3. **Where the time goes.** The network built on the page's own thread and each step timed on
  *    its own, so the next optimisation is aimed rather than guessed — and beside it the dense
- *    reference (`segclrPlan`'s `denseStem`), whose logits the sparse stem must equal to the bit.
+ *    reference (`segclrPlan`'s `denseStem`, which also computes every voxel of stage 0), whose
+ *    logits the shipped network — sparse stem, background skipped — must equal to the bit.
  *
  * The models are served from SEAM's export directory with a manifest written here: Coda's
  * fixture manifest (the `matmul` build ONNX Runtime runs), plus the plain `conv` export the
@@ -110,7 +111,8 @@ const profiled = await evaluate(
   const voxels = list.size ** 3
   const patch = Float32Array.from(labels.subarray(0, voxels))
   await network.profile(patch)
-  const steps = await network.profile(patch)
+  // Each step thirty times in its one submit, so the ~0.3 ms round trip is a hundredth of a ms.
+  const steps = await network.profile(patch, 30)
   const times = []
   for (let i = 0; i < 5; i++) {
     const t = performance.now()
@@ -118,11 +120,12 @@ const profiled = await evaluate(
     times.push(performance.now() - t)
   }
   /*
-   * The dense reference (\`segclrPlan\`'s \`denseStem\`): \`encode\` then the dense stem, which the
-   * sparse stem must equal to the bit (docs/seam-assessor-speed.md §15). Every patch of every
-   * list, through both, compared as values.
+   * The dense reference (\`segclrPlan\`'s \`denseStem\`): \`encode\`, the dense stem, and — having
+   * no stem to flag what a label reaches — every voxel of stage 0. The shipped network must
+   * equal it to the bit (docs/seam-assessor-speed.md §15, §17). Every patch of every list,
+   * through both, compared as values.
    */
-  const reference = await net.buildNetwork(device, planning.segclrPlan(graph, { denseStem: true }))
+  const reference = await net.buildNetwork(device, planning.segclrPlan(graph, { denseStem: true }), { skipBackground: false, frugal: false })
   const mismatches = []
   const referenceTimes = []
   let compared = 0
@@ -147,7 +150,8 @@ const profiled = await evaluate(
   900_000,
 )
 console.log(`device: ${profiled.adapter}; GPU memory ${(profiled.bytes / 1e6).toFixed(0)} MB; built in ${profiled.built.toFixed(0)} ms`)
-console.log(`\nOne patch, each step on its own (${(profiled.flops / 1e9).toFixed(1)} GFLOP a patch):\n`)
+// `flops` counts every voxel of the plan: the background a patch skips is still in it.
+console.log(`\nOne patch, each step on its own (${(profiled.flops / 1e9).toFixed(1)} GFLOP a patch computed whole):\n`)
 const stepTotal = profiled.steps.reduce((ms, one) => ms + one.ms, 0)
 for (const one of profiled.steps) {
   console.log(`  ${one.name.padEnd(28)} ${one.ms.toFixed(2).padStart(7)} ms ${((100 * one.ms) / stepTotal).toFixed(0).padStart(3)}%`)
@@ -155,15 +159,15 @@ for (const one of profiled.steps) {
 console.log(`  ${'sum'.padEnd(28)} ${stepTotal.toFixed(1).padStart(7)} ms`)
 const direct = Math.min(...profiled.times)
 console.log(
-  `\n  one submit, page thread: best ${direct.toFixed(1)} ms = ${(profiled.flops / 1e9 / direct).toFixed(2)} TFLOP/s`,
+  `\n  one submit, page thread: best ${direct.toFixed(1)} ms = ${(profiled.flops / 1e9 / direct).toFixed(2)} TFLOP/s of the whole network's arithmetic`,
 )
 
 const median = (v) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)]
 if (profiled.referenceTimes.length)
-  console.log(`  the dense reference (denseStem), same thread: median ${median(profiled.referenceTimes).toFixed(1)} ms`)
+  console.log(`  the dense reference (dense stem, no background skipped), same thread: median ${median(profiled.referenceTimes).toFixed(1)} ms`)
 report.check(
   profiled.compared > 0 && profiled.mismatches.length === 0,
-  `the sparse stem's logits equal the dense reference's to the bit on ${profiled.compared} patches` +
+  `the shipped network's logits equal the dense reference's to the bit on ${profiled.compared} patches` +
     (profiled.mismatches.length ? `; first apart: ${JSON.stringify(profiled.mismatches[0])}` : ''),
 )
 

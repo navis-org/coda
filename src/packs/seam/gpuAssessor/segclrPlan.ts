@@ -168,6 +168,38 @@ export function bufferSlots(steps: readonly PlanStep[]): {
   return { sizes, slotOf }
 }
 
+/**
+ * The convolutions that can compute only the voxels an object reaches, each with how many 3³
+ * windows its output sits past the pool — which set of flags says where it can differ from the
+ * empty patch's answer (`network.ts`).
+ *
+ * Followed from the pool's output through stride-1 steps only: a 3³ convolution reaches one voxel
+ * further than its input, a 1³ one no further, and a residual brings its own reach. Anything
+ * else ends the chain there, since a reach it cannot follow would be a reach too small — the
+ * first stride-2 convolution, in this network: stage 1, where 45% to 89% of the voxels are in
+ * reach and every 3³ convolution splits its sum (docs/seam-assessor-speed.md §17). A 1³ convolution
+ * is followed and left dense: it is a twentieth of a 3³ one's work.
+ */
+export function skippableConvs(steps: readonly PlanStep[]): {
+  pool: MaxPoolStep | undefined
+  depthOf: Map<ConvStep, number>
+} {
+  const pool = steps.find((step): step is MaxPoolStep => step.kind === 'maxpool')
+  const reach = new Map<string, number>(pool ? [[pool.output, 0]] : [])
+  const depthOf = new Map<ConvStep, number>()
+  for (const step of steps) {
+    if (step.kind !== 'conv') continue
+    const from = reach.get(step.input)
+    const beside = step.residual === undefined ? 0 : reach.get(step.residual)
+    const followed = step.stride === 1 && (step.kernel === 1 || step.kernel === 3)
+    if (from === undefined || beside === undefined || !followed) continue
+    const depth = Math.max(from + (step.kernel === 3 ? 1 : 0), beside)
+    reach.set(step.output, depth)
+    if (step.kernel === 3) depthOf.set(step, depth)
+  }
+  return { pool, depthOf }
+}
+
 /** SEAM's `_same_pad`: the padding before the first voxel, and the output edge. */
 export function samePad(
   size: number,
