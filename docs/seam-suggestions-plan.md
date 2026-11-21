@@ -3253,7 +3253,7 @@ fifteen in one measurement. These reads are `POST`s, which no browser retries �
 - **`l2ChunkCounts` shares a request in flight** between callers, since neighbouring ends' pools
   are mostly the same roots — through `shareInFlight` (`memoPromise.ts`), which `resolveRoots`
   now uses too, and which stops a shared request only once every caller waiting on it has gone.
-- **`searchEnds` keeps up to `depth` ends under way** (`SEARCH_DEPTH` 3): boxes read together,
+- **`searchEnds` keeps up to `depth` ends under way** (`SEARCH_DEPTH`, 3 then, 4 since 2026-11-21): boxes read together,
   measures taking turns on the Python worker in end order, counts overlapping, ends yielded in
   order and final. `depth` 1 is the old sequence.
 - **The next patch box is read while the GPU scores** (`startPatchBox`): only the read runs ahead;
@@ -3323,6 +3323,12 @@ to 16.9). Through the node, 60 ends, interleaved, one answer (`f26c2dd57783`):
 
 **The search sets the pace in both browsers now** — 1.2 to 1.5 s an end — so what an end costs is
 again the search's chain (box, pool, counts) at `SEARCH_DEPTH` 3 inside `CHUNKEDGRAPH_BUDGET`.
+
+**`SEARCH_DEPTH` went from 3 to 4 on that measurement.** The same 60 ends, live, two rounds a
+depth and interleaved: Chrome 90.9 and 91.0 s at 3, 68.4 and 69.1 at 4, 69.6 and 73.7 at 5, 87.1
+and 66.9 at 6; Firefox 96.0 and 101.9 at 3, 92.6 and 103.3 at 4, 100.4 and 104.6 at 5. One answer
+throughout. Chrome's network, at 13 ms a patch, was waiting on the search at 3; Firefox's, at
+18, is still its own limit, so the depth costs it nothing and buys it nothing.
 
 **Measured and not built: the tails later.** Scoring each end's first eight candidates before the
 rest of any list reproduced the plain answer and was no sooner at its first pass and half again

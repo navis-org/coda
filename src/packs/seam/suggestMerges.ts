@@ -215,9 +215,14 @@ const DEFAULT_CHUNK_MB = DEFAULT_CHUNK_BUDGET / (1024 * 1024)
  * lookups and counts at once took 0.4-0.7 s of its time an end against 1.0-1.7 one at a time,
  * inside the tab's budget at that server (`rootIds.ts`' `CHUNKEDGRAPH_BUDGET`).
  *
+ * That was before the network got quicker. At ~13 ms a patch Chrome's GPU waited on the search
+ * again, and 60 ends run live took 91 s at 3 and 69 s at 4, twice each, with no more at 5 or 6;
+ * Firefox, at ~18 ms a patch, took 92-105 s at every depth (2026-11-21). The answer was the
+ * same at all of them.
+ *
  * The cost is memory: each end under way holds its box (~19 MB) until it is measured.
  */
-const SEARCH_DEPTH = 3
+const SEARCH_DEPTH = 4
 
 /**
  * Where `Chunk cache` stops being an ordinary number and starts being a decision about a
