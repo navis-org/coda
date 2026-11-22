@@ -100,6 +100,7 @@ import {
   liveQueue,
   mergedAs,
   neuronsOf,
+  nextToReview,
   pickedNeuron,
   planOfTexts,
   planTexts,
@@ -123,6 +124,7 @@ import { EXTENDED_PORT, pairsOf, verdictKey } from '../../packs/seam/pieces'
 import { KEPT_NEURONS, withRecentWork } from '../../packs/seam/reviewEviction'
 import type {
   Candidate,
+  CurrentItem,
   ExtendChoice,
   QueueMode,
   QueueNeuron,
@@ -181,6 +183,7 @@ import { checkPick } from '../../packs/seam/pickCheck'
 import { flushVerdicts } from '../../data/verdictLog'
 import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
 import { ExtendButtons } from './ExtendButtons'
+import { useReviewKeys } from './reviewKeys'
 import { VerdictButtons } from './VerdictButtons'
 import { VerdictSharing } from './VerdictSharing'
 import { useRowWindow } from '../useRowWindow'
@@ -879,6 +882,84 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     setNotice(`Added ${segment} by hand and accepted it: ${gapLabel(gapUm)} from the neuron.`)
   }
   useSegmentPick(node.id, (pointed) => void addPick(pointed))
+
+  /*
+   * The verdict keys (`reviewKeys.ts`, user, 2026-11-22): the row under the cursor judged, and the
+   * cursor on to the next row to review (`nextToReview`) in the same edit — one undo step takes
+   * both back. A key never takes a verdict back: pressed on a row that already has it, it only
+   * moves on, where the button would clear it. A row that cannot be judged says why, as the
+   * button's title does, and the cursor stays.
+   */
+  const rowOf = (at: CurrentItem | undefined) =>
+    at
+      ? listed.findIndex(
+          (row) =>
+            row.tip === at.tip &&
+            (mode === 'tip' || row.candidate?.candidateId === at.candidate.candidateId),
+        )
+      : -1
+  // The cursor moved by a key is scrolled to once the list has drawn it.
+  const followCursor = useRef(false)
+  useReviewKeys(node.id, (key) => {
+    /*
+     * Not under a Submit window, this card's or another's: it covers the buttons, and its own
+     * viewer hands the keys back like any frame — a verdict changed under the plan being confirmed
+     * or sent would not be the one merged.
+     */
+    if (submitting === 'open' || submitting === 'running' || submitting === 'other') {
+      setNotice('Close the Submit window first: the verdict keys wait until it is gone.')
+      return
+    }
+    const verdict = key === 'skip' ? undefined : key
+    if (verdict !== undefined && !here) {
+      setNotice('Click a row first: a verdict key judges the row under the cursor.')
+      return
+    }
+    const said = here && verdictFor(verdicts, here.tip.neuronId, here.candidate.candidateId)
+    if (verdict !== undefined && here) {
+      const id = here.candidate.candidateId
+      const can = verdictPress({
+        verdict,
+        done: mergedAs(merged, id),
+        inNeuron: acceptedElsewhere(accepted, said, id),
+        goesWith: '',
+      })
+      if (can.disabled) {
+        setNotice(can.title)
+        return
+      }
+    }
+    const at = nextToReview(
+      listed,
+      rowOf(here),
+      mode,
+      verdicts,
+      (id) => mergedAs(merged, id) !== undefined || accepted.has(id),
+      // A change to anything but an accept takes the piece's ends off the list, where it has any.
+      verdict !== undefined && verdict !== 'accept' && said !== verdict
+        ? here?.candidate.candidateId
+        : undefined,
+    )
+    const next = at === undefined ? undefined : listed[at]
+    const move = next && {
+      current: tipKey(next.tip.neuronId, next.tip.endUid),
+      rank: (next.hosted ?? next.candidate)?.rank ?? 1,
+    }
+    if (verdict !== undefined && here && said !== verdict) {
+      judge(here.tip, here.candidate, verdict, blockedOf(here.candidate.candidateId), move)
+    } else if (move) {
+      setParams(node.id, move)
+    }
+    if (move) followCursor.current = true
+    else if (listed.length === 0) setNotice('No row is listed yet.')
+    else setNotice('No other listed row is left to review.')
+  })
+  useEffect(() => {
+    if (!followCursor.current) return
+    followCursor.current = false
+    const at = rowOf(here)
+    if (at >= 0) toRow(at)
+  })
 
   /*
    * Start over: asked in place, as the shelf asks before a delete (no `window.confirm`, which

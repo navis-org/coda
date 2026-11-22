@@ -30,6 +30,7 @@ import {
   isAltDigit,
   isFrameKeysMessage,
   isPickKey,
+  reviewKeyOf,
   FRAME_STATE_MESSAGE,
   FRAME_VIEW_MESSAGE,
   type FrameStateMessage,
@@ -430,10 +431,17 @@ window.addEventListener(
   'keydown',
   (event) => {
     if (window.parent === window || isTypingTarget(event.target)) return
-    // ⌥1–9 only while Coda claims them; the hand-pick key always, being unbound in neuroglancer.
-    if (!(claimAltDigits && isAltDigit(event)) && !isPickKey(event)) return
+    // ⌥1–9 only while Coda claims them; the hand-pick and review keys always, being unbound in
+    // neuroglancer.
+    const claimed =
+      (claimAltDigits && isAltDigit(event)) ||
+      isPickKey(event) ||
+      reviewKeyOf(event) !== undefined
+    if (!claimed) return
     event.preventDefault()
     event.stopImmediatePropagation()
+    // A held key repeats, and a key handed back carries no `repeat`: one press, one message.
+    if (event.repeat) return
     window.parent.postMessage(
       {
         type: FRAME_KEY_MESSAGE,

@@ -9,10 +9,15 @@
  * says, is `verdictPress`'s, as before.
  *
  * The menu is `useSplitMenu`'s, shared with the Extend button's.
+ *
+ * Each title names the verdict's key (`reviewKeys.ts`), read off the shortcut table so it cannot
+ * name another — except where the button is disabled: the key is refused there too, and the
+ * title's sentence is why.
  */
 
 import type { Verdict } from '../../packs/seam/reviewQueue'
 import { NOT_ACCEPT, faceOf } from '../../packs/seam/reviewQueue'
+import { shortcutKeys } from '../shortcuts'
 import { SplitMenu, useSplitMenu } from './splitMenu'
 
 const VERDICT_LABEL: Record<Verdict, string> = {
@@ -21,6 +26,32 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   ends: 'Ends',
   unsure: 'Unsure',
   ignore: 'Ignore',
+}
+
+const keyOf = (verdict: Verdict) => shortcutKeys(`review-${verdict}`)
+
+/** The ▾'s title: the verdicts behind it, each with its key. */
+const MORE_TITLE = (() => {
+  const named = NOT_ACCEPT.map((verdict) => `${VERDICT_LABEL[verdict]} (${keyOf(verdict)})`)
+  return `${named.slice(0, -1).join(', ')} or ${named.at(-1)!}`
+})()
+
+/**
+ * A press's title with the verdict's key added, where the press can be made — said apart where the
+ * row has that verdict already: the press takes it back, the key never does and only moves on.
+ */
+function withKey(
+  verdict: Verdict,
+  said: Verdict | undefined,
+  can: { title: string; disabled: boolean },
+) {
+  if (can.disabled) return can
+  const key = keyOf(verdict)
+  const note =
+    said === verdict
+      ? `Key: ${key} keeps it and moves on to the next row without a verdict.`
+      : `Key: ${key}, which also moves on to the next row without a verdict.`
+  return { ...can, title: `${can.title} ${note}` }
 }
 
 export function VerdictButtons({
@@ -35,8 +66,9 @@ export function VerdictButtons({
   onJudge: (verdict: Verdict) => void
 }) {
   const { menuAt, trigger, close, toggle } = useSplitMenu('verdict-menu')
+  const keyed = (verdict: Verdict) => withKey(verdict, said, press(verdict))
   const face = faceOf(said)
-  const faced = press(face)
+  const faced = keyed(face)
   const button = (verdict: Verdict, can: { title: string; disabled: boolean }) => (
     <button
       type="button"
@@ -52,7 +84,7 @@ export function VerdictButtons({
   )
   return (
     <>
-      {button('accept', press('accept'))}
+      {button('accept', keyed('accept'))}
       <span className="review-row__split">
         {button(face, faced)}
         <button
@@ -62,7 +94,7 @@ export function VerdictButtons({
           aria-haspopup="menu"
           aria-expanded={menuAt !== undefined}
           aria-label="Other verdicts"
-          title="Reject, Ends, Unsure or Ignore"
+          title={MORE_TITLE}
           // `verdictPress` fixes or frees a piece's verdicts together, so the face's state is all of theirs.
           disabled={faced.disabled}
           onClick={toggle}
@@ -79,7 +111,7 @@ export function VerdictButtons({
           items={NOT_ACCEPT.map((verdict) => ({
             value: verdict,
             label: VERDICT_LABEL[verdict],
-            ...press(verdict),
+            ...keyed(verdict),
           }))}
           checked={said}
           onPick={onJudge}

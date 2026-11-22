@@ -67,6 +67,25 @@ The row you are on has a blue outline. The bar on its left shows the verdict (gr
 
 A verdict is about the piece and the neuron, not about the tip: a piece listed at two tips shows the same verdict on both rows. That holds for **Ends** too, although a neuron ends at one tip: the second row reads Ends as well. Verdicts survive running the suggestions again, as long as neither the neuron nor the piece has been edited in between. Verdicts saved before 16 November 2026 were tied to a tip number that changes between runs, and are no longer read.
 
+### Reviewing from the keyboard
+
+With the card open, you can give verdicts from the keyboard, with the pointer in Neuroglancer too:
+
+| Key | |
+|---|---|
+| **Q** | Accept |
+| **W** | Reject |
+| **T** | Ends |
+| **Y** | Unsure |
+| **U** | Ignore |
+| **G** | move on without a verdict |
+
+The keys run along the top row in the same order as the buttons, skipping E and R, which Neuroglancer uses to rotate the view.
+
+Each key judges the row under the cursor and moves to the next row that has no verdict yet. That is the next one down the list, or from the top once you reach the end. A row Auto-extend accepted counts as having a verdict, and so does a tip where you judged any of its candidates; merged pieces are skipped too. Once every listed row has a verdict, the status bar says so.
+
+A key never clears a verdict: on a row that already has it, it only moves on. Ctrl+Z takes back the verdict and the move together. Clicking a verdict button does not move the cursor. With several Review Suggestions cards open, the keys go to the one you expanded, pinned or selected.
+
 ### Seeing what you accepted
 
 With `Show accepted` on (the default), every candidate you have accepted on this neuron is shown in the viewer in green, wherever the cursor is. The scene is then the neuron as it will look once you make the merges, and a piece that does not fit stands out. Accepting the candidate you are looking at turns it from orange to a lighter green straight away, and it stays that lighter green while you are on it, so you can pick out the piece in hand among the others — handy in a long Auto-extend chain, where every piece is accepted.

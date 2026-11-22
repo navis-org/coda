@@ -36,6 +36,7 @@ import type { SubmitState } from './mergeSession'
 import type * as VerdictLog from '../../data/verdictLog'
 import { resetVerdictLog, verdictLogState, writeSharing } from '../../data/verdictLog'
 import { ReviewBody, submitPress } from './ReviewBody'
+import { VerdictButtons } from './VerdictButtons'
 import { NEUROGLANCER_TYPE } from '../../nodes/output/neuroglancer'
 import { setHoveredSegment } from '../viewers/segmentHover'
 import { decodePicks, encodePicks } from '../../packs/seam/handPicks'
@@ -1575,6 +1576,28 @@ describe('the split verdict button', () => {
   const face = () => rows()[0]!.querySelectorAll<HTMLButtonElement>('.review-row__verdict')[1]!
   const more = () => rows()[0]!.querySelector<HTMLButtonElement>('.review-row__more')!
   const item = (name: string) => screen.getByRole('menuitemradio', { name: new RegExp(name) })
+  /** The keys (user, 2026-11-22), named where the reader looks for what a button does. */
+  it('names each verdict’s key in its title, and none where the press is refused', () => {
+    draw({ current: at(11), rank: 1 })
+    const accept = rows()[0]!.querySelectorAll<HTMLButtonElement>('.review-row__verdict')[0]!
+    expect(accept.title).toMatch(
+      / Key: Q, which also moves on to the next row without a verdict\.$/,
+    )
+    expect(face().title).toMatch(/ Key: W,/)
+    expect(more().title).toBe('Reject (W), Ends (T), Unsure (Y) or Ignore (U)')
+    fireEvent.click(more())
+    expect(item('Ignore').getAttribute('title')).toMatch(/ Key: U,/)
+    cleanup()
+    render(
+      <VerdictButtons
+        said={undefined}
+        press={() => ({ title: 'Merged by Submit.', disabled: true })}
+        onJudge={() => {}}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Accept' }).title).toBe('Merged by Submit.')
+  })
+
   it('reads Reject on a row with no verdict, and gives it in one press', () => {
     draw({ current: at(11), rank: 1 })
     expect(face().textContent).toBe('Reject')
@@ -1929,5 +1952,97 @@ describe('hand picks on the review card', () => {
     const first = rows()[0]!
     expect(first.querySelector('.review-row__id')?.textContent).toBe(`${PICKED}by hand`)
     expect(first.querySelector('.review-row__score')?.textContent).toBe('—')
+  })
+})
+
+/** The verdict keys (user, 2026-11-22): Q W T Y U judge the row under the cursor; G moves on. */
+describe('the verdict keys', () => {
+  const stored = () => useGraphStore.getState().graph.nodes[0]!.params
+  const notice = () => useGraphStore.getState().notice
+  // As the frame hands a key back: the position only.
+  const press = (code: string, mods: KeyboardEventInit = {}) =>
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code, ...mods }))
+    })
+  const FIRST = `${NEURON}/648518346368395605`
+  const OTHER = `${NEURON}/648518347608868926`
+
+  beforeEach(() => useGraphStore.setState({ past: [], notice: undefined } as never))
+
+  it('judges the row under the cursor and moves to the next without a verdict, in one step', () => {
+    draw({ current: at(11), rank: 1 })
+    press('KeyQ')
+    expect(decodeVerdicts(stored()['verdicts']).get(FIRST)).toBe('accept')
+    expect(stored()['current']).toBe(at(22))
+    expect(stored()['rank']).toBe(1)
+    expect(useGraphStore.getState().past.length).toBe(1)
+  })
+
+  it('gives each key its verdict, and starts from the top past the last row', () => {
+    draw({ current: at(22), rank: 1 })
+    press('KeyU')
+    expect(decodeVerdicts(stored()['verdicts']).get(OTHER)).toBe('ignore')
+    expect(stored()['current']).toBe(at(11))
+  })
+
+  it('never takes a verdict back, where the button would', () => {
+    draw({ current: at(11), rank: 1, verdicts: `${FIRST}=accept` })
+    press('KeyQ')
+    expect(decodeVerdicts(stored()['verdicts']).get(FIRST)).toBe('accept')
+    expect(stored()['current']).toBe(at(22))
+  })
+
+  it('moves on without a verdict on G, and says so where every row has one', () => {
+    draw({ current: at(11), rank: 1 })
+    press('KeyG')
+    expect(stored()['verdicts'] ?? '').toBe('')
+    expect(stored()['current']).toBe(at(22))
+    draw({ current: at(22), rank: 1, verdicts: `${FIRST}=reject;${OTHER}=unsure` })
+    press('KeyG')
+    expect(stored()['current']).toBe(at(22))
+    expect(notice()).toBe('No other listed row is left to review.')
+  })
+
+  it('leaves a key pressed with a modifier alone', () => {
+    draw({ current: at(11), rank: 1 })
+    press('KeyQ', { shiftKey: true })
+    press('KeyW', { metaKey: true })
+    expect(stored()['verdicts'] ?? '').toBe('')
+    expect(stored()['current']).toBe(at(11))
+  })
+
+  /** A verdict changed under a plan being confirmed or sent is not the one merged (review). */
+  it('waits while a Submit window is up, this card’s or another’s', () => {
+    for (const state of ['open', 'running', 'other'] as const) {
+      submitState = state
+      draw({ current: at(11), rank: 1 })
+      press('KeyQ')
+      expect(stored()['verdicts'] ?? '').toBe('')
+      expect(stored()['current']).toBe(at(11))
+      expect(notice()).toMatch(/Close the Submit window first/)
+    }
+    submitState = 'none'
+  })
+
+  it('stands down during a tour, and in an open menu', () => {
+    draw({ current: at(11), rank: 1 })
+    act(() => useGraphStore.setState({ screenMapOpen: true }))
+    press('KeyQ')
+    expect(stored()['verdicts'] ?? '').toBe('')
+    act(() => useGraphStore.setState({ screenMapOpen: false }))
+    // The ▾ menu open, its first item focused: Q there is not a verdict on the row behind.
+    fireEvent.click(rows()[0]!.querySelector<HTMLButtonElement>('.review-row__more')!)
+    const item = screen.getAllByRole('menuitemradio')[0]!
+    act(() => {
+      item.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', bubbles: true }))
+    })
+    expect(stored()['verdicts'] ?? '').toBe('')
+  })
+
+  it('asks for a row first where the cursor is on none', () => {
+    draw({ current: '', rank: 1 })
+    press('KeyW')
+    expect(stored()['verdicts'] ?? '').toBe('')
+    expect(notice()).toMatch(/Click a row first/)
   })
 })

@@ -17,6 +17,7 @@ import {
   isAltDigit,
   isFrameHoverMessage,
   isPickKey,
+  reviewKeyOf,
 } from './frameMessage'
 import {
   buildScene,
@@ -1338,6 +1339,32 @@ describe('the dashboard tab keys', () => {
     expect(pick('KeyJ', { metaKey: true })).toBe(false)
     expect(pick('KeyK')).toBe(false)
     expect(press('KeyJ', { altKey: true })).toBe(false)
+  })
+
+  /** The review card's keys (user, 2026-11-22): bare, by position, and nothing else. */
+  it('read a review key bare, and no other', () => {
+    const key = (code: string, mods: Partial<Record<'shiftKey' | 'ctrlKey', boolean>> = {}) =>
+      reviewKeyOf({
+        code,
+        altKey: false,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        ...mods,
+      })
+    expect(['KeyQ', 'KeyW', 'KeyT', 'KeyY', 'KeyU', 'KeyG'].map((code) => key(code))).toEqual([
+      'accept',
+      'reject',
+      'ends',
+      'unsure',
+      'ignore',
+      'skip',
+    ])
+    // Shift with a letter is a neuroglancer tool, and E and R rotate.
+    expect(key('KeyQ', { shiftKey: true })).toBeUndefined()
+    expect(key('KeyQ', { ctrlKey: true })).toBeUndefined()
+    expect(key('KeyE')).toBeUndefined()
+    expect(key('KeyJ')).toBeUndefined()
   })
 })
 

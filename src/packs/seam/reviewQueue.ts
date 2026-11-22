@@ -758,6 +758,57 @@ export function arrangeTree(
 }
 
 /**
+ * Where a verdict key moves the cursor (user, 2026-11-22; `ui/seam/reviewKeys.ts`): the next listed
+ * row nobody has said anything about, below `from` and then from the top, never `from` itself.
+ * `undefined` where there is none, and `from` is `-1` for a cursor on no listed row.
+ *
+ * - **A verdict of any kind is reviewed, Auto-extend's accepts included** (`verdicts` as the card
+ *   reads them, `autoJudged`): stepping through a long chain stopped on every piece it took.
+ * - **Per tip, a verdict on any of its candidates**, not only the one the row shows: a reader who
+ *   paged to the second and accepted it has reviewed that tip.
+ * - **A row that cannot be judged is passed by** (`settled`: merged, or in the neuron already by
+ *   another road), as is a tip with no candidates.
+ * - **`drops`: a piece whose rows are about to go** — a verdict other than accept on an extended
+ *   piece takes its ends off the list — so its rows under `from` are passed by. Only that piece's:
+ *   a tip can hold two, and paging to the second and rejecting it leaves the first's rows.
+ */
+export function nextToReview(
+  rows: readonly TreeRow[],
+  from: number,
+  mode: QueueMode,
+  verdicts: Verdicts,
+  settled: (candidateId: string) => boolean,
+  drops?: string,
+): number | undefined {
+  const said = (tip: QueueTip, candidate: Candidate) =>
+    verdicts.has(verdictKey(tip.neuronId, candidate.candidateId))
+  const open = (row: TreeRow): boolean => {
+    const shows = row.hosted ?? row.candidate
+    if (!shows || settled(shows.candidateId)) return false
+    return mode === 'candidate'
+      ? !said(row.tip, shows)
+      : !row.tip.candidates.some((one) => said(row.tip, one))
+  }
+  /*
+   * The dropped piece's rows: those beneath `from` from where its own tips start, a level in, to
+   * where the next level-in row is another piece's — everything deeper in between being its.
+   */
+  const gone = new Set<number>()
+  if (drops !== undefined && from >= 0) {
+    const level = rows[from]!.depth + 1
+    let inside = false
+    for (let at = from + 1; at < rows.length && rows[at]!.depth >= level; at++) {
+      if (rows[at]!.depth === level) inside = rows[at]!.tip.neuronId === drops
+      if (inside) gone.add(at)
+    }
+  }
+  const take = (at: number) => !gone.has(at) && open(rows[at]!)
+  for (let at = from + 1; at < rows.length; at++) if (take(at)) return at
+  for (let at = 0; at < from; at++) if (take(at)) return at
+  return undefined
+}
+
+/**
  * Every accepted piece as a pair with what it was accepted on, each parent once — what
  * `piecesOf` places by. Shared by the list (`listedKey`) and Submit's plan (`acceptedTree`).
  */

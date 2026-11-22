@@ -21,6 +21,7 @@ import {
   acceptedText,
   arrangeRows,
   arrangeTree,
+  nextToReview,
   buildQueue,
   currentOfQueue,
   decodeExtend,
@@ -1307,6 +1308,79 @@ describe('a neuron and the pieces it is extended with', () => {
           ['p1', new Set(['p2'])],
         ]),
       )
+    })
+
+    /** Where a verdict key moves the cursor (user, 2026-11-22). */
+    describe('the next row to review', () => {
+      const tree = liveTree(whole, extendedPairs(EXTEND, VERDICTS))
+      const mine = tipsOf(liveQueue(whole, tree), 'n1')
+      const rows = arrangeTree(mine, 'n1', tree, DEFAULT_FILTERS)
+      const none = (_id: string) => false
+      const next = (from: number, verdicts = VERDICTS, settled = none, drops?: string) => {
+        const at = nextToReview(rows, from, 'tip', verdicts, settled, drops)
+        return at === undefined
+          ? undefined
+          : tipKey(rows[at]!.tip.neuronId, rows[at]!.tip.endUid)
+      }
+
+      it('is the next row below with no verdict, then from the top, never the row itself', () => {
+        // n1|1 (z), n1|0 (p1, accepted), p1|2 (w), p1|1 (p2, accepted), p2|1 (v).
+        expect(rows.map((row) => tipKey(row.tip.neuronId, row.tip.endUid))).toEqual([
+          'n1|1',
+          'n1|0',
+          'p1|2',
+          'p1|1',
+          'p2|1',
+        ])
+        expect(next(0)).toBe('p1|2')
+        expect(next(2)).toBe('p2|1')
+        expect(next(4)).toBe('n1|1')
+        // A cursor on no listed row starts at the top.
+        expect(next(-1)).toBe('n1|1')
+        const all = decodeVerdicts('n1/p1=a,z=r;p1/p2=a,w=u;p2/v=i')
+        expect(next(0, all)).toBeUndefined()
+        expect(next(4, decodeVerdicts('n1/p1=a,z=r;p1/p2=a,w=u'))).toBeUndefined()
+      })
+
+      it('passes by a row that cannot be judged', () => {
+        expect(next(0, VERDICTS, (id) => id === 'w')).toBe('p2|1')
+      })
+
+      it('passes by the rows a verdict is about to take off the list, and only those', () => {
+        // Rejecting p1 at n1|0 drops p1|2, p1|1 and p2|1 with it.
+        expect(next(1, VERDICTS, none, 'p1')).toBe('n1|1')
+        expect(next(1)).toBe('p1|2')
+        // Paged to another candidate of n1|0 and rejected there, p1's rows stay (review, 2026-11-22).
+        expect(next(1, VERDICTS, none, 'other')).toBe('p1|2')
+        // From p1|1, rejecting p2 drops p2's rows only — none of them is p1's.
+        expect(next(3, VERDICTS, none, 'p2')).toBe('n1|1')
+        expect(next(2, VERDICTS, none, 'w')).toBe('p2|1')
+      })
+
+      it('counts a verdict on any of a tip’s candidates per tip, and the pair’s own per candidate', () => {
+        const queue = buildQueue(
+          tips,
+          candidatesTable([
+            { neuron: 'n1', end: 1, id: 'z', rank: 1, l2: 9 },
+            { neuron: 'n1', end: 1, id: 'y', rank: 2, l2: 9 },
+            { neuron: 'n1', end: 0, id: 'x', rank: 1, l2: 9 },
+          ]),
+        )
+        const own = tipsOf(queue, 'n1')
+        const said = decodeVerdicts('n1/y=r')
+        const perTip = arrangeTree(own, 'n1', [], DEFAULT_FILTERS)
+        const tipAt = nextToReview(perTip, -1, 'tip', said, none)
+        expect(perTip[tipAt!]!.tip.endUid).toBe(0)
+        const perCandidate = arrangeTree(own, 'n1', [], {
+          ...DEFAULT_FILTERS,
+          mode: 'candidate',
+        })
+        // x first (a tie on 0.5, broken by the tip), then z: y's verdict is y's alone.
+        const first = nextToReview(perCandidate, -1, 'candidate', said, none)!
+        expect(perCandidate[first]!.candidate?.candidateId).toBe('x')
+        const second = nextToReview(perCandidate, first, 'candidate', said, none)!
+        expect(perCandidate[second]!.candidate?.candidateId).toBe('z')
+      })
     })
 
     it('says which candidate a tip’s row is showing the ends of', () => {

@@ -554,7 +554,14 @@ Eleven things that were each a way to get it wrong:
    exactly as for a key pressed outside — tour and all. A field in the frame keeps the key
    (`isTypingTarget`, moved to `core/keys.ts` so the frame can share it). The claim is re-sent on
    the frame's first report, a message posted before its script loads being lost. Other app keys
-   (`D`, `F`, `I`, `/`) are not forwarded: neuroglancer uses single letters of its own.
+   (`D`, `F`, `I`, `/`) are not forwarded: neuroglancer uses single letters of its own. **The
+   review card's keys are, always** — `J` (hand pick) and `Q W T Y U G` (verdicts and skip,
+   `REVIEW_KEY_CODES`, user 2026-11-22) — being letters neither neuroglancer nor Spelunker binds.
+   Measured against the bundle, not assumed: neuroglancer's global map binds `A B H L N O S V X`
+   bare, `E R Z` in the slice and 3D views, digits and arrows, and **Shift with every letter**
+   (`tool-A`…`tool-Z`), so a verdict chord on Shift would take a reader's tools away; Spelunker's
+   keybinds add `C F M`. Coda's own bare `D F H I M P` leave `G K Q T U W Y` free in both. A
+   repeat is dropped in the frame, since a key handed back carries no `repeat`.
 
 11. **Coda's CAVE tokens are offered to neuroglancer as its credentials** (`src/ngframe/caveCredentials.ts`),
    so somebody signed in to Coda is not asked again inside the card. The frame's entry registers a

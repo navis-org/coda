@@ -133,9 +133,10 @@ function onKey(event: KeyboardEvent): void {
 
 /**
  * Which card a pick goes to: the only one open, else the one expanded, pinned or alone selected —
- * never every card, each of which would add the piece to its own neuron.
+ * never every card, each of which would add the piece to its own neuron. The verdict keys ask the
+ * same (`ui/seam/reviewKeys.ts`).
  */
-function pickingNode(ids: readonly string[]): string | undefined {
+export function pickingNode(ids: readonly string[]): string | undefined {
   if (ids.length <= 1) return ids[0]
   const { expandedNodeId, pinnedNodeId, selection } = useGraphStore.getState()
   const selected = selection.filter((id) => ids.includes(id))

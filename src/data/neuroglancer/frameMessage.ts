@@ -291,20 +291,49 @@ export function isAltDigit(event: {
  */
 export const PICK_KEY_CODE = 'KeyJ'
 
-export function isPickKey(event: {
+interface KeyChord {
   code: string
   altKey: boolean
   metaKey: boolean
   ctrlKey: boolean
   shiftKey: boolean
-}): boolean {
-  return (
-    event.code === PICK_KEY_CODE &&
-    !event.altKey &&
-    !event.metaKey &&
-    !event.ctrlKey &&
-    !event.shiftKey
-  )
+}
+
+/** A key pressed with no modifier held. */
+const bare = (event: KeyChord) =>
+  !event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey
+
+export function isPickKey(event: KeyChord): boolean {
+  return event.code === PICK_KEY_CODE && bare(event)
+}
+
+/**
+ * The review card's verdict keys, and the one that skips to the next row to review (user,
+ * 2026-11-22; `ui/seam/reviewKeys.ts`). Along the top row in the buttons' order, skipping `E` and
+ * `R`, with which neuroglancer rotates. **Bare letters, because nothing else is free**: neuroglancer
+ * binds Shift with every letter to a tool, and its own bare letters (`A`, `B`, `L`, `S`, `X`, …)
+ * would stop working while a card is open. Neither neuroglancer, Spelunker nor Coda binds these,
+ * so the frame claims them always and hands them back, as it does the pick key. By position
+ * (`code`), as a key handed back carries no `key`.
+ */
+export const REVIEW_KEY_CODES = {
+  accept: 'KeyQ',
+  reject: 'KeyW',
+  ends: 'KeyT',
+  unsure: 'KeyY',
+  ignore: 'KeyU',
+  skip: 'KeyG',
+} as const
+
+export type ReviewKey = keyof typeof REVIEW_KEY_CODES
+
+const REVIEW_KEY_OF = new Map<string, ReviewKey>(
+  Object.entries(REVIEW_KEY_CODES).map(([key, code]) => [code, key as ReviewKey]),
+)
+
+/** Which review key this is, where it is one, pressed bare. */
+export function reviewKeyOf(event: KeyChord): ReviewKey | undefined {
+  return bare(event) ? REVIEW_KEY_OF.get(event.code) : undefined
 }
 
 export const FRAME_UNAPPLIED_MESSAGE = 'coda:ng-unapplied'
