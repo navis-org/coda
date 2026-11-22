@@ -99,13 +99,47 @@ describe('the work a review card keeps', () => {
     expect(done.evicted).toEqual([neuron(2)])
   })
 
-  /** Work from before the list existed is older than anything it names. */
-  it('counts a neuron the list does not name as older than every one it does', () => {
+  /**
+   * Only what the list names is a neuron (user, 2026-11-22): work it does not name — from before
+   * it existed, or on a piece Auto-extend took — is never counted, and never cleared on its own.
+   */
+  it('never counts or clears work the list does not name', () => {
     const ids = range(KEPT_NEURONS + 2)
     const params = { ...workOn(ids), recent: neuron(5) }
     const done = withRecentWork(params, neuron(KEPT_NEURONS + 2), {})
-    expect(done.evicted).toEqual([neuron(1), neuron(2)])
-    expect(decodeRecent(done.write['recent'])).toContain(neuron(5))
+    expect(done.evicted).toEqual([])
+    expect(decodeRecent(done.write['recent'])).toEqual([neuron(5), neuron(KEPT_NEURONS + 2)])
+    // Past ten listed, the oldest listed goes, and the unnamed work stays.
+    const listed = { ...params, recent: range(KEPT_NEURONS).map(neuron).join(';') }
+    const next = withRecentWork(listed, neuron(KEPT_NEURONS + 2), {})
+    expect(next.evicted).toEqual([neuron(1)])
+    const after = { ...listed, ...next.write }
+    expect(judgedNeurons(after).has(neuron(1))).toBe(false)
+    expect(judgedNeurons(after).has(neuron(KEPT_NEURONS + 1))).toBe(true)
+  })
+
+  /** A neuron can be another's candidate: rejected there, it is still a neuron (review, 2026-11-22). */
+  it('keeps a listed neuron listed, where another neuron rejected it as a candidate', () => {
+    const ids = range(KEPT_NEURONS)
+    const work = workOn(ids)
+    const params = {
+      ...work,
+      verdicts: encodeVerdicts(
+        new Map([...decodeVerdicts(work.verdicts), [`${neuron(2)}/${neuron(1)}`, 'reject']]),
+      ),
+      recent: ids.map(neuron).join(';'),
+    }
+    const write = {
+      verdicts: encodeVerdicts(
+        new Map([
+          ...decodeVerdicts(params.verdicts),
+          [`${neuron(2)}/${piece(2, 9)}`, 'reject'],
+        ]),
+      ),
+    }
+    const done = withRecentWork(params, neuron(2), write)
+    expect(done.evicted).toEqual([])
+    expect(decodeRecent(done.write['recent'] ?? params.recent)).toContain(neuron(1))
   })
 
   it('keeps a pair a kept neuron reaches, whoever it was given on', () => {
@@ -150,11 +184,74 @@ describe('the work a review card keeps', () => {
     const done = withRecentWork(back, neuron(10), {})
     expect(done.evicted).toEqual([])
     expect(decodeRecent(done.write['recent'] ?? back.recent)).not.toContain(piece(10, 1))
-    // An eleventh neuron drops neuron 1, and neuron 10's waiting verdicts stay with it.
-    const next = withRecentWork({ ...back, ...done.write }, neuron(11), workOn([...ids, 11]))
+    // An eleventh neuron drops neuron 1, and neuron 10's waiting verdicts stay with it. Its first
+    // work is added to what is there, as the card writes it: never a rewrite of other neurons'.
+    const eleventh = workOn([11])
+    const write = {
+      verdicts: encodeVerdicts(
+        new Map([...decodeVerdicts(back.verdicts), ...decodeVerdicts(eleventh.verdicts)]),
+      ),
+      extend: `${back.extend};${eleventh.extend}`,
+      autoRoots: `${back.autoRoots};${eleventh.autoRoots}`,
+      autoRefused: `${back.autoRefused};${eleventh.autoRefused}`,
+    }
+    const next = withRecentWork({ ...back, ...done.write }, neuron(11), write)
     expect(next.evicted).toEqual([neuron(1)])
     const after = decodeVerdicts(next.write['verdicts'])
     expect(after.get(`${piece(10, 1)}/${piece(10, 2)}`)).toBe('accept')
+  })
+
+  /**
+   * A piece Auto-extend took has no stored pair: its accept is the search's, not a verdict. With
+   * verdicts on its own candidates it looked like a neuron, so ten of them filled the card, and a
+   * first verdict on an eleventh was cleared in the edit that wrote it (user, 2026-11-22).
+   */
+  describe('a piece Auto-extend took', () => {
+    const n = neuron(1)
+    const taken = range(KEPT_NEURONS + 1).map((j) => piece(1, j + 10))
+    // A verdict on a candidate of each of the first ten, and the neuron listed alone.
+    const params = {
+      ...workOn([1]),
+      verdicts: encodeVerdicts(
+        new Map([
+          ...decodeVerdicts(workOn([1]).verdicts),
+          ...taken
+            .slice(0, -1)
+            .map((id): [string, 'reject'] => [`${id}/${piece(9, 9)}`, 'reject']),
+        ]),
+      ),
+      recent: n,
+    }
+    const last = taken.at(-1)!
+    const press = {
+      verdicts: encodeVerdicts(
+        new Map([...decodeVerdicts(params.verdicts), [`${last}/${piece(9, 8)}`, 'reject']]),
+      ),
+    }
+    const known = taken.map((id) => `${n}/${id}`)
+
+    it('is the neuron’s, told by the card, and never one of its own', () => {
+      const done = withRecentWork(params, n, press, known)
+      expect(done.evicted).toEqual([])
+      expect(decodeRecent(done.write['recent'] ?? params.recent)).toEqual([n])
+    })
+
+    it('keeps the verdict being written, even where the card cannot say whose it is', () => {
+      // As the user's card had it: the list full of pieces earlier writes put there as neurons,
+      // so the piece judged now was the one id it did not name — and was cleared first.
+      const full = { ...params, recent: [...taken.slice(0, KEPT_NEURONS - 1), n].join(';') }
+      const done = withRecentWork(full, n, press)
+      expect(done.evicted).not.toContain(last)
+      const after = decodeVerdicts(done.write['verdicts'] ?? press.verdicts)
+      expect(after.get(`${last}/${piece(9, 8)}`)).toBe('reject')
+      expect(decodeRecent(done.write['recent'])).not.toContain(last)
+    })
+
+    it('leaves the list, where a write put it in as a neuron', () => {
+      const listed = { ...params, recent: [...taken.slice(0, 3), n].join(';') }
+      const done = withRecentWork(listed, n, press, known)
+      expect(decodeRecent(done.write['recent'])).toEqual([n])
+    })
   })
 
   it('leaves the write alone where no neuron is picked', () => {

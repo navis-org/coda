@@ -716,10 +716,15 @@ Two measures, both chosen by the user:
   read as groups of one, so older workflows load; an older Coda reads none of the new.
 - **The full work of the last ten neurons worked on** (`reviewEviction.ts`, the `recent` param). A
   write for an eleventh clears the oldest neuron's pairs in the same edit — decided from the params
-  at a write, never from `Tips`, which arrives late and in parts, and said on the status bar. A
-  neuron is a parent **no pair names as a piece**: a piece whose accept is taken back leaves
-  `extend`, but the verdicts naming it still say what it is. Reach from the kept neurons follows
-  every pair (`piecesOf`), so verdicts waiting beyond a piece taken back stay with their neuron.
+  at a write, never from `Tips`, which arrives late and in parts, and said on the status bar.
+  **Only what `recent` names is a neuron** (user, 2026-11-22). The first rule — a neuron is a
+  parent no pair names as a piece, unlisted ones the oldest — counted every piece Auto-extend took
+  as a neuron once a candidate of its own was judged (its accept is the search's, in no param):
+  ten filled the card, and a first verdict on an eleventh was cleared in the edit that wrote it.
+  Now what the list does not name is never counted and never cleared on its own; it goes with a
+  cleared neuron that reaches it, unless a kept one does too, and otherwise stays — the price.
+  Reach follows every pair (`piecesOf`), the card's Auto-extend pairs (`known`) and the parents
+  the write touches, so verdicts waiting beyond a piece taken back stay with their neuron.
 - **The record keeps its own last ten neurons** (`appendRecorded`, `RECORD_KEPT_NEURONS`) — not
   `recent`, since the record grows only at a Submit, and a Start over clears `recent` but not the
   record. Older neurons' entries are **shortened** (`shortenedRecord`) where the record grows,

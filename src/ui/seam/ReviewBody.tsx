@@ -531,7 +531,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     also: Readonly<Record<string, string | number>> = {},
     params: Readonly<Record<string, unknown>> = node.params,
   ) => {
-    const { write: full, evicted } = withRecentWork(params, neuron, write)
+    // Auto-extend's accepts are no param's, so the pieces they took are named here (`reviewEviction.ts`).
+    const { write: full, evicted } = withRecentWork(
+      params,
+      neuron,
+      write,
+      growth.accepted.keys(),
+    )
     setParams(node.id, { ...full, ...also })
     if (evicted.length === 0) return
     setNotice(
