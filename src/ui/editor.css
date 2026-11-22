@@ -11336,6 +11336,11 @@ details[open] > summary.tile__label {
   border-left-color: var(--status-error, #e05252);
   border-left-style: dashed;
 }
+/* Ignore is right but not merged: Accept's colour, dashed, as Ends is to Reject. */
+.review-row[data-verdict='ignore'] {
+  border-left-color: var(--status-ok, #4caf50);
+  border-left-style: dashed;
+}
 
 /*
  * The click target, as a layer rather than a wrapper — see the note in `ReviewBody.tsx`.

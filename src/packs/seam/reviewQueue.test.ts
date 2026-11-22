@@ -489,14 +489,14 @@ describe('verdicts', () => {
       ['n1/p1', 'accept'],
       ['p1/p3', 'ends'],
       ['n2/p4', 'unsure'],
+      ['n2/p5', 'ignore'],
     ])
     const text = encodeVerdicts(said)
-    expect(text).toBe('n1/p1=a,p2=r;n2/p4=u;p1/p3=e')
+    expect(text).toBe('n1/p1=a,p2=r;n2/p4=u,p5=i;p1/p3=e')
     expect(decodeVerdicts(text)).toEqual(said)
-    expect(decodeVerdicts('n1/p2=reject;n1/p1=accept;p1/p3=ends;n2/p4=unsure')).toEqual(said)
-    expect(
-      encodeVerdicts(decodeVerdicts('n1/p2=reject;n1/p1=accept;p1/p3=ends;n2/p4=unsure')),
-    ).toBe(text)
+    const flat = 'n1/p2=reject;n1/p1=accept;p1/p3=ends;n2/p4=unsure;n2/p5=ignore'
+    expect(decodeVerdicts(flat)).toEqual(said)
+    expect(encodeVerdicts(decodeVerdicts(flat))).toBe(text)
     // Nothing that is not a verdict is read.
     expect(decodeVerdicts('n1/p1=x,p2=;/p3=a;n1/=a').size).toBe(0)
   })
@@ -916,6 +916,12 @@ describe('the accepted pieces', () => {
   it('drops a piece once it is rejected, on whichever row', () => {
     const rejected = withVerdict(verdicts, 'n1', 'q', 'reject')
     expect([...acceptedPieces(queue, rejected).keys()]).toEqual(['p'])
+  })
+
+  /** Right, but it would grow a false branch of the neuron (user, 2026-11-22): Submit leaves it. */
+  it('drops a piece the reader ignored, as it drops a rejected one', () => {
+    const ignored = withVerdict(verdicts, 'n1', 'q', 'ignore')
+    expect([...acceptedPieces(queue, ignored).keys()]).toEqual(['p'])
   })
 
   it('keeps every row a piece is listed on, nearest gap first and an unmeasured one last', () => {
@@ -2146,6 +2152,10 @@ describe('Auto-extend, as the card reads it', () => {
     expect(offered.write.autoRefused).toBe('201/301')
     const other = judgedParams(params, '201', at('201', 3), 'reject', undefined, false)
     expect(other.write.autoRefused).toBeUndefined()
+    // Ignore is a refusal too: the piece is right, and Auto-extend must still not take it.
+    expect(
+      judgedParams(params, '201', at('201', 1), 'ignore', undefined, true).write.autoRefused,
+    ).toBe('201/301')
     // Taken back, or turned into an accept, the refusal goes with it.
     const refused = { ...params, ...offered.write }
     expect(

@@ -72,17 +72,24 @@ import {
 import { SOURCE_COLUMN, numberAt, pointAt } from './suggestionTables'
 
 /**
- * What a reader can say about a piece for a neuron. SEAM's vocabulary, in their words, and one of
+ * What a reader can say about a piece for a neuron. SEAM's vocabulary, in their words, and two of
  * Coda's: `ends` is a rejection whose reason is that the neuron ends at this tip, where `reject`
  * is a wrong continuation (user, 2026-11-18) — two different mistakes for SEAM to learn from.
- * Only `accept` merges.
+ * `ignore` is the right continuation left unmerged (user, 2026-11-22): the neuron holds a false
+ * merge, and the piece would grow the false branch.
+ *
+ * **Only `accept` merges**, and every rule that acts on a verdict asks exactly that — Submit,
+ * Extend, Auto-extend's refusals — so `ignore` is kept out of all three by being not `accept`.
  */
-export type Verdict = 'accept' | 'reject' | 'ends' | 'unsure'
+export type Verdict = 'accept' | 'reject' | 'ends' | 'unsure' | 'ignore'
 
-export const VERDICTS: readonly Verdict[] = ['accept', 'reject', 'ends', 'unsure']
+export const VERDICTS: readonly Verdict[] = ['accept', 'reject', 'ends', 'unsure', 'ignore']
 
-/** The verdicts behind the row's split button (`VerdictButtons.tsx`, user, 2026-11-18). */
-export const NOT_ACCEPT: readonly Verdict[] = ['reject', 'ends', 'unsure']
+/**
+ * The verdicts behind the row's split button (`VerdictButtons.tsx`, user, 2026-11-18). Ignore
+ * last, so the three before it keep their places in the menu.
+ */
+export const NOT_ACCEPT: readonly Verdict[] = ['reject', 'ends', 'unsure', 'ignore']
 
 /** The split button's face: the row's own verdict where it is one of `NOT_ACCEPT`, else Reject. */
 export function faceOf(said: Verdict | undefined): Verdict {
@@ -1106,6 +1113,7 @@ const VERDICT_LETTER: Readonly<Record<Verdict, string>> = {
   reject: 'r',
   ends: 'e',
   unsure: 'u',
+  ignore: 'i',
 }
 
 function verdictOfText(text: string): Verdict | undefined {
@@ -2111,6 +2119,9 @@ const VERDICT_HELP: Record<Verdict, string> = {
   reject: 'This piece does not belong: it is not the continuation.',
   ends: 'This piece does not belong, because the neuron ends here.',
   unsure: 'Cannot tell. Left out of any calibration, rather than counted as wrong.',
+  ignore:
+    'The right continuation, but not to be merged: a false merge in the neuron would make it ' +
+    'grow the wrong branch. Submit and Auto-extend leave it out.',
 }
 
 /**

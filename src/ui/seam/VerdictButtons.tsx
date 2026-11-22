@@ -1,10 +1,11 @@
 /**
- * A review row's verdict buttons: Accept, and a split button for the three ways of saying no —
- * Reject (a wrong continuation), Ends (rejected because the neuron ends here) and Unsure (user,
- * 2026-11-18). One button where there were two, because a row is short of room.
+ * A review row's verdict buttons: Accept, and a split button for the ways of not merging —
+ * Reject (a wrong continuation), Ends (rejected because the neuron ends here), Unsure (user,
+ * 2026-11-18) and Ignore (right, but it would grow a false branch; user, 2026-11-22). One button
+ * where there were two, because a row is short of room.
  *
- * The face is a verdict in one press: the row's own where it is one of the three, else Reject,
- * the commonest. The ▾ opens the three as a menu. What each press may do, and what its title
+ * The face is a verdict in one press: the row's own where it is one of these, else Reject, the
+ * commonest. The ▾ opens them as a menu. What each press may do, and what its title
  * says, is `verdictPress`'s, as before.
  *
  * The menu is `useSplitMenu`'s, shared with the Extend button's.
@@ -19,6 +20,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   reject: 'Reject',
   ends: 'Ends',
   unsure: 'Unsure',
+  ignore: 'Ignore',
 }
 
 export function VerdictButtons({
@@ -60,7 +62,7 @@ export function VerdictButtons({
           aria-haspopup="menu"
           aria-expanded={menuAt !== undefined}
           aria-label="Other verdicts"
-          title="Reject, Ends or Unsure"
+          title="Reject, Ends, Unsure or Ignore"
           // `verdictPress` fixes or frees a piece's verdicts together, so the face's state is all of theirs.
           disabled={faced.disabled}
           onClick={toggle}

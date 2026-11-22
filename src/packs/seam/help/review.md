@@ -1,6 +1,6 @@
 ## What Review Suggestions does
 
-A queue of SEAM's merge suggestions, one row per tip. Each row is a tip and one of its candidates — the piece SEAM would merge into the neuron there. Click a row and the card's viewer shows the neuron and that candidate in two colours, with the camera on the point where they touch. Accept it, reject it, say the neuron ends there, or mark it unsure, and move on.
+A queue of SEAM's merge suggestions, one row per tip. Each row is a tip and one of its candidates — the piece SEAM would merge into the neuron there. Click a row and the card's viewer shows the neuron and that candidate in two colours, with the camera on the point where they touch. Accept it, reject it, say the neuron ends there, mark it unsure or ignore it, and move on.
 
 A verdict is a note saved with the workflow. Nothing is written to the segmentation until you press **Submit** and confirm the merges — see "Submitting merges" below.
 
@@ -55,13 +55,15 @@ With nothing wired to `Current`, expanding the card (⤢) gives it a small viewe
 | a row   | shows that tip's candidate and points the camera at their contact |
 | `‹` `›` | the candidate ranked above or below this one, within the same tip |
 | Accept | records that the piece you are looking at belongs to this neuron (greyed out once the piece is merged) |
-| Reject ▾ | records that it does not. The button gives the verdict on its face in one click; `▾` picks between **Reject** (not the continuation), **Ends** (rejected because the neuron ends here) and **Unsure** |
+| Reject ▾ | records that it does not. The button gives the verdict on its face in one click; `▾` picks between **Reject** (not the continuation), **Ends** (rejected because the neuron ends here), **Unsure** and **Ignore** (the right continuation, but not to be merged) |
 
 Pressing the same verdict again clears it, so a misclick costs one click. The face of the second button shows the row's verdict once it has one, so changing your mind about an `Ends` is still one click.
 
 Use **Ends** when no candidate could be right because the neuron stops at this tip, and **Reject** when the neuron goes on but this piece is not where it goes. SEAM learns different things from the two. Only `Accept` merges.
 
-The row you are on has a blue outline. The bar on its left shows the verdict (green for accept, red for reject, dashed red for ends, yellow for unsure), so you can still tell which row is selected once it has one.
+Use **Ignore** for a piece that is the right continuation but should not be merged, usually because the neuron already has a false merge and this piece would grow the wrong branch. Submit leaves it out and Auto-extend does not take it, as with Reject, but SEAM is told the suggestion was right.
+
+The row you are on has a blue outline. The bar on its left shows the verdict (green for accept, red for reject, dashed red for ends, yellow for unsure, dashed green for ignore), so you can still tell which row is selected once it has one.
 
 A verdict is about the piece and the neuron, not about the tip: a piece listed at two tips shows the same verdict on both rows. That holds for **Ends** too, although a neuron ends at one tip: the second row reads Ends as well. Verdicts survive running the suggestions again, as long as neither the neuron nor the piece has been edited in between. Verdicts saved before 16 November 2026 were tied to a tip number that changes between runs, and are no longer read.
 
@@ -175,14 +177,14 @@ It needs SEAM's cutoff, so Suggest Merges must have an `Assessor`. Without one t
 The pieces it accepts are listed like any other, with an `auto` tag, and the footer counts them (`12 by Auto-extend`). Their Extend button shows how far their search has got and cannot be pressed. To stop extending them, change the piece you chose Auto-extend on.
 
 - **Accept** on an `auto` row makes the verdict your own. Nothing else changes.
-- **Reject**, `Ends` or `Unsure` drops the piece and everything Auto-extend found beyond it, at once. The next time Suggest Merges runs, it does not take that piece. A verdict on a row Auto-extend could never take changes nothing about the search.
+- **Reject**, `Ends`, `Unsure` or `Ignore` drops the piece and everything Auto-extend found beyond it, at once. The next time Suggest Merges runs, it does not take that piece. A verdict on a row Auto-extend could never take changes nothing about the search.
 - Pressing the button again, or the ticked item in the menu, stops Auto-extend and takes everything it found off the list. `Extend` in the menu keeps the piece's own ends but drops what Auto-extend took.
 
 ### Auto-extend listed
 
 **Auto-extend listed**, in the footer beside Submit, chooses Auto-extend on every listed row whose first candidate clears SEAM's cutoff, in one click. "Listed" means every row the filters let through, whether or not it is scrolled into view. The number on the button says how many rows it would take. It leaves out:
 
-- a row you gave `Reject`, `Ends` or `Unsure`;
+- a row you gave `Reject`, `Ends`, `Unsure` or `Ignore`;
 - a row Auto-extend would not accept (an organelle, or a large piece);
 - a piece already extended, by you or by Auto-extend, or already in the neuron on another row;
 - a piece that cannot be extended (merged, or edited since it was suggested).

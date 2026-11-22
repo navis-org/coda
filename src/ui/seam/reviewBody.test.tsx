@@ -1582,23 +1582,27 @@ describe('the split verdict button', () => {
     expect(storedVerdicts()).toBe('720575940621522189/648518346368395605=r')
   })
 
-  it('opens Reject, Ends and Unsure, and records the one picked', () => {
+  it('opens Reject, Ends, Unsure and Ignore, and records the one picked', () => {
     draw({ current: at(11), rank: 1 })
     fireEvent.click(more())
     expect(screen.getAllByRole('menuitemradio').map((one) => one.textContent)).toEqual([
       'Reject',
       'Ends',
       'Unsure',
+      'Ignore',
     ])
     fireEvent.click(item('Ends'))
     expect(storedVerdicts()).toBe('720575940621522189/648518346368395605=e')
     expect(screen.queryByRole('menuitemradio')).toBeNull()
+    fireEvent.click(more())
+    fireEvent.click(item('Ignore'))
+    expect(storedVerdicts()).toBe('720575940621522189/648518346368395605=i')
   })
 
   it('closes its menu from ▾ as well as from outside', () => {
     draw({ current: at(11), rank: 1 })
     fireEvent.click(more())
-    expect(screen.getAllByRole('menuitemradio')).toHaveLength(3)
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(4)
     // The press as a browser sends it: pointerdown first, then the click.
     fireEvent.pointerDown(more())
     fireEvent.click(more())
@@ -1616,7 +1620,7 @@ describe('the split verdict button', () => {
     expect(document.activeElement).toBe(item('Ends'))
     fireEvent.keyDown(item('Ends'), { key: 'ArrowUp' })
     fireEvent.keyDown(item('Reject'), { key: 'ArrowUp' })
-    expect(document.activeElement).toBe(item('Unsure'))
+    expect(document.activeElement).toBe(item('Ignore'))
   })
 
   it('shows the row’s own verdict on the face, ticked in the menu, and on the row', () => {

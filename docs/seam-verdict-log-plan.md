@@ -37,6 +37,12 @@ workflow. Now a reader who opts in sends each one to the lab's server, and SEAM 
 6. **A fourth verdict, `ends`:** a rejection because the neuron ends at this tip, apart from
    `reject`, a wrong continuation. On the candidate shown, like the others. Reject, Ends and Unsure
    share a split button (face one press, ▾ a menu). Only `accept` merges.
+   **A fifth, `ignore`** (user, 2026-11-22): the right continuation, left unmerged because the
+   neuron holds a false merge and the piece would grow the false branch. Last in the same menu;
+   Submit, Extend and Auto-extend leave it out by asking `=== 'accept'`, as for the others.
+   Stored as `i`. Sent as its own word, so **the server's `ignore` has to be deployed first**
+   (`transform_service`, `app/verdicts.py`'s `Record.verdict`); until then the record is refused
+   (422) and dropped with a notice.
 7. **The foot:** a "Help improve" checkbox, a ⚙ opening a panel with the name, the email and the
    user's own sentence on what is sent, and a count — "3 sent · 1 waiting", the last problem, or
    "Not collected for …".
@@ -84,7 +90,7 @@ Coda                                   server                              chunk
 | `candidate`, `rank` | the candidate judged | which piece, and its place in the tip's list |
 | `q`, `r`, `p_tip` | the tip | the tip's numbers — about its **first** candidate, whichever is judged |
 | `conf`, `shown`, `organelle` | the candidate | its own; `organelle` is `true` or null (not known), never a guessed `false` |
-| `verdict` | the press | `accept`, `reject`, `ends`, `unsure`, or `cleared`; or `auto-accepted`, sent by Submit (below) |
+| `verdict` | the press | `accept`, `reject`, `ends`, `unsure`, `ignore`, or `cleared`; or `auto-accepted`, sent by Submit (below) |
 | `at` | the browser's clock | when it was pressed |
 | `searched_at` | — | always null: the card does not know the run's moment; the ids and `at` say it |
 | `coda` | `__APP_VERSION__` | Coda's version |
@@ -175,5 +181,5 @@ requiring the sparsevol service. Tests: `test_verdicts.py`.
   offered outside the lab.
 - **The challenge is weaker than it first read:** a recent copy of a dataset's root table answers
   it. Acceptable for a lab tool; revisit if the server is ever opened wider.
-- **An older Coda drops `ends` from a saved workflow** (its `VERDICTS` lacks it). Older builds do
+- **An older Coda drops `ends` and `ignore` from a saved workflow** (its `VERDICTS` lacks them). Older builds do
   not read newer workflows anywhere else either.
