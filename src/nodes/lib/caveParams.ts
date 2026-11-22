@@ -32,7 +32,7 @@ import {
   caveServerOfSource,
   normaliseCaveServer,
 } from '../../data/cave/deployments'
-import { byName, peekTableList } from '../../data/cave/tables'
+import { byName, kindOf, notInListing, peekTableList } from '../../data/cave/tables'
 import type { CaveTableEntry } from '../../data/cave/tables'
 import { CAVE_TABLE_PROVIDER } from '../../data/annotations/caveTable'
 import type { AnnotationRef } from '../../data/annotations/types'
@@ -287,4 +287,35 @@ export function caveTableSuggestions(ctx: InferContext): Suggestion[] {
  */
 export function caveTablesAt(where: CaveTarget | undefined): CaveTableEntry[] | undefined {
   return where ? peekTableList(where.deployment, where.datastack, where.version) : undefined
+}
+
+/**
+ * The sentence for a typed table name `entries` does not hold, prefixed with the field it was
+ * typed into — or undefined where it is there. Shared by a card's `validate` and a Run's refusal,
+ * so the two say the same thing.
+ */
+export function unlistedTable(
+  field: string,
+  name: string,
+  where: CaveTarget,
+  entries: readonly CaveTableEntry[],
+): string | undefined {
+  return kindOf(entries, name)
+    ? undefined
+    : `\`${field}\`: ${notInListing(name, where.datastack, where.version, entries)}`
+}
+
+/**
+ * `unlistedTable` against the listing as a card sees it: nothing while the listing has not landed
+ * (`peekTableList`'s "not yet"), since a card that said "no such table" for the second before it
+ * arrives would accuse every saved graph of being broken.
+ */
+export function unlistedTableIssues(
+  field: string,
+  name: string,
+  where: CaveTarget | undefined,
+): string[] {
+  const entries = caveTablesAt(where)
+  const line = name && where && entries ? unlistedTable(field, name, where, entries) : undefined
+  return line ? [line] : []
 }

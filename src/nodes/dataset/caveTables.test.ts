@@ -250,7 +250,7 @@ describe('which datastack, refused on the card', () => {
     expect(issues('cave.tableInfo', { datastack: DATASET, table: 'nuclei_v2' })).toEqual([])
     await tableListFor('flywire_fafb_public', 783, { deployment: DEFAULT_CAVE_SERVER })
     expect(issues('cave.tableInfo', { datastack: DATASET, table: 'nuclei_v2' })[0]).toMatch(
-      /is not in flywire_fafb_public:783.*Available:/s,
+      /^`Table`: "nuclei_v2" is not a table or view in flywire_fafb_public:783.*Available:/s,
     )
     expect(issues('cave.tableInfo', { datastack: DATASET, table: 'nuclei_v1' })).toEqual([])
   })

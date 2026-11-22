@@ -753,6 +753,16 @@ Read off live responses and cross-checked against `caveclient` 8.0.1's own endpo
   `/table/{v}/count` answers a **500** wrapping a 404, and `/views/{v}/count` is not a route.
   The `views` listing is a *map* rather than a list of names, so a view's description arrives
   with the listing and costs nothing extra — which is the asymmetry `tables.ts` is built around.
+- **A live query (`/query?…`) for a table the datastack does not have answers `500: 'NoneType'
+  object is not subscriptable`**, not a 404. Its first step is `check_read_permission`, which
+  reads `metadata["read_permission"]` off a metadata lookup that returns `None` for an unknown
+  name (MaterializationEngine `utils.py`, read November 2026; seen live on Zetta's
+  `kronauer_ant` with a nucleus table copied from an Aedes graph). So a node reading a *typed*
+  table live rewrites **only a 500 carrying that exact text**, and asks the listing only then, to
+  name what is there (`nucleusReadFailure` in `packs/seam/openEnds.ts`). Not before the read: that
+  would cost a request per run. Not on any 5xx: the same read also asks the chunkedgraph, and the
+  listing is one materialization's, so a table made since then is missing from it while the live
+  read can see it. The card warns from the same listing once it has landed (`unlistedTableIssues`).
 
 ### Discovery: what is in a datastack
 

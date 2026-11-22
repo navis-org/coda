@@ -31,7 +31,7 @@ import { makeTable } from '../../core/values'
 import type { CaveTableEntry } from '../../data/cave/tables'
 import {
   kindOf,
-  peekTableList,
+  notInListing,
   tableColumnsFor,
   tableFactsFor,
   tableListFor,
@@ -43,6 +43,7 @@ import {
   caveTableSuggestions,
   caveTargetOfType,
   caveTargetOfValue,
+  unlistedTableIssues,
 } from '../lib/caveParams'
 
 // ---------------------------------------------------------------------------
@@ -177,23 +178,8 @@ export const caveTableInfoNode = packNode({
     if (issues.length > 0) return issues
     const name = String(ctx.params.table).trim()
     if (!name) return ['Set `Table` to the name of a table or view.']
-    /*
-     * Checked against the listing only once it has landed. `peekTableList` answers `undefined`
-     * for "not yet" and that is not a problem to report — a card that said "no such table" for
-     * the second between a graph loading and its listing arriving would be accusing every saved
-     * graph of being broken. Same contract as `peekMaterializations`.
-     */
-    const where = caveTargetOfType(ctx.inputs.dataset, ctx.params)
-    const entries = where
-      ? peekTableList(where.deployment, where.datastack, where.version)
-      : undefined
-    if (entries && !kindOf(entries, name)) {
-      return [
-        `"${name}" is not in ${where?.datastack}:${where?.version}. ` +
-          `Available: ${entries.map((e) => e.name).join(', ')}`,
-      ]
-    }
-    return []
+    // Only once the listing has landed: see `unlistedTableIssues`.
+    return unlistedTableIssues('Table', name, caveTargetOfType(ctx.inputs.dataset, ctx.params))
   },
 
   evaluate: async (ctx) => {
@@ -214,12 +200,7 @@ export const caveTableInfoNode = packNode({
      */
     const entries = await tableListFor(where.datastack, where.version, options)
     const kind = kindOf(entries, name)
-    if (!kind) {
-      throw new Error(
-        `"${name}" is not a table or view in ${where.datastack}:${where.version}. ` +
-          `Available: ${entries.map((e) => e.name).join(', ')}`,
-      )
-    }
+    if (!kind) throw new Error(notInListing(name, where.datastack, where.version, entries))
 
     /*
      * The wait before the wait. A guard rail warns and does not refuse (`docs/limits.md`), and

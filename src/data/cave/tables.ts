@@ -355,6 +355,24 @@ export function peekTableList(
   return undefined
 }
 
+/**
+ * The sentence for a name a landed listing does not hold, naming what it does hold. One wording
+ * for every reader that checks a typed table name.
+ */
+export function notInListing(
+  name: string,
+  datastack: string,
+  version: number,
+  entries: readonly CaveTableEntry[],
+): string {
+  return (
+    `"${name}" is not a table or view in ${datastack}:${version}. ` +
+    (entries.length
+      ? `Available: ${entries.map((e) => e.name).join(', ')}`
+      : 'It lists no tables or views.')
+  )
+}
+
 /** Which kind of object this name is, according to a listing that has landed. */
 export function kindOf(
   entries: readonly CaveTableEntry[] | undefined,
@@ -404,12 +422,7 @@ async function loadFacts(
 ): Promise<CaveTableFacts> {
   const entries = await tableListFor(datastack, version, options)
   const kind = kindOf(entries, name)
-  if (!kind) {
-    throw new Error(
-      `"${name}" is not a table or view in ${datastack}:${version}. ` +
-        `Available: ${entries.map((e) => e.name).join(', ')}`,
-    )
-  }
+  if (!kind) throw new Error(notInListing(name, datastack, version, entries))
   // The listing above already downloaded every view's description, so a view's facts are a map
   // lookup rather than a request. Reaching for `listViews` again here is what the module header
   // means by "one entry of a listing that is very likely already in hand".

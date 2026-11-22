@@ -9,9 +9,15 @@
  * the table they publish is the same table.
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { defaultParams, findParam, makeInferContext } from '../../core/node'
+import { defaultParams, findParam, makeInferContext, validationMessage } from '../../core/node'
+import { resetCache } from '../../data/cache'
+import { CaveError } from '../../data/cave/client'
+import { resetCredentials, setToken } from '../../data/cave/credentials'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
+import { resetCaveState, tableListFor } from '../../data/cave/tables'
+import { installCaveFetch } from '../../test/caveStubs'
 import type { ParamValues } from '../../core/node'
 import { inputPorts } from '../../core/ports'
 import { requireNodeDef } from '../../core/registry'
@@ -20,7 +26,7 @@ import type { CodaType, TableSchema } from '../../core/types'
 import '../../nodes'
 import { OPEN_END_MODELS, OPEN_END_TASK } from './models'
 import { SEAM_TIP_RULE } from './tips'
-import { askedForNucleus } from './openEnds'
+import { askedForNucleus, nucleusReadFailure } from './openEnds'
 import type { MeshesValue } from '../../core/values'
 import { OPEN_END_FIELDS } from './openEndsOps'
 import { schemaOf } from './suggestionTables'
@@ -202,5 +208,93 @@ describe('asking the nucleus table', () => {
     // 49 + 36 = 85 µm² against 64: only the first reaches 75.
     expect(askedForNucleus(set, 75)).toEqual([BIG])
     expect(askedForNucleus(meshes(square(SMALL, 8)), 75)).toEqual([])
+  })
+})
+
+/** A `Nucleus table` copied from another datastack: said on the card, and in place of CAVE's 500. */
+describe('a nucleus table the datastack does not have', () => {
+  const DATASET = T.dataset('cave', 'flywire_fafb_public:783')
+  const TARGET = {
+    deployment: DEFAULT_CAVE_SERVER,
+    datastack: 'flywire_fafb_public',
+    version: 783,
+  }
+  const OPTIONS = { deployment: DEFAULT_CAVE_SERVER }
+  const CRASH = new CaveError(
+    "CAVE returned 500: 'NoneType' object is not subscriptable",
+    500,
+    "'NoneType' object is not subscriptable",
+  )
+  let calls: ReturnType<typeof installCaveFetch>
+
+  const issues = (nucleusTable: string) =>
+    def.validate!(
+      makeInferContext(def, { ...defaultParams(def), nucleusTable } as ParamValues, {
+        meshes: T.meshes(),
+        dataset: DATASET,
+      }),
+    ).map(validationMessage)
+
+  beforeEach(() => {
+    resetCache()
+    resetCaveState()
+    resetCredentials()
+    setToken(DEFAULT_CAVE_SERVER, 'token')
+    calls = installCaveFetch()
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('is said on the card once the listing has landed, and not before', async () => {
+    expect(issues('nuclei_v1_aedes')).toEqual([])
+    await tableListFor('flywire_fafb_public', 783, OPTIONS)
+    expect(issues('nuclei_v1_aedes')).toEqual([
+      expect.stringMatching(
+        /^`Nucleus table`: "nuclei_v1_aedes" is not a table or view in flywire_fafb_public:783\. Available: .*nuclei_v1/,
+      ),
+    ])
+    expect(issues('nuclei_v1')).toEqual([])
+    expect(issues('')).toEqual([])
+  })
+
+  it('replaces the server’s 500 with the listing’s sentence, keeping it as the cause', async () => {
+    const thrown = await nucleusReadFailure(CRASH, 'nuclei_v1_aedes', TARGET, OPTIONS)
+    expect(String(thrown)).toMatch(/"nuclei_v1_aedes" is not a table or view in .*Available:/)
+    expect((thrown as Error).cause).toBe(CRASH)
+  })
+
+  it('does not warn about a Dataset from another backend', async () => {
+    await tableListFor('flywire_fafb_public', 783, OPTIONS)
+    const neuprint = makeInferContext(
+      def,
+      { ...defaultParams(def), nucleusTable: 'nuclei_v1_aedes' } as ParamValues,
+      { meshes: T.meshes(), dataset: T.dataset('neuprint', 'flywire_fafb_public:783') },
+    )
+    expect(def.validate!(neuprint)).toEqual([])
+  })
+
+  it('leaves the server’s answer standing for a table the datastack has', async () => {
+    expect(await nucleusReadFailure(CRASH, 'nuclei_v1', TARGET, OPTIONS)).toBe(CRASH)
+  })
+
+  it('asks nothing about a failure that is not CAVE’s missing-table answer', async () => {
+    for (const error of [
+      new CaveError('Could not reach CAVE'),
+      new CaveError('CAVE returned 401', 401),
+      new CaveError('CAVE returned 429', 429),
+      // A 500 from the chunkedgraph half of the same read, or a passing outage.
+      new CaveError('CAVE returned 500: Internal Server Error', 500, 'Internal Server Error'),
+      new CaveError('CAVE returned 503', 503, 'Service Unavailable'),
+      new Error('not CAVE'),
+    ]) {
+      expect(await nucleusReadFailure(error, 'nuclei_v1_aedes', TARGET, OPTIONS)).toBe(error)
+    }
+    expect(calls).toEqual([])
+  })
+
+  it('keeps the original error when the listing cannot be had', async () => {
+    const elsewhere = { ...TARGET, datastack: 'kronauer_ant', version: 1 }
+    expect(await nucleusReadFailure(CRASH, 'nuclei_v1_aedes', elsewhere, OPTIONS)).toBe(CRASH)
   })
 })

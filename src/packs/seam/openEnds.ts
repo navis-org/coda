@@ -84,8 +84,16 @@ import { noLongerCurrent, notRoots } from './rootMoment'
 import {
   CAVE_DATASET_INPUT,
   caveTableParam,
+  caveTargetOfType,
   caveTargetOfValue,
+  unlistedTable,
+  unlistedTableIssues,
 } from '../../nodes/lib/caveParams'
+import type { CaveTarget } from '../../nodes/lib/caveParams'
+import { foreignBackend } from '../../nodes/lib/datasetParam'
+import { CaveError } from '../../data/cave/client'
+import type { CaveRequestOptions } from '../../data/cave/client'
+import { tableListFor } from '../../data/cave/tables'
 import { runOpenEnds } from './openEndRun'
 import { schemaOf } from './suggestionTables'
 import { notNanometres, windowFieldsFrom } from './windowConfig'
@@ -111,6 +119,9 @@ const DOWNLOAD_SHARE = 0.15
  * message reaches, so the signal is read between pages. Thirty-two windows is a few seconds.
  */
 const PAGE = 32
+
+/** The nucleus table field's label, as a refusal about it names it. */
+const NUCLEUS_FIELD = 'Nucleus table'
 
 const unknownModel = (id: string) =>
   `This graph names the open-end model \`${id}\`, which this build does not carry. ` +
@@ -182,7 +193,7 @@ export const openEndsNode = packNode({
     },
     caveTableParam({
       id: 'nucleusTable',
-      label: 'Nucleus table',
+      label: NUCLEUS_FIELD,
       placeholder: 'nucleus_detection_v0',
       help: 'A CAVE table of nuclei, read for each neuron’s soma so `Soma mask` has something to measure from. Only needed where the dataset does not publish soma positions itself; wire the Dataset it belongs to.',
     }),
@@ -231,6 +242,13 @@ export const openEndsNode = packNode({
     const issues: string[] = []
     const id = String(ctx.params.model)
     if (!openEndModel(id)) issues.push(unknownModel(id))
+    // The card's half of `nucleusReadFailure`.
+    const table = String(ctx.params.nucleusTable).trim()
+    // A Dataset from another backend has no CAVE tables to list.
+    if (table && !foreignBackend(ctx.inputs.dataset, 'cave')) {
+      const where = caveTargetOfType(ctx.inputs.dataset, ctx.params)
+      issues.push(...unlistedTableIssues(NUCLEUS_FIELD, table, where))
+    }
     return issues
   },
 
@@ -586,13 +604,28 @@ async function nucleiFor(
   const ids = askedForNucleus(meshes, Number(ctx.params.nucleusMinAreaUm2))
   if (ids.length === 0) return new Map()
   const graphene = await grapheneFor(target.datastack, options)
-  const { somata, replaced, unknown } = graphene
-    ? await somataLive(server, graphene, target.datastack, table, ids, options)
-    : {
-        somata: await somataFor(server, target.datastack, target.version, table, ids, options),
-        replaced: new Map<NeuronId, number>(),
-        unknown: [],
-      }
+  const read = async () =>
+    graphene
+      ? await somataLive(server, graphene, target.datastack, table, ids, options)
+      : {
+          somata: await somataFor(
+            server,
+            target.datastack,
+            target.version,
+            table,
+            ids,
+            options,
+          ),
+          replaced: new Map<NeuronId, number>(),
+          unknown: [],
+        }
+  let answer: Awaited<ReturnType<typeof read>>
+  try {
+    answer = await read()
+  } catch (error) {
+    throw await nucleusReadFailure(error, table, target, options)
+  }
+  const { somata, replaced, unknown } = answer
   if (replaced.size > 0) {
     ctx.warn(
       `${noLongerCurrent(replaced, {
@@ -617,6 +650,41 @@ async function nucleiFor(
   }
   return somata
 }
+
+/**
+ * What to throw for a nucleus read the server refused: the listing's sentence where the table is
+ * not in the datastack, or the server's own answer where it is.
+ *
+ * Asked **after** the failure, never before the read. A missing table is answered by CAVE's live
+ * query with `500: 'NoneType' object is not subscriptable` (its permission check reads the
+ * table's metadata, which is `None`), and a message about Python says nothing about the field
+ * that caused it. Checking first would cost a request on every run, and the listing is a
+ * materialization's, so it would refuse a table made since then that the live read can see.
+ *
+ * **Only that answer is rewritten** (`MISSING_TABLE`). Any other failure — a 5xx from the
+ * chunkedgraph lookup in the same read, a passing outage — says nothing about the table, and the
+ * listing could not settle it anyway: it is the Dataset's materialization's, and a table made
+ * since then is missing from it while the live read can see it. With the signature the server has
+ * already said the table does not exist; the listing only names what does. A listing that cannot
+ * be had leaves the original error standing.
+ */
+export async function nucleusReadFailure(
+  error: unknown,
+  table: string,
+  target: CaveTarget,
+  options: CaveRequestOptions,
+): Promise<unknown> {
+  if (!(error instanceof CaveError) || error.status !== 500) return error
+  if (!error.detail?.includes(MISSING_TABLE)) return error
+  const entries = await tableListFor(target.datastack, target.version, options).catch(
+    () => undefined,
+  )
+  const line = entries && unlistedTable(NUCLEUS_FIELD, table, target, entries)
+  return line ? new Error(line, { cause: error }) : error
+}
+
+/** What CAVE's live query answers for a table it does not have. See `nucleusReadFailure`. */
+const MISSING_TABLE = "'NoneType' object is not subscriptable"
 
 /** The source's soma position, as a tuple the tip rule can read. */
 function somaPoint(mesh: MeshGeometry): [number, number, number] {
