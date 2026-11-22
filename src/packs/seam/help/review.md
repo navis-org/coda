@@ -229,6 +229,8 @@ A tip that clears SEAM's own calibrated cutoff is marked `shown`, and its number
 
 Every filter reads a tip's **first** candidate, so paging through a tip's other candidates never makes its row jump or disappear. A flagged candidate you page to is marked `organelle`.
 
+A row with a piece you accepted on it stays listed whatever the filters say, so nothing Submit will merge is out of sight. With one row per tip, that is any tip listing the piece, whichever candidate it was. Rows you hand-picked or extended stay listed too.
+
 ## Submitting merges
 
 Once you have accepted pieces on a neuron, **Submit** at the foot of the card merges them into it, with your own CAVE token. The number on the button is how many accepted pieces are not merged yet.

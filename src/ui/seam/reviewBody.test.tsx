@@ -556,6 +556,16 @@ describe('the review card', () => {
     expect(screen.getByText(/No tip passes the filters/)).toBeTruthy()
   })
 
+  /** A filter set after the accept hid the row, and Submit merged a piece nobody could see. */
+  it('lists a row with an accepted piece on it whatever the filters say', () => {
+    draw({
+      minConfidence: '0.99',
+      // Tip 11's second candidate: the tip lists it, so the tip's row is kept (0 rows without).
+      verdicts: '720575940621522189/648518346356867476=accept',
+    })
+    expect(rows()).toHaveLength(1)
+  })
+
   /** The neuron the whole card is about, named even when there is nothing to choose between. */
   it('names its one neuron in a disabled list', () => {
     draw({ verdicts: '720575940621522189/648518346368395605=accept' })

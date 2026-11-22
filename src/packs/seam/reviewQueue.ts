@@ -559,7 +559,7 @@ function wasShown(table: TableValue, row: number): boolean {
 export function arrangeRows(
   queue: readonly QueueTip[],
   filters: QueueFilters,
-  /** Rows listed whatever the filters say — `arrangeTree`'s, for a row others hang beneath. */
+  /** Rows listed whatever the filters say — `arrangeTree`'s: one others hang beneath, an accept. */
   always: (row: QueueRow) => boolean = () => false,
 ): QueueRow[] {
   const rows: QueueRow[] =
@@ -645,6 +645,10 @@ export interface TreeRow extends QueueRow {
  *   where a piece is attached. A piece touching the neuron in two places is listed under one.
  * - **That row is listed whatever the filters say.** Filtered out, the rows beneath it would
  *   hang from nothing, and it is a row the reader accepted and asked to have extended.
+ * - **So is a row with an accepted piece on it**, extended or not (user, 2026-11-21): a filter
+ *   set after the accept hid it, and Submit still merged a piece nobody could see. Per tip that
+ *   is a tip listing the piece at any rank — the row shows its first candidate off the cursor,
+ *   and an accept is a verdict on the pair, not on one tip. `accepted` is `acceptedByRoot`'s.
  * - **A piece none of its parent's tips lists** — its parent has no rows yet, or was searched
  *   by another run — goes after the parent's rows, a level in, and says which piece it is
  *   (`adrift`).
@@ -656,6 +660,7 @@ export function arrangeTree(
   seed: string | undefined,
   pieces: readonly Piece[],
   filters: QueueFilters,
+  accepted: ReadonlyMap<string, ReadonlySet<string>> = NONE_ACCEPTED,
 ): TreeRow[] {
   if (seed === undefined) return []
   const byRoot = groupBy(tips, (tip) => tip.neuronId)
@@ -703,7 +708,14 @@ export function arrangeTree(
       ? here.filter((one) => one.candidate === row.candidate)
       : here
   }
-  const always = (row: QueueRow) => hostedBy(row).length > 0
+  const isAccepted = (row: QueueRow) => {
+    const held = accepted.get(row.tip.neuronId)
+    if (!held) return false
+    return filters.mode === 'candidate'
+      ? row.candidate !== undefined && held.has(row.candidate.candidateId)
+      : row.tip.candidates.some((one) => held.has(one.candidateId))
+  }
+  const always = (row: QueueRow) => hostedBy(row).length > 0 || isAccepted(row)
   const out: TreeRow[] = []
   const list = (root: string, depth: number, lost: boolean) => {
     const rows = arrangeRows(byRoot.get(root) ?? [], filters, always)
@@ -781,6 +793,30 @@ export function listedKey(
     .sort()
     .join(';')
 }
+
+/**
+ * The accepted pairs as one text, sorted, `''` for none — so the card compares them by value and
+ * a verdict that accepts nothing new does not rebuild the list (`accepted` is a new map on every
+ * click, and `arrangeTree` is most of a click's cost). `acceptedByRoot` reads it back.
+ */
+export function acceptedText(accepted: ReadonlyMap<string, readonly AcceptedRow[]>): string {
+  return acceptedPairs(accepted)
+    .map(({ parent, piece }) => verdictKey(parent, piece))
+    .sort()
+    .join(' ')
+}
+
+/** `acceptedText` read back: the accepted pieces by the root they were accepted on. */
+export function acceptedByRoot(text: string): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>()
+  for (const { parent, piece } of pairsOf(text === '' ? [] : text.split(' '))) {
+    let held = out.get(parent)
+    if (!held) out.set(parent, (held = new Set()))
+    held.add(piece)
+  }
+  return out
+}
+const NONE_ACCEPTED: ReadonlyMap<string, ReadonlySet<string>> = new Map()
 
 /** The tree the list walks: `tree`, and the pieces `listedKey` named — the same array for none. */
 export function listedTree(tree: readonly Piece[], key: string): readonly Piece[] {

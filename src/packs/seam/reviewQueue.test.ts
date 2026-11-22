@@ -16,7 +16,9 @@ import { makeTable } from '../../core/values'
 import type { TableValue } from '../../core/values'
 import {
   acceptedElsewhere,
+  acceptedByRoot,
   acceptedPieces,
+  acceptedText,
   arrangeRows,
   arrangeTree,
   buildQueue,
@@ -1250,6 +1252,55 @@ describe('a neuron and the pieces it is extended with', () => {
       expect(drawn({ minConfidence: 0.97 })).toEqual(['n1|0', '>p1|2', '>p1|1'])
       // The size filter reads each row's own candidate: p1|1's is one chunk, and it stays too.
       expect(drawn({ minSize: 5 })).toEqual(['n1|1', 'n1|0', '>p1|2', '>p1|1', '>>p2|1'])
+    })
+
+    /** A filter set after the accept hid the row, and Submit merged a piece nobody could see. */
+    it('lists a row with an accepted piece on it whatever the filters say, extended or not', () => {
+      // `y` accepted at rank 2 on n1|1 (0.9) and never extended; nothing hangs beneath that row.
+      const queue = buildQueue(
+        tips,
+        candidatesTable([
+          { neuron: 'n1', end: 0, id: 'p1', rank: 1, l2: 9 },
+          { neuron: 'n1', end: 1, id: 'z', rank: 1, l2: 9 },
+          { neuron: 'n1', end: 1, id: 'y', rank: 2, l2: 9 },
+          { neuron: 'p1', end: 1, id: 'p2', rank: 1, l2: 1 },
+          { neuron: 'p1', end: 2, id: 'w', rank: 1, l2: 9 },
+          { neuron: 'p2', end: 1, id: 'v', rank: 1, l2: 9 },
+        ]),
+      )
+      const verdicts = decodeVerdicts('n1/p1=accept;p1/p2=accept;n1/y=accept')
+      const tree = liveTree(queue, extendedPairs(EXTEND, verdicts))
+      const mine = tipsOf(liveQueue(queue, tree), 'n1')
+      const kept = acceptedByRoot(acceptedText(acceptedPieces(mine, verdicts)))
+      const list = (filters: Partial<typeof DEFAULT_FILTERS>, accepted = kept) =>
+        arrangeTree(mine, 'n1', tree, { ...DEFAULT_FILTERS, ...filters }, accepted).map(
+          (row) =>
+            `${'>'.repeat(row.depth)}${tipKey(row.tip.neuronId, row.tip.endUid)}:${row.candidate?.candidateId}`,
+        )
+      // Per tip, without the accepts n1|1 goes at 0.97, as above; with them it stays — `y` is
+      // on it at rank 2. p2|1 (0.5) goes either way: nobody accepted `v`.
+      const tipped = ['n1|0:p1', '>p1|2:w', '>p1|1:p2']
+      expect(list({ minConfidence: 0.97 }, new Map())).toEqual(tipped)
+      expect(list({ minConfidence: 0.97 })).toEqual(['n1|1:z', ...tipped])
+      // Per candidate (a rank 1 is 0.5 here), the accepted pair's own row and no other of its
+      // tip: `z` still goes.
+      const perCandidate = { minConfidence: 0.6, mode: 'candidate' as const }
+      expect(list(perCandidate, new Map())).toEqual(['n1|0:p1', '>p1|1:p2'])
+      expect(list(perCandidate)).toEqual(['n1|0:p1', '>p1|1:p2', 'n1|1:y'])
+    })
+
+    it('reads the accepted pairs back from their text', () => {
+      expect(acceptedText(new Map())).toBe('')
+      expect(acceptedByRoot('')).toEqual(new Map())
+      const verdicts = decodeVerdicts('n1/z=accept;n1/p1=accept;p1/p2=accept;n1/x=reject')
+      const text = acceptedText(acceptedPieces(tipsOf(whole, 'n1'), verdicts))
+      expect(text).toBe('n1/p1 n1/z p1/p2')
+      expect(acceptedByRoot(text)).toEqual(
+        new Map([
+          ['n1', new Set(['p1', 'z'])],
+          ['p1', new Set(['p2'])],
+        ]),
+      )
     })
 
     it('says which candidate a tip’s row is showing the ends of', () => {

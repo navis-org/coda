@@ -69,6 +69,8 @@ import { isTableValue } from '../../core/values'
 import {
   acceptedElsewhere,
   acceptedPieces,
+  acceptedByRoot,
+  acceptedText,
   arrangeTree,
   buildQueue,
   currentOfQueue,
@@ -354,6 +356,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     [tree, mine, accepted, neuron],
   )
   const listTree = useMemo(() => listedTree(tree, listKey), [tree, listKey])
+  // Listed whatever the filters say (`arrangeTree`); as text first for the same reason.
+  const acceptedKey = useMemo(() => acceptedText(accepted), [accepted])
+  const keptAccepted = useMemo(() => acceptedByRoot(acceptedKey), [acceptedKey])
   const onNeuron = neurons.find((entry) => entry.neuronId === neuron)
 
   const minConfidence = numberOr(node.params.minConfidence)
@@ -374,8 +379,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   )
   // As a tree: a piece's tips beneath the row the piece was accepted on (`arrangeTree`).
   const listed = useMemo(
-    () => arrangeTree(mine, neuron, listTree, filters),
-    [mine, neuron, listTree, filters],
+    () => arrangeTree(mine, neuron, listTree, filters, keptAccepted),
+    [mine, neuron, listTree, filters, keptAccepted],
   )
   /*
    * What `Exclude organelles` did to this list, said in the foot since about one flagged piece
@@ -388,9 +393,15 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const organellesOut = useMemo(() => {
     if (!excludeOrganelles) return 0
     if (mode === 'tip') return listed.filter((row) => row.passedOver).length
-    const all = arrangeTree(mine, neuron, listTree, { ...filters, excludeOrganelles: false })
+    const all = arrangeTree(
+      mine,
+      neuron,
+      listTree,
+      { ...filters, excludeOrganelles: false },
+      keptAccepted,
+    )
     return all.length - listed.length
-  }, [excludeOrganelles, mode, mine, neuron, listTree, filters, listed])
+  }, [excludeOrganelles, mode, mine, neuron, listTree, filters, listed, keptAccepted])
   /*
    * How many of this neuron's listed tips are still to come. From what the run says of each
    * rather than from the queue's own length: a tip the run will never reach — its box outside
@@ -491,11 +502,15 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const switchTo = (neuronId: string) => {
     const theirs = tipsOf(queue, neuronId)
     // The tree its list will walk, hand-picked pieces outside the extended ones included.
-    const walked = listedTree(
-      tree,
-      listedKey(tree, theirs, acceptedPieces(theirs, verdicts), neuronId),
-    )
-    const top = arrangeTree(theirs, neuronId, walked, filters)[0]
+    const theirAccepted = acceptedPieces(theirs, verdicts)
+    const walked = listedTree(tree, listedKey(tree, theirs, theirAccepted, neuronId))
+    const top = arrangeTree(
+      theirs,
+      neuronId,
+      walked,
+      filters,
+      acceptedByRoot(acceptedText(theirAccepted)),
+    )[0]
     setParams(node.id, {
       neuron: neuronId,
       current: top ? tipKey(top.tip.neuronId, top.tip.endUid) : '',

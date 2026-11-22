@@ -443,6 +443,12 @@ Each lands on its own. Nothing before phase 6 touches the write path.
        which is where Suggest Merges takes the joining end from;
      - that row is **listed whatever the filters say** — filtered out, the rows beneath it
        would hang from nothing;
+     - so is **a row with an accepted piece on it**, extended or not (user, 2026-11-21): a
+       filter set after the accept hid the row while Submit still merged the piece. Per tip it is
+       any tip listing the piece at any rank, since off the cursor a row shows its first
+       candidate and an accept is a verdict on the pair. The card passes the accepts as text
+       (`acceptedText` → `acceptedByRoot`), so a click that accepts nothing new does not
+       rebuild the list;
      - one row per tip, that row **shows the extended piece** rather than the tip's first
        candidate, and a click opens on it — or the rows beneath would be about a piece the row
        above does not name;
