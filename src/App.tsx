@@ -19,6 +19,7 @@ import { GuidesDialog } from './ui/panels/GuidesDialog'
 import { WizardDialog } from './ui/panels/WizardDialog'
 import { WhatsNew } from './ui/panels/WhatsNew'
 import { MergeSubmitHost } from './ui/seam/MergeSubmitHost'
+import { SplitGalleryHost } from './ui/seam/SplitGalleryHost'
 import { StartPage } from './ui/panels/StartPage'
 import { SmallScreenGate } from './ui/panels/SmallScreenGate'
 import { ZooGate } from './ui/panels/ZooGate'
@@ -189,6 +190,8 @@ export function App() {
          * canvas). Portalled, so its place here decides nothing but that it is always mounted.
          */}
         <MergeSubmitHost />
+        {/* The split gallery (`K` over a neuron in Neuroglancer), mounted here for the same reason. */}
+        <SplitGalleryHost />
         {/*
          * The same corner as the nudge, which stands down while this is up. Waits for the launch
          * sequence by itself; see `ui/whatsNew.ts` for who is shown it at all.

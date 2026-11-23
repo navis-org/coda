@@ -143,6 +143,24 @@ export interface DatasetIdentity {
   datasetId?: string | undefined
 }
 
+/** A CAVE chunkedgraph: the deployment and the datastack on it. */
+export interface CaveScope {
+  readonly deployment: string
+  readonly datastack: string
+}
+
+/**
+ * `caveTarget`'s strict sibling: a wired CAVE Dataset's deployment and datastack, or undefined for
+ * anything else — never `caveTarget`'s fallback to the default deployment, which takes any source.
+ * What a feature that reads or writes one chunkedgraph asks of a Dataset (the merge record, the
+ * split gallery).
+ */
+export function caveScopeOf(dataset: DatasetIdentity | undefined): CaveScope | undefined {
+  const deployment = caveServerOfSource(dataset?.sourceId)
+  const parsed = dataset?.datasetId ? splitDatasetId(dataset.datasetId) : undefined
+  return deployment && parsed ? { deployment, datastack: parsed.datastack } : undefined
+}
+
 /**
  * Which datastack and materialization, from a wire or from a field.
  *

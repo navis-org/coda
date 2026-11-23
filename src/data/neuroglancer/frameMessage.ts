@@ -240,6 +240,12 @@ export interface FrameHoverMessage {
   type: typeof FRAME_HOVER_MESSAGE
   segment: string | null
   positionNm?: readonly [number, number, number]
+  /**
+   * The name of the layer the segment is from — the first visible segmentation layer with one under
+   * the pointer, which in a scene with extra layers need not be the dataset's. A key acting on the
+   * card's own dataset (the split key) asks it. Absent with no segment.
+   */
+  layer?: string
 }
 
 export function isFrameHoverMessage(data: unknown): data is FrameHoverMessage {
@@ -249,7 +255,12 @@ export function isFrameHoverMessage(data: unknown): data is FrameHoverMessage {
   const placed =
     at === undefined ||
     (Array.isArray(at) && at.length === 3 && at.every((v) => Number.isFinite(v)))
-  return placed && (segment === null || (typeof segment === 'string' && isSegmentId(segment)))
+  const layer = message?.['layer']
+  return (
+    placed &&
+    (layer === undefined || typeof layer === 'string') &&
+    (segment === null || (typeof segment === 'string' && isSegmentId(segment)))
+  )
 }
 
 export const FRAME_KEY_MESSAGE = 'coda:ng-key'
@@ -305,6 +316,19 @@ const bare = (event: KeyChord) =>
 
 export function isPickKey(event: KeyChord): boolean {
   return event.code === PICK_KEY_CODE && bare(event)
+}
+
+/**
+ * The split key (`K`, beside `J`: join and split): the split gallery for the point under the
+ * pointer (`ui/seam/splitSession.ts`, `docs/split-gallery-plan.md`). Unbound in neuroglancer (which
+ * takes A B E G H L N O R S V X Z bare), Spelunker (C F M) and Coda (whose bare letters are D F H I
+ * J M P and the review keys) — `D` was the first choice and is Coda's Dashboard. So the frame
+ * claims it always and hands it back, as it does the pick key. By position (`code`).
+ */
+export const SPLIT_KEY_CODE = 'KeyK'
+
+export function isSplitKey(event: KeyChord): boolean {
+  return event.code === SPLIT_KEY_CODE && bare(event)
 }
 
 /**

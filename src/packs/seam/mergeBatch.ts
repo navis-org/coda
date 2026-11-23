@@ -57,6 +57,7 @@ import type { ConfirmedMerge, EditOutcome, WriteOptions } from '../../data/cave/
 import { confirmMerge, mergeSupervoxels, requestOptionsOf } from '../../data/cave/edits'
 import type { GrapheneSource } from '../../data/cave/graphene'
 import { isNodeId, layerOf } from '../../data/cave/graphLayout'
+import { rootsOrError, SEND_TIMEOUT_MS, timedRead, within } from '../../data/cave/editWaits'
 import { supervoxelRoots } from '../../data/cave/rootIds'
 import type { PlannedMerge, ReadyPlan } from './mergePlan'
 import { waitsFor } from './mergePlan'
@@ -112,29 +113,12 @@ export interface BatchServices {
   sendTimeoutMs?: number
 }
 
-/**
- * How long a root read may take before it is given up: a read changes nothing, so stopping one is
- * safe, and a check that never answers must not hold the card and the overlay for good.
- */
-export const READ_TIMEOUT_MS = 60_000
-
-/**
- * How long a merge may go unanswered before the batch stops waiting. **The request is not
- * cancelled** — that would only throw away the answer — and the merge is read as `unknown`; the
- * caller is handed the request (`stillOut`) and holds Submit until it answers, so the same pair is
- * not planned and sent again meanwhile. Long, since a merge with its remesh is slow.
- */
-export const SEND_TIMEOUT_MS = 120_000
-
 function liveServices(options: WriteOptions): BatchServices {
   // The reads go as the writes do — not quiet — with a time limit of their own (`READ_TIMEOUT_MS`).
   const readAs = requestOptionsOf(options)
   return {
     roots: (graphene, supervoxels) =>
-      supervoxelRoots(graphene, supervoxels, 'server', {
-        ...readAs,
-        signal: AbortSignal.timeout(READ_TIMEOUT_MS),
-      }),
+      supervoxelRoots(graphene, supervoxels, 'server', timedRead(readAs)),
     send: (merge) => mergeSupervoxels(merge, options),
   }
 }
@@ -470,7 +454,7 @@ async function mergeOne(
   }
 
   on.progress(id, { state: 'sending', message: 'Checking the roots' })
-  const before = await rootsOrError(services, graphene, ends)
+  const before = await rootsOf(services, graphene, ends)
   if (!Array.isArray(before)) {
     // Nothing was decided about this merge, so nothing is recorded.
     const message = `The check before merging ${id} failed: ${before}`
@@ -520,7 +504,7 @@ async function mergeOne(
     })
   }
 
-  const after = await rootsOrError(services, graphene, ends)
+  const after = await rootsOf(services, graphene, ends)
 
   const unmoved = Array.isArray(after) && after[0] === ontoRoot && after[1] === pieceRoot
 
@@ -629,45 +613,25 @@ async function sendOnce(
     kind: 'unknown',
     message: errorMessage(error),
   }))
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const unanswered = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), waitMs)
-  })
-  try {
-    const outcome = await Promise.race([sent, unanswered])
-    if (outcome) return { outcome }
-    return {
-      outcome: {
-        kind: 'unknown',
-        message: `no answer after ${Math.round(waitMs / 1000)} s; it may still be made`,
-      },
-      late: sent,
-    }
-  } finally {
-    clearTimeout(timer)
+  const outcome = await within(sent, waitMs)
+  if (outcome) return { outcome }
+  return {
+    outcome: {
+      kind: 'unknown',
+      message: `no answer after ${Math.round(waitMs / 1000)} s; it may still be made`,
+    },
+    late: sent,
   }
 }
 
 /** What the batch decides about one merge; `keep` adds the merge it was decided about. */
 type Decided = EntryOutcome & { readonly message?: string | undefined }
 
-/**
- * Both ends' roots, or why they could not be read — never a throw. **One root per supervoxel or it
- * is no answer**: `rootsAtInstant` holds the live read to that already, and it is asked again here
- * because a short list read as two `undefined`s would equal each other, and a lost reply would be
- * recorded as merged into no root at all.
- */
-async function rootsOrError(
+/** Both ends' roots, or why they could not be read — never a throw (`rootsOrError`). */
+function rootsOf(
   services: BatchServices,
   graphene: GrapheneSource,
   ends: readonly string[],
 ): Promise<string[] | string> {
-  try {
-    const roots = await services.roots(graphene, ends)
-    return roots.length === ends.length
-      ? roots
-      : `the root lookup answered ${roots.length} of ${ends.length} supervoxels.`
-  } catch (error) {
-    return errorMessage(error)
-  }
+  return rootsOrError(() => services.roots(graphene, ends), ends.length)
 }

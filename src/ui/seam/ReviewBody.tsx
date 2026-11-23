@@ -142,7 +142,8 @@ import {
   viewerBaseFor,
 } from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
-import { decodeRecord, mergedSoFar, recordScopeOf } from '../../packs/seam/mergeRecord'
+import { decodeRecord, mergedSoFar } from '../../packs/seam/mergeRecord'
+import { caveScopeOf } from '../../nodes/lib/caveParams'
 import { caveServerLabel } from '../../data/cave/deployments'
 import { getToken, subscribeTokens } from '../../data/cave/credentials'
 import { rootCurrency } from '../../packs/seam/rootCurrency'
@@ -649,7 +650,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * and the currency check asks.
    */
   const target = useMemo(
-    () => recordScopeOf({ sourceId: dataset.sourceId, datasetId: dataset.datasetId }),
+    () => caveScopeOf({ sourceId: dataset.sourceId, datasetId: dataset.datasetId }),
     [dataset.sourceId, dataset.datasetId],
   )
   /*
@@ -1779,7 +1780,7 @@ export function submitPress(at: {
     return blocked('Wire a CAVE Dataset into `Dataset` to submit merges.')
   }
   // The scope the record is read for, so the card's count and Submit's plan read the same one.
-  const target = recordScopeOf({ sourceId: at.sourceId, datasetId: at.datasetId })
+  const target = caveScopeOf({ sourceId: at.sourceId, datasetId: at.datasetId })
   if (!target) return blocked('Only a CAVE dataset’s segmentation can be merged into.')
   if (!at.signedIn) {
     return blocked(

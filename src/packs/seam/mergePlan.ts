@@ -57,7 +57,7 @@ import type { GraphLayout } from '../../data/cave/graphLayout'
 import { isNodeId } from '../../data/cave/graphLayout'
 import type { MergeEnd } from '../../data/cave/merge'
 import type { EditPermission } from '../../data/cave/permissions'
-import { editPermission } from '../../data/cave/permissions'
+import { editPermission, editRefusal } from '../../data/cave/permissions'
 import type { Instant } from '../../data/cave/rootIds'
 import { isLatestRoots, rootTimestamps, supervoxelRoots } from '../../data/cave/rootIds'
 import type { AnchorPair, AnchorRefusal, AnchorVolume, Anchors } from './mergeAnchors'
@@ -398,15 +398,8 @@ async function plan(
    * it — a reader who may not edit is usually refused the currency read too, and its 401/403
    * would replace the plan's own sentence and raise the token alarm.
    */
-  const permission = await services.permission(graphene, options)
-  if (!permission.mayEdit) {
-    return {
-      ok: false,
-      message: permission.termsPending
-        ? `You may edit ${permission.dataset} once you have accepted its terms of service.`
-        : `Your CAVE account may not edit ${permission.dataset}.`,
-    }
-  }
+  const refusal = editRefusal(await services.permission(graphene, options))
+  if (refusal) return { ok: false, message: refusal }
 
   const latest = await services.latest(graphene, [currentRoot, ...open.map(rootNow)], options)
   // One verdict per root, or currency is unknown — never a piece planned on a missing answer.

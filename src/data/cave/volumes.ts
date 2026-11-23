@@ -23,6 +23,7 @@
  */
 
 import { objectStoreUrl } from '../precomputed/transport'
+import type { VolumeInfo, VolumeScale } from '../precomputed/volume'
 import type { CaveRequestOptions } from './client'
 import { caveGet } from './client'
 import type { DatastackInfo } from './api'
@@ -124,4 +125,29 @@ export async function findSupervoxels(
     )
   }
   return source
+}
+
+/**
+ * The supervoxel volume's scale the chunkedgraph was built on, or a refusal naming the datastack.
+ *
+ * Picked **by resolution, never by `baseMip` as a position**: a scale list parsed by a reader that
+ * skips encodings it cannot decode no longer lines up with mip numbers (`GraphLayout`), and the
+ * server divides positions by exactly this resolution.
+ */
+export function baseScale(
+  datastack: string,
+  info: VolumeInfo,
+  layout: GraphLayout,
+): VolumeScale {
+  const want = layout.baseResolutionNm
+  const scale = info.scales.find((s) =>
+    s.resolution.every((nm, a) => Math.abs(nm - want[a]!) < 1e-6),
+  )
+  if (!scale) {
+    throw new Error(
+      `${datastack}'s chunkedgraph is built on ${want.join(' × ')} nm supervoxels, which its ` +
+        'volume does not offer in an encoding Coda reads.',
+    )
+  }
+  return scale
 }

@@ -53,6 +53,7 @@ import {
 } from '../../data/neuroglancer/selectionEdits'
 import type { NgLayerSet, NgLayout, ViewerKind } from '../../data/neuroglancer/scene'
 import type { DataSource, SegmentPlacement } from '../../data/source'
+import { NoNeuronListError } from '../../data/source'
 import {
   DEFAULT_NEUROGLANCER_URL,
   buildScene,
@@ -699,12 +700,19 @@ async function selectedNeurons(
   } catch (err) {
     // A cancel is the run ending, not a lookup that failed.
     if (ctx.signal.aborted) throw err
-    // Kept rather than thrown, so the scene stays on screen — but cached like any result, so say
-    // how to ask again.
-    ctx.warn(
-      `Could not look up the ${plural(added.length, 'neuron')} added in the viewer, so they ` +
-        `have only an id: ${errorMessage(err)}. Use Invalidate Results on this card to try again.`,
-    )
+    /*
+     * A dataset that lists no neurons (`NoNeuronListError`) has no rows to give: a bare id is the
+     * whole of what it can say, so that is no warning — and "try again" would fail the same way.
+     * Anything else is kept rather than thrown, so the scene stays on screen, but cached like any
+     * result, so say how to ask again.
+     */
+    if (!(err instanceof NoNeuronListError)) {
+      ctx.warn(
+        `Could not look up the ${plural(added.length, 'neuron')} added in the viewer, so they ` +
+          `have only an id: ${errorMessage(err).replace(/\.$/, '')}. Use Invalidate Results on ` +
+          'this card to try again.',
+      )
+    }
   }
   const bare = found ? unmatchedIds(added, found) : added
   if (found && bare.length > 0) {

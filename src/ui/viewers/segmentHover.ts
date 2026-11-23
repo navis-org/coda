@@ -30,6 +30,8 @@ export const REST_MS = 500
 export interface PointedSegment {
   readonly segment: string
   readonly positionNm?: readonly [number, number, number]
+  /** The frame's layer the segment is from (`FrameHoverMessage.layer`), where it said. */
+  readonly layer?: string
 }
 
 /**
@@ -37,7 +39,11 @@ export interface PointedSegment {
  * nothing renders from it, so a move over the same segment re-renders nothing.
  */
 interface Stay {
-  readonly point: { readonly segment: string; positionNm?: readonly [number, number, number] }
+  readonly point: {
+    readonly segment: string
+    positionNm?: readonly [number, number, number]
+    readonly layer?: string
+  }
   readonly from: object
 }
 
@@ -51,22 +57,39 @@ let rest:
   | undefined
 let restTimer: ReturnType<typeof setTimeout> | undefined
 const changed = channel()
+/** Every report, a move over the same segment included — what `changed` leaves out. */
+const moved = channel()
 
 /** Say what `from` — a frame — has under the pointer, and where; `undefined` for nothing. */
 export function setHoveredSegment(
   from: object,
   segment: string | undefined,
   positionNm?: readonly [number, number, number],
+  layer?: string,
+): void {
+  record(from, segment, positionNm, layer)
+  moved.notify()
+}
+
+function record(
+  from: object,
+  segment: string | undefined,
+  positionNm?: readonly [number, number, number],
+  layer?: string,
 ): void {
   if (segment === undefined) {
     if (hovered?.from !== from) return
     hovered = undefined
     clearTimeout(restTimer)
-  } else if (hovered?.point.segment === segment && hovered.from === from) {
+  } else if (
+    hovered?.point.segment === segment &&
+    hovered.point.layer === layer &&
+    hovered.from === from
+  ) {
     hovered.point.positionNm = positionNm
     return
   } else {
-    const point = { segment, positionNm }
+    const point = { segment, positionNm, ...(layer === undefined ? {} : { layer }) }
     hovered = { point, from }
     clearTimeout(restTimer)
     restTimer = setTimeout(() => {
@@ -77,8 +100,26 @@ export function setHoveredSegment(
   changed.notify()
 }
 
+/**
+ * Hear every pointer report from any frame, a move over the same segment included — for reading
+ * ahead under a resting pointer (the split key, `ui/seam/splitKey.ts`), where the segment
+ * changing is not the event. Read `pointerStay()` on each.
+ */
+export function onPointerMove(listener: () => void): () => void {
+  return moved.subscribe(listener)
+}
+
 export function hoveredSegment(): string | undefined {
   return hovered?.point.segment
+}
+
+/**
+ * The segment under the pointer, where it is, and the frame it is in — for a key whose meaning
+ * depends on which frame's dataset the segment is from (the split key, `ui/seam/splitSession.ts`).
+ * A copy of the point, as every point handed out is.
+ */
+export function pointerStay(): { point: PointedSegment; from: object } | undefined {
+  return hovered && { point: { ...hovered.point }, from: hovered.from }
 }
 
 export function useHoveredSegment(): string | undefined {

@@ -29,12 +29,20 @@
  * Measured on the real 64 MB index response: 721 ms for the rewrite against 108 ms for a naive
  * `JSON.parse`, which is paid once per dataset behind the IndexedDB cache and against ~6 s of
  * network. Worth knowing before anyone puts this on a hot path.
+ *
+ * **It also reads Python's non-finite floats.** `json.dumps` writes `Infinity`, `-Infinity` and
+ * `NaN` bare, which is not JSON, and `JSON.parse` throws on the whole reply; the chunkedgraph's
+ * `subgraph` does it for every chunk-border edge (`subgraph.ts`). The same scan rewrites them
+ * (`NON_FINITE`), after the same delimiters, so a string is still never touched. Measured on
+ * 64 MB synthetic replies after adding it (Node 26, median of six): 642 → 662 ms with 18-digit
+ * ids, 470 → 436 ms with quoted ids, 70 → 70 ms of plain floats — within run-to-run noise.
  */
 
 import type { DType } from '../../core/types'
 
 /**
- * A complete string literal, **or** an integer literal in value position.
+ * A complete string literal, **or** an integer literal — or a bare `Infinity`/`NaN` — in value
+ * position.
  *
  * The delimiter is part of the match rather than a lookbehind, which does two jobs: it keeps
  * this to features every target browser has had for years, and it means the fractional digits
@@ -45,7 +53,7 @@ import type { DType } from '../../core/types'
  * 16 digits is the shortest that can overflow a double; the actual decision is made per match
  * by `Number.isSafeInteger`, so a 16-digit value that is genuinely exact stays a number.
  */
-const VALUE_SCAN = /"(?:[^"\\]|\\.)*"|([:,[]\s*)(-?\d{16,})(?![\d.eE])/g
+const VALUE_SCAN = /"(?:[^"\\]|\\.)*"|([:,[]\s*)(?:(-?\d{16,})(?![\d.eE])|(-?Infinity|NaN)\b)/g
 
 /**
  * Quote every integer literal that a double cannot hold exactly.
@@ -56,11 +64,31 @@ const VALUE_SCAN = /"(?:[^"\\]|\\.)*"|([:,[]\s*)(-?\d{16,})(?![\d.eE])/g
 export function quoteWideIntegers(text: string): string {
   return text.replace(
     VALUE_SCAN,
-    (match, prefix: string | undefined, digits: string | undefined) => {
-      if (prefix === undefined || digits === undefined) return match
+    (
+      match,
+      prefix: string | undefined,
+      digits: string | undefined,
+      nonFinite: string | undefined,
+    ) => {
+      if (prefix === undefined) return match
+      if (nonFinite !== undefined) return prefix + NON_FINITE[nonFinite]
+      if (digits === undefined) return match
       return Number.isSafeInteger(Number(digits)) ? match : `${prefix}"${digits}"`
     },
   )
+}
+
+/**
+ * Python's `json.dumps` writes a non-finite float as a bare `Infinity`, `-Infinity` or `NaN`, which
+ * is not JSON: `JSON.parse` throws on the whole reply. The chunkedgraph's `subgraph` does, for the
+ * edge joining two pieces of one supervoxel (`subgraph.ts`). Rewritten by the same string-aware
+ * scan, so the word inside a string literal is never touched: `1e999` parses to `Infinity`, and a
+ * `NaN` becomes `null` — the absence it stands for.
+ */
+const NON_FINITE: Readonly<Record<string, string>> = {
+  Infinity: '1e999',
+  '-Infinity': '-1e999',
+  NaN: 'null',
 }
 
 /**

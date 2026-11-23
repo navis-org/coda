@@ -10,8 +10,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { resetCredentials, subscribeAuthFailure } from './credentials'
-import type { ConfirmedMerge, DoneEdit, WriteOptions } from './edits'
-import { confirmMerge, mergeSupervoxels, undoMerge } from './edits'
+import type { ConfirmedMerge, ConfirmedSplit, DoneEdit, WriteOptions } from './edits'
+import {
+  confirmMerge,
+  confirmSplit,
+  mergeSupervoxels,
+  splitSupervoxels,
+  undoEdit,
+} from './edits'
 import { parseGrapheneSource } from './graphene'
 import type { MergeEnd } from './merge'
 
@@ -265,12 +271,12 @@ describe('confirmMerge', () => {
   })
 })
 
-describe('undoMerge', () => {
+describe('undoEdit', () => {
   it('undoes a merge it made, with caveclient’s request, on the merge’s own table', async () => {
     const sent = serve(200, DONE, '{"operation_id":"4218","new_root_ids":["1","2"]}')
     const merged = await mergeOnce()
     expect(merged.kind).toBe('done')
-    const outcome = await undoMerge(merged as DoneEdit, AS)
+    const outcome = await undoEdit(merged as DoneEdit, AS)
 
     expect(outcome).toEqual({ kind: 'done', operationId: '4218', newRootIds: ['1', '2'] })
     expect(sent[1]!.url).toBe(
@@ -283,8 +289,8 @@ describe('undoMerge', () => {
   it('undoes a merge once, and refuses the second before any request', async () => {
     const sent = serve(200, DONE)
     const merged = (await mergeOnce()) as DoneEdit
-    await undoMerge(merged, AS)
-    await expect(undoMerge(merged, AS)).rejects.toThrow(/already been undone/)
+    await undoEdit(merged, AS)
+    await expect(undoEdit(merged, AS)).rejects.toThrow(/already been undone/)
     expect(sent).toHaveLength(2)
   })
 
@@ -293,10 +299,10 @@ describe('undoMerge', () => {
     const sent = serve(200, DONE)
     const merged = (await mergeOnce()) as DoneEdit
     const literal: DoneEdit = { kind: 'done', operationId: '4217', newRootIds: ['1'] }
-    await expect(undoMerge(literal, AS)).rejects.toThrow(/Only a merge this session made/)
-    await expect(undoMerge({ ...merged }, AS)).rejects.toThrow(/Only a merge this session made/)
-    const undone = (await undoMerge(merged, AS)) as DoneEdit
-    await expect(undoMerge(undone, AS)).rejects.toThrow(/Only a merge this session made/)
+    await expect(undoEdit(literal, AS)).rejects.toThrow(/Only an edit this session made/)
+    await expect(undoEdit({ ...merged }, AS)).rejects.toThrow(/Only an edit this session made/)
+    const undone = (await undoEdit(merged, AS)) as DoneEdit
+    await expect(undoEdit(undone, AS)).rejects.toThrow(/Only an edit this session made/)
     expect(sent).toHaveLength(2)
   })
 
@@ -305,5 +311,96 @@ describe('undoMerge', () => {
     const merged = (await mergeOnce()) as DoneEdit
     expect(Object.isFrozen(merged)).toBe(true)
     expect(Object.isFrozen(merged.newRootIds)).toBe(true)
+  })
+})
+
+describe('splitSupervoxels', () => {
+  const OTHER: MergeEnd = { supervoxel: '73747834149376538', positionNm: [9, 25, 45] }
+  const EDGE = { source: NEURON, sink: CANDIDATE }
+  const SPLIT_DONE =
+    '{"operation_id":"4219","new_root_ids":["648518346349539437","648518346349539438"]}'
+
+  it('removes exactly the confirmed edge: mincut off, its two ends, ids as text', async () => {
+    const sent = serve(200, SPLIT_DONE)
+    const outcome = await splitSupervoxels(confirmSplit(SANDBOX, { edge: EDGE }), AS)
+
+    expect(outcome).toEqual({
+      kind: 'done',
+      operationId: '4219',
+      newRootIds: ['648518346349539437', '648518346349539438'],
+    })
+    expect(sent[0]!.url).toBe(
+      'https://cave.fanc-fly.com/segmentation/api/v1/table/mar2021_test/split' +
+        '?int64_as_str=1&mincut=false&priority=True',
+    )
+    expect(sent[0]!.init.method).toBe('POST')
+    expect(sent[0]!.init.redirect).toBe('error')
+    expect(sent[0]!.init.body).toBe(
+      '{"sources":[["73747834149376537",8,24,22.5]],"sinks":[["18446744073709551615",25.8,43,517.5]]}',
+    )
+  })
+
+  it('sends a confirmation once, and never one it did not make', async () => {
+    const sent = serve(500, '{"code":500,"message":"Could not split selected segment groups."}')
+    const split = confirmSplit(SANDBOX, { edge: EDGE })
+    expect((await splitSupervoxels(split, AS)).kind).toBe('unknown')
+    await expect(splitSupervoxels(split, AS)).rejects.toThrow(/already been sent/)
+    const forged = {
+      graphene: SANDBOX,
+      mincut: false,
+      sources: [NEURON],
+      sinks: [CANDIDATE],
+    } as unknown as ConfirmedSplit
+    await expect(splitSupervoxels(forged, AS)).rejects.toThrow(/not confirmed/)
+    expect(sent).toHaveLength(1)
+  })
+
+  it('refuses a split that could not be meant, before any request', () => {
+    expect(() => confirmSplit(SANDBOX, { edge: { source: NEURON, sink: NEURON } })).toThrow(
+      /itself/,
+    )
+    expect(() =>
+      confirmSplit(SANDBOX, {
+        edge: { source: { ...NEURON, supervoxel: '0' }, sink: CANDIDATE },
+      }),
+    ).toThrow(/Not a chunkedgraph id/)
+    const http = parseGrapheneSource('graphene://http://example.org/segmentation/table/t')!
+    expect(() => confirmSplit(http, { edge: EDGE })).toThrow(/https/)
+  })
+
+  it('asks the server’s own min-cut between two seed sets, with the min-cut spelled on', async () => {
+    const sent = serve(200, SPLIT_DONE)
+    const split = confirmSplit(SANDBOX, {
+      mincut: { sources: [NEURON, OTHER], sinks: [CANDIDATE] },
+    })
+    expect((await splitSupervoxels(split, AS)).kind).toBe('done')
+    expect(sent[0]!.url).toBe(
+      'https://cave.fanc-fly.com/segmentation/api/v1/table/mar2021_test/split' +
+        '?int64_as_str=1&mincut=true&priority=True',
+    )
+    expect(sent[0]!.init.body).toBe(
+      '{"sources":[["73747834149376537",8,24,22.5],["73747834149376538",9,25,45]],' +
+        '"sinks":[["18446744073709551615",25.8,43,517.5]]}',
+    )
+  })
+
+  it('refuses a min-cut with an empty side, or a seed on both', () => {
+    expect(() =>
+      confirmSplit(SANDBOX, { mincut: { sources: [], sinks: [CANDIDATE] } }),
+    ).toThrow(/seeds on both sides/)
+    expect(() =>
+      confirmSplit(SANDBOX, { mincut: { sources: [NEURON], sinks: [CANDIDATE, NEURON] } }),
+    ).toThrow(/seeds both sides/)
+  })
+
+  it('undoes a split it made, once', async () => {
+    const sent = serve(200, SPLIT_DONE, '{"operation_id":"4220","new_root_ids":["1"]}')
+    const split = (await splitSupervoxels(
+      confirmSplit(SANDBOX, { edge: EDGE }),
+      AS,
+    )) as DoneEdit
+    expect((await undoEdit(split, AS)).kind).toBe('done')
+    expect(sent[1]!.init.body).toBe('{"operation_id":4219}')
+    await expect(undoEdit(split, AS)).rejects.toThrow(/already been undone/)
   })
 })

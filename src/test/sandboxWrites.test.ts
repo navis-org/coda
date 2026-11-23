@@ -57,7 +57,7 @@ describe('sandboxRefusal', () => {
   it.each([
     ['production Aedes, on the same host', ON('wclee_aedes_brain', 'merge')],
     ['a read of production, posted', ON('wclee_aedes_brain', 'roots_binary')],
-    ['a sandbox route the test never sends', ON(SANDBOX.table, 'split')],
+    ['a sandbox route the test never sends', ON(SANDBOX.table, 'graph/find_path')],
     ['the admin merge', ON(SANDBOX.table, 'merge_admin')],
     ['redo', ON(SANDBOX.table, 'redo')],
     ['a rollback', ON(SANDBOX.table, 'rollback_user')],
@@ -130,12 +130,41 @@ describe('fenceWrites', () => {
 
   it('refuses an undo with no merge before it', () => {
     fenced({ merge: 1, undo: 1 })
-    expect(() => post('undo')).toThrow(/an undo needs a merge before it/)
+    expect(() => post('undo')).toThrow(/an undo needs a merge or a split before it/)
+  })
+
+  it('lets one split through only where it says whether it is a min-cut, then its undo', async () => {
+    const { sent, written } = fenced({ split: 1, undo: 1 })
+    expect(() => post('merge')).toThrow(/0 merge\(s\) sent, of 0 allowed/)
+    expect(() => post('split')).toThrow(/whether it is a min-cut/)
+    expect(() => post('split?mincut=yes')).toThrow(/whether it is a min-cut/)
+    await post('graph/split_preview?int64_as_str=1')
+    await post('split?int64_as_str=1&mincut=false&priority=True')
+    expect(() => post('split?mincut=false')).toThrow(/1 split\(s\) sent, of 1 allowed/)
+    await post('undo')
+    expect(sent).toHaveLength(3)
+    expect(written()).toBe(2)
+  })
+
+  it('lets the level-2 cache read through on the sandbox table only', async () => {
+    const { sent } = fenced({})
+    const l2 = (table: string) =>
+      `${SANDBOX.server}/l2cache/api/v1/table/${table}/attributes?attribute_names=rep_coord_nm`
+    await fetch(l2(SANDBOX.table), { method: 'POST' })
+    expect(() => fetch(l2('wclee_aedes_brain'), { method: 'POST' })).toThrow(FENCE_REFUSED)
+    expect(sent).toHaveLength(1)
   })
 
   /** The finder's fence: reads only. */
   it('refuses every write when none is declared', () => {
     fenced({})
     expect(() => post('merge')).toThrow(/0 merge\(s\) sent, of 0 allowed/)
+    expect(() => post('split?mincut=false')).toThrow(/0 split\(s\) sent, of 0 allowed/)
+  })
+
+  /** The merge probes' fences hold them to merges: a split is a write they never declared. */
+  it('refuses a split under a merge test’s fence', () => {
+    fenced({ merge: 1, undo: 1 })
+    expect(() => post('split?mincut=false')).toThrow(/0 split\(s\) sent, of 0 allowed/)
   })
 })

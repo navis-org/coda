@@ -39,6 +39,7 @@
 import { useSyncExternalStore } from 'react'
 
 import { errorMessage } from '../../core/errors'
+import { otherWriteOut, registerWriteOut } from '../../data/cave/editWaits'
 import { channel } from '../../data/channel'
 import { flushVerdicts } from '../../data/verdictLog'
 import { prepareMerges } from '../../packs/seam/mergeBatch'
@@ -101,6 +102,14 @@ let planning: AbortController | undefined
 let checked: SubmitChecked | undefined
 /** The batch being sent: the store's hold, and whether Stop was pressed. */
 let inFlight: { readonly hold: WriteHold; stop: boolean } | undefined
+// The split gallery's Accept waits while a batch is out, or a merge it stopped waiting for.
+registerWriteOut('merge', () =>
+  inFlight
+    ? 'Merges are being sent from Submit; wait for them to finish.'
+    : stillOut
+      ? STILL_OUT_NOTICE
+      : undefined,
+)
 /** A merge the batch stopped waiting for, still out (the header): its limit's timer. */
 let stillOut: ReturnType<typeof setTimeout> | undefined
 const changed = channel()
@@ -179,6 +188,11 @@ export function openSubmit(request: SubmitRequest): void {
   }
   if (stillOut) {
     store.setNotice(STILL_OUT_NOTICE)
+    return
+  }
+  const other = otherWriteOut('merge')
+  if (other) {
+    store.setNotice(other)
     return
   }
   publish({ request, phase: 'planning' })

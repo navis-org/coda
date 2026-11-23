@@ -156,3 +156,46 @@ export function keepUnseenChanges<K>(
   for (const id of told.keys()) if (!current.has(id) && unseen(id)) out.delete(id)
   return out
 }
+
+/**
+ * The edits with `gone` taken out of the card and `come` put in — after the segmentation itself
+ * changed under them: a split made from the card (`ui/seam/splitAccept.ts`) turns one root into
+ * new ones, and its undo turns them into one again (under a root of its own). The same fold as a
+ * double-click (`mergeShownSegments`): taking out an id that was added un-adds it, putting in one
+ * that was removed un-removes it. `retired` are ids only ever *added* here — a split's own pieces,
+ * taken out by its undo — so they are un-added and never noted as removed: no input will send
+ * them, and a `-id` for one would stay in the workflow for nothing. A gone or retired id is no
+ * longer hidden — it names nothing now — and the new ones are not hidden for it: they are new
+ * segments, shown so the reader can judge them.
+ */
+export function replaceSegments(
+  edits: SelectionEdits,
+  gone: readonly string[],
+  come: readonly string[],
+  retired: readonly string[] = [],
+): SelectionEdits {
+  const leaving = new Set([...gone, ...retired])
+  const folded = mergeShownSegments(
+    edits,
+    gone,
+    come,
+    [...edits.hidden].filter((id) => !leaving.has(id)),
+  )
+  const added = new Set(folded.added)
+  for (const id of retired) if (!come.includes(id)) added.delete(id)
+  return { ...folded, added }
+}
+
+/**
+ * The stored edits after `fold`, as text — or undefined where `fold` changed nothing, so that a
+ * no-op is not written (and is no undo step). Read off the raw param, as the node stores it.
+ */
+export function refoldedEdits(
+  raw: unknown,
+  fold: (edits: SelectionEdits) => SelectionEdits,
+): string[] | undefined {
+  const current = decodeSelectionEdits(raw)
+  const was = encodeSelectionEdits(current)
+  const next = encodeSelectionEdits(fold(current))
+  return next.join('\n') === was.join('\n') ? undefined : next
+}

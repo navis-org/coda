@@ -22,7 +22,7 @@
  */
 
 import { CaveError } from '../src/data/cave/client.ts'
-import { confirmMerge, mergeSupervoxels, undoMerge } from '../src/data/cave/edits.ts'
+import { confirmMerge, mergeSupervoxels, undoEdit } from '../src/data/cave/edits.ts'
 import { isNodeId } from '../src/data/cave/graphLayout.ts'
 import { editPermission } from '../src/data/cave/permissions.ts'
 import { isLatestRoots, l2ChunkCounts, rootsAtInstant } from '../src/data/cave/rootIds.ts'
@@ -178,7 +178,7 @@ async function main() {
   }
 
   // The undo.
-  const undone = await undoMerge(merged, options)
+  const undone = await undoEdit(merged, options)
   console.log(`\nundo: ${JSON.stringify(undone)}`)
   if (undone.kind !== 'done') {
     const root = await together('The undo', undone)

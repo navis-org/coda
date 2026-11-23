@@ -108,11 +108,7 @@ import {
   isFrameViewMessage,
   withUpdate,
 } from '../../data/neuroglancer/frameMessage'
-import {
-  decodeSelectionEdits,
-  encodeSelectionEdits,
-  mergeShownSegments,
-} from '../../data/neuroglancer/selectionEdits'
+import { mergeShownSegments, refoldedEdits } from '../../data/neuroglancer/selectionEdits'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { errorMessage } from '../../core/errors'
 import { describeLegend, resolveColor } from '../../style/encoding'
@@ -120,6 +116,8 @@ import { copyText } from '../export'
 import { useLatest } from '../useLatest'
 import { useGraphStore } from '../../store/graphStore'
 import { setHoveredSegment } from './segmentHover'
+import { useSplitKey } from '../seam/splitKey'
+import type { SplitCard, SplitTarget } from '../seam/splitSession'
 import { RootRegistry } from './persistentRoots'
 import type { RootLease } from './persistentRoots'
 import { forgetScene, recallScene, rememberScene } from './sceneMemo'
@@ -235,6 +233,14 @@ export interface NeuroglancerViewerProps {
   baseName?: string
   onExpand?: () => void
   onError?: (message: string) => void
+  /**
+   * Where this card's neurons live, for the split key (`K`, `ui/seam/splitKey.ts`): the split
+   * gallery for the segment under the pointer. Undefined where the dataset is not a CAVE one, and
+   * the key does nothing over this frame.
+   */
+  splitTarget?: SplitTarget | undefined
+  /** This card, by document and node, where it can write its neurons: a split's new roots go in. */
+  splitCard?: SplitCard | undefined
 }
 
 /**
@@ -431,9 +437,21 @@ export function NeuroglancerViewer({
   baseName,
   onExpand,
   onError,
+  splitTarget,
+  splitCard,
 }: NeuroglancerViewerProps) {
   /** The frame this surface shows, kept or private — see `frames`. */
   const leaseRef = useRef<RootLease<HeldFrame> | null>(null)
+  useSplitKey(
+    () => leaseRef.current?.root.frame,
+    splitTarget,
+    // The layer the dataset's neurons are in: a segment hovered in any other is not this dataset's.
+    () => {
+      const applied = leaseRef.current?.root.applied
+      return applied && datasetId ? selectionLayerName(applied.scene, datasetId) : undefined
+    },
+    splitCard,
+  )
   /**
    * Bumped to throw the frame away and build a fresh one.
    *
@@ -785,14 +803,12 @@ export function NeuroglancerViewer({
     if (!sent || !got) return false
     // Where hidden neurons stay selected, the list is the selection and the hidden ones are noted;
     // otherwise only what is drawn counts, and hiding a neuron removes it.
-    const current = decodeSelectionEdits(selectionEdits)
-    const was = encodeSelectionEdits(current)
-    const next = encodeSelectionEdits(
+    const next = refoldedEdits(selectionEdits, (current) =>
       keepHidden
         ? mergeShownSegments(current, sent.listed, got.listed, got.hidden)
         : mergeShownSegments(current, sent.shown, got.shown),
     )
-    if (next.join('\n') !== was.join('\n')) onSelectionEdits(next)
+    if (next) onSelectionEdits(next)
     return true
   }
   /** Save where the frame is looking, with the dataset it is looking at (`encodeSavedView`). */
@@ -869,7 +885,12 @@ export function NeuroglancerViewer({
       if (isFrameHoverMessage(event.data)) {
         // Where the pointer is, not what the scene holds: no update to match.
         hoveredFrom = kept.frame
-        setHoveredSegment(kept.frame, event.data.segment ?? undefined, event.data.positionNm)
+        setHoveredSegment(
+          kept.frame,
+          event.data.segment ?? undefined,
+          event.data.positionNm,
+          event.data.layer,
+        )
         return
       }
       if (isFrameKeyMessage(event.data)) {

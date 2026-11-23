@@ -15,6 +15,7 @@ import {
   encodeSelectionEdits,
   keepUnseenChanges,
   mergeShownSegments,
+  replaceSegments,
 } from './selectionEdits'
 
 const edits = (added: string[], removed: string[] = [], hidden: string[] = []) => ({
@@ -199,5 +200,19 @@ describe('an in-place update set while the user is still clicking', () => {
       ]),
     )
     expect([...out]).toEqual([['A', true]])
+  })
+})
+
+describe('a root replaced by a split from the card', () => {
+  it('takes the old root out, puts the new ones in, and an undo puts its root in their place', () => {
+    const before = edits(['7'], [], ['1'])
+    // Root 1 came in on the wire (hidden here); the split made 2 and 3.
+    const split = replaceSegments(before, ['1'], ['2', '3'])
+    expect(split).toEqual(edits(['7', '2', '3'], ['1']))
+    expect(applySelectionEdits(['1', '5'], split)).toEqual(['5', '2', '3', '7'])
+    // The undo made root 4 of 2 and 3.
+    expect(replaceSegments(split, ['2', '3'], ['4'])).toEqual(edits(['7', '4'], ['1']))
+    // A root that had been added and is split: un-added, not removed.
+    expect(replaceSegments(edits(['1']), ['1'], ['2'])).toEqual(edits(['2']))
   })
 })

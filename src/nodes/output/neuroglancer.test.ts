@@ -6,6 +6,7 @@
  * colours that disagree with the 3D view, a stale link surviving a restyle.
  */
 
+import { NoNeuronListError } from '../../data/source'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
@@ -726,13 +727,13 @@ describe('neurons changed inside the viewer', () => {
     )
 
   /** A source that knows some neurons by id, and counts how often it was asked. */
-  function lookupSource(known: Record<string, string>, fail = false) {
+  function lookupSource(known: Record<string, string>, fail: boolean | Error = false) {
     const asked: string[][] = []
     const source = {
       ...stubSource(),
       findNeurons: (req: { neuronIds?: readonly string[] }) => {
         asked.push([...(req.neuronIds ?? [])])
-        if (fail) return Promise.reject(new Error('server said no'))
+        if (fail) return Promise.reject(fail === true ? new Error('server said no.') : fail)
         const ids = (req.neuronIds ?? []).filter((id) => id in known)
         return Promise.resolve(
           tableFromRows(
@@ -797,6 +798,14 @@ describe('neurons changed inside the viewer', () => {
     expect(asked).toEqual([['921']])
   })
 
+  it('says nothing where the dataset lists no neurons: a bare id is all it has', async () => {
+    const { source } = lookupSource({}, new NoNeuronListError('lists no neurons.'))
+    const said: string[] = []
+    const { selected } = await run(input(['140']), ['+941'], source, said)
+    expect(selected.data['neuronId']).toEqual(['140', '941'])
+    expect(said).toEqual([])
+  })
+
   it('keeps the link and an id-only row when the lookup fails, and asks again when invalidated', async () => {
     const { source, asked } = lookupSource({}, true)
     const said: string[] = []
@@ -804,7 +813,7 @@ describe('neurons changed inside the viewer', () => {
     expect(layersOf(scene)[1]!['segments']).toEqual(['130', '931'])
     expect(selected.data['neuronId']).toEqual(['130', '931'])
     expect(said.join(' ')).toMatch(
-      /Could not look up the 1 neuron .*server said no.*Invalidate Results/,
+      /Could not look up the 1 neuron .*server said no\. Use Invalidate Results/,
     )
     // Replayed rather than asked again: this node is cheap, and an upstream keystroke re-runs it.
     const again: string[] = []

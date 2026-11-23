@@ -37,6 +37,17 @@ export interface EditPermission {
   readonly termsPending: boolean
 }
 
+/**
+ * Why `permission` lets nothing be written, as the merge and split dialogs say it — or undefined
+ * where it lets the reader edit.
+ */
+export function editRefusal(permission: EditPermission): string | undefined {
+  if (permission.mayEdit) return undefined
+  return permission.termsPending
+    ? `You may edit ${permission.dataset} once you have accepted its terms of service.`
+    : `Your CAVE account may not edit ${permission.dataset}.`
+}
+
 interface UserCache {
   readonly permissions_v2?: Record<string, readonly string[]>
   readonly permissions_v2_ignore_tos?: Record<string, readonly string[]>

@@ -255,7 +255,7 @@ anchor and 0.9 s to open. None of the five neurons had been edited since the 202
 The only module in Coda allowed to write to a chunkedgraph.
 
 - `confirmMerge(graphene, neuron, candidate)` → `ConfirmedMerge`; `mergeSupervoxels(merge,
-  {deployment, token?})` → `EditOutcome`; `undoMerge(done, …)` for the probe — it takes the `done`
+  {deployment, token?})` → `EditOutcome`; `undoEdit(done, …)` for the probe — it takes the `done`
   outcome a merge returned, never an operation id, so it undoes only this session's own merge,
   on that merge's table, once.
 - **The request** is Spelunker's: `merge?int64_as_str=1&priority=True`, body
@@ -759,7 +759,7 @@ an old one means.
 | # | Found | Now |
 | --- | --- | --- |
 | 1 | A verdict was keyed `${end_uid}:${candidate}`, and `end_uid` is a counter of one run: after a re-run an old accept attached to whichever tip took the number, **on another neuron** as likely as not, and Submit planned it ticked. `candidateLists` joined tips to lists on `end_uid` alone, so two runs stacked shared lists | **Keyed `${neuron}/${candidate}`** (user): one verdict per pair, on every row of the piece, kept across a re-run while neither root is edited. An old key is kept in the param and never read (user) — `/` so none can parse as new. Lists join on (neuron, `end_uid`); so does `Tips`' folded verdict, and the exporters join on (neuron, candidate) |
-| 2 | The record named no chunkedgraph: wired from the sandbox to production, a sandbox merge moved the neuron's root and took its pieces there too (the tables share ids) | Each entry names its deployment and datastack; `mergedSoFar` reads only the scope it is given — the wired Dataset (`recordScopeOf`), the plan's own. An entry naming none is kept and listed, and read for none |
+| 2 | The record named no chunkedgraph: wired from the sandbox to production, a sandbox merge moved the neuron's root and took its pieces there too (the tables share ids) | Each entry names its deployment and datastack; `mergedSoFar` reads only the scope it is given — the wired Dataset (`caveScopeOf`, `nodes/lib/caveParams.ts`), the plan's own. An entry naming none is kept and listed, and read for none |
 | 3 | Nothing near the writer checked an end was a supervoxel; the server maps a root to itself, retired or not, so the per-merge check would pass one | The plan carries the anchor volume's `layout`; `prepareMerges` refuses any end not at layer 1, and a plan with merges but no layout |
 | 4 | The batch adopted a lost reply's shared new root as `merged` without the plan's second test | Always `unknown`; the plan's `settle` is the one place it is decided |
 | 5 | A merge that timed out could be planned and sent again while its request was still out (the server's same-object refusal was the only guard) | The session holds every Submit (`waiting`) until it answers, for up to `STILL_OUT_MS` (10 min) |
@@ -771,7 +771,7 @@ an old one means.
 
 **Review:** /simplify (accepted pieces found through one by-neuron index again, 0.3 ms against
 2.7 ms at 3,000 tips; the wait for a merge still out holding the card's two ids, never the queue;
-one notice from `STILL_OUT_MS`; Submit's scope from `recordScopeOf`; `rootCurrency` skipping a
+one notice from `STILL_OUT_MS`; Submit's scope from `caveScopeOf`; `rootCurrency` skipping a
 cell that is no id), then /code-review medium. It found: a late answer landing while the batch
 still held the card was refused a second hold and lost — it is now waited for once the batch lets
 go; `stillOut` is handed over before anything that can throw; a late refusal now settles the

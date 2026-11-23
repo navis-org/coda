@@ -30,10 +30,11 @@
  */
 
 import { CaveError } from '../src/data/cave/client.ts'
-import { mergeSupervoxels, undoMerge } from '../src/data/cave/edits.ts'
+import { mergeSupervoxels, undoEdit } from '../src/data/cave/edits.ts'
 import { isNodeId } from '../src/data/cave/graphLayout.ts'
 import { isLatestRoots, l2ChunkCounts, supervoxelRoots } from '../src/data/cave/rootIds.ts'
-import { READ_TIMEOUT_MS, prepareMerges } from '../src/packs/seam/mergeBatch.ts'
+import { READ_TIMEOUT_MS } from '../src/data/cave/editWaits.ts'
+import { prepareMerges } from '../src/packs/seam/mergeBatch.ts'
 import { planMerges } from '../src/packs/seam/mergePlan.ts'
 import { verdictKey } from '../src/packs/seam/pieces.ts'
 import { FENCE_REFUSED, SANDBOX, fenceWrites } from '../src/test/sandboxWrites.ts'
@@ -245,7 +246,7 @@ async function main() {
   const unknown = standing.some((one) => one.operation === 'not known')
   if (unknown) report.check(false, 'every merge has a known outcome, so the undos can be sent')
   for (const merged of unknown ? [] : [...done].reverse()) {
-    const undone = await undoMerge(merged, options)
+    const undone = await undoEdit(merged, options)
     console.log(`undo of operation ${merged.operationId}: ${JSON.stringify(undone)}`)
     const at = standing.findIndex((one) => one.operation === merged.operationId)
     if (undone.kind !== 'done') {

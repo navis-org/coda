@@ -372,8 +372,9 @@ rule belongs to one area, its record is in that area's doc.
 ### Backends and data — [docs/backends.md](docs/backends.md)
 
 - **Coda writes to a chunkedgraph in one module, `src/data/cave/edits.ts`, reached only through
-  `mergeBatch.ts` ← `mergeSession.ts` ← the review card** (three levels in `importGraph.test.ts`).
-  A merge is a spent-once confirmation of supervoxels, never retried; an unknown outcome is settled
+  `mergeBatch.ts` ← `mergeSession.ts` ← the review card, or `splitWrite.ts` ← `splitAccept.ts` ←
+  the split gallery** (one chain each, `CHAINS` in `importGraph.test.ts`). An edit is a spent-once
+  confirmation of supervoxels, never retried; an unknown outcome is settled
   from roots read at the server's now (`'server'`), never by resending. Tests never write
   (`writeGuard.ts`); a live write is `fanc_sandbox` only and asked of the user every time. Code that
   writes gets /simplify then /code-review. See [docs/seam-merge-plan.md](docs/seam-merge-plan.md)

@@ -28,7 +28,7 @@
  * counter — and, at these widths, some of the chunk too (invariant 8).
  */
 
-import { isSegmentId } from '../../core/ids'
+import { idText, isSegmentId } from '../../core/ids'
 import type { Triple } from '../precomputed/volume'
 
 /**
@@ -39,6 +39,16 @@ import type { Triple } from '../precomputed/volume'
  */
 export function isNodeId(text: string): boolean {
   return text !== '0' && isSegmentId(text)
+}
+
+/**
+ * One id from a chunkedgraph reply: text under `int64_as_str`, a safe integer if a server ignores
+ * it (`parseCaveJson` quotes any wider one), undefined for anything else or anything `valid`
+ * refuses.
+ */
+export function replyId(value: unknown, valid: (text: string) => boolean): string | undefined {
+  const text = typeof value === 'string' || typeof value === 'number' ? idText(value) : null
+  return text !== null && valid(text) ? text : undefined
 }
 
 /** The id layout of one chunkedgraph table. */
@@ -56,6 +66,13 @@ export interface GraphLayout {
    * server divides merge positions by exactly this resolution.
    */
   readonly baseResolutionNm: Triple
+  /**
+   * A level-2 chunk's extent in base voxels (`graph.chunk_size`), and where chunk 0 starts (the
+   * base scale's `voxel_offset`) — what turns a chunk index into a `bounds` box. Undefined where
+   * the info omits either.
+   */
+  readonly chunkSize?: Triple
+  readonly voxelOffset?: Triple
 }
 
 /** The `graph` block of a chunkedgraph's segmentation `info`, as far as this reads it. */
@@ -63,6 +80,7 @@ interface RawGraph {
   n_bits_for_layer_id?: unknown
   spatial_bit_masks?: unknown
   cv_mip?: unknown
+  chunk_size?: unknown
 }
 
 /**
@@ -95,7 +113,55 @@ export function parseGraphLayout(info: unknown): GraphLayout | undefined {
     ? (scales[baseMip] as { resolution?: unknown } | undefined)?.resolution
     : undefined
   if (!isResolution(resolution)) return undefined
-  return { layerBits, bitsPerAxis, baseMip, baseResolutionNm: resolution }
+  // A chunk extent is three positive numbers, which is `isResolution`'s test; an offset may be 0.
+  const chunkSize = graph.chunk_size
+  const voxelOffset = Array.isArray(scales)
+    ? (scales[baseMip] as { voxel_offset?: unknown } | undefined)?.voxel_offset
+    : undefined
+  const isOffset = (v: unknown): v is Triple =>
+    Array.isArray(v) && v.length === 3 && v.every((x) => Number.isFinite(x))
+  return {
+    layerBits,
+    bitsPerAxis,
+    baseMip,
+    baseResolutionNm: resolution,
+    ...(isResolution(chunkSize) ? { chunkSize } : {}),
+    ...(isOffset(voxelOffset) ? { voxelOffset } : {}),
+  }
+}
+
+/** A layout that can be boxed: one whose `info` publishes the chunk grid. */
+export type BoxableLayout = GraphLayout & {
+  readonly chunkSize: Triple
+  readonly voxelOffset: Triple
+}
+
+export function isBoxable(layout: GraphLayout | undefined): layout is BoxableLayout {
+  return Boolean(layout?.chunkSize && layout.voxelOffset)
+}
+
+/** The grid cell holding a point, nm, along one axis — `cellBox`'s inverse for a position. */
+export function cellAt(layout: BoxableLayout, nm: number, axis: number): number {
+  return Math.floor(
+    (nm / layout.baseResolutionNm[axis]! - layout.voxelOffset[axis]!) / layout.chunkSize[axis]!,
+  )
+}
+
+/**
+ * The box in base voxels covering chunk cells `lo`…`hi` (inclusive) — `chunkOf`'s inverse, for a
+ * `subgraph` read. The high corner is the last voxel of the last cell: the server floors the low
+ * corner to a chunk and ceils the high one (`normalize_bounding_box`), so this is the cells exactly.
+ */
+export function cellBox(
+  layout: BoxableLayout,
+  lo: readonly number[],
+  hi: readonly number[],
+): readonly [Triple, Triple] {
+  const corner = (cell: readonly number[], end: 0 | 1): Triple =>
+    [0, 1, 2].map(
+      (a) => layout.voxelOffset[a]! + (cell[a]! + end) * layout.chunkSize[a]! - end,
+    ) as unknown as Triple
+  return [corner(lo, 0), corner(hi, 1)]
 }
 
 /** The layer an id names. */

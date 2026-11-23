@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
+import { caveScopeOf } from '../../nodes/lib/caveParams'
 import type { MergeRecord, MergeRecordEntry, RecordScope } from './mergeRecord'
 import {
   decodeRecord,
@@ -17,7 +18,6 @@ import {
   mergedSoFar as readFor,
   mergesSchema,
   mergesTable,
-  recordScopeOf,
   settledEntry,
   shortenedRecord,
 } from './mergeRecord'
@@ -178,14 +178,12 @@ describe('mergedSoFar', () => {
   })
 
   it('takes its scope from a wired CAVE Dataset, and none from anything else', () => {
-    expect(recordScopeOf({ sourceId: 'cave', datasetId: 'fanc_sandbox:1' })).toEqual({
+    expect(caveScopeOf({ sourceId: 'cave', datasetId: 'fanc_sandbox:1' })).toEqual({
       deployment: DEFAULT_CAVE_SERVER,
       datastack: 'fanc_sandbox',
     })
-    expect(
-      recordScopeOf({ sourceId: 'neuprint:x', datasetId: 'fanc_sandbox:1' }),
-    ).toBeUndefined()
-    expect(recordScopeOf({ sourceId: 'cave', datasetId: undefined })).toBeUndefined()
+    expect(caveScopeOf({ sourceId: 'neuprint:x', datasetId: 'fanc_sandbox:1' })).toBeUndefined()
+    expect(caveScopeOf({ sourceId: 'cave', datasetId: undefined })).toBeUndefined()
   })
 
   it('follows the neuron through its merges, and counts only what is in it', () => {

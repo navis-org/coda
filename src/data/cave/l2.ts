@@ -22,14 +22,15 @@
 
 import type { NeuronId } from '../../core/ids'
 import type { SkeletonGeometry } from '../../core/values'
-import { mapWithConcurrency } from '../concurrency'
+import { inFlight, mapWithConcurrency } from '../concurrency'
 import type { TreePoint } from '../skeletonTree'
 import { spanningForest } from '../skeletonTree'
-import { caveGet, caveGetOr404, cavePost, sharedRequestOptions } from './client'
+import { CaveError, caveGet, caveGetOr404, cavePost, sharedRequestOptions } from './client'
 import type { GrapheneSource } from './graphene'
 import { tableUrl } from './graphene'
 import type { CaveRequestOptions } from './client'
 import { memoPromise } from '../memoPromise'
+import { levelTwoChunks } from './rootIds'
 
 /**
  * How many neurons are built at once.
@@ -164,8 +165,8 @@ export async function readL2Skeletons(
     .filter((s): s is SkeletonGeometry => s !== undefined)
 }
 
-/** One neuron's level-2 chunk graph, as deduplicated undirected edges. */
-async function readChunkGraph(
+/** One neuron's level-2 chunk graph, as deduplicated undirected edges (no self-edges). */
+export async function readChunkGraph(
   source: GrapheneSource,
   neuronId: NeuronId,
   options: CaveRequestOptions,
@@ -184,11 +185,56 @@ async function readChunkGraph(
     .map((edge) => [edge[0], edge[1]])
 }
 
+/**
+ * A neuron's level-2 chunks and the edges between them.
+ *
+ * The chunks are not just the edges' ends: a neuron of one chunk has no edge (`readChunkGraph`
+ * drops self-edges), so its chunk is asked of the root itself (`leaves_many`, one request) —
+ * otherwise it reads as a neuron with no chunks at all.
+ */
+export async function readLevelTwoGraph(
+  source: GrapheneSource,
+  root: string,
+  options: CaveRequestOptions,
+): Promise<{ chunks: string[]; edges: Array<[string, string]> }> {
+  const edges = await readChunkGraph(source, root, options)
+  if (edges.length) return { chunks: [...new Set(edges.flat())], edges }
+  // `leaves_many` leaves out an id it does not know, answering 200: that is an unknown root, said
+  // as one, not a neuron with no chunks (which would blame the caller's points instead).
+  const chunks = (await levelTwoChunks(source, [root], options)).get(root)
+  if (!chunks?.length) {
+    throw new CaveError(`The chunkedgraph knows no neuron ${root}: it lists no chunks for it.`)
+  }
+  return { chunks, edges }
+}
+
+/**
+ * Each level-2 chunk's representative coordinate in nm, for chunks the cache holds; a chunk it
+ * does not hold is absent from the map rather than placed at its chunk corner (`skeletonFrom`'s
+ * reason). For pointing at a place — a cut's ends (`splitSitesRun.ts`) — not for a skeleton.
+ */
+export async function readL2Positions(
+  source: GrapheneSource,
+  ids: readonly string[],
+  options: CaveRequestOptions,
+): Promise<Map<string, readonly [number, number, number]>> {
+  // Strict: a batch the server failed must not read as chunks it has no position for (CLAUDE.md,
+  // "a failed lookup has not answered none"); a skeleton build tolerates one, this does not.
+  const attributes = await readAttributes(source, [...new Set(ids)], options, true)
+  const positions = new Map<string, readonly [number, number, number]>()
+  for (const [id, entry] of Object.entries(attributes)) {
+    const at = entry?.rep_coord_nm
+    if (at && at.length >= 3) positions.set(id, [at[0], at[1], at[2]])
+  }
+  return positions
+}
+
 /** Every chunk's representative coordinate and radius, in as few requests as it takes. */
 async function readAttributes(
   source: GrapheneSource,
   ids: readonly string[],
   options: CaveRequestOptions,
+  strict = false,
 ): Promise<Record<string, L2Entry>> {
   const batches: string[][] = []
   for (let at = 0; at < ids.length; at += ATTRIBUTE_BATCH) {
@@ -205,9 +251,17 @@ async function readAttributes(
   const url =
     `${source.server}/l2cache/api/v1/table/${source.table}/attributes` +
     `?attribute_names=${encodeURIComponent(ATTRIBUTES.join(','))}`
-  const answered = await mapWithConcurrency(batches, 4, (batch) =>
-    cavePost<Record<string, L2Entry>>(url, { l2_ids: batch }, options),
-  )
+  const read = (batch: string[]) =>
+    cavePost<Record<string, L2Entry>>(url, { l2_ids: batch }, options)
+  if (strict) {
+    // Pieces of one answer: a failed batch fails the read, never reads as chunks the cache lacks.
+    const answered: Array<Record<string, L2Entry>> = []
+    await inFlight(batches, 4, async (batch) => {
+      answered.push(await read(batch))
+    })
+    return Object.assign({}, ...answered) as Record<string, L2Entry>
+  }
+  const answered = await mapWithConcurrency(batches, 4, read)
   return Object.assign({}, ...answered.filter(Boolean)) as Record<string, L2Entry>
 }
 

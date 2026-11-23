@@ -30,6 +30,7 @@ import {
   isAltDigit,
   isFrameKeysMessage,
   isPickKey,
+  isSplitKey,
   reviewKeyOf,
   FRAME_STATE_MESSAGE,
   FRAME_VIEW_MESSAGE,
@@ -132,15 +133,21 @@ function reportHover(ng: typeof viewer): void {
   type Hovered = { hasSelectedSegment?: boolean; selectedSegment?: bigint }
   let posted = ''
   let timer: ReturnType<typeof setTimeout> | undefined
-  const post = (segment: string | null) => {
+  const post = (hit: { segment: string; layer: string } | null) => {
+    const segment = hit?.segment ?? null
     const positionNm = segment === null ? undefined : pointerNm(ng)
-    const text = `${segment}@${positionNm?.join(',')}`
+    const text = `${segment}@${positionNm?.join(',')}@${hit?.layer}`
     if (text === posted) return
     posted = text
-    const message: FrameHoverMessage = { type: FRAME_HOVER_MESSAGE, segment, positionNm }
+    const message: FrameHoverMessage = {
+      type: FRAME_HOVER_MESSAGE,
+      segment,
+      positionNm,
+      ...(hit ? { layer: hit.layer } : {}),
+    }
     window.parent.postMessage(message, window.location.origin)
   }
-  const read = (): string | null => {
+  const read = (): { segment: string; layer: string } | null => {
     for (const managed of ng.layerManager.managedLayers) {
       if (!managed.visible) continue
       const layer = managed.layer as {
@@ -148,7 +155,7 @@ function reportHover(ng: typeof viewer): void {
       } | null
       const hovered = layer?.displayState?.segmentSelectionState
       const id = hovered?.hasSelectedSegment ? hovered.selectedSegment : undefined
-      if (id !== undefined && id !== 0n) return id.toString()
+      if (id !== undefined && id !== 0n) return { segment: id.toString(), layer: managed.name }
     }
     return null
   }
@@ -425,7 +432,8 @@ function sameColors(a: Record<string, string>, b: Record<string, string>): boole
  * the scene — and neuroglancer toggled a layer's picking instead. Capture phase, so it is taken
  * before neuroglancer's own bindings see it; a field in the frame keeps it, for the same reason
  * Coda's own fields do (⌥digit is how a Mac types `¡` and `™`). The hand-pick key (`isPickKey`)
- * goes back the same way, for the review card (`segmentHover.ts`).
+ * goes back the same way, for the review card (`segmentHover.ts`), and the split key (`isSplitKey`)
+ * for the split gallery (`ui/seam/splitSession.ts`).
  */
 window.addEventListener(
   'keydown',
@@ -436,6 +444,7 @@ window.addEventListener(
     const claimed =
       (claimAltDigits && isAltDigit(event)) ||
       isPickKey(event) ||
+      isSplitKey(event) ||
       reviewKeyOf(event) !== undefined
     if (!claimed) return
     event.preventDefault()

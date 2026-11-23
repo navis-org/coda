@@ -2146,6 +2146,14 @@ export async function fetchMeshesFor(
 }
 
 /**
+ * A dataset that lists no neurons of its own — no table to enumerate them from, and nothing wired
+ * to stand in for one. A fact about the dataset, not a failed request: a caller that only wanted
+ * rows for ids it already holds (the Neuroglancer card's `Selected`) can keep the bare ids and say
+ * nothing, where a retry would only fail the same way.
+ */
+export class NoNeuronListError extends Error {}
+
+/**
  * Whether this source can hand back a neuron mesh for this dataset.
  *
  * `canFetchSynapseLinks`' sibling, and here for its reason: the method being optional and the

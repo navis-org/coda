@@ -25,6 +25,17 @@ export interface MergeEnd {
   readonly positionNm: Triple
 }
 
+/** One end as the server reads it, in a merge and a split alike: `[sv, x, y, z]`, the id as text. */
+export const wireEnd = (end: MergeEnd) => [end.supervoxel, ...end.positionNm]
+
+/**
+ * A split's body — `{"sources": [[sv, x, y, z], …], "sinks": […]}`, as `handle_split` and
+ * `handle_split_preview` both read it — so the preview is asked exactly what would be sent.
+ */
+export function splitBody(sources: readonly MergeEnd[], sinks: readonly MergeEnd[]) {
+  return { sources: sources.map(wireEnd), sinks: sinks.map(wireEnd) }
+}
+
 /** Three finite numbers: a position a merge can be sent with. */
 export function isPositionNm(value: unknown): value is Triple {
   return (

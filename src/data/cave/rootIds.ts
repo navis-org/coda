@@ -483,6 +483,7 @@ export async function rootsAtInstant(
   at: Instant,
   supervoxels: BigUint64Array,
   options: CaveRequestOptions,
+  stopLayer?: number,
 ): Promise<BigUint64Array> {
   /*
    * **Label 0 is answered here, as root 0, and never sent.** It is "no object" in every
@@ -518,7 +519,7 @@ export async function rootsAtInstant(
      * every box (1.5 ms per 14,000 ids). A view is fine: `cavePostBinary` sends its own bytes.
      */
     const batch = asked.subarray(i, i + size)
-    const answer = await rootsBinary(graphene, batch, at, options)
+    const answer = await rootsBinary(graphene, batch, at, options, stopLayer)
     /*
      * One root per id, or it is not an answer. Filled with `0n`, a short reply would read as
      * "no object" for every id past its end — remembered by a reader's memo, and reported by the
@@ -761,8 +762,9 @@ async function leavesMany(
   graphene: GrapheneSource,
   roots: readonly string[],
   options: CaveRequestOptions,
+  stopLayer: number = VOTE_LAYER,
 ): Promise<Map<string, string[]>> {
-  const url = tableUrl(graphene, `node/leaves_many?stop_layer=${VOTE_LAYER}`)
+  const url = tableUrl(graphene, `node/leaves_many?stop_layer=${stopLayer}`)
   const answer = await chunkedgraphRead(graphene, options.signal, () =>
     cavePostRawOnce<Record<string, (string | number)[]>>(
       url,
@@ -820,8 +822,13 @@ async function getRoots(
  */
 export type Instant = number | 'server'
 
-function timestampQuery(at: Instant): string {
-  return at === 'server' ? '' : `?timestamp=${at / 1000}`
+/** The query string for a read at `at`, optionally stopping at a layer below the root. */
+function timestampQuery(at: Instant, stopLayer?: number): string {
+  const params = [
+    ...(stopLayer === undefined ? [] : [`stop_layer=${stopLayer}`]),
+    ...(at === 'server' ? [] : [`timestamp=${at / 1000}`]),
+  ]
+  return params.length ? `?${params.join('&')}` : ''
 }
 
 /**
@@ -877,9 +884,14 @@ function rootsBinary(
   ids: BigUint64Array,
   at: Instant,
   options: CaveRequestOptions,
+  stopLayer?: number,
 ): Promise<BigUint64Array> {
   return chunkedgraphRead(graphene, options.signal, () =>
-    cavePostBinary(tableUrl(graphene, `roots_binary${timestampQuery(at)}`), ids, options),
+    cavePostBinary(
+      tableUrl(graphene, `roots_binary${timestampQuery(at, stopLayer)}`),
+      ids,
+      options,
+    ),
   )
 }
 
@@ -936,6 +948,46 @@ export async function supervoxelRoots(
   // `BigInt` from decimal text is exact where `Number` is not (invariant 8).
   const ids = BigUint64Array.from(supervoxels, (id) => BigInt(id))
   return [...(await rootsAtInstant(graphene, at, ids, options))].map(String)
+}
+
+/**
+ * Each supervoxel's level-2 parent at `at`, as text: `roots_binary` with `stop_layer=2`
+ * (pychunkedgraph's `handle_roots` reads it as a query parameter), batched as `rootsAtInstant`
+ * batches. `0` where the server knows no parent. A past root's chunks are its parents at the root's own time: a later
+ * edit in the chunk renumbers them.
+ */
+export async function levelTwoParents(
+  graphene: GrapheneSource,
+  supervoxels: readonly string[],
+  at: Instant,
+  options: CaveRequestOptions,
+): Promise<string[]> {
+  if (supervoxels.length === 0) return []
+  // `rootsAtInstant`'s pieces and streams, stopping at layer 2: a point's box or a scan's cut ends
+  // can be tens of thousands of ids, past what one request should carry.
+  const ids = BigUint64Array.from(supervoxels, (id) => BigInt(id))
+  return [...(await rootsAtInstant(graphene, at, ids, options, 2))].map(String)
+}
+
+/** Each root's level-2 chunks, in one `leaves_many` request (`stop_layer=2`). */
+export function levelTwoChunks(
+  graphene: GrapheneSource,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+): Promise<Map<string, string[]>> {
+  return roots.length ? leavesMany(graphene, roots, options, 2) : Promise.resolve(new Map())
+}
+
+/**
+ * The supervoxels of each level-2 chunk, in one `leaves_many` request (`stop_layer=1`) — a
+ * split's seeds (`splitSitesRun.ts`). Only chunks with supervoxels listed are in the answer.
+ */
+export function chunkSupervoxels(
+  graphene: GrapheneSource,
+  chunks: readonly string[],
+  options: CaveRequestOptions,
+): Promise<Map<string, string[]>> {
+  return chunks.length ? leavesMany(graphene, chunks, options, 1) : Promise.resolve(new Map())
 }
 
 /**

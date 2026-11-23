@@ -41,7 +41,6 @@
  */
 
 import { ID_COLUMN_NAME } from '../../core/ids'
-import { caveServerOfSource } from '../../data/cave/deployments'
 import { column, tableSchema } from '../../core/types'
 import type { TableSchema } from '../../core/types'
 import type { CellValue, TableValue } from '../../core/values'
@@ -49,24 +48,10 @@ import { makeTable } from '../../core/values'
 import { isNodeId } from '../../data/cave/graphLayout'
 import type { MergeEnd } from '../../data/cave/merge'
 import { isMergeEnd } from '../../data/cave/merge'
-import { splitDatasetId } from '../../data/cave/spec'
-import type { DatasetIdentity } from '../../nodes/lib/caveParams'
+import type { CaveScope } from '../../nodes/lib/caveParams'
 
-/** Which chunkedgraph an entry was made on, and the record is read for. */
-export interface RecordScope {
-  readonly deployment: string
-  readonly datastack: string
-}
-
-/**
- * The scope of a wired Dataset: a CAVE one's deployment and datastack, or undefined for anything
- * else — never `caveTarget`'s fallback to the default deployment, which takes any source.
- */
-export function recordScopeOf(dataset: DatasetIdentity | undefined): RecordScope | undefined {
-  const deployment = caveServerOfSource(dataset?.sourceId)
-  const parsed = dataset?.datasetId ? splitDatasetId(dataset.datasetId) : undefined
-  return deployment && parsed ? { deployment, datastack: parsed.datastack } : undefined
-}
+/** Which chunkedgraph an entry was made on, and the record is read for (`caveScopeOf`). */
+export type RecordScope = CaveScope
 
 const inScope = (entry: RecordEntry, scope: RecordScope | undefined): boolean =>
   scope !== undefined &&

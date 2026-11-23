@@ -764,6 +764,39 @@ Read off live responses and cross-checked against `caveclient` 8.0.1's own endpo
   listing is one materialization's, so a table made since then is missing from it while the live
   read can see it. The card warns from the same listing once it has landed (`unlistedTableIssues`).
 
+### The supervoxel graph and the split preview (`subgraph.ts`, measured 2026-11-22)
+
+What a split weighs, and the two read-only routes that reach it. Read off pychunkedgraph
+(`cutting.py`, `app/segmentation/common.py`) and checked live on FANC (2.20), MICrONS (2.21) and
+FlyWire production (1.27). Used by `packs/seam/splitSites.ts`; `pnpm probe:split-sites` runs it.
+
+- **`GET node/{root}/subgraph?bounds=` is the graph a split cuts** — the preview and this route
+  both call `cg.get_subgraph`. View permission. On 2.x it answers `nodes`, `affinities`, `areas`;
+  **1.27 (FlyWire) answers `atomic_edges` only, and no route there exposes an affinity.** Several
+  MB per box (FANC, 58 µm between the points: 4.2 MB, 43k edges, 8–9 s), pretty-printed.
+- **The affinity is a sum over the contact face.** affinity ÷ area is a mean: FANC 0.09–0.90;
+  MICrONS 1.00 on 95% of edges, so there it is area under another name.
+- **A bare `Infinity`** joins two pieces of one supervoxel cut by a chunk border. Not JSON —
+  the shared parser (`json.ts`'s scan, which already skips string literals) reads it as `Infinity`, and a bare `NaN` as `null`. Ids are **not** asked as text: `int64_as_str` makes the server answer slower (user, 2026-11-23), and the shared parser already quotes any integer too wide for a double, so a supervoxel id arrives as text and a smaller one as a safe integer (`replyId`). Checked on `fanc_sandbox` the same day: the same box, the same cuts, edge for edge.
+- **A proofreader's merge is a stored edge of affinity float32-tiny (1.18e-38) and area 0** — only
+  where the merged pieces had no stored edge between them in the merge's box; otherwise the merge
+  reuses the real edge. A min-cut takes it first: on a FANC neuron with 8 merges in its history,
+  both edges of the preview's cut were proofreader merges.
+- **`bounds` with a negative corner is a 500** (the server splits on `-`); `boundsParam` clamps.
+  Bounds are absolute base voxels, snapped outward to whole chunks (`normalize_bounding_box`).
+- **Only edges with both ends inside the box come back** (`only_internal_edges`, default on). Boxes
+  that tile a region therefore drop every edge crossing a tile border: tiled along the level-2 path
+  between two points, all nine FANC test splits read as "not joined". `splitSitesRun.ts` reads one
+  box per run of up to 3 chunks per axis along the path, each run starting on the chunk the last one ended on, so each step is inside some box.
+- **CAVE's own box misses the join often.** Points 15 µm either side of nine past FANC splits:
+  four were not connected inside the preview's padded box; five times the padding took 19 s and
+  still missed one. The level-2 path reads 0.5–2.5 s for the same cases.
+- **`POST graph/split_preview` writes nothing and needs only view permission**, but a public
+  (virtual) table refuses it — `401 No edits allowed on virtual tables` (`remap_public(edit=True)`).
+  It cuts only within the points' box padded by (240, 240, 24) base voxels. FANC 9–19 s, FlyWire
+  1.7 s. `splitSites` with proofreader merges distrusted reproduced its sides exactly (19 / 8,029
+  supervoxels, the same two edges).
+
 ### Discovery: what is in a datastack
 
 `tables.ts`, and the two nodes over it — `List CAVE tables` and `CAVE table info`. It exists

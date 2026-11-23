@@ -43,13 +43,8 @@ import type { CellValue, LayersValue, TableValue } from '../../core/values'
 import { isDatasetValue, isTableValue, layersFrom, makeTable } from '../../core/values'
 import { foldColumns } from '../../nodes/lib/tableOps'
 import { KEPT_NEURONS } from './reviewEviction'
-import {
-  decodeRecord,
-  mergedSoFar,
-  mergesSchema,
-  mergesTable,
-  recordScopeOf,
-} from './mergeRecord'
+import { decodeRecord, mergedSoFar, mergesSchema, mergesTable } from './mergeRecord'
+import { caveScopeOf } from '../../nodes/lib/caveParams'
 import {
   EXTENDED_PORT,
   LARGE_PIECE_CHUNKS,
@@ -503,7 +498,7 @@ export const reviewNode = packNode({
     const record = decodeRecord(ctx.params.merges)
     // Read for the wired dataset's chunkedgraph only, as the card and the plan read it.
     const dataset = ctx.input('dataset')
-    const scope = recordScopeOf(isDatasetValue(dataset) ? dataset : undefined)
+    const scope = caveScopeOf(isDatasetValue(dataset) ? dataset : undefined)
     const pieces = scenePieces(
       mine,
       neuron,

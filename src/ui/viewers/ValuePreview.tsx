@@ -2,6 +2,7 @@ import { useContext, useMemo } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 
 import type { GraphNode } from '../../core/graph'
+import { caveScopeOf } from '../../nodes/lib/caveParams'
 import type { InferContext, ParamValue, ParamValues } from '../../core/node'
 import { enumValue } from '../../core/node'
 import { filledParams, getNodeDef } from '../../core/registry'
@@ -226,7 +227,8 @@ function ValuePreviewInner({
    * a remembered camera. Resolved here, where every surface's viewer is dispatched with the node in
    * hand, rather than in each viewer that keeps something. See `WorkflowScope`.
    */
-  const viewerKey = scopedKey(useContext(WorkflowScope), node.id)
+  const workflowId = useContext(WorkflowScope)
+  const viewerKey = scopedKey(workflowId, node.id)
 
   /*
    * A summary means "no second renderer", not just "no grid": an entry declaring `inSummary` is
@@ -254,6 +256,7 @@ function ValuePreviewInner({
       onSelectionChange,
       selection,
       viewerKey,
+      workflowId,
     })
     if (drawn !== undefined) return drawn
   }
@@ -374,6 +377,8 @@ type ViewerProps = Pick<
   selection: string[]
   /** The node's key within its workflow — a WebGL viewer's `viewerId`. See `scopedKey`. */
   viewerKey: string
+  /** The workflow (document) the node is drawn in: the active document's id (`WorkflowScope`). */
+  workflowId: string
 }
 
 interface ViewerEntry {
@@ -1003,7 +1008,17 @@ const VIEWERS: Record<string, ViewerEntry> = {
   },
   'out.neuroglancer': {
     readsInputs: true,
-    render: ({ value, ctx, params, shared, inputValues, viewerKey, onParamChange }) => {
+    render: ({
+      node,
+      value,
+      ctx,
+      params,
+      shared,
+      inputValues,
+      viewerKey,
+      workflowId,
+      onParamChange,
+    }) => {
       // The scene, the segments and the colours are all in the URL the node emitted; the
       // neuron table comes along only so the legend can be drawn beside the frame.
       const neurons = inputValues?.neurons
@@ -1032,6 +1047,10 @@ const VIEWERS: Record<string, ViewerEntry> = {
       const target = frameTarget(params)
       return (
         <NeuroglancerViewer
+          // A CAVE dataset's neurons can be split from the card (`K`, `ui/seam/splitKey.ts`).
+          splitTarget={caveScopeOf(dataset?.kind === 'dataset' ? dataset : undefined)}
+          // The card itself, so a split's new roots go into its neurons — where it can write them.
+          splitCard={onParamChange ? { docId: workflowId, nodeId: node.id } : undefined}
           url={asString(value)}
           focus={focus}
           focusWidth={focusWidth}

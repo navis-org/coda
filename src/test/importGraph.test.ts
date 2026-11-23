@@ -118,20 +118,44 @@ describe('worker import graphs', () => {
  * `scripts/probe-cave-merge.mjs`, imports it from `scripts/`, where this does not look; what holds
  * that script to the sandbox is `src/test/sandboxWrites.ts`' fence.
  *
- * **Three levels, one check.** The writer may be imported by `MAY_WRITE` alone, each of those by
- * `MAY_SUBMIT` alone, and each of those by `MAY_OPEN` alone: a value import of the batch, or of
- * the session that starts one, is a way to write too, one step further out each.
+ * **Three levels per path, one check.** Each way to write is a chain (`CHAINS`): the writer may be
+ * imported by the chains' first modules alone, each of those by its own chain's second alone, and
+ * that by its own chain's openers alone — a value import of the batch, or of the session that
+ * starts one, is a way to write too, one step further out each. Per chain, so one path's opener
+ * cannot reach the other's session unnoticed.
  * The walk follows value imports only, since a type import cannot send anything. The string search
  * beside it is stricter — any literal naming the file, a type import's included — which is why the
  * overlay's `MergeProgress` lives in the read-only `mergeRecord.ts`, not beside the batch.
  */
 const WRITER = 'data/cave/edits.ts'
-/** Adding a line here is adding a way to write. */
-const MAY_WRITE: readonly string[] = ['packs/seam/mergeBatch.ts']
-/** Who may start a batch: the review card's Submit session (phase 6). */
-const MAY_SUBMIT: readonly string[] = ['ui/seam/mergeSession.ts']
-/** Who may reach the session, whose `confirmSubmit` starts one: its overlay and its card. */
-const MAY_OPEN: readonly string[] = ['ui/seam/MergeSubmitHost.tsx', 'ui/seam/ReviewBody.tsx']
+
+interface WriteChain {
+  /** May import the writer. Adding a chain is adding a way to write. */
+  readonly writes: string
+  /** May import `writes`: the session that starts a write. */
+  readonly starts: string
+  /** May import `starts`. */
+  readonly opens: readonly string[]
+  /** A test importing each, proving the walk sees an importer where there is one. */
+  readonly canaries: readonly [string, string]
+}
+
+const CHAINS: readonly WriteChain[] = [
+  // Merges: the batch, the review card's Submit session (phase 6), its overlay and card.
+  {
+    writes: 'packs/seam/mergeBatch.ts',
+    starts: 'ui/seam/mergeSession.ts',
+    opens: ['ui/seam/MergeSubmitHost.tsx', 'ui/seam/ReviewBody.tsx'],
+    canaries: ['packs/seam/mergeBatch.test.ts', 'ui/seam/mergeSession.test.ts'],
+  },
+  // Splits (`docs/split-gallery-plan.md`, phase 4): the write, Accept, the gallery's overlay.
+  {
+    writes: 'packs/seam/splitWrite.ts',
+    starts: 'ui/seam/splitAccept.ts',
+    opens: ['ui/seam/SplitGalleryHost.tsx'],
+    canaries: ['packs/seam/splitWrite.test.ts', 'ui/seam/splitAccept.test.ts'],
+  },
+]
 
 /** Each file's text, comments aside, read once for every level below. */
 const texts = new Map<string, string>()
@@ -148,21 +172,23 @@ describe.each([
   {
     level: 'the writer',
     targets: [WRITER],
-    allowed: MAY_WRITE,
+    allowed: CHAINS.map((chain) => chain.writes),
     canary: 'data/cave/edits.test.ts',
   },
-  {
-    level: 'the batch',
-    targets: MAY_WRITE,
-    allowed: MAY_SUBMIT,
-    canary: 'packs/seam/mergeBatch.test.ts',
-  },
-  {
-    level: 'the session',
-    targets: MAY_SUBMIT,
-    allowed: MAY_OPEN,
-    canary: 'ui/seam/mergeSession.test.ts',
-  },
+  ...CHAINS.flatMap((chain) => [
+    {
+      level: chain.writes,
+      targets: [chain.writes],
+      allowed: [chain.starts],
+      canary: chain.canaries[0],
+    },
+    {
+      level: chain.starts,
+      targets: [chain.starts],
+      allowed: chain.opens,
+      canary: chain.canaries[1],
+    },
+  ]),
 ])('the chunkedgraph writer, through $level', ({ targets, allowed, canary }) => {
   const isTarget = (path: string) => targets.includes(path)
   /** A string literal naming any target's file. */

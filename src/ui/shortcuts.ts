@@ -325,6 +325,18 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: 'Neuroglancer',
+    note: 'In a Neuroglancer card on a CAVE dataset whose chunkedgraph publishes affinities (not FlyWire).',
+    items: [
+      {
+        id: 'split-segment',
+        chords: [{ key: 'K' }],
+        label: 'Splits of the neuron under the pointer',
+        hint: 'Near the point, nearest first',
+      },
+    ],
+  },
+  {
     title: 'Canvas gestures',
     note: 'No keys of their own — this is what the mouse does on empty canvas.',
     items: [

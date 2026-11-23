@@ -40,7 +40,7 @@ import type { GraphLayout } from '../../data/cave/graphLayout'
 import { isNodeId } from '../../data/cave/graphLayout'
 import type { MergeEnd } from '../../data/cave/merge'
 import { MAX_MERGE_CHUNKS, mergeChunkDistance } from '../../data/cave/merge'
-import { findSupervoxels } from '../../data/cave/volumes'
+import { baseScale, findSupervoxels } from '../../data/cave/volumes'
 import { chunkCache } from '../../data/precomputed/chunkCache'
 import type { Triple, VolumeScale } from '../../data/precomputed/volume'
 import { boxAround, openVolume } from '../../data/precomputed/volume'
@@ -282,17 +282,7 @@ export async function openAnchorVolume(
     )
   }
   const info = await openVolume(source.base, options)
-  // By resolution, never by `baseMip` as a position: see `GraphLayout.baseResolutionNm`.
-  const want = layout.baseResolutionNm
-  const scale = info.scales.find((s) =>
-    s.resolution.every((nm, a) => Math.abs(nm - want[a]!) < 1e-6),
-  )
-  if (!scale) {
-    throw new Error(
-      `${datastack}'s chunkedgraph is built on ${want.join(' × ')} nm supervoxels, which its ` +
-        'volume does not offer in an encoding Coda reads.',
-    )
-  }
+  const scale = baseScale(datastack, info, layout)
   return {
     ...boxReader({ ...source, info }, at, chunkCache(ANCHOR_CHUNK_BYTES)),
     scale,

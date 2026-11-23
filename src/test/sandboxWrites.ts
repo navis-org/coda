@@ -53,13 +53,21 @@ export function requestUrl(input: RequestInfo | URL): string {
 
 const ON_SANDBOX = `/segmentation/api/v1/table/${SANDBOX.table}/`
 
-/** The only two writes the merge test sends, as paths on the sandbox host. */
-const WRITES = new Set(['merge', 'undo'].map((route) => ON_SANDBOX + route))
-
-/** The reads the scripts send as POSTs, all on the sandbox table (`rootIds.ts`). */
-const POSTED_READS = new Set(
-  ['roots_binary', 'is_latest_roots', 'node/leaves_many'].map((route) => ON_SANDBOX + route),
+/** The only writes the live tests send, as paths on the sandbox host: a merge or a split, an undo. */
+const WRITES = new Map(
+  (['merge', 'split', 'undo'] as const).map((route) => [ON_SANDBOX + route, route]),
 )
+
+/**
+ * The reads the scripts send as POSTs, all on the sandbox table: the chunkedgraph's (`rootIds.ts`,
+ * and the split preview, `splitPreview.ts`) and the level-2 cache's chunk points (`l2.ts`).
+ */
+const POSTED_READS = new Set([
+  ...['roots_binary', 'is_latest_roots', 'node/leaves_many', 'graph/split_preview'].map(
+    (route) => ON_SANDBOX + route,
+  ),
+  `/l2cache/api/v1/table/${SANDBOX.table}/attributes`,
+])
 
 /** A request's method, wherever it was given; `fetch`'s default is GET. */
 function methodOf(input: RequestInfo | URL, init?: RequestInit): string {
@@ -70,8 +78,8 @@ function methodOf(input: RequestInfo | URL, init?: RequestInit): string {
 
 /**
  * Why a request is refused, or undefined for one the merge test may make. An **allow-list**, not a
- * list of known write routes: any request but a GET or HEAD must be one of the two writes or the
- * three posted reads, on the sandbox host and table — so a write route nobody listed, a trailing
+ * list of known write routes: any request but a GET or HEAD must be one of the writes (`WRITES`) or
+ * the posted reads (`POSTED_READS`), on the sandbox host and table — so a write route nobody listed, a trailing
  * slash, or another CAVE service's POST is refused too. A GET to a write route is refused as well.
  * Read off the parsed URL, so a `..` segment is resolved before it is judged and an encoded slash
  * is never the sandbox's path.
@@ -84,7 +92,7 @@ export function sandboxRefusal(url: string, method = 'GET'): string | undefined 
     return `${parsed.origin} is not the sandbox's chunkedgraph (${SANDBOX.server}).`
   }
   if (reads || !(WRITES.has(parsed.pathname) || POSTED_READS.has(parsed.pathname))) {
-    return `${method} ${parsed.pathname} is not one of the merge test's requests on the sandbox table.`
+    return `${method} ${parsed.pathname} is not one of the live tests' requests on the sandbox table.`
   }
   return undefined
 }
@@ -99,39 +107,45 @@ export const FENCE_REFUSED = 'Refused by the sandbox fence, never sent'
 /** How many of each write a script may send. Absent is none. */
 export interface WriteLimits {
   readonly merge?: number
+  readonly split?: number
   readonly undo?: number
 }
 
+type WriteRoute = keyof WriteLimits
+
 /**
+ * The fence counts writes; it cannot tell which edit an undo takes back. That pairing is the
+ * writer's: `undoEdit` takes only a `done` outcome `edits.ts` itself returned, once.
+ *
  * Put the fence in front of this process's `fetch`: a request `sandboxRefusal` refuses, a write
- * past its limit, or an undo with no merge before it throws before anything is sent. The merge
- * test declares `{ merge: 1, undo: 1 }`; the pair finder `{}`, which is reads only. Returns how
+ * past its limit, an undo with no merge or split before it, or a split that does not say whether it
+ * is a min-cut throws before anything is sent. The merge test declares `{ merge: 1, undo: 1 }`,
+ * the split test `{ split: 1, undo: 1 }`, the pair finder `{}`, which is reads only. Returns how
  * many writes went out.
  */
 export function fenceWrites(limits: WriteLimits): () => number {
   const real = globalThis.fetch
-  const sent = { merge: 0, undo: 0 }
+  const sent: Record<WriteRoute, number> = { merge: 0, split: 0, undo: 0 }
   globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input)
     const method = methodOf(input, init)
-    const path = new URL(url, 'http://localhost').pathname
-    const route =
-      method === 'GET' || !WRITES.has(path)
-        ? undefined
-        : path.endsWith('/merge')
-          ? 'merge'
-          : 'undo'
+    const parsed = new URL(url, 'http://localhost')
+    const route = method === 'GET' ? undefined : WRITES.get(parsed.pathname)
     const refusal =
       sandboxRefusal(url, method) ??
       (route && sent[route] >= (limits[route] ?? 0)
         ? `${sent[route]} ${route}(s) sent, of ${limits[route] ?? 0} allowed.`
         : undefined) ??
-      (route === 'undo' && sent.undo >= sent.merge
-        ? 'an undo needs a merge before it.'
+      (route === 'undo' && sent.undo >= sent.merge + sent.split
+        ? 'an undo needs a merge or a split before it.'
+        : undefined) ??
+      // The server's default is its min-cut: a split must say which it asks for.
+      (route === 'split' && !['true', 'false'].includes(parsed.searchParams.get('mincut') ?? '')
+        ? 'a split must say whether it is a min-cut (mincut=true or mincut=false).'
         : undefined)
     if (refusal) throw new Error(`${FENCE_REFUSED}: ${method} ${url}: ${refusal}`)
     if (route) sent[route]++
     return real(input, init)
   }
-  return () => sent.merge + sent.undo
+  return () => Object.values(sent).reduce((all, n) => all + n, 0)
 }

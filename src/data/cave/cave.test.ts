@@ -466,6 +466,20 @@ describe('reading CAVE JSON', () => {
       1,
     ])
   })
+
+  it("reads Python's bare Infinity and NaN (a subgraph's chunk-border edge), pretty-printed or not", () => {
+    const text = '{\n  "affinities": [\n    1.5,\n    Infinity,\n    -Infinity,\n    NaN\n  ]}'
+    const parsed = parseCaveJson<{ affinities: Array<number | null> }>(text)
+    expect(parsed.affinities).toEqual([1.5, Infinity, -Infinity, null])
+    expect(parseCaveJson('{"a":[Infinity,2]}')).toEqual({ a: [Infinity, 2] })
+  })
+
+  it('leaves the words alone inside a string, and still quotes a wide id beside them', () => {
+    expect(parseCaveJson('{"a":"Infinity, NaN","id":720575940628857210}')).toEqual({
+      a: 'Infinity, NaN',
+      id: '720575940628857210',
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------
