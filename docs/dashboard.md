@@ -241,12 +241,23 @@ buttons and the resize corner fade in on hover. Three choices here are load-bear
 **The run bar moves to the window's top edge** (`.dashboard__edge`), overlaid for the reason it
 was overlaid in the bar: a strip that took height would resize every cell twice per run.
 
-**The pill sits over the first cell's title**, and the obvious places were wrong. It was top
-centre at first, and the screenshot put it on the left cell's ⤢: under any even column count the
-centre is the column boundary. The corners hold ✕, the grips and the tables' pagers. A fading pill
-is woken by exactly the movement heading for whatever it covers, so it has to cover a label, and
-the first cell's title is one in every layout. It is held awake while hovered, or it would fade
-from under the click. It stays in the tab order while faded, and keyboard focus shows it.
+**The pill sits top centre unless that covers a control, and where the controls are is measured.**
+It was top centre at first, and the screenshot put it on the left cell's ⤢ (two columns of equal
+width put the column boundary at the centre). It then moved over the first cell's title, which
+is a label in every layout, but that always hid one cell's name. Neither fixed spot works,
+because where the buttons fall along the top edge depends on the column count, the cells'
+widths and what each strip draws. So each time the pill wakes, `FocusExit` reads the rects of
+every control in its band (`button`, links, inputs, grips, resize corners, faded ones included,
+since those are what the pointer is about to reveal) and of each cell's name, and `placePill`
+(`focusExitPlacement.ts`, a pure function over spans) slides it to the nearest spot either side
+of the centre that covers neither, `PILL_CLEARANCE` (4px) from its neighbours. With no such spot
+it gives way on a name, never a control. The name is measured as text with a `Range`: its box is
+a stretched flex item, and `scrollWidth` is never less than the box, so both read as the whole
+strip and the pill went on covering the name. Measured at 1400 × 900 with five cells: 0, −138,
+0 and +129px from centre at one to four columns, nothing covered. It measures on a wake and on a window resize, never
+per `pointermove`. A fading pill is woken by exactly the movement heading for whatever it
+covers, so it must never cover a button. It is held awake while hovered, or it would fade from
+under the click. It stays in the tab order while faded, and keyboard focus shows it.
 
 Moving the pointer over a Neuroglancer cell does not wake the pill: an `<iframe>` sends this
 document nothing. Moving off the embed does.

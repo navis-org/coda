@@ -14133,19 +14133,15 @@ select.annotate__input {
 }
 
 /*
- * The way out, over the first cell's title. Every other spot was measured to sit on a control in
- * some layout — top centre is the column boundary under an even column count, where the left
- * cell's ⤢ is; the corners hold ✕, the grips and a table's pager — and a fading pill is woken by
- * exactly the pointer movement that is heading for that control. A title is a label in every
- * layout, and the first cell's always starts here, just past its grip. Sized to the strip.
+ * The way out, top centre unless that covers a control: `FocusExit` measures the controls along
+ * the top edge on each wake and sets `left` itself, sliding to the nearest clear spot. This
+ * centring is only what it shows before that first measurement. Sized to the strip.
  */
 .dashboard__focusExit {
   position: absolute;
   top: 2px;
-  /* Just past the first cell's grip: the grid's edge, the strip's padding, the grip, the gap. */
-  left: calc(
-    var(--focus-gap) + var(--focus-strip-pad) + var(--focus-grip) + var(--focus-strip-gap)
-  );
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 6;
   padding: 1px 10px;
   line-height: 16px;
