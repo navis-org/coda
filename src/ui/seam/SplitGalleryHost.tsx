@@ -4,9 +4,10 @@
  *
  * The candidates as tiles (`SplitTiles`), nearest first, each the neuron coloured by the part the
  * split keeps and the part it takes off; a click enlarges one, with **Accept** — which writes the
- * split (`splitAccept.ts`, phase 4) — and **Back** to all of them. After a write, its answer, and
- * **Undo** while the edit can still be undone. The status line says what is still being read or
- * looked for, and why there is nothing where there is nothing.
+ * split (`splitAccept.ts`, phase 4) — and **Back** to all of them, which Escape is too (a second
+ * Escape closes). After a write, its answer, and **Undo** while the edit can still be undone. The
+ * status line says what is still being read or looked for, and why there is nothing where there
+ * is nothing.
  */
 
 import { useState, useSyncExternalStore } from 'react'
@@ -55,6 +56,10 @@ export function SplitGalleryHost() {
   // A new set is offered for the neuron as it was read: not once a split may have changed it.
   const canRegenerate =
     shown !== undefined && enlarged === undefined && !busy && !mayHaveWritten(accept?.result)
+  const backToAll = () => setSelected(undefined)
+  // Escape steps back as the buttons do: from an enlarged tile to all of them (not while a write
+  // is out, as Back), and from there closes the gallery. The ✕ always closes.
+  const onEscape = enlarged === undefined ? closeSplit : busy ? () => undefined : backToAll
 
   return (
     <Modal
@@ -62,7 +67,7 @@ export function SplitGalleryHost() {
       labelledBy="split-gallery-title"
       portal
       backdrop={false}
-      onClose={closeSplit}
+      onClose={onEscape}
     >
       <ModalHeader titleId="split-gallery-title" onClose={closeSplit}>
         Split {session.request.root}
@@ -128,12 +133,7 @@ export function SplitGalleryHost() {
                 )}
                 {enlarged !== undefined && (
                   <>
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={busy}
-                      onClick={() => setSelected(undefined)}
-                    >
+                    <button type="button" className="btn" disabled={busy} onClick={backToAll}>
                       Back to all
                     </button>
                     <button

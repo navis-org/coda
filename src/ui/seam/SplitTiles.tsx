@@ -154,6 +154,21 @@ function useBaseGeometry(mesh: SplitMesh | undefined) {
   return base
 }
 
+/**
+ * Dispose a tile's geometry, freeing its own colours only. three's `dispose` deletes the GPU
+ * buffer of **every** attribute the geometry holds (`WebGLGeometries.onGeometryDispose`), and the
+ * other tiles' bindings would go on pointing at the deleted position, normal and index buffers:
+ * their meshes would draw nothing from the next frame — a drag, under the `demand` frameloop —
+ * while the point, a geometry of its own, stayed. So the shared ones are detached first; the base
+ * geometry frees them (`useBaseGeometry`).
+ */
+export function disposeOwn(geometry: THREE.BufferGeometry): void {
+  geometry.deleteAttribute('position')
+  geometry.deleteAttribute('normal')
+  geometry.setIndex(null)
+  geometry.dispose()
+}
+
 /** Sides as the caption names them: `a` is whichever part is larger — the one kept. */
 function keptSides(candidate: SplitCandidate): SideColours {
   return candidate.sizes.a >= candidate.sizes.b
@@ -201,6 +216,7 @@ function TileScene({
     )
     return geometry
   }, [base, mesh, exact, candidate, colours])
+  useEffect(() => () => geometry && disposeOwn(geometry), [geometry])
   // Until then, the chunk points, coloured by the chunk's own side.
   const points = useMemo(() => {
     if (geometry) return undefined
@@ -217,7 +233,6 @@ function TileScene({
     cloud.setAttribute('color', new THREE.Float32BufferAttribute(rgb, 3))
     return cloud
   }, [geometry, chunks, positions, candidate, colours])
-  useEffect(() => () => geometry?.dispose(), [geometry])
   useEffect(() => () => points?.dispose(), [points])
   /*
    * The controls move the camera in `update()`, which runs only when a frame is drawn — and under

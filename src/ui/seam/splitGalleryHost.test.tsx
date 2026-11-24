@@ -132,6 +132,44 @@ describe('SplitGalleryHost', () => {
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull()
   })
 
+  it('steps back on Escape: from an enlarged tile to all of them, then closes', async () => {
+    render(<SplitGalleryHost />)
+    await press()
+    const count = screen.getAllByRole('button', { name: /takes off/ }).length
+    fireEvent.click(screen.getAllByRole('button', { name: /takes off/ })[0]!)
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Escape' })
+    })
+    expect(splitSession()).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: /takes off/ })).toHaveLength(count)
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Escape' })
+    })
+    expect(splitSession()).toBeUndefined()
+  })
+
+  it('takes no Escape back to all while a split is being written', async () => {
+    const { services, release } = writeServers()
+    resetSplitAcceptForTests(services)
+    render(<SplitGalleryHost />)
+    await press()
+    fireEvent.click(screen.getAllByRole('button', { name: /takes off/ })[0]!)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
+      await settle()
+    })
+    act(() => {
+      fireEvent.keyDown(window, { key: 'Escape' })
+    })
+    // Still on the split being written, as Back is off.
+    expect(screen.getByRole('button', { name: 'Accept' })).toBeTruthy()
+    await act(async () => {
+      release()
+      await settle()
+    })
+  })
+
   it('writes on Accept, holds the gallery while it is out, then closes once split', async () => {
     const { services, release } = writeServers()
     resetSplitAcceptForTests(services)

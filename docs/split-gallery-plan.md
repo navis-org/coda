@@ -259,6 +259,15 @@ the UI will show.
      where nothing more is found it stays, marked as the last ("these are the last found"). The
      exact colouring reads only the cells the new cuts add, and a pass still running for the old
      ones stops taking cells. On the toy with thirteen splits: 6, 6, 1, then none.
+   - **Escape steps back (user, 2026-11-24).** With a tile enlarged, Escape is Back to all (and,
+     like Back, does nothing while a write is out); with all tiles shown it closes. The ✕ always
+     closes.
+   - **Meshes vanishing on a drag (2026-11-24).** A tile's geometry borrows the shared positions,
+     normals and triangles; recolouring it (each exact cell, a Regenerate) rebuilt it and disposed
+     the old one, and three's `dispose` frees the GPU buffer of every attribute the geometry holds.
+     The other tiles went on binding the deleted buffers and drew nothing from the next frame — a
+     drag, under the `demand` frameloop — while the point, its own geometry, stayed. A tile now
+     detaches the shared attributes before disposing (`disposeOwn`, `splitTiles.test.ts`).
    - **The card shows the pieces (2026-11-23).** A press names the card it was over, by document
      and node (`SplitRequest.card`, from `ValuePreview` through `useSplitKey`); once a split is
      answered and read back (or answered late, or left one piece), `splitAccept.ts` reads that
