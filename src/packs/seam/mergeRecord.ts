@@ -168,14 +168,53 @@ export type ShortEntry = {
   | { readonly outcome: 'failed' | 'not-sent' }
 )
 
-/** An entry as the record is read: in full, or short. */
-export type RecordEntry = MergeRecordEntry | ShortEntry
+/**
+ * **The neuron followed through an edit Coda did not make here** — a split, usually
+ * (`docs/seam-split-review-plan.md`). Not a merge: the reader pressed the outdated neuron's
+ * button, and the card read where the neuron's tips went (`followEdit.ts`, reads only). It moves
+ * the neuron's root from `from` to `to`, as a merge would, and says which tips and merged pieces
+ * went with the other parts, by the supervoxels they were found by.
+ *
+ * Its neuron is never shortened (`shortenedRecord`): the root it moved is what every later merge
+ * was made onto, and a later follow places the merged pieces by their full entries' supervoxels.
+ */
+export interface FollowEntry {
+  readonly kind: 'followed'
+  readonly deployment?: string | undefined
+  readonly datastack?: string | undefined
+  readonly reviewedRoot: string
+  /** The neuron's root before: the one found outdated. */
+  readonly from: string
+  /** The root followed: the part holding the most of its tips, or the one the reader chose. */
+  readonly to: string
+  /** When the card followed it, ISO 8601. */
+  readonly at: string
+  /** The tips' supervoxels (`tip_sv`) under another root at `at`: those tips leave the list. */
+  readonly away: readonly string[]
+  /** Every tip supervoxel it asked about, so tips searched since can be told apart. */
+  readonly placed: readonly string[]
+  /** How many of them are under `to`. */
+  readonly kept: number
+  /** Every other root a tip went to, most tips first, with how many: what the reader may follow instead. */
+  readonly others: readonly { readonly root: string; readonly tips: number }[]
+  /** Pieces merged into the neuron whose supervoxel went with another part: no longer in it. */
+  readonly left: readonly string[]
+}
+
+/** An entry as the record is read: a merge in full, or short, or a follow. */
+export type RecordEntry = MergeRecordEntry | ShortEntry | FollowEntry
+
+/** Whether an entry is a follow rather than a merge. */
+export const isFollow = (entry: RecordEntry): entry is FollowEntry =>
+  'kind' in entry && entry.kind === 'followed'
 
 export type MergeRecord = readonly RecordEntry[]
 
 /** Whether the entry's piece is part of its neuron now, by this workflow's account. */
-const inNeuron = (entry: RecordEntry): boolean =>
-  entry.outcome === 'merged' || entry.outcome === 'already-merged'
+const inNeuron = (
+  entry: RecordEntry,
+): entry is Exclude<RecordEntry, FollowEntry> & { outcome: 'merged' | 'already-merged' } =>
+  !isFollow(entry) && (entry.outcome === 'merged' || entry.outcome === 'already-merged')
 
 export interface MergedSoFar {
   /** The neuron's root now: the last merge's new root, or the reviewed one. */
@@ -205,6 +244,14 @@ export interface MergedSoFar {
    * Its own reviewed root is retired then, so this is what to draw it as.
    */
   readonly absorbedInto: string | undefined
+  /** The last time the neuron was followed through an edit (`FollowEntry`), where it was. */
+  readonly followed: FollowEntry | undefined
+  /**
+   * Pieces merged into the neuron that the last follow found on another part (its `left`), unless
+   * merged again since: in neither `pieces` nor `joined`. **The last follow's**, as `away` is — a
+   * follow places every merged piece again (`followEdit.ts`), so an undone split gives them back.
+   */
+  readonly left: ReadonlySet<string>
 }
 
 /**
@@ -231,8 +278,34 @@ export function mergedSoFar(
   let unknowns: MergeRecordEntry[] = []
   // Whether another reviewed neuron took this one in.
   let taken = false
+  let followed: FollowEntry | undefined
+  /** Merged pieces a follow found on another part, unless a later merge put them back. */
+  const left = new Set<string>()
   for (const entry of record) {
     if (!inScope(entry, scope)) continue
+    if (isFollow(entry)) {
+      groups.replay(entry)
+      if (entry.reviewedRoot !== reviewedRoot) {
+        otherRoots.add(entry.reviewedRoot)
+        otherRoots.add(entry.to)
+        // Split off that neuron: no longer part of it.
+        for (const id of entry.left) elsewhere.delete(id)
+        continue
+      }
+      /*
+       * A part followed away from while it still stands (`others`: it holds tips) is no root of
+       * the neuron's any more — a separate object, which a search may offer to merge back.
+       */
+      if (entry.others.some((one) => one.root === entry.from)) {
+        const at = roots.indexOf(entry.from)
+        if (at > 0) roots.splice(at, 1)
+      }
+      roots.push(entry.to)
+      followed = entry
+      left.clear()
+      for (const id of entry.left) left.add(id)
+      continue
+    }
     // Made onto its neuron's group, as it stood: a merge short of it gives the neuron no root.
     const ontoNeuron =
       'short' in entry
@@ -254,8 +327,10 @@ export function mergedSoFar(
       )
     }
     if (!inNeuron(entry)) continue
-    if (mine) mineIn.push(entry.candidateRoot)
-    else elsewhere.add(entry.candidateRoot)
+    if (mine) {
+      mineIn.push(entry.candidateRoot)
+      left.delete(entry.candidateRoot)
+    } else elsewhere.add(entry.candidateRoot)
     if (entry.outcome !== 'merged' || !ontoNeuron) continue
     if (mine) roots.push(entry.newRoot)
     else otherRoots.add(entry.newRoot)
@@ -264,6 +339,8 @@ export function mergedSoFar(
   // Each group of pieces not in the neuron, every piece in it: the record's own roots are not pieces.
   const joined = new Map<string, string>()
   for (const id of mineIn) {
+    // Merged, and since gone with a part the neuron was split from: in neither.
+    if (left.has(id)) continue
     const root = groups.find(id)
     if (root === currentRoot) {
       pieces.add(id)
@@ -293,6 +370,8 @@ export function mergedSoFar(
     unsettled,
     // A neuron another took in is drawn as what it is part of now: its own root is retired.
     absorbedInto: taken ? currentRoot : undefined,
+    followed,
+    left,
   }
 }
 
@@ -325,6 +404,11 @@ export class Groups {
   }
 
   replay(entry: RecordEntry): void {
+    // A follow moves the neuron's group to the part it followed, as a merge's new root does.
+    if (isFollow(entry)) {
+      this.join(entry.to, [entry.from])
+      return
+    }
     if (!inNeuron(entry)) return
     const onto =
       'short' in entry
@@ -425,7 +509,7 @@ export function settledEntry(
  * Coda, a hand edit — since the record is the log of every Submit; only reading filters them
  * (`decodeRecord`). Text that is no list at all was never a readable record and starts afresh.
  */
-export function appendEntry(raw: unknown, entry: MergeRecordEntry): string {
+export function appendEntry(raw: unknown, entry: MergeRecordEntry | FollowEntry): string {
   const held = parsedList(raw) ?? []
   return JSON.stringify([...held, entry])
 }
@@ -459,10 +543,45 @@ export function appendRecorded(raw: unknown, entry: MergeRecordEntry): string {
 export function decodeRecord(raw: unknown): RecordEntry[] {
   const out: RecordEntry[] = []
   for (const value of parsedList(raw) ?? []) {
-    const entry = isEntry(value) ? value : shortOf(value)
+    const entry = isEntry(value) ? value : (followOf(value) ?? shortOf(value))
     if (entry) out.push(entry)
   }
   return out
+}
+
+/** A follow as the param holds it — the entry itself, checked — or undefined. */
+function followOf(value: unknown): FollowEntry | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const entry = value as Record<string, unknown>
+  if (entry['kind'] !== 'followed') return undefined
+  const id = isId
+  const ids = (v: unknown) => Array.isArray(v) && v.every(isId)
+  const count = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0
+  const scope = (v: unknown) => v === undefined || typeof v === 'string'
+  const others = entry['others']
+  if (
+    !id(entry['reviewedRoot']) ||
+    !id(entry['from']) ||
+    !id(entry['to']) ||
+    typeof entry['at'] !== 'string' ||
+    !scope(entry['deployment']) ||
+    !scope(entry['datastack']) ||
+    !ids(entry['away']) ||
+    !ids(entry['left']) ||
+    !ids(entry['placed']) ||
+    !count(entry['kept']) ||
+    !Array.isArray(others) ||
+    !others.every(
+      (one) =>
+        typeof one === 'object' &&
+        one !== null &&
+        id((one as Record<string, unknown>)['root']) &&
+        count((one as Record<string, unknown>)['tips']),
+    )
+  ) {
+    return undefined
+  }
+  return value as FollowEntry
 }
 
 /**
@@ -480,7 +599,11 @@ export function shortenedRecord(raw: unknown, kept: ReadonlySet<string>): string
   const held = parsedList(raw)
   if (!held) return undefined
   const entries = held.map((value) => (isEntry(value) ? value : undefined))
-  const full = entries.filter((entry) => entry !== undefined)
+  // Replayed with the follows in place: a merge after one was made onto the root it followed.
+  const full: RecordEntry[] = held.flatMap((value) => {
+    const entry = isEntry(value) ? value : followOf(value)
+    return entry ? [entry] : []
+  })
   /*
    * Only an `unknown` can be unsettled, and only a `merged` can join pieces short of the neuron;
    * each in the chunkedgraph it was made on.
@@ -496,7 +619,13 @@ export function shortenedRecord(raw: unknown, kept: ReadonlySet<string>): string
     if (!so) read.set(key, (so = mergedSoFar(full, root, { deployment, datastack })))
     return so
   }
-  for (const entry of full) {
+  /*
+   * A followed neuron is kept whole too: a later follow places its merged pieces again by the
+   * supervoxels their full entries hold (`followEdit.ts`'s `anchorsOf`), which a short one drops.
+   */
+  for (const entry of full) if (isFollow(entry)) open.add(entry.reviewedRoot)
+  for (const entry of entries) {
+    if (entry === undefined) continue
     if (entry.outcome !== 'unknown' && entry.outcome !== 'merged') continue
     if (kept.has(entry.reviewedRoot) || open.has(entry.reviewedRoot)) continue
     const so = soOf(entry)
@@ -545,7 +674,7 @@ function shortOf(value: unknown): ShortEntry | undefined {
   const [outcome, deployment, datastack, reviewedRoot, candidateRoot, sixth, seventh] =
     value as unknown[]
   const scope = (v: unknown) => v === null || typeof v === 'string'
-  const id = (v: unknown): v is string => typeof v === 'string' && isNodeId(v)
+  const id = isId
   if (!scope(deployment) || !scope(datastack) || !id(reviewedRoot) || !id(candidateRoot)) {
     return undefined
   }
@@ -571,6 +700,9 @@ function shortOf(value: unknown): ShortEntry | undefined {
   }
   return undefined
 }
+
+/** A chunkedgraph id written as text, the one check every reader of the param makes. */
+const isId = (v: unknown): v is string => typeof v === 'string' && isNodeId(v)
 
 function parsedList(raw: unknown): unknown[] | undefined {
   const text = typeof raw === 'string' ? raw.trim() : ''
@@ -644,9 +776,15 @@ export function mergesSchema(): TableSchema {
   )
 }
 
-/** The record as a table, in the order it was written. */
+/** The record's merges, in order: every entry but the follows. */
+export function mergeEntries(record: MergeRecord): (MergeRecordEntry | ShortEntry)[] {
+  return record.filter((entry): entry is MergeRecordEntry | ShortEntry => !isFollow(entry))
+}
+
+/** The record's merges as a table, in the order they were written. A follow is no merge. */
 export function mergesTable(record: MergeRecord): TableValue {
-  const cells = (read: (entry: RecordEntry) => CellValue) => record.map(read)
+  const merges = mergeEntries(record)
+  const cells = (read: (entry: MergeRecordEntry | ShortEntry) => CellValue) => merges.map(read)
   // What a short entry no longer holds is null (the header).
   const full = (read: (entry: MergeRecordEntry) => CellValue) =>
     cells((e) => ('short' in e ? null : read(e)))

@@ -59,7 +59,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
 import type { CodaGraph } from '../../core/graph'
 import { referrerOf } from '../../core/graph'
@@ -142,7 +142,7 @@ import {
   viewerBaseFor,
 } from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
-import { decodeRecord, mergedSoFar } from '../../packs/seam/mergeRecord'
+import { appendEntry, decodeRecord, mergedSoFar } from '../../packs/seam/mergeRecord'
 import { caveScopeOf } from '../../nodes/lib/caveParams'
 import { caveServerLabel } from '../../data/cave/deployments'
 import { getToken, subscribeTokens } from '../../data/cave/credentials'
@@ -150,6 +150,7 @@ import { rootCurrency } from '../../packs/seam/rootCurrency'
 import type { SubmitRequest, SubmitState } from './mergeSession'
 import {
   STILL_OUT_NOTICE,
+  appendHeld,
   closeSubmit,
   openSubmit,
   useSubmitChecked,
@@ -181,6 +182,7 @@ import {
   withoutTips,
 } from '../../packs/seam/handPicks'
 import { checkPick } from '../../packs/seam/pickCheck'
+import { anchorsOf, cutOffTips, followEdit, nearEvenOf } from '../../packs/seam/followEdit'
 import { flushVerdicts } from '../../data/verdictLog'
 import { queueVerdict, verdictInput } from '../../packs/seam/verdictRecord'
 import { ExtendButtons } from './ExtendButtons'
@@ -340,7 +342,24 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     () => unreachedTips(placed, verdicts, tree),
     [placed, verdicts, tree],
   )
-  const queue = useMemo(() => withoutTips(placed, unreached), [placed, unreached])
+  const record = useMemo(() => decodeRecord(node.params.merges), [node.params.merges])
+  /*
+   * The wired CAVE dataset's deployment and datastack: the chunkedgraph the record is read for,
+   * and the currency check asks.
+   */
+  const target = useMemo(
+    () => caveScopeOf({ sourceId: dataset.sourceId, datasetId: dataset.datasetId }),
+    [dataset.sourceId, dataset.datasetId],
+  )
+  // Before any follow is applied: what a follow places afresh, so an undone split gives tips back.
+  const uncut = useMemo(() => withoutTips(placed, unreached), [placed, unreached])
+  // Less the tips that went with a part the neuron was split from (`cutOffTips`).
+  // As text, so a click that drops no more keeps this queue and the list built from it.
+  const cutOff = useMemo(
+    () => cutOffTips(uncut, record, target, verdicts),
+    [uncut, record, target, verdicts],
+  )
+  const queue = useMemo(() => withoutTips(uncut, cutOff), [uncut, cutOff])
   /*
    * One neuron at a time. Everything below — the list, the cursor, the counts in the foot — reads
    * `mine`, never `queue`, so no surface of the card can show a second neuron's tips.
@@ -644,15 +663,6 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * The same pieces `Current` publishes, in the same colours the Neuroglancer node gives them —
    * one function each, so this fallback and the full-size viewer cannot disagree.
    */
-  const record = useMemo(() => decodeRecord(node.params.merges), [node.params.merges])
-  /*
-   * The wired CAVE dataset's deployment and datastack: the chunkedgraph the record is read for,
-   * and the currency check asks.
-   */
-  const target = useMemo(
-    () => caveScopeOf({ sourceId: dataset.sourceId, datasetId: dataset.datasetId }),
-    [dataset.sourceId, dataset.datasetId],
-  )
   /*
    * What Submit has done on this neuron (`mergedSoFar`, the one reading of the record): pieces in
    * it, pieces this workflow put in another reviewed neuron, and whether this neuron is itself one.
@@ -717,6 +727,77 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    */
   const neuronEdited =
     neuronNow !== undefined && !absorbed && merged?.unsettled.length === 0 && edited(neuronNow)
+  /*
+   * **Following the neuron through an edit** (`followEdit.ts`, reads only;
+   * `docs/seam-split-review-plan.md`): where its tips are now, the part to follow, and a
+   * `FollowEntry` appended to the record through a short hold, as Submit appends — unrecorded,
+   * since it describes the server, and refused while a batch holds the card. Placed from the
+   * tips before any follow, so following the root an undone split made gives the tips back.
+   */
+  const [following, setFollowing] = useState(false)
+  const followed = merged?.followed
+  // The tips a follow would place now, against those the last one placed.
+  const anchors = useMemo(
+    () =>
+      neuron === undefined || !merged
+        ? undefined
+        : anchorsOf(tipsOf(uncut, neuron), record, neuron, merged),
+    [uncut, neuron, record, merged],
+  )
+  // Tips not asked about by the last follow: searched since, or a piece merged since.
+  const unplaced = useMemo(() => {
+    if (!followed || !anchors) return 0
+    const asked = new Set(followed.placed)
+    return anchors.tips.filter((sv) => !asked.has(sv)).length
+  }, [followed, anchors])
+  // Another part with nearly as many tips: either could be the neuron, so it is offered.
+  const nearEven = nearEvenOf(followed)
+  /*
+   * A ref as well as the state, so a second click in the same frame finds a follow already under
+   * way; and none while a merge's answer is lost — a follow moves the root the plan settles it by.
+   */
+  const followingRef = useRef(false)
+  const follow = async (prefer?: string) => {
+    if (!target || neuron === undefined || !merged || !anchors || followingRef.current) return
+    if (merged.unsettled.length > 0) {
+      setNotice(
+        'A merge sent earlier has not been settled; Submit settles it before the neuron can be followed.',
+      )
+      return
+    }
+    followingRef.current = true
+    setFollowing(true)
+    setNotice('Reading where the neuron’s tips are now…')
+    let answer
+    try {
+      answer = await followEdit(
+        { scope: target, reviewedRoot: neuron, from: merged.currentRoot, anchors, prefer },
+        { deployment: target.deployment },
+      )
+    } finally {
+      followingRef.current = false
+      setFollowing(false)
+    }
+    if (!answer.ok) {
+      setNotice(answer.message)
+      return
+    }
+    const { entry } = answer
+    const refused = appendHeld({ docId, nodeId: node.id }, (now) => appendEntry(now, entry))
+    if (refused !== undefined) {
+      setNotice(`The neuron could not be followed: ${refused}`)
+      return
+    }
+    const unknown = anchors.unknown ?? 0
+    setNotice(
+      (entry.away.length === 0
+        ? `Followed the neuron to ${entry.to}; every tip is on it.`
+        : `Followed the neuron to ${entry.to}, the part holding ${plural(entry.kept, 'tip')}. ${plural(entry.away.length, 'tip')} went with the other part and left the list.`) +
+        (unknown > 0
+          ? ` ${plural(unknown, 'merged piece')} could not be checked (the record keeps only a summary of merges this old) and ${unknown === 1 ? 'is' : 'are'} still counted in the neuron.`
+          : ''),
+    )
+  }
   // Why a piece cannot be extended, where it cannot: read by each row and by Auto-extend listed.
   const blockedOf = useCallback(
     (id: string) => {
@@ -1343,7 +1424,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                             ? '✓ merged'
                             : done === 'joined'
                               ? '✓ joined, not in the neuron yet'
-                              : '✓ merged into another neuron'}
+                              : done === 'split'
+                                ? 'split off with the other part'
+                                : '✓ merged into another neuron'}
                         </span>
                       )}
                       {inNeuron && !done && (
@@ -1541,6 +1624,38 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           {neuronEdited && (
             <span className="review-body__edited">
               query neuron edited since these suggestions were generated
+              <FollowButton
+                disabled={following || anchors === undefined}
+                onClick={() => void follow()}
+                title="Read where this neuron’s tips are now and carry on with the part holding the most of them. Tips on the other parts leave the list; your verdicts are kept."
+              >
+                {following ? 'following…' : 'Follow the edit'}
+              </FollowButton>
+            </span>
+          )}
+          {followed && !neuronEdited && (
+            <span title={`Followed ${followed.from} to ${followed.to} at ${followed.at}.`}>
+              {followed.away.length === 0
+                ? `followed to ${followed.to}`
+                : `${plural(followed.away.length, 'tip')} left with the part split off`}
+              {nearEven && (
+                <FollowButton
+                  disabled={following}
+                  onClick={() => void follow(nearEven.root)}
+                  title={`The other part, ${nearEven.root}, holds ${plural(nearEven.tips, 'tip')} against this part’s ${formatNumber(followed.kept)}: either could be the neuron. Follow it instead, and these tips come back.`}
+                >
+                  follow the other part instead
+                </FollowButton>
+              )}
+              {unplaced > 0 && (
+                <FollowButton
+                  disabled={following}
+                  onClick={() => void follow(followed.to)}
+                  title="Tips searched since the neuron was followed: read which part each is on."
+                >
+                  place {plural(unplaced, 'new tip')}
+                </FollowButton>
+              )}
             </span>
           )}
           {absorbed && (
@@ -1850,4 +1965,29 @@ function numberOr(raw: unknown): number | undefined {
   if (!text) return undefined
   const value = Number(text)
   return Number.isFinite(value) ? value : undefined
+}
+
+/** One of the foot's small buttons for following the neuron through an edit. */
+function FollowButton({
+  disabled,
+  onClick,
+  title,
+  children,
+}: {
+  disabled: boolean
+  onClick: () => void
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className="review-body__follow"
+      disabled={disabled}
+      onClick={onClick}
+      title={title}
+    >
+      {children}
+    </button>
+  )
 }

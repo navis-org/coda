@@ -34,6 +34,8 @@ import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import type { SubmitState } from './mergeSession'
 import type * as VerdictLog from '../../data/verdictLog'
+import type * as FollowEdit from '../../packs/seam/followEdit'
+import type * as MergeSession from './mergeSession'
 import { resetVerdictLog, verdictLogState, writeSharing } from '../../data/verdictLog'
 import { ReviewBody, submitPress } from './ReviewBody'
 import { VerdictButtons } from './VerdictButtons'
@@ -70,7 +72,15 @@ const checkPick = vi.fn()
 vi.mock('../../packs/seam/pickCheck', () => ({
   checkPick: (...args: unknown[]) => checkPick(...args),
 }))
-vi.mock('./mergeSession', () => ({
+/** Reading where the neuron's tips went, faked: what it answers is the test's. */
+const followEditFake = vi.fn()
+vi.mock('../../packs/seam/followEdit', async (importOriginal) => ({
+  ...(await importOriginal<typeof FollowEdit>()),
+  followEdit: (...args: unknown[]) => followEditFake(...args),
+}))
+vi.mock('./mergeSession', async (importOriginal) => ({
+  // The record's held append is the real one: a follow writes through it.
+  appendHeld: (await importOriginal<typeof MergeSession>()).appendHeld,
   STILL_OUT_NOTICE: 'A merge sent earlier has not answered yet.',
   openSubmit: (...args: unknown[]) => openSubmit(...args),
   closeSubmit: () => closeSubmit(),
@@ -879,6 +889,96 @@ describe('currency on the review card', () => {
     ])
     expect(document.querySelector('.review-row__outdated')).toBeNull()
     expect(document.querySelector('.review-body__edited')).toBeNull()
+  })
+})
+
+/**
+ * Following the neuron through an edit (`followEdit.ts`, `docs/seam-split-review-plan.md`): the
+ * outdated neuron's button reads where its tips are, the follow goes into the record, and the tips
+ * on the other part leave the list.
+ */
+describe('following an edited neuron', () => {
+  const NEURON = '720575940621522189'
+  const KEPT = '720575940800000001'
+  const CAVE_DATASET: Value = {
+    kind: 'dataset',
+    sourceId: 'cave',
+    datasetId: 'test_stack:1',
+    label: 'test',
+  }
+  /** `TIPS` with the supervoxel each tip was found on. */
+  const ANCHORED: TableValue = makeTable(
+    tableSchema(...TIPS.schema.columns, column('tip_sv', 'str')),
+    { ...TIPS.data, tip_sv: ['73747834149376601', '73747834149376602'] },
+  )
+  const entry = {
+    kind: 'followed',
+    deployment: DEFAULT_CAVE_SERVER,
+    datastack: 'test_stack',
+    reviewedRoot: NEURON,
+    from: NEURON,
+    to: KEPT,
+    at: '2026-11-24T12:00:00.000Z',
+    away: ['73747834149376602'],
+    placed: ['73747834149376601', '73747834149376602'],
+    kept: 1,
+    others: [{ root: '720575940800000002', tips: 1 }],
+    left: [],
+  }
+
+  beforeEach(() => setToken(DEFAULT_CAVE_SERVER, 'test-token'))
+  afterEach(() => {
+    resetCredentials()
+    edited.clear()
+    followEditFake.mockReset()
+  })
+
+  it('reads the tips’ supervoxels from the neuron’s root now, and records the part followed', async () => {
+    edited.add(NEURON)
+    followEditFake.mockResolvedValue({ ok: true, entry })
+    draw({ mode: 'candidate' }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    const button = screen.getByRole('button', { name: 'Follow the edit' })
+    await act(async () => fireEvent.click(button))
+    expect(followEditFake).toHaveBeenCalledTimes(1)
+    expect(followEditFake.mock.calls[0]![0]).toMatchObject({
+      reviewedRoot: NEURON,
+      from: NEURON,
+      anchors: { tips: ['73747834149376601', '73747834149376602'], pieces: [] },
+    })
+    const merges = useGraphStore.getState().graph.nodes[0]!.params['merges']
+    expect(JSON.parse(String(merges))).toEqual([entry])
+  })
+
+  it('lists only the tips on the part followed, and says how many left', () => {
+    edited.add(NEURON)
+    draw(
+      { mode: 'candidate', merges: JSON.stringify([entry]) },
+      true,
+      CANDIDATES,
+      ANCHORED,
+      CAVE_DATASET,
+    )
+    // The candidate of tip 22 is gone with its tip; tip 11's two remain.
+    expect(rows().some((r) => r.textContent?.includes('648518347608868926'))).toBe(false)
+    expect(rows().some((r) => r.textContent?.includes('648518346368395605'))).toBe(true)
+    // The followed root is current, so the neuron is no longer said to be edited.
+    expect(document.querySelector('.review-body__edited')).toBeNull()
+    expect(document.querySelector('.list-body__foot')?.textContent).toMatch(
+      /1 tip left with the part split off/,
+    )
+    // The other part holds as many tips as this one: either could be the neuron.
+    expect(screen.getByRole('button', { name: 'follow the other part instead' })).toBeTruthy()
+  })
+
+  it('says why where the neuron cannot be followed, and writes nothing', async () => {
+    edited.add(NEURON)
+    followEditFake.mockResolvedValue({ ok: false, message: 'No supervoxels to read.' })
+    draw({ mode: 'candidate' }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Follow the edit' })),
+    )
+    expect(useGraphStore.getState().notice).toBe('No supervoxels to read.')
+    expect(useGraphStore.getState().graph.nodes[0]!.params['merges'] ?? '').toBe('')
   })
 })
 

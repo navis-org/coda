@@ -233,11 +233,49 @@ there. Nothing reads the columns yet: the review queue starts reading them in ph
 seen live: a run in the app, to check `tip_sv` is filled on real ends and `cand_sv` matches the
 candidate's root at the search's moment.
 
-**Phase 2: follow the neuron.** The `followed` entry and `mergedSoFar` reading it, the anchor
-asker, dropped tips leaving the queue and counts, the foot line with its folded list, and
-the outdated tags made into buttons (section 6). The side rule from section 4. Tests: `mergedSoFar`
-over a record with a follow (and a follow undone), the queue with dropped tips, and a Submit plan
-after a follow.
+**Phase 2: follow the neuron (built 2026-11-24).** A follow is a `FollowEntry` in the merge
+record (`mergeRecord.ts`): `from`, `to`, the tip supervoxels found on another part (`away`), every
+tip supervoxel asked about (`placed`), how many were kept, the other parts with their tip counts (`others`), and the
+merged pieces that went with them (`left`). `mergedSoFar` reads it: `Groups` moves the neuron's
+group to `to`, as a merge's new root, so the scene, `Current`, Submit's check and the merges made
+afterwards all build on it; `followed` is the last follow, and `left` its lost pieces, out of
+`pieces`. Like `away`, `left` is the last follow's: every follow places all merged pieces again.
+A followed neuron's record is never shortened (`shortenedRecord`): a later follow places its
+merged pieces by the supervoxels only their full entries hold. Follows are replayed with the merges, and is no row of
+`Merges` (`mergeEntries`).
+
+**Which tips leave is stored, not asked at every render** — a change from section 3. `evaluate`
+cannot fetch, and `Layers` and Submit's plan have to agree with the card's list, so all three
+read one function over the record: `cutOffTips` (`followEdit.ts`, dropped by `withoutTips`, as
+`unreachedTips` is) takes the neuron's tips and
+its merged pieces' tips whose `tip_sv` is in the last follow's `away`, then the tips of every
+piece no longer reached through accepted pieces once those are gone (`piecesOf` over the
+accepted pairs, as `unreachedTips` reads it — one derivation of where a piece sits). A later follow replaces the
+earlier one's `away`, so following an undone split gives the tips back. What is lost: tips
+searched after a follow are not placed until the reader presses **place N new tips** (a follow
+to the same root; the tips counted are those not in the last follow's `placed`). A follow is
+refused while a merge's answer is lost, since it moves the root the plan settles that merge by,
+and a chosen part that holds none of the tips now is refused rather than emptying the list.
+
+A merged piece a follow lost (`left`) is `mergedAs` **`split`**: drawn as no part of the neuron,
+not counted for Submit, refused by the plan as `split-off`, and its tips leave with it whatever
+their supervoxels say. The walk for what is still reached starts from the neuron and the pieces
+still merged into it, as the plan's `acceptedTree` does. A part followed away from while it
+stands leaves `roots`, so a search can offer it, and Submit merge it, back. Another neuron's
+follow takes its lost pieces out of this one's `elsewhere`. Merged pieces the record keeps only
+short (a neuron shortened before its first follow) cannot be placed; the notice says how many.
+
+The reads are `followEdit` (one `supervoxelRoots` call at the server's now for every tip and
+merged piece, plus `l2ChunkCounts` only at a tie), started from the card's foot: **Follow the
+edit** beside the outdated note, **follow the other part instead** where `nearEvenOf` finds
+another part with ≥ 4/5 the tips, and **place N new tips**. The entry is appended through
+`holdForWrite`, as Submit appends, so it is refused while a batch holds the card. Not built here:
+the folded list of dropped tips (the foot gives the count); making the candidate's **outdated**
+tag a button (phase 4). A cut-off extended piece stays in the extend plan, so the search still
+searches it and the foot's "N pieces extended" still counts it, until the reader rejects it or
+stops extending it; re-deriving the plan from what a follow leaves would tell the search, which
+section 3 decided against. Not yet seen live: a follow of a real split; that comes with phase 3's
+sandbox split, asked first.
 
 **Phase 3: the gallery announces.** The channel from `splitAccept.ts`, and cards following at
 once. The gallery's Undo is followed the same way. The Neuroglancer card's `replaceSegments`

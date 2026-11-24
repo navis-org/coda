@@ -22,7 +22,7 @@ import type {
 } from '../../packs/seam/mergePlan'
 import type { MergeRecordEntry } from '../../packs/seam/mergeRecord'
 import type { QueueTip } from '../../packs/seam/reviewQueue'
-import { decodeRecord, settledEntry } from '../../packs/seam/mergeRecord'
+import { decodeRecord, mergeEntries, settledEntry } from '../../packs/seam/mergeRecord'
 import { useGraphStore } from '../../store/graphStore'
 import { node } from '../../test/graph'
 import { clearStorage } from '../../test/jsdomStubs'
@@ -65,7 +65,9 @@ const {
 
 const store = () => useGraphStore.getState()
 const record = () =>
-  decodeRecord(store().graph.nodes.find((n) => n.id === 'review')!.params['merges'])
+  mergeEntries(
+    decodeRecord(store().graph.nodes.find((n) => n.id === 'review')!.params['merges']),
+  )
 
 /** The press, in the document on screen: filled in once the store has one (`beforeEach`). */
 let REQUEST = {

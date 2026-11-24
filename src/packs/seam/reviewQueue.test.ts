@@ -66,6 +66,8 @@ import {
   verdictPress,
   withExtended,
   withVerdict,
+  mergedAs,
+  stillToMerge,
 } from './reviewQueue'
 import { LARGE_PIECE_CHUNKS, pairsOf } from './pieces'
 import type { ExtendPair } from './pieces'
@@ -863,6 +865,8 @@ describe('the scene after merges', () => {
     elsewhere: new Set<string>(),
     unsettled: [],
     absorbedInto: undefined,
+    followed: undefined,
+    left: new Set<string>(),
   }
 
   it('shows the neuron at its new root, and only the pieces still to merge', () => {
@@ -2589,5 +2593,40 @@ describe('Auto-extend: what is the reader\u2019s and what is not', () => {
         extended: false,
       })
     })
+  })
+})
+
+/** Where Submit put a piece, as the card and the plan read it (`mergedAs`). */
+describe('mergedAs', () => {
+  const so = {
+    currentRoot: 'n2',
+    roots: ['n1', 'n2'],
+    pieces: new Set(['p']),
+    joined: new Map([['j', 'g']]),
+    otherRoots: new Set<string>(),
+    elsewhere: new Set(['e']),
+    unsettled: [],
+    absorbedInto: undefined,
+    followed: undefined,
+    left: new Set(['s']),
+  }
+  it('names a piece a follow split off, before anything else, and is undefined for the rest', () => {
+    expect(['p', 'j', 'e', 's', 'x'].map((id) => mergedAs(so, id))).toEqual([
+      'merged',
+      'joined',
+      'elsewhere',
+      'split',
+      undefined,
+    ])
+    // Split off, it is neither to submit nor drawn as accepted.
+    expect(
+      stillToMerge(
+        new Map([
+          ['s', []],
+          ['x', []],
+        ]),
+        so,
+      ),
+    ).toEqual(['x'])
   })
 })

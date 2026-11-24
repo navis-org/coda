@@ -280,6 +280,7 @@ function ownTip(pick: HandPick): QueueTip {
     search: 'done',
     kind: 'hand',
     tipNm: pick.contactNm,
+    ...(pick.tipSv !== undefined ? { tipSv: pick.tipSv } : {}),
     r: undefined,
     q: undefined,
     pTip: undefined,

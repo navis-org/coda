@@ -260,7 +260,7 @@ async function plan(request: SubmitRequest): Promise<void> {
    * on screen in the document it was pressed in.
    */
   for (const entry of made.settled ?? []) {
-    const refused = appendHeld(request, entry)
+    const refused = appendHeld(request, (now) => appendRecorded(now, entry))
     if (refused) return endWith(`Submit was not opened: ${refused}`)
   }
   publish({
@@ -281,14 +281,16 @@ const MOVED =
 type Card = Pick<SubmitRequest, 'docId' | 'nodeId'>
 
 /**
- * Append one entry to the card's record through a short hold, which refuses unless the card is on
- * screen in the document it was pressed in and no batch is holding one. Why not, or undefined.
+ * Append to the card's record through a short hold, which refuses unless the card is on screen in
+ * the document it was pressed in and no batch is holding one: a merge's entry (`appendRecorded`),
+ * or anything else the record takes, as a change to its text — a follow (`ReviewBody`). Why not,
+ * or undefined.
  */
-function appendHeld(card: Card, entry: MergeRecordEntry): string | undefined {
+export function appendHeld(card: Card, change: (now: unknown) => string): string | undefined {
   try {
     const hold = useGraphStore.getState().holdForWrite(card.docId, card.nodeId)
     try {
-      hold.update('merges', (now) => appendRecorded(now, entry))
+      hold.update('merges', change)
     } finally {
       hold.release()
     }
@@ -352,7 +354,7 @@ function waitFor(
     left -= 1
     if (left === 0) endWait(timer)
     if (!entry) return
-    const refused = appendHeld(card, entry)
+    const refused = appendHeld(card, (now) => appendRecorded(now, entry))
     // A merge that landed is one whatever became of its record: SEAM hears of it.
     // Only one made into the neuron: one short of it may never get there.
     if (entry.outcome === 'merged' && intoNeuron && merged(entry.candidateRoot)) {

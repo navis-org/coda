@@ -18,7 +18,7 @@ import {
   tickedWith,
   withoutOrphans,
 } from './mergePlan'
-import type { MergeRecordEntry, RecordOutcome } from './mergeRecord'
+import type { FollowEntry, MergeRecord, MergeRecordEntry, RecordOutcome } from './mergeRecord'
 import type { Candidate, QueueTip, Verdict } from './reviewQueue'
 import { verdictKey } from './pieces'
 
@@ -160,7 +160,7 @@ const made = (reviewedRoot: string, candidateRoot: string, newRoot: string) =>
 const request = (
   queue: QueueTip[],
   judged: [string, Verdict][],
-  record: MergeRecordEntry[] = [],
+  record: MergeRecord = [],
 ): PlanRequest => ({
   datastack: 'test',
   queue,
@@ -262,6 +262,65 @@ describe('planMerges', () => {
     expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['8', '9'])
     expect(plan.merges.every((m) => m.neuron.supervoxel === '1011')).toBe(true)
     expect(refusals(plan)).toEqual([['7', 'already-merged']])
+  })
+
+  /**
+   * A neuron followed through a split (`FollowEntry`, `followEdit.ts`): the plan builds on the
+   * part followed, and a merged piece the split took with the other part is refused for what it
+   * is — not "outdated", not planned again.
+   */
+  it('plans onto the part a follow moved the neuron to, refusing a piece the split took', async () => {
+    const { fake, asked } = services()
+    const follow: FollowEntry = {
+      kind: 'followed',
+      deployment: OPTIONS.deployment,
+      datastack: 'test',
+      reviewedRoot: NEURON,
+      from: '101',
+      to: '201',
+      at: '2026-11-24T12:00:00.000Z',
+      away: [],
+      placed: [],
+      kept: 2,
+      others: [{ root: '202', tips: 1 }],
+      left: ['7'],
+    }
+    const plan = await planned(request(queue, all, [made(NEURON, '7', '101'), follow]), fake)
+    expect(plan.currentRoot).toBe('201')
+    expect(asked.latest).toEqual([['201', '8', '9']])
+    expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['8', '9'])
+    expect(refusals(plan)).toEqual([['7', 'split-off']])
+  })
+
+  /** A part followed away from while it stands is a separate object: it can be merged back. */
+  it('plans the part a follow moved away from, as any other piece', async () => {
+    const back = [tip(1, [candidate('201', 1, 0.1)])]
+    const first: FollowEntry = {
+      kind: 'followed',
+      deployment: OPTIONS.deployment,
+      datastack: 'test',
+      reviewedRoot: NEURON,
+      from: NEURON,
+      to: '201',
+      at: '2026-11-24T12:00:00.000Z',
+      away: [],
+      placed: [],
+      kept: 3,
+      others: [{ root: '202', tips: 3 }],
+      left: [],
+    }
+    const swapped: FollowEntry = {
+      ...first,
+      from: '201',
+      to: '202',
+      others: [{ root: '201', tips: 3 }],
+    }
+    const plan = await planned(
+      request(back, [['201', 'accept']], [first, swapped]),
+      services().fake,
+    )
+    expect(plan.currentRoot).toBe('202')
+    expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['201'])
   })
 
   /*

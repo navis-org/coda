@@ -74,6 +74,8 @@ export type PlanRefusal =
   | 'already-merged'
   /** This workflow merged it into another reviewed neuron already: it is part of that one now. */
   | 'merged-elsewhere'
+  /** Merged by this workflow, then split off with a part the neuron was followed away from. */
+  | 'split-off'
   /** Its root is not current: the piece was edited since the suggestions were made. */
   | 'outdated'
   /** The neuron's root is not current, so none of its merges is made (user, 2026-11-15). */
@@ -335,7 +337,13 @@ async function plan(
   }
   const open = [...pieces.keys()].filter((candidateRoot) => {
     const onto = joinedOnto(candidateRoot)
-    if (inNeuron.has(candidateRoot)) {
+    if (own.left.has(candidateRoot)) {
+      reject(
+        candidateRoot,
+        'split-off',
+        'Merged by this workflow, then split off the neuron with the other part when it was followed.',
+      )
+    } else if (inNeuron.has(candidateRoot)) {
       reject(
         candidateRoot,
         'already-merged',

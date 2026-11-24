@@ -11483,6 +11483,23 @@ details[open] > summary.tile__label {
 .review-body__edited {
   color: var(--status-refused);
 }
+/* Following the neuron through an edit: small text buttons inside a foot fact. */
+.review-body__follow {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: none;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+.review-body__follow:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 .review-row__facts {
   grid-area: facts;
   font-size: 10px;

@@ -52,7 +52,8 @@ import {
   extendedTable,
   verdictKey,
 } from './pieces'
-import { decodePicks, withLivePicks } from './handPicks'
+import { cutOffTips } from './followEdit'
+import { decodePicks, withLivePicks, withoutTips } from './handPicks'
 import { suggestionLayer } from './scene'
 import type { CurrentItem, QueueTip, ScenePiece, Verdict } from './reviewQueue'
 import {
@@ -483,22 +484,24 @@ export const reviewNode = packNode({
     // The hand picks go on last (`withPicks`), so one on a piece accepted and never extended
     // keeps its own row: placed before, it was dropped with that piece's tips.
     const { stored, plan, growth, verdicts } = reviewStateOf(ctx.params, built)
-    const queue = withLivePicks(
+    const record = decodeRecord(ctx.params.merges)
+    // Read for the wired dataset's chunkedgraph only, as the card and the plan read it.
+    const dataset = ctx.input('dataset')
+    const scope = caveScopeOf(isDatasetValue(dataset) ? dataset : undefined)
+    // Less the tips that went with a part the neuron was split from (`cutOffTips`).
+    const live = withLivePicks(
       liveQueue(built, growth.tree),
       decodePicks(ctx.params.picks),
       verdicts,
       growth.tree,
     )
+    const queue = withoutTips(live, cutOffTips(live, record, scope, verdicts))
     // The cursor resolves within the picked neuron only, so a cursor left on another neuron's
     // tip — after the fallback to the first, or a hand edit — shows nothing rather than a pair
     // from a neuron the card is not on.
     const neuron = pickedNeuron(queue, String(ctx.params.neuron))
     const mine = tipsOf(queue, neuron)
     const here = currentOfQueue(mine, String(ctx.params.current), Number(ctx.params.rank))
-    const record = decodeRecord(ctx.params.merges)
-    // Read for the wired dataset's chunkedgraph only, as the card and the plan read it.
-    const dataset = ctx.input('dataset')
-    const scope = caveScopeOf(isDatasetValue(dataset) ? dataset : undefined)
     const pieces = scenePieces(
       mine,
       neuron,

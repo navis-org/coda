@@ -87,6 +87,7 @@ const MERGED: ReadonlySet<string> = new Set(['merged', 'already-merged'])
 const REFUSAL_LABEL: Record<PlanRefusal, string> = {
   'already-merged': 'already merged',
   'merged-elsewhere': 'in another neuron',
+  'split-off': 'split off',
   outdated: 'outdated',
   'neuron-outdated': 'neuron edited',
   'parent-refused': 'nothing to merge onto',

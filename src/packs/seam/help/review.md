@@ -306,7 +306,24 @@ The card follows the neuron to its new root, in its own viewer and on `Current`.
 
 ### Outdated neurons and pieces
 
-With a CAVE dataset wired and you signed in, the card also checks whether the neuron and its candidates are still current, as they arrive. A candidate edited since it was suggested gets a red **outdated** tag. If the neuron itself has been edited — by somebody else, not by your own Submit — the foot says so and Submit is greyed out. Run the suggestions again on the neuron's new root to carry on.
+With a CAVE dataset wired and you signed in, the card also checks whether the neuron and its candidates are still current, as they arrive. A candidate edited since it was suggested gets a red **outdated** tag. If the neuron itself has been edited — split in Neuroglancer, say, or by somebody else, not by your own Submit — the foot says so and Submit is greyed out until you follow the edit.
+
+### Following a split neuron
+
+Splitting off a false merge leaves the neuron as two parts, each with a new root ID. Press **Follow the edit**, beside the outdated note in the foot, and the card carries on with the part that holds the most of the neuron's tips. If two parts hold the same number of tips, it takes the larger one. The tips on the other part leave the list, along with any piece you accepted at one of them and everything you extended beyond it. Your verdicts are kept, and Submit works again, on the part you followed.
+
+The card can tell which part a tip went with because Suggest Merges records the supervoxel each tip was found on (`tip_sv`). A split never changes a supervoxel, only which root it belongs to. Suggestions made before 24 November 2026, and published sets, carry no such supervoxels, so a neuron reviewed from them cannot be followed: run Suggest Merges again on the new root.
+
+Afterwards the foot says how many tips left with the part split off. Two more buttons can appear beside it:
+
+| Button | When |
+| ------ | ---- |
+| follow the other part instead | another part holds at least four fifths as many tips, so either could be the neuron. Following it brings the dropped tips back and drops the others |
+| place N new tips | Suggest Merges searched more tips after you followed. Press it to read which part those are on |
+
+A piece Submit had already merged into the neuron that went with the other part is tagged **split off with the other part**. Submit does not merge it again, and its tips leave the list with it.
+
+Undoing the split gives the neuron a new root again, and **Follow the edit** brings every tip back.
 
 This is common with a published set, which is a snapshot: on Aedes, a neuron from a set a few weeks old has often been edited since.
 

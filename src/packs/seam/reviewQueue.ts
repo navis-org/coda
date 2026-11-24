@@ -50,6 +50,7 @@
  * its own, and every one of them has a tip 0.
  */
 
+import { isNodeId } from '../../data/cave/graphLayout'
 import { groupBy } from '../../core/collections'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
@@ -164,6 +165,12 @@ export interface QueueTip {
   readonly kind: string
   readonly tipNm: readonly [number, number, number]
   /**
+   * The supervoxel the tip was found on (`tip_sv`): what places it after the neuron is split
+   * (`followEdit.ts`). Absent where the search published none — a published set, a run from
+   * before 2026-11-24 — and then the tip is never dropped.
+   */
+  readonly tipSv?: string
+  /**
    * SEAM's estimate of how often a first candidate at this tip's `q` is right — a staircase of a
    * few wide steps over `q`, fitted on judged tips (refitted 2026-11-18: 7 steps in production, 9
    * in the single seed, each on at least 20 tips). **A label only** (SEAM, 2026-11-18): never
@@ -215,6 +222,7 @@ export function buildQueue(
             ? 'never'
             : 'waiting',
       kind: text(tips, 'kind', i) ?? 'tip',
+      ...supervoxelAt(tips, 'tip_sv', i),
       tipNm: [
         numberAt(tips, 'x', i) ?? 0,
         numberAt(tips, 'y', i) ?? 0,
@@ -1097,16 +1105,23 @@ export function stillToMerge(
  * together — the piece they were merged onto as much as the pieces merged onto it), into another
  * reviewed neuron (`elsewhere`), or nowhere.
  */
-export type MergedAs = 'merged' | 'joined' | 'elsewhere'
+/**
+ * Where Submit put a piece: in the neuron, joined short of it, in another reviewed neuron — or
+ * merged and since **split off** with a part the neuron was followed away from (`MergedSoFar.left`):
+ * part of neither, and not to be merged again.
+ */
+export type MergedAs = 'merged' | 'joined' | 'elsewhere' | 'split'
 
 export function mergedAs(merged: MergedSoFar | undefined, id: string): MergedAs | undefined {
+  if (merged?.left.has(id)) return 'split'
   if (merged?.pieces.has(id)) return 'merged'
   if (merged?.joined.has(id)) return 'joined'
   return merged?.elsewhere.has(id) ? 'elsewhere' : undefined
 }
 
 /** Part of a neuron's root, not drawn or asked about as itself. */
-const inAnotherRoot = (as: MergedAs | undefined) => as === 'merged' || as === 'elsewhere'
+const inAnotherRoot = (as: MergedAs | undefined) =>
+  as === 'merged' || as === 'elsewhere' || as === 'split'
 
 /**
  * A verdict, keyed on the neuron and the piece (the header says why not the tip).
@@ -1928,6 +1943,9 @@ export function extendBlocked(at: {
     )
   }
   if (at.done === 'elsewhere') return 'Merged into another neuron by Submit.'
+  if (at.done === 'split') {
+    return 'Merged by Submit, then split off the neuron with the other part when it was followed.'
+  }
   if (at.done === 'joined') {
     return (
       'Merged by Submit with other accepted pieces, short of the neuron; the next Submit takes ' +
@@ -2286,6 +2304,12 @@ export function extendLabel(progress: ExtendProgress): string {
     case 'failed':
       return 'search failed'
   }
+}
+
+/** A supervoxel id cell, as `{ tipSv }`, or nothing where the cell holds none. */
+function supervoxelAt(table: TableValue, name: string, row: number): { tipSv?: string } {
+  const id = text(table, name, row)
+  return id !== undefined && isNodeId(id) ? { tipSv: id } : {}
 }
 
 function text(table: TableValue, name: string, row: number): string | undefined {
