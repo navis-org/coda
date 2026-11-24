@@ -41,6 +41,8 @@ function finished(
     end: {
       rows,
       candRoot: BigUint64Array.from({ length: rows }, (_, at) => BigInt(mark * 100 + at)),
+      repSupervoxel: new BigUint64Array(rows),
+      tipSupervoxel: undefined,
       columns: { min_dist_um: new Float64Array(rows) },
       tip: options.row ?? 0,
       missingQuery: false,
@@ -280,7 +282,7 @@ describe('a run answered from memory', () => {
     // A memory with room for one end, holding the second neuron's. Measuring the first neuron's
     // end pushes it out — and it is the very next one wanted. Read from the memory as the loop
     // reached each neuron, a run larger than the budget would measure nearly all of itself again.
-    const each = 512 + 100 * 20
+    const each = 512 + 100 * 28
     const memory = endMemory(each)
     memory.set('end-2', finished(2, { rows: 100 }), 0)
     const held = heldEnds(memory, ['end-1', 'end-2'])
@@ -349,8 +351,9 @@ describe('what is kept', () => {
   })
 
   it('drops the end used longest ago once it is over its budget', () => {
-    // Each end here is 512 + 100 x (8 + 8 + 4) bytes.
-    const each = 512 + 100 * 20
+    // Each end here is 512 + 100 x (8 + 8 + 8 + 4) bytes: its roots, contact supervoxels, gaps
+    // and order.
+    const each = 512 + 100 * 28
     const memory = endMemory(each * 2)
     memory.set('a', finished(1, { rows: 100 }), 0)
     memory.set('b', finished(2, { rows: 100 }), 0)

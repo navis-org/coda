@@ -79,6 +79,7 @@ import type { EndCandidates, OwnTipList } from './ownTip'
 import { ownTipRule } from './ownTip'
 import type { MeasuredPool, RankedPool } from './rankPool'
 import { rankPool } from './rankPool'
+import { nearestVoxels, supervoxelAt } from './rootedBox'
 import type { TreeRanker } from './treeRanker'
 
 function refuse(why: string): never {
@@ -180,6 +181,12 @@ export interface SearchedEnd extends RankedPool {
   readonly refusal?: string
   /** Which tip it was searched at — an index into `tipsNm`, carried through. */
   readonly tip: number
+  /**
+   * The query's supervoxel nearest the tip, at the search's moment (`tipSupervoxelOf`) — what a
+   * review card places the tip by after a split (`tip_sv`, `docs/seam-split-review-plan.md`).
+   * Undefined where no voxel of the query lies within `TIP_ANCHOR_REACH_NM` of the tip.
+   */
+  readonly tipSupervoxel: bigint | undefined
   /** True where the query root has no voxel in its own box, and then there are no rows. */
   readonly missingQuery: boolean
   /** How many objects the pool held before the cut — the figure `top_k` is a cut *of*. */
@@ -324,9 +331,16 @@ async function searchOne(
    */
   const box = Promise.resolve().then(() => end.box())
   void box.catch(() => {})
+  /*
+   * **The tip's own supervoxel, from the box before it goes.** `measure` hands the box to the
+   * worker, which detaches it, so this is the last moment it can be read on this side. It costs
+   * the voxels near the tip, not the box (`nearestVoxels`).
+   */
+  let tipSupervoxel: bigint | undefined
   const pool = await turns.run(async () => {
     const request = await box
     throwIfAborted(options.signal)
+    tipSupervoxel = tipSupervoxelOf(request)
     return steps.measure(request, (candRoot) => {
       early = Promise.resolve()
         .then(() => steps.counts(rootsOf(candRoot)))
@@ -336,7 +350,7 @@ async function searchOne(
         )
     })
   }, options.signal)
-  if (pool.missingQuery) return emptyEnd(end.tip)
+  if (pool.missingQuery) return emptyEnd(end.tip, tipSupervoxel)
 
   throwIfAborted(options.signal)
   const counts = await topUpCounts(rootsOf(pool.candRoot), await early, steps)
@@ -356,7 +370,11 @@ async function searchOne(
     }
     candCount = countsInPoolOrder(pool.candRoot, counts)
   } catch (error) {
-    return { ...emptyEnd(end.tip), missingQuery: false, refusal: messageOf(error) }
+    return {
+      ...emptyEnd(end.tip, tipSupervoxel),
+      missingQuery: false,
+      refusal: messageOf(error),
+    }
   }
 
   /*
@@ -381,6 +399,7 @@ async function searchOne(
   const measured: MeasuredPool = {
     rows: pool.rows,
     candRoot: pool.candRoot,
+    repSupervoxel: pool.repSupervoxel,
     /*
      * The two size features join the rest here, which is the one place that knows they came
      * by a second route. `rankPool` is deliberately feature-agnostic and must not learn it.
@@ -402,7 +421,7 @@ async function searchOne(
    * which over a few hundred points is microseconds against this end's 560 ms of measuring.
    */
   const list: EndCandidates = { rows: ranking.rows, columns: ranking.columns, tip: end.tip }
-  return gather(ranking, ownTipRule(tipsNm, [list], ownUm)[0]!, pool)
+  return gather(ranking, ownTipRule(tipsNm, [list], ownUm)[0]!, pool, tipSupervoxel)
 }
 
 /**
@@ -522,12 +541,39 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/**
+ * How far from a tip its own supervoxel is looked for. A tip is snapped to the mesh, so the
+ * query's nearest voxel is usually within a voxel of it: 14–17 nm at the median and never past
+ * 58 nm on 2,634 Aedes tips at 16 nm (phase 0 of `docs/seam-split-review-plan.md`). 300 nm leaves
+ * a few voxels at the search's coarser scale. Kept short on purpose: where the tip's own neurite
+ * is not in the box, no anchor is better than a neighbouring neurite's, which a split could put
+ * on the other side.
+ */
+const TIP_ANCHOR_REACH_NM = 300
+
+/**
+ * The query's supervoxel nearest the end, in the end's own box. **The query as the box has it**:
+ * a piece's ends are searched with its path written as its neuron (`labelledBox`' alias; a
+ * neuron's own ends have none), so a piece's tip finds the piece's own supervoxel — or, within
+ * `TIP_ANCHOR_REACH_NM` of where it joins, the piece it hangs from. That is harmless, and the
+ * review card relies on it being so: that close to the join the two are on the same side of any
+ * split of either, so a tip is read as on the neuron when its anchor is under the neuron **or any
+ * piece of its path** (`docs/seam-split-review-plan.md`, section 3).
+ */
+function tipSupervoxelOf(request: CandidatePoolRequest): bigint | undefined {
+  // One root asked, one voxel answered.
+  const at = nearestVoxels(request, [request.queryRoot], request.endNm, TIP_ANCHOR_REACH_NM)[0]!
+  return at < 0 ? undefined : supervoxelAt(request, at)
+}
+
 /** An end with no list: a missing query root, which is a tip worth looking at, not a failure. */
-function emptyEnd(tip: number): SearchedEnd {
+function emptyEnd(tip: number, tipSupervoxel: bigint | undefined): SearchedEnd {
   return {
     tip,
+    tipSupervoxel,
     rows: 0,
     candRoot: new BigUint64Array(0),
+    repSupervoxel: new BigUint64Array(0),
     columns: {},
     missingQuery: true,
     pooled: 0,
@@ -560,7 +606,12 @@ export function queryCountOf(
 }
 
 /** One list cut down to what the rule kept, with `geo_rank` renumbered from one. */
-function gather(ranked: RankedPool, kept: OwnTipList, pool: CandidatePool): SearchedEnd {
+function gather(
+  ranked: RankedPool,
+  kept: OwnTipList,
+  pool: CandidatePool,
+  tipSupervoxel: bigint | undefined,
+): SearchedEnd {
   const columns: Record<string, Float64Array> = {}
   for (const [name, column] of Object.entries(ranked.columns)) {
     columns[name] = Float64Array.from(kept.kept, (from) => column[from]!)
@@ -574,8 +625,10 @@ function gather(ranked: RankedPool, kept: OwnTipList, pool: CandidatePool): Sear
   columns['geo_rank'] = Float64Array.from(kept.kept, (_, at) => at + 1)
   return {
     tip: kept.tip,
+    tipSupervoxel,
     rows: kept.kept.length,
     candRoot: BigUint64Array.from(kept.kept, (from) => ranked.candRoot[from]!),
+    repSupervoxel: BigUint64Array.from(kept.kept, (from) => ranked.repSupervoxel[from]!),
     columns,
     missingQuery: pool.missingQuery,
     pooled: pool.rows,

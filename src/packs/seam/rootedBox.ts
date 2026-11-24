@@ -330,3 +330,70 @@ export async function resolveRoots(
     options.signal,
   )
 }
+
+/** A voxel centre along one axis, in absolute nanometres — the one spelling of "centre". */
+export function voxelCentreNm(box: RootedBox, axis: number, at: number): number {
+  return (box.loVoxels[axis]! + at + 0.5) * box.resolutionNm[axis]!
+}
+
+/**
+ * For each of `roots`, its voxel nearest `pointNm` within `reachNm` (anisotropic, in nanometres):
+ * the voxel's index into `box.index`, or `-1` where none of that root is in reach. Ties go to the
+ * first voxel in scan order, so the answer is the same every time. A root of `0n` (no object)
+ * matches nothing, and neither does a root listed twice after its first place.
+ *
+ * **The one scan over a `RootedBox`** for "the supervoxel of this object nearest this point": a
+ * merge's two ends (`mergeAnchors.ts`) and a tip's own supervoxel (`searchRun.ts`'s `tip_sv`). A
+ * whole row out of reach is skipped, so it costs the voxels near the point, not the box: 0.1 ms a
+ * tip on Aedes (phase 0 of `docs/seam-split-review-plan.md`).
+ */
+export function nearestVoxels(
+  box: RootedBox,
+  roots: readonly bigint[],
+  pointNm: readonly number[],
+  reachNm: number,
+): number[] {
+  // Per supervoxel slot, which of `roots` it is under, plus one; 0 for none of them.
+  const which = new Int32Array(box.roots.length)
+  for (let slot = 0; slot < which.length; slot++) {
+    const root = box.roots[slot]!
+    if (root === 0n) continue
+    const at = roots.indexOf(root)
+    if (at >= 0) which[slot] = at + 1
+  }
+  // Squared distance from the point to each voxel centre, per axis, so the scan adds three.
+  const axis = (a: number): Float64Array =>
+    Float64Array.from(
+      { length: box.size[a]! },
+      (_, i) => (voxelCentreNm(box, a, i) - pointNm[a]!) ** 2,
+    )
+  const dx = axis(0)
+  const dy = axis(1)
+  const dz = axis(2)
+  const [sx, sy, sz] = box.size as [number, number, number]
+  const limit = reachNm * reachNm
+  const best = roots.map(() => Infinity)
+  const at = roots.map(() => -1)
+  for (let k = 0, v = 0; k < sz; k++) {
+    for (let j = 0; j < sy; j++, v += sx) {
+      const yz = dy[j]! + dz[k]!
+      // A whole row out of reach: nothing in it can be chosen.
+      if (yz > limit) continue
+      for (let i = 0; i < sx; i++) {
+        const d = dx[i]! + yz
+        if (d > limit) continue
+        const one = which[box.index[v + i]!]!
+        if (one !== 0 && d < best[one - 1]!) {
+          best[one - 1] = d
+          at[one - 1] = v + i
+        }
+      }
+    }
+  }
+  return at
+}
+
+/** The supervoxel at voxel `v` of the box (an index into `box.index`). */
+export function supervoxelAt(box: RootedBox, v: number): bigint {
+  return box.labels[box.index[v]!]!
+}

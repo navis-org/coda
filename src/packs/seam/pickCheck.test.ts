@@ -27,7 +27,7 @@ const request = (extra: Partial<PickRequest> = {}): PickRequest => ({
   ...extra,
 })
 
-const end = (at: Triple) => ({ supervoxel: '1', positionNm: at })
+const end = (at: Triple, supervoxel = '1') => ({ supervoxel, positionNm: at })
 
 function services(anchors: Anchors, l2?: () => Promise<Map<string, number>>) {
   const asked: AnchorPair[] = []
@@ -48,8 +48,8 @@ describe('checking a hand pick', () => {
   it('finds the contact between the two nearest voxels, and the root it touches now', async () => {
     const { live, asked } = services({
       ok: true,
-      neuron: end([1000, 2000, 2700]),
-      candidate: end([1000, 2400, 3000]),
+      neuron: end([1000, 2000, 2700], '73889314911551600'),
+      candidate: end([1000, 2400, 3000], '73889314911551655'),
       chunks: 0,
       onRoot: NOW,
     })
@@ -60,6 +60,9 @@ describe('checking a hand pick', () => {
       contactNm: [1000, 2200, 2850],
       gapUm: 0.5,
       l2Chunks: 17,
+      // Each side's own supervoxel: what a split of that side is followed by.
+      candSv: '73889314911551655',
+      tipSv: '73889314911551600',
     })
     // Looked for on the neuron and its unmerged pieces alike, at the place pointed to.
     expect(asked[0]).toMatchObject({

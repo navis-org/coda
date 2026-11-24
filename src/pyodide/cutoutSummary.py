@@ -288,6 +288,7 @@ def coda_candidate_pool(request, report=None):
             "rows": 0,
             "missingQuery": True,
             "candRoot": np.zeros(0, dtype=np.uint64),
+            "rep_svid": np.zeros(0, dtype=np.uint64),
             "ms": int((time.perf_counter() - started) * 1000),
         }
 

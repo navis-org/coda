@@ -154,6 +154,7 @@ describe('runCandidatePool', () => {
     rows: 2,
     missingQuery: false,
     candRoot: BigUint64Array.from([864691128455770001n, 864691128455770002n]),
+    rep_svid: BigUint64Array.from([73889314911551655n, 73889314911551656n]),
     min_dist_um: Float64Array.from([0.032, 0.032]),
     end_dist_um: Float64Array.from([0.41, 1.07]),
     ms: 2338,
@@ -174,6 +175,20 @@ describe('runCandidatePool', () => {
     expect(found.rows).toBe(2)
     expect(found.candRoot).toBeInstanceOf(BigUint64Array)
     expect(Object.keys(found.columns).sort()).toEqual(['end_dist_um', 'min_dist_um'])
+  })
+
+  /**
+   * SEAM's `rep_svid` — each candidate's supervoxel nearest the neuron — kept 64-bit and out of
+   * the float columns: it is the supervoxel a review card follows a split candidate by.
+   */
+  it('keeps each candidate’s contact supervoxel, 64-bit and exact', async () => {
+    mockedCall.mockResolvedValue(measured())
+    const found = await runCandidatePool(POOL)
+    expect([...found.repSupervoxel].map(String)).toEqual([
+      '73889314911551655',
+      '73889314911551656',
+    ])
+    expect(found.columns['rep_svid']).toBeUndefined()
   })
 
   /**
@@ -228,6 +243,7 @@ describe('runCandidatePool', () => {
       rows: 0,
       missingQuery: true,
       candRoot: new BigUint64Array(0),
+      rep_svid: new BigUint64Array(0),
       ms: 9,
     })
     const found = await runCandidatePool(POOL)

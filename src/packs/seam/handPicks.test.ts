@@ -168,13 +168,25 @@ describe('a hand pick in the list', () => {
 
 describe('the stored picks', () => {
   it('read back as written, and skip what is not a pick', () => {
-    const read = [pick(), pick({ n: 2, candidateId: '778', l2Chunks: undefined })]
+    const read = [
+      pick(),
+      pick({ n: 2, candidateId: '778', l2Chunks: undefined }),
+      pick({
+        n: 3,
+        candidateId: '779',
+        candSv: '73889314911551655',
+        tipSv: '73889314911551600',
+      }),
+    ]
     expect(decodePicks(encodePicks(read))).toEqual(read)
     expect(encodePicks([])).toBe('')
     expect(decodePicks('not json')).toEqual([])
-    expect(
-      decodePicks(JSON.stringify([[1, 'a'], 'x', [2, 'a', 'b', 'c', 1, 2, 3, 0.1, null]])),
-    ).toHaveLength(1)
+    // A pick saved before its two supervoxels were kept reads without them.
+    const old = decodePicks(
+      JSON.stringify([[1, 'a'], 'x', [2, 'a', 'b', 'c', 1, 2, 3, 0.1, null]]),
+    )
+    expect(old).toHaveLength(1)
+    expect([old[0]!.candSv, old[0]!.tipSv]).toEqual([undefined, undefined])
   })
 })
 

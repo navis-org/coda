@@ -41,6 +41,13 @@ export type PickCheck =
       readonly contactNm: Triple
       readonly gapUm: number
       readonly l2Chunks: number | undefined
+      /**
+       * The two supervoxels Submit merges by: the picked piece's nearest the neuron, and the
+       * neuron's (or its piece's) nearest the pick. What a review card follows a split of either
+       * by (`HandPick.candSv`, `HandPick.tipSv`).
+       */
+      readonly candSv: string
+      readonly tipSv: string
     }
   | { readonly ok: false; readonly message: string }
 
@@ -131,6 +138,8 @@ export async function checkPick(
       contactNm,
       gapUm: Math.round(gapUm * 1000) / 1000,
       l2Chunks: await size,
+      candSv: anchors.candidate.supervoxel,
+      tipSv: anchors.neuron.supervoxel,
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error

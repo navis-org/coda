@@ -93,6 +93,7 @@ function bytesOf(end: PublishedEnd): number {
   let bytes = OVERHEAD_BYTES
   for (const array of [
     end.end.candRoot,
+    end.end.repSupervoxel,
     end.order,
     ...Object.values(end.end.columns),
     ...Object.values(end.scores?.columns ?? {}),

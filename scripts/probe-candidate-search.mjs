@@ -46,7 +46,7 @@ import { l2ChunkCounts } from '../src/data/cave/rootIds.ts'
 import { countsInPoolOrder, searchEnds } from '../src/packs/seam/searchRun.ts'
 import { rankKeys, treeRankerFor } from '../src/packs/seam/treeRanker.ts'
 import { orderByScores } from '../src/nodes/lib/matrixShape.ts'
-import { float64Columns } from '../src/pyodide/types.ts'
+import { float64Columns, uint64From } from '../src/pyodide/types.ts'
 import { bootPyodide, installBridge, probeReport, readRepoFile } from './lib/pyodideProbe.mjs'
 import {
   AEDES_DEPLOYMENT,
@@ -298,7 +298,11 @@ for await (const end of searchEnds(
       const raw = await call('coda_candidate_pool', request)
       // `float64Columns` is the bridge's own rule — measurements are float64, ids are uint64,
       // told apart by dtype and never by a name list. Inline here it had lost exactly that.
-      return { ...raw, columns: float64Columns(raw) }
+      return {
+        ...raw,
+        repSupervoxel: uint64From(raw, 'rep_svid'),
+        columns: float64Columns(raw),
+      }
     },
     sizes: (request) => call('coda_pool_sizes', request),
     counts,

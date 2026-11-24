@@ -173,6 +173,11 @@ export interface CandidatePool {
   /** The candidate object of each row, 64-bit. */
   readonly candRoot: BigUint64Array
   /**
+   * Each row's `rep_svid`, 64-bit: the candidate's supervoxel nearest the query — its side of
+   * the contact, published as `cand_sv` (`searchTips.ts`).
+   */
+  readonly repSupervoxel: BigUint64Array
+  /**
    * Every float column `pool_features` produced, by SEAM's own names — the eight geometric
    * features, `end_dist_um`, and the contact point. **Not `l2c`/`l2x`**: those need a count this
    * side of the bridge has to fetch, and they come back from `runPoolSizes`.
@@ -213,6 +218,7 @@ export async function runCandidatePool(
     rows: numberFrom(result, 'rows'),
     missingQuery: result['missingQuery'] === true,
     candRoot: uint64From(result, 'candRoot'),
+    repSupervoxel: uint64From(result, 'rep_svid'),
     columns: float64Columns(result),
     ms: numberFrom(result, 'ms'),
   }

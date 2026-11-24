@@ -39,6 +39,8 @@ function end(scores: readonly number[], extra: Partial<SearchedEnd> = {}): Searc
     tip: 0,
     rows: n,
     candRoot: BigUint64Array.from({ length: n }, (_, i) => BigInt(100 + i)),
+    repSupervoxel: new BigUint64Array(n),
+    tipSupervoxel: undefined,
     columns: {
       geo_rank: Float64Array.from({ length: n }, (_, i) => i + 1),
       vol_um3: Float64Array.from({ length: n }, () => 1),

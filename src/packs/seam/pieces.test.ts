@@ -200,6 +200,8 @@ function endWith(
     tip: 0,
     rows: candidates.length,
     candRoot: BigUint64Array.from(candidates, (one) => BigInt(one.root)),
+    repSupervoxel: new BigUint64Array(candidates.length),
+    tipSupervoxel: undefined,
     columns: {
       min_dist_um: Float64Array.from(candidates, (one) => one.gap),
       contact_x_nm: Float64Array.from(candidates, (one) => one.at[0]),

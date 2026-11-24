@@ -73,6 +73,7 @@ const poolOf = (x: readonly number[], contacts: readonly number[][]): CandidateP
   rows: x.length,
   missingQuery: false,
   candRoot: BigUint64Array.from(x.map((_, i) => 648518347608843326n + BigInt(i))),
+  repSupervoxel: BigUint64Array.from(x.map((_, i) => 73889314911551600n + BigInt(i))),
   columns: {
     x: Float64Array.from(x),
     contact_x_nm: Float64Array.from(contacts.map((c) => c[0]!)),
@@ -140,6 +141,21 @@ describe('searchEnds', () => {
     expect(one!.pooled).toBe(3)
     expect(one!.rows).toBe(2)
     expect([...one!.columns['x']!]).toEqual([50, 1])
+  })
+
+  /**
+   * The contact supervoxels (`cand_sv`, `docs/seam-split-review-plan.md`) ride with their
+   * candidates through the sort and the cut, as the roots do. Left in the pool's order beside a
+   * re-ordered list, every candidate would be followed through a split by another's supervoxel.
+   */
+  it('keeps each candidate’s contact supervoxel with it through the rank and the cut', async () => {
+    const pool = poolOf([1, 50, 2], [near, near, near])
+    const steps = stepsFor([pool], countsFor([pool]))
+    const [one] = await collect(
+      searchEnds(TIPS, [endAt(0, 1n)], { ranker: RANKER, topK: 2, ownUm: 2 }, steps),
+    )
+    expect([...one!.candRoot]).toEqual([pool.candRoot[1], pool.candRoot[0]])
+    expect([...one!.repSupervoxel]).toEqual([pool.repSupervoxel[1], pool.repSupervoxel[0]])
   })
 
   /**
@@ -269,6 +285,7 @@ describe('searchEnds', () => {
       rows: 0,
       missingQuery: true,
       candRoot: new BigUint64Array(0),
+      repSupervoxel: new BigUint64Array(0),
       columns: {},
       ms: 1,
     }
@@ -817,5 +834,61 @@ describe('a deeper search', () => {
     await expect(run).rejects.toThrow('the bucket refused')
     expect(got).toEqual([0, 1])
     await flush()
+  })
+})
+
+/**
+ * The tip's own supervoxel (`tip_sv`): the query's voxel nearest the tip, read from the end's box
+ * **before** the box is handed to the worker, which detaches it.
+ */
+describe('the tip’s own supervoxel', () => {
+  /** Three voxels along x, 100 nm each: another object, then the query twice (supervoxel 22). */
+  const boxWithQuery = (queryRoot: bigint): CandidatePoolRequest =>
+    ({
+      labels: BigUint64Array.from([11n, 22n]),
+      index: Uint16Array.from([0, 1, 1]),
+      size: [3, 1, 1],
+      roots: BigUint64Array.from([5n, queryRoot]),
+      queryRoot,
+      resolutionNm: [100, 100, 100],
+      loVoxels: [0, 0, 0],
+      endNm: [0, 0, 0],
+    }) as unknown as CandidatePoolRequest
+
+  /** The real `measure` transfers the box; this one does too, so a late read finds it empty. */
+  const detaching = (pool: CandidatePool): SearchSteps => ({
+    ...stepsFor([pool], countsFor([pool])),
+    measure: vi.fn(async (request: CandidatePoolRequest) => {
+      structuredClone(request.index, { transfer: [request.index.buffer] })
+      return pool
+    }),
+  })
+
+  it('is the query’s supervoxel nearest the tip, read before the box goes', async () => {
+    const pool = poolOf([1], [[0, 0, 0]])
+    const [one] = await collect(
+      searchEnds(
+        TIPS,
+        [{ tip: 0, queryRoot: 1n, box: async () => boxWithQuery(1n) }],
+        { ranker: RANKER, topK: 100, ownUm: 2 },
+        detaching(pool),
+      ),
+    )
+    expect(one!.tipSupervoxel).toBe(22n)
+  })
+
+  it('is undefined where no voxel of the query lies within reach of the tip', async () => {
+    const pool = poolOf([1], [[0, 0, 0]])
+    // The query's voxels start 150 nm from the tip, here placed 5 µm away.
+    const far = { ...boxWithQuery(1n), endNm: [5_000, 0, 0] } as CandidatePoolRequest
+    const [one] = await collect(
+      searchEnds(
+        TIPS,
+        [{ tip: 0, queryRoot: 1n, box: async () => far }],
+        { ranker: RANKER, topK: 100, ownUm: 20 },
+        detaching(pool),
+      ),
+    )
+    expect(one!.tipSupervoxel).toBeUndefined()
   })
 })

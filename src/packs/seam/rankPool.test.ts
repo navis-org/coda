@@ -53,6 +53,8 @@ const RANKER = parseTreeRanker(
 const poolOf = (x: readonly number[], ids?: readonly bigint[]): MeasuredPool => ({
   rows: x.length,
   candRoot: BigUint64Array.from(ids ?? x.map((_, i) => 648518347608843326n + BigInt(i))),
+  // Each candidate's contact supervoxel, told apart from its root so a mix-up shows.
+  repSupervoxel: BigUint64Array.from(x.map((_, i) => 73889314911551600n + BigInt(i))),
   columns: {
     x: Float64Array.from(x),
     min_dist_um: Float64Array.from(x.map((v) => v / 100)),
@@ -173,7 +175,12 @@ describe('rankPool', () => {
 
   /** The model's own guard, reached through this one: a pool short of a feature it ranks on. */
   it('refuses a pool with no column for a feature the model reads', () => {
-    const pool: MeasuredPool = { rows: 1, candRoot: BigUint64Array.from([1n]), columns: {} }
+    const pool: MeasuredPool = {
+      rows: 1,
+      candRoot: BigUint64Array.from([1n]),
+      repSupervoxel: BigUint64Array.from([2n]),
+      columns: {},
+    }
     expect(() => rankPool(RANKER, pool, 100)).toThrow(/has no `x` column/)
   })
 })

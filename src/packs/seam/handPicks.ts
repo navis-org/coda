@@ -29,9 +29,12 @@
  *
  * In the `picks` param, beside the verdict that accepts it: one edit, one undo step, cleared by
  * Start over and by the eviction of its neuron (`withRecentWork`). Compact JSON, as the merge
- * record's short entries are: `[n, seed, root, candidate, x, y, z, gapUm, l2Chunks|null]`.
+ * record's short entries are: `[n, seed, root, candidate, x, y, z, gapUm, l2Chunks|null,
+ * candSv|null, tipSv|null]`. The last two were added later (2026-11-24): a pick saved before them
+ * reads without them.
  */
 
+import { isNodeId } from '../../data/cave/graphLayout'
 import type { Triple } from '../../data/precomputed/volume'
 import { NM_PER_UM } from '../../data/units'
 import { OWN_TIP_UM } from './ownTip'
@@ -59,6 +62,17 @@ export interface HandPick {
   /** How far apart those voxels are, µm. */
   readonly gapUm: number
   readonly l2Chunks: number | undefined
+  /**
+   * The picked piece's supervoxel nearest the neuron, as the check found it (`PickCheck`): the
+   * `cand_sv` a search publishes for its candidates. Absent on a pick saved before it was kept.
+   */
+  readonly candSv?: string
+  /**
+   * The neuron's (or its piece's) supervoxel nearest the pick: the `tip_sv` of a pick listed as a
+   * tip of its own, for when the neuron is split (`docs/seam-split-review-plan.md`). Absent on a
+   * pick saved before it was kept.
+   */
+  readonly tipSv?: string
 }
 
 export function decodePicks(raw: unknown): HandPick[] {
@@ -73,7 +87,7 @@ export function decodePicks(raw: unknown): HandPick[] {
   if (!Array.isArray(rows)) return []
   return rows.flatMap((row): HandPick[] => {
     if (!Array.isArray(row)) return []
-    const [n, seed, root, candidateId, x, y, z, gapUm, l2] = row as unknown[]
+    const [n, seed, root, candidateId, x, y, z, gapUm, l2, candSv, tipSv] = row as unknown[]
     const numbers = [n, x, y, z, gapUm]
     if (!numbers.every((v) => typeof v === 'number' && Number.isFinite(v))) return []
     if (
@@ -92,6 +106,8 @@ export function decodePicks(raw: unknown): HandPick[] {
         contactNm: [x, y, z] as Triple,
         gapUm: gapUm as number,
         l2Chunks: typeof l2 === 'number' ? l2 : undefined,
+        ...(typeof candSv === 'string' && isNodeId(candSv) ? { candSv } : {}),
+        ...(typeof tipSv === 'string' && isNodeId(tipSv) ? { tipSv } : {}),
       },
     ]
   })
@@ -108,6 +124,8 @@ export function encodePicks(picks: readonly HandPick[]): string {
       ...pick.contactNm,
       pick.gapUm,
       pick.l2Chunks ?? null,
+      pick.candSv ?? null,
+      pick.tipSv ?? null,
     ]),
   )
 }

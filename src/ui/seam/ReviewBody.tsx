@@ -860,11 +860,21 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     const store = useGraphStore.getState()
     const params = store.graph.nodes.find((one) => one.id === node.id)?.params
     if (store.activeTabId !== docId || !params) return
-    const { root, contactNm, gapUm, l2Chunks } = checked
+    const { root, contactNm, gapUm, l2Chunks, candSv, tipSv } = checked
     const held = decodePicks(params['picks'])
     if (held.some((one) => one.seed === neuron && one.candidateId === segment)) return
     const n = held.reduce((most, one) => Math.max(most, one.n), 0) + 1
-    const pick = { n, seed: neuron, root, candidateId: segment, contactNm, gapUm, l2Chunks }
+    const pick = {
+      n,
+      seed: neuron,
+      root,
+      candidateId: segment,
+      contactNm,
+      gapUm,
+      l2Chunks,
+      candSv,
+      tipSv,
+    }
     // Where it lands is where the queue will list it: placed by `withPicks` itself.
     const placed = listedAt(withPicks(mine, [pick]), segment)!
     // An accept left from before, on a pair no longer listed: judged again, it would be cleared.

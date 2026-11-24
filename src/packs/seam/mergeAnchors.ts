@@ -47,7 +47,7 @@ import { boxAround, openVolume } from '../../data/precomputed/volume'
 import { NM_PER_UM } from '../../data/units'
 import type { Candidate } from './reviewQueue'
 import type { BoxReader, RootedBox } from './rootedBox'
-import { boxReader, labelledBox } from './rootedBox'
+import { boxReader, labelledBox, nearestVoxels, supervoxelAt, voxelCentreNm } from './rootedBox'
 
 /**
  * How far past half the gap a piece's nearest voxel may lie.
@@ -148,16 +148,10 @@ export function anchorReachNm(minDistUm: number | undefined): number | undefined
   return reach <= MAX_REACH_NM ? reach : undefined
 }
 
-/** A voxel centre along one axis, in absolute nanometres — the one spelling of "centre". */
-function centreNm(box: RootedBox, axis: number, at: number): number {
-  return (box.loVoxels[axis]! + at + 0.5) * box.resolutionNm[axis]!
-}
-
 /**
  * The anchors in a box that has been read and rooted — the whole decision, with no I/O.
  *
- * For each root, the voxel nearest the contact (anisotropic, in nanometres), kept only within
- * `reachNm`. Ties go to the first voxel in scan order, so the answer is the same every time. A
+ * For each root, the voxel nearest the contact (`nearestVoxels`), kept only within `reachNm`. A
  * root of `0n` — no object, label 0 included (`rootsAtInstant`) — matches neither, since both
  * roots are refused as `0` before a box is read.
  */
@@ -169,60 +163,34 @@ export function anchorsInBox(
   reachNm: number,
   layout: GraphLayout,
 ): Anchors {
-  // 0 = neither; 1 = the neuron; 2 = the candidate. Indexes `best` and `at` below.
-  const kind = new Uint8Array(box.roots.length)
-  for (let slot = 0; slot < kind.length; slot++) {
-    const root = box.roots[slot]
-    kind[slot] = root === neuronRoot ? 1 : root === candidateRoot ? 2 : 0
+  // `nearestVoxels` answers a root once, so two equal roots would read as a missing candidate.
+  if (neuronRoot === candidateRoot) {
+    return refuse('same-root', `The candidate, ${candidateRoot}, is itself the neuron.`)
   }
-
-  // Squared distance from the contact to each voxel centre, per axis, so the scan adds three.
-  const axis = (a: number): Float64Array =>
-    Float64Array.from(
-      { length: box.size[a]! },
-      (_, i) => (centreNm(box, a, i) - contactNm[a]!) ** 2,
-    )
-  const dx = axis(0)
-  const dy = axis(1)
-  const dz = axis(2)
-  const [sx, sy, sz] = box.size as Triple
-  const limit = reachNm * reachNm
-  const best = [Infinity, Infinity, Infinity]
-  const at = [-1, -1, -1]
-  for (let k = 0, v = 0; k < sz; k++) {
-    for (let j = 0; j < sy; j++, v += sx) {
-      const yz = dy[j]! + dz[k]!
-      // A whole row out of reach: nothing in it can be chosen.
-      if (yz > limit) continue
-      for (let i = 0; i < sx; i++) {
-        const d = dx[i]! + yz
-        if (d > limit) continue
-        const which = kind[box.index[v + i]!]!
-        if (which !== 0 && d < best[which]!) {
-          best[which] = d
-          at[which] = v + i
-        }
-      }
-    }
-  }
+  const [neuronAt, candidateAt] = nearestVoxels(
+    box,
+    [neuronRoot, candidateRoot],
+    contactNm,
+    reachNm,
+  ) as [number, number]
 
   const reach = `${(reachNm / NM_PER_UM).toFixed(2)} µm`
-  if (at[1]! < 0) {
+  if (neuronAt < 0) {
     return refuse(
       'neuron-absent',
       `No part of neuron ${neuronRoot} lies within ${reach} of the contact today. The neuron ` +
         'may have been edited since the suggestion was made.',
     )
   }
-  if (at[2]! < 0) {
+  if (candidateAt < 0) {
     return refuse(
       'candidate-absent',
       `No part of candidate ${candidateRoot} lies within ${reach} of the contact today. It may ` +
         'have been edited or merged since the suggestion was made.',
     )
   }
-  const neuron = endAt(box, at[1]!)
-  const candidate = endAt(box, at[2]!)
+  const neuron = endAt(box, neuronAt)
+  const candidate = endAt(box, candidateAt)
   const chunks = mergeChunkDistance(
     layout,
     BigInt(neuron.supervoxel),
@@ -243,11 +211,11 @@ function endAt(box: RootedBox, v: number): MergeEnd {
   const sx = box.size[0]!
   const sy = box.size[1]!
   return {
-    supervoxel: String(box.labels[box.index[v]!]!),
+    supervoxel: String(supervoxelAt(box, v)),
     positionNm: [
-      centreNm(box, 0, v % sx),
-      centreNm(box, 1, Math.floor(v / sx) % sy),
-      centreNm(box, 2, Math.floor(v / (sx * sy))),
+      voxelCentreNm(box, 0, v % sx),
+      voxelCentreNm(box, 1, Math.floor(v / sx) % sy),
+      voxelCentreNm(box, 2, Math.floor(v / (sx * sy))),
     ],
   }
 }

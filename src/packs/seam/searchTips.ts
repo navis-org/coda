@@ -104,6 +104,13 @@ export const SEARCH_CANDIDATE_FIELDS: readonly Field[] = [
   field('seed', 'seed', 'str'),
   field('end_uid', 'end_uid', 'i64'),
   field('cand_root', 'candidateId', 'str'),
+  /*
+   * **The candidate's supervoxel nearest the neuron** — its side of the contact, SEAM's own
+   * `rep_svid` from the cutout summary, carried rather than measured again. Text, as every id
+   * (invariant 8). Followed through a split as `tip_sv` is (`TIP_SUPERVOXEL_FIELD`): after the
+   * candidate is split, its root is the part that touches the neuron. Candidates only.
+   */
+  field('cand_sv', 'cand_sv', 'str'),
   field('rank', 'rank', 'i64'),
   field('geo_rank', 'geo_rank', 'i64'),
   field('vol_um3', 'vol_um3', 'f64', 'µm³'),
@@ -320,6 +327,15 @@ export const SEARCHED_FIELD: Field = field('searched', 'searched', 'bool')
  */
 export const RUN_SOURCE_FIELD: Field = field(SOURCE_COLUMN, SOURCE_COLUMN, 'str')
 
+/**
+ * **The tip's own supervoxel**: the query's voxel nearest the tip, at the search's moment
+ * (`SearchedEnd.tipSupervoxel`). A split never changes a supervoxel, so after the neuron is
+ * split this one's root says which part the tip went with — how a review card drops the tips on
+ * a part cut off (`docs/seam-split-review-plan.md`). Text, as every id; null where no voxel of
+ * the query lay within reach of the tip, and on a row this run has not searched.
+ */
+export const TIP_SUPERVOXEL_FIELD: Field = field('tip_sv', 'tip_sv', 'str')
+
 /** How much of a manifest's SHA-256 a `source` carries: enough to tell versions apart. */
 const DIGEST_CHARS = 12
 
@@ -381,9 +397,13 @@ export interface Lineage {
 
 /** The tip columns a run publishes. The first candidate's, plus the tip's own where scored. */
 export function tipFields(assessed: boolean): readonly Field[] {
-  return assessed
-    ? [...SEARCH_TIP_FIELDS, ...ASSESSED_TIP_FIELDS, RUN_SOURCE_FIELD, SEARCHED_FIELD]
-    : [...SEARCH_TIP_FIELDS, RUN_SOURCE_FIELD, SEARCHED_FIELD]
+  return [
+    ...SEARCH_TIP_FIELDS,
+    ...(assessed ? ASSESSED_TIP_FIELDS : []),
+    TIP_SUPERVOXEL_FIELD,
+    RUN_SOURCE_FIELD,
+    SEARCHED_FIELD,
+  ]
 }
 
 /**
@@ -403,7 +423,7 @@ export const SEARCH_TIP_FIELDS: readonly Field[] = SEARCH_CANDIDATE_FIELDS.filte
   // `seed` is the tip's own too — one of `LINEAGE_FIELDS`, and never a first candidate's. And the
   // organelle *score* stays on `Candidates`: SEAM's tips file carries the first candidate's flag
   // only (`top_organelle`), so `Tips` holds `organelle` alone, the same from either node.
-  (one) => !['neuron', 'seed', 'end_uid', 'rank', 'enclosed'].includes(one.from),
+  (one) => !['neuron', 'seed', 'end_uid', 'rank', 'enclosed', 'cand_sv'].includes(one.from),
 )
 
 /**
@@ -519,7 +539,10 @@ export function tipsByNeuron(rows: readonly TipRow[]): Map<string, number[]> {
 const FROM_SEARCH: readonly string[] = SEARCH_CANDIDATE_FIELDS.filter(
   // Written rather than copied, by `candidatesTable` itself. From the candidate fields, not the
   // tip fields: a measurement only `Candidates` carries (`organelle_score`) is one all the same.
-  (one) => !['neuron', 'seed', 'end_uid', 'cand_root', 'rank', 'geo_rank'].includes(one.from),
+  (one) =>
+    !['neuron', 'seed', 'end_uid', 'cand_root', 'cand_sv', 'rank', 'geo_rank'].includes(
+      one.from,
+    ),
 ).map((one) => one.from)
 
 /**
@@ -617,6 +640,7 @@ export function candidatesTable(
       read['seed']!.push(tip.seed ?? tip.neuronId)
       read['end_uid']!.push(tip.endUid)
       read['cand_root']!.push(String(end.candRoot[at]!))
+      read['cand_sv']!.push(idOrNull(end.repSupervoxel[at]))
       // **The place in `order`, not the row's index.** With an assessor the two differ — the
       // list is published in the assessor's ranking and `geo_rank` keeps the forest's.
       read['rank']!.push(place + 1)
@@ -635,6 +659,11 @@ const FROM_ASSESSOR: readonly string[] = ASSESSED_CANDIDATE_FIELDS.filter(
   (one) => one.from !== 'filled',
 ).map((one) => one.from)
 
+/** A 64-bit id as text, or null for none (`0`, or no id at all). */
+function idOrNull(id: bigint | undefined): string | null {
+  return id === undefined || id === 0n ? null : String(id)
+}
+
 function cell(column: Float64Array | undefined, at: number): number | null {
   const value = column?.[at]
   return value === undefined || !Number.isFinite(value) ? null : value
@@ -652,7 +681,9 @@ function cell(column: Float64Array | undefined, at: number): number | null {
  * downstream two answers to one question, and the stale one first.
  *
  * A tip nobody searched — one the filter left out, or one whose box held no candidate — keeps
- * whatever the incoming table said, which for Find Open Ends' is null.
+ * whatever the incoming table said, which for Find Open Ends' is null. Except the columns about
+ * this run, which are always written: `searched`, the lineage, and `tip_sv` (null where this run
+ * did not measure it).
  */
 export function tipsWithFirsts(
   table: TableValue,
@@ -709,6 +740,8 @@ export function tipsWithFirsts(
   }
   const searched = data[SEARCHED_FIELD.name]!
   searched.fill(false)
+  // This run's measurement or nothing, as `searched` is: another run's anchor is not this one's.
+  data[TIP_SUPERVOXEL_FIELD.name]!.fill(null)
   for (const row of attempting) if (row < length) searched[row] = null
   for (const { end, order, scores } of ends) {
     const tip = tips[end.tip]
@@ -725,6 +758,7 @@ export function tipsWithFirsts(
     // Guarded, because `p_top` is only there when the incoming table brought it.
     for (const name of FIRST_CANDIDATE_COLUMNS) if (data[name]) data[name]![at] = null
     data[SOURCE_COLUMN]![at] = source
+    data[TIP_SUPERVOXEL_FIELD.name]![at] = idOrNull(end.tipSupervoxel)
     /*
      * **The tip's own numbers are written even where its list is empty**, and the candidate's are
      * not. That is SEAM's shape rather than a convenience: a tip with no candidates still has a

@@ -50,7 +50,7 @@ function tipsTable(rows: readonly Partial<Record<string, CellValue>>[]): TableVa
   const schema = tableSchema(
     ...schemaOf(OPEN_END_FIELDS).columns,
     ...extra.map((name) =>
-      column(name, name === 'candidateId' || name === 'source' ? 'str' : 'f64'),
+      column(name, ['candidateId', 'source', 'tip_sv'].includes(name) ? 'str' : 'f64'),
     ),
   )
   const data: Record<string, CellValue[]> = {}
@@ -63,8 +63,11 @@ function tipsTable(rows: readonly Partial<Record<string, CellValue>>[]): TableVa
 function end(at: number, candidates: readonly { root: string; dist: number }[]): PublishedEnd {
   return searchOnly({
     tip: at,
+    // Told apart from every root, so a column written from the wrong array shows.
+    tipSupervoxel: 73889314911551000n + BigInt(at),
     rows: candidates.length,
     candRoot: BigUint64Array.from(candidates, (c) => BigInt(c.root)),
+    repSupervoxel: BigUint64Array.from(candidates, (c) => 73889314911551000n + BigInt(c.root)),
     columns: {
       geo_rank: Float64Array.from(candidates, (_, i) => i + 1),
       min_dist_um: Float64Array.from(candidates, (c) => c.dist),
@@ -201,6 +204,7 @@ describe('the Candidates table', () => {
       'seed',
       'end_uid',
       'candidateId',
+      'cand_sv',
       'rank',
       'geo_rank',
       'vol_um3',
@@ -222,6 +226,68 @@ describe('the Candidates table', () => {
 function attempted(rows: readonly { row: number }[]): ReadonlySet<number> {
   return new Set(rows.map((one) => one.row))
 }
+
+/**
+ * The two supervoxels a review card follows a split by (`docs/seam-split-review-plan.md`): a
+ * split never changes a supervoxel, so each one's root afterwards says which part it went with.
+ */
+describe('the supervoxels a split is followed by', () => {
+  it('writes each candidate’s own contact supervoxel, as exact text, from its own row', () => {
+    const { rows } = tipsFromTable(
+      tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 7, x: 0, y: 0, z: 0 }]),
+    )
+    const table = candidatesTable(
+      [
+        end(0, [
+          { root: '100', dist: 0.1 },
+          { root: '101', dist: 0.2 },
+        ]),
+      ],
+      rows,
+      false,
+    )
+    // `end` puts each candidate's contact supervoxel at 73889314911551000 plus its root: 18
+    // digits, which a float64 on the way would round.
+    expect(table.data['cand_sv']).toEqual(['73889314911551100', '73889314911551101'])
+    expect(table.schema.columns.find((c) => c.name === 'cand_sv')?.dtype).toBe('str')
+  })
+
+  it('writes the tip’s own supervoxel on the row it searched, and only there', () => {
+    const table = tipsTable([
+      // Another run's anchor on a row this one does not reach: not this run's measurement.
+      { [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0, tip_sv: '5' },
+      { [ID_COLUMN_NAME]: '720', end_uid: 1, x: 0, y: 0, z: 0 },
+    ])
+    const { rows } = tipsFromTable(table)
+    const out = tipsWithFirsts(table, [end(1, [])], rows, false, attempted(rows))
+    expect(out.data['tip_sv']).toEqual([null, String(73889314911551000n + 1n)])
+    // Not the first candidate's: the tip row carries no contact supervoxel.
+    expect(out.schema.columns.map((c) => c.name)).not.toContain('cand_sv')
+  })
+
+  it('writes null where no voxel of the neuron lay near the tip', () => {
+    const table = tipsTable([{ [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0 }])
+    const { rows } = tipsFromTable(table)
+    const one = end(0, [])
+    const out = tipsWithFirsts(
+      table,
+      [{ ...one, end: { ...one.end, tipSupervoxel: undefined } }],
+      rows,
+      false,
+      attempted(rows),
+    )
+    expect(out.data['tip_sv']).toEqual([null])
+  })
+
+  it('writes this run’s over a tip supervoxel the incoming table carried', () => {
+    const table = tipsTable([
+      { [ID_COLUMN_NAME]: '720', end_uid: 0, x: 0, y: 0, z: 0, tip_sv: '5' },
+    ])
+    const { rows } = tipsFromTable(table)
+    const out = tipsWithFirsts(table, [end(0, [])], rows, false, attempted(rows))
+    expect(out.data['tip_sv']).toEqual([String(73889314911551000n)])
+  })
+})
 
 describe('the first candidate on the tip row', () => {
   it('writes onto the row the tip came from, not the row at its index', () => {

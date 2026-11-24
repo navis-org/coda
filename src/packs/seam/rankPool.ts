@@ -45,7 +45,10 @@ function refuse(why: string): never {
  * `Pick` rather than a hand-written copy, which is the convention `ownTip.ts` set beside it: a
  * column added to `CandidatePool` then reaches both files the same way.
  */
-export type MeasuredPool = Pick<CandidatePool, 'rows' | 'candRoot' | 'columns'>
+export type MeasuredPool = Pick<
+  CandidatePool,
+  'rows' | 'candRoot' | 'repSupervoxel' | 'columns'
+>
 
 /** One end's candidates, ranked, cut and numbered — the shape stage 6 onwards reads. */
 export interface RankedPool {
@@ -53,6 +56,8 @@ export interface RankedPool {
   readonly rows: number
   /** The candidate of each row, in the new order, 64-bit. */
   readonly candRoot: BigUint64Array
+  /** Each row's `CandidatePool.repSupervoxel`, in the new order: its side of the contact. */
+  readonly repSupervoxel: BigUint64Array
   /**
    * Every column the pool carried, gathered into the new order, plus `l2c`, `l2x`, `geo_score`
    * and `geo_rank` — by SEAM's own names, because `ownTip.ts` and everything after it read them
@@ -76,9 +81,14 @@ export function rankPool(ranker: TreeRanker, pool: MeasuredPool, topK: number): 
   if (!Number.isInteger(topK) || topK < 1) {
     refuse(`a cut of ${topK}, where the set's \`top_k\` is a positive whole number`)
   }
-  const { rows, candRoot, columns } = pool
+  const { rows, candRoot, repSupervoxel, columns } = pool
   if (candRoot.length !== rows) {
     refuse(`the pool says ${rows} rows and its candidate ids number ${candRoot.length}`)
+  }
+  if (repSupervoxel.length !== rows) {
+    refuse(
+      `the pool says ${rows} rows and its contact supervoxels number ${repSupervoxel.length}`,
+    )
   }
   /*
    * A pool that already carried one of these arrived ranked — which is what the old one-call
@@ -146,6 +156,7 @@ export function rankPool(ranker: TreeRanker, pool: MeasuredPool, topK: number): 
   return {
     rows: kept.length,
     candRoot: BigUint64Array.from(kept, (from) => candRoot[from]!),
+    repSupervoxel: BigUint64Array.from(kept, (from) => repSupervoxel[from]!),
     columns: out,
   }
 }

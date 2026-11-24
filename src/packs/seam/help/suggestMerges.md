@@ -106,6 +106,15 @@ Extended pieces add rows to both tables, after the neuron's own. Four columns on
 
 Group on `seed` if you want one neuron per group. Grouping on `ID` gives you each piece on its own.
 
+Two more columns name a supervoxel each, read from the box the search already has:
+
+| Column    | Table        | Contents |
+| --------- | ------------ | -------- |
+| `tip_sv`  | `Tips`       | the supervoxel of the tip's own root (the neuron, or an accepted piece) nearest the tip, at the moment searched; empty where none was within 300 nm, and on rows this run has not searched |
+| `cand_sv` | `Candidates` | the candidate's supervoxel nearest the neuron, its side of the contact |
+
+A split never changes a supervoxel, only which root it belongs to. So after the neuron or a candidate is split, looking up these supervoxels' roots tells you which part each tip and each contact went with.
+
 ## Organelles
 
 Every candidate also carries `organelle_score`: the share of its surface, inside the search box, that faces its single largest neighbour. A mitochondrion or a vesicle sits wrapped inside one cell, so nearly all of it faces that cell; a neurite's continuation meets the neuron at one end and other pieces along its length. `organelle` is true from 0.5 up, which is SEAM's cut: in two blind checks, 39 of the 40 pieces at or above it were organelles, and 2 of the 50 below it were.
