@@ -21,6 +21,11 @@
  *
  * It is a drawing only: the steps' strengths are the supervoxel graph's (`pathSteps`), whatever
  * the line runs along. And a surface path runs along one side of the neurite, not its middle.
+ *
+ * **The same search runs along a skeleton** (`RouteMesh.lines`: its parent links in place of
+ * triangles), for the route down the neurite's middle that thickness is read along
+ * (`skeletonThickness.ts`): a wavefront skeleton of a graphene mesh is in as many pieces as the mesh,
+ * and wants the same corridor, bridges and thinning.
  */
 
 import type { BoxableLayout } from '../../data/cave/graphLayout'
@@ -31,7 +36,11 @@ import { cellKey } from '../../nodes/lib/topologyOps'
 import { findRoot, MaxHeap, unite } from './splitSites'
 import type { SplitNeuron } from './splitGalleryRun'
 
-/** The least distance between two kept points of the drawn path, nm. */
+/**
+ * The least distance between two kept points of the drawn path, nm. A skeleton's route keeps every
+ * node (`RouteMesh.lines`): its nodes are ~100 nm apart already, and a piece's thickness is read
+ * from its nodes — a neck shorter than half a 250 nm piece would vanish in its median.
+ */
 const KEEP_NM = 250
 
 /**
@@ -51,6 +60,8 @@ const OFF_ROUTE_COST = 4
 export interface RouteMesh {
   readonly positions: Float32Array
   readonly indices: Uint32Array
+  /** `indices` holds line segments, two a piece — a skeleton's parent links — not triangles. */
+  readonly lines?: boolean | undefined
   /** Each vertex's nearest chunk, as an index into `chunks`; −1 for none (`nearestChunks`). */
   readonly nearest: Int32Array
   /**
@@ -64,6 +75,8 @@ export interface RouteMesh {
 export interface SurfaceRoute {
   readonly points: Triple[]
   readonly steps: number[]
+  /** For each piece, the mesh vertices of the path it covers: where its thickness is measured. */
+  readonly vertices: number[][]
 }
 
 /** What does not depend on the bridge width: built once per route (`prepareSurface`). */
@@ -85,6 +98,8 @@ export interface PreparedSurface {
   readonly fromNm: Triple
   readonly toNm: Triple
   readonly stepCount: number
+  /** The least distance between two kept points: `KEEP_NM`, or 0 along a skeleton. */
+  readonly keepNm: number
 }
 
 export function prepareSurface(
@@ -138,11 +153,14 @@ export function prepareSurface(
   const piece = new Int32Array(count)
   for (let v = 0; v < count; v++) piece[v] = v
   const first = new Uint32Array(count + 1)
+  // A triangle's three sides, or a segment's one.
+  const corners = mesh.lines ? 2 : 3
+  const sides = mesh.lines ? 1 : 3
   const eachEdge = (visit: (p: number, q: number) => void) => {
-    for (let t = 0; t < indices.length; t += 3) {
-      for (let k = 0; k < 3; k++) {
+    for (let t = 0; t < indices.length; t += corners) {
+      for (let k = 0; k < sides; k++) {
         const p = indices[t + k]!
-        const q = indices[t + ((k + 1) % 3)]!
+        const q = indices[t + ((k + 1) % corners)]!
         if (placeOf[p]! >= 0 && placeOf[q]! >= 0) {
           visit(p, q)
           visit(q, p)
@@ -176,6 +194,7 @@ export function prepareSurface(
     fromNm,
     toNm,
     stepCount,
+    keepNm: mesh.lines ? 0 : KEEP_NM,
   }
 }
 
@@ -193,22 +212,45 @@ export function surfaceRoute(
   const path = shortestPath(prepared, bridges)
   if (!path) return undefined
 
-  // Thinned: the start point, every vertex KEEP_NM on from the last kept, the end point.
+  // Thinned: the start point, every vertex `keepNm` on from the last kept, the end point.
   const points: Triple[] = [fromNm]
   const steps: number[] = []
+  const vertices: number[][] = []
   const stepOf = (v: number) => Math.min(Math.max(placeOf[v]! - 1, 0), stepCount - 1)
   let last: Triple = fromNm
+  let run: number[] = []
   for (let k = 0; k < path.length; k++) {
     const v = path[k]!
     const at = vertexAt(positions, v)
-    if (k < path.length - 1 && distance(at, last) < KEEP_NM) continue
+    run.push(v)
+    if (k < path.length - 1 && distance(at, last) < prepared.keepNm) continue
     points.push(at)
     steps.push(stepOf(v))
+    vertices.push(run)
+    run = [v]
     last = at
   }
   points.push(toNm)
   steps.push(stepCount - 1)
-  return { points, steps }
+  vertices.push(run)
+  return { points, steps, vertices }
+}
+
+/**
+ * The route at each bridge width in turn (`BRIDGE_NM`), the first that joins it, or undefined.
+ * `between` is awaited before each width — a pause for the browser, say — and stops the search
+ * where it answers false.
+ */
+export async function bridgedRoute(
+  prepared: PreparedSurface,
+  between: () => Promise<boolean> = () => Promise.resolve(true),
+): Promise<SurfaceRoute | undefined> {
+  for (const bridgeNm of BRIDGE_NM) {
+    if (!(await between())) return undefined
+    const route = surfaceRoute(prepared, bridgeNm)
+    if (route) return route
+  }
+  return undefined
 }
 
 function distance(a: Triple, b: Triple): number {

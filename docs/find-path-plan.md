@@ -184,3 +184,104 @@ neuroglancer's tool, and F pressed in Coda's document over the card is pressed i
 (`FramePressMessage`: keydown and keyup on the viewer's element, where its key bindings listen).
 Off every card, F is fullscreen. Checked in Chrome: off, F is left to neuroglancer and the button
 shown; on, claimed and hidden; a press passed in fires neuroglancer's `action:tool-grapheneFindPath`.
+
+## Colour by thickness (user, 2026-11-24)
+
+A "Colour by" choice on the route's notice (`NoticeChoice`, `noticeDismiss.ts`; drawn by
+`StatusNotice`): **affinity** (the red weakness ramp, as before) or **thickness** — each step the
+`max_dt_nm` of the chunk it reaches, on the blue ramp over the route's own thinnest to thickest,
+thinnest brightest, so thick → thin → thick reads as dark → bright → dark. No extra request: the
+neuron read already asked the L2 cache for `max_dt_nm` beside each point (`readL2Points`,
+`SplitNeuron.radii`). Hover shows each step's radius in nm whatever the colour. Without an L2
+cache there are no radii, and thickness is offered greyed out with why; the choice is kept for the
+next route. The measurement above (thickness at chance on past splits) is why affinity stays the
+default; if the chunk-level radius proves too coarse, the mesh cut across the route is the next step.
+- **Superseded: the chunks' `max_dt_nm` is gone** (user, 2026-11-24). It read the false merge's
+  neck as 136 nm and a thick neurite as 55, so it is no longer drawn even while the skeleton is
+  measured: affinity stays drawn with "Measuring…" until the skeleton's thickness is in, and
+  `readL2Points` / `SplitNeuron.radii` were removed. Thickness is offered on every route. See
+  "Thickness from the mesh" below.
+- **The hover value is the first property.** Neuroglancer's layer bar shows one value for the
+  annotation under the pointer: its *first* property (`transformPickedValue`). With `step` first, a
+  reader colouring by thickness read step numbers (1, 3, 7, 12) as radii, and two backbone points
+  of ~equal radius (175 and 132 nm in the L2 cache) as "2" and "11" (user, 2026-11-24). The layer
+  now lists the measure the colour shows first — `radius` or `affinity` — the rest after, in the
+  full hover.
+
+## Thickness from the mesh (2026-11-24, `packs/seam/skeletonThickness.ts`)
+
+`max_dt_nm` was too coarse, as feared: on 648518347578335589 the false merge's thin neck read 136 nm
+(its chunk also holds thick stretches) and a thick neurite 55 nm (its chunk held only a sliver of
+it), so the merge did not stand out (user, 2026-11-24). Tried on the mesh, in order:
+
+- **Rays cast inward** (the shape diameter): the published mesh is coarse — median edge 71 nm, 10%
+  over 123 nm, ~494 k triangles for this neuron at full resolution, and nothing finer is published
+  — and thick neurites read 90–145 nm where they are ~200. Dropped.
+- **A wavefront skeleton** (skeletor's, Coda's Pyodide port): at the nodes, 185–225 nm at three
+  thick points and 47–73 nm at the merge's bridge — the signal is there. But a route piece's
+  *nearest node* is often a short twig's near the surface (0–20 nm) or a blob's (700–900 nm), and
+  routes read wildly.
+- **Each vertex's own wavefront ring** (`coda_vertex_ring_radii`: the waves a skeleton is cast with,
+  stopped before the rings collapse to nodes), on the **full** mesh (`fullMeshOf`; the tiles'
+  grid reduction would merge a neck's walls): each route piece the median over its vertices of the
+  nearest full-mesh vertex's ring radius, then a running median over three pieces. Along three
+  routes from the merge: thick ends 195–210 nm, most of the rest 250–420, a wide stretch 700–830;
+  the merge's first pieces 108–117 nm on two routes — their thinnest stretch — and 141–158 on the
+  third, where a mid-route dip reads 117. Better, not yet the < 100 nm the mesh shows by eye: at a
+  contact, a ring wraps both neurites. Routing along the skeleton itself, through the bridge's
+  nodes, is the next thing to try.
+
+The ring radii were built, then replaced by the skeleton route below; `coda_vertex_ring_radii` is
+gone with them.
+
+### Along the skeleton itself (measured 2026-11-24, `scripts/tmp-skeleton-walk.mjs`, reads only)
+
+The full mesh's wavefront skeleton (`shave: 'off'`, one wave, step 1): 11,068 nodes in 127 pieces
+(one per mesh fragment that is not joined to another), 2.3 s after a 2.8 s full-mesh read. Pieces
+joined by bridges between nodes of different pieces within 600 nm, costed ×4; shortest path between
+the nodes nearest each point (Dijkstra, ≤ 0.01 s). Routes of 35–59 µm, two bridges each.
+
+- **THIN → thick1 and THIN → thick4** leave the same way. Nodes 200–500 nm from the point read
+  **47–70 nm**, then 105–119 nm for 1.3 µm, a second dip to 77–94 at 1.4–1.6 µm, then 195–235.
+  The thinnest 500 nm window (median of its nodes) is the merge, **70 nm**; the next thinnest on
+  either route is 103 nm (2.2 µm along, 38428,15175,2533 in voxels), then 116, 122, 129.
+- **THIN → thick2** leaves the other way and never passes the neck: 102–157 nm for its first 1.4 µm.
+  Its thinnest window is 76 nm, 15.5 µm along (38986,15351,2373) — unchecked whether that is a real
+  thin stretch.
+- The node nearest a clicked point can be a twig's tip: thick1 and thick2's read 94 and 97 nm with
+  ~200 nm a node further in. A route's last node says little.
+
+So routing on the skeleton reads the neck where the ring radii could not (70 against 108–117 nm),
+by about 30% under anything else on the route — but only where the route passes through it.
+
+### Built: thickness down the skeleton (2026-11-24, `packs/seam/skeletonThickness.ts`)
+
+When thickness is the colour, the session builds the neuron's wavefront skeleton from its full mesh
+(`shave: 'twigs'`, last two neurons kept) and finds the route again along it: the **same search as
+the surface's** (`prepareSurface` with `RouteMesh.lines`, the skeleton's parent links as segments;
+nodes placed by `nearestChunksOf`), so the same corridor, off-route cost and bridge widths. Each
+250 nm piece takes the median radius of its nodes. Drawn in place of the surface route, in either
+colour, once in. It does not wait for the surface route, and it needs no L2 cache, so thickness is
+always offered.
+
+**Mesh pieces under 100 vertices are dropped before skeletonizing** (`PATH_SKELETONIZE`, SEAM's
+settings with `minFragment: 100`): the route on thick1 crossed a two-node skeleton piece (8 and
+20 nm, a tiny mesh fragment skeletonized alone) inside a ~400 nm neurite, and that was the route's
+thinnest. Dropping pieces under 50, 150 or 500 vertices took the skeleton from 127 pieces to 34, 21,
+16, removed that piece, and left all three routes' pieces and readings otherwise unchanged; it also
+cut the skeleton's time from 2.4 s to 0.3 s. (Filtering the radii of small skeleton pieces afterwards
+was tried first and dropped in review: the piece still shaped the route.) The full mesh is not
+kept — the skeleton is — and the skeleton is started at the press when thickness is the colour.
+**Every skeleton node is kept** (no 250 nm thinning along a skeleton, `PreparedSurface.keepNm`),
+each piece one node to the next and read as its two nodes' mean: in review, a neck under half a
+250 nm piece vanished in its median. Measured through the functions as built, on
+648518347578335589 (2.3 s skeleton with Pyodide's first load, ≤ 0.013 s search, 300 nm bridges
+sufficed):
+
+| route | pieces | thinnest | where | next | median |
+|---|---|---|---|---|---|
+| THIN → thick1 | 422 | 54 nm | pieces 2–3 (54, 54; then 66, 77): the merge | 85 nm, ~2 µm on (38423,15146,2522) | 251 |
+| THIN → thick4 | 545 | 54 nm | the same | the same | 225 |
+| THIN → thick2 | 314 | 107 nm | pieces 12–13, near the start | 109 | 243 |
+
+THIN → thick2 does not pass through the neck, as before. Ends read 195–224 nm.

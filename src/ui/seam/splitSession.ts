@@ -25,6 +25,7 @@ import type { CaveRequestOptions } from '../../data/cave/client'
 import { datastackRecord } from '../../data/cave/datastack'
 import type { GrapheneSource } from '../../data/cave/graphene'
 import type { GrapheneMeshSource } from '../../data/cave/meshes'
+import type { Reduction } from '../../data/meshDecimate'
 import {
   fragmentConcurrencyFor,
   openGrapheneMeshes,
@@ -40,7 +41,7 @@ import type { MeshArrays } from '../../data/meshParts'
 import type { Triple, VolumeInfo } from '../../data/precomputed/volume'
 import { openVolume, readLabelBox, scaleNear } from '../../data/precomputed/volume'
 import type { ExactVertices, PlacedLabels } from '../../packs/seam/splitColours'
-import { nearestChunks, supervoxelsAtVertices } from '../../packs/seam/splitColours'
+import { nearestChunksOf, supervoxelsAtVertices } from '../../packs/seam/splitColours'
 import type {
   SplitCandidate,
   SplitGalleryInput,
@@ -48,7 +49,7 @@ import type {
 } from '../../packs/seam/splitGallery'
 import { chunkOfMembers, splitCandidates } from '../../packs/seam/splitGallery'
 import type { BoxableLayout } from '../../data/cave/graphLayout'
-import { cellAt, cellBox, isBoxable } from '../../data/cave/graphLayout'
+import { cellBox, isBoxable } from '../../data/cave/graphLayout'
 import type { SplitNeuron } from '../../packs/seam/splitGalleryRun'
 import type { RouteMesh } from '../../packs/seam/surfacePath'
 import { readSplitBox, readSplitNeuron, splitBoxCells } from '../../packs/seam/splitGalleryRun'
@@ -158,6 +159,49 @@ export const optionsOf = (target: SplitTarget): CaveRequestOptions => ({
 /** Where a datastack's meshes are, found once per datastack (`openGrapheneMeshes` reads `info`). */
 const meshSources = new Map<string, Promise<GrapheneMeshSource | undefined>>()
 
+/**
+ * A neuron's mesh from the chunkedgraph's own mesh service, as the split's reads are: any CAVE
+ * datastack with a chunkedgraph has one, wired into Coda's Dataset table (`spec.ts`) or not.
+ * Reduced to `reduction`, or at full resolution without one.
+ */
+async function readMesh(
+  target: SplitTarget,
+  root: string,
+  reduction: Reduction | undefined,
+): Promise<MeshArrays> {
+  const options = optionsOf(target)
+  const source = await memoPromise(
+    meshSources,
+    targetKey(target),
+    async () => {
+      const segmentation = (await datastackRecord(target.datastack, options))
+        .segmentation_source
+      return segmentation ? openGrapheneMeshes(segmentation, options) : undefined
+    },
+    { keep: 'resolved' },
+  )
+  if (!source) throw new Error(`${target.datastack} publishes no meshes.`)
+  const { mesh } = await readGrapheneMesh(
+    source,
+    root,
+    reduction,
+    MESH_FRAGMENTS_IN_FLIGHT,
+    options,
+  )
+  if (!mesh) throw new Error(`${root} has no mesh.`)
+  return mesh
+}
+
+/**
+ * A neuron's mesh at full resolution — for measuring its thickness (find path's skeleton), where
+ * the tiles' reduction (`TILE_TRIANGLES`, vertex clustering on a grid) would merge a thin neck's
+ * walls. Not kept: what is built from it is (a big one is many times the tiles' size), and its
+ * buffers are the caller's to hand over.
+ */
+export function fullMeshOf(target: SplitTarget, root: string): Promise<MeshArrays> {
+  return readMesh(target, root, undefined)
+}
+
 const LIVE: SplitServices = {
   async chunkedgraph(target, options) {
     const { graphene, layout, base } = await findSupervoxels(target.datastack, options)
@@ -194,31 +238,7 @@ const LIVE: SplitServices = {
     readSplitNeuron(graph.graphene, graph.layout, root, options),
   box: (graph, neuron, pointNm, options) =>
     readSplitBox(graph.graphene, graph.layout, neuron, pointNm, options),
-  async mesh(target, root) {
-    // From the chunkedgraph's own mesh service, as the split's reads are: any CAVE datastack with
-    // a chunkedgraph has one, wired into Coda's Dataset table (`spec.ts`) or not.
-    const options = optionsOf(target)
-    const source = await memoPromise(
-      meshSources,
-      targetKey(target),
-      async () => {
-        const segmentation = (await datastackRecord(target.datastack, options))
-          .segmentation_source
-        return segmentation ? openGrapheneMeshes(segmentation, options) : undefined
-      },
-      { keep: 'resolved' },
-    )
-    if (!source) throw new Error(`${target.datastack} publishes no meshes.`)
-    const { mesh } = await readGrapheneMesh(
-      source,
-      root,
-      { targetTriangles: TILE_TRIANGLES },
-      MESH_FRAGMENTS_IN_FLIGHT,
-      options,
-    )
-    if (!mesh) throw new Error(`${root} has no mesh.`)
-    return mesh
-  },
+  mesh: (target, root) => readMesh(target, root, { targetTriangles: TILE_TRIANGLES }),
   pause: yieldToBrowser,
   now: () => performance.now(),
 }
@@ -298,18 +318,10 @@ export function meshOf(target: SplitTarget, root: string): Promise<SplitMesh> {
         graphOf(target),
       ])
       // Each vertex's nearest chunk among those in its own grid cell (`nearestChunks`).
-      const cells = {
-        of: neuron.cells,
-        at: (x: number, y: number, z: number): Triple => [
-          cellAt(graph.layout, x, 0),
-          cellAt(graph.layout, y, 1),
-          cellAt(graph.layout, z, 2),
-        ],
-      }
       return {
         ...mesh,
         chunks: neuron.chunks,
-        nearest: nearestChunks(mesh.positions, neuron.chunks, neuron.positions, cells),
+        nearest: nearestChunksOf(mesh.positions, neuron, graph.layout),
       }
     },
     { keep: 'resolved' },

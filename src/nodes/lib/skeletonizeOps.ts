@@ -24,6 +24,7 @@ import type {
   SkeletonizeRequest,
   SkeletonizeResult,
 } from '../../pyodide/skeletonize'
+import type { PackedMeshes } from '../../pyodide/meshes'
 import { checkItemCount, emptiedItems, packMeshes } from './cleanOps'
 import { geometryPointCount } from './transformOps'
 
@@ -126,14 +127,26 @@ export function skeletonizeRequestFrom(
   meshes: MeshesValue,
   params: SkeletonizeParams,
 ): SkeletonizeRequest {
-  // The card's micrometres to the nanometres the coordinates are in, `cleanRequestFrom`'s split.
+  return skeletonizeRequestOf(packMeshes(meshes), params, somaPositionsFrom(meshes))
+}
+
+/**
+ * Meshes already flattened — nanometre coordinates, buffers the caller hands over — with the card's
+ * settings: its micrometres to nanometres, `cleanRequestFrom`'s split. No soma anywhere unless
+ * `somaPositions` (one xyz per mesh) says where.
+ */
+export function skeletonizeRequestOf(
+  packed: PackedMeshes,
+  params: SkeletonizeParams,
+  somaPositions = new Float32Array((packed.vertexOffsets.length - 1) * 3).fill(Number.NaN),
+): SkeletonizeRequest {
   return {
-    ...packMeshes(meshes),
+    ...packed,
     ...params,
     shaveCutoff: params.shaveCutoff * NM_PER_UM,
     somaRadius: params.somaRadius * NM_PER_UM,
     minSomaRadius: params.minSomaRadius * NM_PER_UM,
-    somaPositions: somaPositionsFrom(meshes),
+    somaPositions,
   }
 }
 

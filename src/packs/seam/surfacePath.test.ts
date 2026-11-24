@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { FANC_LAYOUT } from './__fixtures__/splitToy'
 import type { SplitNeuron } from './splitGalleryRun'
 import type { RouteMesh, SurfaceRoute } from './surfacePath'
-import { BRIDGE_NM, prepareSurface, surfaceRoute } from './surfacePath'
+import { bridgedRoute, prepareSurface } from './surfacePath'
 
 type Triple = readonly [number, number, number]
 
@@ -22,14 +22,9 @@ function along(
   route: readonly string[],
   fromNm: Triple,
   toNm: Triple,
-): SurfaceRoute | undefined {
+): Promise<SurfaceRoute | undefined> {
   const prepared = prepareSurface(mesh, neuron, layout, route, fromNm, toNm)
-  if (!prepared) return undefined
-  for (const bridgeNm of BRIDGE_NM) {
-    const found = surfaceRoute(prepared, bridgeNm)
-    if (found) return found
-  }
-  return undefined
+  return prepared ? bridgedRoute(prepared) : Promise.resolve(undefined)
 }
 
 /** Chunks along x a micrometre apart (FANC's cells are 2.2 µm wide), and one beside them. */
@@ -79,15 +74,15 @@ const meshOf = (...parts: ReturnType<typeof ladder>[]): RouteMesh => ({
 describe('surfaceRoute', () => {
   const straight = Array.from({ length: 41 }, (_, i): Triple => [i * 100, 0, 0])
 
-  it('follows the mesh from the start to the end, thinned, each piece on its step', () => {
-    const route = along(
+  it('follows the mesh from the start to the end, thinned, each piece on its step', async () => {
+    const route = (await along(
       meshOf(ladder(straight, byX)),
       neuron('l2cache'),
       FANC_LAYOUT,
       ROUTE,
       [0, 0, 0],
       [4000, 0, 0],
-    )!
+    ))!
     expect(route.points[0]).toEqual([0, 0, 0])
     expect(route.points.at(-1)).toEqual([4000, 0, 0])
     // A point every 250 nm or so, not every 100 nm vertex.
@@ -99,7 +94,7 @@ describe('surfaceRoute', () => {
     expect([...route.steps].sort((a, b) => a - b)).toEqual(route.steps)
   })
 
-  it('keeps to the route’s chunks where another branch through the same cells is shorter', () => {
+  it('keeps to the route’s chunks where another branch through the same cells is shorter', async () => {
     // The route's own strip bulges 1.5 µm up in z in the middle; a flat strip of `side` beside it
     // joins its two ends.
     const bulge = straight.map((p): Triple => [
@@ -114,13 +109,20 @@ describe('surfaceRoute', () => {
     const ends = [0, 2 * (bulge.length - 1)].flatMap((a) => [a, a + 1, bulge.length * 2 + a])
     const mesh = meshOf(own, side)
     const joined: RouteMesh = { ...mesh, indices: Uint32Array.from([...mesh.indices, ...ends]) }
-    const route = along(joined, neuron('l2cache'), FANC_LAYOUT, ROUTE, [0, 0, 0], [4000, 0, 0])!
+    const route = (await along(
+      joined,
+      neuron('l2cache'),
+      FANC_LAYOUT,
+      ROUTE,
+      [0, 0, 0],
+      [4000, 0, 0],
+    ))!
     expect(Math.max(...route.points.map((p) => p[2]))).toBe(1500)
     expect(route.points.every((p) => p[1] < 300)).toBe(true)
   })
 
-  it('keeps to the route’s cells alone where the chunks have no points of their own', () => {
-    const route = along(
+  it('keeps to the route’s cells alone where the chunks have no points of their own', async () => {
+    const route = await along(
       meshOf(ladder(straight, () => 'side')),
       neuron('cells'),
       FANC_LAYOUT,
@@ -148,17 +150,17 @@ describe('surfaceRoute', () => {
   const across = (mesh: RouteMesh) =>
     along(mesh, neuron('l2cache'), FANC_LAYOUT, ROUTE, [0, 0, 0], [4000, 0, 0])
 
-  it('bridges the gap between two pieces of the mesh', () => {
-    expect(across(split(500))?.points.at(-1)).toEqual([4000, 0, 0])
+  it('bridges the gap between two pieces of the mesh', async () => {
+    expect((await across(split(500)))?.points.at(-1)).toEqual([4000, 0, 0])
   })
 
-  it('gives up where the pieces lie further apart than any bridge, and the straight lines stay', () => {
-    expect(across(split(3000))).toBeUndefined()
+  it('gives up where the pieces lie further apart than any bridge, and the straight lines stay', async () => {
+    expect(await across(split(3000))).toBeUndefined()
   })
 })
 
 describe('surfaceRoute far from the origin', () => {
-  it('keeps neighbouring cells apart at a real neuron’s coordinates (hundreds of µm out)', () => {
+  it('keeps neighbouring cells apart at a real neuron’s coordinates (hundreds of µm out)', async () => {
     // The same strip as above, moved 300 µm out on every axis: cell keys must not collide.
     const out = (p: Triple): Triple => [p[0] + 300_000, p[1] + 300_000, p[2] + 300_000]
     const far: SplitNeuron = {
@@ -179,7 +181,7 @@ describe('surfaceRoute far from the origin', () => {
       ),
     }
     const strip = Array.from({ length: 41 }, (_, i): Triple => out([i * 100, 0, 0]))
-    const route = along(
+    const route = await along(
       meshOf(ladder(strip, (p) => byX([p[0] - 300_000, 0, 0]))),
       far,
       FANC_LAYOUT,
@@ -191,7 +193,7 @@ describe('surfaceRoute far from the origin', () => {
     // Off the route's cells (one cell over in z), the same strip finds no route at all.
     const elsewhere = strip.map((p): Triple => [p[0], p[1], p[2] + 6000])
     expect(
-      along(
+      await along(
         meshOf(ladder(elsewhere, (p) => byX([p[0] - 300_000, 0, 0]))),
         far,
         FANC_LAYOUT,

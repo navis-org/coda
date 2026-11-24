@@ -21,10 +21,13 @@
  * candidate's colours are one pass (`sideColours`).
  */
 
+import type { BoxableLayout } from '../../data/cave/graphLayout'
+import { cellAt } from '../../data/cave/graphLayout'
 import type { LabelBox } from '../../data/precomputed/compressedSegmentation'
 import type { Triple } from '../../data/precomputed/volume'
 import { buildKdTree } from '../../nodes/lib/kdTree'
 import type { SplitSide } from './splitGallery'
+import type { SplitNeuron } from './splitGalleryRun'
 
 /** Where a vertex's grid cell is asked: each chunk's cell, and the cell holding a point (nm). */
 export interface ChunkCells {
@@ -82,6 +85,21 @@ export function nearestChunks(
     nearest[v] = at < 0 ? -1 : index[at]!
   }
   return nearest
+}
+
+/**
+ * `nearestChunks` for a neuron read whole (`readSplitNeuron`): its chunks, their points, and each
+ * one's grid cell under `layout` — the split gallery's mesh and find path's skeleton alike.
+ */
+export function nearestChunksOf(
+  vertices: Float32Array,
+  neuron: Pick<SplitNeuron, 'chunks' | 'positions' | 'cells'>,
+  layout: BoxableLayout,
+): Int32Array {
+  return nearestChunks(vertices, neuron.chunks, neuron.positions, {
+    of: neuron.cells,
+    at: (x, y, z) => [cellAt(layout, x, 0), cellAt(layout, y, 1), cellAt(layout, z, 2)],
+  })
 }
 
 /** A label box read from the segmentation, and where it sits. */

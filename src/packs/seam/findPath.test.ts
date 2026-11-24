@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { parseGrapheneSource } from '../../data/cave/graphene'
 import type { SupervoxelGraph } from '../../data/cave/subgraph'
-import { parseHex } from '../../style/colors'
+import { parseHex, sequentialColor } from '../../style/colors'
 import { FANC_LAYOUT } from './__fixtures__/splitToy'
 import type { PathStep } from './findPath'
 import {
@@ -20,6 +20,7 @@ import {
   readPathSteps,
   stepColor,
   strongestPath,
+  thinnestOf,
   weakestStep,
 } from './findPath'
 import type { SplitNeuron } from './splitGalleryRun'
@@ -200,6 +201,21 @@ describe('strongestPath', () => {
   })
 })
 
+/** A line's properties by id, whatever order the layer lists them in. */
+function propsOf(
+  layer: Readonly<Record<string, unknown>>,
+  line: Record<string, unknown>,
+): Record<string, number> {
+  const ids = (layer['annotationProperties'] as Array<{ id: string }>).map((p) => p.id)
+  const values = line['props'] as number[]
+  return Object.fromEntries(ids.map((id, i) => [id, values[i]!]))
+}
+
+const glsl = (hex: string) =>
+  `vec3(${parseHex(hex)
+    .map((v) => (v / 255).toFixed(4))
+    .join(', ')})`
+
 describe('drawing the route', () => {
   const contact = (affinity: number, from = 'c0', to = 'c1'): PathStep => ({
     from,
@@ -230,12 +246,12 @@ describe('drawing the route', () => {
   })
 
   it('draws the start alone, both points while the route is read, then a line per step', () => {
-    const start = pathLayer([0, 0, 0], undefined, undefined, NEURON.positions)
+    const start = pathLayer([0, 0, 0])
     expect(start['name']).toBe(FIND_PATH_LAYER)
     expect(start['annotations']).toEqual([
       expect.objectContaining({ type: 'point', id: 'start' }),
     ])
-    const reading = pathLayer([0, 0, 0], [9, 9, 9], undefined, NEURON.positions)
+    const reading = pathLayer([0, 0, 0], [9, 9, 9])
     expect((reading['annotations'] as unknown[]).map((a) => (a as { id: string }).id)).toEqual([
       'start',
       'end',
@@ -245,7 +261,10 @@ describe('drawing the route', () => {
       contact(0.5, 'c0', 'c1'),
       { from: 'c1', to: 'c2', kind: 'userMerge', affinity: Number.NaN, area: 0 },
     ]
-    const layer = pathLayer([400, 500, 20], [2400, 500, 20], steps, NEURON.positions)
+    const layer = pathLayer([400, 500, 20], [2400, 500, 20], {
+      steps,
+      positions: NEURON.positions,
+    })
     const lines = (layer['annotations'] as Array<Record<string, unknown>>).filter(
       (a) => a['type'] === 'line',
     )
@@ -268,32 +287,86 @@ describe('drawing the route', () => {
       contact(0.5, 'c0', 'c1'),
       { from: 'c1', to: 'c2', kind: 'userMerge', affinity: Number.NaN, area: 0 },
     ]
-    const layer = pathLayer([400, 500, 20], [2400, 500, 20], steps, NEURON.positions)
+    const layer = pathLayer([400, 500, 20], [2400, 500, 20], {
+      steps,
+      positions: NEURON.positions,
+    })
     const specs = layer['annotationProperties'] as Array<Record<string, unknown>>
-    expect(specs.map((p) => p['id'])).toEqual(['step', 'kind', 'affinity'])
-    const kind = specs[1]!
+    // The measure the colour shows first: neuroglancer's layer bar shows only the first on hover.
+    expect(specs.map((p) => p['id'])).toEqual(['affinity', 'radius', 'kind', 'step'])
+    const kind = specs.find((p) => p['id'] === 'kind')!
     const label = (value: number) =>
       (kind['enum_labels'] as string[])[(kind['enum_values'] as number[]).indexOf(value)]
     const lines = (layer['annotations'] as Array<Record<string, unknown>>).filter(
       (a) => a['type'] === 'line',
     )
-    const [first, second] = lines.map((l) => l['props'] as number[])
-    expect(first![0]).toBe(1)
-    expect(label(first![1]!)).toBe('contact')
-    expect(first![2]).toBe(0.5)
-    expect(second![0]).toBe(2)
-    expect(label(second![1]!)).toBe('proofreader merge')
+    const [first, second] = lines.map((l) => propsOf(layer, l))
+    expect(first!['step']).toBe(1)
+    expect(label(first!['kind']!)).toBe('contact')
+    expect(first!['affinity']).toBe(0.5)
+    expect(second!['step']).toBe(2)
+    expect(label(second!['kind']!)).toBe('proofreader merge')
     // JSON has no NaN: a step with no contact says -1, as the property's description does.
-    expect(second![2]).toBe(-1)
-    expect(String(specs[2]!['description'])).toMatch(/-1 where the step has none/)
+    expect(second!['affinity']).toBe(-1)
+    expect(String(specs[0]!['description'])).toMatch(/-1 where the step has none/)
+    // No radii given: every step's radius is not known.
+    expect([first!['radius'], second!['radius']]).toEqual([-1, -1])
+  })
+
+  /**
+   * The skeleton's measure, the route's only thickness: a chunk's `max_dt_nm` is one number for
+   * ~8 µm, and read a false merge's thin neck as thick (user, 2026-11-24).
+   */
+  it('draws each skeleton piece by its nodes’ radius where there is one', () => {
+    const steps: PathStep[] = [contact(0.5, 'c0', 'c1'), contact(0.4, 'c1', 'c2')]
+    const along = {
+      points: [
+        [0, 0, 0],
+        [250, 0, 0],
+        [500, 0, 0],
+        [750, 0, 0],
+      ] as Triple[],
+      steps: [0, 1, 1],
+      vertices: [[1], [2], [3]],
+    }
+    const route = {
+      steps,
+      positions: NEURON.positions,
+      // A surface route too: the skeleton's is drawn in its place.
+      surface: {
+        points: [[0, 0, 0] as Triple, [750, 9, 0] as Triple],
+        steps: [1],
+        vertices: [[0]],
+      },
+      skeleton: { along, radii: [150, 35, undefined] },
+      colour: 'thickness' as const,
+    }
+    const layer = pathLayer([0, 0, 0], [750, 0, 0], route)
+    const lines = (layer['annotations'] as Array<Record<string, unknown>>).filter(
+      (a) => a['type'] === 'line',
+    )
+    // The last piece has no measure, and stays unmeasured.
+    expect(lines.map((l) => propsOf(layer, l)['radius'])).toEqual([150, 35, -1])
+    expect(lines.map((l) => l['pointB'])).toEqual([
+      [250, 0, 0],
+      [500, 0, 0],
+      [750, 0, 0],
+    ])
+    expect(thinnestOf(route)).toEqual({ step: 1, radius: 35 })
+    expect(thinnestOf({ steps, positions: NEURON.positions })).toBeUndefined()
+    // Colouring by thickness, the radius is what hover shows first (the layer bar's one value).
+    const specs = layer['annotationProperties'] as Array<Record<string, unknown>>
+    expect(specs[0]!['id']).toBe('radius')
+    expect(String(lines[1]!['description'])).toMatch(/radius 35 nm/)
+    // The ramp runs over the route's own range, thinnest brightest, on the blue ramp.
+    const shader = String(layer['shader'])
+    expect(shader).toMatch(/ramp\(1\.0 - \(prop_radius\(\) - 35\.0\) \/ 115\.0\)/)
+    expect(shader).toContain(glsl(sequentialColor(1, 'dark', 'blue')))
+    expect(shader).not.toContain('prop_affinity')
   })
 
   it('colours in the shader from the palette: the ramp’s two ends and every other kind', () => {
     const shader = pathShader()
-    const glsl = (hex: string) =>
-      `vec3(${parseHex(hex)
-        .map((v) => (v / 255).toFixed(4))
-        .join(', ')})`
     for (const hex of [
       stepColor(contact(1)),
       stepColor(contact(0)),

@@ -370,10 +370,17 @@ const KIND_LABELS: Record<(typeof KINDS)[number], string> = {
   unread: 'not read',
   point: 'end point',
 }
-/** The `affinity` property where there is no measured contact (JSON has no NaN). */
+/** The `affinity` and `radius` properties where there is no value (JSON has no NaN). */
 const NO_AFFINITY = -1
-/** Stops of the weakness ramp the shader interpolates between, sampled from `sequentialColor`. */
+const NO_RADIUS = -1
+/** Stops of a ramp the shader interpolates between, sampled from `sequentialColor`. */
 const RAMP_STOPS = 9
+
+/**
+ * What the route's colour says: how weakly each step is joined, or how thick the neurite is there
+ * (along its skeleton, `skeletonThickness.ts`) — a thick → thin → thick run is a place to look.
+ */
+export type PathColour = 'affinity' | 'thickness'
 
 const glslColor = (hex: string) =>
   `vec3(${parseHex(hex)
@@ -381,16 +388,42 @@ const glslColor = (hex: string) =>
     .join(', ')})`
 
 /**
- * The layer's shader: each annotation coloured from its `kind` and `affinity` properties — a
- * contact on the weakness ramp, any other kind its `stepColor` — so hover shows the numbers and
+ * The layer's shader: each annotation coloured from its properties, so hover shows the numbers and
  * names (`annotationProperties`) rather than a colour property, and the colours are still the
- * palette's: the ramp is `sequentialColor` sampled at `RAMP_STOPS`, the rest `kindColor`, as `stepColor` gives them.
+ * palette's — ramps are `sequentialColor` sampled at `RAMP_STOPS`, the rest `kindColor`.
+ *
+ * - `affinity`: a contact on the red weakness ramp, any other kind its `kindColor`, as `stepColor`.
+ * - `thickness`: every step on the blue ramp by its `radius` within `range` (the route's thinnest
+ *   to thickest), the thinnest brightest — as the weakest is in `affinity` — and a step with no
+ *   radius muted ink.
  */
-export function pathShader(): string {
+export function pathShader(
+  colour: PathColour = 'affinity',
+  range: readonly [number, number] = [0, 1],
+): string {
+  const hue = colour === 'affinity' ? 'red' : 'blue'
   const stops = Array.from({ length: RAMP_STOPS }, (_, i) =>
-    glslColor(sequentialColor(i / (RAMP_STOPS - 1), 'dark', 'red')),
+    glslColor(sequentialColor(i / (RAMP_STOPS - 1), 'dark', hue)),
   )
   const fixed = (kind: Exclude<PathStep['kind'], 'contact'>) => glslColor(kindColor(kind))
+  const pointKind = KINDS.indexOf('point')
+  const [lo, hi] = range
+  // At least a nanometre: a span printed as `0.0` divides 0 by 0 where every radius is one value.
+  const span = Math.max(hi - lo, 1)
+  const body =
+    colour === 'affinity'
+      ? // Each kind by its place in `KINDS`, as the `kind` property numbers it; a point stays white.
+        KINDS.map((kind, i) => {
+          const test = `${i === 0 ? '  if' : '  else if'} (k < ${(i + 0.5).toFixed(1)})`
+          if (kind === 'contact') return `${test} c = ramp(1.0 - prop_affinity());`
+          if (kind === 'point') return `${test} c = vec3(1.0);`
+          return `${test} c = ${fixed(kind)};`
+        })
+      : [
+          `  if (k > ${(pointKind - 0.5).toFixed(1)}) c = vec3(1.0);`,
+          `  else if (prop_radius() < 0.0) c = ${fixed('unread')};`,
+          `  else c = ramp(1.0 - (prop_radius() - ${lo.toFixed(1)}) / ${span.toFixed(1)});`,
+        ]
   return [
     `const vec3 RAMP[${RAMP_STOPS}] = vec3[${RAMP_STOPS}](${stops.join(', ')});`,
     'vec3 ramp(float t) {',
@@ -402,13 +435,7 @@ export function pathShader(): string {
     'void main() {',
     '  float k = prop_kind();',
     '  vec3 c = vec3(1.0);',
-    // Each kind by its place in `KINDS`, as the `kind` property numbers it; a point stays white.
-    ...KINDS.map((kind, i) => {
-      const test = `${i === 0 ? '  if' : '  else if'} (k < ${(i + 0.5).toFixed(1)})`
-      if (kind === 'contact') return `${test} c = ramp(1.0 - prop_affinity());`
-      if (kind === 'point') return `${test} c = vec3(1.0);`
-      return `${test} c = ${fixed(kind)};`
-    }),
+    ...body,
     '  setColor(c);',
     '  setLineWidth(4.0);',
     '  setEndpointMarkerSize(0.0);',
@@ -417,29 +444,117 @@ export function pathShader(): string {
   ].join('\n')
 }
 
+/** The layer's annotation properties, by id; `pathLayer` lists them in the order it needs. */
+type PropertyId = 'step' | 'kind' | 'affinity' | 'radius'
+const PROPERTIES: Record<PropertyId, Readonly<Record<string, unknown>>> = {
+  step: { id: 'step', type: 'uint16', description: 'step along the route, from the start' },
+  kind: {
+    id: 'kind',
+    type: 'float32',
+    description: 'how the step is joined at its weakest',
+    enum_values: KINDS.map((_, i) => i),
+    enum_labels: KINDS.map((kind) => KIND_LABELS[kind]),
+  },
+  affinity: {
+    id: 'affinity',
+    type: 'float32',
+    description: `the weakest contact's mean affinity; ${NO_AFFINITY} where the step has none`,
+  },
+  radius: {
+    id: 'radius',
+    type: 'float32',
+    description: `the radius here, nm, measured along the neuron's skeleton; ${NO_RADIUS} where not known`,
+  },
+}
+
+/** A route once read, as `pathLayer` draws it. */
+export interface DrawnRoute {
+  readonly steps: readonly PathStep[]
+  /** Each chunk's point, for the straight lines between them. */
+  readonly positions: ReadonlyMap<string, Triple>
+  /** The route along the mesh, once read (`surfaceRoute`): drawn in place of the straight lines. */
+  readonly surface?: SurfaceRoute | undefined
+  /**
+   * The route down the neurite's middle, along its wavefront skeleton, once measured
+   * (`skeletonThickness.ts`): drawn in place of `surface`, each piece with its nodes' radius — the
+   * route's only thickness. The L2 cache's `max_dt_nm`, one number a chunk, read a false merge's
+   * neck as 136 nm and a thick neurite as 55 (user, 2026-11-24), and is not used.
+   */
+  readonly skeleton?: SkeletonRoute | undefined
+  /** What the colour says; `affinity` where not given. */
+  readonly colour?: PathColour | undefined
+}
+
+/** A route along the skeleton, and each of its pieces' radius (nm, undefined where unknown; some known). */
+export interface SkeletonRoute {
+  readonly along: SurfaceRoute
+  readonly radii: readonly (number | undefined)[]
+}
+
+/**
+ * Where the route is thinnest along its skeleton, and how thin; undefined before it is measured.
+ * The step is 0-based.
+ */
+export function thinnestOf(route: DrawnRoute): { step: number; radius: number } | undefined {
+  let best: { step: number; radius: number } | undefined
+  const skeleton = route.skeleton
+  skeleton?.along.steps.forEach((step, k) => {
+    const radius = skeleton.radii[k]
+    if (radius !== undefined && (!best || radius < best.radius)) best = { step, radius }
+  })
+  return best
+}
+
+/**
+ * The span a thickness ramp runs over: the 5th to the 95th percentile, so one odd measurement — a
+ * twig's node or a blob's — cannot squeeze the rest into one colour. Min to max for few.
+ */
+function rampRange(values: readonly number[]): [number, number] {
+  if (values.length === 0) return [0, 1]
+  const sorted = [...values].sort((a, b) => a - b)
+  if (sorted.length < 20) return [sorted[0]!, sorted.at(-1)!]
+  const at = (q: number) => sorted[Math.round(q * (sorted.length - 1))]!
+  return [at(0.05), at(0.95)]
+}
+
 /**
  * The route as a local annotation layer in nanometres: a line per step from the start point
- * through each chunk's point to the end point, with its step number, how it is joined (`kind`)
- * and its weakest contact's mean (`affinity`) as properties — what neuroglancer shows on hover —
- * and coloured from them (`pathShader`) — along the mesh where `surface` is given, each piece
- * carrying its step's numbers. With no steps yet (`undefined`), the points alone: the start, then
- * both while the route is read. A step whose chunk has no position is drawn from the
- * last placed point.
+ * through each chunk's point to the end point — down the skeleton or along the mesh where given —
+ * with its step number, how it is joined (`kind`), its weakest contact's mean (`affinity`) and its
+ * radius (`radius`, nm) as properties — what neuroglancer shows on hover — coloured from them by
+ * `route.colour` (`pathShader`). Without a route yet, the points alone: the start, then both while
+ * the route is read. A step whose chunk has no position is drawn from the last placed point.
  */
 export function pathLayer(
   fromNm: Triple,
   toNm?: Triple,
-  steps?: readonly PathStep[],
-  /** Each chunk's point, for the straight lines between them; not needed without `steps`. */
-  positions: ReadonlyMap<string, Triple> = new Map(),
-  /** The route along the mesh, once read (`surfaceRoute`): drawn in place of the straight lines. */
-  surface?: SurfaceRoute,
+  route?: DrawnRoute,
 ): Readonly<Record<string, unknown>> {
-  const props = (kind: (typeof KINDS)[number], affinity = NO_AFFINITY, step = 0) => [
-    step,
-    KINDS.indexOf(kind),
-    affinity,
-  ]
+  const steps = route?.steps
+  const by = route?.colour ?? 'affinity'
+  /*
+   * The measure the colour shows comes first: neuroglancer's layer bar shows an annotation's first
+   * property alone on hover (`transformPickedValue`), and with the step number first a reader took
+   * step numbers for radii (user, 2026-11-24). The rest follow, for the full hover.
+   */
+  const order: readonly PropertyId[] =
+    by === 'thickness'
+      ? ['radius', 'affinity', 'kind', 'step']
+      : ['affinity', 'radius', 'kind', 'step']
+  const props = (
+    kind: (typeof KINDS)[number],
+    affinity = NO_AFFINITY,
+    step = 0,
+    r = NO_RADIUS,
+  ) => {
+    const value: Record<PropertyId, number> = {
+      step,
+      kind: KINDS.indexOf(kind),
+      affinity,
+      radius: r,
+    }
+    return order.map((id) => value[id])
+  }
   const point = (id: string, at: Triple) => ({
     type: 'point',
     id,
@@ -447,23 +562,42 @@ export function pathLayer(
     props: props('point'),
     description: id,
   })
-  const line = (id: string, a: Triple, b: Triple, index: number) => {
+  const line = (id: string, a: Triple, b: Triple, index: number, measured?: number) => {
     const step = steps![index]!
+    const r = measured ?? NO_RADIUS
     return {
       type: 'line',
       id,
       pointA: [...a],
       pointB: [...b],
-      props: props(step.kind, step.kind === 'contact' ? step.affinity : NO_AFFINITY, index + 1),
-      description: `step ${index + 1} of ${steps!.length}: ${stepText(step)}`,
+      props: props(
+        step.kind,
+        step.kind === 'contact' ? step.affinity : NO_AFFINITY,
+        index + 1,
+        r,
+      ),
+      description:
+        `step ${index + 1} of ${steps!.length}: ${stepText(step)}` +
+        (r === NO_RADIUS ? '' : `; radius ${Math.round(r)} nm`),
     }
   }
   const annotations: Record<string, unknown>[] = [point('start', fromNm)]
   if (toNm) annotations.push(point('end', toNm))
-  if (toNm && steps) {
-    if (surface) {
-      surface.steps.forEach((index, k) => {
-        annotations.push(line(`piece-${k}`, surface.points[k]!, surface.points[k + 1]!, index))
+  if (toNm && route && steps) {
+    const { positions } = route
+    // Down the skeleton where it is measured, else along the surface, else straight.
+    const pieces = route.skeleton?.along ?? route.surface
+    if (pieces) {
+      pieces.steps.forEach((index, k) => {
+        annotations.push(
+          line(
+            `piece-${k}`,
+            pieces.points[k]!,
+            pieces.points[k + 1]!,
+            index,
+            route.skeleton?.radii[k],
+          ),
+        )
       })
     } else if (steps.length > 0) {
       let last: Triple = fromNm
@@ -483,23 +617,15 @@ export function pathLayer(
       })
     }
   }
+  // The ramp's span over the radii drawn.
+  const drawn = annotations
+    .filter((a) => a['type'] === 'line')
+    .map((a) => (a['props'] as number[])[order.indexOf('radius')]!)
+    .filter((r) => r !== NO_RADIUS)
+  const range = rampRange(drawn)
   return {
     ...localAnnotationLayer(FIND_PATH_LAYER, '', annotations),
-    annotationProperties: [
-      { id: 'step', type: 'uint16', description: 'step along the route, from the start' },
-      {
-        id: 'kind',
-        type: 'float32',
-        description: 'how the step is joined at its weakest',
-        enum_values: KINDS.map((_, i) => i),
-        enum_labels: KINDS.map((kind) => KIND_LABELS[kind]),
-      },
-      {
-        id: 'affinity',
-        type: 'float32',
-        description: `the weakest contact's mean affinity; ${NO_AFFINITY} where the step has none`,
-      },
-    ],
-    shader: pathShader(),
+    annotationProperties: order.map((id) => PROPERTIES[id]),
+    shader: pathShader(by, range),
   }
 }

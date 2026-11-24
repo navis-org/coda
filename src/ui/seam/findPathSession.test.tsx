@@ -9,7 +9,7 @@
  * an F the card takes is not also Coda's fullscreen.
  */
 
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { NoAffinitiesError } from '../../data/cave/subgraph'
@@ -22,9 +22,11 @@ import {
 import { FANC_LAYOUT, toyNeuron } from '../../packs/seam/__fixtures__/splitToy'
 import type { PathStep } from '../../packs/seam/findPath'
 import { FIND_PATH_LAYER } from '../../packs/seam/findPath'
+import type { Skeleton } from '../../packs/seam/skeletonThickness'
 import { clearStorage, installStorageStub } from '../../test/jsdomStubs'
 import { useGraphStore } from '../../store/graphStore'
 import { useAppShortcuts } from '../appShortcuts'
+import { StatusNotice } from '../StatusNotice'
 import { dismissNotice } from '../noticeDismiss'
 import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 import { setHoveredSegment } from '../viewers/segmentHover'
@@ -72,6 +74,8 @@ function fakeServices() {
     ),
     // A mesh that never arrives: the straight lines stay (the surface has its own tests).
     mesh: vi.fn(() => new Promise<SplitMesh>(() => undefined)),
+    // A skeleton that never arrives, unless a test gives one.
+    skeleton: vi.fn(() => new Promise<Skeleton>(() => undefined)),
     post: (frame: object, message: FrameLayerMessage) => posts.push({ frame, message }),
   } satisfies FindPathServices
   return { services, posts }
@@ -265,8 +269,8 @@ describe('find path', () => {
     )
   })
 
-  it('redraws the route along the mesh once it is in', async () => {
-    // A strip along chain A (y 0–50 nm), each vertex's nearest chunk by x: A0 … A5.
+  /** A strip along chain A (y 0–50 nm), each vertex's nearest chunk by x: A0 … A5. */
+  function stripMesh(): SplitMesh {
     const xs = Array.from({ length: 51 }, (_, i) => i * 100)
     const positions = new Float32Array(xs.flatMap((x) => [x, 0, 0, x, 50, 0]))
     const indices = new Uint32Array(
@@ -277,9 +281,11 @@ describe('find path', () => {
     const chunkIndex = (x: number) =>
       NEURON.chunks.indexOf(`A${Math.min(5, Math.round(x / 1000))}`)
     const nearest = Int32Array.from(xs.flatMap((x) => [chunkIndex(x), chunkIndex(x)]))
-    fake.services.mesh.mockImplementation(() =>
-      Promise.resolve({ positions, indices, nearest, chunks: NEURON.chunks }),
-    )
+    return { positions, indices, nearest, chunks: NEURON.chunks }
+  }
+
+  it('redraws the route along the mesh once it is in', async () => {
+    fake.services.mesh.mockImplementation(() => Promise.resolve(stripMesh()))
     const frame = {}
     pressFindPath(FROM, frame)
     pressFindPath(TO, frame)
@@ -292,12 +298,145 @@ describe('find path', () => {
     expect(drawn.at(-1)!['pointB']).toEqual([4100, 0, 0])
   })
 
+  it('builds no skeleton while the colour is affinity', async () => {
+    fake.services.mesh.mockImplementation(() => Promise.resolve(stripMesh()))
+    const frame = {}
+    pressFindPath(FROM, frame)
+    pressFindPath(TO, frame)
+    await vi.waitFor(() => expect(lines(fake.posts.at(-1)!.message).length).toBeGreaterThan(4))
+    expect(fake.services.skeleton).not.toHaveBeenCalled()
+  })
+
+  it('reads thickness down the neuron’s skeleton once asked: thin where it is thin', async () => {
+    // No mesh: the skeleton's route does not wait on it.
+    // A skeleton along chain A every 100 nm: 200 nm thick, a neck of 40 nm at x 2–3 µm.
+    const xs = Array.from({ length: 51 }, (_, i) => i * 100)
+    let release: (skeleton: Skeleton) => void = () => undefined
+    fake.services.skeleton.mockImplementation(
+      () => new Promise<Skeleton>((resolve) => (release = resolve)),
+    )
+    render(<StatusNotice />)
+    const frame = {}
+    act(() => {
+      pressFindPath(FROM, frame)
+      pressFindPath(TO, frame)
+    })
+    await act(settle)
+    act(() => {
+      fireEvent.change(screen.getByRole('combobox', { name: /Colour by/ }), {
+        target: { value: 'thickness' },
+      })
+    })
+    expect(fake.services.skeleton).toHaveBeenCalledTimes(1)
+    expect(notice()).toMatch(/Measuring thickness along the neuron’s skeleton/)
+    // The reader's choice stays chosen while affinity is drawn in the meantime.
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('thickness')
+    await act(async () => {
+      release({
+        points: Float32Array.from(xs.flatMap((x) => [x, 0, 0])),
+        radii: Float32Array.from(xs.map((x) => (x >= 2000 && x <= 3000 ? 40 : 200))),
+        parents: Int32Array.from(xs.map((_, i) => i - 1)),
+      })
+      await settle()
+    })
+    // The search pauses for the browser before each bridge width: a timer, not a microtask.
+    await act(() =>
+      vi.waitFor(() => expect(notice()).toMatch(/Measured along the neuron’s skeleton/)),
+    )
+    const drawn = lines(fake.posts.at(-1)!.message)
+    expect(drawn.every((l) => String(l['id']).startsWith('piece-'))).toBe(true)
+    const radiusAt = (line: Record<string, unknown>) => {
+      const ids = (
+        fake.posts.at(-1)!.message.layer!['annotationProperties'] as Array<{ id: string }>
+      ).map((p) => p.id)
+      return (line['props'] as number[])[ids.indexOf('radius')]
+    }
+    const thin = drawn.filter((l) => radiusAt(l) === 40)
+    const thick = drawn.filter((l) => radiusAt(l) === 200)
+    expect(thin.length).toBeGreaterThan(0)
+    expect(thick.length).toBeGreaterThan(thin.length)
+    expect(notice()).toMatch(/Thinnest: radius 40 nm.*Measured along the neuron’s skeleton/)
+    // Asked once: switching back and forth reads nothing again.
+    act(() => {
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'affinity' } })
+    })
+    act(() => {
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'thickness' } })
+    })
+    expect(fake.services.skeleton).toHaveBeenCalledTimes(1)
+  })
+
+  it('says when the skeleton’s thickness cannot be had', async () => {
+    fake.services.skeleton.mockImplementation(() =>
+      Promise.reject(new Error('Pyodide is down')),
+    )
+    render(<StatusNotice />)
+    const frame = {}
+    act(() => {
+      pressFindPath(FROM, frame)
+      pressFindPath(TO, frame)
+    })
+    await act(settle)
+    act(() => {
+      fireEvent.change(screen.getByRole('combobox', { name: /Colour by/ }), {
+        target: { value: 'thickness' },
+      })
+    })
+    await act(settle)
+    expect(notice()).toMatch(
+      /Thickness could not be measured along the skeleton: Pyodide is down/,
+    )
+    // Asked again when thickness is chosen again: a failure may have passed.
+    act(() => {
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'affinity' } })
+    })
+    act(() => {
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'thickness' } })
+    })
+    expect(fake.services.skeleton).toHaveBeenCalledTimes(2)
+  })
+
+  it('draws affinity until the skeleton’s thickness is in: no chunk radius stands in', async () => {
+    render(<StatusNotice />)
+    const frame = {}
+    act(() => {
+      pressFindPath(FROM, frame)
+      pressFindPath(TO, frame)
+    })
+    await act(settle)
+    const select = screen.getByRole('combobox', { name: /Colour by/ }) as HTMLSelectElement
+    expect(select.value).toBe('affinity')
+    expect(String(fake.posts.at(-1)!.message.layer?.['shader'])).toMatch(/prop_affinity/)
+    act(() => {
+      fireEvent.change(select, { target: { value: 'thickness' } })
+    })
+    // The skeleton never arrives here: affinity stays drawn, and the notice says why.
+    expect(String(fake.posts.at(-1)!.message.layer?.['shader'])).toMatch(/prop_affinity/)
+    expect(notice()).toMatch(/Weakest: .*Measuring thickness along the neuron’s skeleton/)
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('thickness')
+  })
+
+  it('offers thickness on any route, with no level-2 cache: the skeleton gives it', async () => {
+    render(<StatusNotice />)
+    const frame = {}
+    act(() => {
+      pressFindPath(FROM, frame)
+      pressFindPath(TO, frame)
+    })
+    await act(settle)
+    const thickness = screen.getByRole('option', { name: 'thickness' }) as HTMLOptionElement
+    expect(thickness.disabled).toBe(false)
+  })
+
   it('counts the steps a merge alone joins and the steps not read', () => {
-    const text = summaryOf([
-      contact('a', 'b', 0.7),
-      { from: 'b', to: 'c', kind: 'userMerge', affinity: Number.NaN, area: 0 },
-      { from: 'c', to: 'd', kind: 'unread', affinity: Number.NaN, area: 0 },
-    ])
+    const text = summaryOf({
+      steps: [
+        contact('a', 'b', 0.7),
+        { from: 'b', to: 'c', kind: 'userMerge', affinity: Number.NaN, area: 0 },
+        { from: 'c', to: 'd', kind: 'unread', affinity: Number.NaN, area: 0 },
+      ],
+      positions: new Map(),
+    })
     expect(text).toMatch(/3 steps\. Weakest: step 1, mean affinity 0\.70/)
     expect(text).toMatch(/1 step joined by a proofreader’s merge only\. 1 step not read\./)
   })
