@@ -36,6 +36,7 @@ import { hoveredSegment } from './segmentHover'
 import { useGraphStore } from '../../store/graphStore'
 import { RELEASE_AFTER_MS } from './persistentRoots'
 import { resetSceneMemos } from './sceneMemo'
+import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 500 }))
 beforeEach(() => {
@@ -1414,25 +1415,57 @@ describe('neurons changed inside the viewer', () => {
       const posted = speakingFrame(view.container, sceneWith(['1']))
       // Told on the frame's first report: on the canvas they stay neuroglancer's.
       expect(posted).toHaveBeenCalledWith(
-        { type: 'coda:ng-keys', altDigits: false },
+        { type: 'coda:ng-keys', altDigits: false, findPath: false },
         window.location.origin,
       )
       act(() => useGraphStore.setState({ dashboardOpen: true }))
       expect(posted).toHaveBeenLastCalledWith(
-        { type: 'coda:ng-keys', altDigits: true },
+        { type: 'coda:ng-keys', altDigits: true, findPath: false },
         window.location.origin,
       )
+    })
+
+    /** F is Coda's find path only on a CAVE card with the SEAM pack on; else neuroglancer's tool. */
+    it('tells the frame F is Coda’s where find path is on, and neuroglancer’s once SEAM is off', () => {
+      switchPack('seam', true)
+      const view = render(
+        viewer(URL_A, [], vi.fn(), {
+          splitTarget: { deployment: 'https://cave.example', datastack: 'toy' },
+        }),
+      )
+      frameLoaded(view.container)
+      const posted = speakingFrame(view.container, sceneWith(['1']))
+      expect(posted).toHaveBeenCalledWith(
+        { type: 'coda:ng-keys', altDigits: false, findPath: true },
+        window.location.origin,
+      )
+      act(() => switchPack('seam', false))
+      expect(posted).toHaveBeenLastCalledWith(
+        { type: 'coda:ng-keys', altDigits: false, findPath: false },
+        window.location.origin,
+      )
+      resetPackSwitchesForTest()
     })
 
     it('presses a key the frame hands back as if it were pressed here', () => {
       const view = mounted(URL_A)
       frameShowing(view.container, sceneWith(['1']))
       const heard = vi.fn()
-      const listen = (event: KeyboardEvent) => heard(event.code, event.altKey)
+      const listen = (event: KeyboardEvent) =>
+        heard(
+          event.code,
+          event.key,
+          event.altKey,
+          event.cancelable,
+          event.target === document.body,
+        )
       window.addEventListener('keydown', listen)
       post(view.container, { type: 'coda:ng-key', code: 'Digit2', altKey: true })
+      // With the key as typed: bare F handed back is still Coda's fullscreen where nothing takes it.
+      post(view.container, { type: 'coda:ng-key', code: 'KeyF', key: 'f', altKey: false })
       window.removeEventListener('keydown', listen)
-      expect(heard).toHaveBeenCalledWith('Digit2', true)
+      expect(heard).toHaveBeenCalledWith('Digit2', '', true, true, true)
+      expect(heard).toHaveBeenCalledWith('KeyF', 'f', false, true, true)
     })
   })
 

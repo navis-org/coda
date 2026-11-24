@@ -141,6 +141,7 @@ export function toyNeuron(input: SplitGalleryInput, root: string): SplitNeuron {
         return [chunk, cell]
       }),
     ),
+    placed: 'l2cache',
   }
 }
 

@@ -49,7 +49,7 @@ type Triple = readonly [number, number, number]
 export const SITE_RADIUS_NM = 2000
 
 /** `subgraph` requests in flight at once. */
-const SUBGRAPH_CONCURRENCY = 4
+export const SUBGRAPH_CONCURRENCY = 4
 
 /**
  * The widest a `subgraph` box along the path may grow, in chunk cells per axis. Three is what the
@@ -349,8 +349,10 @@ export async function placeCuts(
   )
 }
 
-/** A level-2 chunk graph's edges as adjacency lists. */
-function adjacencyOf(edges: ReadonlyArray<readonly [string, string]>): Map<string, string[]> {
+/** Each chunk's neighbours, both ways, from a list of links (`chunkPaths`' graph). */
+export function adjacencyOf(
+  edges: ReadonlyArray<readonly [string, string]>,
+): Map<string, string[]> {
   const adjacency = new Map<string, string[]>()
   const link = (a: string, b: string) => {
     const list = adjacency.get(a)

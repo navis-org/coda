@@ -50,6 +50,7 @@ import { chunkOfMembers, splitCandidates } from '../../packs/seam/splitGallery'
 import type { BoxableLayout } from '../../data/cave/graphLayout'
 import { cellAt, cellBox, isBoxable } from '../../data/cave/graphLayout'
 import type { SplitNeuron } from '../../packs/seam/splitGalleryRun'
+import type { RouteMesh } from '../../packs/seam/surfacePath'
 import { readSplitBox, readSplitNeuron, splitBoxCells } from '../../packs/seam/splitGalleryRun'
 import { useGraphStore } from '../../store/graphStore'
 import { isTourActive } from '../tour/tourState'
@@ -96,7 +97,7 @@ export type SplitSession =
     }
   | { readonly phase: 'failed'; readonly request: SplitRequest; readonly message: string }
 
-interface Chunkedgraph {
+export interface Chunkedgraph {
   readonly graphene: GrapheneSource
   readonly layout: BoxableLayout
   /** The supervoxel volume's base URL, for the labels under a cut (`labels`). */
@@ -128,17 +129,7 @@ export interface SplitServices {
 }
 
 /** The neuron's mesh for the tiles, each vertex with the level-2 chunk it takes its side from. */
-export interface SplitMesh {
-  readonly positions: Float32Array
-  readonly indices: Uint32Array
-  /**
-   * The chunks `nearest` indexes — the neuron read it was matched against, carried with it: a
-   * neuron read again may list its chunks in another order.
-   */
-  readonly chunks: readonly string[]
-  /** Per vertex, an index into `chunks`, or -1 (`nearestChunks`). */
-  readonly nearest: Int32Array
-}
+export type SplitMesh = RouteMesh
 
 export type SplitMeshState =
   | { readonly status: 'loading' }
@@ -159,8 +150,8 @@ const LABEL_NM = 32
 /** Each supervoxel volume's `info`, opened once. */
 const volumes = new Map<string, Promise<VolumeInfo>>()
 
-const targetKey = (t: SplitTarget) => `${t.deployment}|${t.datastack}`
-const optionsOf = (target: SplitTarget): CaveRequestOptions => ({
+export const targetKey = (t: SplitTarget) => `${t.deployment}|${t.datastack}`
+export const optionsOf = (target: SplitTarget): CaveRequestOptions => ({
   deployment: target.deployment,
 })
 
@@ -253,7 +244,11 @@ const boxes = new LruMap<string, Promise<SplitGalleryInput>>(3)
 const meshes = new LruMap<string, Promise<SplitMesh>>(2)
 let readingAhead = false
 
-function graphOf(target: SplitTarget): Promise<Chunkedgraph> {
+/**
+ * A datastack's chunkedgraph, read once — shared with the find-path key (`findPathSession.ts`), so
+ * F and K pressed over one neuron read it once between them.
+ */
+export function graphOf(target: SplitTarget): Promise<Chunkedgraph> {
   return memoPromise(
     graphs,
     targetKey(target),
@@ -262,7 +257,8 @@ function graphOf(target: SplitTarget): Promise<Chunkedgraph> {
   )
 }
 
-async function neuronOf(target: SplitTarget, root: string): Promise<SplitNeuron> {
+/** A neuron's level-2 graph and points, kept for the last few (`neurons`); shared as `graphOf` is. */
+export async function neuronOf(target: SplitTarget, root: string): Promise<SplitNeuron> {
   const graph = await graphOf(target)
   return memoPromise(
     neurons,
@@ -287,7 +283,11 @@ async function boxOf(request: SplitRequest): Promise<SplitGalleryInput> {
   return { ...box, click: request.pointNm }
 }
 
-function meshOf(target: SplitTarget, root: string): Promise<SplitMesh> {
+/**
+ * A neuron's reduced mesh, each vertex with its nearest chunk — kept for the last two, and shared
+ * as `graphOf` is: find path runs its route along it (`findPathSession.ts`).
+ */
+export function meshOf(target: SplitTarget, root: string): Promise<SplitMesh> {
   return memoPromise(
     meshes,
     `${targetKey(target)}|${root}`,

@@ -100,6 +100,7 @@ import {
   FRAME_SEGMENTS_MESSAGE,
   FRAME_SET_VIEW_MESSAGE,
   isFrameHoverMessage,
+  frameKeyInit,
   isFrameKeyMessage,
   isFrameUnappliedMessage,
   decodeSavedView,
@@ -114,6 +115,7 @@ import { errorMessage } from '../../core/errors'
 import { describeLegend, resolveColor } from '../../style/encoding'
 import { copyText } from '../export'
 import { useLatest } from '../useLatest'
+import { useOfferedPack } from '../packSwitches'
 import { useGraphStore } from '../../store/graphStore'
 import { setHoveredSegment } from './segmentHover'
 import { useSplitKey } from '../seam/splitKey'
@@ -315,6 +317,8 @@ interface HeldFrame {
   sent: number
   /** Whether this document was last told ⌥1–9 are Coda's (`FrameKeysMessage`). */
   claimsAltDigits?: boolean
+  /** And whether F is Coda's find path here (`FrameKeysMessage.findPath`). */
+  claimsFindPath?: boolean
 }
 
 /**
@@ -328,6 +332,7 @@ function forgetDocument(held: HeldFrame): void {
   // A fresh document opens at the scene's own framing, so whatever we last asked for is gone.
   held.focused = undefined
   held.claimsAltDigits = undefined
+  held.claimsFindPath = undefined
 }
 
 function createFrame(): { host: HTMLElement; root: HeldFrame } {
@@ -825,20 +830,31 @@ export function NeuroglancerViewer({
    * the frame's document. So a frame that reports back (Coda's own) is told to hand them over while
    * the dashboard is open, and leaves them to neuroglancer elsewhere, as Coda does. Told again on
    * its first report, since a message sent before its script has loaded is lost.
+   *
+   * F the same way: Coda's find path where it is on for this card — the SEAM pack offered and a CAVE
+   * dataset (`splitTarget`) — and otherwise neuroglancer's own find-path tool (user, 2026-11-24).
    */
   const claimAltDigits = useGraphStore((s) => s.dashboardOpen)
-  const claimRef = useLatest(claimAltDigits)
+  const claimFindPath = useOfferedPack()('seam') && splitTarget !== undefined
+  const claimRef = useLatest({ altDigits: claimAltDigits, findPath: claimFindPath })
   const tellKeys = (kept: HeldFrame) => {
-    if (kept.speaksFor === undefined || kept.claimsAltDigits === claimRef.current) return
-    kept.claimsAltDigits = claimRef.current
-    const message: FrameKeysMessage = { type: FRAME_KEYS_MESSAGE, altDigits: claimRef.current }
+    const { altDigits, findPath } = claimRef.current
+    if (
+      kept.speaksFor === undefined ||
+      (kept.claimsAltDigits === altDigits && kept.claimsFindPath === findPath)
+    ) {
+      return
+    }
+    kept.claimsAltDigits = altDigits
+    kept.claimsFindPath = findPath
+    const message: FrameKeysMessage = { type: FRAME_KEYS_MESSAGE, altDigits, findPath }
     kept.frame.contentWindow?.postMessage(message, window.location.origin)
   }
   const tellKeysRef = useLatest(tellKeys)
   useEffect(() => {
     const kept = leaseRef.current?.root
     if (kept) tellKeysRef.current(kept)
-  }, [claimAltDigits, claimRef, tellKeysRef])
+  }, [claimAltDigits, claimFindPath, claimRef, tellKeysRef])
 
   /*
    * The camera a card asked for — see `focus` on the props.
@@ -894,9 +910,10 @@ export function NeuroglancerViewer({
         return
       }
       if (isFrameKeyMessage(event.data)) {
-        // As if pressed here: Coda's own shortcut listener decides, tour and all.
-        const { code, altKey } = event.data
-        window.dispatchEvent(new KeyboardEvent('keydown', { code, altKey, bubbles: true }))
+        // As if pressed here: Coda's own shortcut listener decides, tour and all. At the page, as a
+        // key pressed in Coda's document is, so the window's capture phase — a card key taking it
+        // (`splitKey.ts`) — comes before the shortcuts on the same letter.
+        document.body.dispatchEvent(new KeyboardEvent('keydown', frameKeyInit(event.data)))
         return
       }
       const latest = (event.data as { update?: unknown }).update === kept.sent

@@ -4,7 +4,9 @@
  * (`docs/split-gallery-plan.md`, measured 2026-11-23):
  *
  * - **`readSplitNeuron`**, per neuron, while it is in the card: its level-2 graph and every
- *   chunk's point from the L2 cache. 0.8–3.4 s on FANC and Aedes, larger neurons slower.
+ *   chunk's point from the L2 cache. 0.8–3.4 s on FANC and Aedes, larger neurons slower. A
+ *   chunkedgraph with no L2 cache (the FANC sandbox is one) has each chunk at its grid cell's
+ *   centre instead, and says so (`SplitNeuron.placed`).
  * - **`readSplitBox`**, per point: **one** `subgraph` of the point's box one chunk wider on every
  *   side, and that box's chunks' supervoxels, at once. Median 2.3 s, 90th percentile 4.2 s.
  *
@@ -16,7 +18,8 @@ import type { CaveRequestOptions } from '../../data/cave/client'
 import type { GrapheneSource } from '../../data/cave/graphene'
 import type { BoxableLayout } from '../../data/cave/graphLayout'
 import { cellAt, cellBox, chunkOf } from '../../data/cave/graphLayout'
-import { readL2Positions, readLevelTwoGraph } from '../../data/cave/l2'
+import type { ChunkPlacement } from '../../data/cave/l2'
+import { chunkPositions, readLevelTwoGraph } from '../../data/cave/l2'
 import { chunkSupervoxels } from '../../data/cave/rootIds'
 import { readSubgraph } from '../../data/cave/subgraph'
 import type { Triple } from '../../data/precomputed/volume'
@@ -43,8 +46,18 @@ export interface SplitNeuron {
   readonly positions: ReadonlyMap<string, Triple>
   /** Each chunk's cell on the grid. */
   readonly cells: ReadonlyMap<string, Triple>
+  /**
+   * Where `positions` came from: each chunk's own point in the L2 cache, or — on a datastack with
+   * no cache — its grid cell's centre, which every chunk in that cell shares.
+   */
+  readonly placed: ChunkPlacement
 }
 
+/**
+ * The neuron's level-2 graph, each chunk's cell, and each chunk's point (`chunkPositions`: from the
+ * L2 cache where there is one, else the cell's centre). The graph needs no cache, so a route or a
+ * cut found on it is the same either way; only where it is drawn is rougher.
+ */
 export async function readSplitNeuron(
   graphene: GrapheneSource,
   layout: BoxableLayout,
@@ -52,13 +65,13 @@ export async function readSplitNeuron(
   options: CaveRequestOptions,
 ): Promise<SplitNeuron> {
   const { chunks, edges } = await readLevelTwoGraph(graphene, root, options)
-  const positions = await readL2Positions(graphene, chunks, options)
   const cells = new Map<string, Triple>()
   for (const chunk of chunks) {
     const cell = chunkOf(layout, BigInt(chunk))
     if (cell) cells.set(chunk, cell)
   }
-  return { root, chunks, links: edges, positions, cells }
+  const { positions, placed } = await chunkPositions(graphene, layout, cells, options)
+  return { root, chunks, links: edges, positions, cells, placed }
 }
 
 /** The point's box and the one-chunk-wider box read around it, as grid cells. */

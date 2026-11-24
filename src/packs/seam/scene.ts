@@ -349,7 +349,7 @@ export function mergeLineLayer(
  * The shader is not optional: neuroglancer's default calls `defaultColor()` and never looks at the
  * properties, so every annotation would draw in one colour with nothing on screen to notice.
  */
-function localAnnotationLayer(
+export function localAnnotationLayer(
   name: string,
   marker: string,
   annotations: readonly unknown[],

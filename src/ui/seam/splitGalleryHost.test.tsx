@@ -54,7 +54,11 @@ beforeEach(() => {
   resetSplitSessionForTests({
     ...toyServices(),
     chunkedgraph: () =>
-      Promise.resolve({ graphene: GRAPHENE, layout: FANC_LAYOUT, base: 'gs://toy' }),
+      Promise.resolve({
+        graphene: GRAPHENE,
+        layout: FANC_LAYOUT,
+        base: 'gs://toy',
+      }),
     box: () => Promise.resolve(NUMBERED),
     // A mesh that never arrives: the tiles draw chunk points meanwhile.
     mesh: () => new Promise(() => undefined),

@@ -27,6 +27,9 @@ import type { TreePoint } from '../skeletonTree'
 import { spanningForest } from '../skeletonTree'
 import { CaveError, caveGet, caveGetOr404, cavePost, sharedRequestOptions } from './client'
 import type { GrapheneSource } from './graphene'
+import type { BoxableLayout } from './graphLayout'
+import { cellCentreNm } from './graphLayout'
+import type { Triple } from '../precomputed/volume'
 import { tableUrl } from './graphene'
 import type { CaveRequestOptions } from './client'
 import { memoPromise } from '../memoPromise'
@@ -227,6 +230,44 @@ export async function readL2Positions(
     if (at && at.length >= 3) positions.set(id, [at[0], at[1], at[2]])
   }
   return positions
+}
+
+/** Where a chunk's point came from: its own in the L2 cache, or its grid cell's centre. */
+export type ChunkPlacement = 'l2cache' | 'cells'
+
+/**
+ * Whether the chunkedgraph's table has an L2 cache — caveclient's `has_cache` rule, as
+ * `l2SourceFor` asks it: the server's table mapping lists the table. Only a mapping that does not
+ * list it is "no"; a failed read of the mapping is thrown (`l2TableMapping`).
+ */
+export async function hasL2Cache(
+  source: GrapheneSource,
+  options: CaveRequestOptions,
+): Promise<boolean> {
+  return source.table in (await l2TableMapping(source.server, options))
+}
+
+/**
+ * Each chunk's point, nm: its own from the L2 cache where the chunkedgraph has one (`hasL2Cache`),
+ * else its grid cell's centre (`cellCentreNm`), which every chunk in that cell shares — the FANC
+ * sandbox and `flywire_fafb_public` have no cache, and would otherwise answer "does not have an L2
+ * Cache". `cells` are the chunks' cells, as the caller already has them; `placed` says which.
+ */
+export async function chunkPositions(
+  source: GrapheneSource,
+  layout: BoxableLayout,
+  cells: ReadonlyMap<string, Triple>,
+  options: CaveRequestOptions,
+): Promise<{ positions: Map<string, Triple>; placed: ChunkPlacement }> {
+  if (await hasL2Cache(source, options)) {
+    return {
+      positions: await readL2Positions(source, [...cells.keys()], options),
+      placed: 'l2cache',
+    }
+  }
+  const positions = new Map<string, Triple>()
+  for (const [chunk, cell] of cells) positions.set(chunk, cellCentreNm(layout, cell))
+  return { positions, placed: 'cells' }
 }
 
 /** Every chunk's representative coordinate and radius, in as few requests as it takes. */

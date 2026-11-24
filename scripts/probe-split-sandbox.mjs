@@ -29,8 +29,7 @@ import { createHash } from 'node:crypto'
 
 import { requestOptionsOf } from '../src/data/cave/edits.ts'
 import { within } from '../src/data/cave/editWaits.ts'
-import { cellBox, chunkOf, isBoxable } from '../src/data/cave/graphLayout.ts'
-import { readLevelTwoGraph } from '../src/data/cave/l2.ts'
+import { isBoxable } from '../src/data/cave/graphLayout.ts'
 import { isLatestRoots, l2ChunkCounts, supervoxelRoots } from '../src/data/cave/rootIds.ts'
 import { findSupervoxels } from '../src/data/cave/volumes.ts'
 import { splitCandidates } from '../src/packs/seam/splitGallery.ts'
@@ -87,35 +86,6 @@ const codeOf = (cut) =>
  */
 let standing
 
-/**
- * The gallery's read of the neuron — or, where the sandbox has no level-2 cache (it has none:
- * "Dataset mar2021_test does not have an L2 Cache.", 2026-11-23), the same read with each chunk
- * placed at its grid cell's centre. The points only order the splits by distance and are logged
- * with the edit; the cut, its check and the write are the same either way.
- */
-async function neuronOf(graphene, layout) {
-  try {
-    return await readSplitNeuron(graphene, layout, root, readAs)
-  } catch (error) {
-    if (!(error instanceof Error && /does not have an L2 Cache/.test(error.message))) throw error
-    console.log('  no level-2 cache: chunks placed at their grid cells’ centres')
-  }
-  const { chunks, edges } = await readLevelTwoGraph(graphene, root, readAs)
-  const cells = new Map()
-  const positions = new Map()
-  for (const chunk of chunks) {
-    const cell = chunkOf(layout, BigInt(chunk))
-    if (!cell) continue
-    cells.set(chunk, cell)
-    const [lo, hi] = cellBox(layout, cell, cell)
-    positions.set(
-      chunk,
-      lo.map((v, a) => ((v + hi[a] + 1) / 2) * layout.baseResolutionNm[a]),
-    )
-  }
-  return { root, chunks, links: edges, positions, cells }
-}
-
 async function main() {
   const { graphene, layout } = await findSupervoxels(SANDBOX.datastack, options)
   // The datastack record decides the table; it has to be the sandbox's, or nothing goes further.
@@ -129,7 +99,11 @@ async function main() {
   report.check(current === true, `${root} is current`)
   if (!current) return
 
-  const neuron = await neuronOf(graphene, layout)
+  // The sandbox has no level-2 cache ("Dataset mar2021_test does not have an L2 Cache.",
+  // 2026-11-23): the gallery's own read then places each chunk at its grid cell's centre. The points
+  // only order the splits by distance and are logged with the edit; the cut and the write are the same.
+  const neuron = await readSplitNeuron(graphene, layout, root, readAs)
+  if (neuron.placed === 'cells') console.log('  no level-2 cache: chunks placed at their grid cells’ centres')
   const input = await readSplitBox(graphene, layout, neuron, pointNm, readAs)
   const candidates = [...splitCandidates(input)].filter(Boolean)
   console.log(

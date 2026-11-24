@@ -9,15 +9,15 @@
  */
 
 import { useGraphStore } from '../store/graphStore'
+import { dismissNotice } from './noticeDismiss'
 
 export function StatusNotice() {
   const notice = useGraphStore((s) => s.notice)
-  const setNotice = useGraphStore((s) => s.setNotice)
   if (!notice) return null
   return (
     <div className="notice" role="status">
       <span>{notice}</span>
-      <button type="button" onClick={() => setNotice(undefined)} title="Dismiss">
+      <button type="button" onClick={dismissNotice} title="Dismiss">
         ×
       </button>
     </div>

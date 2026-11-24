@@ -15,6 +15,7 @@ import 'neuroglancer/unstable/layer/enabled_frontend_modules.js'
 import 'neuroglancer/unstable/datasource/enabled_frontend_modules.js'
 import 'neuroglancer/unstable/kvstore/enabled_frontend_modules.js'
 import { setupDefaultViewer } from 'neuroglancer/unstable/ui/default_viewer_setup.js'
+import { makeLayer } from 'neuroglancer/unstable/layer/index.js'
 import { getCachedJson } from 'neuroglancer/unstable/util/trackable.js'
 
 import { registerCaveCredentials } from './caveCredentials'
@@ -28,7 +29,10 @@ import {
   FRAME_KEY_MESSAGE,
   type FrameKeyMessage,
   isAltDigit,
+  isFindPathKey,
   isFrameKeysMessage,
+  isFramePressMessage,
+  isFrameLayerMessage,
   isPickKey,
   isSplitKey,
   reviewKeyOf,
@@ -98,7 +102,12 @@ function reportChanges(ng: typeof viewer): void {
       const { generation, value } = getCachedJson(layers)
       if (generation !== posted) {
         posted = generation
-        post({ type: FRAME_STATE_MESSAGE, state: { layers: value }, update: applied })
+        // Less the frame's own layers: the card's scene never had them (`setOwnLayer`).
+        const own = ownLayersShown()
+        const layersOf = Array.isArray(value)
+          ? value.filter((layer: { name?: unknown }) => !own.has(String(layer?.name)))
+          : value
+        post({ type: FRAME_STATE_MESSAGE, state: { layers: layersOf }, update: applied })
       }
       // The view only when it moved — a camera drag posts once it settles, not per frame.
       const view = pickView((key) => {
@@ -211,15 +220,31 @@ function pointerNm(ng: typeof viewer): [number, number, number] | undefined {
  */
 /** Whether ⌥1–9 are Coda's right now (`FrameKeysMessage`) — the dashboard's tab keys. */
 let claimAltDigits = false
+/**
+ * Whether `F` is Coda's find path here (`FrameKeysMessage.findPath`): claimed and handed back, and
+ * neuroglancer's own Find Path button hidden (`neuroglancer.html`, by this attribute). Off, `F` and
+ * the button are neuroglancer's own find-path tool, as Spelunker binds it.
+ */
+let claimFindPath = false
 
 window.addEventListener('message', (event) => {
   if (event.source !== window.parent || event.origin !== window.location.origin) return
   if (isFrameKeysMessage(event.data)) {
     claimAltDigits = event.data.altDigits
+    claimFindPath = event.data.findPath === true
+    document.documentElement.toggleAttribute('data-coda-find-path', claimFindPath)
+    return
+  }
+  if (isFramePressMessage(event.data)) {
+    pressInViewer(event.data.code, event.data.key)
     return
   }
   if (isFrameSetViewMessage(event.data)) {
     setView(event.data.position, event.data.width)
+    return
+  }
+  if (isFrameLayerMessage(event.data)) {
+    setOwnLayer(event.data.name, event.data.layer)
     return
   }
   if (!isFrameSegmentsMessage(event.data)) return
@@ -239,6 +264,20 @@ window.addEventListener('message', (event) => {
     )
   }
 })
+
+/**
+ * A key pressed into neuroglancer as if typed in the frame (`FramePressMessage`): down and up on the
+ * viewer's own element, where its key bindings listen (`KeyboardEventBinder`), so a tool bound to
+ * the key — Spelunker's find path on `F` — toggles as it would from the keyboard.
+ */
+function pressInViewer(code: string, key: string): void {
+  const element = (viewer as unknown as { element?: HTMLElement }).element ?? document.body
+  for (const type of ['keydown', 'keyup'] as const) {
+    element.dispatchEvent(
+      new KeyboardEvent(type, { code, key, bubbles: true, cancelable: true }),
+    )
+  }
+}
 
 /**
  * Point the camera and frame it, in the scene's own coordinate space.
@@ -298,6 +337,70 @@ const CROSS_SECTION_PIXELS = 500
 const PROJECTION_SPAN = 2
 /** And how much of it a cross-section frames. */
 const CROSS_SECTION_SPAN = 0.5
+
+/**
+ * The frame's own layers (`FrameLayerMessage`), by name: the layer object it built, and its spec
+ * less its annotations — what decides whether the next spec can be set in place. Owned by object, so
+ * a layer of the scene or the reader's that happens to bear the name is never touched; and left out
+ * of every report to the card (`reportChanges`), so an own layer is never saved.
+ */
+const ownLayers = new Map<string, { readonly layer: object; readonly fixed: string }>()
+
+/**
+ * The names of the frame's own layers still shown, by object — and the rest forgotten: a navigation
+ * throws them away, and a layer of the scene or the reader's that takes the name since is theirs.
+ */
+function ownLayersShown(): Set<string> {
+  const shown = new Set<string>()
+  for (const [name, own] of ownLayers) {
+    if (viewer.layerManager.getLayerByName(name) === own.layer) shown.add(name)
+    else ownLayers.delete(name)
+  }
+  return shown
+}
+
+/**
+ * A layer of the frame's own (`FrameLayerMessage`) — find path's route, say: its annotations
+ * replaced in place where the layer is already here with the same shader and properties, else the
+ * layer (re)built after the scene's — added through the layer manager, so nothing else is rebuilt
+ * and the camera stays — and made visible, where the reader hid it (user, 2026-11-24). `null`
+ * removes it. Where another layer holds the name, or neuroglancer refuses the spec, nothing changes
+ * but a line on the console.
+ */
+function setOwnLayer(name: string, spec: Readonly<Record<string, unknown>> | null): void {
+  const manager = viewer.layerManager
+  const existing = manager.getLayerByName(name)
+  const own = ownLayers.get(name)
+  const mine = existing !== undefined && existing === own?.layer
+  if (existing && !mine) {
+    console.warn(`A layer of the scene is named "${name}": Coda draws nothing over it.`)
+    return
+  }
+  if (spec === null) {
+    if (existing) manager.removeManagedLayer(existing)
+    ownLayers.delete(name)
+    return
+  }
+  const { annotations, ...rest } = spec
+  const fixed = JSON.stringify(rest)
+  // Shown whatever the reader did to it since: a new start or route is something to look at.
+  if (
+    existing &&
+    own?.fixed === fixed &&
+    setAnnotations({ name, annotations: annotations as unknown[] })
+  ) {
+    existing.setVisible(true)
+    return
+  }
+  try {
+    const built = makeLayer(viewer.layerSpecification, name, spec)
+    if (existing) manager.removeManagedLayer(existing)
+    manager.addManagedLayer(built)
+    ownLayers.set(name, { layer: built, fixed })
+  } catch (error) {
+    console.warn(`Neuroglancer refused the layer "${name}":`, error)
+  }
+}
 
 /**
  * Replace a local annotation layer's annotations, as its own `restoreState` reads them from a scene:
@@ -432,8 +535,9 @@ function sameColors(a: Record<string, string>, b: Record<string, string>): boole
  * the scene — and neuroglancer toggled a layer's picking instead. Capture phase, so it is taken
  * before neuroglancer's own bindings see it; a field in the frame keeps it, for the same reason
  * Coda's own fields do (⌥digit is how a Mac types `¡` and `™`). The hand-pick key (`isPickKey`)
- * goes back the same way, for the review card (`segmentHover.ts`), and the split key (`isSplitKey`)
- * for the split gallery (`ui/seam/splitSession.ts`).
+ * goes back the same way, for the review card (`segmentHover.ts`), the split key (`isSplitKey`)
+ * for the split gallery (`ui/seam/splitSession.ts`), and the find-path key (`isFindPathKey`) for
+ * Coda's find path (`ui/seam/splitKey.ts`) — where the card says it is on (`claimFindPath`).
  */
 window.addEventListener(
   'keydown',
@@ -445,6 +549,7 @@ window.addEventListener(
       (claimAltDigits && isAltDigit(event)) ||
       isPickKey(event) ||
       isSplitKey(event) ||
+      (claimFindPath && isFindPathKey(event)) ||
       reviewKeyOf(event) !== undefined
     if (!claimed) return
     event.preventDefault()
@@ -455,6 +560,7 @@ window.addEventListener(
       {
         type: FRAME_KEY_MESSAGE,
         code: event.code,
+        key: event.key,
         altKey: event.altKey,
       } satisfies FrameKeyMessage,
       window.location.origin,

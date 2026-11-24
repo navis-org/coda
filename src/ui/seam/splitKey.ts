@@ -1,5 +1,6 @@
 /**
- * The split key (`K`, `isSplitKey`) in the Neuroglancer cards that can split: each card says which
+ * The split key (`K`, `isSplitKey`) and the find-path key (`F`, `isFindPathKey`,
+ * `findPathSession.ts`) in the Neuroglancer cards that can split: each card says which
  * frame is its and where its neurons live (`useSplitKey`); a press goes to the card whose frame
  * the pointer is in, with the segment and the point under it (`segmentHover.ts`). The pointer's
  * moves over those cards go to the session too, for reading ahead (`splitPointer`) — so the
@@ -13,11 +14,17 @@ import { useEffect } from 'react'
 import type { RefObject } from 'react'
 
 import { isTypingTarget } from '../../core/keys'
-import { isSplitKey } from '../../data/neuroglancer/frameMessage'
+import type { FramePressMessage } from '../../data/neuroglancer/frameMessage'
+import {
+  FRAME_PRESS_MESSAGE,
+  isFindPathKey,
+  isSplitKey,
+} from '../../data/neuroglancer/frameMessage'
 import { useGraphStore } from '../../store/graphStore'
 import { useOfferedPack } from '../packSwitches'
 import { useLatest } from '../useLatest'
 import { onPointerMove, pointerStay } from '../viewers/segmentHover'
+import { pressFindPath } from './findPathSession'
 import type { SplitCard, SplitRequest, SplitTarget } from './splitSession'
 import { splitPointer, startSplit } from './splitSession'
 
@@ -34,49 +41,126 @@ const cards = new Set<
   }>
 >()
 
-/** Why a press over a card that can split asks for nothing, as the status bar says it. */
-const NO_POINT =
-  'Neuroglancer cannot say where the pointer is in this scene, so there is no point to split at.'
-const PACK_OFF =
-  'K splits neurons with the SEAM plugin, which is switched off. Switch it on in Plugins to split here.'
-const otherLayer = (layer: string | undefined) =>
-  `K splits the card's own neurons, and the segment under the pointer is from ` +
-  `${layer ? `the layer "${layer}"` : 'another layer'}. Point at one of the dataset's neurons.`
+/** A card key: which presses it is, what it is for (in the sentences that refuse), what it does. */
+interface CardKey {
+  readonly letter: string
+  readonly matches: (event: KeyboardEvent) => boolean
+  /** What it does, after its letter: "K splits neurons". */
+  readonly does: string
+  /** What the point under the pointer would be for: "no point to split at". */
+  readonly on: string
+  readonly press: (asked: Pointed) => void
+  /**
+   * Neuroglancer's own key where Coda's is off (`F`: Spelunker's find-path tool): while the SEAM
+   * pack is off a press over the card is pressed into its frame (`FramePressMessage`), unsaid — a
+   * pack switched off hides its feature, and the card's own tool is what the reader gets (user,
+   * 2026-11-24). Never Coda's fullscreen over the card.
+   */
+  readonly neuroglancerKey?: true
+}
+
+/** The segment and point under the pointer, on a card that can split, and that card's frame. */
+interface Pointed {
+  readonly request: SplitRequest
+  readonly frame: object
+}
+
+/** Why a press over a card that can split asks for nothing — worded by the key pressed. */
+type Refusal =
+  | { readonly refused: 'packOff'; readonly frame: object }
+  | { readonly refused: 'otherLayer'; readonly layer: string | undefined }
+  | { readonly refused: 'noPoint' }
+
+const CARD_KEYS: readonly CardKey[] = [
+  {
+    letter: 'K',
+    matches: isSplitKey,
+    does: 'splits neurons',
+    on: 'to split at',
+    press: ({ request }) => startSplit(request),
+  },
+  {
+    letter: 'F',
+    matches: isFindPathKey,
+    does: 'finds paths',
+    on: 'to find a path from',
+    press: ({ request, frame }) => pressFindPath(request, frame),
+    neuroglancerKey: true,
+  },
+]
+
+/** A refusal as the status bar says it, for `key`. */
+function sentenceOf(key: CardKey, refusal: Refusal): string {
+  switch (refusal.refused) {
+    case 'packOff':
+      return (
+        `${key.letter} ${key.does} with the SEAM plugin, which is switched off. Switch it on in ` +
+        'Plugins to use it here.'
+      )
+    case 'otherLayer':
+      return (
+        `${key.letter} works on the card's own neurons, and the segment under the pointer is ` +
+        `from ${refusal.layer ? `the layer "${refusal.layer}"` : 'another layer'}. Point at one ` +
+        "of the dataset's neurons."
+      )
+    case 'noPoint':
+      return `Neuroglancer cannot say where the pointer is in this scene, so there is no point ${key.on}.`
+  }
+}
 
 /**
- * The split the pointer asks for: the segment under it and the point on it, in the datastack of
- * the card whose frame it is in — or, over such a card, why not (a sentence for the status bar).
- * Undefined off every card that can split.
+ * What the pointer asks for: the segment under it and the point on it, in the datastack of the
+ * card whose frame it is in, with that frame — or, over such a card, why not. Undefined off every
+ * card that can split.
  */
-function underPointer(): SplitRequest | { readonly refused: string } | undefined {
+function underPointer(): Pointed | Refusal | undefined {
   const stay = pointerStay()
   const card = stay && [...cards].find((one) => one.current.frame() === stay.from)?.current
   const target = card?.target
   if (!stay || !target) return undefined
-  if (!card.offered) return { refused: PACK_OFF }
+  if (!card.offered) return { refused: 'packOff', frame: stay.from }
   // Only a segment of the dataset's own layer: an extra segmentation layer's ids are not its.
   const own = card.layer()
-  if (own === undefined || stay.point.layer !== own)
-    return { refused: otherLayer(stay.point.layer) }
+  if (own === undefined || stay.point.layer !== own) {
+    return { refused: 'otherLayer', layer: stay.point.layer }
+  }
   const pointNm = stay.point.positionNm
   return pointNm
-    ? { ...target, root: stay.point.segment, pointNm, card: card.card }
-    : { refused: NO_POINT }
+    ? {
+        request: { ...target, root: stay.point.segment, pointNm, card: card.card },
+        frame: stay.from,
+      }
+    : { refused: 'noPoint' }
 }
 
+/**
+ * Taken on the capture phase: bare `F` is also Coda's fullscreen (`appShortcuts.ts`), which stands
+ * down for a press this has taken (`defaultPrevented`).
+ */
 function onKey(event: KeyboardEvent): void {
-  if (event.repeat || !isSplitKey(event) || isTypingTarget(event.target)) return
-  const request = underPointer()
-  if (!request) return
+  if (event.repeat || isTypingTarget(event.target)) return
+  const key = CARD_KEYS.find((one) => one.matches(event))
+  const asked = key && underPointer()
+  if (!key || !asked) return
   event.preventDefault()
-  if ('refused' in request) useGraphStore.getState().setNotice(request.refused)
-  else startSplit(request)
+  if ('refused' in asked && asked.refused === 'packOff' && key.neuroglancerKey) {
+    const message: FramePressMessage = {
+      type: FRAME_PRESS_MESSAGE,
+      code: event.code,
+      key: event.key,
+    }
+    const into = (asked.frame as { contentWindow?: Window | null }).contentWindow
+    into?.postMessage(message, window.location.origin)
+    return
+  }
+  if ('refused' in asked) useGraphStore.getState().setNotice(sentenceOf(key, asked))
+  else key.press(asked)
 }
 
 /** Every pointer report: where it rests over a card that can split, the session reads ahead. */
 function onMove(): void {
-  const request = underPointer()
-  splitPointer(request && !('refused' in request) ? request : undefined)
+  const asked = underPointer()
+  splitPointer(asked && !('refused' in asked) ? asked.request : undefined)
 }
 
 let unsubscribe: (() => void) | undefined
@@ -103,14 +187,14 @@ export function useSplitKey(
   useEffect(() => {
     const card = latest
     if (cards.size === 0) {
-      window.addEventListener('keydown', onKey)
+      window.addEventListener('keydown', onKey, true)
       unsubscribe = onPointerMove(onMove)
     }
     cards.add(card)
     return () => {
       cards.delete(card)
       if (cards.size === 0) {
-        window.removeEventListener('keydown', onKey)
+        window.removeEventListener('keydown', onKey, true)
         unsubscribe?.()
       }
     }

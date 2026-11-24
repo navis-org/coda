@@ -534,6 +534,12 @@ rule belongs to one area, its record is in that area's doc.
   at`, a run record (`ParamBase.runRecord`: written mid-run by `ctx.record`, out of the key, emptied
   only by the ⟳, which moves the key via `renewNode`); Find Open Ends reads its nucleus table live.
   A box is rooted through the memo it started with (`BoxReader.memo`), never a shared map moved.
+- **A step between two level-2 chunks is almost always one supervoxel's halves (infinite
+  affinity)** — supervoxels are cut at every chunk border — so find path (F) weighs the route's
+  *supervoxel* path (`strongestPath`), never chunk-to-chunk contacts. Its route is a layer of the
+  frame's own (`FrameLayerMessage`), never the card's scene. **A graphene mesh shares no vertex
+  between its fragment pieces**, so a walk on it needs bridges (`surfacePath.ts`). See
+  [docs/find-path-plan.md](docs/find-path-plan.md).
 - **`waitsFor` — the piece a merge's end is on *and* the piece it was accepted on — is what the
   dialog's ticks follow.** The neuron's side is the neuron and the piece's *own* path, never a
   sibling; an end on any other root refuses that row. **The batch sends from the tips in, up to

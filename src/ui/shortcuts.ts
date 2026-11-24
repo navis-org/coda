@@ -334,6 +334,12 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         label: 'Splits of the neuron under the pointer',
         hint: 'Near the point, nearest first',
       },
+      {
+        id: 'find-path',
+        chords: [{ key: 'F' }],
+        label: 'Find a path along the neuron under the pointer',
+        hint: 'Once at the start, once at the end; weak steps draw brightest',
+      },
     ],
   },
   {

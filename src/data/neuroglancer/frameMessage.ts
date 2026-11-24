@@ -213,15 +213,41 @@ export const FRAME_KEYS_MESSAGE = 'coda:ng-keys'
 /**
  * Card to frame: which chords are Coda's while focus is in the frame. ⌥1–9 only while the dashboard
  * is open, where they switch tabs; elsewhere Coda leaves them free and neuroglancer keeps its own
- * (`toggle-pick-layer-N`).
+ * (`toggle-pick-layer-N`). `F` only where Coda's find path is on for the card — the SEAM pack
+ * offered, a CAVE dataset (`isFindPathKey`); elsewhere it is neuroglancer's own find-path tool, its
+ * Graph-tab button shown (user, 2026-11-24). Absent, as from a card built before it was sent: off.
  */
 export interface FrameKeysMessage {
   type: typeof FRAME_KEYS_MESSAGE
   altDigits: boolean
+  findPath?: boolean
 }
 
 export function isFrameKeysMessage(data: unknown): data is FrameKeysMessage {
-  return typeof messageOf(data, FRAME_KEYS_MESSAGE)?.['altDigits'] === 'boolean'
+  const message = messageOf(data, FRAME_KEYS_MESSAGE)
+  const findPath = message?.['findPath']
+  return (
+    typeof message?.['altDigits'] === 'boolean' &&
+    (findPath === undefined || typeof findPath === 'boolean')
+  )
+}
+
+export const FRAME_PRESS_MESSAGE = 'coda:ng-press'
+
+/**
+ * Card to frame: press this key in neuroglancer, as if pressed in the frame — for a key pressed in
+ * Coda's document over the card that is neuroglancer's there: `F` where Coda's find path is off
+ * (`splitKey.ts`), so the reader gets neuroglancer's find-path tool, not Coda's fullscreen.
+ */
+export interface FramePressMessage {
+  type: typeof FRAME_PRESS_MESSAGE
+  code: string
+  key: string
+}
+
+export function isFramePressMessage(data: unknown): data is FramePressMessage {
+  const message = messageOf(data, FRAME_PRESS_MESSAGE)
+  return typeof message?.['code'] === 'string' && typeof message['key'] === 'string'
 }
 
 export const FRAME_HOVER_MESSAGE = 'coda:ng-hover'
@@ -269,12 +295,38 @@ export const FRAME_KEY_MESSAGE = 'coda:ng-key'
 export interface FrameKeyMessage {
   type: typeof FRAME_KEY_MESSAGE
   code: string
+  /**
+   * The key as typed, for Coda's shortcuts that read `key` rather than `code`: bare `F` is
+   * fullscreen (`appShortcuts.ts`), which the frame claims for find path and hands back when the
+   * SEAM pack is off. Absent from a frame built before it was sent.
+   */
+  key?: string
   altKey: boolean
 }
 
 export function isFrameKeyMessage(data: unknown): data is FrameKeyMessage {
   const message = messageOf(data, FRAME_KEY_MESSAGE)
-  return typeof message?.['code'] === 'string' && typeof message['altKey'] === 'boolean'
+  const key = message?.['key']
+  return (
+    typeof message?.['code'] === 'string' &&
+    typeof message['altKey'] === 'boolean' &&
+    (key === undefined || typeof key === 'string')
+  )
+}
+
+/**
+ * The key event a card dispatches for a key its frame handed back, as if pressed in Coda's own
+ * document: `key` too, and cancellable, so a card key that takes it (`splitKey.ts`) can keep it from
+ * Coda's own shortcut on the same letter (`defaultPrevented`).
+ */
+export function frameKeyInit(message: FrameKeyMessage): KeyboardEventInit {
+  return {
+    code: message.code,
+    key: message.key ?? '',
+    altKey: message.altKey,
+    bubbles: true,
+    cancelable: true,
+  }
 }
 
 /** The chord `FrameKeysMessage.altDigits` claims: ⌥ and a digit key 1–9, no other modifier. */
@@ -329,6 +381,43 @@ export const SPLIT_KEY_CODE = 'KeyK'
 
 export function isSplitKey(event: KeyChord): boolean {
   return event.code === SPLIT_KEY_CODE && bare(event)
+}
+
+/**
+ * The find-path key (`F`): Coda's find path, the route between two points with how strongly each
+ * step is joined (`ui/seam/splitKey.ts`, `docs/find-path-plan.md`), in place of Spelunker's, which
+ * binds it to neuroglancer's own tool — **only where Coda's find path is on**: the card tells the
+ * frame (`FrameKeysMessage.findPath`), which then claims the key and hands it back as it does the
+ * split key. Where it is off (the SEAM pack switched off), `F` is neuroglancer's own tool, in the
+ * frame or over the card (`FramePressMessage`). Bare `F` is also Coda's fullscreen, off every card.
+ * By position (`code`).
+ */
+export const FIND_PATH_KEY_CODE = 'KeyF'
+
+export function isFindPathKey(event: KeyChord): boolean {
+  return event.code === FIND_PATH_KEY_CODE && bare(event)
+}
+
+export const FRAME_LAYER_MESSAGE = 'coda:ng-own-layer'
+
+/**
+ * Card to frame: a layer of the frame's own, beside the scene's — added, replaced in place, or taken
+ * away (`layer: null`), by name. For a drawing the card puts over its scene for a while, such as
+ * find path's route (`packs/seam/findPath.ts`' `pathLayer`). Not part of the card's scene, which
+ * would make it a navigation that rebuilds every layer: the frame adds, replaces and removes the
+ * layer itself, and the card's fold reads only the dataset's layer, so it is never saved. A
+ * navigation clears it with the rest.
+ */
+export interface FrameLayerMessage {
+  type: typeof FRAME_LAYER_MESSAGE
+  name: string
+  layer: Readonly<Record<string, unknown>> | null
+}
+
+export function isFrameLayerMessage(data: unknown): data is FrameLayerMessage {
+  const message = messageOf(data, FRAME_LAYER_MESSAGE)
+  const layer = message?.['layer']
+  return typeof message?.['name'] === 'string' && (layer === null || typeof layer === 'object')
 }
 
 /**

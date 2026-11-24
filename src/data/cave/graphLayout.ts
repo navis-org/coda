@@ -164,6 +164,21 @@ export function cellBox(
   return [corner(lo, 0), corner(hi, 1)]
 }
 
+/** The grid cell holding a point, nm — `cellAt` on each axis. */
+export function cellOf(layout: BoxableLayout, nm: readonly number[]): Triple {
+  return [cellAt(layout, nm[0]!, 0), cellAt(layout, nm[1]!, 1), cellAt(layout, nm[2]!, 2)]
+}
+
+/**
+ * A chunk cell's centre, nm — where a level-2 chunk is placed when the datastack has no L2 cache to
+ * give its own point (`readSplitNeuron`). Every chunk of a neuron in one cell lands on the same spot.
+ */
+export function cellCentreNm(layout: BoxableLayout, cell: readonly number[]): Triple {
+  const [lo, hi] = cellBox(layout, cell, cell)
+  const mid = (a: 0 | 1 | 2) => ((lo[a] + hi[a] + 1) / 2) * layout.baseResolutionNm[a]
+  return [mid(0), mid(1), mid(2)]
+}
+
 /** The layer an id names. */
 export function layerOf(layout: GraphLayout, id: bigint): number {
   return Number(id >> BigInt(64 - layout.layerBits))

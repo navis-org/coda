@@ -262,6 +262,10 @@ the UI will show.
    - **Escape steps back (user, 2026-11-24).** With a tile enlarged, Escape is Back to all (and,
      like Back, does nothing while a write is out); with all tiles shown it closes. The ✕ always
      closes.
+   - **No L2 cache (2026-11-24).** On a datastack without one, each chunk is placed at its grid
+     cell's centre (`readSplitNeuron`'s `l2Cache`, from `l2SourceFor`) rather than the read
+     failing; the cuts are the same, the order by distance and the first colouring rougher
+     (`find-path-plan.md`).
    - **Meshes vanishing on a drag (2026-11-24).** A tile's geometry borrows the shared positions,
      normals and triangles; recolouring it (each exact cell, a Regenerate) rebuilt it and disposed
      the old one, and three's `dispose` frees the GPU buffer of every attribute the geometry holds.
