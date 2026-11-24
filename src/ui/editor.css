@@ -14052,18 +14052,31 @@ select.annotate__input {
  * The buttons keep their hit area — they are the whole interaction contract of a cell — so what
  * gives is the padding and the subtitle, which is the line that can afford to be small because it
  * repeats what the value itself shows.
+ *
+ * The subtitle sits on the name's row rather than under it, so the header is one line tall. When
+ * the row is short of room the subtitle gives way first: its shrink factor dwarfs the name's, and
+ * the name keeps a floor so a long summary never squeezes it to an ellipsis alone.
  */
 .dash-cell__panel .overlay__header {
   padding: 4px 6px;
   gap: 4px;
 }
+.dash-cell__panel .overlay__title {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
 .dash-cell__panel .overlay__title strong {
+  flex: 0 1 auto;
+  min-width: 4em;
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .dash-cell__panel .overlay__title span {
+  flex: 0 1000 auto;
+  min-width: 0;
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
@@ -14117,7 +14130,7 @@ select.annotate__input {
   width: var(--focus-grip);
   text-align: center;
 }
-/* Title only: the summary line is what makes the strip two lines tall. */
+/* Title only: the strip is as short as it can be, and focus is the cells and nothing else. */
 .dashboard[data-focus] .dash-cell__panel .overlay__title span {
   display: none;
 }
