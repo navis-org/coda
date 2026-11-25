@@ -17,7 +17,7 @@
 
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { emptyGraph } from '../core/graph'
 import { MockSource } from '../data/mock/MockSource'
@@ -102,9 +102,20 @@ describe('the session store', () => {
    * session is never the one evicted however old it is.
    */
   it('bounds the stored sessions and never evicts the one writing', async () => {
-    for (let i = 0; i < 20; i++) {
-      await saveSessionDoc(`tab${i}`, 'd', json(`W${i}`))
-      await saveSessionMeta(`tab${i}`, ['d'])
+    /*
+     * A clock that ticks on every read. Twenty writes in a loop share milliseconds, and a tie keeps
+     * IndexedDB's key order — `tab0`, `tab1`, `tab10`… — so on a fast machine `tab0` sorted among
+     * the newest and survived. Recency is what is being tested, so each write gets its own moment.
+     */
+    let now = 1_000_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => ++now)
+    try {
+      for (let i = 0; i < 20; i++) {
+        await saveSessionDoc(`tab${i}`, 'd', json(`W${i}`))
+        await saveSessionMeta(`tab${i}`, ['d'])
+      }
+    } finally {
+      clock.mockRestore()
     }
     // The first tabs written are the least recently active, so they are what goes.
     expect(await loadSession('tab0')).toEqual([])
