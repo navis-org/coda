@@ -14,7 +14,7 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { LayersValue, MeshesValue } from '../../core/values'
-import { makeTable } from '../../core/values'
+import { layersFrom, makeTable } from '../../core/values'
 import { ROI_MESH_SCHEMA } from '../../data/source'
 import { boxLayer, boxMesh, readBox } from '../lib/boundingBox'
 
@@ -107,10 +107,9 @@ registerNode({
       // `Upload Mesh` has none — a typed box says nothing about which template it was read in.
       units: 'nm',
     }
-    const upstream = ctx.input('layers')
     const layers: LayersValue = {
       kind: 'layers',
-      items: [...(upstream?.kind === 'layers' ? upstream.items : []), boxLayer(box, name)],
+      items: [...layersFrom(ctx.input('layers')), boxLayer(box, name)],
     }
     return { meshes, layers }
   },

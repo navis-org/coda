@@ -17,6 +17,7 @@
  * here and no conversion to get wrong.
  */
 
+import { localAnnotationLayer } from '../../data/neuroglancer/scene'
 import { cycleColor, sequentialColor } from '../../style/colors'
 import { clusterColor } from '../../style/encoding'
 import { clusterName } from './affinityTables'
@@ -335,34 +336,4 @@ export function mergeLineLayer(
         linkedSegmentationLayer: { segments: segmentationLayer },
         filterBySegmentation: ['segments'],
       }
-}
-
-/**
- * A local annotation layer in nanometres, each annotation coloured by its own `color` property —
- * the one wrapper every layer here shares; only the marker and the annotations differ.
- *
- * The scale is written out rather than through `data/neuroglancer/scene.ts`' `nanometreDimensions`,
- * which takes a voxel-size triple and answers `undefined` for anything not finite and positive —
- * so reaching it from here costs a `!` on a call that cannot fail. The float trap that helper
- * exists for (`45 * 1e-9` serialising as 4.5000000000000006e-8) cannot bite at exactly 1 nm.
- *
- * The shader is not optional: neuroglancer's default calls `defaultColor()` and never looks at the
- * properties, so every annotation would draw in one colour with nothing on screen to notice.
- */
-export function localAnnotationLayer(
-  name: string,
-  marker: string,
-  annotations: readonly unknown[],
-): Readonly<Record<string, unknown>> {
-  return {
-    type: 'annotation',
-    name,
-    source: {
-      url: 'local://annotations',
-      transform: { outputDimensions: { x: [1e-9, 'm'], y: [1e-9, 'm'], z: [1e-9, 'm'] } },
-    },
-    annotationProperties: [{ id: 'color', type: 'rgb', default: '#ffffff' }],
-    shader: `void main() { setColor(prop_color()); ${marker} }`,
-    annotations,
-  }
 }

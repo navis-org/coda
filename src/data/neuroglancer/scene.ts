@@ -991,8 +991,8 @@ export function parseSceneUrl(url: string): NgScene | undefined {
 
 /**
  * A local annotation layer in nanometres, each annotation coloured by its own `color` property —
- * the one wrapper every local annotation layer Coda builds shares (Bounding Box's box); only the
- * marker and the annotations differ.
+ * the one wrapper every annotation layer Coda builds shares (the SEAM pack's points and paths,
+ * Bounding Box's box); only the marker and the annotations differ.
  *
  * The scale is written out rather than through `nanometreDimensions` above,
  * which takes a voxel-size triple and answers `undefined` for anything not finite and positive —
