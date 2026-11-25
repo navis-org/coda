@@ -575,8 +575,14 @@ async function placeNodes(
 export const VOTE_SAMPLE = 100
 
 /**
- * Roots per `leaves_many` request for `l2ChunkCounts`. A reply is the chunk ids as text, ~25
- * bytes an id; the time is the server's — parsing a reply takes 2 ms of a 525 ms request.
+ * Roots per `leaves_many` request for `l2ChunkCounts`. A reply is one count a root where the
+ * server takes `counts_only` (`leavesCounts`), else the chunk ids as text, ~25 bytes an id; the
+ * time is the server's either way — parsing a list reply takes 2 ms of a 525 ms request.
+ *
+ * **Counts did not move it** (2026-11-25, Aedes on 2.21.1, `scripts/probe-count-batches.mjs`):
+ * the per-id cost is the server's lookup, not the reply — ~60 ms per thousand level-2 ids with
+ * counts, ~53 with lists — so a larger request still waits on its biggest root. 160 × 2 was the
+ * fastest setting cold and warm.
  *
  * **160 at two streams, because it is as fast as fifty at four with a third of the requests**
  * (2026-11-20, Aedes; `docs/seam-suggestions-plan.md`, "count batches"). An end asks ~320 new
@@ -728,9 +734,8 @@ function majorityOf(placed: readonly (string | undefined)[]): MajorityRoot | und
  *
  * **It copies before sorting**, and the copy is not ceremony. This used to sort in place and
  * say so — "the caller handing over a fresh array" — which held while the only call site was
- * `strided(listed.map(String))` on the next line. `leavesMany` now returns arrays its other
- * caller counts, and this runs a module away, where that precondition would hold only because
- * the vote happens to discard them.
+ * `strided(listed.map(String))` on the next line. `leavesMany` returns arrays other callers keep
+ * (`levelTwoChunks`, `chunkSupervoxels`), and a sort in place would reorder what they hold.
  */
 function strided(ids: readonly string[]): string[] {
   const sorted = [...ids].sort(compareIds)
@@ -745,18 +750,14 @@ function strided(ids: readonly string[]): string[] {
  * Each root's level-2 chunks, from `leaves_many`. Only roots with chunks listed are in the answer.
  *
  * **Whole lists, not a sample.** The majority vote wants `VOTE_SAMPLE` strided ids and applies
- * `strided` itself; `l2ChunkCounts` wants the length, which a sample of a fixed size has thrown
- * away. Striding here served one caller and silently answered the other with 100.
+ * `strided` itself; a count wants the length, which a sample of a fixed size has thrown away.
+ * Striding here served one caller and silently answered the other with 100.
  *
  * `caveclient.chunkedgraph.get_leaves_many`: `POST …/node/leaves_many?stop_layer=2` with
  * `{"node_ids": [...]}`, answering `{"<root>": [chunk ids]}`. The body is spliced as text, as
- * `isLatestRoots`' is, and the reply's ids come back as text through `parseCaveJson`.
- *
- * **A failure fails the run; it is never a root "not placed".** A batch holding an id the graph
- * does not know answers 200 with that id simply absent (FlyWire, 2026-10-20), so a refusal is about
- * the request or the server — a 429, a 5xx, a missing endpoint — and counting it as an answer about
- * the data is the "a lookup that failed has not answered none" bug. A 404 is named, being the one a
- * deployment without the endpoint gives on every request.
+ * `isLatestRoots`' is, and the reply's ids come back as text through `parseCaveJson`. An id the
+ * graph does not know comes back absent (FlyWire, 2026-10-20) or as an empty list (Aedes on
+ * 2.20.0, 2026-11-25); both are "not listed".
  */
 async function leavesMany(
   graphene: GrapheneSource,
@@ -764,13 +765,83 @@ async function leavesMany(
   options: CaveRequestOptions,
   stopLayer: number = VOTE_LAYER,
 ): Promise<Map<string, string[]>> {
-  const url = tableUrl(graphene, `node/leaves_many?stop_layer=${stopLayer}`)
-  const answer = await chunkedgraphRead(graphene, options.signal, () =>
-    cavePostRawOnce<Record<string, (string | number)[]>>(
-      url,
-      `{"node_ids":[${roots.join(',')}]}`,
-      options,
-    ),
+  const answer = await leavesManyReply(graphene, roots, options, `stop_layer=${stopLayer}`)
+  const out = new Map<string, string[]>()
+  for (const root of roots) {
+    const listed = answer[root]
+    if (Array.isArray(listed) && listed.length) out.set(root, listed.map(String))
+  }
+  return out
+}
+
+/**
+ * Each root's level-2 chunk *count*, from `leaves_many` with `counts_only=true`. Only roots with
+ * at least one chunk are in the answer, as in `leavesMany`.
+ *
+ * **The flag is a request, not a promise.** pychunkedgraph answers `{"<root>": count}` under it
+ * from 2.21.1 (Aedes, `cave.fanc-fly.com`, 2026-11-25); an older server ignores it without a word
+ * and sends the whole lists (FlyWire on 1.27.0, the same day). So each value is read as whatever
+ * it turned out to be — a number is the count, a list's length is — and no deployment needs to be
+ * known in advance. Not every deployment will take the change, so the list arm is the fallback
+ * for good, not a migration to remove later.
+ *
+ * Measured on Aedes, three roots: 80,342 bytes against 94, and about a third less time (most of
+ * it is the server's lookup, not the reply).
+ *
+ * **A count of 0 is a root the graph does not know** (Aedes on 2.21.1 answered a FlyWire id so,
+ * 2026-11-25), as an empty or absent list is in the list form — every real root holds a chunk. It
+ * is left out, never kept as zero, which would read as the smallest possible object
+ * (`l2ChunkCounts`' "absent, not zero").
+ *
+ * **Any other value is refused, not read as "not listed"**: a count sent as text, or a reply
+ * shaped some new way, is a reply this cannot read, and `l2ChunkCounts` would otherwise remember
+ * every root in it as absent for the session.
+ */
+async function leavesCounts(
+  graphene: GrapheneSource,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+): Promise<Map<string, number>> {
+  const answer = await leavesManyReply(
+    graphene,
+    roots,
+    options,
+    'stop_layer=2&counts_only=true',
+  )
+  const out = new Map<string, number>()
+  for (const root of roots) {
+    const value = answer[root]
+    if (value === undefined) continue
+    const count = typeof value === 'number' ? value : Array.isArray(value) ? value.length : NaN
+    if (!Number.isInteger(count) || count < 0) {
+      throw new CaveError(
+        `${graphene.server} answered \`leaves_many\`'s count for root ${root} as ` +
+          `${JSON.stringify(value)}, which is neither a count nor a list.`,
+      )
+    }
+    if (count > 0) out.set(root, count)
+  }
+  return out
+}
+
+/**
+ * `leaves_many`'s reply, raw: the request and its one named refusal, shared by both readers.
+ *
+ * **A failure fails the run; it is never a root "not placed".** A batch holding an id the graph
+ * does not know still answers 200, so a refusal is about the request or the server — a 429, a
+ * 5xx, a missing endpoint — and counting it as an answer about the data is the "a lookup that
+ * failed has not answered none" bug. A 404 is named, being the one a deployment without the
+ * endpoint gives on every request.
+ */
+async function leavesManyReply(
+  graphene: GrapheneSource,
+  roots: readonly string[],
+  options: CaveRequestOptions,
+  query: string,
+): Promise<Record<string, unknown>> {
+  const url = tableUrl(graphene, `node/leaves_many?${query}`)
+  return chunkedgraphRead(graphene, options.signal, () =>
+    cavePostRawOnce<Record<string, unknown>>(url, `{"node_ids":[${roots.join(',')}]}`, options),
   ).catch((error: unknown) => {
     if (error instanceof CaveError && error.status === 404) {
       /*
@@ -781,18 +852,12 @@ async function leavesMany(
        */
       throw new CaveError(
         `${graphene.server} has no \`leaves_many\` endpoint, so this datastack cannot be asked ` +
-          `which level-2 chunks a root holds.`,
+          `what a root or chunk is made of.`,
         404,
       )
     }
     throw error
   })
-  const out = new Map<string, string[]>()
-  for (const root of roots) {
-    const listed = answer[root]
-    if (listed?.length) out.set(root, listed.map(String))
-  }
-  return out
 }
 
 async function getRoots(
@@ -1250,9 +1315,10 @@ export function resetL2ChunkCounts(): void {
  * How many level-2 chunks each root holds — SEAM's `l2c`/`l2x` features, in one batched pass.
  *
  * SEAM's `l2c`/`l2x`, fetched the way `seam.sizes` does — `get_leaves_many(stop_layer=2)`, the
- * length of each answer. A count is a cheap proxy for an object's total size, which the geometric
- * features cannot see because they are measured inside a 6 µm box around the open end; the rest
- * is in `docs/seam-suggestions-plan.md`.
+ * length of each answer — asked as counts (`counts_only`) where the server takes that, and read
+ * from the whole lists where it does not (`leavesCounts`). A count is a cheap proxy for an
+ * object's total size, which the geometric features cannot see because they are measured inside
+ * a 6 µm box around the open end; the rest is in `docs/seam-suggestions-plan.md`.
  *
  * Batched `LEAVES_CHUNK` (160) to a request against a shared public chunkedgraph (SEAM's
  * invariant 8), which keeps an end's ~320 new roots to two requests rather than one per
@@ -1297,7 +1363,7 @@ export async function l2ChunkCounts(
         wanted.slice(i * LEAVES_CHUNK, (i + 1) * LEAVES_CHUNK),
       )
       await inFlight(batches, LEAVES_STREAMS, async (batch) => {
-        const lists = await leavesMany(graphene, batch, { ...shared, signal })
+        const counts = await leavesCounts(graphene, batch, { ...shared, signal })
         for (const root of batch) {
           /*
            * **Absence is remembered too, as its own state.** A root the graph does not list is
@@ -1308,7 +1374,7 @@ export async function l2ChunkCounts(
            *
            * `ABSENT` rather than 0: zero is a count this never took, and the smallest possible.
            */
-          l2Counts.set(at(root), lists.get(root)?.length ?? ABSENT)
+          l2Counts.set(at(root), counts.get(root) ?? ABSENT)
         }
       })
     },

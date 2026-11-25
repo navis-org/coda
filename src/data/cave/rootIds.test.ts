@@ -405,15 +405,22 @@ const OPTIONS = { deployment: DEFAULT_CAVE_SERVER }
 
 /** The level-2 chunk counts SEAM's tree ranker reads as `l2c`/`l2x`. See `l2ChunkCounts`. */
 describe('level-2 chunk counts', () => {
-  /** `leaves_many` answers `{"<root>": [chunk ids]}`, and an id it does not know is absent. */
-  const serve = (lists: Record<string, number[]>) => {
+  /**
+   * `leaves_many` as a server before pychunkedgraph 2.21.1 answers: `{"<root>": [chunk ids]}`,
+   * ignoring `counts_only`, with an id it does not know absent. `counts: true` is a newer server,
+   * which honours the flag (`leavesCounts`): `{"<root>": count}`, and 0 for an unknown id.
+   */
+  const serve = (lists: Record<string, number[]>, { counts = false } = {}) => {
     const calls: { url: string; nodes: string[] }[] = []
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { node_ids?: (string | number)[] }
       calls.push({ url: String(url), nodes: (body.node_ids ?? []).map(String) })
-      const out: Record<string, number[]> = {}
-      for (const id of body.node_ids ?? [])
-        if (lists[String(id)]) out[String(id)] = lists[String(id)]!
+      const out: Record<string, number | number[]> = {}
+      for (const id of body.node_ids ?? []) {
+        const listed = lists[String(id)]
+        if (counts) out[String(id)] = listed?.length ?? 0
+        else if (listed) out[String(id)] = listed
+      }
       return Promise.resolve({
         ok: true,
         status: 200,
@@ -423,12 +430,14 @@ describe('level-2 chunk counts', () => {
     return calls
   }
 
-  it('counts each root’s chunks, and asks the graph at level 2', async () => {
+  it('counts each root’s chunks, and asks the graph at level 2 for counts only', async () => {
     const calls = serve({ '100': [1, 2, 3, 4], '200': [7] })
     const got = await l2ChunkCounts(graphene, ['100', '200'], OPTIONS)
     expect(got.get('100')).toBe(4)
     expect(got.get('200')).toBe(1)
-    expect(new URL(calls[0]!.url).searchParams.get('stop_layer')).toBe('2')
+    const asked = new URL(calls[0]!.url).searchParams
+    expect(asked.get('stop_layer')).toBe('2')
+    expect(asked.get('counts_only')).toBe('true')
   })
 
   /* Why this exists: `leavesMany`'s "Whole lists, not a sample". */
@@ -444,6 +453,38 @@ describe('level-2 chunk counts', () => {
     const got = await l2ChunkCounts(graphene, ['100', '999'], OPTIONS)
     expect(got.get('100')).toBe(2)
     expect(got.has('999')).toBe(false)
+  })
+
+  it('reads a count a server that honours counts_only sends as a number', async () => {
+    serve({ '100': Array.from({ length: 1009 }, (_, i) => i), '200': [1] }, { counts: true })
+    const got = await l2ChunkCounts(graphene, ['100', '200'], OPTIONS)
+    expect(got.get('100')).toBe(1009)
+    expect(got.get('200')).toBe(1)
+  })
+
+  /* Why this exists: a counting server answers an unknown root 0, which must not read as a speck. */
+  it('leaves out a root the counting server answers 0', async () => {
+    serve({ '100': [1, 2] }, { counts: true })
+    const got = await l2ChunkCounts(graphene, ['100', '999'], OPTIONS)
+    expect(got.get('100')).toBe(2)
+    expect(got.has('999')).toBe(false)
+  })
+
+  /* Why this exists: a reply it cannot read must not be remembered as "not listed" all session. */
+  it('refuses a count it cannot read, and remembers nothing from it', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('{"100": "1009", "200": 4}'),
+      } as Response),
+    )
+    await expect(l2ChunkCounts(graphene, ['100', '200'], OPTIONS)).rejects.toThrow(
+      /neither a count nor a list/,
+    )
+    const calls = serve({ '100': [1, 2], '200': [1] }, { counts: true })
+    expect((await l2ChunkCounts(graphene, ['100'], OPTIONS)).get('100')).toBe(2)
+    expect(calls).toHaveLength(1)
   })
 
   /* A root id names one fixed state of the graph, so a count read once is right forever. */

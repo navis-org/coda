@@ -3128,6 +3128,26 @@ The same session measured `stop_layer=3` against 2 for the same roots, one reque
 ~26 more for the level-2 ids themselves. A counts-only endpoint could save that second part —
 ~0.1-0.2 s an end — and not the floor or the walk.
 
+### Measured and not changed: count batches with `counts_only` (2026-11-25)
+
+pychunkedgraph 2.21.1 (Aedes) answers `leaves_many?counts_only=true` with one count a root;
+`l2ChunkCounts` asks for it and reads a list's length from a server that ignores the flag. Since
+the batch size was set against list replies, `scripts/probe-count-batches.mjs` asked again:
+42 ends, each 320 roots within 0.5 µm of a real neuron in a search-sized box (the recorded lists
+of 2026-11-20 were gone), cold readings on roots never asked, warm ones on the same 8 ends under
+every setting, rotating. ms per 100 roots, median:
+
+| | 50 × 4 | **160 × 2** | 320 × 1 | 320 × 1 again | 160 × 2, lists |
+|---|---|---|---|---|---|
+| cold, 8-9 ends each | 303 | **185** | 477 | 270 | 417 |
+| warm, the same 8 ends | 130 | **93** | 116 | 114 | 100 |
+
+The two `320 × 1` columns are one setting on different ends, so cold medians this far apart are
+noise. Fitted per request: **counts ~265 ms + 60 per thousand level-2 ids, lists ~402 + 53** — the
+per-id part is the server's lookup and counts do not remove it, so a request still waits on its
+biggest root and larger batches still do not pay. `LEAVES_CHUNK` and `LEAVES_STREAMS` stay.
+Counts did help warm only a little (93 against 100); the size of the cold gain is not settled.
+
 ### What the faster search exposed
 
 `cutting patches` rose from a median of 122 ms an end to ~860. The cut did not get slower: the
