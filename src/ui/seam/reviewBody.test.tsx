@@ -1379,6 +1379,49 @@ describe('following an edited piece', () => {
   })
 })
 
+/** Only Coda's own Neuroglancer tells the card what is under the pointer: anything else is said. */
+describe('a viewer that reports nothing back', () => {
+  const withViewer = (params: ParamValues) => {
+    draw()
+    const { graph } = useGraphStore.getState()
+    act(() =>
+      useGraphStore.setState({
+        graph: {
+          ...graph,
+          nodes: [
+            ...graph.nodes,
+            { id: 'ng', type: NEUROGLANCER_TYPE, position: { x: 0, y: 0 }, params } as never,
+          ],
+          edges: [
+            ...graph.edges,
+            {
+              id: 'w',
+              source: 'r1',
+              sourceHandle: 'current',
+              target: 'ng',
+              targetHandle: 'control',
+            },
+          ],
+        },
+      }),
+    )
+  }
+  const said = () => document.querySelector('.review-body__viewer')
+
+  it('is said in the foot where the only viewer wired is another', () => {
+    withViewer({ viewerType: 'dataset' })
+    expect(said()?.textContent).toMatch(/J, K and F are off/)
+  })
+
+  it('is not said for Coda’s own viewer, nor where none is wired', () => {
+    withViewer({})
+    expect(said()).toBeNull()
+    cleanup()
+    draw()
+    expect(said()).toBeNull()
+  })
+})
+
 describe('submitPress', () => {
   const ready = {
     docId: 'doc',

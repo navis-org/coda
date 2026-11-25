@@ -141,6 +141,15 @@ export function frameTarget(params: ParamValues): FrameTarget {
   }
 }
 
+/**
+ * Whether the card embeds Coda's own copy of neuroglancer — the only one that reports back what is
+ * under the pointer, the keys pressed in it and its state (`NeuroglancerViewer`'s `readable`).
+ * What a surface that relies on those asks of a Neuroglancer node, to say when they are off.
+ */
+export function framesOwnCopy(params: ParamValues): boolean {
+  return frameTarget(params).use === 'own'
+}
+
 /** Whether a neuron hidden in the viewer stays in `Selected`, with a `visible` column saying so. */
 export function keepsHidden(params: ParamValues): boolean {
   return params.hiddenNeurons === 'keep'

@@ -20,6 +20,8 @@ review:layers -> ng:layers
 
 Wire **both** of Merge Suggestions' tables in: `Tips` is the queue and `Candidates` is what the arrows page through. The `Dataset` input is what the card's viewer needs to be a scene.
 
+The keys J, K and F, the hover, and following a multicut by itself all need Coda's own Neuroglancer, the embedded viewer that is the Neuroglancer node's default `Viewer type`. Any other viewer cannot tell the card what is under the pointer or which keys were pressed in it. If the card is wired only to such viewers, its foot says so. Reviewing and Submit still work, and an edit made there shows as an **outdated** tag to press.
+
 ## One neuron at a time
 
 The card reviews one neuron at a time. The `Neuron` list at the top of the card picks which one, and each entry gives the root ID, how many tips it has and how many of its candidates you have judged. Until you pick, the card is on the first neuron in `Tips`. That is also the first one [Suggest Merges](#seam:suggestMerges) searches, so it is the first one ready.

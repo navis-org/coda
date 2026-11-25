@@ -206,7 +206,11 @@ import { useReviewKeys } from './reviewKeys'
 import { VerdictButtons } from './VerdictButtons'
 import { VerdictSharing } from './VerdictSharing'
 import { useRowWindow } from '../useRowWindow'
-import { NEUROGLANCER_TYPE, controlPartColor } from '../../nodes/output/neuroglancer'
+import {
+  NEUROGLANCER_TYPE,
+  controlPartColor,
+  framesOwnCopy,
+} from '../../nodes/output/neuroglancer'
 
 /** Where the card remembers whether its filters are folded. Per node, per browser. */
 const FILTERS_KEY = 'coda.seam.review.filters'
@@ -633,6 +637,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * reads that output by reference (`referrerOf`). A published set has no such reader.
    */
   const searchId = useGraphStore((s) => referrerOf(s.graph, node.id, EXTENDED_PORT))
+  // Wired only to viewers that report nothing back: the keys and the hover are off (the foot says).
+  const foreignViewer = useGraphStore((s) => onlyForeignViewers(s.graph, node.id))
   const searchState = useGraphStore((s) =>
     searchId === undefined ? undefined : s.nodeInfo(searchId).state,
   )
@@ -1891,6 +1897,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
               {formatNumber(autoAccepted)} by Auto-extend
             </span>
           )}
+          {foreignViewer && (
+            <span className="review-body__viewer" title={FOREIGN_VIEWER_NOTE}>
+              viewer is not Coda’s own: J, K and F are off
+            </span>
+          )}
           {neuronEdited && (
             <span className="review-body__edited">
               query neuron edited since these suggestions were generated
@@ -2094,6 +2105,20 @@ const MAX_INDENT = 6
  * The Neuroglancer cards wired directly from `nodeId` that hold double-clicks of their own — what
  * Start over clears with the card's work, so a viewer with nothing to clear is not written.
  */
+/**
+ * Whether every Neuroglancer card wired from `nodeId` shows a viewer other than Coda's own — one
+ * that tells the card nothing (`framesOwnCopy`). False where none is wired: the card's own viewer
+ * is Coda's. A boolean, so the store selector reading it allocates nothing (invariant 7).
+ */
+function onlyForeignViewers(graph: CodaGraph, nodeId: string): boolean {
+  const wired = graph.nodes.filter(
+    (one) =>
+      one.type === NEUROGLANCER_TYPE &&
+      graph.edges.some((edge) => edge.source === nodeId && edge.target === one.id),
+  )
+  return wired.length > 0 && !wired.some((one) => framesOwnCopy(one.params))
+}
+
 function viewersWithEdits(graph: CodaGraph, nodeId: string): string[] {
   return graph.nodes
     .filter(
@@ -2111,6 +2136,13 @@ function tipName(tip: QueueTip): string {
     ? `tip ${tip.endUid} of piece ${tip.neuronId}`
     : `tip ${tip.endUid}`
 }
+
+const FOREIGN_VIEWER_NOTE =
+  'The Neuroglancer card wired to this one shows a viewer other than Coda’s own, which cannot ' +
+  'tell the card what is under the pointer or which keys were pressed in it. So J, K and F, the ' +
+  'rows lighting up as you hover, and following a multicut by itself are off. Reviewing and ' +
+  'Submit work as usual, and an edit made there is found on the next row you click: press its ' +
+  'outdated tag. Set Viewer type to the embedded viewer on the Neuroglancer card to have them back.'
 
 const SUBMIT_HELP =
   'Merge the accepted pieces of this neuron into it. Everything is checked and listed, with the ' +

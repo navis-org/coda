@@ -11494,6 +11494,11 @@ details[open] > summary.tile__label {
 .review-body__edited {
   color: var(--status-refused);
 }
+/* Wired only to a viewer that reports nothing back: said, not alarmed. */
+.review-body__viewer {
+  color: var(--text-secondary);
+  cursor: help;
+}
 /* Following the neuron through an edit: small text buttons inside a foot fact. */
 .review-body__follow {
   margin-left: 6px;
