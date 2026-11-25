@@ -502,11 +502,12 @@ const customCaveNode = packNode({
      * card in the graph warns for the first second of every load.
      */
     const known = peekMaterializations(deployment, datastack)
+    // Asked before the pin: with none at all there is nothing to pin, and an unpinned card would
+    // otherwise say nothing until Run.
+    if (known?.length === 0) return [noMaterializations(datastack, deployment)]
     if (known && version && !known.includes(Number(version))) {
       return [
-        known.length
-          ? `Materialization ${version} is not available for ${datastack}. Available: ${known.slice(0, 8).join(', ')}${known.length > 8 ? ', \u2026' : ''}`
-          : `${datastack} has no usable materializations.`,
+        `Materialization ${version} is not available for ${datastack}. Available: ${known.slice(0, 8).join(', ')}${known.length > 8 ? ', \u2026' : ''}`,
       ]
     }
     return [
@@ -536,11 +537,7 @@ const customCaveNode = packNode({
       ? Number(pinned)
       : (await materializationsFor(datastack, { deployment, signal: ctx.signal }))[0]
     if (version === undefined || !Number.isInteger(version)) {
-      throw new Error(
-        `${datastack} has no usable materializations on ` +
-          `${caveServerLabel(deployment)}. Check the datastack name, the \`Global server\`, ` +
-          `and that your token has access to it.`,
-      )
+      throw new Error(noMaterializations(datastack, deployment))
     }
     const datasetId = datasetIdFor(datastack, version)
     registerCustomCaveSpec(ctx.params)
@@ -625,6 +622,18 @@ function rootDriftIssues(sourceId: string, datasetId: string | undefined): strin
       `materialization (e.g. ${some}), so those rows will not match a neuron. Fix them with ` +
       `the Update root IDs node, or pin a matching materialization.`,
   ]
+}
+
+/**
+ * One sentence for `validate` and `evaluate`. The datastack and token are already known good by
+ * now — the info record that names the materialize server was read with them — so the remedy is
+ * on the CAVE side, not a typo here.
+ */
+function noMaterializations(datastack: string, deployment: string): string {
+  return (
+    `${datastack} has no usable materializations on ${caveServerLabel(deployment)}, and this ` +
+    `node can only read a materialized datastack.`
+  )
 }
 
 /**

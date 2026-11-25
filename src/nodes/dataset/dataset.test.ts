@@ -449,6 +449,39 @@ describe('Custom CAVE', () => {
     resetCaveCredentials()
   })
 
+  it('says a datastack has no materializations, where CAVE answers that with a 404', async () => {
+    // `fanc_sandbox`: the metadata endpoint answers 404 "No valid versions found" rather than
+    // `[]`, which used to surface as the bare HTTP error on Run.
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    installRouteFetch({
+      '/info/api/v2/datastack/full/': {
+        body: JSON.stringify({ local_server: 'https://local.example' }),
+      },
+      '/datastack/no_mats/metadata': {
+        status: 404,
+        body: JSON.stringify({ message: 'No valid versions found' }),
+      },
+    })
+    registerSource(new CaveSource())
+    const def = requireNodeDef('dataset.cave')
+    const params = { datastack: 'no_mats', neuronTable: 'n' }
+    def.validate?.(ctxFor('dataset.cave', params))
+    await vi.waitFor(() =>
+      expect((def.validate?.(ctxFor('dataset.cave', params)) ?? []).join(' ')).toContain(
+        'no_mats has no usable materializations',
+      ),
+    )
+
+    const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    let g = emptyGraph('no-mats')
+    g = addNode(g, node('dataset.cave', params))
+    await scheduler.run(g, { mode: 'full' })
+    expect(scheduler.info('ds').error).toContain('no_mats has no usable materializations')
+    expect(scheduler.info('ds').error).not.toContain('404')
+    vi.unstubAllGlobals()
+    resetCaveCredentials()
+  })
+
   it('reads a chosen synapse table, and the datastack’s own declaration otherwise', () => {
     const def = requireNodeDef('dataset.cave')
     // Chosen: the spec names it, so every reader of `specFor` — the queries, the Description

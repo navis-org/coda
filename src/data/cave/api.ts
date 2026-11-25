@@ -36,7 +36,14 @@
  */
 
 import type { CaveRequestOptions, CaveRow } from './client'
-import { CaveError, caveGet, cavePost, cavePostRaw, refuseIfCapped } from './client'
+import {
+  CaveError,
+  caveGet,
+  caveGetOr404,
+  cavePost,
+  cavePostRaw,
+  refuseIfCapped,
+} from './client'
 import { isSegmentId } from '../../core/ids'
 
 /**
@@ -132,14 +139,19 @@ export function datastackInfo(
  * per-version calls turn a listing into a request per entry. `expires_on` is the field worth
  * having — CAVE materializations expire, which is the most confusing thing about the model, and
  * the existing "a pinned version the server no longer lists" path is what reports it.
+ *
+ * **A 404 is an empty list.** A datastack with no valid materialization at all (`fanc_sandbox`)
+ * is answered `404 "No valid versions found"` rather than `[]`, and passed through, that read as
+ * a broken request instead of the fact it is. Only the 404: anything else is still thrown.
  */
 export function versionsMetadata(
   server: string,
   datastack: string,
   options: CaveRequestOptions,
 ): Promise<VersionInfo[]> {
-  return caveGet<VersionInfo[]>(
+  return caveGetOr404<VersionInfo[]>(
     `${server}/materialize/api/v3/datastack/${enc(datastack)}/metadata`,
+    [],
     options,
   )
 }
