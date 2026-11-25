@@ -20,6 +20,7 @@ import './query/roiCounts'
 import './query/roiCompleteness'
 import './query/roiMeshes'
 import './query/uploadMesh'
+import './query/boundingBox'
 import './query/morphology'
 // The node packs. Every pack's nodes register here, at this one position, rather than where each
 // module used to be imported — so a moved node lists later in `listableNodeDefs()` than it did.

@@ -9,7 +9,7 @@ out.neuroglancer as ngl
 exp:selected -> ngl
 ```
 
-Layers from Neuroglancer Source nodes can be wired into `Extra layers`; they are added after everything the dataset publishes.
+Layers from Neuroglancer Source and [Bounding Box](#core.boundingBox) nodes can be wired into `Extra layers`; they are added after everything the dataset publishes.
 
 ## Picking neurons in neuroglancer
 

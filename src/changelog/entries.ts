@@ -112,6 +112,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: '2026-11-25',
+    title: 'Bounding Box',
+    summary:
+      'The new Bounding Box node turns two corners you type or paste from neuroglancer into a box, for Points in Volumes, the 3D View and the Neuroglancer card.',
+    highlight: false,
+    items: [
+      {
+        kind: 'node',
+        date: '2026-11-25',
+        title: 'New: `Bounding Box`.',
+        body: 'A box from two opposite corners, in nanometres or in voxels. Find the synapses inside it with **Points in Volumes**, draw it in the **3D View**, or wire it into a **Neuroglancer** card’s *Extra layers*.',
+        demo: 'core.boundingBox',
+      },
+    ],
+  },
+  {
     date: '2026-10-20',
     title: 'Biophysics, the Line Chart, and picking neurons in Neuroglancer',
     summary:

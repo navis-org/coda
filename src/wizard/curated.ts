@@ -303,6 +303,39 @@ const EXAMPLES: readonly ExampleSpec[] = [
   },
 
   {
+    types: ['core.boundingBox'],
+    focus: 'inside',
+    title: 'Bounding Box',
+    about:
+      'A **Bounding Box** is a volume you type rather than fetch: two opposite corners, here in nanometres around the lobula plate end of the T4a neurons. **Points in Volumes** keeps the synapses inside it.\n\n' +
+      'Corners copied from neuroglancer are usually in voxels: set **Units** to voxels and give the voxel size. Wire **Layers** into a Neuroglancer card’s *Extra layers* to see the box there too.',
+    cards: [
+      DS,
+      find('find', typeIs('T4a')),
+      { id: 'syn', type: 'neuron.synapses' },
+      {
+        id: 'box',
+        type: 'core.boundingBox',
+        row: UNDER_TALL,
+        params: { cornerA: '-7500, 0, 1500', cornerB: '-4000, 4500, 5000', name: 'LOP box' },
+      },
+      { id: 'inside', type: 'neuron.pointsInVolumes' },
+      {
+        id: 'view',
+        type: 'out.viewer3d',
+        params: { pointColorMode: 'categorical', pointColorBy: 'roi', pointSize: 200 },
+      },
+    ],
+    wires: [
+      ['find', 'neurons', 'syn', 'neurons'],
+      ['syn', 'points', 'inside', 'points'],
+      ['box', 'meshes', 'inside', 'volumes'],
+      ['inside', 'inside', 'view', 'points'],
+      ['box', 'meshes', 'view', 'volumes'],
+    ],
+  },
+
+  {
     types: ['neuron.distance'],
     focus: 'distance',
     title: 'Distance between',

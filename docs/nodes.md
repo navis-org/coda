@@ -53,6 +53,7 @@ what a port's declaration means.
 - [Text notes](nodes-io.md#text-notes)
 - [Upload Table and Table from URL: somebody else's data](nodes-io.md#upload-table-and-table-from-url-somebody-elses-data)
 - [Upload Mesh: somebody else's regions](nodes-io.md#upload-mesh-somebody-elses-regions)
+- [Bounding Box: a region somebody types](nodes-io.md#bounding-box-a-region-somebody-types)
 - [Download: a side effect in a reactive graph](nodes-io.md#download-a-side-effect-in-a-reactive-graph)
 - [Copy IDs: the second side effect, and the one that cannot ride a run](nodes-io.md#copy-ids-the-second-side-effect-and-the-one-that-cannot-ride-a-run)
 - [IDs from Label: the inverse query](nodes-io.md#ids-from-label-the-inverse-query)

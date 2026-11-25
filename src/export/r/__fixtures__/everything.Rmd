@@ -1802,6 +1802,18 @@ names(upload_mesh) <- tools::file_path_sans_ext(basename(upload_mesh_paths))
 upload_mesh <- lapply(upload_mesh, function(m) { m$vb[1:3, ] <- m$vb[1:3, ] * 1000; m })
 ```
 
+```{r bounding-box}
+# ── Bounding Box ──
+bounding_box_meshes <- list(rgl::tmesh3d(
+  vertices = matrix(c(400, 400, 1600, 800, 400, 1600, 400, 1200, 1600, 800, 1200, 1600, 400, 400, 2000, 800, 400, 2000, 400, 1200, 2000, 800, 1200, 2000), nrow = 3),
+  indices = matrix(c(1, 3, 4, 1, 4, 2, 5, 6, 8, 5, 8, 7, 1, 2, 6, 1, 6, 5, 3, 7, 8, 3, 8, 4, 1, 5, 7, 1, 7, 3, 2, 4, 8, 2, 8, 6), nrow = 3),
+  homogeneous = FALSE
+))
+names(bounding_box_meshes) <- "calyx box"
+# NOTE: Neuroglancer layers cannot be exported to R, so `Layers` is NULL.
+bounding_box_layers <- NULL
+```
+
 ```{r table-from-url}
 # ── Table from URL ──
 table_from_url <- read_csv("https://example.org/embedding.csv", show_col_types = FALSE)

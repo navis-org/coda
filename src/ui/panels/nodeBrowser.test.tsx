@@ -95,6 +95,15 @@ const rowNames = () =>
     (row) => row.querySelector('.node-row__name')?.textContent,
   )
 
+/** The row whose name is `label`, by name rather than rank. */
+const rowFor = (container: HTMLElement, label: string) => {
+  const row = [...container.querySelectorAll('.node-row')].find(
+    (r) => r.querySelector('.node-row__name')?.textContent === label,
+  )
+  if (!row) throw new Error(`no "${label}" row`)
+  return row
+}
+
 describe('NodeBrowser layout', () => {
   it('lists every addable node, grouped in registry order', () => {
     open()
@@ -182,14 +191,6 @@ describe('NodeBrowser layout', () => {
  */
 describe('NodeBrowser guide tip', () => {
   const tip = () => document.querySelector('.node-guide-tip')
-
-  const rowFor = (container: HTMLElement, label: string) => {
-    const row = [...container.querySelectorAll('.node-row')].find(
-      (r) => r.querySelector('.node-row__name')?.textContent === label,
-    )
-    if (!row) throw new Error(`no "${label}" row`)
-    return row
-  }
 
   it('opens the node’s guide on a rest, not on the way past', async () => {
     const { container } = open()
@@ -316,10 +317,9 @@ describe('NodeBrowser filtering', () => {
   it('highlights the matched characters in the name', () => {
     const { container } = open()
     fireEvent.change(screen.getByLabelText('Search nodes'), { target: { value: 'gb' } })
-    expect([...container.querySelectorAll('mark')].map((m) => m.textContent)).toEqual([
-      'G',
-      'B',
-    ])
+    // Group By's own name: other names can match too ("Bounding Box").
+    const name = rowFor(container, 'Group By').querySelector('.node-row__name')!
+    expect([...name.querySelectorAll('mark')].map((m) => m.textContent)).toEqual(['G', 'B'])
   })
 })
 

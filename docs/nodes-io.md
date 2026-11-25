@@ -761,6 +761,33 @@ error is internally consistent and only the scene's own bounds can show it. (It 
 cover for reading bytes — `installJsdomStubs` polyfills `Blob.prototype.arrayBuffer`, so the
 component test exercises the real path.)
 
+## Bounding Box: a region somebody types
+
+`core.boundingBox`, `Add ▸ Utility ▸ Bounding Box`. An axis-aligned box from two corners, on two
+outputs: `Volumes`, a one-item mesh set with `ROI_MESH_SCHEMA`'s columns, so `Points in Volumes`
+and the 3D View take it unchanged; and `Layers`, the same box as a neuroglancer
+`axis_aligned_bounding_box` annotation, chained like every layer node for the Neuroglancer card's
+`Extra layers`. `cheap`: eight corners and no fetch. The parse is `nodes/lib/boundingBox.ts`'
+`readBox`, read by the node and both exporters, so a card's warning, a run's refusal and a cell's
+`TODO` are one sentence.
+
+- **A corner is one string, not three number fields**, because it arrives by paste from
+  neuroglancer's position readout. `parseTriple` takes `x, y, z`, tabs, spaces, `[x, y, z]`.
+  Which corner is which does not matter: min and max are taken per axis.
+- **Voxels are multiplied out in `readBox`, and the value says `units: 'nm'`**, so `Points in
+  Volumes`' frame check sees nanometres. Neuroglancer's readout is usually in voxels, and a box
+  read as nanometres lands far from the points with no error, only an empty `Inside`.
+- **`Voxel size` has no default.** One right for FlyWire (4, 4, 40) is wrong for MANC (8, 8, 8),
+  which is the same silent miss as above. Empty is a warning naming the remedy.
+- **A flat box warns rather than refuses** (a guard rail warns): it encloses nothing, but still
+  draws in neuroglancer as a rectangle.
+- **The layer goes through `localAnnotationLayer`** (`data/neuroglancer/scene.ts`), the one
+  nanometre-frame wrapper for every local annotation layer.
+- **The exporters write the corners already in nanometres**: a `navis.Volume` list in Python, a
+  named list of one `rgl::tmesh3d` in R (faces one-based); `Layers` is `None`/`NULL`, as
+  `Neuroglancer Source`'s is. The fixture's box is in voxels with its corners typed out of order,
+  so the goldens hold both the conversion and the sort.
+
 ## Download: a side effect in a reactive graph
 
 `out.download`, `Add ▸ Utility ▸ Download`. Write whatever arrives on the wire to a file. The one

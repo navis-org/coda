@@ -1115,6 +1115,24 @@ export function everythingGraph(): CodaGraph {
       params: { fileName: 'glomeruli.obj', units: 'um' },
     },
     {
+      /*
+       * In voxels, because the conversion is the half that can be wrong: both exporters write the
+       * corners already in nanometres, and the goldens are where a cell multiplying them again
+       * would show. The corners are typed in the wrong order on purpose, so min and max are sorted.
+       */
+      id: 'bbox',
+      type: 'core.boundingBox',
+      col: 3,
+      row: 4,
+      params: {
+        cornerA: '200, 100, 50',
+        cornerB: '100, 300, 40',
+        units: 'voxels',
+        voxelSize: '4, 4, 40',
+        name: 'calyx box',
+      },
+    },
+    {
       id: 'url',
       type: 'core.tableFromUrl',
       col: 3,

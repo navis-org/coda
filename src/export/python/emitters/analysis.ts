@@ -22,6 +22,7 @@ import { rawFileNote } from '../../../data/rawFileUrl'
 import { portIdAt } from '../../../core/ports'
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { uploadMeshUnit } from '../../../nodes/query/uploadMesh'
+import { BOX_FACES, boxVertices, readBox } from '../../../nodes/lib/boundingBox'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { codaIds } from './common'
@@ -370,6 +371,36 @@ registerEmitter('core.uploadMesh', (ctx) => {
         ]),
   ]
 })
+
+// ---------------------------------------------------------------------------
+// Bounding Box
+// ---------------------------------------------------------------------------
+
+/**
+ * The box as a one-item list of `navis.Volume`, the shape `ROI Meshes` and `Upload Mesh` emit, so
+ * `coda_in_volumes` and the viewers take it unchanged. Corners already in nanometres: `readBox`
+ * multiplied voxels out, and the cell would be a second place to get that wrong. The Layers port
+ * is a neuroglancer layer, bound to `None` as `Neuroglancer Source`'s is.
+ */
+registerEmitter('core.boundingBox', (ctx) => {
+  const read = readBox(ctx.params)
+  if ('error' in read) return ctx.todo(read.error)
+  ctx.require('navis')
+  return [
+    `${ctx.output('meshes')} = [navis.Volume(`,
+    `    vertices=${pyRows(boxVertices(read.box))},`,
+    `    faces=${pyRows(BOX_FACES)},`,
+    `    name=${pyStr(read.name)},`,
+    `)]`,
+    ...ctx.note('Neuroglancer layers cannot be exported to a notebook, so `Layers` is None.'),
+    `${ctx.output('layers')} = None`,
+  ]
+})
+
+/** Triples as a nested Python list literal, one line. */
+function pyRows(rows: readonly (readonly number[])[]): string {
+  return `[${rows.map((row) => pyList(row)).join(', ')}]`
+}
 
 // ---------------------------------------------------------------------------
 // Table from URL

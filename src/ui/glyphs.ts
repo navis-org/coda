@@ -269,6 +269,12 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ]],
     ['path', { d: 'M12 2.6v5.4M9.5 5.1 12 2.6l2.5 2.5' }],
   ],
+  // A box seen from a corner: the front face and the two visible edges behind it. Straight sides
+  // only, so it cannot be mistaken for the region blob `Upload Mesh` and `ROI Meshes` draw.
+  'core.boundingBox': [
+    ['path', { d: 'M4 8h12v12H4z' }],
+    ['path', { d: 'M4 8l4-4h12l-4 4M20 4v12l-4 4' }],
+  ],
   'core.tableFromUrl': [
     ['circle', { cx: '12', cy: '6.1', r: '3.6' }],
     ['path', { d: 'M8.4 6.1h7.2' }],

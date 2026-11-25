@@ -21,6 +21,7 @@ import {
   unresolvedRowsReason,
 } from '../../../nodes/lib/splitRows'
 import { uploadMeshUnit } from '../../../nodes/query/uploadMesh'
+import { BOX_FACES, boxVertices, readBox } from '../../../nodes/lib/boundingBox'
 import { carryLines, codaIds } from './common'
 import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 import type { AggFn } from '../../../nodes/lib/tableOps'
@@ -43,7 +44,7 @@ import {
 } from '../../../nodes/lib/matrixReduce'
 import { volumeColumnName } from '../../../nodes/lib/pointsInMeshes'
 import { edgePlanRefusal, groupColumns, readPlan } from '../../../nodes/lib/synapseEdges'
-import { rCol, rStr, rValue, rVector } from '../r'
+import { rArgs, rCol, rStr, rValue, rVector } from '../r'
 import { asFrame } from '../../neutral'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -1014,6 +1015,30 @@ registerEmitter('core.uploadMesh', (ctx) => {
           `# which is what everything downstream expects.`,
           `${out} <- lapply(${out}, function(m) { m$vb[1:3, ] <- m$vb[1:3, ] * ${unit.nm}; m })`,
         ]),
+  ]
+})
+
+/**
+ * The box as a named list of one `mesh3d`, the shape `Upload Mesh` emits, so `coda_in_volumes`
+ * and the viewers take it unchanged. `rgl` is in nat's `Depends`, hence no `ctx.library`. Corners
+ * already in nanometres (`readBox`); faces one-based for R. The Layers port has no R form.
+ */
+registerEmitter('core.boundingBox', (ctx) => {
+  const read = readBox(ctx.params)
+  if ('error' in read) return ctx.todo(read.error)
+  const out = ctx.output('meshes')
+  const faces = BOX_FACES.flat().map((i) => i + 1)
+  return [
+    `${out} <- list(rgl::tmesh3d(`,
+    ...rArgs([
+      `vertices = matrix(${rVector(boxVertices(read.box).flat())}, nrow = 3)`,
+      `indices = matrix(${rVector(faces)}, nrow = 3)`,
+      `homogeneous = FALSE`,
+    ]),
+    `))`,
+    `names(${out}) <- ${rStr(read.name)}`,
+    ...ctx.note('Neuroglancer layers cannot be exported to R, so `Layers` is NULL.'),
+    `${ctx.output('layers')} <- NULL`,
   ]
 })
 
