@@ -277,11 +277,28 @@ stops extending it; re-deriving the plan from what a follow leaves would tell th
 section 3 decided against. Not yet seen live: a follow of a real split; that comes with phase 3's
 sandbox split, asked first.
 
-**Phase 3: the gallery announces.** The channel from `splitAccept.ts`, and cards following at
-once. The gallery's Undo is followed the same way. The Neuroglancer card's `replaceSegments`
-puts both parts in its selection, and that card is often the one the review card drives through
-`Current`. Decide whether the cut-off part should stay drawn there. Probably yes, until the next
-row is clicked, so the reader sees what went.
+**Phase 3: the gallery announces (built 2026-11-24).** `data/cave/rootEdits.ts` (on `channel()`)
+is a headless channel of
+"these roots were replaced", certain or suggested, which carries a result and no way to write.
+The split gallery says its write's and its Undo's retired roots, certain (`splitAccept.ts`'s
+`edited`, beside the card's `showInCard`). A Neuroglancer card that can split says, as suggested,
+the roots a frame report took out of its layer *while adding others*, which is what
+Neuroglancer's multicut does (`submitMulticut`, phase 0). A neuron only taken out is the reader's
+choice and is not said, nor is a pasted link; a scene's replacement is said once. A review card
+whose neuron is among the roots follows at once where the edit is certain, or where the neuron is
+already known to be outdated. A certain edit said while a follow is under way (an Undo pressed
+straight after the split) is kept and followed once the record shows the new root. Where it is
+suggested, and the reader is signed in, the card asks for an answer to a question sent from now
+on (`rootCurrency.askAfter`: an age of 0, and once more after a question already out) and
+follows if that answer is outdated within `SUGGESTED_WAIT_MS` (60 s). A card whose neuron was
+merged into another reviewed neuron follows nothing by itself. A follow is written only where
+the record still has the neuron at the follow's `from` (the card can be drawn twice, and both
+copies hear the edit). Answers are stamped with when their question was sent. The neuron and the
+candidate in view are asked about again on each row moved to, where their answer is over 20 s
+old (`RECHECK_ROW_MS`); a merged candidate is not asked. The card the gallery was pressed over
+keeps both parts in its selection (`replaceSegments`), so the reader sees what went. That card
+is often the review card's `Current` viewer, and the parts stay until the reader takes them out.
+Not yet seen live: a gallery split and a multicut on `fanc_sandbox`, each asked of the user.
 
 **Phase 4: follow a candidate.** Aliases in the record, the `trimmed` tag, the verdict carried
 over, and a candidate's extended tips dropped by the same rule.

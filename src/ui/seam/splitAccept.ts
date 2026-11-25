@@ -27,6 +27,7 @@ import type {
 } from '../../packs/seam/splitWrite'
 import { LIVE_SPLIT_WRITE, writeSplit } from '../../packs/seam/splitWrite'
 import { refoldedEdits, replaceSegments } from '../../data/neuroglancer/selectionEdits'
+import { announceEdit } from '../../data/cave/rootEdits'
 import { useGraphStore } from '../../store/graphStore'
 import type { SplitCard, SplitRequest } from './splitSession'
 import { closeSplit, holdSplit } from './splitSession'
@@ -103,6 +104,25 @@ function showInCard(
   }
 }
 
+/**
+ * The card shows the new roots, and every review card hears that `gone` were replaced
+ * (`rootEdits.ts`): a split's write or an undo's, certain either way.
+ */
+function edited(
+  request: SplitRequest,
+  gone: readonly string[],
+  come: readonly string[],
+  retired: readonly string[] = [],
+): void {
+  showInCard(request.card, gone, come, retired)
+  announceEdit({
+    deployment: request.deployment,
+    datastack: request.datastack,
+    roots: [...gone, ...retired],
+    certain: true,
+  })
+}
+
 function set(next: SplitAccept | undefined): void {
   state = next
   holdSplit(next?.step || next?.out ? HELD : undefined)
@@ -169,7 +189,7 @@ export function acceptSplit(from: AcceptFrom): void {
     // In the card, the pieces — where the server made them and the read back bears it out (one
     // new root, too, is the neuron now). Not where every end was read under the old root still.
     if (result.kind === 'split' || result.kind === 'joined') {
-      showInCard(request.card, [request.root], result.done.newRootIds)
+      edited(request, [request.root], result.done.newRootIds)
     }
     // Made, and read back apart: nothing left to choose, so the gallery closes (user,
     // 2026-11-23). The answer stays on the status bar, the card shows the pieces. Anything
@@ -214,7 +234,7 @@ async function settleLate(
   set({ request, index, result: settled })
   // On the server's word: a late answer has no read back to bear it out or contradict it, and the
   // root the key was pressed on is gone either way.
-  if (answer?.kind === 'done') showInCard(request.card, [request.root], answer.newRootIds)
+  if (answer?.kind === 'done') edited(request, [request.root], answer.newRootIds)
   useGraphStore.getState().setNotice(said)
 }
 
@@ -300,7 +320,7 @@ function finishUndo(
   useGraphStore.getState().setNotice(undo.message)
   // The pressed root out where the card was never given the pieces; the pieces only un-added.
   if (outcome.kind === 'done') {
-    showInCard(request.card, [request.root], outcome.newRootIds, done.newRootIds)
+    edited(request, [request.root], outcome.newRootIds, done.newRootIds)
   }
 }
 

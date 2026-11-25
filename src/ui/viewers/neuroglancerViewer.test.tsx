@@ -31,6 +31,8 @@ import {
   updateIn,
 } from '../../data/neuroglancer/frameMessage'
 import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
+import type { RootEdit } from '../../data/cave/rootEdits'
+import { onEdit } from '../../data/cave/rootEdits'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { hoveredSegment } from './segmentHover'
 import { useGraphStore } from '../../store/graphStore'
@@ -1223,6 +1225,29 @@ describe('neurons changed inside the viewer', () => {
     frameShowing(container, sceneWith(['1', '2']))
     report(container, sceneWith(['2']))
     expect(onSelectionEdits).toHaveBeenCalledWith(['+7', '-1'])
+  })
+
+  /**
+   * Neuroglancer's own multicut takes the old root out of the layer and puts the new ones in: said
+   * to the review cards to check (`rootEdits.ts`). A neuron only taken out is the reader's choice.
+   */
+  it('says a root replaced by new ones in one report, on a card that can split', () => {
+    const heard: RootEdit[] = []
+    const stop = onEdit((edit) => heard.push(edit))
+    const target = { deployment: 'https://global.example.org', datastack: 'test_stack' }
+    const onSelectionEdits = vi.fn<(next: string[]) => void>()
+    const view = render(viewer(URL_B, [], onSelectionEdits, { splitTarget: target }))
+    frameLoaded(view.container)
+    frameShowing(view.container, sceneWith(['1', '2']))
+    report(view.container, sceneWith(['2']))
+    // Added by hand, with nothing taken out: said nothing, and the scene's one saying not spent.
+    report(view.container, sceneWith(['1', '2', '7']))
+    expect(heard).toEqual([])
+    report(view.container, sceneWith(['2', '8', '9']))
+    // The frame repeats its report until the next scene lands: said once.
+    report(view.container, sceneWith(['2', '8', '9']))
+    stop()
+    expect(heard).toEqual([{ ...target, roots: ['1'], certain: false }])
   })
 
   it('writes nothing for a report of the scene it was sent', () => {

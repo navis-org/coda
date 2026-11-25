@@ -310,7 +310,7 @@ With a CAVE dataset wired and you signed in, the card also checks whether the ne
 
 ### Following a split neuron
 
-Splitting off a false merge leaves the neuron as two parts, each with a new root ID. Press **Follow the edit**, beside the outdated note in the foot, and the card carries on with the part that holds the most of the neuron's tips. If two parts hold the same number of tips, it takes the larger one. The tips on the other part leave the list, along with any piece you accepted at one of them and everything you extended beyond it. Your verdicts are kept, and Submit works again, on the part you followed.
+Splitting off a false merge leaves the neuron as two parts, each with a new root ID. Split it with the split gallery (K) or with Neuroglancer's multicut in Coda's own viewer, and the card follows the split by itself. A split made anywhere else shows as the outdated note in the foot: press **Follow the edit** beside it. Either way the card carries on with the part that holds the most of the neuron's tips. If two parts hold the same number of tips, it takes the larger one. The tips on the other part leave the list, along with any piece you accepted at one of them and everything you extended beyond it. Your verdicts are kept, and Submit works again, on the part you followed.
 
 The card can tell which part a tip went with because Suggest Merges records the supervoxel each tip was found on (`tip_sv`). A split never changes a supervoxel, only which root it belongs to. Suggestions made before 24 November 2026, and published sets, carry no such supervoxels, so a neuron reviewed from them cannot be followed: run Suggest Merges again on the new root.
 
@@ -323,7 +323,9 @@ Afterwards the foot says how many tips left with the part split off. Two more bu
 
 A piece Submit had already merged into the neuron that went with the other part is tagged **split off with the other part**. Submit does not merge it again, and its tips leave the list with it.
 
-Undoing the split gives the neuron a new root again, and **Follow the edit** brings every tip back.
+Undoing the split gives the neuron a new root again, and following that brings every tip back. The split gallery's Undo is followed by itself, like its split.
+
+The card also checks the neuron and the candidate you are looking at again when you click a row, if it last checked them more than 20 seconds before. So an edit made outside Coda shows by the time you look for it.
 
 This is common with a published set, which is a snapshot: on Aedes, a neuron from a set a few weeks old has often been edited since.
 

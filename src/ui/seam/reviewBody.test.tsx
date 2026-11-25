@@ -36,6 +36,7 @@ import type { SubmitState } from './mergeSession'
 import type * as VerdictLog from '../../data/verdictLog'
 import type * as FollowEdit from '../../packs/seam/followEdit'
 import type * as MergeSession from './mergeSession'
+import { announceEdit } from '../../data/cave/rootEdits'
 import { resetVerdictLog, verdictLogState, writeSharing } from '../../data/verdictLog'
 import { ReviewBody, submitPress } from './ReviewBody'
 import { VerdictButtons } from './VerdictButtons'
@@ -53,9 +54,16 @@ let submitChecked: { done: number; total: number } | undefined
 /** The currency check, faked: roots in `edited` are outdated, and what was asked is kept. */
 const edited = new Set<string>()
 const askedCurrency: string[][] = []
+/** Asks sooner than usual — a suggested edit, or the row in view — each with its age. */
+const soonerCurrency: { roots: string[]; currentForMs: number }[] = []
 vi.mock('../../packs/seam/rootCurrency', () => ({
   rootCurrency: {
-    ask: (_: unknown, roots: readonly string[]) => askedCurrency.push([...roots]),
+    ask: (_: unknown, roots: readonly string[], currentForMs?: number) =>
+      currentForMs === undefined
+        ? askedCurrency.push([...roots])
+        : soonerCurrency.push({ roots: [...roots], currentForMs }),
+    askAfter: (_: unknown, roots: readonly string[], currentForMs: number) =>
+      soonerCurrency.push({ roots: [...roots], currentForMs }),
     current: (_: unknown, root: string) => !edited.has(root),
     subscribe: () => () => {},
     version: () => 0,
@@ -968,6 +976,181 @@ describe('following an edited neuron', () => {
     )
     // The other part holds as many tips as this one: either could be the neuron.
     expect(screen.getByRole('button', { name: 'follow the other part instead' })).toBeTruthy()
+  })
+
+  /** Said by the split gallery (`rootEdits.ts`): certain, so followed without a press. */
+  it('follows at once where the split gallery says it split the neuron', async () => {
+    followEditFake.mockResolvedValue({ ok: true, entry })
+    draw({ mode: 'candidate' }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        roots: [NEURON],
+        certain: true,
+      }),
+    )
+    expect(followEditFake).toHaveBeenCalledTimes(1)
+    // Another datastack's edit, or another root's, is not this card's.
+    followEditFake.mockClear()
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'other',
+        roots: [NEURON],
+        certain: true,
+      }),
+    )
+    expect(followEditFake).not.toHaveBeenCalled()
+  })
+
+  /** Read off a viewer's report — Neuroglancer's own multicut — so asked about before following. */
+  it('asks about the neuron where a viewer only suggests it was split, and follows once it was', async () => {
+    followEditFake.mockResolvedValue({ ok: true, entry })
+    draw({ mode: 'candidate' }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    soonerCurrency.length = 0
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        roots: [NEURON],
+        certain: false,
+      }),
+    )
+    expect(soonerCurrency).toContainEqual({ roots: [NEURON], currentForMs: 0 })
+    expect(followEditFake).not.toHaveBeenCalled()
+    // The chunkedgraph's answer: outdated.
+    edited.add(NEURON)
+    redraw({})
+    await act(async () => {})
+    expect(followEditFake).toHaveBeenCalledTimes(1)
+  })
+
+  /** The same card drawn twice hears an edit twice: the second follow finds the record moved on. */
+  it('writes no follow from a root the record has already moved past', async () => {
+    const merges = JSON.stringify([entry])
+    followEditFake.mockResolvedValue({ ok: true, entry })
+    draw({ mode: 'candidate', merges }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    useGraphStore.setState((state) => ({
+      graph: {
+        ...state.graph,
+        nodes: state.graph.nodes.map((one) =>
+          one.id === 'r1' ? { ...one, params: { ...one.params, merges } } : one,
+        ),
+      },
+    }))
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        roots: [KEPT],
+        certain: true,
+      }),
+    )
+    expect(followEditFake).toHaveBeenCalledTimes(1)
+    expect(useGraphStore.getState().graph.nodes[0]!.params['merges']).toBe(merges)
+  })
+
+  /** An Undo pressed straight after the split: its edit arrives while the split's follow runs. */
+  it('follows an edit said during a follow once that follow ends', async () => {
+    let answer: (value: unknown) => void = () => {}
+    followEditFake.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+    followEditFake.mockResolvedValue({ ok: false, message: 'second' })
+    draw({ mode: 'candidate' }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    const said = (roots: string[]) =>
+      act(async () =>
+        announceEdit({
+          deployment: DEFAULT_CAVE_SERVER,
+          datastack: 'test_stack',
+          roots,
+          certain: true,
+        }),
+      )
+    await said([NEURON])
+    await said([NEURON, KEPT])
+    expect(followEditFake).toHaveBeenCalledTimes(1)
+    await act(async () => answer({ ok: true, entry }))
+    // The record now has the neuron at KEPT, which the second edit retired.
+    redraw({
+      params: { merges: String(useGraphStore.getState().graph.nodes[0]!.params['merges']) },
+    })
+    await act(async () => {})
+    expect(followEditFake).toHaveBeenCalledTimes(2)
+    expect(followEditFake.mock.calls[1]![0]).toMatchObject({ from: KEPT })
+  })
+
+  it('follows a suggested edit at once where the neuron is known to be outdated already', async () => {
+    edited.add(NEURON)
+    followEditFake.mockResolvedValue({ ok: true, entry })
+    draw({ mode: 'candidate' }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        roots: [NEURON],
+        certain: false,
+      }),
+    )
+    expect(followEditFake).toHaveBeenCalledTimes(1)
+  })
+
+  /** Merged into another reviewed neuron: that one's card follows it, not this one. */
+  it('follows nothing by itself where the neuron was merged into another under review', async () => {
+    const intoOther = JSON.stringify([
+      {
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        reviewedRoot: '720575940621522100',
+        candidateRoot: NEURON,
+        endUid: 1,
+        neuronRoot: '720575940621522100',
+        neuron: { supervoxel: '11', positionNm: [1, 2, 3] },
+        candidate: { supervoxel: '12', positionNm: [1, 2, 3] },
+        at: '2026-11-24T10:00:00.000Z',
+        outcome: 'merged',
+        newRoot: '720575940700000009',
+      },
+    ])
+    draw({ mode: 'candidate', merges: intoOther }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        roots: ['720575940700000009'],
+        certain: true,
+      }),
+    )
+    expect(followEditFake).not.toHaveBeenCalled()
+  })
+
+  it('asks nothing about a suggested edit when not signed in', async () => {
+    resetCredentials()
+    draw({ mode: 'candidate' }, true, CANDIDATES, ANCHORED, CAVE_DATASET)
+    soonerCurrency.length = 0
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        roots: [NEURON],
+        certain: false,
+      }),
+    )
+    expect(soonerCurrency).toEqual([])
+  })
+
+  it('asks again about the neuron and the candidate in view', () => {
+    soonerCurrency.length = 0
+    draw(
+      { mode: 'candidate', current: `${NEURON}|11`, rank: 1 },
+      true,
+      CANDIDATES,
+      ANCHORED,
+      CAVE_DATASET,
+    )
+    expect(soonerCurrency).toContainEqual({
+      roots: [NEURON, '648518346368395605'],
+      currentForMs: 20_000,
+    })
   })
 
   it('says why where the neuron cannot be followed, and writes nothing', async () => {

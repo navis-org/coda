@@ -18,6 +18,8 @@ import { useGraphStore } from '../../store/graphStore'
 import { node } from '../../test/graph'
 import { clearStorage } from '../../test/jsdomStubs'
 import { settle } from './__fixtures__/splitServices'
+import type { RootEdit } from '../../data/cave/rootEdits'
+import { onEdit } from '../../data/cave/rootEdits'
 import type { AcceptFrom } from './splitAccept'
 import {
   acceptSplit,
@@ -207,6 +209,27 @@ describe('acceptSplit', () => {
     undoAccepted()
     await settle()
     expect(cardEdits()).toEqual(['+3', '+7', `-${FROM.request.root}`])
+  })
+
+  /** What the review cards follow (`rootEdits.ts`): the root a write or an undo replaced. */
+  it('says the roots it replaced to the review cards, the split’s and then the undo’s', async () => {
+    resetSplitAcceptForTests(servers())
+    const heard: RootEdit[] = []
+    const stop = onEdit((edit) => heard.push(edit))
+    acceptSplit(onCard())
+    await settle()
+    undoAccepted()
+    await settle()
+    stop()
+    expect(heard).toEqual([
+      { deployment: 'd', datastack: 'toy', roots: [FROM.request.root], certain: true },
+      {
+        deployment: 'd',
+        datastack: 'toy',
+        roots: [FROM.request.root, '1', '2'],
+        certain: true,
+      },
+    ])
   })
 
   it('leaves the card alone where every end was read under the old root still', async () => {

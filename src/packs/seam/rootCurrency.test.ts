@@ -63,6 +63,53 @@ describe('rootCurrency', () => {
     expect(currency.version()).toBeGreaterThan(0)
   })
 
+  /** The row in view, or a root a viewer's report suggests was edited, asked again sooner. */
+  it('asks again about a current root only once its answer is old enough, never an outdated one', async () => {
+    const { services, asked, tick } = servers(['8'])
+    const currency = createRootCurrency(services)
+    currency.ask(AT, ['7', '8'])
+    await settle()
+    tick(1_000)
+    currency.ask(AT, ['7', '8'], 20_000)
+    await settle()
+    expect(asked).toEqual([['7', '8']])
+    tick(20_000)
+    currency.ask(AT, ['7', '8'], 20_000)
+    await settle()
+    expect(asked).toEqual([['7', '8'], ['7']])
+    // An age of 0: at once.
+    currency.ask(AT, ['7'], 0)
+    await settle()
+    expect(asked).toHaveLength(3)
+  })
+
+  /** A question already out may predate the edit that prompted an early one: asked once more. */
+  it('asks once more after a question already out, where asked for a later answer meanwhile', async () => {
+    const { services, asked } = servers()
+    const currency = createRootCurrency(services)
+    currency.ask(AT, ['7'])
+    // Sent, not yet answered: the gathering wait ran out and the request is out.
+    vi.advanceTimersByTime(GATHER_MS)
+    currency.askAfter(AT, ['7'], 0)
+    await settle()
+    await settle()
+    expect(asked).toEqual([['7'], ['7']])
+    // A question still queued goes after the edit: not asked once more.
+    currency.ask(AT, ['9'])
+    currency.askAfter(AT, ['9'], 0)
+    await settle()
+    await settle()
+    expect(asked.filter((roots) => roots.includes('9'))).toHaveLength(1)
+    asked.splice(-1)
+    // An ordinary ask meanwhile, of any age, waits for the one out.
+    currency.ask(AT, ['8'])
+    currency.ask(AT, ['8'], 0)
+    await settle()
+    await settle()
+    expect(asked.at(-1)).toEqual(['8'])
+    expect(asked).toHaveLength(3)
+  })
+
   /** A stream: each published partial brings more candidates, and only those are asked. */
   it('gathers a stream’s arrivals, and asks only roots it does not know', async () => {
     const { services, asked } = servers()

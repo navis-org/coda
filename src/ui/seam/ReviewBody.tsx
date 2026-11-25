@@ -147,6 +147,8 @@ import { caveScopeOf } from '../../nodes/lib/caveParams'
 import { caveServerLabel } from '../../data/cave/deployments'
 import { getToken, subscribeTokens } from '../../data/cave/credentials'
 import { rootCurrency } from '../../packs/seam/rootCurrency'
+import { onEdit } from '../../data/cave/rootEdits'
+import { useLatest } from '../useLatest'
 import type { SubmitRequest, SubmitState } from './mergeSession'
 import {
   STILL_OUT_NOTICE,
@@ -203,6 +205,11 @@ function foldedInitially(nodeId: string): boolean {
     return false
   }
 }
+
+/** How old a "current" answer must be before a row click asks about the row's roots again. */
+const RECHECK_ROW_MS = 20_000
+/** How long a suggested edit waits for the chunkedgraph to call the neuron outdated. */
+const SUGGESTED_WAIT_MS = 60_000
 
 export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
@@ -753,10 +760,16 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // Another part with nearly as many tips: either could be the neuron, so it is offered.
   const nearEven = nearEvenOf(followed)
   /*
-   * A ref as well as the state, so a second click in the same frame finds a follow already under
-   * way; and none while a merge's answer is lost — a follow moves the root the plan settles it by.
+   * A ref as well as the state, so a second call in the same frame — a click, or an edit said to the
+   * card — finds a follow already under way; and none while a merge's answer is lost — a follow moves the root the plan settles it by.
    */
   const followingRef = useRef(false)
+  /** The neuron's root as the record in the store has it now, not as this render drew it. */
+  const recordedRoot = (): string | undefined => {
+    if (neuron === undefined) return undefined
+    const held = useGraphStore.getState().graph.nodes.find((one) => one.id === node.id)
+    return mergedSoFar(decodeRecord(held?.params['merges']), neuron, target).currentRoot
+  }
   const follow = async (prefer?: string) => {
     if (!target || neuron === undefined || !merged || !anchors || followingRef.current) return
     if (merged.unsettled.length > 0) {
@@ -765,39 +778,109 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       )
       return
     }
+    // Under way until the record is written, so an edit said meanwhile waits for the new root.
     followingRef.current = true
     setFollowing(true)
-    setNotice('Reading where the neuron’s tips are now…')
-    let answer
     try {
-      answer = await followEdit(
+      setNotice('Reading where the neuron’s tips are now…')
+      const answer = await followEdit(
         { scope: target, reviewedRoot: neuron, from: merged.currentRoot, anchors, prefer },
         { deployment: target.deployment },
+      )
+      if (!answer.ok) {
+        setNotice(answer.message)
+        return
+      }
+      const { entry } = answer
+      /*
+       * Not where the record has already moved the neuron past the root this follow read from: the
+       * same card can be drawn twice (on the canvas and pinned), and both hear an edit said to them.
+       */
+      // Asked of the document it was pressed in; elsewhere, the hold below refuses and says why.
+      if (useGraphStore.getState().activeTabId === docId && recordedRoot() !== entry.from) {
+        setNotice('The neuron has been followed already.')
+        return
+      }
+      const refused = appendHeld({ docId, nodeId: node.id }, (now) => appendEntry(now, entry))
+      if (refused !== undefined) {
+        setNotice(`The neuron could not be followed: ${refused}`)
+        return
+      }
+      const unknown = anchors.unknown ?? 0
+      setNotice(
+        (entry.away.length === 0
+          ? `Followed the neuron to ${entry.to}; every tip is on it.`
+          : `Followed the neuron to ${entry.to}, the part holding ${plural(entry.kept, 'tip')}. ${plural(entry.away.length, 'tip')} went with the other part and left the list.`) +
+          (unknown > 0
+            ? ` ${plural(unknown, 'merged piece')} could not be checked (the record keeps only a summary of merges this old) and ${unknown === 1 ? 'is' : 'are'} still counted in the neuron.`
+            : ''),
       )
     } finally {
       followingRef.current = false
       setFollowing(false)
     }
-    if (!answer.ok) {
-      setNotice(answer.message)
-      return
-    }
-    const { entry } = answer
-    const refused = appendHeld({ docId, nodeId: node.id }, (now) => appendEntry(now, entry))
-    if (refused !== undefined) {
-      setNotice(`The neuron could not be followed: ${refused}`)
-      return
-    }
-    const unknown = anchors.unknown ?? 0
-    setNotice(
-      (entry.away.length === 0
-        ? `Followed the neuron to ${entry.to}; every tip is on it.`
-        : `Followed the neuron to ${entry.to}, the part holding ${plural(entry.kept, 'tip')}. ${plural(entry.away.length, 'tip')} went with the other part and left the list.`) +
-        (unknown > 0
-          ? ` ${plural(unknown, 'merged piece')} could not be checked (the record keeps only a summary of merges this old) and ${unknown === 1 ? 'is' : 'are'} still counted in the neuron.`
-          : ''),
-    )
   }
+  /*
+   * An edit the split gallery or a Neuroglancer card says replaced the neuron (`rootEdits.ts`).
+   * Certain, it is followed at once — or, where a follow is under way, once that one ends (an Undo
+   * pressed straight after the split). Suggested, it is followed once the chunkedgraph says the
+   * neuron is outdated, asked by a question sent from now on, and only for `SUGGESTED_WAIT_MS`.
+   */
+  const followLatest = useLatest(follow)
+  const recordedLatest = useLatest(recordedRoot)
+  const pending = useRef<readonly string[] | undefined>(undefined)
+  const awaiting = useRef<{ root: string; until: number } | undefined>(undefined)
+  useEffect(
+    () =>
+      onEdit((edit) => {
+        // A neuron merged into another reviewed one is that one's to follow.
+        if (!target || neuronNow === undefined || absorbed) return
+        if (edit.deployment !== target.deployment || edit.datastack !== target.datastack) return
+        if (!edit.roots.includes(neuronNow)) return
+        if (edit.certain || rootCurrency.current(target, neuronNow) === false) {
+          if (followingRef.current) pending.current = edit.roots
+          else void followLatest.current()
+          return
+        }
+        if (getToken(target.deployment) === undefined) return
+        awaiting.current = { root: neuronNow, until: Date.now() + SUGGESTED_WAIT_MS }
+        rootCurrency.askAfter(target, [neuronNow], 0)
+      }),
+    [target, neuronNow, absorbed, followLatest],
+  )
+  useEffect(() => {
+    if (following || neuronNow === undefined) return
+    // A follow just written that this render does not show yet: wait for the one that does.
+    if (pending.current && recordedLatest.current() !== neuronNow) return
+    if (pending.current?.includes(neuronNow)) {
+      pending.current = undefined
+      void followLatest.current()
+      return
+    }
+    pending.current = undefined
+    const waited = awaiting.current
+    if (!neuronEdited || waited?.root !== neuronNow) return
+    awaiting.current = undefined
+    if (Date.now() <= waited.until) void followLatest.current()
+  }, [following, neuronEdited, neuronNow, followLatest, recordedLatest])
+  /*
+   * The neuron and the candidate in view asked again on each row clicked, where the last answer is
+   * more than `RECHECK_ROW_MS` old: an edit made outside Coda shows its tag by the time the reader
+   * looks for it, rather than after the currency check's five minutes. A merged candidate's root
+   * is retired by the merge, so not asked.
+   */
+  const shownCandidate = here?.candidate.candidateId
+  const shownToAsk =
+    shownCandidate !== undefined && mergedAs(merged, shownCandidate) === undefined
+      ? shownCandidate
+      : undefined
+  // Each row moved to, not only each candidate: the cursor is the row.
+  const cursor = `${String(node.params.current ?? '')}#${String(node.params.rank ?? '')}`
+  useEffect(() => {
+    if (!target || !signedIn || neuronNow === undefined) return
+    const ids = shownToAsk === undefined ? [neuronNow] : [neuronNow, shownToAsk]
+    rootCurrency.ask(target, ids, RECHECK_ROW_MS)
+  }, [target, signedIn, neuronNow, shownToAsk, cursor])
   // Why a piece cannot be extended, where it cannot: read by each row and by Auto-extend listed.
   const blockedOf = useCallback(
     (id: string) => {

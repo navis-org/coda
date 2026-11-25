@@ -110,6 +110,7 @@ import {
   withUpdate,
 } from '../../data/neuroglancer/frameMessage'
 import { mergeShownSegments, refoldedEdits } from '../../data/neuroglancer/selectionEdits'
+import { announceEdit } from '../../data/cave/rootEdits'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { errorMessage } from '../../core/errors'
 import { describeLegend, resolveColor } from '../../style/encoding'
@@ -792,13 +793,15 @@ export function NeuroglancerViewer({
     resync,
   ])
 
+  /** The scene sent that a replaced root was last said for (`rootEdits.ts`), so it is said once. */
+  const announcedFor = useRef<object | undefined>(undefined)
   /**
    * Fold a scene the viewer reports — or one pasted as a link — into the node's edits, measured
    * against the scene the frame was last sent (`mergeShownSegments` says why not the input).
    * Writes only when something changed, so the frame's report of a scene the node just built is
    * not an edit.
    */
-  const foldScene = (reported: NgScene): boolean => {
+  const foldScene = (reported: NgScene, fromFrame = false): boolean => {
     const applied = leaseRef.current?.root.applied
     if (!onSelectionEdits || !datasetId || !applied) return false
     const layer = selectionLayerName(applied.scene, datasetId)
@@ -806,6 +809,20 @@ export function NeuroglancerViewer({
     const got = layer ? layerListing(reported, layer) : undefined
     // No such layer in what came back: somebody deleted it, which is not a statement about neurons.
     if (!sent || !got) return false
+    /*
+     * Roots replaced by new ones in one report — what Neuroglancer's own multicut does — are said to
+     * the review cards to check (`rootEdits.ts`); a neuron only taken out is the reader's choice.
+     */
+    // From the frame only (a pasted link is the reader's), and once for each scene sent.
+    if (splitTarget && fromFrame && announcedFor.current !== applied) {
+      const now = new Set(got.listed)
+      const was = new Set(sent.listed)
+      const gone = sent.listed.filter((id) => !now.has(id))
+      if (gone.length > 0 && got.listed.some((id) => !was.has(id))) {
+        announcedFor.current = applied
+        announceEdit({ ...splitTarget, roots: gone, certain: false })
+      }
+    }
     // Where hidden neurons stay selected, the list is the selection and the hidden ones are noted;
     // otherwise only what is drawn counts, and hiding a neuron removes it.
     const next = refoldedEdits(selectionEdits, (current) =>
@@ -934,7 +951,7 @@ export function NeuroglancerViewer({
          * where there is a new document to send it to.
          */
         tellFocusRef.current(kept)
-        handlers.current.foldScene(event.data.state)
+        handlers.current.foldScene(event.data.state, true)
       } else if (isFrameUnappliedMessage(event.data) && kept.applied) {
         // The frame could not set the selection in place: stop trying, and navigate instead.
         kept.speaksFor = undefined

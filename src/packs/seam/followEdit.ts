@@ -1,7 +1,8 @@
 /**
  * Following the reviewed neuron through an edit this card did not make — a split, usually
  * (`docs/seam-split-review-plan.md`, phase 2). **Reads only**: the roots its tips' supervoxels
- * are under now, and, at a tie, how big each part is. What the reader's press writes is a
+ * are under now, and, at a tie, how big each part is. What a follow writes — on the reader's press, or on an edit said
+ * to the card (`data/cave/rootEdits.ts`) — is a
  * `FollowEntry` on the merge record (`mergeRecord.ts`), which moves the neuron's root as a merge
  * does; which tips leave the list is worked out from that entry (`cutOffTips`), by the card and
  * by the node's `evaluate` alike.
