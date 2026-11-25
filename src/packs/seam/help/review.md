@@ -327,6 +327,16 @@ Undoing the split gives the neuron a new root again, and following that brings e
 
 The card also checks the neuron and the candidate you are looking at again when you click a row, if it last checked them more than 20 seconds before. So an edit made outside Coda shows by the time you look for it.
 
+### Following an edited candidate
+
+A candidate can hold a false merge too. Split it, and the card keeps the part that meets the neuron where it was suggested: the part holding its side of the contact (`cand_sv`). Your verdict carries over, on the assumption that the join was right and the false merge lay further out. The row is tagged **followed**, and the piece is drawn, checked and merged as its new root. If you had extended the piece, its tips on the part cut off leave the list, with anything accepted on them.
+
+As for the neuron, a split made with the split gallery or with Neuroglancer's multicut in Coda's own viewer is followed by itself. For an edit made anywhere else, press the red **outdated** tag on the row.
+
+The same works for a merge. Merge a candidate into the neuron by hand in Neuroglancer and the card follows both: the neuron to its new root, and the candidate into it. Its row then reads **✓ merged**, and Submit leaves it alone. A candidate merged with some other piece is followed to the new root it is part of.
+
+The card follows a candidate by one contact: the nearest among the rows you accepted it on, or the nearest of all its rows if you have not accepted it. If the candidate is listed at more than one tip, and the split took another of its contacts with the other part, that row stays on the list under the followed piece. Submit then finds nothing to merge at that row and tries the candidate's other rows.
+
 This is common with a published set, which is a snapshot: on Aedes, a neuron from a set a few weeks old has often been edited since.
 
 ## Sending your verdicts to SEAM

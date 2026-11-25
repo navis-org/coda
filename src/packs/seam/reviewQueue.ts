@@ -142,6 +142,12 @@ export interface Candidate {
    * no confidence, and never sent to SEAM's verdict log.
    */
   readonly hand?: true
+  /**
+   * Its supervoxel nearest the neuron, its side of the contact (`cand_sv`; a hand pick's
+   * `candSv`): what places it after it is edited (`followPieces`). Absent where the search
+   * published none.
+   */
+  readonly candSv?: string
 }
 
 /** One tip, with every candidate the own-tip rule kept for it. */
@@ -210,6 +216,7 @@ export function buildQueue(
     if (endUid === undefined) continue
     const neuronId = text(tips, ID_COLUMN_NAME, i) ?? ''
     const searched = tips.data['searched']?.[i]
+    const tipSv = supervoxelOf(tips, 'tip_sv', i)
     out.push({
       endUid,
       neuronId,
@@ -222,7 +229,7 @@ export function buildQueue(
             ? 'never'
             : 'waiting',
       kind: text(tips, 'kind', i) ?? 'tip',
-      ...supervoxelAt(tips, 'tip_sv', i),
+      ...(tipSv !== undefined ? { tipSv } : {}),
       tipNm: [
         numberAt(tips, 'x', i) ?? 0,
         numberAt(tips, 'y', i) ?? 0,
@@ -327,6 +334,7 @@ function candidateLists(table: TableValue | undefined): Map<string, Candidate[]>
     if (endUid === undefined || !neuronId || !candidateId) continue
     const key = tipKey(neuronId, endUid)
     const held = lists.get(key) ?? []
+    const candSv = supervoxelOf(table, 'cand_sv', i)
     held.push({
       candidateId,
       rank: numberAt(table, 'rank', i) ?? held.length + 1,
@@ -339,6 +347,7 @@ function candidateLists(table: TableValue | undefined): Map<string, Candidate[]>
       conf: numberAt(table, 'conf', i),
       shown: wasShown(table, i),
       organelle: table.data['organelle']?.[i] === true,
+      ...(candSv !== undefined ? { candSv } : {}),
     })
     lists.set(key, held)
   }
@@ -1017,21 +1026,19 @@ export function scenePieces(
   const id = here?.candidate.candidateId
   // Joined to the piece its tip is on, the candidate is that segment: drawn as the one in hand.
   const sameSegment =
-    on !== undefined &&
-    id !== undefined &&
-    rootNow(merged?.joined, on) === rootNow(merged?.joined, id)
+    on !== undefined && id !== undefined && rootNow(merged, on) === rootNow(merged, id)
   if (
     on !== undefined &&
     on !== here?.tip.seed &&
     !sameSegment &&
     !inAnotherRoot(mergedAs(merged, on))
   ) {
-    add(rootNow(merged?.joined, on), 'accepted')
+    add(rootNow(merged, on), 'accepted')
   }
   if (id !== undefined && !inAnotherRoot(mergedAs(merged, id))) {
-    add(rootNow(merged?.joined, id), isAccepted.has(id) ? 'focus' : 'candidate')
+    add(rootNow(merged, id), isAccepted.has(id) ? 'focus' : 'candidate')
   }
-  for (const id of toMerge) add(rootNow(merged?.joined, id), 'accepted')
+  for (const id of toMerge) add(rootNow(merged, id), 'accepted')
   return out
 }
 
@@ -2306,10 +2313,10 @@ export function extendLabel(progress: ExtendProgress): string {
   }
 }
 
-/** A supervoxel id cell, as `{ tipSv }`, or nothing where the cell holds none. */
-function supervoxelAt(table: TableValue, name: string, row: number): { tipSv?: string } {
+/** A supervoxel id cell, or undefined where the cell holds none. */
+function supervoxelOf(table: TableValue, name: string, row: number): string | undefined {
   const id = text(table, name, row)
-  return id !== undefined && isNodeId(id) ? { tipSv: id } : {}
+  return id !== undefined && isNodeId(id) ? id : undefined
 }
 
 function text(table: TableValue, name: string, row: number): string | undefined {

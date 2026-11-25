@@ -66,7 +66,8 @@ vi.mock('../../packs/seam/rootCurrency', () => ({
       soonerCurrency.push({ roots: [...roots], currentForMs }),
     current: (_: unknown, root: string) => !edited.has(root),
     subscribe: () => () => {},
-    version: () => 0,
+    // A new answer is a new version, as the real one's is: read again on the next draw.
+    version: () => edited.size,
   },
 }))
 /** The verdict log's sending, faked: what a press flushes. What the server collects is its reply. */
@@ -82,9 +83,12 @@ vi.mock('../../packs/seam/pickCheck', () => ({
 }))
 /** Reading where the neuron's tips went, faked: what it answers is the test's. */
 const followEditFake = vi.fn()
+/** Reading where a piece of the list went, faked the same way. */
+const followPiecesFake = vi.fn()
 vi.mock('../../packs/seam/followEdit', async (importOriginal) => ({
   ...(await importOriginal<typeof FollowEdit>()),
   followEdit: (...args: unknown[]) => followEditFake(...args),
+  followPieces: (...args: unknown[]) => followPiecesFake(...args),
 }))
 vi.mock('./mergeSession', async (importOriginal) => ({
   // The record's held append is the real one: a follow writes through it.
@@ -1165,6 +1169,216 @@ describe('following an edited neuron', () => {
   })
 })
 
+/**
+ * Following a piece of the list through an edit (phase 4 of `docs/seam-split-review-plan.md`):
+ * the outdated tag is a button, an edit said to the card naming a listed piece is followed, and
+ * a followed piece is asked about, drawn and tagged at its new root, or read as merged where it
+ * went into the neuron.
+ */
+describe('following an edited piece', () => {
+  const NEURON = '720575940621522189'
+  const FIRST = '648518346368395605'
+  const TRIMMED = '720575940800000077'
+  const CAVE_DATASET: Value = {
+    kind: 'dataset',
+    sourceId: 'cave',
+    datasetId: 'test_stack:1',
+    label: 'test',
+  }
+  /** `CANDIDATES` with each one's side of the contact. */
+  const ANCHORED: TableValue = makeTable(
+    tableSchema(...CANDIDATES.schema.columns, column('cand_sv', 'str')),
+    {
+      ...CANDIDATES.data,
+      cand_sv: ['73747834149376701', '73747834149376702', '73747834149376703'],
+    },
+  )
+  const pieceFollow = (to: string) => ({
+    kind: 'piece-followed',
+    deployment: DEFAULT_CAVE_SERVER,
+    datastack: 'test_stack',
+    reviewedRoot: NEURON,
+    piece: FIRST,
+    from: FIRST,
+    to,
+    at: '2026-11-25T12:00:00.000Z',
+    supervoxel: '73747834149376701',
+    away: [],
+  })
+  const ACCEPTED = { verdicts: `${NEURON}/${FIRST}=accept`, mode: 'candidate' }
+  const rowOf = (id: string) => rows().find((r) => r.textContent?.includes(id))!
+
+  beforeEach(() => setToken(DEFAULT_CAVE_SERVER, 'test-token'))
+  afterEach(() => {
+    resetCredentials()
+    edited.clear()
+    askedCurrency.length = 0
+    followPiecesFake.mockReset()
+  })
+
+  it('follows a piece when its outdated tag is pressed, keeping its verdict', async () => {
+    edited.add(FIRST)
+    followPiecesFake.mockResolvedValue({
+      ok: true,
+      entries: [pieceFollow(TRIMMED)],
+      refused: [],
+    })
+    draw(ACCEPTED, true, ANCHORED, TIPS, CAVE_DATASET)
+    const tag = rowOf(FIRST).querySelector<HTMLButtonElement>('button.review-row__outdated')!
+    await act(async () => fireEvent.click(tag))
+    expect(followPiecesFake).toHaveBeenCalledTimes(1)
+    expect(followPiecesFake.mock.calls[0]![0]).toMatchObject({
+      reviewedRoot: NEURON,
+      pieces: [{ piece: FIRST, from: FIRST, contact: '73747834149376701', tips: [] }],
+    })
+    const params = useGraphStore.getState().graph.nodes[0]!.params
+    expect(JSON.parse(String(params['merges']))).toEqual([pieceFollow(TRIMMED)])
+    expect(String(params['verdicts'])).toContain(`${NEURON}/${FIRST}=accept`)
+    expect(useGraphStore.getState().notice).toMatch(`Followed ${FIRST} to ${TRIMMED}`)
+  })
+
+  it('asks about a followed piece at its new root, and tags it followed', () => {
+    draw(
+      { ...ACCEPTED, merges: JSON.stringify([pieceFollow(TRIMMED)]) },
+      true,
+      ANCHORED,
+      TIPS,
+      CAVE_DATASET,
+    )
+    expect(askedCurrency.at(-1)).toContain(TRIMMED)
+    expect(askedCurrency.at(-1)).not.toContain(FIRST)
+    expect(rowOf(FIRST).querySelector('.review-row__followed')?.getAttribute('title')).toMatch(
+      TRIMMED,
+    )
+  })
+
+  it('reads a piece followed into the neuron as merged', () => {
+    const MERGED = '720575940800000078'
+    const neuronFollow = {
+      kind: 'followed',
+      deployment: DEFAULT_CAVE_SERVER,
+      datastack: 'test_stack',
+      reviewedRoot: NEURON,
+      from: NEURON,
+      to: MERGED,
+      at: '2026-11-25T12:00:00.000Z',
+      away: [],
+      placed: [],
+      kept: 0,
+      others: [],
+      left: [],
+    }
+    draw(
+      { ...ACCEPTED, merges: JSON.stringify([neuronFollow, pieceFollow(MERGED)]) },
+      true,
+      ANCHORED,
+      TIPS,
+      CAVE_DATASET,
+    )
+    expect(rowOf(FIRST).querySelector('.review-row__merged')?.textContent).toBe('✓ merged')
+    expect(rowOf(FIRST).querySelector('.review-row__followed')).toBeNull()
+  })
+
+  it('offers no follow of a piece while a Submit holds the card', () => {
+    edited.add(FIRST)
+    submitState = 'running'
+    try {
+      draw(ACCEPTED, true, ANCHORED, TIPS, CAVE_DATASET)
+      const tag = rowOf(FIRST).querySelector<HTMLButtonElement>('button.review-row__outdated')!
+      expect(tag.disabled).toBe(true)
+    } finally {
+      submitState = 'none'
+    }
+  })
+
+  it('writes nothing where another copy of the card followed the piece already', async () => {
+    edited.add(FIRST)
+    followPiecesFake.mockResolvedValue({
+      ok: true,
+      entries: [pieceFollow(TRIMMED)],
+      refused: [],
+    })
+    // The record holds the follow already; this answer was read from the root before it.
+    const merges = JSON.stringify([pieceFollow(TRIMMED)])
+    edited.add(TRIMMED)
+    draw({ ...ACCEPTED, merges }, true, ANCHORED, TIPS, CAVE_DATASET)
+    const tag = rowOf(FIRST).querySelector<HTMLButtonElement>('button.review-row__outdated')!
+    await act(async () => fireEvent.click(tag))
+    expect(useGraphStore.getState().graph.nodes[0]!.params['merges']).toBe(merges)
+    expect(useGraphStore.getState().notice).toBe('The piece has been followed already.')
+  })
+
+  it('follows an edit said during a Submit only once the Submit ends', async () => {
+    followPiecesFake.mockResolvedValue({
+      ok: true,
+      entries: [pieceFollow(TRIMMED)],
+      refused: [],
+    })
+    submitState = 'open'
+    try {
+      draw(ACCEPTED, true, ANCHORED, TIPS, CAVE_DATASET)
+      await act(async () =>
+        announceEdit({
+          deployment: DEFAULT_CAVE_SERVER,
+          datastack: 'test_stack',
+          roots: [FIRST],
+          certain: true,
+        }),
+      )
+      expect(followPiecesFake).not.toHaveBeenCalled()
+    } finally {
+      submitState = 'none'
+    }
+    redraw({})
+    await act(async () => {})
+    expect(followPiecesFake).toHaveBeenCalledTimes(1)
+  })
+
+  it('follows at once a listed piece the split gallery says it split', async () => {
+    followPiecesFake.mockResolvedValue({
+      ok: true,
+      entries: [pieceFollow(TRIMMED)],
+      refused: [],
+    })
+    draw(ACCEPTED, true, ANCHORED, TIPS, CAVE_DATASET)
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        roots: [FIRST],
+        certain: true,
+      }),
+    )
+    expect(followPiecesFake).toHaveBeenCalledTimes(1)
+    expect(followPiecesFake.mock.calls[0]![0]).toMatchObject({ pieces: [{ piece: FIRST }] })
+  })
+
+  it('follows a piece a Neuroglancer card suggests once it is found outdated', async () => {
+    followPiecesFake.mockResolvedValue({
+      ok: true,
+      entries: [pieceFollow(TRIMMED)],
+      refused: [],
+    })
+    draw(ACCEPTED, true, ANCHORED, TIPS, CAVE_DATASET)
+    soonerCurrency.length = 0
+    await act(async () =>
+      announceEdit({
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        roots: [FIRST],
+        certain: false,
+      }),
+    )
+    expect(soonerCurrency).toContainEqual({ roots: [FIRST], currentForMs: 0 })
+    expect(followPiecesFake).not.toHaveBeenCalled()
+    // The chunkedgraph's answer: outdated.
+    edited.add(FIRST)
+    redraw({})
+    await act(async () => {})
+    expect(followPiecesFake).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('submitPress', () => {
   const ready = {
     docId: 'doc',
@@ -2095,6 +2309,30 @@ describe('hand picks on the review card', () => {
     expect(stored()['rank']).toBe(2)
     expect(stored()['picks']).toBe('')
     expect(useGraphStore.getState().past.length).toBe(1)
+    expect(checkPick).not.toHaveBeenCalled()
+  })
+
+  /** A followed piece is drawn as its new root: picking that is picking the piece listed. */
+  it('takes a pick on a followed piece’s new root for the piece listed', async () => {
+    const FOLLOWED = '720575940800000077'
+    const merges = JSON.stringify([
+      {
+        kind: 'piece-followed',
+        deployment: DEFAULT_CAVE_SERVER,
+        datastack: 'test_stack',
+        reviewedRoot: NEURON,
+        piece: LISTED,
+        from: LISTED,
+        to: FOLLOWED,
+        at: '2026-11-25T12:00:00.000Z',
+        supervoxel: '73747834149376702',
+        away: [],
+      },
+    ])
+    draw({ current: at(22), rank: 1, merges }, true, CANDIDATES, TIPS, CAVE)
+    await pick(FOLLOWED)
+    expect(decodeVerdicts(stored()['verdicts']).get(`${NEURON}/${LISTED}`)).toBe('accept')
+    expect(stored()['picks']).toBe('')
     expect(checkPick).not.toHaveBeenCalled()
   })
 

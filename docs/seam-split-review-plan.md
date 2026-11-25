@@ -300,8 +300,53 @@ keeps both parts in its selection (`replaceSegments`), so the reader sees what w
 is often the review card's `Current` viewer, and the parts stay until the reader takes them out.
 Not yet seen live: a gallery split and a multicut on `fanc_sandbox`, each asked of the user.
 
-**Phase 4: follow a candidate.** Aliases in the record, the `trimmed` tag, the verdict carried
-over, and a candidate's extended tips dropped by the same rule.
+**Phase 4: follow a candidate (built 2026-11-25).** Aliases in the record, a tag on the row,
+the verdict carried over, and a candidate's extended tips dropped by the same rule. Built as:
+
+- **A second kind of entry, `PieceFollow`** (`kind: 'piece-followed'`): the piece as suggested
+  (`piece`), its root before (`from`) and after (`to`), the contact supervoxel it was placed by
+  (`supervoxel`, the `cand_sv` of its row nearest the neuron, among the rows it was accepted on
+  where it was), and, as for the neuron, the piece's own tips' supervoxels found on another root
+  (`away`). `mergedSoFar` reads it after every other entry, so it needs no order: a piece whose
+  `to` is under the neuron's root now, by the record's groups, is **in the neuron** (`pieces`, so
+  `mergedAs` says `merged`), and any other is `moved` (piece → that root). It is never joined into
+  `Groups` itself, which every reviewed neuron in the record shares: a piece that is another
+  neuron under review is moved for the neuron that followed it, never for itself. One function, `rootNow(so, id)`, reads
+  `joined` then `moved`, so the scene, Submit's plan (currency, anchors, `pieceRoot`) and the batch
+  take the new root without a change of their own. The verdict, the extension and every key stay
+  on the piece as suggested.
+- **A piece merged by hand** (Neuroglancer's merge, or somebody else's) is the same follow: its
+  contact supervoxel is under the neuron's root now, so the row reads `✓ merged`, Submit plans
+  nothing for it, and its tips are the neuron's. The neuron itself was edited by that merge too,
+  and is followed as in phase 2; which of the two is written first does not matter, since the
+  groups are read at the end. A later split of the neuron places such a piece by the entry's
+  `supervoxel`, as it places a merged piece by its merge's.
+- **Drawn as its new root.** The scene, the Neuroglancer hover and rest, and a hand pick all read
+  a followed piece as its root now: a pick on that root is a pick on the piece listed. Submit's
+  plan flags one now part of another neuron under review (`joinsNeuron`), and says of one found in
+  the neuron that it was merged outside the card (`MergedSoFar.foundIn`). A neuron with a followed
+  piece is never shortened, since a merge at the piece's new root keeps that root only in full.
+- **The tag.** An outdated candidate's red **outdated** tag is a button: pressing it follows the
+  piece. A followed piece that is not in the neuron is tagged **followed** (its title names the
+  new root). It is not called `trimmed`: one lookup cannot tell a trim from a merge with
+  something else, and the card does not guess.
+- **Heard of, as the neuron is.** An edit said on `rootEdits` naming a listed piece's root now is
+  followed at once where certain, or once the currency check calls the root outdated within
+  `SUGGESTED_WAIT_MS`; while a Submit holds the card it waits for the Submit to end, since its
+  plan was made on the roots as they were. Several pieces are followed in one lookup and one write, every listed
+  piece under a root named (two pieces merged with each other are under one); a hand pick on such a
+  shared root is refused as ambiguous, as one on pieces Submit joined is. Its contact is read off
+  the rows still listed, so a row that left with a part split off the neuron is no contact. Not for an
+  absorbed neuron, nor while a follow of the neuron or a Submit holds the card.
+- **Tips.** `cutOffTips` drops, besides the neuron's, a followed piece's own tips whose
+  `tip_sv` is in that piece's last follow's `away`, and so everything accepted beyond them.
+- **Not built.** Rows of the piece whose contact went with a part cut off stay under the piece
+  (now its new root). Submit tries its rows in turn, and a row whose contact is no longer on the
+  piece finds no anchor there and is passed over. Listing that part as a new, unjudged candidate
+  (section 5) is left for later. A followed piece that is extended is still searched as it was at
+  the search's moment (`Searched at`), so tips found on the part cut off after the follow are not
+  dropped until the piece is followed again. Not yet seen live: a trim and a hand merge on a real
+  candidate.
 
 **Phase 5 (optional): sets without anchors.** Anchors found by a box read at the search's moment,
 for published sets and older workflows. It shows progress, because it can take a minute on a

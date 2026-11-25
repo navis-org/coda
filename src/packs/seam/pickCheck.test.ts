@@ -145,6 +145,28 @@ describe('checking a hand pick', () => {
     expect(!itself.ok && itself.message).toBe('That piece is already accepted on this neuron.')
   })
 
+  /** A piece followed through an edit is read at its new root: one is the piece, two are ambiguous. */
+  it('places a pick on a followed piece by its new root, and refuses one two pieces share', async () => {
+    const FOLLOWED = '720575940650000002'
+    const OTHER = '720575940630442299'
+    const { live, asked } = services({
+      ok: true,
+      neuron: end([0, 0, 0]),
+      candidate: end([0, 0, 100]),
+      chunks: 0,
+      onRoot: FOLLOWED,
+    })
+    const one = await checkPick(request({ moved: new Map([[PIECE, FOLLOWED]]) }), OPTIONS, live)
+    expect(asked[0]!.alsoNeuron).toEqual([FOLLOWED])
+    expect(one.ok && one.root).toBe(PIECE)
+    const both = new Map([
+      [PIECE, FOLLOWED],
+      [OTHER, FOLLOWED],
+    ])
+    const two = await checkPick(request({ pieces: [PIECE, OTHER], moved: both }), OPTIONS, live)
+    expect(!two.ok && two.message).toMatch(/are all part of now/)
+  })
+
   it('is not refused for want of a size', async () => {
     const { live } = services(
       { ok: true, neuron: end([0, 0, 0]), candidate: end([0, 0, 0]), chunks: 0, onRoot: NOW },

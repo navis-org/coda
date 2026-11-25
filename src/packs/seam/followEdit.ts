@@ -21,15 +21,22 @@
  */
 
 import { countStrings } from '../../core/collections'
+import { errorMessage } from '../../core/errors'
 import { compareIds } from '../../core/ids'
 import type { CaveRequestOptions } from '../../data/cave/client'
 import type { GrapheneSource } from '../../data/cave/graphene'
 import { grapheneFor, l2ChunkCounts, supervoxelRoots } from '../../data/cave/rootIds'
-import type { FollowEntry, MergeRecord, MergedSoFar, RecordScope } from './mergeRecord'
-import { isFollow, mergeEntries, mergedSoFar } from './mergeRecord'
+import type {
+  FollowEntry,
+  MergeRecord,
+  MergedSoFar,
+  PieceFollow,
+  RecordScope,
+} from './mergeRecord'
+import { isFollow, isPieceFollow, mergeEntries, mergedSoFar } from './mergeRecord'
 import { piecesOf } from './pieces'
-import type { QueueTip, Verdicts } from './reviewQueue'
-import { acceptedPairs, acceptedPieces } from './reviewQueue'
+import type { AcceptedRow, QueueTip, Verdicts } from './reviewQueue'
+import { acceptedPairs, acceptedPieces, gapOf } from './reviewQueue'
 
 /** Where another part holds at least this share of the followed one's tips, it is offered too. */
 export const NEAR_EVEN = 0.8
@@ -105,12 +112,10 @@ export async function followEdit(
     }
   }
   try {
-    const graphene = await services.graphene(request.scope.datastack, options)
-    if (!graphene) {
-      return { ok: false, message: `${request.scope.datastack} has no chunkedgraph to ask.` }
-    }
     const supervoxels = [...anchors.tips, ...anchors.pieces.map((piece) => piece.supervoxel)]
-    const roots = await services.roots(graphene, supervoxels, options)
+    const read = await rootsNow(request.scope.datastack, supervoxels, options, services)
+    if ('message' in read) return { ok: false, message: read.message }
+    const { graphene, roots } = read
     const tipRoots = roots.slice(0, anchors.tips.length)
     const counts = tipsPerRoot(tipRoots)
     if (counts.length === 0) {
@@ -135,13 +140,10 @@ export async function followEdit(
         message: 'The neuron has not been edited: there is nothing to follow.',
       }
     }
-    const away = anchors.tips.filter((_, at) => tipRoots[at] !== to && tipRoots[at] !== '0')
+    const away = anchors.tips.filter((_, at) => elsewhere(tipRoots[at], to))
     // As for a tip, a piece on no object is not said to have gone anywhere.
     const left = anchors.pieces
-      .filter((_, at) => {
-        const root = roots[anchors.tips.length + at]
-        return root !== to && root !== '0'
-      })
+      .filter((_, at) => elsewhere(roots[anchors.tips.length + at], to))
       .map((piece) => piece.id)
     return {
       ok: true,
@@ -161,12 +163,39 @@ export async function followEdit(
       },
     }
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
-    return {
-      ok: false,
-      message: `Where the neuron’s tips went could not be read: ${error instanceof Error ? error.message : String(error)}`,
-    }
+    return unread(error, 'Where the neuron’s tips went')
   }
+}
+
+/** Each supervoxel's root at the server's now, with the chunkedgraph asked — or why not. */
+async function rootsNow(
+  datastack: string,
+  supervoxels: readonly string[],
+  options: CaveRequestOptions,
+  services: Pick<FollowServices, 'graphene' | 'roots'>,
+): Promise<{ graphene: GrapheneSource; roots: string[] } | { message: string }> {
+  const graphene = await services.graphene(datastack, options)
+  if (!graphene) return { message: `${datastack} has no chunkedgraph to ask.` }
+  const roots = await services.roots(graphene, supervoxels, options)
+  // One answer per supervoxel, or none is placed: a missing one would read as "on no object".
+  if (roots.length !== supervoxels.length) {
+    throw new Error(
+      `the chunkedgraph answered ${roots.length} of ${supervoxels.length} supervoxels`,
+    )
+  }
+  return { graphene, roots }
+}
+
+/**
+ * Whether a supervoxel's root now is another part than `to` — and some object: one on none (`0`)
+ * is not said to have gone anywhere, so its tip or piece is kept.
+ */
+const elsewhere = (root: string | undefined, to: string) => root !== to && root !== '0'
+
+/** A read that failed, said; a cancel goes through as one. */
+function unread(error: unknown, what: string): { ok: false; message: string } {
+  if (error instanceof DOMException && error.name === 'AbortError') throw error
+  return { ok: false, message: `${what} could not be read: ${errorMessage(error)}` }
 }
 
 /** How many tips each root holds, most first, then by id; `0` (no object) is not a part. */
@@ -190,6 +219,119 @@ async function largest(
 }
 
 /**
+ * What following one piece of the list reads (`docs/seam-split-review-plan.md`, phase 4): the
+ * contact supervoxel it is placed by, and its own tips' (where it was extended).
+ */
+export interface PieceAnchors {
+  readonly piece: string
+  /** Its root as the record has it now: its own, or the one it was followed to last. */
+  readonly from: string
+  /** `cand_sv` of its row nearest the neuron — among the rows it was accepted on, where it was. */
+  readonly contact: string
+  readonly tips: readonly string[]
+}
+
+/**
+ * The anchors a follow of `piece` reads, or undefined where none of its rows says which supervoxel
+ * its contact is on (a published set, a search before 2026-11-24): then it cannot be followed.
+ *
+ * Its contact is read off the rows **still listed** (`listed`, after `cutOffTips`): a row on a tip
+ * that went with a part split off the neuron is no contact with it. The rows it was accepted on
+ * come first, since its verdict is about those contacts; then its rows on the neuron's own tips,
+ * then any other; each nearest gap first. Its own tips are read from `own`, the list before any
+ * follow, so a follow places them all afresh.
+ */
+export function pieceAnchorsOf(
+  listed: readonly QueueTip[],
+  own: readonly QueueTip[],
+  piece: string,
+  from: string,
+  /** `acceptedPieces` over `listed`, read once for every piece followed together. */
+  acceptedHere: ReadonlyMap<string, readonly AcceptedRow[]>,
+): PieceAnchors | undefined {
+  const accepted = (acceptedHere.get(piece) ?? []).map((row) => row.candidate)
+  const rows = listed
+    .flatMap((tip) =>
+      tip.candidates
+        .filter((one) => one.candidateId === piece)
+        .map((one) => ({ one, onNeuron: tip.neuronId === tip.seed })),
+    )
+    .sort((a, b) => Number(b.onNeuron) - Number(a.onNeuron) || gapOf(a.one) - gapOf(b.one))
+    .map((row) => row.one)
+  const contact = [...accepted, ...rows].find((one) => one.candSv !== undefined)?.candSv
+  if (contact === undefined) return undefined
+  const tips = own.flatMap((tip) =>
+    tip.neuronId === piece && tip.tipSv !== undefined ? [tip.tipSv] : [],
+  )
+  return { piece, from, contact, tips }
+}
+
+export type PieceFollowAnswer =
+  | {
+      readonly ok: true
+      /** One per piece edited since; a piece found as it was is in neither list. */
+      readonly entries: readonly PieceFollow[]
+      readonly refused: readonly { readonly piece: string; readonly message: string }[]
+    }
+  | { readonly ok: false; readonly message: string }
+
+/**
+ * Follow pieces of the list through an edit (reads only): one lookup of every contact and tip
+ * supervoxel at the server's now. Each piece goes to the root its contact is under — the part that
+ * touches the neuron, so its verdict carries over (user, 2026-11-24) — and its own tips on any
+ * other root leave the list. A contact on no object refuses that piece. Throws only for a cancel.
+ */
+export async function followPieces(
+  request: {
+    readonly scope: RecordScope
+    readonly reviewedRoot: string
+    readonly pieces: readonly PieceAnchors[]
+  },
+  options: CaveRequestOptions,
+  services: Pick<FollowServices, 'graphene' | 'roots' | 'now'> = LIVE,
+): Promise<PieceFollowAnswer> {
+  const { scope, reviewedRoot, pieces } = request
+  try {
+    const supervoxels = pieces.flatMap((one) => [one.contact, ...one.tips])
+    const read = await rootsNow(scope.datastack, supervoxels, options, services)
+    if ('message' in read) return { ok: false, message: read.message }
+    const { roots } = read
+    const at = services.now().toISOString()
+    const entries: PieceFollow[] = []
+    const refused: { piece: string; message: string }[] = []
+    let next = 0
+    for (const one of pieces) {
+      const to = roots[next]!
+      const tipRoots = roots.slice(next + 1, next + 1 + one.tips.length)
+      next += 1 + one.tips.length
+      if (to === '0' || to === undefined) {
+        refused.push({
+          piece: one.piece,
+          message: `Where ${one.piece} meets the neuron is on no object now, so it cannot be followed.`,
+        })
+        continue
+      }
+      if (to === one.from) continue
+      entries.push({
+        kind: 'piece-followed',
+        deployment: scope.deployment,
+        datastack: scope.datastack,
+        reviewedRoot,
+        piece: one.piece,
+        from: one.from,
+        to,
+        at,
+        supervoxel: one.contact,
+        away: one.tips.filter((_, i) => elsewhere(tipRoots[i], to)),
+      })
+    }
+    return { ok: true, entries, refused }
+  } catch (error) {
+    return unread(error, 'Where the piece went')
+  }
+}
+
+/**
  * Another part the card may offer to follow instead: the one with the most tips after the
  * followed, where it holds at least `NEAR_EVEN` as many.
  */
@@ -210,7 +352,7 @@ export function anchorsOf(
   mine: readonly QueueTip[],
   record: MergeRecord,
   reviewedRoot: string,
-  so: Pick<MergedSoFar, 'pieces' | 'left'>,
+  so: Pick<MergedSoFar, 'pieces' | 'left' | 'pieceFollows'>,
 ): FollowAnchors {
   const inNeuron = inNeuronOf(so)
   const tips = new Set<string>()
@@ -230,6 +372,10 @@ export function anchorsOf(
       continue
     }
     pieces.set(entry.candidateRoot, entry.candidate.supervoxel)
+  }
+  // A piece merged in by hand, found so by its follow (`PieceFollow`): placed by its contact.
+  for (const [id, follow] of so.pieceFollows) {
+    if (inNeuron.has(id) && !pieces.has(id)) pieces.set(id, follow.supervoxel)
   }
   return {
     tips: [...tips],
@@ -256,12 +402,29 @@ export function cutOffTips(
 ): string {
   const cut = new Map<
     string,
-    { away: ReadonlySet<string>; inNeuron: ReadonlySet<string>; left: ReadonlySet<string> }
+    {
+      away: ReadonlySet<string>
+      inNeuron: ReadonlySet<string>
+      left: ReadonlySet<string>
+      /** Each followed piece's own tips found on another root (`PieceFollow.away`). */
+      pieceAway: ReadonlyMap<string, ReadonlySet<string>>
+    }
   >()
-  for (const seed of new Set(record.filter(isFollow).map((entry) => entry.reviewedRoot))) {
+  const seeds = record.filter((e) => isFollow(e) || isPieceFollow(e)).map((e) => e.reviewedRoot)
+  for (const seed of new Set(seeds)) {
     const so = mergedSoFar(record, seed, scope)
-    if (so.followed) {
-      cut.set(seed, { away: new Set(so.followed.away), inNeuron: so.pieces, left: so.left })
+    const pieceAway = new Map(
+      [...so.pieceFollows]
+        .filter(([, f]) => f.away.length > 0)
+        .map(([id, f]) => [id, new Set(f.away)]),
+    )
+    if (so.followed || pieceAway.size > 0) {
+      cut.set(seed, {
+        away: new Set(so.followed?.away),
+        inNeuron: so.pieces,
+        left: so.left,
+        pieceAway,
+      })
     }
   }
   const merged = (tip: QueueTip, of: { inNeuron: ReadonlySet<string> }) =>
@@ -271,7 +434,10 @@ export function cutOffTips(
     const of = cut.get(tip.seed)
     if (of === undefined) return false
     if (of.left.has(tip.neuronId)) return true
-    return tip.tipSv !== undefined && of.away.has(tip.tipSv) && merged(tip, of)
+    if (tip.tipSv === undefined) return false
+    // A followed piece's own tip on a part the piece was not followed to.
+    if (of.pieceAway.get(tip.neuronId)?.has(tip.tipSv)) return true
+    return of.away.has(tip.tipSv) && merged(tip, of)
   }
   if (!queue.some(away)) return ''
   const rest = queue.filter((tip) => !away(tip))

@@ -7,11 +7,25 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { GrapheneSource } from '../../data/cave/graphene'
 import type { FollowServices } from './followEdit'
-import { anchorsOf, cutOffTips, followEdit, nearEvenOf } from './followEdit'
+import {
+  anchorsOf,
+  cutOffTips,
+  followEdit,
+  followPieces,
+  nearEvenOf,
+  pieceAnchorsOf,
+} from './followEdit'
 import { withoutTips } from './handPicks'
-import type { FollowEntry, MergeRecord, MergeRecordEntry, RecordScope } from './mergeRecord'
+import type {
+  FollowEntry,
+  MergeRecord,
+  MergeRecordEntry,
+  PieceFollow,
+  RecordScope,
+} from './mergeRecord'
 import { verdictKey } from './pieces'
 import type { Candidate, QueueTip, Verdicts } from './reviewQueue'
+import { acceptedPieces } from './reviewQueue'
 
 const SCOPE: RecordScope = {
   deployment: 'https://global.example.org',
@@ -341,7 +355,11 @@ describe('what a follow places', () => {
     ]
     const merge = mergeOf(KEPT)
     expect(
-      anchorsOf(mine, [merge], NEURON, { pieces: new Set([PIECE]), left: new Set() }),
+      anchorsOf(mine, [merge], NEURON, {
+        pieces: new Set([PIECE]),
+        left: new Set(),
+        pieceFollows: new Map(),
+      }),
     ).toEqual({
       // BEYOND is accepted and not merged: its tips leave with the tip it hangs on.
       tips: ['a', 'p'],
@@ -364,11 +382,160 @@ describe('what a follow places', () => {
       outcome: 'merged' as const,
       newRoot: KEPT,
     }
-    const so = { pieces: new Set([PIECE, BEYOND]), left: new Set<string>() }
+    const so = {
+      pieces: new Set([PIECE, BEYOND]),
+      left: new Set<string>(),
+      pieceFollows: new Map(),
+    }
     expect(anchorsOf([], [mergeOf(KEPT), later, short], NEURON, so)).toEqual({
       tips: [],
       pieces: [{ id: PIECE, supervoxel: 'pa' }],
       unknown: 1,
+    })
+  })
+})
+
+/** A piece's follow: PIECE from its own root to `to`, its tips in `away` left behind. */
+const pieceFollow = (to: string, away: string[] = []): PieceFollow => ({
+  kind: 'piece-followed',
+  ...SCOPE,
+  reviewedRoot: NEURON,
+  piece: PIECE,
+  from: PIECE,
+  to,
+  at: '2026-11-25T12:00:00.000Z',
+  supervoxel: 'pc',
+  away,
+})
+const TRIMMED = '720575940700000009'
+
+/** A candidate with its contact's supervoxel and gap. */
+const withContact = (id: string, candSv: string | undefined, gapUm: number): Candidate => ({
+  ...candidate(id),
+  minDistUm: gapUm,
+  ...(candSv !== undefined ? { candSv } : {}),
+})
+
+describe('following a piece of the list (phase 4)', () => {
+  const rowOn = (endUid: number, one: Candidate): QueueTip => ({
+    ...tip(NEURON, endUid, undefined),
+    candidates: [one],
+  })
+
+  it('places it by a row it was accepted on, else one on the neuron’s tips, nearest gap first', () => {
+    const mine = [
+      rowOn(1, withContact(PIECE, 'onNeuron', 0.8)),
+      // On a piece's tip: nearer, and no contact with the neuron itself.
+      { ...rowOn(2, withContact(PIECE, 'judged', 0.1)), neuronId: BEYOND },
+      tip(PIECE, 5, 'p'),
+      tip(PIECE, 6, undefined),
+    ]
+    const anchors = (verdicts: Verdicts) =>
+      pieceAnchorsOf(mine, mine, PIECE, PIECE, acceptedPieces(mine, verdicts))
+    expect(anchors(NONE)).toEqual({
+      piece: PIECE,
+      from: PIECE,
+      contact: 'onNeuron',
+      tips: ['p'],
+    })
+    expect(anchors(accepted([BEYOND, PIECE]))?.contact).toBe('judged')
+  })
+
+  it('reads its contact off the rows still listed, and its own tips off the list before', () => {
+    const near = rowOn(1, withContact(PIECE, 'cutOff', 0.1))
+    const kept = rowOn(2, withContact(PIECE, 'kept', 0.5))
+    const own = [near, kept, tip(PIECE, 5, 'p')]
+    expect(pieceAnchorsOf([kept], own, PIECE, PIECE, new Map())).toEqual({
+      piece: PIECE,
+      from: PIECE,
+      contact: 'kept',
+      tips: ['p'],
+    })
+  })
+
+  it('cannot be placed where no row says its contact’s supervoxel', () => {
+    expect(
+      pieceAnchorsOf(
+        [rowOn(1, withContact(PIECE, undefined, 0.1))],
+        [],
+        PIECE,
+        PIECE,
+        acceptedPieces([rowOn(1, withContact(PIECE, undefined, 0.1))], NONE),
+      ),
+    ).toBeUndefined()
+  })
+
+  it('goes where its contact is, its tips elsewhere leaving; unchanged and lost pieces apart', async () => {
+    const live = services({ pc: TRIMMED, p: TRIMMED, q: '720575940700000010', other: BEYOND })
+    const answer = await followPieces(
+      {
+        scope: SCOPE,
+        reviewedRoot: NEURON,
+        pieces: [
+          { piece: PIECE, from: PIECE, contact: 'pc', tips: ['p', 'q', 'nowhere'] },
+          { piece: BEYOND, from: BEYOND, contact: 'other', tips: [] },
+          {
+            piece: '720575940630442212',
+            from: '720575940630442212',
+            contact: 'gone',
+            tips: [],
+          },
+        ],
+      },
+      OPTIONS,
+      live,
+    )
+    // One lookup for everything.
+    expect(live.asked).toHaveLength(1)
+    // A short answer is a read that failed, never "on no object".
+    const short = await followPieces(
+      {
+        scope: SCOPE,
+        reviewedRoot: NEURON,
+        pieces: [{ piece: PIECE, from: PIECE, contact: 'pc', tips: [] }],
+      },
+      OPTIONS,
+      { ...live, roots: async () => [] },
+    )
+    expect(!short.ok && short.message).toMatch(
+      /could not be read: the chunkedgraph answered 0 of 1/,
+    )
+    expect(answer).toEqual({
+      ok: true,
+      entries: [{ ...pieceFollow(TRIMMED, ['q']), at: '2026-11-24T12:00:00.000Z' }],
+      refused: [
+        {
+          piece: '720575940630442212',
+          message: expect.stringMatching(/on no object now/) as unknown as string,
+        },
+      ],
+    })
+  })
+
+  it('drops the piece’s own tips on another part, and what was accepted on them', () => {
+    const queue = [
+      tip(NEURON, 1, 'a', [PIECE]),
+      tip(PIECE, 5, 'p', [BEYOND]),
+      tip(PIECE, 6, 'q'),
+      tip(BEYOND, 7, 'b'),
+    ]
+    const verdicts = accepted([NEURON, PIECE], [PIECE, BEYOND])
+    const left = withoutCutOff(queue, [pieceFollow(TRIMMED, ['p'])], SCOPE, verdicts)
+    expect(left.map((one) => one.endUid)).toEqual([1, 6])
+  })
+
+  it('places a piece merged in by hand by its contact when the neuron is followed', () => {
+    const merged = '720575940700000011'
+    const record = [pieceFollow(merged)]
+    const so = {
+      pieces: new Set([PIECE]),
+      left: new Set<string>(),
+      pieceFollows: new Map([[PIECE, record[0]!]]),
+    }
+    expect(anchorsOf([tip(PIECE, 5, 'p')], record, NEURON, so)).toEqual({
+      tips: ['p'],
+      pieces: [{ id: PIECE, supervoxel: 'pc' }],
+      unknown: 0,
     })
   })
 })

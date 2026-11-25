@@ -11416,11 +11416,7 @@ details[open] > summary.tile__label {
  * as a fill, not as text.
  */
 .review-row__merged {
-  margin-left: 6px;
-  padding: 0 5px;
   border: 1px solid var(--text-primary);
-  border-radius: 3px;
-  font-size: 10px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -11441,11 +11437,7 @@ details[open] > summary.tile__label {
  * dashed one is Auto-extend's.
  */
 .review-row__hand {
-  margin-left: 6px;
-  padding: 0 5px;
   border: 1px solid var(--text-secondary);
-  border-radius: 3px;
-  font-size: 10px;
   color: var(--text-secondary);
 }
 /*
@@ -11453,13 +11445,32 @@ details[open] > summary.tile__label {
  * measured per mode for text — since Submit would refuse it.
  */
 .review-row__outdated {
-  margin-left: 6px;
-  padding: 0 5px;
   border: 1px solid var(--status-refused);
-  border-radius: 3px;
-  font-size: 10px;
+  background: none;
+  font: inherit;
   font-weight: 600;
   color: var(--status-refused);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.review-row__outdated:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+/* Followed through an edit: what it is drawn and merged as now, said in its title. */
+.review-row__followed {
+  border: 1px solid var(--text-secondary);
+  color: var(--text-secondary);
+}
+/* The row's tags share one box; each says its own colour. */
+.review-row__merged,
+.review-row__hand,
+.review-row__outdated,
+.review-row__followed {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
 }
 /*
  * Where an Auto-extend stopped on a piece too large to take (`autoStoppedLarge`): a mark in

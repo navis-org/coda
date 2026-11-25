@@ -196,6 +196,22 @@ describe('building the queue', () => {
     expect(queue[0]!.candidates[0]!.contactNm).toBeUndefined()
   })
 
+  /** What a follow places a candidate by (`followPieces`): its side of the contact, as text. */
+  it('reads a candidate’s contact supervoxel, and nothing where the cell holds no id', () => {
+    const table = candidatesTable([
+      { end: 7, id: 'a', rank: 1 },
+      { end: 7, id: 'b', rank: 2 },
+    ])
+    const withSv = makeTable(
+      tableSchema(...table.schema.columns, column('cand_sv', 'str')),
+      { ...table.data, cand_sv: ['73747834149376537', null] },
+      table.kind,
+      table.length,
+    )
+    const [tip] = buildQueue(tipsTable([{ end: 7 }]), withSv)
+    expect(tip!.candidates.map((one) => one.candSv)).toEqual(['73747834149376537', undefined])
+  })
+
   /** Two runs stacked into one table, each numbering its tips from 0: a list is its own neuron's. */
   it('joins a tip to its list on the neuron as well as the tip number', () => {
     const queue = buildQueue(
@@ -867,6 +883,9 @@ describe('the scene after merges', () => {
     absorbedInto: undefined,
     followed: undefined,
     left: new Set<string>(),
+    moved: new Map<string, string>(),
+    pieceFollows: new Map(),
+    foundIn: new Set<string>(),
   }
 
   it('shows the neuron at its new root, and only the pieces still to merge', () => {
@@ -881,6 +900,14 @@ describe('the scene after merges', () => {
     expect(scenePieces(queue, 'n1', undefined, verdicts, true, joined)).toEqual([
       { id: 'n1b', part: 'neuron' },
       { id: 'g1', part: 'accepted' },
+    ])
+  })
+
+  it('draws a piece followed through an edit as the root it was followed to', () => {
+    const moved = { ...merged, moved: new Map([['q', 'q1']]) }
+    expect(scenePieces(queue, 'n1', undefined, verdicts, true, moved)).toEqual([
+      { id: 'n1b', part: 'neuron' },
+      { id: 'q1', part: 'accepted' },
     ])
   })
 
@@ -2609,6 +2636,9 @@ describe('mergedAs', () => {
     absorbedInto: undefined,
     followed: undefined,
     left: new Set(['s']),
+    moved: new Map<string, string>(),
+    pieceFollows: new Map(),
+    foundIn: new Set<string>(),
   }
   it('names a piece a follow split off, before anything else, and is undefined for the rest', () => {
     expect(['p', 'j', 'e', 's', 'x'].map((id) => mergedAs(so, id))).toEqual([

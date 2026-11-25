@@ -267,6 +267,7 @@ function handCandidate(pick: HandPick, rank: number): Candidate {
     conf: undefined,
     shown: false,
     hand: true,
+    ...(pick.candSv !== undefined ? { candSv: pick.candSv } : {}),
   }
 }
 

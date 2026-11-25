@@ -201,20 +201,52 @@ export interface FollowEntry {
   readonly left: readonly string[]
 }
 
-/** An entry as the record is read: a merge in full, or short, or a follow. */
-export type RecordEntry = MergeRecordEntry | ShortEntry | FollowEntry
+/**
+ * **A candidate followed through an edit** (`docs/seam-split-review-plan.md`, phase 4): a piece
+ * of the neuron's list, as suggested, now under `to` — the root its contact supervoxel is under.
+ * Trimmed, merged with something else, or merged into the neuron by hand: the record does not
+ * say which, and `mergedSoFar` tells the last from where the groups end. The verdict and every
+ * key stay on `piece`.
+ */
+export interface PieceFollow {
+  readonly kind: 'piece-followed'
+  readonly deployment?: string | undefined
+  readonly datastack?: string | undefined
+  readonly reviewedRoot: string
+  /** The piece as the queue names it. */
+  readonly piece: string
+  /** Its root before: its own, or the one it was followed to last. */
+  readonly from: string
+  readonly to: string
+  readonly at: string
+  /** The contact supervoxel it was placed by (`cand_sv`): what places it again later. */
+  readonly supervoxel: string
+  /** Its own tips' supervoxels (`tip_sv`) under another root at `at`: they leave the list. */
+  readonly away: readonly string[]
+}
 
-/** Whether an entry is a follow rather than a merge. */
+/** An entry as the record is read: a merge in full, or short, or a follow of the neuron or a piece. */
+export type RecordEntry = MergeRecordEntry | ShortEntry | FollowEntry | PieceFollow
+
+/** Whether an entry is a follow of the neuron rather than a merge. */
 export const isFollow = (entry: RecordEntry): entry is FollowEntry =>
   'kind' in entry && entry.kind === 'followed'
+
+/** Whether an entry is a follow of a piece. */
+export const isPieceFollow = (entry: RecordEntry): entry is PieceFollow =>
+  'kind' in entry && entry.kind === 'piece-followed'
+
+/** Whether an entry is a follow of either kind: no merge. */
+const isAnyFollow = (entry: RecordEntry): entry is FollowEntry | PieceFollow => 'kind' in entry
 
 export type MergeRecord = readonly RecordEntry[]
 
 /** Whether the entry's piece is part of its neuron now, by this workflow's account. */
 const inNeuron = (
   entry: RecordEntry,
-): entry is Exclude<RecordEntry, FollowEntry> & { outcome: 'merged' | 'already-merged' } =>
-  !isFollow(entry) && (entry.outcome === 'merged' || entry.outcome === 'already-merged')
+): entry is Exclude<RecordEntry, FollowEntry | PieceFollow> & {
+  outcome: 'merged' | 'already-merged'
+} => !isAnyFollow(entry) && (entry.outcome === 'merged' || entry.outcome === 'already-merged')
 
 export interface MergedSoFar {
   /** The neuron's root now: the last merge's new root, or the reviewed one. */
@@ -252,6 +284,16 @@ export interface MergedSoFar {
    * follow places every merged piece again (`followEdit.ts`), so an undone split gives them back.
    */
   readonly left: ReadonlySet<string>
+  /**
+   * Pieces of the list followed through an edit (`PieceFollow`) and not in the neuron, each with
+   * the root it is under now: what it is drawn, asked about and merged as (`rootNow`). A piece
+   * whose follow ended at the neuron's root is in `pieces` instead.
+   */
+  readonly moved: ReadonlyMap<string, string>
+  /** Each followed piece's last follow, in the neuron or not: its tips' `away`, its contact. */
+  readonly pieceFollows: ReadonlyMap<string, PieceFollow>
+  /** Of `pieces`, those a follow found in the neuron: merged outside this card, not by Submit. */
+  readonly foundIn: ReadonlySet<string>
 }
 
 /**
@@ -274,15 +316,21 @@ export function mergedSoFar(
   /** Every root a merge made, which is never a piece. */
   const made = new Set<string>()
   /** The pieces this neuron's merges joined to something, wherever they are now. */
-  const mineIn: string[] = []
+  const mineIn = new Set<string>()
   let unknowns: MergeRecordEntry[] = []
   // Whether another reviewed neuron took this one in.
   let taken = false
   let followed: FollowEntry | undefined
   /** Merged pieces a follow found on another part, unless a later merge put them back. */
   const left = new Set<string>()
+  const pieceFollows = new Map<string, PieceFollow>()
   for (const entry of record) {
     if (!inScope(entry, scope)) continue
+    // Read for its own neuron alone, never joined into the groups every neuron shares (below).
+    if (isPieceFollow(entry)) {
+      if (entry.reviewedRoot === reviewedRoot) pieceFollows.set(entry.piece, entry)
+      continue
+    }
     if (isFollow(entry)) {
       groups.replay(entry)
       if (entry.reviewedRoot !== reviewedRoot) {
@@ -328,7 +376,7 @@ export function mergedSoFar(
     }
     if (!inNeuron(entry)) continue
     if (mine) {
-      mineIn.push(entry.candidateRoot)
+      mineIn.add(entry.candidateRoot)
       left.delete(entry.candidateRoot)
     } else elsewhere.add(entry.candidateRoot)
     if (entry.outcome !== 'merged' || !ontoNeuron) continue
@@ -352,6 +400,23 @@ export function mergedSoFar(
     }
   }
   /*
+   * A followed piece: in the neuron where the root it was followed to is the neuron's now, by the
+   * record's account (merged by hand, or by somebody else — whichever follow was written first),
+   * else under that root as the record has it. Submit's own account wins. **The piece is moved for
+   * this neuron alone**: it is never joined into `groups`, which every reviewed neuron shares, so a
+   * piece that is itself another reviewed neuron is not moved for that one.
+   */
+  const moved = new Map<string, string>()
+  const foundIn = new Set<string>()
+  for (const [id, follow] of pieceFollows) {
+    if (pieces.has(id) || joined.has(id) || left.has(id) || mineIn.has(id)) continue
+    const root = groups.find(follow.to)
+    if (root === currentRoot) {
+      pieces.add(id)
+      foundIn.add(id)
+    } else if (root !== id) moved.set(id, root)
+  }
+  /*
    * A lost reply is open while both roots it was checked against still stand: a merge recorded
    * after it onto either has moved that root on, and was checked against the root it moved.
    */
@@ -372,6 +437,9 @@ export function mergedSoFar(
     absorbedInto: taken ? currentRoot : undefined,
     followed,
     left,
+    moved,
+    pieceFollows,
+    foundIn,
   }
 }
 
@@ -449,9 +517,15 @@ interface Group {
   readonly members: string[]
 }
 
-/** The root a piece is read as: its own, or that of the pieces it was joined to (`joined`). */
-export function rootNow(joined: ReadonlyMap<string, string> | undefined, id: string): string {
-  return joined?.get(id) ?? id
+/**
+ * The root a piece is read as: that of the pieces Submit joined it to (`joined`), or the one it
+ * was followed to (`moved`), or its own.
+ */
+export function rootNow(
+  so: Partial<Pick<MergedSoFar, 'joined' | 'moved'>> | undefined,
+  id: string,
+): string {
+  return so?.joined?.get(id) ?? so?.moved?.get(id) ?? id
 }
 
 /**
@@ -509,7 +583,7 @@ export function settledEntry(
  * Coda, a hand edit — since the record is the log of every Submit; only reading filters them
  * (`decodeRecord`). Text that is no list at all was never a readable record and starts afresh.
  */
-export function appendEntry(raw: unknown, entry: MergeRecordEntry | FollowEntry): string {
+export function appendEntry(raw: unknown, entry: Exclude<RecordEntry, ShortEntry>): string {
   const held = parsedList(raw) ?? []
   return JSON.stringify([...held, entry])
 }
@@ -543,30 +617,58 @@ export function appendRecorded(raw: unknown, entry: MergeRecordEntry): string {
 export function decodeRecord(raw: unknown): RecordEntry[] {
   const out: RecordEntry[] = []
   for (const value of parsedList(raw) ?? []) {
-    const entry = isEntry(value) ? value : (followOf(value) ?? shortOf(value))
+    const entry = isEntry(value) ? value : (anyFollowOf(value) ?? shortOf(value))
     if (entry) out.push(entry)
   }
   return out
 }
 
-/** A follow as the param holds it — the entry itself, checked — or undefined. */
-function followOf(value: unknown): FollowEntry | undefined {
+/** A follow of either kind as the param holds it, or undefined. */
+const anyFollowOf = (value: unknown): FollowEntry | PieceFollow | undefined =>
+  followOf(value) ?? pieceFollowOf(value)
+
+/** A piece's follow as the param holds it — the entry itself, checked — or undefined. */
+function pieceFollowOf(value: unknown): PieceFollow | undefined {
+  const entry = followBase(value, 'piece-followed')
+  return entry && isId(entry['piece']) && isId(entry['supervoxel'])
+    ? (value as PieceFollow)
+    : undefined
+}
+
+/**
+ * What both kinds of follow hold, checked — the object, its kind, the scope, the neuron, the two
+ * roots, the time and `away` — or undefined.
+ */
+function followBase(
+  value: unknown,
+  kind: (FollowEntry | PieceFollow)['kind'],
+): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const entry = value as Record<string, unknown>
-  if (entry['kind'] !== 'followed') return undefined
+  const scope = (v: unknown) => v === undefined || typeof v === 'string'
+  const away = entry['away']
+  const ok =
+    entry['kind'] === kind &&
+    isId(entry['reviewedRoot']) &&
+    isId(entry['from']) &&
+    isId(entry['to']) &&
+    typeof entry['at'] === 'string' &&
+    scope(entry['deployment']) &&
+    scope(entry['datastack']) &&
+    Array.isArray(away) &&
+    away.every(isId)
+  return ok ? entry : undefined
+}
+
+/** A follow as the param holds it — the entry itself, checked — or undefined. */
+function followOf(value: unknown): FollowEntry | undefined {
+  const entry = followBase(value, 'followed')
+  if (!entry) return undefined
   const id = isId
   const ids = (v: unknown) => Array.isArray(v) && v.every(isId)
   const count = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0
-  const scope = (v: unknown) => v === undefined || typeof v === 'string'
   const others = entry['others']
   if (
-    !id(entry['reviewedRoot']) ||
-    !id(entry['from']) ||
-    !id(entry['to']) ||
-    typeof entry['at'] !== 'string' ||
-    !scope(entry['deployment']) ||
-    !scope(entry['datastack']) ||
-    !ids(entry['away']) ||
     !ids(entry['left']) ||
     !ids(entry['placed']) ||
     !count(entry['kept']) ||
@@ -601,7 +703,7 @@ export function shortenedRecord(raw: unknown, kept: ReadonlySet<string>): string
   const entries = held.map((value) => (isEntry(value) ? value : undefined))
   // Replayed with the follows in place: a merge after one was made onto the root it followed.
   const full: RecordEntry[] = held.flatMap((value) => {
-    const entry = isEntry(value) ? value : followOf(value)
+    const entry = isEntry(value) ? value : anyFollowOf(value)
     return entry ? [entry] : []
   })
   /*
@@ -623,7 +725,10 @@ export function shortenedRecord(raw: unknown, kept: ReadonlySet<string>): string
    * A followed neuron is kept whole too: a later follow places its merged pieces again by the
    * supervoxels their full entries hold (`followEdit.ts`'s `anchorsOf`), which a short one drops.
    */
-  for (const entry of full) if (isFollow(entry)) open.add(entry.reviewedRoot)
+  // And one with a piece followed: a merge made at its new root keeps that root only in full.
+  for (const entry of full) {
+    if (isFollow(entry) || isPieceFollow(entry)) open.add(entry.reviewedRoot)
+  }
   for (const entry of entries) {
     if (entry === undefined) continue
     if (entry.outcome !== 'unknown' && entry.outcome !== 'merged') continue
@@ -776,9 +881,9 @@ export function mergesSchema(): TableSchema {
   )
 }
 
-/** The record's merges, in order: every entry but the follows. */
+/** The record's merges, in order: every entry but the follows, of the neuron or a piece. */
 export function mergeEntries(record: MergeRecord): (MergeRecordEntry | ShortEntry)[] {
-  return record.filter((entry): entry is MergeRecordEntry | ShortEntry => !isFollow(entry))
+  return record.filter((entry): entry is MergeRecordEntry | ShortEntry => !isAnyFollow(entry))
 }
 
 /** The record's merges as a table, in the order they were written. A follow is no merge. */

@@ -300,8 +300,11 @@ async function plan(
       ? recorded
       : mergedSoFar([...request.record, ...settled], reviewedRoot, scope)
   const { currentRoot, pieces: inNeuron } = own
-  /** A piece's root now: its own, or that of the pieces this workflow merged onto it. */
-  const rootNow = (id: string) => rootNowIn(own.joined, id)
+  /**
+   * A piece's root now: its own, that of the pieces this workflow merged onto it, or the one it was
+   * followed to through an edit (`MergedSoFar.moved`).
+   */
+  const rootNow = (id: string) => rootNowIn(own, id)
   /*
    * The tree grows from the neuron **as it stands**: the reviewed root and every piece this
    * workflow has merged into it already. A piece accepted on one of those is one step out,
@@ -341,13 +344,15 @@ async function plan(
       reject(
         candidateRoot,
         'split-off',
-        'Merged by this workflow, then split off the neuron with the other part when it was followed.',
+        'Merged into the neuron, then split off with the other part when the neuron was followed.',
       )
     } else if (inNeuron.has(candidateRoot)) {
       reject(
         candidateRoot,
         'already-merged',
-        'Merged into the neuron already, by this workflow.',
+        own.foundIn.has(candidateRoot)
+          ? 'Part of the neuron already: merged outside this card, and found when its edit was followed.'
+          : 'Merged into the neuron already, by this workflow.',
       )
     } else if (ownRoots.has(candidateRoot)) {
       reject(candidateRoot, 'already-merged', 'This is the neuron itself.')
@@ -432,9 +437,11 @@ async function plan(
     reject(
       candidateRoot,
       'outdated',
-      rootNow(candidateRoot) === candidateRoot
-        ? 'This piece has been edited since it was suggested.'
-        : `This piece and the pieces this workflow merged onto it (${rootNow(candidateRoot)}) have been edited since.`,
+      own.joined.has(candidateRoot)
+        ? `This piece and the pieces this workflow merged onto it (${rootNow(candidateRoot)}) have been edited since.`
+        : own.moved.has(candidateRoot)
+          ? `This piece has been edited again since it was followed to ${rootNow(candidateRoot)}.`
+          : 'This piece has been edited since it was suggested.',
     )
     return false
   })
@@ -600,7 +607,8 @@ async function plan(
       used: row,
       neuron: anchors.neuron,
       candidate: anchors.candidate,
-      joinsNeuron: otherNeurons.has(candidateRoot),
+      // As suggested, or what it was followed to: another neuron under review either way.
+      joinsNeuron: otherNeurons.has(candidateRoot) || otherNeurons.has(pieceRoot),
       // Every pair it was accepted on Auto-extend's alone — and there is at least one.
       auto:
         rows.length > 0 &&

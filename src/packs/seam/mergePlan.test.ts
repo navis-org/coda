@@ -18,7 +18,13 @@ import {
   tickedWith,
   withoutOrphans,
 } from './mergePlan'
-import type { FollowEntry, MergeRecord, MergeRecordEntry, RecordOutcome } from './mergeRecord'
+import type {
+  FollowEntry,
+  MergeRecord,
+  MergeRecordEntry,
+  PieceFollow,
+  RecordOutcome,
+} from './mergeRecord'
 import type { Candidate, QueueTip, Verdict } from './reviewQueue'
 import { verdictKey } from './pieces'
 
@@ -290,6 +296,58 @@ describe('planMerges', () => {
     expect(asked.latest).toEqual([['201', '8', '9']])
     expect(plan.merges.map((m) => m.candidateRoot)).toEqual(['8', '9'])
     expect(refusals(plan)).toEqual([['7', 'split-off']])
+  })
+
+  /**
+   * A candidate followed through an edit (`PieceFollow`, phase 4): its verdict stands, and it is
+   * checked, anchored and merged at the root it was followed to — or not at all, where it went
+   * into the neuron by hand.
+   */
+  it('checks and anchors a followed piece at its new root, and skips one merged in by hand', async () => {
+    const { fake, asked } = services()
+    const pieceFollow = (piece: string, to: string): PieceFollow => ({
+      kind: 'piece-followed',
+      deployment: OPTIONS.deployment,
+      datastack: 'test',
+      reviewedRoot: NEURON,
+      piece,
+      from: piece,
+      to,
+      at: '2026-11-25T12:00:00.000Z',
+      supervoxel: '13',
+      away: [],
+    })
+    const plan = await planned(
+      request(queue, all, [pieceFollow('8', '801'), pieceFollow('9', NEURON)]),
+      fake,
+    )
+    expect(asked.latest).toEqual([[NEURON, '7', '801']])
+    expect(plan.merges.map((m) => [m.candidateRoot, m.pieceRoot])).toEqual([
+      ['7', undefined],
+      ['8', '801'],
+    ])
+    expect(asked.anchored.map((pair) => pair.candidateRoot)).toEqual(['7', '801'])
+    expect(refusals(plan)).toEqual([['9', 'already-merged']])
+    expect(plan.rejected[0]!.message).toMatch(/merged outside this card/)
+  })
+
+  it('flags a followed piece now part of another neuron under review', async () => {
+    const OTHER = '200'
+    const otherQueue = [...queue, tip(3, [], OTHER)]
+    const follow: PieceFollow = {
+      kind: 'piece-followed',
+      deployment: OPTIONS.deployment,
+      datastack: 'test',
+      reviewedRoot: NEURON,
+      piece: '8',
+      from: '8',
+      to: OTHER,
+      at: '2026-11-25T12:00:00.000Z',
+      supervoxel: '13',
+      away: [],
+    }
+    const plan = await planned(request(otherQueue, all, [follow]), services().fake)
+    expect(plan.merges.find((m) => m.candidateRoot === '8')?.joinsNeuron).toBe(true)
   })
 
   /** A part followed away from while it stands is a separate object: it can be merged back. */

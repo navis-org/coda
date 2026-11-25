@@ -9,7 +9,13 @@ import { describe, expect, it } from 'vitest'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import { caveScopeOf } from '../../nodes/lib/caveParams'
-import type { FollowEntry, MergeRecord, MergeRecordEntry, RecordScope } from './mergeRecord'
+import type {
+  FollowEntry,
+  MergeRecord,
+  MergeRecordEntry,
+  PieceFollow,
+  RecordScope,
+} from './mergeRecord'
 import {
   decodeRecord,
   mergeEntries,
@@ -19,6 +25,7 @@ import {
   mergedSoFar as readFor,
   mergesSchema,
   mergesTable,
+  rootNow,
   settledEntry,
   shortenedRecord,
 } from './mergeRecord'
@@ -199,6 +206,9 @@ describe('mergedSoFar', () => {
       absorbedInto: undefined,
       followed: undefined,
       left: new Set(),
+      moved: new Map(),
+      pieceFollows: new Map(),
+      foundIn: new Set(),
     })
   })
 
@@ -216,6 +226,9 @@ describe('mergedSoFar', () => {
       absorbedInto: undefined,
       followed: undefined,
       left: new Set(),
+      moved: new Map(),
+      pieceFollows: new Map(),
+      foundIn: new Set(),
     })
   })
 })
@@ -672,5 +685,115 @@ describe('a neuron followed through an edit', () => {
   it('keeps its neuron’s merges whole, for the supervoxels a later follow places', () => {
     const text = JSON.stringify([...before, followed()])
     expect(shortenedRecord(text, new Set())).toBeUndefined()
+  })
+})
+
+describe('a piece followed through an edit (phase 4)', () => {
+  const PIECE = '720575940000000050'
+  const TRIMMED = '720575940800000050'
+  const NEURON_NOW = '720575940700000002'
+  const pieceFollow = (to: string, extra: Partial<PieceFollow> = {}): PieceFollow => ({
+    kind: 'piece-followed',
+    ...SCOPE,
+    reviewedRoot: NEURON,
+    piece: PIECE,
+    from: PIECE,
+    to,
+    at: '2026-11-25T12:00:00.000Z',
+    supervoxel: '73747834149376700',
+    away: [],
+    ...extra,
+  })
+  const before = RECORD.slice(0, -1)
+
+  it('is read back from the param, and is no row of Merges', () => {
+    const text = appendEntry(JSON.stringify(before), pieceFollow(TRIMMED))
+    const record = decodeRecord(text)
+    expect(record.at(-1)).toEqual(pieceFollow(TRIMMED))
+    expect(mergeEntries(record)).toHaveLength(before.length)
+    expect(mergesTable(record).length).toBe(before.length)
+    // One that is not one is skipped.
+    expect(
+      decodeRecord(JSON.stringify([{ ...pieceFollow(TRIMMED), supervoxel: 'x' }])),
+    ).toEqual([])
+  })
+
+  it('moves the piece to the root followed, keeping the neuron as it was', () => {
+    const read = mergedSoFar([...before, pieceFollow(TRIMMED)], NEURON)
+    expect(read.currentRoot).toBe(NEURON_NOW)
+    expect(read.moved.get(PIECE)).toBe(TRIMMED)
+    expect(read.pieces.has(PIECE)).toBe(false)
+    expect(rootNow(read, PIECE)).toBe(TRIMMED)
+    // Followed twice: the last root.
+    const again = pieceFollow('720575940800000051', { from: TRIMMED })
+    expect(rootNow(mergedSoFar([...before, pieceFollow(TRIMMED), again], NEURON), PIECE)).toBe(
+      '720575940800000051',
+    )
+    // Another neuron's follow of the same piece is that neuron's.
+    expect(
+      mergedSoFar([{ ...pieceFollow(TRIMMED), reviewedRoot: '720575940699999999' }], NEURON)
+        .moved.size,
+    ).toBe(0)
+  })
+
+  it('puts a piece merged in by hand in the neuron, whichever follow is written first', () => {
+    const MERGED = '720575940800000060'
+    const neuronFollow: FollowEntry = {
+      kind: 'followed',
+      ...SCOPE,
+      reviewedRoot: NEURON,
+      from: NEURON_NOW,
+      to: MERGED,
+      at: '2026-11-25T12:00:00.000Z',
+      away: [],
+      placed: [],
+      kept: 0,
+      others: [],
+      left: [],
+    }
+    for (const order of [
+      [neuronFollow, pieceFollow(MERGED)],
+      [pieceFollow(MERGED), neuronFollow],
+    ]) {
+      const read = mergedSoFar([...before, ...order], NEURON)
+      expect(read.currentRoot).toBe(MERGED)
+      expect(read.pieces.has(PIECE)).toBe(true)
+      expect(read.moved.size).toBe(0)
+      expect(read.pieceFollows.get(PIECE)?.to).toBe(MERGED)
+      // Found there, not put there by Submit: the plan says which.
+      expect(read.foundIn.has(PIECE)).toBe(true)
+    }
+    // Lost again when a later split of the neuron leaves it on the other part.
+    const split = { ...neuronFollow, from: MERGED, to: '720575940800000061', left: [PIECE] }
+    const read = mergedSoFar([...before, neuronFollow, pieceFollow(MERGED), split], NEURON)
+    expect(read.pieces.has(PIECE)).toBe(false)
+    expect(read.left.has(PIECE)).toBe(true)
+  })
+
+  /** A piece that is another reviewed neuron is moved for the neuron that followed it, alone. */
+  it('moves nothing for another neuron, even the piece itself under review', () => {
+    const OTHER = '720575940699999999'
+    const record = [...before, pieceFollow(TRIMMED, { piece: OTHER, from: OTHER })]
+    expect(mergedSoFar(record, NEURON).moved.get(OTHER)).toBe(TRIMMED)
+    expect(mergedSoFar(record, OTHER).currentRoot).toBe(OTHER)
+  })
+
+  it('keeps whole a neuron with a followed piece, so a merge at its new root keeps that root', () => {
+    const atMoved: MergeRecordEntry = {
+      ...base,
+      candidateRoot: PIECE,
+      candidateRootAt: TRIMMED,
+      neuronRoot: NEURON_NOW,
+      outcome: 'merged',
+      newRoot: '720575940800000070',
+    }
+    const text = JSON.stringify([...before, pieceFollow(TRIMMED), atMoved])
+    expect(shortenedRecord(text, new Set())).toBeUndefined()
+  })
+
+  it('is kept when the record is shortened', () => {
+    const text = JSON.stringify([...before, pieceFollow(TRIMMED)])
+    const shortened = shortenedRecord(text, new Set()) ?? text
+    expect(mergedSoFar(decodeRecord(shortened), NEURON).moved.get(PIECE)).toBe(TRIMMED)
   })
 })

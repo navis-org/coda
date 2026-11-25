@@ -31,6 +31,8 @@ export interface PickRequest {
    * now (`MergedSoFar.joined`): what the segmentation has them under.
    */
   readonly joined?: ReadonlyMap<string, string> | undefined
+  /** Of those, the ones followed through an edit, each with the root it is under now (`MergedSoFar.moved`). */
+  readonly moved?: ReadonlyMap<string, string> | undefined
 }
 
 export type PickCheck =
@@ -84,7 +86,7 @@ export async function checkPick(
   services: PickServices = LIVE,
 ): Promise<PickCheck> {
   const { segment, seed, neuronRoot, pieces } = request
-  const rootOf = (id: string) => rootNow(request.joined, id)
+  const rootOf = (id: string) => rootNow(request, id)
   if (segment === seed || segment === neuronRoot) {
     return { ok: false, message: 'That is the neuron itself.' }
   }
@@ -113,18 +115,27 @@ export async function checkPick(
     )
     if (!anchors.ok) return { ok: false, message: refusalOf(anchors, segment) }
     const on = anchors.onRoot
-    const root = on === neuronRoot || on === undefined ? seed : pieces.find((p) => p === on)
+    /*
+     * The piece under `on`: its own root, or the one it was followed to. Where several are under
+     * it — pieces Submit joined short of the neuron, or pieces merged with each other since — which
+     * of them the pick continues cannot be told, and it would be placed on whichever came first.
+     */
+    const under = pieces.filter((piece) => rootOf(piece) === on)
+    const root =
+      on === neuronRoot || on === undefined
+        ? seed
+        : under.length === 1 && !request.joined?.has(under[0]!)
+          ? under[0]
+          : undefined
     if (root === undefined) {
-      /*
-       * Pieces Submit joined short of the neuron are one segment now: which of them the pick
-       * continues cannot be told, and it would be placed on whichever came first.
-       */
-      const joined = pieces.some((piece) => piece !== on && rootOf(piece) === on)
+      const joined = under.some((piece) => request.joined?.has(piece))
       return {
         ok: false,
         message: joined
           ? `The nearest part of the neuron there is on ${on}, pieces Submit joined short of the neuron. Submit them, then pick again.`
-          : `The nearest part of the neuron there is on ${on}, which is neither the neuron nor a piece accepted on it.`,
+          : under.length > 1
+            ? `The nearest part of the neuron there is on ${on}, which ${under.join(' and ')} are all part of now, so which the pick continues cannot be told.`
+            : `The nearest part of the neuron there is on ${on}, which is neither the neuron nor a piece accepted on it.`,
       }
     }
     const a = anchors.neuron.positionNm
