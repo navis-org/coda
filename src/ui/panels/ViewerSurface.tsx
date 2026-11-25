@@ -60,6 +60,7 @@ const CHANGES_DATA = 'These change the data, not just the drawing — downstream
 import { NodeMap } from '../tour/NodeMap'
 import { ValuePreview, tabFigure } from '../viewers/ValuePreview'
 import { ExportNodeContext } from '../viewers/exportRegistry'
+import { HeaderSlot } from '../viewers/headerSlot'
 import { GlyphSvg, doorGlyph } from './startGlyphs'
 
 /**
@@ -172,6 +173,8 @@ export function ViewerSurface({
    * know one is up. The body ref is what its finders are scoped to — see `MapStageProps.scope`.
    */
   const [mapOpen, setMapOpen] = useState(false)
+  // State, not a ref: the viewer below must re-render once the header's element exists.
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
   const found = useViewerNode(nodeId)
@@ -251,6 +254,9 @@ export function ViewerSurface({
             {info?.durationMs !== undefined && ` · ${formatDuration(info.durationMs)}`}
           </span>
         </div>
+
+        {/* Where a viewer may stand its own buttons instead of in a footer (`HeaderSlot`). */}
+        <div className="overlay__slot" ref={setSlot} />
 
         {spots && (
           /*
@@ -346,74 +352,76 @@ export function ViewerSurface({
         </div>
       )}
 
-      <div className="overlay__main">
-        <div className="overlay__body" ref={bodyRef}>
-          {/* Same component as the card renders, with `compact` off: a node that draws its own
+      <HeaderSlot.Provider value={slot}>
+        <div className="overlay__main">
+          <div className="overlay__body" ref={bodyRef}>
+            {/* Same component as the card renders, with `compact` off: a node that draws its own
               body is expanded by giving that body room, not by showing a viewer of its output. */}
-          {body ? (
-            <ExportNodeContext.Provider value={node.id}>
-              <body.Component
+            {body ? (
+              <ExportNodeContext.Provider value={node.id}>
+                <body.Component
+                  node={node}
+                  ctx={ctx}
+                  compact={false}
+                  inputValues={inputValues}
+                  setParam={(paramId, next) => setParam(node.id, paramId, next)}
+                  onError={setNotice}
+                />
+              </ExportNodeContext.Provider>
+            ) : (
+              <ValuePreview
                 node={node}
+                value={value}
                 ctx={ctx}
-                compact={false}
-                inputValues={inputValues}
-                setParam={(paramId, next) => setParam(node.id, paramId, next)}
+                baseName={baseName}
                 onError={setNotice}
+                onSelectionChange={(ids) => setParam(node.id, 'selection', ids)}
+                onParamChange={(paramId, next) => setParam(node.id, paramId, next)}
+                onParamsChange={(values) => setParams(node.id, values)}
+                inputValues={inputValues}
               />
-            </ExportNodeContext.Provider>
-          ) : (
-            <ValuePreview
-              node={node}
-              value={value}
-              ctx={ctx}
-              baseName={baseName}
-              onError={setNotice}
-              onSelectionChange={(ids) => setParam(node.id, 'selection', ids)}
-              onParamChange={(paramId, next) => setParam(node.id, paramId, next)}
-              onParamsChange={(values) => setParams(node.id, values)}
-              inputValues={inputValues}
-            />
+            )}
+          </div>
+
+          {/* Closed means not rendered, not zero-width: a collapsed-but-present sidebar still
+            catches clicks along the edge of the view it is meant to have given back. */}
+          {styleOpen && activeTab && (
+            <aside className="overlay__style" aria-label="Style">
+              <div className="style-tabs" role="tablist">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    className="style-tab"
+                    aria-selected={tab.id === activeTab.id}
+                    onClick={() => setTabId(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <div className="style-scroll" role="tabpanel" aria-label={activeTab.label}>
+                {activeTab.affectsData && (
+                  /*
+                   * Every other tab is presentational, so touching it re-renders and nothing
+                   * more. This one does not, and a graph quietly going stale with no visible
+                   * cause is exactly the confusion the note exists to prevent.
+                   */
+                  <p className="style-warning">{CHANGES_DATA}</p>
+                )}
+                <ParamRows
+                  rows={activeTab.rows}
+                  params={node.params}
+                  ctx={ctx}
+                  onChange={(paramId, next) => setParam(node.id, paramId, next)}
+                />
+                {TabFigure && <TabFigure params={filledParams(node)} />}
+              </div>
+            </aside>
           )}
         </div>
-
-        {/* Closed means not rendered, not zero-width: a collapsed-but-present sidebar still
-            catches clicks along the edge of the view it is meant to have given back. */}
-        {styleOpen && activeTab && (
-          <aside className="overlay__style" aria-label="Style">
-            <div className="style-tabs" role="tablist">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  className="style-tab"
-                  aria-selected={tab.id === activeTab.id}
-                  onClick={() => setTabId(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div className="style-scroll" role="tabpanel" aria-label={activeTab.label}>
-              {activeTab.affectsData && (
-                /*
-                 * Every other tab is presentational, so touching it re-renders and nothing
-                 * more. This one does not, and a graph quietly going stale with no visible
-                 * cause is exactly the confusion the note exists to prevent.
-                 */
-                <p className="style-warning">{CHANGES_DATA}</p>
-              )}
-              <ParamRows
-                rows={activeTab.rows}
-                params={node.params}
-                ctx={ctx}
-                onChange={(paramId, next) => setParam(node.id, paramId, next)}
-              />
-              {TabFigure && <TabFigure params={filledParams(node)} />}
-            </div>
-          </aside>
-        )}
-      </div>
+      </HeaderSlot.Provider>
     </>
   )
 }

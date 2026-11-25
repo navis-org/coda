@@ -4662,6 +4662,37 @@ input.field--combo {
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
+/*
+ * The header's spot for a viewer's own buttons (`HeaderSlot`). `display: contents`, so what a
+ * viewer portals in sits in the header's row like its other buttons, and an empty slot — every
+ * viewer that does not use it — adds no gap.
+ */
+.overlay__slot {
+  display: contents;
+}
+.overlay__slot-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+/* Below the header there is the whole view; above it, nothing — so the ⤓ menu opens downward. */
+.overlay__header .viewer-actions__menu {
+  bottom: auto;
+  top: calc(100% + 4px);
+}
+/*
+ * But not around neuroglancer: its frame is black edge to edge, so the border and the rounded
+ * corners read as a light rim drawn round the embedded page rather than as the card's edge.
+ */
+.overlay__body .viewer--ng {
+  border: 0;
+  border-radius: 0;
+  /* And edge to edge: cancels `.overlay__body`'s padding, which only frames a lighter viewer. */
+  margin: -10px -12px -12px;
+}
 .overlay__body .data-table {
   font-size: 12px;
 }

@@ -69,7 +69,8 @@
  * it (`inPlaceChanges`).
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { FormEvent } from 'react'
 
 import type { TableValue } from '../../core/values'
@@ -125,6 +126,7 @@ import { RootRegistry } from './persistentRoots'
 import type { RootLease } from './persistentRoots'
 import { forgetScene, recallScene, rememberScene } from './sceneMemo'
 import { ViewerActions } from './ViewerActions'
+import { HeaderSlot } from './headerSlot'
 import { plural } from '../../style/format'
 import { ViewerEmpty } from './ViewerEmpty'
 
@@ -446,6 +448,7 @@ export function NeuroglancerViewer({
   splitTarget,
   splitCard,
 }: NeuroglancerViewerProps) {
+  const headerSlot = useContext(HeaderSlot)
   /** The frame this surface shows, kept or private — see `frames`. */
   const leaseRef = useRef<RootLease<HeldFrame> | null>(null)
   useSplitKey(
@@ -1031,8 +1034,72 @@ export function NeuroglancerViewer({
     setReloadCount((n) => n + 1)
   }
 
+  /*
+   * In a full-size surface the summary and buttons stand in the surface's header rather than in a
+   * footer of their own (`HeaderSlot`), so the frame keeps every row below the header. On a canvas
+   * card there is no such header, and the caption stays where it was.
+   */
+  const captionInHeader = headerSlot !== null && !compact
+  const caption = (
+    <>
+      <span className={captionInHeader ? 'overlay__slot-note' : undefined}>
+        {summary}
+        {count > 0 && legend && ` · ${describeLegend(legend)}`}
+      </span>
+      <div className="viewer-actions">
+        <button
+          type="button"
+          className="viewer-actions__btn nodrag"
+          title="Copy the scene link"
+          aria-label="Copy link"
+          onClick={copyLink}
+        >
+          ⧉{!compact && <span>Copy link</span>}
+        </button>
+        {onSelectionEdits && datasetId && !readable && (
+          <button
+            type="button"
+            className="viewer-actions__btn nodrag"
+            title="Read the neurons from a neuroglancer link — this viewer cannot be read directly"
+            aria-label="Read neurons from a link"
+            aria-pressed={pasting}
+            onClick={() => setPasting((open) => !open)}
+          >
+            ⇣{!compact && <span>From link</span>}
+          </button>
+        )}
+        <button
+          type="button"
+          className="viewer-actions__btn nodrag"
+          title="Reload the viewer"
+          aria-label="Reload the viewer"
+          onClick={reload}
+        >
+          ↻{!compact && <span>Reload</span>}
+        </button>
+        <a
+          className="viewer-actions__btn nodrag"
+          href={url}
+          target="_blank"
+          rel="noreferrer noopener"
+          title="Open in a new tab"
+          aria-label="Open in a new tab"
+        >
+          ↗{!compact && <span>New tab</span>}
+        </a>
+        <ViewerActions
+          baseName={baseName ?? 'neuroglancer'}
+          source={{}}
+          compact={compact}
+          onExpand={onExpand}
+          onError={onError}
+        />
+      </div>
+    </>
+  )
+
   return (
-    <div className="viewer">
+    <div className="viewer viewer--ng">
       <div
         ref={boxRef}
         className="ng-frame"
@@ -1072,61 +1139,11 @@ export function NeuroglancerViewer({
         </form>
       )}
 
-      <div className="viewer__caption">
-        <span>
-          {summary}
-          {count > 0 && legend && ` · ${describeLegend(legend)}`}
-        </span>
-        <div className="viewer-actions">
-          <button
-            type="button"
-            className="viewer-actions__btn nodrag"
-            title="Copy the scene link"
-            aria-label="Copy link"
-            onClick={copyLink}
-          >
-            ⧉{!compact && <span>Copy link</span>}
-          </button>
-          {onSelectionEdits && datasetId && !readable && (
-            <button
-              type="button"
-              className="viewer-actions__btn nodrag"
-              title="Read the neurons from a neuroglancer link — this viewer cannot be read directly"
-              aria-label="Read neurons from a link"
-              aria-pressed={pasting}
-              onClick={() => setPasting((open) => !open)}
-            >
-              ⇣{!compact && <span>From link</span>}
-            </button>
-          )}
-          <button
-            type="button"
-            className="viewer-actions__btn nodrag"
-            title="Reload the viewer"
-            aria-label="Reload the viewer"
-            onClick={reload}
-          >
-            ↻{!compact && <span>Reload</span>}
-          </button>
-          <a
-            className="viewer-actions__btn nodrag"
-            href={url}
-            target="_blank"
-            rel="noreferrer noopener"
-            title="Open in a new tab"
-            aria-label="Open in a new tab"
-          >
-            ↗{!compact && <span>New tab</span>}
-          </a>
-          <ViewerActions
-            baseName={baseName ?? 'neuroglancer'}
-            source={{}}
-            compact={compact}
-            onExpand={onExpand}
-            onError={onError}
-          />
-        </div>
-      </div>
+      {captionInHeader ? (
+        createPortal(caption, headerSlot)
+      ) : (
+        <div className="viewer__caption">{caption}</div>
+      )}
     </div>
   )
 }
