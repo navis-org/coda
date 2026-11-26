@@ -103,8 +103,15 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  * two raises above were made in parallel from 3,100, one for each pack, so the merged bundle carries
  * both (the Biophysics pack's later work on top: fly channels, the seal, NWB and ABF1 recordings).
  * Code and prose of ours; no new library.
+ *
+ * 3,550 → 4,000 on 2026-11-26, at 3,891 kB against 3,493 kB at the commit before it (48da2de1),
+ * for the SEAM pack (#8): its node definitions and the search, review and merge-record code they
+ * reach (304 kB under `src/packs/seam`, 66 kB of it the four help pages), and the CAVE and
+ * precomputed readers it grew (`rootIds`, `volume`, sharded and compressed segmentation). Measured
+ * per module from rollup's `renderedLength`. Code and prose of ours; no new library — the model
+ * runtimes (`onnxruntime-web`, the WGSL assessor, Pyodide) load in workers and are not in this file.
  */
-const SIZE_BUDGET_KB = 3_550
+const SIZE_BUDGET_KB = 4_000
 
 /**
  * Fail the build if the bundle outgrows its budget.
