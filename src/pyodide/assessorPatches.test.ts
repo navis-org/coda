@@ -27,7 +27,9 @@ import type { AssessorBoxRequest } from './assessorPatches'
 import { callPython } from './engine'
 import type { PyCall } from './types'
 
-vi.mock('./engine', () => ({ callPython: vi.fn() }))
+/** Which runtime the lane is on (`pythonGeneration`): a test moves it to stand for a teardown. */
+let generation = 0
+vi.mock('./engine', () => ({ callPython: vi.fn(), pythonGeneration: () => generation }))
 
 const mockedCall = vi.mocked(callPython)
 
@@ -205,6 +207,63 @@ describe('useAssessorBox', () => {
     await expect(
       useAssessorBox(REQUEST, () => Promise.reject(new Error('the model refused'))),
     ).rejects.toThrow('the model refused')
+  })
+
+  /*
+   * A Cancel tears the lane's worker down, and the box with it. A close sent then would boot a
+   * fresh Python runtime — a second heap of tens of MB — only to be told no box is open.
+   */
+  it('sends no close where the worker holding the box was torn down', async () => {
+    mockedCall.mockResolvedValueOnce(opened())
+    await expect(
+      useAssessorBox(REQUEST, () => {
+        generation += 1
+        return Promise.reject(new Error('Aborted'))
+      }),
+    ).rejects.toThrow('Aborted')
+    expect(fnsCalled()).toEqual(['coda_assessor_open'])
+  })
+
+  /** Two documents' runs: the bridge holds one box, so the second waits for the first's close. */
+  it('lets a second run open only once the first has closed its box', async () => {
+    mockedCall.mockImplementation(async (call) =>
+      (call as PyCall).fn === 'coda_assessor_open' ? opened() : { dropped: true },
+    )
+    let finish!: () => void
+    const first = useAssessorBox(REQUEST, () => new Promise<void>((done) => (finish = done)))
+    await vi.waitFor(() => expect(fnsCalled()).toEqual(['coda_assessor_open']))
+    const second = useAssessorBox(REQUEST, async () => 'second')
+    await Promise.resolve()
+    expect(fnsCalled()).toEqual(['coda_assessor_open'])
+    finish()
+    await first
+    await expect(second).resolves.toBe('second')
+    expect(fnsCalled()).toEqual([
+      'coda_assessor_open',
+      'coda_assessor_close',
+      'coda_assessor_open',
+      'coda_assessor_close',
+    ])
+  })
+
+  /** A run cancelled while it waits gives up its own turn, never the turn of the one holding the box. */
+  it('keeps the box with its holder when a waiting run is cancelled', async () => {
+    mockedCall.mockImplementation(async (call) =>
+      (call as PyCall).fn === 'coda_assessor_open' ? opened() : { dropped: true },
+    )
+    let finish!: () => void
+    const first = useAssessorBox(REQUEST, () => new Promise<void>((done) => (finish = done)))
+    await vi.waitFor(() => expect(fnsCalled()).toEqual(['coda_assessor_open']))
+    const stop = new AbortController()
+    const waiting = useAssessorBox(REQUEST, async () => 'never', { signal: stop.signal })
+    const third = useAssessorBox(REQUEST, async () => 'third')
+    stop.abort()
+    await expect(waiting).rejects.toBeDefined()
+    await Promise.resolve()
+    expect(fnsCalled()).toEqual(['coda_assessor_open'])
+    finish()
+    await first
+    await expect(third).resolves.toBe('third')
   })
 
   it('does not let a failing close fail a successful run', async () => {

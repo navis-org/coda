@@ -19,8 +19,9 @@
  *
  * Each end is measured, ranked, ruled and **published** on its own, so the review card fills as
  * the search sweeps the arbour rather than after it. What makes that honest is that a published
- * end is final: the own-tip rule reads the tip *positions*, which are known before any box is
- * read, so a later end cannot change an earlier one. `searchRun.ts` yields them one at a time and
+ * end of the neuron is final: the own-tip rule reads the tip *positions*, which are known before
+ * any box is read, so a later end cannot change an earlier one. A piece extended early is the
+ * exception, a draft put right once the neuron's ends are in (`settle`, below). `searchRun.ts` yields them one at a time and
  * says what that cost.
  *
  * ## Two answers, and `Assessor` is which one
@@ -121,6 +122,7 @@ import type { AssessorConfig } from './assessorModel'
 import { scoreCandidates } from './assessorRun'
 import type { AffinityModel } from './models'
 import {
+  CURRENT_ASSESSOR,
   MERGE_ASSESSOR_MODELS,
   MERGE_ASSESSOR_TASK,
   MERGE_RANKER_MODELS,
@@ -354,7 +356,13 @@ export const suggestMergesNode = packNode({
       id: 'assessor',
       kind: 'enum',
       label: 'Assessor',
-      default: NO_ASSESSOR,
+      /*
+       * The current model, not None (user, 2026-11-26): the assessor is what gives a queue its
+       * cutoff and its probabilities. A card saved without the param predates assessors, so it
+       * stays on None and its answers stay what they were.
+       */
+      default: CURRENT_ASSESSOR,
+      absentMeans: NO_ASSESSOR,
       options: [
         { value: NO_ASSESSOR, label: 'None — rank by geometry' },
         ...MERGE_ASSESSOR_MODELS.map((model) => ({
@@ -1507,7 +1515,22 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   }
   for (const root of roots) {
     if (runWaits) await grow(true, root.seed)
-    await searchRoot(root)
+    try {
+      await searchRoot(root)
+    } catch (error) {
+      throwIfAborted(ctx.signal)
+      /*
+       * A neuron's own end is the run's, unlike a piece's (above): its list would be missing from
+       * what the run publishes. But the failure is most often a passing one — a 5xx or a `429`
+       * from the chunkedgraph partway through — and the ends finished so far are kept
+       * (`endMemory`), so a second run costs only what is left. The sentence says so.
+       */
+      throw new Error(
+        `${errorMessage(error)} Run again: the ends finished so far are remembered, so only ` +
+          'the rest are measured.',
+        { cause: error },
+      )
+    }
   }
 
   // Every neuron's ends are in now. Where a piece joins is asked of the book again, which knows

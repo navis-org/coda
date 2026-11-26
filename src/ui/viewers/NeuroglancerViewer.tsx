@@ -120,6 +120,7 @@ import { useLatest } from '../useLatest'
 import { useOfferedPack } from '../packSwitches'
 import { useGraphStore } from '../../store/graphStore'
 import { setHoveredSegment } from './segmentHover'
+import { useReviewCardOpen } from '../seam/reviewKeys'
 import { useSplitKey } from '../seam/splitKey'
 import type { SplitCard, SplitTarget } from '../seam/splitSession'
 import { RootRegistry } from './persistentRoots'
@@ -322,6 +323,7 @@ interface HeldFrame {
   claimsAltDigits?: boolean
   /** And whether F is Coda's find path here (`FrameKeysMessage.findPath`). */
   claimsFindPath?: boolean
+  claimsReview?: boolean
 }
 
 /**
@@ -336,6 +338,7 @@ function forgetDocument(held: HeldFrame): void {
   held.focused = undefined
   held.claimsAltDigits = undefined
   held.claimsFindPath = undefined
+  held.claimsReview = undefined
 }
 
 function createFrame(): { host: HTMLElement; root: HeldFrame } {
@@ -856,25 +859,34 @@ export function NeuroglancerViewer({
    */
   const claimAltDigits = useGraphStore((s) => s.dashboardOpen)
   const claimFindPath = useOfferedPack()('seam') && splitTarget !== undefined
-  const claimRef = useLatest({ altDigits: claimAltDigits, findPath: claimFindPath })
+  // The review keys only while a Proofread Merges card is open: `G` is neuroglancer's own too.
+  const claimReview = useReviewCardOpen()
+  const claimRef = useLatest({
+    altDigits: claimAltDigits,
+    findPath: claimFindPath,
+    review: claimReview,
+  })
   const tellKeys = (kept: HeldFrame) => {
-    const { altDigits, findPath } = claimRef.current
+    const { altDigits, findPath, review } = claimRef.current
     if (
       kept.speaksFor === undefined ||
-      (kept.claimsAltDigits === altDigits && kept.claimsFindPath === findPath)
+      (kept.claimsAltDigits === altDigits &&
+        kept.claimsFindPath === findPath &&
+        kept.claimsReview === review)
     ) {
       return
     }
     kept.claimsAltDigits = altDigits
     kept.claimsFindPath = findPath
-    const message: FrameKeysMessage = { type: FRAME_KEYS_MESSAGE, altDigits, findPath }
+    kept.claimsReview = review
+    const message: FrameKeysMessage = { type: FRAME_KEYS_MESSAGE, altDigits, findPath, review }
     kept.frame.contentWindow?.postMessage(message, window.location.origin)
   }
   const tellKeysRef = useLatest(tellKeys)
   useEffect(() => {
     const kept = leaseRef.current?.root
     if (kept) tellKeysRef.current(kept)
-  }, [claimAltDigits, claimFindPath, claimRef, tellKeysRef])
+  }, [claimAltDigits, claimFindPath, claimReview, claimRef, tellKeysRef])
 
   /*
    * The camera a card asked for — see `focus` on the props.

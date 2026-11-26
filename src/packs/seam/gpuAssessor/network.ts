@@ -34,7 +34,7 @@
  */
 
 import { errorMessage } from '../../../core/errors'
-import { frugalShaders, gpuSupport } from '../../../ml/support'
+import { NO_USABLE_GPU, frugalShaders, gpuSupport } from '../../../ml/support'
 import type { AssessorPlan, ConvStep, MaxPoolStep, PlanStep } from './segclrPlan'
 import { PATCH, bufferSlots, outputOf, skippableConvs } from './segclrPlan'
 import {
@@ -69,7 +69,7 @@ export async function assessorDevice(): Promise<GPUDevice> {
   const { refusal } = await gpuSupport()
   if (refusal) throw new Error(refusal)
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })
-  if (!adapter) throw new Error('WebGPU offered no high-performance adapter.')
+  if (!adapter) throw new Error(NO_USABLE_GPU)
   return adapter.requestDevice({
     requiredLimits: {
       // The stem's output is 70 MB; the defaults (128 MB a binding, 256 MB a buffer) hold it, but

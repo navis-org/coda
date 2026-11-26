@@ -79,6 +79,23 @@ describe('the split session', () => {
     ])
   })
 
+  /** Said at the press, not after the whole wait at Accept (`splitWrite.ts` asks again there). */
+  it('says at the press that the root has been edited since', async () => {
+    services.current.mockResolvedValueOnce(false)
+    startSplit(press())
+    await settle()
+    const session = splitSession()
+    expect(session?.phase).toBe('failed')
+    expect(session && 'message' in session ? session.message : '').toMatch(/edited since/)
+  })
+
+  it('opens the gallery where the currency check itself fails', async () => {
+    services.current.mockRejectedValueOnce(new Error('503'))
+    startSplit(press())
+    await settle()
+    expect(splitSession()?.phase).toBe('ready')
+  })
+
   it('reads the mesh beside the candidates, each vertex given its nearest chunk', async () => {
     services.mesh.mockImplementation(() =>
       Promise.resolve({

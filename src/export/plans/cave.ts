@@ -12,6 +12,8 @@
 
 import type { CodaType } from '../../core/types'
 import { namedColumns } from '../../data/annotations/types'
+import type { VoxelScale } from '../../data/units'
+import { parseScale } from '../../data/units'
 import type { AnnotationTableSpec, NeuronTableSpec } from '../../data/cave/spec'
 import {
   STANDARD_SYNAPSE_COLUMNS,
@@ -217,6 +219,12 @@ type CaveTablePlan = Refusable<{
   idColumn: string
   columns: string[]
   pivot?: { on: string; value: string }
+  /**
+   * `Position units` as `desired_resolution`, nanometres per unit: what the canvas asks CAVE for
+   * (`caveTable.ts`' `resolutionOf`), so a notebook's `pt_position_*` are in the same units.
+   * Absent, as blank (a card saved before the param) or unparseable: the table's own.
+   */
+  resolution?: VoxelScale
 }>
 
 export function caveTablePlan(params: Record<string, unknown>): CaveTablePlan {
@@ -231,7 +239,13 @@ export function caveTablePlan(params: Record<string, unknown>): CaveTablePlan {
     idColumn,
     columns: namedColumns(String(params.columns ?? ''), idColumn),
     ...(on ? { pivot: { on, value } } : {}),
+    ...withResolution(String(params.resolution ?? '')),
   }
+}
+
+function withResolution(text: string): { resolution?: VoxelScale } {
+  const resolution = parseScale(text)
+  return resolution ? { resolution } : {}
 }
 
 /** Update root IDs' method: a majority vote over `sample` chunks, or each row's supervoxel. */

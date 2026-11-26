@@ -42,12 +42,28 @@ export function SplitGalleryHost() {
   const mesh = useSyncExternalStore(onSplitSession, splitMesh)
   const exact = useSyncExternalStore(onSplitSession, splitExact)
   const accepted = useSyncExternalStore(onSplitAccept, splitAccept)
-  // Which tile is enlarged, for this press only: a new press starts from all of them.
-  const [selected, setSelected] = useState<{ press: SplitSession['request']; index: number }>()
+  /*
+   * Which tile is enlarged, for this press and this set only: a new press starts from all of
+   * them, and so does a Regenerate's new set — a position in the old set names another split in
+   * the new one, and the split shown must be the split Accept writes.
+   */
+  const [selected, setSelected] = useState<{
+    press: SplitSession['request']
+    round: number
+    index: number
+  }>()
   if (!session) return null
-  const enlarged = selected?.press === session.request ? selected.index : undefined
   // The tiles need the neuron as well, which a session has once it has candidates to offer.
   const shown = 'candidates' in session && session.candidates.length > 0 ? session : undefined
+  const enlarged =
+    shown &&
+    selected?.press === shown.request &&
+    selected.round === shown.round &&
+    selected.index < shown.candidates.length
+      ? selected.index
+      : undefined
+  // While a Regenerate looks for the next set, the set on show is about to go: nothing is picked.
+  const regenerating = shown?.regenerating === true
   // The last Accept, where it was made from this press.
   const accept = accepted?.request === session.request ? accepted : undefined
   const busy = Boolean(accepted?.step || accepted?.out)
@@ -101,7 +117,10 @@ export function SplitGalleryHost() {
               exact={exact}
               pointNm={session.request.pointNm}
               selected={enlarged}
-              onSelect={(index) => setSelected({ press: session.request, index })}
+              onSelect={(index) => {
+                if (!regenerating)
+                  setSelected({ press: shown.request, round: shown.round, index })
+              }}
               caption={(candidate, i) => `${i + 1}. ${describe(candidate)}`}
             />
             {accept && (
@@ -139,8 +158,8 @@ export function SplitGalleryHost() {
                     <button
                       type="button"
                       className="btn btn--primary"
-                      disabled={busy || Boolean(blocked)}
-                      title={blocked}
+                      disabled={busy || regenerating || Boolean(blocked)}
+                      title={regenerating ? 'A new set of splits is being found.' : blocked}
                       onClick={() =>
                         acceptSplit({
                           request: shown.request,

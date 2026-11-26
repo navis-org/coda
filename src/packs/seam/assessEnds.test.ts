@@ -183,6 +183,22 @@ describe('assessEnd', () => {
     await expect(assessEnd(end(3), FLOOR, short)).rejects.toThrow(/silently left at its floor/)
   })
 
+  /** A Cancel while the box is read is not a box that could not be read: nothing is published. */
+  it('stops at a cancel during the box read, rather than refusing the end', async () => {
+    const controller = new AbortController()
+    const cancelled: AssessSteps = {
+      box: async () => {
+        controller.abort()
+        throw new DOMException('The operation was aborted.', 'AbortError')
+      },
+      score: vi.fn(),
+    }
+    await expect(
+      assessEnd(end(2), FLOOR, cancelled, { signal: controller.signal }),
+    ).rejects.toThrow()
+    expect(cancelled.score).not.toHaveBeenCalled()
+  })
+
   it('stops at a cancel before any box is read', async () => {
     const run = steps([1])
     await expect(

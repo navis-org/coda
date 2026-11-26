@@ -77,10 +77,19 @@ async function open(
       onProgress: (progress) => post({ id, type: 'progress', progress }),
     }),
   ])
-  const network = await buildNetwork(ready, segclrPlan(readOnnx(new Uint8Array(weights.bytes))))
-  // After the network is built, as `infer.worker.ts` does: the cache write is another copy of
-  // the same 133 MB, and firing it alongside the upload raised the peak for nothing.
-  weights.remember()
+  let network
+  try {
+    network = await buildNetwork(ready, segclrPlan(readOnnx(new Uint8Array(weights.bytes))))
+  } finally {
+    /*
+     * After the network is built, as `infer.worker.ts` does: the cache write is another copy of
+     * the same 133 MB, and firing it alongside the upload raised the peak for nothing. **And
+     * after a build that failed or was cancelled**: the bytes were verified against the
+     * manifest's hash, so a GPU that refused them is no reason to fetch them again on every
+     * retry, nor to ask again for a download already made.
+     */
+    weights.remember()
+  }
   opened = {
     id: manifest.id,
     part,

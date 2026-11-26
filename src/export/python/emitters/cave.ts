@@ -199,6 +199,7 @@ registerEmitter(
         `    value_column=${pyStr(reading.pivot.value)},`,
       )
     }
+    if (reading.resolution) args.push(`    desired_resolution=${pyList(reading.resolution)},`)
     const out = ctx.output('annotations')
     return [...setup, `${out} = coda_cave_table(`, ...args, `)`, ...chainAnnotations(ctx, out)]
   },

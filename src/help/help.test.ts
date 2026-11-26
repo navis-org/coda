@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import '../nodes'
 import { getNodeDef } from '../core/registry'
 import type { MarkdownBlock } from '../core/markdown'
-import { parseMarkdown } from '../core/markdown'
+import { DOCUMENT_TONES, parseMarkdown } from '../core/markdown'
 import { FIGURE_FIT_WIDTH, buildFigure, isFigureLang, parseFigureSource } from './figures'
 import { helpImageUrl, helpTypes, loadHelpDoc } from './registry'
 
@@ -169,6 +169,10 @@ describe('the documents in src/help/nodes', () => {
    * The second is a body written on the marker line behind an inline `>` rather than on its own
    * line. The parser reads everything after the tone as the *title*, so a four-line warning drew
    * as one long bold heading with an empty body. One document shipped that way.
+   *
+   * The third is a tone the parser does not know — GitHub's `[!IMPORTANT]` or `[!CAUTION]`. It
+   * is not a callout, and block quotes are unsupported, so the whole thing draws as one paragraph
+   * with its `>` markers in it. Three callouts, in two SEAM documents, shipped that way.
    */
   it.each(TYPES)(
     '%s: every callout marker is spelled the way the parser reads',
@@ -184,6 +188,11 @@ describe('the documents in src/help/nodes', () => {
           /^\s*>\s*\[![A-Za-z]+\].*\s>\s/.test(line),
           `${at}: a callout body goes on its own '>' line, not behind an inline '>'`,
         ).toBe(false)
+        const tone = /^\s*>\s*\[!([A-Za-z]+)\]/.exec(line)?.[1]?.toLowerCase()
+        expect(
+          tone === undefined || (DOCUMENT_TONES as readonly string[]).includes(tone),
+          `${at}: '[!${tone?.toUpperCase()}]' is not a callout — use one of ${DOCUMENT_TONES.join(', ')}`,
+        ).toBe(true)
       }
     },
   )

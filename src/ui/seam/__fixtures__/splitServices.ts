@@ -46,6 +46,7 @@ export function toyServices() {
     ),
     // The box holds every chunk the toy has near the click: nothing outside it to ask about.
     chunkSupervoxels: vi.fn(() => Promise.resolve(new Map<string, string[]>())),
+    current: vi.fn(() => Promise.resolve(true)),
     pause: () => Promise.resolve(),
     now: () => 0,
   } satisfies SplitServices

@@ -25,7 +25,8 @@
 
 import type { LabelBoxRequest } from './cutoutSummary'
 import type { CallOptions } from './engine'
-import { callPython } from './engine'
+import { untilAborted } from '../data/memoPromise'
+import { callPython, pythonGeneration } from './engine'
 import { int32From, numberFrom, uint8From } from './types'
 
 /**
@@ -228,6 +229,32 @@ export interface OpenAssessorBox {
 }
 
 /**
+ * The cutter's turns: the bridge holds **one** box, so two runs using it at once — Find Merge
+ * Candidates in two documents, each with its own Scheduler — would replace each other's labels
+ * ("Another tip replaced it"), and a Cancel in one tears down the lane under the other's cut.
+ * Taking turns, a run waiting for the box has no call in the lane to lose. One run already uses
+ * one box at a time, so it never waits on itself.
+ */
+let turns: Promise<void> = Promise.resolve()
+
+/** Wait for the box, or for `signal`; the answer lets the next run have it. */
+async function takeTurn(signal: AbortSignal | undefined): Promise<() => void> {
+  const before = turns
+  let release!: () => void
+  const mine = new Promise<void>((resolve) => (release = resolve))
+  // The next run waits for this one *and* the one before: a run that stops waiting gives up only
+  // its own turn, never the turn of the run still holding the box.
+  turns = before.then(() => mine)
+  try {
+    await untilAborted(before, signal)
+  } catch (error) {
+    release()
+    throw error
+  }
+  return release
+}
+
+/**
  * Open a box, do something with it, and close it however that ends.
  *
  * The shape every caller should use. A thrown error or a cancelled run would otherwise leave the
@@ -239,7 +266,16 @@ export async function useAssessorBox<T>(
   use: (open: OpenAssessorBox) => Promise<T>,
   options: CallOptions = {},
 ): Promise<T> {
-  const box = await openAssessorBox(request, options)
+  const release = await takeTurn(options.signal)
+  let box: AssessorBox
+  try {
+    box = await openAssessorBox(request, options)
+  } catch (error) {
+    release()
+    throw error
+  }
+  // The runtime the box is held in: a Cancel during `use` tears it down, and the box with it.
+  const heldIn = pythonGeneration('assessorPatches')
   try {
     return await use({
       box,
@@ -259,6 +295,9 @@ export async function useAssessorBox<T>(
      * must not replace the caller's: after the work threw it would report the wrong thing, and
      * after the work succeeded it costs memory, not an answer.
      */
-    await closeAssessorBox(box.id).catch(() => {})
+    if (pythonGeneration('assessorPatches') === heldIn) {
+      await closeAssessorBox(box.id).catch(() => {})
+    }
+    release()
   }
 }

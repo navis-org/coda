@@ -215,9 +215,9 @@ callout explaining why the code is arranged the way it is belongs in prose, or i
 `flow.forEach` gained two because both of its real traps were buried in paragraphs. The count is
 not the target; what the callout is *about* is.
 
-**Two ways to mistype the marker, both of which render as ordinary text**, and neither is visible
+**Three ways to mistype the marker, all of which render as ordinary text**, and none is visible
 in the parsed document — a mistyped marker produces a perfectly valid paragraph, so there is
-nothing for a test to compare against `blocks`. `help.test.ts` checks the raw source for both.
+nothing for a test to compare against `blocks`. `help.test.ts` checks the raw source for all three.
 
 - `> ![WARNING]` — `![` is the *image* marker, so the line is a blockquote holding the literal
   text `![WARNING]`, printed above the sentence it was meant to label. Four callouts, across
@@ -225,6 +225,9 @@ nothing for a test to compare against `blocks`. `help.test.ts` checks the raw so
 - A body written on the marker line behind an inline `>`, rather than on its own `>` line.
   Everything after the tone is read as the **title**, so a four-line warning draws as one long
   bold heading with an empty body. One document shipped that way.
+- A tone the parser does not know — GitHub's `[!IMPORTANT]`, `[!CAUTION]`. Not a callout, and
+  block quotes are unsupported, so it draws as one paragraph with its `>` markers in it. Three
+  callouts, in two SEAM documents, shipped that way.
 
 A callout's **title is parsed as inline markdown**, which is not a nicety: a warning is very
 often about a named setting, and `` `Normalise` `` in one was rendering as three literal

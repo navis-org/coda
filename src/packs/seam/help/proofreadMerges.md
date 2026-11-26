@@ -40,7 +40,7 @@ Find Merge Candidates publishes each end as it is scored, and the queue fills fr
 
 The N is the picked neuron's tips, not candidates, and it reaches zero: an end the search can never read — its box lies outside the segmentation volume — is counted as done rather than as waiting, and Find Merge Candidates warns separately about how many those were.
 
-> [!IMPORTANT]
+> [!NOTE]
 > **A filter or a sort reaches only what has arrived**
 > `Min confidence`, `Min size` and `Sort by` narrow the tips published so far. On a third-full queue that is a third of the neuron, which is what the caption in the foot is there to say. Nothing is lost — a verdict recorded now is kept — but the top of the list will move as more ends land.
 
@@ -48,7 +48,7 @@ The list holds still as tips arrive: the row at the top of the view stays where 
 
 With nothing wired to `Current`, expanding the card (⤢) gives it a small viewer of its own so it is usable by itself. That is a fallback: it is a second WebGL context showing two segments, and it stands down the moment something else is driving.
 
-> [!IMPORTANT]
+> [!WARNING]
 > **The camera needs the embedded viewer**
 > Moving a camera without reloading the whole scene is a message to the frame, and only Coda's own neuroglancer can receive it. Pointed at another deployment, the segments still change and the camera stays where it is. `Viewer type` is on the Neuroglancer node and the embedded one is the default.
 
@@ -114,9 +114,9 @@ The number on the left is `q`, SEAM's score for the tip's **first** candidate. T
 
 Find Merge Candidates sometimes misses an open end, or does not list the piece that belongs there. Point at that piece in Neuroglancer, where it meets the neuron, and press **J**. The piece is added to the list and accepted in one step, and the cursor moves to it. **Add from viewer**, in the footer, does the same for the piece the pointer last rested on, if you would rather click.
 
-A piece the list already holds is simply accepted where it is listed. Anything else is first checked against the segmentation, which takes a moment and needs you signed in to CAVE: the neuron, or a piece you accepted on it, has to lie within 1.5 µm of where you pointed. That piece does not need to be extended, so you can add a piece to one you added by hand, and so on outwards. The check finds the two supervoxels to merge the way Submit does, so a piece that passes here can be merged. If it fails, the status bar says why and nothing is added.
+A piece the list already holds is simply accepted where it is listed. If it is listed at two tips, say the neuron's and an extended piece's, and is accepted at one of them already, **J** goes to that row instead of accepting it a second time. Anything else is first checked against the segmentation, which takes a moment and needs you signed in to CAVE: the neuron, or a piece you accepted on it, has to lie within 1.5 µm of where you pointed. That piece does not need to be extended, so you can add a piece to one you added by hand, and so on outwards. The check finds the two supervoxels to merge the way Submit does, so a piece that passes here can be merged. If it fails, the status bar says why and nothing is added.
 
-A piece added within 2 µm of one of the neuron's tips is listed as one more candidate of that tip; further away, it gets a tip of its own. Either way its row comes first, whatever the filters and the sort, is marked **by hand**, and shows none of SEAM's numbers, since SEAM did not score it. You can extend it, judge it again and submit it like any other. Ctrl+Z takes it off the list. Hand picks are never sent to SEAM with **Help improve**, and Start over clears them with everything else. With several Proofread Merges cards open, the pick goes to the one you expanded, pinned or selected.
+A piece added within 2 µm of one of the neuron's tips is listed as one more candidate of that tip; further away, it gets a tip of its own. Either way its row comes first, whatever the filters and the sort, is marked **by hand**, and shows none of SEAM's numbers, since SEAM did not score it. You can extend it, judge it again and submit it like any other. Ctrl+Z takes it off the list. A hand pick SEAM did not list is never sent to SEAM with **Help improve**; **J** on a piece the list already holds is an ordinary accept, and is sent like one, and Start over clears them with everything else. With several Proofread Merges cards open, the pick goes to the one you expanded, pinned or selected.
 
 ## Extending a neuron
 
@@ -266,7 +266,7 @@ You do not have to wait for the search to finish. Submit merges what you have ac
 > **These are real edits**
 > Submit changes the shared segmentation, and everybody working on that datastack sees the result. There is no Undo button in Coda: to reverse a merge, take its operation ID from the `Merges` table and undo it with your usual tool, e.g. caveclient's `client.chunkedgraph.undo_operation(...)`.
 
-Pressing Submit sends nothing yet. Coda first checks the accepted pieces — that you may edit, that nothing has changed since, and where exactly each merge goes — and the button counts the pieces as it does. Finding where a piece goes means reading the segmentation around it, under a fifth of a second a piece, so a neuron with 200 accepted pieces takes about half a minute. Press the button again to cancel the check; nothing has been sent. It then opens an overlay with the list on the left and the neuron as the merges will make it on the right: the neuron see-through, each piece in green and a line across each gap where the merge is made. Untick anything you are not sure about, then press **Merge 3 pieces into 720575940… on wclee_aedes_brain**. Only a click or Space presses it, never Enter.
+Pressing Submit sends nothing yet. Coda first checks the accepted pieces — that you may edit, that nothing has changed since, and where exactly each merge goes — and the button counts the pieces as it does. Finding where a piece goes means reading the segmentation around it, under a fifth of a second a piece, so a neuron with 200 accepted pieces takes about half a minute. Press the button again to cancel the check; nothing has been sent. While it runs, verdicts and Extend wait: the check reads them once, when it starts, so a verdict changed during it would not be the one merged. **G** still moves the cursor. It then opens an overlay with the list on the left and the neuron as the merges will make it on the right: the neuron see-through, each piece in green and a line across each gap where the merge is made. Untick anything you are not sure about, then press **Merge 3 pieces into 720575940… on wclee_aedes_brain**. Only a click or Space presses it, never Enter.
 
 ### A neuron you extended
 
@@ -347,7 +347,7 @@ SEAM's estimate `r` is fitted on tips somebody judged, so your verdicts help it 
 
 It is off until you turn it on, and the setting is kept in your browser, not in the workflow, so opening somebody else's workflow never sends anything for you. Your CAVE token is never sent. The server instead asks you to look up one supervoxel's root through your own access, which shows you can read the dataset. Verdicts that cannot be sent straight away, because you are offline or the server is busy, wait in your browser and go with the next one.
 
-Only button presses are sent: undoing a verdict with Ctrl+Z does not send anything, and pressing a verdict again to clear it sends that it was taken back. A piece Auto-extend accepted is sent only when Submit merges it into the neuron without your having judged it, and then as `auto-accepted`, never as an accept. Verdicts on a tip from an old set that names no version are not sent, because nobody could tell which scores they were judged against. The server collects verdicts for Aedes (`wclee_aedes_brain`); on another dataset the foot says it is not collected.
+Only what you press is sent — a verdict button, a verdict key, or **J** on a listed piece: undoing a verdict with Ctrl+Z does not send anything, and pressing a verdict again to clear it sends that it was taken back. A piece Auto-extend accepted is sent only when Submit merges it into the neuron without your having judged it, and then as `auto-accepted`, never as an accept. Verdicts on a tip from an old set that names no version are not sent, because nobody could tell which scores they were judged against. The server collects verdicts for Aedes (`wclee_aedes_brain`); on another dataset the foot says it is not collected.
 
 ## Outputs
 

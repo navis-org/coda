@@ -11,7 +11,7 @@
  */
 
 import type { ComponentProps } from 'react'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
@@ -34,6 +34,7 @@ import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
 import type { RootEdit } from '../../data/cave/rootEdits'
 import { onEdit } from '../../data/cave/rootEdits'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { useReviewKeys } from '../seam/reviewKeys'
 import { hoveredSegment } from './segmentHover'
 import { useGraphStore } from '../../store/graphStore'
 import { RELEASE_AFTER_MS } from './persistentRoots'
@@ -1440,12 +1441,12 @@ describe('neurons changed inside the viewer', () => {
       const posted = speakingFrame(view.container, sceneWith(['1']))
       // Told on the frame's first report: on the canvas they stay neuroglancer's.
       expect(posted).toHaveBeenCalledWith(
-        { type: 'coda:ng-keys', altDigits: false, findPath: false },
+        { type: 'coda:ng-keys', altDigits: false, findPath: false, review: false },
         window.location.origin,
       )
       act(() => useGraphStore.setState({ dashboardOpen: true }))
       expect(posted).toHaveBeenLastCalledWith(
-        { type: 'coda:ng-keys', altDigits: true, findPath: false },
+        { type: 'coda:ng-keys', altDigits: true, findPath: false, review: false },
         window.location.origin,
       )
     })
@@ -1461,15 +1462,35 @@ describe('neurons changed inside the viewer', () => {
       frameLoaded(view.container)
       const posted = speakingFrame(view.container, sceneWith(['1']))
       expect(posted).toHaveBeenCalledWith(
-        { type: 'coda:ng-keys', altDigits: false, findPath: true },
+        { type: 'coda:ng-keys', altDigits: false, findPath: true, review: false },
         window.location.origin,
       )
       act(() => switchPack('seam', false))
       expect(posted).toHaveBeenLastCalledWith(
-        { type: 'coda:ng-keys', altDigits: false, findPath: false },
+        { type: 'coda:ng-keys', altDigits: false, findPath: false, review: false },
         window.location.origin,
       )
       resetPackSwitchesForTest()
+    })
+
+    /** `G` is neuroglancer's multicut swap-group too: claimed only while a review card is open. */
+    it('tells the frame the review keys are Coda’s only while a review card is open', () => {
+      const view = mounted(URL_A)
+      const posted = speakingFrame(view.container, sceneWith(['1']))
+      expect(posted).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'coda:ng-keys', review: false }),
+        window.location.origin,
+      )
+      const card = renderHook(() => useReviewKeys('review', () => {}))
+      expect(posted).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'coda:ng-keys', review: true }),
+        window.location.origin,
+      )
+      card.unmount()
+      expect(posted).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'coda:ng-keys', review: false }),
+        window.location.origin,
+      )
     })
 
     it('presses a key the frame hands back as if it were pressed here', () => {

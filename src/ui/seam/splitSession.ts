@@ -32,7 +32,7 @@ import {
   readGrapheneMesh,
 } from '../../data/cave/meshes'
 import type { CaveScope } from '../../nodes/lib/caveParams'
-import { chunkSupervoxels } from '../../data/cave/rootIds'
+import { chunkSupervoxels, isLatestRoots } from '../../data/cave/rootIds'
 import { NoAffinitiesError } from '../../data/cave/subgraph'
 import { findSupervoxels } from '../../data/cave/volumes'
 import { channel } from '../../data/channel'
@@ -125,6 +125,12 @@ export interface SplitServices {
     chunks: readonly string[],
     options: CaveRequestOptions,
   ): Promise<Map<string, string[]>>
+  /**
+   * Whether `root` is current at the server's now. Asked at the press, beside the box read: a card
+   * still drawing a root someone has since edited would otherwise be met only at Accept, after
+   * the whole wait (`splitWrite.ts` asks again there, last, before the send).
+   */
+  current(graph: Chunkedgraph, root: string, options: CaveRequestOptions): Promise<boolean>
   pause(): Promise<void>
   now(): number
 }
@@ -239,6 +245,8 @@ const LIVE: SplitServices = {
   box: (graph, neuron, pointNm, options) =>
     readSplitBox(graph.graphene, graph.layout, neuron, pointNm, options),
   mesh: (target, root) => readMesh(target, root, { targetTriangles: TILE_TRIANGLES }),
+  current: async (graph, root, options) =>
+    (await isLatestRoots(graph.graphene, [root], 'server', options))[0] !== false,
   pause: yieldToBrowser,
   now: () => performance.now(),
 }
@@ -384,8 +392,22 @@ export function startSplit(request: SplitRequest): void {
     })
   void (async () => {
     try {
-      const [input, graph] = await Promise.all([boxOf(request), graphOf(request)])
+      const [input, graph, current] = await Promise.all([
+        boxOf(request),
+        graphOf(request),
+        // A failed check is not a verdict: the gallery opens, and Accept asks again.
+        graphOf(request).then((graph) =>
+          services.current(graph, request.root, optionsOf(request)).catch(() => true),
+        ),
+      ])
       if (press !== mine) return
+      if (!current) {
+        throw new Error(
+          `${request.root} has been edited since it was read, so its splits would be of a ` +
+            'neuron that is no longer there. Bring the viewer up to the current root, then ' +
+            'press K again.',
+        )
+      }
       const candidates: SplitCandidate[] = []
       const offer = (phase: 'computing' | 'ready') =>
         set({

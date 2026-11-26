@@ -149,6 +149,21 @@ export function submitStateOf(docId: string, nodeId: string): SubmitState {
   return stillOut ? 'waiting' : 'none'
 }
 
+/**
+ * Why a verdict on this card cannot change now, or undefined. The check reads the verdicts once,
+ * when it starts (`plan`), so one changed while it runs, or under the overlay it opens, would not
+ * be the one merged: the keys, the buttons and J all wait.
+ */
+export function verdictsHeld(state: SubmitState): string | undefined {
+  if (state === 'planning') {
+    return 'Submit is checking the accepted pieces: verdicts wait until its window opens. Press Submit again to stop the check.'
+  }
+  if (state === 'open' || state === 'running' || state === 'other') {
+    return 'Close the Submit window first: verdicts wait until it is gone.'
+  }
+  return undefined
+}
+
 /** How many pieces a check has decided, of how many (`PlanRequest.onProgress`). */
 export type SubmitChecked = { readonly done: number; readonly total: number }
 
@@ -394,6 +409,12 @@ export function confirmSubmit(merges: readonly PlannedMerge[]): void {
   if (session?.phase !== 'ready' || session.progress !== undefined) {
     throw new Error('This Submit has already been sent, or is not open.')
   }
+  /*
+   * Asked again here, not only at the press: the split gallery stays live under the check and
+   * the overlay, and its Accept sees no merge out until the batch starts (`registerWriteOut`).
+   */
+  const other = otherWriteOut('merge')
+  if (other) throw new Error(other)
   const { request, plan: confirmed } = session
   const hold = useGraphStore.getState().holdForWrite(request.docId, request.nodeId)
   // A Re-check still out must not land a fresh plan over the batch: its answer is dropped.

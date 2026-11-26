@@ -263,6 +263,28 @@ describe('SplitGalleryHost', () => {
     expect(screen.getByRole('button', { name: 'Regenerate' })).toHaveProperty('disabled', true)
   })
 
+  /** A position in the old set names another split in the new one: the split shown is the one written. */
+  it('picks no tile while a Regenerate looks, and enlarges nothing in the set it brings', async () => {
+    resetSplitSessionForTests({
+      ...toyServices(),
+      box: () => Promise.resolve(toy(MANY_SPLITS)),
+      mesh: () => new Promise(() => undefined),
+    })
+    render(<SplitGalleryHost />)
+    await press()
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+    })
+    act(() => {
+      fireEvent.click(screen.getAllByRole('button', { name: /takes off/ })[2]!)
+    })
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull()
+    await act(settle)
+    expect(screen.getByRole('status').textContent).toMatch(/set 2/)
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: /takes off/ })).toHaveLength(6)
+  })
+
   it('offers no Regenerate with a tile enlarged', async () => {
     render(<SplitGalleryHost />)
     await press()

@@ -22,21 +22,23 @@ Wire [Find Open Ends](#seam:openEnds) into `Tips` and a CAVE dataset into `Datas
 
 ## Rows arrive while it runs
 
-Each end is published as soon as it is finished, so the review card fills while the rest of the neuron is still being measured, and you can start on the first tips straight away. A published end is final. Nothing that comes later changes it.
+Each end is published as soon as it is finished, so the review card fills while the rest of the neuron is still being measured, and you can start on the first tips straight away. A published end of the neuron is final: nothing that comes later changes it.
+
+A piece you extend while the neuron is still being searched is the exception. Its ends are published straight away too, but which of them meets the neuron is judged from the neuron's ends found so far. Once all of them are in, a closer contact may turn up at another of the piece's tips; that tip then becomes where the piece joins, and its list goes from the card. To avoid this, extend pieces once the neuron's search has finished.
 
 The `searched` column on `Tips` says where each tip stands: true once it has been searched, empty while it is still waiting, and false where it never will be. A tip is never searched when its box lies outside the segmentation volume, and the node warns about how many those were.
 
 `source` says which models a searched tip's numbers come from: `model:`, the ranker and the assessor (or `none`), each named by its id and the start of its manifest's SHA-256, for example `model:trees_sizes_tip@d0da2c7b5fe6/n3d_mal_mask_s1@ccb50e76723b`. SEAM keeps a model's id when it refits it, so the digest is what tells two versions apart. A tip the run did not search keeps the `source` it came in with, such as a published set's.
 
-An unassessed end takes about three seconds, and a whole neuron is a few hundred ends. When a run finishes, the card says how long each end took and where the time went.
+Searching one end takes about three seconds, and up to four are searched at once. With an assessor, 60 ends took about 70 seconds in Chrome and 90 to 105 seconds in Firefox. A whole neuron is a few hundred ends. When a run finishes, the card says how long each end took and where the time went.
 
 ## With and without an assessor
 
 With `Assessor` set to "None — rank by geometry", you get the forest's ranking: where each candidate is, how far it is from the neuron, how big it is, and its place in the list. There is no probability and no cutoff, and the columns that would carry them (`p_cand`, `conf`, `q`, `r`, `shown`) are absent from the tables. The first candidate is still the most likely continuation, so a queue sorted this way is worth working through.
 
-Pick an assessor and each candidate's 4 µm patch of segmentation also goes through SEAM's network. Every candidate then carries `p_cand` and `conf`, each tip carries `p_tip`, `q` and `r`, and `shown` says whether the tip clears SEAM's calibrated cutoff. The checkpoint is a 133 MB download, kept in your browser, and `Allow model download` has to be ticked before the node fetches it. A run without it stops with an **Allow model download** button, on the card and in the notice, that ticks the box and runs again.
+With an assessor, each candidate's 4 µm patch of segmentation also goes through SEAM's network. Every candidate then carries `p_cand` and `conf`, each tip carries `p_tip`, `q` and `r`, and `shown` says whether the tip clears SEAM's calibrated cutoff. The checkpoint is a 133 MB download, kept in your browser, and `Allow model download` has to be ticked before the node fetches it. A run without it stops with an **Allow model download** button, on the card and in the notice, that ticks the box and runs again.
 
-The assessor offered is SEAM's student 1, one network trained to copy the average of SEAM's three checkpoints. It replaced the single checkpoint (seed 0) on 2026-11-20 because more of the right suggestions clear its cutoff. A graph saved with seed 0 keeps it and runs as before, and you can switch it to student 1 under `Assessor`. The two give different numbers, so a run with student 1 searches every end again.
+A new card starts on SEAM's student 1, one network trained to copy the average of SEAM's three checkpoints. It replaced the single checkpoint (seed 0) on 2026-11-20 because more of the right suggestions clear its cutoff. A graph saved with seed 0 keeps it and runs as before, and you can switch it to student 1 under `Assessor`. The two give different numbers, so a run with student 1 searches every end again.
 
 The network runs on WebGPU. On a recent laptop a patch takes about 15 ms in Chrome and about 20 ms in Firefox, so an end with 55 candidates spends about a second on the GPU. `Assess top` caps how many candidates are scored per end. It changes a few answers, so read its tooltip first.
 
@@ -44,7 +46,7 @@ The network runs on WebGPU. On a recent laptop a patch takes about 15 ms in Chro
 
 Find Merge Candidates searches every row it is given. To search fewer, cut the table above it: a [Filter Table](#core.filterTable) on `e_tip`, or a Sort and a Sample to keep the best 25.
 
-> [!IMPORTANT]
+> [!WARNING]
 > **A filtered run keeps a few candidates a whole-neuron run would drop**
 > A candidate is dropped when its contact is nearer to some *other* tip of the same neuron. The node can only compare against the tips it was given, so with most of them filtered away, a piece that belonged to one of the missing tips can show up as a suggestion for one you kept. If you are comparing against a published set, search the whole neuron.
 

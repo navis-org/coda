@@ -226,12 +226,15 @@ let claimAltDigits = false
  * the button are neuroglancer's own find-path tool, as Spelunker binds it.
  */
 let claimFindPath = false
+/** Whether the review keys are Coda's (`FrameKeysMessage.review`): only while a review card is open. */
+let claimReview = false
 
 window.addEventListener('message', (event) => {
   if (event.source !== window.parent || event.origin !== window.location.origin) return
   if (isFrameKeysMessage(event.data)) {
     claimAltDigits = event.data.altDigits
     claimFindPath = event.data.findPath === true
+    claimReview = event.data.review === true
     document.documentElement.toggleAttribute('data-coda-find-path', claimFindPath)
     return
   }
@@ -543,14 +546,14 @@ window.addEventListener(
   'keydown',
   (event) => {
     if (window.parent === window || isTypingTarget(event.target)) return
-    // ⌥1–9 only while Coda claims them; the hand-pick and review keys always, being unbound in
-    // neuroglancer.
+    // ⌥1–9 and the review keys only while Coda claims them; the hand-pick key always, being
+    // unbound in neuroglancer.
     const claimed =
       (claimAltDigits && isAltDigit(event)) ||
       isPickKey(event) ||
       isSplitKey(event) ||
       (claimFindPath && isFindPathKey(event)) ||
-      reviewKeyOf(event) !== undefined
+      (claimReview && reviewKeyOf(event) !== undefined)
     if (!claimed) return
     event.preventDefault()
     event.stopImmediatePropagation()

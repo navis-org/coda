@@ -221,14 +221,22 @@ export interface FrameKeysMessage {
   type: typeof FRAME_KEYS_MESSAGE
   altDigits: boolean
   findPath?: boolean
+  /**
+   * The review keys (`REVIEW_KEY_CODES`) only while a Proofread Merges card is open: `G` is also
+   * neuroglancer's multicut swap-group (`shift?+keyg`), which a frame claiming it always took from
+   * every CAVE card. Absent: off.
+   */
+  review?: boolean
 }
+
+const optionalFlag = (value: unknown) => value === undefined || typeof value === 'boolean'
 
 export function isFrameKeysMessage(data: unknown): data is FrameKeysMessage {
   const message = messageOf(data, FRAME_KEYS_MESSAGE)
-  const findPath = message?.['findPath']
   return (
     typeof message?.['altDigits'] === 'boolean' &&
-    (findPath === undefined || typeof findPath === 'boolean')
+    optionalFlag(message['findPath']) &&
+    optionalFlag(message['review'])
   )
 }
 
@@ -425,9 +433,10 @@ export function isFrameLayerMessage(data: unknown): data is FrameLayerMessage {
  * 2026-11-22; `ui/seam/reviewKeys.ts`). Along the top row in the buttons' order, skipping `E` and
  * `R`, with which neuroglancer rotates. **Bare letters, because nothing else is free**: neuroglancer
  * binds Shift with every letter to a tool, and its own bare letters (`A`, `B`, `L`, `S`, `X`, …)
- * would stop working while a card is open. Neither neuroglancer, Spelunker nor Coda binds these,
- * so the frame claims them always and hands them back, as it does the pick key. By position
- * (`code`), as a key handed back carries no `key`.
+ * would stop working while a card is open. Q W T Y U are unbound in neuroglancer and Spelunker;
+ * `G` is neuroglancer's multicut swap-group (`shift?+keyg`, Shift+G still does it). So the frame
+ * claims them only while a review card is open (`FrameKeysMessage.review`) and hands them back, as
+ * it does the pick key. By position (`code`), as a key handed back carries no `key`.
  */
 export const REVIEW_KEY_CODES = {
   accept: 'KeyQ',

@@ -97,6 +97,8 @@ vi.mock('./mergeSession', async (importOriginal) => ({
   openSubmit: (...args: unknown[]) => openSubmit(...args),
   closeSubmit: () => closeSubmit(),
   useSubmitState: () => submitState,
+  submitStateOf: () => submitState,
+  verdictsHeld: (await importOriginal<typeof MergeSession>()).verdictsHeld,
   useSubmitChecked: () => submitChecked,
 }))
 
@@ -1606,6 +1608,35 @@ describe('extending a neuron from the review card', () => {
     expect(button.title).toMatch(/published set cannot be extended/)
   })
 
+  /** A gap (`min_dist_um`) per candidate row, which decides where a listed piece is hung. */
+  const gapped = (table: TableValue, gaps: number[]): TableValue =>
+    makeTable(tableSchema(...table.schema.columns, column('min_dist_um', 'f64')), {
+      ...table.data,
+      min_dist_um: gaps,
+    })
+
+  /** Listed under the neuron and, nearer, under an extended piece: accepted once, not twice. */
+  it('takes J on a piece accepted at another tip to where it is accepted', async () => {
+    const FRAME = {}
+    draw(
+      { ...EXTENDED, verdicts: `${ACCEPTED};${NEURON}/${SECOND}=accept` },
+      true,
+      gapped(grownCandidates(SECOND), [0.4, 0.3, 1, 0.5]),
+      grownTips(true),
+    )
+    setHoveredSegment(FRAME, SECOND, [5000, 5000, 5000])
+    try {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyJ' }))
+      })
+      expect(decodeVerdicts(stored()['verdicts']).get(`${PIECE}/${SECOND}`)).toBeUndefined()
+      expect(stored()['current']).toBe(`${NEURON}|22`)
+      expect(useGraphStore.getState().notice).toMatch(/accepted already/)
+    } finally {
+      setHoveredSegment(FRAME, undefined)
+    }
+  })
+
   describe('Auto-extend', () => {
     const more = () =>
       rows()[0]!.querySelector<HTMLButtonElement>(
@@ -1643,6 +1674,20 @@ describe('extending a neuron from the review card', () => {
       expect(document.body.textContent).toMatch(/1 by Auto-extend/)
       // Nothing was written: an Auto-extend accept is not the reader's verdict.
       expect(stored()['verdicts']).toBe(ACCEPTED)
+    })
+
+    /** As the Accept button does: Q on an `auto` row makes the accept the reader's own. */
+    it('takes Q on what it took as the reader’s own accept', () => {
+      draw(
+        { ...PRESSED, current: `${PIECE}|11`, rank: 1 },
+        true,
+        grownCandidates(),
+        grownTips(true),
+      )
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ' }))
+      })
+      expect(stored()['verdicts']).toContain(`${PIECE}/${NEXT}=a`)
     })
 
     /** The chip takes the pointer for its title (`editor.css`), and a click on it still picks. */
@@ -2593,6 +2638,23 @@ describe('the verdict keys', () => {
       expect(notice()).toMatch(/Close the Submit window first/)
     }
     submitState = 'none'
+  })
+
+  /** The check reads the verdicts once, when it starts: one changed after is not in the plan. */
+  it('holds verdicts, but not Skip, while Submit is checking', () => {
+    submitState = 'planning'
+    try {
+      draw({ current: at(11), rank: 1 })
+      press('KeyQ')
+      expect(stored()['verdicts'] ?? '').toBe('')
+      expect(notice()).toMatch(/Submit is checking/)
+      const accept = rows()[0]!.querySelector<HTMLButtonElement>('[data-verdict="accept"]')
+      expect(accept?.disabled).toBe(true)
+      press('KeyG')
+      expect(stored()['current']).not.toBe(at(11))
+    } finally {
+      submitState = 'none'
+    }
   })
 
   it('stands down during a tour, and in an open menu', () => {

@@ -199,6 +199,8 @@ export async function assessEnd(
   try {
     request = await (box ?? startPatchBox(end, steps, options)!)
   } catch (error) {
+    // A Cancel is not a box that could not be read: it would publish this end as refused.
+    throwIfAborted(options.signal)
     /*
      * **Every candidate is "no patch" here, including the ones past the cap.** `filled` says why
      * a candidate carries the floor, and on this end the reason is the same for all of them: no

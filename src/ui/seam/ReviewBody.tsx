@@ -165,8 +165,10 @@ import {
   appendHeld,
   closeSubmit,
   openSubmit,
+  submitStateOf,
   useSubmitChecked,
   useSubmitState,
+  verdictsHeld,
 } from './mergeSession'
 import { formatNumber, plural } from '../../style/format'
 import { cycleColor } from '../../style/colors'
@@ -600,6 +602,12 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     if (next < 1 || next > here.tip.candidates.length) return
     setParam('rank', next)
   }
+  /** Whether a Submit holds the verdicts now (`verdictsHeld`), saying why on the status bar. */
+  const heldBySubmit = (): boolean => {
+    const held = verdictsHeld(submitStateOf(useGraphStore.getState().activeTabId, node.id))
+    if (held) setNotice(held)
+    return held !== undefined
+  }
   /*
    * What a press on a verdict writes, and whether it starts a search, is `judgedParams`'s to say
    * — `Auto-extend`, a large piece and a piece that cannot be extended are all read there.
@@ -611,6 +619,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     blocked: string | undefined,
     also?: Readonly<Record<string, string | number>>,
   ) => {
+    // Every verdict path comes through here — keys, buttons, J — so one guard holds them all.
+    if (heldBySubmit()) return
     const { write, search, said } = judgedParams(
       node.params,
       tip.neuronId,
@@ -663,6 +673,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
    * whenever the search next runs.
    */
   const extend = (tip: QueueTip, candidate: Candidate, choice: ExtendChoice) => {
+    // Auto-extend's accepts are in the plan too (`reviewStateOf`), so this waits as a verdict does.
+    if (heldBySubmit()) return
     const unjudgedHere = unjudged.has(verdictKey(tip.neuronId, candidate.candidateId))
     commitWork(
       extendParams(
@@ -707,6 +719,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   // This card's Submit, named by document and node: two documents can share a node id.
   const docId = useGraphStore((s) => s.activeTabId)
   const submitting = useSubmitState(docId, node.id)
+  const verdictHold = verdictsHeld(submitting)
   const deployment = target?.deployment
   // Followed, so a sign-in in the Sources panel lifts the reason at once.
   const signedIn = useSyncExternalStore(
@@ -1121,6 +1134,8 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   useEffect(() => () => pickAbort.current?.abort(), [])
   const addPick = async ({ segment: pointed, positionNm }: PointedSegment) => {
     if (neuron === undefined || checkingRef.current) return
+    // A hand pick is an accept, so it waits for a Submit as the verdict keys do.
+    if (heldBySubmit()) return
     // A followed piece is drawn as its new root: a pick on that is a pick on the piece listed.
     const drawnFor = pieceAt.get(pointed)
     if (drawnFor !== undefined && drawnFor.size > 1) {
@@ -1134,7 +1149,16 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       setNotice(`${segment} has been merged already.`)
       return
     }
-    const listed = listedAt(mine, segment)
+    /*
+     * Where it is accepted already, if anywhere: a piece listed at two tips — the neuron's and an
+     * extended piece's — is accepted at one, and accepting it at the other would merge it twice.
+     * The reader's own accept first, then Auto-extend's (which J makes the reader's, as Q does).
+     */
+    const acceptedAt = accepted.get(segment) ?? []
+    const listed =
+      acceptedAt.find((row) => verdictFor(stored, row.tip.neuronId, segment) === 'accept') ??
+      acceptedAt[0] ??
+      listedAt(mine, segment)
     if (listed) {
       const { tip, candidate } = listed
       const cursor = { current: tipKey(tip.neuronId, tip.endUid), rank: candidate.rank }
@@ -1254,10 +1278,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     /*
      * Not under a Submit window, this card's or another's: it covers the buttons, and its own
      * viewer hands the keys back like any frame — a verdict changed under the plan being confirmed
-     * or sent would not be the one merged.
+     * or sent would not be the one merged. While the check runs, nothing covers the list, so
+     * Skip still moves the cursor.
      */
-    if (submitting === 'open' || submitting === 'running' || submitting === 'other') {
-      setNotice('Close the Submit window first: the verdict keys wait until it is gone.')
+    if (verdictHold && (submitting !== 'planning' || key !== 'skip')) {
+      setNotice(verdictHold)
       return
     }
     const verdict = key === 'skip' ? undefined : key
@@ -1295,7 +1320,13 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
       current: tipKey(next.tip.neuronId, next.tip.endUid),
       rank: (next.hosted ?? next.candidate)?.rank ?? 1,
     }
-    if (verdict !== undefined && here && said !== verdict) {
+    /*
+     * Written where the reader's *own* verdict differs, not the one read with Auto-extend's: Q on
+     * an `auto` row makes the accept theirs, as the Accept button does, so it is sent to SEAM as
+     * an accept rather than as `auto-accepted`.
+     */
+    const own = here && verdictFor(stored, here.tip.neuronId, here.candidate.candidateId)
+    if (verdict !== undefined && here && own !== verdict) {
       judge(here.tip, here.candidate, verdict, blockedOf(here.candidate.candidateId), move)
     } else if (move) {
       setParams(node.id, move)
@@ -1804,18 +1835,20 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                         <VerdictButtons
                           said={said}
                           press={(verdict) =>
-                            verdictPress({
-                              verdict,
-                              done,
-                              inNeuron,
-                              goesWith,
-                              auto:
-                                autoFrom !== undefined
-                                  ? 'unjudged'
-                                  : heldBy !== undefined
-                                    ? 'judged'
-                                    : undefined,
-                            })
+                            verdictHold
+                              ? { title: verdictHold, disabled: true }
+                              : verdictPress({
+                                  verdict,
+                                  done,
+                                  inNeuron,
+                                  goesWith,
+                                  auto:
+                                    autoFrom !== undefined
+                                      ? 'unjudged'
+                                      : heldBy !== undefined
+                                        ? 'judged'
+                                        : undefined,
+                                })
                           }
                           onJudge={(verdict) => judge(tip, candidate, verdict, blocked)}
                         />

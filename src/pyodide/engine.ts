@@ -53,6 +53,16 @@ type PyLane = 'main' | 'assessor'
 /** The modules with a lane of their own; every other module runs on `'main'`. */
 const MODULE_LANES: Readonly<Record<string, PyLane>> = { assessorPatches: 'assessor' }
 
+/**
+ * Which runtime a module's lane is on: changed by every teardown (a Cancel, a crash, Stop), so a
+ * caller holding something in Python can tell it went with the worker. A close for it then has
+ * nothing to close, and sent anyway would boot a fresh runtime only to be told so — or reach a
+ * newer run's worker and close what that run holds.
+ */
+export function pythonGeneration(module: string): number {
+  return lanes[laneOf(module)].generation
+}
+
 /** Which lane a module's calls run on. Exported for its test alone. */
 export function laneOf(module: string): PyLane {
   return MODULE_LANES[module] ?? 'main'
@@ -67,9 +77,11 @@ interface Lane {
    * runtime look busy — `pythonBusy` is what decides whether it may be stopped.
    */
   readonly probes: Map<number, (bytes: number | undefined) => void>
+  /** One more each time the lane is torn down: which worker's heap a value left in Python is in. */
+  generation: number
 }
 
-const newLane = (): Lane => ({ pending: new Map(), probes: new Map() })
+const newLane = (): Lane => ({ pending: new Map(), probes: new Map(), generation: 0 })
 /** Every lane, made up front: an unused one is two empty maps, and boots nothing. */
 const lanes: Record<PyLane, Lane> = { main: newLane(), assessor: newLane() }
 let nextId = 1
@@ -85,6 +97,7 @@ function fail(lane: Lane, reason: string): void {
 function teardown(lane: Lane, reason: string): void {
   lane.worker?.terminate()
   lane.worker = undefined
+  lane.generation += 1
   fail(lane, reason)
 }
 

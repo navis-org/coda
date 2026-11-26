@@ -15,7 +15,9 @@ import {
   decodeSavedView,
   encodeSavedView,
   isAltDigit,
+  FRAME_KEYS_MESSAGE,
   isFrameHoverMessage,
+  isFrameKeysMessage,
   isPickKey,
   reviewKeyOf,
 } from './frameMessage'
@@ -1339,6 +1341,17 @@ describe('the dashboard tab keys', () => {
     expect(pick('KeyJ', { metaKey: true })).toBe(false)
     expect(pick('KeyK')).toBe(false)
     expect(press('KeyJ', { altKey: true })).toBe(false)
+  })
+
+  /** `G` is also neuroglancer's multicut swap-group: the frame claims it only when told. */
+  it('read which keys a card claims, the review keys among them', () => {
+    const keys = (more: Record<string, unknown>) =>
+      isFrameKeysMessage({ type: FRAME_KEYS_MESSAGE, altDigits: false, ...more })
+    expect(keys({})).toBe(true)
+    expect(keys({ findPath: true, review: true })).toBe(true)
+    expect(keys({ review: false })).toBe(true)
+    expect(keys({ review: 'yes' })).toBe(false)
+    expect(keys({ findPath: 1 })).toBe(false)
   })
 
   /** The review card's keys (user, 2026-11-22): bare, by position, and nothing else. */

@@ -85,13 +85,29 @@ export function preferredVariant(manifest: ModelManifest): string | undefined {
  * false negative while measuring this — so "no WebGPU" can mean "not served over https" rather
  * than "this browser cannot". The message says so, because the two are fixed differently.
  */
+/**
+ * WebGPU is there and found no graphics hardware to use. **Not the browser's fault**, so the
+ * sentence does not send the reader to another one: the machine may have no GPU WebGPU supports,
+ * the browser may have blocked its driver, hardware acceleration may be off, or it may be a
+ * virtual machine. Shared with the hand-written assessor's own device request (`network.ts`).
+ */
+export const NO_USABLE_GPU =
+  'The browser has WebGPU but found no graphics card it can use, which running a model here ' +
+  'needs. This computer may have none that WebGPU supports, its graphics driver may be too old ' +
+  'or blocked by the browser, or hardware acceleration may be switched off in the browser’s ' +
+  'settings.'
+
 export async function gpuSupport(): Promise<GpuSupport> {
   const gpu = (globalThis.navigator as Navigator | undefined)?.gpu
   if (!gpu) {
     return {
       refusal:
-        'This browser has no WebGPU, which running a model here needs. Chrome and Edge have it; ' +
-        'Safari and Firefox are adding it. A page served over plain http has it switched off too.',
+        // No list of browsers: which ones have it moves faster than this sentence would. Absent
+        // is the browser's answer, not the hardware's (that is `NO_USABLE_GPU`), so another
+        // browser can help here.
+        'This browser does not offer WebGPU, which running a model here needs. A current ' +
+        'version of a major browser does, unless it is switched off in its settings; a page ' +
+        'served over plain http has it switched off too.',
     }
   }
   let adapter: GPUAdapter | null = null
@@ -101,9 +117,7 @@ export async function gpuSupport(): Promise<GpuSupport> {
     adapter = null
   }
   if (!adapter) {
-    return {
-      refusal: 'WebGPU is present but offered no adapter, so there is no GPU to run on.',
-    }
+    return { refusal: NO_USABLE_GPU }
   }
   const info = adapter.info as { vendor?: string; architecture?: string } | undefined
   return { refusal: undefined, vendor: info?.vendor, architecture: info?.architecture }

@@ -22,7 +22,13 @@ import type { CodaType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import '../../nodes'
 import { seam } from './index'
-import { MERGE_ASSESSOR_MODELS, MERGE_RANKER_MODELS, NO_ASSESSOR } from './models'
+import {
+  CURRENT_ASSESSOR,
+  MERGE_ASSESSOR_MODELS,
+  MERGE_RANKER_MODELS,
+  NO_ASSESSOR,
+  mergeAssessorModel,
+} from './models'
 import { LINEAGE_FIELDS, SEARCH_CANDIDATE_FIELDS } from './searchTips'
 import { schemaOf } from './suggestionTables'
 
@@ -172,14 +178,18 @@ describe('the ranker param', () => {
 
 describe('the assessor param', () => {
   /**
-   * **Off by default**, which is the whole shape of the decision: the search alone is two
-   * seconds an end, and the assessor is a 133 MB download and several seconds more. A node that
-   * reached for both the moment it was dropped on a canvas would be answering a question nobody
-   * had asked yet.
+   * **The current model by default** (user, 2026-11-26): the assessor is what gives a queue its
+   * cutoff and its probabilities. Nothing is fetched for it on a drop — the node is `expensive`,
+   * and the 133 MB download waits on `Allow model download`, which is off until it is ticked —
+   * and a card saved without the param predates assessors, so it stays on None.
    */
-  it('runs no assessor unless one is picked', () => {
+  it('starts on the current model, downloads nothing unasked, and leaves an old card on None', () => {
     const param = findParam(def, 'assessor')
-    expect(param?.default).toBe(NO_ASSESSOR)
+    expect(param?.default).toBe(CURRENT_ASSESSOR)
+    expect(mergeAssessorModel(CURRENT_ASSESSOR)?.retired).toBeUndefined()
+    expect(param?.absentMeans).toBe(NO_ASSESSOR)
+    expect(findParam(def, 'download')?.default).toBe(false)
+    expect(def.cost).toBe('expensive')
     const options = param?.kind === 'enum' ? param.options : undefined
     const values = (typeof options === 'function' ? [] : (options ?? [])).map(
       (one) => one.value,

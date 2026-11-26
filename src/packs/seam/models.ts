@@ -205,6 +205,14 @@ export const MERGE_ASSESSOR_MODELS: readonly AffinityModel[] = [
   },
 ]
 
+/**
+ * The assessor a new Find Merge Candidates card starts on: the first not retired. Derived rather
+ * than named, so a refit that retires this one moves the default with it.
+ */
+export const CURRENT_ASSESSOR: string = MERGE_ASSESSOR_MODELS.find(
+  (model) => model.retired === undefined,
+)!.id
+
 /** One assessor by id, or undefined. */
 export function mergeAssessorModel(id: string): AffinityModel | undefined {
   return modelById(MERGE_ASSESSOR_MODELS, id)

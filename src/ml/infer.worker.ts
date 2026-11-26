@@ -139,15 +139,19 @@ async function open(
       const weights = await loadWeights(loaded, variant, part, {
         onProgress: (progress) => post({ id, type: 'progress', progress }),
       })
-      built.set(
-        part,
-        await runtime.InferenceSession.create(new Uint8Array(weights.bytes), {
-          executionProviders: ['webgpu'],
-        }),
-      )
-      // After the session is built, never before: the cache write is another copy of the same
-      // 385 MB, and firing it alongside `create` tripled the peak.
-      weights.remember()
+      try {
+        built.set(
+          part,
+          await runtime.InferenceSession.create(new Uint8Array(weights.bytes), {
+            executionProviders: ['webgpu'],
+          }),
+        )
+      } finally {
+        // After the session is built, never before: the cache write is another copy of the same
+        // 385 MB, and firing it alongside `create` tripled the peak. After a failed one too: the
+        // bytes are verified, so a retry should not fetch them again.
+        weights.remember()
+      }
     }
   } catch (error) {
     for (const session of built.values()) await session.release()

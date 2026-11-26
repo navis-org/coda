@@ -14,7 +14,7 @@
  * mouse is not moved off a row they are still looking at.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 
 import { isTypingTarget } from '../../core/keys'
 import type { ReviewKey } from '../../data/neuroglancer/frameMessage'
@@ -28,6 +28,22 @@ type Answer = (key: ReviewKey) => void
 
 /** Who answers, by node id, each card's surfaces in the order they mounted (as `pickers`). */
 const answerers = new Map<string, Answer[]>()
+
+/** Told when the first review card mounts or the last unmounts (`useReviewCardOpen`). */
+const openWatchers = new Set<() => void>()
+const reviewCardOpen = () => answerers.size > 0
+function onOpenChange(watcher: () => void): () => void {
+  openWatchers.add(watcher)
+  return () => openWatchers.delete(watcher)
+}
+
+/**
+ * Whether any review card is mounted, and so whether a neuroglancer frame claims the review keys
+ * (`FrameKeysMessage.review`). Off, they are neuroglancer's own: `G` is its multicut swap-group.
+ */
+export function useReviewCardOpen(): boolean {
+  return useSyncExternalStore(onOpenChange, reviewCardOpen)
+}
 
 function onKey(event: KeyboardEvent): void {
   const key = reviewKeyOf(event)
@@ -59,13 +75,18 @@ export function useReviewKeys(nodeId: string, answer: Answer): void {
   const latest = useLatest(answer)
   useEffect(() => {
     const mine: Answer = (key) => latest.current(key)
-    if (answerers.size === 0) window.addEventListener('keydown', onKey)
+    const opening = answerers.size === 0
+    if (opening) window.addEventListener('keydown', onKey)
     answerers.set(nodeId, [...(answerers.get(nodeId) ?? []), mine])
+    if (opening) openWatchers.forEach((watcher) => watcher())
     return () => {
       const left = (answerers.get(nodeId) ?? []).filter((one) => one !== mine)
       if (left.length > 0) answerers.set(nodeId, left)
       else answerers.delete(nodeId)
-      if (answerers.size === 0) window.removeEventListener('keydown', onKey)
+      if (answerers.size === 0) {
+        window.removeEventListener('keydown', onKey)
+        openWatchers.forEach((watcher) => watcher())
+      }
     }
   }, [nodeId, latest])
 }

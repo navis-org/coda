@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addNode, emptyGraph } from '../../core/graph'
+import { registerWriteOut } from '../../data/cave/editWaits'
 import type * as VerdictLog from '../../data/verdictLog'
 import '../../nodes'
 import type { BatchCallbacks, BatchResult } from '../../packs/seam/mergeBatch'
@@ -356,6 +357,23 @@ describe('Submit', () => {
     expect(currentSubmit()).toMatchObject({ running: false, progress: undefined })
     store().deleteNodes(['review'])
     expect(store().graph.nodes).toHaveLength(0)
+  })
+
+  /** The gallery stays live under the overlay, and sees no merge out until the batch starts. */
+  it('starts nothing where a split was accepted while the overlay was open', async () => {
+    await opened()
+    let splitting = true
+    registerWriteOut('split', () => (splitting ? 'A split is being written.' : undefined))
+    try {
+      expect(() => confirmSubmit([MERGE])).toThrow(/split is being written/)
+      expect(prepareMerges).not.toHaveBeenCalled()
+      expect(currentSubmit()).toMatchObject({ running: false, progress: undefined })
+      splitting = false
+      heldBatch()
+      expect(() => confirmSubmit([MERGE])).not.toThrow()
+    } finally {
+      registerWriteOut('split', () => undefined)
+    }
   })
 
   /** Two documents from one file share node ids: the press names its document too. */
