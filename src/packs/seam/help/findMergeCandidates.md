@@ -26,7 +26,7 @@ Each end is published as soon as it is finished, so the review card fills while 
 
 The `searched` column on `Tips` says where each tip stands: true once it has been searched, empty while it is still waiting, and false where it never will be. A tip is never searched when its box lies outside the segmentation volume, and the node warns about how many those were.
 
-`source` says which models a searched tip's numbers come from: `model:`, the ranker and the assessor (or `none`), each named by its id and the start of its manifest's SHA-256, for example `model:trees_sizes_tip@d0da2c7b5fe6/n3_mal_mask_s0@c1a615400751`. SEAM keeps a model's id when it refits it, so the digest is what tells two versions apart. A tip the run did not search keeps the `source` it came in with, such as a published set's.
+`source` says which models a searched tip's numbers come from: `model:`, the ranker and the assessor (or `none`), each named by its id and the start of its manifest's SHA-256, for example `model:trees_sizes_tip@d0da2c7b5fe6/n3d_mal_mask_s1@ccb50e76723b`. SEAM keeps a model's id when it refits it, so the digest is what tells two versions apart. A tip the run did not search keeps the `source` it came in with, such as a published set's.
 
 An unassessed end takes about three seconds, and a whole neuron is a few hundred ends. When a run finishes, the card says how long each end took and where the time went.
 

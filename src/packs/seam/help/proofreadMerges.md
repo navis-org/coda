@@ -18,7 +18,7 @@ review:current -> ng:control
 review:layers -> ng:layers
 ```
 
-Wire **both** of Load Merge Candidates' tables in: `Tips` is the queue and `Candidates` is what the arrows page through. The `Dataset` input is what the card's viewer needs to be a scene.
+Wire in **both** tables from [Find Merge Candidates](#seam:findMergeCandidates), which searches in the browser, or from Load Merge Candidates, which reads a published set: `Tips` is the queue and `Candidates` is what the arrows page through. The `Dataset` input is what the card's viewer needs to be a scene.
 
 The keys J, K and F, the hover, and following a multicut by itself all need Coda's own Neuroglancer, the embedded viewer that is the Neuroglancer node's default `Viewer type`. Any other viewer cannot tell the card what is under the pointer or which keys were pressed in it. If the card is wired only to such viewers, its foot says so. Reviewing and Submit still work, and an edit made there shows as an **outdated** tag to press.
 
@@ -238,7 +238,7 @@ When you start on an eleventh neuron, the one you worked on longest ago loses it
 
 **Per candidate** gives every candidate of every tip its own row, led by that candidate's `conf`. Nothing at that grain is calibrated — there is no `r` for a rank 4 — but it is how you work when the first candidate is clearly wrong and something further down is clearly right. Clicking a row opens on *that* candidate rather than on the tip's first.
 
-The filters read whichever number the row leads with, so `Min confidence` means `q` per tip and `conf` per candidate. Set it from the cutoff your set was made with (0.159 for the single-seed configuration Find Merge Candidates runs, 0.118 for SEAM's production sets) to browse just below it. `r` is never filtered or sorted on: it has only about 14 values, so thousands of tips would tie.
+The filters read whichever number the row leads with, so `Min confidence` means `q` per tip and `conf` per candidate. Set it from the cutoff your set was made with (0.156 for Find Merge Candidates with the student 1 assessor, 0.159 with the older seed 0, 0.118 for SEAM's production sets) to browse just below it. `r` is never filtered or sorted on: it has fewer than ten values, so thousands of tips would tie.
 
 ## Filtering
 

@@ -23,8 +23,8 @@ ends -> table
 `e_tip` is the model's best score within a micrometre of the tip. A higher number means the surface there looks more like a cut-off neurite — but the number itself has no calibrated meaning, and a reader should use it to decide **what to look at first**, not to decide anything on its own.
 
 > [!NOTE]
-> **The columns that are empty are empty on purpose**
-> The output carries the same columns as [Load Merge Candidates](#seam:loadMergeCandidates) — `p_tip`, `q`, `shown`, the candidate's id and its measurements — and this node fills in only `e_tip`. The rest need the stages that go looking for what each end should join to, which are not in Coda yet. They are present and null so that the table is the one [Proofread Merges](#seam:proofreadMerges) already reads, and so a column picker is offered the same choices either way.
+> **This table has no candidates in it**
+> The output holds only what this node measures: the neuron, the tip's number (`end_uid`), its `kind`, its position and `e_tip`. To find the piece each end should be merged with, wire `Tips` into [Find Merge Candidates](#seam:findMergeCandidates), which adds `p_tip`, `q`, `shown` and the candidates. [Proofread Merges](#seam:proofreadMerges) reads that node's tables, not this one.
 
 ## Rows arrive while it runs
 
@@ -32,7 +32,7 @@ A whole neuron is a few hundred windows and about a minute of scanning. You do n
 
 ## What counts as a tip
 
-Five things happen before the model sees anything, and each is SEAM's own:
+These steps happen before the model sees anything, and each is SEAM's own:
 
 - Disconnected fragments are joined end to end, with `Heal fragments` as the longest bridge allowed. A long bridge invents topology, which is why SEAM caps it at a micrometre.
 - Twigs shorter than `Prune twigs` go first. A skeleton of a segmentation sprouts single-node spurs along the backbone, and every one of them would be a false open end.

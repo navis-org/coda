@@ -330,7 +330,7 @@ export const reviewNode = packNode({
       label: 'Auto-extend min q',
       default: '',
       placeholder: 'SEAM’s cutoff',
-      help: 'The least `q` Auto-extend accepts a candidate at. Empty is SEAM’s own cutoff (0.159 for the runs Find Merge Candidates makes, 0.118 for SEAM’s published sets); a higher number makes Auto-extend take fewer, surer pieces. A number below the cutoff changes nothing, since the cutoff still applies. Changing it while an Auto-extend is running grows the tree again by the new rule; pieces it no longer takes are no longer accepted.',
+      help: 'The least `q` Auto-extend accepts a candidate at. Empty is SEAM’s own cutoff (0.156 for Find Merge Candidates with student 1, 0.118 for SEAM’s published sets); a higher number makes Auto-extend take fewer, surer pieces. A number below the cutoff changes nothing, since the cutoff still applies. Changing it while an Auto-extend is running grows the tree again by the new rule; pieces it no longer takes are no longer accepted.',
     },
     {
       id: 'minConfidence',
@@ -339,7 +339,7 @@ export const reviewNode = packNode({
       default: '',
       presentational: true,
       placeholder: '(any)',
-      help: 'List only rows whose number is at least this: per tip SEAM’s `q` for the first candidate, the score its cutoff is a value of (0.159 single seed, 0.118 production); per candidate that candidate’s `conf`. A reading aid: it changes nothing this node publishes.',
+      help: 'List only rows whose number is at least this: per tip SEAM’s `q` for the first candidate, the score its cutoff is a value of (0.156 for student 1, 0.118 for production sets); per candidate that candidate’s `conf`. A reading aid: it changes nothing this node publishes.',
     },
     {
       /*
@@ -467,14 +467,16 @@ export const reviewNode = packNode({
     const tips = ctx.input('tips')
     if (!isTableValue(tips)) {
       throw new Error(
-        'Nothing is wired into `Tips`. Wire in the Load Merge Candidates node’s Tips.',
+        'Nothing is wired into `Tips`. Wire in the Tips of a Find Merge Candidates or Load ' +
+          'Merge Candidates node.',
       )
     }
     const candidates = ctx.input('candidates')
     if (!isTableValue(candidates)) {
       throw new Error(
         'Nothing is wired into `Candidates`. The candidate lists are what the arrows page ' +
-          'through, so the node needs both of Load Merge Candidates’ tables.',
+          'through, so the node needs both tables from Find Merge Candidates or Load Merge ' +
+          'Candidates.',
       )
     }
     const built = buildQueue(tips, candidates)
