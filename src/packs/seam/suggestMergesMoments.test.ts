@@ -107,7 +107,7 @@ describe('the moment Suggest Merges searches each neuron at', () => {
     const { moments, warnings, recorded } = ask('2026-11-17T09:57:40.098Z')
     const got = await moments
     expect(warnings.join(' ')).toMatch(
-      /held “2026-11-17T09:57:40.098Z”, which is not a `root=moment` entry/,
+      /Ignored “2026-11-17T09:57:40.098Z” in `Searched at`: not a `root=moment` entry/,
     )
     expect(recorded).toHaveLength(1)
     expect(readSearchedAt(String(recorded[0]![1]))).toEqual({
@@ -124,7 +124,7 @@ describe('the moment Suggest Merges searches each neuron at', () => {
     lives.mockRejectedValueOnce(new Error('CAVE returned 503'))
     const { moments, warnings, recorded } = ask(`${OLD}=2026-11-17T08:41:00.000Z`)
     expect((await moments).get(OLD)).toBe(Date.parse('2026-11-17T08:41:00.000Z'))
-    expect(warnings.join(' ')).toMatch(/could not be asked \(CAVE returned 503\)/)
+    expect(warnings.join(' ')).toMatch(/Could not check .* edited \(CAVE returned 503\)/)
     expect(recorded).toEqual([])
   })
 

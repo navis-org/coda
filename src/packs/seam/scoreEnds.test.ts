@@ -222,15 +222,14 @@ describe('reportOnRun', () => {
    * Every end missing its own neuron. Each neuron is read at its own moment, so the cause left
    * is tips that are not on it — and advice about the cache beside that is noise.
    */
-  it('names tips that are not on the neuron, and says nothing of the cache, where no end was measured', () => {
+  it('names tips that are not on the neuron where no end found it', () => {
     const { said, warner } = warnings()
     const missing = { ...tip(null), end: { ...end([]), missingQuery: true } } as PublishedEnd
-    reportOnRun(warner, [missing, missing], { asked: 200, hits: 0, budget: 512 * 1024 * 1024 })
+    reportOnRun(warner, [missing, missing])
     const text = said.join(' ')
     expect(text).toMatch(/None of the 2 open ends had its own neuron/)
-    expect(text).toMatch(/tips that are not on it/)
+    expect(text).toMatch(/probably not on this neuron/)
     expect(text).not.toMatch(/materialization/)
-    expect(text).not.toMatch(/`Chunk cache`/)
   })
 
   /**
@@ -245,16 +244,14 @@ describe('reportOnRun', () => {
   })
 
   /**
-   * **A run where nothing was scored reports the floor and nothing else.** The tally sentence
-   * is for a run that assessed real candidates and showed none of them — here there were none
-   * to assess, so "none cleared the cutoff" would be true and useless, and would sit next to a
-   * sentence already saying why. (The name said "says nothing"; the assertion never did.)
+   * **A wholly capped run says nothing.** The reader set `Assess top`, so a sentence about the
+   * candidates past it says what they already know (user, 2026-11-26) — and "none cleared the
+   * cutoff" would be true and useless where nothing was assessed.
    */
-  it('reports the floor but does not call a wholly capped run an empty one', () => {
+  it('says nothing about a wholly capped run', () => {
     const { said, warner } = warnings()
     reportOnRun(warner, [tip(false, ['capped']), tip(false, ['capped'])])
-    expect(said.join(' ')).toMatch(/took the checkpoint’s lowest score/)
-    expect(said.join(' ')).not.toMatch(/None of the/)
+    expect(said).toEqual([])
   })
 
   /**
@@ -270,77 +267,21 @@ describe('reportOnRun', () => {
     }
     const some = warnings()
     reportOnRun(some.warner, [refused(), tip(true), tip(true)])
-    expect(some.said.join(' ')).toMatch(/1 of the 3 searched ends could not have a patch box/)
+    expect(some.said.join(' ')).toMatch(
+      /No patch box could be read for 1 of the 3 searched ends, so that tip is ranked/,
+    )
 
     const every = warnings()
     reportOnRun(every.warner, [refused(), refused()])
-    expect(every.said.join(' ')).toMatch(/No patch box could be read around any of the 2/)
-    expect(every.said.join(' ')).not.toMatch(/could have a patch box/)
+    expect(every.said.join(' ')).toMatch(
+      /No patch box could be read for any of the 2 searched ends, so those tips are ranked/,
+    )
   })
 
-  it('names the two reasons a candidate carried the floor apart', () => {
+  it('says which candidates had no patch to cut, and not which were capped', () => {
     const { said, warner } = warnings()
     reportOnRun(warner, [tip(true, ['', 'capped', 'no patch'])])
-    expect(said.join(' ')).toMatch(/1 past `Assess top`/)
-    expect(said.join(' ')).toMatch(/1 with no patch to cut/)
-  })
-
-  /**
-   * The chunk cache's own tally. The run is bandwidth-bound and a chunk is wider than either box
-   * an end reads, so a poor hit rate is not a fact about the data — it is a budget too small to
-   * hold one end's working set, or ends arriving in an order that defeats one. Both are the
-   * reader's to fix, and this is the only place either is visible.
-   */
-  describe('what it says about the reading', () => {
-    const MB = 1024 * 1024
-    /** A cache that was switched on, unless the test says otherwise. */
-    const reads = (asked: number, hits: number, budget = 512 * MB) => ({ asked, hits, budget })
-
-    it('says nothing about a cache that is doing its job', () => {
-      const { said, warner } = warnings()
-      reportOnRun(warner, [tip(true)], reads(200, 150))
-      expect(said).toEqual([])
-    })
-
-    it('names the share and both ways to fix it when most reads miss', () => {
-      const { said, warner } = warnings()
-      reportOnRun(warner, [tip(true)], reads(200, 40))
-      const text = said.join(' ')
-      expect(text).toMatch(/160 chunks of segmentation were fetched/)
-      expect(text).toMatch(/20% of its reads/)
-      expect(text).toMatch(/`Chunk cache`/)
-      expect(text).toMatch(/`Sort` above this node/)
-    })
-
-    /**
-     * **A reader who set `Chunk cache` to 0 made a decision.** At that budget every `set` is
-     * refused and every `get` misses, so the counters are indistinguishable from a cache doing
-     * badly — and advice to raise a number they chose, perhaps because the machine has no
-     * memory to spare, is the sentence `docs/limits.md` says teaches a reader to dismiss the
-     * next one.
-     */
-    it('says nothing to a reader who turned the cache off', () => {
-      const { said, warner } = warnings()
-      reportOnRun(warner, [tip(true)], reads(200, 0, 0))
-      expect(said).toEqual([])
-    })
-
-    /**
-     * A run of two ends is about 48 reads and its first box can hit nothing, so a short run is
-     * *expected* to look bad. Reporting there would teach a reader to dismiss the sentence,
-     * which `docs/limits.md` records as the way a warning stops working.
-     */
-    it('stays quiet on a run too short for the share to mean anything', () => {
-      const { said, warner } = warnings()
-      reportOnRun(warner, [tip(true)], reads(24, 0))
-      expect(said).toEqual([])
-    })
-
-    /** A run with no cache at all — a probe, a test — reports nothing rather than 0%. */
-    it('says nothing where no cache was passed', () => {
-      const { said, warner } = warnings()
-      reportOnRun(warner, [tip(true)])
-      expect(said).toEqual([])
-    })
+    expect(said.join(' ')).toMatch(/1 of 3 candidates had no patch to cut/)
+    expect(said.join(' ')).not.toMatch(/Assess top/)
   })
 })

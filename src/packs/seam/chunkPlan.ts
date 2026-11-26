@@ -56,7 +56,7 @@ export interface ChunkPlan {
   /**
    * How many distinct chunks the plan covers. **For tests.**
    *
-   * Not for a run's report: `reportOnReads` speaks about the *cache*'s `asked` and `hits`, and
+   * Not for a run's report: the timing report (`runClock.ts`) speaks about the *cache*'s `asked` and `hits`, and
    * nothing in a run holds a `ChunkPlan` — the volume keeps it private behind `planEnds`.
    */
   readonly chunks: number

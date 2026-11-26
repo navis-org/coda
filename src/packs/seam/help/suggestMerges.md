@@ -28,7 +28,7 @@ The `searched` column on `Tips` says where each tip stands: true once it has bee
 
 `source` says which models a searched tip's numbers come from: `model:`, the ranker and the assessor (or `none`), each named by its id and the start of its manifest's SHA-256, for example `model:trees_sizes_tip@d0da2c7b5fe6/n3_mal_mask_s0@c1a615400751`. SEAM keeps a model's id when it refits it, so the digest is what tells two versions apart. A tip the run did not search keeps the `source` it came in with, such as a published set's.
 
-An unassessed end takes about three seconds. A whole neuron is a few hundred ends, so the node warns before a long run and then runs anyway.
+An unassessed end takes about three seconds, and a whole neuron is a few hundred ends. When a run finishes, the card says how long each end took and where the time went.
 
 ## With and without an assessor
 
@@ -50,7 +50,7 @@ Suggest Merges searches every row it is given. To search fewer, cut the table ab
 
 ## Which moment is searched
 
-Each neuron is searched as it stood at one moment, which follows the neuron rather than the Dataset. The first run that meets a neuron searches it at the present and keeps that moment in the document, in `Searched at`. The same suggestions then come back after a reload, and when you return to the neuron from another one. On a dataset with a chunkedgraph, the Dataset's materialization does not change what is searched, so it can stay on "Latest".
+Each neuron is searched as it stood at one moment, which follows the neuron rather than the Dataset. The first run that meets a neuron searches it at the present and keeps that moment in the document, in `Searched at` (shown in the inspector). The same suggestions then come back after a reload, and when you return to the neuron from another one. On a dataset with a chunkedgraph, the Dataset's materialization does not change what is searched, so it can stay on "Latest".
 
 If a neuron has been edited since its moment, by you through the review card or by somebody else, the card says so. A root that has been replaced is searched as it last stood. To search the neuron as it is now, run [Update Root IDs](#cave.updateRootIds) above `Tips`: the new root is met for the first time and searched at the present.
 

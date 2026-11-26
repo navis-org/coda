@@ -11,9 +11,7 @@
  * `seam:review` take either. It cannot be checked by reading one file.
  */
 
-import { describe, expect, it, vi } from 'vitest'
-
-import * as support from '../../ml/support'
+import { describe, expect, it } from 'vitest'
 
 import { defaultParams, findParam, makeInferContext } from '../../core/node'
 import type { ParamValues } from '../../core/node'
@@ -27,8 +25,6 @@ import { seam } from './index'
 import { MERGE_ASSESSOR_MODELS, MERGE_RANKER_MODELS, NO_ASSESSOR } from './models'
 import { LINEAGE_FIELDS, SEARCH_CANDIDATE_FIELDS } from './searchTips'
 import { schemaOf } from './suggestionTables'
-import { SECONDS_PER_END, secondsPerEnd } from './suggestMerges'
-import { WAIT_WARN_SECONDS } from '../../core/limits'
 
 const def = requireNodeDef('seam:suggestMerges')
 
@@ -104,7 +100,8 @@ describe('Searched at', () => {
    * A record the run keeps of each neuron's moment (`docs/seam-live-plan.md`): out of the key,
    * or writing it mid-run would re-run the node and the review card for a record of what they
    * had just done; unrecorded, or undo would take it back; internal, or the card would offer it
-   * for editing, and an edit by hand re-runs nothing.
+   * for editing, and an edit by hand re-runs nothing; advanced, so it is drawn in the inspector
+   * and never on the card.
    */
   it('is a run record, out of the key, kept off the card and out of undo', () => {
     expect(findParam(def, 'at')).toMatchObject({
@@ -112,6 +109,7 @@ describe('Searched at', () => {
       presentational: true,
       unrecorded: true,
       internal: true,
+      advanced: true,
       absentMeans: '',
     })
   })
@@ -240,101 +238,5 @@ describe('the assessor param', () => {
     for (const name of ['segclr', 'p_tip', 'p_top', 'q', 'r', 'shown']) {
       expect(columnNames(out.tips!.schema!), name).toContain(name)
     }
-  })
-})
-
-describe('the wait it prices', () => {
-  /** How many ends of each kind it takes to cross the wait the node may stay silent about. */
-  const endsBeforeWarning = (assessed: boolean, top = 0) =>
-    WAIT_WARN_SECONDS / secondsPerEnd(assessed, top)
-
-  /**
-   * A guard rail warns and runs anyway (`docs/limits.md`), so what matters is *when*. One end is
-   * a box over the network and a Pyodide measure; a handful should pass in silence and a whole
-   * neuron's worth should not.
-   */
-  it('says nothing about a handful of ends and does about a neuron’s worth', () => {
-    expect(20 * secondsPerEnd(false, 0)).toBeLessThan(WAIT_WARN_SECONDS)
-    expect(500 * secondsPerEnd(false, 0)).toBeGreaterThan(WAIT_WARN_SECONDS)
-  })
-
-  /**
-   * **The relationship, not the ratio.** An assessed end reads a second box and runs a network
-   * over every candidate, so it must cost meaningfully more and must therefore warn sooner —
-   * but *how much* more is a measurement that has already moved once: the hand-written WebGPU
-   * runtime took a patch from 136 ms to 26.5, which dropped an assessed end from about 4x a
-   * searched one to about 2x. Pinning the ratio would have made that a test failure to be
-   * edited past rather than a fact to be read.
-   */
-  it('prices an assessed end above a searched one, and warns sooner for it', () => {
-    expect(secondsPerEnd(true, 0)).toBeGreaterThan(secondsPerEnd(false, 0))
-    // Sooner, with no factor: a factor of 1.5 stood here until the organelle measure added 260 ms
-    // to every end (2026-11-17) and took the measured ratio to 1.49 — the move the note above
-    // says a ratio must not be pinned against.
-    expect(endsBeforeWarning(true)).toBeLessThan(endsBeforeWarning(false))
-    // And a neuron is hundreds of ends, so an assessed whole neuron is always worth a word.
-    expect(endsBeforeWarning(true)).toBeLessThan(500)
-  })
-
-  /** The cap is a lever on the price, so it has to move it — and only downwards. */
-  it('prices a capped run below an uncapped one, and never below the search itself', () => {
-    expect(secondsPerEnd(true, 10)).toBeLessThan(secondsPerEnd(true, 0))
-    expect(secondsPerEnd(true, 10)).toBeGreaterThan(SECONDS_PER_END)
-    // A cap longer than a list costs what no cap costs: there is nothing left to leave out.
-    expect(secondsPerEnd(true, 1000)).toBe(secondsPerEnd(true, 0))
-  })
-
-  /**
-   * **What the cap is worth is a property of the browser, and the model prices one of them.**
-   *
-   * This test has now been wrong in both directions, which is the part worth keeping. It first
-   * asserted that no cap could save more than a quarter of a run, on the reasoning that three of
-   * an assessed end's four seconds were box reads. Then a reader's 50 ends put the network at
-   * 46% of 11.0 s each — 91 ms a patch — and capping at 10 took them to 4.5 s, so the bound was
-   * raised to a third on the belief that the first machine's 26.5 ms had been a defect in this
-   * loop. It was neither a defect nor a second machine: the two readings are **Chrome and
-   * Firefox on the same laptop**, 27 ms a patch against 98, and `slowGpuDispatch` is where that
-   * measurement now lives.
-   *
-   * So the number this asserts is a fact about one browser and would be wrong on the other, and
-   * pinning either figure is what produced two wrong tests. What is pinned instead is the
-   * **shape**: the cap saves real time, it does not save most of a run, and it never promises
-   * back the reads, which no cap touches. A model that priced patches as free would fail the
-   * first; one that priced an end as nothing but patches would fail the other two.
-   */
-  /**
-   * **The browser is the biggest single factor in this sum, and the node already knows it.**
-   * 27 ms a patch in Chrome against 98 in Firefox on one GPU. Priced at the fast rate for
-   * everyone, the warning under-stated a long Firefox run by well over half — the one direction
-   * `docs/limits.md` says a guard rail must not fail in.
-   */
-  it('prices an assessed end by the reader\u2019s own browser', () => {
-    const chrome = secondsPerEnd(true, 0)
-    const geometryOnly = secondsPerEnd(false, 0)
-    try {
-      vi.spyOn(support, 'slowGpuDispatch').mockReturnValue(true)
-      const firefox = secondsPerEnd(true, 0)
-      expect(firefox).toBeGreaterThan(chrome)
-      // The patches are the whole of the difference: a box read does not care which browser.
-      expect(secondsPerEnd(false, 0)).toBe(geometryOnly)
-      // And the cap bites harder there, which is what the `Assess top` help promises.
-      expect(firefox - secondsPerEnd(true, 10)).toBeGreaterThan(
-        chrome - secondsPerEnd(true, 10),
-      )
-    } finally {
-      vi.restoreAllMocks()
-    }
-  })
-
-  it('prices the cap as a real saving that is not the whole run, and never the reads', () => {
-    const saved = 1 - secondsPerEnd(true, 10) / secondsPerEnd(true, 0)
-    // Real: a model that called a cap of 10 noise would be advertising a control that does
-    // nothing. On the measured Chrome run this is 23%.
-    expect(saved).toBeGreaterThan(0.1)
-    // And not the run: most of an assessed end is the two boxes it reads, on the browser this
-    // is priced for. A model drifting past this is one pricing an end as patches alone.
-    expect(saved).toBeLessThan(0.5)
-    // The two boxes and the pool survive any cap, so a run can never be cut to nothing.
-    expect(secondsPerEnd(true, 10)).toBeGreaterThan(SECONDS_PER_END)
   })
 })

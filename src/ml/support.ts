@@ -110,31 +110,12 @@ export async function gpuSupport(): Promise<GpuSupport> {
 }
 
 /**
- * Whether this browser answers a wait for the GPU slowly, whatever the work: Firefox.
+ * Firefox, by name: what the measurement below was taken in, and all it claims.
  *
- * **Measured, in both browsers** (2026-11-19, `pnpm probe:gpu-browsers`,
- * `docs/seam-assessor-speed.md` §16). Firefox answers every wait — `mapAsync`,
- * `onSubmittedWorkDone`, an empty submit included — in ~100 ms; Chrome in under one. Code that
- * waits once per item pays it per item: SEAM's assessor took 98 ms a patch in Firefox against 27
- * in Chrome until it kept patches in flight, and 29 against 19 once it did. It took a probe that could
- * drive Firefox to see it: a ladder of nine rungs in Chrome (`pnpm probe:assessor-gap`) had
- * cleared everything around the network and could not look inside the other browser.
- *
- * **Asked by name, which nothing else in this file does.** Every other question here is a
- * capability — is there an adapter, does the backend implement this op — and the browser answers
- * it. This one has no feature to ask about: the API is present and correct, the shaders compile,
- * the answers are identical to the last bit, and only the clock is different. The alternative is
- * to run the network and time it, which costs a 133 MB download before anything can be said.
- *
- * It names only Firefox because Firefox is what was measured. Safari's WebGPU may well be in the
- * same position and is deliberately not claimed here — `docs/ml.md`'s rule is that a figure in
- * this repo was taken rather than reasoned forward.
+ * Firefox also answers every wait for the GPU in ~100 ms whatever the work, which is why SEAM's
+ * assessor keeps patches in flight (`docs/seam-assessor-speed.md` §16). That one is a fact about
+ * waiting, not about shaders, and nothing asks it by name any more.
  */
-export function slowGpuDispatch(): boolean {
-  return firefox()
-}
-
-/** Firefox, by name: what both measurements here were taken in, and all either claims. */
 function firefox(): boolean {
   const agent = (globalThis.navigator as Navigator | undefined)?.userAgent
   return typeof agent === 'string' && agent.includes('Firefox/')
@@ -152,10 +133,8 @@ function firefox(): boolean {
  * written out saved it 3.4 ms while costing Chrome 2%. So a kernel has a second form for this
  * browser — less workgroup memory, the hot loop written out — and this says when to build it.
  *
- * Asked by name for `slowGpuDispatch`'s reason: there is no feature to ask about. The shaders
- * compile and answer the same to the bit; only the clock differs. **A second question about the
- * same browser, not the same question** — were Firefox's waits fixed tomorrow, its translator
- * would be no quicker with a loop.
+ * Asked by name because there is no feature to ask about: the shaders compile and answer the
+ * same to the bit; only the clock differs.
  */
 export function frugalShaders(): boolean {
   return firefox() && onMac()

@@ -107,7 +107,41 @@ export interface RunClock {
    * here, because it says how much of a stage is already hidden behind another and therefore
    * whether attacking it would buy anything.
    */
-  report(run: { ends: number; patches: number }): TimingReport | undefined
+  report(run: {
+    ends: number
+    patches: number
+    /** The chunk cache's counters, where the run had one (`ChunkCache`). */
+    reads?: ChunkReads
+  }): TimingReport | undefined
+}
+
+/** What the report needs of a chunk cache: its counters and whether it was switched on at all. */
+export interface ChunkReads {
+  readonly asked: number
+  readonly hits: number
+  readonly budget: number
+}
+
+/**
+ * How many chunk reads a run needs before its cache's hit rate is worth a clause.
+ *
+ * One end's two boxes are about 24 reads and the first of them can hit nothing, so a run of a
+ * couple of ends is *expected* to look bad. Forty is a few ends in, by which point the number
+ * says something about the walk rather than about its start.
+ */
+const READS_WORTH_REPORTING = 40
+
+/**
+ * The cache's share of the reads, as a clause of the timing sentence — or nothing.
+ *
+ * **A clause, not a warning of its own** (user, 2026-11-26): it is a debugging number like the
+ * rest of the sentence, and the lever it points at (`Chunk cache`) is already named there. Silent
+ * for a cache switched off (`budget` 0 is a decision, and every read would miss) and for a run
+ * too short for the share to mean anything.
+ */
+function cacheClause(reads: ChunkReads | undefined): string {
+  if (!reads || reads.budget === 0 || reads.asked < READS_WORTH_REPORTING) return ''
+  return `; \`Chunk cache\` answered ${Math.round((100 * reads.hits) / reads.asked)}% of reads`
 }
 
 /**
@@ -169,7 +203,7 @@ const OVERLAP_WORTH_SAYING = 0.05
  *
  * The answer was a fourth explanation this line cannot distinguish and the reader could:
  * **two browsers**, 27 ms a patch in Chrome against 98 in Firefox on one laptop and one GPU
- * (`slowGpuDispatch`). What made it findable was that a reader could report what their machine
+ * (`docs/seam-assessor-speed.md`). What made it findable was that a reader could report what their machine
  * did in the one unit that compares against anything, without this file knowing which browser
  * they were in. (And the browser was not the end of it: driven directly, Firefox waits ~100 ms
  * for any GPU answer, which keeping patches in flight shares out — 29 ms a patch since.)
@@ -255,7 +289,7 @@ export function runClock(now: () => number = () => performance.now()): RunClock 
     },
     spend: add,
     spent: (stage) => spent.get(stage) ?? 0,
-    report({ ends, patches }) {
+    report({ ends, patches, reads }) {
       const elapsed = now() - startedAt
       let total = 0
       for (const ms of spent.values()) total += ms
@@ -310,8 +344,11 @@ export function runClock(now: () => number = () => performance.now()): RunClock 
         .map(([stage, ms]) => `${stage} (${Math.round((100 * ms) / total)}%)`)
       return {
         said:
-          `${each}, mostly ${most.join(' and ')}. To speed this up, raise \`Chunk cache\`, ` +
-          'lower `Assess top`, or search fewer ends with a `Filter Table` above this node.',
+          `${each}, mostly ${most.join(' and ')}${cacheClause(reads)}. To speed this up, ` +
+          // `Assess top` only where something was assessed: it is hidden otherwise.
+          (patches > 0
+            ? 'raise `Chunk cache`, lower `Assess top`, or filter the ends above this node.'
+            : 'raise `Chunk cache`, or filter the ends above this node.'),
         detail:
           `${each}. The stages this node times come to ` +
           `${(total / 1000 / ends).toFixed(1)} s of work an end${alongside}, in ms: ` +

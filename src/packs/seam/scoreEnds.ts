@@ -23,7 +23,6 @@
 
 import type { Warner } from '../../core/limits'
 import { agree, plural } from '../../style/format'
-import type { ChunkCache } from '../../data/precomputed/chunkCache'
 import type { Triple } from '../../data/precomputed/volume'
 import type { PipelineFits } from './pipelineFits'
 import type { SearchedEnd } from './searchRun'
@@ -144,9 +143,6 @@ export function contactsOf(end: SearchedEnd): Triple[] {
   return out
 }
 
-/** What the warnings need of a cache: its counters and whether it was switched on at all. */
-type ChunkReads = Pick<ChunkCache, 'asked' | 'hits' | 'budget'>
-
 /**
  * What the run found, as warnings a reader can act on.
  *
@@ -161,77 +157,11 @@ type ChunkReads = Pick<ChunkCache, 'asked' | 'hits' | 'budget'>
  * to dismiss the next one". A run that went well says nothing here; what it found is in the
  * table, and `seam:review` is the surface that counts it.
  */
-export function reportOnRun(
-  warner: Warner,
-  ends: readonly PublishedEnd[],
-  chunks?: ChunkReads,
-): void {
+export function reportOnRun(warner: Warner, ends: readonly PublishedEnd[]): void {
   reportOnSearch(warner, ends)
   reportOnScores(warner, ends)
-  /*
-   * **Not where no end was measured.** Advice about the cache beside "none of the ends had its
-   * own neuron in the box" is noise: the reads were real, but the run has nothing to show for
-   * them that a faster read would bring sooner (`docs/seam-live-plan.md`, phase 4).
-   */
-  if (ends.some(({ end }) => !end.missingQuery && end.refusal === undefined)) {
-    reportOnReads(warner, chunks)
-  }
+  // How well the chunk cache did is a clause of the timing report (`runClock.ts`), not a warning.
 }
-
-/**
- * How much of the segmentation this run fetched twice — the one number that decides whether to
- * spend more memory, said only where there is something to spend it on.
- *
- * The run is bandwidth-bound: a chunk of the Aedes segmentation is wider than either box an end
- * reads, so a cache that holds a neighbourhood turns most of the reading into a map lookup (a
- * search box measured 89 ms held against ~1300 ms over the wire). Which means a *poor* hit rate
- * is not a fact about the data but a thing the reader can fix, in one of two ways — and this is
- * the only place either is visible.
- *
- * Conditional twice over, which is this file's rule: nothing is said about a run too short for
- * the answer to be stable, and nothing about one whose cache was already doing its job.
- */
-function reportOnReads(warner: Warner, chunks?: ChunkReads): void {
-  if (!chunks || chunks.asked < READS_WORTH_REPORTING) return
-  /*
-   * **Nothing to say to a reader who turned the cache off.** At a budget of zero every `set` is
-   * refused and every `get` misses, so the share is 0 and this would fire on every run over
-   * forty reads — advice to raise a number they set deliberately, perhaps because the machine
-   * has no memory to spare. `docs/limits.md` records what a channel that speaks when there is
-   * nothing to do teaches a reader to do with the next one.
-   */
-  if (chunks.budget === 0) return
-  const share = chunks.hits / chunks.asked
-  if (share >= POOR_HIT_SHARE) return
-  const missed = chunks.asked - chunks.hits
-  warner.warn(
-    `${plural(missed, 'chunk')} of segmentation ${agree(missed, 'was', 'were')} fetched that ` +
-      `\`Chunk cache\` did not hold — ${Math.round(100 * share)}% of its reads were answered ` +
-      'from memory. Raising it is the direct fix — then Clear Cache and run again, since ends ' +
-      'already searched are remembered and read nothing; the other is the order the ends arrive in, ' +
-      'since a `Sort` above this node scatters ends that lie beside each other in the volume ' +
-      'and a cache cannot make a scattered walk local.',
-  )
-}
-
-/**
- * How many chunk reads a run needs before its hit rate is worth reporting.
- *
- * One end's two boxes are about 24 reads and the first of them can hit nothing, so a run of a
- * couple of ends is *expected* to look bad. Forty is a few ends in, by which point the number
- * says something about the walk rather than about its start.
- */
-const READS_WORTH_REPORTING = 40
-
-/**
- * The share below which the cache is worth a sentence.
- *
- * Half, because the guaranteed part is already more than that: an end's patch box is drawn
- * inside the search box it follows, so a cache holding one end answers those reads whatever the
- * walk does next. Under a half means it is not even managing that — the budget is too small to
- * hold one end's working set, or the ends are arriving in an order that defeats it.
- */
-const POOR_HIT_SHARE = 0.5
 
 /**
  * The search's own two failures.
@@ -252,15 +182,15 @@ function reportOnSearch(warner: Warner, ends: readonly PublishedEnd[]): void {
   }
   if (missing === ends.length && ends.length > 0) {
     warner.warn(
-      `None of the ${plural(ends.length, 'open end')} had its own neuron in the box around it, ` +
-        'so there was nothing to measure a candidate against. Each neuron was read as it stood ' +
-        'at its moment in `Searched at`, so the usual cause is tips that are not on it: a ' +
-        '`Tips` table from another neuron, or positions that are not in nanometres.',
+      `None of the ${plural(ends.length, 'open end')} had its own neuron in its search box, so ` +
+        'nothing could be searched. The tips are probably not on this neuron: a `Tips` table ' +
+        'from another neuron, or positions not in nanometres.',
     )
   } else if (missing > 0) {
     warner.warn(
-      `${plural(missing, 'open end')} had no voxel of its own neuron in the box around it, so ` +
-        `${agree(missing, 'it has', 'they have')} no candidates. The rest were searched.`,
+      `${plural(missing, 'open end')} had no voxel of ${agree(missing, 'its', 'their')} own ` +
+        `neuron in ${agree(missing, 'its', 'their')} search box, so ` +
+        `${agree(missing, 'it has', 'they have')} no candidates.`,
     )
   }
   /*
@@ -272,8 +202,8 @@ function reportOnSearch(warner: Warner, ends: readonly PublishedEnd[]): void {
   if (refused.length === 0) return
   const scale = refused.length === ends.length ? 'Every one of the' : `${refused.length} of the`
   warner.warn(
-    `${scale} ${plural(ends.length, 'open end')} could not be sized: ${refused[0]!}. ` +
-      `${agree(refused.length, 'It has', 'They have')} no candidates; the rest were searched.`,
+    `${scale} ${plural(ends.length, 'open end')} could not be sized, so ` +
+      `${agree(refused.length, 'it has', 'they have')} no candidates. For example: ${refused[0]!}.`,
   )
 }
 
@@ -309,21 +239,24 @@ function reportOnScores(warner: Warner, ends: readonly PublishedEnd[]): void {
      * whose whole job is to say what happened. `reportOnSearch`'s sibling got this right and
      * this one did not, which is what two sentences sharing a shape and not a statement does.
      */
-    const all = refused.length === scored.length
-    const scale = all
-      ? `No patch box could be read around any of the ${plural(scored.length, 'searched end')}`
-      : `${refused.length} of the ${plural(scored.length, 'searched end')} could not have a ` +
-        'patch box read around ' +
-        agree(refused.length, 'it', 'them')
+    const scale =
+      refused.length === scored.length
+        ? `No patch box could be read for any of the ${plural(scored.length, 'searched end')}`
+        : `No patch box could be read for ${refused.length} of the ` +
+          plural(scored.length, 'searched end')
     warner.warn(
-      `${scale}: ${refused[0]!}. Every candidate there carries the checkpoint’s floor, so ` +
-        `${agree(refused.length, 'that tip is', 'those tips are')} ranked by geometry alone.`,
+      `${scale}, so ${agree(refused.length, 'that tip is', 'those tips are')} ranked by ` +
+        `geometry only. For example: ${refused[0]!}.`,
     )
   }
 
   /*
    * Counting the **published words**, which is what makes this honest: `WhyFilled` is a union,
    * so a reworded cause is a type error here rather than a tally that quietly goes to zero.
+   *
+   * **Only `no patch` is said** (user, 2026-11-26). A candidate past `Assess top` is one the
+   * reader chose not to assess, so a sentence about it on every capped run says what they
+   * already know; `filled` still marks it.
    */
   let capped = 0
   let noPatch = 0
@@ -335,14 +268,11 @@ function reportOnScores(warner: Warner, ends: readonly PublishedEnd[]): void {
       else if (why === 'no patch') noPatch += 1
     }
   }
-  if (capped + noPatch > 0) {
-    const parts: string[] = []
-    if (capped > 0) parts.push(`${capped} past \`Assess top\``)
-    if (noPatch > 0) parts.push(`${noPatch} with no patch to cut`)
+  if (noPatch > 0) {
     warner.warn(
-      `${capped + noPatch} of ${plural(candidates, 'candidate')} took the checkpoint’s lowest ` +
-        `score instead of being assessed — ${parts.join(', ')}. They are still ranked and ` +
-        'still carry a share of their tip, marked in `filled`.',
+      `${noPatch} of ${plural(candidates, 'candidate')} had no patch to cut, so ` +
+        `${agree(noPatch, 'it was', 'they were')} given the assessor’s lowest score ` +
+        '(marked in `filled`).',
     )
   }
 
@@ -351,8 +281,8 @@ function reportOnScores(warner: Warner, ends: readonly PublishedEnd[]): void {
   if (decided.length > 0 && shown === 0 && candidates > capped + noPatch) {
     warner.warn(
       `None of the ${plural(decided.length, 'assessed tip')} has a first candidate above the ` +
-        'cutoff this model was fitted with, so the queue is a ranking without a recommendation. ' +
-        'That is an ordinary answer on a neuron with little left to merge.',
+        'model’s cutoff, so nothing is recommended. That is normal for a neuron with little ' +
+        'left to merge.',
     )
   }
 }

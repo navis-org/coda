@@ -45,7 +45,7 @@
  * Firefox was 98 ms a patch and 6.2 s an end until the patches were kept in flight — every wait
  * for the GPU costs it ~100 ms, and the network had waited once a patch — and 30 ms over the same 60
  * ends until stage 0 skipped its background and the kernels took the forms Firefox is quick with;
- * `SLOW_SECONDS_PER_PATCH` has the story. The card once told Firefox
+ * `docs/seam-assessor-speed.md` has the story. The card once told Firefox
  * readers to try Chrome; at 1.2x an end that would overstate it, so it no longer does. The
  * checkpoint is a 133 MB download. The network is Coda's own WGSL implementation rather than
  * ONNX Runtime — 14 ms a patch against 134 — so most of an assessed end is the two boxes it
@@ -54,7 +54,7 @@
  * `Assess top` caps the patches per end; what the cap costs in answers is measured on SEAM's own
  * set, in `assessEnds.ts`' header, and the part worth knowing is that it does not only lose
  * suggestions, it invents a few. Since the runtime changed it also buys much less than it used
- * to — see `CANDIDATES_PER_END`.
+ * to.
  *
  * ## It does not cut the **ends**, and that is the lesson from `seam:findMerges`
  *
@@ -62,8 +62,9 @@
  * narrow them. It is not this node. `seam:findMerges` shipped a `Score cutoff` inside an
  * expensive node, and the cost was that every nudge re-ran the whole thing and a discarded
  * answer looked like a verdict the model had given. Narrowing here is a `Filter Table` on `e_tip`
- * above this node, where the cut is a thing somebody did. What this node has instead is a guard
- * rail: it prices the wait and warns, and runs anyway (`docs/limits.md`).
+ * above this node, where the cut is a thing somebody did. It used to price the wait and warn
+ * before a long run; it no longer does (user, 2026-11-26), since the ends stream in as they
+ * finish and the estimate was calibrated on one laptop. The timing report after a run stays.
  *
  * **Narrowing the ends also narrows the own-tip rule, and that is not a bug to fix here.** The
  * rule drops a candidate whose contact is nearer some *other* tip of the neuron, and the only
@@ -84,12 +85,10 @@
 import type { EvalContext, ParamValues } from '../../core/node'
 import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
-import { warnOverWait } from '../../core/limits'
 import { errorMessage } from '../../core/errors'
 import { LruMap } from '../../core/lruMap'
 import type { TableValue } from '../../core/values'
 import { isTableValue } from '../../core/values'
-import { slowGpuDispatch } from '../../ml/support'
 import { agree, plural } from '../../style/format'
 import type { CaveTarget } from '../../nodes/lib/caveParams'
 import {
@@ -250,141 +249,6 @@ const BIG_CHUNK_CACHE_MB = 1024
 const ASSESSOR_SHARE = 0.1
 
 /**
- * What one open end costs before any patch, in seconds, measured on Aedes.
- *
- * The search box, the pool measured from it, and the chunk counts of every root in that pool —
- * everything an end pays whether or not an assessor is picked. From a 25-end run in Chrome, a
- * cold session: **1.27 s of search box, 0.64 s of pool, 0.83 s of counts**, which is 2.74 and is
- * rounded down to 2.7 rather than up, the patch figures below being measured on the same run.
- *
- * **The counts used to be left out of this entirely**, on the reasoning that they are shared
- * between neighbouring ends and so ride on top. They are shared, and they were still a third of
- * an end: `l2ChunkCounts` memoises by root, but a pool is about 500 roots and a walk along a
- * neuron keeps meeting new ones, so what is shared is a fraction and not the cost. Pricing it at
- * zero made this model under-state a wait by about a fifth, which is the one direction
- * `docs/limits.md` says a guard rail must not fail in.
- *
- * **It is the cold figure, and the warm one is lower.** The memo lasts the session, so a second
- * run over ends near the first pays far less — two Firefox runs put the same stage at 16% and
- * then under 5%. The conservative one is the one to price with, for the same reason.
- *
- * `pnpm probe:seam-tip-boxes` holds the reading half up on real ends: 1.3 s of voxels for a
- * search box that has to fetch its chunks, 0.6 s of root lookups beside it, and 89 ms where
- * `Chunk cache` already holds them — so the box figure is right for an end moving into new
- * segmentation, which on a walk along a neuron is most of them.
- *
- * **The organelle measure adds a quarter of a second** (2026-11-17): SEAM's `enclosure` on the
- * same box, in the same Pyodide call as the pool. One rv2 end's warm pool step, five calls each
- * way in Chrome: a median of 836 ms with it, 577 ms without — 260 ms. So the 2.74 s above is
- * 3.0 s, and that is the rate.
- *
- * **A rate, not a limit.** `WAIT_WARN_SECONDS` decides when the number is worth saying; this only
- * turns a count of ends into it, which is `docs/limits.md`' rule about stating a limit in the
- * units of what it protects.
- */
-export const SECONDS_PER_END = 3.0
-
-/**
- * What one assessed candidate costs, in seconds: a 129³ patch cut and run.
- *
- * **16 ms, the larger of what the node and a probe measured** (2026-11-21, Chrome, patches kept in
- * flight, `docs/seam-assessor-speed.md` §17): 13 and 16 ms a patch over 60 real ends through the
- * node in two runs, 13.5 median in `pnpm probe:gpu-browsers` at `GPU_ASSESSOR_IN_FLIGHT`. It was
- * 20 before stage 0 skipped its background (§16), 22 one at a time (§15), 27 before the stem read
- * the patch itself (§14). **It depends on the patch**: one whose objects fill more of the window
- * has less background to skip — the patches of SEAM's short lists measured 15.9 against the
- * 13.5 of its long ones. The cut is about 40 ms a group of four and is prefetched one group deep,
- * so it hides behind the GPU that group costs and does not appear here.
- *
- * **It is a rate for one browser.** Firefox computes the same patch in ~19 ms, and until the
- * patches were kept in flight it paid 98, because there every wait for the GPU costs ~100 ms;
- * `SLOW_SECONDS_PER_PATCH` has it.
- *
- * **This is the fast figure and there is a second constant for the other**, rather than an
- * average of the two, which would be a number no reader experiences. `secondsPerEnd` asks
- * `slowGpuDispatch` which of them applies; `SLOW_SECONDS_PER_PATCH` carries the Firefox
- * measurement and the reason.
- *
- * The consequence is not only a number in a warning. The scoring is about as long as the search
- * now, and `Assess top` the one lever on it that changes answers. Which is why the node
- * reports the rate, and the fastest call beside it, after a run rather than this file claiming to
- * know (`runClock.ts`).
- *
- * **The ONNX Runtime path was 136 ms** for the same network and the same answer — its WebGPU
- * backend runs 3D `Conv` through a per-element shader — so this is about 7x cheaper. That is not
- * only a faster run: it moves where an end's time *goes*, which is why `Assess top` no longer
- * promises much. `secondsPerEnd` is the sum.
- *
- * (A draft of this constant said 0.17, which was a review chain's *budget* for 133 ms of GPU
- * plus some of the cut, never a measurement of anything. A later one said 0.091, which was the
- * Firefox figure taken for a defect in this loop before anybody asked which browser it came
- * from. Both are recorded because prose contrasting against either was comparing a measurement
- * with something that was not one.)
- */
-const SECONDS_PER_PATCH = 0.016
-
-/**
- * What a patch costs where the browser's WebGPU dispatch is the slow kind — `slowGpuDispatch`.
- *
- * **26 ms, the largest of the measurements** (2026-11-21, Firefox 160,
- * `docs/seam-assessor-speed.md` §18). On a Mac, where Firefox builds the kernel forms its shader
- * translator is quick with (`frugalShaders`): 19 ms a patch over 60 real ends through the node,
- * twice (`pnpm probe:suggest-merges --browser firefox`), and in `pnpm probe:gpu-browsers` at
- * `GPU_ASSESSOR_IN_FLIGHT` 16.9 on the patches of SEAM's long lists and 20.0 on its short ones,
- * whose objects fill more of the window and leave less background to skip. In the plain forms,
- * which Firefox runs anywhere else, the same two sets measured 21.6 and 25.7. The largest is
- * taken because under-stating is the one direction `docs/limits.md` says a guard rail must not
- * fail in; `SECONDS_PER_END` records being caught by exactly that once already.
- *
- * Before stage 0 skipped its background the same 60 ends measured 30 ms a patch that day — 29
- * over 40 ends on 2026-11-19 — and this constant was 0.033, a probe's figure that was a batch's
- * rounding.
- *
- * **It was 98, and the reason is the thing worth knowing.** Firefox answers every wait for the
- * GPU in ~100 ms whatever the work — an empty submit included — so a network that waited once a
- * patch paid ~100 ms for ~30 of computing, 6.2 s an end against Chrome's 1.8. The ladder of
- * `pnpm probe:assessor-gap` could not see it: it drives Chrome only. Keeping patches in flight
- * shares the wait (`GPU_ASSESSOR_IN_FLIGHT`), and what is left is Firefox's own arithmetic.
- *
- * It costs nothing to ask, and `slowGpuDispatch` answers `false` where there is no `navigator`
- * at all (the MCP server, a build-time render), which is the Chrome figure and the right default
- * for a machine nobody is waiting at.
- */
-const SLOW_SECONDS_PER_PATCH = 0.026
-
-/**
- * The patch box an end's whole list shares: a little over 8 µm of segmentation, read once.
- *
- * **Measured now, where this was a range taken at its top.** `pnpm probe:seam-tip-boxes` reads
- * real consecutive ends of one Aedes neuron, and the thing it found is that this box is mostly
- * the chunks the search box in front of it has just fetched — a chunk here is 8.2 x 8.2 x 2.9 µm
- * and 3.0 MB, wider than either box. So with `Chunk cache` holding them, a box read drops from
- * ~1300 ms to **89 ms**: cold, the wire is everything. (Warm, what is left *is* the decode —
- * `chunkCache.ts` weighs that trade.)
- *
- * 0.4 s is that, plus the part of this box which genuinely lies outside the search box — it
- * reaches 8.5 µm against the search's 6 — averaged over a walk. At the default budget a tip
- * reads 13 MB against the 72 MB it read before the cache, and the two boxes together come to
- * about 1.3 s rather than 3.
- *
- * **It is a rate for the default configuration**, and the two things that move it are the
- * reader's: a smaller `Chunk cache`, and a `Sort` above this node scattering ends that lie
- * beside each other. `reportOnReads` is what says so after a run where it went badly, since no
- * constant here can know either.
- */
-const SECONDS_PER_PATCH_BOX = 0.4
-
-/**
- * How many candidates an end's list holds once the own-tip rule has run, for pricing a wait.
- *
- * SEAM's own rv2 sets: 40 on average over 2,708 tips, 1 to 94. **An average, not a cap** — the
- * list is already cut at the ranker's `top_k` and thinned by the own-tip rule, so there is no
- * number to read off a manifest. It prices a run of hundreds of ends, where an average is what
- * a total is made of.
- */
-const CANDIDATES_PER_END = 40
-
-/**
  * Which assessor a run is to use, from the param — the **one** derivation of it.
  *
  * `undefined` for none, and a sentence for an id this build does not carry; a saved graph keeps
@@ -428,21 +292,6 @@ function chosenRanker(params: ParamValues): { model?: AffinityModel; issue?: str
  */
 function unknownModel(what: string, id: string, param: string): string {
   return `This build does not have ${what} called \`${id}\`. Pick one in \`${param}\`.`
-}
-
-/**
- * What one end costs with the assessor a reader picked, and the cap they set.
- *
- * Exported for the test rather than its three constants, so a change to how an assessed end is
- * priced cannot pass a test that recomputes the old formula from the parts.
- */
-export function secondsPerEnd(assessed: boolean, top: number): number {
-  if (!assessed) return SECONDS_PER_END
-  const patches = top > 0 ? Math.min(top, CANDIDATES_PER_END) : CANDIDATES_PER_END
-  // The reader's own browser, because that is the largest single factor in this sum and the
-  // node already knows it — see `SLOW_SECONDS_PER_PATCH`.
-  const perPatch = slowGpuDispatch() ? SLOW_SECONDS_PER_PATCH : SECONDS_PER_PATCH
-  return SECONDS_PER_END + SECONDS_PER_PATCH_BOX + patches * perPatch
 }
 
 export const suggestMergesNode = packNode({
@@ -498,7 +347,7 @@ export const suggestMergesNode = packNode({
       label: 'Ranker',
       default: MERGE_RANKER_MODELS[0]!.id,
       options: MERGE_RANKER_MODELS.map((model) => ({ value: model.id, label: model.label })),
-      help: 'Which forest to order each open end’s candidates with. The model carries the pipeline it was fitted with — the box size, the pool radius, the cut and the feature order — so picking a ranker picks all of them together.',
+      help: 'The forest that ranks each end’s candidates. It comes with the box size, pool radius and cutoff it was fitted with, so changing the ranker changes those too.',
     },
     {
       id: 'assessor',
@@ -513,7 +362,7 @@ export const suggestMergesNode = packNode({
           ...(model.retired === undefined ? {} : { retired: model.retired }),
         })),
       ],
-      help: 'Which checkpoint judges whether each candidate really continues the neuron. Without one the answer is the forest’s ranking and nothing else — no probability and no cutoff. With one, each candidate gets a 4 µm patch of segmentation through the network, and the tip gets SEAM’s own `q`, `r` and shown/withheld. An assessed end took 1.2 to 1.5 s on one laptop, 13 to 19 ms of it on the GPU for each candidate, and the model is a 133 MB download kept in this browser.',
+      help: 'The network that judges whether each candidate continues the neuron. With “None — rank by geometry” you get the forest’s ranking only, with no probabilities and no cutoff. With an assessor, each candidate gets `p_cand` and `conf`, and each tip gets `q`, `r` and `shown`. It adds about 15–25 ms of GPU time per candidate.',
     },
     {
       id: 'download',
@@ -521,7 +370,7 @@ export const suggestMergesNode = packNode({
       label: 'Download the model',
       default: false,
       visibleIf: (params) => params.assessor !== NO_ASSESSOR,
-      help: 'The assessor’s weights are 133 MB, fetched once and kept in this browser. Off by default so a graph that opens on its own does not reach for them. The ranker is 1.3 MB and is never asked about.',
+      help: 'The assessor is a 133 MB download, kept in this browser after the first time. Tick this to allow it.',
     },
     {
       id: 'assessTop',
@@ -532,7 +381,7 @@ export const suggestMergesNode = packNode({
       step: 5,
       absentMeans: 0,
       visibleIf: (params) => params.assessor !== NO_ASSESSOR,
-      help: 'How many of each end’s ranked candidates to put through the assessor, counting from the forest’s first. 0 is all of them, which is what SEAM does. **It usually saves little**: 60 ends on one laptop measured 13 to 16 ms a patch in Chrome and 19 in Firefox, 1.2 to 1.5 s an end, with the search setting the pace in both. Run once uncapped and read the `ms a patch` in the timing the node reports: around these rates a Filter Table above this node is the better lever, and only well above them is the cap worth what it costs. What it costs is answers, and not only lost ones: flooring the rest of the list concentrates the first candidate’s share and so raises `q`, so a cap invents a few suggestions as well as losing a few. Against SEAM’s own 2,708 tips a cap of 25 changes the verdict on 5, and a cap of 10 on 21.',
+      help: 'How many of each end’s top-ranked candidates to assess. 0 assesses all of them, as SEAM does. A cap rarely saves much time and it changes some answers: on SEAM’s 2,708 tips, a cap of 25 changes the verdict on 5 and a cap of 10 on 21. To make a run shorter, filter the ends above this node instead.',
     },
     {
       id: 'chunkCacheMb',
@@ -552,10 +401,10 @@ export const suggestMergesNode = packNode({
        * wrong.
        */
       presentational: true,
-      help: 'How much memory to spend holding segmentation this run has already fetched. A chunk of the Aedes segmentation is 8.2 × 8.2 × 2.9 µm and 3 MB — wider than either box an end reads — so an end’s patch box is largely the chunks its own search box just pulled, and so is its neighbour’s: one neuron’s 505 ends fetched 25.4 GB for 2.8 GB of distinct chunks. On that neuron a tip read 72 MB with no cache, 13 MB at this default, and 7 MB at 1.5 GB. Raising it pays most where a Sort above this node has scattered the ends, since a cache the size of the neuron’s working set does not care what order they arrive in. It is held until the run ends, outside the JavaScript heap where nothing refuses it — so a budget past what the machine has loses the run rather than slowing it. 0 holds nothing. It changes no answer, so changing it re-runs nothing, and an end already searched is remembered and reads no segmentation at all: to see what a new budget does, use Clear Cache and run again.',
+      help: 'Memory for segmentation this run has already fetched. Neighbouring ends share most of their chunks, so a bigger cache means less downloading: on one neuron, an end read 72 MB with no cache, 13 MB at the default and 7 MB at 1.5 GB. Running out of memory ends the run, so leave room to spare. 0 turns the cache off. It never changes the results.',
     },
     caveDatastackParam(
-      'Which datastack’s segmentation to search, as `datastack:materialization`. Wire a Dataset instead and this follows it. Only the datastack is read: the moment the search reads the segmentation at is `Searched at`, moved into each neuron’s own life, never the materialization.',
+      'The datastack to search, as `datastack:materialization`. Only the datastack is used: when each neuron is searched is set by `Searched at`, not by the materialization.',
     ),
     {
       id: 'at',
@@ -573,13 +422,15 @@ export const suggestMergesNode = packNode({
        * and it is out of the key so that writing it re-runs nothing — the same key means the
        * same neurons, and an entry is what the run that wrote it used. Internal, so the card does
        * not offer it for editing; unrecorded, so undo does not take it back
-       * (`docs/seam-live-plan.md`).
+       * (`docs/seam-live-plan.md`); advanced, so it is drawn in the inspector only — a list of
+       * eighteen-digit roots and timestamps has no place on the card (user, 2026-11-26).
        */
       runRecord: true,
+      advanced: true,
       presentational: true,
       unrecorded: true,
       internal: true,
-      help: 'The moment each neuron was searched at, as `root=moment` entries (ISO 8601, UTC). Kept by the node: the first run that meets a neuron searches it at the present and writes it here, so the same suggestions come back for it after a reload and when you return to it from another neuron. The card’s ⟳ empties it, and the run after searches every neuron at the present. Where a root was edited before its moment, it is searched as it last stood; the card says so.',
+      help: 'When each neuron was searched, as `root=moment` entries (UTC). The node fills this in: the first run searches a neuron at the present, and later runs use the same moment, so you get the same suggestions after a reload. The card’s ⟳ clears it, and the next run searches at the present.',
     },
   ],
 
@@ -653,9 +504,9 @@ export const suggestMergesNode = packNode({
     const parsed = tipsFromTable(table, assessing)
     if (parsed.dropped > 0) {
       ctx.warn(
-        `${plural(parsed.dropped, 'row')} of the Tips table could not be searched — no ` +
-          'position, no `end_uid`, or a neuron that is not a chunkedgraph id. ' +
-          `${agree(parsed.dropped, 'It is', 'They are')} passed through unsearched.`,
+        `${plural(parsed.dropped, 'row')} of \`Tips\` could not be searched (no position, no ` +
+          '`end_uid`, or a neuron that is not a chunkedgraph id) and ' +
+          `${agree(parsed.dropped, 'is', 'are')} passed through unsearched.`,
       )
     }
     const top = assessing ? Math.max(0, Math.floor(Number(ctx.params.assessTop) || 0)) : 0
@@ -695,7 +546,7 @@ export const suggestMergesNode = packNode({
 
     /*
      * **When each neuron is read** — its own moment, not the Dataset's materialization
-     * (`momentsOf`, `docs/seam-live-plan.md`). Asked before anything is priced, since the moment
+     * (`momentsOf`, `docs/seam-live-plan.md`). Asked before anything is opened, since the moment
      * is in every end's key. A neuron the chunkedgraph never made is passed through unsearched,
      * as a row with no position is.
      */
@@ -705,9 +556,8 @@ export const suggestMergesNode = packNode({
     /*
      * **What this run is, for the memory of finished ends** — everything an end's answer depends
      * on that every end of a neuron shares (`endMemory.ts`), the moment included, so one per
-     * neuron. Built before anything is opened, because it also prices the wait: an end already
-     * answered costs nothing, and a warning that counted it would announce twenty minutes for a
-     * run that takes one.
+     * neuron. Built before anything is opened, because it also decides whether the assessor is
+     * opened up front: an end already answered needs none.
      */
     const identityOf = (neuron: string): RunIdentity => ({
       ranker: modelVersion(rankerManifest.loaded),
@@ -735,30 +585,16 @@ export const suggestMergesNode = packNode({
     )
     const foreseen = foreseePieces(ctx, identityOf, neurons, pieces, assessing)
     /*
+     * Whether anything is left to measure, which decides whether the assessor is opened up front.
      * A count of **tips**, where the run searches only those whose box fits the volume; a tip
-     * outside it is never remembered, so it is counted and never searched. That errs towards
-     * the longer wait, which is the direction `docs/limits.md` allows a guard rail to be wrong
-     * in — and towards opening an assessor a run of remembered ends did not need.
+     * outside it is never remembered, so it is counted and never searched — which errs towards
+     * opening an assessor a run of remembered ends did not need.
+     *
+     * **No wait is priced or announced** (user, 2026-11-26): the ends stream into the review card
+     * as they finish, and a figure calibrated on one laptop and one network misled more readers
+     * than it helped. The timing report at the end of a run says what this machine actually spent.
      */
     const toMeasure = keys.length - held.size + foreseen.unremembered
-    const perEnd = secondsPerEnd(assessing, top)
-    const openEnds = plural(toMeasure, 'open end')
-    warnOverWait(ctx, {
-      seconds:
-        toMeasure * perEnd +
-        foreseen.unknown * (SECONDS_PER_PIECE_CHAIN + ENDS_PER_UNSEEN_PIECE * perEnd),
-      what:
-        (assessing ? `Searching and assessing ${openEnds}` : `Searching ${openEnds}`) +
-        (foreseen.unknown > 0
-          ? `, and finding the open ends of ${plural(foreseen.unknown, 'piece')}`
-          : ''),
-      lever: assessing
-        ? 'Each end is a 6 µm box of segmentation at about 19 MB, a second box for the patches, ' +
-          'and a patch through the network per candidate. Narrow the ends with a Filter Table ' +
-          'on `e_tip` above this node, or cap the candidates with `Assess top`.'
-        : 'Each end is a 6 µm box of segmentation, about 19 MB. Narrow them with a Filter Table ' +
-          'on `e_tip` above this node.',
-    })
 
     /*
      * **One moment per neuron.** Every box of a neuron is turned into roots at the same moment,
@@ -778,8 +614,8 @@ export const suggestMergesNode = packNode({
      * first request. The ranker first, because a manifest this build cannot read or a config
      * missing a number costs one small file. Then the assessor, where this run can already see
      * an end to score (below). The volume last. (The neurons' moments came before all three —
-     * three small chunkedgraph requests — because the moment is in every key the wait above was
-     * priced on.)
+     * three small chunkedgraph requests — because the moment is in every key the memory is
+     * asked with.)
      *
      * It costs a second or so of serialisation on a warm cache. Overlapping them would buy that
      * back and give up the property above, which is the wrong trade on a node whose next step
@@ -1036,7 +872,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     const outside = rows.length - seedAttempting.size
     ctx.warn(
       `${plural(outside, 'open end')} ${agree(outside, 'lies', 'lie')} outside the ` +
-        'segmentation volume, so no box could be read there. The rest were searched.',
+        'segmentation volume and could not be searched.',
     )
   }
   /**
@@ -1205,7 +1041,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
      * flight, the cache can evict what a read has just fetched, and it is fetched again —
      * wasted bytes, never a wrong box. At the default budget the ends in flight want ~70 chunks
      * against 170 held; a reader who sets `Chunk cache` low meets it sooner, which is one more
-     * reason `reportOnReads` exists.
+     * reason the timing report gives the cache's hit rate.
      *
      * What it costs is boxes alive: up to three search boxes and two patch boxes at once — not
      * yet measured as a peak.
@@ -1459,8 +1295,8 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
          */
         if (got.tips.length > 0 && mine.length === 0) {
           ctx.warn(
-            `${piece.id}: the chain above Tips answered with ${plural(got.tips.length, 'row')}, ` +
-              'none of them an open end of this piece that can be searched.',
+            `${piece.id}: the chain above \`Tips\` found no open end of this piece to search ` +
+              `(${plural(got.tips.length, 'row')} came back).`,
           )
         }
         record = book.addPiece(
@@ -1478,12 +1314,11 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
       }
     }
     const { mine } = record
-    if (!contact && mine.length > 0) {
-      ctx.warn(
-        `${piece.id} is not among the candidates found for ${piece.parent}, so the end it ` +
-          'joins by could not be told from an open one and was searched with the rest.',
-      )
-    }
+    /*
+     * No `contact` — the piece is not among its parent's candidates — leaves no end to call the
+     * join, so every end of it is searched. Not said (user, 2026-11-26): it read as a fault, and
+     * the one extra end searched shows in the review card anyway.
+     */
     // Which end is the join, by what the parent's ends say now. An end found earlier at a tip
     // that turns out to be the join is dropped by the book; one that is no longer it is wanted.
     const moved = book.join(piece.id, junctionOf(mine, contact, plan.ownUm))
@@ -1500,7 +1335,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     const { competing, keys } = pieceKeys(identityOf(piece.seed), piece, mine, tipsOf)
     /*
      * What the memory held of this piece when the run started, where its tips were known then —
-     * the reading the wait was priced on and the assessor decided on (`foreseePieces`). A piece
+     * the reading the assessor was decided on (`foreseePieces`). A piece
      * whose chain has only just run is read now: nothing could have been foreseen of it. Taken
      * again, it is asked of the ends now wanted alone — an old joining tip, never measured in
      * this run — so Clear Cache and the card's lifetime reach those too, and nothing this run
@@ -1652,8 +1487,8 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
       await settleAll()
     }
     ctx.warn(
-      `Auto-extend was stopped after ${MAX_GROW_ROUNDS} rounds without settling on a tree. ` +
-        'The pieces it had taken are listed.',
+      `Auto-extend stopped after ${MAX_GROW_ROUNDS} rounds without settling. ` +
+        'The pieces taken so far are listed.',
     )
   }
 
@@ -1683,19 +1518,19 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   const piecesOutside = book.piecesOutside()
   if (piecesOutside > 0) {
     ctx.warn(
-      `${plural(piecesOutside, 'open end')} of the extended pieces ` +
-        `${agree(piecesOutside, 'lies', 'lie')} ` +
-        'outside the segmentation volume, so no box could be read there.',
+      `${plural(piecesOutside, 'open end')} of extended pieces ` +
+        `${agree(piecesOutside, 'lies', 'lie')} outside the segmentation volume and could not ` +
+        'be searched.',
     )
   }
 
   // The answer has to hold the last ends recalled, shown yet or not.
   if (behind) build()
 
-  reportOnRun(ctx, listed, volume.chunks)
+  reportOnRun(ctx, listed)
   // The rate is the one number in the report that compares against another machine — and both
   // halves of it are this run's own work, so a run answered from memory says nothing about time.
-  const timing = clock.report({ ends: measured, patches })
+  const timing = clock.report({ ends: measured, patches, reads: volume.chunks })
   if (timing) {
     ctx.warn(timing.said)
     // The whole split, for a reader comparing machines or browsers (`TimingReport`).
@@ -1714,10 +1549,9 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
  * time. Keyed on `ctx.inputKey('tips')`, which is the provenance of that chain: change a setting
  * in it and these are asked for afresh, as the neuron's own tips are.
  */
-/** A piece's tips as the chain answered, what it warned about, and when — epoch ms. */
+/** A piece's tips as the chain answered, and when — epoch ms. */
 interface KeptTips {
   readonly tips: TableValue
-  readonly warnings: readonly string[]
   readonly at: number
 }
 
@@ -1745,17 +1579,6 @@ const MAX_GROW_ROUNDS = 100
  * answer for the session. Five minutes is neither; Clear Cache tries at once.
  */
 const FAILED_FOR_MS = 5 * 60 * 1000
-
-/**
- * What one piece's chain costs before any of its ends is searched, in seconds, and how many
- * ends a piece nothing is known of is priced at — for the wait warning alone.
- *
- * Phase 0's measurement over 33 pieces (`docs/seam-extend-plan.md`): the chain took a median
- * 1.5 s, and a median piece had two tips with one to search; a quarter were larger, at eleven.
- * Two is between, and a rate rather than a limit: `WAIT_WARN_SECONDS` decides when to speak.
- */
-const SECONDS_PER_PIECE_CHAIN = 1.5
-const ENDS_PER_UNSEEN_PIECE = 2
 
 /** The node `rerunInput` puts where the neuron came in: the piece's id, and nothing wired. */
 const PIECE_SOURCE = 'neuron.inputIds'
@@ -1826,7 +1649,7 @@ async function pieceTips(
     }
     report(`${piece.id}: finding its open ends`)
     try {
-      const { value, warnings } = await ctx.rerunInput(
+      const { value } = await ctx.rerunInput(
         'tips',
         { type: PIECE_SOURCE, params: { ids: piece.id }, output: 'neurons' },
         { report: (says) => report(`${piece.id}: ${says}`), settings: PIECE_SETTINGS },
@@ -1834,7 +1657,7 @@ async function pieceTips(
       if (!isTableValue(value)) {
         throw new Error('The chain above `Tips` did not answer with a table of open ends.')
       }
-      kept = { tips: value, warnings, at: Date.now() }
+      kept = { tips: value, at: Date.now() }
     } catch (error) {
       // A Cancel is not the piece's failure, and must not be remembered as one.
       throwIfAborted(ctx.signal)
@@ -1847,13 +1670,10 @@ async function pieceTips(
   // The age of the tips counts towards the card's, as each end's does.
   ctx.reportFetched(kept.at)
   /*
-   * Said again on every run, kept or not — a caveat that held for the tips holds for an answer
-   * built on them, and names the piece. Find Open Ends' two about the nucleus lookup — no row in
-   * the table, a root no longer current — are said only for a piece large enough to be asked
-   * (`PIECE_SETTINGS`), where a missing soma mask is worth knowing about.
+   * **What the chain warned about is not passed on** (user, 2026-11-26). Said on this card it
+   * read as Suggest Merges' own trouble, under a piece id the reader had not asked about — the
+   * nucleus-table caveat on a small piece, mostly. A chain that fails throws, and that is said.
    */
-  for (const said of kept.warnings)
-    ctx.warn(`Finding the open ends of piece ${piece.id}: ${said}`)
   return { tips: kept.tips, ran }
 }
 
@@ -1872,10 +1692,10 @@ function ownTips(tips: TableValue, piece: Piece, assessing: boolean): TipRow[] {
  * A piece's ends in the memory of finished ends: every tip the own-tip rule measures them
  * against — the piece's own, then its path's — and each of its tips' key.
  *
- * **One derivation, read twice**, for `neuronsOf`'s reason: by `foreseePieces`, which prices the
- * run and takes a Clear Cache to every piece before anything is measured, and by the loop. A
- * key those two spelled apart would be a Clear Cache that forgot nothing, or a wait priced on
- * ends the run never asks for.
+ * **One derivation, read twice**, for `neuronsOf`'s reason: by `foreseePieces`, which decides on the
+ * assessor and takes a Clear Cache to every piece before anything is measured, and by the loop. A
+ * key those two spelled apart would be a Clear Cache that forgot nothing, or an assessor opened
+ * for ends the run never asks for.
  */
 function pieceKeys(
   identity: RunIdentity,
@@ -1893,8 +1713,8 @@ function pieceKeys(
  * everything about them forgotten here.
  *
  * A piece whose tips an earlier run found has ends whose keys can be worked out now. What the
- * memory holds of them is **taken here, once**, and handed to the loop (`held`): the wait is
- * priced and the assessor opened, or not, on the very reading the run then answers from —
+ * memory holds of them is **taken here, once**, and handed to the loop (`held`): the assessor is
+ * opened, or not, on the very reading the run then answers from —
  * `heldEnds`' reason, which a second look as the loop reached each piece would undo. A piece
  * nothing is kept of has a chain to run first.
  *
@@ -1946,10 +1766,10 @@ function foreseePieces(
     /*
      * Less one: the end a piece joins by is never searched, so it is never remembered, and
      * counted it would have every piece already extended look as though it had an end to
-     * measure — a wait announced for a run that has none, and an assessor opened for it. Which
+     * measure — an assessor opened for a run that has none. Which
      * end that is cannot be told here (the own-tip radius is the ranker's, not yet opened), so
-     * it is taken off the count; a piece with no such end and exactly one to measure is priced
-     * one end short, and its assessor opened on that end instead.
+     * it is taken off the count; a piece with no such end and exactly one to measure has its
+     * assessor opened on that end instead.
      */
     unremembered += Math.max(0, keys.length - snapshot.size - 1)
   }
@@ -1990,10 +1810,10 @@ export async function momentsOf(
   const { moments: record, unread } = readSearchedAt(String(ctx.params.at))
   if (unread.length > 0) {
     ctx.warn(
-      `\`Searched at\` held ${namedFew(unread.map((entry) => `“${entry}”`))}, which ` +
-        `${agree(unread.length, 'is not a', 'are not')} \`root=moment\` ` +
-        `${agree(unread.length, 'entry', 'entries')}, so ${agree(unread.length, 'it was', 'they were')} ` +
-        'set aside. The node keeps this field itself, and writes it again without them.',
+      `Ignored ${namedFew(unread.map((entry) => `“${entry}”`))} in \`Searched at\`: not ` +
+        `${agree(unread.length, 'a `root=moment` entry', '`root=moment` entries')}. ` +
+        'The node rewrites the field without ' +
+        `${agree(unread.length, 'it', 'them')}.`,
     )
   }
   // On the paths that write nothing else, so a set-aside entry is not said again every run.
@@ -2020,9 +1840,8 @@ export async function momentsOf(
     throwIfAborted(ctx.signal)
     if (neurons.some((root) => !record.has(root))) throw error
     ctx.warn(
-      `Whether ${agree(neurons.length, 'this neuron has', 'these neurons have')} been edited ` +
-        `since could not be asked (${errorMessage(error)}), so the moments in \`Searched at\` ` +
-        'were used.',
+      `Could not check whether ${agree(neurons.length, 'this neuron was', 'these neurons were')} ` +
+        `edited (${errorMessage(error)}), so the moments in \`Searched at\` were used.`,
     )
     healed()
     return new Map(neurons.map((root) => [root, record.get(root)!]))
@@ -2031,7 +1850,7 @@ export async function momentsOf(
   if (unknown.length > 0) {
     ctx.warn(
       `${notRoots(unknown, target.datastack)}, so ${agree(unknown.length, 'its', 'their')} ` +
-        'ends were passed through unsearched.',
+        'ends were not searched.',
     )
   }
   const { moments, edited, later } = momentsFrom(lives, wantedOf)
@@ -2070,7 +1889,7 @@ export async function momentsOf(
     ctx.warn(
       `${namedFew(madeLater)} ${agree(madeLater.length, 'was', 'were')} made after ` +
         `${agree(madeLater.length, 'its', 'their')} moment in \`Searched at\`, so ` +
-        `${agree(madeLater.length, 'it was', 'each was')} searched from the moment it was made. ` +
+        `${agree(madeLater.length, 'it was', 'each was')} searched as first made. ` +
         'The card’s ⟳ searches at the present.',
     )
   }
@@ -2086,7 +1905,7 @@ export async function momentsOf(
 function heldFor(ctx: EvalContext, keys: readonly string[]): Map<string, Remembered> {
   // Clear Cache, and a lifetime chosen on the card.
   forgetStale(sessionEnds, keys, { refresh: ctx.refresh, maxAgeMs: ctx.maxAgeMs })
-  // Then what is left, taken once — the run prices on this and answers from this.
+  // Then what is left, taken once — the run decides on this and answers from this.
   return heldEnds(sessionEnds, keys)
 }
 
@@ -2104,8 +1923,8 @@ interface RunNeuron {
  * The run's neurons, each with its key in the memory of finished ends.
  *
  * **One derivation, read three times** — by what a Clear Cache forgets, by what the run takes
- * from the memory before anything is opened, and by the loop. Derived apart, nothing would hold the key a wait was priced on equal to the key the run
- * then asks for, and a drift between them is a warning that miscounts and says nothing else.
+ * from the memory before anything is opened, and by the loop. Derived apart, nothing would hold the key the
+ * memory was asked with equal to the key the run then asks for.
  */
 function neuronsOf(
   rows: readonly TipRow[],

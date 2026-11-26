@@ -41,8 +41,7 @@ describe('the run clock', () => {
     const { said, detail } = clock.report({ ends: 10, patches: 0 })!
     expect(said).toBe(
       '10 ends took 8.0 s each, mostly reading the search box (50%) and running the network ' +
-        '(38%). To speed this up, raise `Chunk cache`, lower `Assess top`, or search fewer ends ' +
-        'with a `Filter Table` above this node.',
+        '(38%). To speed this up, raise `Chunk cache`, or filter the ends above this node.',
     )
     expect(detail).toMatch(/measuring the pool 13%/)
   })
@@ -251,7 +250,7 @@ describe('the run clock', () => {
    * cost nearly every call carries; a last fifth well above the first is a machine getting
    * slower as the run goes on. The measurement that prompted this had a best of 47 ms against
    * an average of 90, and no way to say which of the three it was. It was the fourth: a browser
-   * whose every dispatch costs more (`slowGpuDispatch`), which looks like the second.
+   * whose every dispatch costs more (Firefox), which looks like the second.
    */
   it('names the shape of the network’s calls once there are enough to have one', async () => {
     const { clock, tick } = fake()
@@ -275,13 +274,48 @@ describe('the run clock', () => {
     expect(said).not.toMatch(/a patch/)
   })
 
-  /** Each stage names the control that moves it; a split nobody can act on is just a number. */
+  /**
+   * Each stage names the control that moves it; a split nobody can act on is just a number.
+   * `Assess top` only where something was assessed — without an assessor it is hidden.
+   */
   it('names what a reader can do about it', async () => {
     const { clock, tick } = fake()
     await clock.around('reading the search box', step(tick, 70_000))()
-    const said = clock.report({ ends: 10, patches: 0 })!.said
-    expect(said).toMatch(/`Chunk cache`/)
-    expect(said).toMatch(/`Assess top`/)
-    expect(said).toMatch(/`Filter Table`/)
+    const assessed = clock.report({ ends: 10, patches: 100 })!.said
+    expect(assessed).toMatch(/`Chunk cache`/)
+    expect(assessed).toMatch(/`Assess top`/)
+    expect(assessed).toMatch(/filter the ends/)
+    expect(clock.report({ ends: 10, patches: 0 })!.said).not.toMatch(/`Assess top`/)
+  })
+
+  /**
+   * The chunk cache's share of the reads, as a clause of the sentence (user, 2026-11-26) — it was
+   * a warning of its own. Silent where the share means nothing: a cache switched off (every read
+   * misses, by the reader's decision), a run too short for the share to settle, no cache at all.
+   */
+  describe('the chunk cache', () => {
+    const MB = 1024 * 1024
+    const reads = (asked: number, hits: number, budget = 512 * MB) => ({ asked, hits, budget })
+    const said = async (got?: ReturnType<typeof reads>) => {
+      const { clock, tick } = fake()
+      await clock.around('reading the search box', step(tick, 70_000))()
+      return clock.report({ ends: 10, patches: 0, ...(got ? { reads: got } : {}) })!.said
+    }
+
+    it('gives its hit rate', async () => {
+      expect(await said(reads(200, 40))).toMatch(/; `Chunk cache` answered 20% of reads\./)
+    })
+
+    it('says nothing of a cache that was switched off', async () => {
+      expect(await said(reads(200, 0, 0))).not.toMatch(/answered/)
+    })
+
+    it('says nothing on a run too short for the share to mean anything', async () => {
+      expect(await said(reads(24, 0))).not.toMatch(/answered/)
+    })
+
+    it('says nothing where no cache was passed', async () => {
+      expect(await said()).not.toMatch(/answered/)
+    })
   })
 })
