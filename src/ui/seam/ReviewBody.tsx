@@ -1834,6 +1834,9 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
                         </button>
                         <VerdictButtons
                           said={said}
+                          own={
+                            candidate && verdictFor(stored, tip.neuronId, candidate.candidateId)
+                          }
                           press={(verdict) =>
                             verdictHold
                               ? { title: verdictHold, disabled: true }

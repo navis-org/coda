@@ -12,6 +12,23 @@
 import { plural } from '../style/format'
 import { ancestorsOf, nodeLabel, type CodaGraph } from './graph'
 
+/**
+ * A reason as the notice's one line. A Python traceback is a line a frame, and the line that says
+ * what went wrong is its last (`ValueError: …`); the card and the inspector keep the whole of it.
+ * Any other reason keeps every word, its line breaks read as spaces.
+ */
+function oneLine(reason: string | undefined): string | undefined {
+  const lines = (reason ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  if (lines.length === 0) return undefined
+  if (lines.some((line) => line.startsWith('Traceback (most recent call last)'))) {
+    return lines[lines.length - 1]
+  }
+  return lines.join(' ')
+}
+
 export function failureNotice(
   failed: readonly string[],
   graph: CodaGraph,
@@ -23,7 +40,7 @@ export function failureNotice(
   // Capitalised: it starts the sentence, and a node deleted mid-run is "a node".
   const named = nodeLabel(graph.nodes.find((node) => node.id === first))
   const label = named.charAt(0).toUpperCase() + named.slice(1)
-  const why = errorOf(first)?.trim()
+  const why = oneLine(errorOf(first))
   // Ended with a full stop where the reason has none, so a count can follow it.
   const stop = why && !/[.!?]$/.test(why) ? '.' : ''
   const head = why ? `${label} failed: ${why}${stop}` : `${label} failed.`

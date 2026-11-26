@@ -3811,12 +3811,20 @@ input.field--combo {
 .issue__text {
   user-select: text;
   cursor: text;
-  /* One warning a line (`Scheduler.warning` joins them with a newline). */
-  white-space: pre-line;
   /* A URL is one long unbreakable token; without this it widens the inspector's whole column
      and pushes a 232px card's band past its own edge. */
   overflow-wrap: anywhere;
   min-width: 0;
+}
+/*
+ * One warning a line (`Scheduler.warning` joins them with a newline) — on a card's warning band and
+ * in the inspector, and nowhere else. An *error* may be a whole Python traceback, one line a frame:
+ * kept, it grew a 232px card by twenty lines and the run's notice over the canvas by as many, so
+ * there it stays one wrapped paragraph, as it was. The inspector keeps the lines, beside its Copy.
+ */
+.coda-node__issue[data-severity='warning'] .issue__text,
+.issue-list .issue__text {
+  white-space: pre-line;
 }
 .issue__text a {
   color: inherit;
@@ -4447,6 +4455,10 @@ input.field--combo {
   align-items: center;
   gap: 9px;
   max-width: min(560px, 90%);
+  /* A run's failure is one line (`failureNotice`), but a sentence from elsewhere can be long, and
+     the notice sits over the canvas until it is dismissed. */
+  max-height: 30vh;
+  overflow-y: auto;
   padding: 6px 10px;
   font-size: 11.5px;
   background: var(--surface-1);

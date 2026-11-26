@@ -2183,11 +2183,33 @@ describe('the split verdict button', () => {
     render(
       <VerdictButtons
         said={undefined}
+        own={undefined}
         press={() => ({ title: 'Merged by Submit.', disabled: true })}
         onJudge={() => {}}
       />,
     )
     expect(screen.getByRole('button', { name: 'Accept' }).title).toBe('Merged by Submit.')
+  })
+
+  /**
+   * Q on an `auto` row writes the accept as the reader's own, so its title must not say it only
+   * "keeps it" — that is true only of the reader's own accept.
+   */
+  it('says Q keeps an accept only where the accept is the reader’s own', () => {
+    const accept = (own: 'accept' | undefined) => {
+      cleanup()
+      render(
+        <VerdictButtons
+          said="accept"
+          own={own}
+          press={() => ({ title: 'Accept.', disabled: false })}
+          onJudge={() => {}}
+        />,
+      )
+      return screen.getByRole('button', { name: 'Accept' }).title
+    }
+    expect(accept(undefined)).toMatch(/ Key: Q, which also moves on/)
+    expect(accept('accept')).toMatch(/ Key: Q keeps it and moves on/)
   })
 
   it('reads Reject on a row with no verdict, and gives it in one press', () => {

@@ -38,17 +38,19 @@ const MORE_TITLE = (() => {
 
 /**
  * A press's title with the verdict's key added, where the press can be made — said apart where the
- * row has that verdict already: the press takes it back, the key never does and only moves on.
+ * reader has given that verdict already: the press takes it back, the key never does and only
+ * moves on. Asked of the reader's **own** verdict, as the key is (`ReviewBody`): on an `auto` row
+ * Q writes the accept as theirs, so "keeps it" would be untrue there.
  */
 function withKey(
   verdict: Verdict,
-  said: Verdict | undefined,
+  own: Verdict | undefined,
   can: { title: string; disabled: boolean },
 ) {
   if (can.disabled) return can
   const key = keyOf(verdict)
   const note =
-    said === verdict
+    own === verdict
       ? `Key: ${key} keeps it and moves on to the next row without a verdict.`
       : `Key: ${key}, which also moves on to the next row without a verdict.`
   return { ...can, title: `${can.title} ${note}` }
@@ -56,17 +58,20 @@ function withKey(
 
 export function VerdictButtons({
   said,
+  own,
   press,
   onJudge,
 }: {
   /** The row's verdict, where it has one. */
   said: Verdict | undefined
+  /** The reader's own verdict on the row: `said` less Auto-extend's accept. */
+  own: Verdict | undefined
   /** What a verdict's button says and whether it can be pressed (`verdictPress`). */
   press: (verdict: Verdict) => { title: string; disabled: boolean }
   onJudge: (verdict: Verdict) => void
 }) {
   const { menuAt, trigger, close, toggle } = useSplitMenu('verdict-menu')
-  const keyed = (verdict: Verdict) => withKey(verdict, said, press(verdict))
+  const keyed = (verdict: Verdict) => withKey(verdict, own, press(verdict))
   const face = faceOf(said)
   const faced = keyed(face)
   const button = (verdict: Verdict, can: { title: string; disabled: boolean }) => (

@@ -44,6 +44,27 @@ describe('failureNotice', () => {
     expect(failureNotice(['gone'], graph, errorOf)).toBe('A node failed.')
   })
 
+  /**
+   * The notice sits over the canvas: a Python failure's whole traceback grew it twenty lines tall.
+   * The card and the inspector keep the traceback; the notice says what went wrong.
+   */
+  it('gives a traceback as its last line, and any other reason on one line', () => {
+    const traceback = [
+      'Traceback (most recent call last):',
+      '  File "/lib/python3.12/site-packages/x.py", line 3, in f',
+      '    raise ValueError("no skeleton")',
+      'ValueError: no skeleton',
+      '',
+    ].join('\n')
+    expect(failureNotice(['a'], graph, () => traceback)).toBe(
+      'Search failed: ValueError: no skeleton.',
+    )
+    expect(failureNotice(['a'], graph, () => 'First part.\nSecond part.')).toBe(
+      'Search failed: First part. Second part.',
+    )
+    expect(failureNotice(['a'], graph, () => '  \n ')).toBe('Search failed.')
+  })
+
   it('still names a node whose reason is unknown', () => {
     expect(failureNotice(['c'], graph, errorOf)).toBe('Plot failed.')
     expect(failureNotice(['c', 'a'], graph, errorOf)).toBe(
