@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 /**
- * The Review Suggestions card.
+ * The Proofread Merges card.
  *
  * What is pinned here is the loop a proofreader actually performs — click a row, judge it, page
  * to the next candidate — and three things in it that fail without throwing. A body replaces the
@@ -100,7 +100,7 @@ vi.mock('./mergeSession', async (importOriginal) => ({
   useSubmitChecked: () => submitChecked,
 }))
 
-const TYPE = 'seam:review'
+const TYPE = 'seam:proofreadMerges'
 
 const NEURON = '720575940621522189'
 /** The cursor on one of the neuron's own tips, as `current` holds it. */
@@ -200,7 +200,7 @@ const TWO_CANDIDATES: TableValue = makeTable(CANDIDATES.schema, {
   shown: [...CANDIDATES.data['shown']!, true],
 })
 
-/** Whether `draw` wires the card's `Extended` back into a Suggest Merges node. */
+/** Whether `draw` wires the card's `Extended` back into a Find Merge Candidates node. */
 let wiredBack = false
 
 function draw(
@@ -218,7 +218,7 @@ function draw(
     params: defaultParams(def),
   })
   /*
-   * With the dotted wire back to a Suggest Merges node where a test asks for it. The node the
+   * With the dotted wire back to a Find Merge Candidates node where a test asks for it. The node the
    * card is drawn from carries the params, in the store too: Extend writes through the store.
    */
   const node = { ...graph.nodes[0]!, params: { ...defaultParams(def), ...params } }
@@ -228,7 +228,14 @@ function draw(
       nodes: [
         node,
         ...(wiredBack
-          ? [{ id: 's1', type: 'seam:suggestMerges', position: { x: 0, y: 0 }, params: {} }]
+          ? [
+              {
+                id: 's1',
+                type: 'seam:findMergeCandidates',
+                position: { x: 0, y: 0 },
+                params: {},
+              },
+            ]
           : []),
       ],
       edges: wiredBack
@@ -1491,7 +1498,7 @@ describe('submitPress', () => {
 /**
  * Extending a neuron from the card (`docs/seam-extend-plan.md`, phase 5).
  *
- * The tables are what Suggest Merges publishes once a piece is extended: the piece's tips beneath
+ * The tables are what Find Merge Candidates publishes once a piece is extended: the piece's tips beneath
  * the neuron's, `ID` the piece and `seed` the neuron — and the piece's open end is **tip 11, the
  * same number as one of the neuron's**, so anything that reads a tip by its number alone shows
  * up here as two rows lit, or the wrong one written.

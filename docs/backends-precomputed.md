@@ -248,7 +248,7 @@ own chunks, which is right for a one-off box.
 
 The reason it exists is a ratio nobody looks at until they measure. The Aedes segmentation stores
 **256 × 256 × 64 voxels to a chunk — 8.2 × 8.2 × 2.9 µm, 3.01 MB on the wire** — and the boxes
-that read it are smaller than that: `seam:suggestMerges` reads a 6 µm box per open end for its
+that read it are smaller than that: `seam:findMergeCandidates` reads a 6 µm box per open end for its
 search and a little over 8 µm for the assessor's patches. So the two boxes of one end are largely
 the same chunks, and so are the boxes of the end next to it. `pnpm probe:seam-tip-boxes` walks
 real consecutive ends of one 505-end neuron:
@@ -306,7 +306,7 @@ sorts last and goes first, including the one just stored, whose read has already
 The plan is per **neuron**, not per run: a run can be hundreds of neurons and a quarter of a
 million ends, and two neurons share no chunks worth indexing for.
 
-`DEFAULT_CHUNK_BUDGET` is 512 MB and `seam:suggestMerges` exposes it as `Chunk cache`, because
+`DEFAULT_CHUNK_BUDGET` is 512 MB and `seam:findMergeCandidates` exposes it as `Chunk cache`, because
 past that it is a decision about a particular machine. The failure it is bounded against is not a
 slow tab but a dead one: `ArrayBuffer` bytes sit outside V8's JS heap, so `jsHeapSizeLimit` does
 not bind, `CRASH_FLOOR_BYTES` never sees them, and nothing refuses before the process does. The

@@ -276,7 +276,7 @@ the shape worth optimising for is the one where a wire is a line that looks like
 
 **A wire into a `reference` input is drawn dotted, as on the canvas** — read off the port, like
 everything else, so no figure says it. One that runs **backwards**, from a card to one upstream
-of it (Review Suggestions' `Extended` into Suggest Merges' `Review`, 2026-11-17), is kept out of
+of it (Proofread Merges' `Extended` into Find Merge Candidates' `Review`, 2026-11-17), is kept out of
 the layering and routed *under* the cards between its ends, and the figure grows to hold it
 (`closesLoop`, `attachPaths`). Layered, it pushed the two cards apart; drawn with the canvas' own
 curve, it ran behind the cards — which are drawn over the wires here — and bulged half the

@@ -1,5 +1,5 @@
 /**
- * Suggest Merges' memory of finished ends.
+ * Find Merge Candidates' memory of finished ends.
  *
  * The node's `evaluate` cannot run under vitest — it needs a token, a segmentation and a GPU —
  * so what it does with the memory is `recalled`, which takes the search as a function. What is

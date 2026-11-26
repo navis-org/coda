@@ -3,8 +3,8 @@
  *
  * **One parser, two sources, and that is the whole reason this is its own file.** SEAM writes the
  * same block twice over — in a published suggestion set's manifest (`suggestionSet.ts`, which is
- * how `seam:suggestions` recomputes what it reads) and in a model manifest's `config`
- * (`assessorModel.ts`, which is how `seam:suggestMerges` scores what it searched). The numbers
+ * how `seam:loadMergeCandidates` recomputes what it reads) and in a model manifest's `config`
+ * (`assessorModel.ts`, which is how `seam:findMergeCandidates` scores what it searched). The numbers
  * mean the same thing either way, and a second reader of them would be a second place for the
  * design's column order, the seed order and the staircase's direction to be got wrong.
  *

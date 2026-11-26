@@ -31,7 +31,7 @@ import { fetchText } from '../../data/fetchText'
 import { reportSourceLearned } from '../../data/source'
 
 /** What `reportSourceLearned` is told, so a filled listing re-runs inference. */
-export const SUGGESTIONS_SOURCE = 'seam:suggestions'
+export const SUGGESTIONS_SOURCE = 'seam:loadMergeCandidates'
 
 /** One set in a directory, as the index describes it. */
 export interface IndexEntry {

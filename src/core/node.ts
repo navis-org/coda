@@ -402,7 +402,7 @@ interface ParamBase {
   /**
    * Written without an undo step — a viewer recording where somebody is looking, many times a
    * gesture, which Ctrl+Z should not have to rewind through first; or a record of writes made to a
-   * server, which Ctrl+Z must not be able to erase (`seam:review`'s `merges`). Saved in the
+   * server, which Ctrl+Z must not be able to erase (`seam:proofreadMerges`'s `merges`). Saved in the
    * document like any param. `setParam` reads it, so a writer cannot forget it. Undo and redo step
    * around it: the write is carried into every history snapshot, so no step restores an old value.
    * It auto-runs only where it is not `presentational`, i.e. where it can change a result.
@@ -414,7 +414,7 @@ interface ParamBase {
    * same. The card's ⟳ (the store's `refreshNode`) empties it. `core/runRecord.ts`.
    *
    * For a node whose answer depends on *when* it is asked, where the moment has to be in the
-   * document: `seam:suggestMerges` reads the live segmentation, and a review card below it saves
+   * document: `seam:findMergeCandidates` reads the live segmentation, and a review card below it saves
    * verdicts naming the candidates it found — searched again at a new "now" after a reload, they
    * could name nothing (`docs/seam-live-plan.md`). It keeps the moment it searched each neuron
    * at, and the neurons are only known while it runs, so the record can only be written after
@@ -1561,7 +1561,7 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    *
    * A reference names a node without waiting for it, so the node may be *downstream* of its
    * reader and may never have run. What it can still say is whatever its params say, and this is
-   * that: Review Suggestions' list of pieces to extend, read by the Suggest Merges above it
+   * that: Proofread Merges' list of pieces to extend, read by the Find Merge Candidates above it
    * (`docs/seam-extend-plan.md`). The reader's provenance key takes the hash of the answer, so the
    * reader re-runs when the answer moves and at no other edit of this node — a click that changes
    * some other param re-keys nothing.

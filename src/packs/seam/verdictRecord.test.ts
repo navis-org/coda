@@ -91,7 +91,7 @@ describe('a row as a record', () => {
 })
 
 describe('which verdicts are sent', () => {
-  it('sends a verdict labelled by a published set or by a run of Suggest Merges', () => {
+  it('sends a verdict labelled by a published set or by a run of Find Merge Candidates', () => {
     expect(isSeamSource('set:rv4-ad75ed161bb6')).toBe(true)
     expect(isSeamSource('model:trees_sizes_tip@d0da2c7b5fe6/none')).toBe(true)
   })

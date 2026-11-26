@@ -182,8 +182,8 @@ def coda_seam_windows(request, report=None):
             )
         order = only.astype(np.int64)
     selected = len(order)
-    # A cap, which is a different thing from a selection: `Find Merges` offers a reader a
-    # `Max windows` rail and cannot name the centres it wants, not knowing the tiling until the
+    # A cap, which is a different thing from a selection: Model A's node (since dropped) offered a reader a
+    # `Max windows` rail and could not name the centres it wanted, not knowing the tiling until the
     # call returns. `0` or less takes everything `only` named.
     limit = int(req.get("limit") or 0)
     wanted = min(selected, limit) if limit > 0 else selected

@@ -194,7 +194,7 @@ describe('openEndsTable', () => {
   ]
 
   /**
-   * Its **own** list, and the data has exactly it. The shared one `seam:suggestions` publishes
+   * Its **own** list, and the data has exactly it. The shared one `seam:loadMergeCandidates` publishes
    * from was dropped this round (`OPEN_END_FIELDS`), so what holds now is that the schema half
    * and the value half come from one declaration — invariant 3's point, applied per node.
    */
@@ -208,7 +208,7 @@ describe('openEndsTable', () => {
   /**
    * **What it measured, and nothing else.** It used to carry every column a later stage would
    * fill, present and null, which was right while one node was to run all nine stages. With the
-   * search in `seam:suggestMerges` downstream, a null here is a picker offered a choice this
+   * search in `seam:findMergeCandidates` downstream, a null here is a picker offered a choice this
    * node can never answer — see `OPEN_END_FIELDS`.
    */
   it('carries no column it cannot fill', () => {

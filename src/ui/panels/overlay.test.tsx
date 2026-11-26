@@ -438,7 +438,7 @@ describe('expanded width', () => {
    */
   it('leaves a body that holds a viewer uncapped', () => {
     expect(expandedWidth('cortex:gallery')).toBe('full')
-    expect(expandedWidth('seam:review')).toBe('full')
+    expect(expandedWidth('seam:proofreadMerges')).toBe('full')
   })
 
   it('caps a tile grid and a prose body', () => {

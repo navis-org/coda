@@ -576,7 +576,7 @@ describe('writing the nodes out, which wants the opposite order', () => {
 /**
  * The second kind of reference: a source that says what a reader is handed, from its params.
  *
- * `seam:review` is the node this is for (`docs/seam-extend-plan.md`). It sits *below* the search
+ * `seam:proofreadMerges` is the node this is for (`docs/seam-extend-plan.md`). It sits *below* the search
  * it steers, it re-runs on every click, and what the search needs from it — which pieces to
  * extend — is in its params. So the wire runs backwards, and three things have to hold that a
  * dataset reference never had to say: the value comes from params and not a type, the reader's

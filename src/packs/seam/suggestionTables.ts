@@ -1,5 +1,5 @@
 /**
- * What `seam:suggestions` publishes, as the schema/value pairs invariant 3 asks for — except
+ * What `seam:loadMergeCandidates` publishes, as the schema/value pairs invariant 3 asks for — except
  * that here the two halves are not written twice.
  *
  * ## One field table, both halves
@@ -63,7 +63,7 @@ export interface Field {
    * is different: a set from before it is not damaged, it simply predates the column, and
    * refusing it would stop every older set loading. So the column is published either way, null
    * where the set does not hold it, and the table's shape does not depend on the set's age.
-   * Null, not a default: an older set does not say, and `seam:review` reads only an explicit
+   * Null, not a default: an older set does not say, and `seam:proofreadMerges` reads only an explicit
    * value. The organelle flag (2026-11-14) is the case.
    */
   readonly optional?: true
@@ -122,14 +122,14 @@ const check = (from: string, dtype: DType): Field => ({ from, name: from, dtype,
 
 /**
  * **Which `q`, cutoff and `r` a tip's numbers are**, as text: `set:<version>` for a published set
- * (its manifest's `version`, e.g. `set:rv4-ad75ed161bb6`), or, for a live run of Suggest Merges,
+ * (its manifest's `version`, e.g. `set:rv4-ad75ed161bb6`), or, for a live run of Find Merge Candidates,
  * `model:` and the ranker and assessor it ran with, each named by id and the start of its
  * manifest's SHA-256 (`searchTips.ts`' `runSource`).
  *
  * A column because two configurations are never to be read against each other (SEAM,
  * `coda-note-sort-by-q.md`): a single-seed `q` against production's cutoff or `r` means nothing,
  * and a refit of `r` changes what one `q` means without changing the set's name or the model's id.
- * Per row, not per table, because Suggest Merges writes its own over the rows it searched and keeps
+ * Per row, not per table, because Find Merge Candidates writes its own over the rows it searched and keeps
  * a published set's on the rest. Null where a set's manifest names no version (the earliest sets
  * did not): those numbers cannot be told apart, and the review card does not send them.
  */
@@ -154,7 +154,7 @@ export const MODEL_SOURCE_PREFIX = 'model:'
  * Table` somebody can see.
  *
  * The verdict columns at the end are **SEAM's own review of rv2**, carried so a new round can be
- * compared against it. They are not Coda's: `seam:review` writes its own, under its own names, so
+ * compared against it. They are not Coda's: `seam:proofreadMerges` writes its own, under its own names, so
  * the two can never be mistaken for each other. `belongs`/`not_belongs` are `;`-joined candidate
  * ids, empty for "judged, none", and **null for a tip nobody judged** — a distinction worth
  * keeping, since 2,331 of the 2,708 tips were never looked at.
@@ -189,7 +189,7 @@ export const TIP_FIELDS: readonly Field[] = [
   field('top_contact_y_nm', 'contact_y', 'f64', 'nm'),
   field('top_contact_z_nm', 'contact_z', 'f64', 'nm'),
   field('p_top', 'p_top', 'f64'),
-  // The first candidate's organelle flag, published as `organelle` as Suggest Merges' `Tips` has
+  // The first candidate's organelle flag, published as `organelle` as Find Merge Candidates' `Tips` has
   // it (`searchTips.ts`), so a picker downstream is offered one column from either node.
   // Optional: sets from before 2026-11-14 do not hold it.
   optional('top_organelle', 'organelle', 'bool'),
@@ -243,12 +243,12 @@ export const CANDIDATE_FIELDS: readonly Field[] = [
   field('filled', 'filled', 'bool'),
   field('shown', 'shown', 'bool'),
   /*
-   * SEAM's organelle flag (2026-11-14), the columns Suggest Merges publishes under the same
+   * SEAM's organelle flag (2026-11-14), the columns Find Merge Candidates publishes under the same
    * names (`searchTips.ts`). Optional: sets from before it do not hold them.
    */
   optional('organelle_score', 'organelle_score', 'f64'),
   optional('organelle', 'organelle', 'bool'),
-  // The whole object's level-2 chunk count, as Suggest Merges publishes it (`searchTips.ts`).
+  // The whole object's level-2 chunk count, as Find Merge Candidates publishes it (`searchTips.ts`).
   // Optional (rv4 on); without it, `sizeOf` falls back to `vol_um3`.
   optional('n_l2', 'n_l2', 'i64'),
 ]
@@ -344,7 +344,7 @@ export function numberAt(table: TableValue, name: string, row: number): number |
  * Three numeric cells as a point, or undefined if any is missing — never a zero standing in for
  * one, since `[0, 0, 0]` is a real place: a contact read as the origin draws a suggestion there,
  * and a merge looked for there would be a merge somewhere else. The one reader of a point column
- * for both `seam:suggestions` and the review queue.
+ * for both `seam:loadMergeCandidates` and the review queue.
  */
 export function pointAt(
   table: TableValue,

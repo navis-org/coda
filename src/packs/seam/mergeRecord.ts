@@ -5,7 +5,7 @@
  *
  * ## Why a param, unrecorded
  *
- * The record is the `seam:review` param `merges`, written with no undo step (`unrecorded`). An
+ * The record is the `seam:proofreadMerges` param `merges`, written with no undo step (`unrecorded`). An
  * undoable record would let Ctrl+Z erase the note of a merge the server still holds, and the next
  * Submit would plan it again. It is not what stops a merge being sent twice, though: a piece
  * merged already maps to the neuron's root, which the batch's per-merge check reads at the

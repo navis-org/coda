@@ -39,7 +39,7 @@ interface Pending {
  * Which worker a call runs on. **`'main'` for everything but one bridge**, which is the default.
  *
  * `'assessor'` is SEAM's patch cutter (`assessorPatches.ts`), and it is a lane of its own because
- * Suggest Merges runs it *alongside* the search, which calls Python too: one worker made them
+ * Find Merge Candidates runs it *alongside* the search, which calls Python too: one worker made them
  * queue, and once the search's lookups were fast the cut waited ~0.7 s an end for the pool measure
  * to finish (`docs/seam-suggestions-plan.md`, 2026-11-18). A second heap is the price — a few tens
  * of megabytes and one boot, the download already cached.

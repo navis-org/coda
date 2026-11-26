@@ -1,9 +1,9 @@
 /**
- * Suggest Merges: run SEAM's search over a neuron's open ends and publish the ranked candidates.
+ * Find Merge Candidates: run SEAM's search over a neuron's open ends and publish the ranked candidates.
  *
  * ## It computes a set; it does not read one
  *
- * `seam:suggestions` reads the lists SEAM's pipeline produced on a cluster. This does stages 4
+ * `seam:loadMergeCandidates` reads the lists SEAM's pipeline produced on a cluster. This does stages 4
  * and 5 — the 6 µm box, the eleven geometric features, the forest, the cut, the own-tip rule —
  * in the browser, for the ends on the wire — and stages 6 to 9 too, where an `Assessor` is
  * picked. Everything it publishes was measured here, from the
@@ -56,10 +56,10 @@
  * suggestions, it invents a few. Since the runtime changed it also buys much less than it used
  * to.
  *
- * ## It does not cut the **ends**, and that is the lesson from `seam:findMerges`
+ * ## It does not cut the **ends**, and that is the lesson from the dropped Model A node
  *
  * A whole neuron is hundreds of open ends and each is a ~19 MB cutout, so something has to
- * narrow them. It is not this node. `seam:findMerges` shipped a `Score cutoff` inside an
+ * narrow them. It is not this node. Model A's node (`findMerges.ts`, dropped) had a `Score cutoff` inside an
  * expensive node, and the cost was that every nudge re-ran the whole thing and a discarded
  * answer looked like a verdict the model had given. Narrowing here is a `Filter Table` on `e_tip`
  * above this node, where the cut is a thing somebody did. It used to price the wait and warn
@@ -78,8 +78,8 @@
  * ## Read-only
  *
  * Boxes out of a public bucket, roots and chunk counts out of the chunkedgraph, and nothing
- * written anywhere. The merge is the proofreader's own, in their own viewer, with their own
- * token — SEAM's invariant 7, which holds in every phase of this pack.
+ * written anywhere. The merge is the proofreader's own, with their own token — SEAM's invariant
+ * 7 — made by `seam:proofreadMerges`'s Submit, which this module does not import (`importGraph.test.ts`).
  */
 
 import type { EvalContext, ParamValues } from '../../core/node'
@@ -295,14 +295,15 @@ function unknownModel(what: string, id: string, param: string): string {
 }
 
 export const suggestMergesNode = packNode({
-  type: 'seam:suggestMerges',
-  label: 'Suggest Merges',
+  type: 'seam:findMergeCandidates',
+  formerTypes: ['seam:suggestMerges'],
+  label: 'Find Merge Candidates',
   category: 'analysis',
   description:
     'Searches around each open end for the piece of segmentation most likely to be its continuation, and ranks them with SEAM’s forest.',
   guide:
     'Takes a table of open ends and, around each, finds and ranks the pieces of segmentation ' +
-    'that could continue the neuron. Usually wired from Find Open Ends into Review Suggestions, ' +
+    'that could continue the neuron. Usually wired from Find Open Ends into Proofread Merges, ' +
     'which fills while the search runs. Pick an Assessor for calibrated probabilities, and wire ' +
     'the review card’s `Extended` output back into `Review` to search accepted pieces too.',
   cost: 'expensive',
@@ -322,7 +323,7 @@ export const suggestMergesNode = packNode({
     { id: 'tips', label: 'Tips', type: T.table() },
     CAVE_DATASET_INPUT,
     /*
-     * **A reference, drawn backwards**: Review Suggestions sits below this node and says which
+     * **A reference, drawn backwards**: Proofread Merges sits below this node and says which
      * accepted pieces to extend. It is read from that card's params alone
      * (`NodeDefinition.asReference`), so this node waits for nothing below it, and re-runs when
      * that list moves and at no other click on the card.
@@ -333,7 +334,7 @@ export const suggestMergesNode = packNode({
       type: T.table(),
       required: false,
       reference: true,
-      producedBy: { type: 'seam:review', port: EXTENDED_PORT },
+      producedBy: { type: 'seam:proofreadMerges', port: EXTENDED_PORT },
     },
   ],
   outputs: [
@@ -861,7 +862,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
   /*
    * The rows this run will attempt, by their index in the published table. It is what the
    * `searched` column reads — every row outside it is one the run has warned about, or the end
-   * a piece joins by — and `seam:review` counts the rows still waiting from the difference. A
+   * a piece joins by — and `seam:proofreadMerges` counts the rows still waiting from the difference. A
    * neuron's own are known here; a piece's are its record's, added when its tips are found
    * (`runBook.ts`). Together they are the progress bar's whole.
    */
@@ -1535,7 +1536,7 @@ async function searchAndScore(ctx: EvalContext, run: RunPlan) {
     ctx.warn(timing.said)
     // The whole split, for a reader comparing machines or browsers (`TimingReport`).
     // eslint-disable-next-line no-console
-    console.info(`Suggest Merges: ${timing.detail}`)
+    console.info(`Find Merge Candidates: ${timing.detail}`)
   }
   return answer
 }
@@ -1671,7 +1672,7 @@ async function pieceTips(
   ctx.reportFetched(kept.at)
   /*
    * **What the chain warned about is not passed on** (user, 2026-11-26). Said on this card it
-   * read as Suggest Merges' own trouble, under a piece id the reader had not asked about — the
+   * read as Find Merge Candidates' own trouble, under a piece id the reader had not asked about — the
    * nucleus-table caveat on a small piece, mostly. A chain that fails throws, and that is said.
    */
   return { tips: kept.tips, ran }

@@ -5,7 +5,7 @@
  *
  * ## Built for a queue that is still arriving
  *
- * Suggest Merges streams its candidates into the card, so the set of roots grows while it is on
+ * Find Merge Candidates streams its candidates into the card, so the set of roots grows while it is on
  * screen. `ask` takes the whole set every time and asks only the roots it knows nothing about —
  * after a short wait (`GATHER_MS`), so a stream's arrivals go out together rather than a request
  * per published partial — in batches of `BATCH`, one at a time.

@@ -74,9 +74,9 @@ export type SeamWindowRequest = {
   /**
    * Stop after this many centres of whatever `only` named; `0` or less takes them all.
    *
-   * A **cap**, not a selection, which is why it survives beside `only`: Find Merges offers a
-   * reader a `Max windows` rail and cannot name the centres it wants, since it does not know how
-   * many there are until the call comes back.
+   * A **cap**, not a selection, which is why it survives beside `only`: Model A's node (since dropped) offered a
+   * reader a `Max windows` rail and could not name the centres it wanted, since it did not know how
+   * many there were until the call came back.
    */
   limit: number
   /**

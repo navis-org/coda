@@ -35,7 +35,7 @@ def main() -> None:
     graph = client.chunkedgraph
     pieces = graph.get_past_ids([neuron], timestamp_past=past, timestamp_future=future)
     roots = [int(root) for root in pieces["past_id_map"][neuron]]
-    # A level-2 chunk count per piece: the same size `seam:review` shows for a candidate.
+    # A level-2 chunk count per piece: the same size `seam:proofreadMerges` shows for a candidate.
     counts = {}
     for root in roots:
         try:

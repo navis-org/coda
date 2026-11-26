@@ -108,7 +108,7 @@ export interface Slots {
  * At most `limit` pieces of work at once, **across callers** — where `inFlight` bounds one
  * call's own items, this bounds everyone who shares it. First come, first served.
  *
- * For politeness at a shared server whose load is the sum of several readers: Suggest Merges
+ * For politeness at a shared server whose load is the sum of several readers: Find Merge Candidates
  * reads one end's boxes while it counts another's, and a cap per call let those add up past
  * what any of them was allowed (`rootIds.ts`' `CHUNKEDGRAPH_BUDGET`).
  */

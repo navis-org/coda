@@ -11,7 +11,7 @@
  *
  * `previewVersion` is the tick that fixes it, and it is subscribed to only where something draws
  * arriving data — for viewers by category, and for a body that says `drawsInputs`. Pinned here
- * with the real `seam:review`, whose queue fills from `seam:suggestMerges` one end at a time,
+ * with the real `seam:proofreadMerges`, whose queue fills from `seam:findMergeCandidates` one end at a time,
  * because the flag and the subscription are in two files and nothing but a render connects them.
  */
 
@@ -46,7 +46,7 @@ const ENDS = [11, 22] as const
  * `searched` the only column that moves.
  *
  * Worth getting right rather than approximating with a growing row count, because the two
- * shapes would put the reader's attention in different places: `seam:suggestMerges` copies the
+ * shapes would put the reader's attention in different places: `seam:findMergeCandidates` copies the
  * whole incoming table on its first publish and fills it in, so what a reader watches grow is
  * each row's contents and the foot's count, never the length of the list.
  */
@@ -109,7 +109,7 @@ beforeAll(() => {
   // Node 26 shadows jsdom's `localStorage`, and the card's filter fold is remembered there.
   installStorageStub()
   /*
-   * A stand-in for `seam:suggestMerges`: one end published, then a wait we hold open, then the
+   * A stand-in for `seam:findMergeCandidates`: one end published, then a wait we hold open, then the
    * pair. The real node is a GPU session, a CAVE credential and a volume read; what this test is
    * about is one publish reaching the card under it, which is the same either way.
    */
@@ -173,7 +173,7 @@ function graph(relay = false): CodaGraph {
   })
   let g = emptyGraph('streaming')
   g = addNode(g, at('src', 'test.publishesEnds', 0))
-  g = addNode(g, at('review', 'seam:review', 720))
+  g = addNode(g, at('review', 'seam:proofreadMerges', 720))
   for (const port of ['tips', 'candidates']) {
     // The relay sits on the tips wire only, which is where a narrowing node would go.
     if (relay && port === 'tips') {

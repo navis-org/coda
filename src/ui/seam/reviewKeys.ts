@@ -47,7 +47,7 @@ function onKey(event: KeyboardEvent): void {
     useGraphStore
       .getState()
       .setNotice(
-        'Several Review Suggestions cards are open. Select the one to review in, and press the key again.',
+        'Several Proofread Merges cards are open. Select the one to review in, and press the key again.',
       )
     return
   }

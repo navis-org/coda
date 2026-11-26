@@ -16,13 +16,13 @@
  *
  * On a geometry-only run those columns are **absent, not null**. An earlier draft published the
  * full shape
- * `seam:suggestions` reads, with eleven nulls, so the two nodes' tables matched column for
- * column. That coupling is gone deliberately (2026-11-15, user): `seam:suggestions` is modelled
+ * `seam:loadMergeCandidates` reads, with eleven nulls, so the two nodes' tables matched column for
+ * column. That coupling is gone deliberately (2026-11-15, user): `seam:loadMergeCandidates` is modelled
  * on an earlier SEAM pipeline and its output is going to change, so pinning this node's shape to
  * it would pin it to something that is about to move. A column picker offered `p_cand` on a node
  * that can never fill it is worse than not being offered it.
  *
- * `seam:review` takes either, because it reads every column by name through an accessor that
+ * `seam:proofreadMerges` takes either, because it reads every column by name through an accessor that
  * answers `undefined` for one that is not there.
  *
  * ## The field machinery is shared; the lists are not
@@ -92,7 +92,7 @@ export interface TipRow {
  * `rank` and `geo_rank` are the same number, and that is not a coincidence waiting to break:
  * SEAM's published lists are post-own-tip and numbered `1..n`, and `searchRun.ts` renumbers
  * `geo_rank` over the kept list for exactly that reason. `rank` is that renumbering under the
- * name `seam:review` reads.
+ * name `seam:proofreadMerges` reads.
  */
 export const SEARCH_CANDIDATE_FIELDS: readonly Field[] = [
   field('neuron', ID_COLUMN_NAME, 'str'),
@@ -123,7 +123,7 @@ export const SEARCH_CANDIDATE_FIELDS: readonly Field[] = [
    * count is of the **object**, wherever it reaches: it is the chunkedgraph's own decomposition,
    * so it is coarse (a chunk is a fixed box of the volume) and it does not stop at the box.
    * That makes it the better proxy for "is this a fragment or a piece of a neuron", which is
-   * the question a reader triaging a queue is actually asking — `seam:review` sorts and filters
+   * the question a reader triaging a queue is actually asking — `seam:proofreadMerges` sorts and filters
    * on it.
    *
    * It is already fetched: the search asks `l2ChunkCounts` for every root in the pool because
@@ -142,7 +142,7 @@ export const SEARCH_CANDIDATE_FIELDS: readonly Field[] = [
    * mitochondrion or a vesicle sits wrapped in one cell, so nearly all of it faces that cell; a
    * neurite's continuation meets the neuron at one end and other objects along its length.
    * `organelle` is that at or above `ORGANELLE_CUT`. **A flag for the reader, never a rank**: it
-   * changes no order, `q` or `shown` — SEAM's own rule — and `seam:review` can leave flagged
+   * changes no order, `q` or `shown` — SEAM's own rule — and `seam:proofreadMerges` can leave flagged
    * pieces out of its list.
    */
   field('enclosed', 'organelle_score', 'f64'),
@@ -282,7 +282,7 @@ export interface AssessedEnd {
  *
  * `null` where SEAM has no answer rather than a number: `q` and `r` on a tip with no first
  * candidate, and `shown` where the configuration published no cutoff for the quantity this tip
- * could reach — which `seam:review` draws as "no verdict" rather than as a rejection.
+ * could reach — which `seam:proofreadMerges` draws as "no verdict" rather than as a rejection.
  */
 export interface AssessedTip {
   readonly segclr: number
@@ -309,7 +309,7 @@ export function candidateFields(assessed: boolean): readonly Field[] {
  *   row carries no position, no `end_uid` or a neuron that is not a chunkedgraph id. The node
  *   warns about both, and the column is where a reader finds *which* rows it meant.
  * - `null`: not yet. Only ever seen on a partial, which is exactly what makes it worth
- *   publishing — `seam:review` counts the nulls to say how many tips are still to come, and that
+ *   publishing — `seam:proofreadMerges` counts the nulls to say how many tips are still to come, and that
  *   count reaches zero because the rows that will never be searched are `false` rather than
  *   left empty.
  *
@@ -468,7 +468,7 @@ export function tipsFromTable(
     throw new Error(
       `The Tips table has no \`${missing.join('`, `')}\` column, so there is no open end to ` +
         `search${missing.includes('e_tip') ? ' and nothing to score a tip with' : ''}. ` +
-        'Wire this to Find Open Ends or Merge Suggestions.',
+        'Wire this to Find Open Ends or Load Merge Candidates.',
     )
   }
   const rows: TipRow[] = []
@@ -672,8 +672,8 @@ function cell(column: Float64Array | undefined, at: number): number | null {
 /**
  * The tips table with each end's **first candidate** written onto it.
  *
- * `seam:suggestions` publishes a tips table carrying its first candidate's columns, because the
- * queue a reader works through is one row per tip, and `seam:review` reads them from there. This
+ * `seam:loadMergeCandidates` publishes a tips table carrying its first candidate's columns, because the
+ * queue a reader works through is one row per tip, and `seam:proofreadMerges` reads them from there. This
  * writes the same columns from the search's own answer.
  *
  * **Written over, never beside** (`foldColumns`' rule): the incoming table from `seam:openEnds`
@@ -721,7 +721,7 @@ export function tipsWithFirsts(
   }
   /*
    * **Written from this run's own answer, never carried through.** An incoming `Tips` table may
-   * already hold a `searched` column — a `seam:suggestions` set, or this node's own output fed
+   * already hold a `searched` column — a `seam:loadMergeCandidates` set, or this node's own output fed
    * back round — and that one is another run's statement about another box and another filter.
    * Left in place it would say "searched" about rows this run is still queueing, which is the
    * one cell in the table a reader is counting on.
@@ -750,10 +750,10 @@ export function tipsWithFirsts(
     searched[at] = true
     /*
      * **Cleared first, so a searched tip with no candidates says so.** The incoming table may
-     * already carry a first candidate — a `Tips` table from `seam:suggestions` does — and that
+     * already carry a first candidate — a `Tips` table from `seam:loadMergeCandidates` does — and that
      * one belongs to another run. Left in place beside this node's own `Candidates`, the tip
      * would name a `candidateId` that has no row in the published list, which is the one
-     * inconsistency `seam:review` cannot see: it reads the two tables separately.
+     * inconsistency `seam:proofreadMerges` cannot see: it reads the two tables separately.
      */
     // Guarded, because `p_top` is only there when the incoming table brought it.
     for (const name of FIRST_CANDIDATE_COLUMNS) if (data[name]) data[name]![at] = null
@@ -809,11 +809,11 @@ const FIRST_CANDIDATE_COLUMNS: readonly string[] = [
   /*
    * **Every stage-6 column, derived rather than listed.** A geometry-only run publishes none of
    * these and an assessed one publishes all of them — and in both cases an incoming `Tips` table
-   * from `seam:suggestions` may already carry them from *another* run over *another* candidate
+   * from `seam:loadMergeCandidates` may already carry them from *another* run over *another* candidate
    * list. `p_top`, `q`, `r` and `shown` are that run's reading of that run's first candidate;
    * `segclr` and `p_tip` are its reading of that run's whole list, which this node has just
    * replaced. Left in place beside this run's `candidateId` every one of them reads as
-   * describing it, and `seam:review` sorts and filters on three of them.
+   * describing it, and `seam:proofreadMerges` sorts and filters on three of them.
    *
    * Hand-listing four of the six was the version before this: the two it left out were the two
    * that are about the list rather than its first row, which is exactly the distinction a reader

@@ -473,9 +473,9 @@ describe('which controls a generic surface draws', () => {
       { paramGroups: [{ id: 'tune', label: 'Tune', affectsData: true }] },
     )
     expect(railParams(def, {}).map((p) => p.id)).toEqual(['colour'])
-    expect(railParams(requireNodeDef('seam:review'), {}).map((p) => p.id)).not.toContain(
-      'recent',
-    )
+    expect(
+      railParams(requireNodeDef('seam:proofreadMerges'), {}).map((p) => p.id),
+    ).not.toContain('recent')
     expect(railParams(requireNodeDef('out.neuroglancer'), {}).map((p) => p.id)).not.toContain(
       'view',
     )

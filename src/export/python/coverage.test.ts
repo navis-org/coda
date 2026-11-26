@@ -25,21 +25,14 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
-  'seam:findMerges':
-    'Inference in the browser over a 71 MB ONNX model, on windows built by a vendored numpy ' +
-    'sampler running in Pyodide. A cell would have to fetch the weights, run onnxruntime, and ' +
-    'reproduce the tiling and the surface resample exactly — the \u2018one function for ' +
-    'training and inference\u2019 property the vendoring exists to keep. The answer would also ' +
-    'be the notebook\u2019s GPU\u2019s. What is worth emitting is the scored windows, which ' +
-    'the Table and Points outputs already are.',
   'seam:openEnds':
-    'The same inference as Find Merges, over the same vendored sampler, and with the same ' +
-    'answer: a cell would have to fetch the weights, run onnxruntime and reproduce the seeded ' +
+    'Inference in the browser over an ONNX model, on windows built by a vendored numpy sampler ' +
+    'running in Pyodide. A cell would have to fetch the weights, run onnxruntime and reproduce the seeded ' +
     'tiling exactly, and what came back would be the notebook\u2019s GPU\u2019s. The scores ' +
     'themselves are worth emitting and the Tips output already is them. The skeleton half *is* ' +
     'emittable \u2014 Skeletonize Meshes and Simplify Skeletons both emit \u2014 so a reader ' +
     'wanting the tips without the scores can build them on the canvas and export that.',
-  'seam:suggestMerges':
+  'seam:findMergeCandidates':
     'The search is a 6 µm box of segmentation per open end, decoded, turned into roots at a ' +
     'materialization, and measured by a vendored numpy step running in Pyodide \u2014 then ' +
     'ranked by a 191-tree LightGBM forest. A cell could do all of it, and that is the point: it ' +
@@ -48,8 +41,6 @@ const NO_EMITTER: Record<string, string> = {
     '(`pnpm probe:candidate-search`). A second copy that merely looks right is what this pack ' +
     'exists to avoid. What is worth emitting is the answer, and the Tips and Candidates outputs ' +
     'already are it.',
-  'seam:affinityClusters':
-    'Inference in the browser, over a quantised ONNX conversion of a published PyTorch checkpoint. A cell would have to fetch the original weights, run upstream\u2019s model, and then reimplement the sampler and the average-linkage cut \u2014 a fourth copy of what `scripts/affinity_reference.py` declares and `pnpm probe:affinity-parity` checks two of. The answer would also be the notebook\u2019s GPU\u2019s, not the one on the card. Where it is worth emitting is the clusters as data, which the Points and Table outputs already are.',
   'annotation:editor':
     'Annotate is a card that writes a backend on an edit — there is nothing for a notebook to ' +
     'recompute, and a cell that replayed the writes would push them again. The node itself passes ' +

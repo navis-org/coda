@@ -5,7 +5,7 @@
  * `evaluate` is unreachable from vitest — it needs WebGPU, a real `Worker`, Pyodide and the
  * weights — so the run belongs to the probes (`pnpm probe:seam-e-cells` for the parity, and
  * `probe-seam-windows-py.mjs` for the bridge). What is here is everything that holds without
- * them, plus the one property this node shares with `seam:suggestions` and must keep sharing:
+ * them, plus the one property this node shares with `seam:loadMergeCandidates` and must keep sharing:
  * the table they publish is the same table.
  */
 
@@ -76,10 +76,10 @@ describe('the card', () => {
   })
 
   /**
-   * **Not `seam:suggestions`' shape any more**, and that is the change rather than a regression.
+   * **Not `seam:loadMergeCandidates`' shape any more**, and that is the change rather than a regression.
    * This node used to publish `TIP_FIELDS` with every later stage's column null, so the two
-   * tables matched column for column. The search is `seam:suggestMerges` downstream now, and
-   * `seam:suggestions` is modelled on an earlier SEAM pipeline whose output is going to move —
+   * tables matched column for column. The search is `seam:findMergeCandidates` downstream now, and
+   * `seam:loadMergeCandidates` is modelled on an earlier SEAM pipeline whose output is going to move —
    * so the coupling was dropped (2026-11-15, user). What holds instead is that this node
    * publishes nothing it cannot fill.
    */

@@ -1,6 +1,6 @@
 /**
  * Hand picks: a candidate the reader found in neuroglancer themselves, added to the review list
- * and accepted in one gesture (user, 2026-11-19) — for an open end Suggest Merges missed, or a
+ * and accepted in one gesture (user, 2026-11-19) — for an open end Find Merge Candidates missed, or a
  * tip whose right candidate it did not list.
  *
  * ## A pick is a piece and a place

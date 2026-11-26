@@ -270,7 +270,7 @@ let bootPromise: Promise<PyodideApi> | undefined
  * the session: a module's functions read their helpers from it at call time.
  *
  * **As a promise made once** — not as the namespace, filled when loading
- * ends. Two first calls to one module can overlap (Suggest Merges warms the cutter's worker while
+ * ends. Two first calls to one module can overlap (Find Merge Candidates warms the cutter's worker while
  * its first box is opened), and filled on completion both would load, each run the source into a
  * namespace of its own, and the later `set` would replace the earlier: the cutter's held box would
  * then sit in a copy no later call reaches. A failed load is forgotten, so the next call retries.

@@ -1,7 +1,7 @@
 /**
  * Build a directory of merge-suggestion sets, ready to copy to a web server.
  *
- * `seam:suggestions` reads a directory through an **index**, because a browser cannot list an
+ * `seam:loadMergeCandidates` reads a directory through an **index**, because a browser cannot list an
  * HTTP directory — there is no portable way, and the host this is meant for answers `403` to a
  * directory request. So something has to write that index. Eventually that is SEAM's pipeline,
  * depositing each run as it finishes; until then it is this, which is the same job done by hand.
@@ -100,7 +100,7 @@ writeFileSync(
   join(out, 'index.json'),
   `${JSON.stringify(
     {
-      what: "SEAM's merge-candidate suggestion sets, for Coda's Merge Suggestions node",
+      what: "SEAM's merge-candidate suggestion sets, for Coda's Load Merge Candidates node",
       sets: entries,
     },
     null,

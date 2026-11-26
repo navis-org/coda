@@ -152,7 +152,7 @@ export interface AssessorPatches {
  */
 export async function readyAssessorPatches(): Promise<void> {
   // No signal, on purpose: an abort would tear down the lane, and with it a box another caller
-  // holds there (`seam:suggestMerges` says more).
+  // holds there (`seam:findMergeCandidates` says more).
   await callPython({ module: 'assessorPatches', fn: 'coda_assessor_ready', args: [{}] })
 }
 

@@ -385,14 +385,14 @@ nodes read the segmentation for one neuron at a time, and for them the neuron de
 instead ([seam-live-plan.md](seam-live-plan.md)): a root minted after the pinned materialization
 names nothing at it, and one replaced before it names nothing either. Measured on 2026-11-17 with
 the Dataset on "Latest" (564) and a root edited that morning: Find Open Ends found no nucleus row,
-and Suggest Merges found its own neuron in none of the ten boxes.
+and Find Merge Candidates found its own neuron in none of the ten boxes.
 
 - **Find Open Ends** reads the nucleus table live (`somataLive`), each root at a moment it is
   current — now, or the last moment before it was replaced.
-- **Suggest Merges** keeps a moment per neuron in `Searched at`, a run record
+- **Find Merge Candidates** keeps a moment per neuron in `Searched at`, a run record
   ([core.md](core.md#a-run-record-is-a-param-the-run-writes-and-the-key-leaves-out)), and reads
   every box of that neuron at it.
-- **Review Suggestions** tells no time of its own: the currency check and Submit's plan read at the
+- **Proofread Merges** tells no time of its own: the currency check and Submit's plan read at the
   server's now.
 
 The Dataset still supplies the datastack, and on a datastack with no chunkedgraph — root ids that

@@ -10,7 +10,7 @@
  *
  * **A leaf module, holding one expression and importing nothing.** It lived in
  * `openWindowModel.ts` for one round, which put `src/ml/session` and `src/ml/support` in the
- * module graph of `seam:suggestions` — a node that opens no model and fetches two files over
+ * module graph of `seam:loadMergeCandidates` — a node that opens no model and fetches two files over
  * HTTP. A shared arithmetic helper should not drag a GPU runtime behind it.
  */
 export function afterShare(share: number, fraction: number): number {

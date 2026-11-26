@@ -100,7 +100,7 @@ export async function openSearchVolume(
    * How much the run may spend holding chunks it has fetched, in bytes.
    *
    * A parameter rather than a constant read here, because the budget is a reader's decision —
-   * `seam:suggestMerges` exposes it — and because a probe measuring what a cache is worth has to
+   * `seam:findMergeCandidates` exposes it — and because a probe measuring what a cache is worth has to
    * be able to turn it off. Absent is `chunkCache`'s own default.
    */
   budget: { chunkBytes?: number } = {},

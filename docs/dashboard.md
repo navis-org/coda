@@ -386,7 +386,7 @@ a **non-viewer** node can hold a cell, and this component draws such a node as a
 is the streaming value itself. `onPreview` bumps `previewVersion` alone and never `runVersion`, so
 the gate would freeze exactly that cell mid-stream. On the canvas it is safe because a non-viewer
 card shows a one-line summary, unless its body draws from `inputValues` — which is what
-`drawsInputs` is for, and what `seam:review` sets.
+`drawsInputs` is for, and what `seam:proofreadMerges` sets.
 
 **What this does not reach**, and it is a bound worth knowing rather than a loose end here: a
 viewer only refreshes on a render something else schedules, and `runNode` on an *upstream* card

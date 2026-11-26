@@ -1,5 +1,5 @@
 /**
- * The Review Suggestions card's verdict-sharing control, in its foot (user, 2026-11-18): a switch
+ * The Proofread Merges card's verdict-sharing control, in its foot (user, 2026-11-18): a switch
  * to send this browser's verdicts to SEAM, what has been sent, and a small panel for the name and
  * email. Everything it shows and writes is `src/data/verdictLog.ts`'s, kept per browser — never in
  * the workflow (`docs/seam-verdict-log-plan.md`).

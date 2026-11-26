@@ -1,7 +1,7 @@
 /**
  * The review card's currency check (`rootCurrency.ts`), against fake servers and a fake clock:
  * what is asked, when, how often, and how long an answer holds — built for a queue that is still
- * arriving from Suggest Merges.
+ * arriving from Find Merge Candidates.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

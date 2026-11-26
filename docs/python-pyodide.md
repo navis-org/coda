@@ -233,7 +233,7 @@ Coda passed no `errorCallback`, so a download that broke off went by in silence.
 imports its packages on first use — `cutoutSummary` installs its vendored files inside the first
 call — then ran, was kept in `namespaces`, and failed on every later call for the session:
 `ModuleNotFoundError: No module named 'pandas'`, with Pyodide's advice to call `micropip`, on
-Suggest Merges, after a long wait at "opening the segmentation". The symptom names a package; the
+Find Merge Candidates, after a long wait at "opening the segmentation". The symptom names a package; the
 cause was a request. Seen three times in one day, twice in a probe and once in the app, with
 every file in place on the CDN and its checksum matching each time it was asked for by hand. **What
 makes the request fail was not found**: the episodes lasted a few minutes each and were slow as
@@ -796,7 +796,7 @@ different object. Cutting one 66-candidate tip's patches went from a 220 MB peak
 
 ### Two more protocol changes: a second worker, and an answer in two parts (2026-11-18)
 
-Both came out of Suggest Merges' speed work (`docs/seam-suggestions-plan.md`, "The search's
+Both came out of Find Merge Candidates' speed work (`docs/seam-suggestions-plan.md`, "The search's
 network, measured apart and through the node"), and both are general.
 
 **A lane is a worker per module.** `engine.ts` holds one worker per lane, made on first use, and
@@ -805,7 +805,7 @@ It is a property of the *module* rather than of a call, because the cutter leave
 its heap: a call routed elsewhere would load a fresh copy and still answer, from a module with no
 box open. Each lane is torn down alone, so a Cancel on one leaves the other; the memory readout
 sums the heaps and `stopPython` stops every idle one. The price is a second heap and one boot
-(~1.5 s, cached download) — which a caller can move off its critical path, as Suggest Merges does
+(~1.5 s, cached download) — which a caller can move off its critical path, as Find Merge Candidates does
 with `readyAssessorPatches` under the model download. A new lane is warranted only where two
 bridges' calls run concurrently and one holds state.
 

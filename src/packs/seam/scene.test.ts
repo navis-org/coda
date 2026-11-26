@@ -97,7 +97,7 @@ describe('writeDrawnPositions', () => {
 })
 
 /**
- * The two layers Find Merges emits over one set of points.
+ * The two layers Model A's node emitted over one set of points (the node is dropped; the layers are kept).
  *
  * They are two rather than one two-mode layer because a mode would have been a param
  * `evaluate` reads, and that is a re-run every time somebody wants the other picture. Being two

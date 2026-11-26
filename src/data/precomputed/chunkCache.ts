@@ -5,7 +5,7 @@
  *
  * A precomputed chunk is big and a box is small. Aedes' segmentation stores 256 x 256 x 64
  * voxels to a chunk — **8.2 x 8.2 x 2.9 µm, 3.0 MB on the wire** — which is wider in xy than
- * most of what reads it. `seam:suggestMerges` reads two boxes per open end, a 6 µm one for the
+ * most of what reads it. `seam:findMergeCandidates` reads two boxes per open end, a 6 µm one for the
  * search and a larger one for the assessor's patches, and measured on one neuron's 505 ends
  * (`pnpm probe:seam-tip-boxes`):
  *
@@ -127,7 +127,7 @@ export interface ChunkCache {
  * an out-of-memory loses the whole run, which on several hundred ends is worth more than the
  * minutes a larger cache saves. 512 MB is a few times the 133 MB the assessor's weights already
  * hold and is comfortable on a machine with 8 GB; past that is a decision about a particular
- * machine, which is why `seam:suggestMerges` exposes it rather than this file deciding.
+ * machine, which is why `seam:findMergeCandidates` exposes it rather than this file deciding.
  */
 export const DEFAULT_CHUNK_BUDGET = 512 * 1024 * 1024
 

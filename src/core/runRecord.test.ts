@@ -45,7 +45,7 @@ beforeAll(() => {
       { id: 'other', kind: 'string', label: 'Other', default: '' },
     ],
     inferOutputs: () => ({ out: T.table() }),
-    // Decided as the run starts, as Suggest Merges decides its moments, and recorded after.
+    // Decided as the run starts, as Find Merge Candidates decides its moments, and recorded after.
     evaluate: async (ctx) => {
       started = true
       const decided = toRecord

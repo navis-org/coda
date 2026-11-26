@@ -6,9 +6,9 @@
  * directly against SEAM's own published list. What this node adds above that layer is tables,
  * and `searchTips.test.ts` covers those.
  *
- * What is left here is the shape, and the property it shares with `seam:suggestions` and must go
+ * What is left here is the shape, and the property it shares with `seam:loadMergeCandidates` and must go
  * on sharing: **the two tables they publish are the same two tables**, because that is what lets
- * `seam:review` take either. It cannot be checked by reading one file.
+ * `seam:proofreadMerges` take either. It cannot be checked by reading one file.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -26,7 +26,7 @@ import { MERGE_ASSESSOR_MODELS, MERGE_RANKER_MODELS, NO_ASSESSOR } from './model
 import { LINEAGE_FIELDS, SEARCH_CANDIDATE_FIELDS } from './searchTips'
 import { schemaOf } from './suggestionTables'
 
-const def = requireNodeDef('seam:suggestMerges')
+const def = requireNodeDef('seam:findMergeCandidates')
 
 function infer(params: Partial<ParamValues>, inputs: Record<string, CodaType | undefined>) {
   const ctx = makeInferContext(def, { ...defaultParams(def), ...params } as ParamValues, inputs)
@@ -47,14 +47,14 @@ describe('the card', () => {
   })
 
   it('is listed in the pack, which is what registers it', () => {
-    expect(seam.nodes.map((node) => node.type)).toContain('seam:suggestMerges')
+    expect(seam.nodes.map((node) => node.type)).toContain('seam:findMergeCandidates')
   })
 
   /**
-   * **Deliberately not `seam:suggestions`' shape** (2026-11-15, user). That node reads a run of
+   * **Deliberately not `seam:loadMergeCandidates`' shape** (2026-11-15, user). That node reads a run of
    * an earlier SEAM pipeline and its output is going to change, so pinning this node's columns
    * to it would pin them to something about to move. What holds instead is that this node
-   * publishes exactly what the search measures — `seam:review` reads every column by name and
+   * publishes exactly what the search measures — `seam:proofreadMerges` reads every column by name and
    * answers `undefined` for one that is not there, so it takes either.
    */
   it('publishes only the columns the search fills', () => {
@@ -117,7 +117,7 @@ describe('Searched at', () => {
 
 describe('extending a neuron', () => {
   it('takes what to extend by reference, so it waits for nothing below it', () => {
-    // Review Suggestions sits below this node. An ordinary input from it would be a cycle.
+    // Proofread Merges sits below this node. An ordinary input from it would be a cycle.
     const port = inputPorts(def, defaultParams(def)).find((one) => one.id === 'review')
     expect(port?.reference).toBe(true)
     expect(port?.required).toBe(false)

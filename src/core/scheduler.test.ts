@@ -752,7 +752,7 @@ describe('publishing a partial result', () => {
  * A partial crossing a node boundary.
  *
  * `ctx.publish` was built for a viewer drawing its own *inputs*, where the value on the upstream
- * wire **is** the scene and nothing downstream has to run. Review Suggestions broke that
+ * wire **is** the scene and nothing downstream has to run. Proofread Merges broke that
  * premise: its queue is the partial, but the picture a reader judges a merge in is a
  * Neuroglancer node one further along, fed from outputs only Review's `evaluate` produces. So
  * the queue filled while the viewer beside it stayed on the previous run.
@@ -1036,7 +1036,7 @@ describe('what a node warns about', () => {
   })
 
   /**
-   * One warning a line (user, 2026-11-18): joined with spaces, six warnings on a Suggest Merges
+   * One warning a line (user, 2026-11-18): joined with spaces, six warnings on a Find Merge Candidates
    * card read as one paragraph. A caller passing them on takes the list, never a split string.
    */
   it('keeps two warnings apart: a line each, and an entry each', async () => {

@@ -266,8 +266,8 @@ describe('building a figure', () => {
     const figure = buildFigure(
       'coda-graph',
       [
-        'seam:suggestMerges as search',
-        'seam:review as review',
+        'seam:findMergeCandidates as search',
+        'seam:proofreadMerges as review',
         'search:tips -> review:tips',
         'search:candidates -> review:candidates',
         'review:extended -> search:review',
@@ -293,7 +293,9 @@ describe('building a figure', () => {
   it('layers a forward reference wire as any other', () => {
     const figure = buildFigure(
       'coda-graph',
-      ['dataset.cave as ds', 'seam:suggestMerges as search', 'ds -> search:dataset'].join('\n'),
+      ['dataset.cave as ds', 'seam:findMergeCandidates as search', 'ds -> search:dataset'].join(
+        '\n',
+      ),
     )
     expect(figure.problems).toEqual([])
     if (figure.kind !== 'graph') return

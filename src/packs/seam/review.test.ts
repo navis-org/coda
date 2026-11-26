@@ -1,5 +1,5 @@
 /**
- * What `seam:review` publishes when the tables hold more than one neuron.
+ * What `seam:proofreadMerges` publishes when the tables hold more than one neuron.
  *
  * The node reviews one neuron at a time, and two of its outputs follow that choice: `Layers`,
  * whose annotation points would otherwise put a second neuron's suggestions in the viewer, and
@@ -69,7 +69,7 @@ async function run(
   params: ParamValues,
   inputs: Record<string, Value | undefined> = { tips: TIPS, candidates: CANDIDATES },
 ): Promise<Record<string, Value>> {
-  const def = requireNodeDef('seam:review')
+  const def = requireNodeDef('seam:proofreadMerges')
   const ctx = {
     params: { ...defaultParams(def), ...params },
     input: (portId: string) => inputs[portId],
@@ -253,14 +253,14 @@ describe('after merges', () => {
 
 /**
  * Extending (`docs/seam-extend-plan.md`): the pairs leave by `Extended`, and a reference to the
- * node is answered with the same table from its params alone — which is what Suggest Merges
+ * node is answered with the same table from its params alone — which is what Find Merge Candidates
  * reads, before this node has run.
  */
 describe('what is extended', () => {
   const SEED = '648518347558097460'
   const PIECE = '648518347558680055'
   const NEXT = '648518347558349370'
-  const def = requireNodeDef('seam:review')
+  const def = requireNodeDef('seam:proofreadMerges')
   const grown = (id: string[], seed: string[], steps: number[], junction: boolean[]) =>
     makeTable(
       tableSchema(
@@ -330,7 +330,7 @@ describe('what is extended', () => {
     }
     const referred = def.asReference!(params, 'extended')
     expect(referred).toEqual((await run(params, inputs))['extended'])
-    // And it is what Suggest Merges reads: two chunkedgraph ids a pair, in a stable order.
+    // And it is what Find Merge Candidates reads: two chunkedgraph ids a pair, in a stable order.
     expect(extendPlanOf(referred).pairs).toEqual([
       { parent: SEED, piece: PIECE },
       { parent: PIECE, piece: NEXT },
@@ -356,7 +356,7 @@ describe('what is extended', () => {
    * The card finds the node that searches a piece by who reads `Extended` **by reference** —
    * the reader's own declaration, not a type id the card would have to know.
    */
-  it('is read by reference by Suggest Merges, which is how the card finds the search', () => {
+  it('is read by reference by Find Merge Candidates, which is how the card finds the search', () => {
     const node = (id: string, type: string) => ({
       id,
       type,
@@ -373,8 +373,8 @@ describe('what is extended', () => {
     const graph = (edges: ReturnType<typeof edge>[]): CodaGraph => ({
       ...emptyGraph(),
       nodes: [
-        node('r1', 'seam:review'),
-        node('s1', 'seam:suggestMerges'),
+        node('r1', 'seam:proofreadMerges'),
+        node('s1', 'seam:findMergeCandidates'),
         node('f1', 'core.filter'),
       ],
       edges,
@@ -391,11 +391,11 @@ describe('what is extended', () => {
       referrerOf(graph([edge('tips', 's1', 'review')]), 'r1', EXTENDED_PORT),
     ).toBeUndefined()
     expect(referrerOf(graph([]), 'r1', EXTENDED_PORT)).toBeUndefined()
-    // And the port Suggest Merges declares names this output as its producer.
-    const port = allInputPorts(requireNodeDef('seam:suggestMerges')).find(
+    // And the port Find Merge Candidates declares names this output as its producer.
+    const port = allInputPorts(requireNodeDef('seam:findMergeCandidates')).find(
       (one) => one.id === 'review',
     )!
-    expect(port.producedBy).toEqual({ type: 'seam:review', port: EXTENDED_PORT })
+    expect(port.producedBy).toEqual({ type: 'seam:proofreadMerges', port: EXTENDED_PORT })
   })
 
   it('reviews the piece’s tips under the neuron, and leaves its joining end out', async () => {
@@ -436,7 +436,7 @@ describe('what is extended', () => {
 describe('Exclude organelles', () => {
   /** On by default, and on for a graph saved before it existed: a reading aid, publishing nothing. */
   it('is on by default and when absent, and changes nothing the node publishes', () => {
-    const def = requireNodeDef('seam:review')
+    const def = requireNodeDef('seam:proofreadMerges')
     expect(findParam(def, 'excludeOrganelles')).toMatchObject({
       kind: 'boolean',
       default: true,

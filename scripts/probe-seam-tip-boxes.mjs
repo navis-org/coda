@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Where a tip's seconds go in `seam:suggestMerges`, and what a chunk cache would be worth.
+ * Where a tip's seconds go in `seam:findMergeCandidates`, and what a chunk cache would be worth.
  *
  *   pnpm probe:seam-tip-boxes                                      # needs a CAVE token
  *   pnpm probe:seam-tip-boxes -- --tips 12 --budget-mb 24          # small enough to force eviction

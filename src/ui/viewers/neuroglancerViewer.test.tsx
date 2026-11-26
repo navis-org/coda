@@ -1620,7 +1620,7 @@ describe('neurons changed inside the viewer', () => {
   })
 
   /*
-   * Review Suggestions under Auto-extend: a piece taken arrives with the tips of the piece it was
+   * Proofread Merges under Auto-extend: a piece taken arrives with the tips of the piece it was
    * taken on, so its points layer changes in the same update. A local layer's points go in place
    * with the segments, so the whole update applies under the pointer (user, 2026-11-18).
    */

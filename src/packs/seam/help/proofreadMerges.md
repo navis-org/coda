@@ -1,4 +1,4 @@
-## What Review Suggestions does
+## What Proofread Merges does
 
 A queue of SEAM's merge suggestions, one row per tip. Each row is a tip and one of its candidates — the piece SEAM would merge into the neuron there. Click a row and the card's viewer shows the neuron and that candidate in two colours, with the camera on the point where they touch. Accept it, reject it, say the neuron ends there, mark it unsure or ignore it, and move on.
 
@@ -7,8 +7,8 @@ A verdict is a note saved with the workflow. Nothing is written to the segmentat
 ```coda-graph
 caption: Suggestions read, worked through, and shown in the viewer.
 dataset.flywire as ds
-seam:suggestions as sug
-seam:review as review
+seam:loadMergeCandidates as sug
+seam:proofreadMerges as review
 out.neuroglancer as ng
 sug:tips -> review:tips
 sug:candidates -> review:candidates
@@ -18,13 +18,13 @@ review:current -> ng:control
 review:layers -> ng:layers
 ```
 
-Wire **both** of Merge Suggestions' tables in: `Tips` is the queue and `Candidates` is what the arrows page through. The `Dataset` input is what the card's viewer needs to be a scene.
+Wire **both** of Load Merge Candidates' tables in: `Tips` is the queue and `Candidates` is what the arrows page through. The `Dataset` input is what the card's viewer needs to be a scene.
 
 The keys J, K and F, the hover, and following a multicut by itself all need Coda's own Neuroglancer, the embedded viewer that is the Neuroglancer node's default `Viewer type`. Any other viewer cannot tell the card what is under the pointer or which keys were pressed in it. If the card is wired only to such viewers, its foot says so. Reviewing and Submit still work, and an edit made there shows as an **outdated** tag to press.
 
 ## One neuron at a time
 
-The card reviews one neuron at a time. The `Neuron` list at the top of the card picks which one, and each entry gives the root ID, how many tips it has and how many of its candidates you have judged. Until you pick, the card is on the first neuron in `Tips`. That is also the first one [Suggest Merges](#seam:suggestMerges) searches, so it is the first one ready.
+The card reviews one neuron at a time. The `Neuron` list at the top of the card picks which one, and each entry gives the root ID, how many tips it has and how many of its candidates you have judged. Until you pick, the card is on the first neuron in `Tips`. That is also the first one [Find Merge Candidates](#seam:findMergeCandidates) searches, so it is the first one ready.
 
 Switching neuron jumps to the top row of the new neuron's list. The list, the counts in the footer and the `Layers` annotation layer all cover the picked neuron only. `Tips` and `Verdicts` still carry every neuron, so no verdict is lost when you switch.
 
@@ -36,9 +36,9 @@ If the picked root ID is no longer in `Tips` (the neuron was edited, or the tabl
 
 ### Start before the search finishes
 
-Suggest Merges publishes each end as it is scored, and the queue fills from that — so you can work through the first tips while the rest of the neuron is still being measured, and the Neuroglancer node follows your clicks exactly as it does afterwards. The foot says **still searching — N to go** while that is happening.
+Find Merge Candidates publishes each end as it is scored, and the queue fills from that — so you can work through the first tips while the rest of the neuron is still being measured, and the Neuroglancer node follows your clicks exactly as it does afterwards. The foot says **still searching — N to go** while that is happening.
 
-The N is the picked neuron's tips, not candidates, and it reaches zero: an end the search can never read — its box lies outside the segmentation volume — is counted as done rather than as waiting, and Suggest Merges warns separately about how many those were.
+The N is the picked neuron's tips, not candidates, and it reaches zero: an end the search can never read — its box lies outside the segmentation volume — is counted as done rather than as waiting, and Find Merge Candidates warns separately about how many those were.
 
 > [!IMPORTANT]
 > **A filter or a sort reaches only what has arrived**
@@ -86,7 +86,7 @@ The keys run along the top row in the same order as the buttons, skipping E and 
 
 Each key judges the row under the cursor and moves to the next row that has no verdict yet. That is the next one down the list, or from the top once you reach the end. A row Auto-extend accepted counts as having a verdict, and so does a tip where you judged any of its candidates; merged pieces are skipped too. Once every listed row has a verdict, the status bar says so.
 
-A key never clears a verdict: on a row that already has it, it only moves on. Ctrl+Z takes back the verdict and the move together. Clicking a verdict button does not move the cursor. With several Review Suggestions cards open, the keys go to the one you expanded, pinned or selected.
+A key never clears a verdict: on a row that already has it, it only moves on. Ctrl+Z takes back the verdict and the move together. Clicking a verdict button does not move the cursor. With several Proofread Merges cards open, the keys go to the one you expanded, pinned or selected.
 
 ### Seeing what you accepted
 
@@ -102,7 +102,7 @@ The number on the left is `q`, SEAM's score for the tip's **first** candidate. T
 
 > [!NOTE]
 > **Not the same as `vol_um3`**
-> The table also carries `vol_um3`, which is the candidate's voxels *inside the 6 µm search box* — how much of the piece is near the tip rather than how big the piece is. A long neurite passing through counts only for the part in view. Where the candidates carry no chunk count (`n_l2` — a [Merge Suggestions](#seam:suggestions) set from before rv4), the rows fall back to µm³ and say so; the two differ by orders of magnitude, so a number that worked in `Min size` on one will not mean the same on the other.
+> The table also carries `vol_um3`, which is the candidate's voxels *inside the 6 µm search box* — how much of the piece is near the tip rather than how big the piece is. A long neurite passing through counts only for the part in view. Where the candidates carry no chunk count (`n_l2` — a [Load Merge Candidates](#seam:loadMergeCandidates) set from before rv4), the rows fall back to µm³ and say so; the two differ by orders of magnitude, so a number that worked in `Min size` on one will not mean the same on the other.
 
 `conf` there is the candidate's own score, `p_tip × p_cand`: how likely something belongs at this tip at all, times how much of that belongs to *this* piece. For a first candidate it is exactly the `q` SEAM's cutoff is applied to.
 
@@ -112,30 +112,30 @@ The number on the left is `q`, SEAM's score for the tip's **first** candidate. T
 
 ### Adding a piece by hand
 
-Suggest Merges sometimes misses an open end, or does not list the piece that belongs there. Point at that piece in Neuroglancer, where it meets the neuron, and press **J**. The piece is added to the list and accepted in one step, and the cursor moves to it. **Add from viewer**, in the footer, does the same for the piece the pointer last rested on, if you would rather click.
+Find Merge Candidates sometimes misses an open end, or does not list the piece that belongs there. Point at that piece in Neuroglancer, where it meets the neuron, and press **J**. The piece is added to the list and accepted in one step, and the cursor moves to it. **Add from viewer**, in the footer, does the same for the piece the pointer last rested on, if you would rather click.
 
 A piece the list already holds is simply accepted where it is listed. Anything else is first checked against the segmentation, which takes a moment and needs you signed in to CAVE: the neuron, or a piece you accepted on it, has to lie within 1.5 µm of where you pointed. That piece does not need to be extended, so you can add a piece to one you added by hand, and so on outwards. The check finds the two supervoxels to merge the way Submit does, so a piece that passes here can be merged. If it fails, the status bar says why and nothing is added.
 
-A piece added within 2 µm of one of the neuron's tips is listed as one more candidate of that tip; further away, it gets a tip of its own. Either way its row comes first, whatever the filters and the sort, is marked **by hand**, and shows none of SEAM's numbers, since SEAM did not score it. You can extend it, judge it again and submit it like any other. Ctrl+Z takes it off the list. Hand picks are never sent to SEAM with **Help improve**, and Start over clears them with everything else. With several Review Suggestions cards open, the pick goes to the one you expanded, pinned or selected.
+A piece added within 2 µm of one of the neuron's tips is listed as one more candidate of that tip; further away, it gets a tip of its own. Either way its row comes first, whatever the filters and the sort, is marked **by hand**, and shows none of SEAM's numbers, since SEAM did not score it. You can extend it, judge it again and submit it like any other. Ctrl+Z takes it off the list. Hand picks are never sent to SEAM with **Help improve**, and Start over clears them with everything else. With several Proofread Merges cards open, the pick goes to the one you expanded, pinned or selected.
 
 ## Extending a neuron
 
-A piece you accept often has open ends of its own. With suggestions from [Suggest Merges](#seam:suggestMerges) you can search those too and grow the neuron piece by piece, all in one queue: accept a piece, extend it, accept one of the new suggestions, extend that, and Submit the lot at the end.
+A piece you accept often has open ends of its own. With suggestions from [Find Merge Candidates](#seam:findMergeCandidates) you can search those too and grow the neuron piece by piece, all in one queue: accept a piece, extend it, accept one of the new suggestions, extend that, and Submit the lot at the end.
 
 ```coda-graph
-caption: The dotted wire tells Suggest Merges which accepted pieces to extend.
-seam:suggestMerges as search
-seam:review as review
+caption: The dotted wire tells Find Merge Candidates which accepted pieces to extend.
+seam:findMergeCandidates as search
+seam:proofreadMerges as review
 search:tips -> review:tips
 search:candidates -> review:candidates
 review:extended -> search:review
 ```
 
-**Wire `Extended` back into Suggest Merges' `Review` input.** The wire is dotted and runs backwards. Without it the Extend button is greyed out and says so. Suggestions from a published set ([Merge Suggestions](#seam:suggestions)) cannot be extended.
+**Wire `Extended` back into Find Merge Candidates' `Review` input.** The wire is dotted and runs backwards. Without it the Extend button is greyed out and says so. Suggestions from a published set ([Load Merge Candidates](#seam:loadMergeCandidates)) cannot be extended.
 
 ### The Extend button
 
-Every accepted row has an **Extend** button. Press it and Suggest Merges finds that piece's open ends and searches them, with the neuron and the piece read as one object. It runs whatever auto-run is set to. The new tips appear beneath the row, and the button says how far the search has got:
+Every accepted row has an **Extend** button. Press it and Find Merge Candidates finds that piece's open ends and searches them, with the neuron and the piece read as one object. It runs whatever auto-run is set to. The new tips appear beneath the row, and the button says how far the search has got:
 
 | The button reads | Meaning |
 | ---------------- | ------- |
@@ -147,7 +147,7 @@ Every accepted row has an **Extend** button. Press it and Suggest Merges finds t
 | `3 of 7 ends searched` | the search stopped part way, e.g. you cancelled the run |
 | `no open ends` | the piece has tips, and none left to search |
 | `nothing to search` | the search finished and listed nothing for this piece |
-| `search failed` | the search ended in an error; the reason is on the Suggest Merges card |
+| `search failed` | the search ended in an error; the reason is on the Find Merge Candidates card |
 | `not searched yet` | extended, and the search has not run |
 
 Pressing the button again stops extending the piece and takes its tips off the list. The piece stays accepted.
@@ -191,14 +191,14 @@ Auto-extend does not accept:
 
 Where a chain stops because its next piece is large, that row is marked with a `!`. A piece that size at the end of a chain is often a false merge, either in that piece or in a piece earlier in the chain that has led into another neuron. Hover over the `!` for the piece's size and `q`. If both look right in the viewer, accept the piece and extend it yourself.
 
-It needs SEAM's cutoff, so Suggest Merges must have an `Assessor`. Without one the menu item is greyed out.
+It needs SEAM's cutoff, so Find Merge Candidates must have an `Assessor`. Without one the menu item is greyed out.
 
 **`Auto-extend min q`** raises the bar. Empty, Auto-extend takes what clears SEAM's cutoff; set to a number, it takes a first candidate only where its `q` is at least that as well — `0.4`, say, for fewer and surer pieces. A number below the cutoff changes nothing, since the cutoff still applies. Changing it while an Auto-extend is running grows the tree again by the new rule: pieces it no longer takes, and everything beyond them, come off the list, and pieces you accepted yourself stay. `Auto-extend listed` counts by it too.
 
 The pieces it accepts are listed like any other, with an `auto` tag, and the footer counts them (`12 by Auto-extend`). Their Extend button shows how far their search has got and cannot be pressed. To stop extending them, change the piece you chose Auto-extend on.
 
 - **Accept** on an `auto` row makes the verdict your own. Nothing else changes.
-- **Reject**, `Ends`, `Unsure` or `Ignore` drops the piece and everything Auto-extend found beyond it, at once. The next time Suggest Merges runs, it does not take that piece. A verdict on a row Auto-extend could never take changes nothing about the search.
+- **Reject**, `Ends`, `Unsure` or `Ignore` drops the piece and everything Auto-extend found beyond it, at once. The next time Find Merge Candidates runs, it does not take that piece. A verdict on a row Auto-extend could never take changes nothing about the search.
 - Pressing the button again, or the ticked item in the menu, stops Auto-extend and takes everything it found off the list. `Extend` in the menu keeps the piece's own ends but drops what Auto-extend took.
 
 ### Auto-extend listed
@@ -238,7 +238,7 @@ When you start on an eleventh neuron, the one you worked on longest ago loses it
 
 **Per candidate** gives every candidate of every tip its own row, led by that candidate's `conf`. Nothing at that grain is calibrated — there is no `r` for a rank 4 — but it is how you work when the first candidate is clearly wrong and something further down is clearly right. Clicking a row opens on *that* candidate rather than on the tip's first.
 
-The filters read whichever number the row leads with, so `Min confidence` means `q` per tip and `conf` per candidate. Set it from the cutoff your set was made with (0.159 for the single-seed configuration Suggest Merges runs, 0.118 for SEAM's production sets) to browse just below it. `r` is never filtered or sorted on: it has only about 14 values, so thousands of tips would tie.
+The filters read whichever number the row leads with, so `Min confidence` means `q` per tip and `conf` per candidate. Set it from the cutoff your set was made with (0.159 for the single-seed configuration Find Merge Candidates runs, 0.118 for SEAM's production sets) to browse just below it. `r` is never filtered or sorted on: it has only about 14 values, so thousands of tips would tie.
 
 ## Filtering
 
@@ -248,7 +248,7 @@ On the card they fold away behind `Filters` in the footer, for when the list is 
 
 A tip that clears SEAM's own calibrated cutoff is marked `shown`, and its number is drawn in the brighter colour. The cutoff is a value of `q`, so to list only those tips, set `Min confidence` to it. The full list is worth working through too: in the published Aedes set, 97 tips cleared the cutoff, and of the 614 tips just below it a review found about three in five were real. The cutoff is tuned to be right when it speaks, not to find everything.
 
-`Exclude organelles` leaves out candidates the search flags as organelles: mitochondria, vesicles and other pieces wrapped inside one cell, which are never the continuation of a neurite. It is **on** by default. With one row per candidate, flagged candidates are not listed. With one row per tip, a tip whose first candidate is flagged stays in the list but leads with its next candidate, marked `first was an organelle` — often the real continuation is the second. That row shows no `q` or `r` and is never counted as shown, so `Min confidence` passes it by: SEAM's numbers all describe the first candidate, and the next one has only its own `conf`, in the line under its id. An organelle further down a tip's list changes nothing about the row. The footer says how many rows the filter changed. About one flagged piece in a hundred is not an organelle, so switch the filter off to see the list as it was. The flag comes from [Suggest Merges](#seam:suggestMerges), and from [Merge Suggestions](#seam:suggestions) for sets made since SEAM added it. An older published set has no flag, and nothing is left out of it.
+`Exclude organelles` leaves out candidates the search flags as organelles: mitochondria, vesicles and other pieces wrapped inside one cell, which are never the continuation of a neurite. It is **on** by default. With one row per candidate, flagged candidates are not listed. With one row per tip, a tip whose first candidate is flagged stays in the list but leads with its next candidate, marked `first was an organelle` — often the real continuation is the second. That row shows no `q` or `r` and is never counted as shown, so `Min confidence` passes it by: SEAM's numbers all describe the first candidate, and the next one has only its own `conf`, in the line under its id. An organelle further down a tip's list changes nothing about the row. The footer says how many rows the filter changed. About one flagged piece in a hundred is not an organelle, so switch the filter off to see the list as it was. The flag comes from [Find Merge Candidates](#seam:findMergeCandidates), and from [Load Merge Candidates](#seam:loadMergeCandidates) for sets made since SEAM added it. An older published set has no flag, and nothing is left out of it.
 
 Every filter reads a tip's **first** candidate, so paging through a tip's other candidates never makes its row jump or disappear. A flagged candidate you page to is marked `organelle`.
 
@@ -314,14 +314,14 @@ With a CAVE dataset wired and you signed in, the card also checks whether the ne
 
 Splitting off a false merge leaves the neuron as two parts, each with a new root ID. Split it with the split gallery (K) or with Neuroglancer's multicut in Coda's own viewer, and the card follows the split by itself. A split made anywhere else shows as the outdated note in the foot: press **Follow the edit** beside it. Either way the card carries on with the part that holds the most of the neuron's tips. If two parts hold the same number of tips, it takes the larger one. The tips on the other part leave the list, along with any piece you accepted at one of them and everything you extended beyond it. Your verdicts are kept, and Submit works again, on the part you followed.
 
-The card can tell which part a tip went with because Suggest Merges records the supervoxel each tip was found on (`tip_sv`). A split never changes a supervoxel, only which root it belongs to. Suggestions made before 24 November 2026, and published sets, carry no such supervoxels, so a neuron reviewed from them cannot be followed: run Suggest Merges again on the new root.
+The card can tell which part a tip went with because Find Merge Candidates records the supervoxel each tip was found on (`tip_sv`). A split never changes a supervoxel, only which root it belongs to. Suggestions made before 24 November 2026, and published sets, carry no such supervoxels, so a neuron reviewed from them cannot be followed: run Find Merge Candidates again on the new root.
 
 Afterwards the foot says how many tips left with the part split off. Two more buttons can appear beside it:
 
 | Button | When |
 | ------ | ---- |
 | follow the other part instead | another part holds at least four fifths as many tips, so either could be the neuron. Following it brings the dropped tips back and drops the others |
-| place N new tips | Suggest Merges searched more tips after you followed. Press it to read which part those are on |
+| place N new tips | Find Merge Candidates searched more tips after you followed. Press it to read which part those are on |
 
 A piece Submit had already merged into the neuron that went with the other part is tagged **split off with the other part**. Submit does not merge it again, and its tips leave the list with it.
 
@@ -358,12 +358,12 @@ Only button presses are sent: undoing a verdict with Ctrl+Z does not send anythi
 | `Current`  | the ids to show — the neuron at its root now, the candidate being looked at and, with `Show accepted` on, every accepted piece not yet merged — with a `part` column saying which is which |
 | `Layers`   | an annotation layer of **every** shown suggestion on the picked neuron — a map of where the work is |
 | `Merges`   | one row per merge Submit made or tried, on every neuron — the datastack, the outcome, the new root, the operation ID, both supervoxels and their positions, and the time. `accepted_on` names the piece a merge was accepted on, and is empty for a piece accepted on the neuron itself |
-| `Extended` | the accepted pieces being extended, one row per piece: `parent`, the root it was accepted on, and `piece`. Wire it into Suggest Merges' `Review` input |
+| `Extended` | the accepted pieces being extended, one row per piece: `parent`, the root it was accepted on, and `piece`. Wire it into Find Merge Candidates' `Review` input |
 
 `Layers` holds every shown suggestion on the neuron rather than just the one you are on, and that is deliberate: an annotation layer's contents are not part of a scene's *selection*, so a layer that changed on every click would make every click rebuild the whole viewer — and reset the camera with it. Which suggestion is current travels on `Current`, where it costs nothing.
 
 `Verdicts` is the one to keep. It carries every judgement, including those on candidates other than the first, which the folded `verdict` column on `Tips` cannot — a tip is one row.
 
 ```coda-params
-seam:review: mode, minConfidence, minSize, excludeOrganelles, sortBy, showAccepted, extendOnAccept
+seam:proofreadMerges: mode, minConfidence, minSize, excludeOrganelles, sortBy, showAccepted, extendOnAccept
 ```

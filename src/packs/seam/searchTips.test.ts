@@ -40,7 +40,7 @@ import { concatBatches } from '../../nodes/lib/tableOps'
 /**
  * A tips table as `seam:openEnds` publishes one, plus any column a case names.
  *
- * The extra keys are how the cases that stand in for a `seam:suggestions` table are written —
+ * The extra keys are how the cases that stand in for a `seam:loadMergeCandidates` table are written —
  * that one carries a first candidate of its own, which this node has to clear.
  */
 function tipsTable(rows: readonly Partial<Record<string, CellValue>>[]): TableValue {
@@ -181,7 +181,7 @@ describe('the Candidates table', () => {
   })
 
   /**
-   * **Absent, not null.** An earlier draft published `seam:suggestions`' full shape with eleven
+   * **Absent, not null.** An earlier draft published `seam:loadMergeCandidates`' full shape with eleven
    * nulls so the two tables matched column for column; that coupling is gone, because the node
    * it was matching is modelled on an earlier SEAM pipeline and is going to move. A picker
    * offered `p_cand` on a node that can never fill it is worse than not being offered it.
@@ -339,10 +339,10 @@ describe('the first candidate on the tip row', () => {
   })
 
   /**
-   * A `Tips` table from `seam:suggestions` already carries a first candidate, and that one
+   * A `Tips` table from `seam:loadMergeCandidates` already carries a first candidate, and that one
    * belongs to another run. Left in place beside this node's own `Candidates`, the tip would
    * name a `candidateId` with no row in the published list — the one inconsistency
-   * `seam:review` cannot see, since it reads the two tables separately.
+   * `seam:proofreadMerges` cannot see, since it reads the two tables separately.
    */
   it('clears an incoming first candidate from a tip it searched and found nothing at', () => {
     const table = tipsTable([
@@ -393,7 +393,7 @@ describe('the first candidate on the tip row', () => {
 
   /**
    * Every one of these is the *previous* run's reading of the *previous* run's first candidate.
-   * Left in place beside this node's own `candidateId`, `seam:review` would sort on `r`, filter
+   * Left in place beside this node's own `candidateId`, `seam:proofreadMerges` would sort on `r`, filter
    * on `shown` and show `p_top` as if they described it.
    */
   it('clears every calibrated column an earlier run left on the tip', () => {
@@ -470,7 +470,7 @@ describe('which fits a searched tip’s numbers come from', () => {
   })
 
   /**
-   * A `Tips` table from `seam:suggestions` arrives labelled with its set. A row this run searched
+   * A `Tips` table from `seam:loadMergeCandidates` arrives labelled with its set. A row this run searched
    * now carries this run's numbers, so it carries this run's label; a row it did not search still
    * carries the set's numbers, so it keeps the set's.
    */
@@ -734,7 +734,7 @@ describe('an assessed run', () => {
   /**
    * **The row order is `order`'s and `rank` counts along it, while `geo_rank` stays the
    * forest's.** A `rank` that counted the list's own index would number the published rows
-   * 2, 1 — believable, and read by `seam:review` as the queue's order.
+   * 2, 1 — believable, and read by `seam:proofreadMerges` as the queue's order.
    */
   it('numbers the rows by the order it publishes them in', () => {
     const { rows } = tipsFromTable(
@@ -777,7 +777,7 @@ describe('an assessed run', () => {
 
   /**
    * The three states of `searched`, which is the one tip column about the **run** rather than
-   * about a candidate — and the one `seam:review` counts to say how many tips are still coming.
+   * about a candidate — and the one `seam:proofreadMerges` counts to say how many tips are still coming.
    *
    * The middle row is the whole point. It was searched and its box held nothing, so it has no
    * row in `Candidates` and, on a geometry-only run, no tip score either: without this column it
@@ -807,7 +807,7 @@ describe('an assessed run', () => {
 
   /**
    * **This run's statement, never the incoming table's.** A `Tips` table can arrive already
-   * carrying `searched` — from `seam:suggestions`, or from this node's own output fed back
+   * carrying `searched` — from `seam:loadMergeCandidates`, or from this node's own output fed back
    * round — and that one is about another box and another filter. Carried through, it would say
    * "searched" about rows this run has not begun, which is the one cell a reader is counting.
    */

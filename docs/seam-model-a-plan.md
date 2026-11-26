@@ -54,7 +54,7 @@ The plain name goes to the model that works.
 
 | | type | label |
 | --- | --- | --- |
-| Model A | `seam:findMerges` | Find Merges |
+| Model A | `seam:findSplitCandidates` | Find Split Candidates |
 | affinity transformer | `seam:affinityClusters` | Affinity Clusters |
 
 "Affinity Clusters" is also the more honest label for what that node does: it clusters a neuron's
@@ -64,8 +64,8 @@ inference rather than the model's claim.
 ## The pack becomes `seam`
 
 SEAM's own `docs/coda-pack.md` plans a pack called `seam` in this repo, on a branch off
-`neuroglancer-selected`, with `seam:suggestions` (fetch suggestions from a service) and
-`seam:review` (a review queue that POSTs decisions, in the style of `annotation:editor`), plus
+`neuroglancer-selected`, with `seam:loadMergeCandidates` (fetch suggestions from a service) and
+`seam:proofreadMerges` (a review queue that POSTs decisions, in the style of `annotation:editor`), plus
 three neuroglancer protocol extensions. `proofread` is the in-browser half of the same thing.
 
 **Decided (user, 2026-11-04): one pack, named `seam`.** `findMerges` is the node that runs a model
@@ -80,7 +80,7 @@ its pack by that path.
 
 ## Three things Model A forces, and one it does not
 
-**1. Meshes, not skeletons.** `seam:findMerges` cannot take what `seam:affinityClusters` takes.
+**1. Meshes, not skeletons.** `seam:findSplitCandidates` cannot take what `seam:affinityClusters` takes.
 Model A's input is mesh surface points with normals, and SEAM decided for the browser path on
 2026-10-20 that it stays that way, because Coda's bundled neuroglancer already fetches and decodes
 graphene meshes. A window is megabytes of mesh rather than kilobytes of skeleton, so **fetch time
@@ -166,7 +166,7 @@ Stated so it is a decision rather than a default:
 - **A help document that has to say what was measured.** `help/affinityClusters.md` currently says
   "read a cluster as a place to look rather than as a finding", which was the honest hedge while
   nothing was measured. Something *is* measured now, and the affinity node's help has to say that
-  its checkpoint is at chance on real FlyWire merges and that `seam:findMerges` is the one to
+  its checkpoint is at chance on real FlyWire merges and that `seam:findSplitCandidates` is the one to
   reach for. Not saying so would be the worse outcome of keeping it.
 - **Two input idioms in one pack**, discussed above — acceptable, and worth one sentence in the
   pack's README-equivalent so the next reader does not take it for an accident.
@@ -238,7 +238,7 @@ Two findings that change what Phase D builds:
   lever, and should run one neuron at a time rather than accumulate. Window building and
   inference are the same order, so neither is the thing to optimise first.
 
-**Phase D — `seam:findMerges`.** The node: meshes in, a per-window table with scores out, a
+**Phase D — `seam:findSplitCandidates`.** The node: meshes in, a per-window table with scores out, a
 `Points` output carrying the per-point bipartition, and a layer marking sites. The cutoff param
 reads the manifest's calibration curve rather than naming a number. Help, glyph, See also, and the
 `packs.test.ts` sweeps.

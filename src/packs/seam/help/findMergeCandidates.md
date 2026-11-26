@@ -1,15 +1,15 @@
-## What Suggest Merges does
+## What Find Merge Candidates does
 
-Suggest Merges takes a table of open ends and looks, around each one, for the piece of segmentation that continues the neuron there. For every end it reads a 6 µm box of segmentation, measures each object that comes near the neuron inside it, and ranks them. The result is the queue [Review Suggestions](#seam:review) works through: one row per tip in `Tips`, and every tip's ranked list in `Candidates`.
+Find Merge Candidates takes a table of open ends and looks, around each one, for the piece of segmentation that continues the neuron there. For every end it reads a 6 µm box of segmentation, measures each object that comes near the neuron inside it, and ranks them. The result is the queue [Proofread Merges](#seam:proofreadMerges) works through: one row per tip in `Tips`, and every tip's ranked list in `Candidates`.
 
-It runs SEAM's search in your browser, on the ends you give it. [Merge Suggestions](#seam:suggestions) publishes the same two tables from a run somebody else did on a cluster; use that one if a published set covers your neurons, and this one for a neuron no set covers or one that has been edited since.
+It runs SEAM's search in your browser, on the ends you give it. [Load Merge Candidates](#seam:loadMergeCandidates) publishes the same two tables from a run somebody else did on a cluster; use that one if a published set covers your neurons, and this one for a neuron no set covers or one that has been edited since.
 
 ```coda-graph
 caption: A neuron's open ends found, searched and reviewed. The dotted wire is what lets you extend an accepted piece.
 dataset.cave as ds
 seam:openEnds as ends
-seam:suggestMerges as search
-seam:review as review
+seam:findMergeCandidates as search
+seam:proofreadMerges as review
 ds -> ends:dataset
 ends -> search:tips
 ds -> search:dataset
@@ -42,7 +42,7 @@ The network runs on WebGPU. On a recent laptop a patch takes about 15 ms in Chro
 
 ## Narrowing the ends
 
-Suggest Merges searches every row it is given. To search fewer, cut the table above it: a [Filter Table](#core.filterTable) on `e_tip`, or a Sort and a Sample to keep the best 25.
+Find Merge Candidates searches every row it is given. To search fewer, cut the table above it: a [Filter Table](#core.filterTable) on `e_tip`, or a Sort and a Sample to keep the best 25.
 
 > [!IMPORTANT]
 > **A filtered run keeps a few candidates a whole-neuron run would drop**
@@ -66,7 +66,7 @@ Finished ends are remembered for the session. Cancel a run, or change a setting 
 
 ## Extending accepted pieces
 
-A piece you accept in the review card often has open ends of its own. Wire the review card's `Extended` output back into this node's `Review` input and you can search those too, without leaving the queue: accept a piece, press **Extend** on its row, and its ends are listed beneath it. Accept one of those, extend it, and so on until the neuron is filled out. [Review Suggestions](#seam:review) has the card's side of this.
+A piece you accept in the review card often has open ends of its own. Wire the review card's `Extended` output back into this node's `Review` input and you can search those too, without leaving the queue: accept a piece, press **Extend** on its row, and its ends are listed beneath it. Accept one of those, extend it, and so on until the neuron is filled out. [Proofread Merges](#seam:proofreadMerges) has the card's side of this.
 
 The wire is dotted and runs backwards on the canvas. It carries no data downstream. It only tells this node which accepted pieces to extend, so the node runs again when that list changes and at no other click on the card.
 
@@ -119,8 +119,8 @@ A split never changes a supervoxel, only which root it belongs to. So after the 
 
 Every candidate also carries `organelle_score`: the share of its surface, inside the search box, that faces its single largest neighbour. A mitochondrion or a vesicle sits wrapped inside one cell, so nearly all of it faces that cell; a neurite's continuation meets the neuron at one end and other pieces along its length. `organelle` is true from 0.5 up, which is SEAM's cut: in two blind checks, 39 of the 40 pieces at or above it were organelles, and 2 of the 50 below it were.
 
-The flag changes no rank, `q` or `shown`. [Review Suggestions](#seam:review) leaves flagged candidates out unless you untick `Exclude organelles`. The measure is SEAM's own code, run on the box the search has already read, and adds about a quarter of a second to each end. `Tips` carries its first candidate's `organelle`, as [Merge Suggestions](#seam:suggestions)' does; the score is on `Candidates`.
+The flag changes no rank, `q` or `shown`. [Proofread Merges](#seam:proofreadMerges) leaves flagged candidates out unless you untick `Exclude organelles`. The measure is SEAM's own code, run on the box the search has already read, and adds about a quarter of a second to each end. `Tips` carries its first candidate's `organelle`, as [Load Merge Candidates](#seam:loadMergeCandidates)' does; the score is on `Candidates`.
 
 ```coda-params
-seam:suggestMerges: model, assessor, download, assessTop, chunkCacheMb
+seam:findMergeCandidates: model, assessor, download, assessTop, chunkCacheMb
 ```

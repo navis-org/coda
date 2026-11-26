@@ -7,14 +7,31 @@ from there rather than restating its reasoning.
 
 ## The direction of the error, because it is easy to get backwards
 
-The two nodes already in this pack — `seam:findMerges`, `seam:affinityClusters`, both retired —
+The two nodes already in this pack — `seam:findSplitCandidates`, `seam:affinityClusters`, both retired —
 look for **false merges**: one segment that is really two neurons, and the fix is a split. This
 plan is the other direction. SEAM finds **false splits**: a neuron that stops at a tip when a
 separate piece of segmentation nearby is very likely its continuation, and the fix is a merge.
 
-So "Find Merges" finds false merges and "Merge Suggestions" suggests merges. That sentence is the
-trap, and it is why the nodes below get unambiguous **labels** even though they keep the type ids
-SEAM reserved.
+So every name in the pack says the **fix**: a merge candidate is fixed by a merge, a split
+candidate by a split.
+
+**The names (user, 2026-11-26, before the first public release).** The nodes were renamed so
+that each says what it does in an assisted-proofreading chain, and leaves room for what comes
+next (a false-merge finder, a review of auto-completed neurons). Find or Load says where a list
+comes from; Proofread is the step that ends in an edit. Every old id is declared in
+`formerTypes`, so a workflow saved under it still opens. This document, like the others, was
+rewritten to the new names, so a dated entry below uses a name the node did not have yet.
+
+| Was | Is | Type id (was) |
+| --- | --- | --- |
+| Suggest Merges | **Find Merge Candidates** | `seam:findMergeCandidates` (`seam:suggestMerges`) |
+| Merge Suggestions | **Load Merge Candidates** | `seam:loadMergeCandidates` (`seam:suggestions`) |
+| Review Suggestions | **Proofread Merges** | `seam:proofreadMerges` (`seam:review`) |
+| Find Merges (retired) | **Find Split Candidates**, then dropped the same day | `seam:findSplitCandidates` (`seam:findMerges`) |
+
+Find Open Ends kept its name. Affinity Clusters and Find Split Candidates were dropped later that day; the machinery that runs both models is kept (`docs/seam-plan.md`, "What is kept"). The source files kept theirs
+(`suggestMerges.ts`, `suggestions.ts`, `review.ts`, `findMerges.ts`); only the help documents
+moved, since a help document is found by its file name.
 
 **Read-only, as always.** SEAM suggests; the proofreader makes the merge with the `m` tool in
 Coda's own neuroglancer frame, with their own CAVE token. Nothing here writes to a chunkedgraph
@@ -85,7 +102,7 @@ Model E scores the neuron's tips, a tip is picked by score, full inference runs 
 candidates go onto the wire, repeat. `ctx.publish` is exactly that mechanism — "the value on the
 wire growing", read by a downstream card through `inputValues` with nothing re-running — and
 `ReviewBody` already reads its queue from `inputValues`, so the review card fills live. It
-publishes the same `Tips`/`Candidates` shape `seam:suggestions` does, so `seam:review` takes
+publishes the same `Tips`/`Candidates` shape `seam:loadMergeCandidates` does, so `seam:proofreadMerges` takes
 either.
 
 **Tips come from a skeleton, not from Model E's peaks** (user, 2026-11-09). My worry that this
@@ -104,7 +121,7 @@ read at a *skeleton* tip, and tips defined another way would need SEAM to refit 
 
 **Model E goes straight into that node** rather than landing as one of its own (user). Its parity
 against `e_cells/*.npz` is checked by a probe *before* anything is wired to it — the one thing
-Find Merges did out of order.
+Find Split Candidates did out of order.
 
 **Exact parity is available and should be taken.** The cells depend on two seeded draws,
 `default_rng(0)` for the window centres and `default_rng([0, i])` for each window's points, and
@@ -184,7 +201,7 @@ mesh that has not changed.
 ## `seam:openEnds` — Find Open Ends, measured (2026-11-10, `pnpm probe:seam-open-ends`)
 
 The node that will run stages 1–9, with stage 3 live. Meshes in; the fixture's `Tips` table out,
-built from `TIP_FIELDS` so `seam:review` takes it without knowing which node made it, with every
+built from `TIP_FIELDS` so `seam:proofreadMerges` takes it without knowing which node made it, with every
 column a later stage will fill present and null.
 
 On `648518347558097460`, through the node's own `evaluate`:
@@ -400,7 +417,7 @@ how a second X gets written.
 Type ids are SEAM's reserved ones (`coda-pack.md`), because a type id is persisted in every file
 that uses it and is expensive to change later. The **labels** are not, so they say the direction.
 
-### `seam:suggestions` — "Merge Suggestions"
+### `seam:loadMergeCandidates` — "Load Merge Candidates"
 
 An `expensive` source node. `Suggestions` is the address of a directory's index — or of one set's
 manifest — and `Set` picks which of the directory's sets to read.
@@ -429,7 +446,7 @@ look, and a cut hidden inside one is indistinguishable from a model's verdict.
 the loader. It exists to check Phase 6, which is what `make_search.py` cuts the search's two
 goldens out of.
 
-### `seam:review` — "Review Suggestions"
+### `seam:proofreadMerges` — "Proofread Merges"
 
 A `cheap` pass-through tap in `annotation:editor`'s style: tips in, tips out unchanged, so it sits
 mid-chain and its `Layers` feed `out.neuroglancer`. Every param presentational; nothing it does
@@ -465,7 +482,7 @@ points. Shortcuts go through `coda:ng-keys`, avoiding neuroglancer's single lett
 
 ## Phases
 
-**Phase 1 — `seam:suggestions`. Built.** The node above, against the hosted fixture. Done when it
+**Phase 1 — `seam:loadMergeCandidates`. Built.** The node above, against the hosted fixture. Done when it
 reproduces the fixture's own counts from a real fetch: 2,708 tips, 97 shown, 103,375 candidates,
 5 neurons, and 711 tips at r ≥ 0.5. A probe reads it through the real path, as
 `probe-seam-merge.mjs` does for Model A. Nothing else depends on its shape until this lands.
@@ -473,14 +490,14 @@ reproduces the fixture's own counts from a real fetch: 2,708 tips, 97 shown, 103
 **Deferred, with a decision attached: filters on the node or on the review tap?** (user,
 2026-11-09). The existing Twig Capture panel filters a neuron's candidate list by `p ≥`, by
 mitochondrion flag, by review state, and sorts by probability — and that is the idiom a
-proofreader already has. Coda should offer the same. **The likely shape is that `seam:suggestions`
-loads everything and `seam:review` filters**, which keeps the expensive node free of cuts (the
+proofreader already has. Coda should offer the same. **The likely shape is that `seam:loadMergeCandidates`
+loads everything and `seam:proofreadMerges` filters**, which keeps the expensive node free of cuts (the
 `Score cutoff` lesson) and puts every filter on a presentational param where moving it costs
 nothing. Not decided; it waits until the review tap's shape is known.
 
 **The review card's own viewer is a stopgap** (user, 2026-11-09). It let the queue be built
 without touching a core node, and it is not the destination. The destination is a **`Control`
-input on `out.neuroglancer`**, wired from `seam:review`, so the review card drives the full-size
+input on `out.neuroglancer`**, wired from `seam:proofreadMerges`, so the review card drives the full-size
 Neuroglancer node instead of carrying a second viewer with a second WebGL context and a second
 copy of the scene. It may reasonably work **only with the embedded viewer** (Coda's own,
 same-origin): a cross-origin frame has no channel for an in-place camera move, and a port that
@@ -503,7 +520,7 @@ current candidate marked. Worth doing only if it fits without pushing the row to
 existing Neuroglancer card, reviewable on their own, before anything in this pack depends on
 them. Shared code gets its own commit.
 
-**Phase 3 — `seam:review`.** The queue, the card, the verdicts, the viewer jumps. At the end of
+**Phase 3 — `seam:proofreadMerges`.** The queue, the card, the verdicts, the viewer jumps. At the end of
 this a proofreader can work through rv2 in Coda and the result is comparable, tip for tip, with
 the verdicts the user already recorded on their own pages — which is the only honest test of the
 UI and the reason the fixture carries them.
@@ -2037,10 +2054,10 @@ Worth confirming upstream that the move was deliberate; if it was not, the golde
   `organelle` and `top_organelle`, and the published set now carries them — this is noted as
   delivered, and the UI switch it is for is still to build.
 
-## `seam:suggestMerges` — "Suggest Merges", built 2026-11-15
+## `seam:findMergeCandidates` — "Find Merge Candidates", built 2026-11-15
 
 The node that calls the search. It takes `seam:openEnds`' `Tips` table and a CAVE Dataset and
-publishes `Tips` and `Candidates`, the same two `seam:suggestions` does, so `seam:review` takes
+publishes `Tips` and `Candidates`, the same two `seam:loadMergeCandidates` does, so `seam:proofreadMerges` takes
 either. The code is in `src/packs/seam/suggestMerges.ts` with its headless halves beside it;
 what belongs in the plan is the shape decisions, which are the ones that could have gone the
 other way.
@@ -2087,7 +2104,7 @@ shape a reader wires up does not change when the stage behind it lands. Null rat
 `false`, because zero is a measurement and `shown: false` would say SEAM's cutoff had been applied
 and had excluded the row.
 
-`seam:review` tolerates every one of them — `reviewQueue.ts` reads them through an accessor that
+`seam:proofreadMerges` tolerates every one of them — `reviewQueue.ts` reads them through an accessor that
 answers `undefined` either way — but two of the card's three filters (`Min confidence`, `Shown
 only`) then have nothing to read, and the queue's order is geometric. The node's `guide` says so;
 a reader should not have to infer it from a column of nulls.
@@ -2095,7 +2112,7 @@ a reader should not have to infer it from a column of nulls.
 ### No cutoff on the node
 
 A whole neuron is hundreds of ends at a ~19 MB cutout each, so something has to narrow them, and
-it is not this node — `seam:findMerges`' `Score cutoff` is the recorded lesson (every nudge
+it is not this node — `seam:findSplitCandidates`' `Score cutoff` is the recorded lesson (every nudge
 re-ran the node, and a discarded answer looked like a verdict). Narrowing is a `Filter Table` on
 `e_tip` above it. What the node has instead is `warnOverWait` at `SECONDS_PER_END`, which is
 `docs/limits.md`' rule: a guard rail warns, states a wait rather than a count, and runs anyway.
@@ -2122,8 +2139,8 @@ disagreement: `scaleNear` is what `caveclient` does too.
 
 - No card body, so the node draws generic param rows. A sparkline of a tip's ranked list would
   want `conf`, which is null here.
-- No `Points` or `Layers` output. `seam:suggestions` has both; this node's answer reaches
-  neuroglancer through `seam:review`, which is the surface that knows which pair is current.
+- No `Points` or `Layers` output. `seam:loadMergeCandidates` has both; this node's answer reaches
+  neuroglancer through `seam:proofreadMerges`, which is the surface that knows which pair is current.
 - No probe through the node itself. `pnpm probe:candidate-search` drives `searchEnds` directly,
   which is the layer where parity with SEAM is checked; what the node adds above it is tables,
   and `searchTips.test.ts` covers those.
@@ -2151,7 +2168,7 @@ refusal before the first byte rather than every supervoxel silently resolving to
 - **`end_uid` fell back to the row index.** It is a tip's identity downstream — `reviewQueue`
   merges a tip with its candidate list on `(neuron, end_uid)` alone — so a stand-in can collide
   with another row's real one and merge two tips' lists. A missing one drops the row.
-- **A searched tip with no candidates kept whatever arrived.** From a `seam:suggestions` tips
+- **A searched tip with no candidates kept whatever arrived.** From a `seam:loadMergeCandidates` tips
   table that is another run's `candidateId` and `p_top`, published beside this run's `Candidates`
   with no matching row. Every first-candidate column is cleared before any is written.
 - **An end outside the volume aborted the run.** `boxAroundAll` throws for a box that clamps to
@@ -2166,7 +2183,7 @@ there was one caller again and `suggestionParams.ts` was folded back into `sugge
 before either was committed. The file never existed in git; the fold-back's reason is recorded
 in `suggestions.ts` beside what it holds.)* The `url`/`set` controls and their five
 refusal sentences had been written out twice, on the one node whose premise is not drifting from
-`seam:suggestions`. `suggestionParams.ts` owns them now — the shape `caveParams.ts` exists for,
+`seam:loadMergeCandidates`. `suggestionParams.ts` owns them now — the shape `caveParams.ts` exists for,
 and its header already records what the second copy costs. `chosenManifest` moved there too and
 grew the empty-address refusal that only one of its two callers had.
 
@@ -2177,7 +2194,7 @@ whole neuron.
 
 ## The pipeline moves into Coda, and the search streams (2026-11-15, user)
 
-Two changes to `seam:suggestMerges`, decided together.
+Two changes to `seam:findMergeCandidates`, decided together.
 
 ### `Suggestions`/`Set` out, `Ranker` in
 
@@ -2235,10 +2252,10 @@ which was right while one node was to run all nine stages — the shape would no
 landed. With the search downstream those became pickers offered a choice that node can never
 answer.
 
-**`seam:suggestMerges` declares its own two lists** rather than `seam:suggestions`'. That node is
+**`seam:findMergeCandidates` declares its own two lists** rather than `seam:loadMergeCandidates`'. That node is
 modelled on an earlier SEAM pipeline and its output is going to change (user), so pinning this
 node's columns to it would pin them to something about to move. The eleven stage-6 columns are now
-**absent rather than null**. `seam:review` takes either, because it reads every column by name
+**absent rather than null**. `seam:proofreadMerges` takes either, because it reads every column by name
 through an accessor that answers `undefined` for one that is not there.
 
 What the three still share is `suggestionTables.ts`' `Field`/`schemaOf`/`tableOf` machinery — one
@@ -2249,19 +2266,19 @@ is no longer shared is the list.
 
 Two `/simplify` and two `/code-review medium` passes over the streaming node and the model
 manifest. The findings worth keeping are the ones about the seam between this node and
-`seam:review`, because every one of them was silent.
+`seam:proofreadMerges`, because every one of them was silent.
 
-**Absent is not false, and null is not false either.** `seam:review` read `shown` as `=== true`,
-so a `Tips` table from `seam:suggestMerges` — which publishes no `shown` at all, its ranking
+**Absent is not false, and null is not false either.** `seam:proofreadMerges` read `shown` as `=== true`,
+so a `Tips` table from `seam:findMergeCandidates` — which publishes no `shown` at all, its ranking
 being geometric — made every row hidden: an empty annotation layer and an empty `Shown only`
 filter, without a word. `wasShown` says what the column means instead. The second half arrived
 with the first fix: `tipsWithFirsts` clears every first-candidate column when it searches a tip,
-so a `seam:suggestions` table fed through this node keeps its `shown` *column* and holds `null`
+so a `seam:loadMergeCandidates` table fed through this node keeps its `shown` *column* and holds `null`
 in it. Only an explicit `false` hides a row now.
 
 **Clearing has to cover everything the first candidate implied.** `p_top`, `q`, `r` and `shown`
 are all the previous run's reading of the previous run's first candidate, and left beside this
-run's `candidateId` they are what `seam:review` sorts and filters on.
+run's `candidateId` they are what `seam:proofreadMerges` sorts and filters on.
 
 **A substitute on another scale is worse than no ordering.** Without `r` the `confidence` sort
 scored every row the same and fell through to its `end_uid` tie-break. The first attempt at a fix
@@ -2283,7 +2300,7 @@ answer, never a different ranking of the same list. Ends the node drops itself s
 for exactly this reason; rows a filter removed are not there to keep. The node's header and its
 guide both say so, and a reader comparing against a published set should search the whole neuron.
 
-## The single-seed assessor on `seam:suggestMerges` (2026-11-15, user)
+## The single-seed assessor on `seam:findMergeCandidates` (2026-11-15, user)
 
 Stage 6 arrives as a **param on the search node**, not as a node after it, and in SEAM's cheap
 configuration: one mask assessor seed, no split head, segmentation only. SEAM refitted everything
@@ -2292,7 +2309,7 @@ after the scorer for it and handed the numbers over in
 
 ### The three decisions, and what each turned on
 
-**Where it runs — a param on Suggest Merges (user).** The alternative was a fourth node reading
+**Where it runs — a param on Find Merge Candidates (user).** The alternative was a fourth node reading
 `Tips` + `Candidates`, which this plan had already argued for: the published `Candidates` table
 carries `candidateId` and the contact triple, which is the whole of what a patch needs, so it is
 as complete an interface for stage 6 as `Tips` was for stage 4. What won is the streaming. The
@@ -2361,7 +2378,7 @@ quantity that tip did not reach and `cutoff_ref` or nothing is the honest answer
 
 The fits parser came out of `suggestionSet.ts`, where it read as a property of a published run.
 It is not: it is a property of the **configuration**, and a configuration can be published as a
-set of answers (`seam:suggestions`) or as a model to run (`seam:suggestMerges`). One parser, so
+set of answers (`seam:loadMergeCandidates`) or as a model to run (`seam:findMergeCandidates`). One parser, so
 the design's column order, the seed order and the staircase's direction are stated once.
 
 It grew one shape: production writes `ref.seeds` as a list, and the single-seed configuration
@@ -2381,7 +2398,7 @@ takes the export directory's own family name and **checks it against the fixture
 
 `src/packs/seam/gpuAssessor/` landed in parallel: SegCLR's 3D ResNet-18 written out in WGSL,
 reading the plain `conv` export, **26.5 ms a patch against ONNX Runtime's 136** — and within
-3.8e-4 of PyTorch, with the ranking identical on every list. `seam:suggestMerges` opens it.
+3.8e-4 of PyTorch, with the ranking identical on every list. `seam:findMergeCandidates` opens it.
 
 Three things the swap needed, from `docs/seam-assessor-speed.md` §14:
 
@@ -2674,7 +2691,7 @@ synchronising a dispatch, and the probe can see the shape of it from the other s
 network a step at a time forces a synchronisation per dispatch and turns 26 ms into 358, so ~10
 ms a sync, and 72 is about seven of them.
 
-`src/ml/support.ts`' `slowGpuDispatch` is where the measurement lives, and `Suggest Merges` draws
+`src/ml/support.ts`' `slowGpuDispatch` is where the measurement lives, and `Find Merge Candidates` draws
 a reader hint from it — derived from the browser, never written into the document, so it cannot
 ride a share link to somebody for whom it is false. It names the lever as well as the fact,
 because which browser this is decides which knob is worth reaching for.
@@ -2911,9 +2928,9 @@ offers any route to a size that is not the whole list.
 
 ## The organelle flag, ported (2026-11-17, user)
 
-SEAM's flag (`seam/enclosure.py`, SEAM's handoff "The organelle filter") is in Coda: Suggest
-Merges publishes `organelle_score` and `organelle` on `Candidates` (and the first candidate's on
-`Tips`), and Review Suggestions has `Exclude organelles`, on by default.
+SEAM's flag (`seam/enclosure.py`, SEAM's handoff "The organelle filter") is in Coda: Find Merge
+Candidates publishes `organelle_score` and `organelle` on `Candidates` (and the first candidate's on
+`Tips`), and Proofread Merges has `Exclude organelles`, on by default.
 
 - **The measure is SEAM's file, vendored whole** (`src/pyodide/seam/enclosure.py`, the fifth
   byte-identical copy; `pnpm vendor:seam` checks it). It runs in `coda_candidate_pool` on the box
@@ -2931,7 +2948,7 @@ Merges publishes `organelle_score` and `organelle` on `Candidates` (and the firs
   the measure against 577 ms without — 260 ms an end. `SECONDS_PER_END` is 3.0 (was 2.7).
 - **On the workflow's neuron** (`648518347585551219`, three ends, Chrome): 27 of 200 candidates
   flagged, none of them a first candidate, none unmeasured.
-- **Review Suggestions**: `Exclude organelles` (presentational, `absentMeans: true`). Per
+- **Proofread Merges**: `Exclude organelles` (presentational, `absentMeans: true`). Per
   candidate, a flagged one is not listed. **Per tip, a tip whose first candidate is flagged stays
   listed and leads with its next candidate that is not** (`QueueRow.passedOver`; decided by the
   user after code review, 2026-11-17 — first built as SEAM's handoff asked, hiding the tip, which
@@ -2944,7 +2961,7 @@ Merges publishes `organelle_score` and `organelle` on `Candidates` (and the firs
   within the tip's list.
 - ~~**Re-scored without organelles**~~ — **withdrawn 2026-11-18** (user, after SEAM's updated note:
   "the filter hides; it should not promote"); see the section at the end. What it was: (same day, user, after seeing passed-over rows lose their
-  score). Suggest Merges' `publishedEnd` (`scoreEnds.ts`) runs stages 7–9 a second time over the
+  score). Find Merge Candidates' `publishedEnd` (`scoreEnds.ts`) runs stages 7–9 a second time over the
   list with its flagged candidates taken out — same fits, same `e_tip`, `geo_rank` kept as the
   search gave it rather than renumbered — and publishes `q_no_organelles`, `r_no_organelles` and
   `shown_no_organelles` on `Tips` (`ASSESSED_TIP_FIELDS`), equal to `q`, `r` and `shown` where the
@@ -2954,18 +2971,18 @@ Merges publishes `organelle_score` and `organelle` on `Candidates` (and the firs
   list holds one** (`QueueTip.withoutOrganelles`, `QueueRow.rescored`, marked `scored without
   organelles`), not only a passed-over row; `QueueRow.shown` carries the row's verdict for the
   filter, the facts and the score's ink alike (the ink read the first *candidate's* `shown`
-  before, which Suggest Merges' `Candidates` never carries). A table without the columns —
-  Merge Suggestions, a geometry-only run — keeps SEAM's, and a passed-over row there still has
+  before, which Find Merge Candidates' `Candidates` never carries). A table without the columns —
+  Load Merge Candidates, a geometry-only run — keeps SEAM's, and a passed-over row there still has
   no score. **An estimate**: SEAM fitted every stage on lists that still held organelles.
-  **Merge Suggestions not yet**: its sets are the split configuration, so re-scoring needs
+  **Load Merge Candidates not yet**: its sets are the split configuration, so re-scoring needs
   `head_s0..2` (not read today) and the set's fits, and no set published so far carries the flag.
   **Ask for SEAM**: remove organelles before ranking, so `r` comes with fits made for that list;
   and say whether `geo_rank` would then be renumbered.
 - **`Tips` carries `organelle` alone**, from either node (code review, same day): SEAM's tips
-  file has the first candidate's flag (`top_organelle`) and no score, so Suggest Merges' `Tips`
+  file has the first candidate's flag (`top_organelle`) and no score, so Find Merge Candidates' `Tips`
   leaves the score on `Candidates` too. An optional column a set holds as a list or a struct is
   refused with the reason, as a required one is, never filled as though the set predated it.
-- **Merge Suggestions carries the flag too** (same day, user): `organelle_score` and `organelle`
+- **Load Merge Candidates carries the flag too** (same day, user): `organelle_score` and `organelle`
   are on its `CANDIDATE_FIELDS` as **optional** fields (`Field.optional`) — read where the set
   holds them (SEAM's sets do since 2026-11-14; the fixture's `candidates.parquet` does), and
   published as **nulls** where it predates them, rather than refused as a missing required column
@@ -2975,7 +2992,7 @@ Merges publishes `organelle_score` and `organelle` on `Candidates` (and the firs
   filter off less the list with it on, so it honours every other filter and the tree's rows — a
   separate count over the unfiltered tips said "left out" of rows `Only SEAM's shown set` had
   already hidden; the card builds one filters object for both lists; `DEFAULT_FILTERS` excludes
-  organelles, as the param does; Merge Suggestions' `Tips` reads SEAM's `top_organelle` as
+  organelles, as the param does; Load Merge Candidates' `Tips` reads SEAM's `top_organelle` as
   `organelle` (optional), so `Tips` has one column from either node; a test holds `ORGANELLE_CUT`
   to the set's `pipeline.organelles.cutoff`. **Left**: the cut is a constant, not read from the
   ranker manifest (it would need the manifest republished with it). **Asks for SEAM**, since
@@ -2993,18 +3010,18 @@ near the cutoff, untested on held-out tips — so sorting on it only adds ties (
 tips below q 0.003 share four values), and a sum is mostly its thin low steps (432 "expected right"
 on one rv4 neuron). Decided with the user, same day:
 
-- **Review Suggestions, per tip, leads with `q`** (`QueueRow.score`): the sort, `Min confidence`
+- **Proofread Merges, per tip, leads with `q`** (`QueueRow.score`): the sort, `Min confidence`
   and the big number all read it; `conf` per candidate is unchanged. `r` rides beside it as
   `QueueRow.estimate` and is drawn beneath the number as a rounded label (`estimateLabel`: tens,
   `≥90%` and `<10%` at the open ends). The organelle re-scoring reads `q_no_organelles`, which
-  Suggest Merges already published.
-- **`expectedRight` is gone** from Merge Suggestions' `Neurons`, its help, and both exports, which
+  Find Merge Candidates already published.
+- **`expectedRight` is gone** from Load Merge Candidates' `Neurons`, its help, and both exports, which
   were re-run against the fixtures (`tips` 5 and `shown` 2 per neuron from the node, pandas and R).
 - **The neuroglancer layer** is coloured by `q` and captions `q` with the rounded `r` "(estimate)";
   no `0` where a set has no `r`.
 - Each configuration keeps its own `q`, cutoff and `r`: Coda's single-seed manifest carries 0.159,
   SEAM's single-seed figure, and nothing compares a `q` across configurations.
-- **`Only SEAM's shown set` removed** from Review Suggestions (user, same day). Per tip `shown` is
+- **`Only SEAM's shown set` removed** from Proofread Merges (user, same day). Per tip `shown` is
   `q` at or above the set's cutoff and the list now leads with `q`, so `Min confidence` at the
   cutoff gives the same list; the help says so. `shown` still marks the row and colours its number.
   A saved `shownOnly` is an undeclared param, which `normalizeParams` and the card ignore.
@@ -3017,10 +3034,10 @@ rv2 + rv4 (536 / 537 judged tips, 15 neurons, every step at least 20 tips: 7 ste
 single seed). Only `r` changed — `q`, the cutoffs (0.118, 0.159), `shown` and every column stay.
 Precision at the cutoff on rv4: production 0.84 [0.74, 0.99], single seed 0.97 [0.91, 0.99].
 
-- **The refit reaches Coda only through hosted files.** Merge Suggestions' hosted sets were older
+- **The refit reaches Coda only through hosted files.** Load Merge Candidates' hosted sets were older
   still (rv2 at cutoff 0.208 with a 12-step `r` and no organelle flag; rv4 with the 14-step `r`):
   the new production sets are `rv2-9db6c7b1b397` and `rv4-ad75ed161bb6`, replaced in place under
-  the same paths. Suggest Merges reads `r` from the assessor manifest's `config.pipeline`, rebuilt
+  the same paths. Find Merge Candidates reads `r` from the assessor manifest's `config.pipeline`, rebuilt
   with `pnpm make:assessor-manifest <SEAM data/onnx/n3_mal_mask>
   <coda_rv2_single_s0/fixture.json> <out> --seed 0 --model-e <coda_rv2/fixture.json>` (the
   single-seed fixture states no Model E block): against the hosted one only `pipeline.r` (9 steps)
@@ -3031,7 +3048,7 @@ Precision at the cutoff on rv4: production 0.84 [0.74, 0.99], single seed 0.97 [
   such tips). Decided (user): a tip whose first candidate is flagged still **leads with the next
   candidate**, but with **no `q`, no `r`, never shown** — its `conf` is in its facts. Coda's
   re-scoring without organelles is gone from both ends (`scoreEnds.ts` and `ASSESSED_TIP_FIELDS`
-  back to their state before it; Review Suggestions reads no `*_no_organelles` column, which a
+  back to their state before it; Proofread Merges reads no `*_no_organelles` column, which a
   `Tips` table from a run in between may still carry, harmlessly). An organelle further down a
   list changes nothing about its tip's row.
 - The wording about `r` no longer counts steps or tips where a reader sees it, so the next refit
@@ -3041,7 +3058,7 @@ Precision at the cutoff on rv4: production 0.84 [0.74, 0.99], single seed 0.97 [
 
 A speed audit of the search and the mask assessor, Chrome first (the reader's Firefox loses to
 per-patch GPU overhead instead, which is a separate lever). **`pnpm probe:suggest-merges`** is new:
-it runs the workflow's chain and then `seam:suggestMerges` itself, assessor on and uncapped, over
+it runs the workflow's chain and then `seam:findMergeCandidates` itself, assessor on and uncapped, over
 the first `--ends` of a neuron (default 40 since 2026-11-19, 25 before; neuron `648518347585551219`) in a fresh headless
 Chrome per run, and prints the node's own `runClock` split. It needs `pnpm dev --port 5193
 --strictPort` and a CAVE token, and reads only. Runs vary by ±15% with the chunkedgraph's load
@@ -3191,7 +3208,7 @@ with the final `candRoot`'s own guard (`uint64From`). Its `onPool` gives them to
 which starts the counts there. (First built as raw bytes on the progress callback; the review
 moved it, since bytes skipped the one check that refuses a float64 id.)
 
-The cutter's own worker (`PyLane`, below) boots on its first call, ~1.5 s; Suggest Merges asks
+The cutter's own worker (`PyLane`, below) boots on its first call, ~1.5 s; Find Merge Candidates asks
 it `coda_assessor_ready` while the model downloads, so the first end's patches do not wait for
 it. The lane belongs to a module, not a call: `engine.ts`' `laneOf` maps `assessorPatches` to its
 own worker, so no call can land on the other one and still answer. The
@@ -3325,7 +3342,7 @@ Tiny pieces' precision on h2 is 0.84, against seed 0's 0.80 and a target of 0.9.
   hand-written assessor within 2.7e-6 of PyTorch, ranking identical, 22 ms a patch in Chrome;
   `probe:gpu-browsers` in Firefox 33 ms a patch in flight, every answer equal to the one-at-a-time
   one.
-- **Not done:** Merge Suggestions' hosted sets are still seed 0's (`rv2-9db6c7b1b397`,
+- **Not done:** Load Merge Candidates' hosted sets are still seed 0's (`rv2-9db6c7b1b397`,
   `rv4-ad75ed161bb6`). SEAM's student-1 sets (`coda_rv2_student1`, `coda_rv4_student1`) can
   replace them with `scripts/seam-suggestion-dir.mjs`; that upload is the user's too.
 

@@ -22,7 +22,7 @@ still a fixed point in time, like a materialization, but the moment is chosen by
 than frozen by CAVE:
 
 - The moment is taken on the first Run and stored on the node (a run record,
-  `ParamBase.runRecord`, as Suggest Merges' `Searched at` is). The ⟳ button takes a new one
+  `ParamBase.runRecord`, as Find Merge Candidates' `Searched at` is). The ⟳ button takes a new one
   (`renewNode`). So invariant 4 holds: the provenance key carries the moment, and a re-run with
   no edit reads the same data.
 - Every read goes through the live endpoint at that moment (`queryTableLive`,

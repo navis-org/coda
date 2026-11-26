@@ -8,9 +8,9 @@ go wrong on a shared production server.
 
 ## The workflow
 
-1. Suggestions arrive — published (`seam:suggestions`, "Merge Suggestions") or computed in the
-   browser (`seam:suggestMerges`, "Suggest Merges").
-2. The reader reviews one neuron in `seam:review` ("Review Suggestions"), accepting candidates.
+1. Suggestions arrive — published (`seam:loadMergeCandidates`, "Load Merge Candidates") or computed in the
+   browser (`seam:findMergeCandidates`, "Find Merge Candidates").
+2. The reader reviews one neuron in `seam:proofreadMerges` ("Proofread Merges"), accepting candidates.
 3. The reader presses **Submit**; Coda checks every accepted merge, shows the list, and on
    confirmation performs the merges on the chunkedgraph, one at a time.
 
@@ -344,7 +344,7 @@ sentence where nothing can be planned (no permission, not a chunkedgraph, a chec
    six in flight (755 against 131 in a second shuffle, through `slots`), flat to sixteen (the
    bytes are the limit there). Taking the pieces in order of place helps one at a time only (768
    to 568 ms): anchors in flight together each fetch a chunk they share, as the cache holds no
-   request in flight — sharing those is the next lever, in the volume reader Suggest Merges
+   request in flight — sharing those is the next lever, in the volume reader Find Merge Candidates
    shares. The button counts the pieces decided (`PlanRequest.onProgress`, "Checking 12 of 212…
    (cancel)").
 
@@ -456,7 +456,7 @@ which lives in the record module so the overlay never names a module that writes
 - **A refusal stops the batch**, recorded `failed` with the status. A check that cannot be read
   stops it too and records nothing, since nothing was decided. **Stop** takes effect before the
   next merge's check. Merges not reached are shown `not-sent` and not recorded.
-- **The record is the `seam:review` param `merges`** — `unrecorded` (no undo step), and data, in
+- **The record is the `seam:proofreadMerges` param `merges`** — `unrecorded` (no undo step), and data, in
   the key, since `Merges` and `Current` read it. JSON, appended to, ids as text. One entry per
   decision the batch made about a confirmed merge: the deployment and datastack it was made on,
   reviewed root, candidate root, `end_uid`, the
@@ -643,7 +643,7 @@ only, and advice only — Submit's own check still decides.
   record's `currentRoot`, so this workflow's own merges never read as somebody else's edit) and
   every candidate of the picked neuron not already merged — a merged piece is retired by the
   merge and says `merged`, never `outdated`. Gated on a sign-in, and `quiet`.
-- **Streaming:** Suggest Merges publishes candidates while the card is up, so the card hands over
+- **Streaming:** Find Merge Candidates publishes candidates while the card is up, so the card hands over
   the whole set on every change and only roots not yet known are asked — gathered for 400 ms, so a
   stream's partials go out together, in batches of 1,000, one at a time.
 - **How long an answer holds:** outdated for good (an edited root is never current again);
@@ -685,8 +685,8 @@ The user's notes, all fixed:
 
 ### Published sets (2026-11-18)
 
-Asked for as "the second arm": Submit from a published set (`seam:suggestions`), not only from a
-live Suggest Merges run. **The merge path needed no change** — nothing in the card, the plan or
+Asked for as "the second arm": Submit from a published set (`seam:loadMergeCandidates`), not only from a
+live Find Merge Candidates run. **The merge path needed no change** — nothing in the card, the plan or
 the batch tells the two apart, and the first Aedes merge above was from `rv2`. What stopped it was
 upstream: **`rv4` did not load at all.** Nobody had reviewed it, so its four review columns
 (`page`, `tip_verdict`, `belongs`, `not_belongs`) hold no value, and pandas wrote them with Arrow's
@@ -696,7 +696,7 @@ the declared type without decoding it — **only for a field allowed to be empty
 `mayBeEmpty`: the five review columns, still required to be there). Any other field written that
 way is refused by name, since a key of nothing but nulls would be an empty queue nobody explained
 (`suggestionRead.ts`, tested on `__fixtures__/rv4/`, cut by `make_rv4.py`). Also read now: `n_l2`
-(optional), which rv4's candidates carry, so a published set sizes pieces as Suggest Merges does —
+(optional), which rv4's candidates carry, so a published set sizes pieces as Find Merge Candidates does —
 **in one unit per table** (`candidateLists`): where any row has a chunk count, a row without one
 has no size, never a µm³ one beside chunks.
 
@@ -797,11 +797,11 @@ layer-1 check in `confirmMerge` itself, so the sandbox probe gets it too.
 
 ## Settled questions (user, 2026-11-15)
 
-- **Suggest Merges looks up candidate roots at the dataset's materialization**, not at now
+- **Find Merge Candidates looks up candidate roots at the dataset's materialization**, not at now
   (`seam-suggestions-plan.md`, "One instant for the whole run"), so on an old materialization many
   candidates will fail the latest check. Accepted as correct; **looking roots up at now is the next
   feature after this one.**
-- **Published suggestions** (`seam:suggestions`) are a 2026-11-04 snapshot, so neurons edited
+- **Published suggestions** (`seam:loadMergeCandidates`) are a 2026-11-04 snapshot, so neurons edited
   since will be rejected whole. Accepted; the user is generating up-to-date suggestions.
 - **Rate: one merge at a time, no added pause.** No courtesy limit is known. Spelunker has none:
   `bulkMerge` (vendored `graphene/frontend.js`) starts **every** pending merge at once — up to
@@ -819,7 +819,7 @@ layer-1 check in `confirmMerge` itself, so the sandbox probe gets it too.
 
 ## Hand picks (user, 2026-11-19)
 
-A reader can add a candidate Suggest Merges missed: point at it in a Neuroglancer frame and press
+A reader can add a candidate Find Merge Candidates missed: point at it in a Neuroglancer frame and press
 `J`, or use the card's **Add from viewer** (the segment the pointer last rested on). Code:
 `packs/seam/handPicks.ts` (storage, placement), `packs/seam/pickCheck.ts` (the check),
 `ui/viewers/segmentHover.ts` (the key and the pointer's place).

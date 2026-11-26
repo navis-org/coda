@@ -85,8 +85,8 @@ export function verdictInput(
 }
 
 /**
- * Whether a `source` is one a published set or a run of Suggest Merges wrote. `source` is a common
- * column name, and a table a reader folded onto the tips may carry its own, which Suggest Merges
+ * Whether a `source` is one a published set or a run of Find Merge Candidates wrote. `source` is a common
+ * column name, and a table a reader folded onto the tips may carry its own, which Find Merge Candidates
  * keeps on the rows it did not search (`docs/seam-verdict-log-plan.md`).
  */
 export function isSeamSource(source: unknown): source is string {

@@ -5,42 +5,31 @@
 
 const groups: readonly (readonly string[])[] = [
   // The pair: a queue is read by one and worked through by the other.
-  ['seam:suggestions', 'seam:review'],
+  ['seam:loadMergeCandidates', 'seam:proofreadMerges'],
   // Where the current pair is looked at full size, when the card's own frame is too small.
-  ['seam:review', 'out.neuroglancer'],
+  ['seam:proofreadMerges', 'out.neuroglancer'],
   // What the verdicts come out as, and where they go next.
-  ['seam:review', 'out.download'],
+  ['seam:proofreadMerges', 'out.download'],
   // Where a suggestion is looked at and acted on: the merge is made in the Neuroglancer card.
-  ['seam:suggestions', 'out.neuroglancer'],
+  ['seam:loadMergeCandidates', 'out.neuroglancer'],
   // The queue is a table, and narrowing it -- by `shown` or by `r` -- is a filter somebody does.
-  ['seam:suggestions', 'core.filterTable'],
+  ['seam:loadMergeCandidates', 'core.filterTable'],
   // The neurons a set covers, so their meshes can be drawn beside the tips.
-  ['seam:suggestions', 'neuron.meshes'],
+  ['seam:loadMergeCandidates', 'neuron.meshes'],
   // Where the meshes come from, and where the suspected sites are looked at over the EM.
   ['seam:openEnds', 'neuron.meshes'],
   ['seam:openEnds', 'neuron.skeletonize'],
-  ['seam:openEnds', 'seam:suggestions'],
+  ['seam:openEnds', 'seam:loadMergeCandidates'],
   ['seam:openEnds', 'out.neuroglancer'],
   // The chain: open ends found, then searched, then worked through.
-  ['seam:openEnds', 'seam:suggestMerges'],
-  ['seam:suggestMerges', 'seam:review'],
+  ['seam:openEnds', 'seam:findMergeCandidates'],
+  ['seam:findMergeCandidates', 'seam:proofreadMerges'],
   // The other node that publishes this shape -- one computes the lists, the other reads them.
-  ['seam:suggestMerges', 'seam:suggestions'],
+  ['seam:findMergeCandidates', 'seam:loadMergeCandidates'],
   // Which ends to search is a cut somebody makes, above this node and not inside it.
-  ['seam:suggestMerges', 'core.filterTable'],
+  ['seam:findMergeCandidates', 'core.filterTable'],
   // Which datastack's segmentation the boxes are read out of.
-  ['seam:suggestMerges', 'dataset.cave'],
-  ['seam:findMerges', 'neuron.meshes'],
-  ['seam:findMerges', 'out.neuroglancer'],
-  // The two nodes in the pack, so a reader who finds one finds the other and the difference.
-  ['seam:findMerges', 'seam:affinityClusters'],
-  // Where the clusters are looked at, over the EM, which is the point of the Layers output.
-  ['seam:affinityClusters', 'out.neuroglancer'],
-  // The other way to read the answer: the per-neuron table. The 3D View is left out on purpose
-  // -- its own list is already full, and the help document says how to colour by cluster there.
-  ['seam:affinityClusters', 'out.table'],
-  // Acting on it: a split reads the summary columns off the skeletons' attributes.
-  ['seam:affinityClusters', 'neuron.splitNeurons'],
+  ['seam:findMergeCandidates', 'dataset.cave'],
 ]
 
 export default groups

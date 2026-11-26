@@ -15,7 +15,7 @@ stops when nothing clears the cutoff, or more than ten layers out.
 | Names | The menu item is **Auto-extend**. The old toggle `Auto-extend` (extend a piece as you accept it) became **Extend on accept**, param `extendOnAccept`, `formerId: 'autoExtend'`. |
 | The cutoff | **SEAM's own**: the tip's `shown`, read only as an explicit `true`. A search with no assessor publishes no `shown`, so Auto-extend is greyed out there (`autoUnavailable`). |
 | Which candidates at an end | **The first only**, if it clears. The second at an end is usually the alternative to the first. |
-| Where the recursion runs | **In Suggest Merges, with the card working out the same tree.** One press is one param edit and one undo step. The automatic accepts are never written. |
+| Where the recursion runs | **In Find Merge Candidates, with the card working out the same tree.** One press is one param edit and one undo step. The automatic accepts are never written. |
 | A large candidate (41+ chunks) | **Not accepted.** |
 | The ten layers | **Counted from the piece it was pressed on.** Layer ten is accepted and not searched, and keeps an Extend button. A press nested inside another's tree starts its own count. |
 | Submit | **Merges them.** The confirm dialog tags them `auto`, counts them, and they can be unticked there. |
@@ -193,7 +193,7 @@ hover with the piece's size, its `q`, the limit and what to look at (`autoStoppe
   never reached answering from before the Clear Cache on the next run.
 - **`Extended` carries the `refused` rows too** while an Auto-extend is live, told apart only by
   `mode`. The port exists to be
-  wired back into Suggest Merges, and its table is the reference's by rule (one function for
+  wired back into Find Merge Candidates, and its table is the reference's by rule (one function for
   both). Anything else wired to it has to filter on `mode`.
 - **A piece accepted on another piece but not extended can be taken again** under another parent.
   Submit merges it once (one merge per piece), but the row on the other parent reads `auto`.
@@ -217,7 +217,7 @@ hover with the piece's size, its `q`, the limit and what to look at (`autoStoppe
 
 A scratch probe loaded the on-demand chain (Aedes, the 8 or 12 best ends by `e_tip`, assessor
 `n3_mal_mask_s0`, real GPU, auto-run on). It pressed Auto-extend the way the card does
-(`judgedParams`, then `extendParams`, then a run of Suggest Merges) and compared the card's tree
+(`judgedParams`, then `extendParams`, then a run of Find Merge Candidates) and compared the card's tree
 (`reviewGrowth`) with the search's `Tips`. Nothing was merged. Submit's dialog was opened, read,
 and closed without pressing Merge.
 

@@ -1,5 +1,5 @@
 /**
- * `Merge Suggestions`, in arrow and dplyr.
+ * `Load Merge Candidates`, in arrow and dplyr.
  *
  * The Python emitter's reasoning applies unchanged: a suggestion set is two parquet files and a
  * manifest at a URL, with no model to run and nothing to reproduce, so the document reads exactly
@@ -31,13 +31,13 @@ import { rCol, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
-registerEmitter('seam:suggestions', (ctx: EmitContext) => {
+registerEmitter('seam:loadMergeCandidates', (ctx: EmitContext) => {
   // Through the node's own normaliser, so a card holding a directory's address exports a cell
   // that reads the file the card read. A second rule here is how the two come to disagree.
   const url = suggestionsAddress(String(ctx.params['url'] ?? ''))
   if (!url) {
     return ctx.todo(
-      'This Merge Suggestions card has no suggestion set yet — paste the address of SEAM’s ' +
+      'This Load Merge Candidates card has no suggestion set yet — paste the address of SEAM’s ' +
         '`fixture.json` into it and export again.',
     )
   }

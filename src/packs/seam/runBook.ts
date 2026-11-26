@@ -1,5 +1,5 @@
 /**
- * What one Suggest Merges run has found so far, kept so that **the order the work is done in is
+ * What one Find Merge Candidates run has found so far, kept so that **the order the work is done in is
  * not the order it is published in**.
  *
  * ## Why this exists

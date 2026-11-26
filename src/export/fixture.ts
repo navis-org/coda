@@ -1198,7 +1198,7 @@ export function everythingGraph(): CodaGraph {
      */
     {
       id: 'suggestions',
-      type: 'seam:suggestions',
+      type: 'seam:loadMergeCandidates',
       col: -2,
       row: 9,
       // The *directory*, without its index file, which is what a reader pastes: the emitter has
@@ -1212,7 +1212,7 @@ export function everythingGraph(): CodaGraph {
      */
     {
       id: 'review',
-      type: 'seam:review',
+      type: 'seam:proofreadMerges',
       col: -1,
       row: 9,
       params: {

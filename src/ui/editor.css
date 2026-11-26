@@ -10917,36 +10917,7 @@ details[open] > summary.tile__label {
 }
 
 /* ---------------------------------------------------------------------------
- * Find Merges card
- *
- * `.list-body` for the fields and the foot, with the score histogram between them. The histogram
- * fills the card's width and keeps a fixed height, which is why its `viewBox` is drawn with
- * `preserveAspectRatio="none"`: the bars are a distribution, so stretching them horizontally
- * changes nothing a reader reads off, while letting it scale uniformly would leave the card
- * either a sliver or a square depending on how wide the node was dropped.
- * ------------------------------------------------------------------------- */
-
-.merge-hist {
-  display: block;
-  width: 100%;
-  height: 46px;
-  cursor: crosshair;
-}
-
-/*
- * The expanded-only sentence under the foot. Muted and wrapped, in the register of an aside:
- * it explains a gesture somebody has already got away with discovering, and it is not on the
- * card because a card-sized body has no room for three lines of prose.
- */
-.list-body__note {
-  font-size: 10px;
-  line-height: 1.45;
-  color: var(--text-muted);
-  max-width: 48em;
-}
-
-/* ---------------------------------------------------------------------------
- * Review Suggestions card
+ * Proofread Merges card
  *
  * A viewer above a scrolling queue. The list carries `nowheel` so the wheel scrolls it rather
  * than zooming the canvas, and the rows are buttons rather than clickable `li`s so the keyboard
@@ -11024,12 +10995,12 @@ details[open] > summary.tile__label {
 }
 
 /*
- * "still searching" in the card's foot, while Suggest Merges is mid-run.
+ * "still searching" in the card's foot, while Find Merge Candidates is mid-run.
  *
  * A caveat on the two counts beside it rather than an alarm — the queue is real and so is every
  * verdict made on it, it is simply not all of the neuron yet — so it takes the warning ink and
  * none of the weight: no badge, no background, no animation. The run's own progress is on the
- * Suggest Merges card, which is where a bar belongs.
+ * Find Merge Candidates card, which is where a bar belongs.
  */
 .review-body__filling {
   /* `--status-warn` is the per-mode prose warning colour — 5.41:1 light, 9.78:1 dark. */
@@ -15806,7 +15777,7 @@ select.annotate__input {
 }
 
 /* ---------------------------------------------------------------------------
- * Review Suggestions: sending verdicts to SEAM (`VerdictSharing.tsx`), in the card's foot
+ * Proofread Merges: sending verdicts to SEAM (`VerdictSharing.tsx`), in the card's foot
  * ------------------------------------------------------------------------- */
 
 /*

@@ -156,7 +156,7 @@ the UI will show.
    `spec.ts`, and the split needs only the chunkedgraph. Two browser-only traps found: drei's
    `TrackballControls` binds A/S/**D** on the window unless `keys` is blanked, and under
    `frameloop="demand"` a drag turns nothing unless the tile asks for a frame on pointer moves.
-   Checked in Chrome (`tmp-gallery-probe.mjs`) on Aedes …268769: five tiles in 4.3 s, the right
+   Checked in Chrome on Aedes …268769: five tiles in 4.3 s, the right
    split first; drawing, enlarging and turning work. **A real mesh is unchecked**: on 2026-11-23
    the mesh service (`cave.fanc-fly.com`) refused every manifest ("command not allowed under OOM
    prevention"), so the mesh path was checked with a stand-in mesh through the same code.

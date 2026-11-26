@@ -1,2 +1,7 @@
 duplicates	src/ui/assistantChat.ts	clearChat = resetAssistantChat
 exports	src/data/edges/store.ts	releaseEdgeSet
+exports	src/packs/seam/mergeTables.ts	minorityShare
+exports	src/packs/seam/models.ts	AFFINITY_TASK
+exports	src/packs/seam/models.ts	MERGE_WINDOW_TASK
+exports	src/packs/seam/models.ts	affinityModel
+exports	src/packs/seam/models.ts	mergeWindowModel

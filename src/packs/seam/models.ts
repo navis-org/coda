@@ -46,6 +46,14 @@ export interface AffinityModel {
   readonly retired?: string
 }
 
+/*
+ * **No node offers the next two lists** (2026-11-26): Affinity Clusters and Find Split Candidates
+ * were dropped before the pack's first release, because neither checkpoint worked on real merges
+ * (`docs/seam-plan.md`, "Why both nodes are retired"). The models, their tasks and everything
+ * that runs them are kept for a retrained checkpoint, and the probes still read them
+ * (`probe:affinity-parity`, `probe:seam-merge`). In `knip-baseline.txt` for that reason.
+ */
+
 /** Every point affinity model's `task`, checked against the manifest's own on open. */
 export const AFFINITY_TASK = 'point-affinity'
 

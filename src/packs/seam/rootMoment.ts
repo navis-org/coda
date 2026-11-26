@@ -1,6 +1,6 @@
 /**
- * When Suggest Merges reads each neuron (`momentsFrom`), and what the SEAM nodes say about the
- * moment they read one at — one wording for Find Open Ends and Suggest Merges, which both follow
+ * When Find Merge Candidates reads each neuron (`momentsFrom`), and what the SEAM nodes say about the
+ * moment they read one at — one wording for Find Open Ends and Find Merge Candidates, which both follow
  * their query neuron rather than a materialization (`docs/seam-live-plan.md`). Each node adds
  * what the moment meant for its own answer. Find Open Ends picks its moments in the data layer
  * (`somataLive`), with no `Searched at` to honour.
@@ -100,7 +100,7 @@ export function notRoots(ids: readonly string[], datastack: string): string {
 }
 
 /**
- * Suggest Merges' `Searched at`, read: each neuron's moment by its root id, epoch ms, and the
+ * Find Merge Candidates' `Searched at`, read: each neuron's moment by its root id, epoch ms, and the
  * entries that are not one. Entries are `root=moment`, the moment ISO 8601, separated by commas
  * or whitespace.
  *

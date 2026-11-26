@@ -8,7 +8,10 @@ Spelunker upgrade. F comes from Spelunker's keybindings, which Coda injects itse
 (`src/ngframe/keybinds.ts`), so it can be dropped there and claimed by the frame as J and K are
 (`src/ngframe/main.ts`); the Graph tab's **Find Path** button is the one other way in.
 
-## What it costs (measured 2026-11-24, Aedes, reads only, `scripts/tmp-path-cost.mjs`)
+The measurements below were taken with one-off scripts that were never committed. To repeat one,
+start from `scripts/probe-split-sites.mjs`, which reads the same chunkedgraph endpoints.
+
+## What it costs (measured 2026-11-24, Aedes, reads only)
 
 The ends of a longest shortest path by hops ("across"), and a pair 40 hops apart ("near").
 `subgraph` four requests at a time, in `boxesAlong`'s boxes.
@@ -56,7 +59,7 @@ place to look, not a verdict.
   scene: adding a layer to the scene is a navigation that rebuilds every layer and reloads every
   mesh. The frame adds it with neuroglancer's `makeLayer` / `addManagedLayer`, sets its annotations
   in place after that, and removes it on `null`; the card's fold reads only the dataset's layer, so
-  it is never saved, and a navigation clears it. Checked in Chrome (`scripts/tmp-path-frame.mjs`):
+  it is never saved, and a navigation clears it. Checked in Chrome:
   added, set in place on the same layer object, removed, F handed back, only Find Path hidden.
 - **Each step is the weakest join of the strongest supervoxel path, not chunk to chunk.** The first
   build summed the contacts between neighbouring chunks, and on 648518347493136877 all 36 steps came
@@ -80,7 +83,7 @@ place to look, not a verdict.
   notice clears the route** (or a start waiting for its end), while a notice that merely replaces
   it leaves the route drawn.
 
-## Thickness as a second measure (measured 2026-11-24, `scripts/tmp-neck-eval.mjs`, reads only)
+## Thickness as a second measure (measured 2026-11-24, reads only)
 
 Past splits sampled at random (`operation_details`, 40 graded per datastack), the root before each,
 a point ~15 µm from the cut on each root it made (`splitCase`), the find-path route between them on
@@ -234,7 +237,7 @@ it), so the merge did not stand out (user, 2026-11-24). Tried on the mesh, in or
 The ring radii were built, then replaced by the skeleton route below; `coda_vertex_ring_radii` is
 gone with them.
 
-### Along the skeleton itself (measured 2026-11-24, `scripts/tmp-skeleton-walk.mjs`, reads only)
+### Along the skeleton itself (measured 2026-11-24, reads only)
 
 The full mesh's wavefront skeleton (`shave: 'off'`, one wave, step 1): 11,068 nodes in 127 pieces
 (one per mesh fragment that is not joined to another), 2.3 s after a 2.8 s full-mesh read. Pieces

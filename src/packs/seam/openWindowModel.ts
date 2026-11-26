@@ -6,9 +6,9 @@
  * of the tail, a forest being scored in TypeScript. `openSeamModel` below is the window path:
  * the gate, the consent and an ONNX session.
  *
- * Three cards in this pack run a checkpoint over a neuron's surface — Find Merges, Find Open Ends
- * and Affinity Clusters — and the forty lines in front of each run were the same forty lines,
- * three times. They had already drifted: the refusal sentences were worded two ways and the share
+ * Three cards in this pack ran a checkpoint over a neuron's surface — Find Open Ends and the two
+ * false-merge nodes since dropped — and the forty lines in front of each run were the same forty
+ * lines, three times. They had already drifted: the refusal sentences were worded two ways and the share
  * of the bar given to the download was two different numbers, which is what a third copy does.
  *
  * Nothing about the three nodes' differences lives in this sequence. What differs is the task,

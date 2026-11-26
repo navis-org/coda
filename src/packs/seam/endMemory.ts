@@ -1,5 +1,5 @@
 /**
- * Suggest Merges' memory of the ends it has finished.
+ * Find Merge Candidates' memory of the ends it has finished.
  *
  * ## Why a node needs a memory of its own
  *
@@ -149,7 +149,7 @@ export function endMemory(maxBytes = END_MEMORY_BYTES): EndMemory {
   }
 }
 
-/** The one memory the node reads: every Suggest Merges card in the session shares it. */
+/** The one memory the node reads: every Find Merge Candidates card in the session shares it. */
 export const sessionEnds = endMemory()
 
 /** What every end of one neuron in a run has in common. */
@@ -272,7 +272,7 @@ export interface Recall<E> {
   readonly held: ReadonlyMap<string, Remembered>
   keyOf(end: E): string
   /**
-   * The number the caller keeps this end under — for Suggest Merges, its tip's place among its
+   * The number the caller keeps this end under — for Find Merge Candidates, its tip's place among its
    * root's tips (`runBook.ts`, which numbers it into the published table). Written onto every
    * end here, measured or remembered — one place, because a remembered end was at another
    * index when it was measured, and one carried over folds its first candidate onto a

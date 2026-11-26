@@ -294,7 +294,7 @@ def coda_assessor_ready(request, report=None):
     """Boot this bridge's worker and load the vendored cutter, opening no box.
 
     The cutter has a worker of its own (`engine.ts`' `PyLane`), and a worker boots on its first
-    call: ~1.5 s, which would otherwise land in front of the first end's patches. Suggest Merges
+    call: ~1.5 s, which would otherwise land in front of the first end's patches. Find Merge Candidates
     asks this while the model downloads, where the boot costs nothing.
     """
     _seam(globals()["__vendored__"])

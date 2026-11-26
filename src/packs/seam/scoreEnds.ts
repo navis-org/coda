@@ -80,7 +80,7 @@ export function publishedEnd(
       r: tip.against?.r ?? null,
       /*
        * **A verdict's absence, not `false`.** `null` here means the configuration published no
-       * cutoff for the quantity this tip could reach, which `seam:review` draws as "no verdict";
+       * cutoff for the quantity this tip could reach, which `seam:proofreadMerges` draws as "no verdict";
        * `false` would say the cutoff was applied and this tip did not clear it. The single-seed
        * configuration always decides, so this is the arm nothing takes today and the one a
        * split configuration scored live would.
@@ -148,14 +148,13 @@ export function contactsOf(end: SearchedEnd): Triple[] {
  *
  * **Here rather than in the node, and taking a `Warner` rather than an `EvalContext`**, which is
  * what makes any of it reachable from a test: `evaluate` needs a CAVE token, a volume and a GPU,
- * so counting code left inside it is counting code nothing checks. `affinityClusters.ts` and
- * `findMerges.ts` hand their reporters a `Warner` for the same reason.
+ * so counting code left inside it is counting code nothing checks.
  *
  * **Every sentence below is conditional, and that is a rule rather than a coincidence.**
  * `docs/limits.md` records the failure twice from two directions — "attributing on every run
  * instead is a line people learn to skip", "a warning raised over half a minute teaches a reader
  * to dismiss the next one". A run that went well says nothing here; what it found is in the
- * table, and `seam:review` is the surface that counts it.
+ * table, and `seam:proofreadMerges` is the surface that counts it.
  */
 export function reportOnRun(warner: Warner, ends: readonly PublishedEnd[]): void {
   reportOnSearch(warner, ends)

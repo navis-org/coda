@@ -521,7 +521,7 @@ export function isReferencePort(nodeType: string | undefined, portId: string): b
  * it, or `undefined`.
  *
  * The other direction of a reference wire, for a card that has to act on whoever reads it —
- * `seam:review` runs the search its `Extended` output is wired back to. Asked of the port's own
+ * `seam:proofreadMerges` runs the search its `Extended` output is wired back to. Asked of the port's own
  * declaration rather than of a type id the caller would have to know: the reader says it reads
  * by reference, and that is the whole of what joins the two.
  *

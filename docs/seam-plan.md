@@ -17,10 +17,13 @@ the reader can see where one segment holds two neurons. Later nodes bring other 
 of writing the seam down now is that the *second* model must cost a manifest entry, not a rewrite.
 
 > **The pack's live work is now [seam-suggestions-plan.md](seam-suggestions-plan.md)** — SEAM's
-> merge candidates (false *splits*), `seam:suggestions` and `seam:review`. This file is about the
-> false-*merge* nodes, both of which are retired.
+> merge candidates (false *splits*), `seam:loadMergeCandidates` and `seam:proofreadMerges`. This file is about the
+> false-*merge* nodes, both of which are retired. The nodes were renamed on 2026-11-26; the
+> table is in [seam-suggestions-plan.md](seam-suggestions-plan.md).
 >
-> **Both nodes are retired as of 2026-11-09** — `hidden: true`, registered, nothing deleted. The
+> **Both nodes were retired on 2026-11-09 (`hidden: true`) and dropped on 2026-11-26**, before the
+> pack's first release; the machinery that runs the models is kept (see
+> [What is kept](#what-is-kept-and-what-bringing-a-node-back-costs)). The
 > models are the reason, not the nodes; the measurements are in
 > [Why both nodes are retired](#why-both-nodes-are-retired) at the foot of this file. Everything
 > below is the plan as it stood, kept because a retrained checkpoint would walk the same path.
@@ -95,6 +98,11 @@ into a background class (`misc.remove_small_clusters`).
 
 The read-only decision is the standing "never write to production" rule, and it is also the honest
 one: a model whose transfer to real merges is unmeasured must not be wired to a chunkedgraph split.
+
+*Later (2026-11-16 and 2026-11-23):* the pack now writes, but not from these nodes. Proofread
+Merges' Submit makes merges (`docs/seam-merge-plan.md`), and the split gallery makes a split
+the reader picks (`docs/split-gallery-plan.md`). No model output reaches either write on its own.
+The two nodes this plan covers still write nothing.
 
 **Where the weights live.** Phase 0 hands over a converted file; it goes on one of our own servers
 and the URL comes back into the manifest. If the model is ever retrained (below), a GitHub release
@@ -493,7 +501,7 @@ design constraint on Phase 2, not just a caveat.
 
 ## Why both nodes are retired
 
-Written on 2026-11-09, after the first end-to-end run of `seam:findMerges` on a neuron somebody
+Written on 2026-11-09, after the first end-to-end run of `seam:findSplitCandidates` on a neuron somebody
 had already proofread by hand. **Neither retirement is about the node.** The input path, the
 window geometry and both heads were checked against PyTorch and agree to 4e-6 on WebGPU
 (Phase B). What failed is the checkpoint, each in its own way, and that is why the code stays.
@@ -505,7 +513,7 @@ centred on the origin and then offset by about 20 µm — and scored **at chance
 merges by SEAM's own measurement. A real merge is two neurons in their true positions touching at
 one place, which is not the distribution it saw.
 
-### Model A (`seam:findMerges`)
+### Model A (`seam:findSplitCandidates`)
 
 Measured with `pnpm probe:seam-merge`, which fetches a mesh through Coda's own `CaveSource`, tiles
 it, scores every cell and prints the scores against a coordinate the reader names. It is the
@@ -542,10 +550,24 @@ put 21% of its points on the minority side, so the two heads disagree where the 
 exists in the window table for this reason. Whether it lands on the crossing neurites is unknown —
 it needs looking at in the scene, not more numbers.
 
-### What is kept, and what un-retiring costs
+### What is kept, and what bringing a node back costs
 
-Nothing was deleted. `windowRun.ts`, `windowConfig.ts`, `mergeTables.ts`, `mergeSummary.ts`,
-`scene.ts`, the vendored `src/pyodide/seam/` and `seamWindows.py`/`.ts`, both help documents and
-all four probes stay, registered and under test. A retrained checkpoint costs an entry in
-`models.ts` and the removal of two `hidden: true` lines — which is the thing this pack's seam was
-designed for, and the one part of it that was worth the work.
+*Dropped 2026-11-26 (user), before the first release.* The two nodes went: `affinityClusters.ts`,
+`findMerges.ts`, Find Merges' card body (`ui/seam/FindMergesBody.tsx`) and its arithmetic
+(`mergeSummary.ts`), the cluster node value (`nodeValues.ts`), both help documents, their glyphs,
+See-also groups and export refusals. A file that holds either node now opens it as a
+`core.missing` placeholder.
+
+**The machinery stays, under test** (user: "we will likely re-use that"). For the point affinity
+transformer: `affinityOps.ts` (clustering, confidence, summary), `affinityRun.ts` (the matrix
+off a session), `affinityConfig.ts`, `affinityTables.ts`, `checkAffinitySize.ts`,
+`pointCloud.ts`, `labelSkeleton.ts`, `scene.ts`' cluster layer, the converter, the Python
+reference and the parity probe. For Model A: `windowRun.ts`, `windowConfig.ts`, `mergeTables.ts`,
+`scene.ts`' score and fragment layers, the vendored `src/pyodide/seam/`, `seamWindows.py`/`.ts`
+(shared with Find Open Ends) and `pnpm probe:seam-merge`. Both models keep their `models.ts`
+entries; the exports no node reads any more are accepted in `knip-baseline.txt`.
+
+A retrained checkpoint costs an entry in `models.ts` and a node again. The quickest way back is
+the dropped nodes themselves: `git show 6fcd5b5d:src/packs/seam/affinityClusters.ts` (and
+`findMerges.ts`, `ui/seam/FindMergesBody.tsx`, the help documents), registered under new type
+ids from the naming scheme in [seam-suggestions-plan.md](seam-suggestions-plan.md).

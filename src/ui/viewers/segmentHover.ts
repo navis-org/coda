@@ -165,7 +165,7 @@ function onKey(event: KeyboardEvent): void {
     useGraphStore
       .getState()
       .setNotice(
-        'Several Review Suggestions cards are open. Select the one to add the piece to, and press J again.',
+        'Several Proofread Merges cards are open. Select the one to add the piece to, and press J again.',
       )
     return
   }

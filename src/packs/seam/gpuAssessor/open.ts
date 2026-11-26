@@ -2,7 +2,7 @@
  * Open the hand-written WebGPU assessor: the same `ModelSession` as `openModel` gives, so it is a
  * drop-in for the ONNX Runtime one wherever the assessor is opened.
  *
- * `seam:suggestMerges` opens the assessor through this (as `ASSESSOR_RUNTIME`), and the
+ * `seam:findMergeCandidates` opens the assessor through this (as `ASSESSOR_RUNTIME`), and the
  * published manifest lists both builds. The variant is fixed here rather than taken from the
  * caller: the habit at an `openModel` site is to name `matmul`, which would download 133 MB
  * before `segclrPlan` refused it — the plain export is the only one it can read

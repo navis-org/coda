@@ -54,9 +54,9 @@ export function clusterName(label: number): string {
 /**
  * The summary's schema half: the neurons' own columns with the four folded in.
  *
- * `cluster`, not `merge`: these are counts of what the clustering found, and a `seam:findMerges`
- * node with a summary of its own is being built — `mergeSummaryTable` in this file would then
- * mean "the cluster node's table", which is the most confusing residue available.
+ * `cluster`, not `merge`: these are counts of what the clustering found, and Model A's tables
+ * (`mergeTables.ts`) are the merge ones — a `mergeSummaryTable` here would mean "the cluster
+ * table", which is the most confusing residue available.
  */
 export function clusterSummarySchema(schema: TableSchema | undefined): TableSchema {
   return foldColumns(schema ?? tableSchema(), SUMMARY_COLUMNS)

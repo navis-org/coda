@@ -525,12 +525,12 @@ rule belongs to one area, its record is in that area's doc.
   the lower parent id, breadth first), read by the search, the review card and the merge plan —
   never the order of clicks, or a reload publishes other tables. `ID` stays the piece's own root;
   the neuron is `seed`, and the card's cursor is `root|end_uid`.
-- **Suggest Merges publishes in the plain order whatever order it worked in** (`runBook.ts`: one
+- **Find Merge Candidates publishes in the plain order whatever order it worked in** (`runBook.ts`: one
   record per root, tables assembled on publish). What follows from a root's ends — its join, what
   is still wanted — is asked of the book, never cached beside it. A piece's boxes are read with
   `aliasOf(piece)`, a required argument: left out, the neuron comes back as its own candidate.
 - **The proofreading nodes read the segmentation at the neuron's moment, never the Dataset's
-  materialization** (`docs/seam-live-plan.md`). Suggest Merges keeps one per neuron in `Searched
+  materialization** (`docs/seam-live-plan.md`). Find Merge Candidates keeps one per neuron in `Searched
   at`, a run record (`ParamBase.runRecord`: written mid-run by `ctx.record`, out of the key, emptied
   only by the ⟳, which moves the key via `renewNode`); Find Open Ends reads its nucleus table live.
   A box is rooted through the memo it started with (`BoxReader.memo`), never a shared map moved.

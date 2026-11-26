@@ -162,7 +162,7 @@ export function parseWindowConfig(config: unknown, modelId: string): WindowConfi
  * Returns the sentence, or undefined where there is nothing to say: absent units mean unknown,
  * which `checkCleanUnits` and every other unit check in Coda let through.
  *
- * **Find Merges states its own**, deliberately, and should not be folded in here: it refuses an
+ * **Model A's node stated its own** (dropped 2026-11-26), deliberately, and a successor should keep it apart: it refused an
  * *absent* unit too, on the reasoning that there is nothing to convert an unknown with. That is
  * a different decision about the same question, not two spellings of one.
  */
@@ -177,7 +177,7 @@ export function notNanometres(what: string, units: string | undefined): string |
 /**
  * A checkpoint's preprocessing as the request fields that carry it.
  *
- * **One mapping for both cards.** Find Merges and Find Open Ends each wrote these four out, from
+ * **One mapping for every card.** Model A's node (since dropped) and Find Open Ends each wrote these four out, from
  * the same `config.preprocessing`, and the failure that invites is quiet in the way this whole
  * seam is: a field added here reaches one card and not the other, and a model scored on
  * differently-sampled windows returns perfectly ordinary numbers.

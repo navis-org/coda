@@ -558,7 +558,7 @@ reminder that a kernel fast on one GPU can be slow on another.
 ## 15. The stem reads the patch and skips its background: 26.5 ms to 21.1 (2026-11-19)
 
 Once the search ran three deep (`docs/seam-suggestions-plan.md`, "A step per queue"), the GPU set
-the pace of Suggest Merges in Chrome: 1.65 s of every 1.91 s end was the network, 61 patches at
+the pace of Find Merge Candidates in Chrome: 1.65 s of every 1.91 s end was the network, 61 patches at
 26.8 ms. Timed a step at a time (each step carries ~0.28 ms of submit), the stem was the largest
 single step at ~7.1 ms of a 26.6 ms patch, and stage 0's four 3³ convolutions ~9.6 together.
 

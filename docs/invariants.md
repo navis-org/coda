@@ -60,7 +60,7 @@ verbatim. Read the entry before arguing with the rule.
    wrong means a stale result silently survives an edit.
 
    **The one sanctioned exception is a run record** (`ParamBase.runRecord`, 2026-11-17): a param
-   the node writes while it runs (`ctx.record`) and reads back next run — Suggest Merges' moment
+   the node writes while it runs (`ctx.record`) and reads back next run — Find Merge Candidates' moment
    per neuron. It is presentational although `evaluate` reads it, because in the key the write
    would re-key the node and everything below it mid-run. It holds by construction rather than by
    the rule: the same key means the same upstream and so the same record, `internal` keeps hand

@@ -1,5 +1,5 @@
 /**
- * When Suggest Merges reads each neuron (`momentsOf`): the moment each neuron is kept at in
+ * When Find Merge Candidates reads each neuron (`momentsOf`): the moment each neuron is kept at in
  * `Searched at`, the present for one it has not met, the record written back before anything is
  * measured, and the run going on at moments it knows when the chunkedgraph cannot be asked. The
  * chunkedgraph calls are faked; `rootLives` and `momentWithin` have tests of their own.
@@ -57,7 +57,7 @@ beforeEach(() => {
   graphene.mockResolvedValue({ server: 'https://cave.example.org', table: 't', base: 'b' })
 })
 
-describe('the moment Suggest Merges searches each neuron at', () => {
+describe('the moment Find Merge Candidates searches each neuron at', () => {
   it('keeps a neuron at its moment, and meets a new one at the present, recording it', async () => {
     lives.mockResolvedValueOnce({
       lives: new Map([

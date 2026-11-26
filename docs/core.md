@@ -32,7 +32,7 @@ result cache cannot answer a run whose params moved, so without it every restyle
 `loadCachedTable`: a month in IndexedDB is for bulk tables, and this is a handful of ids. It does
 not honour `ctx.refresh` — the node declares no `dataCache` — so an answer stays for the session.
 
-And **Suggest Merges**, one end at a time (`packs/seam/endMemory.ts`): an end is 6 to 11 s and a
+And **Find Merge Candidates**, one end at a time (`packs/seam/endMemory.ts`): an end is 6 to 11 s and a
 run is tens to hundreds of them, so an entry per *node* loses all of them to anything that moves
 the key — a cancel, or an Extend, which moves it by design
 ([seam-extend-plan.md](seam-extend-plan.md)). Keyed on everything an end's answer depends on,
@@ -248,10 +248,10 @@ through `loadCachedTable` and `cachedGeometry` would save the read and touch eve
 
 ## A run record is a param the run writes and the key leaves out
 
-`ParamBase.runRecord` (built 2026-11-17 for `seam:suggestMerges`' `Searched at`;
+`ParamBase.runRecord` (built 2026-11-17 for `seam:findMergeCandidates`' `Searched at`;
 [seam-live-plan.md](seam-live-plan.md)). Some answers depend on something the node can only decide
 while it runs, and must decide the same way next time — after a reload, and when the reader comes
-back to a neuron from another. Suggest Merges searches each neuron at the moment it first met it,
+back to a neuron from another. Find Merge Candidates searches each neuron at the moment it first met it,
 and only learns which neurons there are once its inputs have arrived. So the node writes what it
 decided into one of its own params, through `ctx.record(paramId, value)`, and reads it back next run.
 
@@ -325,7 +325,7 @@ moment of the cache below it, with two nodes publishing at once.
 The rule it replaced dropped the partial with the run that made it, however that run ended — and
 an edit retiring a run in flight then handed every reader the cache, the last run that
 *finished*, until the new run's first publish. On a node edited faster than it finishes that is
-several edits old: pressing Extend on Review Suggestions while the last search was still running
+several edits old: pressing Extend on Proofread Merges while the last search was still running
 blanked the list and the Neuroglancer card beside it, and both came back a moment later.
 Measured in Chrome on a second Extend pressed 3.5 s into the first one's search: the card's tips
 went 12 → 10 → 12, with a 375 ms gap; 12 throughout after. It had a second gap of the same kind:
@@ -335,7 +335,7 @@ has published, and its drop then took the successor's partial with it.
 What it costs: with auto-run off, or on an expensive node auto-run defers, an edit to a node
 that was publishing leaves its partial on screen beside the `stale` badge until the next Run,
 where the last finished result stood before. Meanwhile `hasPartial` stays true, so a card
-reading it (Review Suggestions' foot) says the queue is still filling; the partial is held beside
+reading it (Proofread Merges' foot) says the queue is still filling; the partial is held beside
 the old cache entry; and it is a live publisher to `derivePreviews`, so every edit — a card
 dragged, each frame — derives the cheap nodes below it again and re-renders their readers, which
 before happened only while something streamed. A derive that remembered what it last derived
@@ -355,8 +355,8 @@ draws no arriving data, so the repaint cost tracks the scene rather than the siz
 
 There are two ways in, because a viewer is not the only thing that draws a partial. A node of
 `category: 'visualisation'` subscribes because that is what a viewer is for; any other card does
-so by its **body** declaring `drawsInputs` (`ui/nodes/nodeBodies.ts`). `seam:review` is the case
-that needed the second: its queue is `seam:suggestMerges`' published partial, an end landing
+so by its **body** declaring `drawsInputs` (`ui/nodes/nodeBodies.ts`). `seam:proofreadMerges` is the case
+that needed the second: its queue is `seam:findMergeCandidates`' published partial, an end landing
 every few seconds, and the body reads `inputValues` exactly as the 3D viewer does — but the card
 is a `utility` one, so it had selected nothing that a publish moves and sat on an empty list
 until the run ended. The flag is off by default for the measured reason above: a publish is four
@@ -380,7 +380,7 @@ nodes one at a time; two morphology nodes in a graph do not publish concurrently
 ### A partial that has to cross a node boundary
 
 The paragraph above rests on one premise: the viewer draws its **inputs**, so the value on the
-upstream wire *is* the picture. Review Suggestions is the case where that stops being true. Its
+upstream wire *is* the picture. Proofread Merges is the case where that stops being true. Its
 card draws the arriving queue, but the viewer a reader judges a merge in is a **Neuroglancer node
 downstream of it**, wired from `Current` and `Layers` — outputs only Review's own `evaluate`
 produces. So the queue filled end by end while the picture beside it stayed on the previous run,
@@ -765,9 +765,9 @@ its type; a general mechanism would have to answer that question for every kind 
 widen the first. The source says what a reader is handed; the condition is the one above — a
 function of the source's params alone — and it is now the source that states it.
 
-It exists for Review Suggestions, which sits *below* the search it steers
+It exists for Proofread Merges, which sits *below* the search it steers
 ([seam-extend-plan.md](seam-extend-plan.md)): which pieces to extend is in its params, and the
-Suggest Merges above it has to read that without waiting for a node that cannot run first.
+Find Merge Candidates above it has to read that without waiting for a node that cannot run first.
 
 - **The key is the hash of the answer, never of the source's params.** Review's cursor and
   verdicts are data params that move on every click; keyed on them, the search would start over
@@ -791,7 +791,7 @@ Suggest Merges above it has to read that without waiting for a node that cannot 
 **Known, and left:** "run this node" on the reader also runs the source and what feeds it,
 because `resolveScope` scopes with `ancestors`, which follows reference wires. True of a dataset
 reference since they were added; with a source *below* its reader it now reaches further. For
-Review ⇢ Suggest Merges it is harmless — what feeds Review is Suggest Merges — but it is not a
+Review ⇢ Find Merge Candidates it is harmless — what feeds Review is Find Merge Candidates — but it is not a
 property to lean on.
 - **Nothing to say is an answer.** `undefined` reaches the reader as an unwired port would;
   `unresolvedReference` and `settle` are about a dataset that has not named itself and skip a
@@ -832,12 +832,12 @@ another neuron on the wire, and hand back what then arrives on the port. Present
 declaring `rerunsInputs`, which `registerNode` refuses on anything but an `expensive` one.
 `settings` (`RerunSettings`) lays params over every copied node of a type — what the caller knows
 of the neuron that the chain was not built for — and refuses a param the type does not declare.
-A caller's constant, so the port's upstream key still names the run. Suggest Merges' one use:
+A caller's constant, so the port's upstream key still names the run. Find Merge Candidates' one use:
 the nucleus lookup only for a piece large enough to hold a nucleus ([seam-extend-plan.md](seam-extend-plan.md),
 "Phase 0 — results").
 
 It is for extending a neuron piece by piece ([seam-extend-plan.md](seam-extend-plan.md)): the
-chain above Suggest Merges' `Tips` — Meshes, a clean-up, Find Open Ends, a Sort — is, read this
+chain above Find Merge Candidates' `Tips` — Meshes, a clean-up, Find Open Ends, a Sort — is, read this
 way, a function of one neuron, and an accepted piece is another argument to it.
 
 **A private `Scheduler` over a copy of the graph, not a loop and not a pass on the reader's own.**

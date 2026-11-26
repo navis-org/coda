@@ -229,14 +229,14 @@ export interface OpenEnd {
 /**
  * The columns this node publishes — **what it measured, and nothing else.**
  *
- * It used to publish `TIP_FIELDS`, the full shape `seam:suggestions` reads out of a published
+ * It used to publish `TIP_FIELDS`, the full shape `seam:loadMergeCandidates` reads out of a published
  * set, with every column a later stage would fill present and null. That was right while the
  * plan was one node running all nine stages: the shape would not change as the stages landed.
- * It is wrong now that the search is `seam:suggestMerges` downstream — a null column is a
+ * It is wrong now that the search is `seam:findMergeCandidates` downstream — a null column is a
  * picker offered a choice that answers nothing, on a node that has no way ever to fill it.
  *
  * So this is the identity, the position, which kind of end it is, and the one measurement.
- * `seam:suggestMerges` folds its own columns onto this (`searchTips.ts`), which is how the two
+ * `seam:findMergeCandidates` folds its own columns onto this (`searchTips.ts`), which is how the two
  * meet without either declaring the other's list.
  *
  * Built through `suggestionTables.ts`' `Field` machinery, which is shared on purpose — one

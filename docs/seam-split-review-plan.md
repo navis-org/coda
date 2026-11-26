@@ -1,10 +1,10 @@
-# Splits fed back to Review Suggestions — plan
+# Splits fed back to Proofread Merges — plan
 
 Drafted 2026-11-24. A plan, not a record of what is built.
 
 ## The problem
 
-Reviewing a neuron's suggestions in **Review Suggestions** (`seam:review`) often turns up a false
+Reviewing a neuron's suggestions in **Proofread Merges** (`seam:proofreadMerges`) often turns up a false
 merge. It can be in the neuron itself, where a branch belongs to another cell, or in a candidate,
 where the piece that continues the neuron has something else stuck to it. Either can be split
 today: with Neuroglancer's own multicut in the Neuroglancer card, or with Coda's split gallery
@@ -41,7 +41,7 @@ reader's verdicts are kept, and nothing has to be searched again.
   split names the tip's side after it: its root now is either the kept part or the cut-off part.
   This is the whole design. One batched `rootsForSupervoxels` call (`rootIds.ts`) places every
   tip of a neuron.
-- **Suggest Merges already reads the supervoxels around every tip** (`rootedBox.ts`, a box per
+- **Find Merge Candidates already reads the supervoxels around every tip** (`rootedBox.ts`, a box per
   end with each supervoxel's root at the search's moment). It knows the neuron's supervoxel
   nearest each tip, and both supervoxels at each candidate's contact. Today it keeps neither.
 - **Submit already finds supervoxels at a contact at the server's now** (`mergeAnchors.ts`). A
@@ -51,7 +51,7 @@ reader's verdicts are kept, and nothing has to be searched again.
 
 ### 1. Anchors: one supervoxel per tip, one per candidate
 
-Suggest Merges publishes two new columns:
+Find Merge Candidates publishes two new columns:
 
 | Table | Column | What it is | Found |
 |---|---|---|---|
@@ -67,7 +67,7 @@ about 0.1 ms (phase 0); `cand_sv` costs nothing. The scan is the one Submit's an
 (`nearestVoxels`, `rootedBox.ts`), so there is one copy of it. A hand pick (J, `handPicks.ts`) records
 `cand_sv` too, since its check (`pickCheck.ts`) finds that supervoxel already.
 
-A table without these columns (a published set from `seam:suggestions`, or a workflow saved
+A table without these columns (a published set from `seam:loadMergeCandidates`, or a workflow saved
 before this change) can still be followed. That costs a box read per tip at the search's moment
 (`Searched at`), measured at 0.7 s each, or about two minutes for a 1,600-tip neuron read eight
 at a time. See phase 5.
@@ -105,7 +105,7 @@ both are on the same side of any split, so the test must accept a root anywhere 
 `GATHER_MS`, asks in batches, and remembers the answers. Because the answer is worked out rather
 than written down:
 
-- tips that arrive after the split (Suggest Merges still running) are placed like the rest;
+- tips that arrive after the split (Find Merge Candidates still running) are placed like the rest;
 - undoing the split brings the dropped tips back;
 - a reload asks once again, which is one request per neuron.
 
@@ -180,7 +180,7 @@ A follow is refused while a Submit is out, or while the record has a merge whose
   channel the gallery announces on carries a result, not a way to write.
 - **Verdict keys.** Verdicts are still keyed on the reviewed root and the candidate as suggested.
   Nothing is re-keyed. The record says what each root is now.
-- **The search's moment.** Suggest Merges still reads the neuron at its `Searched at`. The new
+- **The search's moment.** Find Merge Candidates still reads the neuron at its `Searched at`. The new
   end that a split leaves at the cut is not searched. Searching it is a later step (below).
 
 ## Phases

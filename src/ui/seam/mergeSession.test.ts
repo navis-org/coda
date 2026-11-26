@@ -150,7 +150,7 @@ beforeEach(() => {
   clearStorage()
   resetSubmit()
   store().newGraph()
-  store().loadGraph(addNode(emptyGraph('submit'), node('review', 'seam:review')))
+  store().loadGraph(addNode(emptyGraph('submit'), node('review', 'seam:proofreadMerges')))
   store().setNotice(undefined)
   REQUEST = { ...REQUEST, docId: store().activeTabId }
   planMerges.mockReset()

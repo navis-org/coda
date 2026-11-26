@@ -1,12 +1,12 @@
 /**
- * Merge Suggestions: read a set of SEAM's merge candidates and publish it as a queue.
+ * Load Merge Candidates: read a set of SEAM's merge candidates and publish it as a queue.
  *
  * ## The direction of the error
  *
  * This node is about **false splits** — a neuron that stops at a tip where a separate piece of
- * segmentation is very likely its continuation, and the fix is a merge. The pack's other two
- * nodes look for false *merges* and are retired. "Find Merges finds false merges; Merge
- * Suggestions suggests merges" is the sentence to keep hold of.
+ * segmentation is very likely its continuation, and the fix is a merge. Every name in the pack
+ * says the **fix**: a merge candidate is fixed by a merge, and a node for false merges would find
+ * split candidates.
  *
  * ## It reads a set; it does not compute one
  *
@@ -24,15 +24,15 @@
  *
  * `shown` is SEAM's absolute cutoff applied (invariant 14) and `r` is on every row. There is no
  * threshold param here: narrowing is a `Filter Table` on `shown` or `r`, where the cut is visible
- * as something somebody did. `seam:findMerges` is why — its `Score cutoff` was a cut inside an
+ * as something somebody did. Model A's dropped node is why — its `Score cutoff` was a cut inside an
  * expensive node, which made every nudge a re-run and made a discarded answer look like a verdict
  * the model had given.
  *
  * ## Read-only
  *
  * SEAM suggests; the proofreader decides. This node fetches files over HTTP and nothing else. The
- * merges are made downstream, by `seam:review`'s Submit with the reader's own token — the same
- * path for a published set as for a live Suggest Merges run (`docs/seam-merge-plan.md`), which
+ * merges are made downstream, by `seam:proofreadMerges`'s Submit with the reader's own token — the same
+ * path for a published set as for a live Find Merge Candidates run (`docs/seam-merge-plan.md`), which
  * this node is kept out of reach of (`importGraph.test.ts`).
  */
 
@@ -78,7 +78,7 @@ const TIPS_SHARE = 0.25
 // Which suggestion set this card is pointed at: the two controls, and what they resolve to
 // ---------------------------------------------------------------------------
 //
-// Briefly their own module, extracted so `seam:suggestMerges` could share them. That node reads
+// Briefly their own module, extracted so `seam:findMergeCandidates` could share them. That node reads
 // its pipeline from a model manifest now (2026-11-15, user), so there is one caller again and
 // the extraction's stated reason had gone with it — the shape `nodes/lib/caveParams.ts` records
 // is for a question *several* nodes ask, and this is no longer one. The two param literals went
@@ -184,8 +184,9 @@ async function chosenManifest(
 }
 
 export const suggestionsNode = packNode({
-  type: 'seam:suggestions',
-  label: 'Merge Suggestions',
+  type: 'seam:loadMergeCandidates',
+  formerTypes: ['seam:suggestions'],
+  label: 'Load Merge Candidates',
   category: 'query',
   description:
     'Reads a set of SEAM’s merge suggestions — places a neuron stops where a nearby piece of segmentation is probably its continuation — as a queue of tips with their ranked candidates.',
@@ -193,7 +194,7 @@ export const suggestionsNode = packNode({
     'Reads SEAM’s merge candidates for a set of neurons from a published suggestion set. Each ' +
     'row is a tip, with the piece SEAM would merge into it, how likely that is to be right, and ' +
     'whether it clears SEAM’s own cutoff. Nothing is computed here and nothing is written: wire ' +
-    'both tables into Review Suggestions to work through them and submit the merges you accept.',
+    'both tables into Proofread Merges to work through them and submit the merges you accept.',
   cost: 'expensive',
 
   inputs: [{ id: 'layers', label: 'Layers', type: T.layers(), required: false }],

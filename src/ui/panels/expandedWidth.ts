@@ -59,7 +59,7 @@ const EXPANDED_WIDTHS: Record<string, ExpandedWidth> = {
    * this to look at. Capped, the viewer stops at about a thousand pixels on a screen with three
    * thousand to give it.
    */
-  'seam:review': 'full',
+  'seam:proofreadMerges': 'full',
 }
 
 export function expandedWidth(nodeType: string): ExpandedWidth {

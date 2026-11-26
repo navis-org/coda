@@ -158,7 +158,7 @@ describe('which part is followed', () => {
   it('says why, where it cannot follow', async () => {
     const none = await followEdit(request([]), OPTIONS, services({}))
     expect(none.ok).toBe(false)
-    expect(!none.ok && none.message).toMatch(/Run Suggest Merges again/)
+    expect(!none.ok && none.message).toMatch(/Run Find Merge Candidates again/)
     const same = await followEdit(request(['a']), OPTIONS, services({ a: NEURON }))
     expect(!same.ok && same.message).toMatch(/has not been edited/)
     const failing = services({})

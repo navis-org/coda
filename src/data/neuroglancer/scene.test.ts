@@ -1146,7 +1146,7 @@ describe('what can be set in place', () => {
   })
 
   it('names a local annotation layer whose annotations changed', () => {
-    // Review Suggestions under Auto-extend: a piece taken, with the tips of the piece it was taken
+    // Proofread Merges under Auto-extend: a piece taken, with the tips of the piece it was taken
     // on as new points, in one update — all of it in place.
     const changes = inPlaceChanges(
       scene(['1'], {}, [points(2)]),

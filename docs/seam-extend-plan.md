@@ -11,7 +11,7 @@ review those, and repeat until the neuron is filled out. On-demand pipeline only
 
 1. Run the on-demand chain for the seed neuron and review it, as today.
 2. Accept a piece. Its row gets an **Extend** button.
-3. Press Extend. Suggest Merges finds the piece's open ends by re-running the chain above its
+3. Press Extend. Find Merge Candidates finds the piece's open ends by re-running the chain above its
    `Tips` input — Meshes, Clean Meshes, Find Open Ends, Sort, Sample, whatever is there — for that
    piece alone. It then searches those ends, treating the seed and every piece between the seed
    and this one as a single neuron. The new rows stream into the same queue, under the same
@@ -23,23 +23,23 @@ review those, and repeat until the neuron is filled out. On-demand pipeline only
 
 | Question | Decision |
 | --- | --- |
-| Which node runs the search for a piece | **Suggest Merges**, told what to extend by a dotted wire from Review Suggestions. Not the review card itself, and not a visible loop of nodes. |
+| Which node runs the search for a piece | **Find Merge Candidates**, told what to extend by a dotted wire from Proofread Merges. Not the review card itself, and not a visible loop of nodes. |
 | When it starts | **By hand, unless `Auto-extend` is on.** An accept starts nothing; each accepted row has an Extend button, and only extended pieces are searched. `Auto-extend` (added later the same day, off by default) extends a piece as it is accepted — **except a large one** (41 level-2 chunks or more), which is left to its button, and **only pieces accepted from then on**: switching it on starts nothing. |
 | When merges are sent | **Only at Submit.** Accepted pieces count as part of the neuron for searching and drawing; nothing is written before Submit. |
-| Published sets (`seam:suggestions`) | **Left for later.** The card says a piece from a published set cannot be extended. |
-| A table of what became of each piece (`Pieces`) | **Dropped**, after it was built in phase 4. Few pieces are expected to fail, and it was a third output on a node that is already hard to read. A failed piece is a warning on the Suggest Merges card. If failures mount up it can come back. |
+| Published sets (`seam:loadMergeCandidates`) | **Left for later.** The card says a piece from a published set cannot be extended. |
+| A table of what became of each piece (`Pieces`) | **Dropped**, after it was built in phase 4. Few pieces are expected to fail, and it was a third output on a node that is already hard to read. A failed piece is a warning on the Find Merge Candidates card. If failures mount up it can come back. |
 
 ## What is in the way today — read off the code
 
 - **A graph has no cycles, and `For Each` does not fit.** A loop publishes no partial results
   (`derivePreviews` leaves loops out), so the card would not fill while the search runs. It also
   re-runs every pass when its collection grows, and is not adopted by a newer run.
-- **Review Suggestions is `cheap` and re-runs on every click** — the cursor and the verdicts are
+- **Proofread Merges is `cheap` and re-runs on every click** — the cursor and the verdicts are
   data params. It cannot hold minutes of work, and making it `expensive` would put 700 ms between
   a click and the viewer.
-- **The result cache holds one entry per node.** Anything that changes Suggest Merges' key makes
+- **The result cache holds one entry per node.** Anything that changes Find Merge Candidates' key makes
   it search the seed's ends again: 6.2 s an end in Chrome, 11.0 s in Firefox.
-- **Suggest Merges searches one root per tip.** Searched on its own, a piece's best candidate at
+- **Find Merge Candidates searches one root per tip.** Searched on its own, a piece's best candidate at
   the end facing the neuron is the neuron it was just accepted onto.
 - **Review's cursor is a bare `end_uid`,** resolved inside one root. `end_uid` is a counter of one
   run of Find Open Ends, so every piece starts again at 0.
@@ -52,7 +52,7 @@ Five parts. The first two are small core features; the rest is in the `seam` pac
 
 ### 1. What is extended is a param on Review
 
-A new param on `seam:review`, `extend`: a list of `parent/piece` pairs, the same shape as a
+A new param on `seam:proofreadMerges`, `extend`: a list of `parent/piece` pairs, the same shape as a
 verdict key.
 
 - **Pairs, not piece ids**, so the tree can be read from the params alone. That is the condition
@@ -68,14 +68,14 @@ verdict key.
   shorter one, then the lower parent id. Pieces are listed breadth first. A reload followed by Run
   must produce the same tables the session did.
 - A data param (it is in the key), and an ordinary undo step.
-- **The Extend gesture** is one `setParams` and then `runNode` on the Suggest Merges the card is
+- **The Extend gesture** is one `setParams` and then `runNode` on the Find Merge Candidates the card is
   wired back to, so it works whatever auto-run is set to. With auto-run on, the two runs are one:
   a newer walk adopts the evaluation (`core.md`, "supersedes the walk, not the work").
 
 ### 2. A reference that reads params
 
-A new input on `seam:suggestMerges`, `Review`, marked `reference`, wired from a new `Extended`
-output on `seam:review`. Drawn dotted, as references are, and running right to left.
+A new input on `seam:findMergeCandidates`, `Review`, marked `reference`, wired from a new `Extended`
+output on `seam:proofreadMerges`. Drawn dotted, as references are, and running right to left.
 
 Before this, every reference was a dataset: `gatherInputs` built the value with
 `datasetIdentity(type)` and the key with `referenceKey(type)`. This is the second kind, so the mechanism has to say what a
@@ -120,7 +120,7 @@ neuron on the wire, and hand back the value that arrives.
   with it. The memory meter cannot see it while it runs. The closure must be built in a function
   holding only the graph and the host, never the pass (`core.md`, the evaluation rule).
 
-### 4. Suggest Merges searches a piece as part of the neuron
+### 4. Find Merge Candidates searches a piece as part of the neuron
 
 **The neuron so far**, for a piece, is the seed plus the pieces on the path from the seed to it.
 Not its siblings and not anything accepted later. That is fixed by the tree, so an answer does
@@ -165,7 +165,7 @@ not depend on what else was accepted first, and "a published end is final" still
 - A row says which piece its tip is on and how many steps that is from the seed.
 - An accepted row shows **Extend**; then `searching 3 of 7`; then `7 ends searched` or
   `nothing to search` — which is all the card can say of a piece with no rows, failed or not
-  (no `Pieces` table; see Decisions). Disabled with the reason as its title: no wire back to Suggest Merges, a
+  (no `Pieces` table; see Decisions). Disabled with the reason as its title: no wire back to Find Merge Candidates, a
   published set, a piece already merged elsewhere.
 - **Size is said before the press.** The button's title carries the piece's level-2 chunk count,
   and the card warns where a piece is bigger than the neuron it joins: extending it searches a
@@ -221,9 +221,9 @@ Each lands on its own. Nothing before phase 6 touches the write path.
    sitting on that wire, such as Update Root IDs between Input IDs and Meshes, without saying so —
    but a piece should not need updating, so this is not a problem in general. Noted in
    [core.md](core.md) with the two ways out, should one ever be needed.
-   **For phase 4 to settle:** Clear Cache on Suggest Merges does not reach a piece's re-run chain
-   (`ctx.refresh` is one node's flag); and "run this node" on Suggest Merges also runs Review.
-3. **Suggest Merges: the memory of finished ends**, with no other change. **Built 2026-11-16** —
+   **For phase 4 to settle:** Clear Cache on Find Merge Candidates does not reach a piece's re-run chain
+   (`ctx.refresh` is one node's flag); and "run this node" on Find Merge Candidates also runs Review.
+3. **Find Merge Candidates: the memory of finished ends**, with no other change. **Built 2026-11-16** —
    `packs/seam/endMemory.ts`, used by the node's loop through `recalled`. The node still runs
    and still walks every tip; an end it has finished before is answered from the memory, in the
    order an unremembered run would publish it.
@@ -269,7 +269,7 @@ Each lands on its own. Nothing before phase 6 touches the write path.
      after each, so Cancel works through a long stretch of them.
 
    **Checked in Chrome** on the on-demand workflow's own chain (seed `648518347558097460`, four
-   ends, no assessor), one `Scheduler`, Suggest Merges' own time:
+   ends, no assessor), one `Scheduler`, Find Merge Candidates' own time:
 
    | Run | Seconds | Bucket reads | Chunkedgraph calls | Candidate rows |
    | --- | --- | --- | --- | --- |
@@ -295,7 +295,7 @@ Each lands on its own. Nothing before phase 6 touches the write path.
    fourteen seconds are Python's packages and a cold chunk cache.)
    **For phase 4:** a piece's path joins the key, and `forgetRoots` moves from between neurons to
    between seeds.
-4. **Suggest Merges: the `Review` port and pieces.** **Built 2026-11-16.** The pure parts are
+4. **Find Merge Candidates: the `Review` port and pieces.** **Built 2026-11-16.** The pure parts are
    `packs/seam/pieces.ts` (tested, each rule checked by breaking it); the node does the reading.
    - **The port**: `Review`, a reference, handed a table of `parent`/`piece` pairs
      (`EXTENDED_FIELDS`). Unwired, the node behaves as before and gains the new columns.
@@ -360,7 +360,7 @@ Each lands on its own. Nothing before phase 6 touches the write path.
    ends, its own assessor, real GPU), with a stand-in for Review handing over the pairs. Every
    table came out in the shape inference promised.
 
-   | Run | Suggest Merges took | Tip rows | What was new |
+   | Run | Find Merge Candidates took | Tip rows | What was new |
    | --- | --- | --- | --- |
    | No pieces | 22.9 s | 3 | the seed's three ends |
    | Its best candidate extended (`…680055`, r 0.98) | 5.6 s | 5 | the piece's 2 tips: one the junction, one searched |
@@ -393,9 +393,9 @@ Each lands on its own. Nothing before phase 6 touches the write path.
      rows with the piece as `ID` and a `first` not yet filled are waiting; all filled is
      searched. **A piece with no rows once the run has finished reads "nothing to search"** —
      that covers a piece with no open ends and a piece that failed alike, and the reason for a
-     failure is on the Suggest Merges card.
+     failure is on the Find Merge Candidates card.
    - A candidate that is already in the tree by another route is listed like any other.
-   - Add `producedBy: { type: 'seam:review', port: 'extended' }` to the `Review` port once that
+   - Add `producedBy: { type: 'seam:proofreadMerges', port: 'extended' }` to the `Review` port once that
      output exists.
    **For phase 6 to know:**
    - A piece's `contact_*` and `min_dist_um` are measured to the neuron *and its path*, on a
@@ -409,8 +409,8 @@ Each lands on its own. Nothing before phase 6 touches the write path.
    `review.ts`; the card in `ui/seam/ReviewBody.tsx`.
    - **`extend`** is a param of verdict keys (`parent/piece`), written sorted. **What is
      extended is one rule**, `extendedPairs`: a pair in `extend` whose verdict is still
-     `accept`. The `Extended` output, the reference Suggest Merges holds (`asReference`) and
-     the card all read it. Suggest Merges' `Review` port now names that output (`producedBy`).
+     `accept`. The `Extended` output, the reference Find Merge Candidates holds (`asReference`) and
+     the card all read it. Find Merge Candidates' `Review` port now names that output (`producedBy`).
    - **Which rows there are to review comes from the params, not from the rows**
      (`liveTree` → `piecesOf`, the derivation the search uses; `liveQueue`). A piece that is
      un-accepted or no longer extended is off the list on that click, whether or not the search
@@ -425,8 +425,8 @@ Each lands on its own. Nothing before phase 6 touches the write path.
      accepting it again does not start a search nobody pressed Extend for. The pieces beyond
      it keep their entries: unreachable until it is extended again, and back when it is. The
      verdict buttons and the Extend button say how many pieces go with it, before the click.
-   - **The Extend button** is on an accepted row. Off: it writes the pair and runs the Suggest
-     Merges node the card's `Extended` is wired back to — one undo step, whatever auto-run is
+   - **The Extend button** is on an accepted row. Off: it writes the pair and runs the Find Merge
+     Candidates node the card's `Extended` is wired back to — one undo step, whatever auto-run is
      set to. On: it says how far that search has got and a second press stops extending,
      running nothing. Disabled with the reason: no wire back (which is also every published
      set), merged by Submit, edited since.
@@ -434,13 +434,13 @@ Each lands on its own. Nothing before phase 6 touches the write path.
      table of piece states: `waiting…`, `searching 3 of 7`, `7 ends searched`,
      `3 of 7 ends searched` for a search stopped part way, `no open ends`,
      `nothing to search` (a finished search that published no row: no tips, or it failed —
-     the reason is on the Suggest Merges card) and `not searched yet`.
+     the reason is on the Find Merge Candidates card) and `not searched yet`.
    - **The list is a tree** (user, 2026-11-16; `arrangeTree`): a piece's tips are drawn
      directly beneath the row the piece was accepted on, a step in for every piece between them
      and the neuron, behind an arrow. Each level is narrowed and sorted on its own by the
      card's filters and `Sort by`. Rules that go with it:
      - the row a piece hangs beneath is the parent's tip that lists it at the **smallest gap**,
-       which is where Suggest Merges takes the joining end from;
+       which is where Find Merge Candidates takes the joining end from;
      - that row is **listed whatever the filters say** — filtered out, the rows beneath it
        would hang from nothing;
      - so is **a row with an accepted piece on it**, extended or not (user, 2026-11-21): a
@@ -470,7 +470,7 @@ Each lands on its own. Nothing before phase 6 touches the write path.
    **Changed from the plan**
    - **The size warning is not "bigger than the neuron it joins".** The neuron's own chunk
      count is not published anywhere the card can read, and adding a column for it is a
-     change to Suggest Merges' tables. What stands in: the button's title carries the piece's
+     change to Find Merge Candidates' tables. What stands in: the button's title carries the piece's
      chunk count, and from 41 chunks — phase 0's top band — the button reads
      `Extend (large)` and the title says what a piece that size cost when it was measured.
      Never a refusal. The comparison with the neuron can come with a `neuron_n_l2` column.
@@ -478,7 +478,7 @@ Each lands on its own. Nothing before phase 6 touches the write path.
      extending a piece without un-accepting it.
 
    **Checked in Chrome** on the on-demand workflow (seed `648518347558097460`, 25 ends, its own
-   assessor, real GPU, auto-run on), with `Extended` wired back to Suggest Merges, by pressing
+   assessor, real GPU, auto-run on), with `Extended` wired back to Find Merge Candidates, by pressing
    the card's own buttons. Reads only.
 
    | Step | Took | What the card showed |
@@ -517,8 +517,8 @@ Each lands on its own. Nothing before phase 6 touches the write path.
    The table below was taken before the list became a tree; the tree was looked at in Chrome
    afterwards, on the same workflow.
 
-   **Extending while the neuron's own search is still running.** The pair moves Suggest
-   Merges' key, so the scheduler retires the evaluation under way and starts another; the
+   **Extending while the neuron's own search is still running.** The pair moves Find Merge
+   Candidates' key, so the scheduler retires the evaluation under way and starts another; the
    ends already finished come back from the memory. It does not run alongside.
    - **First built**, the new run took the neuron's remaining ends first and the pieces after.
      Measured in Chrome (a piece accepted with 6 of 25 ends done): the piece's button read
@@ -684,12 +684,12 @@ Each lands on its own. Nothing before phase 6 touches the write path.
    through an alias is covered by the sandbox reads above, not by a unit test — it needs a
    volume.
 7. **Docs.** **Written 2026-11-17.**
-   - **Suggest Merges has a help page** (`help/suggestMerges.md`; it had none), and its `guide`
+   - **Find Merge Candidates has a help page** (`help/suggestMerges.md`; it had none), and its `guide`
      is cut to the two or three sentences the overlay prints above one.
-   - **Review Suggestions' page** has a section on extending — the wire, the Extend button's
+   - **Proofread Merges' page** has a section on extending — the wire, the Extend button's
      states, how the tree list reads, changing your mind, `Auto-extend` — and one on submitting
-     a neuron that was extended. Three places that said Merge Suggestions where the on-demand
-     search was meant now say Suggest Merges.
+     a neuron that was extended. Three places that said Load Merge Candidates where the on-demand
+     search was meant now say Find Merge Candidates.
    - **A help figure can draw the dotted wire** (`help/figures.ts`, recorded in `help.md`): both
      pages show `Extended` wired back into `Review`. Looked at in Chrome.
    - `core.md` had references and `rerunInput` from phases 1 and 2. CLAUDE.md has two rules
@@ -881,7 +881,7 @@ hand-made merges.
   very fast run.
 - **`ID` is the piece, `seed` is the neuron.** A node below that groups on `ID` sees each piece as
   its own neuron.
-- **`Sort` above Suggest Merges** already costs locality; with pieces it also decides which of a
+- **`Sort` above Find Merge Candidates** already costs locality; with pieces it also decides which of a
   piece's ends make the cut, per piece.
 - **A reference keyed too widely** re-runs the search on every click; keyed too narrowly, Extend
   does nothing. Both look like a slow or a stuck node, not like a key.

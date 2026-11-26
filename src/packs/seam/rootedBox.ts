@@ -198,7 +198,7 @@ export function forgetRoots(volume: Pick<BoxReader, 'memo'>, at: Instant): void 
  * **No query root.** The search's Python step wants one (`LabelBoxRequest.queryRoot`) and the
  * anchors do not, so the callers that want it add it.
  *
- * **Safe to have several of these in flight** — up to four in Suggest Merges, three search boxes
+ * **Safe to have several of these in flight** — up to four in Find Merge Candidates, three search boxes
  * and a patch box. `resolveRoots` shares a lookup between callers rather than letting each ask, so
  * reading neighbouring ends' boxes together does not multiply the chunkedgraph's work. Reading the voxels is already safe: `ChunkCache.set` is
  * idempotent on a key it already holds, so a chunk fetched twice is wasted bytes rather than a

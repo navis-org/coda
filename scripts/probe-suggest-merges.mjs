@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Suggest Merges, run as a node in Chrome over real open ends — the timing a reader's own run
+ * Find Merge Candidates, run as a node in Chrome over real open ends — the timing a reader's own run
  * reports, taken the same way every time.
  *
  *   pnpm dev --port 5193 --strictPort           # in another terminal
@@ -16,7 +16,7 @@
  * `pnpm probe:seam-tip-boxes` drive pieces of the sequence; nothing drove the node.
  *
  * This runs the workflow's chain — Dataset, Input IDs, Meshes, Clean Meshes twice, Find Open
- * Ends, Sample — and then `seam:suggestMerges` with the assessor, uncapped, on a `Scheduler` of
+ * Ends, Sample — and then `seam:findMergeCandidates` with the assessor, uncapped, on a `Scheduler` of
  * its own. Only the last node's report is read: `runClock` starts where the search begins, so
  * the chain above and the 133 MB model download are not in it.
  *
@@ -79,7 +79,7 @@ function chain() {
     // The assessor is filled in the page, from the build's own model list.
     {
       id: 'suggest',
-      type: 'seam:suggestMerges',
+      type: 'seam:findMergeCandidates',
       position: { x: 1800, y: 0 },
       params: { download: true, assessTop: 0 },
     },
@@ -168,7 +168,7 @@ async function once(run) {
         return one.state === 'ok' ? [] : [id + ' is ' + one.state + ': ' + (one.error ?? '')]
       }),
       warning: scheduler.warning('suggest') ?? '',
-      detail: said.find((line) => line.startsWith('Suggest Merges:')) ?? '',
+      detail: said.find((line) => line.startsWith('Find Merge Candidates:')) ?? '',
       candidates: table?.length ?? 0,
       fingerprint,
     })

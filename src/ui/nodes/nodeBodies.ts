@@ -20,7 +20,6 @@
 
 import { AnnotateBody } from './AnnotateBody'
 import { GalleryBody } from '../cortex/GalleryBody'
-import { FindMergesBody } from '../seam/FindMergesBody'
 import { ReviewBody } from '../seam/ReviewBody'
 import type { ComponentType } from 'react'
 
@@ -110,8 +109,8 @@ export interface NodeBodyEntry {
    * which has the measurement behind keeping it off by default.
    *
    * A viewer never sets it: `isViewer` already subscribes, that being what a viewer is for. This
-   * is for the bodies that are not viewers and draw data anyway — `seam:review` is the first,
-   * whose queue fills from `seam:suggestMerges` one end at a time.
+   * is for the bodies that are not viewers and draw data anyway — `seam:proofreadMerges` is the first,
+   * whose queue fills from `seam:findMergeCandidates` one end at a time.
    */
   drawsInputs?: boolean
   /**
@@ -131,18 +130,13 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
   // The Cortex pack's; a card body lives here, `src/packs/**` being imported by the headless MCP build.
   'cortex:gallery': { Component: GalleryBody, expandable: true, resizable: true },
   /*
-   * The SEAM pack's. `expandable`, because the histogram is the point and a card-sized one is
-   * twenty bars across a hundred pixels — enough to see the shape, not enough to place a line.
-   */
-  'seam:findMerges': { Component: FindMergesBody, expandable: true },
-  /*
    * `expandable` and `resizable`: the card holds a viewer *and* a queue, and how much of each a
    * reader wants is the whole question — a long list to triage, or a big frame to judge one site.
    *
-   * `drawsInputs`, because the queue is `seam:suggestMerges`' published partial: an end lands
+   * `drawsInputs`, because the queue is `seam:findMergeCandidates`' published partial: an end lands
    * about every four seconds and the point of publishing it is that somebody can start on it.
    */
-  'seam:review': {
+  'seam:proofreadMerges': {
     Component: ReviewBody,
     expandable: true,
     resizable: true,

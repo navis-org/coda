@@ -1,5 +1,5 @@
 /**
- * Does `seam:suggestions` read a real suggestion set, over real HTTP, by byte range?
+ * Does `seam:loadMergeCandidates` read a real suggestion set, over real HTTP, by byte range?
  *
  * The unit tests read the committed fixture from a `Blob`, which exercises the parquet decoding
  * and none of the transport. Everything that has ever gone wrong in this path is in the

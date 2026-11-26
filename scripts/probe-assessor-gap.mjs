@@ -8,7 +8,7 @@
  * ## What it was built for, and what it found
  *
  * `pnpm probe:gpu-assessor` ran the hand-written WebGPU assessor at **26.3 ms a patch** on a
- * bare page while `seam:suggestMerges` measured **98** — same laptop, same GPU, same
+ * bare page while `seam:findMergeCandidates` measured **98** — same laptop, same GPU, same
  * `openGpuAssessor`, same worker. Five explanations had already been eliminated by measurement
  * (the Pyodide handover, the hardware, the patch copy, the float32 conversion, a 3D viewer on
  * the canvas) and the two pages differed in too many ways at once for a sixth guess to be worth

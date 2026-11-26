@@ -1,6 +1,6 @@
 /**
  * A record a run keeps in a param (`ParamBase.runRecord`), written by the store as the run
- * reports it — `seam:suggestMerges`' moment per neuron (`docs/seam-live-plan.md`). Pinned at the
+ * reports it — `seam:findMergeCandidates`' moment per neuron (`docs/seam-live-plan.md`). Pinned at the
  * store, because that is where every run passes through, the dashboard's included, where no card
  * is mounted. Out of the key, so the write runs nothing again and leaves nothing stale; the
  * card's ⟳ (`refreshNode`) empties it, and Clear Cache does not.
@@ -45,7 +45,7 @@ beforeAll(() => {
       { id: 'other', kind: 'number', label: 'Other', default: 1 },
     ],
     inferOutputs: () => ({ out: T.table() }),
-    // As Suggest Merges does: keep what is recorded, record a moment where there is none.
+    // As Find Merge Candidates does: keep what is recorded, record a moment where there is none.
     evaluate: (ctx) => {
       seen.push(ctx.params.at)
       if (ctx.params.at === '') ctx.record?.('at', `moment ${++moments}`)

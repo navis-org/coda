@@ -991,7 +991,7 @@ export interface GraphState {
   closeDocument(id: string): void
   /**
    * Hold the on-screen document and one of its nodes while that node's card writes to a server
-   * (`seam:review`'s merge batch): until `release`, nothing removes the node or changes the
+   * (`seam:proofreadMerges`'s merge batch): until `release`, nothing removes the node or changes the
    * document — a delete, an undo, a load, a switch or a close is refused with a notice. Throws
    * unless `docId` is on screen and holds the node, and while another hold is up. `update` is the
    * one way the card's record is written: read and replaced in one step, with no undo step.
@@ -1179,7 +1179,7 @@ export interface GraphState {
   setParams(nodeId: string, values: Readonly<Record<string, ParamValue>>): void
   /**
    * Several nodes' params in one edit, one undo step — for a gesture whose meaning spans cards:
-   * Review Suggestions' Start over also clears its viewers' double-clicks.
+   * Proofread Merges' Start over also clears its viewers' double-clicks.
    */
   setParamsMany(
     changes: readonly { nodeId: string; values: Readonly<Record<string, ParamValue>> }[],
@@ -1314,7 +1314,7 @@ export interface GraphState {
   clearNodeCache(nodeId: string): void
   /**
    * The card's ⟳ and "Fetch Again Now": forget the node's data, empty what its runs recorded
-   * (`ParamBase.runRecord` — the moments `seam:suggestMerges` searched its neurons at), and run
+   * (`ParamBase.runRecord` — the moments `seam:findMergeCandidates` searched its neurons at), and run
    * it, which decides afresh. Its own action because `clearNodeCache` is also the Inspector's and the
    * menu's Clear Cache, which say "forget downloaded data" and must not move a moment in the
    * document — that would leave a review card's saved verdicts naming another search's answer.
@@ -1817,7 +1817,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
   const frozen = () => get().locked
 
   /*
-   * A card writing to a server (`seam:review`'s merge batch): the document and the node its record
+   * A card writing to a server (`seam:proofreadMerges`'s merge batch): the document and the node its record
    * is written to, while the writes are in flight. Nothing may take that node off the graph or
    * that document off the screen until it is released — the record of a write the server made
    * would have nowhere to go, or would land in another document that shares the node's id.
@@ -3241,7 +3241,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       }
       // No undo step, and none of the snapshots history holds is touched: undo and redo lay the
       // live value over whatever they restore (`withLiveUnrecorded`). A run only where the value
-      // can change a result: a camera cannot, a merge record (`seam:review`) can.
+      // can change a result: a camera cannot, a merge record (`seam:proofreadMerges`) can.
       commit((g) => setNodeParam(g, nodeId, paramId, value), {
         history: false,
         autoRun: param.presentational !== true,

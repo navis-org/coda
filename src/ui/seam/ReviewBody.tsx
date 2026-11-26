@@ -1,5 +1,5 @@
 /**
- * Review Suggestions' card: a queue of merge suggestions, and a viewer showing the current one.
+ * Proofread Merges' card: a queue of merge suggestions, and a viewer showing the current one.
  *
  * ## The viewer is a fallback, not the plan
  *
@@ -42,7 +42,7 @@
  * ## Extend
  *
  * An accepted row has an Extend button (`docs/seam-extend-plan.md`). Pressing it writes the pair
- * into `extend` and runs the Suggest Merges node this card's `Extended` output is wired back to,
+ * into `extend` and runs the Find Merge Candidates node this card's `Extended` output is wired back to,
  * which searches the piece's own open ends; they arrive in `Tips` like any others and are listed
  * with the neuron's. **Started by hand, unless `Auto-extend` is on** (user, 2026-11-16): then a
  * press that accepts a piece extends it too (`judgedParams`).
@@ -241,7 +241,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     s.graph.edges.some((edge) => edge.source === node.id && edge.sourceHandle === 'current'),
   )
   /*
-   * Is the queue still filling? What arrives here while Suggest Merges runs is a published
+   * Is the queue still filling? What arrives here while Find Merge Candidates runs is a published
    * partial, which the scheduler recomputes this card's own outputs from (`derivePreviews`), so
    * the list is real and so is every verdict made on it — but it is the ends searched *so far*,
    * and a reader filtering the top of a queue that is a third full is sorting a third of the
@@ -281,7 +281,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   const stored = useMemo(() => decodeVerdicts(node.params.verdicts), [node.params.verdicts])
   /*
    * What is extended, and so which rows there are to review — read from the params, as `evaluate`
-   * and Suggest Merges read it, so a piece un-accepted here is off the list on that click. The
+   * and Find Merge Candidates read it, so a piece un-accepted here is off the list on that click. The
    * same calls `reviewStateOf` makes, one memo at a time.
    *
    * As the plan's texts first (`planTexts`), which compare by value: `stored` is a new map on
@@ -713,7 +713,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
   /*
    * Whether the neuron and its candidates are still current (`rootCurrency`, reads only): the
    * neuron at its root now, and every candidate not already merged. Asked as the queue grows — a
-   * Suggest Merges run streams its candidates in — and only of roots not yet known.
+   * Find Merge Candidates run streams its candidates in — and only of roots not yet known.
    */
   const neuronNow = merged?.currentRoot
   /**
@@ -906,7 +906,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
     if (wanted.length === 0) {
       setNotice(
         'These suggestions do not say which supervoxel the piece meets the neuron on, so where it ' +
-          'went cannot be read. Run Suggest Merges again to follow it.',
+          'went cannot be read. Run Find Merge Candidates again to follow it.',
       )
       return
     }
@@ -1483,7 +1483,7 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
             {queue.length === 0
               ? filling
                 ? 'Searching — the first tips will appear here as they are scored.'
-                : 'Nothing to review yet — wire in Merge Suggestions and run it.'
+                : 'Nothing to review yet — wire in Load Merge Candidates and run it.'
               : `No tip passes the filters. ${formatNumber(mine.length)} in this neuron’s queue.`}
           </div>
         ) : (
@@ -1870,11 +1870,11 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
           {filling && (
             <span
               className="review-body__filling"
-              title="Suggest Merges is still searching. These are this neuron’s tips scored so far, and more are still to come — a filter or a sort reaches only this much of the neuron."
+              title="Find Merge Candidates is still searching. These are this neuron’s tips scored so far, and more are still to come — a filter or a sort reaches only this much of the neuron."
             >
               {/*
                * The count where the table says, the bare caption where it cannot. A
-               * `seam:suggestions` set carries no `searched` column, being complete by
+               * `seam:loadMergeCandidates` set carries no `searched` column, being complete by
                * definition, and "0 to search" on one would be a number nobody can act on.
                */}
               {toSearch === undefined

@@ -744,7 +744,7 @@ const ANNOTATION_FIELDS = ['annotations'] as const
  * **`whole`** says whether that is all that changed. Asked of every layer and every key, so a
  * change to anything else — a layer added, removed or moved, a shader, a layout, a camera — is
  * never applied this way. When it is not whole, a navigation follows for the rest, and what can go
- * in place still goes ahead of it: Review Suggestions under Auto-extend changed its points and
+ * in place still goes ahead of it: Proofread Merges under Auto-extend changed its points and
  * its pieces in one update, and the new green piece waited on the navigation (user, 2026-11-18).
  * Both now go in place, so that update is whole.
  */

@@ -454,7 +454,7 @@ Eleven things that were each a way to get it wrong:
    Anything else — a layer added, `Layout`, a different dataset — still navigates and still waits.
    **A local annotation layer's annotations go in place too** (2026-11-18): the same message
    carries them (`annotations`), and the frame hands them to the layer's `LocalAnnotationSource`
-   (`restoreState`), which keeps the layer and redraws on `changed`. Review Suggestions under
+   (`restoreState`), which keeps the layer and redraws on `changed`. Proofread Merges under
    Auto-extend was the case: a piece taken arrives with the tips of the piece it was taken on, so
    its points layer changed in the same update, and the new green piece waited on a navigation —
    for the pointer to leave, then for the search to stop publishing, since every new URL restarts

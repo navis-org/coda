@@ -2,7 +2,7 @@
 
 Find Open Ends takes the tips of each neuron's skeleton and asks SEAM's Model E, for the surface around every one of them, whether this is a place where the reconstruction stopped short — a neurite that carries on in the EM and was never traced. It gives back one row per tip with a score, `e_tip`.
 
-The model is SEAM's Model E, trained on real open ends from the FlyWire v783 edit history: the places proofreaders went on to extend. It is the same network as Model A behind [Find Merges](#seam:findMerges) and answers the opposite question — where a neuron is *missing* something rather than where it has too much.
+The model is SEAM's Model E, trained on real open ends from the FlyWire v783 edit history: the places proofreaders went on to extend. It looks for where a neuron is *missing* something: a branch that stops short of where it should go.
 
 ```coda-graph
 caption: A neuron's tips, ranked by how much each looks cut off.
@@ -24,7 +24,7 @@ ends -> table
 
 > [!NOTE]
 > **The columns that are empty are empty on purpose**
-> The output carries the same columns as [Merge Suggestions](#seam:suggestions) — `p_tip`, `q`, `shown`, the candidate's id and its measurements — and this node fills in only `e_tip`. The rest need the stages that go looking for what each end should join to, which are not in Coda yet. They are present and null so that the table is the one [Review Suggestions](#seam:review) already reads, and so a column picker is offered the same choices either way.
+> The output carries the same columns as [Load Merge Candidates](#seam:loadMergeCandidates) — `p_tip`, `q`, `shown`, the candidate's id and its measurements — and this node fills in only `e_tip`. The rest need the stages that go looking for what each end should join to, which are not in Coda yet. They are present and null so that the table is the one [Proofread Merges](#seam:proofreadMerges) already reads, and so a column picker is offered the same choices either way.
 
 ## Rows arrive while it runs
 

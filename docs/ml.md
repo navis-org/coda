@@ -232,7 +232,7 @@ uniform noise at ten times the real coordinate magnitude, and the crossing rate 
 decided by the input.
 
 **`pnpm probe:seam-model -- --exported <dir>`** is the same question for a *SEAM* model — the
-checkpoint `seam:findMerges` will run — and it compares against **PyTorch's own logits**, carried
+checkpoint Model A's node ran (dropped 2026-11-26; the model and the probe are kept) — and it compares against **PyTorch's own logits**, carried
 in a `fixture.json` the exporter writes, rather than against another ORT build. On apple/metal-3,
 `A_d256_e80` fp32 agrees to **4e-6 on WebGPU** and 9e-6 on WASM with **no point changing the side
 PyTorch put it on**, and runs warm in 49 ms against WASM's 370 — which is also the only signal

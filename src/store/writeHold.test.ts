@@ -31,8 +31,8 @@ beforeEach(() => {
   store().newGraph()
   store().loadGraph(
     addNode(
-      addNode(emptyGraph('held'), node('review', 'seam:review')),
-      node('other', 'seam:review'),
+      addNode(emptyGraph('held'), node('review', 'seam:proofreadMerges')),
+      node('other', 'seam:proofreadMerges'),
     ),
   )
   store().setNotice(undefined)
@@ -67,7 +67,7 @@ describe('holding a card while it writes', () => {
 
   it('refuses an undo or a redo that would take it away', () => {
     // An edit that adds a third card: undoing it is what could remove it.
-    store().setGraph(addNode(store().graph, node('added', 'seam:review')))
+    store().setGraph(addNode(store().graph, node('added', 'seam:proofreadMerges')))
     hold = holdOn('added')
     store().undo()
     expect(has('added')).toBe(true)

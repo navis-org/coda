@@ -10,7 +10,7 @@
  * ## Why supervoxels
  *
  * A split cuts the links between supervoxels and never changes one. So the supervoxel a tip was
- * found on (`tip_sv`, published by Suggest Merges) is under one part or the other afterwards, and
+ * found on (`tip_sv`, published by Find Merge Candidates) is under one part or the other afterwards, and
  * one batched lookup places every tip of the neuron: 1,581 in 374 ms on Aedes (phase 0).
  *
  * ## Which part is the neuron (user, 2026-11-24)
@@ -108,7 +108,7 @@ export async function followEdit(
       ok: false,
       message:
         'These suggestions say nothing about which supervoxel each tip is on, so where the tips ' +
-        'went cannot be read. Run Suggest Merges again on the neuron’s new root.',
+        'went cannot be read. Run Find Merge Candidates again on the neuron’s new root.',
     }
   }
   try {

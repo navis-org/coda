@@ -272,8 +272,8 @@ export async function* searchEnds(
    * measure leave the queue and measure nothing; one already measuring finishes its own steps,
    * whose signals are their own. But a close reaches here only once the
    * end being awaited has finished — an async generator's `return()` waits behind its pending
-   * `next()` — so a caller that must stop at once aborts `options.signal` itself, as Suggest
-   * Merges does. A box read already in flight finishes: its signal is its step's own.
+   * `next()` — so a caller that must stop at once aborts `options.signal` itself, as Find Merge
+   * Candidates does. A box read already in flight finishes: its signal is its step's own.
    */
   const own = new AbortController()
   const signal = options.signal ? AbortSignal.any([options.signal, own.signal]) : own.signal

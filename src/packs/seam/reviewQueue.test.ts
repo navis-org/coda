@@ -286,7 +286,7 @@ describe("a candidate's size", () => {
     })
   })
 
-  /** A `seam:suggestions` set from before rv4: its parquet publishes no chunk count. */
+  /** A `seam:loadMergeCandidates` set from before rv4: its parquet publishes no chunk count. */
   it('falls back to the in-box volume where it does not', () => {
     expect(sizeOf(candidate({ volumeUm3: 0.25 }))).toEqual({ value: 0.25, of: 'um3' })
   })
@@ -357,7 +357,7 @@ describe('how many tips are still to search', () => {
   })
 
   /**
-   * **Absent is not zero.** A `seam:suggestions` table is a published set, complete by
+   * **Absent is not zero.** A `seam:loadMergeCandidates` table is a published set, complete by
    * definition and carrying no such column; reported as 0 it would print the same as a run that
    * has just finished, which is a number about a run that never happened.
    */
@@ -636,7 +636,7 @@ describe('one row per candidate', () => {
 })
 
 /**
- * A `Tips`/`Candidates` pair from `seam:suggestMerges`: ranked by geometry, with none of the
+ * A `Tips`/`Candidates` pair from `seam:findMergeCandidates`: ranked by geometry, with none of the
  * calibrated columns, because the stage that produces them cannot run in a browser yet.
  */
 const geometryOnly = () => ({
@@ -697,7 +697,7 @@ describe('a queue with no calibration at all', () => {
   /**
    * **Absent is not excluded.** `shown` is SEAM's cutoff applied, and a table that has no such
    * column is one nobody applied a cutoff to. Read as `=== true` every row was hidden, which
-   * emptied `seam:review`'s annotation layer and its `Shown only` filter without a word.
+   * emptied `seam:proofreadMerges`'s annotation layer and its `Shown only` filter without a word.
    */
   it('treats a missing `shown` column as nothing having been cut', () => {
     const { tips, candidates } = geometryOnly()
@@ -712,8 +712,8 @@ describe('a queue with no calibration at all', () => {
 
   /**
    * **A cleared `shown` is not a hidden row.** `tipsWithFirsts` nulls every first-candidate
-   * column when it searches a tip, so a `seam:suggestions` table fed through
-   * `seam:suggestMerges` keeps the *column* and holds `null` in it — the old run's verdict about
+   * column when it searches a tip, so a `seam:loadMergeCandidates` table fed through
+   * `seam:findMergeCandidates` keeps the *column* and holds `null` in it — the old run's verdict about
    * a candidate this run replaced.
    */
   it('treats a cleared `shown` cell the same as a missing column', () => {
@@ -980,7 +980,7 @@ describe('the accepted pieces', () => {
 /**
  * A neuron and the pieces it is extended with (`docs/seam-extend-plan.md`).
  *
- * Suggest Merges publishes a piece's tips in the same table as the neuron's: `ID` is the piece,
+ * Find Merge Candidates publishes a piece's tips in the same table as the neuron's: `ID` is the piece,
  * `seed` the neuron being grown. The fixture is one neuron, `n1`, with a piece `p1` accepted on
  * it and a piece `p2` accepted on `p1` — and **every root has a tip 0**, which is the case a
  * cursor or a row key read as a bare `end_uid` gets wrong.

@@ -1,5 +1,5 @@
 /**
- * Merge Suggestions, against **real parquet bytes** — a trimmed copy of SEAM's rv2 set, written
+ * Load Merge Candidates, against **real parquet bytes** — a trimmed copy of SEAM's rv2 set, written
  * by pyarrow the way SEAM writes the full one (`__fixtures__/make.py`).
  *
  * Reading the file is the point. Every failure this path has had anywhere in Coda has been in the
@@ -74,7 +74,7 @@ function schemaOfType(type: CodaType | undefined): TableSchema {
   return schema
 }
 
-const def = requireNodeDef('seam:suggestions')
+const def = requireNodeDef('seam:loadMergeCandidates')
 const infer = (params: ParamValues = {}) =>
   def.inferOutputs!(makeInferContext(def, { ...defaultParams(def), ...params }, {}))
 
@@ -482,7 +482,7 @@ describe('the node, end to end over HTTP', () => {
 })
 
 describe('which set a tip came from', () => {
-  it('labels every tip with the set’s version, as Suggest Merges labels its own', () => {
+  it('labels every tip with the set’s version, as Find Merge Candidates labels its own', () => {
     const source = built.tips.data[SOURCE_COLUMN] ?? []
     expect(source.length).toBe(built.tips.length)
     expect(new Set(source)).toEqual(new Set([`set:${SET.version}`]))
@@ -510,7 +510,7 @@ describe('a column a set may predate', () => {
     )
   })
 
-  it('puts the first candidate’s flag on Tips as `organelle`, as Suggest Merges does', () => {
+  it('puts the first candidate’s flag on Tips as `organelle`, as Find Merge Candidates does', () => {
     const flag = built.tips.data['organelle'] ?? []
     expect(flag.length).toBe(built.tips.length)
     expect(flag.every((value) => value === null || typeof value === 'boolean')).toBe(true)
@@ -518,7 +518,7 @@ describe('a column a set may predate', () => {
   })
 
   /**
-   * Suggest Merges flags with `ORGANELLE_CUT`, a constant, where SEAM ships its cut in the set
+   * Find Merge Candidates flags with `ORGANELLE_CUT`, a constant, where SEAM ships its cut in the set
    * (`pipeline.organelles.cutoff`). Held equal here, so a SEAM re-check that moves it is a failing
    * test rather than two nodes flagging the same piece two ways.
    */

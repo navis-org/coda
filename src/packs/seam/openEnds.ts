@@ -1,10 +1,10 @@
 /**
  * Find Open Ends: where a reconstruction stops short, scored by SEAM's Model E.
  *
- * **Stage 3 of the merge-candidate pipeline.** `seam:suggestions` reads a run somebody else did
+ * **Stage 3 of the merge-candidate pipeline.** `seam:loadMergeCandidates` reads a run somebody else did
  * on a server; this does the work in the browser, on demand, for the neuron on the wire.
  *
- * The stages that find a *candidate* for each open end are `seam:suggestMerges`, downstream of
+ * The stages that find a *candidate* for each open end are `seam:findMergeCandidates`, downstream of
  * this one — a reversal of the 2026-11-09 plan, which had them growing into this node
  * (`docs/seam-suggestions-plan.md`, "A node after Find Open Ends"). What made the split safe is
  * that the `Tips` table published here is a complete interface: the search needs a tip's
@@ -14,7 +14,7 @@
  * column a later stage would fill, present and null, which was right while one node was to run
  * all nine stages — the shape would not change as they landed. With the search downstream those
  * nulls became pickers offered a choice this node can never answer, so they are gone;
- * `seam:suggestMerges` folds its own columns on.
+ * `seam:findMergeCandidates` folds its own columns on.
  *
  * ## What it answers, and what it does not
  *
@@ -198,7 +198,7 @@ export const openEndsNode = packNode({
       help: 'A CAVE table of nuclei, read for each neuron’s soma so `Soma mask` has something to measure from. Only needed where the dataset does not publish soma positions itself; wire the Dataset it belongs to.',
     }),
     /*
-     * **Set by Suggest Merges for a piece's chain, never on the card** (`RerunSettings`): a mesh
+     * **Set by Find Merge Candidates for a piece's chain, never on the card** (`RerunSettings`): a mesh
      * smaller than any nucleus cannot hold one, and the lookup was most of a small piece's chain
      * (`docs/seam-extend-plan.md`, "Phase 0 — results"). 0, the default, asks about every mesh.
      */
@@ -231,7 +231,7 @@ export const openEndsNode = packNode({
   ],
 
   /**
-   * The same schema `seam:suggestions` promises, from the same list — so a column picker
+   * The same schema `seam:loadMergeCandidates` promises, from the same list — so a column picker
    * downstream is offered the same choices whichever node feeds it, and is offered them **before
    * anything runs**. Invariant 2's reason: inference may not fetch, and a schema that only
    * appeared after a minute of scanning would leave every picker below it empty until then.

@@ -1,5 +1,5 @@
 /**
- * Review Suggestions: work through SEAM's merge candidates, one tip at a time.
+ * Proofread Merges: work through SEAM's merge candidates, one tip at a time.
  *
  * ## A tap, and the writing is the card's
  *
@@ -13,7 +13,7 @@
  * so a presentational one would serve a stale answer (invariant 4). That is affordable here and
  * is not elsewhere — the node fetches nothing and copies a few hundred rows, so a click re-runs
  * it in about a millisecond, and the Neuroglancer card downstream patches its frame in place.
- * `seam:suggestions` is the expensive half and nothing here re-runs it.
+ * `seam:loadMergeCandidates` is the expensive half and nothing here re-runs it.
  *
  * The filters and the sort are **presentational**: they narrow what the card lists and change no
  * output at all. A reader hunting for the right threshold should not be re-keying anything.
@@ -21,7 +21,7 @@
  * ## A neuron is extended from here, and searched somewhere else
  *
  * `docs/seam-extend-plan.md`. Which accepted pieces are to be extended is a param, `extend`, and
- * it leaves by `Extended` — a table of `parent`/`piece` pairs that Suggest Merges reads through a
+ * it leaves by `Extended` — a table of `parent`/`piece` pairs that Find Merge Candidates reads through a
  * **reference** wire. A reference to this node is answered from its params (`asReference`), so
  * the search knows what to extend before this node has run, and the wire closes no loop: this
  * node still takes its tips from that one. The card's Extend button writes the param and runs
@@ -109,8 +109,9 @@ export function reviewedSchema(tips: TableSchema | undefined): TableSchema {
 }
 
 export const reviewNode = packNode({
-  type: 'seam:review',
-  label: 'Review Suggestions',
+  type: 'seam:proofreadMerges',
+  formerTypes: ['seam:review'],
+  label: 'Proofread Merges',
   category: 'utility',
   cardWidth: 560,
   description:
@@ -142,7 +143,7 @@ export const reviewNode = packNode({
     // Every merge Submit has made or tried from this card, one row each.
     { id: 'merges', label: 'Merges', type: T.table() },
     /*
-     * The accepted pieces to extend, as `parent`/`piece` pairs. Made for Suggest Merges' `Review`
+     * The accepted pieces to extend, as `parent`/`piece` pairs. Made for Find Merge Candidates' `Review`
      * port, which reads it by reference — from the params, through `asReference` below.
      */
     { id: EXTENDED_PORT, label: 'Extended', type: T.table() },
@@ -329,7 +330,7 @@ export const reviewNode = packNode({
       label: 'Auto-extend min q',
       default: '',
       placeholder: 'SEAM’s cutoff',
-      help: 'The least `q` Auto-extend accepts a candidate at. Empty is SEAM’s own cutoff (0.159 for the runs Suggest Merges makes, 0.118 for SEAM’s published sets); a higher number makes Auto-extend take fewer, surer pieces. A number below the cutoff changes nothing, since the cutoff still applies. Changing it while an Auto-extend is running grows the tree again by the new rule; pieces it no longer takes are no longer accepted.',
+      help: 'The least `q` Auto-extend accepts a candidate at. Empty is SEAM’s own cutoff (0.159 for the runs Find Merge Candidates makes, 0.118 for SEAM’s published sets); a higher number makes Auto-extend take fewer, surer pieces. A number below the cutoff changes nothing, since the cutoff still applies. Changing it while an Auto-extend is running grows the tree again by the new rule; pieces it no longer takes are no longer accepted.',
     },
     {
       id: 'minConfidence',
@@ -466,14 +467,14 @@ export const reviewNode = packNode({
     const tips = ctx.input('tips')
     if (!isTableValue(tips)) {
       throw new Error(
-        'Nothing is wired into `Tips`. Wire in the Merge Suggestions node’s Tips.',
+        'Nothing is wired into `Tips`. Wire in the Load Merge Candidates node’s Tips.',
       )
     }
     const candidates = ctx.input('candidates')
     if (!isTableValue(candidates)) {
       throw new Error(
         'Nothing is wired into `Candidates`. The candidate lists are what the arrows page ' +
-          'through, so the node needs both of Merge Suggestions’ tables.',
+          'through, so the node needs both of Load Merge Candidates’ tables.',
       )
     }
     const built = buildQueue(tips, candidates)

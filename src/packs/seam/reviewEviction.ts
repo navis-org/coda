@@ -1,5 +1,5 @@
 /**
- * How much review work a `seam:review` card keeps (user, 2026-11-19): **the full work of the last
+ * How much review work a `seam:proofreadMerges` card keeps (user, 2026-11-19): **the full work of the last
  * `KEPT_NEURONS` neurons worked on**, so a long campaign does not outgrow the browser's storage
  * for the workflow (a tab's slot is about 2 M characters, `docs/persistence.md`).
  *

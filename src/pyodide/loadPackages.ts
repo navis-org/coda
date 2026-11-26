@@ -13,7 +13,7 @@
  * — a module that imports its packages on first use, as `cutoutSummary` does, runs fine without
  * them — and was kept for the session. Every later call failed inside Python with
  * `ModuleNotFoundError: No module named 'pandas'` and Pyodide's advice to call `micropip`, on a
- * node the reader had no way to fix but a reload. Found on Suggest Merges, 2026-11-16: twice in a
+ * node the reader had no way to fix but a reload. Found on Find Merge Candidates, 2026-11-16: twice in a
  * probe and once in the app, each time with the files themselves in place on the CDN.
  *
  * ## Tried twice, then said

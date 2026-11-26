@@ -3,7 +3,7 @@
  *
  * An undefined one makes the whole declaration invalid, so the browser drops it in silence — a
  * background that is never drawn, a colour that is merely inherited — and jsdom applies no CSS, so
- * no other test can see it. Review Suggestions' row backgrounds named a `--surface-raised` no theme
+ * no other test can see it. Proofread Merges' row backgrounds named a `--surface-raised` no theme
  * had, and the hover highlight built on them showed nothing (user, 2026-11-19).
  *
  * "Defined" is read generously: a declaration in any stylesheet or page, or a name set from code

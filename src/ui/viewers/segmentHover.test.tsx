@@ -113,7 +113,7 @@ describe('the pick key', () => {
     useGraphStore.setState({ selection: [], notice: undefined } as never)
     press({})
     expect(took).toEqual([])
-    expect(useGraphStore.getState().notice).toMatch(/Several Review Suggestions cards/)
+    expect(useGraphStore.getState().notice).toMatch(/Several Proofread Merges cards/)
     useGraphStore.setState({ selection: ['n2', 'x'] } as never)
     press({})
     expect(took).toEqual(['n2'])

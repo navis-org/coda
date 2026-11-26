@@ -1033,7 +1033,7 @@ export class Scheduler {
    *
    * Joined rather than handed over as the array, so the snapshot is a primitive and a selector
    * over it is stable by value (invariant 7) — the same trick `error` gets for free by being a
-   * string already. Joined with spaces until 2026-11-18, when six warnings on a Suggest Merges
+   * string already. Joined with spaces until 2026-11-18, when six warnings on a Find Merge Candidates
    * card read as one paragraph nobody could take apart (user).
    */
   warning(nodeId: string): string | undefined {
@@ -1626,7 +1626,7 @@ export class Scheduler {
    *
    * `ctx.publish` was built for a viewer drawing its own *inputs*: the 3D scene is the value on
    * the upstream wire, so growing that value is the whole mechanism and nothing downstream has
-   * to run. Review Suggestions broke that premise. Its card draws the arriving queue, but the
+   * to run. Proofread Merges broke that premise. Its card draws the arriving queue, but the
    * viewer a reader actually judges a merge in is a **Neuroglancer node downstream of it**, fed
    * from `Current` and `Layers` — outputs only this node's `evaluate` can produce. So the queue
    * filled while the picture beside it stayed on the previous run, and clicking a row did
@@ -1805,7 +1805,7 @@ export class Scheduler {
       } catch {
         /*
          * **Dropped and not descended past.** A node that cannot answer a half-filled input is
-         * the ordinary case rather than a fault — Review Suggestions refuses an unwired
+         * the ordinary case rather than a fault — Proofread Merges refuses an unwired
          * `Candidates`, and a partial can be one table ahead of the other — and it will answer
          * when the real run reaches it. What must not happen is the stale entry staying on
          * screen beside a queue that has moved, so whatever this node had derived goes.
@@ -2511,7 +2511,7 @@ export class Scheduler {
        * A getter, so what this evaluation records it reads back (`record` below). The lifetime
        * backstop runs `evaluate` a second time on a spread of this context, and a second pass
        * reading the record as it was before the first would decide afresh what the first had
-       * just decided — a new moment for every neuron Suggest Merges met, and its work wasted.
+       * just decided — a new moment for every neuron Find Merge Candidates met, and its work wasted.
        */
       get params() {
         return params

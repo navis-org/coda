@@ -3,7 +3,7 @@
  *
  * For a scrolling list of **equal-height** rows: the caller draws `rows.start … rows.end` between
  * two spacers of `rows.before` and `rows.after` pixels, so the scrollbar is the whole list's and
- * only a screenful (plus a margin) is in the DOM. Written for Review Suggestions, whose queue is
+ * only a screenful (plus a margin) is in the DOM. Written for Proofread Merges, whose queue is
  * hundreds of rows per tip and tens of thousands per candidate, each holding six buttons.
  *
  * **Spacer elements, not padding**, because `ResizeObserver` reports the content box — padding

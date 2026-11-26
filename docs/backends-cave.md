@@ -1104,7 +1104,7 @@ object starting at its first byte.
 ### Smaller decisions
 
 - **A read that got no answer is asked again, twice, after about 1 s and 4 s; a write never is**
-  (`client.ts`' `readAgain`, `READ_AGAIN_MS`; user, 2026-11-20). A Suggest Merges run on Aedes lost
+  (`client.ts`' `readAgain`, `READ_AGAIN_MS`; user, 2026-11-20). A Find Merge Candidates run on Aedes lost
   41 of 43 extended pieces to "Failed to fetch" from `cave.fanc-fly.com` — the same reads answered
   200 minutes later — and with them everything accepted on their ends, Auto-extend's most of all.
   No answer is the dropped HTTP/2 connection `chunkedgraphRead` measured (2026-11-19), or a busy
@@ -1171,7 +1171,7 @@ object starting at its first byte.
   `DatasetFamily.notebook`; see [export.md](export.md#the-softer-half-warning-that-an-export-will-have-gaps-in-it)
   for why that is one field rather than a test repeated at each site.
 
-### Writing to a chunkedgraph: merges, and only from Review Suggestions
+### Writing to a chunkedgraph: merges, and only from Proofread Merges
 
 Everything above reads. **One module writes**: `src/data/cave/edits.ts`, which sends a merge (and,
 for the sandbox probe only, an undo of a merge it made itself). The full record — what was read off

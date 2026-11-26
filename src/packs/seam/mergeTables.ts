@@ -1,5 +1,7 @@
 /**
- * The two tables Find Merges publishes, each as the schema/value pair invariant 3 asks for.
+ * The two tables Model A's node published, each as the schema/value pair invariant 3 asks for.
+ * The node was dropped before the first release (2026-11-26); the tables are kept, under test,
+ * for a retrained checkpoint (`index.ts`).
  *
  * `affinityTables.ts`' argument, for the other task — and the agreement matters for the same
  * reason: both schemas fold over an upstream one, so a column written under a name the schema

@@ -163,7 +163,7 @@ function withVisibleColumn(schema: TableSchema): TableSchema {
   return foldColumns(schema, [column(VISIBLE_COLUMN, 'bool')])
 }
 
-/** The card's type, for a card that acts on the viewers wired to it (Review Suggestions' Start over). */
+/** The card's type, for a card that acts on the viewers wired to it (Proofread Merges' Start over). */
 export const NEUROGLANCER_TYPE = 'out.neuroglancer'
 
 registerNode({
@@ -202,7 +202,7 @@ registerNode({
     /*
      * A card that drives this one: the segments to look at *now*, and where to look.
      *
-     * `seam:review` is the first, paging through a queue of merge suggestions. Its ids are added
+     * `seam:proofreadMerges` is the first, paging through a queue of merge suggestions. Its ids are added
      * to the scene and its first row's `x`/`y`/`z` — in nanometres — point the camera, which is
      * the half an ordinary wire cannot do: a camera lives in the scene's `position`, and a scene
      * whose position changed is a scene pointed somewhere else, so it re-navigates and every
@@ -567,7 +567,7 @@ registerNode({
  * as it will look once the merges are made. `focus` is an accepted piece under the cursor, in a
  * lighter step of that green (`FOCUS_GREEN`). Anything else, or no `part` at all, takes the first.
  *
- * Exported for `seam:review`'s own fallback viewer, so the two surfaces cannot disagree.
+ * Exported for `seam:proofreadMerges`'s own fallback viewer, so the two surfaces cannot disagree.
  */
 export function controlPartColor(part: unknown): string {
   // An accepted piece in focus: a lighter step of the accepted green (`FOCUS_GREEN`).
@@ -618,7 +618,7 @@ export const CONTROL_FRAME_NM = 15_000
 /**
  * Where a `Control` wire is pointing the camera, in nanometres, or undefined where it says.
  *
- * The **first row**, because a controller is showing one thing: `seam:review` puts the neuron
+ * The **first row**, because a controller is showing one thing: `seam:proofreadMerges` puts the neuron
  * first and the candidate second, and the contact between them is on both. Read by the card
  * rather than by `evaluate`, since a camera is not part of a scene's identity — see
  * `NeuroglancerViewer`'s `focus`.

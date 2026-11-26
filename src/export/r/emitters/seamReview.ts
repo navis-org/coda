@@ -1,5 +1,5 @@
 /**
- * `Review Suggestions`, in dplyr. The Python emitter's reasoning applies unchanged: what travels
+ * `Proofread Merges`, in dplyr. The Python emitter's reasoning applies unchanged: what travels
  * is a **record** of what somebody decided, not a computation, and the join is on the pair.
  */
 
@@ -10,7 +10,7 @@ import { rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
-registerEmitter('seam:review', (ctx: EmitContext) => {
+registerEmitter('seam:proofreadMerges', (ctx: EmitContext) => {
   const verdicts = decodeVerdicts(ctx.params['verdicts'])
   const tipsIn = ctx.wired('tips')
   const tips = ctx.output('tips')

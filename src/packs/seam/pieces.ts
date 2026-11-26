@@ -1,5 +1,5 @@
 /**
- * The pieces a neuron is being extended with, as Suggest Merges searches them.
+ * The pieces a neuron is being extended with, as Find Merge Candidates searches them.
  *
  * `docs/seam-extend-plan.md` has the feature. A reader accepts a candidate on one of a neuron's
  * tips and presses Extend; the search then finds *that piece's* open ends and looks for what
@@ -9,7 +9,7 @@
  *
  * ## What is extended arrives as pairs, and the tree is derived
  *
- * `seam:review` hands over a table of `parent`/`piece` pairs (`EXTENDED_FIELDS`), read through a
+ * `seam:proofreadMerges` hands over a table of `parent`/`piece` pairs (`EXTENDED_FIELDS`), read through a
  * reference wire from its params alone. A pair says "this piece was accepted on that one's tip,
  * and is to be extended". The seeds are the neurons of the tips table; everything else follows.
  *
@@ -62,7 +62,7 @@ export interface ExtendPair {
 
 /**
  * A pair's key, `parent/piece` — **one spelling**, and the key a reader's verdict on a candidate is
- * filed under too (`seam:review`'s `verdicts`): the neuron or piece a tip is on, and the candidate.
+ * filed under too (`seam:proofreadMerges`'s `verdicts`): the neuron or piece a tip is on, and the candidate.
  * Both ids are digits, so neither can hold the separator. An older verdict key, `end_uid:id`,
  * reads as no pair (`verdictPair`), so it can never be taken for one.
  */
@@ -89,13 +89,13 @@ export function pairsOf(keys: Iterable<string>): ExtendPair[] {
 }
 
 /**
- * The output of `seam:review` the pairs leave by, and so the one a reference to it is read from.
- * One spelling for the node's port, its `asReference`, Suggest Merges' `producedBy` and the card.
+ * The output of `seam:proofreadMerges` the pairs leave by, and so the one a reference to it is read from.
+ * One spelling for the node's port, its `asReference`, Find Merge Candidates' `producedBy` and the card.
  */
 export const EXTENDED_PORT = 'extended'
 
 /**
- * The table a reference to `seam:review` is handed: one row per pair, and what the row says of it.
+ * The table a reference to `seam:proofreadMerges` is handed: one row per pair, and what the row says of it.
  *
  * `mode` is `extend` for a piece extended by hand, `auto` for one Auto-extend was pressed on, and
  * `refused` for a pair the reader gave a verdict other than accept — which Auto-extend must not
@@ -134,7 +134,7 @@ export interface ExtendPlan {
   readonly autoMinQ?: number | undefined
 }
 
-/** The plan as the table `seam:review` publishes — the one writer of that shape. */
+/** The plan as the table `seam:proofreadMerges` publishes — the one writer of that shape. */
 export function extendedTable(plan: ExtendPlan): TableValue {
   const refused = pairsOf([...plan.refused].sort())
   const rows = [...plan.pairs, ...refused]

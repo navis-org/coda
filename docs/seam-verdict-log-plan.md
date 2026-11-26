@@ -12,7 +12,7 @@ Kept under its plan's name because the code points here by it.
 ## Why
 
 SEAM's `r` is fitted on tips somebody judged, and those judgements came from one-off pages SEAM
-published (`rv4_check.py`: 123 tips, one person). Readers of the Review Suggestions card give the
+published (`rv4_check.py`: 123 tips, one person). Readers of the Proofread Merges card give the
 same judgement on far more tips, and it was lost to SEAM: the verdicts lived only in each reader's
 workflow. Now a reader who opts in sends each one to the lab's server, and SEAM reads them back.
 
@@ -32,7 +32,7 @@ workflow. Now a reader who opts in sends each one to the lab's server, and SEAM 
    press and sends nothing, so a misclick and its undo leave the misclick, outranked by any later
    record for the same neuron and candidate.
 5. **Both kinds of review, each labelled by its source** — a published set by its version, a live
-   Suggest Merges run by its models' manifests — since a single-seed `q` must never be read against
+   Find Merge Candidates run by its models' manifests — since a single-seed `q` must never be read against
    production's cutoff or `r` (SEAM, `coda-note-sort-by-q.md`). A tip that cannot say is not sent.
 6. **A fourth verdict, `ends`:** a rejection because the neuron ends at this tip, apart from
    `reject`, a wrong continuation. On the candidate shown, like the others. Reject, Ends and Unsure
@@ -148,9 +148,9 @@ requiring the sparsevol service. Tests: `test_verdicts.py`.
   (`isSeamSource`, on the shared `set:`/`model:` prefixes); the card calls `queueVerdict`.
 - `src/packs/seam/suggestionTables.ts`, `suggestions.ts`, `searchTips.ts`, `suggestMerges.ts` —
   `source` on both tips tables (phase 2):
-  - Merge Suggestions fills it from the manifest's `version`, through `Field.filled` (a column the
+  - Load Merge Candidates fills it from the manifest's `version`, through `Field.filled` (a column the
     loader fills, which `candidateId` uses too); both exporters read the version the same way.
-  - Suggest Merges writes it on every row it searched (`runSource`), keeping an incoming set's on
+  - Find Merge Candidates writes it on every row it searched (`runSource`), keeping an incoming set's on
     the rest. The digest is the first 12 hex characters of the manifest's SHA-256
     (`LoadedManifest.digest`), because a refit keeps a model's id. Both manifests are read once,
     before the run's key is built: the memory of finished ends is keyed on each model's id and full

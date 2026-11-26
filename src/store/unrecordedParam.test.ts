@@ -69,7 +69,7 @@ describe('an unrecorded param', () => {
 
 /**
  * Unrecorded is about undo, not about running: a presentational one (the camera) changes no result
- * and schedules nothing, while one that is data (`seam:review`'s merge record, which `Merges` and
+ * and schedules nothing, while one that is data (`seam:proofreadMerges`'s merge record, which `Merges` and
  * `Current` read) re-runs like any edit, or the card would show a result from before the write.
  */
 describe('an unrecorded param that is data', () => {
@@ -78,7 +78,7 @@ describe('an unrecorded param that is data', () => {
   })
 
   it('schedules a run where a presentational one does not', () => {
-    const def = requireNodeDef('seam:review')
+    const def = requireNodeDef('seam:proofreadMerges')
     store().loadGraph(
       addNode(store().graph, {
         id: 'review',

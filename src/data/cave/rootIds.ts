@@ -71,8 +71,8 @@ const CHUNK = 10_000
  * How many `roots_binary` requests one `rootsAtInstant` call keeps in flight — four, the
  * streams SEAM's own fetching holds at Aedes, for SEAM's invariant 8.
  *
- * **A cap per call, not the run's share of the server**: several calls run at once in Suggest
- * Merges, and what bounds them together is `CHUNKEDGRAPH_BUDGET`.
+ * **A cap per call, not the run's share of the server**: several calls run at once in Find Merge
+ * Candidates, and what bounds them together is `CHUNKEDGRAPH_BUDGET`.
  */
 const ROOT_STREAMS = 4
 
@@ -504,7 +504,7 @@ export async function rootsAtInstant(
    * at most `CHUNK`. The time is the server's, per id: one request of 7,200 supervoxels took
    * 741 ms where the same count as four requests at once took 335 (Aedes, 2026-11-18), against
    * a floor of ~145 ms for a request of ten. So a box's lookup — which is one request, and the
-   * largest single wait in a Suggest Merges end — is worth splitting, and a small one is not.
+   * largest single wait in a Find Merge Candidates end — is worth splitting, and a small one is not.
    *
    * Pieces of one answer, so `inFlight` (`l2ChunkCounts`' reason): a piece that failed must
    * fail the lookup rather than come back as ids left at `0n`, which would be remembered as
@@ -604,7 +604,7 @@ const LEAVES_CHUNK = 160
  * `LEAVES_CHUNK` that is an end's ~320 roots in one round.
  *
  * **Concurrency at all, because this was the largest stage in a run and the batches are a
- * queue.** Sent one after another, fifty roots a request, `Suggest Merges` measured the stage
+ * queue.** Sent one after another, fifty roots a request, `Find Merge Candidates` measured the stage
  * at **33% of a 6.2 s end** — more than the GPU, the search box or the patch box. Four in flight
  * took it from 2.05 s to 0.83; 160 a request at two holds that with a third of the requests.
  *
@@ -898,8 +898,8 @@ function timestampQuery(at: Instant, stopLayer?: number): string {
 
 /**
  * How many `roots_binary` and `leaves_many` requests may be in flight at one chunkedgraph, from
- * every caller in the tab together — the user's figure (2026-11-19), above the ~12 a Suggest
- * Merges run reached once its reads overlapped. **Those two endpoints only**, the search's hot
+ * every caller in the tab together — the user's figure (2026-11-19), above the ~12 a Find Merge
+ * Candidates run reached once its reads overlapped. **Those two endpoints only**, the search's hot
  * path: this file's other chunkedgraph reads (`is_latest_roots`, `root_timestamps`) and other
  * files' (`l2.ts`, the mesh manifests) go around it, and are not counted. `ROOT_STREAMS` and
  * `LEAVES_STREAMS` still cap a single call; this is the total those calls share, so a run that
@@ -931,7 +931,7 @@ function budgetAt(graphene: GrapheneSource): Slots {
  * The server closes its HTTP/2 connections from time to time with a `GOAWAY` (code 0, "no
  * error"), and every request still open on that connection fails at once — twelve to fifteen
  * lookups in one measurement (2026-11-19). These reads are `POST`s, which no browser retries on
- * its own, so one such close failed a whole Suggest Merges run. Only a request that got no
+ * its own, so one such close failed a whole Find Merge Candidates run. Only a request that got no
  * answer (`CaveError.noAnswer`) or lost it mid-read is asked again; an HTTP error or a bad body
  * is the server's answer, and a Cancel is an `AbortError`.
  */

@@ -1,5 +1,5 @@
 /**
- * `Review Suggestions`, in pandas.
+ * `Proofread Merges`, in pandas.
  *
  * What is reproducible here is not a computation — it is a **record**. The verdicts are clicks
  * somebody made on the card, stored in a param, and so they travel with the graph: a cell can
@@ -18,7 +18,7 @@ import { pyList } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
-registerEmitter('seam:review', (ctx: EmitContext) => {
+registerEmitter('seam:proofreadMerges', (ctx: EmitContext) => {
   const verdicts = decodeVerdicts(ctx.params['verdicts'])
   const tipsIn = ctx.wired('tips')
   const tips = ctx.output('tips')

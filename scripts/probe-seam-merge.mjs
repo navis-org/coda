@@ -1,7 +1,7 @@
 /**
  * What does SEAM's Model A actually say about a neuron somebody has already looked at?
  *
- * Find Merges' `evaluate` has never run outside a unit test, and the first real run raised a
+ * Model A's node (`findMerges.ts`, dropped 2026-11-26) ran its `evaluate` outside a unit test once, and that run raised a
  * question the tests cannot answer: on a segment with a known false merge, every cell came back
  * as one fragment. Two different things produce that picture — the model scoring the merge site
  * low, or the node never asking the per-point head because `Score cutoff` was empty — and the

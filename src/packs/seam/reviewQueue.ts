@@ -31,12 +31,12 @@
  * ## One neuron is a seed and the pieces it was extended with
  *
  * `docs/seam-extend-plan.md` has the feature. A reader accepts a candidate and presses Extend;
- * Suggest Merges then searches that piece's open ends, and its tips arrive in the same table with
+ * Find Merge Candidates then searches that piece's open ends, and its tips arrive in the same table with
  * `ID` the piece and `seed` the neuron being grown. So a neuron in the picker is a **seed**, and
  * its queue is its own tips and those of every piece in its tree.
  *
  * **Which pieces those are is read from the card's own params, never from the rows** (`extend`
- * and the verdicts, `extendedKeys`) — the same pairs Suggest Merges is handed. The rows are what
+ * and the verdicts, `extendedKeys`) — the same pairs Find Merge Candidates is handed. The rows are what
  * the search has got round to; the params are what the reader asked for. A piece that was
  * un-accepted is gone from the list on that click (`liveQueue`), whether or not the search has
  * run again and dropped its rows.
@@ -106,7 +106,7 @@ export interface Candidate {
   readonly geoRank: number | undefined
   readonly volumeUm3: number | undefined
   /**
-   * How many level-2 chunks the candidate object occupies — **the size `seam:review` means.**
+   * How many level-2 chunks the candidate object occupies — **the size `seam:proofreadMerges` means.**
    *
    * `volumeUm3` is the candidate's voxels inside the search box, so it measures how much of
    * the piece is near the tip; two candidates with the same number can be a whole fragment and
@@ -203,7 +203,7 @@ export interface QueueTip {
   readonly candidates: readonly Candidate[]
 }
 
-/** Build the queue from the two tables `seam:suggestions` publishes. */
+/** Build the queue from the two tables `seam:loadMergeCandidates` publishes. */
 export function buildQueue(
   tips: TableValue | undefined,
   candidates: TableValue | undefined,
@@ -263,7 +263,7 @@ export interface QueueNeuron {
  * Every neuron in the queue, in the order `Tips` first lists it.
  *
  * Table order rather than any ranking because it is the order the search runs in —
- * `seam:suggestMerges` takes a table sorted by neuron in the order a reader sees it — so the first
+ * `seam:findMergeCandidates` takes a table sorted by neuron in the order a reader sees it — so the first
  * neuron is the first one ready.
  */
 export function neuronsOf(queue: readonly QueueTip[], verdicts: Verdicts): QueueNeuron[] {
@@ -300,7 +300,7 @@ export function neuronsOf(queue: readonly QueueTip[], verdicts: Verdicts): Queue
  * which is the opposite of what a column picker does, for a reason that does not apply to a
  * column picker. A picker keeps a missing column because the schema has usually not *arrived*
  * yet. Here the neurons are rows of `Tips`, and every producer publishes all of them at once —
- * `seam:suggestMerges` lists every tip from its first partial, with `searched` null until it is
+ * `seam:findMergeCandidates` lists every tip from its first partial, with `searched` null until it is
  * reached — so a root id that is absent is gone (edited, or a different set upstream), not late.
  * Nothing is written by the fallback, so the stored id comes back if the neuron does.
  */
@@ -360,12 +360,12 @@ function candidateLists(table: TableValue | undefined): Map<string, Candidate[]>
  * How many of these tips the run still has to search, or `undefined` where the table does not
  * say.
  *
- * Counts the tips still waiting in `searched`, which is `seam:suggestMerges`' three-state
+ * Counts the tips still waiting in `searched`, which is `seam:findMergeCandidates`' three-state
  * statement about its own run (`searchTips.ts`): `true` searched, `false` never going to be,
  * `null` not yet. So the number is exact and reaches zero — a count of "rows with no answer"
  * would stall at whatever the node could not reach and read as a run that stopped early.
  *
- * **Absent means finished**, which is why this is `undefined` rather than 0: a `seam:suggestions`
+ * **Absent means finished**, which is why this is `undefined` rather than 0: a `seam:loadMergeCandidates`
  * table is a published set, complete by definition, and it carries no such column. Reported as a
  * number, a set with nothing left to search and a table that cannot say would print the same.
  *
@@ -395,8 +395,8 @@ export interface CandidateSize {
  *
  * **Two quantities, and the card says which it is showing**, because they are not comparable: a
  * chunk count is of the whole object and a volume is of the part inside the search box, and the
- * numbers differ by orders of magnitude. `n_l2` is what "size" means — `seam:suggestMerges`
- * publishes it, and so does a `seam:suggestions` set from rv4 on; a set made before carries no
+ * numbers differ by orders of magnitude. `n_l2` is what "size" means — `seam:findMergeCandidates`
+ * publishes it, and so does a `seam:loadMergeCandidates` set from rv4 on; a set made before carries no
  * chunk count and falls back to the volume rather than losing the control entirely.
  *
  * **One unit per table**, decided where the candidates are read (`candidateLists`): a table with
@@ -542,7 +542,7 @@ export interface QueueFilters {
 export const DEFAULT_FILTERS: QueueFilters = {
   minConfidence: undefined,
   minSize: undefined,
-  // The node's own default (`seam:review`'s `excludeOrganelles`): a set with no flag is unchanged.
+  // The node's own default (`seam:proofreadMerges`'s `excludeOrganelles`): a set with no flag is unchanged.
   excludeOrganelles: true,
   sortBy: 'confidence',
   mode: 'tip',
@@ -552,14 +552,14 @@ export const DEFAULT_FILTERS: QueueFilters = {
  * Whether SEAM's cutoff kept this row — and **`true` where no cutoff was applied at all.**
  *
  * An absent `shown` column is not a row the cutoff excluded; it is a table nobody applied a
- * cutoff to. `seam:suggestMerges` publishes one: its ranking is geometric, and the calibration
+ * cutoff to. `seam:findMergeCandidates` publishes one: its ranking is geometric, and the calibration
  * `shown` comes from is a stage Coda cannot run yet. Read as `=== true`, every one of its rows
- * was hidden — the annotation layer in `seam:review` drew nothing, and `Shown only` emptied the
+ * was hidden — the annotation layer in `seam:proofreadMerges` drew nothing, and `Shown only` emptied the
  * queue, both without a word.
  *
  * **A null cell means it too**, and that is not the same rule arriving twice. `tipsWithFirsts`
- * clears every first-candidate column when it searches a tip, so a `seam:suggestions` table fed
- * through `seam:suggestMerges` keeps its `shown` *column* and holds `null` in it — the old run's
+ * clears every first-candidate column when it searches a tip, so a `seam:loadMergeCandidates` table fed
+ * through `seam:findMergeCandidates` keeps its `shown` *column* and holds `null` in it — the old run's
  * verdict about a candidate this run replaced. Read as `=== true` those rows were hidden again,
  * which is the first fix walking into the second.
  *
@@ -618,7 +618,7 @@ export function arrangeRows(
    * every real one, and `-1` is inside the range of things being compared — a volume cannot be
    * negative but a confidence fit can, so an unmeasured row was sorting above a measured one.
    *
-   * A table with no `q` at all — `seam:suggestMerges` publishes one, its ranking being
+   * A table with no `q` at all — `seam:findMergeCandidates` publishes one, its ranking being
    * geometric — scores every row the same and falls through to the `end_uid` tie-break below,
    * which is the table's own order. That is the honest answer rather than a defect to patch
    * here: there is no confidence to sort by, and substituting a number on another scale (the
@@ -665,7 +665,7 @@ export interface TreeRow extends QueueRow {
  * narrowed and sorted on its own (`arrangeRows`) (user, 2026-11-16).
  *
  * - **Which row a piece hangs beneath** is the parent's tip that lists it at the smallest gap —
- *   the contact Suggest Merges takes the joining end from (`pieceContacts`), so the two agree on
+ *   the contact Find Merge Candidates takes the joining end from (`pieceContacts`), so the two agree on
  *   where a piece is attached. A piece touching the neuron in two places is listed under one.
  * - **That row is listed whatever the filters say.** Filtered out, the rows beneath it would
  *   hang from nothing, and it is a row the reader accepted and asked to have extended.
@@ -1297,7 +1297,7 @@ export function withVerdict(
  * `parent/piece` — joined and sorted the way the verdicts are, and for `encodeVerdicts`' reason.
  *
  * **Pairs, not piece ids**, so the tree can be read from the params alone: that is what lets
- * Suggest Merges be handed it through a reference wire, before this card has ever run.
+ * Find Merge Candidates be handed it through a reference wire, before this card has ever run.
  */
 export function decodeExtend(raw: unknown): Set<string> {
   const out = new Set<string>()
@@ -1326,7 +1326,7 @@ export function withExtended(raw: unknown, parent: string, piece: string, on: bo
  * What is extended: a pair in `extend` whose verdict is still `accept`, or that Auto-extend was
  * pressed on with no verdict at all — which only `Auto-extend listed` writes, accepting on SEAM's
  * word (`PlanTexts.taken`). **The one rule**, read by
- * the `Extended` output, by the reference Suggest Merges holds to this card, and by the card —
+ * the `Extended` output, by the reference Find Merge Candidates holds to this card, and by the card —
  * as the keys the param holds, sorted. Joined, it is a string, and a string compares by value
  * where a fresh array of pairs never does — the card memoises on it, so a verdict that extends
  * nothing re-sorts nothing.
@@ -1939,7 +1939,7 @@ export function extendBlocked(at: {
 }): string | undefined {
   if (!at.wired) {
     return (
-      'Wire this card’s `Extended` output into the `Review` input of the Suggest Merges node ' +
+      'Wire this card’s `Extended` output into the `Review` input of the Find Merge Candidates node ' +
       'these suggestions come from. Suggestions read from a published set cannot be extended.'
     )
   }
@@ -2167,7 +2167,7 @@ export function autoUnavailable(tips: TableValue | undefined): string | undefine
   if (tips?.data['shown']) return undefined
   return (
     'Auto-extend accepts what clears SEAM’s cutoff, and these suggestions have none: pick an ' +
-    'Assessor on Suggest Merges.'
+    'Assessor on Find Merge Candidates.'
   )
 }
 
@@ -2250,7 +2250,7 @@ export function verdictPress(at: {
  *
  * There is no table of piece states (`docs/seam-extend-plan.md`, Decisions), so this is all the
  * card can know: a piece with no rows once the search has finished had nothing to search, or
- * failed — and the reason for a failure is a warning on the Suggest Merges card.
+ * failed — and the reason for a failure is a warning on the Find Merge Candidates card.
  */
 export type ExtendProgress =
   /** Asked for, the search under way, and none of its tips published yet. */

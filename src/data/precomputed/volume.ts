@@ -514,7 +514,7 @@ export function compressedMortonCode(grid: Triple, gridShape: Triple): bigint {
 /**
  * What a chunk is called in a `ChunkCache` — **one spelling, because two readers depend on it.**
  *
- * `overChunks` writes under it and anything planning ahead (`seam:suggestMerges` works out which
+ * `overChunks` writes under it and anything planning ahead (`seam:findMergeCandidates` works out which
  * chunks each open end will want before it fetches any) reads under it. Written out twice the
  * two would drift, and the failure is silent in the worst way: a planner whose keys no longer
  * match finds nothing, reports no error, and quietly turns the eviction policy back into

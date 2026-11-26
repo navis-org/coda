@@ -293,8 +293,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
      * `seam/reviewKeys.ts`) — listed here so the dialog shows them. They work with the pointer in
      * a neuroglancer frame too, which hands them back (`REVIEW_KEY_CODES`).
      */
-    title: 'Review Suggestions',
-    note: 'With a Review Suggestions card open, in Neuroglancer too. A verdict key moves on to the next row without one.',
+    title: 'Proofread Merges',
+    note: 'With a Proofread Merges card open, in Neuroglancer too. A verdict key moves on to the next row without one.',
     items: [
       { id: 'review-accept', chords: reviewChord('accept'), label: 'Accept' },
       { id: 'review-reject', chords: reviewChord('reject'), label: 'Reject' },
@@ -319,7 +319,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       {
         id: 'pick-segment',
         chords: [{ key: 'J' }],
-        label: 'Add the piece under the pointer to Review Suggestions',
+        label: 'Add the piece under the pointer to Proofread Merges',
         hint: 'In Neuroglancer: listed for its neuron and accepted',
       },
     ],

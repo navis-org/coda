@@ -1,5 +1,5 @@
 /**
- * The chain above Suggest Merges' `Tips` that the extend probes run a piece through.
+ * The chain above Find Merge Candidates' `Tips` that the extend probes run a piece through.
  *
  * Shared by `probe-seam-extend.mjs` and `probe-seam-flake.mjs` so the two measure one chain: a
  * number from one is only comparable with a number from the other while this is the same graph.
@@ -25,7 +25,7 @@ export function truthFileFor(neuron, t0, t1) {
 }
 
 /**
- * The on-demand workflow's chain above Suggest Merges' `Tips`, with its own settings.
+ * The on-demand workflow's chain above Find Merge Candidates' `Tips`, with its own settings.
  *
  * Kept here as a document rather than read from a file: the probe measures *this* chain, and a
  * reader comparing two runs needs to see that it did not change.

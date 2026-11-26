@@ -2,7 +2,7 @@
  * "Which datastack is this node pointed at" — the port, the field, and the three refusals.
  *
  * Four nodes ask that question (`CAVE table`, `List CAVE tables`, `CAVE table info` and the SEAM
- * pack's `Suggest Merges`), a fifth surface answers it again on a card, and the notebook exporter
+ * pack's `Find Merge Candidates`), a fifth surface answers it again on a card, and the notebook exporter
  * answers it a sixth time. `Find Open Ends` takes the port alone and refuses in its own words,
  * having no typed field for a wire to win over — so it is not a worked example of the pair. They all
  * apply the same rule — **a wired Dataset wins over the typed field**, then `splitDatasetId` — and

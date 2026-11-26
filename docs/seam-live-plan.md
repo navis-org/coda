@@ -1,6 +1,6 @@
 # Proofreading on the live segmentation — plan
 
-Status: **all five phases done** (2026-11-17 – 18): the two server calls, Find Open Ends reading the nucleus table live, Suggest Merges searching at `Searched at` within each neuron's life, the messages, and the docs. Follows [seam-extend-plan.md](seam-extend-plan.md)
+Status: **all five phases done** (2026-11-17 – 18): the two server calls, Find Open Ends reading the nucleus table live, Find Merge Candidates searching at `Searched at` within each neuron's life, the messages, and the docs. Follows [seam-extend-plan.md](seam-extend-plan.md)
 and [seam-merge-plan.md](seam-merge-plan.md).
 
 ## The problem
@@ -21,7 +21,7 @@ made (read from the server, 2026-11-17):
 
 - **Find Open Ends** reads the nucleus table at 564, which has no row for the root, so it says
   "1 of 1 neurons have no row in `nuclei_v1_aedes`". The live table has one (nucleus `6393`).
-- **Suggest Merges** turns each box's supervoxels into roots at 564's time. The neuron appears as
+- **Find Merge Candidates** turns each box's supervoxels into roots at 564's time. The neuron appears as
   its old pieces, never as `648518347585551219`, so every end reads "None of the 10 open ends had
   its own neuron in the box".
 
@@ -32,8 +32,8 @@ made (read from the server, 2026-11-17):
 | Custom CAVE | `version: ''` is "the newest when loaded" (564) | — |
 | Meshes | Nothing on Aedes: a graphene mesh is fetched by root id at any time. (Where a datastack has a flat mesh store for one materialization, e.g. FlyWire public, a newer root is not in it.) | fine |
 | Find Open Ends | The nucleus lookup only (`nucleiFor` → `somataFor` → a materialized query) | soma not masked, and a warning |
-| Suggest Merges | `when = { version }`: the moment every box's roots are read at; also in the memory key (`RunIdentity.version`) | no candidates |
-| Review Suggestions, the merge plan, Submit | Nothing. Root currency, anchors and the batch all ask at the server's own now (`'server'`) | already live |
+| Find Merge Candidates | `when = { version }`: the moment every box's roots are read at; also in the memory key (`RunIdentity.version`) | no candidates |
+| Proofread Merges, the merge plan, Submit | Nothing. Root currency, anchors and the batch all ask at the server's own now (`'server'`) | already live |
 
 ## Decisions (user, 2026-11-17)
 
@@ -41,7 +41,7 @@ made (read from the server, 2026-11-17):
 | --- | --- |
 | What sets the moment | **The query neuron.** The proofreading nodes take the deployment and datastack from the Dataset and ignore its materialization. A root still current is read at a recent moment; a root no longer current is read at the last moment it was current, **with a warning**. |
 | A "Materialization: live" option on the Dataset | **Not now.** It would need a live path for every table, synapse and annotation query, and would not fix a pinned dataset fed a newer root, which is the case that failed. |
-| How "now" is kept | **A param on Suggest Merges, `at`**, with no undo step (`unrecorded`, as Review's `merges`); the card's ⟳ moves it to now. First "written by the card"; then (same day) filled by the store before the run, since the card is not mounted on the dashboard; then **a record of each neuron's moment, written by the run and out of the key** — see phase 3. |
+| How "now" is kept | **A param on Find Merge Candidates, `at`**, with no undo step (`unrecorded`, as Review's `merges`); the card's ⟳ moves it to now. First "written by the card"; then (same day) filled by the store before the run, since the card is not mounted on the dashboard; then **a record of each neuron's moment, written by the run and out of the key** — see phase 3. |
 
 **Why a param, where Update Root IDs decided against one.** `updateRootIds.ts`' header argues a
 moving "now" must not be a param: it would be an edit, an undo step and a timestamp in somebody
@@ -71,7 +71,7 @@ moment of its life. The nucleus lookup asks the live table at **each root's last
 (less 1 ms). Nothing to pin, and an answer can be kept by root id for the session. A root no
 longer current is warned about, naming it.
 
-### Suggest Merges: `at`
+### Find Merge Candidates: `at`
 
 - **Each neuron is searched at the earlier of `at` and its root's last current moment.** One param
   covers a run of several neurons; a replaced root falls back to just before it was replaced, and
@@ -93,7 +93,7 @@ case), and the card writes it into `at` without an undo step. The key then moves
 after is answered from the memory. Measure that this costs well under a second before settling on
 it.
 
-### Review Suggestions
+### Proofread Merges
 
 Nothing changes in how it tells time. Candidates found at `at` can be edited by somebody else
 afterwards; the card's currency check and Submit's plan already read at the server's now and
@@ -193,12 +193,12 @@ nothing; it should be left off there.
        fails the node, as a mistyped table always has. One query per separately replaced root.
        `grapheneFor` could replace the inline `parseGrapheneSource(datastackRecord(…))` in
        `mergePlan.ts` and `rootCurrency.ts`, and the "edited since" sentence and `utcMinute`
-       should move somewhere shared when Suggest Merges needs them in phase 3.
+       should move somewhere shared when Find Merge Candidates needs them in phase 3.
    - **Left:** a datastack that *declares* a nucleus table puts the soma on the mesh itself
      (`CaveSource.meshSomas`, at the Dataset's materialization), which Find Open Ends uses when
      `Nucleus table` is empty. A root newer than the materialization gets no soma that way, as
      before. Aedes declares none; the Meshes node is outside this plan.
-3. **Suggest Merges: a moment per neuron, kept in the document.** **Built 2026-11-17**, and
+3. **Find Merge Candidates: a moment per neuron, kept in the document.** **Built 2026-11-17**, and
    built twice — the first design is recorded below because each of its steps is the obvious one.
    - **Decided (user, 2026-11-17): a moment per neuron, kept by the run, out of the key.** The
      first build kept *one* `Searched at` for the node, filled by the store before the first run.
@@ -258,7 +258,7 @@ nothing; it should be left off there.
      cannot run), one moment for the node, an empty one refused outside the store. Reviewed once
      each way (/simplify, /code-review medium); what those found that still applies is above. It
      went for the per-neuron record, which no pre-run fill can write.
-   - **Checked in Chrome**, reads only: the workflow's chain through Suggest Merges (no assessor,
+   - **Checked in Chrome**, reads only: the workflow's chain through Find Merge Candidates (no assessor,
      the best three ends by `e_tip`), the Dataset on "Latest" (564), the scheduler's host
      capturing the record. `648518347585551219` with no record: 3 of 3 ends, 200 candidates,
      recorded `648518347585551219=2026-11-17T10:26:39.205Z` (it had found none before this

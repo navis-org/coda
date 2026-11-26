@@ -155,8 +155,8 @@ function CodaNodeViewImpl({
    * and the selector still returns a primitive — invariant 7 holds either way.
    *
    * Two ways in, because a viewer is not the only thing that draws arriving data: a body saying
-   * `drawsInputs` does too (`nodeBodies.ts`), `seam:review`'s queue filling end by end from
-   * `seam:suggestMerges` being the case that is neither a viewer nor still.
+   * `drawsInputs` does too (`nodeBodies.ts`), `seam:proofreadMerges`'s queue filling end by end from
+   * `seam:findMergeCandidates` being the case that is neither a viewer nor still.
    */
   const previewable = getNodeDef(node.type)
   const drawsPreviews =

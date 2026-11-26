@@ -538,7 +538,7 @@ describe('level-2 chunk counts', () => {
     Object.fromEntries(roots.map((root) => [root, [1]]))
 
   /**
-   * **The stage this was changed for.** Sent one batch after another, `Suggest Merges` measured
+   * **The stage this was changed for.** Sent one batch after another, `Find Merge Candidates` measured
    * the counts at 33% of a 6.2 s end, more than the GPU — round trips in a row are latency the
    * caller is standing in rather than work. 500 roots is four batches of 160.
    *

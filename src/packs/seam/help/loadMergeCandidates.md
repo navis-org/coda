@@ -1,17 +1,13 @@
-## What Merge Suggestions does
+## What Load Merge Candidates does
 
-A reconstruction is full of neurons that stop early. Merge Suggestions reads a set of SEAM's **merge candidates**: places where a neuron ends at a tip, and a separate piece of segmentation just past it is probably its continuation. Each row is one tip, the piece SEAM would merge into it, how likely that is to be right, and whether it clears SEAM's own cutoff.
+A reconstruction is full of neurons that stop early. Load Merge Candidates reads a set of SEAM's **merge candidates**: places where a neuron ends at a tip, and a separate piece of segmentation just past it is probably its continuation. Each row is one tip, the piece SEAM would merge into it, how likely that is to be right, and whether it clears SEAM's own cutoff.
 
-Nothing is computed here and nothing is written. The set was made by SEAM's pipeline at a pinned snapshot; this node reads it. To work through the suggestions and merge the ones you accept, wire `Tips` and `Candidates` into [Review Suggestions](#seam:review) — see "Reviewing and merging" below.
-
-> [!IMPORTANT]
-> **This node is about false splits — the pack's other two are about false merges**
-> Merge Suggestions suggests **merges**, because a neuron stopping early is one neuron cut in two. [Find Merges](#seam:findMerges) and [Affinity Clusters](#seam:affinityClusters) look for false **merges** — one segment holding two neurons — and their fix is a split. The names run in opposite directions and it is easy to read one for the other.
+Nothing is computed here and nothing is written. The set was made by SEAM's pipeline at a pinned snapshot; this node reads it. To work through the suggestions and merge the ones you accept, wire `Tips` and `Candidates` into [Proofread Merges](#seam:proofreadMerges) — see "Reviewing and merging" below.
 
 ```coda-graph
 caption: The suggestions drawn over the EM, beside the neurons they belong to.
 dataset.flywire as ds
-seam:suggestions as sug
+seam:loadMergeCandidates as sug
 neuron.meshes as mesh
 out.neuroglancer as ng
 sug:neurons -> mesh:neurons
@@ -60,15 +56,15 @@ Only the **first** candidate of each tip is a suggestion. The rest of the list i
 
 The `seam_` columns are the verdicts from SEAM's own review of this set, carried so a new round can be compared with the old one. An empty `seam_belongs` means the tip was judged and nothing on its list belonged; an empty cell means nobody looked at it. A set SEAM did not review leaves them all empty.
 
-`Candidates` carries `n_l2`, each piece's level-2 chunk count, where the set has it (rv4 on). Review Suggestions sizes pieces by it, as it does for [Suggest Merges](#seam:suggestMerges); where it is empty, the card falls back to `vol_um3`.
+`Candidates` carries `n_l2`, each piece's level-2 chunk count, where the set has it (rv4 on). Proofread Merges sizes pieces by it, as it does for [Find Merge Candidates](#seam:findMergeCandidates); where it is empty, the card falls back to `vol_um3`.
 
 ## Reviewing and merging
 
 ```coda-graph
 caption: The suggestions reviewed one neuron at a time; the full-size viewer follows the card.
 dataset.flywire as ds
-seam:suggestions as sug
-seam:review as review
+seam:loadMergeCandidates as sug
+seam:proofreadMerges as review
 out.neuroglancer as ng
 sug:tips -> review:tips
 sug:candidates -> review:candidates
@@ -78,16 +74,16 @@ review:current -> ng:control
 review:layers -> ng:layers
 ```
 
-[Review Suggestions](#seam:review) takes both tables and lists one neuron's tips at a time. Accept the pieces that belong, then press **Submit**: Coda checks each merge, shows them all beside the neuron as it will look, and merges the ones you confirm, with your own CAVE token. Wire a CAVE Dataset into its `Dataset` socket — the datastack the set was made on — and sign in to its server first.
+[Proofread Merges](#seam:proofreadMerges) takes both tables and lists one neuron's tips at a time. Accept the pieces that belong, then press **Submit**: Coda checks each merge, shows them all beside the neuron as it will look, and merges the ones you confirm, with your own CAVE token. Wire a CAVE Dataset into its `Dataset` socket — the datastack the set was made on — and sign in to its server first.
 
-A piece from a published set cannot be extended: its own open ends were never searched. To grow a neuron piece by piece, search it with [Suggest Merges](#seam:suggestMerges) instead.
+A piece from a published set cannot be extended: its own open ends were never searched. To grow a neuron piece by piece, search it with [Find Merge Candidates](#seam:findMergeCandidates) instead.
 
 ## What a set is tied to
 
-A suggestion set is made at one snapshot, and the manifest carries it. A merge you make through Review Suggestions gives the neuron a new root id, and the card follows it there: the rest of that neuron's suggestions can still be reviewed and submitted.
+A suggestion set is made at one snapshot, and the manifest carries it. A merge you make through Proofread Merges gives the neuron a new root id, and the card follows it there: the rest of that neuron's suggestions can still be reviewed and submitted.
 
-A neuron somebody else has edited since the snapshot is different. Its suggestions were computed against a segment that has moved on, so Review Suggestions marks it as edited and Submit refuses all of its merges, and a candidate edited since is refused on its own. Ask SEAM for a newer set rather than trusting a stale one, and use [Update root IDs](#cave.updateRootIds) if you need the current ids for something else.
+A neuron somebody else has edited since the snapshot is different. Its suggestions were computed against a segment that has moved on, so Proofread Merges marks it as edited and Submit refuses all of its merges, and a candidate edited since is refused on its own. Ask SEAM for a newer set rather than trusting a stale one, and use [Update root IDs](#cave.updateRootIds) if you need the current ids for something else.
 
 ```coda-params
-seam:suggestions: url, set, layerName
+seam:loadMergeCandidates: url, set, layerName
 ```
