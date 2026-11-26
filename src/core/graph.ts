@@ -417,6 +417,24 @@ export function ancestors(graph: CodaGraph, nodeId: string): Set<string> {
 }
 
 /**
+ * The upstream closure over every edge, as a function so the index is built once for however many
+ * nodes are asked about. Reference edges included, since a node whose referenced node failed is
+ * refused too — and since one may point upstream (`asReference`), a node can be in its own set.
+ */
+export function ancestorsOf(graph: CodaGraph): (nodeId: string) => Set<string> {
+  const index = neighbourIndex(graph.edges, 'target')
+  return (nodeId) => closure(index, nodeId)
+}
+
+/**
+ * The downstream closure along **dataflow edges only**: what a node's output reaches. A reference
+ * edge may point upstream (`asReference`), and following it would reach nodes above this one.
+ */
+export function dataflowDescendants(graph: CodaGraph, nodeId: string): Set<string> {
+  return closure(neighbourIndex(dataflowEdges(graph), 'source'), nodeId)
+}
+
+/**
  * Whether this graph could contain a loop at all — `mayHaveReferences`' twin.
  *
  * Asked before `loopRegion` or `loopsIn` walk anything, so a graph with no `For Each` in it pays

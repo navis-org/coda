@@ -52,7 +52,11 @@
 
 import { isNodeId } from '../../data/cave/graphLayout'
 import { groupBy } from '../../core/collections'
+import { failureNotice, rootFailure } from '../../core/failureNotice'
+import { edgeInto, nodeLabel, type CodaGraph } from '../../core/graph'
 import { ID_COLUMN_NAME } from '../../core/ids'
+import type { IssueFix } from '../../core/node'
+import type { NodeRunInfo } from '../../core/scheduler'
 import type { CellValue, TableValue } from '../../core/values'
 import { formatNumber, plural } from '../../style/format'
 import type { MergedSoFar } from './mergeRecord'
@@ -2322,4 +2326,57 @@ function supervoxelOf(table: TableValue, name: string, row: number): string | un
 function text(table: TableValue, name: string, row: number): string | undefined {
   const cell: CellValue | undefined = table.data[name]?.[row]
   return typeof cell === 'string' && cell ? cell : undefined
+}
+
+/** What a Proofread Merges card's empty foot says (`emptyQueue`). */
+export interface EmptyQueue {
+  readonly text: string
+  /** The failed node and its fix, where the failure behind the empty queue has one. */
+  readonly fix?: { readonly nodeId: string; readonly fix: IssueFix }
+}
+
+/**
+ * Why a Proofread Merges queue is empty while nothing is filling it, as the card's foot says it,
+ * with the fix of the failure behind it where there is one. A node above that is running is the
+ * card's own "Searching" line (`nodeInputsFilling`), not this.
+ *
+ * The foot said "wire in Load Merge Candidates and run it" whatever the reason, which was wrong
+ * twice on a card that *was* wired, often to Find Merge Candidates — and on a dashboard, where the
+ * failed node's card is out of sight, it was the only sentence the reader had (2026-11-26).
+ *
+ * Read off the wire into `Tips`, not off a node type, so a `Filter Table` in between still gives
+ * a true answer. A node below a failed one is `blocked`, so the walk goes up to the failure that
+ * started it: the one with no failed node above it. The failure is worded by `failureNotice`, the
+ * run notice's own sentence.
+ */
+export function emptyQueue(
+  graph: CodaGraph,
+  nodeId: string,
+  infoOf: (nodeId: string) => NodeRunInfo,
+): EmptyQueue {
+  const feed = edgeInto(graph, nodeId, 'tips')
+  if (!feed) {
+    return {
+      text: 'Nothing to review yet — wire in Find Merge Candidates or Load Merge Candidates and run it.',
+    }
+  }
+  const labelOf = (id: string) => nodeLabel(graph.nodes.find((n) => n.id === id))
+  const state = infoOf(feed.source).state
+  if (state === 'ok') {
+    return { text: `Nothing to review: no tips arrived from ${labelOf(feed.source)}.` }
+  }
+  if (state === 'disabled') {
+    return { text: `Nothing to review: ${labelOf(feed.source)} is muted.` }
+  }
+  // A failure above is the reason only where it is what stops the feeder: failed or blocked. A
+  // stale feeder can run, whatever failed on some other branch.
+  const root =
+    state === 'error' || state === 'blocked'
+      ? rootFailure(graph, feed.source, (id) => infoOf(id).state === 'error')
+      : undefined
+  if (root === undefined)
+    return { text: `Nothing to review yet — run ${labelOf(feed.source)}.` }
+  const { error, fix } = infoOf(root)
+  const text = `Nothing to review: ${failureNotice([root], graph, () => error)}`
+  return fix ? { text, fix: { nodeId: root, fix } } : { text }
 }

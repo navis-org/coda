@@ -27,6 +27,7 @@ import { registerNode, requireNodeDef } from '../../core/registry'
 import { T, column, tableSchema } from '../../core/types'
 import { isTableValue, makeTable } from '../../core/values'
 import type { TableValue } from '../../core/values'
+import { FixableError } from '../../core/errors'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import '../../nodes'
@@ -154,6 +155,30 @@ beforeAll(() => {
       return { tips: tips([true, true]), candidates: candidates([11, 22]) }
     },
   })
+  // A producer whose run refuses with a fix, as Find Merge Candidates does with no download.
+  registerNode({
+    type: 'test.refusesEnds',
+    label: 'Refuses Ends',
+    category: 'utility',
+    cost: 'expensive',
+    inputs: [],
+    params: [{ id: 'allow', kind: 'boolean', label: 'Allow', default: false }],
+    outputs: [
+      { id: 'tips', label: 'Tips', type: T.table() },
+      { id: 'candidates', label: 'Candidates', type: T.table() },
+    ],
+    inferOutputs: () => ({ tips: T.table(), candidates: T.table() }),
+    evaluate: (ctx) => {
+      if (ctx.params.allow !== true) {
+        throw new FixableError('Not allowed.', {
+          label: 'Allow it',
+          action: 'tickAndRun',
+          param: 'allow',
+        })
+      }
+      return { tips: tips([true, true]), candidates: candidates([11, 22]) }
+    },
+  })
 })
 
 beforeEach(() => {
@@ -164,7 +189,7 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-function graph(relay = false): CodaGraph {
+function graph(relay = false, producer = 'test.publishesEnds'): CodaGraph {
   const at = (id: string, type: string, x: number) => ({
     id,
     type,
@@ -172,7 +197,7 @@ function graph(relay = false): CodaGraph {
     params: defaultParams(requireNodeDef(type)) as never,
   })
   let g = emptyGraph('streaming')
-  g = addNode(g, at('src', 'test.publishesEnds', 0))
+  g = addNode(g, at('src', producer, 0))
   g = addNode(g, at('review', 'seam:proofreadMerges', 720))
   for (const port of ['tips', 'candidates']) {
     // The relay sits on the tips wire only, which is where a narrowing node would go.
@@ -320,5 +345,32 @@ describe('a card body drawing from a still-running input', () => {
     act(() => answerNow())
     await waitFor(() => expect(useGraphStore.getState().nodeInfo('review').state).toBe('ok'))
     expect(document.querySelector('.review-body__filling')).toBeNull()
+  })
+})
+
+describe('a card whose producer failed', () => {
+  /*
+   * The foot said "wire in Load Merge Candidates and run it" whatever had happened — wrong on a
+   * wired card, and on a dashboard the only sentence the reader had. It names the failure, gives
+   * its reason and offers its fix, through a relay too (2026-11-26).
+   */
+  it('names the failure, gives its reason and offers its fix', async () => {
+    render(<App />)
+    act(() => {
+      useGraphStore.getState().closeStartPage()
+      useGraphStore.getState().loadGraph(graph(true, 'test.refusesEnds'))
+    })
+    await act(async () => {
+      await useGraphStore.getState().runAll()
+    })
+    const card = () => document.querySelector('.review-body')!
+    expect(card().textContent).toContain('Nothing to review: Refuses Ends failed: Not allowed.')
+    const button = [...card().querySelectorAll('button')].find(
+      (b) => b.textContent === 'Allow it',
+    )!
+    await act(async () => {
+      button.click()
+    })
+    await waitFor(() => expect(rows()).toHaveLength(2))
   })
 })

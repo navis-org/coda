@@ -29,6 +29,7 @@
  *    without being asked for — a graph that opens on its own must not reach for them.
  */
 
+import { FixableError } from '../../core/errors'
 import { formatBytes } from '../../core/limits'
 import type { LoadedManifest } from '../../ml/manifest'
 import { completeVariants, loadManifest, variantBytes } from '../../ml/manifest'
@@ -39,6 +40,12 @@ import { weightsCached } from '../../ml/weights'
 import type { AffinityModel } from './models'
 import { parseWindowConfig } from './windowConfig'
 import type { WindowConfig } from './windowConfig'
+
+/**
+ * The id of the boolean param a node opening a model through here asks consent with ("Allow model
+ * download"). One id, because the refusal below names it for its fix button (`tickAndRun`).
+ */
+export const DOWNLOAD_PARAM = 'download'
 
 /** A manifest as read, and its `config` as the caller's task reads it. */
 export interface SeamManifest<C> {
@@ -123,7 +130,7 @@ export interface OpenSeamModelOptions<C> {
    * `src/ml`'s. The id is there only so a refusal can name what it refused.
    */
   readonly parse: (config: unknown, modelId: string) => C
-  /** `ctx.params.download` — whether the reader has agreed to the fetch. */
+  /** `ctx.params.download` (`DOWNLOAD_PARAM`) — whether the reader has agreed to the fetch. */
   readonly download: boolean
   /** How much of the progress bar the download gets before the node's own work starts. */
   readonly downloadShare: number
@@ -179,7 +186,7 @@ export async function openSeamModel<C>(
    * refusal entirely — `variant` was unconditionally truthy, so `if (!variant)` could not fire —
    * and the failure that let through was quiet rather than loud: `variantBytes` of a variant the
    * manifest does not carry filters to an empty list and sums to **0**, so a reader with
-   * `Download the model` off was told the model "is a 0 kB download". Refusal #3 is a property
+   * `Allow model download` off was told the model "is a 0 kB download". Refusal #3 is a property
    * of the published model and has to hold for both paths.
    */
   const complete = completeVariants(loaded.manifest)
@@ -199,9 +206,17 @@ export async function openSeamModel<C>(
   }
   const bytes = variantBytes(loaded.manifest, variant)
   if (!options.download && !(await weightsCached(loaded, variant))) {
-    throw new Error(
-      `${model.label} is a ${formatBytes(bytes)} download and \`Download the model\` is off. ` +
+    // With the button that ticks it: on a dashboard the box is on a canvas nobody can see.
+    throw new FixableError(
+      `${model.label} is a ${formatBytes(bytes)} download and \`Allow model download\` is off. ` +
         `Tick it to allow the download; it is fetched once and kept in this browser.`,
+      {
+        label: 'Allow model download',
+        title:
+          'Tick the box and run the node: the model is fetched once and kept in this browser.',
+        action: 'tickAndRun',
+        param: DOWNLOAD_PARAM,
+      },
     )
   }
 

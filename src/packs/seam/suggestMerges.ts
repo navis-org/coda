@@ -128,7 +128,7 @@ import {
   mergeAssessorModel,
   mergeRankerModel,
 } from './models'
-import { loadSeamManifest, openSeamModel } from './openWindowModel'
+import { DOWNLOAD_PARAM, loadSeamManifest, openSeamModel } from './openWindowModel'
 import type { OpenedSeamModel } from './openWindowModel'
 import { patchBoxFor, patchScaleFrom, widestPatchReach } from './patchBox'
 import { afterShare } from './progress'
@@ -366,9 +366,9 @@ export const suggestMergesNode = packNode({
       help: 'The network that judges whether each candidate continues the neuron. With “None — rank by geometry” you get the forest’s ranking only, with no probabilities and no cutoff. With an assessor, each candidate gets `p_cand` and `conf`, and each tip gets `q`, `r` and `shown`. It adds about 15–25 ms of GPU time per candidate.',
     },
     {
-      id: 'download',
+      id: DOWNLOAD_PARAM,
       kind: 'boolean',
-      label: 'Download the model',
+      label: 'Allow model download',
       default: false,
       visibleIf: (params) => params.assessor !== NO_ASSESSOR,
       help: 'The assessor is a 133 MB download, kept in this browser after the first time. Tick this to allow it.',

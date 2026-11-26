@@ -132,6 +132,33 @@ describe('entering the dashboard', () => {
   })
 
   /*
+   * A node with no cell fails out of sight: the dashboard replaces the canvas its red card is on.
+   * So the run's notice names it and gives its reason (`failureNotice`), where it used to say
+   * only "1 node failed" (2026-11-26).
+   */
+  it('names a failed node that has no cell, with its reason', async () => {
+    const refuse = vi
+      .spyOn(MockSource.prototype, 'fetchConnectivity')
+      .mockRejectedValue(new Error('The server is down.'))
+    try {
+      render(<App />)
+      act(() => {
+        store().addToDashboard(['view'])
+        store().setDashboardOpen(true)
+      })
+      await act(async () => {
+        await store().runAll()
+      })
+      expect(cellFor('conn')).toBeNull()
+      expect(screen.getByRole('status').textContent).toMatch(
+        /^Connectivity failed: .*The server is down\./,
+      )
+    } finally {
+      refuse.mockRestore()
+    }
+  })
+
+  /*
    * A run's whole-app effects — its files, its title flash — were `Editor`'s, which is not
    * mounted here: a run started from the dashboard wrote none of its files (user, 2026-11-20).
    */

@@ -34,6 +34,7 @@ import type { InferenceResult } from './inference'
 import { hasErrors, inferGraph } from './inference'
 import type {
   EvalContext,
+  IssueFix,
   LoopIteration,
   LoopPlan,
   NodeDefinition,
@@ -49,7 +50,7 @@ import type { CodaType } from './types'
 import type { Value } from './values'
 import { datasetIdentity } from './values'
 import type { DataSource } from '../data/source'
-import { errorMessage } from './errors'
+import { errorFix, errorMessage } from './errors'
 import { throwIfAborted } from './slice'
 import { variantGraph } from './variantRun'
 import { untilAborted } from '../data/memoPromise'
@@ -73,6 +74,8 @@ export type NodeRunState =
 export interface NodeRunInfo {
   state: NodeRunState
   error?: string
+  /** The button that answers `error`, where the node knows one (`IssueFix`, `FixableError`). */
+  fix?: IssueFix
   /** Wall-clock of the last successful evaluation. */
   durationMs?: number
   /** 0..1 while running. */
@@ -2337,9 +2340,11 @@ export class Scheduler {
         return 'aborted'
       }
       this.cache.delete(nodeId)
+      const fix = errorFix(err)
       this.setState(nodeId, {
         state: 'error',
         error: errorMessage(err),
+        ...(fix ? { fix } : {}),
       })
       return 'failed'
     } finally {

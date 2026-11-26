@@ -99,7 +99,7 @@ import { schemaOf } from './suggestionTables'
 import { notNanometres, windowFieldsFrom } from './windowConfig'
 import { scoreWindows } from './windowRun'
 import { OPEN_END_MODELS, OPEN_END_TASK, openEndModel } from './models'
-import { openWindowModel } from './openWindowModel'
+import { DOWNLOAD_PARAM, openWindowModel } from './openWindowModel'
 import { afterShare } from './progress'
 import { warnSkeletonizeWait } from '../../nodes/lib/skeletonizeOps'
 import type { TipRule } from './tips'
@@ -167,9 +167,9 @@ export const openEndsNode = packNode({
       help: 'Which open-end checkpoint to score with.',
     },
     {
-      id: 'download',
+      id: DOWNLOAD_PARAM,
       kind: 'boolean',
-      label: 'Download the model',
+      label: 'Allow model download',
       default: false,
       help: 'The weights are tens of megabytes, fetched once and kept in this browser. Off by default so a graph that opens on its own does not reach for them.',
     },

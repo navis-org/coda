@@ -10,11 +10,14 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { emptyGraph, type CodaGraph } from '../../core/graph'
 import { ID_COLUMN_NAME } from '../../core/ids'
+import type { NodeRunInfo } from '../../core/scheduler'
 import { column, tableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
 import type { TableValue } from '../../core/values'
 import {
+  emptyQueue,
   acceptedElsewhere,
   acceptedByRoot,
   acceptedPieces,
@@ -2658,5 +2661,110 @@ describe('mergedAs', () => {
         so,
       ),
     ).toEqual(['x'])
+  })
+})
+
+describe('why the queue is empty', () => {
+  const at = (id: string, title: string) => ({
+    id,
+    type: 'not.registered',
+    position: { x: 0, y: 0 },
+    params: {},
+    title,
+  })
+  /** review ← filter ← search ← dataset, with `tips` from `filter`. */
+  const wired: CodaGraph = {
+    ...emptyGraph(),
+    nodes: [
+      at('ds', 'Dataset'),
+      at('search', 'Search'),
+      at('filter', 'Filter'),
+      at('review', 'Review'),
+    ],
+    edges: [
+      { id: '1', source: 'ds', sourceHandle: 'out', target: 'search', targetHandle: 'in' },
+      {
+        id: '2',
+        source: 'search',
+        sourceHandle: 'tips',
+        target: 'filter',
+        targetHandle: 'table',
+      },
+      {
+        id: '3',
+        source: 'filter',
+        sourceHandle: 'out',
+        target: 'review',
+        targetHandle: 'tips',
+      },
+    ],
+  }
+  const FIX = { label: 'Allow it', action: 'tickAndRun', param: 'allow' } as const
+  const infos =
+    (given: Record<string, NodeRunInfo>) =>
+    (id: string): NodeRunInfo =>
+      given[id] ?? { state: 'idle' }
+
+  it('asks for a wire where nothing feeds `Tips`', () => {
+    expect(
+      emptyQueue({ ...wired, edges: wired.edges.slice(0, 2) }, 'review', infos({})),
+    ).toEqual({
+      text: 'Nothing to review yet — wire in Find Merge Candidates or Load Merge Candidates and run it.',
+    })
+  })
+
+  it('names the feeding node where it has not run, or ran and sent nothing', () => {
+    expect(emptyQueue(wired, 'review', infos({ filter: { state: 'stale' } })).text).toBe(
+      'Nothing to review yet — run Filter.',
+    )
+    expect(emptyQueue(wired, 'review', infos({ filter: { state: 'ok' } })).text).toBe(
+      'Nothing to review: no tips arrived from Filter.',
+    )
+  })
+
+  it('names the failure that blocked it, with its reason and its fix', () => {
+    expect(
+      emptyQueue(
+        wired,
+        'review',
+        infos({
+          filter: { state: 'blocked' },
+          search: { state: 'error', error: 'Not allowed.', fix: FIX },
+        }),
+      ),
+    ).toEqual({
+      text: 'Nothing to review: Search failed: Not allowed.',
+      fix: { nodeId: 'search', fix: FIX },
+    })
+    expect(emptyQueue(wired, 'review', infos({ filter: { state: 'error' } }))).toEqual({
+      text: 'Nothing to review: Filter failed.',
+    })
+  })
+
+  it('says run a feeder that can run, whatever failed on another branch, and names a muted one', () => {
+    expect(
+      emptyQueue(
+        wired,
+        'review',
+        infos({ filter: { state: 'stale' }, ds: { state: 'error', error: 'Elsewhere.' } }),
+      ).text,
+    ).toBe('Nothing to review yet — run Filter.')
+    expect(emptyQueue(wired, 'review', infos({ filter: { state: 'disabled' } })).text).toBe(
+      'Nothing to review: Filter is muted.',
+    )
+  })
+
+  it('goes up to the failure that started it, not one beneath it', () => {
+    expect(
+      emptyQueue(
+        wired,
+        'review',
+        infos({
+          filter: { state: 'blocked' },
+          search: { state: 'error', error: 'Later.' },
+          ds: { state: 'error', error: 'First.' },
+        }),
+      ).text,
+    ).toBe('Nothing to review: Dataset failed: First.')
   })
 })

@@ -403,6 +403,39 @@ The regression test is in `dashboard.test.tsx`, and its shape is the point — e
 that file runs first and enters the grid second, which is the one order that cannot see this. It
 loads a wizard graph with `dashboard: true`, renders, and runs *underneath* the mounted grid.
 
+## A failure out of sight
+
+**A run that ends with failures names the first one, and why, in the notice** (`failureNotice`,
+`core/failureNotice.ts`): "Find Merge Candidates failed: … One more node failed too." It said only
+"1 node failed", which was enough on the canvas, where the failed card is red with its reason in
+the band, and nothing on a dashboard — the canvas is gone, and a node with no cell failed out of
+sight. Reported over Find Merge Candidates refusing its model download, whose "tick `Allow model
+download`" sat on a card nobody could see (2026-11-26). The notice is drawn by `DashboardView` as
+well as `Editor` (`StatusNotice`), through `IssueText`, so a link in the reason can be followed.
+
+**And the button that answers it, where the failure knows one.** A run error thrown as a
+`FixableError` (`core/errors.ts`) carries an `IssueFix`; the scheduler keeps it on
+`NodeRunInfo.fix`, the card draws it under the message (`nodeIssues`), and the store pins the
+node and a **copy** of its fix to the notice as `noticeFix` — drawn only while `notice` is still
+the sentence it came with, so any later write of the notice retires it. A copy, because the notice
+outlives edits on purpose: a clean run keeps a failure notice whose node it never ran (an auto
+pass after an unrelated edit skips the expensive node), and that edit's `refreshStates` has
+already turned the node `stale` and dropped its fix. A failure with a fix is named first. Every
+button goes through one store action, `applyFix`, and the lock rule is `fixLiveUnderLock` beside
+`IssueFix`. The one so far is the model download's
+"Allow model download" (`openWindowModel.ts`): `tickAndRun` ticks the boolean param and runs the
+node **and everything its output reaches** (`dataflowDescendants`) — `runFull` cancels the auto pass the edit scheduled, so a run
+of the node alone left a Proofread Merges below it empty. A param and a run, so it is live under
+the lock (`lock.test.ts`), unlike `attachAnnotationChain`, whose button the lock hides.
+
+Proofread Merges' empty foot says the same thing from below (`emptyQueue`, `reviewQueue.ts`):
+unwired, muted, not run, failed or blocked — naming the failure that stopped it (`rootFailure`, over
+references too), with its reason and fix — or ran and sent nothing. It used to say "wire in Load Merge Candidates and run it" whatever the reason.
+
+**One line, not a list**, because the notice holds one sentence and any later `setNotice` replaces
+it. The first failure is the likeliest cause: a node below a failed one is `blocked`, not failed,
+and is not counted. The same text on the canvas, deliberately — one notice, not one per surface.
+
 ## The run bar
 
 The grid is the one surface with no run indication of its own. A card on the canvas wears

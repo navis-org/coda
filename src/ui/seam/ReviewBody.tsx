@@ -117,6 +117,7 @@ import {
   stillToSearch,
   tipKey,
   tipsOf,
+  emptyQueue,
   verdictFor,
   verdictPress,
 } from '../../packs/seam/reviewQueue'
@@ -155,6 +156,8 @@ import { caveServerLabel } from '../../data/cave/deployments'
 import { getToken, subscribeTokens } from '../../data/cave/credentials'
 import { rootCurrency } from '../../packs/seam/rootCurrency'
 import { onEdit } from '../../data/cave/rootEdits'
+import { IssueFixButton } from '../IssueFixButton'
+import { IssueText } from '../IssueText'
 import { useLatest } from '../useLatest'
 import type { SubmitRequest, SubmitState } from './mergeSession'
 import {
@@ -1480,11 +1483,15 @@ export function ReviewBody({ node, ctx, inputValues, compact, setParam }: NodeBo
 
         {listed.length === 0 ? (
           <div className="list-body__foot list-body__foot--empty">
-            {queue.length === 0
-              ? filling
-                ? 'Searching — the first tips will appear here as they are scored.'
-                : 'Nothing to review yet — wire in Load Merge Candidates and run it.'
-              : `No tip passes the filters. ${formatNumber(mine.length)} in this neuron’s queue.`}
+            {queue.length === 0 ? (
+              filling ? (
+                'Searching — the first tips will appear here as they are scored.'
+              ) : (
+                <EmptyQueueFoot nodeId={node.id} />
+              )
+            ) : (
+              `No tip passes the filters. ${formatNumber(mine.length)} in this neuron’s queue.`
+            )}
           </div>
         ) : (
           <div className="review-list-frame">
@@ -2291,5 +2298,28 @@ function FollowButton({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * The empty queue's foot (`emptyQueue`): the sentence, and the fix of the failure behind it.
+ *
+ * Its own component because the sentence reads the graph and every node's run state, so it
+ * subscribes to `graph` and `runVersion` — which move on every edit and every run tick. Held by
+ * the card, that subscription re-rendered the whole card on each; held here, it is one line's,
+ * and only while the line is drawn.
+ */
+function EmptyQueueFoot({ nodeId }: { nodeId: string }) {
+  const graph = useGraphStore((s) => s.graph)
+  const runVersion = useGraphStore((s) => s.runVersion)
+  const empty = useMemo(() => {
+    void runVersion
+    return emptyQueue(graph, nodeId, (id) => useGraphStore.getState().nodeInfo(id))
+  }, [graph, runVersion, nodeId])
+  return (
+    <>
+      <IssueText message={empty.text} />
+      {empty.fix && <IssueFixButton nodeId={empty.fix.nodeId} fix={empty.fix.fix} />}
+    </>
   )
 }

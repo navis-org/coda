@@ -4467,6 +4467,19 @@ input.field--combo {
 .notice button:hover {
   color: var(--text-primary);
 }
+/* A run's failure notice may carry its fix (`noticeFix`): the card's button, inline here, and not
+   the ×'s bare look, which `.notice button` would otherwise give it. */
+.notice .issue-fix {
+  flex: none;
+  margin-top: 0;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.notice .issue-fix:hover {
+  background: var(--surface-hover);
+}
 /* A feature's notice may carry a choice beside its text (`NoticeChoice`): find path's "Colour by". */
 .notice__choice {
   display: flex;

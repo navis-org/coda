@@ -452,6 +452,10 @@ describe('every store action is on one side of the lock', () => {
     'setSelection',
     'runAll',
     'runNode',
+    // A fix's button (`IssueFix`). `tickAndRun` is a boolean param ticked and the node run, live
+    // so a reader of a locked dashboard can still allow a model download; `attachAnnotationChain`
+    // refuses under the lock itself (above).
+    'applyFix',
     'cancelRun',
     'invalidateNode',
     'clearNodeCache',

@@ -81,6 +81,6 @@ Left unwired, the node skeletonizes each mesh itself with SEAM's settings. Wire 
 
 ## Downloading the model
 
-The weights are tens of megabytes. Nothing is fetched until you tick `Download the model`, and the card refuses to run until you do. They are then kept in this browser, so every later run starts in about a second.
+The weights are tens of megabytes. Nothing is fetched until you tick `Allow model download`. A run without it stops with an **Allow model download** button, on the card and in the notice, that ticks the box and runs again. They are then kept in this browser, so every later run starts in about a second.
 
 You need WebGPU. Chrome and Edge have it; Safari and Firefox are adding it. A page served over plain `http` has it switched off, and the node says so rather than running on the CPU.

@@ -81,7 +81,7 @@ import { addNodeWithCompanion } from '../core/companion'
 import type { InferenceResult } from '../core/inference'
 import { checkConnection, inferGraph } from '../core/inference'
 import { spliceCandidate, spliceGraph } from '../core/splice'
-import type { ParamValue } from '../core/node'
+import type { IssueFix, ParamValue } from '../core/node'
 import { defaultParams, findParam } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
 import type {
@@ -178,7 +178,8 @@ import type { VisualisationId } from '../wizard/options'
 // graph, so the node pack must be registered first. Declaring the dependency here rather
 // than relying on import order in main.tsx keeps that from silently breaking.
 import '../nodes'
-import { nodeLabel, nodePorts } from '../core/graph'
+import { dataflowDescendants, nodeLabel, nodePorts } from '../core/graph'
+import { failureNotice } from '../core/failureNotice'
 
 // Registered once, at module load. See `data/builtins.ts` for the set and the ordering.
 registerBuiltinSources()
@@ -268,6 +269,21 @@ export interface WorkflowMemory {
 }
 
 /**
+ * The node a run's failure notice is about, and its fix, tied to the sentence it came with
+ * (`GraphState.noticeFix`).
+ */
+export interface NoticeFix {
+  readonly text: string
+  readonly nodeId: string
+  /**
+   * A copy of the node's fix, not a live read of `NodeRunInfo.fix`: any edit runs
+   * `refreshStates`, which turns a failed node with no cached result `stale` and drops its fix —
+   * and the notice outlives edits on purpose (`runFull`).
+   */
+  readonly fix?: IssueFix
+}
+
+/**
  * Everything about a document that is *live in the store* while it is the one on screen.
  *
  * Set aside on the way out and put back on the way in, which is what makes a switch cost nothing
@@ -298,6 +314,7 @@ interface DocStash {
   future: HistoryEntry[]
   selection: string[]
   notice: string | undefined
+  noticeFix: NoticeFix | undefined
   lastRun: RunSummary | undefined
   expandedNodeId: string | undefined
   pinnedNodeId: string | undefined
@@ -391,6 +408,12 @@ export interface GraphState {
   future: HistoryEntry[]
   /** Transient messages (load warnings, run failures) shown in the status bar. */
   notice: string | undefined
+  /**
+   * Which node a run's failure notice is about, so the notice can draw its fix (`IssueFix`), for
+   * as long as `notice` is still the sentence it came with — any later write of `notice` replaces
+   * the text and so retires it, with nobody clearing this.
+   */
+  noticeFix: NoticeFix | undefined
   lastRun: RunSummary | undefined
   busy: boolean
   /**
@@ -1302,6 +1325,14 @@ export interface GraphState {
   // --- evaluation ----------------------------------------------------------
   runAll(): Promise<void>
   runNode(nodeId: string): Promise<void>
+  /**
+   * Press a fix's button (`IssueFix`) for node `nodeId`: one dispatch, so every surface drawing a
+   * fix — card, inspector, notice — does the same thing. `attachAnnotationChain` refuses under the
+   * lock itself. `tickAndRun` sets the boolean param `fix.param` and runs the node and everything
+   * it feeds (nothing where that is not one of its boolean params), and takes the run's failure
+   * notice down where it was about this node, since it is being answered.
+   */
+  applyFix(nodeId: string, fix: IssueFix): Promise<void>
   cancelRun(): void
   invalidateNode(nodeId: string): void
   /**
@@ -1738,12 +1769,36 @@ export const useGraphStore = create<GraphState>((set, get) => {
         ...(options.automatic ? { automatic: true } : {}),
       })
       if (token === runToken) {
-        set({
-          lastRun: summary,
-          notice: summary.failed.length
-            ? `${summary.failed.length} node${summary.failed.length === 1 ? '' : 's'} failed`
-            : undefined,
-        })
+        // Named, with its reason and its fix: on a dashboard this is the only place it shows. A
+        // failure with a fix first, since that is one the reader can answer from the notice.
+        const info = (id: string) => sched().info(id)
+        const failed = [...summary.failed].sort((a, b) => +!info(a).fix - +!info(b).fix)
+        const first = failed[0]
+        const notice = failureNotice(failed, get().graph, (id) => info(id).error)
+        /*
+         * A run with no failures takes the notice down — unless it is a failure notice and this run
+         * never ran its node: an auto pass after an unrelated edit does not re-run an expensive
+         * node, and on a dashboard the notice is the only place its failure shows. Asked of the
+         * run, not of the node's state, which the edit's `refreshStates` has already made `stale`.
+         */
+        const held = get().noticeFix
+        const keep =
+          !notice &&
+          held !== undefined &&
+          held.text === get().notice &&
+          !summary.executed.includes(held.nodeId) &&
+          get().graph.nodes.some((n) => n.id === held.nodeId)
+        if (!keep) {
+          const fix = first === undefined ? undefined : info(first).fix
+          set({
+            notice,
+            noticeFix:
+              notice && first !== undefined
+                ? { text: notice, nodeId: first, ...(fix ? { fix } : {}) }
+                : undefined,
+          })
+        }
+        set({ lastRun: summary })
       }
       return summary
     } finally {
@@ -2124,6 +2179,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       future: s.future,
       selection: s.selection,
       notice: s.notice,
+      noticeFix: s.noticeFix,
       lastRun: s.lastRun,
       expandedNodeId: s.expandedNodeId,
       pinnedNodeId: s.pinnedNodeId,
@@ -2160,6 +2216,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       future: [],
       selection: [],
       notice: undefined,
+      noticeFix: undefined,
       lastRun: undefined,
       expandedNodeId: undefined,
       pinnedNodeId: undefined,
@@ -2401,6 +2458,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     past: [],
     future: [],
     notice: initial?.warnings.length ? initial.warnings.join(' · ') : undefined,
+    noticeFix: undefined,
     clipboard: undefined,
     lastRun: undefined,
     busy: false,
@@ -3596,6 +3654,21 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     runNode: async (nodeId) => {
       await runFull([nodeId])
+    },
+
+    applyFix: async (nodeId, fix) => {
+      if (fix.action === 'attachAnnotationChain') {
+        get().attachAnnotationChain(nodeId)
+        return
+      }
+      const node = get().graph.nodes.find((n) => n.id === nodeId)
+      const def = node && getNodeDef(node.type)
+      if (!node || !def || findParam(def, fix.param)?.kind !== 'boolean') return
+      if (node.params[fix.param] !== true) get().setParam(nodeId, fix.param, true)
+      if (get().noticeFix?.nodeId === nodeId) set({ notice: undefined, noticeFix: undefined })
+      // And what it feeds: the run it failed was for them, and `runFull` cancels the auto pass
+      // the edit scheduled, so a Proofread Merges below would otherwise stay empty.
+      await runFull([nodeId, ...dataflowDescendants(get().graph, nodeId)])
     },
 
     cancelRun: () => {

@@ -977,21 +977,38 @@ export type ParamValues = Record<string, ParamValue>
 // ---------------------------------------------------------------------------
 
 /**
- * A remedy a warning offers as a button, drawn directly under its sentence on the card and in the
- * inspector.
+ * A remedy an issue offers as a button, drawn directly under its sentence on the card and in the
+ * inspector — and, for a run's first failure, in the notice (`failureNotice`), which is the only
+ * place a dashboard shows it.
  *
- * **A store action by name, never a callback**, for two reasons. A node definition is headless
+ * **Data a store action reads, never a callback**, for two reasons. A node definition is headless
  * and frozen, so it cannot hold a closure over the store. And a fix is an edit, and every edit is
- * a store action that `lock.test.ts` has put on one side of the lock, so the list of things a
- * button here can do is closed and every one of them is already refused under the lock. The
- * action takes the node id and nothing else.
+ * a store action that `lock.test.ts` has put on one side of the lock: every button goes through
+ * the one, `applyFix(nodeId, fix)`, which dispatches on `action`, so the list of things a button
+ * can do is closed. Whether the button shows under the lock is `fixLiveUnderLock`.
+ *
+ * - `attachAnnotationChain` adds nodes, so it is refused under the lock and its button hidden.
+ * - `tickAndRun` sets a boolean param and runs the node: `setParam`'s kind of edit, live under the
+ *   lock, so a reader of a locked dashboard can still say yes. It comes from `evaluate` throwing a
+ *   `FixableError` — a consent the run found it needed, like a model download.
  */
-export interface IssueFix {
+export type IssueFix = {
   /** What the button says. */
   label: string
   /** Its tooltip: what pressing it will do. */
   title?: string
-  action: 'attachAnnotationChain'
+} & (
+  | { action: 'attachAnnotationChain' }
+  | {
+      action: 'tickAndRun'
+      /** A boolean param of the node. */
+      param: string
+    }
+)
+
+/** Whether a fix's button stays under the lock: only where its action is live there too. */
+export function fixLiveUnderLock(fix: IssueFix): boolean {
+  return fix.action === 'tickAndRun'
 }
 
 /** One line of `validate` carrying its fix. A bare string is the same line with none. */
