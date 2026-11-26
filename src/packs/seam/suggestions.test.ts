@@ -1,0 +1,626 @@
+/**
+ * Load Merge Candidates, against **real parquet bytes** — a trimmed copy of SEAM's rv2 set, written
+ * by pyarrow the way SEAM writes the full one (`__fixtures__/make.py`).
+ *
+ * Reading the file is the point. Every failure this path has had anywhere in Coda has been in the
+ * reading rather than the folding: an id through a float, a nested column dropped in silence, a
+ * dtype that decoded but meant something else. A test that handed `readSuggestions` a hand-built
+ * table would check the half that has never broken.
+ *
+ * What is pinned here, in order of how badly it would hurt:
+ *
+ *  - **root ids come back as text, exactly.** An 18-digit id through a float is a different
+ *    neuron and nothing downstream could tell (invariant 8).
+ *  - the schema the card promises before a fetch is the schema the rows arrive in (invariant 3);
+ *  - `shown` is read, never recomputed — it is SEAM's absolute cutoff (invariant 14);
+ *  - a tip nobody judged is **null**, not `""`, which is "judged, nothing belongs".
+ */
+
+import { readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { ID_COLUMN_NAME, isNeuronId } from '../../core/ids'
+import { defaultParams, findParam, makeInferContext } from '../../core/node'
+import { requireNodeDef } from '../../core/registry'
+import type { ParamValues } from '../../core/node'
+import type { CodaType, TableSchema } from '../../core/types'
+import { columnNames } from '../../core/types'
+import type { LayersValue, PointsValue, TableValue } from '../../core/values'
+import { blobBytes } from '../../data/files/bytes'
+import { openTableFile } from '../../data/files/read'
+import '../../nodes'
+import { peekSuggestions, resetSuggestionPeeks } from './suggestionIndex'
+import { parseSuggestionSet } from './suggestionSet'
+import type { OpenFile } from './suggestionRead'
+import { readSuggestions } from './suggestions'
+import { readFields } from './suggestionRead'
+import { buildQueue, sizeOf } from './reviewQueue'
+import { ORGANELLE_CUT } from './searchTips'
+import type { Field } from './suggestionTables'
+import {
+  CANDIDATE_FIELDS,
+  SOURCE_COLUMN,
+  TIP_FIELDS,
+  field,
+  neuronsSchema,
+  published,
+  schemaOf,
+} from './suggestionTables'
+
+const DIR = 'src/packs/seam/__fixtures__'
+
+/** A committed set: its manifest, and the node's own opener pointed at its files, not a URL. */
+function fixtureSet(dir: string, name: string) {
+  const set = parseSuggestionSet(
+    JSON.parse(readFileSync(`${dir}/fixture.json`, 'utf8')),
+    `https://example.invalid/${name}/fixture.json`,
+  )
+  const open: OpenFile = (file) =>
+    openTableFile(blobBytes(new Blob([readFileSync(`${dir}/${file}`)])))
+  return { set, open }
+}
+
+const { set: SET, open: openLocal } = fixtureSet(DIR, 'coda_rv2')
+
+const built = await readSuggestions(SET, openLocal)
+
+/** A declared output's schema. `CodaType` is a union and only some arms carry one. */
+function schemaOfType(type: CodaType | undefined): TableSchema {
+  const schema = type && 'schema' in type ? type.schema : undefined
+  if (!schema) throw new Error('the output declares no schema')
+  return schema
+}
+
+const def = requireNodeDef('seam:loadMergeCandidates')
+const infer = (params: ParamValues = {}) =>
+  def.inferOutputs!(makeInferContext(def, { ...defaultParams(def), ...params }, {}))
+
+/*
+ * The peek memo is module-level, so without this a `validate` assertion inherits whatever an
+ * earlier test left under the same address — and the states it distinguishes ("still looking",
+ * "failed", "an index") are exactly what it would inherit.
+ */
+beforeEach(resetSuggestionPeeks)
+
+describe('the card', () => {
+  /** Invariant 6: it fetches, so a `cheap` node would refetch on every keystroke anywhere. */
+  it('is expensive', () => {
+    expect(def.cost).toBe('expensive')
+  })
+
+  /** Invariant 2: `inferOutputs` may not fetch, so the columns are a contract, not a discovery. */
+  it('promises every output’s columns before anything is read', () => {
+    const out = infer()
+    expect(columnNames(schemaOfType(out.tips))).toEqual(
+      published(TIP_FIELDS).map((f) => f.name),
+    )
+    expect(columnNames(schemaOfType(out.candidates))).toEqual(
+      published(CANDIDATE_FIELDS).map((f) => f.name),
+    )
+    expect(columnNames(schemaOfType(out.neurons))).toEqual(columnNames(neuronsSchema()))
+  })
+
+  it('asks for an address before it will run, and refuses one that is not a URL', () => {
+    const validate = (params: ParamValues) =>
+      def.validate!(makeInferContext(def, { ...defaultParams(def), ...params }, {})).join(' ')
+    expect(validate({})).toContain('directory of suggestion sets')
+    expect(validate({ url: 'coda_rv2/fixture.json' })).toContain('http')
+    /*
+     * A card whose peek has not landed says nothing. "Still looking" and "wrong" are different
+     * states and only one of them is the reader's problem — the same reason a column picker
+     * keeps a column whose schema has not arrived.
+     */
+    expect(validate({ url: 'https://example.invalid/x/index.json' })).toBe('')
+  })
+})
+
+describe('reading a set', () => {
+  it('reads every tip and every candidate the manifest says it holds', () => {
+    expect(built.tips.length).toBe(SET.counts.tips)
+    expect(built.candidates.length).toBe(SET.counts.candidates)
+    expect(built.shown).toBe(SET.counts.shown)
+  })
+
+  /** The whole of invariant 8, in the one place this node could lose it. */
+  it('reads root ids as text, exactly', () => {
+    for (const name of [ID_COLUMN_NAME, 'candidateId']) {
+      const cells = built.tips.data[name]!
+      expect(cells.length).toBe(built.tips.length)
+      for (const cell of cells) {
+        expect(typeof cell).toBe('string')
+        expect(isNeuronId(cell as string)).toBe(true)
+      }
+    }
+    // The one that would actually bite: an 18-digit id survives the read unchanged, where the
+    // same id through a float would name a neighbouring neuron.
+    const id = SET.neurons[0]!
+    expect(built.tips.data[ID_COLUMN_NAME]).toContain(id)
+    expect(String(Number(id))).not.toBe(id)
+  })
+
+  /** Invariant 3, reached through a file rather than a mismatched pair. */
+  it('publishes rows under exactly the schema it promised', () => {
+    for (const [table, fields] of [
+      [built.tips, TIP_FIELDS],
+      [built.candidates, CANDIDATE_FIELDS],
+    ] as const) {
+      expect(table.schema).toEqual(schemaOf(fields))
+      expect(Object.keys(table.data).sort()).toEqual(
+        published(fields)
+          .map((f) => f.name)
+          .sort(),
+      )
+      for (const field of published(fields)) {
+        expect(table.data[field.name]!.length).toBe(table.length)
+      }
+    }
+  })
+
+  it('reads `shown` as a boolean rather than the text parquet could hand back', () => {
+    const shown = built.tips.data['shown']!
+    for (const cell of shown) expect(typeof cell).toBe('boolean')
+    expect(shown.filter(Boolean).length).toBe(SET.counts.shown)
+  })
+
+  /**
+   * SEAM's verdicts arrive `;`-joined, and the two empty cases are different answers: `""` is
+   * "judged, and nothing in the list belongs", `null` is "nobody looked at this tip". The
+   * fixture holds both on purpose, because a reader folding one into the other would report
+   * 2,331 unlooked-at tips as judgements of "none".
+   */
+  it('keeps a judged-but-empty verdict apart from an unjudged one', () => {
+    const belongs = built.tips.data['seam_belongs']!
+    expect(belongs.filter((cell) => cell === '').length).toBeGreaterThan(0)
+    expect(belongs.filter((cell) => cell === null).length).toBeGreaterThan(0)
+    for (const [i, cell] of belongs.entries()) {
+      // A tip with no verdict has no list, and a tip with a verdict has one — possibly empty.
+      expect(cell === null).toBe(built.tips.data['seam_verdict']![i] === null)
+    }
+  })
+
+  /**
+   * No **damaged** id in the set as published, which is the state to notice a change from.
+   *
+   * SEAM's exporter runs this before writing (their `bccb484`); the loader runs it again because
+   * this is the only place a *reader* can see the failure, and the next set will come from a
+   * pipeline nobody here runs.
+   *
+   * `stray` is **not** asserted to be zero, and that is the finding rather than a relaxation.
+   * The tree-ranker set of 2026-11-14 has four here and fifty-one across the full set, none of
+   * them damaged — they are candidates the verdicts name that the re-ranked search no longer
+   * lists. Pinning zero would mean re-pinning it after every re-rank, and it would go on reading
+   * as corruption, which is what the warning used to call it.
+   */
+  it('finds no damaged id in the set as published', () => {
+    expect(built.damaged).toBe(0)
+  })
+
+  /** A judged id outside its neuron's current lists is ordinary; it must not be miscounted. */
+  it('counts the judged ids a re-ranking left outside the lists, without calling them damaged', () => {
+    expect(built.stray).toBeGreaterThan(0)
+    expect(built.damaged).toBe(0)
+  })
+
+  /** The joined id is the rank-1 row's, for the tip it belongs to — not merely some candidate. */
+  it('joins the rank-1 candidate of that tip, by end_uid', () => {
+    const byEnd = new Map<number, string>()
+    const ends = built.candidates.data['end_uid']!
+    const ranks = built.candidates.data['rank']!
+    const roots = built.candidates.data['candidateId']!
+    for (const [i, end] of ends.entries()) {
+      if (ranks[i] === 1) byEnd.set(end as number, roots[i] as string)
+    }
+    const tipEnds = built.tips.data['end_uid']!
+    const joined = built.tips.data['candidateId']!
+    for (const [i, end] of tipEnds.entries()) {
+      expect(joined[i]).toBe(byEnd.get(end as number) ?? null)
+    }
+  })
+
+  it('draws one point per tip, at the tip rather than at the contact', () => {
+    expect(built.points.positions.length).toBe(built.tips.length * 3)
+    expect(built.points.units).toBe('nm')
+    expect(built.points.attributes).toBe(built.tips)
+    expect(built.points.positions[0]).toBeCloseTo(built.tips.data['x']![0] as number)
+  })
+
+  /**
+   * The neuron rows come from the manifest's list, so a set naming a neuron its tips file has
+   * nothing for still gets a row. Zero tips is an answer; an absent row is not.
+   */
+  it('folds one row per neuron the manifest names, in its order', () => {
+    expect(built.neurons.kind).toBe('neurons')
+    expect(built.neurons.data[ID_COLUMN_NAME]).toEqual([...SET.neurons])
+    let tips = 0
+    let shown = 0
+    for (let i = 0; i < built.neurons.length; i++) {
+      tips += built.neurons.data['tips']![i] as number
+      shown += built.neurons.data['shown']![i] as number
+    }
+    expect(tips).toBe(SET.counts.tips)
+    expect(shown).toBe(SET.counts.shown)
+  })
+
+  /**
+   * The exact per-neuron numbers, because there are **three** implementations of this fold — the
+   * node, the pandas emitter and the R one — and two of them have disagreed before (over
+   * `expectedRight`, the sum of `r` all three dropped on 2026-11-18 at SEAM's word). These are what
+   * all three produce against `__fixtures__`, so a change to any one is checked by running its cell
+   * against the same files and comparing this list.
+   */
+  it('counts each neuron’s tips and shown tips, as both exporters do', () => {
+    expect(built.neurons.data['tips']).toEqual([5, 5, 5, 5, 5])
+    expect(built.neurons.data['shown']).toEqual([2, 2, 2, 2, 2])
+    expect(built.neurons.data['expectedRight']).toBeUndefined()
+  })
+
+  /** The layer is the shown suggestions, two points each: where to look and where to merge. */
+  it('carries a tip and a contact for every shown suggestion, and nothing else', () => {
+    expect(built.suggestions.length).toBe(SET.counts.shown)
+    for (const item of built.suggestions) {
+      expect(isNeuronId(item.neuronId)).toBe(true)
+      expect(isNeuronId(item.candidateId)).toBe(true)
+      expect(item.tipNm).not.toEqual(item.contactNm)
+      expect(item.q).toBeGreaterThanOrEqual(SET.cutoff)
+    }
+  })
+})
+
+/**
+ * The node's own `evaluate`, over HTTP.
+ *
+ * Written because the last node in this pack shipped with an `evaluate` that had never once run:
+ * every part was tested, nothing had run them together, and the first real run found two design
+ * errors in an afternoon. Everything above this point reads a `Blob` and calls `readSuggestions`
+ * directly, which skips `openOverHttp`, `urlHead`, the layer, the manifest check and the warning
+ * — in other words most of what `evaluate` is.
+ *
+ * The server below honours `Range` and answers `HEAD`, because those are the two things the
+ * reader needs of a host and the two a host most often does not do. It is deliberately **not**
+ * shared with `probe-seam-suggestions.mjs`: that one also has to serve cross-origin, and a shared
+ * version would be a helper tuned to neither.
+ */
+describe('the node, end to end over HTTP', () => {
+  let origin = ''
+  let server: Server
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const name = (req.url ?? '/').replace(/^\/+/, '')
+      let bytes: Buffer
+      try {
+        bytes = readFileSync(`${DIR}/${name}`)
+      } catch {
+        res.writeHead(404).end()
+        return
+      }
+      if (req.method === 'HEAD') {
+        res.writeHead(200, { 'content-length': String(bytes.length) }).end()
+        return
+      }
+      const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? '')
+      if (!range) {
+        res.writeHead(200, { 'content-length': String(bytes.length) }).end(bytes)
+        return
+      }
+      const from = Number(range[1])
+      const to = Math.min(Number(range[2]), bytes.length - 1)
+      res
+        .writeHead(206, {
+          'content-length': String(to - from + 1),
+          'content-range': `bytes ${from}-${to}/${bytes.length}`,
+        })
+        .end(bytes.subarray(from, to + 1))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  })
+
+  afterAll(() => server.close())
+
+  const run = async (params: ParamValues = {}) => {
+    const said: string[] = []
+    const out = await def.evaluate({
+      params: { ...defaultParams(def), url: `${origin}/fixture.json`, ...params },
+      refresh: false,
+      reportFetched: () => undefined,
+      warn: (message: string) => said.push(message),
+      publish: () => undefined,
+      input: () => undefined,
+      inputKey: () => undefined,
+      column: () => undefined,
+      columns: () => [],
+      inputPorts: () => [],
+      outputPorts: () => [],
+      resolveSource: () => undefined as never,
+      signal: new AbortController().signal,
+      progress: () => {},
+    } as never)
+    return { out, said }
+  }
+
+  /**
+   * The production shape: a pipeline deposits sets into a directory and keeps an index, and a
+   * card pins one by name. The card reads the *same* files either way, so this is about the
+   * addressing — which is the half a fixture URL never exercises.
+   */
+  /**
+   * The picker is filled by a peek, which is the only shape invariant 2 allows: options are read
+   * synchronously on every inference pass, so the read starts the fetch it cannot answer and
+   * fires `reportSourceLearned` when it lands. The first look is therefore always empty, and the
+   * test is that the second one is not.
+   */
+  it('fills the Set dropdown from the directory, one fetch later', async () => {
+    const address = `${origin}/index.json`
+    const options = () => {
+      const param = findParam(def, 'set')!
+      const list = (param as { options: unknown }).options as (ctx: {
+        params: ParamValues
+      }) => { value: string }[]
+      return list({ params: { url: address } }).map((option) => option.value)
+    }
+    expect(peekSuggestions(address).state).toBe('pending')
+    expect(options()).toEqual([])
+    // One turn of the event loop is all the fetch needs against a server in this process.
+    await vi.waitFor(() => expect(peekSuggestions(address).state).toBe('index'))
+    expect(options()).toEqual(['rv2', 'rv2-mismatched'])
+  })
+
+  /** One field, two kinds of document, told apart by what the document is rather than its name. */
+  it('recognises a single set’s manifest as one, not as a directory', async () => {
+    const address = `${origin}/fixture.json`
+    peekSuggestions(address)
+    await vi.waitFor(() => expect(peekSuggestions(address).state).toBe('single'))
+  })
+
+  /**
+   * The address a reader actually has is the directory's — it is what their browser's address
+   * bar holds. Both the picker and the run must reach the same file from it, or the dropdown
+   * fills and the run then refuses.
+   */
+  it('reads the directory when given only its address, slash or no slash', async () => {
+    for (const address of [`${origin}/`, origin]) {
+      resetSuggestionPeeks()
+      const { out } = await run({ url: address, set: 'rv2' })
+      expect((out['tips'] as TableValue).length).toBe(SET.counts.tips)
+      await vi.waitFor(() => expect(peekSuggestions(address).state).toBe('index'))
+    }
+  })
+
+  it('reads a set chosen by name out of a directory’s index', async () => {
+    const { out } = await run({ url: `${origin}/index.json`, set: 'rv2' })
+    expect((out['tips'] as TableValue).length).toBe(SET.counts.tips)
+  })
+
+  /**
+   * Pinned, not latest: a directory that gains a set changes nothing about a card already
+   * pointed at one, and a card naming a set that is gone says so rather than reading its
+   * neighbour.
+   */
+  it('refuses a set the directory does not hold, listing the ones it does', async () => {
+    await expect(run({ url: `${origin}/index.json`, set: 'rv9' })).rejects.toThrow(
+      /no set called “rv9”.*rv2, rv2-mismatched/s,
+    )
+  })
+
+  it('refuses a directory with no set chosen, rather than guessing one', async () => {
+    await expect(run({ url: `${origin}/index.json` })).rejects.toThrow(/Choose one of its sets/)
+  })
+
+  /**
+   * One field takes either kind of address, decided by what the document *is*. A card that
+   * ignored a control it had no use for would be worse than one that says so.
+   */
+  it('refuses a set named against a single manifest, rather than ignoring it', async () => {
+    await expect(run({ url: `${origin}/fixture.json`, set: 'rv2' })).rejects.toThrow(
+      /nothing for `Set` to choose/,
+    )
+  })
+
+  it('fetches a set and publishes all five outputs', async () => {
+    const { out, said } = await run()
+    expect((out['tips'] as TableValue).length).toBe(SET.counts.tips)
+    expect((out['candidates'] as TableValue).length).toBe(SET.counts.candidates)
+    expect((out['neurons'] as TableValue).length).toBe(SET.neurons.length)
+    expect((out['points'] as PointsValue).positions.length).toBe(SET.counts.tips * 3)
+    // Two annotations per shown suggestion: the tip and the contact.
+    const layers = out['layers'] as LayersValue
+    const annotations = (layers.items[0] as { annotations: unknown[] }).annotations
+    expect(annotations.length).toBe(SET.counts.shown * 2)
+    /*
+     * One note, and only the one: the judged ids a re-ranking left outside the current lists.
+     * The set matches its own manifest and holds no damaged id, so nothing else is said — and
+     * what is said must not read as corruption, which is what this asserts the shape of.
+     */
+    expect(said).toHaveLength(1)
+    expect(said[0]).toMatch(/judged ids name nothing/)
+    expect(said[0]).not.toMatch(/64-bit float|regenerate/)
+  })
+
+  /**
+   * The failure a reader could not otherwise see: a directory holding one run's manifest beside
+   * another run's files. Warned rather than refused — the tables are still readable, and naming
+   * the mismatch is more use than showing nothing.
+   */
+  it('says so when the files do not match the manifest', async () => {
+    const { said } = await run({ url: `${origin}/mismatched.json` })
+    expect(said.join(' ')).toMatch(/does not match its own manifest/)
+    expect(said.join(' ')).toMatch(/tips says 9999/)
+  })
+
+  /**
+   * **The 2026-11-09 incident, as a regression fixture.**
+   *
+   * `__fixtures__/damaged/` is the trimmed set with its ids put back through a float64, the way
+   * a `Series.map` over a nullable `Int64` column produced them — a *string* column of *rounded*
+   * ids, which is why "every id is a string column" did not catch it and why nothing downstream
+   * could have. SEAM fixed the exporter; this is what makes sure a future set that regresses is
+   * caught on read, by us, rather than by whoever eventually clicks a merge.
+   */
+  it('catches ids that have been through a float, and still publishes the sound one', async () => {
+    const { out, said } = await run({ url: `${origin}/damaged/fixture.json` })
+    const tips = out['tips'] as TableValue
+    expect(said.join(' ')).toMatch(/through a 64-bit float/)
+    expect(said.join(' ')).toMatch(/25 tips disagree/)
+    expect(said.join(' ')).toMatch(/judged ids name nothing/)
+    // The rows are still published, and `candidateId` is the joined one rather than the file's.
+    expect(tips.length).toBe(SET.counts.tips)
+    const joined = tips.data['candidateId']!
+    for (const id of joined) {
+      if (typeof id !== 'string') continue
+      // A sound id is not what a float would have left behind.
+      expect(String(BigInt(Number(id)))).not.toBe(id)
+    }
+  })
+
+  it('names the address when the set is not there', async () => {
+    await expect(run({ url: `${origin}/nothing.json` })).rejects.toThrow()
+  })
+})
+
+describe('which set a tip came from', () => {
+  it('labels every tip with the set’s version, as Find Merge Candidates labels its own', () => {
+    const source = built.tips.data[SOURCE_COLUMN] ?? []
+    expect(source.length).toBe(built.tips.length)
+    expect(new Set(source)).toEqual(new Set([`set:${SET.version}`]))
+  })
+
+  it('leaves it null for a set whose manifest names no version', async () => {
+    const old = await readSuggestions({ ...SET, version: undefined }, openLocal)
+    expect(new Set(old.tips.data[SOURCE_COLUMN])).toEqual(new Set([null]))
+  })
+})
+
+/**
+ * A column SEAM added after some sets were made (`Field.optional`): read where the set has it,
+ * nulls where it does not — never a refusal, which would stop every older set loading, and never
+ * a default, since an older set does not say. A required column missing is still refused.
+ */
+describe('a column a set may predate', () => {
+  it('publishes the organelle flag where the set carries it', () => {
+    const flag = built.candidates.data['organelle'] ?? []
+    expect(flag.length).toBe(built.candidates.length)
+    expect(flag.every((value) => typeof value === 'boolean')).toBe(true)
+    expect(flag.some((value) => value === true)).toBe(true)
+    expect(built.candidates.data['organelle_score']?.every((v) => typeof v === 'number')).toBe(
+      true,
+    )
+  })
+
+  it('puts the first candidate’s flag on Tips as `organelle`, as Find Merge Candidates does', () => {
+    const flag = built.tips.data['organelle'] ?? []
+    expect(flag.length).toBe(built.tips.length)
+    expect(flag.every((value) => value === null || typeof value === 'boolean')).toBe(true)
+    expect(flag.some((value) => typeof value === 'boolean')).toBe(true)
+  })
+
+  /**
+   * Find Merge Candidates flags with `ORGANELLE_CUT`, a constant, where SEAM ships its cut in the set
+   * (`pipeline.organelles.cutoff`). Held equal here, so a SEAM re-check that moves it is a failing
+   * test rather than two nodes flagging the same piece two ways.
+   */
+  it('flags at the cut SEAM ships with the set', () => {
+    const shipped = JSON.parse(readFileSync(`${DIR}/fixture.json`, 'utf8')) as {
+      pipeline: { organelles: { cutoff: number } }
+    }
+    expect(ORGANELLE_CUT).toBe(shipped.pipeline.organelles.cutoff)
+  })
+
+  it('publishes nulls for an optional column the set does not hold, and reads the rest', async () => {
+    const reader = await openLocal('candidates.parquet')
+    const fields: readonly Field[] = [
+      field('end_uid', 'end_uid', 'i64'),
+      { from: 'organelle_v9', name: 'organelle_v9', dtype: 'bool', optional: true },
+    ]
+    const read = await readFields(reader, fields, 'The candidates file')
+    expect(read.data['end_uid']).toHaveLength(read.rows)
+    expect(read.data['organelle_v9']).toEqual(new Array(read.rows).fill(null))
+  })
+
+  /**
+   * Held as a list or a struct, which Coda skips: not a column the set predates. Read as one, the
+   * flag would load as nulls and `Exclude organelles` would leave nothing out, unsaid.
+   */
+  it('refuses an optional column the set holds in a shape Coda skips, with the reason', async () => {
+    const reader = await openLocal('candidates.parquet')
+    const skipping = {
+      ...reader,
+      summary: { ...reader.summary, skipped: [...reader.summary.skipped, 'organelle_v9'] },
+    }
+    const fields: readonly Field[] = [
+      { from: 'organelle_v9', name: 'organelle_v9', dtype: 'bool', optional: true },
+    ]
+    await expect(readFields(skipping, fields, 'The candidates file')).rejects.toThrow(
+      /a list or a struct/,
+    )
+  })
+
+  it('still refuses a required column the set does not hold, by name', async () => {
+    const reader = await openLocal('candidates.parquet')
+    await expect(
+      readFields(
+        reader,
+        [field('organelle_v9', 'organelle_v9', 'bool')],
+        'The candidates file',
+      ),
+    ).rejects.toThrow(/has no `organelle_v9` column/)
+  })
+})
+
+/** SEAM's rv4 set, trimmed by `__fixtures__/make_rv4.py`: no review, and `n_l2` on candidates. */
+const rv4 = fixtureSet(`${DIR}/rv4`, 'coda_rv4')
+const rv4Read = await readSuggestions(rv4.set, rv4.open)
+
+describe('a set SEAM did not review (rv4)', () => {
+  // SEAM's own review columns, which nobody filled in for this set.
+  const unreviewed = TIP_FIELDS.filter((f) => f.name.startsWith('seam_') && f.dtype === 'str')
+
+  it('is a file whose review columns name no type, as SEAM wrote them', async () => {
+    const reader = await rv4.open('tips.parquet')
+    const held = new Map(reader.summary.columns.map((column) => [column.name, column]))
+    expect(unreviewed).toHaveLength(4)
+    for (const { from } of unreviewed) expect(held.get(from)?.untyped).toBe(true)
+    // Only those: a typed column is never taken for one.
+    expect(held.get('neuron')?.untyped).toBeUndefined()
+    expect(held.get('q')?.untyped).toBeUndefined()
+  })
+
+  it('reads, publishing the untyped columns as nulls under the schema it promised', () => {
+    expect(rv4Read.tips.length).toBe(rv4.set.counts.tips)
+    expect(rv4Read.candidates.length).toBe(rv4.set.counts.candidates)
+    expect(rv4Read.tips.schema).toEqual(schemaOf(TIP_FIELDS))
+    expect(rv4Read.candidates.schema).toEqual(schemaOf(CANDIDATE_FIELDS))
+    for (const { name } of unreviewed) {
+      expect(rv4Read.tips.data[name]).toEqual(new Array(rv4Read.tips.length).fill(null))
+    }
+    // The ids beside them are read as ever: text, exactly.
+    expect(rv4Read.tips.data[ID_COLUMN_NAME]).toContain(rv4.set.neurons[0])
+  })
+
+  /** Only an optional field may hold nothing: a key written empty would be an empty queue unsaid. */
+  it('refuses a required column written with no type, by name', async () => {
+    const reader = await rv4.open('tips.parquet')
+    await expect(
+      readFields(reader, [field('page', 'page', 'str')], 'The tips file'),
+    ).rejects.toThrow(/`page` holds no values/)
+  })
+
+  it('carries each candidate’s level-2 chunk count, and the review card sizes by it', () => {
+    const counts = rv4Read.candidates.data['n_l2'] ?? []
+    expect(counts.length).toBe(rv4Read.candidates.length)
+    expect(counts.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 1)).toBe(
+      true,
+    )
+    const first = buildQueue(rv4Read.tips, rv4Read.candidates)[0]?.candidates[0]
+    expect(sizeOf(first)?.of).toBe('chunks')
+  })
+
+  it('leaves `n_l2` null on a set that predates it, which sizes in µm³ as before', () => {
+    expect(built.candidates.data['n_l2']).toEqual(new Array(built.candidates.length).fill(null))
+    const first = buildQueue(built.tips, built.candidates)[0]?.candidates[0]
+    expect(sizeOf(first)?.of).toBe('um3')
+  })
+})

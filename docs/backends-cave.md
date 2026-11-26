@@ -1,8 +1,32 @@
 # Backends: CAVE
 
 CAVE: deployments and sign-in, the datastack listing, tables and the row cap, discovery and segment
-properties. Meshes and skeletons are in [backends-cave-geometry.md](backends-cave-geometry.md).
+properties, and the one place Coda writes to a chunkedgraph. Meshes and skeletons are in [backends-cave-geometry.md](backends-cave-geometry.md).
 [backends.md](backends.md) holds what all of them share — the geometry cache and streaming.
+
+
+## Where a datastack's voxels are
+
+`cave/volumes.ts`, the one layer that knows both routes — `precomputed/volume.ts` reads a box and
+knows nothing about CAVE. A datastack names its two volumes in two different ways and neither is
+an address a browser can fetch:
+
+- **The EM is on the *aligned volume*, not on the datastack**: `aligned_volume.image_source`,
+  which is where `caveclient`'s `info.image_source()` reads it from too. It arrives as an
+  already-prefixed `precomputed://gs://…`, so the prefix comes off and the bucket is rewritten,
+  and then it is an ordinary precomputed volume. **No request** — the address is in the record
+  the datastack already fetched.
+- **The supervoxels are not at the graphene address.** `graphene://…/segmentation/table/<table>`
+  is the chunkedgraph; its own `info` names a `data_dir` bucket where the watershed voxels live.
+  So that is one authenticated request (the chunkedgraph is not public even where its bucket is)
+  and then an address anyone can read. Reading the graphene URL as a volume is the plausible
+  mistake and would 404 on every chunk — which the volume reader takes for empty space.
+
+**What comes back from the segmentation volume is supervoxels, not neurons.** A supervoxel id is
+not a root id and is not stable the way a neuron is; turning one into a neuron is a chunkedgraph
+lookup at a timestamp (`roots_binary` — what `caveclient.chunkedgraph.get_roots` calls, and what
+`cavePostBinary` already does). The resolver returns an address rather than a `DataSource` method
+for exactly that reason: the reader cannot make that step and should not look as though it can.
 
 ## CAVE
 
@@ -729,6 +753,49 @@ Read off live responses and cross-checked against `caveclient` 8.0.1's own endpo
   `/table/{v}/count` answers a **500** wrapping a 404, and `/views/{v}/count` is not a route.
   The `views` listing is a *map* rather than a list of names, so a view's description arrives
   with the listing and costs nothing extra — which is the asymmetry `tables.ts` is built around.
+- **A live query (`/query?…`) for a table the datastack does not have answers `500: 'NoneType'
+  object is not subscriptable`**, not a 404. Its first step is `check_read_permission`, which
+  reads `metadata["read_permission"]` off a metadata lookup that returns `None` for an unknown
+  name (MaterializationEngine `utils.py`, read November 2026; seen live on Zetta's
+  `kronauer_ant` with a nucleus table copied from an Aedes graph). So a node reading a *typed*
+  table live rewrites **only a 500 carrying that exact text**, and asks the listing only then, to
+  name what is there (`nucleusReadFailure` in `packs/seam/openEnds.ts`). Not before the read: that
+  would cost a request per run. Not on any 5xx: the same read also asks the chunkedgraph, and the
+  listing is one materialization's, so a table made since then is missing from it while the live
+  read can see it. The card warns from the same listing once it has landed (`unlistedTableIssues`).
+
+### The supervoxel graph and the split preview (`subgraph.ts`, measured 2026-11-22)
+
+What a split weighs, and the two read-only routes that reach it. Read off pychunkedgraph
+(`cutting.py`, `app/segmentation/common.py`) and checked live on FANC (2.20), MICrONS (2.21) and
+FlyWire production (1.27). Used by `packs/seam/splitSites.ts`; `pnpm probe:split-sites` runs it.
+
+- **`GET node/{root}/subgraph?bounds=` is the graph a split cuts** — the preview and this route
+  both call `cg.get_subgraph`. View permission. On 2.x it answers `nodes`, `affinities`, `areas`;
+  **1.27 (FlyWire) answers `atomic_edges` only, and no route there exposes an affinity.** Several
+  MB per box (FANC, 58 µm between the points: 4.2 MB, 43k edges, 8–9 s), pretty-printed.
+- **The affinity is a sum over the contact face.** affinity ÷ area is a mean: FANC 0.09–0.90;
+  MICrONS 1.00 on 95% of edges, so there it is area under another name.
+- **A bare `Infinity`** joins two pieces of one supervoxel cut by a chunk border. Not JSON —
+  the shared parser (`json.ts`'s scan, which already skips string literals) reads it as `Infinity`, and a bare `NaN` as `null`. Ids are **not** asked as text: `int64_as_str` makes the server answer slower (user, 2026-11-23), and the shared parser already quotes any integer too wide for a double, so a supervoxel id arrives as text and a smaller one as a safe integer (`replyId`). Checked on `fanc_sandbox` the same day: the same box, the same cuts, edge for edge.
+- **A proofreader's merge is a stored edge of affinity float32-tiny (1.18e-38) and area 0** — only
+  where the merged pieces had no stored edge between them in the merge's box; otherwise the merge
+  reuses the real edge. A min-cut takes it first: on a FANC neuron with 8 merges in its history,
+  both edges of the preview's cut were proofreader merges.
+- **`bounds` with a negative corner is a 500** (the server splits on `-`); `boundsParam` clamps.
+  Bounds are absolute base voxels, snapped outward to whole chunks (`normalize_bounding_box`).
+- **Only edges with both ends inside the box come back** (`only_internal_edges`, default on). Boxes
+  that tile a region therefore drop every edge crossing a tile border: tiled along the level-2 path
+  between two points, all nine FANC test splits read as "not joined". `splitSitesRun.ts` reads one
+  box per run of up to 3 chunks per axis along the path, each run starting on the chunk the last one ended on, so each step is inside some box.
+- **CAVE's own box misses the join often.** Points 15 µm either side of nine past FANC splits:
+  four were not connected inside the preview's padded box; five times the padding took 19 s and
+  still missed one. The level-2 path reads 0.5–2.5 s for the same cases.
+- **`POST graph/split_preview` writes nothing and needs only view permission**, but a public
+  (virtual) table refuses it — `401 No edits allowed on virtual tables` (`remap_public(edit=True)`).
+  It cuts only within the points' box padded by (240, 240, 24) base voxels. FANC 9–19 s, FlyWire
+  1.7 s. `splitSites` with proofreader merges distrusted reproduced its sides exactly (19 / 8,029
+  supervoxels, the same two edges).
 
 ### Discovery: what is in a datastack
 
@@ -1036,6 +1103,21 @@ object starting at its first byte.
 
 ### Smaller decisions
 
+- **A read that got no answer is asked again, twice, after about 1 s and 4 s; a write never is**
+  (`client.ts`' `readAgain`, `READ_AGAIN_MS`; user, 2026-11-20). A Find Merge Candidates run on Aedes lost
+  41 of 43 extended pieces to "Failed to fetch" from `cave.fanc-fly.com` — the same reads answered
+  200 minutes later — and with them everything accepted on their ends, Auto-extend's most of all.
+  No answer is the dropped HTTP/2 connection `chunkedgraphRead` measured (2026-11-19), or a busy
+  proxy's error page without a CORS header — which can hide a 429 or a 503 too, so those are
+  asked again when the browser cannot see them. Each wait is spread by up to half either way,
+  since a dropped connection fails a dozen reads at once. **A status the browser can see is not
+  asked again**: it is the server's answer. JSON reads and `caveGetBytes` ask again themselves;
+  `chunkedgraphRead` asks again around its `CHUNKEDGRAPH_BUDGET` slot, with requests made once
+  (`cavePostBinary`, `cavePostRawOnce`), so a read waiting holds no slot. `cavePostWrite` calls
+  `requestOnce`: a lost merge reply may be a merge made (`edits.ts`). What it costs: a host that
+  is down, or refuses cross-origin reads, takes ~1.5–7.5 s longer to say so per read; and a shared
+  request (`sharedRequestOptions`, no signal) is still asked again after a Cancel, as its fetch
+  was always finished.
 - **`neuronId` is `str` on this source, and `type` is the only other renamed column.**
   `pt_root_id` → `neuronId` and the `cell_type` annotation kind → `type`; everything else keeps
   CAVE's own spelling (`super_class`, `cell_class`), the same call neuPrint's passthroughs make.
@@ -1088,6 +1170,44 @@ object starting at its first byte.
   document that runs and answers nothing. The loops and `canExportNotebook` both read
   `DatasetFamily.notebook`; see [export.md](export.md#the-softer-half-warning-that-an-export-will-have-gaps-in-it)
   for why that is one field rather than a test repeated at each site.
+
+### Writing to a chunkedgraph: merges, and only from Proofread Merges
+
+Everything above reads. **One module writes**: `src/data/cave/edits.ts`, which sends a merge (and,
+for the sandbox probe only, an undo of a merge it made itself). The full record — what was read off
+pychunkedgraph 2.20.0, every decision with the user, the sandbox test and the first Aedes merge —
+is [seam-merge-plan.md](seam-merge-plan.md). What a change near this code must keep:
+
+- **Three import levels, one test.** The writer is imported only by `packs/seam/mergeBatch.ts`
+  (`MAY_WRITE`), the batch only by `ui/seam/mergeSession.ts` (`MAY_SUBMIT`), the session only by
+  the review card and its overlay (`MAY_OPEN`) — walked by `importGraph.test.ts` and backed by a
+  string search that also refuses a type import. Adding a line there is adding a way to write.
+- **A merge is a confirmation, spent once.** `mergeSupervoxels` takes only a frozen
+  `ConfirmedMerge` from `confirmMerge`, registered in a `WeakSet` and spent by sending. Never
+  retried; no `signal` (aborting a sent POST does not stop the server); redirects refused
+  (`cavePostWrite`).
+- **Outcomes are read off the server's code, not guessed.** Only 400/401/403/404 are `refused`;
+  every other status, an unreachable host and an unreadable success are `unknown`, and an unknown
+  merge is settled by reading the roots — never by sending again.
+- **Supervoxels, not root ids** — checked at layer 1 in `prepareMerges`, beside the writer — and
+  **every root read after a write asks at the server's now** (`Instant` `'server'`): the server
+  does not check that a root is current, maps a root to itself retired or not, and a client clock
+  behind the server's sees the roots from before our own merge.
+- **A lost reply is `unknown` in the batch, always**; only the next plan's `settle` (two reads)
+  decides it was this merge. A merge still out after `SEND_TIMEOUT_MS` holds every Submit until it
+  answers (`mergeSession.ts`), so the pair is not planned again meanwhile.
+- **The guarantee is the per-merge check** (`mergeBatch.ts`): both ends' roots, read just before
+  each merge, must be the neuron's root as the batch last made it and the piece's reviewed root.
+  The pre-flight (`mergePlan.ts`) and the card's currency chips (`rootCurrency.ts`) are advice.
+- **The record is an `unrecorded` param**, written only through the store's write hold
+  (`holdForWrite`), which keeps the card and its document on screen until the batch ends, saves
+  each entry at once, and throws rather than skip one. Every entry names its deployment and
+  datastack, and is read for that chunkedgraph only: a sandbox shares ids with production.
+- **A verdict is keyed on neuron and piece** (`verdictKey`), never on `end_uid`, which a re-run
+  renumbers.
+- **Tests never write.** `src/test/writeGuard.ts` fails any test that reaches an edit endpoint
+  without a stubbed `fetch`; a live write goes to `fanc_sandbox` (`mar2021_test`) only, through
+  `src/test/sandboxWrites.ts`' fence, and is asked of the user every time.
 
 ### What is not done
 

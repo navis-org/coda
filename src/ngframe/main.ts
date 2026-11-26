@@ -15,6 +15,7 @@ import 'neuroglancer/unstable/layer/enabled_frontend_modules.js'
 import 'neuroglancer/unstable/datasource/enabled_frontend_modules.js'
 import 'neuroglancer/unstable/kvstore/enabled_frontend_modules.js'
 import { setupDefaultViewer } from 'neuroglancer/unstable/ui/default_viewer_setup.js'
+import { makeLayer } from 'neuroglancer/unstable/layer/index.js'
 import { getCachedJson } from 'neuroglancer/unstable/util/trackable.js'
 
 import { registerCaveCredentials } from './caveCredentials'
@@ -23,19 +24,28 @@ import { isTypingTarget } from '../core/keys'
 import {
   FRAME_UNAPPLIED_MESSAGE,
   type FrameUnappliedMessage,
+  FRAME_HOVER_MESSAGE,
+  type FrameHoverMessage,
   FRAME_KEY_MESSAGE,
   type FrameKeyMessage,
   isAltDigit,
+  isFindPathKey,
   isFrameKeysMessage,
+  isFramePressMessage,
+  isFrameLayerMessage,
+  isPickKey,
+  isSplitKey,
+  reviewKeyOf,
   FRAME_STATE_MESSAGE,
   FRAME_VIEW_MESSAGE,
   type FrameStateMessage,
   type FrameViewMessage,
   pickView,
   isFrameSegmentsMessage,
+  isFrameSetViewMessage,
   updateIn,
 } from '../data/neuroglancer/frameMessage'
-import type { LayerSelection } from '../data/neuroglancer/scene'
+import type { LayerAnnotations, LayerSelection } from '../data/neuroglancer/scene'
 import { layerListing, parseSceneUrl, segmentEntry } from '../data/neuroglancer/scene'
 import { keepUnseenChanges } from '../data/neuroglancer/selectionEdits'
 
@@ -70,7 +80,10 @@ window.addEventListener('hashchange', () => {
   // fragment names the layers. A merge naming none (the layer bar alone) told no layer anything.
   if (!merge || Array.isArray(parseSceneUrl(window.location.hash)?.['layers'])) told.clear()
 })
-if (window.parent !== window) reportChanges(viewer)
+if (window.parent !== window) {
+  reportChanges(viewer)
+  reportHover(viewer)
+}
 
 /** Post the layers and the view to the card whenever they settle after a change. */
 function reportChanges(ng: typeof viewer): void {
@@ -89,7 +102,12 @@ function reportChanges(ng: typeof viewer): void {
       const { generation, value } = getCachedJson(layers)
       if (generation !== posted) {
         posted = generation
-        post({ type: FRAME_STATE_MESSAGE, state: { layers: value }, update: applied })
+        // Less the frame's own layers: the card's scene never had them (`setOwnLayer`).
+        const own = ownLayersShown()
+        const layersOf = Array.isArray(value)
+          ? value.filter((layer: { name?: unknown }) => !own.has(String(layer?.name)))
+          : value
+        post({ type: FRAME_STATE_MESSAGE, state: { layers: layersOf }, update: applied })
       }
       // The view only when it moved — a camera drag posts once it settles, not per frame.
       const view = pickView((key) => {
@@ -108,19 +126,128 @@ function reportChanges(ng: typeof viewer): void {
   })
 }
 
+/** How often, at most, the segment under the pointer is posted: often enough to follow a sweep. */
+const HOVER_MS = 100
+
+/**
+ * Post the segment under the pointer whenever it changes (`FrameHoverMessage`): the root id each
+ * segmentation layer's own hover highlight is drawn from (`segmentSelectionState`, the mapped id,
+ * so a root rather than a supervoxel), from the first visible layer that has one. Read on
+ * neuroglancer's pointer signal, at most every `HOVER_MS`, and cleared when the pointer leaves.
+ *
+ * With the pointer's place in nanometres (`pointerNm`), posted as it moves over a segment too, so
+ * a hand pick is taken where the pointer is rather than where it came onto the segment.
+ */
+function reportHover(ng: typeof viewer): void {
+  type Hovered = { hasSelectedSegment?: boolean; selectedSegment?: bigint }
+  let posted = ''
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const post = (hit: { segment: string; layer: string } | null) => {
+    const segment = hit?.segment ?? null
+    const positionNm = segment === null ? undefined : pointerNm(ng)
+    const text = `${segment}@${positionNm?.join(',')}@${hit?.layer}`
+    if (text === posted) return
+    posted = text
+    const message: FrameHoverMessage = {
+      type: FRAME_HOVER_MESSAGE,
+      segment,
+      positionNm,
+      ...(hit ? { layer: hit.layer } : {}),
+    }
+    window.parent.postMessage(message, window.location.origin)
+  }
+  const read = (): { segment: string; layer: string } | null => {
+    for (const managed of ng.layerManager.managedLayers) {
+      if (!managed.visible) continue
+      const layer = managed.layer as {
+        displayState?: { segmentSelectionState?: Hovered }
+      } | null
+      const hovered = layer?.displayState?.segmentSelectionState
+      const id = hovered?.hasSelectedSegment ? hovered.selectedSegment : undefined
+      if (id !== undefined && id !== 0n) return { segment: id.toString(), layer: managed.name }
+    }
+    return null
+  }
+  ng.layerSelectedValues.changed.add(() => {
+    timer ??= setTimeout(() => {
+      timer = undefined
+      post(read())
+    }, HOVER_MS)
+  })
+  document.documentElement.addEventListener('mouseleave', () => {
+    clearTimeout(timer)
+    timer = undefined
+    post(null)
+  })
+}
+
+/**
+ * Where the pointer is, in absolute nanometres, or undefined where neuroglancer cannot say: the
+ * pointer off every panel, or a coordinate space with no `x`/`y`/`z` in metres. Rounded to the
+ * nanometre — a place to look for a voxel, never finer than one.
+ */
+function pointerNm(ng: typeof viewer): [number, number, number] | undefined {
+  const mouse = ng.mouseState as unknown as {
+    active?: boolean
+    position?: Float32Array
+    coordinateSpace?: {
+      names?: readonly string[]
+      units?: readonly string[]
+      scales?: Float64Array
+    }
+  }
+  const space = mouse.coordinateSpace
+  if (!mouse.active || !mouse.position || !space?.names || !space.units || !space.scales) {
+    return undefined
+  }
+  const at: number[] = []
+  for (const axis of ['x', 'y', 'z']) {
+    const i = space.names.indexOf(axis)
+    if (i < 0 || space.units[i] !== 'm') return undefined
+    const nm = mouse.position[i]! * space.scales[i]! * 1e9
+    if (!Number.isFinite(nm)) return undefined
+    at.push(Math.round(nm))
+  }
+  return at as [number, number, number]
+}
+
 /*
- * Segments and colours set in place, from the card (`FrameSegmentsMessage`): no layer is restored,
+ * Segments and colours, and a local annotation layer's annotations, set in place from the card
+ * (`FrameSegmentsMessage`): no layer is restored,
  * so this applies under the cursor and keeps the camera, the layout and loaded meshes. Only ids
  * that changed are touched. Adding to `visibleSegments` selects too, and deleting from
  * `selectedSegments` hides too — the pair neuroglancer's own restore relies on.
  */
 /** Whether ⌥1–9 are Coda's right now (`FrameKeysMessage`) — the dashboard's tab keys. */
 let claimAltDigits = false
+/**
+ * Whether `F` is Coda's find path here (`FrameKeysMessage.findPath`): claimed and handed back, and
+ * neuroglancer's own Find Path button hidden (`neuroglancer.html`, by this attribute). Off, `F` and
+ * the button are neuroglancer's own find-path tool, as Spelunker binds it.
+ */
+let claimFindPath = false
+/** Whether the review keys are Coda's (`FrameKeysMessage.review`): only while a review card is open. */
+let claimReview = false
 
 window.addEventListener('message', (event) => {
   if (event.source !== window.parent || event.origin !== window.location.origin) return
   if (isFrameKeysMessage(event.data)) {
     claimAltDigits = event.data.altDigits
+    claimFindPath = event.data.findPath === true
+    claimReview = event.data.review === true
+    document.documentElement.toggleAttribute('data-coda-find-path', claimFindPath)
+    return
+  }
+  if (isFramePressMessage(event.data)) {
+    pressInViewer(event.data.code, event.data.key)
+    return
+  }
+  if (isFrameSetViewMessage(event.data)) {
+    setView(event.data.position, event.data.width)
+    return
+  }
+  if (isFrameLayerMessage(event.data)) {
+    setOwnLayer(event.data.name, event.data.layer)
     return
   }
   if (!isFrameSegmentsMessage(event.data)) return
@@ -128,6 +255,7 @@ window.addEventListener('message', (event) => {
   // fully applied, so its reports are dropped rather than read against a scene it is not showing.
   let all = true
   for (const selection of event.data.layers) all = setSelection(selection) && all
+  for (const change of event.data.annotations ?? []) all = setAnnotations(change) && all
   if (all) applied = event.data.update
   else {
     window.parent.postMessage(
@@ -139,6 +267,162 @@ window.addEventListener('message', (event) => {
     )
   }
 })
+
+/**
+ * A key pressed into neuroglancer as if typed in the frame (`FramePressMessage`): down and up on the
+ * viewer's own element, where its key bindings listen (`KeyboardEventBinder`), so a tool bound to
+ * the key — Spelunker's find path on `F` — toggles as it would from the keyboard.
+ */
+function pressInViewer(code: string, key: string): void {
+  const element = (viewer as unknown as { element?: HTMLElement }).element ?? document.body
+  for (const type of ['keydown', 'keyup'] as const) {
+    element.dispatchEvent(
+      new KeyboardEvent(type, { code, key, bubbles: true, cancelable: true }),
+    )
+  }
+}
+
+/**
+ * Point the camera and frame it, in the scene's own coordinate space.
+ *
+ * Read by shape, as the segmentation layer below is and for the same reason — the package ships
+ * no declarations for this path. `restoreState` is preferred because it is the same entry point
+ * the fragment uses, so a position set here and one restored from a URL cannot diverge; the
+ * `value` assignment is the fallback for a build that exposes only the trackable.
+ */
+function setView(position: readonly number[], width: number | undefined): void {
+  const ng = viewer as unknown as {
+    navigationState?: { position?: unknown }
+    projectionScale?: { value?: number }
+    crossSectionScale?: { value?: number }
+  }
+  const at = ng.navigationState?.position as
+    { restoreState?: (json: unknown) => void; value?: Float32Array } | undefined
+  if (at) {
+    if (typeof at.restoreState === 'function') at.restoreState([...position])
+    else if (at.value instanceof Float32Array) at.value = Float32Array.from(position)
+  }
+  if (width === undefined) return
+  /*
+   * The 3D camera's distance and the cross-sections' zoom, which are two trackables rather than
+   * one. `crossSectionScale` is units per *pixel*, so a span becomes a scale by dividing by a
+   * panel's worth of them — assumed rather than measured, because the panels are neuroglancer's
+   * to lay out and a frame that read their size would have to re-read it on every resize.
+   *
+   * The two panels answer different questions at the same site and want different amounts of
+   * room, so `width` — the span of the thing being looked at — is a reference rather than
+   * either answer. The 3D frames **twice** it: what a piece is attached to is the question
+   * there, and that is a fact about its surroundings. A section frames **half** it: whether a
+   * membrane runs through is read at the scale of the membrane.
+   */
+  /*
+   * Written only where they differ. A reviewer paging through a queue asks for the same framing
+   * every time and only the position moves, so an unconditional write is two state changes per
+   * click that say nothing — and every state change is a reason for the viewer to reconsider
+   * which chunks it wants. Measured: at a click every 300 ms the sections never get past the
+   * coarsest mip (`pnpm probe:ng-chunks`), so anything that invalidates for no reason is worth
+   * not doing.
+   */
+  set(ng.projectionScale, width * PROJECTION_SPAN)
+  set(ng.crossSectionScale, (width * CROSS_SECTION_SPAN) / CROSS_SECTION_PIXELS)
+}
+
+/** A trackable number, where it is one and the value is new. */
+function set(trackable: { value?: number } | undefined, value: number): void {
+  if (trackable && typeof trackable.value === 'number' && trackable.value !== value) {
+    trackable.value = value
+  }
+}
+
+/** A cross-section panel's assumed width in pixels, for turning a span into a scale. */
+const CROSS_SECTION_PIXELS = 500
+/** How much of the asked width the 3D panel frames. See `setView`. */
+const PROJECTION_SPAN = 2
+/** And how much of it a cross-section frames. */
+const CROSS_SECTION_SPAN = 0.5
+
+/**
+ * The frame's own layers (`FrameLayerMessage`), by name: the layer object it built, and its spec
+ * less its annotations — what decides whether the next spec can be set in place. Owned by object, so
+ * a layer of the scene or the reader's that happens to bear the name is never touched; and left out
+ * of every report to the card (`reportChanges`), so an own layer is never saved.
+ */
+const ownLayers = new Map<string, { readonly layer: object; readonly fixed: string }>()
+
+/**
+ * The names of the frame's own layers still shown, by object — and the rest forgotten: a navigation
+ * throws them away, and a layer of the scene or the reader's that takes the name since is theirs.
+ */
+function ownLayersShown(): Set<string> {
+  const shown = new Set<string>()
+  for (const [name, own] of ownLayers) {
+    if (viewer.layerManager.getLayerByName(name) === own.layer) shown.add(name)
+    else ownLayers.delete(name)
+  }
+  return shown
+}
+
+/**
+ * A layer of the frame's own (`FrameLayerMessage`) — find path's route, say: its annotations
+ * replaced in place where the layer is already here with the same shader and properties, else the
+ * layer (re)built after the scene's — added through the layer manager, so nothing else is rebuilt
+ * and the camera stays — and made visible, where the reader hid it (user, 2026-11-24). `null`
+ * removes it. Where another layer holds the name, or neuroglancer refuses the spec, nothing changes
+ * but a line on the console.
+ */
+function setOwnLayer(name: string, spec: Readonly<Record<string, unknown>> | null): void {
+  const manager = viewer.layerManager
+  const existing = manager.getLayerByName(name)
+  const own = ownLayers.get(name)
+  const mine = existing !== undefined && existing === own?.layer
+  if (existing && !mine) {
+    console.warn(`A layer of the scene is named "${name}": Coda draws nothing over it.`)
+    return
+  }
+  if (spec === null) {
+    if (existing) manager.removeManagedLayer(existing)
+    ownLayers.delete(name)
+    return
+  }
+  const { annotations, ...rest } = spec
+  const fixed = JSON.stringify(rest)
+  // Shown whatever the reader did to it since: a new start or route is something to look at.
+  if (
+    existing &&
+    own?.fixed === fixed &&
+    setAnnotations({ name, annotations: annotations as unknown[] })
+  ) {
+    existing.setVisible(true)
+    return
+  }
+  try {
+    const built = makeLayer(viewer.layerSpecification, name, spec)
+    if (existing) manager.removeManagedLayer(existing)
+    manager.addManagedLayer(built)
+    ownLayers.set(name, { layer: built, fixed })
+  } catch (error) {
+    console.warn(`Neuroglancer refused the layer "${name}":`, error)
+  }
+}
+
+/**
+ * Replace a local annotation layer's annotations, as its own `restoreState` reads them from a scene:
+ * the layer and its render layers are kept, and `changed` redraws them. False where the layer is
+ * not a local annotation layer whose source has loaded, or an annotation does not parse — the card
+ * then navigates, which restores the whole layer.
+ */
+function setAnnotations(change: LayerAnnotations): boolean {
+  const layer = viewer.layerManager.getLayerByName(change.name)?.layer as
+    { localAnnotations?: { restoreState?: (json: unknown) => void } } | null | undefined
+  const local = layer?.localAnnotations
+  if (typeof local?.restoreState !== 'function') return false
+  try {
+    local.restoreState(change.annotations)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /**
  * The part of a segmentation layer this touches. Read by shape because the package ships no
@@ -253,17 +537,35 @@ function sameColors(a: Record<string, string>, b: Record<string, string>): boole
  * and never Coda's, so without this the dashboard's ⌥1–9 did nothing once somebody had clicked into
  * the scene — and neuroglancer toggled a layer's picking instead. Capture phase, so it is taken
  * before neuroglancer's own bindings see it; a field in the frame keeps it, for the same reason
- * Coda's own fields do (⌥digit is how a Mac types `¡` and `™`).
+ * Coda's own fields do (⌥digit is how a Mac types `¡` and `™`). The hand-pick key (`isPickKey`)
+ * goes back the same way, for the review card (`segmentHover.ts`), the split key (`isSplitKey`)
+ * for the split gallery (`ui/seam/splitSession.ts`), and the find-path key (`isFindPathKey`) for
+ * Coda's find path (`ui/seam/splitKey.ts`) — where the card says it is on (`claimFindPath`).
  */
 window.addEventListener(
   'keydown',
   (event) => {
-    if (!claimAltDigits || window.parent === window || isTypingTarget(event.target)) return
-    if (!isAltDigit(event)) return
+    if (window.parent === window || isTypingTarget(event.target)) return
+    // ⌥1–9 and the review keys only while Coda claims them; the hand-pick key always, being
+    // unbound in neuroglancer.
+    const claimed =
+      (claimAltDigits && isAltDigit(event)) ||
+      isPickKey(event) ||
+      isSplitKey(event) ||
+      (claimFindPath && isFindPathKey(event)) ||
+      (claimReview && reviewKeyOf(event) !== undefined)
+    if (!claimed) return
     event.preventDefault()
     event.stopImmediatePropagation()
+    // A held key repeats, and a key handed back carries no `repeat`: one press, one message.
+    if (event.repeat) return
     window.parent.postMessage(
-      { type: FRAME_KEY_MESSAGE, code: event.code, altKey: true } satisfies FrameKeyMessage,
+      {
+        type: FRAME_KEY_MESSAGE,
+        code: event.code,
+        key: event.key,
+        altKey: event.altKey,
+      } satisfies FrameKeyMessage,
       window.location.origin,
     )
   },

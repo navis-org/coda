@@ -241,12 +241,23 @@ buttons and the resize corner fade in on hover. Three choices here are load-bear
 **The run bar moves to the window's top edge** (`.dashboard__edge`), overlaid for the reason it
 was overlaid in the bar: a strip that took height would resize every cell twice per run.
 
-**The pill sits over the first cell's title**, and the obvious places were wrong. It was top
-centre at first, and the screenshot put it on the left cell's ⤢: under any even column count the
-centre is the column boundary. The corners hold ✕, the grips and the tables' pagers. A fading pill
-is woken by exactly the movement heading for whatever it covers, so it has to cover a label, and
-the first cell's title is one in every layout. It is held awake while hovered, or it would fade
-from under the click. It stays in the tab order while faded, and keyboard focus shows it.
+**The pill sits top centre unless that covers a control, and where the controls are is measured.**
+It was top centre at first, and the screenshot put it on the left cell's ⤢ (two columns of equal
+width put the column boundary at the centre). It then moved over the first cell's title, which
+is a label in every layout, but that always hid one cell's name. Neither fixed spot works,
+because where the buttons fall along the top edge depends on the column count, the cells'
+widths and what each strip draws. So each time the pill wakes, `FocusExit` reads the rects of
+every control in its band (`button`, links, inputs, grips, resize corners, faded ones included,
+since those are what the pointer is about to reveal) and of each cell's name, and `placePill`
+(`focusExitPlacement.ts`, a pure function over spans) slides it to the nearest spot either side
+of the centre that covers neither, `PILL_CLEARANCE` (4px) from its neighbours. With no such spot
+it gives way on a name, never a control. The name is measured as text with a `Range`: its box is
+a stretched flex item, and `scrollWidth` is never less than the box, so both read as the whole
+strip and the pill went on covering the name. Measured at 1400 × 900 with five cells: 0, −138,
+0 and +129px from centre at one to four columns, nothing covered. It measures on a wake and on a window resize, never
+per `pointermove`. A fading pill is woken by exactly the movement heading for whatever it
+covers, so it must never cover a button. It is held awake while hovered, or it would fade from
+under the click. It stays in the tab order while faded, and keyboard focus shows it.
 
 Moving the pointer over a Neuroglancer cell does not wake the pill: an `<iframe>` sends this
 document nothing. Moving off the embed does.
@@ -369,12 +380,13 @@ dearer. A twelve-cell dashboard on a sixty-node graph during a mesh stream (4 pu
 spends about 66 µs per second on it.
 
 One thing not to *undo* while here: `previewVersion` is subscribed ungated, where `CodaNodeView`
-gates it on `isViewer`. Porting that gate would be wrong. `canHaveCell` refuses only annotations, so
+gates it on `isViewer` or the body's own `drawsInputs`. Porting that gate would be wrong. `canHaveCell` refuses only annotations, so
 a **non-viewer** node can hold a cell, and this component draws such a node as a full-size
 `ValuePreview` of its own output — which for the nodes that publish previews, Skeletons and Meshes,
 is the streaming value itself. `onPreview` bumps `previewVersion` alone and never `runVersion`, so
 the gate would freeze exactly that cell mid-stream. On the canvas it is safe because a non-viewer
-card shows a one-line summary.
+card shows a one-line summary, unless its body draws from `inputValues` — which is what
+`drawsInputs` is for, and what `seam:proofreadMerges` sets.
 
 **What this does not reach**, and it is a bound worth knowing rather than a loose end here: a
 viewer only refreshes on a render something else schedules, and `runNode` on an *upstream* card
@@ -390,6 +402,39 @@ with `resolveScope`, not here.
 The regression test is in `dashboard.test.tsx`, and its shape is the point — every other test in
 that file runs first and enters the grid second, which is the one order that cannot see this. It
 loads a wizard graph with `dashboard: true`, renders, and runs *underneath* the mounted grid.
+
+## A failure out of sight
+
+**A run that ends with failures names the first one, and why, in the notice** (`failureNotice`,
+`core/failureNotice.ts`): "Find Merge Candidates failed: … One more node failed too." It said only
+"1 node failed", which was enough on the canvas, where the failed card is red with its reason in
+the band, and nothing on a dashboard — the canvas is gone, and a node with no cell failed out of
+sight. Reported over Find Merge Candidates refusing its model download, whose "tick `Allow model
+download`" sat on a card nobody could see (2026-11-26). The notice is drawn by `DashboardView` as
+well as `Editor` (`StatusNotice`), through `IssueText`, so a link in the reason can be followed.
+
+**And the button that answers it, where the failure knows one.** A run error thrown as a
+`FixableError` (`core/errors.ts`) carries an `IssueFix`; the scheduler keeps it on
+`NodeRunInfo.fix`, the card draws it under the message (`nodeIssues`), and the store pins the
+node and a **copy** of its fix to the notice as `noticeFix` — drawn only while `notice` is still
+the sentence it came with, so any later write of the notice retires it. A copy, because the notice
+outlives edits on purpose: a clean run keeps a failure notice whose node it never ran (an auto
+pass after an unrelated edit skips the expensive node), and that edit's `refreshStates` has
+already turned the node `stale` and dropped its fix. A failure with a fix is named first. Every
+button goes through one store action, `applyFix`, and the lock rule is `fixLiveUnderLock` beside
+`IssueFix`. The one so far is the model download's
+"Allow model download" (`openWindowModel.ts`): `tickAndRun` ticks the boolean param and runs the
+node **and everything its output reaches** (`dataflowDescendants`) — `runFull` cancels the auto pass the edit scheduled, so a run
+of the node alone left a Proofread Merges below it empty. A param and a run, so it is live under
+the lock (`lock.test.ts`), unlike `attachAnnotationChain`, whose button the lock hides.
+
+Proofread Merges' empty foot says the same thing from below (`emptyQueue`, `reviewQueue.ts`):
+unwired, muted, not run, failed or blocked — naming the failure that stopped it (`rootFailure`, over
+references too), with its reason and fix — or ran and sent nothing. It used to say "wire in Load Merge Candidates and run it" whatever the reason.
+
+**One line, not a list**, because the notice holds one sentence and any later `setNotice` replaces
+it. The first failure is the likeliest cause: a node below a failed one is `blocked`, not failed,
+and is not counted. The same text on the canvas, deliberately — one notice, not one per surface.
 
 ## The run bar
 

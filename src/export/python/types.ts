@@ -50,6 +50,7 @@ export type PyModule =
   | 'os'
   | 're'
   | 'unicodedata'
+  | 'warnings'
   | 'copy'
   | 'pandas'
   | 'numpy'
@@ -95,6 +96,7 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
   os: { statement: 'import os' },
   re: { statement: 'import re' },
   unicodedata: { statement: 'import unicodedata' },
+  warnings: { statement: 'import warnings' },
   copy: { statement: 'import copy' },
   pandas: { statement: 'import pandas as pd', pip: 'pandas' },
   numpy: { statement: 'import numpy as np', pip: 'numpy' },

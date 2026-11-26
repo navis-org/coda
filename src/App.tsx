@@ -18,6 +18,8 @@ import { SharedLinkGate } from './ui/panels/SharedLinkGate'
 import { GuidesDialog } from './ui/panels/GuidesDialog'
 import { WizardDialog } from './ui/panels/WizardDialog'
 import { WhatsNew } from './ui/panels/WhatsNew'
+import { MergeSubmitHost } from './ui/seam/MergeSubmitHost'
+import { SplitGalleryHost } from './ui/seam/SplitGalleryHost'
 import { StartPage } from './ui/panels/StartPage'
 import { SmallScreenGate } from './ui/panels/SmallScreenGate'
 import { ZooGate } from './ui/panels/ZooGate'
@@ -28,6 +30,9 @@ import { GroupPeek } from './ui/panels/GroupPeek'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
 import { ScreenMap } from './ui/tour/ScreenMap'
 import { useNarrowShell } from './ui/smallScreen'
+import { useDownloads } from './ui/useDownloads'
+import { useForEach } from './ui/useForEach'
+import { useRunNotify } from './ui/notify'
 import { WorkflowScope } from './ui/viewers/workflowScope'
 
 export function App() {
@@ -94,6 +99,7 @@ export function App() {
         style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
       >
         {!focused && <Toolbar />}
+        <RunEffects />
         {dashboardOpen ? <DashboardView /> : <Editor />}
         {/*
          * Between the canvas and the inspector, and before it in the DOM so tab order runs left to
@@ -179,6 +185,14 @@ export function App() {
          */}
         <FeedbackNudge />
         {/*
+         * Submit's merge overlay, here rather than in the review card that opens it: a batch
+         * writing to a segmentation must outlive the card's surface (the dashboard unmounts the
+         * canvas). Portalled, so its place here decides nothing but that it is always mounted.
+         */}
+        <MergeSubmitHost />
+        {/* The split gallery (`K` over a neuron in Neuroglancer), mounted here for the same reason. */}
+        <SplitGalleryHost />
+        {/*
          * The same corner as the nudge, which stands down while this is up. Waits for the launch
          * sequence by itself; see `ui/whatsNew.ts` for who is shown it at all.
          */}
@@ -192,4 +206,18 @@ export function App() {
       </div>
     </WorkflowScope.Provider>
   )
+}
+
+/**
+ * A run's files and its notice when it lands — Download nodes, a `For Each`'s per-pass files,
+ * the title flash. Under `App`, not in `Editor` (where they were) and not on a card: a run
+ * finishing is a whole-app event, a collapsed card unmounts its body, and `Editor` is not mounted
+ * while the dashboard is up — a run started there wrote none of its files (user, 2026-11-20).
+ * A component of its own, drawing nothing, so what they subscribe to re-renders only this.
+ */
+function RunEffects(): null {
+  useDownloads()
+  useForEach()
+  useRunNotify()
+  return null
 }

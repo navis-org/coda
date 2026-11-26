@@ -4,7 +4,7 @@
  * store because that is where the flag is honoured, so no writer can forget it.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addNode, emptyGraph } from '../core/graph'
 import { defaultParams } from '../core/node'
@@ -64,5 +64,36 @@ describe('an unrecorded param', () => {
     const before = store().past.length
     store().setParam('ng', 'selectionEdits', ['+1'])
     expect(store().past).toHaveLength(before + 1)
+  })
+})
+
+/**
+ * Unrecorded is about undo, not about running: a presentational one (the camera) changes no result
+ * and schedules nothing, while one that is data (`seam:proofreadMerges`'s merge record, which `Merges` and
+ * `Current` read) re-runs like any edit, or the card would show a result from before the write.
+ */
+describe('an unrecorded param that is data', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('schedules a run where a presentational one does not', () => {
+    const def = requireNodeDef('seam:proofreadMerges')
+    store().loadGraph(
+      addNode(store().graph, {
+        id: 'review',
+        type: def.type,
+        position: { x: 0, y: 300 },
+        params: defaultParams(def),
+      }),
+    )
+    vi.useFakeTimers()
+    vi.clearAllTimers()
+    store().setParam('ng', 'view', '{"dataset":"x","view":{}}')
+    const camera = vi.getTimerCount()
+    vi.clearAllTimers()
+    store().setParam('review', 'merges', '[]')
+    expect(vi.getTimerCount()).toBe(camera + 1)
+    expect(store().past.length).toBe(0)
   })
 })

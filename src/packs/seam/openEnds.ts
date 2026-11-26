@@ -1,0 +1,693 @@
+/**
+ * Find Open Ends: where a reconstruction stops short, scored by SEAM's Model E.
+ *
+ * **Stage 3 of the merge-candidate pipeline.** `seam:loadMergeCandidates` reads a run somebody else did
+ * on a server; this does the work in the browser, on demand, for the neuron on the wire.
+ *
+ * The stages that find a *candidate* for each open end are `seam:findMergeCandidates`, downstream of
+ * this one — a reversal of the 2026-11-09 plan, which had them growing into this node
+ * (`docs/seam-suggestions-plan.md`, "A node after Find Open Ends"). What made the split safe is
+ * that the `Tips` table published here is a complete interface: the search needs a tip's
+ * position in nanometres and its neuron's root id and nothing else.
+ *
+ * **It publishes what it measured and nothing else** (`OPEN_END_FIELDS`). It used to carry every
+ * column a later stage would fill, present and null, which was right while one node was to run
+ * all nine stages — the shape would not change as they landed. With the search downstream those
+ * nulls became pickers offered a choice this node can never answer, so they are gone;
+ * `seam:findMergeCandidates` folds its own columns on.
+ *
+ * ## What it answers, and what it does not
+ *
+ * `e_tip` per tip: the best Model E cell within 1 µm of it. That is the feature `p_tip` is fitted
+ * on, and on its own it is a ranking of the neuron's ends by how much they look like somewhere a
+ * neurite was cut off. It is **not** `p_tip` and it is not a probability — `p_tip` also needs
+ * `segclr`, which is the assessors' output, and the cutoff and `r` are calibrated on both.
+ *
+ * ## Why it streams
+ *
+ * A whole Aedes neuron is 417 windows and about a minute of scanning (measured, with the tiling
+ * kept). A tip, though, is finished long before that: its `e_tip` can only come from a window
+ * whose centre is within the crop radius plus 1 µm, so once those centres are scored, nothing
+ * later can change it. `openEndsOps.ts` holds that bookkeeping; what it buys is rows appearing as
+ * the scan sweeps the arbour rather than a minute of nothing.
+ *
+ * ## The skeleton
+ *
+ * A tip is a leaf of a skeleton, and which skeleton decides what a tip is. The `Skeletons` port
+ * is the honest answer — Skeletonize Meshes and Clean Skeletons are on the canvas where their
+ * settings are visible and their results cached. Unwired, the node skeletonizes the mesh itself
+ * with SEAM's own settings, so the thing works on a bare Meshes wire.
+ *
+ * **Both paths end in one function.** `tipsOf` is the only definition of a tip in Coda, so the
+ * two cannot come to disagree about one — which is the failure a choice like this invites, and it
+ * would show up as a slightly different set of ends, never as an error.
+ *
+ * ## Kinks
+ *
+ * `Also look for kinks` adds SEAM's fifth decision: a sharp turn inside an unbranched run, where
+ * a side branch swallowed the real end so the skeleton carried on instead of stopping. Off by
+ * default, and the default is the measurement — on the Aedes neuron this was measured on kinks
+ * were 111 of 964 candidates, every one of them scored like a tip, so about an eighth more run.
+ * They are not bad candidates when looked at (19 of 38 judged right against the tips' 216 of
+ * 359), but almost none of them clear the cutoff: 2 of the fixture's 610 are `shown`. An eighth
+ * more run for a handful of ends is a reader's decision, not a default. The rule is `tips.ts`'.
+ */
+
+import { packNode } from '../../core/registry'
+import type { EvalContext } from '../../core/node'
+import { T } from '../../core/types'
+import { isMeshesValue, meshSurfaceArea } from '../../core/values'
+import type {
+  MeshGeometry,
+  MeshesValue,
+  SkeletonGeometry,
+  SkeletonsValue,
+  Value,
+} from '../../core/values'
+import {
+  forgetSeamScan,
+  meshKeyFor,
+  runSeamReduce,
+  runSeamWindows,
+} from '../../pyodide/seamWindows'
+import type { SeamWindowRequest } from '../../pyodide/seamWindows'
+import type { ModelSession } from '../../ml/session'
+import type { WindowConfig } from './windowConfig'
+import type { Tips } from './tips'
+import { NM_PER_UM } from '../../data/units'
+import type { NeuronId } from '../../core/ids'
+import { idText, isSegmentId } from '../../core/ids'
+import { caveServerFor } from '../../data/cave/datastack'
+import { somataFor, somataLive } from '../../data/cave/nuclei'
+import { grapheneFor } from '../../data/cave/rootIds'
+import { noLongerCurrent, notRoots } from './rootMoment'
+import {
+  CAVE_DATASET_INPUT,
+  caveTableParam,
+  caveTargetOfType,
+  caveTargetOfValue,
+  unlistedTable,
+  unlistedTableIssues,
+} from '../../nodes/lib/caveParams'
+import type { CaveTarget } from '../../nodes/lib/caveParams'
+import { foreignBackend } from '../../nodes/lib/datasetParam'
+import { CaveError } from '../../data/cave/client'
+import type { CaveRequestOptions } from '../../data/cave/client'
+import { tableListFor } from '../../data/cave/tables'
+import { runOpenEnds } from './openEndRun'
+import { schemaOf } from './suggestionTables'
+import { notNanometres, windowFieldsFrom } from './windowConfig'
+import { scoreWindows } from './windowRun'
+import { OPEN_END_MODELS, OPEN_END_TASK, openEndModel } from './models'
+import { DOWNLOAD_PARAM, openWindowModel } from './openWindowModel'
+import { afterShare } from './progress'
+import { warnSkeletonizeWait } from '../../nodes/lib/skeletonizeOps'
+import type { TipRule } from './tips'
+import { SEAM_TIP_RULE, tipsOf } from './tips'
+import { SEAM_SKELETONIZE, tipSkeletons } from './tipSkeleton'
+import type { OpenEnd } from './openEndsOps'
+import { E_TIP_UM, OPEN_END_FIELDS, openEndsTable, reachNm } from './openEndsOps'
+
+/** Of the progress bar, before a window is built. The model is 71 MB on a cold browser. */
+const DOWNLOAD_SHARE = 0.15
+
+/**
+ * Centres built, scored and folded before the next page.
+ *
+ * The page is three things at once: how often rows can appear, how much tensor is in flight, and
+ * how long Cancel takes — a call is inside ONNX Runtime and Pyodide with no interrupt point a
+ * message reaches, so the signal is read between pages. Thirty-two windows is a few seconds.
+ */
+const PAGE = 32
+
+/** The nucleus table field's label, as a refusal about it names it. */
+const NUCLEUS_FIELD = 'Nucleus table'
+
+const unknownModel = (id: string) =>
+  `This graph names the open-end model \`${id}\`, which this build does not carry. ` +
+  `Choose one under \`Model\`.`
+
+export const openEndsNode = packNode({
+  type: 'seam:openEnds',
+  label: 'Find Open Ends',
+  category: 'analysis',
+  description:
+    'Score a neuron’s tips for whether the reconstruction stops short there, with SEAM’s ' +
+    'open-end model.',
+  guide:
+    'Scores the surface around each of a neuron’s skeleton tips with SEAM’s Model E. `e_tip` is ' +
+    'the best score within a micrometre of the tip: a ranking of where a neurite looks cut off, ' +
+    'not a probability. Rows appear as the scan reaches them. Wire `Skeletons` to decide what a ' +
+    'tip is; unwired, the node skeletonizes the mesh itself.',
+  cost: 'expensive',
+  inputs: [
+    { id: 'meshes', label: 'Meshes', type: T.meshes() },
+    {
+      id: 'skeletons',
+      label: 'Skeletons',
+      type: T.skeletons(),
+      required: false,
+    },
+    /*
+     * A **reference**: it names the datastack the nucleus table is read from rather than
+     * consuming anything. The meshes on the wire cannot say which datastack they came from, and
+     * a reference creates no ordering dependency, so this does not make a cycle out of
+     * `Dataset → Meshes → Find Open Ends` plus `Dataset → Find Open Ends`.
+     */
+    CAVE_DATASET_INPUT,
+  ],
+  outputs: [{ id: 'tips', label: 'Tips', type: T.table() }],
+  params: [
+    {
+      id: 'model',
+      kind: 'enum',
+      label: 'Model',
+      default: OPEN_END_MODELS[0]!.id,
+      options: OPEN_END_MODELS.map((model) => ({ value: model.id, label: model.label })),
+      help: 'Which open-end checkpoint to score with.',
+    },
+    {
+      id: DOWNLOAD_PARAM,
+      kind: 'boolean',
+      label: 'Allow model download',
+      default: false,
+      help: 'The weights are tens of megabytes, fetched once and kept in this browser. Off by default so a graph that opens on its own does not reach for them.',
+    },
+    {
+      id: 'prune',
+      kind: 'number',
+      label: 'Prune twigs (µm)',
+      default: SEAM_TIP_RULE.pruneUm,
+      min: 0,
+      step: 0.5,
+      help: 'Twigs shorter than this go before the tips are taken, as SEAM does. A wavefront skeleton sprouts single-node spurs off the backbone and every one of them is a false open end. 0 keeps them.',
+    },
+    {
+      id: 'heal',
+      kind: 'number',
+      label: 'Heal fragments (µm)',
+      default: SEAM_TIP_RULE.healUm,
+      min: 0,
+      step: 0.5,
+      help: 'Join fragments whose loose ends are this close, end to end, before the tips are taken. A skeleton of a segmentation is normally several disconnected pieces, and the ends where it was cut are not open ends — on the neuron this was measured on they outnumbered the real ones four to one. 0 heals nothing; a long bridge invents topology, which is why SEAM caps it at 1 µm.',
+    },
+    caveTableParam({
+      id: 'nucleusTable',
+      label: NUCLEUS_FIELD,
+      placeholder: 'nucleus_detection_v0',
+      help: 'A CAVE table of nuclei, read for each neuron’s soma so `Soma mask` has something to measure from. Only needed where the dataset does not publish soma positions itself; wire the Dataset it belongs to.',
+    }),
+    /*
+     * **Set by Find Merge Candidates for a piece's chain, never on the card** (`RerunSettings`): a mesh
+     * smaller than any nucleus cannot hold one, and the lookup was most of a small piece's chain
+     * (`docs/seam-extend-plan.md`, "Phase 0 — results"). 0, the default, asks about every mesh.
+     */
+    {
+      id: 'nucleusMinAreaUm2',
+      kind: 'number',
+      label: 'Nucleus lookup from (µm²)',
+      default: 0,
+      min: 0,
+      advanced: true,
+      internal: true,
+      help: 'Ask the nucleus table only about meshes with at least this much surface. A mesh smaller than any nucleus cannot hold one. 0 asks about every mesh.',
+    },
+    {
+      id: 'somaMask',
+      kind: 'number',
+      label: 'Soma mask (µm)',
+      default: SEAM_TIP_RULE.somaUm,
+      min: 0,
+      step: 1,
+      help: 'No tip within this of the soma, where the source knows where it is. A cell body is a hairball of ends and none of them is a missing neurite. 0 keeps them.',
+    },
+    {
+      id: 'kinks',
+      kind: 'boolean',
+      label: 'Also look for kinks',
+      default: false,
+      help: `Score the sharp turns inside a branch as well as the tips. Where a small side branch swallowed the real end, the skeleton carries on around a corner instead of stopping, so there is no tip to ask about — only a turn of more than ${SEAM_TIP_RULE.kinkTurnDeg}° over ${SEAM_TIP_RULE.kinkLengthUm} µm of path. Off by default: on the neuron this was measured on kinks were 111 of 964 candidates and far fewer of the answers, so they cost about an eighth of the run for a small number of extra ends.`,
+    },
+  ],
+
+  /**
+   * The same schema `seam:loadMergeCandidates` promises, from the same list — so a column picker
+   * downstream is offered the same choices whichever node feeds it, and is offered them **before
+   * anything runs**. Invariant 2's reason: inference may not fetch, and a schema that only
+   * appeared after a minute of scanning would leave every picker below it empty until then.
+   */
+  inferOutputs: () => ({ tips: T.table(schemaOf(OPEN_END_FIELDS)) }),
+
+  validate(ctx) {
+    const issues: string[] = []
+    const id = String(ctx.params.model)
+    if (!openEndModel(id)) issues.push(unknownModel(id))
+    // The card's half of `nucleusReadFailure`.
+    const table = String(ctx.params.nucleusTable).trim()
+    // A Dataset from another backend has no CAVE tables to list.
+    if (table && !foreignBackend(ctx.inputs.dataset, 'cave')) {
+      const where = caveTargetOfType(ctx.inputs.dataset, ctx.params)
+      issues.push(...unlistedTableIssues(NUCLEUS_FIELD, table, where))
+    }
+    return issues
+  },
+
+  async evaluate(ctx) {
+    const meshes = ctx.input('meshes')
+    if (!isMeshesValue(meshes)) throw new Error('Meshes input is missing')
+    const given = ctx.input('skeletons') as SkeletonsValue | undefined
+    // Both inputs, since a voxel skeleton is as wrong as a voxel mesh and fails less visibly.
+    for (const [what, units] of [
+      ['meshes', meshes.units],
+      ['skeletons', given?.units],
+    ] as const) {
+      const refusal = notNanometres(what, units)
+      if (refusal) throw new Error(refusal)
+    }
+    const id = String(ctx.params.model)
+    const model = openEndModel(id)
+    if (!model) throw new Error(unknownModel(id))
+
+    const { session, config } = await openWindowModel({
+      model,
+      task: OPEN_END_TASK,
+      download: ctx.params.download === true,
+      downloadShare: DOWNLOAD_SHARE,
+      signal: ctx.signal,
+      progress: (fraction, note) => ctx.progress(fraction, note),
+      // `e_tip` is defined over pooled cells, so the cell size is part of the question and not a
+      // default this node may pick. A checkpoint that does not publish one was not scored this
+      // way, and guessing 0.5 µm would be answering with a number nobody fitted.
+      check: (parsed) =>
+        parsed.scan
+          ? undefined
+          : `${model.label} publishes no \`scan\` block, so there is no cell size to pool its ` +
+            'scores at. This node needs a checkpoint scored over a whole neuron.',
+    })
+    // Narrowed by `check`, which refused before the weights were fetched.
+    const scan = config.scan!
+
+    const bySkeletonId = new Map<string, SkeletonGeometry>()
+    for (const item of given?.items ?? []) bySkeletonId.set(String(item.id), item)
+
+    /*
+     * SEAM's numbers with the card's three laid over them: the kink constants have no field of
+     * their own, so spreading is what keeps them from being three more numbers to keep in step.
+     */
+    const rule: TipRule = {
+      ...SEAM_TIP_RULE,
+      pruneUm: Math.max(0, Number(ctx.params.prune)),
+      healUm: Math.max(0, Number(ctx.params.heal)),
+      somaUm: Math.max(0, Number(ctx.params.somaMask)),
+    }
+    const kinks = Boolean(ctx.params.kinks)
+    const ends: OpenEnd[] = []
+    const items = meshes.items
+    let endUid = 0
+    let skipped = 0
+    let unsnapped = 0
+    let nearSoma = 0
+    let kinkCount = 0
+
+    /*
+     * **The session is open from here**, so everything that can throw is inside the `finally`
+     * that closes it. `nucleiFor` used to sit above this line, and it is the likeliest throw in
+     * the whole node — a datastack that has no such table answers 500, which is how a mistyped
+     * table name arrives. That left a WebGPU session and a 71 MB model holding a heap nothing
+     * would give back, on the one path a reader is most likely to take twice.
+     */
+    try {
+      /*
+       * The skeletonizing is said before it starts, where it is long — the house rule for a wait,
+       * and this one is not free: a 3.7 M-face neuron is a minute of wavefront before a single
+       * window is built. Only for meshes the node will skeletonize itself; a wired skeleton has
+       * already been paid for on the canvas.
+       */
+      const unwired = meshes.items.filter((item) => !bySkeletonId.has(String(item.id)))
+      if (unwired.length > 0) {
+        warnSkeletonizeWait(ctx, { ...meshes, items: unwired }, SEAM_SKELETONIZE.waves)
+      }
+
+      /*
+       * The somata, if a table was named: read at `[1, 1, 1]` (`somataLive`, or `somataFor` where
+       * the datastack has no chunkedgraph — `nucleiFor` says which), so they arrive in nanometres
+       * like the meshes. That is the whole reason this reads the table itself rather than taking one from a
+       * wired CAVE table node: a plain table query answers in the table's own **voxels**, and a
+       * soma a factor out either masks nothing or masks the neuron, with nothing failing.
+       *
+       * A neuron with no row keeps every tip, which is what no soma has always meant here; a root
+       * holding two nuclei is a merge and gets none, for the same reason.
+       */
+      const somata = await nucleiFor(ctx, meshes, ctx.input('dataset'))
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]!
+        const neuronId = String(item.id)
+        const share = (done: number) => afterShare(DOWNLOAD_SHARE, (i + done) / items.length)
+        if (item.indices.length === 0) {
+          skipped += 1
+          continue
+        }
+
+        ctx.progress(share(0), `${neuronId}: the skeleton (${i + 1} of ${items.length})`)
+        const wired = bySkeletonId.get(neuronId)
+        const made = await tipSkeletons(
+          { ...meshes, items: [item] },
+          wired ? { ...(given as SkeletonsValue), items: [wired] } : undefined,
+          rule,
+          ctx.signal,
+        )
+        // The table first where there is one, else whatever the source published with the mesh.
+        // Looked up by the spelling the read was asked in (`idText`), never `String` (invariant 8).
+        const soma =
+          somata.get(idText(item.id) ?? '') ?? (item.soma ? somaPoint(item) : undefined)
+        const tips = tipsOf(made.items[0]!, item, {
+          rule,
+          kinks,
+          ...(soma ? { somaNm: soma } : {}),
+        })
+        unsnapped += tips.unsnapped
+        nearSoma += tips.nearSoma
+        kinkCount += tips.kinks
+        if (tips.positions.length === 0) continue
+
+        const firstUid = endUid
+        endUid += tips.positions.length / 3
+        await scoreTips({
+          mesh: item,
+          tips,
+          session,
+          config,
+          reduceUm: scan.reduceUm,
+          signal: ctx.signal,
+          progress: (done, total) => {
+            ctx.progress(
+              share(0.05 + (0.95 * done) / total),
+              `${neuronId}: window ${done} of ${total}`,
+            )
+          },
+          onSettled: (settled, best) => {
+            for (const t of settled) {
+              ends.push({
+                neuronId,
+                endUid: firstUid + t,
+                kind: tips.kinds[t]!,
+                x: tips.positions[t * 3]!,
+                y: tips.positions[t * 3 + 1]!,
+                z: tips.positions[t * 3 + 2]!,
+                eTip: best[t]! === -Infinity ? null : best[t]!,
+              })
+            }
+            // In the order the final table uses, which is the order they settled in.
+            ctx.publish({ tips: openEndsTable(ends) })
+          },
+        })
+      }
+    } finally {
+      // Neither of these may mask what brought us here, and the second must run whatever the
+      // first does: a failed `close` would otherwise leave the cached tiling — on a large neuron
+      // over a hundred megabytes of float64 mesh — in a heap that never gives it back.
+      await session.close().catch(() => undefined)
+      // The tiling holds the mesh as float64 — on a large neuron, over a hundred megabytes in a
+      // heap that never gives it back. Nothing follows this run, so it goes.
+      await forgetSeamScan().catch(() => undefined)
+    }
+
+    if (skipped > 0) ctx.warn(`${skipped} of ${items.length} meshes have no faces, so no tips.`)
+    if (unsnapped > 0) {
+      ctx.warn(
+        `${unsnapped} ends had no mesh surface within reach and were dropped. A skeleton and a ` +
+          'mesh that disagree this much are usually from different timepoints.',
+      )
+    }
+    if (nearSoma > 0) {
+      ctx.warn(`${nearSoma} ends were dropped for sitting within ${rule.somaUm} µm of a soma.`)
+    }
+    /*
+     * The cost, not a census. `kind` already carries which candidate is which, so a tally would
+     * say nothing the table does not — what a reader cannot read off the table is that these are
+     * the rows the extra time went on. No message where there were none: a warning that fires on
+     * every run with the switch on is one a reader learns to scroll past, and nothing was spent.
+     */
+    if (kinkCount > 0) {
+      // The tips are the denominator, and a neuron can have none of them — every tip masked at
+      // the soma or dropped for having no surface, with kinks surviving further out. `… % more
+      // than nothing` is not a number, so that case says what happened instead.
+      const tipCount = ends.length - kinkCount
+      ctx.warn(
+        tipCount > 0
+          ? `${kinkCount} of the ${ends.length} candidates are kinks, so this run scored about ` +
+              `${Math.round((100 * kinkCount) / tipCount)}% more windows than the tips alone ` +
+              'would have.'
+          : `Every one of the ${kinkCount} candidates is a kink, so without \`Also look for ` +
+              'kinks` this neuron would have had no open ends at all.',
+      )
+    }
+    return { tips: openEndsTable(ends) }
+  },
+})
+
+interface ScoreTipsOptions {
+  readonly mesh: MeshGeometry
+  readonly tips: Tips
+  readonly session: ModelSession
+  readonly config: WindowConfig
+  /** `config.scan.reduceUm`, resolved once by the caller. */
+  readonly reduceUm: number
+  readonly signal?: AbortSignal
+  readonly progress: (done: number, total: number) => void
+  readonly onSettled: (settled: readonly number[], best: Float64Array) => void
+}
+
+/**
+ * One neuron's tips scored: tile once, then sweep, score and pool page by page.
+ *
+ * Out of `evaluate` because this is the part a reader follows on its own — the three calls a
+ * page costs and the one conversion between them — and inside `evaluate` it could only be read
+ * with the whole per-neuron scope in mind.
+ *
+ * **The tiling and the mesh cross once.** Every call after the first names the key and sends
+ * neither, which is measured at 5.4 s a tip against 0.4 s. The key is minted from the mesh's own
+ * arrays rather than written here: a key a node describes a mesh with is a key two different
+ * meshes can share.
+ */
+async function scoreTips(options: ScoreTipsOptions): Promise<void> {
+  const { config, mesh, session, signal, tips } = options
+  const pre = config.preprocessing
+  const meshKey = meshKeyFor(mesh.positions, mesh.indices)
+  const ask = (over: Partial<SeamWindowRequest>) =>
+    runSeamWindows(
+      {
+        positions: new Float32Array(0),
+        indices: new Uint32Array(0),
+        units: 'nm',
+        ...windowFieldsFrom(pre),
+        drawEvery: 1,
+        limit: 0,
+        meshKey,
+        ...over,
+      },
+      { signal },
+    )
+
+  // An empty selection: tile, and say where the windows are. Nothing is built yet.
+  const tiling = await ask({
+    positions: mesh.positions,
+    indices: mesh.indices,
+    only: new Int32Array(0),
+  })
+
+  await runOpenEnds({
+    tipsNm: tips.positions,
+    centresNm: tiling.tilingCentresNm,
+    within: reachNm(pre.windowRadiusUm),
+    tipReachNm: E_TIP_UM * NM_PER_UM,
+    cellUm: options.reduceUm,
+    pageSize: PAGE,
+    signal,
+    onSettled: options.onSettled,
+    score: async (centres, done, total) => {
+      options.progress(done, total)
+      const page = await ask({ only: centres })
+      if (page.windows === 0)
+        return { cellsNm: new Float32Array(0), scores: new Float32Array(0) }
+      const scored = await scoreWindows(
+        session,
+        page.points,
+        page.feats,
+        page.windows,
+        pre.nPoints,
+        {
+          signal,
+        },
+      )
+      /*
+       * **Pooled to cells before anything reads it**, which is not a tidy-up: `e_tip` is the best
+       * *cell* within a micrometre, and a cell is the best point in a 0.5 µm box standing at that
+       * point's position. Folding the raw points instead would count a point whose own cell is
+       * represented somewhere outside the micrometre — a slightly higher score, on every tip,
+       * with nothing to say so.
+       *
+       * Per page, which is what `score_neuron` does and what the idempotence of a maximum allows:
+       * the page's points are pooled and thrown away, and a neuron's — tens of millions of them —
+       * never exist at once.
+       */
+      const cells = await runSeamReduce(
+        { pointsNm: page.sourceNm, scores: scored.pointLogits, cellUm: options.reduceUm },
+        { signal },
+      )
+      return { cellsNm: cells.pointsNm, scores: cells.scores }
+    },
+  })
+}
+
+/**
+ * The neurons worth asking the nucleus table about: each once — a neuron can arrive as several
+ * items, and the counts are of neurons — in the chunkedgraph's grammar, since an id it could not
+ * parse is not a root to ask about, and with at least `minAreaUm2` of mesh surface (summed over
+ * its items, the meshes in nanometres): a smaller one cannot hold a nucleus.
+ */
+export function askedForNucleus(meshes: MeshesValue, minAreaUm2: number): string[] {
+  const area = new Map<string, number>()
+  for (const item of meshes.items) {
+    const id = idText(item.id)
+    if (!id || !isSegmentId(id)) continue
+    const um2 =
+      minAreaUm2 > 0 ? meshSurfaceArea(item.positions, item.indices) / NM_PER_UM ** 2 : 0
+    area.set(id, (area.get(id) ?? 0) + um2)
+  }
+  return [...area].filter(([, um2]) => um2 >= minAreaUm2).map(([id]) => id)
+}
+
+/**
+ * Each neuron's soma from a CAVE nucleus table, in nanometres — or nothing, where none was named.
+ *
+ * **Read here rather than taken from a wired CAVE table node.** A plain table query answers in
+ * the table's own voxels — `spec.ts` records measuring exactly that, "a client that took the raw
+ * column would put every synapse a factor out, with nothing failing, because the cloud is
+ * internally consistent either way" — and a soma a factor out either masks nothing or masks the
+ * whole neuron. `somataFor` asks at `[1, 1, 1]`, so there is no setting to get wrong.
+ *
+ * The CAVE table card *can* now be asked for nanometres (`Position units`), so the wired route
+ * is no longer impossible — this stays the default because it needs nothing configured and is
+ * the same path the datastacks that declare a nucleus table already take.
+ *
+ * It is also the path the datastacks that *do* declare a nucleus table already take, so a
+ * dataset that later declares one answers the same way with this field left empty.
+ *
+ * ## At each neuron's own moment, not the Dataset's materialization
+ *
+ * The neuron on the wire is usually one somebody is proofreading, and every merge makes a new
+ * root that no materialization has heard of — read at the Dataset's, it had "no row", and its
+ * soma went unmasked (`docs/seam-live-plan.md`). So where the datastack has a chunkedgraph, the
+ * table is read live, at the last moment each root was current (`somataLive`); the Dataset says
+ * only which datastack. A root that has been replaced since is read as it was then, and said: the
+ * meshes above were fetched for that same old root, so the whole run is about the neuron as it
+ * stood. Without a chunkedgraph root ids never move, and the materialization is as good as any.
+ */
+async function nucleiFor(
+  ctx: EvalContext,
+  meshes: MeshesValue,
+  dataset: Value | undefined,
+): Promise<Map<string, readonly [number, number, number]>> {
+  const table = String(ctx.params.nucleusTable).trim()
+  if (!table) return new Map()
+  const target = caveTargetOfValue(dataset, ctx.params)
+  if (!target) {
+    throw new Error(
+      `\`Nucleus table\` names \`${table}\`, but there is no datastack to read it from. Wire ` +
+        'the Dataset these meshes came from into `Dataset`.',
+    )
+  }
+  const options = { deployment: target.deployment, signal: ctx.signal }
+  const server = await caveServerFor(target.datastack, options)
+  const ids = askedForNucleus(meshes, Number(ctx.params.nucleusMinAreaUm2))
+  if (ids.length === 0) return new Map()
+  const graphene = await grapheneFor(target.datastack, options)
+  const read = async () =>
+    graphene
+      ? await somataLive(server, graphene, target.datastack, table, ids, options)
+      : {
+          somata: await somataFor(
+            server,
+            target.datastack,
+            target.version,
+            table,
+            ids,
+            options,
+          ),
+          replaced: new Map<NeuronId, number>(),
+          unknown: [],
+        }
+  let answer: Awaited<ReturnType<typeof read>>
+  try {
+    answer = await read()
+  } catch (error) {
+    throw await nucleusReadFailure(error, table, target, options)
+  }
+  const { somata, replaced, unknown } = answer
+  if (replaced.size > 0) {
+    ctx.warn(
+      `${noLongerCurrent(replaced, {
+        one: 'its soma is from before that edit',
+        many: 'their somata are from before those edits',
+      })} To read the neuron as it is now, run Update Root IDs above the meshes.`,
+    )
+  }
+  if (unknown.length > 0) {
+    ctx.warn(`${notRoots(unknown, target.datastack)}, so no soma was looked for.`)
+  }
+  const asked = ids.length - unknown.length
+  const missing = asked - somata.size
+  if (missing > 0) {
+    // Not an error: a nucleus table is routinely incomplete, and a root holding two nuclei is a
+    // merge that `somataFor` gives no soma at all. Those tips are kept, which is what no soma
+    // has always meant here — said rather than left as a quietly uneven mask.
+    ctx.warn(
+      `${missing} of ${asked} neurons have no row in \`${table}\`, so their tips are not ` +
+        'masked near the soma. A neuron holding two nuclei is a merge and counts as none.',
+    )
+  }
+  return somata
+}
+
+/**
+ * What to throw for a nucleus read the server refused: the listing's sentence where the table is
+ * not in the datastack, or the server's own answer where it is.
+ *
+ * Asked **after** the failure, never before the read. A missing table is answered by CAVE's live
+ * query with `500: 'NoneType' object is not subscriptable` (its permission check reads the
+ * table's metadata, which is `None`), and a message about Python says nothing about the field
+ * that caused it. Checking first would cost a request on every run, and the listing is a
+ * materialization's, so it would refuse a table made since then that the live read can see.
+ *
+ * **Only that answer is rewritten** (`MISSING_TABLE`). Any other failure — a 5xx from the
+ * chunkedgraph lookup in the same read, a passing outage — says nothing about the table, and the
+ * listing could not settle it anyway: it is the Dataset's materialization's, and a table made
+ * since then is missing from it while the live read can see it. With the signature the server has
+ * already said the table does not exist; the listing only names what does. A listing that cannot
+ * be had leaves the original error standing.
+ */
+export async function nucleusReadFailure(
+  error: unknown,
+  table: string,
+  target: CaveTarget,
+  options: CaveRequestOptions,
+): Promise<unknown> {
+  if (!(error instanceof CaveError) || error.status !== 500) return error
+  if (!error.detail?.includes(MISSING_TABLE)) return error
+  const entries = await tableListFor(target.datastack, target.version, options).catch(
+    () => undefined,
+  )
+  const line = entries && unlistedTable(NUCLEUS_FIELD, table, target, entries)
+  return line ? new Error(line, { cause: error }) : error
+}
+
+/** What CAVE's live query answers for a table it does not have. See `nucleusReadFailure`. */
+const MISSING_TABLE = "'NoneType' object is not subscriptable"
+
+/** The source's soma position, as a tuple the tip rule can read. */
+function somaPoint(mesh: MeshGeometry): [number, number, number] {
+  const at = mesh.soma!
+  return [at[0]!, at[1]!, at[2]!]
+}

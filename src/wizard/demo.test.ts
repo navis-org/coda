@@ -123,7 +123,16 @@ describe('the graphs themselves', () => {
     const warnings = [...DEMOS.values()]
       .flatMap(issuesOf)
       .filter((issue) => issue.severity === 'warning' && issue.fix !== 'attachAnnotationChain')
-    expect(warnings.length).toBeLessThanOrEqual(40)
+    /*
+     * 42 since `core.tablePoints`: its coordinate pickers are `optional` with no default, so a
+     * fresh card asks for them in words rather than resolving to the first numeric column it can
+     * find. It caught itself doing the latter — a demo was reading `size` as z — which is the
+     * failure the picker rules exist for, and one warning is the price of not having it.
+     *
+     * 41 since two SEAM nodes were dropped (2026-11-26), measured: Find Split Candidates' consent
+     * gate warned until `Download the model` was ticked, which a demo graph never does.
+     */
+    expect(warnings.length).toBeLessThanOrEqual(41)
   })
 
   it('wires every required input of the node being demonstrated', () => {

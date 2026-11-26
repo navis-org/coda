@@ -1,0 +1,566 @@
+{
+ "what": "A trimmed copy of SEAM's rv4 set, for Coda's tests. Not a suggestion set.",
+ "dataset": "aedes",
+ "datastack": "wclee_aedes_brain",
+ "snapshot": "2026-11-15 20:15:00+00:00",
+ "neurons": [
+  "648518347496004653",
+  "648518347498313551"
+ ],
+ "test_neuron": null,
+ "pipeline": {
+  "skeleton": {
+   "tool": "navis mesh2skeleton(method='wavefront', shave=True), heal LEAFS max 1 um",
+   "navis": "2.0.0-rc.1 (27a93c4 shave)",
+   "mesh": "drop_internals (whole mesh if <10% kept)"
+  },
+  "tips": {
+   "prune_twigs_um": 1.0,
+   "kink_path_um": 1.0,
+   "kink_deg": 60,
+   "kink_nms_um": 2.0,
+   "snap": "nearest mesh vertex",
+   "soma_mask_um": 10.0
+  },
+  "model_e": {
+   "ckpt": "E_oe3_all_s0 (FlyWire, zero-shot on Aedes)",
+   "window_radius_um": 15.0,
+   "spacing_um": 0.2,
+   "cell_um": 0.5,
+   "e_tip": "best cell logit within 1 um of the tip",
+   "e_tip_floor": -2.6701560020446777
+  },
+  "search": {
+   "cutout_half_width_um": 3.0,
+   "cutout_xy_nm": 64,
+   "roots_at": "snapshot - 1 ms",
+   "pool_max_dist_um": 0.5,
+   "top_k": 100,
+   "ranker": {
+    "kind": "tree (LightGBM lambdarank, adopted 2026-11-11)",
+    "features": [
+     "min_dist_um",
+     "touching",
+     "log_vol",
+     "has_shape",
+     "align",
+     "caliber_ratio",
+     "elongation",
+     "ahead",
+     "l2c",
+     "l2x",
+     "end_dist_um"
+    ],
+    "model_file": "ranker/model.txt",
+    "fitted_on": "aedes_h1 m1 block A, m1 10k (ranker_m1.py, seed 0), whole pools with sizes and end_dist_um; LightGBM lambdarank (gbm_worker.PARAMS), stopped on a 10% hold-out; ranker_tip A+",
+    "placement": "contact",
+    "pool": "every object within pool_max_dist_um of Q; the whole pool is ranked, then cut to top_k",
+    "sizes": "l2c = log10 of the candidate's L2 chunk count (CAVE, at the snapshot), l2x = l2c x log10(Q's count) / 5 (seam.candidates.size_features)",
+    "end_dist_um": "the tip to the candidate's nearest voxel touching Q",
+    "score": "geo_score = the booster's raw score; geo_rank its order (1 = best)"
+   },
+   "n_l2": "candidates.parquet n_l2: the candidate's L2 chunk count at the snapshot (the count l2c is log10 of)"
+  },
+  "own_tip": {
+   "own_um": 2.0,
+   "rule": "keep a candidate only if its contact is within own_um of the tip and no other tip of the neuron is nearer; geo_rank renumbered in the kept list"
+  },
+  "assessor": {
+   "ckpt": "n3_mal_mask_s0, s1, s2 (32 nm mask, maleCNS flyCLR backbone)",
+   "patch": "129^3 at 32 nm (Aedes z 45 -> 32 nm), centred on the contact",
+   "inputs": "masks only: union Q+C, and side labels (+1 C, -1 Q); no EM",
+   "missing_patch": "a candidate without a patch takes its seed's fixed score, its lowest on rr_h1c_val (the calibration list ref's fits come from); filled marks it",
+   "missing_patch_score": [
+    -258.37689208984375,
+    -5643.474609375,
+    -415.00860595703125
+   ]
+  },
+  "ref": {
+   "design": "X = [-geo_rank, log(vol_um3), clip(assessor score of seed k, -score_clip, score_clip)]; logit_k = ((X - mu) / sd) @ w; logit = mean over k",
+   "score_clip": 20.0,
+   "seeds": [
+    {
+     "k": 0,
+     "mu": [
+      -98.47155291261137,
+      -3.399308678908845,
+      -5.871937371628823
+     ],
+     "sd": [
+      57.31284933927063,
+      2.4183713928165798,
+      5.078408522084348
+     ],
+     "w": [
+      1.00904265649029,
+      0.5971720292572514,
+      3.9368531331626744
+     ]
+    },
+    {
+     "k": 1,
+     "mu": [
+      -98.47155291261137,
+      -3.399308678908845,
+      -4.8073273707423745
+     ],
+     "sd": [
+      57.31284933927063,
+      2.4183713928165798,
+      3.845365178969782
+     ],
+     "w": [
+      1.0774452683642353,
+      0.3971954343895509,
+      3.1755423967376784
+     ]
+    },
+    {
+     "k": 2,
+     "mu": [
+      -98.47155291261137,
+      -3.399308678908845,
+      -6.14324157560598
+     ],
+     "sd": [
+      57.31284933927063,
+      2.4183713928165798,
+      5.491797659057496
+     ],
+     "w": [
+      1.0622873364077616,
+      0.5586213565273314,
+      4.228275725816982
+     ]
+    }
+   ]
+  },
+  "p_cand": "softmax of logit within the tip's list (ref's share; ranks by logit)",
+  "split": {
+   "what": "the trained EM-texture head (ph_a5, on frozen a5-ft1 embeddings of each candidate's Q and C EM views) fused with ref: the confidence model that decides what is shown (adopted 2026-11-09)",
+   "head_scores": "candidates.parquet head_s0..2 (the head's logit per seed)",
+   "design": "X = [-geo_rank, log(vol_um3), assessor score of seed k, head score of seed k], both scores clipped to +-ref.score_clip; per fold f and seed k logit = ((X - mu) / sd) @ w; conf_logit = mean over folds of the mean over seeds",
+   "folds": [
+    [
+     {
+      "k": 0,
+      "mu": [
+       -98.35110469462992,
+       -3.41413958266228,
+       -5.930667118598353,
+       -1.2426883173375278
+      ],
+      "sd": [
+       57.34885808468953,
+       2.420978220979053,
+       5.11326535636326,
+       2.0432998133249316
+      ],
+      "w": [
+       1.1394556115603431,
+       0.4358765399958303,
+       3.6964260485568277,
+       0.47443675213171843
+      ]
+     },
+     {
+      "k": 1,
+      "mu": [
+       -98.35110469462992,
+       -3.41413958266228,
+       -4.845243383357491,
+       -1.586238517162541
+      ],
+      "sd": [
+       57.34885808468953,
+       2.420978220979053,
+       3.861029278545671,
+       2.2979998905616403
+      ],
+      "w": [
+       1.218903035545488,
+       0.31379971313163324,
+       3.0821165299629234,
+       0.3635896622308784
+      ]
+     },
+     {
+      "k": 2,
+      "mu": [
+       -98.35110469462992,
+       -3.41413958266228,
+       -6.2103385942632965,
+       -1.5594600187499073
+      ],
+      "sd": [
+       57.34885808468953,
+       2.420978220979053,
+       5.524115677378997,
+       2.278316729877615
+      ],
+      "w": [
+       1.1502563508568757,
+       0.45886774470680103,
+       4.045073086004507,
+       0.43642554755746843
+      ]
+     }
+    ],
+    [
+     {
+      "k": 0,
+      "mu": [
+       -98.98845165721262,
+       -3.4051990809991106,
+       -5.797573171680889,
+       -1.1743069426532184
+      ],
+      "sd": [
+       57.368392597295106,
+       2.393148825968148,
+       5.069910552599671,
+       1.9919298362775384
+      ],
+      "w": [
+       0.9085867438312674,
+       0.4876117156378681,
+       3.499481695611413,
+       0.4073377532689243
+      ]
+     },
+     {
+      "k": 1,
+      "mu": [
+       -98.98845165721262,
+       -3.4051990809991106,
+       -4.74325140506878,
+       -1.5059722107735498
+      ],
+      "sd": [
+       57.368392597295106,
+       2.393148825968148,
+       3.835727850277159,
+       2.2358529353567285
+      ],
+      "w": [
+       0.953368219279777,
+       0.3386213564855479,
+       2.864782455988508,
+       0.36410923342585566
+      ]
+     },
+     {
+      "k": 2,
+      "mu": [
+       -98.98845165721262,
+       -3.4051990809991106,
+       -6.074224838827322,
+       -1.4956348776981068
+      ],
+      "sd": [
+       57.368392597295106,
+       2.393148825968148,
+       5.477947996673447,
+       2.2340115476488607
+      ],
+      "w": [
+       0.9247259350884447,
+       0.4803589518343617,
+       3.779052931979403,
+       0.42731918659560336
+      ]
+     }
+    ],
+    [
+     {
+      "k": 0,
+      "mu": [
+       -98.3616308368627,
+       -3.4115497618791473,
+       -5.838780626123981,
+       -1.1901692622849243
+      ],
+      "sd": [
+       57.267215480322434,
+       2.426231892243464,
+       5.1261743342569,
+       2.0081825387406376
+      ],
+      "w": [
+       0.8804344630565205,
+       0.5098878129537384,
+       3.7686468543179465,
+       0.4852792755987451
+      ]
+     },
+     {
+      "k": 1,
+      "mu": [
+       -98.3616308368627,
+       -3.4115497618791473,
+       -4.791041941449944,
+       -1.5019492219073254
+      ],
+      "sd": [
+       57.267215480322434,
+       2.426231892243464,
+       3.910154793017077,
+       2.263938740766016
+      ],
+      "w": [
+       1.0104941206883526,
+       0.3286481965038979,
+       2.9637197387819714,
+       0.4019193302460958
+      ]
+     },
+     {
+      "k": 2,
+      "mu": [
+       -98.3616308368627,
+       -3.4115497618791473,
+       -6.067975128033921,
+       -1.5117129842018622
+      ],
+      "sd": [
+       57.267215480322434,
+       2.426231892243464,
+       5.502003350658044,
+       2.250685791762466
+      ],
+      "w": [
+       0.9641573318799076,
+       0.5141476534353373,
+       3.8837815392694988,
+       0.4938506232037532
+      ]
+     }
+    ],
+    [
+     {
+      "k": 0,
+      "mu": [
+       -98.07578435138942,
+       -3.3500093815574723,
+       -5.848301377249429,
+       -1.2005633415677917
+      ],
+      "sd": [
+       57.24445041715222,
+       2.425054285653325,
+       5.029907336079174,
+       2.0708104412683643
+      ],
+      "w": [
+       1.1092133310846621,
+       0.5064887211521881,
+       3.4258659411549166,
+       0.4162533824645046
+      ]
+     },
+     {
+      "k": 1,
+      "mu": [
+       -98.07578435138942,
+       -3.3500093815574723,
+       -4.792491975851488,
+       -1.5423821277098766
+      ],
+      "sd": [
+       57.24445041715222,
+       2.425054285653325,
+       3.814046439931046,
+       2.32406880509483
+      ],
+      "w": [
+       1.1517239843534064,
+       0.3811365360128584,
+       2.852227496089173,
+       0.3129925894462631
+      ]
+     },
+     {
+      "k": 2,
+      "mu": [
+       -98.07578435138942,
+       -3.3500093815574723,
+       -6.132956053614511,
+       -1.546975114836264
+      ],
+      "sd": [
+       57.24445041715222,
+       2.425054285653325,
+       5.481797788516552,
+       2.3128332545786128
+      ],
+      "w": [
+       1.127468406475988,
+       0.5327539649280162,
+       3.688043600915698,
+       0.42866627475787294
+      ]
+     }
+    ],
+    [
+     {
+      "k": 0,
+      "mu": [
+       -98.5693112685577,
+       -3.415866772209933,
+       -5.942168065009367,
+       -1.1987166452354638
+      ],
+      "sd": [
+       57.32866488239356,
+       2.4259985774874115,
+       5.0535949730619825,
+       1.9824652132232654
+      ],
+      "w": [
+       0.8967857302173472,
+       0.5481141727726847,
+       3.4747225950953537,
+       0.48521233484671594
+      ]
+     },
+     {
+      "k": 1,
+      "mu": [
+       -98.5693112685577,
+       -3.415866772209933,
+       -4.863284270421828,
+       -1.520257008790349
+      ],
+      "sd": [
+       57.32866488239356,
+       2.4259985774874115,
+       3.8077053128316276,
+       2.227824252669488
+      ],
+      "w": [
+       0.9109398198043005,
+       0.4708914627264946,
+       2.848656786752527,
+       0.5035716862775858
+      ]
+     },
+     {
+      "k": 2,
+      "mu": [
+       -98.5693112685577,
+       -3.415866772209933,
+       -6.226362948952023,
+       -1.5061866809981397
+      ],
+      "sd": [
+       57.32866488239356,
+       2.4259985774874115,
+       5.4721803110940845,
+       2.2307226257198725
+      ],
+      "w": [
+       0.8924989512390711,
+       0.5857101472958152,
+       3.7775038796283957,
+       0.4870019853053813
+      ]
+     }
+    ]
+   ],
+   "p_conf": "softmax of conf_logit within the tip's list",
+   "p_split": "p_conf of the first candidate (ref's)"
+  },
+  "p_tip": {
+   "columns": [
+    "segclr",
+    "e_tip"
+   ],
+   "weights": [
+    -11.5507,
+    0.9237,
+    1.0601
+   ],
+   "segclr": "per seed the best logit in the list, averaged over seeds",
+   "segclr_floor": 1.3658560021366828,
+   "form": "sigmoid(w0 + w1 segclr + w2 e_tip)"
+  },
+  "show": {
+   "q": "p_tip x p_split (the first candidate is ref's; its probability the confidence model's)",
+   "cutoff": 0.11768065742643952,
+   "rule": "show the first candidate when q >= cutoff (neuron 669, every tip either rule shows judged: 34 shown, 33 right)",
+   "q_ref": "tips.parquet q_ref: the q before split (p_tip x ref's share; its cutoff was 0.208), for the record"
+  },
+  "r": {
+   "steps_q": [
+    0.008395,
+    0.031143,
+    0.071769,
+    0.156246,
+    0.299382,
+    0.605233,
+    0.959193
+   ],
+   "steps_r": [
+    0.2458,
+    0.6092,
+    0.7467,
+    0.7912,
+    0.9041,
+    0.9273,
+    1.0
+   ],
+   "clip": 0.02,
+   "rule": "r = the step whose upper q edge is the first at or above q; tips without a list r = 0",
+   "tested": false
+  },
+  "organelles": {
+   "what": "a filter for the reviewer (user, 2026-11-14): candidates that are intracellular organelles (mitochondria, vesicles, ...); changes no rank, q or shown",
+   "score": "candidates.parquet organelle_score: seam.enclosure's enclosed from the search's supervoxel cutout (the share of the candidate's voxel faces that face its largest neighbour)",
+   "cutoff": 0.5,
+   "flag": "organelle = organelle_score >= cutoff; tips.parquet top_organelle: the first candidate's",
+   "checked": "blind eye check of 50 rv2 candidates: an organelle in 39 of 40 at or above 0.5 (big-ideas \u00a712f)"
+  }
+ },
+ "checks_largest_difference": {
+  "logit": 0.0,
+  "p_cand": 2.220446049250313e-16,
+  "p_conf": 2.220446049250313e-16,
+  "conf": 2.220446049250313e-16,
+  "segclr": 0.0,
+  "p_tip": 0.0,
+  "p_split": 2.220446049250313e-16,
+  "q": 2.220446049250313e-16,
+  "r": 0.0
+ },
+ "counts": {
+  "tips": 6,
+  "shown": 4,
+  "candidates": 240
+ },
+ "commit": "64b0bf50766def0aeaa34e104a85d7aebbdeb27e-dirty",
+ "checks_ids": {
+  "tips_with_a_list": 5860,
+  "judged_ids": 0,
+  "judged_ids_only_in_the_lists_judged_on": 0
+ },
+ "files": {
+  "candidates.parquet": "a5871dd30de3d8c2dde3383af961ca169a9909d14fce120a6875b53ab5635e7e",
+  "candidates_all.parquet": "2acd470b3ad3b6910976cbb38096a204365d81675e5815482fbe03e4dbd42d1a",
+  "e_cells/648518347496004653.npz": "d0fb95ee12c7464b07f9cac9828885fca38918aaf8e69e0ff9276379423e0bad",
+  "e_cells/648518347498313551.npz": "85b289545498e99d6c635810293fb3b4ace0a5a26026facacf8de882557f1df2",
+  "e_cells/648518347499310794.npz": "fc03802e4362ce882e8860ced9b0fea7a0a918c88247eeafea046f3a954e078b",
+  "e_cells/648518347510235253.npz": "04307168bef2fd3073cdad3fb193b3e3fed534ec417f6aca93f74160e4f30c72",
+  "e_cells/648518347519300812.npz": "915650499110542129e61aa6c3588ea75474f0158a2299c2a0d7c3eda6e3f8e2",
+  "e_cells/648518347543568206.npz": "a90f6e8300c640524fd060dcf47507f187e5b2cd1b5dd8cc6b230e1ff95f693a",
+  "e_cells/648518347545963629.npz": "c4b8a2bc85683bf7ed609deae2cf62ff6b66ac72f42370414e441c923ddba29a",
+  "e_cells/648518347611873024.npz": "89f6864f6d0d050c9719c912e89f2719da6870d6fa31bcc2d2b3fe936d474761",
+  "e_cells/648518347618700172.npz": "94f463256b2c86d13c34d05eb48ba175c44645b9c87ee1fd17bd3612d8fee591",
+  "e_cells/648518347659090562.npz": "9c14e6288cb64fcc0f7bdbe29678ba07670aeefa155fca918b1c06904dbff661",
+  "e_cells/params.json": "d905e709ef4cc3aeac3ffd905aff8341e4293e228a71a048ad08f5b07dd088c8",
+  "ranker/model.txt": "f00e62f80bcf067608b9cc3732f81f3445841d4784d82861b3701f9f2d141047",
+  "tips.parquet": "3b6f4dc9d528460976fab5bcd6b0a0c28dba4eb70b959e4d60123767e000f4ad"
+ },
+ "version": "rv4-ad75ed161bb6",
+ "made": "2026-11-18T09:51:32+00:00"
+}

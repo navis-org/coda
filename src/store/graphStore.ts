@@ -81,7 +81,7 @@ import { addNodeWithCompanion } from '../core/companion'
 import type { InferenceResult } from '../core/inference'
 import { checkConnection, inferGraph } from '../core/inference'
 import { spliceCandidate, spliceGraph } from '../core/splice'
-import type { ParamValue } from '../core/node'
+import type { IssueFix, ParamValue } from '../core/node'
 import { defaultParams, findParam } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
 import type {
@@ -92,6 +92,7 @@ import type {
   RunSummary,
 } from '../core/scheduler'
 import { Scheduler } from '../core/scheduler'
+import { emptyRecords } from '../core/runRecord'
 import type { TableSchema } from '../core/types'
 import type { Value } from '../core/values'
 import { isTableValue } from '../core/values'
@@ -177,7 +178,8 @@ import type { VisualisationId } from '../wizard/options'
 // graph, so the node pack must be registered first. Declaring the dependency here rather
 // than relying on import order in main.tsx keeps that from silently breaking.
 import '../nodes'
-import { nodeLabel, nodePorts } from '../core/graph'
+import { dataflowDescendants, nodeLabel, nodePorts } from '../core/graph'
+import { failureNotice } from '../core/failureNotice'
 
 // Registered once, at module load. See `data/builtins.ts` for the set and the ordering.
 registerBuiltinSources()
@@ -193,6 +195,11 @@ const AUTO_RUN_DELAY_MS = 180
  */
 const AUTO_FULL_RUN_DELAY_MS = 700
 const AUTOSAVE_DELAY_MS = 800
+
+/** What a refused delete, undo, load or switch says while a card's writes are in flight. */
+const WRITING_NOTICE =
+  'Merges are being sent to the segmentation. This card and this workflow stay as they are ' +
+  'until they finish.'
 /** Param edits closer together than this collapse into one undo step. */
 const HISTORY_COALESCE_MS = 700
 const HISTORY_LIMIT = 100
@@ -262,6 +269,21 @@ export interface WorkflowMemory {
 }
 
 /**
+ * The node a run's failure notice is about, and its fix, tied to the sentence it came with
+ * (`GraphState.noticeFix`).
+ */
+export interface NoticeFix {
+  readonly text: string
+  readonly nodeId: string
+  /**
+   * A copy of the node's fix, not a live read of `NodeRunInfo.fix`: any edit runs
+   * `refreshStates`, which turns a failed node with no cached result `stale` and drops its fix —
+   * and the notice outlives edits on purpose (`runFull`).
+   */
+  readonly fix?: IssueFix
+}
+
+/**
  * Everything about a document that is *live in the store* while it is the one on screen.
  *
  * Set aside on the way out and put back on the way in, which is what makes a switch cost nothing
@@ -292,6 +314,7 @@ interface DocStash {
   future: HistoryEntry[]
   selection: string[]
   notice: string | undefined
+  noticeFix: NoticeFix | undefined
   lastRun: RunSummary | undefined
   expandedNodeId: string | undefined
   pinnedNodeId: string | undefined
@@ -351,6 +374,14 @@ interface DocRecord {
   stash: DocStash | undefined
 }
 
+/** A card's hold on its document while it writes to a server — see `holdForWrite`. */
+export interface WriteHold {
+  /** Replace one of the held node's params with `change(value now)`, unrecorded. */
+  update(paramId: string, change: (now: ParamValue | undefined) => ParamValue): void
+  /** Let go. Safe to call twice; `update` throws afterwards. */
+  release(): void
+}
+
 export interface GraphState {
   graph: CodaGraph
   inference: InferenceResult
@@ -377,6 +408,12 @@ export interface GraphState {
   future: HistoryEntry[]
   /** Transient messages (load warnings, run failures) shown in the status bar. */
   notice: string | undefined
+  /**
+   * Which node a run's failure notice is about, so the notice can draw its fix (`IssueFix`), for
+   * as long as `notice` is still the sentence it came with — any later write of `notice` replaces
+   * the text and so retires it, with nobody clearing this.
+   */
+  noticeFix: NoticeFix | undefined
   lastRun: RunSummary | undefined
   busy: boolean
   /**
@@ -976,6 +1013,14 @@ export interface GraphState {
    */
   closeDocument(id: string): void
   /**
+   * Hold the on-screen document and one of its nodes while that node's card writes to a server
+   * (`seam:proofreadMerges`'s merge batch): until `release`, nothing removes the node or changes the
+   * document — a delete, an undo, a load, a switch or a close is refused with a notice. Throws
+   * unless `docId` is on screen and holds the node, and while another hold is up. `update` is the
+   * one way the card's record is written: read and replaced in one step, with no undo step.
+   */
+  holdForWrite(docId: string, nodeId: string): WriteHold
+  /**
    * What every open workflow's results hold, in the switcher's order, charged to `ledger`.
    *
    * The ledger is the caller's so a total can carry on past the workflows — the geometry cache
@@ -1155,6 +1200,13 @@ export interface GraphState {
    * rows placed on it). Two `setParam`s would be two steps, and undoing one leaves the other.
    */
   setParams(nodeId: string, values: Readonly<Record<string, ParamValue>>): void
+  /**
+   * Several nodes' params in one edit, one undo step — for a gesture whose meaning spans cards:
+   * Proofread Merges' Start over also clears its viewers' double-clicks.
+   */
+  setParamsMany(
+    changes: readonly { nodeId: string; values: Readonly<Record<string, ParamValue>> }[],
+  ): void
   renameNode(nodeId: string, title: string): void
   toggleDisabled(nodeIds: string[]): void
   toggleCollapsed(nodeIds: string[]): void
@@ -1273,6 +1325,14 @@ export interface GraphState {
   // --- evaluation ----------------------------------------------------------
   runAll(): Promise<void>
   runNode(nodeId: string): Promise<void>
+  /**
+   * Press a fix's button (`IssueFix`) for node `nodeId`: one dispatch, so every surface drawing a
+   * fix — card, inspector, notice — does the same thing. `attachAnnotationChain` refuses under the
+   * lock itself. `tickAndRun` sets the boolean param `fix.param` and runs the node and everything
+   * it feeds (nothing where that is not one of its boolean params), and takes the run's failure
+   * notice down where it was about this node, since it is being answered.
+   */
+  applyFix(nodeId: string, fix: IssueFix): Promise<void>
   cancelRun(): void
   invalidateNode(nodeId: string): void
   /**
@@ -1283,6 +1343,14 @@ export interface GraphState {
    * IndexedDB in milliseconds with the same bytes.
    */
   clearNodeCache(nodeId: string): void
+  /**
+   * The card's ⟳ and "Fetch Again Now": forget the node's data, empty what its runs recorded
+   * (`ParamBase.runRecord` — the moments `seam:findMergeCandidates` searched its neurons at), and run
+   * it, which decides afresh. Its own action because `clearNodeCache` is also the Inspector's and the
+   * menu's Clear Cache, which say "forget downloaded data" and must not move a moment in the
+   * document — that would leave a review card's saved verdicts naming another search's answer.
+   */
+  refreshNode(nodeId: string): Promise<void>
   /** Drop every cached result, so the next Run re-fetches from scratch. */
   /**
    * Drop a workflow's results — the one on screen by default, any open one by id (the Memory
@@ -1328,6 +1396,20 @@ export interface GraphState {
    * it; the values themselves are the cached ones, by reference (invariant 7).
    */
   nodeInputs(nodeId: string): Record<string, Value | undefined>
+  /**
+   * Whether this node is drawing from something still being produced — a partial on one of its
+   * input ports, or a node still running above it.
+   *
+   * For a body that draws its inputs while an upstream node streams: the list is real and so is
+   * any judgement made on it, but it is what has arrived so far, and a reader filtering the top
+   * of a third-full queue should be told which third they are in.
+   *
+   * A boolean, built per call like `nodeInputs`, so a selector returning it is stable by
+   * identity (invariant 7). It asks about **partials first**, because that is the question that
+   * survives an intermediate node: a `Filter Table` wired between a streaming node and a card is
+   * never itself `running`, but it does hold a derived partial.
+   */
+  nodeInputsFilling(nodeId: string): boolean
   setNotice(notice: string | undefined): void
 }
 
@@ -1538,6 +1620,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
         if (activeDoc !== id) return
         rec.scheduler.refreshStates(get().graph, get().inference)
       },
+      /*
+       * A running node recorded what it decided (`ParamBase.runRecord`). Written into the
+       * document with no undo step and no run: the param is out of the key, so the write
+       * re-keys nothing — it is a record of the run in flight, not an edit asking for one. A
+       * background document's run was cancelled on the way out (`switchDocument`), and the
+       * context drops a cancelled run's record.
+       */
+      onRecord: (nodeId, paramId, value) => {
+        if (activeDoc !== id) return
+        commit((graph) => setNodeParam(graph, nodeId, paramId, value), {
+          history: false,
+          autoRun: false,
+        })
+      },
     })
     docs.set(id, rec)
     return rec
@@ -1673,12 +1769,36 @@ export const useGraphStore = create<GraphState>((set, get) => {
         ...(options.automatic ? { automatic: true } : {}),
       })
       if (token === runToken) {
-        set({
-          lastRun: summary,
-          notice: summary.failed.length
-            ? `${summary.failed.length} node${summary.failed.length === 1 ? '' : 's'} failed`
-            : undefined,
-        })
+        // Named, with its reason and its fix: on a dashboard this is the only place it shows. A
+        // failure with a fix first, since that is one the reader can answer from the notice.
+        const info = (id: string) => sched().info(id)
+        const failed = [...summary.failed].sort((a, b) => +!info(a).fix - +!info(b).fix)
+        const first = failed[0]
+        const notice = failureNotice(failed, get().graph, (id) => info(id).error)
+        /*
+         * A run with no failures takes the notice down — unless it is a failure notice and this run
+         * never ran its node: an auto pass after an unrelated edit does not re-run an expensive
+         * node, and on a dashboard the notice is the only place its failure shows. Asked of the
+         * run, not of the node's state, which the edit's `refreshStates` has already made `stale`.
+         */
+        const held = get().noticeFix
+        const keep =
+          !notice &&
+          held !== undefined &&
+          held.text === get().notice &&
+          !summary.executed.includes(held.nodeId) &&
+          get().graph.nodes.some((n) => n.id === held.nodeId)
+        if (!keep) {
+          const fix = first === undefined ? undefined : info(first).fix
+          set({
+            notice,
+            noticeFix:
+              notice && first !== undefined
+                ? { text: notice, nodeId: first, ...(fix ? { fix } : {}) }
+                : undefined,
+          })
+        }
+        set({ lastRun: summary })
       }
       return summary
     } finally {
@@ -1751,6 +1871,38 @@ export const useGraphStore = create<GraphState>((set, get) => {
    */
   const frozen = () => get().locked
 
+  /*
+   * A card writing to a server (`seam:proofreadMerges`'s merge batch): the document and the node its record
+   * is written to, while the writes are in flight. Nothing may take that node off the graph or
+   * that document off the screen until it is released — the record of a write the server made
+   * would have nowhere to go, or would land in another document that shares the node's id.
+   * Checked where a graph is replaced or a document changes; ordinary edits go on.
+   */
+  let writing: string | undefined
+  /** Whether `graph` would lose the held node, said on the status bar where it would. */
+  const dropsHeld = (graph: CodaGraph): boolean => {
+    if (writing === undefined) return false
+    const held = writing
+    if (graph.nodes.some((node) => node.id === held)) return false
+    set({ notice: WRITING_NOTICE })
+    return true
+  }
+  /**
+   * Whether `ids` include the held node, said on the status bar where they do — asked before an
+   * action does anything else, so a refused delete or cut leaves the selection and views alone.
+   */
+  const holdsAny = (ids: readonly string[]): boolean => {
+    if (writing === undefined || !ids.includes(writing)) return false
+    set({ notice: WRITING_NOTICE })
+    return true
+  }
+  /** Whether the document may not change now, said on the status bar where it may not. */
+  const documentHeld = (): boolean => {
+    if (writing === undefined) return false
+    set({ notice: WRITING_NOTICE })
+    return true
+  }
+
   /** Apply a graph mutation, recording history unless told otherwise. */
   function commit(
     mutate: (graph: CodaGraph) => CodaGraph,
@@ -1764,7 +1916,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
   ): void {
     const before = get().graph
     const after = mutate(before)
-    if (after === before) return
+    if (after === before || dropsHeld(after)) return
 
     let undoTo = before
     if (options.gesture) {
@@ -2027,6 +2179,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       future: s.future,
       selection: s.selection,
       notice: s.notice,
+      noticeFix: s.noticeFix,
       lastRun: s.lastRun,
       expandedNodeId: s.expandedNodeId,
       pinnedNodeId: s.pinnedNodeId,
@@ -2063,6 +2216,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       future: [],
       selection: [],
       notice: undefined,
+      noticeFix: undefined,
       lastRun: undefined,
       expandedNodeId: undefined,
       pinnedNodeId: undefined,
@@ -2304,6 +2458,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     past: [],
     future: [],
     notice: initial?.warnings.length ? initial.warnings.join(' · ') : undefined,
+    noticeFix: undefined,
     clipboard: undefined,
     lastRun: undefined,
     busy: false,
@@ -2640,7 +2795,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     switchDocument: (id) => {
-      if (id === get().activeTabId) return
+      if (id === get().activeTabId || documentHeld()) return
       const rec = docs.get(id)
       if (!rec) return
       stashActive()
@@ -2650,7 +2805,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     closeDocument: (id) => {
       const rec = docs.get(id)
-      if (!rec) return
+      if (!rec || documentHeld()) return
       const wasActive = id === get().activeTabId
       // Where it sat, so the neighbour that takes its place is the one under the cursor.
       const order = [...docs.keys()]
@@ -2711,6 +2866,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     openDocument: (graph, warnings = []) => {
+      if (documentHeld()) return
       beginDocument()
       // Through `loadGraph`, so the history reset, the load warnings, the auto-layout stand-down
       // and the fit-on-load request are the ones every other open has always got.
@@ -2719,7 +2875,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     duplicateDocument: (id) => {
       const source = docs.get(id)
-      if (!source) return
+      if (!source || documentHeld()) return
       // Stashed first, so the source is read one way whether or not it was the one on screen.
       stashActive()
       cancelActiveWork()
@@ -2809,6 +2965,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     newGraph: () => {
+      if (documentHeld()) return
       const graph = emptyGraph('Untitled')
       // A new graph has no dashboard, so this opens on the canvas whatever the last graph was
       // seen through.
@@ -2818,6 +2975,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     loadGraph: (graph, warnings = []) => {
+      if (documentHeld()) return
       /*
        * Opening a graph turns auto-layout off, on the same reasoning as a drag: the positions in
        * a file are somebody's decision, and a mode that re-arranged them on open would mean a
@@ -3140,16 +3298,29 @@ export const useGraphStore = create<GraphState>((set, get) => {
         return
       }
       // No undo step, and none of the snapshots history holds is touched: undo and redo lay the
-      // live value over whatever they restore (`withLiveUnrecorded`).
-      commit((g) => setNodeParam(g, nodeId, paramId, value), { history: false, autoRun: false })
+      // live value over whatever they restore (`withLiveUnrecorded`). A run only where the value
+      // can change a result: a camera cannot, a merge record (`seam:proofreadMerges`) can.
+      commit((g) => setNodeParam(g, nodeId, paramId, value), {
+        history: false,
+        autoRun: param.presentational !== true,
+      })
     },
 
-    setParams: (nodeId, values) => {
-      const ids = Object.keys(values)
-      if (ids.length === 0) return
+    setParams: (nodeId, values) => get().setParamsMany([{ nodeId, values }]),
+
+    setParamsMany: (changes) => {
+      const writes = changes.flatMap(({ nodeId, values }) =>
+        Object.keys(values).map((id) => ({ nodeId, id, value: values[id]! })),
+      )
+      if (writes.length === 0) return
       commit(
-        (g) => ids.reduce((graph, id) => setNodeParam(graph, nodeId, id, values[id]!), g),
-        { tag: `params:${nodeId}:${ids.sort().join(',')}` },
+        (g) => writes.reduce((graph, w) => setNodeParam(graph, w.nodeId, w.id, w.value), g),
+        {
+          tag: `params:${writes
+            .map((w) => `${w.nodeId}.${w.id}`)
+            .sort()
+            .join(',')}`,
+        },
       )
     },
 
@@ -3244,7 +3415,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     cutSelection: () => {
       // Silent under the lock, like every other refusal here: the sentence a reader sees is the
       // UI's (`LOCKED_NOTICE`), and the store's own refusal strings are addressed to a model.
-      if (frozen()) return undefined
+      if (frozen() || holdsAny(get().selection)) return undefined
       const text = get().copySelection()
       if (!text) return undefined
       get().deleteNodes([...get().selection])
@@ -3330,7 +3501,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     deleteNodes: (nodeIds) => {
-      if (frozen() || nodeIds.length === 0) return
+      if (frozen() || nodeIds.length === 0 || holdsAny(nodeIds)) return
       commit((g) => removeNodes(g, nodeIds))
       set((s) => ({
         selection: s.selection.filter((id) => !nodeIds.includes(id)),
@@ -3409,6 +3580,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       }
       const result = applyPlan(get().graph, plan)
       if (!result.ok) return result
+      // A plan that would take away a card writing to a server is refused, and says so.
+      if (result.graph !== get().graph && dropsHeld(result.graph)) {
+        return { ok: false, errors: [WRITING_NOTICE] }
+      }
 
       /*
        * `commit` compares by identity and does nothing when the graph did not change, which is
@@ -3447,6 +3622,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const entry = past.at(-1)
       if (!entry) return
       const restored = withLiveUnrecorded(entry.graph, graph)
+      if (dropsHeld(restored)) return
       set({
         graph: restored,
         past: past.slice(0, -1),
@@ -3461,6 +3637,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const entry = future.at(-1)
       if (!entry) return
       const restored = withLiveUnrecorded(entry.graph, graph)
+      if (dropsHeld(restored)) return
       set({
         graph: restored,
         future: future.slice(0, -1),
@@ -3479,6 +3656,21 @@ export const useGraphStore = create<GraphState>((set, get) => {
       await runFull([nodeId])
     },
 
+    applyFix: async (nodeId, fix) => {
+      if (fix.action === 'attachAnnotationChain') {
+        get().attachAnnotationChain(nodeId)
+        return
+      }
+      const node = get().graph.nodes.find((n) => n.id === nodeId)
+      const def = node && getNodeDef(node.type)
+      if (!node || !def || findParam(def, fix.param)?.kind !== 'boolean') return
+      if (node.params[fix.param] !== true) get().setParam(nodeId, fix.param, true)
+      if (get().noticeFix?.nodeId === nodeId) set({ notice: undefined, noticeFix: undefined })
+      // And what it feeds: the run it failed was for them, and `runFull` cancels the auto pass
+      // the edit scheduled, so a Proofread Merges below would otherwise stay empty.
+      await runFull([nodeId, ...dataflowDescendants(get().graph, nodeId)])
+    },
+
     cancelRun: () => {
       sched().cancel()
     },
@@ -3489,6 +3681,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     clearNodeCache: (nodeId) => {
       sched().clearNodeCache(get().graph, nodeId)
+    },
+
+    refreshNode: async (nodeId) => {
+      // No undo step and no auto-run, as a record is written: the run below is the one.
+      const before = get().graph
+      commit((graph) => emptyRecords(graph, nodeId), { history: false, autoRun: false })
+      // Where a record was emptied, re-keyed, so a run still deciding on it is stopped rather
+      // than adopted. Every other card's ⟳ is Clear Cache and run, as it always was.
+      if (get().graph !== before) sched().renewNode(get().graph, nodeId)
+      else sched().clearNodeCache(get().graph, nodeId)
+      await runFull([nodeId])
     },
 
     clearResults: (workflowId) => {
@@ -3534,10 +3737,69 @@ export const useGraphStore = create<GraphState>((set, get) => {
       }
       return out
     },
+    nodeInputsFilling: (nodeId) => {
+      const graph = get().graph
+      const node = graph.nodes.find((n) => n.id === nodeId)
+      for (const port of node ? nodePorts(node, 'input') : []) {
+        const edge = edgeInto(graph, nodeId, port.id)
+        if (!edge) continue
+        if (sched().hasPartial(edge.source)) return true
+        if (sched().info(edge.source).state === 'running') return true
+      }
+      return false
+    },
     nodeOutput: (nodeId, portId) => sched().output(nodeId, portId),
     nodeFetchedAt: (nodeId) => sched().fetchedAt(nodeId),
     nodeWarning: (nodeId) => sched().warning(nodeId),
     setNotice: (notice) => set({ notice }),
+
+    holdForWrite: (docId, nodeId) => {
+      const onScreen = () =>
+        docId === activeDoc && get().graph.nodes.some((node) => node.id === nodeId)
+      if (writing !== undefined) throw new Error('Another card is already writing to a server.')
+      if (!onScreen())
+        throw new Error('The card that opened this Submit is no longer on screen.')
+      writing = nodeId
+      let held = true
+      /*
+       * Saved now rather than on the autosave's debounce: the record's entries are the note of
+       * writes the server made, and a crash or a closed tab inside the debounce must not lose one.
+       */
+      const saveNow = () => {
+        if (!autosaveTimer) return
+        clearTimeout(autosaveTimer)
+        autosaveTimer = undefined
+        persistActive()
+      }
+      return {
+        update: (paramId, change) => {
+          if (!held) throw new Error('This hold has been released.')
+          /*
+           * Refused out loud rather than skipped: the guards above make it unreachable, and if a
+           * path round them ever appears, an entry that vanished in silence is a merge the server
+           * made that the workflow has no note of. The batch turns this throw into a stop.
+           */
+          if (!onScreen()) {
+            throw new Error('The card is no longer on screen, so this could not be recorded.')
+          }
+          // Read and written in one step, so the param is this card's as it stands now.
+          commit(
+            (graph) => {
+              const node = graph.nodes.find((n) => n.id === nodeId)!
+              return setNodeParam(graph, nodeId, paramId, change(node.params[paramId]))
+            },
+            { history: false },
+          )
+          saveNow()
+        },
+        release: () => {
+          if (!held) return
+          held = false
+          if (writing === nodeId) writing = undefined
+          saveNow()
+        },
+      }
+    },
   }
 })
 

@@ -77,6 +77,7 @@ import {
   synapsesBetweenSchema,
   synapsesBetweenTable,
   asksForNoSynapses,
+  NoNeuronListError,
   reportSourceLearned,
   requireSkeletonRoute,
 } from '../source'
@@ -883,7 +884,7 @@ export class CaveSource implements DataSource {
      */
     const neurons = spec.neurons
     if (!neurons) {
-      throw new Error(
+      throw new NoNeuronListError(
         `${spec.datastack} publishes no table listing its neurons, so Coda cannot ` +
           `enumerate them. Wire an Annotations source to the Dataset to supply the list. ` +
           `Queries using ids need no such table.`,

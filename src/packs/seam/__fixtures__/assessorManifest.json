@@ -1,0 +1,213 @@
+{
+ "id": "n3_mal_mask_s0",
+ "manifestSchema": 2,
+ "task": "merge-assessor",
+ "parts": [
+  "assess"
+ ],
+ "datasets": [
+  "aedes_h1"
+ ],
+ "license": "MIT",
+ "citation": "SEAM, Drosophila Connectomics group; mask assessor trained on the Aedes reconstruction's edit history",
+ "source": "https://github.com/flyconnectome/SEAM",
+ "upstreamCommit": "0a4d2e3f570a165d58245ca3c04f307ade67f8b4-dirty",
+ "randomWeights": false,
+ "config": {
+  "seed": 0,
+  "batch": 1,
+  "input": {
+   "name": "lab",
+   "dtype": "float32",
+   "shape": [
+    "n",
+    129,
+    129,
+    129
+   ],
+   "axes": "array index [n][x][y][z] (C order: z fastest)",
+   "values": {
+    "0": "neither",
+    "1": "Q (the neuron)",
+    "2": "C (the candidate)"
+   },
+   "made_by": "seam/segclr/patches.py: patch_box (the box) -> label_box (supervoxels labelled by each object's leaves) -> pair_sides (the patch)",
+   "patch": {
+    "voxels": 129,
+    "nm": 32.0,
+    "segmentation": "Aedes supervoxels at mip 1 (32 x 32 x 45 nm)",
+    "z": "resampled to 32 nm, labels by nearest section",
+    "centre": "the candidate's contact (contact_{x,y,z}_nm)",
+    "objects": "Q: the neuron's root, C: the candidate's root, both at the set's snapshot - 1 ms (Coda fixture: search.roots_at)"
+   }
+  },
+  "output": {
+   "name": "logit",
+   "dtype": "float32",
+   "shape": [
+    "n"
+   ]
+  },
+  "missingPatchScore": -258.37689208984375,
+  "gflopPerPatch": 86.8,
+  "checkpoint": {
+   "auc": 0.9822243504873127,
+   "n": 16072,
+   "n_pos": 1489,
+   "auc_matched": 0.978792179688083,
+   "auc_no_break": 0.9896700480526445,
+   "auc_pool": 0.9796565803860271
+  },
+  "parity": {
+   "against": "PyTorch fp32 (lists.parquet torch_s<k>) on the fixture's lists",
+   "must": [
+    "the shown decision (q >= the cutoff; stages 7-9 with the Coda fixture's fits, its stored head scores and e_tip) is the same on every tip",
+    "ref's first candidate is the same on every list",
+    "q is within 0.01 on every tip",
+    "per seed, first place is the same on every list whose fp32 top two differ by more than 0.05",
+    "per seed, the rank correlation (Spearman) within each list of 5+ candidates is at least 0.99"
+   ],
+   "reported, not judged": "raw logit error (max, median)"
+  },
+  "pipeline": {
+   "assessor": {
+    "ckpt": "n3_mal_mask_s0 only (the ONNX graph n3_mal_mask_s0)",
+    "score": "candidates.parquet score_s0: its logit per candidate"
+   },
+   "ref": {
+    "design": "X = [-geo_rank, log(vol_um3), clip(score_s0, -score_clip, score_clip)]; logit = ((X - mu) / sd) @ w",
+    "score_clip": 20.0,
+    "mu": [
+     -98.47155291261137,
+     -3.399308678908845,
+     -5.871937371628823
+    ],
+    "sd": [
+     57.31284933927063,
+     2.4183713928165798,
+     5.078408522084348
+    ],
+    "w": [
+     1.00904265649029,
+     0.5971720292572514,
+     3.9368531331626744
+    ]
+   },
+   "p_cand": "softmax of logit within the tip's list (ranks by logit)",
+   "p_tip": {
+    "columns": [
+     "segclr",
+     "e_tip"
+    ],
+    "weights": [
+     -11.0921,
+     0.868,
+     1.048
+    ],
+    "segclr": "the list's best logit",
+    "segclr_floor": 1.5313115130351262,
+    "form": "sigmoid(w0 + w1 segclr + w2 e_tip)"
+   },
+   "show": {
+    "q": "p_tip x p_cand of the first candidate (no split)",
+    "cutoff": 0.15877442432875044,
+    "rule": "show the first candidate when q >= cutoff"
+   },
+   "r": {
+    "steps_q": [
+     0.00028,
+     0.000921,
+     0.004264,
+     0.006091,
+     0.008154,
+     0.00868,
+     0.032393,
+     0.055938,
+     0.063709,
+     0.160175,
+     0.243128,
+     0.457977,
+     0.566367,
+     0.999272
+    ],
+    "steps_r": [
+     0.0,
+     0.1818,
+     0.1875,
+     0.3333,
+     0.3846,
+     0.5,
+     0.5577,
+     0.6207,
+     0.6667,
+     0.8082,
+     0.875,
+     0.8974,
+     0.9,
+     1.0
+    ],
+    "clip": 0.02,
+    "tested": false,
+    "rule": "r = the step whose upper q edge is the first at or above q; tips without a list r = 0"
+   },
+   "organelles": {
+    "cutoff": 0.5,
+    "flag": "organelle = organelle_score >= cutoff (a view filter)"
+   },
+   "model_e": {
+    "ckpt": "E_oe3_all_s0 (FlyWire, zero-shot on Aedes)",
+    "window_radius_um": 15.0,
+    "spacing_um": 0.2,
+    "cell_um": 0.5,
+    "e_tip": "best cell logit within 1 um of the tip",
+    "e_tip_floor": -2.6701560020446777
+   }
+  }
+ },
+ "signatures": {
+  "assess": {
+   "inputs": [
+    "lab"
+   ],
+   "outputs": [
+    "logit"
+   ],
+   "dynamic": {}
+  }
+ },
+ "files": [
+  {
+   "variant": "conv",
+   "part": "assess",
+   "file": "n3_mal_mask_s0.onnx",
+   "url": null,
+   "bytes": 132877338,
+   "sha256": "d601d9721ac6000b04fc9fe5b122653685594d6a05c42f10264c64ef63906275",
+   "quantisation": {
+    "kind": "none",
+    "io": "float32",
+    "quantises": [],
+    "emits": [
+     "Gemm"
+    ]
+   }
+  },
+  {
+   "variant": "matmul",
+   "part": "assess",
+   "file": "n3_mal_mask_mm_s0.onnx",
+   "url": null,
+   "bytes": 133083679,
+   "sha256": "9db480739607b0f9aa691fec5c9fb73113bc718ad6fe2f95452ebb1bd2858094",
+   "quantisation": {
+    "kind": "none",
+    "io": "float32",
+    "quantises": [],
+    "emits": [
+     "Gemm",
+     "MatMul"
+    ]
+   }
+  }
+ ]
+}

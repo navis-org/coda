@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import '../nodes'
 import { getNodeDef } from '../core/registry'
 import type { MarkdownBlock } from '../core/markdown'
-import { parseMarkdown } from '../core/markdown'
+import { DOCUMENT_TONES, parseMarkdown } from '../core/markdown'
 import { FIGURE_FIT_WIDTH, buildFigure, isFigureLang, parseFigureSource } from './figures'
 import { helpImageUrl, helpTypes, loadHelpDoc } from './registry'
 
@@ -169,6 +169,10 @@ describe('the documents in src/help/nodes', () => {
    * The second is a body written on the marker line behind an inline `>` rather than on its own
    * line. The parser reads everything after the tone as the *title*, so a four-line warning drew
    * as one long bold heading with an empty body. One document shipped that way.
+   *
+   * The third is a tone the parser does not know — GitHub's `[!IMPORTANT]` or `[!CAUTION]`. It
+   * is not a callout, and block quotes are unsupported, so the whole thing draws as one paragraph
+   * with its `>` markers in it. Three callouts, in two SEAM documents, shipped that way.
    */
   it.each(TYPES)(
     '%s: every callout marker is spelled the way the parser reads',
@@ -184,6 +188,11 @@ describe('the documents in src/help/nodes', () => {
           /^\s*>\s*\[![A-Za-z]+\].*\s>\s/.test(line),
           `${at}: a callout body goes on its own '>' line, not behind an inline '>'`,
         ).toBe(false)
+        const tone = /^\s*>\s*\[!([A-Za-z]+)\]/.exec(line)?.[1]?.toLowerCase()
+        expect(
+          tone === undefined || (DOCUMENT_TONES as readonly string[]).includes(tone),
+          `${at}: '[!${tone?.toUpperCase()}]' is not a callout — use one of ${DOCUMENT_TONES.join(', ')}`,
+        ).toBe(true)
       }
     },
   )
@@ -260,6 +269,48 @@ describe('building a figure', () => {
     expect(x[1]).toBeLessThan(x[2]!)
     expect(figure.cards.every((c) => c.y >= 0)).toBe(true)
     expect(figure.wires.every((w) => w.path.startsWith('M '))).toBe(true)
+  })
+
+  it('draws a backwards reference wire dotted, under the cards and out of the layering', () => {
+    const figure = buildFigure(
+      'coda-graph',
+      [
+        'seam:findMergeCandidates as search',
+        'seam:proofreadMerges as review',
+        'search:tips -> review:tips',
+        'search:candidates -> review:candidates',
+        'review:extended -> search:review',
+      ].join('\n'),
+    )
+    expect(figure.problems).toEqual([])
+    if (figure.kind !== 'graph') return
+    const [search, review] = figure.cards
+    // Layered by the wires that carry something: the card that searches stays upstream.
+    expect(search!.x).toBeLessThan(review!.x)
+    const back = figure.wires.find((w) => w.toPort === 'review')!
+    expect(back.reference).toBe(true)
+    expect(figure.wires.filter((w) => w.reference)).toHaveLength(1)
+    // Under both cards, and the figure is grown to hold it.
+    const below = Math.max(search!.y + search!.height, review!.y + review!.height)
+    expect(back.path).toContain(` L `)
+    expect(figure.height).toBeGreaterThan(below)
+    expect(figure.width).toBeGreaterThan(review!.x + review!.width)
+    // Into a card in the first column: every card is moved over, so the turn is not clipped.
+    expect(search!.x).toBeGreaterThan(0)
+  })
+
+  it('layers a forward reference wire as any other', () => {
+    const figure = buildFigure(
+      'coda-graph',
+      ['dataset.cave as ds', 'seam:findMergeCandidates as search', 'ds -> search:dataset'].join(
+        '\n',
+      ),
+    )
+    expect(figure.problems).toEqual([])
+    if (figure.kind !== 'graph') return
+    expect(figure.wires[0]!.reference).toBe(true)
+    expect(figure.cards[0]!.x).toBeLessThan(figure.cards[1]!.x)
+    expect(figure.wires[0]!.path).not.toContain(' L ')
   })
 
   it('is deterministic, so a figure is the same on every render', () => {

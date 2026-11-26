@@ -3626,7 +3626,7 @@ input.field--combo {
   min-width: 0;
 }
 .context-menu__endpoint-node {
-  color: var(--text);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3815,6 +3815,16 @@ input.field--combo {
      and pushes a 232px card's band past its own edge. */
   overflow-wrap: anywhere;
   min-width: 0;
+}
+/*
+ * One warning a line (`Scheduler.warning` joins them with a newline) — on a card's warning band and
+ * in the inspector, and nowhere else. An *error* may be a whole Python traceback, one line a frame:
+ * kept, it grew a 232px card by twenty lines and the run's notice over the canvas by as many, so
+ * there it stays one wrapped paragraph, as it was. The inspector keeps the lines, beside its Copy.
+ */
+.coda-node__issue[data-severity='warning'] .issue__text,
+.issue-list .issue__text {
+  white-space: pre-line;
 }
 .issue__text a {
   color: inherit;
@@ -4445,6 +4455,10 @@ input.field--combo {
   align-items: center;
   gap: 9px;
   max-width: min(560px, 90%);
+  /* A run's failure is one line (`failureNotice`), but a sentence from elsewhere can be long, and
+     the notice sits over the canvas until it is dismissed. */
+  max-height: 30vh;
+  overflow-y: auto;
   padding: 6px 10px;
   font-size: 11.5px;
   background: var(--surface-1);
@@ -4464,6 +4478,32 @@ input.field--combo {
 }
 .notice button:hover {
   color: var(--text-primary);
+}
+/* A run's failure notice may carry its fix (`noticeFix`): the card's button, inline here, and not
+   the ×'s bare look, which `.notice button` would otherwise give it. */
+.notice .issue-fix {
+  flex: none;
+  margin-top: 0;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.notice .issue-fix:hover {
+  background: var(--surface-hover);
+}
+/* A feature's notice may carry a choice beside its text (`NoticeChoice`): find path's "Colour by". */
+.notice__choice {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.notice__choice .field {
+  width: auto;
+  height: 20px;
 }
 
 .shortcut-hints {
@@ -4646,6 +4686,37 @@ input.field--combo {
 .overlay__body .viewer {
   background: var(--surface-2);
   border: 1px solid var(--border);
+}
+/*
+ * The header's spot for a viewer's own buttons (`HeaderSlot`). `display: contents`, so what a
+ * viewer portals in sits in the header's row like its other buttons, and an empty slot — every
+ * viewer that does not use it — adds no gap.
+ */
+.overlay__slot {
+  display: contents;
+}
+.overlay__slot-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+/* Below the header there is the whole view; above it, nothing — so the ⤓ menu opens downward. */
+.overlay__header .viewer-actions__menu {
+  bottom: auto;
+  top: calc(100% + 4px);
+}
+/*
+ * But not around neuroglancer: its frame is black edge to edge, so the border and the rounded
+ * corners read as a light rim drawn round the embedded page rather than as the card's edge.
+ */
+.overlay__body .viewer--ng {
+  border: 0;
+  border-radius: 0;
+  /* And edge to edge: cancels `.overlay__body`'s padding, which only frames a lighter viewer. */
+  margin: -10px -12px -12px;
 }
 .overlay__body .data-table {
   font-size: 12px;
@@ -10871,6 +10942,683 @@ details[open] > summary.tile__label {
 }
 
 /* ---------------------------------------------------------------------------
+ * Proofread Merges card
+ *
+ * A viewer above a scrolling queue. The list carries `nowheel` so the wheel scrolls it rather
+ * than zooming the canvas, and the rows are buttons rather than clickable `li`s so the keyboard
+ * reaches them without anything bespoke.
+ *
+ * The row's own colour says the verdict and the left edge says which row is current. Both are
+ * borders rather than fills: a tinted row under a coloured confidence reads as two signals about
+ * the same thing, and only one of them is a measurement.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  /*
+   * How wide the queue stands beside the viewer when the card is expanded. Enough for an
+   * 18-digit id, the verdict buttons and the two arrows, and no more: the picture is what the
+   * extra pixels are for.
+   */
+  --review-queue: 340px;
+}
+
+.review-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  height: 100%;
+}
+
+/*
+ * Expanded **with a viewer beside it**, the two sit side by side: the viewer takes the width and
+ * the queue keeps to a width it can be read in. `0 0 var(--review-queue)` rather than
+ * `min-content`, because the rows hold 18-digit ids and ellipsised fact lines — content-sizing
+ * them gives a column that changes width as the list is filtered, which is the one thing a list
+ * beside a viewer must not do.
+ *
+ * **Without one the queue takes the panel.** That is the ordinary case: once `Current` drives a
+ * Neuroglancer node the card's own frame stands down, and a 340px column in a 3000px panel is a
+ * sliver in an empty room. `data-viewer` is what tells the two apart. The card has no viewer in
+ * either case, so it stays a column.
+ */
+.review-body[data-compact='no'] {
+  flex-direction: row;
+  gap: 8px;
+}
+
+.review-body__viewer {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.review-body__queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.review-body[data-compact='no'][data-viewer='yes'] .review-body__queue {
+  flex: 0 0 var(--review-queue);
+  max-width: var(--review-queue);
+}
+
+/* The disclosure in the card's foot. Quiet: it is chrome, and it is on every row of every card. */
+.review-body__fold {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.review-body__fold:hover {
+  color: var(--text-secondary);
+}
+
+/*
+ * "still searching" in the card's foot, while Find Merge Candidates is mid-run.
+ *
+ * A caveat on the two counts beside it rather than an alarm — the queue is real and so is every
+ * verdict made on it, it is simply not all of the neuron yet — so it takes the warning ink and
+ * none of the weight: no badge, no background, no animation. The run's own progress is on the
+ * Find Merge Candidates card, which is where a bar belongs.
+ */
+.review-body__filling {
+  /* `--status-warn` is the per-mode prose warning colour — 5.41:1 light, 9.78:1 dark. */
+  color: var(--status-warn);
+}
+.review-body__absorbed {
+  color: var(--status-warn);
+}
+/* Submit, at the foot's end: the one button there that does more than show. */
+/*
+ * `Auto-extend listed` stands beside Submit at the foot's right end, and takes the push to the
+ * right from it: the two are one group, the button that fills the queue and the one that sends it.
+ */
+/* The foot's buttons, on their own row under the facts, to the right: Start over, or its question. */
+.review-body__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 3px 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.review-body__actions .btn {
+  font-size: 11px;
+  padding: 2px 10px;
+}
+/* Submit counts the pieces it checks: equal-width digits, so the button does not jitter. */
+.review-body__submit {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Submit's confirm overlay (`MergeConfirm.tsx`): the plan beside the neuron as the merges will make
+ * it, over most of the screen (user, 2026-11-16), so the end product is in front of the reader.
+ */
+.overlay__panel.merge-confirm {
+  width: 76vw;
+  height: 78vh;
+  max-width: none;
+}
+.merge-confirm__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.merge-confirm__plan {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 min(440px, 38%);
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+.merge-confirm__head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.merge-confirm__head h2 {
+  margin: 0 0 2px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.merge-confirm__head p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-muted);
+}
+.merge-confirm__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+}
+.merge-confirm__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 4px 14px;
+}
+.merge-confirm__row[data-ticked='no'] {
+  color: var(--text-muted);
+}
+.merge-confirm__row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.merge-confirm__row[data-ticked='no'] .legend__swatch {
+  opacity: 0.3;
+}
+.merge-confirm__id {
+  font-variant-numeric: tabular-nums;
+}
+.merge-confirm__facts {
+  color: var(--text-muted);
+}
+.merge-confirm__joins,
+.merge-confirm__progress {
+  /* Under the row's id, past its tick box and swatch. */
+  flex-basis: 100%;
+  padding-left: 38px;
+}
+.merge-confirm__joins {
+  color: var(--status-warn);
+}
+.merge-confirm__progress[data-state='merged'],
+.merge-confirm__progress[data-state='already-merged'] {
+  color: var(--status-ok);
+}
+.merge-confirm__progress[data-state='refused'],
+.merge-confirm__progress[data-state='unknown'] {
+  color: var(--status-error);
+}
+.merge-confirm__refused {
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  max-height: 30%;
+  overflow-y: auto;
+}
+.merge-confirm__refused ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.merge-confirm__refused li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 2px 0;
+}
+.merge-confirm__reason {
+  color: var(--status-warn);
+}
+.merge-confirm__why {
+  flex-basis: 100%;
+  color: var(--text-muted);
+}
+.merge-confirm__empty {
+  padding: 10px 14px;
+  color: var(--text-muted);
+}
+.merge-confirm__foot {
+  /* Stacked, the merge button on top: its label names the root and the datastack, and is long. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.merge-confirm__failed {
+  margin: 0;
+  color: var(--status-error);
+}
+.merge-confirm__go {
+  /* `.btn` keeps to one line; this label names a root id and a datastack, and must wrap. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.merge-confirm__viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+/* The viewer sizes to its content unless something stretches it: here, the whole column. */
+.merge-confirm__viewer > .viewer {
+  flex: 1 1 auto;
+}
+/* Narrow: the plan above the viewer, never a row wider than the screen. */
+@media (max-width: 860px) {
+  .overlay__panel.merge-confirm {
+    width: 100%;
+    height: 100%;
+  }
+  .merge-confirm__body {
+    flex-direction: column;
+  }
+  .merge-confirm__plan {
+    flex: 1 1 50%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/*
+ * The list takes whatever height is left and scrolls inside it — **no cap of its own**. One here
+ * was what stopped a resized card and an expanded panel filling: the surrounding box grows, the
+ * list stopped at 320px, and the rest was blank. The bounds belong to the surfaces that have
+ * them: an unsized card is held by `.coda-node__body`'s own max height, a resized one by what it
+ * was dragged to, and the overlay by the backdrop.
+ */
+.review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  border-top: 1px solid var(--border);
+  /*
+   * The card holds the reader's place itself as rows arrive (`anchoredScroll`); the browser's own
+   * anchoring, picking a drawn row as React reorders them, would move the list a second time.
+   */
+  overflow-anchor: none;
+}
+/* The list's box, for the "new above" note to sit over: it takes the height the list took. */
+.review-list-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.review-body__new-above {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--text-inverse);
+  font-size: 10px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+/*
+ * Two rows, and the confidence spans them.
+ *
+ * The row answers two questions at once and they are not the same size. "How likely is this?"
+ * is the number somebody scans the column for, so it is large, tabular and spans both rows —
+ * one column of scores to run an eye down. "What is it?" is the id and its measurements, which
+ * are read once the eye has stopped, so they stack beside it and the second line is muted.
+ *
+ * The acts sit top-right on the first row rather than centred across both: they belong to the
+ * id above them, and a verdict button floating beside the measurements reads as being about
+ * them.
+ */
+.review-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'score id    acts'
+    'score facts facts';
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 4px 4px 4px 6px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  /*
+   * **One height for every row**, because the list draws only the rows in view and places them
+   * by `index × height` (`useRowWindow`). Measured in Chrome: a row with its buttons is 47px, a
+   * tip with no candidate — no buttons — 42px. Fixed at the taller, with the shorter centred, so
+   * a scrollbar over thousands of rows is not off by five pixels a row. The code reads this off
+   * a drawn row, so it is the one place the number lives.
+   */
+  height: 47px;
+  align-content: center;
+}
+/*
+ * A tip of a piece the neuron was extended with: beneath the row the piece was accepted on, a
+ * step in for every piece between it and the neuron, behind an arrow. The margin is the row's
+ * own, so its verdict edge moves in with it and the arrow has somewhere to stand. Same height
+ * as every other row — the list places rows by `index × height`.
+ */
+.review-row:not([data-depth='0']) {
+  margin-left: calc(var(--depth, 1) * 14px);
+}
+.review-row:not([data-depth='0'])::before {
+  content: '↳';
+  position: absolute;
+  left: -14px;
+  top: 6px;
+  width: 12px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+/* What stands in for the rows not drawn, above and below the ones in view. */
+.review-list__spacer {
+  padding: 0;
+  border: 0;
+}
+/*
+ * The row being looked at: a ring all the way round, in the accent, and the raised surface.
+ *
+ * **Not the left edge alone**, which is the verdict's (below): a selected row that was then
+ * accepted turned green there and nothing was left to say which row was selected (user,
+ * 2026-11-16). The ring is inside the border, so the verdict's edge stays its own colour and
+ * the two are read apart. Not yellow, which is `Unsure`'s. A selected row with no verdict keeps
+ * its accent edge, so the ring closes on that side.
+ */
+.review-row[data-current='yes'] {
+  border-left-color: var(--accent);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+/*
+ * A row that has just arrived from the search (`ReviewBody.tsx`): the accent, fading out, so one
+ * landing in view is seen. A colour that fades, not a movement, so it stays under reduced motion.
+ */
+.review-row[data-arrived='yes'] {
+  animation: review-row-arrived 1.6s ease-out;
+}
+@keyframes review-row-arrived {
+  from {
+    background: color-mix(in srgb, var(--accent) 28%, var(--surface-2));
+  }
+  to {
+    background: var(--surface-2);
+  }
+}
+/*
+ * The piece under the pointer in a neuroglancer frame (`segmentHover.ts`): a wash rather than a
+ * border, which the verdict and the cursor already use, so all three read at once.
+ */
+.review-row[data-hovered='yes'] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+}
+.review-row[data-verdict='accept'] {
+  border-left-color: var(--status-ok, #4caf50);
+}
+.review-row[data-verdict='reject'] {
+  border-left-color: var(--status-error, #e05252);
+}
+.review-row[data-verdict='unsure'] {
+  border-left-color: var(--status-stale);
+}
+/* Ends is a rejection with another reason: Reject's colour, dashed, so the two read apart. */
+.review-row[data-verdict='ends'] {
+  border-left-color: var(--status-error, #e05252);
+  border-left-style: dashed;
+}
+/* Ignore is right but not merged: Accept's colour, dashed, as Ends is to Reject. */
+.review-row[data-verdict='ignore'] {
+  border-left-color: var(--status-ok, #4caf50);
+  border-left-style: dashed;
+}
+
+/*
+ * The click target, as a layer rather than a wrapper — see the note in `ReviewBody.tsx`.
+ *
+ * Covering the row is what lets the measurements run the full width *under* the acts: a wrapper
+ * would be one grid column and its text could never pass where the buttons start, which is what
+ * truncated the line a third of the way across an otherwise empty row.
+ */
+.review-row__pick {
+  position: absolute;
+  inset: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.review-row__score,
+.review-row__id,
+.review-row__facts {
+  /* Above the layer, so the text is selectable and the row still reads as one thing. */
+  position: relative;
+  pointer-events: none;
+}
+/*
+ * A chip with a title takes the pointer back, or its title never shows: the line gives the
+ * pointer up to the row's layer, and so would the chip (checked in Chrome, 2026-11-21). A click
+ * on one picks the row all the same — it bubbles to `.review-row__id`'s handler.
+ */
+.review-row__id > [title] {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.review-row__score {
+  grid-area: score;
+  display: flex;
+  flex-direction: column;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  line-height: 1.1;
+}
+/*
+ * `r`, under `q`, as a rounded estimate (SEAM, 2026-11-18): small and muted, so the number the
+ * list is ordered by is the one that reads first.
+ */
+.review-row__estimate {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.review-row__id {
+  grid-area: id;
+  /* Up one step with the score: an 11px id under a 16px number reads as a caption on it. */
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/*
+ * A piece Submit has merged: a chip in full-strength text, bold and outlined, so it stands apart
+ * from the muted facts by shape and weight — no hue of its own, since `--status-ok` is measured
+ * as a fill, not as text.
+ */
+.review-row__merged {
+  border: 1px solid var(--text-primary);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+/*
+ * A piece Auto-extend accepted and the reader has not judged: the merged chip's shape, dashed and
+ * muted — no hue of its own, the palette having none to spare — so it reads as provisional.
+ */
+.review-row__auto {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px dashed var(--text-secondary);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+/*
+ * A hand pick (`handPicks.ts`): the auto chip's shape, solid — the reader's own word, where the
+ * dashed one is Auto-extend's.
+ */
+.review-row__hand {
+  border: 1px solid var(--text-secondary);
+  color: var(--text-secondary);
+}
+/*
+ * A piece edited since it was suggested: the merged chip's shape, in `--status-refused` — the red
+ * measured per mode for text — since Submit would refuse it.
+ */
+.review-row__outdated {
+  border: 1px solid var(--status-refused);
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--status-refused);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.review-row__outdated:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+/* Followed through an edit: what it is drawn and merged as now, said in its title. */
+.review-row__followed {
+  border: 1px solid var(--text-secondary);
+  color: var(--text-secondary);
+}
+/* The row's tags share one box; each says its own colour. */
+.review-row__merged,
+.review-row__hand,
+.review-row__outdated,
+.review-row__followed {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+/*
+ * Where an Auto-extend stopped on a piece too large to take (`autoStoppedLarge`): a mark in
+ * `--status-warn`, the amber measured per mode for text, and a sentence on hover.
+ */
+.review-row__stopped {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  border: 1px solid var(--status-warn);
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--status-warn);
+  vertical-align: 1px;
+}
+.review-body__edited {
+  color: var(--status-refused);
+}
+/* Wired only to a viewer that reports nothing back: said, not alarmed. */
+.review-body__viewer {
+  color: var(--text-secondary);
+  cursor: help;
+}
+/* Following the neuron through an edit: small text buttons inside a foot fact. */
+.review-body__follow {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: none;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+.review-body__follow:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.review-row__facts {
+  grid-area: facts;
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-row__acts {
+  grid-area: acts;
+  justify-self: end;
+  /* Over the click layer, or the buttons would be the row's own click target. */
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.review-row__page,
+.review-row__verdict,
+.review-row__extend {
+  font-size: 10px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+/*
+ * Off — an arrow at the end of the list, the verdicts of a piece Submit has merged or that is in
+ * the neuron already, or a piece that cannot be extended.
+ */
+.review-row__page:disabled,
+.review-row__verdict:disabled,
+.review-row__extend:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.review-row__verdict[aria-pressed='true'],
+.review-row__extend[aria-pressed='true'] {
+  color: var(--text-primary);
+  border-color: currentColor;
+}
+/*
+ * Reject, Ends and Unsure's split button (`VerdictButtons.tsx`), and Extend's (`ExtendButtons.tsx`),
+ * each joined to read as one control.
+ */
+.review-row__split {
+  display: inline-flex;
+}
+.review-row__split > :first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.review-row__more {
+  margin-left: -1px;
+  padding: 3px 3px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/*
+ * Extend stands a little apart from the verdicts: it is not a fourth verdict but what to do
+ * about one. Pressed, its text is how far the search has got, in tabular figures so a count
+ * going up does not shift the buttons beside it.
+ */
+.review-row__split--extend {
+  margin-left: 4px;
+}
+.review-row__extend {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
  * Annotate card
  *
  * `.list-body` for the settings and the foot, with a table between them. The table scrolls inside
@@ -13364,18 +14112,31 @@ select.annotate__input {
  * The buttons keep their hit area — they are the whole interaction contract of a cell — so what
  * gives is the padding and the subtitle, which is the line that can afford to be small because it
  * repeats what the value itself shows.
+ *
+ * The subtitle sits on the name's row rather than under it, so the header is one line tall. When
+ * the row is short of room the subtitle gives way first: its shrink factor dwarfs the name's, and
+ * the name keeps a floor so a long summary never squeezes it to an ellipsis alone.
  */
 .dash-cell__panel .overlay__header {
   padding: 4px 6px;
   gap: 4px;
 }
+.dash-cell__panel .overlay__title {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
 .dash-cell__panel .overlay__title strong {
+  flex: 0 1 auto;
+  min-width: 4em;
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .dash-cell__panel .overlay__title span {
+  flex: 0 1000 auto;
+  min-width: 0;
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
@@ -13429,7 +14190,7 @@ select.annotate__input {
   width: var(--focus-grip);
   text-align: center;
 }
-/* Title only: the summary line is what makes the strip two lines tall. */
+/* Title only: the strip is as short as it can be, and focus is the cells and nothing else. */
 .dashboard[data-focus] .dash-cell__panel .overlay__title span {
   display: none;
 }
@@ -13458,19 +14219,15 @@ select.annotate__input {
 }
 
 /*
- * The way out, over the first cell's title. Every other spot was measured to sit on a control in
- * some layout — top centre is the column boundary under an even column count, where the left
- * cell's ⤢ is; the corners hold ✕, the grips and a table's pager — and a fading pill is woken by
- * exactly the pointer movement that is heading for that control. A title is a label in every
- * layout, and the first cell's always starts here, just past its grip. Sized to the strip.
+ * The way out, top centre unless that covers a control: `FocusExit` measures the controls along
+ * the top edge on each wake and sets `left` itself, sliding to the nearest clear spot. This
+ * centring is only what it shows before that first measurement. Sized to the strip.
  */
 .dashboard__focusExit {
   position: absolute;
   top: 2px;
-  /* Just past the first cell's grip: the grid's edge, the strip's padding, the grip, the gap. */
-  left: calc(
-    var(--focus-gap) + var(--focus-strip-pad) + var(--focus-grip) + var(--focus-strip-gap)
-  );
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 6;
   padding: 1px 10px;
   line-height: 16px;
@@ -15042,4 +15799,148 @@ select.annotate__input {
 }
 .term-hover__text {
   color: var(--text-secondary, var(--text-primary));
+}
+
+/* ---------------------------------------------------------------------------
+ * Proofread Merges: sending verdicts to SEAM (`VerdictSharing.tsx`), in the card's foot
+ * ------------------------------------------------------------------------- */
+
+/*
+ * Lined up by text, as the rest of `.list-body__foot` is (`align-items: baseline`). A checkbox's
+ * own baseline is not its label's, so the words carry it (`align-self: baseline` makes theirs the
+ * label's), and this box passes it on.
+ */
+.verdict-sharing {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+/* Over `.checkbox-field`, at the foot's own size. */
+.verdict-sharing__switch {
+  gap: 3px;
+  font-size: inherit;
+  white-space: nowrap;
+}
+.verdict-sharing__label {
+  align-self: baseline;
+}
+.verdict-sharing__settings {
+  font-size: 12px;
+  line-height: 1;
+}
+.verdict-sharing__said {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.verdict-sharing__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  font-size: 12px;
+}
+.verdict-sharing__panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+}
+.verdict-sharing__note {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.verdict-sharing__done {
+  align-self: flex-end;
+}
+
+/* The split gallery (`ui/seam/SplitGalleryHost.tsx`, `SplitTiles.tsx`). */
+.overlay__panel.split-gallery {
+  width: min(1200px, 92vw);
+  height: 86vh;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+}
+.split-gallery__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 16px 16px;
+}
+.split-gallery__status {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+}
+.split-gallery__legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.split-gallery__hint {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+.split-gallery__written {
+  margin: 8px 0 0;
+  /* The new roots, to copy. */
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+.split-gallery__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+}
+/* The tiles, with one canvas laid over them all; each tile's view draws inside its own box. */
+.split-tiles {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 8px;
+}
+.split-tiles[data-enlarged] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.split-tiles__tile {
+  position: relative;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.split-tiles[data-enlarged] .split-tiles__tile:not([data-selected]) {
+  display: none;
+}
+.split-tiles__tile[data-selected] {
+  cursor: grab;
+}
+.split-tiles__caption {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  z-index: 1;
+  font-size: 12px;
+  pointer-events: none;
+}
+.split-tiles__canvas {
+  position: absolute !important;
+  inset: 0;
+  pointer-events: none;
+}
+@media (max-width: 720px) {
+  .split-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

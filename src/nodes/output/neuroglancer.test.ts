@@ -6,17 +6,19 @@
  * colours that disagree with the 3D view, a stale link surviving a restyle.
  */
 
+import { NoNeuronListError } from '../../data/source'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { EvalContext, NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams, findParam, makeInferContext, resolveColumn } from '../../core/node'
+import { ID_COLUMN_NAME } from '../../core/ids'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
 import { T, column, tableSchema } from '../../core/types'
 import type { DatasetValue, TableValue, Value } from '../../core/values'
-import { asString, num, tableFromRows } from '../../core/values'
+import { asString, makeTable, num, tableFromRows } from '../../core/values'
 import type { NgScene } from '../../data/neuroglancer/scene'
 import { parseSceneUrl, layerSourceUrl } from '../../data/neuroglancer/scene'
 import { MockSource } from '../../data/mock/MockSource'
@@ -24,7 +26,8 @@ import type { DataSource } from '../../data/source'
 import { CANONICAL_SCHEMAS, registerSource, requireSource } from '../../data/source'
 import { resolveColor } from '../../style/encoding'
 import { readColorSpec } from '../lib/encodingParams'
-import { frameTarget } from './neuroglancer'
+import { FOCUS_GREEN } from '../../style/colors'
+import { controlFocusNm, controlPartColor, frameTarget } from './neuroglancer'
 import '../index'
 
 const NEURON_SCHEMA = tableSchema(
@@ -103,8 +106,13 @@ function evalContext(
   table: TableValue | undefined,
   source: DataSource,
   said: string[] = [],
+  extra: Record<string, Value | undefined> = {},
 ): EvalContext {
-  const inputs: Record<string, Value | undefined> = { dataset: DATASET, neurons: table }
+  const inputs: Record<string, Value | undefined> = {
+    dataset: DATASET,
+    neurons: table,
+    ...extra,
+  }
   const types: Record<string, CodaType | undefined> = {
     dataset: T.dataset('stub', 'manc:v1.2.3'),
     // Undefined, not an empty type: an unconnected port has no type at all, which is what
@@ -144,10 +152,11 @@ async function sceneFrom(
   ]),
   source = stubSource(),
   said: string[] = [],
+  extra: Record<string, Value | undefined> = {},
 ): Promise<{ url: string; scene: NgScene }> {
   const d = def()
   const params = { ...defaultParams(d), ...overrides } as ParamValues
-  const out = await d.evaluate(evalContext(d, params, table ?? undefined, source, said))
+  const out = await d.evaluate(evalContext(d, params, table ?? undefined, source, said, extra))
   const url = asString(out['url'])
   const scene = parseSceneUrl(url)
   if (!scene) throw new Error(`no scene in ${url.slice(0, 80)}`)
@@ -381,6 +390,8 @@ describe('guard rails', () => {
         // deliberately — and neither is a segment id. That gap is why `isSegmentId` exists.
         { neuronId: '-1', type: 'A' },
         { neuronId: '007', type: 'A' },
+        // One past 2⁶⁴ − 1: the grammar passes it, and neuroglancer's `parseUint64` still throws.
+        { neuronId: '18446744073709551616', type: 'A' },
         { neuronId: '  ', type: 'A' },
         { neuronId: '10002', type: 'A' },
       ],
@@ -390,7 +401,7 @@ describe('guard rails', () => {
     const { scene } = await sceneFrom({}, messy, stubSource(), said)
 
     expect(layersOf(scene)[1]!['segments']).toEqual(['10001', '10002'])
-    expect(said.join(' ')).toMatch(/4 of 6 rows/)
+    expect(said.join(' ')).toMatch(/5 of 7 rows/)
     expect(said.join(' ')).toMatch(/only accepts ids that are plain whole numbers/)
   })
 
@@ -716,13 +727,13 @@ describe('neurons changed inside the viewer', () => {
     )
 
   /** A source that knows some neurons by id, and counts how often it was asked. */
-  function lookupSource(known: Record<string, string>, fail = false) {
+  function lookupSource(known: Record<string, string>, fail: boolean | Error = false) {
     const asked: string[][] = []
     const source = {
       ...stubSource(),
       findNeurons: (req: { neuronIds?: readonly string[] }) => {
         asked.push([...(req.neuronIds ?? [])])
-        if (fail) return Promise.reject(new Error('server said no'))
+        if (fail) return Promise.reject(fail === true ? new Error('server said no.') : fail)
         const ids = (req.neuronIds ?? []).filter((id) => id in known)
         return Promise.resolve(
           tableFromRows(
@@ -787,6 +798,14 @@ describe('neurons changed inside the viewer', () => {
     expect(asked).toEqual([['921']])
   })
 
+  it('says nothing where the dataset lists no neurons: a bare id is all it has', async () => {
+    const { source } = lookupSource({}, new NoNeuronListError('lists no neurons.'))
+    const said: string[] = []
+    const { selected } = await run(input(['140']), ['+941'], source, said)
+    expect(selected.data['neuronId']).toEqual(['140', '941'])
+    expect(said).toEqual([])
+  })
+
   it('keeps the link and an id-only row when the lookup fails, and asks again when invalidated', async () => {
     const { source, asked } = lookupSource({}, true)
     const said: string[] = []
@@ -794,7 +813,7 @@ describe('neurons changed inside the viewer', () => {
     expect(layersOf(scene)[1]!['segments']).toEqual(['130', '931'])
     expect(selected.data['neuronId']).toEqual(['130', '931'])
     expect(said.join(' ')).toMatch(
-      /Could not look up the 1 neuron .*server said no.*Invalidate Results/,
+      /Could not look up the 1 neuron .*server said no\. Use Invalidate Results/,
     )
     // Replayed rather than asked again: this node is cheap, and an upstream keystroke re-runs it.
     const again: string[] = []
@@ -932,5 +951,130 @@ describe('neurons changed inside the viewer', () => {
     })
     const out = d.inferOutputs!(types)
     expect(out['selected']).toEqual(T.neurons(STR_SCHEMA))
+  })
+})
+
+/**
+ * The `Control` port: a card driving this one.
+ *
+ * Both halves are here because only one of them is in the scene. The **segments** are: a
+ * controller's ids reach the viewer through the scene like any others, which is why they can be
+ * tested from `evaluate`. The **camera** is not, on purpose — a scene whose `position` changed
+ * is a scene pointed somewhere else and re-navigates, tearing every layer down — so it travels
+ * beside the scene as `focus` and all that can be checked here is the position being read off
+ * the right row.
+ */
+describe('a card driving the scene', () => {
+  const control = (rows: { id: string; part: string; at?: number }[]) =>
+    makeTable(
+      tableSchema(
+        column(ID_COLUMN_NAME, 'str'),
+        column('part', 'str'),
+        column('x', 'f64'),
+        column('y', 'f64'),
+        column('z', 'f64'),
+      ),
+      {
+        [ID_COLUMN_NAME]: rows.map((r) => r.id),
+        part: rows.map((r) => r.part),
+        x: rows.map((r) => r.at ?? 100),
+        y: rows.map((r) => (r.at ?? 100) * 2),
+        z: rows.map((r) => (r.at ?? 100) * 3),
+      },
+      'neurons',
+    )
+
+  it('adds the controller’s ids to the scene, without dropping what was there', async () => {
+    const { scene } = await sceneFrom(
+      {},
+      neurons([{ neuronId: 10001, type: 'DNa02' }]),
+      stubSource(),
+      [],
+      {
+        control: control([
+          { id: '10001', part: 'neuron' },
+          { id: '20002', part: 'candidate' },
+        ]),
+      },
+    )
+    const segments = layersOf(scene).flatMap((l) => (l['segments'] as string[]) ?? [])
+    expect(segments).toContain('10001')
+    expect(segments).toContain('20002')
+  })
+
+  /** The pair is one question — does the second belong to the first — and one colour hides it. */
+  it('colours the neuron and the candidate apart', async () => {
+    const { scene } = await sceneFrom(
+      {},
+      neurons([{ neuronId: 10001, type: 'DNa02' }]),
+      stubSource(),
+      [],
+      {
+        control: control([
+          { id: '10001', part: 'neuron' },
+          { id: '20002', part: 'candidate' },
+        ]),
+      },
+    )
+    const colors = layersOf(scene)
+      .map((l) => l['segmentColors'] as Record<string, string> | undefined)
+      .find(Boolean)!
+    expect(colors['10001']).toBeTruthy()
+    expect(colors['20002']).toBeTruthy()
+    expect(colors['10001']).not.toBe(colors['20002'])
+  })
+
+  /** A piece already accepted is a third thing, and takes a third hue. */
+  it('colours an accepted piece apart from the neuron and the candidate', async () => {
+    const { scene } = await sceneFrom({}, undefined, stubSource(), [], {
+      control: control([
+        { id: '10001', part: 'neuron' },
+        { id: '20002', part: 'candidate' },
+        { id: '30003', part: 'accepted' },
+      ]),
+    })
+    const colors = layersOf(scene)
+      .map((l) => l['segmentColors'] as Record<string, string> | undefined)
+      .find(Boolean)!
+    expect(new Set([colors['10001'], colors['20002'], colors['30003']]).size).toBe(3)
+    expect(colors['30003']).toBe(controlPartColor('accepted'))
+  })
+
+  /** The accepted piece in hand, among other green ones: the same green, a lighter step. */
+  it('colours an accepted piece in focus apart from the other accepted ones', async () => {
+    const { scene } = await sceneFrom({}, undefined, stubSource(), [], {
+      control: control([
+        { id: '10001', part: 'neuron' },
+        { id: '30003', part: 'accepted' },
+        { id: '40004', part: 'focus' },
+      ]),
+    })
+    const colors = layersOf(scene)
+      .map((l) => l['segmentColors'] as Record<string, string> | undefined)
+      .find(Boolean)!
+    expect(colors['40004']).toBe(FOCUS_GREEN)
+    expect(colors['40004']).not.toBe(colors['30003'])
+  })
+
+  /** The camera reads the first row, so sorting the table cannot move it somewhere else. */
+  it('reads the camera off the first row, in nanometres', () => {
+    expect(
+      controlFocusNm(
+        control([
+          { id: '1', part: 'neuron', at: 7 },
+          { id: '2', part: 'candidate', at: 999 },
+        ]),
+      ),
+    ).toEqual([7, 14, 21])
+  })
+
+  it('points no camera where the table carries no position', () => {
+    const bare = makeTable(
+      tableSchema(column(ID_COLUMN_NAME, 'str')),
+      { [ID_COLUMN_NAME]: ['1'] },
+      'neurons',
+    )
+    expect(controlFocusNm(bare)).toBeUndefined()
+    expect(controlFocusNm(undefined)).toBeUndefined()
   })
 })

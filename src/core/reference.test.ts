@@ -28,8 +28,10 @@ import type { CodaGraph, GraphNode } from './graph'
 import { checkConnection, inferGraph } from './inference'
 import { registerNode } from './registry'
 import { Scheduler } from './scheduler'
-import { T } from './types'
+import { T, column, tableSchema } from './types'
 import type { Value } from './values'
+import { emptyTable, makeTable } from './values'
+import { sourcelessScheduler } from '../test/scheduler'
 
 /** What the reader saw on its reference port, once per run. An array, so nothing narrows it. */
 const captured: Array<Value | undefined> = []
@@ -568,5 +570,281 @@ describe('writing the nodes out, which wants the opposite order', () => {
     const order = referencesFirst(sorted, g)
     expect(order.slice(0, 2)).toEqual(sorted.filter((id) => id === 'd1' || id === 'd2'))
     expect(order).toHaveLength(sorted.length)
+  })
+})
+
+/**
+ * The second kind of reference: a source that says what a reader is handed, from its params.
+ *
+ * `seam:proofreadMerges` is the node this is for (`docs/seam-extend-plan.md`). It sits *below* the search
+ * it steers, it re-runs on every click, and what the search needs from it — which pieces to
+ * extend — is in its params. So the wire runs backwards, and three things have to hold that a
+ * dataset reference never had to say: the value comes from params and not a type, the reader's
+ * key follows that value and **nothing else** on the source, and a source with nothing to say is
+ * not a wire to refuse.
+ */
+describe('a reference to a node that answers from its params', () => {
+  const handed: Array<Value | undefined> = []
+  const keys: Array<string | undefined> = []
+  /** Every output the hook was asked about, one entry per call. */
+  const asked: string[] = []
+
+  beforeAll(() => {
+    // The card: downstream of the reader, with a param the reader follows and one it must not.
+    registerNode({
+      type: 'test.ref.card',
+      label: 'card',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [{ id: 'in', label: 'In', type: T.table() }],
+      outputs: [
+        { id: 'out', label: 'Out', type: T.table() },
+        { id: 'picked', label: 'Picked', type: T.table() },
+        { id: 'dataset', label: 'Dataset', type: T.dataset() },
+      ],
+      params: [
+        { id: 'picked', kind: 'string', label: 'Picked', default: '' },
+        { id: 'cursor', kind: 'string', label: 'Cursor', default: '' },
+      ],
+      inferOutputs: () => ({
+        out: T.table(),
+        picked: T.table(),
+        dataset: T.dataset('mock', 'stack:3'),
+      }),
+      asReference: (params, output) => {
+        asked.push(output)
+        const picked = String(params.picked)
+        if (picked === 'throw') throw new Error('a hook that broke its own rule')
+        // Only `picked` is readable this way; the card's other output needs the card to run.
+        if (output !== 'picked' || !picked) return undefined
+        return makeTable(tableSchema(column('id', 'str')), { id: picked.split(',') })
+      },
+      evaluate: () => {
+        ran.push('card')
+        return {
+          out: emptyTable(tableSchema()),
+          picked: emptyTable(tableSchema()),
+          dataset: { kind: 'dataset', sourceId: 'mock', datasetId: 'stack:3', label: 'ds' },
+        }
+      },
+    })
+    registerNode({
+      type: 'test.ref.follower',
+      label: 'follower',
+      category: 'analysis',
+      cost: 'expensive',
+      inputs: [
+        { id: 'card', label: 'Card', type: T.table(), required: false, reference: true },
+      ],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: (ctx) => {
+        ran.push('follower')
+        handed.push(ctx.input('card'))
+        keys.push(ctx.inputKey('card'))
+        return { out: emptyTable(tableSchema()) }
+      },
+    })
+  })
+
+  /** follower → card, and the card's `picked` wired back to the follower by reference. */
+  function loop(params: Record<string, unknown> = { picked: 'a' }): CodaGraph {
+    let g = emptyGraph('feedback')
+    g = addNode(g, node('fw', 'test.ref.follower'))
+    g = addNode(g, node('cd', 'test.ref.card', params))
+    g = addEdge(g, { source: 'fw', sourceHandle: 'out', target: 'cd', targetHandle: 'in' })
+    return addEdge(g, {
+      source: 'cd',
+      sourceHandle: 'picked',
+      target: 'fw',
+      targetHandle: 'card',
+    })
+  }
+
+  const withParams = (g: CodaGraph, params: Record<string, unknown>): CodaGraph => ({
+    ...g,
+    nodes: g.nodes.map((n) =>
+      n.id === 'cd' ? { ...n, params: params as GraphNode['params'] } : n,
+    ),
+  })
+
+  const scheduler = sourcelessScheduler
+
+  const idsIn = (value: Value | undefined) =>
+    value && 'data' in value ? (value.data as Record<string, unknown[]>)['id'] : undefined
+
+  it('is handed what the card’s params say, before the card has ever run', async () => {
+    ran = []
+    handed.length = 0
+    const g = loop({ picked: 'a,b' })
+    expect(topoSort(g).cyclic).toEqual([])
+    await scheduler().run(g, { mode: 'full' })
+    // The follower first — it is upstream of the card it reads — and with the card's answer.
+    expect(ran).toEqual(['follower', 'card'])
+    expect(idsIn(handed[0])).toEqual(['a', 'b'])
+  })
+
+  it('re-runs the reader when the answer moves, and at no other edit of the card', async () => {
+    const sched = scheduler()
+    const g = loop({ picked: 'a', cursor: '1' })
+    await sched.run(g, { mode: 'full' })
+
+    // A click: some other param of the card. The card re-runs; the expensive reader must not —
+    // keyed on the card's whole params, a search would start over on every row somebody looked at.
+    ran = []
+    const clicked = withParams(g, { picked: 'a', cursor: '2' })
+    await sched.run(clicked, { mode: 'full' })
+    expect(ran).toEqual(['card'])
+    expect(sched.info('fw').state).toBe('ok')
+
+    // The answer itself: now the reader runs again, and is handed the new one.
+    ran = []
+    handed.length = 0
+    await sched.run(withParams(g, { picked: 'a,b', cursor: '2' }), { mode: 'full' })
+    expect(ran).toEqual(['follower', 'card'])
+    expect(idsIn(handed[0])).toEqual(['a', 'b'])
+  })
+
+  it('keys the reader and tells the node the same thing', async () => {
+    // `desiredKeys` and `ctx.inputKey` read one function; if they parted, a node could key a cache
+    // of its own on an identity that does not move when it re-runs.
+    keys.length = 0
+    const sched = scheduler()
+    await sched.run(loop({ picked: 'a' }), { mode: 'full' })
+    await sched.run(loop({ picked: 'b' }), { mode: 'full' })
+    expect(keys).toHaveLength(2)
+    expect(keys[0]).toMatch(/^ref:/)
+    expect(keys[0]).not.toBe(keys[1])
+  })
+
+  it('runs the reader on nothing where the card has nothing to say — that is not a dead wire', async () => {
+    ran = []
+    handed.length = 0
+    const sched = scheduler()
+    const summary = await sched.run(loop({ picked: '' }), { mode: 'full' })
+    // A dataset that has not named itself is refused here. This is a different statement: the
+    // source answered, and the answer is "nothing".
+    expect(summary.failed).toEqual([])
+    expect(ran).toEqual(['follower', 'card'])
+    expect(handed[0]).toBeUndefined()
+  })
+
+  it('reads a hook that throws as nothing, rather than losing every key in the graph', async () => {
+    ran = []
+    handed.length = 0
+    const sched = scheduler()
+    const summary = await sched.run(loop({ picked: 'throw' }), { mode: 'full' })
+    expect(summary.failed).toEqual([])
+    expect(handed[0]).toBeUndefined()
+    expect(sched.info('fw').state).toBe('ok')
+  })
+
+  it('answers for the output the wire leaves from, and only that one', async () => {
+    // Wired from the card's *other* output, the type check still passes — both are tables — so
+    // a hook that ignored the handle would hand the picked ids over under the wrong output.
+    handed.length = 0
+    const g = loop({ picked: 'a' })
+    const other = {
+      ...g,
+      edges: g.edges.map((e) =>
+        e.targetHandle === 'card' ? { ...e, sourceHandle: 'out' } : e,
+      ),
+    }
+    await scheduler().run(other, { mode: 'full' })
+    expect(handed[0]).toBeUndefined()
+  })
+
+  it('asks the hook once per params record, however many times the keys are derived', async () => {
+    const sched = scheduler()
+    const g = loop({ picked: 'a' })
+    asked.length = 0
+    await sched.run(g, { mode: 'full' })
+    await sched.run(g, { mode: 'full' })
+    sched.refreshStates(g)
+    // Keys, inputs and a settle check all read it; unmemoised that is the hook and a hash of its
+    // whole answer on every graph mutation.
+    expect(asked).toEqual(['picked'])
+    // A new record for the card is a new question.
+    await sched.run(withParams(g, { picked: 'a' }), { mode: 'full' })
+    expect(asked).toEqual(['picked', 'picked'])
+  })
+
+  it('refuses a reference to a node of neither kind in its own words', async () => {
+    // A reference port wired from a node that names no dataset and declares no hook. The
+    // dataset's sentence — "its version list has not loaded, run again" — is a remedy for
+    // something that is not wrong here: this wire can never deliver.
+    let g = emptyGraph('neither')
+    g = addNode(g, node('fw', 'test.ref.follower'))
+    g = addNode(g, node('rd', 'test.ref.reader'))
+    g = addEdge(g, { source: 'rd', sourceHandle: 'out', target: 'fw', targetHandle: 'card' })
+    const sched = scheduler()
+    await sched.run(g, { mode: 'full' })
+    expect(sched.info('fw').error).toContain('cannot be read this way')
+    expect(sched.info('fw').error).not.toContain('Run again')
+  })
+
+  it('keeps the dataset’s sentence where the wire may yet be a dataset', async () => {
+    // An output declared `any` — or a placeholder for a node this build lacks — may stand for a
+    // dataset still naming itself. "Can never deliver" would be wrong there, and "run again" right.
+    registerNode({
+      type: 'test.ref.anything',
+      label: 'anything',
+      category: 'utility',
+      cost: 'cheap',
+      outputs: [{ id: 'out', label: 'Out', type: T.any() }],
+      inferOutputs: () => ({ out: T.any() }),
+      evaluate: () => ({ out: emptyTable(tableSchema()) }),
+    })
+    let g = emptyGraph('maybe a dataset')
+    g = addNode(g, node('fw', 'test.ref.follower'))
+    g = addNode(g, node('an', 'test.ref.anything'))
+    g = addEdge(g, { source: 'an', sourceHandle: 'out', target: 'fw', targetHandle: 'card' })
+    const sched = scheduler()
+    await sched.run(g, { mode: 'full' })
+    expect(sched.info('fw').error).toContain('has not resolved a dataset')
+    expect(sched.info('fw').error).not.toContain('cannot be read this way')
+  })
+
+  it('still reads a dataset off the same node as a dataset', async () => {
+    // A node may answer from its params for one output and carry a dataset on another. The hook
+    // says nothing for the dataset output; read through it, a dataset port would be handed
+    // nothing and — "nothing to say" being an answer — never be refused or waited for.
+    captured.length = 0
+    let g = emptyGraph('both kinds')
+    g = addNode(g, node('cd', 'test.ref.card', { picked: 'a' }))
+    g = addNode(g, node('rd', 'test.ref.reader'))
+    g = addEdge(g, {
+      source: 'cd',
+      sourceHandle: 'dataset',
+      target: 'rd',
+      targetHandle: 'dataset',
+    })
+    await scheduler().run(g, { mode: 'full' })
+    const seen = captured[0]
+    expect(seen?.kind).toBe('dataset')
+    expect(seen && 'datasetId' in seen ? seen.datasetId : undefined).toBe('stack:3')
+  })
+
+  it('hears nothing from a muted card, and is not re-run by edits to it', async () => {
+    const sched = scheduler()
+    const muted = (params: Record<string, unknown>): CodaGraph => {
+      const g = loop(params)
+      return { ...g, nodes: g.nodes.map((n) => (n.id === 'cd' ? { ...n, disabled: true } : n)) }
+    }
+    handed.length = 0
+    await sched.run(muted({ picked: 'a' }), { mode: 'full' })
+    expect(handed[0]).toBeUndefined()
+    // A switched-off card that still steered the search would be the one control that is not off.
+    ran = []
+    await sched.run(muted({ picked: 'a,b' }), { mode: 'full' })
+    expect(ran).toEqual([])
+  })
+
+  it('leaves a dataset reference exactly as it was', async () => {
+    // The two kinds are told apart by the *source*. A dataset node declares no hook, so it is
+    // still read off its type — and still refused when it cannot name itself.
+    captured.length = 0
+    await scheduler().run(roundTrip(), { mode: 'full' })
+    expect(captured[0]?.kind).toBe('dataset')
   })
 })

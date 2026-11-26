@@ -1,8 +1,10 @@
 /**
  * "Which datastack is this node pointed at" — the port, the field, and the three refusals.
  *
- * Three nodes ask that question (`CAVE table`, `List CAVE tables`, `CAVE table info`), a fourth
- * surface answers it again on a card, and the notebook exporter answers it a fifth time. They all
+ * Four nodes ask that question (`CAVE table`, `List CAVE tables`, `CAVE table info` and the SEAM
+ * pack's `Find Merge Candidates`), a fifth surface answers it again on a card, and the notebook exporter
+ * answers it a sixth time. `Find Open Ends` takes the port alone and refuses in its own words,
+ * having no typed field for a wire to win over — so it is not a worked example of the pair. They all
  * apply the same rule — **a wired Dataset wins over the typed field**, then `splitDatasetId` — and
  * they all decline in the same three ways. Written out per node, the *wording* of those refusals
  * duplicated too, so fixing a sentence shipped on two nodes and not the third.
@@ -30,7 +32,7 @@ import {
   caveServerOfSource,
   normaliseCaveServer,
 } from '../../data/cave/deployments'
-import { byName, peekTableList } from '../../data/cave/tables'
+import { byName, kindOf, notInListing, peekTableList } from '../../data/cave/tables'
 import type { CaveTableEntry } from '../../data/cave/tables'
 import { CAVE_TABLE_PROVIDER } from '../../data/annotations/caveTable'
 import type { AnnotationRef } from '../../data/annotations/types'
@@ -89,6 +91,33 @@ export function caveDatastackParam(help: string): ParamDef {
 }
 
 /**
+ * A field naming a table in a CAVE datastack, for the three cards that have one.
+ *
+ * `caveDatastackParam`'s shape and its reason: the cards differ in what the table is *for* and
+ * in nothing else, and written out per node the caveat drifted — "listing them needs a CAVE
+ * token; you can always type a name" was already said three ways. The `suggestions` hook is the
+ * part that must not be forgotten, since a card without it silently offers nothing.
+ */
+export function caveTableParam(field: {
+  id?: string
+  label?: string
+  placeholder?: string
+  /** What this card reads the table for. The shared caveat is appended. */
+  help: string
+}): ParamDef {
+  return {
+    id: field.id ?? 'table',
+    kind: 'string',
+    label: field.label ?? 'Table',
+    placeholder: field.placeholder ?? 'nuclei_v1',
+    default: '',
+    help: `${field.help} Listing the tables needs a CAVE token; you can always type a name.`,
+    // Views too, where the card reads them: the read asks the listing which a name is.
+    suggestions: caveTableSuggestions,
+  }
+}
+
+/**
  * The deployment a `Custom CAVE` card names — normalised, so a pasted address bar and a bare host
  * resolve to the one source, the one token and the one set of memo keys. Here rather than on the
  * node so its exporter reads the same answer.
@@ -112,6 +141,24 @@ export interface CaveTarget {
 export interface DatasetIdentity {
   sourceId?: string | undefined
   datasetId?: string | undefined
+}
+
+/** A CAVE chunkedgraph: the deployment and the datastack on it. */
+export interface CaveScope {
+  readonly deployment: string
+  readonly datastack: string
+}
+
+/**
+ * `caveTarget`'s strict sibling: a wired CAVE Dataset's deployment and datastack, or undefined for
+ * anything else — never `caveTarget`'s fallback to the default deployment, which takes any source.
+ * What a feature that reads or writes one chunkedgraph asks of a Dataset (the merge record, the
+ * split gallery).
+ */
+export function caveScopeOf(dataset: DatasetIdentity | undefined): CaveScope | undefined {
+  const deployment = caveServerOfSource(dataset?.sourceId)
+  const parsed = dataset?.datasetId ? splitDatasetId(dataset.datasetId) : undefined
+  return deployment && parsed ? { deployment, datastack: parsed.datastack } : undefined
 }
 
 /**
@@ -153,6 +200,13 @@ export function caveTableRef(
     idColumn?: string
     pivotOn?: string
     valueColumn?: string
+    /**
+     * `desired_resolution`, as the card's free text. **Required**, though empty is a perfectly
+     * ordinary value: it was optional for one commit and the card's own call site forgot it, so
+     * the whole setting was parsed, validated, documented and then dropped on the floor. A field
+     * every caller must name is a field no caller can forget.
+     */
+    resolution: string
   },
 ): AnnotationRef {
   const deployment = caveServerOfSource(sourceId) ?? DEFAULT_CAVE_SERVER
@@ -165,6 +219,7 @@ export function caveTableRef(
       pivotOn: fields.pivotOn ?? '',
       valueColumn: fields.valueColumn ?? '',
       columns: fields.columns,
+      resolution: fields.resolution,
       ...(deployment !== DEFAULT_CAVE_SERVER ? { deployment } : {}),
     },
   }
@@ -250,4 +305,35 @@ export function caveTableSuggestions(ctx: InferContext): Suggestion[] {
  */
 export function caveTablesAt(where: CaveTarget | undefined): CaveTableEntry[] | undefined {
   return where ? peekTableList(where.deployment, where.datastack, where.version) : undefined
+}
+
+/**
+ * The sentence for a typed table name `entries` does not hold, prefixed with the field it was
+ * typed into — or undefined where it is there. Shared by a card's `validate` and a Run's refusal,
+ * so the two say the same thing.
+ */
+export function unlistedTable(
+  field: string,
+  name: string,
+  where: CaveTarget,
+  entries: readonly CaveTableEntry[],
+): string | undefined {
+  return kindOf(entries, name)
+    ? undefined
+    : `\`${field}\`: ${notInListing(name, where.datastack, where.version, entries)}`
+}
+
+/**
+ * `unlistedTable` against the listing as a card sees it: nothing while the listing has not landed
+ * (`peekTableList`'s "not yet"), since a card that said "no such table" for the second before it
+ * arrives would accuse every saved graph of being broken.
+ */
+export function unlistedTableIssues(
+  field: string,
+  name: string,
+  where: CaveTarget | undefined,
+): string[] {
+  const entries = caveTablesAt(where)
+  const line = name && where && entries ? unlistedTable(field, name, where, entries) : undefined
+  return line ? [line] : []
 }

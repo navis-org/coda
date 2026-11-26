@@ -20,5 +20,12 @@
 import { beforeEach } from 'vitest'
 
 import { resetGeometryCache } from '../data/geometryCache'
+import { installWriteGuard } from './writeGuard'
 
 beforeEach(resetGeometryCache)
+
+/*
+ * The one exception to "state only": a test that sends a real merge has not failed a check, it has
+ * written to a shared server. See `writeGuard.ts`.
+ */
+installWriteGuard()

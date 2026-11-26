@@ -42,6 +42,7 @@ import { DashboardCellView } from './DashboardCellView'
 import { DashboardTabs } from './DashboardTabs'
 import { FocusExit } from './FocusExit'
 import { RunProgressBar } from './RunProgressBar'
+import { StatusNotice } from '../StatusNotice'
 import { dropIndex, rowHeight } from './gridGeometry'
 
 /** What the pointer is currently over, mid-drag. */
@@ -361,6 +362,8 @@ export function DashboardView() {
           ))}
         </div>
       )}
+      {/* The store's notice: `Editor` draws it on the canvas, and is not mounted here. */}
+      <StatusNotice />
     </div>
   )
 }

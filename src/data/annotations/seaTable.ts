@@ -11,10 +11,14 @@
  *
  * ```text
  * GET  {host}/api/v2.1/workspaces/                                   → bases, by workspace
- * GET  {host}/api/v2.1/workspace/{ws}/dtable/{base}/access-token/    → JWT + uuid + dtable_server
+ * GET  {host}/api/v2.1/workspace/{ws}/dtable/{base}/access-token/    → JWT + uuid (+ dtable_server)
  * GET  {server}/api/v1/dtables/{uuid}/metadata/                      → tables and their columns
  * GET  {server}/api/v1/dtables/{uuid}/rows/?table_name=…&limit=…     → the rows
  * ```
+ *
+ * where `{server}` is the reply's `dtable_server`. **SeaTable 6 names none** and serves both from
+ * `{host}/api-gateway/api/v2/…` instead — rows at most 1,000 a page, and keyed by column *key*
+ * unless asked `convert_keys=true`. `openBase` decides the route once; see `BaseAccess`.
  *
  * The auth scheme is **`Token`**, not `Bearer`, on every one of them — a `Bearer` JWT gets
  * `403 invalid token`, which names the token rather than the scheme and sends you looking in the
@@ -57,11 +61,15 @@ import { annotationColumns, namedColumns } from './types'
 
 export const SEATABLE_PROVIDER = 'seaTable'
 
-/** How many rows one request returns. The server's own maximum. */
+/**
+ * How many rows one request asks for — each route's own maximum. The gateway answers at most
+ * 1,000 however many are asked for, so paging advances by what came back, never by what was asked.
+ */
 const PAGE_SIZE = 10_000
+const GATEWAY_PAGE_SIZE = 1_000
 
-/** A backstop against a base nobody should be reading whole. Six pages is FlyWire's `info`. */
-const MAX_PAGES = 40
+/** A backstop against a base nobody should be reading whole. FlyWire's `info` is ~58,000. */
+const MAX_ROWS = 400_000
 
 export class SeaTableError extends Error {
   readonly status: number
@@ -426,14 +434,32 @@ export async function listBases(host: string, signal?: AbortSignal): Promise<Sea
   return bases
 }
 
+/** The access-token reply as the server sends it — every route field optional. */
+interface AccessReply {
+  access_token: string
+  dtable_uuid: string
+  dtable_server?: string
+  dtable_db?: string
+  use_api_gateway?: boolean
+}
+
+/**
+ * A base, opened: its JWT and the routes to read and write it, decided once here.
+ *
+ * Exactly one of `gateway` and `dtable_server` is set. A deployment routes rows through
+ * `{host}/api-gateway/` when its reply says `use_api_gateway` — **or names no `dtable_server` at
+ * all**, which is what SeaTable 6 sends (FlyTable since its 6.2 upgrade, measured 2026-11-18:
+ * the reply is `access_token` and `dtable_uuid` only, and `/dtable-server/…/rows/` is a 404).
+ */
 export interface BaseAccess {
   access_token: string
   dtable_uuid: string
-  dtable_server: string
-  /** Where SQL goes. Absent from older deployments' replies; `/dtable-db/` on FlyTable. */
+  /** `{host}/api-gateway`, without the slash — set when rows and SQL go through the gateway. */
+  gateway?: string
+  /** The per-base server — set only where the gateway is not used. */
+  dtable_server?: string
+  /** Where SQL goes off the gateway. Absent from older deployments' replies. */
   dtable_db?: string
-  /** Newer deployments route row and SQL calls through `{host}/api-gateway/` instead. */
-  use_api_gateway?: boolean
 }
 
 export async function openBase(
@@ -444,15 +470,18 @@ export async function openBase(
 ): Promise<BaseAccess> {
   const root = normaliseHost(host)
   const ws = workspace || (await workspaceFor(root, base, signal))
-  const access = await request<BaseAccess>(
+  const reply = await request<AccessReply>(
     `${root}/api/v2.1/workspace/${encodeURIComponent(ws)}/dtable/${encodeURIComponent(base)}/access-token/`,
     requireToken(root),
     { signal },
   )
+  const access = { access_token: reply.access_token, dtable_uuid: reply.dtable_uuid }
+  if (reply.use_api_gateway || !reply.dtable_server)
+    return { ...access, gateway: `${root}/api-gateway` }
   return {
     ...access,
-    dtable_server: access.dtable_server.replace(/\/+$/, ''),
-    ...(access.dtable_db ? { dtable_db: access.dtable_db.replace(/\/+$/, '') } : {}),
+    dtable_server: reply.dtable_server.replace(/\/+$/, ''),
+    ...(reply.dtable_db ? { dtable_db: reply.dtable_db.replace(/\/+$/, '') } : {}),
   }
 }
 
@@ -515,7 +544,9 @@ export async function readMetadataWith(
   signal?: AbortSignal,
 ): Promise<SeaTableTable[]> {
   const meta = await request<Metadata>(
-    `${access.dtable_server}/api/v1/dtables/${access.dtable_uuid}/metadata/`,
+    access.gateway
+      ? `${access.gateway}/api/v2/dtables/${access.dtable_uuid}/metadata/`
+      : `${access.dtable_server}/api/v1/dtables/${access.dtable_uuid}/metadata/`,
     access.access_token,
     { signal },
   )
@@ -552,18 +583,24 @@ async function readAllRows(
   options: AnnotationFetchOptions,
 ): Promise<Array<Record<string, unknown>>> {
   const rows: Array<Record<string, unknown>> = []
-  for (let page = 0; page < MAX_PAGES; page++) {
+  // The gateway answers with column *keys* (`er39`) unless asked for names.
+  const [route, limit] = access.gateway
+    ? [`${access.gateway}/api/v2/dtables/${access.dtable_uuid}/rows/`, GATEWAY_PAGE_SIZE]
+    : [`${access.dtable_server}/api/v1/dtables/${access.dtable_uuid}/rows/`, PAGE_SIZE]
+  const extra = access.gateway ? '&convert_keys=true' : ''
+  while (rows.length <= MAX_ROWS) {
     const url =
-      `${access.dtable_server}/api/v1/dtables/${access.dtable_uuid}/rows/` +
-      `?table_name=${encodeURIComponent(config.table)}&limit=${PAGE_SIZE}&start=${page * PAGE_SIZE}`
+      `${route}?table_name=${encodeURIComponent(config.table)}` +
+      `&limit=${limit}&start=${rows.length}${extra}`
     const body = await request<RowsPage>(url, access.access_token, { signal: options.signal })
     const batch = body.rows ?? []
+    // Only an empty page ends the table: a short one may be the server's cap, not the end.
+    if (batch.length === 0) return rows
     rows.push(...batch)
-    options.onProgress?.(Math.min(0.95, (page + 1) / 8), `${rows.length} rows`)
-    if (batch.length < PAGE_SIZE) return rows
+    options.onProgress?.(Math.min(0.95, rows.length / 80_000), `${rows.length} rows`)
   }
   throw new SeaTableError(
-    `"${config.table}" is longer than ${(MAX_PAGES * PAGE_SIZE).toLocaleString()} rows, which ` +
+    `"${config.table}" is longer than ${MAX_ROWS.toLocaleString()} rows, which ` +
       `is more than Coda will read into one annotation table.`,
   )
 }

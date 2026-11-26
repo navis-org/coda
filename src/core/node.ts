@@ -91,6 +91,11 @@ export interface PortDef {
    * provenance key takes the type's hash in place of the upstream node's key — so changing the
    * dataset's version re-keys this node and changing its annotations does not, which is right
    * because this node never reads them.
+   *
+   * **A second kind, on the same condition**: a source that declares
+   * `NodeDefinition.asReference` hands over what that returns instead, and is keyed on it. The
+   * condition is unchanged — a function of the source's params alone — and it is the source that
+   * states it, so a reader cannot ask for more than the source can know without running.
    */
   reference?: boolean
   /**
@@ -395,13 +400,40 @@ interface ParamBase {
    */
   internal?: boolean
   /**
-   * Written without an undo step and without an auto-run — a viewer recording where somebody is
-   * looking, many times a gesture, which Ctrl+Z should not have to rewind through first. Saved in
-   * the document like any param. `setParam` reads it, so a writer cannot forget it. Undo and redo
-   * step around it: the write is carried into every history snapshot, so no step restores an old
-   * value.
+   * Written without an undo step — a viewer recording where somebody is looking, many times a
+   * gesture, which Ctrl+Z should not have to rewind through first; or a record of writes made to a
+   * server, which Ctrl+Z must not be able to erase (`seam:proofreadMerges`'s `merges`). Saved in the
+   * document like any param. `setParam` reads it, so a writer cannot forget it. Undo and redo step
+   * around it: the write is carried into every history snapshot, so no step restores an old value.
+   * It auto-runs only where it is not `presentational`, i.e. where it can change a result.
    */
   unrecorded?: boolean
+  /**
+   * **A record the run keeps**, not a setting: what the node decided while it ran, written back
+   * into the document through `ctx.record` so the next run — after a reload too — answers the
+   * same. The card's ⟳ (the store's `refreshNode`) empties it. `core/runRecord.ts`.
+   *
+   * For a node whose answer depends on *when* it is asked, where the moment has to be in the
+   * document: `seam:findMergeCandidates` reads the live segmentation, and a review card below it saves
+   * verdicts naming the candidates it found — searched again at a new "now" after a reload, they
+   * could name nothing (`docs/seam-live-plan.md`). It keeps the moment it searched each neuron
+   * at, and the neurons are only known while it runs, so the record can only be written after
+   * the run has begun — by the store, through `SchedulerHost.onRecord`, from every surface that
+   * runs it (the dashboard too, where no card is mounted).
+   *
+   * **Declare it `presentational`, `unrecorded` and `internal` as well** — `registerNode` refuses
+   * it otherwise. Presentational, because it is out of the key: written mid-run, in the key it
+   * would re-key the node and everything below it, and run them again, for a record of what they
+   * had just done. That bends invariant 4's wording — a record *is* read by `evaluate` — and
+   * holds by construction instead: the same key means the same upstream, so the same things to
+   * record, and an entry, once written, is what the run that wrote it used. The ways it changes
+   * otherwise are the ⟳, which moves the node's key as it empties the record
+   * (`Scheduler.renewNode`), so a run deciding on the old record is stopped rather than adopted,
+   * and an edit by hand, which `internal` keeps off the card. Unrecorded, because undo must not
+   * take back what a run did. A run outside the store (the MCP server, `rerunInput`)
+   * writes nothing, so `evaluate` must still answer a record that lacks what it is about to add.
+   */
+  runRecord?: boolean
   /** Conditional visibility, evaluated against the node's current params. */
   visibleIf?: (params: ParamValues) => boolean
   /**
@@ -945,21 +977,38 @@ export type ParamValues = Record<string, ParamValue>
 // ---------------------------------------------------------------------------
 
 /**
- * A remedy a warning offers as a button, drawn directly under its sentence on the card and in the
- * inspector.
+ * A remedy an issue offers as a button, drawn directly under its sentence on the card and in the
+ * inspector — and, for a run's first failure, in the notice (`failureNotice`), which is the only
+ * place a dashboard shows it.
  *
- * **A store action by name, never a callback**, for two reasons. A node definition is headless
+ * **Data a store action reads, never a callback**, for two reasons. A node definition is headless
  * and frozen, so it cannot hold a closure over the store. And a fix is an edit, and every edit is
- * a store action that `lock.test.ts` has put on one side of the lock, so the list of things a
- * button here can do is closed and every one of them is already refused under the lock. The
- * action takes the node id and nothing else.
+ * a store action that `lock.test.ts` has put on one side of the lock: every button goes through
+ * the one, `applyFix(nodeId, fix)`, which dispatches on `action`, so the list of things a button
+ * can do is closed. Whether the button shows under the lock is `fixLiveUnderLock`.
+ *
+ * - `attachAnnotationChain` adds nodes, so it is refused under the lock and its button hidden.
+ * - `tickAndRun` sets a boolean param and runs the node: `setParam`'s kind of edit, live under the
+ *   lock, so a reader of a locked dashboard can still say yes. It comes from `evaluate` throwing a
+ *   `FixableError` — a consent the run found it needed, like a model download.
  */
-export interface IssueFix {
+export type IssueFix = {
   /** What the button says. */
   label: string
   /** Its tooltip: what pressing it will do. */
   title?: string
-  action: 'attachAnnotationChain'
+} & (
+  | { action: 'attachAnnotationChain' }
+  | {
+      action: 'tickAndRun'
+      /** A boolean param of the node. */
+      param: string
+    }
+)
+
+/** Whether a fix's button stays under the lock: only where its action is live there too. */
+export function fixLiveUnderLock(fix: IssueFix): boolean {
+  return fix.action === 'tickAndRun'
 }
 
 /** One line of `validate` carrying its fix. A bare string is the same line with none. */
@@ -1009,8 +1058,65 @@ export interface InferContext<P extends ParamValues = ParamValues> {
   outputPorts(): readonly ResolvedPort[]
 }
 
+/**
+ * The node `EvalContext.rerunInput` puts in place of whatever fed the neuron wire.
+ *
+ * **It has no wires of its own, and that is meant.** The source it replaces may have been wired
+ * from a dataset — `Input IDs` reads full rows through one and drops ids the dataset does not
+ * hold. The neuron asked about here is usually a piece of segmentation no neuron table lists, so
+ * inheriting that wire would drop the very id being asked for. What the chain gets is the id and
+ * nothing else; a node below that reads the neuron table's other columns finds none for it.
+ */
+export interface NeuronSwap {
+  /** A registered node type that needs no input to produce neurons — `neuron.inputIds`. */
+  type: string
+  params: ParamValues
+  /** Which of its outputs carries the neurons. */
+  output: string
+}
+
+/**
+ * Params laid over every node of a type in a re-run's copy of the chain, by node type — what the
+ * caller knows of the neuron that the chain was not built for. Only the copy is changed, and a
+ * param the type does not declare is refused (`variantGraph`), so a renamed one cannot quietly
+ * stop applying.
+ */
+export type RerunSettings = Readonly<Record<string, ParamValues>>
+
+/** What a re-run chain delivered on the port, and what its nodes warned about on the way. */
+export interface RerunResult {
+  value: Value | undefined
+  /** Each inner node's `ctx.warn`, led by that node's label. The caller decides what to pass on. */
+  warnings: string[]
+}
+
 export interface EvalContext<P extends ParamValues = ParamValues> {
   params: P
+  /**
+   * Run everything above one input again with a different neuron on the wire, and hand back the
+   * value that then arrives on the port. Present only on a node declaring `rerunsInputs`.
+   *
+   * The chain above an input is, read this way, a function of one neuron: Meshes, a clean-up, a
+   * model, a Sort, whatever the reader built. This calls it. It runs on a `Scheduler` of its own
+   * over a copy of the graph (`core/variantRun.ts`), so the cards on the canvas keep their
+   * results and their one cache entry each, and whatever is in the chain costs only the neuron
+   * asked about.
+   *
+   * It carries this evaluation's signal, so Cancel stops it. `report` is told which inner node is
+   * running and what it says, each time one reports progress — for the caller's own note.
+   * `settings` lays params over the copy's nodes (`RerunSettings`). It throws, in a sentence, where the chain cannot be re-run —
+   * no neuron wire above the port, two from different sources, a loop — and where an inner node
+   * fails.
+   *
+   * **What comes back is not in this node's key**, and does not need to be: the chain's own params
+   * are, through the port's upstream key, and the neuron asked for must come from something that
+   * is too — a param, or a reference. So are `settings`, which must be the caller's constant.
+   */
+  rerunInput?(
+    portId: string,
+    neurons: NeuronSwap,
+    options?: { report?: (note: string) => void; settings?: RerunSettings },
+  ): Promise<RerunResult>
   /** Realised value on an input port, or undefined when unconnected. */
   input(portId: string): Value | undefined
   /**
@@ -1058,6 +1164,18 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
    * one statement, so a node cannot offer Clear Cache and quietly ignore it.
    */
   refresh: boolean
+  /**
+   * The longest this node's data may be held, in ms — present only where somebody chose a
+   * lifetime on the card (`GraphNode.cache`, `core/cachePolicy.ts`).
+   *
+   * For a node with a cache of its own to read, so it can leave out what is too old **the first
+   * time**. Without it the lifetime is still kept, by the scheduler's backstop: a node that
+   * reports data that was older than this when it started is evaluated again with `refresh` —
+   * the whole of it, including whatever the first pass had just fetched. A node that reads through `loadCachedTable` loses
+   * a table read to that; one whose work is minutes long loses the run. "Don't cache" is not
+   * here: it is `refresh` on every execution.
+   */
+  maxAgeMs?: number
   /** Aborted when the run is superseded or cancelled. Long loops should check it. */
   signal: AbortSignal
   /** Report 0..1 progress for the node's status bar. */
@@ -1130,6 +1248,16 @@ export interface EvalContext<P extends ParamValues = ParamValues> {
    * honest state for a node that did not fetch.
    */
   reportFetched(at: number): void
+  /**
+   * Write a `runRecord` param's new value into the document — what this run decided and the
+   * next must read back (`ParamBase.runRecord`). The whole value, not a change to it.
+   *
+   * Throws for a param not declared `runRecord`, so nothing else can be written this way. Does
+   * nothing for a run that has been cancelled, and nothing where the scheduler has no host to
+   * write it (the MCP server, `rerunInput`'s private scheduler). Optional, as `rerunInput` is,
+   * only so a context built by hand in a test need not carry it: the scheduler always does.
+   */
+  record?(paramId: string, value: ParamValue): void
   /**
    * Which pass of a `For Each` this is, when the node sits inside a loop's region.
    *
@@ -1445,6 +1573,47 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * to report, in `validate` or `evaluate`.
    */
   settle?(ctx: Pick<InferContext<P>, 'params'>): Promise<unknown> | undefined
+  /**
+   * What a `reference` port wired from this node is handed — **from this node's params alone.**
+   *
+   * A reference names a node without waiting for it, so the node may be *downstream* of its
+   * reader and may never have run. What it can still say is whatever its params say, and this is
+   * that: Proofread Merges' list of pieces to extend, read by the Find Merge Candidates above it
+   * (`docs/seam-extend-plan.md`). The reader's provenance key takes the hash of the answer, so the
+   * reader re-runs when the answer moves and at no other edit of this node — a click that changes
+   * some other param re-keys nothing.
+   *
+   * Three rules, each the reason the mechanism is sound:
+   *
+   * - **Params only.** No input, no cache, no clock. An answer that read an input would be an
+   *   answer the reader could get before the thing it depends on had run.
+   * - **Must not throw.** It is asked where the keys are derived, and a throw is read as
+   *   `undefined`.
+   * - **Small.** The value is hashed whole to make the key. Asked once per params record, so an
+   *   edit elsewhere in the graph costs nothing.
+   *
+   * `output` is the port the wire leaves from, so a node with several outputs answers for the one
+   * that was wired and `undefined` for the rest — the type on the wire is that output's, and a
+   * value that ignored which one it was could be handed over under another output's type.
+   *
+   * Not asked of a muted node, which says nothing, nor for an output that carries a dataset,
+   * which is read as one.
+   *
+   * `undefined` is an answer — "nothing to say" — and the reader is handed it as it would be an
+   * unwired port. Absent on every node but the ones meant to be read this way; a dataset node is
+   * read through its *type* instead (`datasetIdentity`), which this does not replace.
+   */
+  asReference?(params: P, output: string): Value | undefined
+  /**
+   * This node may run the chain above one of its inputs again, for another neuron
+   * (`EvalContext.rerunInput`). `expensive` nodes only — `registerNode` refuses the pair
+   * otherwise, since a re-run is a whole chain of fetches and a `cheap` node runs per keystroke.
+   *
+   * Declared rather than offered to every node because the context then has to hold the run's
+   * graph for as long as the node is evaluating, which the scheduler otherwise takes care not to
+   * (`makeEvalContext`).
+   */
+  rerunsInputs?: boolean
   /**
    * Feed this node's last observed output schema back into `inferOutputs` via
    * `ctx.observed`. Set it only when the shape genuinely cannot be known before running —

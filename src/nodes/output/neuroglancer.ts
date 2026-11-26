@@ -46,12 +46,14 @@ import { datasetCacheKey } from '../../data/neuronIndex'
 import { unmatchedIds } from '../lib/idList'
 import { errorMessage } from '../../core/errors'
 import { plural } from '../../style/format'
+import { FOCUS_GREEN, cycleColor } from '../../style/colors'
 import {
   applySelectionEdits,
   decodeSelectionEdits,
 } from '../../data/neuroglancer/selectionEdits'
 import type { NgLayerSet, NgLayout, ViewerKind } from '../../data/neuroglancer/scene'
 import type { DataSource, SegmentPlacement } from '../../data/source'
+import { NoNeuronListError } from '../../data/source'
 import {
   DEFAULT_NEUROGLANCER_URL,
   buildScene,
@@ -139,6 +141,15 @@ export function frameTarget(params: ParamValues): FrameTarget {
   }
 }
 
+/**
+ * Whether the card embeds Coda's own copy of neuroglancer — the only one that reports back what is
+ * under the pointer, the keys pressed in it and its state (`NeuroglancerViewer`'s `readable`).
+ * What a surface that relies on those asks of a Neuroglancer node, to say when they are off.
+ */
+export function framesOwnCopy(params: ParamValues): boolean {
+  return frameTarget(params).use === 'own'
+}
+
 /** Whether a neuron hidden in the viewer stays in `Selected`, with a `visible` column saying so. */
 export function keepsHidden(params: ParamValues): boolean {
   return params.hiddenNeurons === 'keep'
@@ -152,8 +163,11 @@ function withVisibleColumn(schema: TableSchema): TableSchema {
   return foldColumns(schema, [column(VISIBLE_COLUMN, 'bool')])
 }
 
+/** The card's type, for a card that acts on the viewers wired to it (Proofread Merges' Start over). */
+export const NEUROGLANCER_TYPE = 'out.neuroglancer'
+
 registerNode({
-  type: 'out.neuroglancer',
+  type: NEUROGLANCER_TYPE,
   label: 'Neuroglancer',
   category: 'visualisation',
   description: "View neurons in the dataset's own neuroglancer scene.",
@@ -185,6 +199,26 @@ registerNode({
      * without Coda having to know about any of them.
      */
     { id: 'layers', label: 'Extra layers', type: T.layers(), required: false },
+    /*
+     * A card that drives this one: the segments to look at *now*, and where to look.
+     *
+     * `seam:proofreadMerges` is the first, paging through a queue of merge suggestions. Its ids are added
+     * to the scene and its first row's `x`/`y`/`z` — in nanometres — point the camera, which is
+     * the half an ordinary wire cannot do: a camera lives in the scene's `position`, and a scene
+     * whose position changed is a scene pointed somewhere else, so it re-navigates and every
+     * layer is torn down. Moving a camera *without* that is `coda:ng-set-view`, a message, and
+     * a message needs the embedded viewer.
+     *
+     * **So the camera half works only in Coda's own frame.** The segments work anywhere. That is
+     * said on the port and on the card rather than left to be discovered, because a camera that
+     * quietly does not move looks exactly like a camera pointed at the right place.
+     */
+    {
+      id: 'control',
+      label: 'Control',
+      type: T.neurons(),
+      required: false,
+    },
   ],
   outputs: [
     { id: 'url', label: 'Link', type: T.string() },
@@ -465,13 +499,40 @@ registerNode({
       throw new Error('Extra layers input is not a layer set')
     }
 
+    /*
+     * The controller's segments, added after the rest and after the selection edits.
+     *
+     * Added rather than replacing, so a scene somebody built still stands and the thing being
+     * looked at arrives on top of it. Added *last* so it wins the colour: a controller is saying
+     * "this one now", and a row that was already in `Neurons` keeping its table colour would
+     * hide exactly that.
+     */
+    const control = ctx.input('control')
+    if (control !== undefined && !isTableValue(control)) {
+      throw new Error('Control input is not a table')
+    }
+    const driven = controlSegments(control)
+    const already = new Set(segments)
+    const shownSegments = [...segments, ...driven.ids.filter((id: string) => !already.has(id))]
+
     // Hidden neurons are listed `!id` only where they stay selected; otherwise hiding is removing.
     const hidden = keepsHidden(ctx.params) ? shownOnly(edits.hidden, segments) : undefined
+    const fields = ownColors ?? colorFields(spec, colors)
     const scene = buildScene(published, {
       datasetId: dataset.datasetId,
-      segments,
+      segments: shownSegments,
       ...(hidden ? { hiddenSegments: hidden } : {}),
-      ...(ownColors ?? colorFields(spec, colors)),
+      ...fields,
+      ...(driven.ids.length > 0
+        ? {
+            segmentColors: { ...(fields.segmentColors ?? {}), ...driven.colors },
+            // A per-segment map and a single default are alternatives in a scene; naming both
+            // leaves neuroglancer to choose, and the map is the one carrying the controller.
+            ...(fields.segmentDefaultColor === undefined
+              ? {}
+              : { segmentDefaultColor: undefined }),
+          }
+        : {}),
       ...(placed ? { placements: placed } : {}),
       layout: String(ctx.params.layout) as NgLayout,
       layers: String(ctx.params.layers) as NgLayerSet,
@@ -495,6 +556,84 @@ registerNode({
     }
   },
 })
+
+/**
+ * The hue a `Control` row takes, by its `part`.
+ *
+ * Three, from the first three slots of the categorical palette, which were validated as adjacent
+ * pairs rather than picked: `neuron` blue, `candidate` orange, `accepted` green. The question a
+ * reader is answering is whether a candidate belongs to the neuron, which they cannot see if the
+ * two are one colour; `accepted` is a piece they already said does, so the scene shows the neuron
+ * as it will look once the merges are made. `focus` is an accepted piece under the cursor, in a
+ * lighter step of that green (`FOCUS_GREEN`). Anything else, or no `part` at all, takes the first.
+ *
+ * Exported for `seam:proofreadMerges`'s own fallback viewer, so the two surfaces cannot disagree.
+ */
+export function controlPartColor(part: unknown): string {
+  // An accepted piece in focus: a lighter step of the accepted green (`FOCUS_GREEN`).
+  if (part === 'focus') return FOCUS_GREEN
+  const slot = part === 'candidate' ? 1 : part === 'accepted' ? 2 : 0
+  return cycleColor(slot, VIEWER_MODE)
+}
+
+/**
+ * What a `Control` wire is asking for: ids to add, and a colour each (`controlPartColor`).
+ *
+ * The first row naming an id decides its colour; a later row repeating it is ignored.
+ *
+ * Ids through `idText` and nothing else: these reach a scene as segments, and a float here is a
+ * different neuron (invariant 8).
+ */
+function controlSegments(table: TableValue | undefined): {
+  ids: string[]
+  colors: Record<string, string>
+} {
+  const ids: string[] = []
+  const colors: Record<string, string> = {}
+  if (!table) return { ids, colors }
+  const column = table.data[ID_COLUMN_NAME] ?? []
+  const parts = table.data['part'] ?? []
+  const seen = new Set<string>()
+  for (let i = 0; i < column.length; i++) {
+    const id = idText(column[i])
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+    colors[id] = controlPartColor(parts[i])
+  }
+  return { ids, colors }
+}
+
+/**
+ * How much of the scene to frame around a controlled view, in **nanometres**.
+ *
+ * Fifteen micrometres across. Not tuned: it is the span of the thing being judged — SEAM's own
+ * window is a 15 µm radius, its own-tip rule reaches 2 µm, and a candidate is a fragment of a
+ * neurite — so a site and enough of its neighbourhood to tell what it is attached to. The
+ * alternative, framing by the candidate's own size, puts a 0.02 µm³ fragment under a microscope
+ * with nothing around it to judge it against.
+ */
+export const CONTROL_FRAME_NM = 15_000
+
+/**
+ * Where a `Control` wire is pointing the camera, in nanometres, or undefined where it says.
+ *
+ * The **first row**, because a controller is showing one thing: `seam:proofreadMerges` puts the neuron
+ * first and the candidate second, and the contact between them is on both. Read by the card
+ * rather than by `evaluate`, since a camera is not part of a scene's identity — see
+ * `NeuroglancerViewer`'s `focus`.
+ */
+export function controlFocusNm(
+  table: TableValue | undefined,
+): readonly [number, number, number] | undefined {
+  if (!table || table.length === 0) return undefined
+  const at = (name: string): number | undefined => {
+    const cell = table.data[name]?.[0]
+    return typeof cell === 'number' && Number.isFinite(cell) ? cell : undefined
+  }
+  const [x, y, z] = [at('x'), at('y'), at('z')]
+  return x !== undefined && y !== undefined && z !== undefined ? [x, y, z] : undefined
+}
 
 /** The hidden ids the scene still shows — a note about a neuron since removed means nothing. */
 function shownOnly(hidden: ReadonlySet<string>, segments: readonly string[]): Set<string> {
@@ -570,12 +709,19 @@ async function selectedNeurons(
   } catch (err) {
     // A cancel is the run ending, not a lookup that failed.
     if (ctx.signal.aborted) throw err
-    // Kept rather than thrown, so the scene stays on screen — but cached like any result, so say
-    // how to ask again.
-    ctx.warn(
-      `Could not look up the ${plural(added.length, 'neuron')} added in the viewer, so they ` +
-        `have only an id: ${errorMessage(err)}. Use Invalidate Results on this card to try again.`,
-    )
+    /*
+     * A dataset that lists no neurons (`NoNeuronListError`) has no rows to give: a bare id is the
+     * whole of what it can say, so that is no warning — and "try again" would fail the same way.
+     * Anything else is kept rather than thrown, so the scene stays on screen, but cached like any
+     * result, so say how to ask again.
+     */
+    if (!(err instanceof NoNeuronListError)) {
+      ctx.warn(
+        `Could not look up the ${plural(added.length, 'neuron')} added in the viewer, so they ` +
+          `have only an id: ${errorMessage(err).replace(/\.$/, '')}. Use Invalidate Results on ` +
+          'this card to try again.',
+      )
+    }
   }
   const bare = found ? unmatchedIds(added, found) : added
   if (found && bare.length > 0) {

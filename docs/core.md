@@ -32,6 +32,26 @@ result cache cannot answer a run whose params moved, so without it every restyle
 `loadCachedTable`: a month in IndexedDB is for bulk tables, and this is a handful of ids. It does
 not honour `ctx.refresh` — the node declares no `dataCache` — so an answer stays for the session.
 
+And **Find Merge Candidates**, one end at a time (`packs/seam/endMemory.ts`): an end is 6 to 11 s and a
+run is tens to hundreds of them, so an entry per *node* loses all of them to anything that moves
+the key — a cancel, or an Extend, which moves it by design
+([seam-extend-plan.md](seam-extend-plan.md)). Keyed on everything an end's answer depends on,
+the other tips of its neuron included; a refused end is not kept; `ctx.refresh` forgets the
+run's ends before measuring any, so a Clear Cache stopped half way leaves nothing old behind. It
+reports the age of the oldest end behind its answer. A first draft reported none, since a
+materialization is a fixed moment — but without an age the card's lifetime menu does nothing,
+and `cached 12m ago` is the only lasting sign that a run of a fifth of a second came from memory.
+It is the first user of `ByteLru` (`core/lruMap.ts`), the byte-budgeted, read-promoting cache
+that three older modules each still write out by hand.
+
+**`ctx.maxAgeMs` came with it**: the lifetime somebody chose on the card, handed to `evaluate`.
+The lifetime's backstop (below) runs a node a second time, with `refresh`, when it reports data
+older than its lifetime — a table read for most `dataCache` nodes, and for this one every end
+again, the ones the first pass had just measured included. A node with a cache of its own reads
+the lifetime and leaves out what is too old the first time, so it never reports an age the
+backstop would act on. And the backstop asks whether the copy was too old **when the node
+started**, not when it finished: a node is not run twice for having taken long.
+
 **The third exists because the first two cannot help each other.** A morphology node's key folds
 in its upstream *provenance*, so it re-runs whenever anything about its Neurons input changes —
 and re-running means re-downloading. Probed on a 12-neuron scene: widening a type pattern from
@@ -226,6 +246,45 @@ with `refresh`. That costs a second `evaluate` in that one case — for an annot
 IndexedDB read thrown away — and needs no node to know the feature exists. Threading a `maxAgeMs`
 through `loadCachedTable` and `cachedGeometry` would save the read and touch every `DataSource`.
 
+## A run record is a param the run writes and the key leaves out
+
+`ParamBase.runRecord` (built 2026-11-17 for `seam:findMergeCandidates`' `Searched at`;
+[seam-live-plan.md](seam-live-plan.md)). Some answers depend on something the node can only decide
+while it runs, and must decide the same way next time — after a reload, and when the reader comes
+back to a neuron from another. Find Merge Candidates searches each neuron at the moment it first met it,
+and only learns which neurons there are once its inputs have arrived. So the node writes what it
+decided into one of its own params, through `ctx.record(paramId, value)`, and reads it back next run.
+
+**The pieces.** `EvalContext.record` refuses a param not declared `runRecord` and does nothing for
+an aborted evaluation; otherwise it hands the value to `SchedulerHost.onRecord`. The store commits
+it with `{ history: false, autoRun: false }`, from every surface that runs a node — the dashboard
+included, where no card is mounted, which is why the store writes it and not the card. A run outside
+the store (the MCP server, `rerunInput`'s private scheduler) writes nothing, so `evaluate` must answer
+a record that lacks what it is about to add.
+
+**Out of the key, and that bends invariant 4's wording.** A record is declared `presentational`,
+`unrecorded` and `internal`, and `registerNode` refuses one that is not. In the key, a write made
+mid-run would re-key the node and everything below it and run them all again for a record of what
+they had just done. Yet `evaluate` reads it, which is what invariant 4 says a presentational param
+must not be read for. It holds by construction instead: the same key means the same upstream, so
+the same things to record, and an entry, once written, is what the run that wrote it used.
+Unrecorded because undo must not take back what a run did; internal because a record edited by
+hand is a different answer under the same key.
+
+**Read back by the evaluation that wrote it.** `ctx.params` is a getter over the evaluation's own
+copy, which `record` replaces. The lifetime backstop above runs `evaluate` a second time on a spread
+of the context, and before this the second pass read the record as it was before the first —
+deciding again what the first had just decided (a new moment for every new neuron, and its ends
+searched twice).
+
+**The card's ⟳ empties it, Clear Cache does not.** The ⟳ is the store's `refreshNode`:
+`emptyRecords` (`core/runRecord.ts`), then `Scheduler.renewNode` — a lapse asked for, so the key
+moves — then a run. The key has to move because the record is not in it: a run already in flight,
+deciding on the old record, would otherwise be **adopted** by the next walk and its answer kept.
+A card with no record to empty gets Clear Cache and a run, as before. Clear Cache leaves the record
+alone, because it says "forget downloaded data", and a review card's saved verdicts may name the
+answer the record reproduces.
+
 ## A partial result, while the node is still running
 
 `ctx.publish(outputs)` puts a half-finished value on a node's output port without the node having
@@ -243,19 +302,68 @@ evaluation, nothing new in a saved file.
 Three things had to be true, and each was a separate bug waiting:
 
 **A preview is not a cache entry.** It lives in `Scheduler.previews`, read *before* the cache by
-`output`/`outputs` and dropped the moment the node settles — onto the real result, or onto
-nothing. A partial stored under the node's provenance key would be the answer *for that key*
+`output`/`outputs` and dropped by the rule below. A partial stored under the node's provenance key would be the answer *for that key*
 (invariant 4), so a run cancelled at body 250 of 300 would leave a scene that looks complete and
 that no later run would even be scheduled to fix. The geometry is still in `geometryCache`, so
 dropping it costs a redraw rather than a re-download.
+
+**A partial stays until something newer replaces it, or nothing is coming to** (user,
+2026-11-18). Newer is a publish, or a run of the node ending on its own — success or error, and
+whoever published the partial. Nothing coming is Cancel, `invalidateAll` (a dataset switch, a
+document closed), or a node no longer `stale` — fresh from the cache again (dropped at the
+walk's cache hit, not when the walk ends), switched off, refused, or `blocked` (`dropUnawaited`,
+asked on every edit and at the end of every walk, which sets states an edit never sees).
+`blocked` is not told apart: it is also a node whose upstream is only waiting for the same run,
+so an edit *above* a node that is publishing still drops its partial, as it always did — the
+Extend case is an edit to the node itself. **A run that was stopped
+drops nothing on its way out**, so a retired run's partial is kept for the run replacing it —
+except a loop's pass, since the run replacing it starts again at the first element (and a pass
+unwinding late can still drop its successor's partial, as before). Dropping one partial drops
+every derived answer (`dropDerived`), so where another stands, its chain is derived again — a
+moment of the cache below it, with two nodes publishing at once.
+
+The rule it replaced dropped the partial with the run that made it, however that run ended — and
+an edit retiring a run in flight then handed every reader the cache, the last run that
+*finished*, until the new run's first publish. On a node edited faster than it finishes that is
+several edits old: pressing Extend on Proofread Merges while the last search was still running
+blanked the list and the Neuroglancer card beside it, and both came back a moment later.
+Measured in Chrome on a second Extend pressed 3.5 s into the first one's search: the card's tips
+went 12 → 10 → 12, with a 375 ms gap; 12 throughout after. It had a second gap of the same kind:
+a stopped run unwinds when its work next looks at its signal, which can be after its successor
+has published, and its drop then took the successor's partial with it.
+
+What it costs: with auto-run off, or on an expensive node auto-run defers, an edit to a node
+that was publishing leaves its partial on screen beside the `stale` badge until the next Run,
+where the last finished result stood before. Meanwhile `hasPartial` stays true, so a card
+reading it (Proofread Merges' foot) says the queue is still filling; the partial is held beside
+the old cache entry; and it is a live publisher to `derivePreviews`, so every edit — a card
+dragged, each frame — derives the cheap nodes below it again and re-renders their readers, which
+before happened only while something streamed. A derive that remembered what it last derived
+from would cut that; not built.
+
+`scheduler.test.ts`' "a partial when its run is retired" pins the cases; each was checked by
+breaking it, except three that need a graph of their own: a loop's pass dropping on stop, a
+second partial's chain derived again, and `blocked` counting as nothing coming.
 
 **`onPreview` is its own host hook, not `onStateChange`.** A state change moves a badge, and a
 card subscribes to it through its *own* node's state; a preview changes what is on somebody
 else's card. `void s.runVersion` inside a selector subscribes to nothing on its own — zustand
 compares what the selector *returns* — so the 3D View card, whose own output and state are both
 unchanged while its upstream fills in, would never re-render. `previewVersion` is selected
-directly, as the primitive invariant 7 requires — and returned as a constant for anything that is
-not a viewer, so the repaint cost tracks the scene rather than the size of the graph.
+directly, as the primitive invariant 7 requires — and returned as a constant for anything that
+draws no arriving data, so the repaint cost tracks the scene rather than the size of the graph.
+
+There are two ways in, because a viewer is not the only thing that draws a partial. A node of
+`category: 'visualisation'` subscribes because that is what a viewer is for; any other card does
+so by its **body** declaring `drawsInputs` (`ui/nodes/nodeBodies.ts`). `seam:proofreadMerges` is the case
+that needed the second: its queue is `seam:findMergeCandidates`' published partial, an end landing
+every few seconds, and the body reads `inputValues` exactly as the 3D viewer does — but the card
+is a `utility` one, so it had selected nothing that a publish moves and sat on an empty list
+until the run ended. The flag is off by default for the measured reason above: a publish is four
+times a second and re-rendering a card costs two `nodeInputs` walks, so on a sixty-node graph an
+ungated version was tens of thousands of array scans a second to repaint the two cards that could
+have changed. `ui/nodes/streamingBody.test.tsx` pins it, by holding a producer open at a gate and
+asserting the card lists the published end while that node is still `running`.
 
 **The viewer branch sits above `ValuePreview`'s `!value` guard**, on `out.rois`' terms. This
 node's own output is the selection table, empty until it evaluates — one whole scheduler step
@@ -268,6 +376,71 @@ is not local: every publish repaints every viewer card, and a skeleton channel r
 merged vertex buffer each time. Leading edge only and no timer — the complete answer is the
 trailing edge. It is per fetch rather than global, which is only safe because the scheduler runs
 nodes one at a time; two morphology nodes in a graph do not publish concurrently.
+
+### A partial that has to cross a node boundary
+
+The paragraph above rests on one premise: the viewer draws its **inputs**, so the value on the
+upstream wire *is* the picture. Proofread Merges is the case where that stops being true. Its
+card draws the arriving queue, but the viewer a reader judges a merge in is a **Neuroglancer node
+downstream of it**, wired from `Current` and `Layers` — outputs only Review's own `evaluate`
+produces. So the queue filled end by end while the picture beside it stayed on the previous run,
+and clicking a row did nothing at all until the whole search settled. On a neuron of several
+hundred ends that is the opposite of reviewing while the inference is in flight.
+
+`derivePreviews` runs the `cheap` nodes below a partial against it and keeps their answers as
+previews of their own. Four things make that safe to state as simply as the precedence rule
+above:
+
+- **Nothing derived is cached.** An answer computed from half an input is the answer for no
+  provenance key at all (invariant 4). Cached it would be a complete-looking result that no later
+  run would even be scheduled to replace — the same failure a published partial in the cache
+  would be, one node further along. It goes in `previews`, which `output` already prefers.
+- **`cheap` is the whole gate, and it is one that already exists.** `cheap` means the node
+  re-runs on every edit (invariant 6), so a node that must not run four times a second has
+  already said so by being `expensive`. No new flag, which is also why a chain survives somebody
+  dropping a `Filter Table` into the middle of it — the drift a hand-kept list of participating
+  node types would have had.
+- **A node already `ok` is left alone**, and the walk stops there: its cached result answers its
+  current key, so it is final, and a partial below it would be a lesser answer rather than a
+  newer one.
+- **A derived run reports nothing** — no `progress` (which would put a `running` badge on a node
+  that is not running), no `warn` (kept, and copied onto the node's eventual cache entry), no
+  `reportFetched` (dating data this run did not fetch), no `publish`. Each of those channels says
+  "this node ran", and it did not: something was recomputed on its behalf from an input that is
+  still arriving.
+
+Two triggers, because there are two ways a derived answer goes out of date: `ctx.publish`, and
+`refreshStates` — which is every graph mutation, **including the ones made while a run is in
+flight**. That second one is the click: a reader picking a row in a card sets a param on a node
+whose upstream is still fetching, and the old behaviour parked that edit's cheap pass above the
+running node until it finished. The asks coalesce, since a publish is up to four a second and a
+derive walks the graph's keys.
+
+The whole derived chain is dropped when the partial under it goes — on success the real walk is
+already on its way to those nodes with the real inputs, and on a cancel there is nothing left for
+them to be a preview *of*.
+
+**Dropping it has to stop the derive, not just forget it**, and that is the one thing here that
+failed silently and could not be recovered from. A derive is parked on an `evaluate` while the
+walk carries on, so between the await and the write the partial it was computed from can be gone
+— a node settles the moment its last publish is out. Left to land, that write put a value
+computed from one row of input into `previews`, where `outputs()` prefers it to the cache: it
+shadowed the node's real result for the rest of the session, and with no publisher left there was
+never another derive to sweep it away. So `dropDerived` aborts the in-flight derive first, the
+walk checks the signal before each node as well as after each `evaluate`, and `cancel()` drops
+the chain too — a node that ignores its own signal never unwinds, so its `finally` cannot be
+relied on to do it.
+
+Two smaller rules come from the same reading. The sweep for orphaned entries runs **when there
+are no publishers left**, rather than returning early — that state is reached whenever the last
+partial settles between one ask and the next, and a bare `return` there was what made the stale
+write permanent. And the drop in a node's `finally` is gated on that node having held a partial,
+since the `finally` runs for every node.
+
+`scheduler.test.ts`' "a partial below a node boundary" pins all of it, the late write included —
+that one needs a publisher that publishes **once**, since a second publish queues a second derive
+whose own sweep tidies up after the first. `ui/nodes/streamingBody.test.tsx` drives the whole
+thing through the editor, Review card included.
 
 **Re-assembling a partial has to be cheap, or the feature pays for itself twice.** Every publish
 rebuilds the whole value from every body that has arrived, so anything derived per body was being
@@ -521,7 +694,7 @@ Five places implement it, and each was mutation-checked because every failure he
   company on the merge rule (`if (type)` against `?? declared`) and on whether a throw becomes an
   issue.
 - **The scheduler neither waits nor keys on the upstream.** `evaluate` is handed the value
-  `datasetIdentity(type)` builds, and the provenance takes `referenceKey(type)` in place of the
+  `datasetIdentity(type)` builds, and the provenance takes the type's hash (`referenceOf`) in place of the
   upstream node's key — which it *must*, since that node is outside the order and its key may not
   exist yet. It is also the better key: changing the dataset's version re-keys the reader,
   changing its annotations does not, and the reader never sees them. Both are single functions for
@@ -584,8 +757,49 @@ Five places implement it, and each was mutation-checked because every failure he
 
 **Deliberately narrow: a Dataset socket that takes the identity only, not a general information
 edge.** Synthesising a value from a type is defensible exactly because a dataset's identity *is*
-its type; there is no second kind asking, and a general mechanism would have to answer that
-question for every one of them.
+its type; a general mechanism would have to answer that question for every kind of node.
+
+### A second kind: a source that answers from its params (2026-11-16)
+
+`NodeDefinition.asReference(params)` is what a second kind asking looks like, and it does not
+widen the first. The source says what a reader is handed; the condition is the one above — a
+function of the source's params alone — and it is now the source that states it.
+
+It exists for Proofread Merges, which sits *below* the search it steers
+([seam-extend-plan.md](seam-extend-plan.md)): which pieces to extend is in its params, and the
+Find Merge Candidates above it has to read that without waiting for a node that cannot run first.
+
+- **The key is the hash of the answer, never of the source's params.** Review's cursor and
+  verdicts are data params that move on every click; keyed on them, the search would start over
+  for each row somebody looked at. The reader re-runs when the answer moves and at no other edit.
+- **One function, `referenceOf`, gives the value and the key** to `gatherInputs` and
+  `desiredKeys`, for both kinds — the old `referenceKey` is folded into it. Answers are kept per
+  params record (a `WeakMap`), so the hook and its hash are paid once per edit of the source,
+  not per graph mutation.
+- **The hook is told which output the wire leaves from**, and answers for that one. The type on
+  the wire is that output's, so a value that ignored it could arrive under another output's type.
+- **A reference port wired from a node of neither kind is refused in its own words** — not with
+  the dataset's "version list has not loaded, run again", which is a remedy for something else.
+- **A dataset on the wire is read as a dataset, hook or no hook.** `wireKind` — the inferred
+  type, else the source output's own declaration — is the one reading of "what kind of wire is
+  this", for `referenceOf` and for the refusal. A node may answer from its params on one output
+  and carry a dataset on another; read through the hook, that dataset port would be handed
+  nothing and, "nothing" being an answer, never refused or waited for.
+- **A muted source says nothing, and is keyed on that**, so a switched-off card neither steers
+  its reader nor re-runs it when edited.
+
+**Known, and left:** "run this node" on the reader also runs the source and what feeds it,
+because `resolveScope` scopes with `ancestors`, which follows reference wires. True of a dataset
+reference since they were added; with a source *below* its reader it now reaches further. For
+Review ⇢ Find Merge Candidates it is harmless — what feeds Review is Find Merge Candidates — but it is not a
+property to lean on.
+- **Nothing to say is an answer.** `undefined` reaches the reader as an unwired port would;
+  `unresolvedReference` and `settle` are about a dataset that has not named itself and skip a
+  source of this kind.
+- **A hook that throws is read as `undefined`.** It is asked where the keys are derived, on every
+  graph mutation, and a throw there would lose every key in the graph.
+
+`reference.test.ts` pins each, and each was checked by breaking it.
 
 The canvas draws it **dotted** — a wire already wears the colour of the data flowing through it,
 so a hue would read as a type, where what this has to say is that nothing flows.
@@ -610,3 +824,80 @@ dataset refuses export outright, so the only reference port in the tree is on a 
 emitter. The day a caveclient emitter is written it would fire, and it fires as a *plausible*
 TODO rather than as an error. `reference.test.ts` covers the ordering; the end-to-end case has
 nothing to exercise it with until that emitter exists.
+
+## A node re-running the chain above one of its inputs
+
+`ctx.rerunInput(portId, neurons, { report?, settings? })`: run everything above an input again with
+another neuron on the wire, and hand back what then arrives on the port. Present only on a node
+declaring `rerunsInputs`, which `registerNode` refuses on anything but an `expensive` one.
+`settings` (`RerunSettings`) lays params over every copied node of a type — what the caller knows
+of the neuron that the chain was not built for — and refuses a param the type does not declare.
+A caller's constant, so the port's upstream key still names the run. Find Merge Candidates' one use:
+the nucleus lookup only for a piece large enough to hold a nucleus ([seam-extend-plan.md](seam-extend-plan.md),
+"Phase 0 — results").
+
+It is for extending a neuron piece by piece ([seam-extend-plan.md](seam-extend-plan.md)): the
+chain above Find Merge Candidates' `Tips` — Meshes, a clean-up, Find Open Ends, a Sort — is, read this
+way, a function of one neuron, and an accepted piece is another argument to it.
+
+**A private `Scheduler` over a copy of the graph, not a loop and not a pass on the reader's own.**
+A node holds one cache entry and one state, so a pass on the document's scheduler would leave
+the cards holding another neuron's tables; a `For Each` re-runs every pass when its collection
+grows and publishes no partials. `Scheduler.run` already takes its graph per call, so nothing
+inside the class changed. Phase 0 of the plan ran the real chain this way 42 times in a session.
+
+**The copy holds only what the run needs**: the node that fed the port, and everything feeding
+*it* by an ordinary wire. A run sorts, infers and keys the whole graph it is handed, and a
+partial published inside it derives every cheap node below; uncut, each re-run paid for the whole
+document and re-derived its viewers. A node the chain only *names*, by a reference wire, is kept
+on its own with nothing wired into it. **That is also what keeps the caller out of its own
+re-run**: `ancestors`, which the scheduler scopes a run with, follows reference wires, so a chain
+node naming something below the caller pulled the caller into the copy — and it re-ran its input
+again inside the re-run, without end (found in review, before anything used it).
+
+**Where the neuron comes in** is `core/variantRun.ts`, pure and tested apart: going up from the
+port, the nearest wires carrying a neuron table. The walk does not follow a reference wire, nor a
+wire carrying a dataset — what is above a dataset is where its labels come from, often a neuron
+table too. It refuses, in a sentence: nothing wired; no neuron wire; neuron wires from two
+sources; the old source still feeding the chain by another output (the answer would be half
+about each neuron — though feeding a dataset's labels as well does not count); a loop anywhere
+in what the run needs, a dataset's label chain included.
+
+**A failure is blamed on the chain's own nodes** (`VariantGraph.chain`). A node the chain only
+names sits in the copy with nothing wired into it and may fail there for that reason alone;
+earlier in the graph, it would otherwise be the one the sentence names.
+
+**The swapped-in node has no wires**, on purpose. `Input IDs` wired from a dataset drops ids the
+dataset does not list, and a piece of segmentation is usually not in any neuron table — so the
+chain is handed the id alone, and a node below that reads other neuron columns finds none.
+
+Three things to keep:
+
+- **The closure is made in a module-level function** (`rerunnerFor`), for `makeEvalContext`'s
+  reason: made inline it would keep a superseded walk's whole pass alive. It still holds the
+  graph and its inference, which is why the flag confines it to nodes that ask.
+- **Cancel reaches it through the caller's signal**, and the private scheduler is emptied in a
+  `finally` — it has a lapse timer of its own.
+- **What comes back is not in the caller's key.** The chain's params are, through the port's
+  upstream key; the neuron asked for must come from something that is too.
+
+**"The nearest neuron wire" leaves out a transform that sits on it — known, and left** (user,
+2026-11-16). With `Input IDs → Update Root IDs → Meshes` the cut lands below Update Root IDs, so
+a re-run piece skips it, and nothing says so. Left because a piece does not need what such a
+node does: it is asked about under its own root at the dataset's materialization, the moment the
+search found it at. If a transform that a piece *does* need ever sits there, the two ways out are
+the furthest wire of a neurons-only run (a filter on the seed's own columns then fails loudly on a
+piece) or a declaration of which node to replace.
+
+**Known, and left:**
+
+- **Clear Cache does not reach a re-run.** `ctx.refresh` is a flag on one node, spent when it
+  runs; the private scheduler starts with none, so a re-run answers from the geometry cache. A
+  caller that honours its own `refresh` can say so when it asks — nothing does yet.
+- **Every call pays for the parts of the chain that are the same for every neuron** (the dataset
+  node, measured at 0.1 s of a 1.5 s chain). One private scheduler kept for the evaluation would
+  answer those from its cache, at the price of holding the last neuron's meshes until it ends.
+
+Not shown anywhere: the cards do not move while a re-run is going, so the caller's own progress
+note is the only sign of it (`report`), and the memory meter cannot see what the private
+scheduler holds until it is dropped.

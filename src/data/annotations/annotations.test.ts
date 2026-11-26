@@ -77,7 +77,9 @@ function installFetch(overrides: Record<string, string> = {}): Captured[] {
     if (String(url).includes('/api/v2.1/workspaces/')) return answer(fixture('workspaces.json'))
     if (String(url).includes('/access-token/')) return answer(fixture('access-token.json'))
     if (String(url).includes('/metadata/')) return answer(fixture('base-metadata.json'))
-    if (String(url).includes('/rows/')) return answer(fixture('rows.json'))
+    // One page, then the empty page that ends a table — a reader stops only on an empty one.
+    if (String(url).includes('/rows/'))
+      return answer(String(url).includes('start=0') ? fixture('rows.json') : '{"rows":[]}')
     return Promise.resolve({
       ok: false,
       status: 404,
@@ -149,6 +151,60 @@ describe('reading a SeaTable deployment', () => {
       // that puts its dtable server somewhere else.
       `${HOST}/dtable-server/api/v1/dtables/0de674a1-b620-4c64-bf7d-1cbe372b6ed1/metadata/`,
     ])
+  })
+
+  it('reads through the gateway when the access token names no server, as SeaTable 6 does', async () => {
+    // FlyTable's reply since its 6.2 upgrade: no `dtable_server`, no `use_api_gateway`, and the
+    // old `/dtable-server/…/rows/` route a 404.
+    const captured = installFetch({
+      '/access-token/': JSON.stringify({ access_token: 'JWT', dtable_uuid: 'uuid' }),
+    })
+    await readMetadata(HOST, '5', 'main')
+    expect(captured[1]?.url).toBe(`${HOST}/api-gateway/api/v2/dtables/uuid/metadata/`)
+  })
+
+  it('reads a table longer than the gateway’s 1,000-row page whole, by name', async () => {
+    /*
+     * The gateway answers at most 1,000 rows whatever `limit` asks, and keyed by column *key*
+     * unless asked `convert_keys`. Stopping at the first page shorter than the one asked for
+     * read exactly 1,000 rows of FlyWire's 58,000, and said nothing.
+     */
+    const page = (from: number, n: number) =>
+      JSON.stringify({
+        rows: Array.from({ length: n }, (_, i) => ({
+          root_id: String(from + i + 1),
+          side: 'left',
+        })),
+      })
+    const captured = installFetch({
+      '/access-token/': JSON.stringify({ access_token: 'JWT', dtable_uuid: 'uuid' }),
+      'start=0&': page(0, 1000),
+      'start=1000&': page(1000, 1000),
+      'start=2000&': page(2000, 300),
+    })
+    const provider = annotationProvider(SEATABLE_PROVIDER)
+    const table = await provider?.fetch(
+      {
+        provider: SEATABLE_PROVIDER,
+        config: {
+          host: HOST,
+          workspace: '5',
+          base: 'main',
+          table: 'info',
+          idColumn: 'root_id',
+          columns: 'side',
+        },
+      },
+      {},
+    )
+    expect(table?.length).toBe(2300)
+    expect(table?.data.neuronId?.[2299]).toBe('2300')
+    const reads = captured.map((c) => c.url).filter((u) => u.includes('/rows/'))
+    expect(reads).toHaveLength(4)
+    expect(
+      reads.every((u) => u.startsWith(`${HOST}/api-gateway/api/v2/dtables/uuid/rows/`)),
+    ).toBe(true)
+    expect(reads.every((u) => u.includes('convert_keys=true'))).toBe(true)
   })
 
   it('reports a missing token on the channel rather than as a bare error', async () => {
@@ -366,6 +422,7 @@ const nucleiConfig = (over: Partial<CaveTableConfig> = {}): CaveTableConfig => (
   pivotOn: '',
   valueColumn: '',
   columns: '',
+  resolution: '',
   ...over,
 })
 
@@ -473,6 +530,7 @@ describe('what a CAVE reference table needs', () => {
     pivotOn: '',
     valueColumn: '',
     columns: '',
+    resolution: '',
     ...over,
   })
 

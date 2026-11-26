@@ -64,10 +64,13 @@
  * **Except where nothing is restored.** Coda's own frame takes a change that is only a selection —
  * which neurons show, and their colours — as a message and edits the live layer in place
  * (`FrameSegmentsMessage`), so that, the commonest update by far, applies under the cursor with
- * the camera, the layout and the loaded meshes left alone. Only a structural change still navigates.
+ * the camera, the layout and the loaded meshes left alone. A local annotation layer's annotations
+ * go the same way. Only a structural change still navigates, and what can go in place goes ahead of
+ * it (`inPlaceChanges`).
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { FormEvent } from 'react'
 
 import type { TableValue } from '../../core/values'
@@ -86,15 +89,19 @@ import {
   layerPanelPatch,
   withLayerPanel,
   selectionLayerName,
-  selectionChanges,
+  inPlaceChanges,
   layerListing,
   sceneUrlBase,
 } from '../../data/neuroglancer/scene'
 import type { FrameSegmentsMessage } from '../../data/neuroglancer/frameMessage'
 import type { FrameKeysMessage } from '../../data/neuroglancer/frameMessage'
+import type { FrameSetViewMessage } from '../../data/neuroglancer/frameMessage'
 import {
   FRAME_KEYS_MESSAGE,
   FRAME_SEGMENTS_MESSAGE,
+  FRAME_SET_VIEW_MESSAGE,
+  isFrameHoverMessage,
+  frameKeyInit,
   isFrameKeyMessage,
   isFrameUnappliedMessage,
   decodeSavedView,
@@ -103,27 +110,56 @@ import {
   isFrameViewMessage,
   withUpdate,
 } from '../../data/neuroglancer/frameMessage'
-import {
-  decodeSelectionEdits,
-  encodeSelectionEdits,
-  mergeShownSegments,
-} from '../../data/neuroglancer/selectionEdits'
+import { mergeShownSegments, refoldedEdits } from '../../data/neuroglancer/selectionEdits'
+import { announceEdit } from '../../data/cave/rootEdits'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { errorMessage } from '../../core/errors'
 import { describeLegend, resolveColor } from '../../style/encoding'
 import { copyText } from '../export'
 import { useLatest } from '../useLatest'
+import { useOfferedPack } from '../packSwitches'
 import { useGraphStore } from '../../store/graphStore'
+import { setHoveredSegment } from './segmentHover'
+import { useReviewCardOpen } from '../seam/reviewKeys'
+import { useSplitKey } from '../seam/splitKey'
+import type { SplitCard, SplitTarget } from '../seam/splitSession'
 import { RootRegistry } from './persistentRoots'
 import type { RootLease } from './persistentRoots'
 import { forgetScene, recallScene, rememberScene } from './sceneMemo'
 import { ViewerActions } from './ViewerActions'
+import { HeaderSlot } from './headerSlot'
 import { plural } from '../../style/format'
 import { ViewerEmpty } from './ViewerEmpty'
 
 export interface NeuroglancerViewerProps {
   /** Built by the node; empty until it has run. */
   url: string
+  /**
+   * Point the camera here, in the **scene's own units** — not nanometres.
+   *
+   * A prop rather than a key of the scene, and the distinction is the whole of why this exists.
+   * A scene's `position` is its *published* camera, and it is part of `sceneIdentity` on purpose:
+   * a different published camera means the node is pointed at a different place, and keeping the
+   * old framing there would leave you looking at empty space beside the volume you asked for.
+   * "Move the camera to this site" is a different statement, made by a card paging through a
+   * queue, and folding it into the scene would make every such move a full navigation — every
+   * layer torn down, every mesh refetched, once per click.
+   *
+   * So it travels beside the scene and is sent as `coda:ng-set-view`, which needs **Coda's own
+   * frame**: a cross-origin viewer has no channel for it and keeps its framing. Converting from
+   * nanometres is the caller's, through `sceneVoxelNm`, because only the caller knows which
+   * scene's units these are.
+   */
+  focus?: readonly number[] | undefined
+  /**
+   * How much to frame around `focus`, across, in the same units.
+   *
+   * Without it the camera points and does not zoom, which on a scene that publishes no
+   * `projectionScale` — plenty do not — leaves a site correctly in the middle of a view hundreds
+   * of micrometres wide. Undefined keeps the zoom exactly as the reader left it, which is the
+   * right answer for a caller that only means "look over there".
+   */
+  focusWidth?: number | undefined
   /** The table the colours were resolved from. Only the legend needs it. */
   neurons?: TableValue | undefined
   color: ColorSpec
@@ -203,6 +239,14 @@ export interface NeuroglancerViewerProps {
   baseName?: string
   onExpand?: () => void
   onError?: (message: string) => void
+  /**
+   * Where this card's neurons live, for the split key (`K`, `ui/seam/splitKey.ts`): the split
+   * gallery for the segment under the pointer. Undefined where the dataset is not a CAVE one, and
+   * the key does nothing over this frame.
+   */
+  splitTarget?: SplitTarget | undefined
+  /** This card, by document and node, where it can write its neurons: a split's new roots go in. */
+  splitCard?: SplitCard | undefined
 }
 
 /**
@@ -260,6 +304,8 @@ interface HeldFrame {
     | undefined
   /** Whether a document has finished loading in the frame, i.e. whether there is state to merge into. */
   loaded: boolean
+  /** The last camera this card asked the frame for, so an unchanged one is not re-sent. */
+  focused: string | undefined
   /** Where its live state is remembered once the frame is gone — the leasing surface's `viewerId`. */
   memoKey: string | undefined
   /**
@@ -275,6 +321,9 @@ interface HeldFrame {
   sent: number
   /** Whether this document was last told ⌥1–9 are Coda's (`FrameKeysMessage`). */
   claimsAltDigits?: boolean
+  /** And whether F is Coda's find path here (`FrameKeysMessage.findPath`). */
+  claimsFindPath?: boolean
+  claimsReview?: boolean
 }
 
 /**
@@ -285,7 +334,11 @@ interface HeldFrame {
 function forgetDocument(held: HeldFrame): void {
   held.loaded = false
   held.speaksFor = undefined
+  // A fresh document opens at the scene's own framing, so whatever we last asked for is gone.
+  held.focused = undefined
   held.claimsAltDigits = undefined
+  held.claimsFindPath = undefined
+  held.claimsReview = undefined
 }
 
 function createFrame(): { host: HTMLElement; root: HeldFrame } {
@@ -298,6 +351,7 @@ function createFrame(): { host: HTMLElement; root: HeldFrame } {
     frame,
     applied: undefined,
     loaded: false,
+    focused: undefined,
     memoKey: undefined,
     speaksFor: undefined,
     sent: 0,
@@ -373,6 +427,8 @@ const VIEWER_MODE = 'dark' as const
 
 export function NeuroglancerViewer({
   url,
+  focus,
+  focusWidth,
   neurons,
   color,
   scale = 1,
@@ -392,9 +448,22 @@ export function NeuroglancerViewer({
   baseName,
   onExpand,
   onError,
+  splitTarget,
+  splitCard,
 }: NeuroglancerViewerProps) {
+  const headerSlot = useContext(HeaderSlot)
   /** The frame this surface shows, kept or private — see `frames`. */
   const leaseRef = useRef<RootLease<HeldFrame> | null>(null)
+  useSplitKey(
+    () => leaseRef.current?.root.frame,
+    splitTarget,
+    // The layer the dataset's neurons are in: a segment hovered in any other is not this dataset's.
+    () => {
+      const applied = leaseRef.current?.root.applied
+      return applied && datasetId ? selectionLayerName(applied.scene, datasetId) : undefined
+    },
+    splitCard,
+  )
   /**
    * Bumped to throw the frame away and build a fresh one.
    *
@@ -538,8 +607,9 @@ export function NeuroglancerViewer({
     const split = splitSceneUrl(url)
 
     /*
-     * Only a selection changed, and the frame is Coda's own (it has reported): set it in place, no
-     * pointer hold, no navigation — see the file header. Anything else navigates, below.
+     * Only segments, colours or local annotations changed, and the frame is Coda's own (it has
+     * reported): set them in place, no pointer hold, no navigation — see the file header. Anything
+     * else navigates, below.
      */
     if (
       was &&
@@ -550,20 +620,32 @@ export function NeuroglancerViewer({
       was.viewerType === viewerType &&
       was.layerPanel === layerBar
     ) {
-      const changes = selectionChanges(was.scene, split.scene)
-      if (changes) {
-        if (changes.length > 0) {
+      const inPlace = inPlaceChanges(was.scene, split.scene)
+      if (inPlace) {
+        const { segments, annotations } = inPlace
+        const sent = segments.length > 0 || annotations.length > 0
+        if (sent) {
           const message: FrameSegmentsMessage = {
             type: FRAME_SEGMENTS_MESSAGE,
-            layers: changes,
+            layers: segments,
+            ...(annotations.length > 0 ? { annotations } : {}),
             update: nextUpdate(),
           }
           kept.frame.contentWindow?.postMessage(message, window.location.origin)
         }
-        kept.applied = { ...was, url, scene: split.scene }
-        // A navigation held for the pointer is superseded: this is the scene to show now.
-        heldRef.current = false
-        return
+        if (inPlace.whole) {
+          kept.applied = { ...was, url, scene: split.scene }
+          // A navigation held for the pointer is superseded: this is the scene to show now.
+          heldRef.current = false
+          return
+        }
+        /*
+         * More than that changed, so a navigation follows, and what could go in place went ahead
+         * of it. Recorded as what the frame now shows, since its reports are folded against
+         * `applied.scene`; with the URL cleared, as no URL is this scene, so the same URL arriving
+         * again is not taken for one already applied.
+         */
+        if (sent) kept.applied = { ...was, url: '', scene: inPlace.scene }
       }
     }
 
@@ -669,6 +751,15 @@ export function NeuroglancerViewer({
       kept.frame.src = canMerge
         ? scenePatchUrl(frameBase, scene, kind, withUpdate(barChange, nextUpdate()))
         : sceneUrl(frameBase, withUpdate(withLayerPanel(scene, layerBar), nextUpdate()), kind)
+      /*
+       * A navigation replaces the document, and the camera goes with it: the scene it restores
+       * carries whatever framing *it* names, which for a dataset publishing none is
+       * neuroglancer's default. So whatever camera a card last asked for is no longer true, and
+       * must be asked for again — without this, a caller that moved the camera once and then
+       * changed anything that navigates (an annotation layer's contents, say) loses it for good,
+       * because the effect sees the same `focus` it already sent.
+       */
+      kept.focused = undefined
       kept.applied = {
         url,
         base: target,
@@ -708,13 +799,15 @@ export function NeuroglancerViewer({
     resync,
   ])
 
+  /** The scene sent that a replaced root was last said for (`rootEdits.ts`), so it is said once. */
+  const announcedFor = useRef<object | undefined>(undefined)
   /**
    * Fold a scene the viewer reports — or one pasted as a link — into the node's edits, measured
    * against the scene the frame was last sent (`mergeShownSegments` says why not the input).
    * Writes only when something changed, so the frame's report of a scene the node just built is
    * not an edit.
    */
-  const foldScene = (reported: NgScene): boolean => {
+  const foldScene = (reported: NgScene, fromFrame = false): boolean => {
     const applied = leaseRef.current?.root.applied
     if (!onSelectionEdits || !datasetId || !applied) return false
     const layer = selectionLayerName(applied.scene, datasetId)
@@ -722,16 +815,28 @@ export function NeuroglancerViewer({
     const got = layer ? layerListing(reported, layer) : undefined
     // No such layer in what came back: somebody deleted it, which is not a statement about neurons.
     if (!sent || !got) return false
+    /*
+     * Roots replaced by new ones in one report — what Neuroglancer's own multicut does — are said to
+     * the review cards to check (`rootEdits.ts`); a neuron only taken out is the reader's choice.
+     */
+    // From the frame only (a pasted link is the reader's), and once for each scene sent.
+    if (splitTarget && fromFrame && announcedFor.current !== applied) {
+      const now = new Set(got.listed)
+      const was = new Set(sent.listed)
+      const gone = sent.listed.filter((id) => !now.has(id))
+      if (gone.length > 0 && got.listed.some((id) => !was.has(id))) {
+        announcedFor.current = applied
+        announceEdit({ ...splitTarget, roots: gone, certain: false })
+      }
+    }
     // Where hidden neurons stay selected, the list is the selection and the hidden ones are noted;
     // otherwise only what is drawn counts, and hiding a neuron removes it.
-    const current = decodeSelectionEdits(selectionEdits)
-    const was = encodeSelectionEdits(current)
-    const next = encodeSelectionEdits(
+    const next = refoldedEdits(selectionEdits, (current) =>
       keepHidden
         ? mergeShownSegments(current, sent.listed, got.listed, got.hidden)
         : mergeShownSegments(current, sent.shown, got.shown),
     )
-    if (next.join('\n') !== was.join('\n')) onSelectionEdits(next)
+    if (next) onSelectionEdits(next)
     return true
   }
   /** Save where the frame is looking, with the dataset it is looking at (`encodeSavedView`). */
@@ -748,20 +853,69 @@ export function NeuroglancerViewer({
    * the frame's document. So a frame that reports back (Coda's own) is told to hand them over while
    * the dashboard is open, and leaves them to neuroglancer elsewhere, as Coda does. Told again on
    * its first report, since a message sent before its script has loaded is lost.
+   *
+   * F the same way: Coda's find path where it is on for this card — the SEAM pack offered and a CAVE
+   * dataset (`splitTarget`) — and otherwise neuroglancer's own find-path tool (user, 2026-11-24).
    */
   const claimAltDigits = useGraphStore((s) => s.dashboardOpen)
-  const claimRef = useLatest(claimAltDigits)
+  const claimFindPath = useOfferedPack()('seam') && splitTarget !== undefined
+  // The review keys only while a Proofread Merges card is open: `G` is neuroglancer's own too.
+  const claimReview = useReviewCardOpen()
+  const claimRef = useLatest({
+    altDigits: claimAltDigits,
+    findPath: claimFindPath,
+    review: claimReview,
+  })
   const tellKeys = (kept: HeldFrame) => {
-    if (kept.speaksFor === undefined || kept.claimsAltDigits === claimRef.current) return
-    kept.claimsAltDigits = claimRef.current
-    const message: FrameKeysMessage = { type: FRAME_KEYS_MESSAGE, altDigits: claimRef.current }
+    const { altDigits, findPath, review } = claimRef.current
+    if (
+      kept.speaksFor === undefined ||
+      (kept.claimsAltDigits === altDigits &&
+        kept.claimsFindPath === findPath &&
+        kept.claimsReview === review)
+    ) {
+      return
+    }
+    kept.claimsAltDigits = altDigits
+    kept.claimsFindPath = findPath
+    kept.claimsReview = review
+    const message: FrameKeysMessage = { type: FRAME_KEYS_MESSAGE, altDigits, findPath, review }
     kept.frame.contentWindow?.postMessage(message, window.location.origin)
   }
   const tellKeysRef = useLatest(tellKeys)
   useEffect(() => {
     const kept = leaseRef.current?.root
     if (kept) tellKeysRef.current(kept)
-  }, [claimAltDigits, claimRef, tellKeysRef])
+  }, [claimAltDigits, claimFindPath, claimReview, claimRef, tellKeysRef])
+
+  /*
+   * The camera a card asked for — see `focus` on the props.
+   *
+   * Its own effect rather than a line in the scene update, because the two are not the same
+   * question and do not change together: a queue can move the camera without touching the
+   * selection, and change the selection without moving the camera. Keyed on what was last sent
+   * so a re-render that changes nothing sends nothing, and gated on `speaksFor`, which is the
+   * frame saying it is Coda's own and can hear this at all.
+   */
+  const focusKey = focus ? `${focus.join(',')}@${focusWidth ?? ''}` : undefined
+  const focusRef = useLatest(focusKey)
+  const tellFocus = (kept: HeldFrame) => {
+    const wanted = focusRef.current
+    if (!wanted || kept.speaksFor === undefined || kept.focused === wanted) return
+    kept.focused = wanted
+    const [at, width] = wanted.split('@')
+    const message: FrameSetViewMessage = {
+      type: FRAME_SET_VIEW_MESSAGE,
+      position: at!.split(',').map(Number),
+      ...(width ? { width: Number(width) } : {}),
+    }
+    kept.frame.contentWindow?.postMessage(message, window.location.origin)
+  }
+  const tellFocusRef = useLatest(tellFocus)
+  useEffect(() => {
+    const kept = leaseRef.current?.root
+    if (kept) tellFocusRef.current(kept)
+  }, [focusKey, tellFocusRef])
 
   /*
    * Bound whether or not this surface can write: a report is also how the frame says it is Coda's
@@ -770,14 +924,28 @@ export function NeuroglancerViewer({
    * (`FRAME_UPDATE_KEY`).
    */
   useEffect(() => {
+    // The frame whose hover this surface last passed on, to clear as it goes (`segmentHover.ts`).
+    let hoveredFrom: object | undefined
     const listen = (event: MessageEvent) => {
       const kept = leaseRef.current?.root
       if (!kept || event.source !== kept.frame.contentWindow) return
       if (event.origin !== window.location.origin) return
+      if (isFrameHoverMessage(event.data)) {
+        // Where the pointer is, not what the scene holds: no update to match.
+        hoveredFrom = kept.frame
+        setHoveredSegment(
+          kept.frame,
+          event.data.segment ?? undefined,
+          event.data.positionNm,
+          event.data.layer,
+        )
+        return
+      }
       if (isFrameKeyMessage(event.data)) {
-        // As if pressed here: Coda's own shortcut listener decides, tour and all.
-        const { code, altKey } = event.data
-        window.dispatchEvent(new KeyboardEvent('keydown', { code, altKey, bubbles: true }))
+        // As if pressed here: Coda's own shortcut listener decides, tour and all. At the page, as a
+        // key pressed in Coda's document is, so the window's capture phase — a card key taking it
+        // (`splitKey.ts`) — comes before the shortcuts on the same letter.
+        document.body.dispatchEvent(new KeyboardEvent('keydown', frameKeyInit(event.data)))
         return
       }
       const latest = (event.data as { update?: unknown }).update === kept.sent
@@ -790,7 +958,15 @@ export function NeuroglancerViewer({
         // navigation would vouch for a document that has not reported.
         kept.speaksFor = kept.applied?.base
         tellKeysRef.current(kept)
-        handlers.current.foldScene(event.data.state)
+        /*
+         * And the camera, for the same reason the keys are re-told here: a message sent before
+         * the frame's script was listening is lost, and a navigation replaces the document —
+         * taking the camera with it, since the restored scene carries its own framing or none.
+         * `kept.focused` was cleared when that navigation was applied, so this sends again only
+         * where there is a new document to send it to.
+         */
+        tellFocusRef.current(kept)
+        handlers.current.foldScene(event.data.state, true)
       } else if (isFrameUnappliedMessage(event.data) && kept.applied) {
         // The frame could not set the selection in place: stop trying, and navigate instead.
         kept.speaksFor = undefined
@@ -799,8 +975,11 @@ export function NeuroglancerViewer({
       }
     }
     window.addEventListener('message', listen)
-    return () => window.removeEventListener('message', listen)
-  }, [handlers, tellKeysRef])
+    return () => {
+      window.removeEventListener('message', listen)
+      if (hoveredFrom) setHoveredSegment(hoveredFrom, undefined)
+    }
+  }, [handlers, tellKeysRef, tellFocusRef])
 
   const [pasting, setPasting] = useState(false)
   const readLink = (event: FormEvent<HTMLFormElement>) => {
@@ -867,8 +1046,72 @@ export function NeuroglancerViewer({
     setReloadCount((n) => n + 1)
   }
 
+  /*
+   * In a full-size surface the summary and buttons stand in the surface's header rather than in a
+   * footer of their own (`HeaderSlot`), so the frame keeps every row below the header. On a canvas
+   * card there is no such header, and the caption stays where it was.
+   */
+  const captionInHeader = headerSlot !== null && !compact
+  const caption = (
+    <>
+      <span className={captionInHeader ? 'overlay__slot-note' : undefined}>
+        {summary}
+        {count > 0 && legend && ` · ${describeLegend(legend)}`}
+      </span>
+      <div className="viewer-actions">
+        <button
+          type="button"
+          className="viewer-actions__btn nodrag"
+          title="Copy the scene link"
+          aria-label="Copy link"
+          onClick={copyLink}
+        >
+          ⧉{!compact && <span>Copy link</span>}
+        </button>
+        {onSelectionEdits && datasetId && !readable && (
+          <button
+            type="button"
+            className="viewer-actions__btn nodrag"
+            title="Read the neurons from a neuroglancer link — this viewer cannot be read directly"
+            aria-label="Read neurons from a link"
+            aria-pressed={pasting}
+            onClick={() => setPasting((open) => !open)}
+          >
+            ⇣{!compact && <span>From link</span>}
+          </button>
+        )}
+        <button
+          type="button"
+          className="viewer-actions__btn nodrag"
+          title="Reload the viewer"
+          aria-label="Reload the viewer"
+          onClick={reload}
+        >
+          ↻{!compact && <span>Reload</span>}
+        </button>
+        <a
+          className="viewer-actions__btn nodrag"
+          href={url}
+          target="_blank"
+          rel="noreferrer noopener"
+          title="Open in a new tab"
+          aria-label="Open in a new tab"
+        >
+          ↗{!compact && <span>New tab</span>}
+        </a>
+        <ViewerActions
+          baseName={baseName ?? 'neuroglancer'}
+          source={{}}
+          compact={compact}
+          onExpand={onExpand}
+          onError={onError}
+        />
+      </div>
+    </>
+  )
+
   return (
-    <div className="viewer">
+    <div className="viewer viewer--ng">
       <div
         ref={boxRef}
         className="ng-frame"
@@ -908,61 +1151,11 @@ export function NeuroglancerViewer({
         </form>
       )}
 
-      <div className="viewer__caption">
-        <span>
-          {summary}
-          {count > 0 && legend && ` · ${describeLegend(legend)}`}
-        </span>
-        <div className="viewer-actions">
-          <button
-            type="button"
-            className="viewer-actions__btn nodrag"
-            title="Copy the scene link"
-            aria-label="Copy link"
-            onClick={copyLink}
-          >
-            ⧉{!compact && <span>Copy link</span>}
-          </button>
-          {onSelectionEdits && datasetId && !readable && (
-            <button
-              type="button"
-              className="viewer-actions__btn nodrag"
-              title="Read the neurons from a neuroglancer link — this viewer cannot be read directly"
-              aria-label="Read neurons from a link"
-              aria-pressed={pasting}
-              onClick={() => setPasting((open) => !open)}
-            >
-              ⇣{!compact && <span>From link</span>}
-            </button>
-          )}
-          <button
-            type="button"
-            className="viewer-actions__btn nodrag"
-            title="Reload the viewer"
-            aria-label="Reload the viewer"
-            onClick={reload}
-          >
-            ↻{!compact && <span>Reload</span>}
-          </button>
-          <a
-            className="viewer-actions__btn nodrag"
-            href={url}
-            target="_blank"
-            rel="noreferrer noopener"
-            title="Open in a new tab"
-            aria-label="Open in a new tab"
-          >
-            ↗{!compact && <span>New tab</span>}
-          </a>
-          <ViewerActions
-            baseName={baseName ?? 'neuroglancer'}
-            source={{}}
-            compact={compact}
-            onExpand={onExpand}
-            onError={onError}
-          />
-        </div>
-      </div>
+      {captionInHeader ? (
+        createPortal(caption, headerSlot)
+      ) : (
+        <div className="viewer__caption">{caption}</div>
+      )}
     </div>
   )
 }

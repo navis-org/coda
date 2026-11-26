@@ -12,7 +12,7 @@ Every node type that emits, wired up once.
 *Exported from Coda.*
 
 ```{r setup}
-# install.packages(c("nat", "nat.nblast", "dplyr", "tidyr", "readr", "ggplot2", "igraph", "Matrix", "uwot", "nabor", "httr", "jsonlite", "stringi"))
+# install.packages(c("arrow", "nat", "nat.nblast", "dplyr", "tidyr", "readr", "ggplot2", "igraph", "Matrix", "uwot", "nabor", "httr", "jsonlite", "stringi"))
 # remotes::install_github("natverse/neuprintr")  # not on CRAN
 # remotes::install_github("schlegelp/nglscenes-r")  # not on CRAN
 # uwot >= 0.1.15, for `umap()`’s `seed` argument.
@@ -1425,7 +1425,9 @@ coda_segment_ids <- function(ids) {
   # id only as a plain whole number, and one it cannot read breaks the whole layer, so anything
   # else is left out and counted, as on the canvas. A blank row is dropped without a word.
   ids <- trimws(as.character(ids))
-  readable <- !is.na(ids) & grepl("^(0|[1-9][0-9]*)$", ids)
+  readable <- !is.na(ids) & grepl("^(0|[1-9][0-9]*)$", ids) &
+    # No more than 2^64 - 1, which neuroglancer also refuses; digits of one length sort as numbers.
+    (nchar(ids) < 20 | (nchar(ids) == 20 & ids <= "18446744073709551615"))
   unreadable <- sum(!is.na(ids) & !readable)
   if (unreadable > 0) {
     message(unreadable, " of ", length(ids), " rows have an id neuroglancer cannot use and were left out.")
@@ -1820,6 +1822,72 @@ table_from_url <- read_csv("https://example.org/embedding.csv", show_col_types =
 table_from_url <- table_from_url |> mutate(across(all_of(c("layer")), as.character))
 ```
 
+```{r load-merge-candidates}
+# ── Load Merge Candidates ──
+# A directory of suggestion sets. The card pins one by id, so look that id up rather than
+# baking in the path it had when this was exported.
+load_merge_candidates_manifest_sets <- jsonlite::fromJSON("https://example.org/seam/aedes/index.json", simplifyDataFrame = FALSE)$sets
+load_merge_candidates_manifest <- paste0(
+  sub("[^/]*$", "", "https://example.org/seam/aedes/index.json"),
+  Filter(function(s) s$id == "rv2", load_merge_candidates_manifest_sets)[[1]]$path
+)
+load_merge_candidates_base <- sub("[^/]*$", "", load_merge_candidates_manifest)
+
+load_merge_candidates_tips_file <- tempfile(fileext = ".parquet")
+download.file(paste0(load_merge_candidates_base, "tips.parquet"), load_merge_candidates_tips_file, mode = "wb", quiet = TRUE)
+load_merge_candidates_tips <- arrow::read_parquet(
+  load_merge_candidates_tips_file,
+  col_select = dplyr::any_of(c("neuron", "end_uid", "kind", "x_nm", "y_nm", "z_nm", "e_tip", "segclr", "p_tip", "top_cand_root", "top_vol_um3", "top_geo_rank", "top_min_dist_um", "top_contact_x_nm", "top_contact_y_nm", "top_contact_z_nm", "p_top", "top_organelle", "q", "shown", "r", "page", "tip_verdict", "belongs", "not_belongs", "first_right"))
+)
+# NA where the set predates them, as on the card.
+for (column in c("top_organelle")) {
+  if (!column %in% names(load_merge_candidates_tips)) load_merge_candidates_tips[[column]] <- NA
+}
+load_merge_candidates_tips <- load_merge_candidates_tips[c("neuron", "end_uid", "kind", "x_nm", "y_nm", "z_nm", "e_tip", "segclr", "p_tip", "top_cand_root", "top_vol_um3", "top_geo_rank", "top_min_dist_um", "top_contact_x_nm", "top_contact_y_nm", "top_contact_z_nm", "p_top", "top_organelle", "q", "shown", "r", "page", "tip_verdict", "belongs", "not_belongs", "first_right")]
+names(load_merge_candidates_tips) <- c("neuronId", "end_uid", "kind", "x", "y", "z", "e_tip", "segclr", "p_tip", "top_cand_root", "vol_um3", "geo_rank", "min_dist_um", "contact_x", "contact_y", "contact_z", "p_top", "organelle", "q", "shown", "r", "seam_page", "seam_verdict", "seam_belongs", "seam_not_belongs", "seam_first_right")
+
+load_merge_candidates_candidates_file <- tempfile(fileext = ".parquet")
+download.file(paste0(load_merge_candidates_base, "candidates.parquet"), load_merge_candidates_candidates_file, mode = "wb", quiet = TRUE)
+load_merge_candidates_candidates <- arrow::read_parquet(
+  load_merge_candidates_candidates_file,
+  col_select = dplyr::any_of(c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle", "n_l2"))
+)
+# NA where the set predates them, as on the card.
+for (column in c("organelle_score", "organelle", "n_l2")) {
+  if (!column %in% names(load_merge_candidates_candidates)) load_merge_candidates_candidates[[column]] <- NA
+}
+load_merge_candidates_candidates <- load_merge_candidates_candidates[c("neuron", "end_uid", "cand_root", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x_nm", "contact_y_nm", "contact_z_nm", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle", "n_l2")]
+names(load_merge_candidates_candidates) <- c("neuronId", "end_uid", "candidateId", "rank", "geo_rank", "vol_um3", "min_dist_um", "contact_x", "contact_y", "contact_z", "logit", "p_cand", "conf", "score_s0", "score_s1", "score_s2", "logit_s0", "logit_s1", "logit_s2", "filled", "shown", "organelle_score", "organelle", "n_l2")
+
+# The first candidate's id, joined from the candidate lists rather than taken from the tips
+# file's own copy. The copy is a denormalised 18-digit id, and in the set as first published
+# it had been through a float64 and named a different segment on 2,661 of 2,691 rows. Fixed
+# upstream; joined here so it cannot come back.
+load_merge_candidates_tips <- dplyr::left_join(
+  load_merge_candidates_tips,
+  dplyr::select(dplyr::filter(load_merge_candidates_candidates, rank == 1), end_uid, candidateId),
+  by = "end_uid"
+)
+
+# Which set these numbers are, as the card labels them: q, the cutoff and r belong to this
+# version of the set, and are never to be read against another's.
+load_merge_candidates_version <- jsonlite::fromJSON(load_merge_candidates_manifest)[["version"]]
+load_merge_candidates_tips[["source"]] <- if (is.character(load_merge_candidates_version) && length(load_merge_candidates_version) == 1 && nzchar(load_merge_candidates_version)) {
+  paste0("set:", load_merge_candidates_version)
+} else {
+  NA_character_
+}
+
+# One row per neuron: its tips, and how many of them clear the cutoff. Sort the tips by q,
+# never r: r is a staircase over q, and SEAM advises against summing it.
+load_merge_candidates_neurons <- load_merge_candidates_tips |>
+  dplyr::group_by(`neuronId`) |>
+  dplyr::summarise(tips = dplyr::n(), shown = sum(shown))
+# NOTE: The Points and Layers outputs are the same tips drawn — a cloud and
+# a neuroglancer annotation layer. Their coordinates are the `x`, `y` and
+# `z` columns of the tips frame.
+```
+
 ## The transform chain
 
 Everything below runs locally.
@@ -2012,6 +2080,39 @@ embedding$annotation <- NA_character_
 # ── Rename Columns ──
 rename_columns <- table_from_url |>
   rename(any_of(c(`neuronId` = "root_id", `type` = "cell_type")))
+```
+
+```{r proofread-merges}
+# ── Proofread Merges ──
+# The verdicts recorded on the card. A record of what somebody decided, not a computation.
+proofread_merges_verdicts <- data.frame(
+  neuronId = c("648518346341397760", "648518346341397760"),
+  candidateId = c("648518347368875056", "648518347608868926"),
+  verdict = c("reject", "accept"),
+  stringsAsFactors = FALSE
+)
+
+# Onto the tips, on the pair: a verdict is about this piece and this neuron, so the
+# candidate alone would carry one neuron's judgement onto another neuron's tip.
+proofread_merges_tips <- dplyr::left_join(load_merge_candidates_tips, proofread_merges_verdicts, by = c("neuronId", "candidateId"))
+# NOTE: The Current and Layers outputs are the card’s own: the pair being
+# looked at, and an annotation layer of it. There is nothing for a document
+# to look at.
+```
+
+```{r table-to-points}
+# ── Table to Points ──
+table_to_points <- load_merge_candidates_tips |>
+  dplyr::mutate(
+    .coda_x = suppressWarnings(as.numeric(`x`)) * 4,
+    .coda_y = suppressWarnings(as.numeric(`y`)) * 4,
+    .coda_z = suppressWarnings(as.numeric(`z`)) * 40,
+  ) |>
+  dplyr::filter(is.finite(.coda_x), is.finite(.coda_y), is.finite(.coda_z)) |>
+  dplyr::select(
+    dplyr::all_of(c("neuronId", "e_tip")),
+    x = .coda_x, y = .coda_y, z = .coda_z,
+  )
 ```
 
 ```{r connectivity}

@@ -25,6 +25,7 @@
 
 import { errorMessage } from '../../core/errors'
 import { bodyExcerpt } from '../errorBody'
+import { delay } from '../source'
 import { parseCaveJson } from './json'
 import { getToken, reportAuthFailure } from './credentials'
 import { DEFAULT_CAVE_SERVER, caveServerLabel, normaliseCaveServer } from './deployments'
@@ -32,11 +33,51 @@ import { DEFAULT_CAVE_SERVER, caveServerLabel, normaliseCaveServer } from './dep
 export class CaveError extends Error {
   /** HTTP status, or 0 for a failure that never got one — a refusal, or an unreachable host. */
   readonly status: number
-  constructor(message: string, status = 0) {
+  /**
+   * What the server said, alone — for a caller that reads the answer rather than shows it. Set
+   * where a response failed; `rootLives` reads it, since one chunkedgraph 500 means "this id
+   * does not exist" and says which in exactly this text.
+   */
+  readonly detail: string | undefined
+  /**
+   * The request got no answer at all — `fetch` itself failed: a connection dropped under it, a
+   * host down, or a cross-origin refusal, which a browser does not tell apart. Set only there, so
+   * a reader asking "is this worth asking again" is not answered yes by a bad body (status 0 too).
+   */
+  noAnswer = false
+  constructor(message: string, status = 0, detail?: string) {
     super(message)
     this.name = 'CaveError'
     this.status = status
+    this.detail = detail
   }
+}
+
+/**
+ * The answer's body, or the error for one cut off while it was read — no answer either
+ * (`CaveError.noAnswer`): a connection dropped mid-reply fails here, not in `fetch`.
+ */
+async function bodyOf<T>(url: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read()
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    const cut = new CaveError(
+      `The answer from CAVE at ${new URL(url).origin} was cut off. (${errorMessage(error)})`,
+    )
+    cut.noAnswer = true
+    throw cut
+  }
+}
+
+/** The error for a request `fetch` itself refused — no answer at all (`CaveError.noAnswer`). */
+function unreachable(url: string, error: unknown): CaveError {
+  const refused = new CaveError(
+    `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
+      `the host is down. The browser does not say which. (${errorMessage(error)})`,
+  )
+  refused.noAnswer = true
+  return refused
 }
 
 /**
@@ -136,7 +177,40 @@ export interface CaveRequestOptions {
 /** One row of a CAVE query result: the API answers with an array of record objects. */
 export type CaveRow = Record<string, string | number | boolean | null>
 
-async function request<T>(
+/**
+ * How long a read that got **no answer** (`CaveError.noAnswer`) waits before it is asked again,
+ * each spread by up to half either way so reads that failed together do not return together.
+ * Not a status — that is the server's answer — and never a write. Why: `docs/backends-cave.md`,
+ * "Smaller decisions".
+ */
+const READ_AGAIN_MS = [1000, 4000] as const
+
+/**
+ * `once`, and again after each of `READ_AGAIN_MS` while it gets no answer. Exported for a caller
+ * that holds a slot per request (`chunkedgraphRead`): it asks again around the slot, so a read
+ * waiting out a dropped connection holds none, with requests made once (`cavePostRawOnce`).
+ */
+export async function readAgain<T>(
+  options: Pick<CaveRequestOptions, 'signal'>,
+  once: () => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await once()
+    } catch (error) {
+      const wait = READ_AGAIN_MS[attempt]
+      if (wait === undefined || !(error instanceof CaveError && error.noAnswer)) throw error
+      await delay(wait * (0.5 + Math.random()), options.signal)
+    }
+  }
+}
+
+/** A JSON read, asked again where it got no answer (`readAgain`). */
+function request<T>(url: string, init: RequestInit, options: CaveRequestOptions): Promise<T> {
+  return readAgain(options, () => requestOnce<T>(url, init, options))
+}
+
+async function requestOnce<T>(
   url: string,
   init: RequestInit,
   options: CaveRequestOptions,
@@ -159,20 +233,19 @@ async function request<T>(
     // An AbortError is the scheduler cancelling. It must stay an AbortError, or the run
     // machinery reports "the server is down" for a run the user stopped.
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new CaveError(
-      `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down. The browser does not say which. (${errorMessage(error)})`,
-    )
+    throw unreachable(url, error)
   }
 
-  const text = await response.text()
+  const text = await bodyOf(url, () => response.text())
   // `text` is read *before* this branch because the refusal is in the body: the canned sentence
   // was being told to somebody whose token was fine and whose remedy was a terms page.
   if (response.status === 401 || response.status === 403)
     refuseAuth(url, response.status, text, options)
 
-  if (!response.ok)
-    throw new CaveError(`CAVE returned ${response.status}: ${explain(text)}`, response.status)
+  if (!response.ok) {
+    const said = explain(text)
+    throw new CaveError(`CAVE returned ${response.status}: ${said}`, response.status, said)
+  }
   return parseCaveJson<T>(text)
 }
 
@@ -264,8 +337,14 @@ function authRefusal(url: string, status: number, body: string): string {
     )
   }
   if (parsed.error === 'missing_permission') {
+    // `edit` on a merge, `view` on a read (`middle_auth_client`'s `auth_requires_permission`); a
+    // fixed "read" misnamed a refused edit, so a body without it gets no verb at all.
+    const lacks =
+      typeof data.required_permission === 'string'
+        ? `not permitted to ${data.required_permission}`
+        : 'missing a permission on'
     return (
-      `Your CAVE account is not permitted to read ${dataset} (${status} at ` +
+      `Your CAVE account is ${lacks} ${dataset} (${status} at ` +
       `${new URL(url).origin}). Your token is fine; this is a permission on the dataset, so ` +
       `signing in again will not help.`
     )
@@ -334,7 +413,17 @@ export function caveGetOr404<T>(url: string, none: T, options: CaveRequestOption
  * otherwise be every caller's, and a memo above it may keep the failure.
  */
 export function sharedRequestOptions(options: CaveRequestOptions): CaveRequestOptions {
-  return { deployment: options.deployment, ...(options.quiet ? { quiet: true } : {}) }
+  return {
+    deployment: options.deployment,
+    /*
+     * **The token is carried; only the signal is dropped.** A credential is not a lifetime —
+     * every joiner needs the request to be signed, and dropping it was invisible in a browser,
+     * where `request` falls back to the credentials store, and fatal in Node, where a caller
+     * that passes `token` explicitly is the only way a probe or a script authenticates at all.
+     */
+    ...(options.token ? { token: options.token } : {}),
+    ...(options.quiet ? { quiet: true } : {}),
+  }
 }
 
 export function cavePost<T>(
@@ -346,15 +435,6 @@ export function cavePost<T>(
 }
 
 /**
- * A POST whose body the caller has already written.
- *
- * For the one thing `JSON.stringify` cannot express: a list of **unquoted** integers too wide for
- * a double. `is_latest_roots` takes `node_ids` as integers, and a root id through
- * `JSON.stringify` of a `number` is a different neuron (invariant 8) — where quoting them is a
- * type the endpoint was not promised to accept. So the digits are spliced in as text, the same
- * answer `idList` gives for Cypher and `pyLongIntList` for the notebook.
- */
-/**
  * A POST whose body and reply are both raw `uint64` arrays.
  *
  * `roots_binary` — what `caveclient.chunkedgraph.get_roots` calls — takes
@@ -365,7 +445,8 @@ export function cavePost<T>(
  * JavaScript runs on both are.
  *
  * Its own function rather than an option on `request`, which parses JSON unconditionally and
- * would have to grow a branch through every error path to do otherwise.
+ * would have to grow a branch through every error path to do otherwise. **Made once**: its one
+ * caller asks again around its budget slot (`chunkedgraphRead`, `readAgain`).
  */
 export async function cavePostBinary(
   url: string,
@@ -381,22 +462,23 @@ export async function cavePostBinary(
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/octet-stream',
       },
-      body: body.buffer as ArrayBuffer,
+      /*
+       * The array itself, not `body.buffer`: a view's buffer is the whole allocation it was cut
+       * from, so a `subarray` would send every id after it too. `fetch` sends a view's own bytes.
+       */
+      body: body as BufferSource,
       ...(options.signal ? { signal: options.signal } : {}),
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new CaveError(
-      `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down. The browser does not say which. (${errorMessage(error)})`,
-    )
+    throw unreachable(url, error)
   }
   if (response.status === 401 || response.status === 403)
     refuseAuth(url, response.status, await response.text(), options)
   if (!response.ok) {
     throw new CaveError(`CAVE returned ${response.status}`, response.status)
   }
-  const buffer = await response.arrayBuffer()
+  const buffer = await bodyOf(url, () => response.arrayBuffer())
   // A partial word would silently truncate the last id rather than failing.
   if (buffer.byteLength % 8 !== 0) {
     throw new CaveError(`CAVE returned ${buffer.byteLength} bytes, which is not whole uint64s`)
@@ -417,7 +499,14 @@ export async function cavePostBinary(
  * that, and one missing body must not fail a batch of five hundred — the same rule
  * `precomputed/skeletons.ts` states for a bucket.
  */
-export async function caveGetBytes(
+export function caveGetBytes(
+  url: string,
+  options: CaveRequestOptions,
+): Promise<ArrayBuffer | undefined> {
+  return readAgain(options, () => caveGetBytesOnce(url, options))
+}
+
+async function caveGetBytesOnce(
   url: string,
   options: CaveRequestOptions,
 ): Promise<ArrayBuffer | undefined> {
@@ -430,22 +519,55 @@ export async function caveGetBytes(
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new CaveError(
-      `Could not reach CAVE at ${new URL(url).origin}. It could not be read cross-origin, or ` +
-        `the host is down. The browser does not say which. (${errorMessage(error)})`,
-    )
+    throw unreachable(url, error)
   }
   if (response.status === 404) return undefined
   if (response.status === 401 || response.status === 403)
     refuseAuth(url, response.status, await response.text(), options)
   if (!response.ok) throw new CaveError(`CAVE returned ${response.status}`, response.status)
-  return response.arrayBuffer()
+  // A body cut off mid-read is no answer, as `request`'s is.
+  return bodyOf(url, () => response.arrayBuffer())
 }
 
+/**
+ * A POST whose body the caller has already written.
+ *
+ * For the one thing `JSON.stringify` cannot express: a list of **unquoted** integers too wide for
+ * a double. `is_latest_roots` takes `node_ids` as integers, and a root id through
+ * `JSON.stringify` of a `number` is a different neuron (invariant 8) — where quoting them is a
+ * type the endpoint was not promised to accept. So the digits are spliced in as text, the same
+ * answer `idList` gives for Cypher and `pyLongIntList` for the notebook.
+ */
 export function cavePostRaw<T>(
   url: string,
   body: string,
   options: CaveRequestOptions,
 ): Promise<T> {
   return request<T>(url, { method: 'POST', body }, options)
+}
+
+/** `cavePostRaw` made once, for a caller that asks again itself (`readAgain`). */
+export function cavePostRawOnce<T>(
+  url: string,
+  body: string,
+  options: CaveRequestOptions,
+): Promise<T> {
+  return requestOnce<T>(url, { method: 'POST', body }, options)
+}
+
+/**
+ * A POST that changes something on the server: `cavePostRaw`, refusing to follow a redirect.
+ *
+ * `fetch` follows a 307 or 308 by sending the same body again to wherever it points, and turns a
+ * 301–303 into a GET — so a write would land on a host nobody confirmed, or come back as some
+ * page's 200. With `redirect: 'error'` the fetch fails instead, which the writer (`edits.ts`)
+ * reads as "not known" and answers by re-reading the roots.
+ */
+export function cavePostWrite<T>(
+  url: string,
+  body: string,
+  options: CaveRequestOptions,
+): Promise<T> {
+  // Once only: a merge whose reply was lost may well have happened, and only the roots can say.
+  return requestOnce<T>(url, { method: 'POST', body, redirect: 'error' }, options)
 }

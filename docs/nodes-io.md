@@ -778,11 +778,13 @@ and the 3D View take it unchanged; and `Layers`, the same box as a neuroglancer
   Volumes`' frame check sees nanometres. Neuroglancer's readout is usually in voxels, and a box
   read as nanometres lands far from the points with no error, only an empty `Inside`.
 - **`Voxel size` has no default.** One right for FlyWire (4, 4, 40) is wrong for MANC (8, 8, 8),
-  which is the same silent miss as above. Empty is a warning naming the remedy.
+  which is the same silent miss as above. It is read by `parseScale` and refused in
+  `scaleRefusal`'s words (`data/units.ts`), like every other scale field; only the corners use
+  the looser `parseTriple`, since a corner may be zero or negative.
 - **A flat box warns rather than refuses** (a guard rail warns): it encloses nothing, but still
   draws in neuroglancer as a rectangle.
-- **The layer goes through `localAnnotationLayer`** (`data/neuroglancer/scene.ts`), the one
-  nanometre-frame wrapper for every local annotation layer.
+- **The layer goes through `localAnnotationLayer`** (`data/neuroglancer/scene.ts`), moved there
+  from the SEAM pack so there is one nanometre-frame wrapper for every local annotation layer.
 - **The exporters write the corners already in nanometres**: a `navis.Volume` list in Python, a
   named list of one `rgl::tmesh3d` in R (faces one-based); `Layers` is `None`/`NULL`, as
   `Neuroglancer Source`'s is. The fixture's box is in voxels with its corners typed out of order,

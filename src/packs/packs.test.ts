@@ -158,3 +158,36 @@ describe('ZapBench, moved into a pack', () => {
     expect(graph?.nodes.map((n) => n.type)).toContain('zapbench:traces')
   })
 })
+
+describe('SEAM, renamed before its first release (2026-11-26)', () => {
+  it('answers its old ids with its new ones', () => {
+    expect(currentType('seam:suggestMerges')).toBe('seam:findMergeCandidates')
+    expect(currentType('seam:suggestions')).toBe('seam:loadMergeCandidates')
+    expect(currentType('seam:review')).toBe('seam:proofreadMerges')
+  })
+
+  it('loads a file saved before the rename, wires intact', () => {
+    const { graph, warnings } = deserializeGraph(
+      JSON.stringify({
+        version: 1,
+        nodes: [
+          { id: 's', type: 'seam:suggestions', position: { x: 0, y: 0 }, params: {} },
+          { id: 'r', type: 'seam:review', position: { x: 300, y: 0 }, params: {} },
+        ],
+        edges: ['tips', 'candidates'].map((port) => ({
+          id: port,
+          source: 's',
+          sourceHandle: port,
+          target: 'r',
+          targetHandle: port,
+        })),
+      }),
+    )
+    expect(warnings).toEqual([])
+    expect(graph.nodes.map((n) => n.type)).toEqual([
+      'seam:loadMergeCandidates',
+      'seam:proofreadMerges',
+    ])
+    expect(graph.edges).toHaveLength(2)
+  })
+})

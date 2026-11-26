@@ -73,7 +73,9 @@ function dashboardTabKey(event: KeyboardEvent): boolean {
 export function useAppShortcuts(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isTypingTarget(event.target)) return
+      // A key something nearer has already taken is not a shortcut here: F over a Neuroglancer
+      // card that finds paths is that card's (`splitKey.ts`, on the capture phase).
+      if (event.defaultPrevented || isTypingTarget(event.target)) return
       if (dashboardTabKey(event)) return
       // Every other key here is unmodified. Leaving the modified ones alone matters: ⌘D is Duplicate
       // and ⌘I is the browser's inspector, and neither is ours to take.

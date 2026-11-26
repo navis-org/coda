@@ -78,7 +78,10 @@ class Mat:
     def get_view_metadata(self, view): return self.views.get(view, {})
     def get_annotation_count(self, table): return self.counts.get(table, (0, 0))[1]
     def query_table(self, table, filter_equal_dict=None, select_columns=None,
-                    merge_reference=True, limit=None, split_positions=False):
+                    merge_reference=True, limit=None, split_positions=False,
+                    desired_resolution=None):
+        # Recorded, so a check can see the card's `Position units` reach every query.
+        self.resolutions = getattr(self, 'resolutions', []) + [desired_resolution]
         df = self.tables[table].copy()
         if filter_equal_dict:
             for col, val in filter_equal_dict.items():
@@ -157,6 +160,13 @@ p = ns['coda_cave_table'](c2, 'hier', id_column='target_id',
                           pivot_on='classification_system', value_column='cell_type')
 check('table: pivot folds to one row per neuron', len(p) == 2, str(len(p)))
 check('table: pivot names the kind', 'cell_type' in p.columns or 'type' in p.columns, str(list(p.columns)))
+c2.materialize.resolutions = []
+ns['coda_cave_table'](c2, 'nuclei', id_column='pt_root_id', columns=['volume'], desired_resolution=[1, 1, 1])
+ns['coda_cave_table'](c2, 'hier', id_column='target_id', pivot_on='classification_system',
+                      value_column='cell_type', desired_resolution=[1, 1, 1])
+check('table: Position units reach every query',
+      len(c2.materialize.resolutions) >= 2 and all(r == [1, 1, 1] for r in c2.materialize.resolutions),
+      str(c2.materialize.resolutions))
 
 # ---- coda_seatable ----------------------------------------------------------
 class SeaStub:

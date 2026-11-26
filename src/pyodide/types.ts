@@ -40,7 +40,30 @@ export type PyArg =
   | Uint32Array
   // SWC compartment codes, one byte per skeleton node — a category, not a measurement.
   | Uint8Array
-  | PyArg[]
+  /*
+   * A voxel's slot in a label table (`VoxelIndex`), and the only member here chosen for its
+   * **width** rather than its meaning. A box of segmentation is millions of voxels naming a few
+   * thousand objects, so the wide form is mostly zeroes — and what crosses this seam is copied
+   * into a wasm heap that is never given back, which makes a needless 12 MB permanent for the
+   * life of the worker. `readLabelBox` sends whichever width names its table.
+   */
+  | Uint16Array
+  /*
+   * Segmentation and root ids, and the one member that is an **identity** rather than a
+   * quantity. Invariant 8: an 18-digit id does not survive a float64, and the two that collide
+   * are two different neurons — so a column of them crosses as 64-bit on both legs, becoming
+   * numpy's `uint64` on the far side rather than being narrowed anywhere in between.
+   * `ArrayBuffer.isView` already transfers it, so only the type had to widen.
+   */
+  | BigUint64Array
+  // A single id, for the same reason: `queryRoot` is one neuron, not a count of them.
+  | bigint
+  /*
+   * `readonly`, so a request may hold a small array a caller keeps — a resolution or a box
+   * extent. Only the big views are worth transferring, and transferring detaches; a three-number
+   * array handed over as a typed one comes back empty on the caller's side for no saving.
+   */
+  | readonly PyArg[]
   | { [key: string]: PyArg }
 
 /**
@@ -79,6 +102,8 @@ export type WorkerRequest =
 /** Worker to main thread. */
 export type WorkerReply =
   | { id: number; kind: 'progress'; fraction: number; note?: string }
+  /** A piece of the answer before the call ends — `CallOptions.onPartial`. */
+  | { id: number; kind: 'partial'; result: PyResult }
   | { id: number; kind: 'done'; result: PyResult }
   | { id: number; kind: 'error'; message: string }
   | { id: number; kind: 'memory'; bytes: number | undefined }
@@ -135,6 +160,27 @@ export function uint8From(result: PyResult, key: string): Uint8Array {
   return value
 }
 
+/**
+ * The measurement columns of a result, told apart by **dtype rather than by name**.
+ *
+ * Python casts the id columns to uint64 and every measurement to float64, so a list of which
+ * names are ids would be a cross-language pair with nothing testing either half. An id column
+ * added upstream arrives as a `BigUint64Array` and is simply not a measurement, rather than
+ * reaching `float64From`.
+ *
+ * Here rather than in one capability's wrapper because the rule is the bridge's, not any one
+ * call's: it lived in `cutoutSummary.ts`, two wrappers had the loop and the second copy had
+ * lost the reason, and when `probe:candidate-search` came to want it a third inline copy went
+ * in — without the dtype rule, which is the whole content.
+ */
+export function float64Columns(result: PyResult): Record<string, Float64Array> {
+  const columns: Record<string, Float64Array> = {}
+  for (const [key, value] of Object.entries(result)) {
+    if (value instanceof Float64Array) columns[key] = value
+  }
+  return columns
+}
+
 /** Read a float64 array a Python function promised. */
 export function float64From(result: PyResult, key: string): Float64Array {
   const value = result[key]
@@ -144,6 +190,26 @@ export function float64From(result: PyResult, key: string): Float64Array {
     throw new Error(
       `Python returned no flat float64 array called "${key}" ` +
         `(got ${Array.isArray(value) ? 'a nested Array — ravel it' : typeof value})`,
+    )
+  }
+  return value
+}
+
+/**
+ * Read a uint64 array a Python function promised.
+ *
+ * Segmentation and root ids, which is the whole reason it exists: an 18-digit id through a
+ * `Float64Array` is a *different object* and nothing downstream could tell (invariant 8). So a
+ * column of them crosses as `BigUint64Array` and is read as one, and the error below names the
+ * mistake rather than the type — a numpy column that was built rather than cast arrives as
+ * float64 and compares equal to nothing.
+ */
+export function uint64From(result: PyResult, key: string): BigUint64Array {
+  const value = result[key]
+  if (!(value instanceof BigUint64Array)) {
+    throw new Error(
+      `Python returned no flat uint64 array called "${key}" ` +
+        `(got ${value instanceof Float64Array ? 'float64 — an id does not survive one' : typeof value})`,
     )
   }
   return value

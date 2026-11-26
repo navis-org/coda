@@ -49,6 +49,7 @@
 
 import { memoPromise } from '../memoPromise'
 import { reportSourceLearned } from '../source'
+import { resetL2ChunkCounts, resetRootChecks } from './rootIds'
 import type { TableMetadata, ViewInfo } from './api'
 import {
   annotationCount,
@@ -211,6 +212,11 @@ export function resetCaveTables(): void {
  * The fan-out `resetCaveTables` names above, as far as a test teardown needs it. Four suites had
  * hand-copied the same two calls into their own `beforeEach`, so every new memo meant editing
  * four blocks and the file that missed one got cross-test bleed reading as a routing bug.
+ *
+ * `rootIds.ts`' two were outside it until 2026-11-14 and one suite had duly hand-written its own
+ * `beforeEach`, which is that incident starting again. A request memo's bleed is the silent
+ * direction: a request that does **not** fire, which reads as "the node never asked" rather than
+ * "the memo was warm".
  */
 export function resetCaveState(): void {
   resetCaveTables()
@@ -218,6 +224,8 @@ export function resetCaveState(): void {
   resetFlatSources()
   resetSkeletonServices()
   resetNuclei()
+  resetL2ChunkCounts()
+  resetRootChecks()
 }
 
 /**
@@ -347,6 +355,24 @@ export function peekTableList(
   return undefined
 }
 
+/**
+ * The sentence for a name a landed listing does not hold, naming what it does hold. One wording
+ * for every reader that checks a typed table name.
+ */
+export function notInListing(
+  name: string,
+  datastack: string,
+  version: number,
+  entries: readonly CaveTableEntry[],
+): string {
+  return (
+    `"${name}" is not a table or view in ${datastack}:${version}. ` +
+    (entries.length
+      ? `Available: ${entries.map((e) => e.name).join(', ')}`
+      : 'It lists no tables or views.')
+  )
+}
+
 /** Which kind of object this name is, according to a listing that has landed. */
 export function kindOf(
   entries: readonly CaveTableEntry[] | undefined,
@@ -396,12 +422,7 @@ async function loadFacts(
 ): Promise<CaveTableFacts> {
   const entries = await tableListFor(datastack, version, options)
   const kind = kindOf(entries, name)
-  if (!kind) {
-    throw new Error(
-      `"${name}" is not a table or view in ${datastack}:${version}. ` +
-        `Available: ${entries.map((e) => e.name).join(', ')}`,
-    )
-  }
+  if (!kind) throw new Error(notInListing(name, datastack, version, entries))
   // The listing above already downloaded every view's description, so a view's facts are a map
   // lookup rather than a request. Reaching for `listViews` again here is what the module header
   // means by "one entry of a listing that is very likely already in hand".

@@ -11,7 +11,7 @@
  */
 
 import type { ComponentProps } from 'react'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
@@ -24,16 +24,22 @@ import {
   withLayerPanel,
 } from '../../data/neuroglancer/scene'
 import {
+  FRAME_HOVER_MESSAGE,
   FRAME_STATE_MESSAGE,
   FRAME_UPDATE_KEY,
   FRAME_VIEW_MESSAGE,
   updateIn,
 } from '../../data/neuroglancer/frameMessage'
 import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
+import type { RootEdit } from '../../data/cave/rootEdits'
+import { onEdit } from '../../data/cave/rootEdits'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { useReviewKeys } from '../seam/reviewKeys'
+import { hoveredSegment } from './segmentHover'
 import { useGraphStore } from '../../store/graphStore'
 import { RELEASE_AFTER_MS } from './persistentRoots'
 import { resetSceneMemos } from './sceneMemo'
+import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 500 }))
 beforeEach(() => {
@@ -1192,6 +1198,22 @@ describe('neurons changed inside the viewer', () => {
     return { ...view, onSelectionEdits }
   }
 
+  /** For the review card to light its rows by (`segmentHover.ts`): not stamped with an update. */
+  it('passes on the segment under the pointer in its own frame, and clears it as it goes', () => {
+    const { container, unmount } = mounted(URL_A)
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: '720575940621522189' })
+    expect(hoveredSegment()).toBe('720575940621522189')
+    // Not from its own frame, or not a segment id: ignored.
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: '5' }, {})
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: 'x' })
+    expect(hoveredSegment()).toBe('720575940621522189')
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: null })
+    expect(hoveredSegment()).toBeUndefined()
+    post(container, { type: FRAME_HOVER_MESSAGE, segment: '720575940621522189' })
+    unmount()
+    expect(hoveredSegment()).toBeUndefined()
+  })
+
   it('writes a neuron double-clicked into the scene back as an edit', () => {
     const { container, onSelectionEdits } = mounted(URL_A)
     frameShowing(container, sceneWith(['1']))
@@ -1204,6 +1226,29 @@ describe('neurons changed inside the viewer', () => {
     frameShowing(container, sceneWith(['1', '2']))
     report(container, sceneWith(['2']))
     expect(onSelectionEdits).toHaveBeenCalledWith(['+7', '-1'])
+  })
+
+  /**
+   * Neuroglancer's own multicut takes the old root out of the layer and puts the new ones in: said
+   * to the review cards to check (`rootEdits.ts`). A neuron only taken out is the reader's choice.
+   */
+  it('says a root replaced by new ones in one report, on a card that can split', () => {
+    const heard: RootEdit[] = []
+    const stop = onEdit((edit) => heard.push(edit))
+    const target = { deployment: 'https://global.example.org', datastack: 'test_stack' }
+    const onSelectionEdits = vi.fn<(next: string[]) => void>()
+    const view = render(viewer(URL_B, [], onSelectionEdits, { splitTarget: target }))
+    frameLoaded(view.container)
+    frameShowing(view.container, sceneWith(['1', '2']))
+    report(view.container, sceneWith(['2']))
+    // Added by hand, with nothing taken out: said nothing, and the scene's one saying not spent.
+    report(view.container, sceneWith(['1', '2', '7']))
+    expect(heard).toEqual([])
+    report(view.container, sceneWith(['2', '8', '9']))
+    // The frame repeats its report until the next scene lands: said once.
+    report(view.container, sceneWith(['2', '8', '9']))
+    stop()
+    expect(heard).toEqual([{ ...target, roots: ['1'], certain: false }])
   })
 
   it('writes nothing for a report of the scene it was sent', () => {
@@ -1396,12 +1441,54 @@ describe('neurons changed inside the viewer', () => {
       const posted = speakingFrame(view.container, sceneWith(['1']))
       // Told on the frame's first report: on the canvas they stay neuroglancer's.
       expect(posted).toHaveBeenCalledWith(
-        { type: 'coda:ng-keys', altDigits: false },
+        { type: 'coda:ng-keys', altDigits: false, findPath: false, review: false },
         window.location.origin,
       )
       act(() => useGraphStore.setState({ dashboardOpen: true }))
       expect(posted).toHaveBeenLastCalledWith(
-        { type: 'coda:ng-keys', altDigits: true },
+        { type: 'coda:ng-keys', altDigits: true, findPath: false, review: false },
+        window.location.origin,
+      )
+    })
+
+    /** F is Coda's find path only on a CAVE card with the SEAM pack on; else neuroglancer's tool. */
+    it('tells the frame F is Coda’s where find path is on, and neuroglancer’s once SEAM is off', () => {
+      switchPack('seam', true)
+      const view = render(
+        viewer(URL_A, [], vi.fn(), {
+          splitTarget: { deployment: 'https://cave.example', datastack: 'toy' },
+        }),
+      )
+      frameLoaded(view.container)
+      const posted = speakingFrame(view.container, sceneWith(['1']))
+      expect(posted).toHaveBeenCalledWith(
+        { type: 'coda:ng-keys', altDigits: false, findPath: true, review: false },
+        window.location.origin,
+      )
+      act(() => switchPack('seam', false))
+      expect(posted).toHaveBeenLastCalledWith(
+        { type: 'coda:ng-keys', altDigits: false, findPath: false, review: false },
+        window.location.origin,
+      )
+      resetPackSwitchesForTest()
+    })
+
+    /** `G` is neuroglancer's multicut swap-group too: claimed only while a review card is open. */
+    it('tells the frame the review keys are Coda’s only while a review card is open', () => {
+      const view = mounted(URL_A)
+      const posted = speakingFrame(view.container, sceneWith(['1']))
+      expect(posted).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'coda:ng-keys', review: false }),
+        window.location.origin,
+      )
+      const card = renderHook(() => useReviewKeys('review', () => {}))
+      expect(posted).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'coda:ng-keys', review: true }),
+        window.location.origin,
+      )
+      card.unmount()
+      expect(posted).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'coda:ng-keys', review: false }),
         window.location.origin,
       )
     })
@@ -1410,11 +1497,21 @@ describe('neurons changed inside the viewer', () => {
       const view = mounted(URL_A)
       frameShowing(view.container, sceneWith(['1']))
       const heard = vi.fn()
-      const listen = (event: KeyboardEvent) => heard(event.code, event.altKey)
+      const listen = (event: KeyboardEvent) =>
+        heard(
+          event.code,
+          event.key,
+          event.altKey,
+          event.cancelable,
+          event.target === document.body,
+        )
       window.addEventListener('keydown', listen)
       post(view.container, { type: 'coda:ng-key', code: 'Digit2', altKey: true })
+      // With the key as typed: bare F handed back is still Coda's fullscreen where nothing takes it.
+      post(view.container, { type: 'coda:ng-key', code: 'KeyF', key: 'f', altKey: false })
       window.removeEventListener('keydown', listen)
-      expect(heard).toHaveBeenCalledWith('Digit2', true)
+      expect(heard).toHaveBeenCalledWith('Digit2', '', true, true, true)
+      expect(heard).toHaveBeenCalledWith('KeyF', 'f', false, true, true)
     })
   })
 
@@ -1442,6 +1539,61 @@ describe('neurons changed inside the viewer', () => {
   ) {
     view.rerender(viewer(url, selectionEdits, view.onSelectionEdits))
   }
+
+  /**
+   * The camera a card asked for, which travels **beside** the scene rather than in it.
+   *
+   * A scene's `position` is its *published* camera and is part of its identity: a scene whose
+   * position changed is one pointed somewhere else, and re-navigates — every layer torn down,
+   * every mesh refetched. "Point the camera here", from a card paging through a queue, is a
+   * different statement and must not cost that, so it is `focus` and a message.
+   */
+  it('posts a camera a caller asked for, without touching the scene', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    const before = frameSrc(view.container)
+    view.rerender(viewer(URL_A, [], view.onSelectionEdits, { focus: [10, 20, 30] }))
+    expect(posted).toHaveBeenCalledWith(
+      { type: 'coda:ng-set-view', position: [10, 20, 30] },
+      window.location.origin,
+    )
+    // No navigation: the frame is still on the document it was on.
+    expect(frameSrc(view.container)).toBe(before)
+  })
+
+  /**
+   * A navigation replaces the document and the camera goes with it — the restored scene carries
+   * whatever framing *it* names, which for a dataset publishing none is neuroglancer's default.
+   * So the camera has to be asked for again, or a caller that moved it once and then changed
+   * anything that navigates loses it for good while the effect sees a `focus` it already sent.
+   */
+  it('asks for the camera again after a navigation', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    view.rerender(viewer(URL_A, [], view.onSelectionEdits, { focus: [1, 2, 3] }))
+    // A different scene entirely: this navigates rather than setting a selection in place.
+    view.rerender(viewer(URL_OTHER, [], view.onSelectionEdits, { focus: [1, 2, 3] }))
+    frameLoaded(view.container)
+    report(view.container, sceneWith(['1']))
+    view.rerender(viewer(URL_OTHER, [], view.onSelectionEdits, { focus: [1, 2, 3] }))
+    const views = posted.mock.calls.filter(
+      ([message]) => (message as { type?: string }).type === 'coda:ng-set-view',
+    )
+    expect(views.length).toBeGreaterThan(1)
+  })
+
+  /** Re-rendering with the same camera is not a new instruction. */
+  it('does not post the same camera twice', () => {
+    const view = mounted(URL_A)
+    const posted = speakingFrame(view.container, sceneWith(['1']))
+    for (let i = 0; i < 3; i++) {
+      view.rerender(viewer(URL_A, [], view.onSelectionEdits, { focus: [1, 2, 3] }))
+    }
+    const views = posted.mock.calls.filter(
+      ([message]) => (message as { type?: string }).type === 'coda:ng-set-view',
+    )
+    expect(views).toHaveLength(1)
+  })
 
   it('sets a changed selection in place, at once, with the pointer inside the frame', () => {
     // Restoring `layers` rebuilds every layer, which is why an update used to wait for the pointer
@@ -1486,6 +1638,113 @@ describe('neurons changed inside the viewer', () => {
       expect.anything(),
     )
     expect(frameSrc(view.container)).not.toBe(before)
+  })
+
+  /*
+   * Proofread Merges under Auto-extend: a piece taken arrives with the tips of the piece it was
+   * taken on, so its points layer changes in the same update. A local layer's points go in place
+   * with the segments, so the whole update applies under the pointer (user, 2026-11-18).
+   */
+  it('sets a local annotation layer’s points in place with the segments', () => {
+    const pointsOf = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ type: 'point', id: String(i) }))
+    const withPoints = (segments: string[], n: number) => {
+      const scene = sceneWith(segments)
+      const tips = {
+        type: 'annotation',
+        name: 'tips',
+        source: 'local://annotations',
+        annotations: pointsOf(n),
+      }
+      return { ...scene, layers: [...scene.layers, tips] }
+    }
+    const view = mounted(sceneUrl(undefined, withPoints(['1'], 1)))
+    const posted = speakingFrame(view.container, withPoints(['1'], 1))
+    const before = frameSrc(view.container)
+    fireEvent.mouseEnter(scaleBox(view.container)!)
+    rerendered(view, sceneUrl(undefined, withPoints(['1', '2'], 3)))
+    expect(posted).toHaveBeenCalledWith(
+      {
+        type: 'coda:ng-set-segments',
+        layers: [{ name: OWNED, segments: ['1', '2'], segmentColors: {} }],
+        annotations: [{ name: 'tips', annotations: pointsOf(3) }],
+        update: 2,
+      },
+      window.location.origin,
+    )
+    fireEvent.mouseLeave(scaleBox(view.container)!)
+    flushMerge()
+    // Nothing left to navigate for.
+    expect(frameSrc(view.container)).toBe(before)
+  })
+
+  /*
+   * An annotation layer the frame cannot refill — not local — still navigates, and waits for the
+   * pointer; the segments in the same update need not wait with it.
+   */
+  it('sets the selection ahead of a navigation that waits for the pointer', () => {
+    const withPoints = (segments: string[], n: number) => {
+      const scene = sceneWith(segments)
+      const annotations = Array.from({ length: n }, (_, i) => ({
+        type: 'point',
+        id: String(i),
+      }))
+      return {
+        ...scene,
+        layers: [...scene.layers, { type: 'annotation', name: 'tips', annotations }],
+      }
+    }
+    const view = mounted(sceneUrl(undefined, withPoints(['1'], 1)))
+    const posted = speakingFrame(view.container, withPoints(['1'], 1))
+    const before = frameSrc(view.container)
+    fireEvent.mouseEnter(scaleBox(view.container)!)
+    rerendered(view, sceneUrl(undefined, withPoints(['1', '2'], 3)))
+    expect(posted).toHaveBeenCalledWith(
+      {
+        type: 'coda:ng-set-segments',
+        layers: [{ name: OWNED, segments: ['1', '2'], segmentColors: {} }],
+        update: 2,
+      },
+      window.location.origin,
+    )
+    // The frame's report of that update is the scene it was sent, not a neuron added by hand.
+    report(view.container, withPoints(['1', '2'], 1))
+    expect(view.onSelectionEdits).not.toHaveBeenCalled()
+    // The points are still held.
+    flushMerge()
+    expect(frameSrc(view.container)).toBe(before)
+    fireEvent.mouseLeave(scaleBox(view.container)!)
+    flushMerge()
+    expect(frameSrc(view.container)).not.toBe(before)
+  })
+
+  it('takes the scene it went ahead from, arriving again, as a selection to set back', () => {
+    const withPoints = (segments: string[], n: number) => {
+      const scene = sceneWith(segments)
+      const annotations = Array.from({ length: n }, (_, i) => ({
+        type: 'point',
+        id: String(i),
+      }))
+      return {
+        ...scene,
+        layers: [...scene.layers, { type: 'annotation', name: 'tips', annotations }],
+      }
+    }
+    const first = sceneUrl(undefined, withPoints(['1'], 1))
+    const view = mounted(first)
+    const posted = speakingFrame(view.container, withPoints(['1'], 1))
+    fireEvent.mouseEnter(scaleBox(view.container)!)
+    rerendered(view, sceneUrl(undefined, withPoints(['1', '2'], 3)))
+    // Undone before the points went in: the frame shows `2`, so it is taken out again.
+    rerendered(view, first)
+    expect(posted).toHaveBeenLastCalledWith(
+      {
+        type: 'coda:ng-set-segments',
+        layers: [{ name: OWNED, segments: ['1'], segmentColors: {} }],
+        update: 3,
+      },
+      window.location.origin,
+    )
   })
 
   it('navigates as before for a frame that never said it can take one', () => {

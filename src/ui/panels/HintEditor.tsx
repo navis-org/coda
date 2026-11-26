@@ -35,7 +35,7 @@ import { restoreHints } from '../hints'
 import type { CalloutTone } from '../../core/markdown'
 import { CALLOUT_TONES, TONE_TITLE } from '../../core/markdown'
 import { ContextMenu } from '../menu/ContextMenu'
-import { layoutViewport } from '../menu/placement'
+import { anchorBelow, layoutViewport } from '../menu/placement'
 import { HintBox } from '../nodes/NodeHints'
 
 const SIDE_TITLE: Record<HintSide, string> = { bottom: 'Below', top: 'Above' }
@@ -77,9 +77,8 @@ function anchorFor(nodeId: string): { at: { x: number; y: number }; cardWidth?: 
     const { width, height } = layoutViewport()
     return { at: { x: width / 3, y: height / 3 } }
   }
-  const rect = card.getBoundingClientRect()
   return {
-    at: { x: rect.left, y: rect.bottom + GAP },
+    at: anchorBelow(card, GAP),
     cardWidth: card.offsetWidth || undefined,
   }
 }

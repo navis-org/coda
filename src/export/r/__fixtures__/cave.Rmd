@@ -151,7 +151,8 @@ coda_cave_labels <- function(ds) {
 
 
 coda_cave_table <- function(ds, table, id_column = "pt_root_id", columns = NULL,
-                            pivot_on = NULL, value_column = NULL) {
+                            pivot_on = NULL, value_column = NULL,
+                            desired_resolution = NULL) {
   # A CAVE annotation table as a Coda neuron table. A reference table has no root id of its
   # own -- it lives in the table it references -- so it is read through that join.
   client <- coda_cave_client(ds)
@@ -165,7 +166,7 @@ coda_cave_table <- function(ds, table, id_column = "pt_root_id", columns = NULL,
   if (!is.null(pivot_on)) {
     out <- coda_cave_wide(
       ds, table, pivot_on, value_column, id_column, select(value_column),
-      merge_reference = !is.null(reference)
+      merge_reference = !is.null(reference), desired_resolution = desired_resolution
     )
     if (is.null(out)) out <- stats::setNames(data.frame(character(0)), id_column)
   } else {
@@ -177,7 +178,7 @@ coda_cave_table <- function(ds, table, id_column = "pt_root_id", columns = NULL,
     }
     out <- coda_cave_query(
       ds, table, select_columns = if (is.null(own)) NULL else select(own),
-      merge_reference = !is.null(reference)
+      merge_reference = !is.null(reference), desired_resolution = desired_resolution
     )
     if (!is.null(own)) out <- out[, c(id_column, intersect(own, names(out))), drop = FALSE]
   }
@@ -651,7 +652,8 @@ cave_table <- coda_cave_table(
   .cave,
   "nuclei_v1",
   id_column = "pt_root_id",
-  columns = c("volume")
+  columns = c("volume"),
+  desired_resolution = c(1, 1, 1)
 )
 cave_table <- coda_join_annotations(flytable, cave_table)
 ```
@@ -667,7 +669,8 @@ cave_table_2 <- coda_cave_table(
   "hierarchical_neuron_annotations",
   id_column = "target_id",
   pivot_on = "classification_system",
-  value_column = "cell_type"
+  value_column = "cell_type",
+  desired_resolution = c(1, 1, 1)
 )
 cave_table_2 <- coda_join_annotations(cave_table, cave_table_2)
 ```

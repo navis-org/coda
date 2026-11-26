@@ -861,6 +861,18 @@ export interface LayersValue {
 }
 
 /**
+ * The layers arriving on a chaining input, or none.
+ *
+ * A node that adds a layer takes one on an input and passes everything through, because a port
+ * takes exactly one wire and several layers reach a scene by chaining nodes. Absent reads as an
+ * empty list — never a throw and never a dropped chain — and that convention is one line, so it
+ * is here rather than copied into every node that joins the chain.
+ */
+export function layersFrom(value: Value | undefined): LayersValue['items'] {
+  return value?.kind === 'layers' ? value.items : []
+}
+
+/**
  * A table held in a file rather than in memory — what `tableFile` sockets carry.
  *
  * **Plain data, deliberately**: where the bytes are, what they hold, and a fingerprint of them,
@@ -922,6 +934,13 @@ export interface TableFileColumn {
   readonly overflow?: true
   /** A timestamp or date, read as ISO text. */
   readonly time?: true
+  /**
+   * The file gives the column no type, and every value is empty: parquet's `NULL` logical type,
+   * which pandas writes for a column holding nothing but `None`. `dtype` is the storage's, a
+   * placeholder rather than a statement, so a reader that declares its own columns may take it
+   * as any type, all nulls.
+   */
+  readonly untyped?: true
 }
 
 /**
@@ -956,8 +975,18 @@ export function makeTable(
   schema: TableSchema,
   data: Record<string, ColumnData>,
   kind: 'table' | 'neurons' = 'table',
+  /**
+   * How many rows there are, where the columns cannot say.
+   *
+   * A table of **no columns** has a length the data cannot carry, and it is a real state: a
+   * point cloud's attribute table is where its row count lives (`PointsValue` holds
+   * `attributes.length * 3` coordinates), so a cloud carrying nothing would otherwise be length
+   * 0 with a full buffer of positions — and draw nothing at all. Stated rather than derived
+   * wherever the caller knows; every other caller leaves it out and the columns decide.
+   */
+  rows?: number,
 ): TableValue {
-  let length = 0
+  let length = rows ?? 0
   for (const col of schema.columns) {
     const arr = data[col.name]
     if (!arr)
@@ -1212,6 +1241,24 @@ export function triangleArea(positions: Float32Array, a: number, b: number, c: n
   const cy = uz * vx - ux * vz
   const cz = ux * vy - uy * vx
   return Math.sqrt(cx * cx + cy * cy + cz * cz) / 2
+}
+
+/**
+ * Total triangle area, in the positions' units squared. Reported beside a volume where a shell's
+ * roughness is worth seeing, and what Find Open Ends sizes a mesh by against a nucleus.
+ */
+export function meshSurfaceArea(positions: Float32Array, indices: Uint32Array): number {
+  let sum = 0
+  const triangles = Math.floor(indices.length / 3)
+  for (let t = 0; t < triangles; t++) {
+    sum += triangleArea(
+      positions,
+      indices[t * 3]! * 3,
+      indices[t * 3 + 1]! * 3,
+      indices[t * 3 + 2]! * 3,
+    )
+  }
+  return sum
 }
 
 /** Per-item axis-aligned box, six entries each: min xyz then max xyz. */

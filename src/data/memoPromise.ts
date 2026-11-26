@@ -32,6 +32,7 @@
  */
 
 import { LruMap } from '../core/lruMap'
+import { throwIfAborted } from '../core/slice'
 
 /** What a memo holds on to once its promise has settled successfully. See the module header. */
 export type Keep = 'resolved' | 'inflight'
@@ -130,5 +131,91 @@ export class ReplayedFailures<K> {
   /** Ask again next time — what a refresh (Invalidate Results) means. */
   forget(key: K): void {
     this.held.delete(key)
+  }
+}
+
+/**
+ * A request several callers share, and how many of them still want it (`shareInFlight`).
+ * Fields are the helper's; a caller only holds the map.
+ */
+export interface SharedAsk {
+  done: Promise<void>
+  waiters: number
+  readonly stop: AbortController
+}
+
+/**
+ * **Many keys, asked once between however many callers want them** — `memoPromise`'s idea for a
+ * request that answers a whole set of keys at once (a batch of supervoxels, of roots), where a
+ * promise per key would destroy the batching the request exists for.
+ *
+ * Each key is `held` (answered already — `ask` writes its answers wherever `held` reads), being
+ * asked by somebody (in `asking`: join that request), or this caller's to ask. Three rules, each
+ * of which fails in silence when broken, since the answers agree either way and the only sign is
+ * twice the requests at a server that is not ours:
+ *
+ * - **The partition and the registration are one synchronous block.** An `await` between them
+ *   lets a second caller find the same keys in neither place and ask again.
+ * - **A shared request carries nobody's signal.** One caller's Cancel must not fail the others'
+ *   answer — so it stops *its* waiting (`untilAborted`), and the request is stopped only when
+ *   **every** caller waiting on it has gone (`SharedAsk.waiters`); `ask` gets that signal.
+ * - **A failed or stopped request leaves nothing to join.** Its keys leave `asking` when it
+ *   settles, identity-guarded, and at once when it is stopped, so the next caller asks afresh.
+ *
+ * Written twice by hand before it moved here — the supervoxel lookups (`rootedBox.ts`'
+ * `resolveRoots`) and the level-2 counts (`rootIds.ts`' `l2ChunkCounts`). A third, looser copy
+ * stays where it is: `skeletonService.ts`' existence check also gathers askers within one tick,
+ * since its endpoint is rate-limited, which this does not do.
+ */
+export async function shareInFlight<K>(
+  keys: Iterable<K>,
+  held: (key: K) => boolean,
+  asking: Map<K, SharedAsk>,
+  ask: (mine: K[], signal: AbortSignal) => Promise<void>,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const joined = new Set<SharedAsk>()
+  const mine: K[] = []
+  // No `await` in this loop, or between it and the registration below.
+  for (const key of keys) {
+    if (held(key)) continue
+    const already = asking.get(key)
+    if (already) joined.add(already)
+    else mine.push(key)
+  }
+  if (joined.size === 0 && mine.length === 0) return
+  // Refused before anything is registered, so every request made here has a waiter watching it.
+  throwIfAborted(signal)
+  if (mine.length > 0) {
+    const stop = new AbortController()
+    const share: SharedAsk = { done: Promise.resolve(), waiters: 0, stop }
+    const forget = () => {
+      for (const key of mine) if (asking.get(key) === share) asking.delete(key)
+    }
+    for (const key of mine) asking.set(key, share)
+    // Forgotten at once when stopped, so nobody joins a request that is about to fail.
+    stop.signal.addEventListener('abort', forget, { once: true })
+    joined.add(share)
+    // Asked at once, once registered; the wrapper turns a synchronous throw into a rejection.
+    share.done = (async () => ask(mine, stop.signal))().finally(forget)
+  }
+  for (const share of joined) share.waiters += 1
+  /*
+   * **Every way out gives this caller's place up, once** — a Cancel at once, and a return or a
+   * failure when it comes. A caller that left because one of its requests failed and stayed
+   * counted on the others would keep those running for nobody once everyone else had gone.
+   */
+  let left = false
+  const leave = () => {
+    if (left) return
+    left = true
+    for (const share of joined) if (--share.waiters === 0) share.stop.abort()
+  }
+  signal?.addEventListener('abort', leave, { once: true })
+  try {
+    await untilAborted(Promise.all([...joined].map((share) => share.done)), signal)
+  } finally {
+    signal?.removeEventListener('abort', leave)
+    leave()
   }
 }

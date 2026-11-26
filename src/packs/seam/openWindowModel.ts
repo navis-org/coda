@@ -1,0 +1,274 @@
+/**
+ * Opening a SEAM model: the gate, the download consent and the progress bar.
+ *
+ * Two exports are not about *window* models at all. `loadSeamManifest` is the manifest, task and
+ * `config` head, shared with `rankerConfig.ts`' `openTreeRanker` — which deliberately takes none
+ * of the tail, a forest being scored in TypeScript. `openSeamModel` below is the window path:
+ * the gate, the consent and an ONNX session.
+ *
+ * Three cards in this pack ran a checkpoint over a neuron's surface — Find Open Ends and the two
+ * false-merge nodes since dropped — and the forty lines in front of each run were the same forty
+ * lines, three times. They had already drifted: the refusal sentences were worded two ways and the share
+ * of the bar given to the download was two different numbers, which is what a third copy does.
+ *
+ * Nothing about the three nodes' differences lives in this sequence. What differs is the task,
+ * the model list and what to do with the session afterwards, so those are arguments.
+ *
+ * ## The four refusals, in the order a reader meets them
+ *
+ * 1. **No usable GPU.** Asked before a byte is fetched: a browser that cannot run the model
+ *    should say so in one sentence rather than after seventy megabytes.
+ * 2. **The wrong task.** A manifest is checked against the task the caller can read it as.
+ *    Model A and Model E are the same network on the same inputs and differ only in what they
+ *    were trained to answer, so a URL pointing at the other one would load, run and return
+ *    perfectly shaped numbers about a different question.
+ * 3. **No runnable build.** A property of the published model, not of the neurons, and worth
+ *    saying that way round. A caller whose runtime reads one particular build names it
+ *    (`variant`) rather than letting `preferredVariant` choose — see that option.
+ * 4. **Consent.** The weights are tens of megabytes. They are fetched once and kept, but never
+ *    without being asked for — a graph that opens on its own must not reach for them.
+ */
+
+import { FixableError } from '../../core/errors'
+import { formatBytes } from '../../core/limits'
+import type { LoadedManifest } from '../../ml/manifest'
+import { completeVariants, loadManifest, variantBytes } from '../../ml/manifest'
+import type { ModelSession, OpenOptions } from '../../ml/session'
+import { openModel } from '../../ml/session'
+import { gpuSupport, preferredVariant } from '../../ml/support'
+import { weightsCached } from '../../ml/weights'
+import type { AffinityModel } from './models'
+import { parseWindowConfig } from './windowConfig'
+import type { WindowConfig } from './windowConfig'
+
+/**
+ * The id of the boolean param a node opening a model through here asks consent with ("Allow model
+ * download"). One id, because the refusal below names it for its fix button (`tickAndRun`).
+ */
+export const DOWNLOAD_PARAM = 'download'
+
+/** A manifest as read, and its `config` as the caller's task reads it. */
+export interface SeamManifest<C> {
+  readonly loaded: LoadedManifest
+  readonly config: C
+}
+
+/**
+ * The manifest, checked against the task the caller can read it as, and its `config` parsed.
+ *
+ * Shared by `openSeamModel` below and by `rankerConfig.ts`' `openTreeRanker`, which wants this
+ * head and none of the tail: a LightGBM forest is scored in TypeScript, so the WebGPU gate does
+ * not apply to it, and 1.3 MB fetched once and kept is not a download to ask consent for.
+ *
+ * It is here rather than copied for the reason `caveParams.ts`' header records about its own
+ * refusals: the sentence below shipped from two places for one round, and the *wording* is what
+ * drifts. Model A and Model E are the same network differing only in what they were trained to
+ * answer, so a URL pointing at the wrong one loads, runs and returns perfectly shaped numbers
+ * about a different question — this sentence is the only thing between a reader and that.
+ */
+export async function loadSeamManifest<C>(options: {
+  readonly model: AffinityModel
+  readonly task: string
+  readonly parse: (config: unknown, modelId: string) => C
+  readonly signal?: AbortSignal
+}): Promise<SeamManifest<C>> {
+  const loaded = await loadManifest(options.model.manifestUrl, options.signal)
+  if (loaded.manifest.task !== options.task) {
+    throw new Error(
+      `${options.model.label} is a ${loaded.manifest.task} model, not a ${options.task} one.`,
+    )
+  }
+  return { loaded, config: options.parse(loaded.manifest.config, loaded.manifest.id) }
+}
+
+/**
+ * A runtime and the build it reads, together.
+ *
+ * `preferredVariant` answers "the smallest build this browser can run", which is the right rule
+ * for a model published in several **quantisations** of one graph. It is the wrong one for a
+ * model whose variants are different **graphs for different runtimes**: the assessor publishes a
+ * plain `conv` export and a `matmul` rewrite of the same weights 0.2 MB apart, so the
+ * smallest-runnable rule would hand ONNX Runtime the graph it is eight times slower on without
+ * a word. A runtime therefore names its own build.
+ */
+export interface SeamRuntime {
+  /** The variant this runtime reads. Priced for consent and fetched, from this one field. */
+  readonly variant: string
+  /**
+   * How to open it. Returns the same `ModelSession` as `openModel`, so nothing downstream knows.
+   *
+   * The shape is `openModel`'s own, minus the two an opener owns for itself — the worker it
+   * builds and the variant it reads. A hand-written copy of the four fields was a second
+   * spelling of `src/ml`'s convention that could drift from it; `parse: parseWindowConfig`
+   * below makes the same argument ("its signature already *is* the hook's").
+   */
+  readonly open: (
+    options: Omit<OpenOptions, 'createWorker' | 'variant'>,
+  ) => Promise<ModelSession>
+  /**
+   * How many runs a caller may keep outstanding on what `open` returns. Absent is one at a
+   * time; beside the opener because it is a fact about the worker behind it.
+   */
+  readonly inFlight?: number
+}
+
+export interface OpenSeamModelOptions<C> {
+  /** The chosen entry of the caller's own model list. */
+  readonly model: AffinityModel
+  /** The task this caller can read the manifest's `config` as. */
+  readonly task: string
+  /**
+   * How to read this task's `config` blob — the one thing that is genuinely per task.
+   *
+   * An argument rather than a `switch`, because `src/ml` hands `config` over opaque on purpose
+   * (`docs/ml.md`): a table of parsers here would be this file knowing every task's vocabulary,
+   * which is the seam that split was drawn to prevent. It runs **before** the weights are
+   * fetched, so a config this build cannot read costs nothing.
+   *
+   * It takes the **blob and the model's id**, not the whole manifest, because `config` is
+   * precisely what `docs/ml.md` says is pack-owned — everything else in a manifest is
+   * `src/ml`'s. The id is there only so a refusal can name what it refused.
+   */
+  readonly parse: (config: unknown, modelId: string) => C
+  /** `ctx.params.download` (`DOWNLOAD_PARAM`) — whether the reader has agreed to the fetch. */
+  readonly download: boolean
+  /** How much of the progress bar the download gets before the node's own work starts. */
+  readonly downloadShare: number
+  readonly signal?: AbortSignal
+  readonly progress: (fraction: number, note?: string) => void
+  /**
+   * The caller's own question about the config, asked **before** the weights are fetched.
+   *
+   * Return a sentence to refuse with, or undefined to go on. Here rather than after the call
+   * because a checkpoint this node cannot use should cost nothing: asking afterwards means tens
+   * of megabytes downloaded and a GPU session opened for a model that is about to be refused —
+   * and a throw between `openModel` and the caller's own `try` leaks that session.
+   */
+  readonly check?: (config: C) => string | undefined
+  /**
+   * The runtime to open with, where `openModel` on the preferred build is not it.
+   *
+   * **One field, not two, and that is the whole of why it is an object.** It was `variant` and
+   * `open` side by side for a round, and they could disagree: the consent sentence priced one
+   * build while the opener fetched the other, which is precisely the failure
+   * `GPU_ASSESSOR_VARIANT` was exported to prevent — a convention held by one call site rather
+   * than by the API. Paired, the build that is priced is the build that is read.
+   */
+  readonly runtime?: SeamRuntime
+  /**
+   * The manifest, where the caller has read it already (`loadSeamManifest`) — so the model opened
+   * is the version the caller named its answers by, rather than whatever a second read finds.
+   */
+  readonly manifest?: SeamManifest<C>
+}
+
+export interface OpenedSeamModel<C> {
+  readonly session: ModelSession
+  readonly config: C
+  /** How many runs may be outstanding on `session`: the runtime's `inFlight`, else one. */
+  readonly inFlight: number
+}
+
+export async function openSeamModel<C>(
+  options: OpenSeamModelOptions<C>,
+): Promise<OpenedSeamModel<C>> {
+  const { model, task, downloadShare } = options
+  const gpu = await gpuSupport()
+  if (gpu.refusal) throw new Error(gpu.refusal)
+
+  options.progress(0, 'reading the model')
+  const { loaded, config } = options.manifest ?? (await loadSeamManifest(options))
+  const refusal = options.check?.(config)
+  if (refusal) throw new Error(refusal)
+
+  /*
+   * **A pinned build is checked against the manifest, not trusted.** Pinning used to skip this
+   * refusal entirely — `variant` was unconditionally truthy, so `if (!variant)` could not fire —
+   * and the failure that let through was quiet rather than loud: `variantBytes` of a variant the
+   * manifest does not carry filters to an empty list and sums to **0**, so a reader with
+   * `Allow model download` off was told the model "is a 0 kB download". Refusal #3 is a property
+   * of the published model and has to hold for both paths.
+   */
+  const complete = completeVariants(loaded.manifest)
+  const variant = options.runtime?.variant ?? preferredVariant(loaded.manifest)
+  if (!variant) {
+    throw new Error(
+      `None of ${model.label}'s builds can run on this browser's GPU. This is a property of ` +
+        `the published model, not of the neurons.`,
+    )
+  }
+  if (!complete.includes(variant)) {
+    throw new Error(
+      `${model.label}'s manifest carries no \`${variant}\` build — it lists ` +
+        `\`${complete.join('`, `')}\`. This build reads that one and cannot read the others, ` +
+        'so the model needs repackaging rather than a different graph.',
+    )
+  }
+  const bytes = variantBytes(loaded.manifest, variant)
+  if (!options.download && !(await weightsCached(loaded, variant))) {
+    // With the button that ticks it: on a dashboard the box is on a canvas nobody can see.
+    throw new FixableError(
+      `${model.label} is a ${formatBytes(bytes)} download and \`Allow model download\` is off. ` +
+        `Tick it to allow the download; it is fetched once and kept in this browser.`,
+      {
+        label: 'Allow model download',
+        title:
+          'Tick the box and run the node: the model is fetched once and kept in this browser.',
+        action: 'tickAndRun',
+        param: DOWNLOAD_PARAM,
+      },
+    )
+  }
+
+  /*
+   * **Summed over the parts**, not taken from the latest one. A model with more than one graph
+   * reports progress per part, and reading only the newest number makes the bar jump backwards
+   * every time a part starts — which reads as a stalled download.
+   */
+  const received = new Map<string, number>()
+  const openWith = options.runtime?.open ?? ((one) => openModel({ ...one, variant }))
+  const session = await openWith({
+    manifestUrl: model.manifestUrl,
+    task,
+    signal: options.signal,
+    onProgress: (progress) => {
+      received.set(progress.part, progress.received)
+      let held = 0
+      for (const part of received.values()) held += part
+      options.progress(
+        bytes > 0 ? (downloadShare * held) / bytes : 0,
+        progress.cached ? 'opening the model' : `fetching ${model.label}`,
+      )
+    },
+  })
+  /*
+   * **The worker reads the manifest for itself**, and its weights are checked against that read.
+   * Where the caller named its answers by an earlier read (`options.manifest`), the two must be
+   * one version, or the run would be scored by one model and labelled with another — the exact
+   * mistake `source` exists to stop. They differ only when the file was republished in between.
+   */
+  if (session.loaded.digest !== loaded.digest) {
+    await session.close().catch(() => undefined)
+    throw new Error(
+      `${model.label} was republished while it was being opened, so this run would be scored ` +
+        'by a version other than the one it is labelled with. Run it again.',
+    )
+  }
+  return { session, config, inFlight: options.runtime?.inFlight ?? 1 }
+}
+
+/**
+ * The window models' own call — Model A and Model E, for the three cards that run them.
+ *
+ * A thin wrapper rather than a second copy: the sequence above is the same for every SEAM
+ * checkpoint, and the only thing the window task adds is how to read its `config`. Kept as a
+ * named function so the three callers say what they are opening rather than passing a parser.
+ */
+export type OpenWindowModelOptions = Omit<OpenSeamModelOptions<WindowConfig>, 'parse'>
+export type OpenedWindowModel = OpenedSeamModel<WindowConfig>
+
+export function openWindowModel(options: OpenWindowModelOptions): Promise<OpenedWindowModel> {
+  // `parseWindowConfig` by name, with no lambda: its signature already *is* the hook's, which
+  // is the sign the hook is drawn at the right seam.
+  return openSeamModel({ ...options, parse: parseWindowConfig })
+}

@@ -25,7 +25,7 @@
 
 import type { Bounds3, MeshGeometry } from '../../core/values'
 import { localAnnotationLayer } from '../../data/neuroglancer/scene'
-import { IDENTITY_SCALE } from '../../data/units'
+import { IDENTITY_SCALE, parseScale, scaleRefusal } from '../../data/units'
 
 type Triple = [number, number, number]
 
@@ -33,8 +33,8 @@ type Triple = [number, number, number]
  * A typed corner as three numbers, or `undefined`.
  *
  * Looser than `parseScale` (`data/units.ts`) on purpose: a corner may be zero or negative, and
- * arrives in whichever spelling neuroglancer copies, brackets and all. The voxel size is read by
- * the same parser and must also be positive.
+ * arrives in whichever spelling neuroglancer copies, brackets and all. The voxel size, which *is*
+ * a scale, goes through `parseScale` like every other scale field.
  */
 export function parseTriple(text: string): Triple | undefined {
   const numbers = text
@@ -79,14 +79,8 @@ export function readBox(params: BoxParams): BoxReading {
 
   let scale = IDENTITY_SCALE
   if (params.units === 'voxels') {
-    const size = parseTriple(String(params.voxelSize))
-    if (!size || !size.every((v) => v > 0)) {
-      return {
-        error:
-          '`Voxel size` must be three positive numbers, as `x, y, z` nanometres per voxel — ' +
-          '`4, 4, 40` for 4x4x40 nm voxels. Or switch `Units` to nm.',
-      }
-    }
+    const size = parseScale(String(params.voxelSize))
+    if (!size) return { error: `${scaleRefusal('Voxel size')} Or switch \`Units\` to nm.` }
     scale = size
   }
 

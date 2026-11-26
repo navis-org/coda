@@ -147,3 +147,12 @@ export function useMenuFit(
 
   return fit
 }
+
+/**
+ * Where a menu or popover hung under an element opens: its left edge, just below it — the
+ * anchor `ContextMenu` takes, for a control that opens one by a click rather than at a pointer.
+ */
+export function anchorBelow(element: Element, gap = 2): { x: number; y: number } {
+  const box = element.getBoundingClientRect()
+  return { x: box.left, y: box.bottom + gap }
+}

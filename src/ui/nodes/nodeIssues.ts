@@ -29,7 +29,11 @@ export function nodeIssues(
 ): NodeIssue[] {
   const issues: NodeIssue[] = []
   if (info.state === 'error' && info.error) {
-    issues.push({ severity: 'error', message: info.error })
+    issues.push({
+      severity: 'error',
+      message: info.error,
+      ...(info.fix ? { fix: info.fix } : {}),
+    })
   }
   for (const issue of inferred ?? []) if (issue.severity === 'error') issues.push(issue)
   if (runWarning) issues.push({ severity: 'warning', message: runWarning })

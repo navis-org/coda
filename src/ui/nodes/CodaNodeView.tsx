@@ -147,15 +147,21 @@ function CodaNodeViewImpl({
    * moves while an upstream fetch fills in: its own output and its own state are both unchanged,
    * so every selector above returns exactly what it returned before and zustand skips the render.
    *
-   * **Constant for everything that is not a viewer**, which is what keeps the cost proportional
+   * **Constant for everything that draws neither**, which is what keeps the cost proportional
    * to the scene rather than to the graph. A publish is four times a second and re-rendering a
    * card also costs two `nodeInputs` walks (a `find` over the nodes plus an `edgeInto` scan per
    * port), so on a sixty-node graph the ungated version was tens of thousands of array scans a
-   * second to repaint the two cards that could have changed. `def` is stable per node and the
-   * selector still returns a primitive — invariant 7 holds either way.
+   * second to repaint the two cards that could have changed. Both lookups are stable per node
+   * and the selector still returns a primitive — invariant 7 holds either way.
+   *
+   * Two ways in, because a viewer is not the only thing that draws arriving data: a body saying
+   * `drawsInputs` does too (`nodeBodies.ts`), `seam:proofreadMerges`'s queue filling end by end from
+   * `seam:findMergeCandidates` being the case that is neither a viewer nor still.
    */
   const previewable = getNodeDef(node.type)
-  const drawsPreviews = previewable !== undefined && isViewer(previewable)
+  const drawsPreviews =
+    (previewable !== undefined && isViewer(previewable)) ||
+    nodeBody(node.type)?.drawsInputs === true
   void useGraphStore((s) => (drawsPreviews ? s.previewVersion : 0))
   // A number or undefined, so the snapshot is a primitive — invariant 7.
   const fetchedAt = useGraphStore((s) => s.nodeFetchedAt(id))
@@ -167,13 +173,13 @@ function CodaNodeViewImpl({
    * with Cancel an inch away. See `EvalContext.warn`.
    */
   const runWarning = useGraphStore((s) => s.nodeWarning(id))
-  const clearNodeCache = useGraphStore((s) => s.clearNodeCache)
+  const refreshNode = useGraphStore((s) => s.refreshNode)
   // Where the cache-lifetime menu was opened, while it is open — see `CacheLifetimeMenu`.
   const [cacheMenuAt, setCacheMenuAt] = useState<{ x: number; y: number } | undefined>()
-  // The label's click and the menu's "Fetch Again Now": drop the node's data cache and run it.
+  // The label's click and the menu's "Fetch Again Now": empty what the node's runs recorded, drop
+  // its data cache, and run it (`refreshNode`).
   const refreshData = () => {
-    clearNodeCache(id)
-    void runNode(id)
+    void refreshNode(id)
   }
   // Only the multi-input viewers need these, so they are resolved lazily per render rather
   // than subscribed to — `previewVersion` above is what re-renders the card when they move.

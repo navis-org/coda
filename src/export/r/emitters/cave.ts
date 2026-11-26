@@ -144,6 +144,7 @@ registerEmitter(
         `value_column = ${rStr(reading.pivot.value)}`,
       )
     }
+    if (reading.resolution) args.push(`desired_resolution = ${rVector(reading.resolution)}`)
     const out = ctx.output('annotations')
     return [
       ...dataset.setup,

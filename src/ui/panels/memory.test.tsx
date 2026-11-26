@@ -28,6 +28,7 @@ import { App } from '../../App'
 import { emptyGraph } from '../../core/graph'
 import { cacheSet, resetCache } from '../../data/cache'
 import { resetLibrary, saveWorkflow } from '../../store/library'
+import { resetWeightStore } from '../../ml/weights'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -42,6 +43,7 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory()
   resetCache()
   resetLibrary()
+  resetWeightStore()
   installStorageStub()
   clearStorage()
 })
@@ -51,6 +53,32 @@ afterEach(() => {
   clearStorage()
   delete (performance as { memory?: unknown }).memory
 })
+
+/**
+ * A cached model as `ml/weights.ts` writes one — body and meta together — through a raw
+ * connection, since the only public writer is a verified download.
+ */
+async function putModel(key: string, body: Uint8Array): Promise<void> {
+  await new Promise<void>((settle, fail) => {
+    const open = indexedDB.open('coda-models', 2)
+    open.onupgradeneeded = () => {
+      open.result.createObjectStore('weights')
+      open.result.createObjectStore('meta')
+    }
+    open.onerror = () => fail(open.error)
+    open.onsuccess = () => {
+      const db = open.result
+      const tx = db.transaction(['weights', 'meta'], 'readwrite')
+      tx.objectStore('weights').put(body.buffer, key)
+      tx.objectStore('meta').put({ bytes: body.byteLength }, key)
+      tx.oncomplete = () => {
+        db.close()
+        settle()
+      }
+      tx.onerror = () => fail(tx.error)
+    }
+  })
+}
 
 function readout(): HTMLElement {
   return screen.getByRole('button', { name: /^Memory/ })
@@ -111,13 +139,21 @@ describe('storage tab', () => {
     return dialog
   }
 
+  function rowOf(dialog: HTMLElement, name: string): HTMLElement {
+    return within(dialog).getByText(name).closest('li')!
+  }
+
+  function clearIn(row: HTMLElement): HTMLButtonElement {
+    return within(row).getByRole('button', { name: 'Clear' }) as HTMLButtonElement
+  }
+
   it('lists what Coda keeps, and clears only the downloaded data', async () => {
     await cacheSet('neurons:test', { ids: ['1', '2'] })
     await saveWorkflow(emptyGraph('Kept'))
     render(<App />)
     const dialog = openStorage()
-    const clear = await within(dialog).findByRole('button', { name: 'Clear' })
-    const row = (name: string) => within(dialog).getByText(name).closest('li')!
+    await within(dialog).findAllByRole('button', { name: 'Clear' })
+    const row = (name: string) => rowOf(dialog, name)
     expect(within(row('Downloaded data')).getByText(/^1 item\./)).toBeTruthy()
     // Somebody's work reports where it is managed, and carries no button here.
     expect(
@@ -125,18 +161,38 @@ describe('storage tab', () => {
         '1 workflow. Manage them under Open ▸ Saved in this browser.',
       ),
     ).toBeTruthy()
-    expect(within(dialog).getAllByRole('button', { name: 'Clear' })).toHaveLength(1)
+    // The two download caches, and nothing else, can be cleared.
+    expect(within(dialog).getAllByRole('button', { name: 'Clear' })).toHaveLength(2)
 
     act(() => {
-      fireEvent.click(clear)
+      fireEvent.click(clearIn(row('Downloaded data')))
     })
     await waitFor(() => {
       expect(within(row('Downloaded data')).getByText('None yet.')).toBeTruthy()
     })
-    expect(
-      (within(dialog).getByRole('button', { name: 'Clear' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
+    expect(clearIn(row('Downloaded data')).disabled).toBe(true)
     // The library is untouched by a clear.
     expect(within(row('Saved workflows')).getByText(/^1 workflow\./)).toBeTruthy()
+  })
+
+  it('lists downloaded models, and clears them without touching the data cache', async () => {
+    await cacheSet('neurons:test', { ids: ['1', '2'] })
+    await putModel('affinity/mixed/encoder', new Uint8Array(3 * 1024 * 1024))
+    render(<App />)
+    const dialog = openStorage()
+    const row = (name: string) => rowOf(dialog, name)
+    await waitFor(() => {
+      expect(within(row('Downloaded models')).getByText(/^1 model file\./)).toBeTruthy()
+    })
+    expect(within(row('Downloaded models')).getByText('≈ 3.0 MB')).toBeTruthy()
+
+    act(() => {
+      fireEvent.click(clearIn(row('Downloaded models')))
+    })
+    await waitFor(() => {
+      expect(within(row('Downloaded models')).getByText('None yet.')).toBeTruthy()
+    })
+    expect(clearIn(row('Downloaded models')).disabled).toBe(true)
+    expect(within(row('Downloaded data')).getByText(/^1 item\./)).toBeTruthy()
   })
 })

@@ -1,0 +1,89 @@
+{
+  "$comment": "Every value is a fact about how that checkpoint was TRAINED, read off upstream's own scripts/<dataset>/train_topology.sh -- never guessed, and never defaulted from another checkpoint. `translate` is the one that differs (20/60/70 um), and FlyWire's 20.0 is absent from its train script because it is train_affinity.py's default. Everything under `config` is the task's own and is copied into the manifest opaquely -- `src/ml` never reads it, only `src/packs/seam` does. The incident behind this file is in docs/seam-plan.md; the rule is in describe().",
+  "checkpoints": {
+    "affinity-flywire": {
+      "task": "point-affinity",
+      "datasets": [
+        "flywire"
+      ],
+      "license": "MIT (code); see upstream for checkpoint terms",
+      "citation": "Troidl et al., Global Neuron Shape Reasoning with Point Affinity Transformers, bioRxiv 2024.11.24.625067",
+      "source": "https://github.com/jakobtroidl/neuron-shape-reasoning",
+      "config": {
+        "model": "ae_d1024_m512",
+        "depth": 24,
+        "preprocessing": {
+          "sampler": "uniform-nodes-with-replacement",
+          "units": "um",
+          "globalScale": 659.88367,
+          "centre": "centroid",
+          "samplesPerNeuron": 1024,
+          "jitter": 1.0,
+          "translate": 20.0,
+          "padValue": -1.0
+        },
+        "clustering": {
+          "linkage": "average",
+          "threshold": 0.8,
+          "minClusterSize": 30
+        }
+      }
+    },
+    "affinity-hemibrain": {
+      "task": "point-affinity",
+      "datasets": [
+        "hemibrain"
+      ],
+      "license": "MIT (code); see upstream for checkpoint terms",
+      "citation": "Troidl et al., Global Neuron Shape Reasoning with Point Affinity Transformers, bioRxiv 2024.11.24.625067",
+      "source": "https://github.com/jakobtroidl/neuron-shape-reasoning",
+      "config": {
+        "model": "ae_d1024_m512",
+        "depth": 24,
+        "preprocessing": {
+          "sampler": "uniform-nodes-with-replacement",
+          "units": "um",
+          "globalScale": 659.88367,
+          "centre": "centroid",
+          "samplesPerNeuron": 1024,
+          "jitter": 1.0,
+          "translate": 60.0,
+          "padValue": -1.0
+        },
+        "clustering": {
+          "linkage": "average",
+          "threshold": 0.8,
+          "minClusterSize": 30
+        }
+      }
+    },
+    "affinity-manc": {
+      "task": "point-affinity",
+      "datasets": [
+        "manc"
+      ],
+      "license": "MIT (code); see upstream for checkpoint terms",
+      "citation": "Troidl et al., Global Neuron Shape Reasoning with Point Affinity Transformers, bioRxiv 2024.11.24.625067",
+      "source": "https://github.com/jakobtroidl/neuron-shape-reasoning",
+      "config": {
+        "model": "ae_d1024_m512",
+        "depth": 24,
+        "preprocessing": {
+          "sampler": "uniform-nodes-with-replacement",
+          "units": "um",
+          "globalScale": 659.88367,
+          "centre": "centroid",
+          "samplesPerNeuron": 1024,
+          "jitter": 1.0,
+          "translate": 70.0,
+          "padValue": -1.0
+        },
+        "clustering": {
+          "linkage": "average",
+          "threshold": 0.8,
+          "minClusterSize": 30
+        }
+      }
+    }
+  }
+}

@@ -437,7 +437,7 @@ Eleven things that were each a way to get it wrong:
    splice alike — clears the layer list and constructs every layer again, which is the teardown the
    pointer hold exists for, and reloads every mesh. Where a new scene differs from the last one sent
    only in some segmentation layers' `segments`/`segmentColors`/`segmentDefaultColor`
-   (`selectionChanges`, asked of every key of every layer), the card posts a
+   (`inPlaceChanges`, asked of every key of every layer), the card posts a
    `FrameSegmentsMessage` and the frame edits the live `selectedSegments`/`visibleSegments` and colour
    state, touching only ids that changed. No layer's lifetime is involved, so it applies **with the
    pointer inside**, the camera and layout untouched and loaded meshes kept — measured by the probe
@@ -452,6 +452,19 @@ Eleven things that were each a way to get it wrong:
    against the link, which for FlyWire is written for the Seung-lab fork and names the layer
    `segmentation_with_graph`.
    Anything else — a layer added, `Layout`, a different dataset — still navigates and still waits.
+   **A local annotation layer's annotations go in place too** (2026-11-18): the same message
+   carries them (`annotations`), and the frame hands them to the layer's `LocalAnnotationSource`
+   (`restoreState`), which keeps the layer and redraws on `changed`. Proofread Merges under
+   Auto-extend was the case: a piece taken arrives with the tips of the piece it was taken on, so
+   its points layer changed in the same update, and the new green piece waited on a navigation —
+   for the pointer to leave, then for the search to stop publishing, since every new URL restarts
+   the debounce. Measured in Chrome with a scratch probe: two points to five, the same layer
+   object, no navigation, the frame's report naming the update, and the points drawn. A layer the
+   frame cannot refill (not local, not loaded) is answered unapplied, and the card navigates.
+   **What goes in place goes ahead of a navigation** (`inPlaceChanges`, which says whether it was
+   `whole`): an update that also changes something else sets its segments and points at once, and
+   the navigation follows for the rest. What went ahead is recorded as `applied.scene` (reports
+   fold against it) with `applied.url` cleared, as no URL is that scene.
    **An update set in place keeps the user's changes it was computed without.** The frame reports
    250 ms after a change settles, so an update the card sends inside that window — an upstream edit,
    a colour change — lists the selection as it was before the latest double-click, and applied
@@ -541,7 +554,14 @@ Eleven things that were each a way to get it wrong:
    exactly as for a key pressed outside — tour and all. A field in the frame keeps the key
    (`isTypingTarget`, moved to `core/keys.ts` so the frame can share it). The claim is re-sent on
    the frame's first report, a message posted before its script loads being lost. Other app keys
-   (`D`, `F`, `I`, `/`) are not forwarded: neuroglancer uses single letters of its own.
+   (`D`, `F`, `I`, `/`) are not forwarded: neuroglancer uses single letters of its own. **The
+   review card's keys are, always** — `J` (hand pick) and `Q W T Y U G` (verdicts and skip,
+   `REVIEW_KEY_CODES`, user 2026-11-22) — being letters neither neuroglancer nor Spelunker binds.
+   Measured against the bundle, not assumed: neuroglancer's global map binds `A B H L N O S V X`
+   bare, `E R Z` in the slice and 3D views, digits and arrows, and **Shift with every letter**
+   (`tool-A`…`tool-Z`), so a verdict chord on Shift would take a reader's tools away; Spelunker's
+   keybinds add `C F M`. Coda's own bare `D F H I M P` leave `G K Q T U W Y` free in both. A
+   repeat is dropped in the frame, since a key handed back carries no `repeat`.
 
 11. **Coda's CAVE tokens are offered to neuroglancer as its credentials** (`src/ngframe/caveCredentials.ts`),
    so somebody signed in to Coda is not asked again inside the card. The frame's entry registers a
@@ -573,3 +593,14 @@ Limits: only the dataset's own segmentation layer is read back, so a neuron adde
 volume of a multi-volume scene (a BigClust project) is not seen; FlyWire's public segmentation
 fails in mainline and spelunker alike, upstream; and the exporters still refuse the node, so a
 `Selected` wired downstream blocks the notebook.
+
+### The segment under the pointer (user, 2026-11-19)
+
+The frame also posts the root id under the pointer (`FrameHoverMessage`, `coda:ng-hover`), read
+from each segmentation layer's own hover state (`segmentSelectionState` — the mapped id, so a
+root, not a supervoxel), at most every 100 ms and only when it changes, `null` when the pointer
+leaves. Not stamped with an update: it says where the pointer is, not what the scene holds. The
+viewer hands it to one app-wide value (`ui/viewers/segmentHover.ts`) — a root id names one object
+whichever frame hovered it, so a reader asks only whether it lists it — which only the frame that
+set it clears. The review card lights the rows showing it and, after a 500 ms rest, scrolls the
+first into view (`useRowWindow`'s `toRow`, which leaves a row already in view alone).

@@ -719,6 +719,37 @@ string, which is what stops it being got wrong twice: nothing outside `datastack
 field except `datasetInfoFor`, which only slices a date out of it for prose. An offset already on
 the string is honoured, so a deployment that starts sending one is not shifted twice.
 
+### `now` and `pinned` are the same number with opposite cache rules
+
+`RootsAt`'s four arms (`rootIds.ts`) are really two questions: *which instant* and *how long its
+answer is good for*. A materialization's is good forever, a clock boundary's until the next one,
+and live's not at all — and for a long time a caller-stated instant did not exist, so `live` used
+an arm called `instant` whose answers were held by nobody.
+
+That is the wrong rule for a stated moment, and the distinction is worth stating because the two
+look identical in the code: **what a root was at a past instant never changes**, so a stated one
+is as permanently cacheable as a materialization's. Without the split, something asking about one
+snapshot across hundreds of neurons — which is exactly what a candidate search does — re-asks the
+chunkedgraph for every one, and that is the hammering the file's cache exists to avoid.
+
+**The guard is on the cache, not on the question** (`PINNED_MIN_AGE_MS`). The permanent store has
+no eviction, so an entry may only go in where the answer cannot change, and an instant seconds
+old is one the chunkedgraph may still be receiving edits for. Under a minute it is answered and
+not written down. A reader pinning a snapshot is pinning something far older by construction, so
+nothing legitimate takes that branch.
+
+**A future instant is refused on the card, and the reason is not pedantry**: the chunkedgraph
+answers a future timestamp with the state *right now*, so a mistyped year is silently `live` —
+and would then have its answers kept forever as settled history. That is why `Update root IDs`
+validates the field rather than letting `evaluate` discover it.
+
+**The stated instant is a param; the moving ones are not.** The node's header argues at length
+that an instant must not be a param, and it is right about live and the clock modes: an update
+would become an edit, an undo step and a timestamp in a file somebody else opens, and the
+provenance key does not need it because only ⟳ or an upstream edit replaces the result. A stated
+instant inverts every clause — it is the reader's choice, it belongs in the file, and it *must*
+be in the key, since two runs at two moments are two different answers.
+
 **The test could not have caught it, and that is the part worth carrying.** It asserted
 `timestamp=${Date.parse(STAMP) / 1000}` — the same expression the code used — so it agreed with
 whatever that expression produced. A value a test derives the way the code derives it is not an

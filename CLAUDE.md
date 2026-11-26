@@ -49,8 +49,9 @@ bundled corepack, so pnpm was installed with `npm i -g pnpm`.
 4. **Cache keys are provenance, not content** — `hash(type, params, upstream keys)`: `evaluate` is
    deterministic, hidden mutable state takes an explicit nonce param. `normalizeParams` drops hidden
    (`visibleIf` false) and `presentational: true` params — presentational **only** if it cannot
-   change what `evaluate` returns. Read `ctx.params.x` plainly (`withDefaults`; no `?? literal`) and
-   ask `visibleIf` through `visibleParams`.
+   change what `evaluate` returns, the one exception being a run record (`ParamBase.runRecord`). Read
+   `ctx.params.x` plainly (`withDefaults`; no `?? literal`) and ask `visibleIf` through
+   `visibleParams`.
 
 5. **Resolve column params via `ctx.column()` / `ctx.columns()`,** never `ctx.params.someColumn` —
    infer, validate, evaluate and the key share that resolution. **An unresolved column is not
@@ -370,6 +371,14 @@ rule belongs to one area, its record is in that area's doc.
 
 ### Backends and data — [docs/backends.md](docs/backends.md)
 
+- **Coda writes to a chunkedgraph in one module, `src/data/cave/edits.ts`, reached only through
+  `mergeBatch.ts` ← `mergeSession.ts` ← the review card, or `splitWrite.ts` ← `splitAccept.ts` ←
+  the split gallery** (one chain each, `CHAINS` in `importGraph.test.ts`). An edit is a spent-once
+  confirmation of supervoxels, never retried; an unknown outcome is settled
+  from roots read at the server's now (`'server'`), never by resending. Tests never write
+  (`writeGuard.ts`); a live write is `fanc_sandbox` only and asked of the user every time. Code that
+  writes gets /simplify then /code-review. See [docs/seam-merge-plan.md](docs/seam-merge-plan.md)
+  and [docs/backends-cave.md](docs/backends-cave.md).
 - **An edge list is not a skeleton.** `SkeletonGeometry.parents` is a rooted tree in *visit order*;
   `spanningForest` (`src/data/skeletonTree.ts`) is the one walk from an undirected graph that may
   hold cycles and components — a surviving cycle makes every walk to a root loop forever.
@@ -488,13 +497,55 @@ rule belongs to one area, its record is in that area's doc.
 - **A new run supersedes the walk, never the work.** A newer walk **adopts** an evaluation owned by
   its provenance key, a key-moving edit **retires** it (`retireMoved`), only Cancel stops all.
   `refreshStates` leaves a live `running` badge alone; a cheap pass during a Run goes through
-  `runFull` (`requestedFull`). Loops are excluded on purpose.
+  `runFull` (`requestedFull`). Loops are excluded on purpose. A partial stays until something
+  newer replaces it (a publish, a run ending on its own) or nothing is coming (Cancel, a node no
+  longer waiting); a stopped run drops nothing.
+- **A published partial crosses `cheap` node boundaries, and nothing derived is ever cached**
+  (`derivePreviews`): an answer computed from half an input answers no provenance key. `cheap` is
+  the only gate, a node already `ok` stops the walk, loops are excluded, and a derived run reports
+  no progress, warning or `fetchedAt`. **Dropping a derived chain aborts the derive in flight** —
+  a late write lands in `previews`, which `outputs()` prefers to the cache, and nothing sweeps it.
 - **A `reference` that resolved to nothing is refused by the scheduler, not the node** — the node
   sees one `undefined` for two states. `gatherInputs` builds `GatheredInputs.refusal` from the
   referenced node's inference issues, after `blocked` and the auto-pass deferral.
 - **A loop is one number in a hash** (`Scheduler.loopIndex` in the begin node's key), so the region
   is derived from the wires. It runs at the region's **last** node; a `Collect` never takes a cache
   hit mid-pass; per-pass files go through the awaited `SchedulerHost.onIteration`.
+- **A reference to a node that is not a dataset reads that node's params alone**
+  (`NodeDefinition.asReference`), so it may point *upstream* — drawn dotted, never a cycle. Its key
+  is the hash of what it returns, so return only what the reader acts on, or every click re-keys it.
+- **`ctx.rerunInput` runs the chain above an input again on a private `Scheduler`**
+  (`core/variantRun.ts`), for an `expensive` node declaring `rerunsInputs` only. It refuses a chain
+  with no neuron wire, two neuron sources or a loop, in a sentence; a node the chain only *names*
+  is kept without its inputs, or the caller re-runs itself without end.
+
+### The SEAM pack — [docs/seam-extend-plan.md](docs/seam-extend-plan.md), [docs/seam-merge-plan.md](docs/seam-merge-plan.md), [docs/seam-verdict-log-plan.md](docs/seam-verdict-log-plan.md)
+
+- **Where an accepted piece sits is one derivation, `piecesOf`** (fewest steps from the neuron, then
+  the lower parent id, breadth first), read by the search, the review card and the merge plan —
+  never the order of clicks, or a reload publishes other tables. `ID` stays the piece's own root;
+  the neuron is `seed`, and the card's cursor is `root|end_uid`.
+- **Find Merge Candidates publishes in the plain order whatever order it worked in** (`runBook.ts`: one
+  record per root, tables assembled on publish). What follows from a root's ends — its join, what
+  is still wanted — is asked of the book, never cached beside it. A piece's boxes are read with
+  `aliasOf(piece)`, a required argument: left out, the neuron comes back as its own candidate.
+- **The proofreading nodes read the segmentation at the neuron's moment, never the Dataset's
+  materialization** (`docs/seam-live-plan.md`). Find Merge Candidates keeps one per neuron in `Searched
+  at`, a run record (`ParamBase.runRecord`: written mid-run by `ctx.record`, out of the key, emptied
+  only by the ⟳, which moves the key via `renewNode`); Find Open Ends reads its nucleus table live.
+  A box is rooted through the memo it started with (`BoxReader.memo`), never a shared map moved.
+- **A step between two level-2 chunks is almost always one supervoxel's halves (infinite
+  affinity)** — supervoxels are cut at every chunk border — so find path (F) weighs the route's
+  *supervoxel* path (`strongestPath`), never chunk-to-chunk contacts. Its route is a layer of the
+  frame's own (`FrameLayerMessage`), never the card's scene. **A graphene mesh shares no vertex
+  between its fragment pieces**, so a walk on it needs bridges (`surfacePath.ts`). See
+  [docs/find-path-plan.md](docs/find-path-plan.md).
+- **`waitsFor` — the piece a merge's end is on *and* the piece it was accepted on — is what the
+  dialog's ticks follow.** The neuron's side is the neuron and the piece's *own* path, never a
+  sibling; an end on any other root refuses that row. **The batch sends from the tips in, up to
+  `MERGES_IN_FLIGHT`, never one root in two merges** (the server's root lock), so a stop can leave
+  pieces joined short of the neuron: the record replays each merge's two roots (`neuronRoot`,
+  `candidateRootAt`) into `MergedSoFar.joined`, and the plan merges a group at its root.
 
 ### The wizard, the pages and the help — [docs/wizard.md](docs/wizard.md), [docs/pages.md](docs/pages.md), [docs/help.md](docs/help.md)
 
@@ -573,6 +624,8 @@ Each is a design record: what was tried, what was measured, which failures are s
 - [neuronbridge.md](docs/neuronbridge.md), [dotmotif.md](docs/dotmotif.md),
   [annotations.md](docs/annotations.md), [catmaid_vfb.md](docs/catmaid_vfb.md) — single features.
 - [export.md](docs/export.md) — notebook and R Markdown exporters, refusals, goldens.
+- [ml.md](docs/ml.md) — the model runtime: manifests, the verified weight cache, the WebGPU
+  worker. **A manifest's `config` is opaque to `src/ml`**; read before adding a model or a task.
 - [python-pyodide.md](docs/python-pyodide.md) — the bridge; read before adding a Python capability.
 - [persistence.md](docs/persistence.md), [recipes.md](docs/recipes.md) — share links, autosave,
   shelf; recipes as fragments plus slots.

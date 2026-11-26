@@ -56,7 +56,7 @@ lean on:
 | `core/recipes.test.ts`          | recipes: a slot per outside node, file round trip, renamed/gone ports, all-or-nothing attach, the wire-drop sockets |
 | `core/reference.test.ts`        | reference edges: the round trip sorting, identity without a schema, evaluate not waiting, real cycles unchanged |
 | `core/registry.test.ts`         | what `registerNode`/`registerPack` refuse: the type-id grammar, reserved ids, changes after freezing, ambiguous `formerTypes` |
-| `core/scheduler.test.ts`        | the Scheduler: hybrid eval, caching, invalidation, `ctx.publish`/`ctx.warn`, run progress (via `onStateChange`), loops, in-flight evaluations |
+| `core/scheduler.test.ts`        | the Scheduler: hybrid eval, caching, invalidation, `ctx.publish`/`ctx.warn`, previews derived through cheap nodes, run progress (via `onStateChange`), loops, in-flight evaluations |
 | `core/slice.test.ts`            | `sliced`, the shared yielding loop: adaptive clock stride, progress, cancel — pinned here rather than in a calling node |
 | `core/sockets.test.ts`          | `PortDef.kinds`: declared sets, overlap, tiers, refused spellings, and the registry sweep over every `any` port |
 | `core/splice.test.ts`           | dropping a node on a wire: the downstream check, isolation, one link left on the port                |
@@ -85,7 +85,10 @@ lean on:
 | `store/shelf.test.ts`           | what the two shelves share: `freeName`, `newestFirst`                                                |
 | `store/splice.test.ts`          | splice-onto-wire: move and rewire as one undo, a misfit node still moved                             |
 | `store/unrecordedParam.test.ts` | an `unrecorded` param written with no undo step                                                      |
-| `test/importGraph.test.ts`      | invariant 1 transitively: headless dirs (read off `eslint.config.js`) and every Web Worker reach no UI/store; `nodes/lib` not `src/style` |
+| `store/writeHold.test.ts`       | a card writing to a server held: no delete, undo, redo, load, new graph or document change that would lose it, a notice saying why; its record still written, with no undo step, saved at once, and refused out loud for a card gone from under it; one hold at a time |
+| `test/importGraph.test.ts`      | invariant 1 transitively: headless dirs (read off `eslint.config.js`) and every Web Worker reach no UI/store; `nodes/lib` not `src/style`; only the modules in `MAY_WRITE` value-import the chunkedgraph writer (`data/cave/edits.ts`) |
+| `test/writeGuard.test.ts`       | the guard `setup.ts` installs: every chunkedgraph route that writes is refused and recorded (fails the test) when no stub is in place; reads pass |
+| `test/sandboxWrites.test.ts`    | the live merge test's fence: only a merge or undo on the sandbox table passes, judged on the parsed URL (production on the same host, `..`, encoded slashes, other routes refused); a write past the declared count refused before sending; which URLs are chunkedgraph writes |
 
 ### Layout
 
@@ -124,7 +127,11 @@ lean on:
 | `data/cave/live.test.ts`                       | CAVE against real services (skipped without `CAVE_TOKEN`): endpoint shapes, BANC row caps, flat/graphene/L2/skeleton-service routes, auth_info |
 | `data/cave/nuclei.test.ts`                     | a neuron's nucleus: position in nm, merge vs absence, a materialization asked only about new ids     |
 | `data/cave/oauth.test.ts`                      | CAVE sign-in minus the window: the login prefix read off `auth_info`, refusals, terms-of-service arm, identity lookup |
-| `data/cave/rootIds.test.ts`                    | the root-id drift check: wire format, UTC instant, when it re-asks, late landers                     |
+| `data/cave/rootIds.test.ts`                    | the root-id drift check: wire format, UTC instant, when it re-asks, late landers; the level-2 chunk counts SEAM's ranker reads as sizes; `rootsAtInstant` answering label 0 without sending it, and copying a view before a binary body sends its whole buffer; reads at the server's now sending no timestamp; a merge's two ends read back as text; `root_timestamps` asked with integer ids and answered in ms, a short or malformed answer refused |
+| `data/cave/graphLayout.test.ts`                | a chunkedgraph id's layer and chunk, decoded by pychunkedgraph's own formula (`test/chunkedgraphIds.ts`); a partial `graph` layout refused rather than guessed |
+| `data/cave/merge.test.ts`                      | the merge handler's chunk distance, and a non-supervoxel id thrown as a broken setup rather than answered "too far" |
+| `data/cave/edits.test.ts`                      | the writer, stubbed `fetch` only: Spelunker's merge body byte for byte (ids as text), caveclient's undo; only 400/401/403/404 `refused`, every other status, unreachable or unreadable `unknown`; redirects not followed; a confirmation sent once, never forged, copied and frozen; undo only of this session's own `done`, once; no `signal` carried |
+| `data/cave/permissions.test.ts`                | edit permission read off `permissions_v2[dataset]`, terms pending named, `missing_tos` for other datasets ignored |
 | `data/csv.test.ts`                             | reading a foreign CSV: quoting, delimiter, header bias, name suffixes, values never widened          |
 | `data/custom/neurons.test.ts`                  | the custom neuron table's schema half vs the table built at run time, for every id-column shape      |
 | `data/datasetCache.test.ts`                    | "everything cached for this dataset" as a key question: version prefixes, oldest entry, pre-sidecar entries |
@@ -179,6 +186,12 @@ lean on:
 | `data/precomputed/live.test.ts`                | precomputed against real buckets (male-CNS, hemibrain), skipped without `PRECOMPUTED_LIVE`           |
 | `data/precomputed/precomputed.test.ts`         | shard lookup, multi-LOD manifests, Draco, legacy fragments, CORS fallback, the two-phase progress split |
 | `data/precomputed/skeletons.test.ts`           | the precomputed skeleton format: edge list to rooted tree, radius/affine, `uint8` compartments       |
+| *(no unit test)* `src/pyodide/cutoutSummary.py`'s search | `pnpm probe:candidate-search` drives all three crossings of a search — the pool, the level-2 counts, the size features — and the forest that ranks them, on one real open end against SEAM's own `geo_rank`, comparing the order **and** the scores (the two fail differently), applying the own-tip rule SEAM now publishes behind, with the reversed rank-key sort as its negative control. Needs a CAVE token and Pyodide |
+| `pyodide/cutoutSummary.test.ts`                | the wrapper's marshalling against a mocked `callPython` — columns split by dtype, the id columns kept 64-bit, the missing-query state (`warp.test.ts`' arrangement) |
+| *(no unit test)* `src/pyodide/cutoutSummary.py` | vitest has no Pyodide: `pnpm probe:cutout-summary` runs the vendored `summarize_cutout` under CPython **and** wasm and compares, then runs Coda's bridge and checks the axis order survived it |
+| `data/cave/volumes.test.ts`                    | where a datastack's voxels are: the EM off `aligned_volume.image_source`, the supervoxels out of the chunkedgraph's own `data_dir` (not the graphene URL) |
+| `data/precomputed/compressedSegmentation.test.ts` | the label-chunk decoder against the reference encoder's own output; the ragged, zero-bit and asymmetric-block cases exist because a cubic block hides an axis swap |
+| `data/precomputed/volume.test.ts`              | voxel addressing: the grid anchored on `voxel_offset`, the last chunk named by where data ends, the box assembly and its sorted table; morton codes against cloudvolume's (whole path on a real store: `pnpm probe:volume`) |
 | `data/queries.test.ts`                         | the connectivity funnel: source vs attached edge set, and the refusal when the set is not in this browser |
 | `data/rawFileUrl.test.ts`                      | GitHub file links rewritten to a browser-readable raw URL                                            |
 | `data/share/fragment.test.ts`                  | the `#!` share grammar and packed codec, above all its refusals; demo links                          |
@@ -249,7 +262,7 @@ lean on:
 | `nodes/lib/tableEdits.test.ts`             | Edit Table's op: schema/value agreement, failure direction, `""` clearing a cell, rule order         |
 | `nodes/lib/tableFilter.test.ts`            | a header cell's filter grammar: dtype-following values, nulls, dropped clauses                       |
 | `nodes/lib/tableOps.test.ts`               | the table ops (join, coalesce, relabel, unpivot, rename, id bridge…), each with schema/value agreement — hand-written per op, no sweep |
-| `nodes/lib/topologyOps.test.ts`            | skeleton topology (Strahler, segments, morphometrics) against navis-fastcore 0.13.0's transcribed output |
+| `nodes/lib/topologyOps.test.ts`            | skeleton topology (Strahler, segments, morphometrics) against navis-fastcore 0.13.2's transcribed output |
 | `nodes/lib/transformOps.test.ts`           | moving geometry: reflection, mesh winding, bounds, the mirrored column's two halves, the real manifest |
 | `nodes/lib/typeMapping.test.ts`            | the cross-dataset cell-type mapper against cocoa's worked examples, label modes, `suspicious`, oversize warning |
 | `nodes/naming.test.ts`                     | every node that renames or mints columns names them in its `description`; annotation nodes saying `cell_type` arrives as `type` |
@@ -374,12 +387,41 @@ lean on:
 | `packs/cortex/live.test.ts`                       | every declared MICrONS typing table read live, with `CAVE_TOKEN`                                     |
 | `packs/cortex/pointDepth.test.ts`                 | Cortical Depth: schema/value agreement, soma placement, typing synapse ends                          |
 | `packs/cortex/profileSelection.test.ts`           | Laminar Profile's stored selection: a depth range within one facet                                   |
+| `packs/seam/affinityConfig.test.ts`               | a model's declared preprocessing, and the substitutions it refuses rather than approximates         |
+| `packs/seam/affinityOps.test.ts`                  | average-linkage clustering of affinities: the distance-threshold reading, background, confidence    |
+| `packs/seam/affinityRun.test.ts`                  | the chunked decode against a fake session: every pair once, Cancel between chunks, latents released  |
+| `packs/seam/affinityTables.test.ts`               | the two schema/value pairs, including a sparse summary array filling as null                        |
+| `packs/seam/assessEnds.test.ts`                   | the bookkeeping around the assessor: which candidates get a patch, that the cap floors the tail rather than shortening the list and shrinks the box with it, the two reasons a candidate carries the floor told apart, a box that cannot be read carried as a refusal rather than ending the run, and a short answer refused |
+| `packs/seam/checkAffinitySize.test.ts`            | the wait priced over the set, and both matrices counted against the crash floor                     |
+| `packs/seam/labelSkeleton.test.ts`                | point labels folded onto skeleton nodes: majority per draw, nearest for the rest, background stays  |
+| `packs/seam/pointCloud.test.ts`                   | the model's own sampler: with replacement, sorted, centred, scaled; and the skip verdicts           |
+| `packs/seam/rankPool.test.ts`                     | the order around the score: lower-is-better, the cut at `top_k`, 1-based `geo_rank`, every column gathered, and the refusal of a pool already ranked |
+| `packs/seam/rankerConfig.test.ts`                 | the ranker manifest `pnpm make:ranker-manifest` writes, read back: that `src/ml` opens it, that it carries the whole pipeline, that its feature list is as long as the forest's own column count — the one half of that pairing anything can check — and the pool radius held against the vendored `candidates.py` |
+| `packs/seam/scene.test.ts`                        | the neuroglancer annotation layer: ids, the colour property, nanometres, the dropped tail           |
+| `packs/seam/scoreEnds.test.ts`                    | the join between the assessor's logits and the published columns: the list reordered into the assessor's ranking with `geo_rank` kept, a tie broken towards the better geometric rank, `conf` as both halves multiplied, a tip with no candidates scored rather than left blank, and a column the search did not measure refused instead of softmaxed into `NaN` |
+| `packs/seam/searchRun.test.ts`                    | the sequence of a search over fakes: that each end is yielded finished before the next is measured, that the cut comes before the own-tip rule, `geo_rank` renumbered over what the rule kept, one counts call per end as it is reached, and a missing query carried through, and `oneAhead`'s scheduling: the source asked before the body is done, one ahead and no further, no unhandled rejection when the body gives up |
+| `packs/seam/searchTips.test.ts`                   | the table layer around the search: which rows are searchable (an id that is not a chunkedgraph one is dropped and counted), the ranked lists as one table carrying no column the run cannot answer, the first candidate written onto the row its tip came from — including cleared, so an incoming first candidate from another run cannot survive beside this one's — and an assessed run's extra columns, its rows in the assessor's order under a `rank` that counts along it |
+| `packs/seam/singleSeed.test.ts`                   | **stages 7–9 against SEAM's own published numbers** for the single-seed, masks-only configuration — the one a browser runs — with the fits read out of the assessor manifest this repo generates. Every logit, share, `p_tip`, `q`, rank and verdict on 75 chosen tips, and the one tip whose `q` is the cutoff to the last bit |
+| `packs/seam/suggestMerges.test.ts`                | the Find Merge Candidates card: that it is expensive, that it keeps the incoming tips columns, that it publishes only what the search fills until an `Assessor` is picked and then the eleven stage-6 columns before anything runs, what it refuses before a run, and the per-end rates bracketed against `WAIT_WARN_SECONDS` |
+| `packs/seam/treeRanker.test.ts`                   | the LightGBM forest read and walked, against **LightGBM's own predictions** on 991 vectors — the missing rules, the `<=` boundary, and every format it refuses by name |
 | `packs/packs.test.ts`                             | the packs as a set: directories, type prefixes, drawings and See also kept in-pack, ZapBench's rename, shortcuts |
 | `packs/vfb/vfb.test.ts`                           | the VFB pack's nodes against a stubbed PDB: what they ask as well as return, schema halves           |
 | `packs/zapbench/cells.test.ts`                    | the ZapBench cell-id grammar: row labels, pasted lists, release bounds                               |
 | `packs/zapbench/neuronTraces.test.ts`             | Neurons to ZapBench Traces: the seam — a wrong `zapbenchId` column, the off-by-one, cost, missing ids |
 | `packs/zapbench/neurons.test.ts`                  | ZapBench neurons: the request (members, integers, no population filter), order, batching, refusals   |
 | `packs/zapbench/traces.test.ts`                   | the ZapBench Traces card: order, repeats, scales, the cost sentence, `validate`'s matrix ceiling     |
+
+### Model runtime (`src/ml`)
+
+| File                    | Covers                                                                                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `ml/manifest.test.ts`   | resolving a file against the manifest's own URL, the schema and random-weights refusals, and that a model of a different shape (one graph, its own part names) loads at all — the property the seam exists for |
+| `ml/weights.test.ts`    | verify-before-keep, the length and hash refusals, the cache hit that is *not* re-hashed, one download shared between concurrent callers (`fake-indexeddb`) |
+
+No test can reach `session.ts` or `infer.worker.ts`: both need a real `Worker` and a WebGPU
+adapter. `pnpm probe:affinity-variants -- --exported <dir>` measures which quantisation a browser
+can run, on a real GPU; the probe that drives this runtime end to end arrives with the node that
+uses it ([ml.md](ml.md)).
 
 ### Biophysics solver (`src/biophys`)
 
@@ -478,6 +520,18 @@ lean on:
 | `ui/nodes/skeletonSource.test.tsx`      | the Skeletons card's `Source` dropdown and route footer                                              |
 | `ui/nodes/socketAgreement.test.tsx`     | a wire and its sockets drawn as one type, over a graph built to *contain* `any` ports (the demo alone passes either way) |
 | `ui/nodes/splitNeuronsBody.test.tsx`    | the Split Neurons card: the attribute-table field list, the foot line                                |
+| `packs/seam/rootedBox.test.ts`         | one supervoxel lookup shared between two reads in flight: what a joiner asks for, that it waits, and that a failed lookup leaves nothing registered |
+| `packs/seam/mergeAnchors.test.ts`      | where a merge goes: each piece's voxel nearest the contact in nanometres (a case where counting voxels picks the other), centres the server truncates back, the reach, the refusals (edited neuron or candidate, too far, bad id, root 0). Live: `pnpm probe:merge-anchors`, read-only, on the fixture's Aedes rows |
+| `packs/seam/mergePlan.test.ts`         | Submit's pre-flight with its server calls faked: one merge per accepted piece in queue order (refusals too), the next row tried when one will not anchor, no volume opened when nothing is current, an outdated neuron refusing every piece, an outdated piece refused alone, the record giving the neuron's root now and what is merged, a lost reply settled only where the roots show that merge and nothing after it (checked just before the shared root was made), only the record entries made on its own chunkedgraph read, a piece whose id is not one refused before any request, the id layout carried for the batch, no permission or a failed check as one sentence. Live: `pnpm probe:merge-plan`, read-only |
+| `packs/seam/mergeBatch.test.ts`        | Submit's batch against a fake segmentation that really merges: in order, each checked at the server's now against the root the last merge made; a piece already in the neuron recorded and not sent; a piece edited since not sent, the rest going on; somebody else's edit to the neuron, a refusal, a check that cannot be read or a merge not found in the roots after stopping everything after it; a lost reply always unknown, even where the roots show one new root; `done` with both ends unmoved unknown; a merge past the time limit handed on still out, its late answer as the entry to append; a throwing writer read as lost; what it was prepared with read, never the plan's objects as they are later; Stop before the next merge; refused before anything is sent for a merge not in the plan, listed twice, bad, with an end that is not a supervoxel or from a plan with no layout; runs once. One test over stubbed `fetch`: `roots_binary` with no timestamp, the merge, the token |
+| `packs/seam/rootCurrency.test.ts`      | the card's currency check against fake servers and a fake clock: one gathered ask for a stream's arrivals and only unknown roots asked again; batches of 1,000 in turn; outdated kept, current re-asked once it runs out; a failure not re-asked until the retry time; datastacks kept apart; every ask `quiet` |
+| `packs/seam/mergeRecord.test.ts`       | the merge record: round trip with ids as text, a malformed entry dropped and the rest kept, `mergedSoFar` following the neuron through its merges, counting only `merged`/`already-merged`, naming other neurons' roots and pieces and the lost replies still unsettled, a settlement appended as a merge, an entry it cannot read kept on append, only the entries of the chunkedgraph asked about read (none for an entry naming none, or no scope), the scope of a wired Dataset, the `Merges` table in its schema's columns |
+| `ui/seam/mergeSession.test.ts`         | Submit's session, plan and batch faked: nothing opens during a tour; a plan opens the overlay or is one sentence on the status bar; a settled lost reply recorded as the plan arrives; the card held while merging (no delete, no close of the overlay), each entry appended to the live param with no undo step, the neuron following, the hold let go at the end; nothing held where the batch cannot be prepared; a merge still out holding every Submit until it answers, its answer recorded (after the batch lets go of the card, if it lands sooner), and let go past `STILL_OUT_MS` with a later answer dropped; one confirmation |
+| `ui/seam/mergeConfirm.test.tsx`        | Submit's confirm overlay, viewer stubbed: the button names count, root and datastack, hands on the ticked merges in plan order, is disabled at none and not pressed by Enter; unticking drops a piece from the scene in place (`inPlaceChanges`), each line linked to its piece; once per press (two clicks in one update); a Re-check's new piece unticked; a piece hidden in the viewer unticked; no closing from the press until the batch ends, an `onConfirm` that fails unlocking it with the reason; Escape kept from the surface underneath; a viewer report that moves no tick rebuilding nothing; merged pieces leave the view; the joins-two-neurons mark; Escape/Cancel close before a batch and nothing does during one; progress per row. Layout measured in Chrome (76% × 78%, 420 px narrow), not in jsdom |
+| `packs/seam/runClock.test.ts`           | the run's per-stage timing: a step that threw is still charged, a short run says nothing |
+| `packs/seam/chunkPlan.test.ts`          | the plan a search makes of its own reading: keys matching the reader's, next use, a passed end |
+| `data/precomputed/chunkCache.test.ts`   | the chunk cache's bound: LRU order, an oversized chunk, a zero budget                                 |
+| `ui/nodes/streamingBody.test.tsx`       | a card body filling in from an upstream `ctx.publish` while that node still runs (`drawsInputs`)     |
 | `ui/nodes/uploadBody.test.tsx`          | the Upload card's states and size ceiling                                                            |
 | `ui/nodes/uploadMeshBody.test.tsx`      | the Upload Mesh card                                                                                 |
 

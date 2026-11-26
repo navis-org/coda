@@ -32,12 +32,20 @@ export function sourceFiles(dir: string): string[] {
  */
 const STATIC = /^\s*(?:import|export)\s+(type\s+)?[\w$*{},\s]*?\bfrom\s+'([^']+)'/gm
 const BARE = /^\s*import\s+'([^']+)'/gm
-const DYNAMIC = /import\(\s*'([^']+)'\s*\)/g
+const DYNAMIC = /import\(\s*(?:\/\*[\s\S]*?\*\/\s*)*'([^']+)'\s*\)/g
 
-/** The file a relative specifier names, or undefined for a package or a non-source file. */
+/**
+ * The file a specifier names, or undefined for a package or a non-source file. Relative, or under
+ * the `@/` alias (`vite.config.ts`, `tsconfig.app.json`) — a walk that skipped the alias would let
+ * any boundary be crossed by spelling the import that way. A `.js` extension names the `.ts`
+ * file, as bundler resolution reads it.
+ */
 export function resolveImport(from: string, spec: string): string | undefined {
-  if (!spec.startsWith('.')) return undefined
-  const base = join(dirname(from), spec.replace(/\?.*$/, ''))
+  let path: string
+  if (spec.startsWith('.')) path = join(dirname(from), spec)
+  else if (spec.startsWith('@/')) path = join(SRC, spec.slice(2))
+  else return undefined
+  const base = path.replace(/\?.*$/, '').replace(/\.js$/, '')
   return [
     base,
     `${base}.ts`,

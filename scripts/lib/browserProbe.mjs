@@ -71,20 +71,7 @@ export async function launchChrome({
     ],
     { stdio: 'ignore' },
   )
-  const bye = () => {
-    try {
-      chrome.kill()
-    } catch {
-      // Already gone.
-    }
-  }
-  process.on('exit', bye)
-  for (const event of ['uncaughtException', 'unhandledRejection']) {
-    process.on(event, (error) => {
-      console.error(error)
-      process.exit(1)
-    })
-  }
+  const bye = killOnExit(() => chrome.kill())
 
   const page = await firstPage(port)
   const ws = new WebSocket(page.webSocketDebuggerUrl)
@@ -117,31 +104,32 @@ export async function launchChrome({
     return new Promise((resolve) => pending.set(id, resolve))
   }
 
-  /** Evaluate in the page and get the value back. Throws what the page threw. */
-  const evaluate = async (expression) => {
+  /**
+   * Evaluate in the page and get the value back. Throws what the page threw.
+   *
+   * `timeout` is CDP's own, in milliseconds, and is worth passing for anything that runs for
+   * minutes — a model download, a long measurement loop. Without it the default applies and a
+   * caller that passed one as a second argument was silently ignored.
+   */
+  const evaluate = async (expression, timeout) => {
     const reply = await send('Runtime.evaluate', {
       expression,
       awaitPromise: true,
       returnByValue: true,
+      ...(timeout ? { timeout } : {}),
     })
+    // A CDP-level failure answers with `error` and no `result` at all — "Execution context was
+    // destroyed" when the page reloaded under it, for instance, which vite's HMR will do to a
+    // probe running while its source is edited. Without this the call quietly returns
+    // `undefined` and the probe reports a nonsense reading instead of a failure.
+    if (reply.error) throw new Error(`Runtime.evaluate: ${reply.error.message ?? reply.error}`)
     const failed = reply.result?.exceptionDetails
     if (failed) throw new Error(failed.exception?.description ?? failed.text)
     return reply.result?.result?.value
   }
 
-  /**
-   * Poll an expression until it answers truthily.
-   *
-   * Beats a fixed sleep on both ends: a fast machine does not wait, a slow one is not measured
-   * half-built. `what` is the sentence the timeout throws, so make it name the thing waited for.
-   */
-  const waitFor = async (expression, what, { tries = 150, every = 100 } = {}) => {
-    for (let i = 0; i < tries; i++) {
-      if (await evaluate(expression)) return
-      await sleep(every)
-    }
-    throw new Error(`timed out waiting for ${what}`)
-  }
+  /** Poll an expression until it answers truthily (`pollUntil`). */
+  const waitFor = (expression, what, options) => pollUntil(evaluate, expression, what, options)
 
   /** Write a PNG into the temp dir — never the working directory, which is the repo root. */
   const screenshot = async (name) => {
@@ -250,6 +238,27 @@ export async function launchChrome({
     },
     evaluate,
     waitFor,
+    /** `Page.navigate`, as `launchFirefox` has it, so a probe can drive either browser. */
+    navigate: (to) => send('Page.navigate', { url: to }),
+    reload: () => send('Page.reload'),
+    /**
+     * Call a page-side function, given as source, with string arguments — for a credential,
+     * which goes in as an argument and never into an expression, a log or a file.
+     */
+    async callFunction(source, ...values) {
+      const global = await send('Runtime.evaluate', { expression: 'globalThis' })
+      if (global.error) throw new Error(`Runtime.evaluate: ${global.error.message ?? global.error}`)
+      const reply = await send('Runtime.callFunctionOn', {
+        objectId: global.result.result.objectId,
+        functionDeclaration: source,
+        arguments: values.map((value) => ({ value })),
+        awaitPromise: true,
+        returnByValue: true,
+      })
+      if (reply.error) throw new Error(`Runtime.callFunctionOn: ${reply.error.message ?? reply.error}`)
+      if (reply.result?.exceptionDetails) throw new Error('the page threw')
+      return reply.result?.result?.value
+    },
     screenshot,
     setDevice,
     /**
@@ -322,6 +331,56 @@ export const RECT = `(selector) => {
  */
 export const PANE_ZOOM = `Number(/scale\\((.*?)\\)/.exec(document.querySelector('.react-flow__viewport')?.style.transform ?? '')?.[1] ?? 1)`
 
+/**
+ * Kill a browser on any exit of this process, a throw included, and make a throw an exit.
+ * Returns the kill, for a `close`. The crash handlers are registered once per process, however
+ * many browsers a probe launches.
+ */
+export function killOnExit(kill) {
+  const bye = () => {
+    try {
+      kill()
+    } catch {
+      // Already gone.
+    }
+  }
+  process.on('exit', bye)
+  if (!crashHandled) {
+    crashHandled = true
+    for (const event of ['uncaughtException', 'unhandledRejection']) {
+      process.on(event, (error) => {
+        console.error(error)
+        process.exit(1)
+      })
+    }
+  }
+  return bye
+}
+let crashHandled = false
+
+/**
+ * Poll an expression until it answers truthily — every launcher's `waitFor`.
+ *
+ * Beats a fixed sleep on both ends: a fast machine does not wait, a slow one is not measured
+ * half-built. `what` is the sentence the timeout throws, so make it name the thing waited for.
+ */
+export async function pollUntil(evaluate, expression, what, { tries = 150, every = 100 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    // Errors are a *normal* answer while polling: right after `Page.navigate` the old
+    // execution context is being torn down, and asking it anything answers "Execution context
+    // was destroyed". That is precisely the state this loop exists to wait out, so it counts
+    // as "not yet" rather than as a failure — `evaluate` still throws for a caller that is
+    // not polling.
+    try {
+      if (await evaluate(expression)) return
+    } catch {
+      // Not ready. The timeout below is what reports a page that never arrives.
+    }
+    await sleep(every)
+  }
+  throw new Error(`timed out waiting for ${what}`)
+}
+
 /** The DevTools page target, once Chrome is listening. */
 async function firstPage(port) {
   for (let i = 0; i < 80; i++) {
@@ -344,7 +403,15 @@ export function probeArgs(argv = process.argv.slice(2)) {
     keep: argv.includes('--keep'),
     value(flag) {
       const at = argv.indexOf(flag)
-      return at >= 0 ? argv[at + 1] : undefined
+      if (at >= 0) return argv[at + 1]
+      // `--flag=value` too. Only the space-separated form was read, so the joined one — which is
+      // the form half of us reach for first — was dropped in silence and the probe ran its
+      // default. Strictly additive: nothing that worked before changes.
+      const joined = argv.find((arg) => arg.startsWith(`${flag}=`))
+      // `|| undefined`, so a bare `--flag=` reads as absent. An empty string is not nullish, so
+      // it would sail past every caller's `?? default` and land as `Number('') === 0` or
+      // `readFileSync('')`.
+      return joined?.slice(flag.length + 1) || undefined
     },
   }
 }
@@ -482,17 +549,102 @@ export function readCaveToken() {
   }
 }
 
+/**
+ * The token, or a message and exit 2 — what every probe that reads CAVE wants.
+ *
+ * Beside `readCaveToken` because the sentence belongs with the credential it is about: the same
+ * four lines had been written out in six probes, so re-wording the remedy — when the secret's
+ * path moves, say — meant six edits and five of them being missed.
+ */
+export function requireCaveToken() {
+  const token = readCaveToken()
+  if (!token) {
+    console.error(
+      'no CAVE token: set CAVE_TOKEN or put one in ~/.cloudvolume/secrets/cave-secret.json',
+    )
+    process.exit(2)
+  }
+  return token
+}
+
 /** Hand the token to the page's CAVE credentials for the default deployment. Answers whether it took. */
 export function handCaveToken(send, token) {
-  return handToken(
-    send,
-    `async function (t) {
-      const appModule = ${APP_MODULE}
-      const m = await appModule('/src/data/cave/credentials.ts')
-      const d = await appModule('/src/data/cave/deployments.ts')
-      m.setToken(d.DEFAULT_CAVE_SERVER, t)
-      return !!m.getToken(d.DEFAULT_CAVE_SERVER)
-    }`,
-    token,
-  )
+  return handToken(send, CAVE_TOKEN_STORE, token)
+}
+
+/**
+ * The page-side half of `handCaveToken`, as source: stores the token in the app's own CAVE
+ * credentials and answers whether it took. Exported for `firefoxProbe.mjs`' `callFunction`,
+ * so the two browsers hand the token over through one function rather than two copies.
+ */
+export const CAVE_TOKEN_STORE = `async function (t) {
+  const appModule = ${APP_MODULE}
+  const m = await appModule('/src/data/cave/credentials.ts')
+  const d = await appModule('/src/data/cave/deployments.ts')
+  m.setToken(d.DEFAULT_CAVE_SERVER, t)
+  return !!m.getToken(d.DEFAULT_CAVE_SERVER)
+}`
+
+/**
+ * The Aedes chunkedgraph, which two probes both read supervoxel roots from.
+ *
+ * Here beside `readCaveToken` for its reason: a credential and the address it opens are one
+ * fact, and a probe that spells either for itself is a probe that can drift from the app.
+ *
+ * **In the `graphene://` form, which is the one the app parses**, not the REST base. A probe
+ * that wants to call `src/data/cave`'s own functions hands this to `parseGrapheneSource`, and
+ * the REST base is derived below rather than written out — pointing that parser at the REST
+ * base makes it read `v1` as the table name and the server answers `400 Invalid table_id`.
+ */
+export const AEDES_SEGMENTATION =
+  'graphene://https://cave.fanc-fly.com/segmentation/table/wclee_aedes_brain'
+
+/**
+ * The **deployment**, which `CaveRequestOptions` requires and the URL genuinely cannot say.
+ *
+ * `global.daf-apis.com`, not `cave.fanc-fly.com`. A deployment is the global server that issued
+ * the token, and `src/data/cave/deployments.ts` names `cave.fanc-fly.com` as one of the hosts
+ * that *take* the `global.daf-apis.com` token rather than being a deployment itself — the first
+ * version of this constant conflated the datastack's own host with its deployment, which is
+ * invisible while a caller passes an explicit token and wrong the moment one does not.
+ *
+ * Spelled out rather than imported because this file is loaded by plain `node` for the other
+ * probes and cannot reach `DEFAULT_CAVE_SERVER`, which is its source.
+ */
+export const AEDES_DEPLOYMENT = 'https://global.daf-apis.com'
+
+/** The datastack's own host — not its deployment. */
+const AEDES_HOST = 'https://cave.fanc-fly.com'
+
+export const AEDES_CHUNKEDGRAPH = `${AEDES_HOST}/segmentation/api/v1/table/wclee_aedes_brain/roots_binary`
+
+/**
+ * The root each supervoxel belonged to at one instant, cached on disk.
+ *
+ * `roots_binary` — what `caveclient.chunkedgraph.get_roots` calls, and what `cavePostBinary`
+ * calls in the app. **uint64 both ways**, so no id is ever a double (SEAM's invariant 1,
+ * Coda's 8); a root through a float64 is a different neuron, silently.
+ *
+ * **The cache file must be keyed on the instant**, which is the caller's job because only it
+ * knows which instant it means. A cache from another moment describes another agglomeration
+ * and would be reused without a word.
+ *
+ * **One request where the app sends two.** `rootIds.ts` batches at `CHUNK = 10_000` and these
+ * boxes hold more than that, so the app crosses a batch boundary here and this does not — the
+ * one place an ordering bug could enter the roots array is therefore untested. Said rather than
+ * papered over: batching here would test this helper's own loop, not the app's.
+ */
+export async function rootsAt(labels, atMs, cacheFile, url = AEDES_CHUNKEDGRAPH) {
+  if (!existsSync(cacheFile)) {
+    const token = requireCaveToken()
+    const answer = await fetch(`${url}?timestamp=${atMs / 1000}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
+      body: labels,
+    })
+    if (!answer.ok) throw new Error(`chunkedgraph: ${answer.status} ${await answer.text()}`)
+    const got = new BigUint64Array(await answer.arrayBuffer())
+    writeFileSync(cacheFile, JSON.stringify([...got].map(String)))
+  }
+  return BigUint64Array.from(JSON.parse(readFileSync(cacheFile, 'utf8')).map(BigInt))
 }

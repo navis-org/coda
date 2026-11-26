@@ -59,6 +59,16 @@ verbatim. Read the entry before arguing with the rule.
    cannot change what `evaluate` returns — every `out.*` viewer knob qualifies. Getting it
    wrong means a stale result silently survives an edit.
 
+   **The one sanctioned exception is a run record** (`ParamBase.runRecord`, 2026-11-17): a param
+   the node writes while it runs (`ctx.record`) and reads back next run — Find Merge Candidates' moment
+   per neuron. It is presentational although `evaluate` reads it, because in the key the write
+   would re-key the node and everything below it mid-run. It holds by construction rather than by
+   the rule: the same key means the same upstream and so the same record, `internal` keeps hand
+   edits out, and the ⟳ that empties it moves the key itself (`Scheduler.renewNode`).
+   `registerNode` refuses a `runRecord` without `presentational`, `unrecorded` and `internal`.
+   Anything else that changes a result belongs in the key. See
+   [core.md](core.md#a-run-record-is-a-param-the-run-writes-and-the-key-leaves-out).
+
    **A declared param with no stored value reads as its declared default, everywhere.**
    `withDefaults` (`core/node.ts`) is applied where every context is built — `makeInferContext`,
    the scheduler's eval context, `normalizeParams` and both exporters' walks — so read

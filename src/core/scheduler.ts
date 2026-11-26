@@ -21,6 +21,7 @@ import {
   loopRegion,
   loopsIn,
   mayHaveLoops,
+  nodeLabel,
   nodesById,
   portKey,
   referenceEdgeIds,
@@ -33,11 +34,14 @@ import type { InferenceResult } from './inference'
 import { hasErrors, inferGraph } from './inference'
 import type {
   EvalContext,
+  IssueFix,
   LoopIteration,
   LoopPlan,
   NodeDefinition,
+  ParamValue,
   ParamValues,
   PortDef,
+  RerunResult,
 } from './node'
 import { findParam, resolveColumn, resolveColumns, visibleParams, withDefaults } from './node'
 import { getNodeDef } from './registry'
@@ -46,7 +50,9 @@ import type { CodaType } from './types'
 import type { Value } from './values'
 import { datasetIdentity } from './values'
 import type { DataSource } from '../data/source'
-import { errorMessage } from './errors'
+import { errorFix, errorMessage } from './errors'
+import { throwIfAborted } from './slice'
+import { variantGraph } from './variantRun'
 import { untilAborted } from '../data/memoPromise'
 
 export type NodeRunState =
@@ -68,6 +74,8 @@ export type NodeRunState =
 export interface NodeRunInfo {
   state: NodeRunState
   error?: string
+  /** The button that answers `error`, where the node knows one (`IssueFix`, `FixableError`). */
+  fix?: IssueFix
   /** Wall-clock of the last successful evaluation. */
   durationMs?: number
   /** 0..1 while running. */
@@ -349,6 +357,12 @@ export interface SchedulerHost {
    * this (a document in the background) loses only a badge, and derives it on the way back in.
    */
   onLapseDue?(): void
+  /**
+   * A running node recorded what it decided (`EvalContext.record`, `ParamBase.runRecord`): write
+   * it into the document's `paramId` of `nodeId`. The host owns the document; the scheduler only
+   * relays. Out of the key, so the write re-keys nothing and runs nothing.
+   */
+  onRecord?(nodeId: string, paramId: string, value: ParamValue): void
 }
 
 /**
@@ -429,9 +443,45 @@ export class Scheduler {
    *
    * Read *before* the cache by `output`/`outputs`, because while a node is running the preview
    * is the newer truth and whatever the cache holds belongs to a key that has already moved.
-   * Dropped when the node settles, which is what makes that precedence safe to state so simply.
+   *
+   * **Kept until something newer replaces it, or nothing is coming to** (`docs/core.md`, "A
+   * partial result, while the node is still running"). Newer: a publish, or a run of the node
+   * ending on its own (the evaluation's `finally`). Nothing coming: Cancel, `invalidateAll`, or
+   * a node no longer `stale` (`dropUnawaited`). A run that was stopped drops nothing, so a
+   * retired run's partial stands until the run replacing it publishes.
    */
   private previews = new HeldMap<Record<string, Value>>()
+  /**
+   * Which entries in `previews` were **derived** — computed by `derivePreviews` from somebody
+   * else's partial, rather than published by the node itself.
+   *
+   * Kept apart for two reasons. A derive starts from the partials that are genuinely a node's
+   * own, so without this it would feed on its own output and walk the graph one node per pass.
+   * And the whole derived chain is dropped together when the partial under it is, since every
+   * one of them answers a question about a value that no longer exists.
+   */
+  private derived = new Set<string>()
+  /**
+   * The graph as `refreshStates` last saw it — what a derive runs against.
+   *
+   * **Not the running pass's graph**, and that is the point rather than an economy: the case a
+   * derive exists for is a reader clicking a row in a card while the node above it is still
+   * fetching, which is an edit, and the pass's graph is the one from before they clicked.
+   */
+  private latest: { graph: CodaGraph; inference: InferenceResult } | undefined
+  /** The derive in flight, and whether another was asked for while it ran. See `askDerive`. */
+  private deriving: Promise<void> | undefined
+  private deriveAgain = false
+  /**
+   * The in-flight derive's signal, so anything that invalidates its answers can stop it.
+   *
+   * **A derive awaits an `evaluate` while the walk runs other nodes**, so between the await and
+   * the write the partial it was computed from can be gone — the node settled, or a Cancel came
+   * in. Without a signal the write still lands, and because `outputs()` prefers a preview to the
+   * cache, that half-input value then shadows the node's real result for as long as the session
+   * lasts, with nothing left to drop it. It is also how a derived `evaluate` sees Cancel at all.
+   */
+  private deriveAbort: AbortController | undefined
   /**
    * Warnings raised by the node currently executing, before there is a cache entry to hold them.
    *
@@ -636,6 +686,20 @@ export class Scheduler {
     if (announce) this.host.onRunProgress?.()
   }
 
+  /**
+   * Whether what this node is holding is a **partial** — published mid-run, or derived from one.
+   *
+   * The question a card asks about its own inputs: "is what I am drawing all of it yet?" One
+   * map lookup, and a boolean, so a selector over it is stable by identity (invariant 7).
+   *
+   * Told from `info(id).state === 'running'` on purpose, which is a different question and the
+   * one that reads wrong through an intermediate node: a `Filter Table` between a streaming node
+   * and a card is never itself running, but it does hold a derived partial.
+   */
+  hasPartial(nodeId: string): boolean {
+    return this.previews.has(nodeId)
+  }
+
   /** Cached outputs of a node, if fresh or stale-but-present. Viewers read this. */
   outputs(nodeId: string): Record<string, Value> | undefined {
     return this.previews.get(nodeId) ?? this.cache.get(nodeId)?.outputs
@@ -675,6 +739,12 @@ export class Scheduler {
    */
   refreshStates(graph: CodaGraph, inference?: InferenceResult): void {
     const inf = inference ?? inferGraph(graph)
+    /*
+     * The graph a derive runs against, kept here because this is the one call made after *every*
+     * mutation — including the ones made while a run is in flight, which is precisely when a
+     * derive has something to do. See `latest`.
+     */
+    this.latest = { graph, inference: inf }
     const { order, cyclic } = topoSort(graph)
     const nodes = nodesById(graph)
     const inbound = inboundIndex(graph)
@@ -759,6 +829,15 @@ export class Scheduler {
 
     this.pruneCache(graph)
     this.host.onStateChange?.()
+    // Not `partialsDropped`: the derive it would ask for is asked below, for every edit.
+    if (this.dropUnawaited()) this.host.onPreview?.()
+    /*
+     * The edit may have been downstream of a partial — a reader clicking a row in a card while
+     * the node above it is still fetching — so what was derived from it is now an answer to the
+     * wrong question. Last, after the states and the prune, so the derive sees the graph this
+     * call has finished settling.
+     */
+    if (this.previews.size > 0) this.askDerive()
   }
 
   /**
@@ -811,6 +890,8 @@ export class Scheduler {
     // An evaluation still in flight would put its result straight back under a key that, after a
     // dataset switch, nothing may trust any more.
     for (const [nodeId, evaluation] of this.evaluations) this.retire(nodeId, evaluation)
+    // A retired run keeps its partial (`previews`); after this, nothing is to be trusted.
+    this.dropAllPartials()
     this.cache.clear()
     this.states.clear()
     this.forceRefresh.clear()
@@ -869,11 +950,73 @@ export class Scheduler {
     this.invalidateNode(graph, nodeId)
   }
 
+  /**
+   * `clearNodeCache`, with the node's key moved as a lapse moves it (`lapses`) — for a node asked
+   * to decide afresh what its key cannot see: the ⟳ emptying a run record (`ParamBase.runRecord`),
+   * which is out of the key by design.
+   *
+   * Without the move, a run of this node already in flight keeps its key, so the next walk
+   * **adopts** it, and its answer — decided on what the record held before — lands as the
+   * result. Moved, `refreshStates` retires it (`retireMoved`), and everything below the node is
+   * keyed afresh. Session state, like the lapse it borrows: after a reload there is nothing in
+   * flight and no result to tell apart.
+   */
+  renewNode(graph: CodaGraph, nodeId: string): void {
+    this.lapses.set(nodeId, (this.lapses.get(nodeId) ?? 0) + 1)
+    this.clearNodeCache(graph, nodeId)
+  }
+
   /** Stop the walk *and* everything it set evaluating — the one gesture that means "all of it". */
   cancel(): void {
     this.requestedFull.clear()
     this.abort?.abort()
     for (const evaluation of this.evaluations.values()) evaluation.controller.abort()
+    // Nothing comes after a Cancel, and a node ignoring its signal never unwinds at all.
+    this.dropAllPartials()
+  }
+
+  /**
+   * Drop a node's partial and everything derived from it; whether there was one. The caller
+   * says so once for however many it drops (`partialsDropped`).
+   */
+  private dropPartial(nodeId: string): boolean {
+    if (!this.previews.delete(nodeId)) return false
+    this.dropDerived()
+    return true
+  }
+
+  /**
+   * Announce dropped partials. `dropDerived` drops every derived entry, not only the dropped
+   * node's, so where another node's partial still stands — a retired run's, kept — its chain is
+   * derived again.
+   */
+  private partialsDropped(): void {
+    if (this.previews.size > 0) this.askDerive()
+    this.host.onPreview?.()
+  }
+
+  /** Drop every partial, own and derived, and the derive in flight; announced. */
+  private dropAllPartials(): void {
+    const had = this.previews.size > 0
+    this.dropDerived()
+    this.previews.clear()
+    if (had) this.host.onPreview?.()
+  }
+
+  /**
+   * Drop the partials of nodes nobody is working on and no run is awaited for: no live
+   * evaluation, and no longer `stale` — fresh from the cache again, switched off, refused, or
+   * waiting on an upstream that cannot run (`blocked`). See `previews`.
+   */
+  private dropUnawaited(): boolean {
+    // The nodes' own, taken first: the first drop empties `derived`.
+    const own = [...this.previews.keys()].filter((nodeId) => !this.derived.has(nodeId))
+    let dropped = false
+    for (const nodeId of own) {
+      if (this.live(nodeId) || this.info(nodeId).state === 'stale') continue
+      if (this.dropPartial(nodeId)) dropped = true
+    }
+    return dropped
   }
 
   /**
@@ -888,17 +1031,26 @@ export class Scheduler {
   }
 
   /**
-   * What this node said through `ctx.warn` about the result it is holding, as one string.
+   * What this node said through `ctx.warn` about the result it is holding, as one string — one
+   * warning a line, which the card and the inspector draw as lines (`.issue__text`).
    *
    * Joined rather than handed over as the array, so the snapshot is a primitive and a selector
    * over it is stable by value (invariant 7) — the same trick `error` gets for free by being a
-   * string already. The live map wins over the entry: while a node runs, what it has just said
-   * is newer than whatever its last result came with.
+   * string already. Joined with spaces until 2026-11-18, when six warnings on a Find Merge Candidates
+   * card read as one paragraph nobody could take apart (user).
    */
   warning(nodeId: string): string | undefined {
-    const live = this.liveWarnings.get(nodeId)
-    const held = live ?? this.cache.get(nodeId)?.warnings
-    return held && held.length > 0 ? held.join(' ') : undefined
+    const held = this.warnings(nodeId)
+    return held.length > 0 ? held.join('\n') : undefined
+  }
+
+  /**
+   * The same warnings, one entry each — for a caller that passes them on, which must not split a
+   * joined string back up. The live map wins over the entry: while a node runs, what it has just
+   * said is newer than whatever its last result came with.
+   */
+  warnings(nodeId: string): readonly string[] {
+    return this.liveWarnings.get(nodeId) ?? this.cache.get(nodeId)?.warnings ?? []
   }
 
   // -------------------------------------------------------------------------
@@ -928,6 +1080,9 @@ export class Scheduler {
       return await promise
     } finally {
       if (this.inFlight === promise) this.inFlight = undefined
+      // The walk sets states `refreshStates` never sees — a refusal, a cache hit — and a partial
+      // whose node one of them settled is waiting for nothing any more.
+      if (this.dropUnawaited()) this.partialsDropped()
     }
   }
 
@@ -953,7 +1108,12 @@ export class Scheduler {
             references.has(e.id) &&
             scope.has(e.target) &&
             !nodes.get(e.target)?.disabled &&
-            !datasetIdentity(inference.nodes[e.target]?.inputs[e.targetHandle]),
+            // A source read through `asReference` has no listing to wait for: it is its params.
+            !referenceOf(
+              nodes.get(e.source),
+              e.sourceHandle,
+              inference.nodes[e.target]?.inputs[e.targetHandle],
+            ).named,
         )
         .map((e) => e.source),
     )
@@ -1012,15 +1172,14 @@ export class Scheduler {
     )
       inference = inferGraph(graph)
 
-    const summary: RunSummary = {
-      executed: [],
-      failed: [],
-      deferred: [],
-      loopNodes: [],
-      iterations: 0,
-      cancelled: false,
-      durationMs: 0,
-    }
+    /*
+     * A derive runs against this too, so a host that never calls `refreshStates` — a script, a
+     * test — still gets one. A later edit replaces it from `refreshStates`, which is newer than
+     * this by definition and is the graph a reader just clicked on.
+     */
+    this.latest = { graph, inference }
+
+    const summary = emptySummary()
 
     const loops = loopsIn(graph).filter((l) => scope.has(l.beginId))
 
@@ -1434,6 +1593,269 @@ export class Scheduler {
     return true
   }
 
+  /**
+   * Ask for the cheap nodes below a partial to be recomputed from it, coalescing the asks.
+   *
+   * Called from `ctx.publish` and from `refreshStates`, which between them are every moment a
+   * derived answer could have moved: the value above changed, or the graph did. Coalesced
+   * because a publish is up to four a second and a derive walks the whole graph's keys — and
+   * because the second ask of a pair wants the state the first one is still producing, so
+   * running them concurrently would mean two walks writing the same entries.
+   */
+  private askDerive(): void {
+    if (this.deriving) {
+      this.deriveAgain = true
+      return
+    }
+    this.deriving = this.derivePreviews()
+      .catch(() => {
+        // A derive is speculative from end to end: nothing it produces is anyone's result, so
+        // there is no surface a failure belongs on. `derivePreviews` already drops the node it
+        // failed on and stops descending, which is the whole of the handling.
+      })
+      .finally(() => {
+        this.deriving = undefined
+        if (!this.deriveAgain) return
+        this.deriveAgain = false
+        this.askDerive()
+      })
+  }
+
+  /**
+   * Run the `cheap` nodes below a published partial against it, and keep their answers as
+   * previews of their own.
+   *
+   * ## Why a partial has to cross a node boundary at all
+   *
+   * `ctx.publish` was built for a viewer drawing its own *inputs*: the 3D scene is the value on
+   * the upstream wire, so growing that value is the whole mechanism and nothing downstream has
+   * to run. Proofread Merges broke that premise. Its card draws the arriving queue, but the
+   * viewer a reader actually judges a merge in is a **Neuroglancer node downstream of it**, fed
+   * from `Current` and `Layers` — outputs only this node's `evaluate` can produce. So the queue
+   * filled while the picture beside it stayed on the previous run, and clicking a row did
+   * nothing until the whole search settled, which on a neuron of several hundred ends is the
+   * opposite of reviewing while the inference is in flight.
+   *
+   * ## What keeps it honest
+   *
+   * **Nothing derived is ever cached.** A cache entry is the answer for a provenance key
+   * (invariant 4), and an answer computed from half an input is not the answer for anything —
+   * cached, it would be a complete-looking result that no later run would be scheduled to fix.
+   * It goes in `previews` with everything else that is "worth drawing and not an answer", and
+   * `output` already prefers that to the cache.
+   *
+   * **`cheap` is the gate, and it is a gate that already exists.** `cheap` means the node
+   * re-runs on every edit (invariant 6), so a node that may not be run four times a second has
+   * already said so by being `expensive`. Nothing else needs a flag, which also means a chain
+   * keeps working when somebody drops a `Filter Table` into the middle of it — the failure a
+   * hand-kept list of participating node types would have.
+   *
+   * **A node that has already answered is left alone.** `ok` means its cached result answers
+   * its current key, so its output is final and a partial cannot improve it; the walk stops
+   * there rather than replacing a whole answer with a lesser one.
+   *
+   * **Loops are excluded**, as they are from every other speculative pass. A region's nodes are
+   * re-keyed per element and fold into an accumulator, so running one outside a pass would
+   * either fold twice or fold into nothing.
+   *
+   * **It reports nothing.** No badge, no progress, no warning, no `fetchedAt` — see the
+   * overrides in the walk. A derived run is not the node running, and every one of those
+   * channels says that it is.
+   */
+  private async derivePreviews(): Promise<void> {
+    const latest = this.latest
+    if (!latest) return
+    // The partials that are somebody's own publish. Deriving from a derived value would walk
+    // one node further per pass and never settle.
+    const live = new Set<string>()
+    for (const id of this.previews.keys()) if (!this.derived.has(id)) live.add(id)
+    /*
+     * **Nothing is publishing any more, so every derived entry is an answer about a value that
+     * has stopped existing** — and this is the sweep that has to run, not an early exit. It is
+     * reached whenever the last publisher settles between one ask and the next, and left as a
+     * bare `return` it was the one state nothing could clean up: no publisher means no further
+     * publish, so no further derive, so the stale entries stood for the rest of the session
+     * shadowing the real results underneath them.
+     */
+    if (live.size === 0) {
+      if (this.dropDerived()) this.host.onPreview?.()
+      return
+    }
+
+    const { graph, inference } = latest
+    const { order } = topoSort(graph)
+    const nodes = nodesById(graph)
+    const inbound = inboundIndex(graph)
+    const inLoop = new Set<string>()
+    for (const loop of loopsIn(graph)) for (const id of loop.region) inLoop.add(id)
+
+    /*
+     * **Who could be derived at all, before a single key is computed.** The scan below is a
+     * registry lookup and a state lookup per node; `desiredKeys` under it is a `normalizeParams`
+     * and a hash per node, paid up to four times a second while a mesh stream runs. On a graph
+     * whose streaming node has nothing cheap under it — one node and a viewer, the common
+     * shape — that is the whole derive, and it costs a walk rather than a rekey.
+     */
+    const open = order.filter((nodeId) => {
+      if (live.has(nodeId)) return false
+      const node = nodes.get(nodeId)
+      const def = node && getNodeDef(node.type)
+      if (!node || !def || def.annotation || node.disabled) return false
+      if (def.cost !== 'cheap' || def.loop !== undefined || inLoop.has(nodeId)) return false
+      /*
+       * **Never a node that is running, or has an evaluation of its own in flight.** Two things
+       * would then race for one `previews` entry, and the loser would be marked `derived` — so
+       * a node's own published partial could stop seeding derives and be swept by the next
+       * `dropDerived`.
+       *
+       * A guard rather than a fix for anything seen: the walk runs one node at a time, so the
+       * only running node is the publisher, which `live` already excludes. It is here because
+       * that premise is held elsewhere in this file (`PUBLISH_INTERVAL_MS` is per fetch for the
+       * same reason) and nothing in *this* method would notice if it moved.
+       */
+      if (this.info(nodeId).state === 'running' || this.evaluations.has(nodeId)) return false
+      // Final for its key already: a partial below it would be a worse answer, not a newer one.
+      return this.info(nodeId).state !== 'ok'
+    })
+    /*
+     * Nothing to compute, but possibly something to sweep: a wire pulled out or a node switched
+     * off leaves entries derived by an earlier ask with nothing to recompute them.
+     */
+    if (open.length === 0) {
+      if (this.sweepDerived(new Set<string>())) this.host.onPreview?.()
+      return
+    }
+
+    /*
+     * A pass of its own, so `gatherInputs` and `makeEvalContext` are the ones the run uses
+     * rather than a second spelling of the reference rule and the context — which is the reason
+     * `gatherInputs` was lifted out of `execute` in the first place. Its `available` is filled
+     * in as the walk goes: a node is reachable here when what feeds it is either cached or
+     * derived, which is exactly `held` below.
+     */
+    const controller = new AbortController()
+    this.deriveAbort = controller
+    const pass: RunPass = {
+      graph,
+      inference,
+      nodes,
+      inbound,
+      scope: new Set<string>(),
+      summary: emptySummary(),
+      controller,
+      generation: this.generation,
+      mode: 'auto',
+      automatic: true,
+      keys: this.desiredKeys(graph, inference, order, { nodes, inbound }),
+      steps: undefined,
+      available: new Set<string>(),
+      accumulations: new Map<string, Record<string, Value>>(),
+    }
+    this.markAvailable(pass, order)
+
+    const derived = new Set<string>()
+    let moved = false
+    for (const nodeId of open) {
+      /*
+       * Asked before each node as well as after each `evaluate`, because what invalidates a
+       * derive — the partial's node settling, a Cancel — happens on the walk's clock, not on
+       * this one. `dropDerived` has already cleared what this walk wrote, so there is nothing
+       * to undo on the way out.
+       */
+      if (controller.signal.aborted) return
+      const node = nodes.get(nodeId)!
+      const def = getNodeDef(node.type)!
+      /*
+       * Fed by something that moved — a partial, or a node this walk has just derived. Asked of
+       * the *edges* rather than of a descendant set computed up front, because that is the same
+       * question one port at a time and it is the question `gatherInputs` is about to ask.
+       */
+      let feeds = false
+      for (const port of inputPorts(def, node.params)) {
+        if (port.reference) continue
+        const edge = inbound.get(portKey(nodeId, port.id))
+        if (edge && (live.has(edge.source) || derived.has(edge.source))) feeds = true
+      }
+      if (!feeds) continue
+
+      // Everything held counts as available here, preview or cache — that is the whole change.
+      for (const id of [...live, ...derived]) pass.available.add(id)
+      const gathered = this.gatherInputs(pass, nodeId, def, { held: true })
+      if (gathered.blocked || gathered.refusal) continue
+
+      const base = this.makeEvalContext({ pass, nodeId, def, gathered, refresh: false })
+      /*
+       * **The four channels a derived run must not touch.** `progress` sets a `running` badge,
+       * `warn` is kept and copied onto the node's eventual cache entry, `reportFetched` dates
+       * data this run did not fetch, and `publish` would file a partial of a partial under a
+       * node that published nothing. Each of them says "this node ran", and it did not: a value
+       * was recomputed on its behalf from an input that is still arriving.
+       */
+      const ctx: EvalContext = {
+        ...base,
+        progress: () => {},
+        warn: () => {},
+        reportFetched: () => {},
+        publish: () => {},
+      }
+      try {
+        const outputs = await def.evaluate(ctx)
+        if (controller.signal.aborted) return
+        this.previews.set(nodeId, outputs)
+        this.derived.add(nodeId)
+        derived.add(nodeId)
+        moved = true
+      } catch {
+        /*
+         * **Dropped and not descended past.** A node that cannot answer a half-filled input is
+         * the ordinary case rather than a fault — Proofread Merges refuses an unwired
+         * `Candidates`, and a partial can be one table ahead of the other — and it will answer
+         * when the real run reaches it. What must not happen is the stale entry staying on
+         * screen beside a queue that has moved, so whatever this node had derived goes.
+         */
+        if (this.previews.delete(nodeId)) moved = true
+        this.derived.delete(nodeId)
+      }
+    }
+    if (controller.signal.aborted) return
+    if (this.sweepDerived(derived)) moved = true
+    if (this.deriveAbort === controller) this.deriveAbort = undefined
+    if (moved) this.host.onPreview?.()
+  }
+
+  /**
+   * Drop anything an earlier ask derived that this one did not reach — a wire pulled out, a node
+   * switched off, an input that stopped answering.
+   *
+   * Left in place such an entry is a drawing of a graph that no longer exists, and because
+   * `outputs()` prefers a preview to the cache it hides the node's real result while it stands.
+   */
+  private sweepDerived(kept: ReadonlySet<string>): boolean {
+    let dropped = false
+    for (const id of [...this.derived]) {
+      if (kept.has(id)) continue
+      this.derived.delete(id)
+      if (this.previews.delete(id)) dropped = true
+    }
+    return dropped
+  }
+
+  /**
+   * Drop every derived preview, the partial they were all computed from having gone.
+   *
+   * **The in-flight derive is stopped first, not just forgotten.** It is parked on an `evaluate`
+   * somewhere, and a result written after this call would be a value nothing can reach to drop:
+   * `outputs()` prefers a preview to the cache, so it would shadow the node's real answer for
+   * the rest of the session.
+   */
+  private dropDerived(): boolean {
+    this.deriveAbort?.abort()
+    let dropped = false
+    for (const id of this.derived) if (this.previews.delete(id)) dropped = true
+    this.derived.clear()
+    return dropped
+  }
+
   /** Which of these nodes' cached results still answer their current key. */
   private markAvailable(pass: RunPass, ids: Iterable<string>): void {
     for (const nodeId of ids) {
@@ -1454,7 +1876,21 @@ export class Scheduler {
    * later without a second spelling of the reference rule — which is exactly the sort of
    * duplication `upstreamKey`'s own note was written about.
    */
-  private gatherInputs(pass: RunPass, nodeId: string, def: NodeDefinition): GatheredInputs {
+  private gatherInputs(
+    pass: RunPass,
+    nodeId: string,
+    def: NodeDefinition,
+    /**
+     * Read what is **held** on each upstream port — a published partial where there is one, the
+     * cache otherwise — instead of the cache alone.
+     *
+     * A parameter rather than a second gather, because the reference rule, the blocked rule and
+     * the refusal sentence are the part worth not writing twice (see this method's own note).
+     * Only `derivePreviews` passes it, and only because what it produces is never cached: read
+     * into a cache entry, a partial would be the answer for a key it does not answer.
+     */
+    options: { held?: boolean } = {},
+  ): GatheredInputs {
     const inputs: Record<string, Value | undefined> = {}
     const inputKeys: Record<string, string> = {}
     let blocked = false
@@ -1473,7 +1909,7 @@ export class Scheduler {
        */
       if (port.reference) {
         const type = pass.inference.nodes[nodeId]?.inputs[port.id]
-        const identity = datasetIdentity(type)
+        const read = referenceOf(pass.nodes.get(edge.source), edge.sourceHandle, type)
         /*
          * A wire that resolved to nothing. The node is refused *here*, with a sentence naming
          * the node it references and that node's own reason, rather than left to refuse with
@@ -1481,17 +1917,23 @@ export class Scheduler {
          *
          * First one wins, and nothing overwrites it: a node with two dead references has one
          * story, and it is the first port's.
+         *
+         * Only where it was a dataset that failed to name itself. A source read through
+         * `asReference` that has nothing to say has said so, and its reader is handed `undefined`
+         * as for an unwired port.
          */
-        if (!identity) refusal ??= this.unresolvedReference(pass, port, edge)
-        inputs[port.id] = identity
-        inputKeys[port.id] = referenceKey(type)
+        if (!read.named) refusal ??= this.unresolvedReference(pass, port, edge)
+        inputs[port.id] = read.value
+        inputKeys[port.id] = read.key
         continue
       }
       if (!pass.available.has(edge.source)) {
         blocked = true
         continue
       }
-      inputs[port.id] = this.cache.get(edge.source)?.outputs[edge.sourceHandle]
+      inputs[port.id] = options.held
+        ? this.outputs(edge.source)?.[edge.sourceHandle]
+        : this.cache.get(edge.source)?.outputs[edge.sourceHandle]
       inputKeys[port.id] = upstreamKey(pass.keys, edge.source, edge.sourceHandle)
     }
     return { inputs, inputKeys, blocked, ...(refusal ? { refusal } : {}) }
@@ -1522,6 +1964,22 @@ export class Scheduler {
   private unresolvedReference(pass: RunPass, port: PortDef, edge: GraphEdge): string {
     const source = pass.nodes.get(edge.source)
     const label = (source && getNodeDef(source.type)?.label) ?? source?.type ?? edge.source
+    /*
+     * Not a dataset at all: a reference port wired from a node that neither names a dataset nor
+     * declares `asReference`. "Its version list has not loaded, run again" would be a remedy for
+     * a thing that is not wrong — the wire can never deliver, however often it is run.
+     */
+    const inferred = pass.inference.nodes[edge.target]?.inputs[port.id]
+    // Only where the wire is *known* to be something else. A placeholder for a node this build
+    // lacks, or an output declared `any`, may well stand for a dataset still naming itself.
+    const kind = wireKind(source, edge.sourceHandle, inferred)
+    if (kind !== undefined && kind !== 'dataset' && kind !== 'any') {
+      return (
+        `Input "${port.label ?? port.id}" is wired to ${label}, which cannot be read this way: ` +
+        'this input reads a node without waiting for it to run, and that node has nothing to ' +
+        'say before it has.'
+      )
+    }
     const why = pass.inference.nodes[edge.source]?.issues.find((i) => !i.aboutColumns)?.message
     // `Input "…"` is `inferGraph`'s wording for the same thing, one state along: that one says a
     // port is not connected, this one that what it is connected to cannot answer yet.
@@ -1573,6 +2031,9 @@ export class Scheduler {
     const foldingHere = iteration !== undefined && def.loop === 'end'
     if (pass.available.has(nodeId) && !foldingHere) {
       this.setState(nodeId, { state: 'ok', ...pick(this.states.get(nodeId), 'durationMs') })
+      // The cache answers the node's key, so a retired run's partial is answering an older one:
+      // gone now, not when the walk ends, or every reader is shown it over the answer.
+      if (this.dropPartial(nodeId)) this.partialsDropped()
       return 'skipped'
     }
 
@@ -1782,6 +2243,8 @@ export class Scheduler {
       def,
       gathered,
       refresh,
+      // A chosen lifetime, for a node with a cache of its own — `EvalContext.maxAgeMs`.
+      maxAgeMs: policy && policy.maxAgeMs > 0 ? policy.maxAgeMs : undefined,
       iteration,
       owner,
       // No `def.loop === 'end'` guard: the only writer of this map already gates on it, so a
@@ -1794,6 +2257,7 @@ export class Scheduler {
     })
     return this.finish(nodeId, def, ctx, {
       key: pass.keys.get(nodeId)!,
+      inLoop: iteration !== undefined,
       // A loop exit folds into what its last pass returned — see `RunPass.accumulations`.
       accumulations: def.loop === 'end' && iteration ? pass.accumulations : undefined,
       fetched,
@@ -1808,6 +2272,8 @@ export class Scheduler {
     ctx: EvalContext,
     run: {
       key: string
+      /** A pass of a loop region, whose next run starts again at the first element. */
+      inLoop: boolean
       accumulations: Map<string, Readonly<Record<string, Value>>> | undefined
       fetched: { at?: number }
       policy: CachePolicy | undefined
@@ -1816,6 +2282,8 @@ export class Scheduler {
     const { key, fetched, policy } = run
     const signal = ctx.signal
     const nodeStarted = performance.now()
+    // The wall clock too: the lifetime below is asked of the moment the node began.
+    const startedAt = Date.now()
     try {
       let outputs = await def.evaluate(ctx)
       signal.throwIfAborted()
@@ -1825,8 +2293,15 @@ export class Scheduler {
        * node's lifetime — the store keeps a table a month whatever this node asked. The node said
        * how old its data is, so ask again, reading the server this time. Once: a node whose
        * refresh still reports the old age has no fresher copy to give.
+       *
+       * **Asked of when the node started, not of now.** The question is whether the copy was
+       * too old to *read*, and a node cannot be made to pay twice for having taken long: one
+       * whose run crosses the lifetime's edge would otherwise be run again, whole, for data
+       * that was inside its lifetime when it was read. (`EvalContext.maxAgeMs` is the other
+       * half: with it a node leaves out what is already too old, and reports nothing this
+       * would act on.) A result that ages past its lifetime afterwards is a lapse's to find.
        */
-      if (!ctx.refresh && cacheExpired(fetched.at, policy)) {
+      if (!ctx.refresh && cacheExpired(fetched.at, policy, startedAt)) {
         delete fetched.at
         // Released first, so a large stale result is not held beside the one replacing it.
         outputs = {}
@@ -1865,24 +2340,21 @@ export class Scheduler {
         return 'aborted'
       }
       this.cache.delete(nodeId)
+      const fix = errorFix(err)
       this.setState(nodeId, {
         state: 'error',
         error: errorMessage(err),
+        ...(fix ? { fix } : {}),
       })
       return 'failed'
     } finally {
       /*
-       * The preview dies with the run that made it, however that run ended.
-       *
-       * On success the real outputs are already in the cache and the preview is the same
-       * value one publish out of date. On an error or a cancel there is no result to show, and
-       * a partial scene left standing beside a `stale` badge is the "looks complete but isn't"
-       * failure this whole mechanism is arranged to avoid — the geometry is still in
-       * `geometryCache`, so the next run redraws it at once anyway.
+       * Ended on its own, ok or error: this run is the newest work on the node — a stopped one
+       * cannot get past its `throwIfAborted` — so whatever partial the node holds goes, whoever
+       * published it. A stopped run drops nothing (`previews`), except a loop's pass: the run
+       * replacing it starts again at the first element, so its next publish answers another.
        */
-      // Announced, not just deleted: on an error or a cancel nothing else will move, and a
-      // card drawing from this node's port would otherwise keep the dropped partial on screen.
-      if (this.previews.delete(nodeId)) this.host.onPreview?.()
+      if ((!signal.aborted || run.inLoop) && this.dropPartial(nodeId)) this.partialsDropped()
       // The entry above took a copy on success; on a failure or a cancel there is nothing to
       // caveat, and the error is the only thing worth reading.
       this.liveWarnings.delete(nodeId)
@@ -1936,7 +2408,10 @@ export class Scheduler {
          * is right, because this node never sees them.
          */
         if (edge && port.reference) {
-          upstream.push([port.id, referenceKey(inputTypes[port.id])])
+          upstream.push([
+            port.id,
+            referenceOf(nodes.get(edge.source), edge.sourceHandle, inputTypes[port.id]).key,
+          ])
           continue
         }
         upstream.push([
@@ -2014,6 +2489,7 @@ export class Scheduler {
     def: NodeDefinition
     gathered: GatheredInputs
     refresh: boolean
+    maxAgeMs?: number | undefined
     iteration?: LoopIteration | undefined
     accumulated?: Readonly<Record<string, Value>> | undefined
     onFetched?: (at: number) => void
@@ -2025,17 +2501,40 @@ export class Scheduler {
      * `Evaluation` is adopted, and V8 gives every closure made in one scope the same context — so
      * one mention would keep the superseded walk's whole graph alive until the node returned.
      */
-    const { nodeId, def, gathered, refresh, iteration, accumulated, onFetched } = opts
-    const params = withDefaults(def, this.nodeOf(opts.pass, nodeId).params)
+    const { nodeId, def, gathered, refresh, maxAgeMs, iteration, accumulated, onFetched } = opts
+    let params = withDefaults(def, this.nodeOf(opts.pass, nodeId).params)
     const types = (opts.pass.inference.nodes[nodeId]?.inputs ?? {}) as Record<string, never>
     const owner = opts.owner ?? { controller: opts.pass.controller, walk: walkOf(opts.pass) }
     const signal = owner.controller.signal
+    // Called here, not closed over: see `rerunnerFor` for why the closure is made elsewhere.
+    // `registerNode` has already refused the flag on anything but an `expensive` node.
+    const rerunInput = def.rerunsInputs
+      ? rerunnerFor(this.host, opts.pass.graph, opts.pass.inference, nodeId, signal)
+      : undefined
     return {
-      params,
+      /*
+       * A getter, so what this evaluation records it reads back (`record` below). The lifetime
+       * backstop runs `evaluate` a second time on a spread of this context, and a second pass
+       * reading the record as it was before the first would decide afresh what the first had
+       * just decided — a new moment for every neuron Find Merge Candidates met, and its work wasted.
+       */
+      get params() {
+        return params
+      },
+      rerunInput,
       refresh,
+      maxAgeMs,
       iteration,
       accumulated,
       reportFetched: (at) => onFetched?.(at),
+      record: (paramId, value) => {
+        if (!findParam(def, paramId)?.runRecord) {
+          throw new Error(`${def.type} records \`${paramId}\`, which is not a run record.`)
+        }
+        if (signal.aborted) return
+        params = { ...params, [paramId]: value }
+        this.host.onRecord?.(nodeId, paramId, value)
+      },
       warn: (message) => {
         const said = this.liveWarnings.get(nodeId) ?? []
         // Deduped, so a warning raised inside a per-item loop says its piece once.
@@ -2055,6 +2554,9 @@ export class Scheduler {
         if (signal.aborted) return
         this.previews.set(nodeId, partial)
         this.host.onPreview?.()
+        // The cheap nodes below this one answer about the value that just moved — see
+        // `derivePreviews`. Asked for, not awaited: a publish is on the fetch's path.
+        this.askDerive()
       },
       input: (portId) => gathered.inputs[portId],
       inputKey: (portId) => gathered.inputKeys[portId],
@@ -2099,6 +2601,7 @@ export class Scheduler {
     for (const held of [this.cache, this.previews, this.states, this.liveWarnings]) {
       for (const id of [...held.keys()]) if (!alive.has(id)) held.delete(id)
     }
+    for (const id of [...this.derived]) if (!alive.has(id)) this.derived.delete(id)
     // A deleted node's pending request would otherwise be spent by whatever reused its id.
     for (const id of [...this.forceRefresh]) if (!alive.has(id)) this.forceRefresh.delete(id)
     for (const id of [...this.requestedFull]) if (!alive.has(id)) this.requestedFull.delete(id)
@@ -2107,6 +2610,19 @@ export class Scheduler {
     for (const id of [...this.loopIndex.keys()]) if (!alive.has(id)) this.loopIndex.delete(id)
     for (const id of [...this.loopDone]) if (!alive.has(id)) this.loopDone.delete(id)
     for (const id of [...this.lapses.keys()]) if (!alive.has(id)) this.lapses.delete(id)
+  }
+}
+
+/** A run's tally before it has run anything. One spelling, for the run and for a derive. */
+function emptySummary(): RunSummary {
+  return {
+    executed: [],
+    failed: [],
+    deferred: [],
+    loopNodes: [],
+    iterations: 0,
+    cancelled: false,
+    durationMs: 0,
   }
 }
 
@@ -2123,19 +2639,169 @@ function upstreamKey(keys: Map<string, string>, source: string, handle: string):
 }
 
 /**
- * How a `reference` port's upstream is named — the resolved *type*, not the source node's key.
+ * What a `reference` port is handed, and the key it is known by — **the pair, from one place.**
  *
- * It has to be the type: the referenced node is excluded from the order, so its key may not be
- * computed when this is read, and `keys.get` would answer `'unresolved'` forever. It is also the
- * better key, since a dataset's identity is all a reference reads.
+ * Two kinds of source, told apart by the source and never by the reader:
  *
- * One spelling, for `upstreamKey`'s reason and in the same two consumers — `desiredKeys` folds it
- * into the hash that decides whether a node re-runs, and `ctx.inputKey` hands it to the node as
- * the identity of what arrived. Written out twice, they drift into a node that either re-runs
- * forever or never invalidates, with nothing type-checking the pair.
+ * - a node declaring `asReference` hands over what that returns from its params, keyed on the
+ *   answer itself. So the reader re-runs when the answer moves and at no other edit of the
+ *   source — which matters, because the first such source is a card whose other params change on
+ *   every click;
+ * - anything else is a dataset, read off its inferred *type* (`datasetIdentity`) and keyed on
+ *   that type. It has to be the type and not the source node's key: the referenced node is
+ *   excluded from the order, so its key may not be computed when this is read. It is also the
+ *   better key, since a dataset's identity is all such a reference reads.
+ *
+ * `named` says whether there is something to hand over **or the source is the kind that may
+ * honestly have nothing**: only a dataset that has not named itself is a wire to wait for
+ * (`settle`) or to refuse (`unresolvedReference`).
+ *
+ * One function, for `upstreamKey`'s reason: `desiredKeys` folds the key into the hash that
+ * decides whether a node re-runs, `gatherInputs` decides what the node is given and what
+ * `ctx.inputKey` says. Written out twice they drift into a node keyed on one answer and handed
+ * another — or one that re-runs forever, or never — with nothing type-checking the pair.
  */
-function referenceKey(type: CodaType | undefined): string {
-  return `ref:${hashValue(type ?? null)}`
+function referenceOf(
+  source: GraphNode | undefined,
+  output: string,
+  type: CodaType | undefined,
+): { value: Value | undefined; key: string; named: boolean } {
+  const def = source && getNodeDef(source.type)
+  // A dataset on the wire is read as one whatever else its node can say: the hook answers for
+  // the outputs it means to, and a node may carry a dataset output beside them.
+  if (source && def?.asReference && wireKind(source, output, type) !== 'dataset') {
+    // A muted node says nothing — and is keyed on that, so editing it while muted re-runs no one.
+    return source.disabled ? SILENT : answerOf(def, source.params, output)
+  }
+  const value = datasetIdentity(type)
+  return { value, key: `ref:${hashValue(type ?? null)}`, named: value !== undefined }
+}
+
+type ReferenceAnswer = ReturnType<typeof referenceOf>
+
+const SILENT: ReferenceAnswer = { value: undefined, key: `ref:${hashValue(null)}`, named: true }
+
+/**
+ * What kind of value a reference wire stands for: the type inference resolved, else the source
+ * output's own declaration — which is there exactly when inference has nothing, the state the
+ * refusal below is written for. One reading for `referenceOf` and `unresolvedReference`, so a
+ * wire is not a dataset to one of them and something else to the other.
+ */
+function wireKind(
+  source: GraphNode | undefined,
+  output: string,
+  type: CodaType | undefined,
+): CodaType['kind'] | undefined {
+  if (type) return type.kind
+  const def = source && getNodeDef(source.type)
+  return def && outputPorts(def, source.params).find((port) => port.id === output)?.type.kind
+}
+
+/**
+ * `asReference`'s answers, by the params record they were read from.
+ *
+ * An edit replaces the record of the node it edits and no other (`updateNode`), so this is asked
+ * once per edit *of the source* — where unmemoised it was the hook and a hash of its whole
+ * answer per reference wire on every graph mutation, and again per execution. It also makes
+ * "the pair, from one place" literal: the key a node was scheduled on and the value it is handed
+ * are the same object's two fields. Weak, so a record goes with its graph.
+ */
+const answers = new WeakMap<object, Map<string, ReferenceAnswer>>()
+
+function answerOf(def: NodeDefinition, params: ParamValues, output: string): ReferenceAnswer {
+  let held = answers.get(params)
+  if (!held) answers.set(params, (held = new Map()))
+  let answer = held.get(output)
+  if (!answer) {
+    let value: Value | undefined
+    try {
+      value = def.asReference!(withDefaults(def, params), output)
+    } catch {
+      // "Must not throw" is the hook's rule; a key derivation is no place to find out it did.
+      value = undefined
+    }
+    answer = { value, key: `ref:${hashValue(value ?? null)}`, named: true }
+    held.set(output, answer)
+  }
+  return answer
+}
+
+/**
+ * `EvalContext.rerunInput`, bound to one evaluation: the chain above one of the node's inputs,
+ * run for another neuron on a `Scheduler` of its own.
+ *
+ * **A module-level factory, and that is the point.** The closure it returns outlives the walk
+ * that built it whenever its evaluation is adopted, and V8 gives every closure made in one scope
+ * the same context — so made inside `makeEvalContext` it would keep that walk's whole pass alive
+ * (`makeEvalContext`'s own note). Made here it holds the five things it reads. Two of them are
+ * the graph and its inference, which is the cost `NodeDefinition.rerunsInputs` exists to confine
+ * to the nodes that ask for it.
+ *
+ * **A scheduler of its own, so nothing on the canvas moves**: a node holds one cache entry and
+ * one state, and a pass taken on the reader's scheduler would overwrite both with another
+ * neuron's. The private one is dropped when the value is in hand, and what it held goes with it
+ * — the geometry cache, below the `DataSource` seam, is what makes a neuron met twice cheap.
+ *
+ * **A full run, by somebody**: `mode: 'full'` and no `automatic`, since the node calling this is
+ * itself `expensive` and running because a person asked.
+ */
+function rerunnerFor(
+  host: Pick<SchedulerHost, 'resolveSource'>,
+  graph: CodaGraph,
+  inference: InferenceResult,
+  nodeId: string,
+  signal: AbortSignal,
+): NonNullable<EvalContext['rerunInput']> {
+  return async (portId, neurons, { report, settings } = {}): Promise<RerunResult> => {
+    throwIfAborted(signal)
+    const variant = variantGraph(graph, inference, nodeId, portId, neurons, settings)
+    const byId = nodesById(variant.graph)
+    const inner: Scheduler = new Scheduler({
+      resolveSource: (id) => host.resolveSource(id),
+      // Which inner node is at work, and what it says — the caller's progress note.
+      onStateChange:
+        report &&
+        (() => {
+          for (const [id, node] of byId) {
+            const info = inner.info(id)
+            if (info.state !== 'running') continue
+            report(info.note ? `${nodeLabel(node)}: ${info.note}` : nodeLabel(node))
+            return
+          }
+        }),
+    })
+    const stop = () => inner.cancel()
+    signal.addEventListener('abort', stop, { once: true })
+    try {
+      const { nodeId: target, handle } = variant.source
+      const summary = await inner.run(variant.graph, { mode: 'full', targets: [target] })
+      throwIfAborted(signal)
+      if (inner.info(target).state !== 'ok') {
+        /*
+         * The node that actually failed, not the one left blocked beneath it. A node that could
+         * not start is in `failed` too — an input the swap left unwired, a reference that did not
+         * resolve — so the target itself is only the fallback for a run that ended some other way.
+         *
+         * **Of the chain only.** A node the chain merely names is in the copy with nothing wired
+         * into it, and may well fail there for that reason; it is a bystander, and naming it
+         * would blame a card that has nothing to do with why the chain stopped.
+         */
+        const failed = summary.failed.find((id) => variant.chain.has(id)) ?? target
+        const why = inner.info(failed).error ?? `it ended ${inner.info(failed).state}`
+        throw new Error(`${nodeLabel(byId.get(failed))} could not be run again: ${why}`)
+      }
+      const warnings: string[] = []
+      // One entry per warning, so the caller can pass each on, or leave one out, by itself.
+      for (const [id, node] of byId) {
+        for (const said of inner.warnings(id)) warnings.push(`${nodeLabel(node)}: ${said}`)
+      }
+      return { value: inner.output(target, handle), warnings }
+    } finally {
+      signal.removeEventListener('abort', stop)
+      // Drops what it held and clears its lapse timer, which would otherwise outlive it.
+      inner.invalidateAll()
+    }
+  }
 }
 
 /**

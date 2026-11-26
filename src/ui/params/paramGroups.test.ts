@@ -462,6 +462,25 @@ describe('which controls a generic surface draws', () => {
     expect(railParams(def, {}).map((p) => p.id)).toEqual(['colour'])
   })
 
+  /** Written by a widget, reachable in the inspector, advertised nowhere (`ParamBase.internal`). */
+  it('draws no internal param, presentational or in a data group', () => {
+    const def = defOf(
+      [
+        param({ id: 'colour', presentational: true }),
+        param({ id: 'recent', presentational: true, internal: true }),
+        param({ id: 'cursor', group: 'tune', internal: true }),
+      ],
+      { paramGroups: [{ id: 'tune', label: 'Tune', affectsData: true }] },
+    )
+    expect(railParams(def, {}).map((p) => p.id)).toEqual(['colour'])
+    expect(
+      railParams(requireNodeDef('seam:proofreadMerges'), {}).map((p) => p.id),
+    ).not.toContain('recent')
+    expect(railParams(requireNodeDef('out.neuroglancer'), {}).map((p) => p.id)).not.toContain(
+      'view',
+    )
+  })
+
   it('draws a data group the node declares, since that is the node opting its knobs in', () => {
     // The dashboard cell only ever gets this rail, so without it a node's deliberately exposed
     // data controls — Split Axon/Dendrite's thresholds, a heatmap's order — reach no cell.

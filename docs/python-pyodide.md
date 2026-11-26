@@ -189,6 +189,18 @@ proxy it came from, while every proxy taken is still destroyed where it was take
   lands in 153 ms, and the next run re-boots in 1.4 s because the ten megabytes are cached by
   then. The same missing headers are why it is **single-threaded** — `get_num_threads()` is 1 —
   so fastcore's headline multi-core speed is not available here whatever the backend.
+
+  **What that costs, measured** (2026-11-10, `fc.drop_internals` on a 3.7 M-face Aedes neuron at
+  the card's defaults): 5.5 s natively on 14 cores, **46.6 s natively on one thread**, **98 s in
+  Pyodide**. So the headers are worth about 8.5x and wasm itself about 2x, and the first of those
+  is the one worth knowing: the gap is overwhelmingly threads, not the runtime. `os.cpu_count()`
+  is 1 inside Pyodide and passing `threads=4` changes nothing (94 s), so the wheel is not
+  secretly able to either — lifting this needs a threaded Pyodide build **and** a threaded wheel
+  **and** the headers, not just the headers.
+
+  The lever that is available is the work itself: at `n_rays=8` the same call is **43.6 s** and
+  keeps 3,076,278 faces against 3,106,753 — a 1% difference in the surface for 2.2x the speed —
+  and `iterations=2` is 66.8 s for a surface within 0.2%.
 - **Nothing is guarded that fastcore already handles.** Checked against the wheel rather than
   assumed: it clamps `k` to the point count, resamples a multi-rooted fragment with both roots
   surviving, and accepts a one-point neuron. So `dotpropSetFrom` drops nothing — a filtered set
@@ -209,6 +221,39 @@ proxy it came from, while every proxy taken is still destroyed where it was take
   sends no CORS headers at all to a bare `curl -I` and `access-control-allow-origin: *` to a
   request carrying `Origin` — so the wheel loads in a browser, which the obvious check says it
   does not. Same shape as the `/api/roimeshes` HEAD-vs-GET finding. jsdelivr is open either way.
+
+### A package that failed to load, and nothing saying so (2026-11-16)
+
+**Pyodide's `loadPackage` does not throw for a package it could not load.** It catches each
+package's failure, writes `The following error occurred while loading pandas:` and the reason to
+its error stream — `console.error`, unless the caller passes `errorCallback` — and resolves. Read
+off the shipped `pyodide.asm.mjs` (v314.0.5, `loadPackageInner`).
+
+Coda passed no `errorCallback`, so a download that broke off went by in silence. A module that
+imports its packages on first use — `cutoutSummary` installs its vendored files inside the first
+call — then ran, was kept in `namespaces`, and failed on every later call for the session:
+`ModuleNotFoundError: No module named 'pandas'`, with Pyodide's advice to call `micropip`, on
+Find Merge Candidates, after a long wait at "opening the segmentation". The symptom names a package; the
+cause was a request. Seen three times in one day, twice in a probe and once in the app, with
+every file in place on the CDN and its checksum matching each time it was asked for by hand. **What
+makes the request fail was not found**: the episodes lasted a few minutes each and were slow as
+well as failing (one end took 187 s, against nine).
+
+`pyodide/loadPackages.ts` passes `errorCallback`, asks once more after a short pause where a
+package failed — a failed package is not marked loaded, so the second ask fetches only what is
+missing — and then throws with Pyodide's own reason, before the module's source is run or kept.
+The sentence it listens for is Pyodide's wording from one build, so the outcome is checked as
+well: a package named from the lock file must be in `loadedPackages` afterwards. (A wheel by URL
+cannot be checked that way.) The card says when it is trying again, and every line of the error
+stream still reaches the console — reading the stream must not be what hides a `URI mismatch`. So the next call
+starts from the download again, where before only a reload did.
+
+Checked in Chrome with the pandas request failed on purpose (CDP `Fetch.failRequest`, on the
+page's session — a dedicated worker's requests are intercepted there, and `Network.setBlockedURLs`
+does not reach them): two attempts, then `Python could not load what this needs (numpy · scipy ·
+pandas · SEAM cutout and ranker). The following error occurred while loading pandas: Failed to
+fetch …`; the same on a second call; and a normal answer on the third, once the request was let
+through, with no reload.
 
 ### What is not settled
 
@@ -237,10 +282,22 @@ There is no download budget at which that node could have been the eighth row of
 The road not taken is worth pricing, because it is the one somebody will reach for next.
 **scikit-learn is in the lock**, with t-SNE, PCA, MDS and spectral embedding, every one of them
 taking `metric='precomputed'` — for **scipy's 14.0 MB plus scikit-learn's 4.4 MB**, measured off
-the CDN. That is nearly twice the whole existing backend, and it is the first thing that would
-break the seven-identical-rows property above: every capability here declares numpy and one 1.1
-MB wheel, which is what makes the second through seventh nearly free. A capability declaring
-scipy would not be, and the row after it would inherit the cost.
+the CDN. That is nearly twice the whole existing backend, and it would break the
+seven-identical-rows property above: every capability in that run declares numpy and one 1.1 MB
+wheel, which is what makes the second through seventh nearly free.
+
+**A scipy row has since landed, and it did not cost the row after it.** `cutoutSummary` declares
+numpy, scipy and pandas — about 19 MB with the dependencies — because it vendors SEAM's
+`summarize_cutout`, whose exact distance transform is scipy's and whose return value is a
+DataFrame (see *Vendoring* below). The claim above that the *next* row would inherit the cost is
+the part that was wrong: `loadPackage` runs once per module on the first call that names it, so
+a graph that never searches for merge candidates never fetches any of it, and nothing else's
+first call changed. What remains true is the sentence's real point — a capability that wants
+scipy is not nearly free, and should say so on its own row rather than be folded into the run.
+
+So that is the test a scipy capability has to pass, and UMAP still fails it: scikit-learn buys a
+general-purpose embedder where `cutoutSummary` buys the one function a fitted ranker was
+calibrated on, which cannot be ported without the features drifting.
 
 So the second compute backend is `src/umap/`, in the same eslint boundary group as this one and
 for the same reason. What it costs in *fidelity* is recorded in [nodes-tables.md](nodes-tables.md): nothing
@@ -533,13 +590,188 @@ that does both pays it once.
 
 **DotMotif is the eighth row and the exception** ([dotmotif.md](dotmotif.md)): networkx, lark,
 grandiso and dotmotif, all pure Python and none of them shared, so its first use pays its own
-download whatever else the graph has run.
+download whatever else the graph has run. **`seamWindows` is the ninth and the other kind of
+exception** — numpy alone, no wheel at all — which is why it sits outside that run in `MODULES`
+rather than inside it. See below.
 
 **Measured on this build.** The Pyodide worker chunk went 20.1 kB → 47.6 kB, carrying the three
 new `.py` files inlined. `main-*.js` still matches `jsdelivr` nowhere, and `np.frombuffer`,
 `navis_fastcore` and `resample_skeleton` appear in the worker chunk and in no other. The node
 definitions and their ops added 12.9 kB to `nodes-*.js` and the eight new emitters 11.7 kB
 across the two exporter chunks — neither of which is on the Python side of anything.
+
+## SEAM windows: the first capability whose working code Coda did not write
+
+`seamWindows` cuts a neuron's mesh into the 15 µm windows a SEAM model takes
+([seam-model-a-plan.md](seam-model-a-plan.md)). Its two working files, `seam/canonical.py` and
+`seam/scan.py`, are **byte-identical copies** of SEAM's own, hashes and commit in
+`src/pyodide/seam/VENDORED.md`.
+
+**They are copies rather than a port on purpose, and the reason is not laziness.** SEAM's
+invariant 3 is that training and inference build the model's input through *one* function, and
+its invariant 11 keeps that function numpy-only precisely so the same file can run in CPython for
+training and here for inference. A TypeScript reimplementation is the drift those rules exist to
+prevent, and it is undetectable from this side: a window built slightly differently still scores
+plausibly. SEAM verified the premise rather than assuming it — `canonical.py` gives bit-identical
+output under Pyodide and CPython for the same mesh and seed.
+
+**A fifth convention, for a module that needs more than one file.** `scan.py` does
+`from . import canonical`, and the bridge runs one source per module with no import machinery. So
+`PyModule.vendored` carries the extra sources, `runtime.ts` seeds them into the module's globals
+as `__vendored__`, and `seamWindows.py` assembles them into a real `seam` package in
+`sys.modules`. Transport in the runtime, policy in the module — the runtime does not learn a
+package name or a file order. Two consequences worth knowing: a module that reads `__vendored__`
+without declaring it fails at **call** time rather than load time, and the sources sit in the
+worker chunk rather than the app bundle, which is the whole reason they are not `?raw` imports in
+the wrapper.
+
+### A sixth convention: a slice, for code that cannot be copied whole
+
+`cutoutSummary` vendors **two** runs of SEAM: `summarize_cutout` (what is in a box of
+segmentation around an open end) from `negatives.py`, and `pool_features` plus `GeometricRanker`
+(the features, and the logistic score over them) from `candidates.py`. Neither could be a
+byte-identical whole-file copy like the two above — `negatives.py` imports `cave`, `paths` and
+`pre_edit`, and `candidates.py` imports `paths`.
+
+**The score no longer crosses with the features, and that is this repository's one deliberate
+break with invariant 11.** SEAM's production ranker became a LightGBM forest on 2026-11-11, and
+LightGBM is a compiled extension with no Pyodide build — so the eleven features are still built
+here by SEAM's own `pool_features`, and the forest is walked in TypeScript by
+`src/packs/seam/treeRanker.ts`. `GeometricRanker` stays vendored and stays the thing the logistic
+sets are scored with; it is simply no longer what production uses.
+
+The break is real and is not pretended away: a traversal written twice can drift, and nothing
+like `pnpm vendor:seam` covers the TypeScript half. What stands in for it is that the format is
+declarative and the scorer is checked against **LightGBM's own predictions** on 991 vectors,
+including every split threshold. The end state is upstream — a numpy-vectorised traversal in
+`candidates.py` over the forest as arrays, which the vendor check would then cover like anything
+else — and that ask is in `docs/seam-suggestions-plan.md`.
+
+So it takes the two functions **verbatim but not whole**, and `pnpm vendor:seam` is what
+makes that claim checkable — it re-cuts the run from `negatives.py` by the markers that bound it
+and byte-compares, refusing by name if SEAM moves them. A sha256 cannot pin a subset of a file
+the way the table in `VENDORED.md` pins the copies; the script does that job instead, and in one
+respect does it better, since a hash detects a local edit where the script detects a local edit
+*and* upstream movement.
+
+**What the script does not catch**, and it is worth knowing before relying on it: a run that
+acquires a *new* module-level dependency upstream — another constant, a helper — is cut away
+silently and surfaces as a `NameError` in a browser. `pnpm probe:cutout-summary`'s CPython leg
+is what would see it, because it imports the cut file on its own.
+
+The right end state is for SEAM to put those functions in a numpy-only module of their own, as
+`canonical.py` and `scan.py` already are; then the slice becomes an ordinary hash-pinned copy
+and the script goes. That ask is recorded in
+[seam-suggestions-plan.md](seam-suggestions-plan.md).
+
+### What the cutout summary and the search cost, measured
+
+Pyodide against CPython on the same 188×188×134 box (the real Aedes cutout, 14,424 supervoxels
+over 900 roots), `pnpm probe:cutout-summary`:
+
+| | CPython | Pyodide |
+| --- | --- | --- |
+| scipy's exact EDT, with `return_indices` | 166 ms | 190 ms |
+| the whole summary, warm | — | **~560 ms** |
+
+And the search over it, which is what a caller actually runs:
+
+| | |
+| --- | --- |
+| `coda_candidate_pool`, warm | **~0.56 s** |
+| the same call, first in a worker | ~2.5 s |
+| `coda_pool_sizes` | two expressions; does not register |
+
+A first call carries scipy's and pandas' own imports inside its clock — `started` is taken
+before the vendored modules are `exec`'d — so it is **paid once per worker, not per open end**.
+That is the correction worth carrying twice over: a cold reading priced the feature step at
+1.2 s and the whole search at 2.3 s, and both are about a quarter of that warm. Fetching the box
+is the larger half of an end's real price (~1.2 s), so **an end costs about 1.75 s** and a
+caller should keep one worker across a neuron's ends.
+
+**The search was one crossing, and is now three** (2026-11-14). It used to be
+`coda_candidate_search`: the summary, the features and the score together, because each step's
+output is the next one's input and none is useful alone. SEAM then replaced its logistic fit with
+a LightGBM forest on eleven features, and two of the eleven — `l2c` and `l2x` — are log counts of
+level-2 chunks that come from an authenticated chunkedgraph read. **The roots to ask about are
+not known until the features have been computed**, so no ordering of the work gets the counts
+first, and the pool has to cross unranked whatever else is decided. LightGBM has no Pyodide build
+either, so the scoring went with it.
+
+So: `coda_candidate_pool` (box in, the whole unranked pool out), `l2ChunkCounts`
+(`data/cave/rootIds.ts`), then `coda_pool_sizes` (the counts in by **position**, `l2c`/`l2x` out
+through the vendored `size_features`), with the forest, the sort, the cut and the `geo_rank`
+numbering in `packs/seam/treeRanker.ts` and `packs/seam/rankPool.ts`. The TypeScript still
+computes no feature — `coda_pool_sizes` exists precisely so that the two `log10` expressions stay
+vendored, since a feature computed slightly differently still ranks.
+
+Checked against SEAM's own ranking for a real open end (`pnpm probe:candidate-search`): SEAM's
+exact order, every `geo_score` to 1e-4, `min_dist_um` to 1e-5 µm and the contact point per axis
+to 1e-6 nm. **Note the published list is post-own-tip** — SEAM moved that rule upstream in the
+same set — so the probe ranks, cuts at `top_k` and then applies `ownTipRule`: 538 in the pool,
+100 after the cut, 9 after the rule, which is SEAM's list exactly.
+
+The end state is an upstream numpy `score_trees`, which would put the whole ranker back inside
+invariant 11; `docs/seam-suggestions-plan.md` records the ask.
+
+**Two ways to get the rank key wrong, and they fail differently.** The published `geo_score` is
+a rank *key* — lower is better, `-score`, and still so under the forest, which the set's own
+numbers say even though its manifest line reads "the booster's raw score". Publishing the raw
+score and sorting *that* descending
+is the same ordering, so it gets every rank right and every score's sign wrong; sorting the rank
+key the wrong way reverses the list outright. The probe compares both the order and the scores
+for that reason, and runs the reversal as an assertion rather than describing it.
+
+**The heap is the open question, not the clock.** `return_indices=True` returns a float64
+distance plus three int32 index planes — 95 MB for a box this size — and the ravel inside the
+vendored code allocates another 38 MB, so one call peaks near 180 MB. The probe reports 547 MB
+of wasm heap after four summaries, and wasm never returns heap to the OS. The dialog already
+reports this figure and **Stop** terminates the worker, which is the only reclaim
+([ui-shell.md](ui-shell.md)); what is not measured is the growth per call over a search of many
+ends.
+
+### What a window costs, measured
+
+Two real FlyWire v783 neurons — `720575940621522189` and `720575940628857210` — through
+`pnpm probe:seam-windows`, on an M-series laptop:
+
+| | faces | windows | fetch | tiling | per window | across the bridge |
+| --- | --- | --- | --- | --- | --- | --- |
+| a dense one | 359,564 | 32 | 1.2–4.1 s | 0.46 s | **118–122 ms** | 4.7 MB |
+| a large one | 1,170,692 | 543 | 1.2–2.1 s | 1.45 s | **43.5 ms** | 80 MB |
+
+**The per-window cost is not per window.** The two differ 2.7×, and the tiling is not why — that
+is 1.2–1.4 µs a face on both, timed separately in `seamWindows.py` for exactly this question.
+`FaceGrid.crop` reads the 27 cells around a centre, so a dense neuron with few windows pays more
+per window than a sprawling one with many. Taking faces-per-window as *total faces ÷ windows* —
+a proxy for the crop, not the crop itself — two points give roughly 26 ms of resampling plus
+8 µs per face in range. **That is a two-point solve of a two-parameter model, so it is a shape
+rather than a constant**; a third neuron, and summing `len(grid.near(centre))` instead of the
+proxy, would make it a measurement.
+
+**The fetch is per neuron, not per window.** FlyWire public ignores a bbox on a mesh request —
+SEAM's `geometry.window_mesh` filters fragments client-side by the boxes in their names — so the
+neuron is fetched once and the windows are local crops. `cave/meshes.ts` has the fetch measured
+over sets of 25: 132 fragments, 0.51 MB compressed, 1.59 s. Decoded, those two neurons are
+6.5 MB and 21.2 MB.
+
+**What it sets for whatever uses this.** A large neuron is about a minute end to end once
+inference is added (~49 ms a window, [ml.md](ml.md)), so a set is minutes: a `warnOverWait`
+priced over the set, with a cap on **windows** as the lever — which is why `runSeamWindows` takes
+`limit` and the node decides it. Window building and inference are the same order (25 s against
+27 s), so neither is the one to optimise. And 80 MB crossing the bridge for one neuron means a
+caller should run a neuron at a time rather than accumulate; a third of that is `sourceNm`, which
+is derivable from the points and the centres if it ever bites.
+
+### Two probes, because one of them cannot run in CI
+
+`pnpm probe:seam-windows` is the measurement above: real meshes, a CAVE token, a dev server and a
+browser. `pnpm probe:seam-windows-py` is the contract — an icosphere, no network, no credential —
+and it is the one in `pyodide.yml`. That split exists because the workflow fires on every change
+under `src/pyodide/**`, and for a while it fired on these three files while checking nothing in
+them. What the contract probe asserts above all else is that the vendored package *assembles*:
+if `from . import canonical` fails there is no partial answer, every window is gone, and nothing
+a type checker sees would have caught it.
 
 ### The one protocol change in five capabilities
 
@@ -552,6 +784,41 @@ types and a wrapper" changed.
 The reason it was needed rather than worked around: `MeshGeometry.indices` is a `Uint32Array`,
 and every face argument in fastcore's mesh module wants numpy's `uint32`. Narrowing to `Int32Array`
 on the way over would have bought a cast on both sides to deliver the same bits.
+
+**It gained `Uint16Array` on 2026-11-11, and that one is about memory rather than meaning.** A
+box of segmentation (`VoxelIndex`) is millions of voxels naming a few thousand objects, so its
+index fits in sixteen bits and the wide form is half zeroes. Here that is not a transient: the
+copy lands in a heap that is never given back, so a needless 12 MB is permanent for the life of
+the worker. `readLabelBox` sends whichever width names its table, the Python asks for no dtype
+on the way in — naming one would widen the array straight back out — and it refuses a table too
+big for the width that arrived, since every index past the width has already wrapped onto a
+different object. Cutting one 66-candidate tip's patches went from a 220 MB peak to 201 MB.
+
+### Two more protocol changes: a second worker, and an answer in two parts (2026-11-18)
+
+Both came out of Find Merge Candidates' speed work (`docs/seam-suggestions-plan.md`, "The search's
+network, measured apart and through the node"), and both are general.
+
+**A lane is a worker per module.** `engine.ts` holds one worker per lane, made on first use, and
+`laneOf` names a module's: `assessorPatches` runs on `'assessor'`, every other module on `'main'`.
+It is a property of the *module* rather than of a call, because the cutter leaves a labelled box in
+its heap: a call routed elsewhere would load a fresh copy and still answer, from a module with no
+box open. Each lane is torn down alone, so a Cancel on one leaves the other; the memory readout
+sums the heaps and `stopPython` stops every idle one. The price is a second heap and one boot
+(~1.5 s, cached download) — which a caller can move off its critical path, as Find Merge Candidates does
+with `readyAssessorPatches` under the model download. A new lane is warranted only where two
+bridges' calls run concurrently and one holds state.
+
+**A partial result.** A Python function may call `report(fraction, note, {...})`: the dict is
+converted exactly as the final result is (`toJs({ dict_converter })`, so a `uint64` array arrives
+as a `BigUint64Array`), posted as its own `partial` reply, and handed to `CallOptions.onPartial`.
+The wrapper reads it with the same `uint64From` and friends as the final answer. It exists because
+the call is synchronous inside the worker, so `report` is the only way anything leaves mid-call:
+`coda_candidate_pool` hands over its pool's roots before its organelle measure, and the level-2
+counts start under it. **Neither `onProgress` nor `onPartial` may throw** — both run in the worker's
+message handler, where a throw is an uncaught page error that neither settles nor fails the call.
+A bridge that cannot use a partial should drop it and let the final result's own checks speak
+(`cutoutSummary.ts`' `poolFrom`).
 
 ### syNBLAST: the same matrix, a different question
 
@@ -627,6 +894,18 @@ Three things about them are worth knowing before changing either:
   scaled, so nothing round-trips through a second scale. `checkCleanUnits` refuses voxel
   coordinates, but **only where a distance is actually in play**: keeping every Nth node counts
   hops and means the same thing in either unit.
+- **A healing bridge's two ends are a decision, not a detail.** `Bridge from` is fastcore's
+  `heal_skeleton` `method`, crossing as the word it spells: `ALL` considers every node of both
+  fragments and so finds the genuinely shortest join, which can land in the *middle* of a
+  neurite; `LEAFS` lets a bridge start and end only on a leaf or a root, so a fragment that broke
+  mid-cable reattaches end to end. The difference is measured in `probe-skeletons.mjs` on a
+  T-shaped forest — `ALL` takes a 2 µm bridge onto the middle node, `LEAFS` 2.24 µm onto an end —
+  because the shared fixture's two fragments meet leaf to root and every method bridges the same
+  pair there. SEAM's tip pipeline heals with `LEAFS` and a 1 µm cap for exactly this reason: a
+  bridge landing mid-neurite invents a branch point where an open end should be, and two of
+  thirteen misses in its own review were a 3–4 µm healing edge sitting where the tip was. The
+  default stays `ALL`, with `absentMeans: 'ALL'` so a graph saved before the control existed keeps
+  what it did.
 
 **`detail` is dropped wherever the face count could have moved.** Not only because the triangle
 count would be stale — `detailNote` reads `decimated` as *"this source publishes one level of
@@ -744,7 +1023,7 @@ the top of `skeletor.post`, which `import skeletor` imports. About 22 MB on top 
 then one package that cannot load. But with navis-fastcore installed, skeletor's wavefront path
 calls fastcore for every graph step — unique edges, components, the BFS, level-set components,
 vertex contraction, dotprops, the spanning tree, the orientation — and every one of those is in
-the 0.13.0 wheel Coda already pins. So the module is that path with trimesh and pandas cut out:
+the 0.13.2 wheel Coda already pins. So the module is that path with trimesh and pandas cut out:
 the same two packages as every other capability, **nothing to download** on a runtime that has
 run anything else.
 
@@ -778,13 +1057,31 @@ groupby becomes `bincount` and `reduceat` — pandas' mean is Kahan-summed, so a
 in the last bit, and the quantiles interpolate linearly as pandas does.
 
 **Two of skeletor's callers clean its answer, and the node offers both.** navis'
-`mesh2skeleton(shave=True)` removes every one-node twig hanging off a branch point, and then —
+`mesh2skeleton` removes every one-node twig hanging off a branch point, and then —
 unconditionally — gives every radius-0 non-root node half its parent's radius. fafbseg's
 `skeletonize_neuron(shave_skeleton=True)` first removes, repeatedly, terminal segments of at most
 two nodes or holding an edge of 1 µm or more (never one of ten nodes or more), then runs the same
-bristle pass. So the card has `Shave` (`off`/`bristles`/`thorough`, nested rather than combined)
-and `Fix zero radii` as a separate toggle, a radius fix not being a shave; both default on, as in
-navis, and both off is skeletor's answer. The 1 µm is fafbseg's and tuned on fly, so it is an
+bristle pass. So the card has `Shave` and `Fix zero radii` as a separate toggle, a radius fix not
+being a shave; both default on, as in navis, and both off is skeletor's answer.
+
+**`Shave` is four published recipes, not a severity ramp.** navis' `shave` went three-valued in
+27a93c477: `"bristles"` is the one-node pass alone, which is all `shave=True` used to do, and
+`True` now runs that and then `_shave_variable` — every *terminal twig* (leaf up to the first
+branch point) shorter than twice the median radius of the ten nodes rootwards of that branch
+point. The reasoning is that a false tip on a thick process is a twig running from the axis out to
+the surface, so its length is about the radius of the branch it comes off: under any fixed prune,
+and visible only relative to local thickness. Coda's `twigs` is that pair and `bristles` the old
+behaviour, kept because the card's value is saved in a graph — a word that quietly started
+shaving twigs would change every skeleton anybody had already made. `twigs` and `thorough` are
+**two independent extensions of `bristles`**: fafbseg's pass holds nothing of navis' radius-based
+one, so Thorough keeps twigs Twigs removes, and there is no ordering between them for a test to
+assert. `probe-skeletonize.py` therefore drives both of its loops off `_SHAVES` — so a fifth mode
+cannot be added without a parity line — and holds each mode against the code it was taken from:
+on skeletor's example mesh, off 1,260 nodes, bristles 1,051, twigs 1,022, thorough 659, each
+matching navis or fafbseg node for node. The twig walk is hand-vectorised rather than
+`fc.break_segments` filtered the way navis does it, because that call hands back a Python list of
+arrays; the walk compacts its live set each step, so it costs the total twig length rather than
+the longest walk times the number of leaves. The 1 µm is fafbseg's and tuned on fly, so it is an
 advanced control (`Long edge`), shown wherever it is read — `thorough`, and `Clean up soma`'s
 shave around the soma — and, like the soma radius, refused on voxel coordinates by
 `checkCleanUnits` (`usesDistance`). Three things the parity probe found worth
@@ -794,7 +1091,9 @@ test covers **the segment's end node too**, whose edge is not part of the segmen
 fafbseg's own 1 µm neither the long-edge rule nor the ten-node cap changes anything on skeletor's
 example mesh, so the probe also compares at 200 and 150 nm, where both do. Each is checked against
 navis' `mesh2skeleton` and fafbseg's shave loop run on a navis neuron as fafbseg writes it, and
-the notebook's `coda_tidy_skeleton` against the module.
+the notebook's `coda_tidy_skeleton` against the module — which is the check that matters most, the
+notebook's shave chain being a second implementation that fails *open*: a mode its `if` ladder did
+not know would have skipped the shave entirely and still produced a plausible neuron.
 
 **The soma: labelled from the source, cleaned up on request, detected as a last resort.**
 `MeshGeometry.soma` is the source's soma position in the mesh's frame — neuPrint's

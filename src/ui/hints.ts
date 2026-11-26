@@ -39,6 +39,7 @@
 import { useSyncExternalStore } from 'react'
 
 import type { GraphNode, HintSide, NodeHint } from '../core/graph'
+import { NO_HINTS } from '../core/graph'
 import { DEFAULT_HINT_SIDE } from '../core/graph'
 import { hashString } from '../core/hash'
 import { filledParams, getNodeDef } from '../core/registry'
@@ -114,8 +115,6 @@ export function restoreHints(hints?: readonly NodeHint[]): void {
   if (next.size === set.size) return
   publish(next)
 }
-
-const NO_HINTS: readonly NodeHint[] = []
 
 /**
  * The hints a node's definition derives from this browser (`NodeDefinition.readerHints`) — never

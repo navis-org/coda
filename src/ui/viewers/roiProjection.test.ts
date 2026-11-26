@@ -9,6 +9,8 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { meshSurfaceArea } from '../../core/values'
+
 import type { MeshGeometry } from '../../core/values'
 import { generateRoiMesh } from '../../data/mock/morphology'
 import type { XY } from '../raster'
@@ -22,7 +24,6 @@ import {
   regionGeometry,
   regionSide,
   fitFrame,
-  meshSurfaceArea,
   meshVolume,
   panRoiWindow,
   pointToScene,

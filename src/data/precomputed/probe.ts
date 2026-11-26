@@ -198,6 +198,16 @@ async function classify(
      * sequence put a whole extra round trip in front of a card that is waiting to say what it
      * found. This runs from an edit-time peek, so that latency is visible.
      */
+    /*
+     * The scales are deliberately **not** opened here, though `openVolume` would fit beside
+     * these. Unlike the mesh and skeleton directories — whose `/info` is a different URL nobody
+     * has fetched — a volume's scales come out of the very document `read` just fetched, which
+     * `fetchInfo` memoises per URL; so a caller's own `openVolume(base)` costs no request and
+     * this would save nothing. It would cost something: `tryOpen` turns a throw into
+     * `undefined`, and `parseVolumeInfo` throws on purpose when a scale is missing a field an
+     * address is computed from. Carried here, that refusal becomes a silent absent field that
+     * nothing reads.
+     */
     const [mesh, skeletons] = await Promise.all([
       tryOpen(meshUrl, openMeshDir, signal),
       tryOpen(skeletonUrl, openSkeletonSource, signal),

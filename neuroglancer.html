@@ -14,6 +14,16 @@
         overflow: hidden;
         background: #000;
       }
+      /*
+       * Neuroglancer's own Find Path, on a graphene layer's Graph tab — hidden only where Coda's
+       * find path takes F on this card (the frame sets the attribute: `FrameKeysMessage.findPath`),
+       * so two find-path tools never draw two routes; elsewhere it is the reader's (`docs/find-path-plan.md`).
+       */
+      html[data-coda-find-path]
+        .neuroglancer-graphene-tab
+        .neuroglancer-tool-button:has(> .neuroglancer-tool-button-label[title^='Find Path']) {
+        display: none;
+      }
     </style>
   </head>
   <body>

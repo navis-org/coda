@@ -38,6 +38,8 @@ import { column, tableSchema } from '../../core/types'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import type { ColumnData, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
+import type { VoxelScale } from '../units'
+import { parseScale } from '../units'
 import { caveDType } from '../cave/json'
 import type { CaveRequestOptions, CaveRow } from '../cave/client'
 import type { CaveReference } from '../cave/api'
@@ -101,6 +103,36 @@ export interface CaveTableConfig extends Record<string, string> {
   valueColumn: string
   /** Comma-separated columns to keep, for a wide table. Empty keeps everything but the id. */
   columns: string
+  /**
+   * `desired_resolution` as `x, y, z` nanometres per unit, or empty for the table's own.
+   *
+   * **Empty is CAVE's default, which is the table's stored voxels**, and that is what this
+   * returned before the field existed — so empty it stays, for every graph saved until now. A
+   * position column read that way is a factor out of anything Coda measures in nanometres, and
+   * nothing fails: `spec.ts` records establishing exactly that on FlyWire's synapses, by asking
+   * for both and watching the values divide by 4, 4 and 40.
+   *
+   * `1, 1, 1` is nanometres, which is Coda's rule for geometry everywhere else and what a reader
+   * wanting to *use* a position rather than look at it wants.
+   */
+  resolution: string
+}
+
+/**
+ * `CaveTableConfig.resolution` as the query's `resolution`, or nothing at all.
+ *
+ * Parsed rather than trusted: the field is free text on a card, and a resolution that is not
+ * three positive numbers is **left off the request** rather than sent. The card's own `validate`
+ * is what says so — sending a malformed one gets a 400 naming nothing a reader would recognise,
+ * and sending a silently-wrong one (two numbers, a stray letter) is worse than sending none.
+ *
+ * The grammar is `parseScale`'s, shared with Custom CAVE's `Voxel size` and Table to Points'
+ * `Nanometres per unit`: all three fields are three positive numbers of nanometres per unit, and
+ * a card that read them differently would be a second answer to a question settled once.
+ */
+function resolutionOf(config: CaveTableConfig): { resolution?: VoxelScale } {
+  const parsed = parseScale(config.resolution ?? '')
+  return parsed ? { resolution: parsed } : {}
 }
 
 /** Distinct values of `pivotOn` for a long table, keyed by (dataset, table, column), once landed. */
@@ -289,6 +321,9 @@ class CaveTableProvider implements AnnotationProvider {
               table: config.table,
               filters: { equal: { [config.pivotOn]: kind } },
               columns: withId([config.valueColumn]),
+              // The long-form read too: a position column is a position column whichever branch
+              // fetched it, and this one was left out while the card said nanometres.
+              ...resolutionOf(config),
               ...(reference ? { reference } : {}),
             },
             { of: `${config.table} (${kind})`, consequence: INCOMPLETE },
@@ -316,7 +351,7 @@ class CaveTableProvider implements AnnotationProvider {
           server,
           datastack,
           version,
-          { view: config.table, ...columns },
+          { view: config.table, ...columns, ...resolutionOf(config) },
           refusal,
           request,
         )
@@ -324,7 +359,12 @@ class CaveTableProvider implements AnnotationProvider {
           server,
           datastack,
           version,
-          { table: config.table, ...columns, ...(reference ? { reference } : {}) },
+          {
+            table: config.table,
+            ...columns,
+            ...resolutionOf(config),
+            ...(reference ? { reference } : {}),
+          },
           refusal,
           request,
         )

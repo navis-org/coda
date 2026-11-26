@@ -16,6 +16,9 @@
  * Headless on purpose (no React, no store), so `shortcuts.test.ts` can read it without jsdom.
  */
 
+import type { ReviewKey } from '../data/neuroglancer/frameMessage'
+import { REVIEW_KEY_CODES } from '../data/neuroglancer/frameMessage'
+
 /**
  * A chord, stored by meaning rather than by glyph.
  *
@@ -112,6 +115,11 @@ export function formatChord(chord: Chord, apple = isApplePlatform()): string {
   if (chord.shift) parts.push('Shift')
   parts.push(SPELLED_OUT[chord.key] ?? chord.key)
   return parts.join('+')
+}
+
+/** A review key's chord, read off the codes the card and the frame match it by. */
+function reviewChord(key: ReviewKey): [Chord] {
+  return [{ key: REVIEW_KEY_CODES[key].slice('Key'.length) }]
 }
 
 /**
@@ -276,6 +284,61 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
         id: 'escape',
         chords: [{ key: 'Esc' }],
         label: 'Close the menu, dialog or expanded result',
+      },
+    ],
+  },
+  {
+    /*
+     * The review card's keys, bound by the card while it is mounted (`segmentHover.ts`,
+     * `seam/reviewKeys.ts`) — listed here so the dialog shows them. They work with the pointer in
+     * a neuroglancer frame too, which hands them back (`REVIEW_KEY_CODES`).
+     */
+    title: 'Proofread Merges',
+    note: 'With a Proofread Merges card open, in Neuroglancer too. A verdict key moves on to the next row without one.',
+    items: [
+      { id: 'review-accept', chords: reviewChord('accept'), label: 'Accept' },
+      { id: 'review-reject', chords: reviewChord('reject'), label: 'Reject' },
+      {
+        id: 'review-ends',
+        chords: reviewChord('ends'),
+        label: 'Ends',
+        hint: 'Rejected because the neuron ends here',
+      },
+      { id: 'review-unsure', chords: reviewChord('unsure'), label: 'Unsure' },
+      {
+        id: 'review-ignore',
+        chords: reviewChord('ignore'),
+        label: 'Ignore',
+        hint: 'The right continuation, but not to be merged',
+      },
+      {
+        id: 'review-skip',
+        chords: reviewChord('skip'),
+        label: 'Skip to the next row without a verdict',
+      },
+      {
+        id: 'pick-segment',
+        chords: [{ key: 'J' }],
+        label: 'Add the piece under the pointer to Proofread Merges',
+        hint: 'In Neuroglancer: listed for its neuron and accepted',
+      },
+    ],
+  },
+  {
+    title: 'Neuroglancer',
+    note: 'In a Neuroglancer card on a CAVE dataset whose chunkedgraph publishes affinities (not FlyWire).',
+    items: [
+      {
+        id: 'split-segment',
+        chords: [{ key: 'K' }],
+        label: 'Splits of the neuron under the pointer',
+        hint: 'Near the point, nearest first',
+      },
+      {
+        id: 'find-path',
+        chords: [{ key: 'F' }],
+        label: 'Find a path along the neuron under the pointer',
+        hint: 'Once at the start, once at the end; weak steps draw brightest',
       },
     ],
   },

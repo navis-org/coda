@@ -29,15 +29,25 @@
  * that moves the ABI needs a wheel built against it, which is why `sources.json` pins both.
  */
 
+import ASSESSOR_PATCHES_PY from './assessorPatches.py?raw'
 import DOTMOTIF_PY from './dotmotif.py?raw'
 import LINKAGE_PY from './linkage.py?raw'
 import MATCHES_PY from './matches.py?raw'
+import CUTOUT_SUMMARY_PY from './cutoutSummary.py?raw'
 import MESHES_PY from './meshes.py?raw'
 import NBLAST_PY from './nblast.py?raw'
+import SEAM_CANONICAL_PY from './seam/canonical.py?raw'
+import SEAM_CANDIDATES_PY from './seam/candidates.py?raw'
+import SEAM_CUTOUT_PY from './seam/cutout.py?raw'
+import SEAM_ENCLOSURE_PY from './seam/enclosure.py?raw'
+import SEAM_PATCHES_PY from './seam/patches.py?raw'
+import SEAM_SCAN_PY from './seam/scan.py?raw'
+import SEAM_WINDOWS_PY from './seamWindows.py?raw'
 import SKELETONIZE_PY from './skeletonize.py?raw'
 import SKELETONS_PY from './skeletons.py?raw'
 import TOPOLOGY_PY from './topology.py?raw'
 import WARP_PY from './warp.py?raw'
+import { loadPackagesOrThrow } from './loadPackages'
 import sources from './sources.json'
 import type { PyArg, PyResult } from './types'
 
@@ -59,6 +69,15 @@ type Report = (fraction: number, note?: string) => void
  */
 interface PyModule {
   source: string
+  /**
+   * Other Python files this module installs itself, by name.
+   *
+   * For a module whose working code is **vendored unchanged** from another repository and
+   * imports across files, which the one-source-per-module bridge otherwise cannot express.
+   * Seeded into the module's globals as `__vendored__`; the module decides what to do with it,
+   * because how a package is assembled is its own business and not the runtime's.
+   */
+  vendored?: Record<string, string>
   /** Package names Pyodide resolves from its own lock, or an absolute wheel URL. */
   packages: string[]
   /**
@@ -110,6 +129,8 @@ const MODULES: Record<string, PyModule> = {
    * download that a first NBLAST pays is the download for all of them, and the table below
    * is seven identical rows because a capability that declared *fewer* packages would still
    * pay the same first-use cost the moment anything else in the graph needed the wheel.
+   * (`seamWindows` is the first that does declare fewer — numpy alone — and it is kept out of
+   * this run for that reason rather than folded into it.)
    *
    * They stay six rows rather than becoming one shared constant: `MODULES` is the place a
    * reader looks to find out what a given node downloads, and an indirection there would
@@ -141,6 +162,59 @@ const MODULES: Record<string, PyModule> = {
   },
   // skeletor's wavefront skeletonizer trimmed to the calls it makes into fastcore, so the same
   // two packages again rather than skeletor's own scipy, pandas, trimesh and igraph.
+  /*
+   * The windows a SEAM model takes, and **the first row that is not like the others** — numpy
+   * alone, no wheel. It sits down here rather than in the run above because that run's whole
+   * point is that every row declares the same two packages; this one declares fewer, which is
+   * the cheap exception rather than DotMotif's expensive one. Its two working files are
+   * byte-identical copies of SEAM's own (`seam/VENDORED.md`), because that project's invariants
+   * 3 and 11 put training and inference behind one numpy-only function precisely so this can be
+   * a copy rather than a port.
+   */
+  seamWindows: {
+    source: SEAM_WINDOWS_PY,
+    vendored: { 'seam.canonical': SEAM_CANONICAL_PY, 'seam.scan': SEAM_SCAN_PY },
+    packages: ['numpy'],
+    label: 'numpy · SEAM windows',
+  },
+  /*
+   * **The expensive row**, and the only one that is not numpy-and-a-wheel. `summarize_cutout`
+   * needs scipy for its exact distance transform and pandas for the frame it returns, which is
+   * a 14 MB wheel and a 4.2 MB one on top of numpy — about 19 MB with their dependencies,
+   * fetched once and cached by the browser. For scale, Model E's weights are 71 MB.
+   *
+   * It is a row of its own rather than folded into the runs above for the reason the header
+   * gives: a capability declares what it downloads, so a graph that never searches for merge
+   * candidates never pays this. Neither package can be avoided without porting SEAM's feature
+   * code, which is the drift `seam/VENDORED.md` exists to prevent — and four of the geometric
+   * ranker's eight features come out of the moments pass alone.
+   */
+  cutoutSummary: {
+    source: CUTOUT_SUMMARY_PY,
+    vendored: {
+      'seam.cutout': SEAM_CUTOUT_PY,
+      'seam.candidates': SEAM_CANDIDATES_PY,
+      'seam.enclosure': SEAM_ENCLOSURE_PY,
+    },
+    packages: ['numpy', 'scipy', 'pandas'],
+    label: 'numpy · scipy · pandas · SEAM cutout and ranker',
+  },
+  /*
+   * The assessor's patches — numpy alone, like `seamWindows` and unlike the row above it. The
+   * labelling and the cutting are `seam/patches.py`, a byte-identical copy of SEAM's own file
+   * (`seam/VENDORED.md`), and neither needs scipy or pandas: it is indexing and a lookup table.
+   *
+   * Which matters more than it looks. A caller scoring one tip pays this row and not
+   * `cutoutSummary`'s 19 MB of wheels, so the half of the pipeline that cuts patches can run in
+   * a session that never searched for a candidate — a graph reading a published suggestion set,
+   * for instance, where SEAM did the search months ago.
+   */
+  assessorPatches: {
+    source: ASSESSOR_PATCHES_PY,
+    vendored: { 'seam.patches': SEAM_PATCHES_PY },
+    packages: ['numpy'],
+    label: 'numpy · SEAM patches',
+  },
   skeletonize: {
     source: SKELETONIZE_PY,
     packages: ['numpy', sources.fastcoreWheel],
@@ -169,8 +243,13 @@ interface PyNamespace extends PyProxy {
 interface PyodideApi {
   loadPackage(
     names: string | string[],
-    options?: { messageCallback?: (message: string) => void },
+    options?: {
+      messageCallback?: (message: string) => void
+      errorCallback?: (message: string) => void
+    },
   ): Promise<unknown>
+  /** Every package installed so far, by its name in Pyodide's lock file. */
+  loadedPackages: Readonly<Record<string, unknown>>
   runPython(code: string, options?: { globals?: PyNamespace }): unknown
   /** A JS object as a Python one — for a plain object, a dict proxy. */
   toPy(value: object): unknown
@@ -189,8 +268,51 @@ let bootPromise: Promise<PyodideApi> | undefined
 /**
  * Each module's own globals, never one shared `py.globals` — see `docs/python-pyodide.md`. Held for
  * the session: a module's functions read their helpers from it at call time.
+ *
+ * **As a promise made once** — not as the namespace, filled when loading
+ * ends. Two first calls to one module can overlap (Find Merge Candidates warms the cutter's worker while
+ * its first box is opened), and filled on completion both would load, each run the source into a
+ * namespace of its own, and the later `set` would replace the earlier: the cutter's held box would
+ * then sit in a copy no later call reaches. A failed load is forgotten, so the next call retries.
  */
-const namespaces = new Map<string, PyNamespace>()
+const namespaces = new Map<string, Promise<PyNamespace>>()
+
+function namespaceOf(py: PyodideApi, module: string, report: Report): Promise<PyNamespace> {
+  const held = namespaces.get(module)
+  if (held) return held
+  const loading = loadNamespace(py, module, report)
+  namespaces.set(module, loading)
+  loading.catch(() => {
+    if (namespaces.get(module) === loading) namespaces.delete(module)
+  })
+  return loading
+}
+
+async function loadNamespace(
+  py: PyodideApi,
+  module: string,
+  report: Report,
+): Promise<PyNamespace> {
+  const spec = MODULES[module]
+  if (!spec) throw new Error(`No Python module called "${module}"`)
+  report(0.1, spec.label)
+  // One call, not one per package: these come from two different hosts, so awaited in turn
+  // the second request's DNS, TLS and slow-start all wait on the first transfer finishing —
+  // 2.9 MB and 1.1 MB, on the one path where the whole ten megabytes is already being paid.
+  const wheels = (spec.wheels ?? []).map((name) => new URL(`wheels/${name}`, siteRoot).href)
+  // Thrown before anything is run or kept, so a download that failed is retried by the next
+  // call rather than leaving a module that imports what never arrived — `loadPackages.ts`.
+  await loadPackagesOrThrow(py, [...spec.packages, ...wheels], spec.label, {
+    note: (text) => report(0.1, text),
+  })
+  // `__name__` seeded, as an import would, so a class or a traceback names its module.
+  const namespace = py.toPy({
+    __name__: module,
+    ...(spec.vendored ? { __vendored__: spec.vendored } : {}),
+  }) as PyNamespace
+  py.runPython(spec.source, { globals: namespace })
+  return namespace
+}
 
 async function boot(report: Report): Promise<PyodideApi> {
   if (!bootPromise) {
@@ -258,32 +380,37 @@ export async function callPython(
   fn: string,
   args: PyArg[],
   report: Report,
+  /**
+   * A piece of the answer the function has already worked out, which its caller can start on
+   * while the rest is computed — Python's `report(fraction, note, {...})`. Converted as the
+   * result is, below.
+   */
+  onPartial: (partial: PyResult) => void,
 ): Promise<PyResult> {
   const py = await boot(report)
 
-  let namespace = namespaces.get(module)
-  if (!namespace) {
-    const spec = MODULES[module]
-    if (!spec) throw new Error(`No Python module called "${module}"`)
-    report(0.1, spec.label)
-    // One call, not one per package: these come from two different hosts, so awaited in turn
-    // the second request's DNS, TLS and slow-start all wait on the first transfer finishing —
-    // 2.9 MB and 1.1 MB, on the one path where the whole ten megabytes is already being paid.
-    const wheels = (spec.wheels ?? []).map((name) => new URL(`wheels/${name}`, siteRoot).href)
-    await py.loadPackage([...spec.packages, ...wheels], { messageCallback: () => {} })
-    // `__name__` seeded, as an import would, so a class or a traceback names its module.
-    namespace = py.toPy({ __name__: module }) as PyNamespace
-    py.runPython(spec.source, { globals: namespace })
-    namespaces.set(module, namespace)
-  }
-
+  const namespace = await namespaceOf(py, module, report)
   const callable = namespace.get(fn)
   if (!callable) throw new Error(`Python module "${module}" defines no "${fn}"`)
 
   let out: PyProxy | undefined
   try {
-    out = callable(...args, (fraction: number, note?: string) => {
+    out = callable(...args, (fraction: number, note?: string, partial?: PyProxy) => {
       report(BOOT_SHARE + (1 - BOOT_SHARE) * fraction, note)
+      /*
+       * Converted and released here, while Python is still running: the call is synchronous, so
+       * this is the only moment it can leave, and a proxy kept past it leaks (above). **A partial
+       * that cannot be sent is dropped**, never raised into Python: it is a head start, and the
+       * final result alone is the answer.
+       */
+      if (partial == null) return
+      try {
+        onPartial(partial.toJs({ dict_converter: Object.fromEntries }) as PyResult)
+      } catch {
+        // Dropped; see above.
+      } finally {
+        partial.destroy()
+      }
     })
     return out.toJs({ dict_converter: Object.fromEntries }) as PyResult
   } finally {

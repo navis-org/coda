@@ -431,6 +431,8 @@ describe('every store action is on one side of the lock', () => {
     'setParam',
     // Several params in one commit: `setParam`'s kind of edit, made once.
     'setParams',
+    // Several nodes' params in one commit: the same kind of edit, across cards.
+    'setParamsMany',
     'renameNode',
     'toggleDisabled',
     'toggleCollapsed',
@@ -450,21 +452,34 @@ describe('every store action is on one side of the lock', () => {
     'setSelection',
     'runAll',
     'runNode',
+    // A fix's button (`IssueFix`). `tickAndRun` is a boolean param ticked and the node run, live
+    // so a reader of a locked dashboard can still allow a model download; `attachAnnotationChain`
+    // refuses under the lock itself (above).
+    'applyFix',
     'cancelRun',
     'invalidateNode',
     'clearNodeCache',
+    // The card's ⟳: the node's run record emptied (a `setParam`'s kind of edit, and live for the
+    // same reason), its key moved and its cache dropped, and the node run.
+    'refreshNode',
     'clearResults',
     'needsRun',
     'nodeInfo',
     // How far the run in flight has got. A read, like its four neighbours here.
     'runProgress',
     'nodeInputs',
+    // Whether what arrives on a node's inputs is still being produced. A read, like its
+    // neighbours — a card draws a caption from it and nothing about the graph moves.
+    'nodeInputsFilling',
     'nodeOutput',
     'nodeFetchedAt',
     'nodeWarning',
     // What each workflow's results hold, for the memory readout. A read.
     'workflowMemory',
     'setNotice',
+    // A card writing to a server holds its node and document; it edits nothing, and a locked
+    // canvas does not stop merges the reader confirmed (`writeHold.test.ts`).
+    'holdForWrite',
     'copySelection',
     /*
      * The workflow switcher, all on this side. The lock freezes edits landing on *this* graph;

@@ -639,6 +639,31 @@ export function patchUrl(viewerBase: string | undefined, patch: NgScene): string
 }
 
 /**
+ * Nanometres per unit of a scene's global coordinate space, from its own `dimensions`.
+ *
+ * Undefined unless all three axes are present and in metres — the only unit these scenes use,
+ * and the one a guess would silently get wrong by a factor of a thousand.
+ *
+ * What it is for: neuroglancer's camera `position` is in the global space's units, and every
+ * caller who wants to point a camera has nanometres — a contact point, a window centre, a
+ * synapse. A scene that declares no dimensions converts nothing, because a camera at the wrong
+ * scale looks exactly like a camera at the right one somewhere else.
+ */
+export function sceneVoxelNm(scene: NgScene): [number, number, number] | undefined {
+  const dimensions = scene['dimensions']
+  if (!dimensions || typeof dimensions !== 'object') return undefined
+  const read = (axis: string): number | undefined => {
+    const entry = (dimensions as Record<string, unknown>)[axis]
+    if (!Array.isArray(entry) || entry.length !== 2) return undefined
+    const [size, unit] = entry as [unknown, unknown]
+    if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) return undefined
+    return unit === 'm' ? size * 1e9 : undefined
+  }
+  const [x, y, z] = [read('x'), read('y'), read('z')]
+  return x !== undefined && y !== undefined && z !== undefined ? [x, y, z] : undefined
+}
+
+/**
  * The part of a scene a patch cannot change, as a comparable string.
  *
  * Two scenes with the same identity describe the same *place* — same dataset, same published
@@ -688,48 +713,108 @@ export interface LayerSelection {
   segmentDefaultColor?: string
 }
 
+/** One local annotation layer's contents, as the frame takes them in place. */
+export interface LayerAnnotations {
+  name: string
+  annotations: unknown[]
+}
+
+/** What `inPlaceChanges` found. */
+export interface InPlaceChanges {
+  /** Segmentation layers whose segments or colours changed. */
+  segments: LayerSelection[]
+  /** Local annotation layers whose annotations changed. */
+  annotations: LayerAnnotations[]
+  /** `before` with those set — what the frame shows once they are. */
+  scene: NgScene
+  /** Whether that is `next`, so nothing is left for a navigation. */
+  whole: boolean
+}
+
+/** Layer keys that carry a local annotation layer's contents. */
+const ANNOTATION_FIELDS = ['annotations'] as const
+
 /**
- * The selections that change between two scenes, or undefined where anything else changes too.
+ * What of a new scene can be set in the frame in place (`FrameSegmentsMessage`), rather than
+ * restored, which tears every layer down — and so waits for the pointer to leave and reloads every
+ * mesh. Two kinds of change go in place: a segmentation layer's segments and colours, and a local
+ * annotation layer's annotations. Undefined where none can: another scene (`sceneIdentity`), or two
+ * layers of one name, since the frame finds a layer by its name.
  *
- * The question behind the card's cheapest update: when a new scene differs from the one the frame
- * holds only in which segments some layers show and how they are coloured, those layers can be set
- * in place (`FrameSegmentsMessage`) rather than restored, which tears every layer down. Asked of
- * the whole scene, every layer and every key, so a change to anything else — a layer added, a
- * layout, a camera — is never applied this way and goes through a navigation as before. Empty
- * means the scenes are the same.
+ * **`whole`** says whether that is all that changed. Asked of every layer and every key, so a
+ * change to anything else — a layer added, removed or moved, a shader, a layout, a camera — is
+ * never applied this way. When it is not whole, a navigation follows for the rest, and what can go
+ * in place still goes ahead of it: Proofread Merges under Auto-extend changed its points and
+ * its pieces in one update, and the new green piece waited on the navigation (user, 2026-11-18).
+ * Both now go in place, so that update is whole.
  */
-export function selectionChanges(before: NgScene, next: NgScene): LayerSelection[] | undefined {
+export function inPlaceChanges(before: NgScene, next: NgScene): InPlaceChanges | undefined {
   if (sceneIdentity(before) !== sceneIdentity(next)) return undefined
   const was = layerList(before)
   const now = layerList(next)
-  if (was.length !== now.length) return undefined
-  const changes: LayerSelection[] = []
-  for (let i = 0; i < now.length; i++) {
-    const a = was[i]!
-    const b = now[i]!
-    if (a.name !== b.name || typeof b.name !== 'string') return undefined
-    if (stableStringify(withoutSelection(a)) !== stableStringify(withoutSelection(b))) {
-      return undefined
-    }
-    if (sameSelection(a, b)) continue
-    if (!SEGMENTATION_TYPES.has(String(b.type))) return undefined
-    changes.push({
-      name: b.name,
-      segments: stringList(b['segments']),
-      segmentColors: colorMap(b['segmentColors']),
-      ...(typeof b['segmentDefaultColor'] === 'string'
-        ? { segmentDefaultColor: b['segmentDefaultColor'] }
-        : {}),
-    })
+  const byName = new Map(now.map((layer) => [layer.name, layer]))
+  if (byName.size !== now.length || new Set(was.map((l) => l.name)).size !== was.length) {
+    return undefined
   }
-  return changes
+  let whole = was.length === now.length && was.every((a, i) => a.name === now[i]!.name)
+  const segments: LayerSelection[] = []
+  const annotations: LayerAnnotations[] = []
+  const layers = was.map((a): NgLayer => {
+    const b = byName.get(a.name)
+    if (!b || typeof b.name !== 'string') {
+      whole = false
+      return a
+    }
+    const fields = inPlaceFields(b)
+    if (stableStringify(without(a, fields)) !== stableStringify(without(b, fields))) {
+      whole = false
+      return a
+    }
+    if (fields === SEGMENT_FIELDS) {
+      if (sameSelection(a, b)) return a
+      segments.push(selectionOf(b.name, b))
+    } else if (fields === ANNOTATION_FIELDS) {
+      if (stableStringify(a['annotations']) === stableStringify(b['annotations'])) return a
+      const list = b['annotations']
+      annotations.push({ name: b.name, annotations: Array.isArray(list) ? [...list] : [] })
+    } else {
+      return a
+    }
+    const moved: Record<string, unknown> = without(a, fields)
+    for (const key of fields) if (key in b) moved[key] = b[key]
+    return moved as NgLayer
+  })
+  return { segments, annotations, scene: { ...before, layers }, whole }
 }
 
-function withoutSelection(layer: NgLayer): Record<string, unknown> {
-  const rest: Record<string, unknown> = {}
-  for (const key of Object.keys(layer)) {
-    if (!(SEGMENT_FIELDS as readonly string[]).includes(key)) rest[key] = layer[key]
+/** The keys of a layer that can be set in place, by its kind; none for any other layer. */
+function inPlaceFields(layer: NgLayer): readonly string[] {
+  if (SEGMENTATION_TYPES.has(String(layer.type))) return SEGMENT_FIELDS
+  if (layer.type === 'annotation' && isLocalSource(layer['source'])) return ANNOTATION_FIELDS
+  return []
+}
+
+/** A layer source that is `local://annotations`, written alone or as `{ url }`. */
+function isLocalSource(source: unknown): boolean {
+  const url = source && typeof source === 'object' ? (source as { url?: unknown }).url : source
+  return url === 'local://annotations'
+}
+
+/** A layer's selection as the frame takes it (`FrameSegmentsMessage`). */
+function selectionOf(name: string, layer: NgLayer): LayerSelection {
+  return {
+    name,
+    segments: stringList(layer['segments']),
+    segmentColors: colorMap(layer['segmentColors']),
+    ...(typeof layer['segmentDefaultColor'] === 'string'
+      ? { segmentDefaultColor: layer['segmentDefaultColor'] }
+      : {}),
   }
+}
+
+function without(layer: NgLayer, fields: readonly string[]): Record<string, unknown> {
+  const rest: Record<string, unknown> = {}
+  for (const key of Object.keys(layer)) if (!fields.includes(key)) rest[key] = layer[key]
   return rest
 }
 
@@ -906,8 +991,8 @@ export function parseSceneUrl(url: string): NgScene | undefined {
 
 /**
  * A local annotation layer in nanometres, each annotation coloured by its own `color` property —
- * the one wrapper every local annotation layer Coda builds shares (Bounding Box's box); only the
- * marker and the annotations differ.
+ * the one wrapper every annotation layer Coda builds shares (the SEAM pack's points and paths,
+ * Bounding Box's box); only the marker and the annotations differ.
  *
  * The scale is written out rather than through `nanometreDimensions` above,
  * which takes a voxel-size triple and answers `undefined` for anything not finite and positive —

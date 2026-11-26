@@ -163,6 +163,17 @@ export interface NodeHint {
   side?: HintSide
 }
 
+/**
+ * No hints — the answer most `readerHints` give most of the time.
+ *
+ * Here rather than four times over, which is what it had become (`ui/hints.ts`,
+ * `nodes/table/linkTable.ts`, `packs/annotation/bigclust.ts`, `packs/seam/suggestMerges.ts`).
+ * A shared constant rather than a fresh `[]` per call because the card asks on every render to
+ * decide whether to mount its hint stack at all, and `NodeDefinition.readerHints` asks for a
+ * module-level constant in as many words.
+ */
+export const NO_HINTS: readonly NodeHint[] = []
+
 export interface GraphEdge {
   id: string
   source: string
@@ -406,6 +417,24 @@ export function ancestors(graph: CodaGraph, nodeId: string): Set<string> {
 }
 
 /**
+ * The upstream closure over every edge, as a function so the index is built once for however many
+ * nodes are asked about. Reference edges included, since a node whose referenced node failed is
+ * refused too — and since one may point upstream (`asReference`), a node can be in its own set.
+ */
+export function ancestorsOf(graph: CodaGraph): (nodeId: string) => Set<string> {
+  const index = neighbourIndex(graph.edges, 'target')
+  return (nodeId) => closure(index, nodeId)
+}
+
+/**
+ * The downstream closure along **dataflow edges only**: what a node's output reaches. A reference
+ * edge may point upstream (`asReference`), and following it would reach nodes above this one.
+ */
+export function dataflowDescendants(graph: CodaGraph, nodeId: string): Set<string> {
+  return closure(neighbourIndex(dataflowEdges(graph), 'source'), nodeId)
+}
+
+/**
  * Whether this graph could contain a loop at all — `mayHaveReferences`' twin.
  *
  * Asked before `loopRegion` or `loopsIn` walk anything, so a graph with no `For Each` in it pays
@@ -503,6 +532,30 @@ export function isReferencePort(nodeType: string | undefined, portId: string): b
    * cannot be a reference at any count. See `core/ports.ts`.
    */
   return !!def && allInputPorts(def).some((p) => p.id === portId && p.reference === true)
+}
+
+/**
+ * The node that **names** one output of another: the first whose `reference` port is wired from
+ * it, or `undefined`.
+ *
+ * The other direction of a reference wire, for a card that has to act on whoever reads it —
+ * `seam:proofreadMerges` runs the search its `Extended` output is wired back to. Asked of the port's own
+ * declaration rather than of a type id the caller would have to know: the reader says it reads
+ * by reference, and that is the whole of what joins the two.
+ *
+ * A string or nothing, so a store selector can return it as it is (invariant 7).
+ */
+export function referrerOf(
+  graph: CodaGraph,
+  nodeId: string,
+  outputId: string,
+): string | undefined {
+  for (const edge of graph.edges) {
+    if (edge.source !== nodeId || edge.sourceHandle !== outputId) continue
+    const target = graph.nodes.find((node) => node.id === edge.target)
+    if (isReferencePort(target?.type, edge.targetHandle)) return edge.target
+  }
+  return undefined
 }
 
 /**
@@ -633,7 +686,10 @@ export function topoSort(graph: CodaGraph): TopoResult {
  *
  * A reader left ahead of its reference is not stranded: the walk does not treat an unbound
  * reference port as blocking, and an emitter reading one falls back to the referenced node's
- * *type*, which is all a reference ever promised.
+ * *type*, which is all a dataset reference ever promised. **Not so for a source read through
+ * `NodeDefinition.asReference`**: its value is in its params, not its type, and such a node
+ * consumes inputs, so it is never lifted. No node of that kind has an emitter yet; one that gets
+ * one has to write the params' answer out itself.
  *
  * Relative order is preserved on both sides, so a graph with no references is untouched.
  */

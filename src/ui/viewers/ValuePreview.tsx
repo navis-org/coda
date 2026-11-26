@@ -2,6 +2,7 @@ import { useContext, useMemo } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 
 import type { GraphNode } from '../../core/graph'
+import { caveScopeOf } from '../../nodes/lib/caveParams'
 import type { InferContext, ParamValue, ParamValues } from '../../core/node'
 import { enumValue } from '../../core/node'
 import { filledParams, getNodeDef } from '../../core/registry'
@@ -45,8 +46,13 @@ import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
 import type { BackgroundChoice } from './viewer3dScene'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import type { FrameTarget } from '../../nodes/output/neuroglancer'
-import { frameTarget, keepsHidden } from '../../nodes/output/neuroglancer'
-import { selfHostedViewer } from '../../data/neuroglancer/scene'
+import {
+  CONTROL_FRAME_NM,
+  controlFocusNm,
+  frameTarget,
+  keepsHidden,
+} from '../../nodes/output/neuroglancer'
+import { parseSceneUrl, sceneVoxelNm, selfHostedViewer } from '../../data/neuroglancer/scene'
 import { widthModeOf } from '../../nodes/output/viewer3d'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { NetworkMetricsViewer } from './NetworkMetricsViewer'
@@ -221,7 +227,8 @@ function ValuePreviewInner({
    * a remembered camera. Resolved here, where every surface's viewer is dispatched with the node in
    * hand, rather than in each viewer that keeps something. See `WorkflowScope`.
    */
-  const viewerKey = scopedKey(useContext(WorkflowScope), node.id)
+  const workflowId = useContext(WorkflowScope)
+  const viewerKey = scopedKey(workflowId, node.id)
 
   /*
    * A summary means "no second renderer", not just "no grid": an entry declaring `inSummary` is
@@ -249,6 +256,7 @@ function ValuePreviewInner({
       onSelectionChange,
       selection,
       viewerKey,
+      workflowId,
     })
     if (drawn !== undefined) return drawn
   }
@@ -369,6 +377,8 @@ type ViewerProps = Pick<
   selection: string[]
   /** The node's key within its workflow — a WebGL viewer's `viewerId`. See `scopedKey`. */
   viewerKey: string
+  /** The workflow (document) the node is drawn in: the active document's id (`WorkflowScope`). */
+  workflowId: string
 }
 
 interface ViewerEntry {
@@ -998,7 +1008,17 @@ const VIEWERS: Record<string, ViewerEntry> = {
   },
   'out.neuroglancer': {
     readsInputs: true,
-    render: ({ value, ctx, params, shared, inputValues, viewerKey, onParamChange }) => {
+    render: ({
+      node,
+      value,
+      ctx,
+      params,
+      shared,
+      inputValues,
+      viewerKey,
+      workflowId,
+      onParamChange,
+    }) => {
       // The scene, the segments and the colours are all in the URL the node emitted; the
       // neuron table comes along only so the legend can be drawn beside the frame.
       const neurons = inputValues?.neurons
@@ -1009,11 +1029,31 @@ const VIEWERS: Record<string, ViewerEntry> = {
        */
       const dataset = inputValues?.dataset
       const extra = inputValues?.layers
+      /*
+       * Where a `Control` wire is pointing the camera. Read here rather than in `evaluate`
+       * because a camera is not part of a scene: a scene whose `position` changed is a scene
+       * pointed somewhere else, and re-navigates. Converted from nanometres with the scene's own
+       * `dimensions`, which the URL already carries — so a controller says where in the units
+       * every caller has, and nothing has to fetch to find out how big a voxel is.
+       */
+      const control = inputValues?.control
+      const focusNm = controlFocusNm(isTableValue(control) ? control : undefined)
+      const voxel = focusNm ? sceneVoxelNm(parseSceneUrl(asString(value)) ?? {}) : undefined
+      const focus = focusNm && voxel ? focusNm.map((nm, i) => nm / voxel[i]!) : undefined
+      // Across the coarsest axis's units, so the span is the same physical distance whichever
+      // axis a scene samples most coarsely.
+      const focusWidth = voxel ? CONTROL_FRAME_NM / Math.max(...voxel) : undefined
       // What the frame opens — `Viewer type` and `Viewer`. The link (`value`) is the datastack's.
       const target = frameTarget(params)
       return (
         <NeuroglancerViewer
+          // A CAVE dataset's neurons can be split from the card (`K`, `ui/seam/splitKey.ts`).
+          splitTarget={caveScopeOf(dataset?.kind === 'dataset' ? dataset : undefined)}
+          // The card itself, so a split's new roots go into its neurons — where it can write them.
+          splitCard={onParamChange ? { docId: workflowId, nodeId: node.id } : undefined}
           url={asString(value)}
+          focus={focus}
+          focusWidth={focusWidth}
           neurons={isTableValue(neurons) ? neurons : undefined}
           color={readColorSpec('segment', params, ctx.column)}
           scale={Number(params.uiScale)}

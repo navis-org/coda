@@ -215,9 +215,9 @@ callout explaining why the code is arranged the way it is belongs in prose, or i
 `flow.forEach` gained two because both of its real traps were buried in paragraphs. The count is
 not the target; what the callout is *about* is.
 
-**Two ways to mistype the marker, both of which render as ordinary text**, and neither is visible
+**Three ways to mistype the marker, all of which render as ordinary text**, and none is visible
 in the parsed document — a mistyped marker produces a perfectly valid paragraph, so there is
-nothing for a test to compare against `blocks`. `help.test.ts` checks the raw source for both.
+nothing for a test to compare against `blocks`. `help.test.ts` checks the raw source for all three.
 
 - `> ![WARNING]` — `![` is the *image* marker, so the line is a blockquote holding the literal
   text `![WARNING]`, printed above the sentence it was meant to label. Four callouts, across
@@ -225,6 +225,9 @@ nothing for a test to compare against `blocks`. `help.test.ts` checks the raw so
 - A body written on the marker line behind an inline `>`, rather than on its own `>` line.
   Everything after the tone is read as the **title**, so a four-line warning draws as one long
   bold heading with an empty body. One document shipped that way.
+- A tone the parser does not know — GitHub's `[!IMPORTANT]`, `[!CAUTION]`. Not a callout, and
+  block quotes are unsupported, so it draws as one paragraph with its `>` markers in it. Three
+  callouts, in two SEAM documents, shipped that way.
 
 A callout's **title is parsed as inline markdown**, which is not a nicety: a warning is very
 often about a named setting, and `` `Normalise` `` in one was rendering as three literal
@@ -273,6 +276,17 @@ the shape worth optimising for is the one where a wire is a line that looks like
   type is *assignable* to — which is what lets `find -> skel` mean the obvious thing on a node
   whose first input is a Dataset and whose second is Neurons.
 - `caption:` and `focus:`.
+
+**A wire into a `reference` input is drawn dotted, as on the canvas** — read off the port, like
+everything else, so no figure says it. One that runs **backwards**, from a card to one upstream
+of it (Proofread Merges' `Extended` into Find Merge Candidates' `Review`, 2026-11-17), is kept out of
+the layering and routed *under* the cards between its ends, and the figure grows to hold it
+(`closesLoop`, `attachPaths`). Layered, it pushed the two cards apart; drawn with the canvas' own
+curve, it ran behind the cards — which are drawn over the wires here — and bulged half the
+distance past both ends, where `.cfig` clips. A forward reference (a dataset the card names) is
+layered as it always was. Looked at in Chrome on both documents: the wire is inside the box, and
+nothing scrolls. Where its target is in the first column every card moves over by the turn's
+reach.
 
 **`coda-node` and `coda-graph` differ in one thing, and it is not the number of cards.** A
 `coda-node` figure with two nodes and a wire is a `coda-graph`. What differs is which settings a

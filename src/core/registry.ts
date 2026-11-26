@@ -209,6 +209,27 @@ function register<P extends ParamValues>(
         'A loop needs both: the flag is what derives its region, the plan is what says how many passes to make.',
     )
   }
+  // A re-run is a chain of fetches; a `cheap` node runs on every keystroke (invariant 6).
+  if (def.rerunsInputs && def.cost !== 'expensive') {
+    throw new Error(
+      `"${def.type}" declares \`rerunsInputs\` but is not \`expensive\`. Re-running the chain ` +
+        'above an input is a run of every node in it, which a node that runs per edit must not start.',
+    )
+  }
+  /*
+   * A run record is written mid-run (`ParamBase.runRecord`). In the key, that write would re-key
+   * the node and everything below it and run them again for a record of what they had just done
+   * — silently, which is why the three flags it rests on are checked here, not left to its doc.
+   */
+  for (const param of def.params ?? []) {
+    if (param.runRecord && !(param.presentational && param.unrecorded && param.internal)) {
+      throw new Error(
+        `"${def.type}"'s \`${param.id}\` is a \`runRecord\` but not \`presentational\`, ` +
+          '`unrecorded` and `internal`: a record written mid-run must stay out of the key, the ' +
+          'undo history and the param rows.',
+      )
+    }
+  }
   /*
    * A companion is placed under its host's *height* on add, before anything has measured the
    * host — so the host has to say how tall it expects to be. Without this it would silently fall

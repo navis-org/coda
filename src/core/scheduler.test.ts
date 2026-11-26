@@ -443,6 +443,10 @@ describe('a node’s cache lifetime', () => {
   let downstream = 0
   /** When the stored copy was made — what a run that does not refresh reports. */
   let storedAt = 0
+  /** How long the source's own `evaluate` takes, on the faked clock. */
+  let takes = 0
+  /** The lifetime each execution was handed. */
+  let handed: Array<number | undefined> = []
 
   registerNode({
     type: 'test.lifetime.source',
@@ -455,8 +459,10 @@ describe('a node’s cache lifetime', () => {
     inferOutputs: () => ({ out: T.table() }),
     evaluate: (ctx) => {
       refreshes.push(ctx.refresh)
+      handed.push(ctx.maxAgeMs)
       if (ctx.refresh) storedAt = Date.now()
       ctx.reportFetched(storedAt)
+      if (takes > 0) vi.setSystemTime(Date.now() + takes)
       return { out: tableFromRows(tableSchema(column('x', 'i64')), [{ x: 1 }]) }
     },
   })
@@ -499,6 +505,8 @@ describe('a node’s cache lifetime', () => {
     refreshes = []
     downstream = 0
     storedAt = Date.now()
+    takes = 0
+    handed = []
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -515,6 +523,29 @@ describe('a node’s cache lifetime', () => {
     const summary = await sched.run(graph, { mode: 'full' })
     expect(summary.executed).toEqual([])
     expect(refreshes).toEqual([false])
+  })
+
+  it('hands the node its lifetime, and none where nobody chose one', async () => {
+    await makeScheduler().run(chain(HOUR), { mode: 'full' })
+    await makeScheduler().run(chain(undefined), { mode: 'full' })
+    // So a node with a cache of its own can leave out what is too old the first time.
+    expect(handed).toEqual([HOUR, undefined])
+  })
+
+  it('does not run a node twice for having taken long', async () => {
+    // A copy 50 minutes old under a one-hour lifetime, read by a node that takes 20 minutes. It
+    // was inside its lifetime when it was read; asked of the moment the node *finished*, the
+    // backstop would run the whole twenty minutes again.
+    storedAt = Date.now() - 50 * 60 * 1000
+    takes = 20 * 60 * 1000
+    await makeScheduler().run(chain(HOUR), { mode: 'full' })
+    expect(refreshes).toEqual([false])
+  })
+
+  it('still reads the server again for a copy that was too old when the node started', async () => {
+    storedAt = Date.now() - 2 * HOUR
+    await makeScheduler().run(chain(HOUR), { mode: 'full' })
+    expect(refreshes).toEqual([false, true])
   })
 
   it('lapses past it: stale downstream too, outputs kept, and the re-run reads the server', async () => {
@@ -718,6 +749,226 @@ describe('publishing a partial result', () => {
 })
 
 /**
+ * A partial crossing a node boundary.
+ *
+ * `ctx.publish` was built for a viewer drawing its own *inputs*, where the value on the upstream
+ * wire **is** the scene and nothing downstream has to run. Proofread Merges broke that
+ * premise: its queue is the partial, but the picture a reader judges a merge in is a
+ * Neuroglancer node one further along, fed from outputs only Review's `evaluate` produces. So
+ * the queue filled while the viewer beside it stayed on the previous run.
+ *
+ * `derivePreviews` recomputes the `cheap` nodes below a partial from it and keeps their answers
+ * as previews of their own. What has to stay true is everything that makes a preview not a
+ * result: nothing derived is cached, nothing derived survives the partial it came from, and a
+ * derived run reports none of the things a real run reports.
+ */
+describe('a partial below a node boundary', () => {
+  const ROW = tableSchema(column('x', 'i64'))
+  const rows = (n: number) =>
+    tableFromRows(
+      ROW,
+      Array.from({ length: n }, (_, x) => ({ x })),
+    )
+  const rowCount = (value: Value | undefined) => (isTableValue(value) ? value.length : -1)
+  /** A macrotask, which flushes the microtasks a derive is made of. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  let scheduler: Scheduler
+  /** What `out` held on each downstream node, sampled from inside the publisher. */
+  let seen: Record<string, number[]>
+  /** Lets `slowFollower`'s parked first evaluate finish. */
+  let releaseDerive: () => void
+
+  /**
+   * Publishes `steps` growing tables, sampling the whole chain after each.
+   *
+   * `steps` matters to one test and is worth a word: a second publish queues a second derive
+   * (`deriveAgain`), and that derive's own sweep cleans up after the first. A publisher that
+   * publishes **once** is the honest case for anything about a derive that outlives its
+   * partial, because nothing comes along afterwards to tidy up.
+   */
+  function publisher(type: string, watch: readonly string[], fail = false, steps = 2) {
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: async (ctx) => {
+        for (let n = 1; n <= steps; n++) {
+          ctx.publish({ out: rows(n) })
+          await settle()
+          for (const id of watch) (seen[id] ??= []).push(rowCount(scheduler.output(id, 'out')))
+        }
+        if (fail) throw new Error('nope')
+        return { out: rows(9) }
+      },
+    })
+  }
+
+  /**
+   * A follower whose **first** evaluate parks on a gate the test opens by hand.
+   *
+   * The first call is the derive's; every call after it is the real walk's. That is what lets a
+   * test put the two in the order that used to break — a derive still awaiting an `evaluate`
+   * when the partial under it has already gone.
+   */
+  function slowFollower(type: string) {
+    let calls = 0
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [{ id: 'in', label: 'In', type: T.table() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: async (ctx) => {
+        const given = ctx.input('in')
+        const out = rows((isTableValue(given) ? given.length : 0) + 1)
+        if (++calls === 1) await new Promise<void>((resolve) => (releaseDerive = resolve))
+        return { out }
+      },
+    })
+  }
+
+  /** Passes its input through with one row added, so what reached it is readable off the count. */
+  function follower(type: string, cost: 'cheap' | 'expensive') {
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost,
+      inputs: [{ id: 'in', label: 'In', type: T.table() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+      inferOutputs: () => ({ out: T.table() }),
+      evaluate: (ctx) => {
+        const given = ctx.input('in')
+        return { out: rows((isTableValue(given) ? given.length : 0) + 1) }
+      },
+    })
+  }
+
+  function chain(head: string, rest: readonly string[]): CodaGraph {
+    let g = addNode(emptyGraph('derive-test'), {
+      id: 'head',
+      type: head,
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    let from = 'head'
+    rest.forEach((type, i) => {
+      const id = `down${i}`
+      g = addNode(g, { id, type, position: { x: 200 * (i + 1), y: 0 }, params: {} })
+      g = addEdge(g, { source: from, sourceHandle: 'out', target: id, targetHandle: 'in' })
+      from = id
+    })
+    return g
+  }
+
+  beforeEach(() => {
+    scheduler = makeScheduler()
+    seen = {}
+    releaseDerive = () => {}
+  })
+
+  /**
+   * The case the whole mechanism is for. Sampled from *inside* the publisher, which is the only
+   * moment a derived value is the visible one.
+   */
+  it('recomputes a cheap node below it, before the node above has finished', async () => {
+    publisher('test.derive.one', ['down0'])
+    follower('test.derive.one.next', 'cheap')
+    await scheduler.run(chain('test.derive.one', ['test.derive.one.next']), { mode: 'full' })
+    // One row published then two, each with the follower's own row added.
+    expect(seen['down0']).toEqual([2, 3])
+  })
+
+  /** Review → Neuroglancer is two nodes along, so one hop would not have fixed anything. */
+  it('carries down a chain, not just to the first node', async () => {
+    publisher('test.derive.deep', ['down0', 'down1'])
+    follower('test.derive.deep.next', 'cheap')
+    await scheduler.run(
+      chain('test.derive.deep', ['test.derive.deep.next', 'test.derive.deep.next']),
+      { mode: 'full' },
+    )
+    expect(seen['down0']).toEqual([2, 3])
+    expect(seen['down1']).toEqual([3, 4])
+  })
+
+  /**
+   * **`cheap` is the gate, and it is one that already exists.** A node that may not run four
+   * times a second has said so by being `expensive` (invariant 6); a derive that ignored that
+   * would fire a request per publish at a shared server.
+   */
+  it('leaves an expensive node below it alone', async () => {
+    publisher('test.derive.costly', ['down0'])
+    follower('test.derive.costly.next', 'expensive')
+    await scheduler.run(chain('test.derive.costly', ['test.derive.costly.next']), {
+      mode: 'full',
+    })
+    // -1 is "nothing on that port at all", which is what a node that never ran holds.
+    expect(seen['down0']).toEqual([-1, -1])
+  })
+
+  /**
+   * The rule that makes the whole thing safe to state simply: a derived answer is computed from
+   * half an input, so it is the answer for no provenance key at all (invariant 4). Cached, it
+   * would be a complete-looking result that no later run would be scheduled to replace.
+   */
+  it('caches nothing it derived, so a failed run leaves no answer behind', async () => {
+    publisher('test.derive.fails', ['down0'], true)
+    follower('test.derive.fails.next', 'cheap')
+    await scheduler.run(chain('test.derive.fails', ['test.derive.fails.next']), {
+      mode: 'full',
+    })
+    expect(scheduler.info('head').state).toBe('error')
+    // Both gone: the partial, and the answer computed from it.
+    expect(scheduler.output('head', 'out')).toBeUndefined()
+    expect(scheduler.output('down0', 'out')).toBeUndefined()
+  })
+
+  /**
+   * **A derive is parked on an `evaluate` while the walk carries on**, so between the await and
+   * the write the partial it was computed from can be gone. The write has to be refused.
+   *
+   * Left to land it was the worst failure this mechanism can have, and an unrecoverable one:
+   * `outputs()` prefers a preview to the cache, so a value computed from one row of input
+   * shadowed the node's real result for the rest of the session — and with no publisher left
+   * there was never another derive to sweep it away. It is not a race that needs luck, either;
+   * a node settles the moment its last publish is out.
+   */
+  it('refuses a derived answer that finishes after the partial under it has gone', async () => {
+    // One publish, so no second derive comes along to sweep up after this one.
+    publisher('test.derive.late', [], false, 1)
+    slowFollower('test.derive.late.next')
+    await scheduler.run(chain('test.derive.late', ['test.derive.late.next']), { mode: 'full' })
+    // The run is over and the real answer is cached: nine rows published, plus the follower's.
+    expect(rowCount(scheduler.output('down0', 'out'))).toBe(10)
+
+    // Now let the derive's own call return, long after what it was computing from went away.
+    releaseDerive()
+    await settle()
+    expect(rowCount(scheduler.output('down0', 'out'))).toBe(10)
+    expect(scheduler.info('down0').state).toBe('ok')
+  })
+
+  /** On the way out the real walk reaches the same node, and its answer is the whole one. */
+  it('hands over to the real result once the node above settles', async () => {
+    publisher('test.derive.settles', ['down0'])
+    follower('test.derive.settles.next', 'cheap')
+    await scheduler.run(chain('test.derive.settles', ['test.derive.settles.next']), {
+      mode: 'full',
+    })
+    // Nine rows returned, not the two the last publish carried.
+    expect(rowCount(scheduler.output('down0', 'out'))).toBe(10)
+    expect(scheduler.info('down0').state).toBe('ok')
+  })
+})
+
+/**
  * The warning channel: `ctx.warn`, and where what it says lives afterwards.
  *
  * The behaviour worth pinning is not that a string comes back — it is *when*. A guard rail's
@@ -726,7 +977,10 @@ describe('publishing a partial result', () => {
  * those are easy to lose to a refactor and neither shows up in a type.
  */
 describe('what a node warns about', () => {
-  function register(type: string, opts: { twice?: boolean; fail?: boolean } = {}): void {
+  function register(
+    type: string,
+    opts: { twice?: boolean; fail?: boolean; another?: boolean } = {},
+  ): void {
     registerNode({
       type,
       label: type,
@@ -738,6 +992,7 @@ describe('what a node warns about', () => {
       evaluate: (ctx) => {
         ctx.warn('this is large')
         if (opts.twice) ctx.warn('this is large')
+        if (opts.another) ctx.warn('and this is slow')
         // Read back from inside `evaluate`: the point of the live map is that the card can
         // show this while the node is still working.
         heardWhileRunning = scheduler.warning('n')
@@ -778,6 +1033,17 @@ describe('what a node warns about', () => {
     register('test.warn.repeats', { twice: true })
     await scheduler.run(graphOver('test.warn.repeats'), { mode: 'full' })
     expect(scheduler.warning('n')).toBe('this is large')
+  })
+
+  /**
+   * One warning a line (user, 2026-11-18): joined with spaces, six warnings on a Find Merge Candidates
+   * card read as one paragraph. A caller passing them on takes the list, never a split string.
+   */
+  it('keeps two warnings apart: a line each, and an entry each', async () => {
+    register('test.warn.two', { another: true })
+    await scheduler.run(graphOver('test.warn.two'), { mode: 'full' })
+    expect(scheduler.warning('n')).toBe('this is large\nand this is slow')
+    expect(scheduler.warnings('n')).toEqual(['this is large', 'and this is slow'])
   })
 
   it('is dropped when the run fails, where the error is the only thing worth reading', async () => {
@@ -1712,5 +1978,286 @@ describe('an evaluation in flight', () => {
     expect(scheduler.info('slow').state).toBe('stale')
     expect(scheduler.busy).toBe(false)
     expect(scheduler.owesFullRun).toBe(false)
+  })
+})
+
+/**
+ * A partial whose run an edit retired: kept until something newer replaces it, or nothing is
+ * coming to (`docs/core.md`, "A partial result, while the node is still running"). Each step is
+ * the test's to take, since what matters is the order: when the retired evaluation unwinds, and
+ * when its successor publishes.
+ */
+describe('a partial when its run is retired', () => {
+  const ROW = tableSchema(column('x', 'i64'))
+  const rows = (n: number) =>
+    tableFromRows(
+      ROW,
+      Array.from({ length: n }, (_, x) => ({ x })),
+    )
+  const calls: Array<{ publish: () => void; finish: () => void; unwind: () => void }> = []
+
+  // Publishes `k` rows when told to, returns `k × 10`, and ignores its signal until unwound.
+  registerNode({
+    type: 'test.handover.slow',
+    label: 'slow',
+    category: 'utility',
+    cost: 'expensive',
+    inputs: [],
+    outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+    params: [{ id: 'k', label: 'K', kind: 'number', default: 1 }],
+    inferOutputs: () => ({ out: T.table() }),
+    evaluate: (ctx) =>
+      new Promise((resolve, reject) => {
+        const k = Number(ctx.params.k)
+        calls.push({
+          publish: () => ctx.publish({ out: rows(k) }),
+          finish: () => resolve({ out: rows(k * 10) }),
+          unwind: () => reject(new Error('aborted')),
+        })
+      }),
+  })
+
+  /*
+   * What a reader of `slow` — a card — is shown when the walk reaches the node below: past the
+   * node's settling, which is when its partial is due to go.
+   */
+  const handed: number[] = []
+  let watched: Scheduler | undefined
+  registerNode({
+    type: 'test.handover.below',
+    label: 'below',
+    category: 'utility',
+    cost: 'cheap',
+    inputs: [{ id: 'in', label: 'In', type: T.table() }],
+    outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+    inferOutputs: () => ({ out: T.table() }),
+    evaluate: (ctx) => {
+      if (watched) handed.push(shown(watched))
+      return { out: ctx.input('in')! }
+    },
+  })
+
+  beforeEach(() => {
+    calls.length = 0
+    handed.length = 0
+    watched = undefined
+  })
+
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+  const shown = (scheduler: Scheduler) => {
+    const value = scheduler.output('slow', 'out')
+    return isTableValue(value) ? value.length : -1
+  }
+  const graphAt = (k: number) => {
+    let g = addNode(emptyGraph('handover'), node('slow', 'test.handover.slow', {}))
+    g = addNode(g, node('below', 'test.handover.below', {}))
+    g = addEdge(g, { source: 'slow', sourceHandle: 'out', target: 'below', targetHandle: 'in' })
+    return setNodeParam(g, 'slow', 'k', k)
+  }
+
+  /**
+   * A finished run at k = 1 (10 rows cached), then a run at k = 2 that has published 2 rows, then
+   * an edit to k = 3 — `run` says whether a run follows it, as a press on Extend does.
+   */
+  async function retired(run: boolean, onStateChange?: (scheduler: Scheduler) => void) {
+    const scheduler: Scheduler = onStateChange
+      ? new Scheduler({
+          resolveSource: () => source,
+          onStateChange: () => onStateChange(scheduler),
+        })
+      : makeScheduler()
+    watched = scheduler
+    const first = scheduler.run(graphAt(1), { mode: 'full' })
+    await tick()
+    calls[0]!.finish()
+    await first
+    scheduler.refreshStates(graphAt(2))
+    const second = scheduler.run(graphAt(2), { mode: 'full' })
+    await tick()
+    calls[1]!.publish()
+    expect(shown(scheduler)).toBe(2)
+    scheduler.refreshStates(graphAt(3))
+    const third = run ? scheduler.run(graphAt(3), { mode: 'full' }) : undefined
+    await tick()
+    return { scheduler, second, third }
+  }
+
+  it('stays on screen until the run replacing it publishes', async () => {
+    const { scheduler, second, third } = await retired(true)
+    expect(calls).toHaveLength(3)
+    calls[1]!.unwind()
+    await second
+    // Not the 10 rows the last *finished* run left — two edits old.
+    expect(shown(scheduler)).toBe(2)
+    expect(scheduler.hasPartial('slow')).toBe(true)
+    calls[2]!.publish()
+    expect(shown(scheduler)).toBe(3)
+    calls[2]!.finish()
+    await third
+    expect(shown(scheduler)).toBe(30)
+    expect(scheduler.hasPartial('slow')).toBe(false)
+  })
+
+  it('goes when the run replacing it settles without publishing', async () => {
+    const { scheduler, second, third } = await retired(true)
+    calls[1]!.unwind()
+    await second
+    calls[2]!.finish()
+    await third
+    expect(shown(scheduler)).toBe(30)
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    // At once, not when the walk ends: by the node below, a reader is shown the real result.
+    expect(handed.at(-1)).toBe(30)
+  })
+
+  it('is never dropped by a retired run unwinding after its successor published', async () => {
+    const { scheduler, second, third } = await retired(true)
+    calls[2]!.publish()
+    calls[1]!.unwind()
+    await second
+    expect(shown(scheduler)).toBe(3)
+    calls[2]!.finish()
+    await third
+  })
+
+  it('does not hide a run that finished before the retired one unwound', async () => {
+    const { scheduler, second, third } = await retired(true)
+    // The new run answers — from a cache of its own, say — while the old one is still at work.
+    calls[2]!.finish()
+    await third
+    expect(shown(scheduler)).toBe(30)
+    expect(handed.at(-1)).toBe(30)
+    calls[1]!.unwind()
+    await second
+    expect(shown(scheduler)).toBe(30)
+  })
+
+  it('stays while its node waits for a run, however late the run comes', async () => {
+    // The edit, and no run with it: auto-run's delay, or auto-run off on an expensive node.
+    const { scheduler, second } = await retired(false)
+    calls[1]!.unwind()
+    await second
+    expect(scheduler.info('slow').state).toBe('stale')
+    expect(shown(scheduler)).toBe(2)
+    const later = scheduler.run(graphAt(3), { mode: 'full' })
+    await tick()
+    calls[2]!.publish()
+    expect(shown(scheduler)).toBe(3)
+    calls[2]!.finish()
+    await later
+    expect(shown(scheduler)).toBe(30)
+  })
+
+  it('is kept by an edit elsewhere while its own run is still going', async () => {
+    const { scheduler, second, third } = await retired(true)
+    calls[2]!.publish()
+    // A card dragged: every edit sweeps for partials nobody is working on, and this one is.
+    const moved = graphAt(3)
+    scheduler.refreshStates({
+      ...moved,
+      nodes: moved.nodes.map((n) =>
+        n.id === 'below' ? { ...n, position: { x: 9, y: 9 } } : n,
+      ),
+    })
+    expect(shown(scheduler)).toBe(3)
+    calls[1]!.unwind()
+    calls[2]!.finish()
+    await second
+    await third
+  })
+
+  it('goes when an undo makes the cached result the answer again', async () => {
+    const { scheduler, second } = await retired(false)
+    calls[1]!.unwind()
+    await second
+    scheduler.refreshStates(graphAt(1))
+    expect(scheduler.info('slow').state).toBe('ok')
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    expect(shown(scheduler)).toBe(10)
+  })
+
+  it('goes when its node is switched off', async () => {
+    const { scheduler, second } = await retired(false)
+    calls[1]!.unwind()
+    await second
+    const g = graphAt(3)
+    scheduler.refreshStates({
+      ...g,
+      nodes: g.nodes.map((n) => (n.id === 'slow' ? { ...n, disabled: true } : n)),
+    })
+    expect(scheduler.hasPartial('slow')).toBe(false)
+  })
+
+  it('goes when a walk finds the cached result the answer again', async () => {
+    // A host that runs without asking `refreshStates` first: the walk's cache hit settles it —
+    // at the hit, not when the walk ends, or the node below is reached with the partial shown.
+    const below: boolean[] = []
+    const { scheduler, second } = await retired(false, (s) => {
+      if (s.info('below').state === 'ok') below.push(s.hasPartial('slow'))
+    })
+    calls[1]!.unwind()
+    await second
+    below.length = 0
+    await scheduler.run(graphAt(1), { mode: 'full' })
+    expect(below.length).toBeGreaterThan(0)
+    expect(below.every((held) => !held)).toBe(true)
+    expect(shown(scheduler)).toBe(10)
+  })
+
+  it('goes when every result is thrown away', async () => {
+    // A dataset switch, or a document closed: nothing held may be trusted, a partial least of all.
+    const { scheduler, second } = await retired(false)
+    calls[1]!.unwind()
+    await second
+    scheduler.invalidateAll()
+    expect(scheduler.hasPartial('slow')).toBe(false)
+  })
+
+  it('goes on Cancel', async () => {
+    const { scheduler, second, third } = await retired(true)
+    calls[1]!.unwind()
+    await second
+    expect(scheduler.hasPartial('slow')).toBe(true)
+    scheduler.cancel()
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    calls[2]!.unwind()
+    await third
+    expect(shown(scheduler)).toBe(10)
+  })
+
+  /** A run at k = 1 that published a row and was cancelled, still unwinding, and a run after it. */
+  async function cancelled() {
+    const scheduler = makeScheduler()
+    watched = scheduler
+    const first = scheduler.run(graphAt(1), { mode: 'full' })
+    await tick()
+    calls[0]!.publish()
+    scheduler.cancel()
+    const again = scheduler.run(graphAt(1), { mode: 'full' })
+    await tick()
+    return { scheduler, first, again }
+  }
+
+  it('is not handed on by a cancelled run', async () => {
+    const { scheduler, first, again } = await cancelled()
+    // Nothing comes after a Cancel: the next run starts from nothing, not from what was stopped.
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    calls[0]!.unwind()
+    await first
+    expect(scheduler.hasPartial('slow')).toBe(false)
+    calls[1]!.finish()
+    await again
+  })
+
+  it('is never dropped by a cancelled run unwinding after a new run published', async () => {
+    const { scheduler, first, again } = await cancelled()
+    calls[1]!.publish()
+    calls[0]!.unwind()
+    await first
+    expect(scheduler.hasPartial('slow')).toBe(true)
+    expect(shown(scheduler)).toBe(1)
+    calls[1]!.finish()
+    await again
+    expect(shown(scheduler)).toBe(10)
   })
 })
